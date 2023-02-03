@@ -1,0 +1,24 @@
+make clean
+
+if [ "$1" == "v" ]; then
+make magpie_test
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./bin/magpie_test
+elif [ "$1" == "g" ]; then
+make magpie_test
+gdb ./bin/magpie_test
+elif [ "$1" == "c" ]; then
+make magpie_test BUILD=cov
+./bin/magpie_test
+mkdir -p cov
+rm -f cov/*
+ln -sf $PWD/obj/*/*.gc* cov
+lcov --capture --directory cov --output-file coverage.info
+genhtml coverage.info --output-directory covhtml
+xdg-open covhtml/index.html
+elif [ "$1" == "r" ]; then
+make magpie BUILD=release
+./bin/magpie
+else 
+make magpie_test
+./bin/magpie_test
+fi

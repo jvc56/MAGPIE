@@ -1,0 +1,13 @@
+.vscode
+bin
+obj
+cov
+covhtml
+*.gcda
+*.gcno
+*.info
+*.gcg
+.env
+*/data/lexica/*
+*/data/letterdistributions/*
+
