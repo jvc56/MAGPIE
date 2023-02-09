@@ -4,8 +4,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func main() {
-	zerolog.SetGlobalLevel(zerolog.Disabled)
+func testDev() {
 	// racks := []string{
 	// 	"UUUVVWW",
 	// 	"AEFRWYZ",
@@ -100,4 +99,13 @@ func main() {
 	// mg := FindRandomStandard()
 	// fmt.Println(mg.ToDisplayText())
 	// fmt.Println(gcgio.GameHistoryToGCG(mg.History(), false))
+}
+
+func NondeterministicTests() {
+	RunComparisonTests()
+}
+
+func main() {
+	zerolog.SetGlobalLevel(zerolog.Disabled)
+	NondeterministicTests()
 }
