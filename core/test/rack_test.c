@@ -11,9 +11,10 @@
 
 #include "rack_test.h"
 #include "test_util.h"
+#include "test_config.h"
 
-void test_rack() {
-    Config * config = create_america_sort_by_score_config();
+void test_rack(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
     Rack * rack = create_rack();
     Rack * expected_rack = create_rack();
 
@@ -90,7 +91,7 @@ void test_rack() {
 
     destroy_rack(rack);
     destroy_rack(expected_rack);
-    destroy_config(config);
+    
 }
 
 int equal_rack(Rack * expected_rack, Rack * actual_rack) {

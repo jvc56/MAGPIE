@@ -12,9 +12,10 @@
 #include "../src/leaves.h"
 
 #include "test_util.h"
+#include "test_config.h"
 
-void test_english_leaves() {
-    Config * config = create_csw_sort_by_equity_config();
+void test_english_leaves(TestConfig * test_config) {
+    Config * config = get_csw_config(test_config);
     Laddag * laddag = config->laddag;
     // Check the empty leave
     assert(within_epsilon(laddag->values[0], 0));
@@ -172,9 +173,9 @@ void test_english_leaves() {
     assert(within_epsilon(laddag->values[914624], -10.563130413252125));
 
     destroy_rack(rack);
-    destroy_config(config);
+    
 }
 
-void test_leaves() {
-    test_english_leaves();
+void test_leaves(TestConfig * test_config) {
+    test_english_leaves(test_config);
 }

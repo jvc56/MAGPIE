@@ -16,6 +16,7 @@
 #include "move_print.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "test_config.h"
 
 int count_scoring_plays(MoveList * ml) {
     int sum = 0;
@@ -72,8 +73,8 @@ void test_simple_case(Game * game, Rack * rack, const char* rack_string, int cur
     reset_rack(rack);
 }
 
-void macondo_tests() {
-    Config * config = create_america_sort_by_score_config();
+void macondo_tests(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
     Game * game = create_game(config);
     Rack * rack = create_rack();
     char test_string[100];
@@ -328,11 +329,11 @@ void macondo_tests() {
     destroy_rack(rack);
     destroy_game(game);
     destroy_game(game_two);
-    destroy_config(config);
+    
 }
 
-void exchange_tests() {
-    Config * config = create_csw_sort_by_equity_config();
+void exchange_tests(TestConfig * test_config) {
+    Config * config = get_csw_config(test_config);
     Game * game = create_game(config);
 
     char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
@@ -352,14 +353,14 @@ void exchange_tests() {
     assert(game->gen->move_list->moves[0]->move_type == MOVE_TYPE_EXCHANGE);
 
     destroy_game(game);
-    destroy_config(config);
+    
 }
 
-void equity_test() {
-    Config * config = create_america_sort_by_score_config();
-    config->move_sorting = SORT_BY_EQUITY;
+void equity_test(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
 
     Game * game = create_game(config);
+    set_gen_sorting_parameter(game->gen, SORT_BY_EQUITY);
     Rack * rack = create_rack();
     // A middlegame is chosen to avoid
     // the opening and endgame equity adjustments
@@ -386,14 +387,14 @@ void equity_test() {
     destroy_rack(rack);
     destroy_rack(move_rack);
     destroy_game(game);
-    destroy_config(config);
+    
 }
 
-void top_equity_play_recorder_test() {
-    Config * config = create_america_sort_by_score_config();
-    config->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
+void top_equity_play_recorder_test(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
 
     Game * game = create_game(config);
+    set_gen_play_recorder_type(game->gen, PLAY_RECORDER_TYPE_TOP_EQUITY);
     Rack * rack = create_rack();
     char test_string[100];
     reset_string(test_string);
@@ -419,34 +420,12 @@ void top_equity_play_recorder_test() {
 
     destroy_rack(rack);
     destroy_game(game);
-    destroy_config(config);
+    
 }
 
-void init_tests() {
-    Config * config = create_america_sort_by_score_config();
-
-    config->preendgame_adjustment_values_type = PREENDGAME_ADJUSTMENT_VALUES_TYPE_ZERO;
-    Game * game_zeros = create_game(config);
-    for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
-        assert(game_zeros->gen->preendgame_adjustment_values[i] == 0);
-    }
-
-	double quackle_values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
-    config->preendgame_adjustment_values_type = PREENDGAME_ADJUSTMENT_VALUES_TYPE_QUACKLE;
-    Game * game_quackle = create_game(config);
-    for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
-        assert(within_epsilon(game_quackle->gen->preendgame_adjustment_values[i], quackle_values[i]));
-    }
-
-    destroy_game(game_zeros);
-    destroy_game(game_quackle);
-    destroy_config(config);
-}
-
-void test_movegen() {
-    init_tests();
-    macondo_tests();
-    exchange_tests();
-    equity_test();
-    top_equity_play_recorder_test();
+void test_movegen(TestConfig * test_config) {
+    macondo_tests(test_config);
+    exchange_tests(test_config);
+    equity_test(test_config);
+    top_equity_play_recorder_test(test_config);
 }

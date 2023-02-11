@@ -6,9 +6,6 @@
 #include "../src/move.h"
 #include "../src/rack.h"
 
-
-Config * create_america_sort_by_score_config();
-Config * create_csw_sort_by_equity_config();
 void generate_moves_for_game(Game * game);
 double get_leave_value_for_move(Config * config, Move * move, Rack * rack);
 int within_epsilon(double a, double b);

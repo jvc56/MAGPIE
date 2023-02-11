@@ -63,14 +63,6 @@ void generate_moves_for_game(Game * game) {
     generate_moves(game->gen, game->players[game->player_on_turn_index]->rack, game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
 }
 
-Config * create_america_sort_by_score_config() {
-    return create_config(getenv("AMERICA_GADDAG"), getenv("CSW21_ALPHABET"), getenv("ENGLISH_LETTER_DISTRIBUTION"), getenv("CSW21_LADDAG"), DEFAULT_MOVE_LIST_CAPACITY, SORT_BY_SCORE, PLAY_RECORDER_TYPE_ALL, PREENDGAME_ADJUSTMENT_VALUES_TYPE_ZERO);
-}
-
-Config * create_csw_sort_by_equity_config() {
-    return create_config(getenv("CSW21_GADDAG"), getenv("CSW21_ALPHABET"), getenv("ENGLISH_LETTER_DISTRIBUTION"), getenv("CSW21_LADDAG"), DEFAULT_MOVE_LIST_CAPACITY, SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, PREENDGAME_ADJUSTMENT_VALUES_TYPE_ZERO);
-}
-
 void write_rack_to_end_of_buffer(char * dest, Alphabet * alphabet, Rack * rack) {
     for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
         for (int k = 0; k < rack->array[i]; k++) {

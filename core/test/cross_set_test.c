@@ -9,6 +9,7 @@
 
 #include "test_constants.h"
 #include "test_util.h"
+#include "test_config.h"
 
 uint64_t cross_set_from_string(const char* letters, Alphabet* alph) {
     if (strcmp(letters, "TRIVIAL") == 0) {
@@ -50,8 +51,8 @@ void test_gen_cross_set_row(Game * game, int row, int col, const char* row_conte
     test_gen_cross_set(game, row, col, 0, letters, expected_cross_score, run_gcs);
 }
 
-void test_cross_set() {
-    Config * config = create_america_sort_by_score_config();
+void test_cross_set(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
     Game * game = create_game(config);
 
     // TestGencross_setLoadedGame
@@ -113,5 +114,5 @@ void test_cross_set() {
     assert(get_cross_set(game->gen->board, 7, 10, BOARD_VERTICAL_DIRECTION) == 0);
 
     destroy_game(game);
-    destroy_config(config);
+    
 }

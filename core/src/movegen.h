@@ -44,6 +44,8 @@ void destroy_generator(Generator * gen);
 void generate_moves(Generator * gen, Rack * rack, Rack * opp_rack, int add_exchange);
 void recursive_gen(Generator * gen, int col, Rack * rack, Rack * opp_rack, uint32_t node_index, int leftstrip, int rightstrip, int unique_play);
 void reset_generator(Generator * gen);
+void set_gen_play_recorder_type(Generator * gen, int play_recorder_type);
+void set_gen_sorting_parameter(Generator * gen, int move_sorting);
 void set_start_leave_index(Generator * gen, Rack * rack);
 
 #endif

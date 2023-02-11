@@ -18,7 +18,7 @@ xdg-open covhtml/index.html
 elif [ "$1" == "r" ]; then
 make magpie BUILD=release
 ./bin/magpie
-else 
+elif [ "$1" == "u" ]; then
 make magpie_test
-./bin/magpie_test
+./bin/magpie_test unit
 fi

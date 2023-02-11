@@ -5,9 +5,10 @@
 #include "../src/alphabet.h"
 
 #include "test_util.h"
+#include "test_config.h"
 
-void test_alphabet() {
-    Config * config = create_america_sort_by_score_config();
+void test_alphabet(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
     // Test blank
     assert(get_blanked_machine_letter(0) == BLANK_OFFSET);
     assert(get_blanked_machine_letter(1) == BLANK_OFFSET + 1);
@@ -53,5 +54,4 @@ void test_alphabet() {
     assert(user_visible_letter(config->gaddag->alphabet, 2) == 'C');
     assert(user_visible_letter(config->gaddag->alphabet, 3) == 'D');
 
-    destroy_config(config);
 }

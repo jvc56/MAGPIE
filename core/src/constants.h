@@ -52,6 +52,7 @@
 #define BONUS_DOUBLE_LETTER_SCORE '\''
 #define DATA_DIRECTORY "data"
 #define LADDAG_FILENAME_EXTENSION "lg"
+#define MAX_ARG_LENGTH 300
 
 #define CROSSWORD_GAME_BOARD "=  '   =   '  ="\
 		" -   \"   \"   - "\
