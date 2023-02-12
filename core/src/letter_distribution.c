@@ -16,7 +16,7 @@ void load_letter_distribution(LetterDistribution * letter_distribution, const ch
 	stream = fopen(letter_distribution_filename, "r");
 	if (stream == NULL) {
 		perror(letter_distribution_filename);
-		abort();
+		exit(EXIT_FAILURE);
 	}
 	size_t result;
 

@@ -2,10 +2,10 @@ make clean
 
 if [ "$1" == "v" ]; then
 make magpie_test
-valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./bin/magpie_test
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./bin/magpie_test unit
 elif [ "$1" == "g" ]; then
 make magpie_test
-gdb ./bin/magpie_test
+gdb ./bin/magpie_test unit
 elif [ "$1" == "c" ]; then
 make magpie_test BUILD=cov
 ./bin/magpie_test
@@ -21,4 +21,14 @@ make magpie BUILD=release
 elif [ "$1" == "u" ]; then
 make magpie_test
 ./bin/magpie_test unit
+elif [ "$1" == "m" ]; then
+make magpie_test
+#gdb --args ./bin/magpie_test gen -g "./data/lexica/CSW21.gaddag" \
+./bin/magpie_test gen -g "./data/lexica/CSW21.gaddag" \
+                      -a "./data/lexica/CSW21.alph" \
+                      -d "./data/letterdistributions/english.dist" \
+                      -l "./data/lexica/CSW21.laddag" \
+                      -r "all" \
+                      -s "equity" \
+                      -c "1PACIFYING5/1IS12/YE13/1REQUALIFIED3/H1L12/EDS12/NO3T9/1RAINWASHING3/UM3O9/T2E1O9/1WAKEnERS6/1OnETIME7/OOT2E1B7/N6U7/1JACULATING4 ABEOPXZ/ 0/0 0 lex NWL18;"
 fi

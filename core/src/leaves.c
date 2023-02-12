@@ -82,7 +82,7 @@ void load_laddag(Laddag * laddag, const char * laddag_filename) {
 	stream = fopen(laddag_filename, "r");
 	if (stream == NULL) {
 		perror(laddag_filename);
-		abort();
+		exit(EXIT_FAILURE);
 	}
 	size_t result;
 

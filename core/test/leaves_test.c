@@ -173,7 +173,6 @@ void test_english_leaves(TestConfig * test_config) {
     assert(within_epsilon(laddag->values[914624], -10.563130413252125));
 
     destroy_rack(rack);
-    
 }
 
 void test_leaves(TestConfig * test_config) {

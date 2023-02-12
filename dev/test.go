@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/domino14/macondo/ai/runner"
@@ -11,15 +12,21 @@ import (
 	"github.com/domino14/macondo/game"
 	"github.com/domino14/macondo/gcgio"
 	pb "github.com/domino14/macondo/gen/api/proto/macondo"
+	"github.com/domino14/macondo/move"
 )
 
+var passMove = "pass"
+
 func RunComparisonTests() {
+	count := 0
 	for {
 		game := CreateTopEquityStaticGame()
 		ok := CompareMovesForGame(game)
 		if !ok {
 			break
 		}
+		count++
+		fmt.Printf("Game %d\n", count)
 	}
 }
 
@@ -32,26 +39,60 @@ func playGameToTurn(g *game.Game, turnNumber int) *game.Game {
 	return newGame
 }
 
-func createMoveMap(g *game.Game, turnNumber int) (map[string]bool, bool) {
-	lg := playGameToTurn(g, turnNumber)
-	if lg.Playing() != pb.PlayState_PLAYING {
-		return nil, false
-	}
-	agr, err := runner.NewAIGameRunnerFromGame(lg, nil, pb.BotRequest_HASTY_BOT)
+func createMoveMap(g *game.Game) map[string]bool {
+	agr, err := runner.NewAIGameRunnerFromGame(g, nil, pb.BotRequest_HASTY_BOT)
 	if err != nil {
 		panic(err)
 	}
 	moves := agr.GenerateMoves(1000000)
 	moveMap := map[string]bool{}
-	for _, move := range moves {
-		moveKey := fmt.Sprintf("%d,%s,%s,%d", move.Action(), move.BoardCoords(), move.TilesString(), move.Score())
+	// Macondo only includes the pass move if there are
+	// no other moves available. Magpie will always include
+	// the pass move. So if the pass move was not produced,
+	// add it to the move map anyway so the two maps are
+	// equivalent.
+	passMoveIncluded := false
+	for _, mv := range moves {
+		var moveKey string
+		if mv.Action() == move.MoveTypePass {
+			moveKey = passMove
+			passMoveIncluded = true
+		} else {
+			moveKey = fmt.Sprintf("%d,%s,%s,%d", mv.Action(), mv.BoardCoords(), mv.TilesString(), mv.Score())
+		}
 		moveMap[moveKey] = true
 	}
-	return moveMap, true
+	if !passMoveIncluded {
+		moveMap[passMove] = true
+	}
+	return moveMap
 }
 
-func getActualMoves(g *game.Game, turnNumber int) map[string]bool {
-	return nil
+func getActualMoves(g *game.Game) map[string]bool {
+	cmd := []string{
+		"gen",
+		"-g", "../core/data/lexica/CSW21.gaddag",
+		"-a", "../core/data/lexica/CSW21.alph",
+		"-d", "../core/data/letterdistributions/english.dist",
+		"-l", "../core/data/lexica/CSW21.laddag",
+		"-r", "all",
+		"-s", "equity",
+		"-c", gameToCGP(g, true),
+	}
+	outBytes, err := exec.Command("../core/bin/magpie_test", cmd...).Output()
+	if err != nil {
+		fmt.Print("error is:\n\n")
+		panic(err)
+	}
+	output := string(outBytes)
+	moves := strings.Split(output, "\n")
+	moveMap := map[string]bool{}
+	for _, mv := range moves {
+		if mv != "" {
+			moveMap[mv] = true
+		}
+	}
+	return moveMap
 }
 
 // Performs m1 - m2 and returns the result as a list
@@ -73,11 +114,13 @@ func subtractMaps(m1 map[string]bool, m2 map[string]bool) []string {
 
 func CompareMovesForGame(g *game.Game) bool {
 	for i := 0; i < len(g.History().Events); i++ {
-		expectedMoves, playing := createMoveMap(g, i)
-		if !playing {
-			break
+		gameAtTurn := playGameToTurn(g, i)
+		fmt.Printf("Comparing moves for\n%s", gameAtTurn.ToDisplayText())
+		if gameAtTurn.Playing() != pb.PlayState_PLAYING {
+			return true
 		}
-		actualMoves := getActualMoves(g, i)
+		expectedMoves := createMoveMap(gameAtTurn)
+		actualMoves := getActualMoves(gameAtTurn)
 
 		expectedMovesNotGenerated := subtractMaps(expectedMoves, actualMoves)
 		extraneousMovesGenerated := subtractMaps(actualMoves, expectedMoves)
@@ -85,11 +128,15 @@ func CompareMovesForGame(g *game.Game) bool {
 		errString := ""
 		if len(expectedMovesNotGenerated) > 0 {
 			errString += fmt.Sprintf("%d expected moves not generated:\n", len(expectedMovesNotGenerated))
-			errString += fmt.Sprintln(strings.Join(expectedMovesNotGenerated, "\n"))
+			for i := 0; i < len(expectedMovesNotGenerated); i++ {
+				errString += fmt.Sprintf(">%s<", expectedMovesNotGenerated[i])
+			}
 		}
 		if len(extraneousMovesGenerated) > 0 {
 			errString += fmt.Sprintf("%d extraneous moves generated:\n", len(extraneousMovesGenerated))
-			errString += fmt.Sprintln(strings.Join(extraneousMovesGenerated, "\n"))
+			for i := 0; i < len(extraneousMovesGenerated); i++ {
+				errString += fmt.Sprintf(">%s<", extraneousMovesGenerated[i])
+			}
 		}
 		if errString != "" {
 			fmt.Printf("Turn %d\n\n", i)

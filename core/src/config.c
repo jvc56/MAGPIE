@@ -9,33 +9,32 @@
 #include "letter_distribution.h"
 #include "leaves.h"
 
-Config * create_config(const char * gaddag_filename, const char * alphabet_filename, const char * letter_distribution_filename, const char * laddag_filename, int move_sorting, int play_recorder_type, const char * command) {
+Config * create_config(const char * gaddag_filename, const char * alphabet_filename, const char * letter_distribution_filename, const char * laddag_filename, const char * cgp, int move_sorting, int play_recorder_type) {
     Config * config = malloc(sizeof(Config));
     config->gaddag = create_gaddag(gaddag_filename, alphabet_filename);
     config->letter_distribution = create_letter_distribution(letter_distribution_filename);
+    config->cgp = strdup(cgp);
 	  config->laddag = create_laddag(laddag_filename);
     config->move_sorting = move_sorting;
     config->play_recorder_type = play_recorder_type;
-    config->command = strdup(command);
     return config;
 }
 
 void check_arg_length(const char * arg) {
   if (strlen(arg) > (MAX_ARG_LENGTH) - 1) {
     printf("argument exceeded maximum size: %s\n", arg);
-    abort();
+    exit(EXIT_FAILURE);
   }
 }
 
 Config * create_config_from_args(int argc, char *argv[]) {
   char alphabet_filename[(MAX_ARG_LENGTH)] = "";
-  char cgp[(MAX_ARG_LENGTH)] = "";
   char letter_distribution_filename[(MAX_ARG_LENGTH)] = "";
   char gaddag_filename[(MAX_ARG_LENGTH)] = "";
   char laddag_filename[(MAX_ARG_LENGTH)] = "";
+  char cgp[(MAX_ARG_LENGTH)] = "";
   int play_recorder_type = PLAY_RECORDER_TYPE_ALL;
   int move_sorting = SORT_BY_EQUITY;
-  char command[(MAX_ARG_LENGTH)] = "";
 
   int c;
 
@@ -61,14 +60,6 @@ Config * create_config_from_args(int argc, char *argv[]) {
     }
 
     switch (c) {
-      case 0:
-        printf ("option %s", long_options[option_index].name);
-        if (optarg) {
-          printf (" with arg %s", optarg);
-        }
-        printf ("\n");
-        break;
-
       case 'a':
         check_arg_length(optarg);
         strcpy(alphabet_filename, optarg);
@@ -103,8 +94,8 @@ Config * create_config_from_args(int argc, char *argv[]) {
           // is the default.
           play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
         } else {
-          printf("invalid sort option: %s\n", optarg);
-          abort();
+          printf("invalid play recorder option: %s\n", optarg);
+          exit(EXIT_FAILURE);
         }
         break;
 
@@ -118,7 +109,7 @@ Config * create_config_from_args(int argc, char *argv[]) {
           move_sorting = SORT_BY_EQUITY;
         } else {
           printf("invalid sort option: %s\n", optarg);
-          abort();
+          exit(EXIT_FAILURE);
         }
         break;
 
@@ -130,26 +121,13 @@ Config * create_config_from_args(int argc, char *argv[]) {
         abort ();
       }
   }
-
-  // There should only be one command
-  if (optind != argc - 1) {
-    printf("must specify exactly one command, instead got:");
-    while (optind < argc) {
-        printf("%s ", argv[optind++]);
-    }
-    printf("\n");
-    abort();
-  }
-
-  strcpy(command, argv[optind]);
-
-  return create_config(gaddag_filename, alphabet_filename, letter_distribution_filename, laddag_filename, move_sorting, play_recorder_type, command);
+  return create_config(gaddag_filename, alphabet_filename, letter_distribution_filename, laddag_filename, cgp, move_sorting, play_recorder_type);
 }
 
 void destroy_config(Config * config) {
 	destroy_laddag(config->laddag);
 	destroy_letter_distribution(config->letter_distribution);
 	destroy_gaddag(config->gaddag);
-  free(config->command);
+  free(config->cgp);
   free(config);
 }

@@ -80,7 +80,6 @@ void test_game_main(TestConfig * test_config) {
 
     destroy_rack(rack);
     destroy_game(game);
-    
 }
 
 void test_game(TestConfig * test_config) {
