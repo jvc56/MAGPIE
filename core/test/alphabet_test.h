@@ -1,6 +1,8 @@
 #ifndef ALPHABET_TEST_H
 #define ALPHABET_TEST_H
 
-void test_alphabet();
+#include "test_config.h"
+
+void test_alphabet(TestConfig * test_config);
 
 #endif

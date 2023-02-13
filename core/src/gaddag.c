@@ -13,7 +13,7 @@ void load_gaddag(Gaddag* gaddag, const char* gaddag_filename, const char* alphab
 	stream = fopen(gaddag_filename, "r");
 	if (stream == NULL) {
 		perror(gaddag_filename);
-		abort();
+		exit(EXIT_FAILURE);
 	}
 	size_t result;
 

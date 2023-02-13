@@ -1,6 +1,8 @@
 #ifndef BAG_TEST_H
 #define BAG_TEST_H
 
-void test_bag();
+#include "test_config.h"
+
+void test_bag(TestConfig * test_config);
 
 #endif

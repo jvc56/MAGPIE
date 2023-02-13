@@ -8,9 +8,10 @@
 
 #include "test_constants.h"
 #include "test_util.h"
+#include "test_config.h"
 
-void test_macondo_opening_equity_adjustments() {
-    Config * config = create_csw_sort_by_equity_config();
+void test_macondo_opening_equity_adjustments(TestConfig * test_config) {
+    Config * config = get_csw_config(test_config);
     Game * game = create_game(config);
 
     Rack * rack = game->players[0]->rack;
@@ -54,11 +55,10 @@ void test_macondo_opening_equity_adjustments() {
     assert(within_epsilon((double)(top_move->score + get_leave_value_for_move(config, top_move, rack) + (3 * OPENING_HOTSPOT_PENALTY)), top_move->equity));
 
     destroy_game(game);
-    destroy_config(config);
 }
 
-void test_macondo_endgame_equity_adjustments() {
-    Config * config = create_csw_sort_by_equity_config();
+void test_macondo_endgame_equity_adjustments(TestConfig * test_config) {
+    Config * config = get_csw_config(test_config);
     Game * game = create_game(config);
 
     load_cgp(game, "4RUMMAGED2C/7A6A/2H1G2T6V/2O1O2I6E/2WAB2PREBENDS/2ER3O3n3/2SI6COW2/3L2HUE2KANE/3LI3FILII2/J1TANGENT2T1Z1/A2TA5FA1OP/R2EN5Ok1OU/VILDE5YEX1D/I3R6SUQS/E13Y INR/OT 440/448 0 lex CSW21;");
@@ -108,10 +108,10 @@ void test_macondo_endgame_equity_adjustments() {
     assert(within_epsilon(move5->equity, -2));
 
     destroy_game(game);
-    destroy_config(config);
+    
 }
 
-void test_equity_adjustments() {
-    test_macondo_opening_equity_adjustments();
-    test_macondo_endgame_equity_adjustments();
+void test_equity_adjustments(TestConfig * test_config) {
+    test_macondo_opening_equity_adjustments(test_config);
+    test_macondo_endgame_equity_adjustments(test_config);
 }

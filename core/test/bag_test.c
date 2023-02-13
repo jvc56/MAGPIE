@@ -8,6 +8,7 @@
 
 #include "bag_print.h"
 #include "test_util.h"
+#include "test_config.h"
 
 void write_bag_to_string(char * bag_string, Bag * bag, Alphabet * alphabet) {
     reset_string(bag_string);
@@ -23,8 +24,8 @@ void test_add_letter(Config * config, Bag * bag, char r, char * expected_bag_str
     assert(!strcmp(bag_string, expected_bag_string));
 }
 
-void test_bag() {
-    Config * config = create_america_sort_by_score_config();
+void test_bag(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
     Bag * bag = create_bag(config->letter_distribution);
     Rack * rack = create_rack();
 
@@ -71,5 +72,4 @@ void test_bag() {
 
     destroy_bag(bag);
     destroy_rack(rack);
-    destroy_config(config);
 }

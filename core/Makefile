@@ -15,9 +15,9 @@ OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 #dev is default, for another flavor : make BUILD=release
 BUILD := dev
 
-cflags.dev := -g -O0 -Wall -Wextra
-cflags.cov := -g -O0 -Wall -Wextra --coverage
-cflags.release := -O3 -Wall
+cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra
+cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
+cflags.release := -O3 -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
 

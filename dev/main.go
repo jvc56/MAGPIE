@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
+	"sync"
+
 	"github.com/rs/zerolog"
 )
 
-func main() {
-	zerolog.SetGlobalLevel(zerolog.Disabled)
+func testDev() {
 	// racks := []string{
 	// 	"UUUVVWW",
 	// 	"AEFRWYZ",
@@ -100,4 +102,19 @@ func main() {
 	// mg := FindRandomStandard()
 	// fmt.Println(mg.ToDisplayText())
 	// fmt.Println(gcgio.GameHistoryToGCG(mg.History(), false))
+}
+
+func NondeterministicTests(threadName string) {
+	zerolog.SetGlobalLevel(zerolog.Disabled)
+	threads := 12
+	var wg sync.WaitGroup
+	wg.Add(threads)
+	for i := 0; i < threads; i++ {
+		go RunComparisonTests(fmt.Sprintf("Thread %d", i))
+	}
+	wg.Wait()
+}
+
+func main() {
+	fmt.Println(ConvertGCGToCGP("many_moves.gcg"))
 }

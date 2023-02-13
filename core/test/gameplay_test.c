@@ -10,6 +10,7 @@
 
 #include "game_print.h"
 #include "test_util.h"
+#include "test_config.h"
 
 void draw_rack_to_string(Bag * bag, Rack * rack, char * letters, Alphabet * alphabet) {
     for (size_t i = 0; i < strnlen(letters, 7); i++) {
@@ -156,8 +157,8 @@ void test_gameplay_by_turn(Config * config, char * cgps[], char * racks[], int a
     destroy_game(expected_game);
 }
 
-void test_six_exchanges_game() {
-    Config * config = create_csw_sort_by_equity_config();
+void test_six_exchanges_game(TestConfig * test_config) {
+    Config * config = get_csw_config(test_config);
 
     char * racks[18] = {
 		"UUUVVWW",
@@ -202,11 +203,11 @@ void test_six_exchanges_game() {
     };
     test_gameplay_by_turn(config, cgps, racks, 18);
 
-    destroy_config(config);
+    
 }
 
-void test_six_passes_game() {
-    Config * config = create_csw_sort_by_equity_config();
+void test_six_passes_game(TestConfig * test_config) {
+    Config * config = get_csw_config(test_config);
 
 	char * racks[31] = {
 		"AEGILPR",
@@ -278,11 +279,11 @@ void test_six_passes_game() {
 
     test_gameplay_by_turn(config, cgps, racks, 31);
 
-    destroy_config(config);
+    
 }
 
-void test_standard_game() {
-    Config * config = create_csw_sort_by_equity_config();
+void test_standard_game(TestConfig * test_config) {
+    Config * config = get_csw_config(test_config);
 
 	char * racks[23] = {
 		"EGIILNO",
@@ -339,12 +340,10 @@ void test_standard_game() {
     };
 
     test_gameplay_by_turn(config, cgps, racks, 23);
-
-    destroy_config(config);
 }
 
-void test_playmove() {
-    Config * config = create_csw_sort_by_equity_config();
+void test_playmove(TestConfig * test_config) {
+    Config * config = get_csw_config(test_config);
     Game * game = create_game(config);
 
     // Test play
@@ -416,12 +415,12 @@ void test_playmove() {
     assert(game->gen->bag->last_tile_index + 1 == 0);
 
     destroy_game(game);
-    destroy_config(config);
+    
 }
 
-void test_gameplay() {
-    test_playmove();
-    test_six_exchanges_game();
-    test_six_passes_game();
-    test_standard_game();
+void test_gameplay(TestConfig * test_config) {
+    test_playmove(test_config);
+    test_six_exchanges_game(test_config);
+    test_six_passes_game(test_config);
+    test_standard_game(test_config);
 }

@@ -13,8 +13,8 @@ void reset_and_load_game(Game * game, const char* cgp) {
     load_cgp(game, cgp);
 }
 
-void test_load_cgp() {
-    Config * config = create_america_sort_by_score_config();
+void test_load_cgp(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
     Game * game = create_game(config);
     // Test that loading various CGPs doesn't result in
     // any errors
@@ -41,11 +41,11 @@ void test_load_cgp() {
     reset_and_load_game(game, VS_ANDY_CGP);
     reset_and_load_game(game, VS_FRENTZ_CGP);
     destroy_game(game);
-    destroy_config(config);
+    
 }
 
-void test_game_main() {
-    Config * config = create_america_sort_by_score_config();
+void test_game_main(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
     Game * game = create_game(config);
     Rack * rack = create_rack();
 
@@ -80,10 +80,9 @@ void test_game_main() {
 
     destroy_rack(rack);
     destroy_game(game);
-    destroy_config(config);
 }
 
-void test_game() {
-    test_game_main();
-    test_load_cgp();
+void test_game(TestConfig * test_config) {
+    test_game_main(test_config);
+    test_load_cgp(test_config);
 }

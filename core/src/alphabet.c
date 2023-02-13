@@ -12,7 +12,7 @@ void load_alphabet(Alphabet * alphabet, const char * alphabet_filename) {
 	stream = fopen(alphabet_filename, "r");
 	if (stream == NULL) {
 		perror(alphabet_filename);
-		abort();
+		exit(EXIT_FAILURE);
 	}
 	size_t result;
 

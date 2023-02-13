@@ -10,6 +10,7 @@ import (
 	"github.com/domino14/macondo/board"
 	"github.com/domino14/macondo/config"
 	"github.com/domino14/macondo/game"
+	"github.com/domino14/macondo/gcgio"
 	pb "github.com/domino14/macondo/gen/api/proto/macondo"
 )
 
@@ -19,6 +20,28 @@ var DefaultConfig = config.Config{
 	LetterDistributionPath:    os.Getenv("LETTER_DISTRIBUTION_PATH"),
 	DefaultLexicon:            os.Getenv("DEFAULT_LEXICON"),
 	DefaultLetterDistribution: "English",
+}
+
+func ConvertGCGToCGP(gcgFile string) string {
+	hist, err := gcgio.ParseGCG(&DefaultConfig, gcgFile)
+	if err != nil {
+		panic(err)
+	}
+	rules, err := game.NewBasicGameRules(
+		&DefaultConfig,
+		"CSW21",
+		board.CrosswordGameLayout,
+		"english",
+		game.CrossScoreAndSet,
+		"")
+	if err != nil {
+		panic(err)
+	}
+	g, err := game.NewFromHistory(hist, rules, len(hist.Events))
+	if err != nil {
+		panic(err)
+	}
+	return gameToCGP(g, true)
 }
 
 func ConvertMacondoBoardStringToCGP(boardString string, alph *alphabet.Alphabet, player0Rack string, player1Rack string, player0Points int, player1Points int, scorelessTurns int, lexicon string) string {

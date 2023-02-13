@@ -1,8 +1,8 @@
 #ifndef MOVEGEN_TEST_H
 #define MOVEGEN_TEST_H
 
-#include "../src/config.h"
+#include "test_config.h"
 
-void test_movegen();
+void test_movegen(TestConfig * test_config);
 
 #endif

@@ -12,8 +12,8 @@ void reset_move_list(MoveList * ml) {
 
 MoveList * create_move_list() {
     MoveList *ml = malloc(sizeof(MoveList));
-    ml->moves = malloc((sizeof(Move*)) * (DEFAULT_MOVE_LIST_CAPACITY));
-    for (int i = 0; i < (DEFAULT_MOVE_LIST_CAPACITY); i++) {
+    ml->moves = malloc((sizeof(Move*)) * (MOVE_LIST_CAPACITY));
+    for (int i = 0; i < (MOVE_LIST_CAPACITY); i++) {
         ml->moves[i] = malloc(sizeof(Move));
     }
     reset_move_list(ml);
@@ -25,7 +25,7 @@ void destroy_move(Move * move) {
 }
 
 void destroy_move_list(MoveList * ml) {
-    for (int i = 0; i < (DEFAULT_MOVE_LIST_CAPACITY); i++) {
+    for (int i = 0; i < (MOVE_LIST_CAPACITY); i++) {
         destroy_move(ml->moves[i]);
     }
     free(ml->moves);
@@ -33,6 +33,10 @@ void destroy_move_list(MoveList * ml) {
 }
 
 Move * new_move(MoveList * ml) {
+    if (ml->count == MOVE_LIST_CAPACITY) {
+        printf("move list at capacity\n");
+        exit(EXIT_FAILURE);
+    }
     ml->count++;
     return ml->moves[ml->count - 1];
 }

@@ -54,11 +54,11 @@ func getLaddagOutputFilename(lexicon string) string {
 }
 
 func getLetterDistributionOutputFilename(letterDistribution string) string {
-	return filepath.Join(OutputDataDirectory, LetterDistributionsDirectory, letterDistribution+".ldist")
+	return filepath.Join(OutputDataDirectory, LetterDistributionsDirectory, letterDistribution+".dist")
 }
 
 func getLetterConversionOutputFilename(lexicon string) string {
-	return filepath.Join(OutputDataDirectory, LexicaDirectory, lexicon+".lconv")
+	return filepath.Join(OutputDataDirectory, LexicaDirectory, lexicon+".alph")
 }
 
 func createGaddag(lexicon string) *gaddagmaker.Gaddag {

@@ -3,7 +3,9 @@
 
 #include "../src/game.h"
 
+#include "test_config.h"
+
 void set_row(Game * game, int row, const char* row_content);
-void test_cross_set();
+void test_cross_set(TestConfig * test_config);
 
 #endif

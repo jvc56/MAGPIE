@@ -3,42 +3,165 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/domino14/macondo/ai/runner"
 	"github.com/domino14/macondo/automatic"
 	"github.com/domino14/macondo/config"
 	"github.com/domino14/macondo/game"
+	"github.com/domino14/macondo/gcgio"
 	pb "github.com/domino14/macondo/gen/api/proto/macondo"
+	"github.com/domino14/macondo/move"
 )
 
-func RunComparisonTests() {
-	game := CreateTopEquityStaticGame()
-	CompareMovesForGame(game)
-}
+var passMove = "pass"
 
-func CompareMovesForGame(g *game.Game) {
-	var err error
-	var lg *game.Game
-	var agr *runner.AIGameRunner
-	for i := 0; i < len(g.History().Events); i++ {
-		lg, err = game.NewFromHistory(g.History(), g.Rules(), i)
-		if err != nil {
-			panic(err)
-		}
-		if lg.Playing() != pb.PlayState_PLAYING {
+func RunComparisonTests(threadName string) {
+	count := 0
+	for {
+		count++
+		fmt.Printf("%s - Game %d\n", threadName, count)
+		game := CreateTopEquityStaticGame()
+		ok := CompareMovesForGame(game)
+		if !ok {
 			break
 		}
-		agr, err = runner.NewAIGameRunnerFromGame(lg, nil, pb.BotRequest_HASTY_BOT)
-		if err != nil {
-			panic(err)
+	}
+}
+
+func playGameToTurn(g *game.Game, turnNumber int) *game.Game {
+	var newGame *game.Game
+	newGame, err := game.NewFromHistory(g.History(), g.Rules(), turnNumber)
+	if err != nil {
+		panic(err)
+	}
+	return newGame
+}
+
+func createMoveMap(g *game.Game) map[string]bool {
+	agr, err := runner.NewAIGameRunnerFromGame(g, nil, pb.BotRequest_HASTY_BOT)
+	if err != nil {
+		panic(err)
+	}
+	moves := agr.GenerateMoves(1000000)
+	moveMap := map[string]bool{}
+	// Macondo only includes the pass move if there are
+	// no other moves available. Magpie will always include
+	// the pass move. So if the pass move was not produced,
+	// add it to the move map anyway so the two maps are
+	// equivalent.
+	passMoveIncluded := false
+	for _, mv := range moves {
+		var moveKey string
+		if mv.Action() == move.MoveTypePass {
+			moveKey = passMove
+			passMoveIncluded = true
+		} else {
+			moveKey = fmt.Sprintf("%d,%s,%s,%d", mv.Action(), mv.BoardCoords(), mv.TilesString(), mv.Score())
 		}
-		moves := agr.GenerateMoves(1000000)
-		moveMap := map[string]bool{}
-		for _, move := range moves {
-			moveKey := fmt.Sprintf("%s,%s,%s,%d", move.MoveTypeString(), move.BoardCoords(), move.TilesString(), move.Score())
-			moveMap[moveKey] = true
+		moveMap[moveKey] = true
+	}
+	if !passMoveIncluded {
+		moveMap[passMove] = true
+	}
+	return moveMap
+}
+
+func getActualMoves(g *game.Game) map[string]bool {
+	cgp := gameToCGP(g, true)
+	cmd := []string{
+		"gen",
+		"-g", "../core/data/lexica/CSW21.gaddag",
+		"-a", "../core/data/lexica/CSW21.alph",
+		"-d", "../core/data/letterdistributions/english.dist",
+		"-l", "../core/data/lexica/CSW21.laddag",
+		"-r", "all",
+		"-s", "equity",
+		"-c", cgp,
+	}
+	outBytes, err := exec.Command("../core/bin/magpie_test", cmd...).Output()
+	if err != nil {
+		fmt.Println("panicked on game")
+		printGameInfo(g)
+		panic(err)
+	}
+	output := string(outBytes)
+	moves := strings.Split(output, "\n")
+	moveMap := map[string]bool{}
+	for _, mv := range moves {
+		if mv != "" {
+			moveMap[mv] = true
 		}
 	}
+	return moveMap
+}
+
+// Performs m1 - m2 and returns the result as a list
+func subtractMaps(m1 map[string]bool, m2 map[string]bool) []string {
+	for key, _ := range m2 {
+		_, exists := m1[key]
+		if exists {
+			m1[key] = false
+		}
+	}
+	moves := []string{}
+	for key, val := range m1 {
+		if val {
+			moves = append(moves, key)
+		}
+	}
+	return moves
+}
+
+func printGameInfo(g *game.Game) {
+	fmt.Println("\nText Display:")
+	fmt.Println(g.ToDisplayText())
+	fmt.Println("\nCGP:")
+	fmt.Println(gameToCGP(g, true))
+	fmt.Println("\nGCG:")
+	gcg, err := gcgio.GameHistoryToGCG(g.History(), true)
+	if err != nil {
+		fmt.Printf("error generating gcg file: %s", err.Error())
+	} else {
+		fmt.Println(gcg)
+	}
+}
+
+func CompareMovesForGame(g *game.Game) bool {
+	for i := 0; i < len(g.History().Events); i++ {
+		gameAtTurn := playGameToTurn(g, i)
+		if gameAtTurn.Playing() != pb.PlayState_PLAYING {
+			return true
+		}
+		expectedMoves := createMoveMap(gameAtTurn)
+		actualMoves := getActualMoves(gameAtTurn)
+
+		expectedMovesNotGenerated := subtractMaps(expectedMoves, actualMoves)
+		extraneousMovesGenerated := subtractMaps(actualMoves, expectedMoves)
+
+		errString := ""
+		if len(expectedMovesNotGenerated) > 0 {
+			errString += fmt.Sprintf("%d expected moves not generated:\n", len(expectedMovesNotGenerated))
+			for i := 0; i < len(expectedMovesNotGenerated); i++ {
+				errString += fmt.Sprintf(">%s<", expectedMovesNotGenerated[i])
+			}
+		}
+		if len(extraneousMovesGenerated) > 0 {
+			errString += fmt.Sprintf("%d extraneous moves generated:\n", len(extraneousMovesGenerated))
+			for i := 0; i < len(extraneousMovesGenerated); i++ {
+				errString += fmt.Sprintf(">%s<", extraneousMovesGenerated[i])
+			}
+		}
+		if errString != "" {
+			fmt.Printf("Turn %d\n\n", i)
+			fmt.Printf("%s\n\n", errString)
+			gameAtTurn := playGameToTurn(g, i)
+			printGameInfo(gameAtTurn)
+			return false
+		}
+	}
+	return true
 }
 
 func CreateTopEquityStaticGame() *game.Game {

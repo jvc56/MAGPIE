@@ -294,6 +294,16 @@ void generate_moves(Generator * gen, Rack * rack, Rack * opp_rack, int add_excha
 	}
 }
 
+void set_gen_sorting_parameter(Generator * gen, int move_sorting) {
+	gen->sorting_parameter = move_sorting;
+	return;
+}
+
+void set_gen_play_recorder_type(Generator * gen, int play_recorder_type) {
+	gen->play_recorder_type = play_recorder_type;
+	return;
+}
+
 void reset_generator(Generator * gen) {
 	reset_bag(gen->bag, gen->letter_distribution);
 	reset_board(gen->board);
@@ -328,11 +338,8 @@ Generator * create_generator(Config * config) {
 	generator->vertical = 0;
 	generator->last_anchor_col = 0;
 
-	if (config->preendgame_adjustment_values_type == PREENDGAME_ADJUSTMENT_VALUES_TYPE_QUACKLE) {
-		load_quackle_preendgame_adjustment_values(generator);
-	} else {
-		load_zero_preendgame_adjustment_values(generator);
-	}
+	// Just load the zero values for now
+	load_zero_preendgame_adjustment_values(generator);
 
 	return generator;
 }

@@ -1,6 +1,8 @@
 #ifndef LETTER_DISTRIBUTION_TEST_H
 #define LETTER_DISTRIBUTION_TEST_H
 
-void test_letter_distribution();
+#include "test_config.h"
+
+void test_letter_distribution(TestConfig * test_config);
 
 #endif

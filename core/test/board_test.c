@@ -9,9 +9,10 @@
 #include "board_test.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "test_config.h"
 
-void test_board() {
-    Config * config = create_america_sort_by_score_config();
+void test_board(TestConfig * test_config) {
+    Config * config = get_america_config(test_config);
     Game * game = create_game(config);
     load_cgp(game, VS_ED);
 
@@ -34,5 +35,5 @@ void test_board() {
     assert(!allowed(cs, 12));
 
     destroy_game(game);
-    destroy_config(config);
+    
 }
