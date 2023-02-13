@@ -17,16 +17,16 @@ import (
 
 var passMove = "pass"
 
-func RunComparisonTests() {
+func RunComparisonTests(threadName string) {
 	count := 0
 	for {
+		count++
+		fmt.Printf("%s - Game %d\n", threadName, count)
 		game := CreateTopEquityStaticGame()
 		ok := CompareMovesForGame(game)
 		if !ok {
 			break
 		}
-		count++
-		fmt.Printf("Game %d\n", count)
 	}
 }
 
@@ -69,6 +69,7 @@ func createMoveMap(g *game.Game) map[string]bool {
 }
 
 func getActualMoves(g *game.Game) map[string]bool {
+	cgp := gameToCGP(g, true)
 	cmd := []string{
 		"gen",
 		"-g", "../core/data/lexica/CSW21.gaddag",
@@ -77,11 +78,12 @@ func getActualMoves(g *game.Game) map[string]bool {
 		"-l", "../core/data/lexica/CSW21.laddag",
 		"-r", "all",
 		"-s", "equity",
-		"-c", gameToCGP(g, true),
+		"-c", cgp,
 	}
 	outBytes, err := exec.Command("../core/bin/magpie_test", cmd...).Output()
 	if err != nil {
-		fmt.Print("error is:\n\n")
+		fmt.Println("panicked on game")
+		printGameInfo(g)
 		panic(err)
 	}
 	output := string(outBytes)
@@ -112,10 +114,23 @@ func subtractMaps(m1 map[string]bool, m2 map[string]bool) []string {
 	return moves
 }
 
+func printGameInfo(g *game.Game) {
+	fmt.Println("\nText Display:")
+	fmt.Println(g.ToDisplayText())
+	fmt.Println("\nCGP:")
+	fmt.Println(gameToCGP(g, true))
+	fmt.Println("\nGCG:")
+	gcg, err := gcgio.GameHistoryToGCG(g.History(), true)
+	if err != nil {
+		fmt.Printf("error generating gcg file: %s", err.Error())
+	} else {
+		fmt.Println(gcg)
+	}
+}
+
 func CompareMovesForGame(g *game.Game) bool {
 	for i := 0; i < len(g.History().Events); i++ {
 		gameAtTurn := playGameToTurn(g, i)
-		fmt.Printf("Comparing moves for\n%s", gameAtTurn.ToDisplayText())
 		if gameAtTurn.Playing() != pb.PlayState_PLAYING {
 			return true
 		}
@@ -142,17 +157,7 @@ func CompareMovesForGame(g *game.Game) bool {
 			fmt.Printf("Turn %d\n\n", i)
 			fmt.Printf("%s\n\n", errString)
 			gameAtTurn := playGameToTurn(g, i)
-			fmt.Println("\nText Display:")
-			fmt.Println(gameAtTurn.ToDisplayText())
-			fmt.Println("\nCGP:")
-			fmt.Println(gameToCGP(gameAtTurn, true))
-			fmt.Println("\nGCG:")
-			gcg, err := gcgio.GameHistoryToGCG(g.History(), true)
-			if err != nil {
-				fmt.Printf("error generating gcg file: %s", err.Error())
-			} else {
-				fmt.Println(gcg)
-			}
+			printGameInfo(gameAtTurn)
 			return false
 		}
 	}

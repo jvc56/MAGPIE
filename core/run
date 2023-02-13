@@ -5,7 +5,7 @@ make magpie_test
 valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./bin/magpie_test unit
 elif [ "$1" == "g" ]; then
 make magpie_test
-gdb ./bin/magpie_test unit
+gdb --args ./bin/magpie_test unit
 elif [ "$1" == "c" ]; then
 make magpie_test BUILD=cov
 ./bin/magpie_test

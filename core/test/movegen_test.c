@@ -353,7 +353,19 @@ void exchange_tests(TestConfig * test_config) {
     assert(game->gen->move_list->moves[0]->move_type == MOVE_TYPE_EXCHANGE);
 
     destroy_game(game);
-    
+}
+
+void many_moves_tests(TestConfig * test_config) {
+    Config * config = get_csw_config(test_config);
+    Game * game = create_game(config);
+
+    char cgp[300] = "7P7/7A7/7R7/7T7/7E7/7R7/4P2RETRACED/1ORDINEE3S3/4C6T3/4T6O3/4U6N3/4R6I3/4A6E3/4L6S3/15 AEINS??/DEIKLYY 139/221 0 lex CSW21;";
+    load_cgp(game, cgp);
+    generate_moves_for_game(game);
+    assert(count_scoring_plays(game->gen->move_list) == 238895);
+    assert(count_nonscoring_plays(game->gen->move_list) == 96);
+
+    destroy_game(game);
 }
 
 void equity_test(TestConfig * test_config) {
@@ -426,6 +438,7 @@ void top_equity_play_recorder_test(TestConfig * test_config) {
 void test_movegen(TestConfig * test_config) {
     macondo_tests(test_config);
     exchange_tests(test_config);
+    many_moves_tests(test_config);
     equity_test(test_config);
     top_equity_play_recorder_test(test_config);
 }
