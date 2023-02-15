@@ -219,7 +219,7 @@ void go_on(Generator * gen, int current_col, uint8_t L, Rack * rack, Rack * opp_
 		if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
 			recursive_gen(gen, current_col - 1, rack, opp_rack, new_node_index, leftstrip, rightstrip, unique_play);
 		}
-		
+
 		uint32_t separation_node_index = get_next_node_index(gen->gaddag, new_node_index, SEPARATION_MACHINE_LETTER);
 		if (separation_node_index != 0 && no_letter_directly_left && gen->current_anchor_col < BOARD_DIM - 1) {
 			recursive_gen(gen, gen->current_anchor_col+1, rack, opp_rack, separation_node_index, leftstrip, rightstrip, unique_play);

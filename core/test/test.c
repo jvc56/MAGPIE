@@ -16,6 +16,7 @@
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
 #include "movegen_test.h"
+#include "prof_tests.h"
 #include "rack_test.h"
 #include "test_constants.h"
 #include "test_config.h"
@@ -46,6 +47,10 @@ int main(int argc, char *argv[]) {
   if (!strcmp(argv[1], CMD_GEN)) {
     Config * config = create_config_from_args(argc, argv);
     test_gen_all(config);
+    destroy_config(config);
+  } else if (!strcmp(argv[1], CMD_PROF)) { 
+    Config * config = create_config_from_args(argc, argv);
+    prof_tests(config);
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
     // Assumes the unit test is called from the 'core' directory
