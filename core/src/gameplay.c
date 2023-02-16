@@ -134,7 +134,7 @@ void play_move(Game *  game, Move * move) {
 }
 
 void play_top_n_equity_move(Game * game, int n) {
-    generate_moves(game->gen, game->players[game->player_on_turn_index]->rack, game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+    generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
     play_move(game, game->gen->move_list->moves[n]);
     reset_move_list(game->gen->move_list);
 }

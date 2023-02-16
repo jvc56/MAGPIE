@@ -2,9 +2,10 @@
 #include <stdio.h>
 
 #include "../src/config.h"
+#include "../src/constants.h"
 #include "../src/game.h"
 #include "../src/gameplay.h"
-#include "../src/constants.h"
+#include "../src/leaves.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -13,8 +14,8 @@
 void test_macondo_opening_equity_adjustments(TestConfig * test_config) {
     Config * config = get_csw_config(test_config);
     Game * game = create_game(config);
-
     Rack * rack = game->players[0]->rack;
+    Laddag * laddag = game->players[0]->strategy_params->laddag;
     set_rack_to_string(rack, "EORSTVX", game->gen->gaddag->alphabet);
     generate_moves_for_game(game);
     // Should be 8G VORTEX
@@ -22,7 +23,7 @@ void test_macondo_opening_equity_adjustments(TestConfig * test_config) {
     assert(top_move->col_start == 6);
     assert(top_move->tiles_played == 6);
     assert(top_move->score == 48);
-    assert(within_epsilon((double)(top_move->score + get_leave_value_for_move(config, top_move, rack)), top_move->equity));
+    assert(within_epsilon((double)(top_move->score + get_leave_value_for_move(laddag, top_move, rack)), top_move->equity));
     reset_game(game);
 
     set_rack_to_string(rack, "BDEIIIJ", game->gen->gaddag->alphabet);
@@ -32,7 +33,7 @@ void test_macondo_opening_equity_adjustments(TestConfig * test_config) {
     assert(top_move->col_start == 3);
     assert(top_move->tiles_played == 5);
     assert(top_move->score == 46);
-    assert(within_epsilon((double)(top_move->score + get_leave_value_for_move(config, top_move, rack) + OPENING_HOTSPOT_PENALTY), top_move->equity));
+    assert(within_epsilon((double)(top_move->score + get_leave_value_for_move(laddag, top_move, rack) + OPENING_HOTSPOT_PENALTY), top_move->equity));
     reset_game(game);
 
     set_rack_to_string(rack, "ACEEEFT", game->gen->gaddag->alphabet);
@@ -42,7 +43,7 @@ void test_macondo_opening_equity_adjustments(TestConfig * test_config) {
     assert(top_move->col_start == 3);
     assert(top_move->tiles_played == 6);
     assert(top_move->score == 30);
-    assert(within_epsilon((double)(top_move->score + get_leave_value_for_move(config, top_move, rack) + (2 * OPENING_HOTSPOT_PENALTY)), top_move->equity));
+    assert(within_epsilon((double)(top_move->score + get_leave_value_for_move(laddag, top_move, rack) + (2 * OPENING_HOTSPOT_PENALTY)), top_move->equity));
     reset_game(game);
 
     set_rack_to_string(rack, "AAAALTY", game->gen->gaddag->alphabet);
@@ -52,7 +53,7 @@ void test_macondo_opening_equity_adjustments(TestConfig * test_config) {
     assert(top_move->col_start == 6);
     assert(top_move->tiles_played == 7);
     assert(top_move->score == 78);
-    assert(within_epsilon((double)(top_move->score + get_leave_value_for_move(config, top_move, rack) + (3 * OPENING_HOTSPOT_PENALTY)), top_move->equity));
+    assert(within_epsilon((double)(top_move->score + get_leave_value_for_move(laddag, top_move, rack) + (3 * OPENING_HOTSPOT_PENALTY)), top_move->equity));
 
     destroy_game(game);
 }

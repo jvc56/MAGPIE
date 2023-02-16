@@ -32,7 +32,7 @@ make magpie_test BUILD=prof
 gprof ./bin/magpie_test
 elif [ "$1" == "t" ]; then
 make magpie_test BUILD=release
-./bin/magpie_test prof -g "./data/lexica/CSW21.gaddag" \
+./bin/magpie_test prof -g1 "./data/lexica/CSW21.gaddag" \
                       -a "./data/lexica/CSW21.alph" \
                       -d "./data/letterdistributions/english.dist" \
                       -l "./data/lexica/CSW21.laddag" \

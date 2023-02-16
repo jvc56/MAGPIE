@@ -3,11 +3,12 @@
 
 #include "../src/config.h"
 #include "../src/game.h"
+#include "../src/leaves.h"
 #include "../src/move.h"
 #include "../src/rack.h"
 
 void generate_moves_for_game(Game * game);
-double get_leave_value_for_move(Config * config, Move * move, Rack * rack);
+double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack);
 int within_epsilon(double a, double b);
 void reset_string(char * string);
 void write_char_to_end_of_buffer(char * buffer, char c);

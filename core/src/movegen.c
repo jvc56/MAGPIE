@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <endian.h>
 
 #include "alphabet.h"
 #include "config.h"
@@ -12,22 +11,23 @@
 #include "gaddag.h"
 #include "leaves.h"
 #include "movegen.h"
+#include "player.h"
 #include "rack.h"
 
-void go_on(Generator * gen, int current_col, uint8_t L, Rack * rack, Rack * opp_rack, uint32_t new_node_index, uint32_t oldnode_index, int leftstrip, int rightstrip, int unique_play);
+void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, uint32_t oldnode_index, int leftstrip, int rightstrip, int unique_play);
 
-void add_letter_to_rack_and_recalculate_leave_index(Generator * gen, Rack * rack, uint8_t letter) {
-	add_letter_to_rack(rack, letter);
-	traverse_add_edge(gen->laddag, letter);
+void add_letter_to_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
+	add_letter_to_rack(player->rack, letter);
+	traverse_add_edge(player->strategy_params->laddag, letter);
 }
 
-void take_letter_from_rack_and_recalculate_leave_index(Generator * gen, Rack * rack, uint8_t letter) {
-	take_letter_from_rack(rack, letter);
-	traverse_take_edge(gen->laddag, letter);
+void take_letter_from_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
+	take_letter_from_rack(player->rack, letter);
+	traverse_take_edge(player->strategy_params->laddag, letter);
 }
 
-void set_start_leave_index(Generator * gen, Rack * rack) {
-	set_start_leave(gen->laddag, rack);
+void set_start_leave_index(Player * player) {
+	set_start_leave(player->strategy_params->laddag, player->rack);
 }
 
 double placement_adjustment(Generator * gen, Move * move) {
@@ -56,7 +56,7 @@ double endgame_adjustment(Generator * gen, Rack * rack, Rack * opp_rack) {
 	return 2 * ((double)score_on_rack(gen->letter_distribution, opp_rack));
 }
 
-double get_move_equity(Generator * gen, Rack * rack, Rack * opp_rack, Move * move) {
+double get_move_equity(Generator * gen, Player * player, Rack * opp_rack, Move * move) {
 	double leave_adjustment = 0;
 	double other_adjustments = 0;
 
@@ -65,19 +65,19 @@ double get_move_equity(Generator * gen, Rack * rack, Rack * opp_rack, Move * mov
 	}
 
 	if (gen->bag->last_tile_index >= 0) {
-		leave_adjustment = get_current_value(gen->laddag);
+		leave_adjustment = get_current_value(player->strategy_params->laddag);
 		int bag_plus_rack_size = (gen->bag->last_tile_index+1) - move->tiles_played + RACK_SIZE;
 		if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
 			other_adjustments += gen->preendgame_adjustment_values[bag_plus_rack_size];
 		}
 	} else {
-		other_adjustments += endgame_adjustment(gen, rack, opp_rack);
+		other_adjustments += endgame_adjustment(gen, player->rack, opp_rack);
 	}
 
 	return ((double)move->score) + leave_adjustment + other_adjustments;
 }
 
-void record_play(Generator * gen, Rack * rack, Rack * opp_rack, int leftstrip, int rightstrip, int move_type) {
+void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstrip, int rightstrip, int move_type) {
 	int start_row = gen->current_row_index;
 	int tiles_played = gen->tiles_played;
 
@@ -106,13 +106,13 @@ void record_play(Generator * gen, Rack * rack, Rack * opp_rack, int leftstrip, i
 		strip = gen->exchange_strip;
 	}
 
-	if (gen->play_recorder_type == PLAY_RECORDER_TYPE_ALL) {
+	if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL) {
 		// Set the move to more easily handle equity calculations
 		Move * move = new_move(gen->move_list);
 		set_move_without_equity(move, strip, leftstrip, rightstrip, score, row, col, tiles_played, gen->vertical, move_type);
 		double equity;
-		if (gen->sorting_parameter == SORT_BY_EQUITY) {
-			equity = get_move_equity(gen, rack, opp_rack, move);
+		if (player->strategy_params->move_sorting == SORT_BY_EQUITY) {
+			equity = get_move_equity(gen, player, opp_rack, move);
 		} else {
 			equity = score;
 		}
@@ -120,7 +120,7 @@ void record_play(Generator * gen, Rack * rack, Rack * opp_rack, int leftstrip, i
 	} else {
 		Move * move = new_top_equity_move(gen->move_list);
 		set_move_without_equity(move, strip, leftstrip, rightstrip, score, row, col, tiles_played, gen->vertical, move_type);
-		double equity = get_move_equity(gen, rack, opp_rack, move);
+		double equity = get_move_equity(gen, player, opp_rack, move);
 		if (gen->move_list->moves[0]->equity < equity) {
 			set_move_equity(move, equity);
 			set_top_equity_move(gen->move_list);
@@ -128,30 +128,30 @@ void record_play(Generator * gen, Rack * rack, Rack * opp_rack, int leftstrip, i
 	}
 }
 
-void generate_exchange_moves(Generator * gen, Rack * rack, uint8_t ml, int stripidx) {
-	while (ml < (RACK_ARRAY_SIZE) && rack->array[ml] == 0) {
+void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int stripidx) {
+	while (ml < (RACK_ARRAY_SIZE) && player->rack->array[ml] == 0) {
 		ml++;
 	}
 	if (ml == (RACK_ARRAY_SIZE)) {
 		// The recording of an exchange should never require
 		// the opponent's rack.
-		record_play(gen, rack, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
+		record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
 	} else {
-		generate_exchange_moves(gen, rack, ml+1, stripidx);
-		int num_this = rack->array[ml];
+		generate_exchange_moves(gen, player, ml+1, stripidx);
+		int num_this = player->rack->array[ml];
 		for (int i = 0; i < num_this; i++) {
 			gen->exchange_strip[stripidx] = ml;
 			stripidx += 1;
-			take_letter_from_rack_and_recalculate_leave_index(gen, rack, ml);
-			generate_exchange_moves(gen, rack, ml+1, stripidx);
+			take_letter_from_rack_and_recalculate_leave_index(player, ml);
+			generate_exchange_moves(gen, player, ml+1, stripidx);
 		}
 		for (int i = 0; i < num_this; i++) {
-			add_letter_to_rack_and_recalculate_leave_index(gen, rack, ml);
+			add_letter_to_rack_and_recalculate_leave_index(player, ml);
 		}
 	}
 }
 
-void recursive_gen(Generator * gen, int col, Rack * rack, Rack * opp_rack, uint32_t node_index, int leftstrip, int rightstrip, int unique_play) {
+void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, uint32_t node_index, int leftstrip, int rightstrip, int unique_play) {
 	int cs_direction;
 	uint8_t current_letter = get_letter(gen->board, gen->current_row_index, col);
 	if (gen->vertical) {
@@ -162,30 +162,30 @@ void recursive_gen(Generator * gen, int col, Rack * rack, Rack * opp_rack, uint3
 	uint64_t cross_set = get_cross_set(gen->board, gen->current_row_index, col, cs_direction);
 	if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
 		uint32_t next_node_index = get_next_node_index(gen->gaddag, node_index, get_unblanked_machine_letter(current_letter));
-		go_on(gen, col, current_letter, rack, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
-	} else if (!rack->empty) {
+		go_on(gen, col, current_letter, player, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
+	} else if (!player->rack->empty) {
 		for (uint8_t ml = 0; ml < gen->number_of_possible_letters; ml++)
 		{
-			if (rack->array[ml] == 0) {
+			if (player->rack->array[ml] == 0) {
 				continue;
 			}
 			if (allowed(cross_set, ml)) {
 				uint32_t next_node_index = get_next_node_index(gen->gaddag, node_index, ml);
-				take_letter_from_rack_and_recalculate_leave_index(gen, rack, ml);
+				take_letter_from_rack_and_recalculate_leave_index(player, ml);
 				gen->tiles_played++;
-				go_on(gen, col, ml, rack, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
-				add_letter_to_rack_and_recalculate_leave_index(gen, rack, ml);
+				go_on(gen, col, ml, player, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
+				add_letter_to_rack_and_recalculate_leave_index(player, ml);
 				gen->tiles_played--;
 			}
 		}
-		if (rack->array[BLANK_MACHINE_LETTER] > 0) {
+		if (player->rack->array[BLANK_MACHINE_LETTER] > 0) {
 			for (uint8_t i = 0; i < gen->number_of_possible_letters; i++) {
 				if (allowed(cross_set, i)) {
 					uint32_t next_node_index = get_next_node_index(gen->gaddag, node_index, i);
-					take_letter_from_rack_and_recalculate_leave_index(gen, rack, BLANK_MACHINE_LETTER);
+					take_letter_from_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
 					gen->tiles_played++;
-					go_on(gen, col, get_blanked_machine_letter(i), rack, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
-					add_letter_to_rack_and_recalculate_leave_index(gen, rack, BLANK_MACHINE_LETTER);
+					go_on(gen, col, get_blanked_machine_letter(i), player, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
+					add_letter_to_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
 					gen->tiles_played--;
 				}
 			}
@@ -193,7 +193,7 @@ void recursive_gen(Generator * gen, int col, Rack * rack, Rack * opp_rack, uint3
 	}
 }
 
-void go_on(Generator * gen, int current_col, uint8_t L, Rack * rack, Rack * opp_rack, uint32_t new_node_index, uint32_t oldnode_index, int leftstrip, int rightstrip, int unique_play) {
+void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, uint32_t oldnode_index, int leftstrip, int rightstrip, int unique_play) {
 	if (current_col <= gen->current_anchor_col) {
 		if (!is_empty(gen->board, gen->current_row_index, current_col)) {
 			gen->strip[current_col] = PLAYED_THROUGH_MARKER;
@@ -208,7 +208,7 @@ void go_on(Generator * gen, int current_col, uint8_t L, Rack * rack, Rack * opp_
 
 		if (in_letter_set(gen->gaddag, L, oldnode_index) && no_letter_directly_left && gen->tiles_played > 0) {
 			if (unique_play || gen->tiles_played > 1) {
-				record_play(gen, rack, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
+				record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
 			}
 		}
 
@@ -217,12 +217,12 @@ void go_on(Generator * gen, int current_col, uint8_t L, Rack * rack, Rack * opp_
 		}
 
 		if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
-			recursive_gen(gen, current_col - 1, rack, opp_rack, new_node_index, leftstrip, rightstrip, unique_play);
+			recursive_gen(gen, current_col - 1, player, opp_rack, new_node_index, leftstrip, rightstrip, unique_play);
 		}
 
 		uint32_t separation_node_index = get_next_node_index(gen->gaddag, new_node_index, SEPARATION_MACHINE_LETTER);
 		if (separation_node_index != 0 && no_letter_directly_left && gen->current_anchor_col < BOARD_DIM - 1) {
-			recursive_gen(gen, gen->current_anchor_col+1, rack, opp_rack, separation_node_index, leftstrip, rightstrip, unique_play);
+			recursive_gen(gen, gen->current_anchor_col+1, player, opp_rack, separation_node_index, leftstrip, rightstrip, unique_play);
 		}
 	} else {
 		if (!is_empty(gen->board, gen->current_row_index, current_col)) {
@@ -238,17 +238,17 @@ void go_on(Generator * gen, int current_col, uint8_t L, Rack * rack, Rack * opp_
 
 		if (in_letter_set(gen->gaddag, L, oldnode_index) && no_letter_directly_right && gen->tiles_played > 0) {
 			if (unique_play || gen->tiles_played > 1) {
-				record_play(gen, rack, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
+				record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
 			}
 		}
 
 		if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
-			recursive_gen(gen, current_col+1, rack, opp_rack, new_node_index, leftstrip, rightstrip, unique_play);
+			recursive_gen(gen, current_col+1, player, opp_rack, new_node_index, leftstrip, rightstrip, unique_play);
 		}
 	}
 }
 
-void gen_by_orientation(Generator * gen, Rack * rack, Rack * opp_rack, int dir) {
+void gen_by_orientation(Generator * gen, Player * player, Rack * opp_rack, int dir) {
 	// genByOrientation
 	for (int row = 0; row < BOARD_DIM; row++)
 	{
@@ -258,30 +258,30 @@ void gen_by_orientation(Generator * gen, Rack * rack, Rack * opp_rack, int dir) 
 		{
 			if (get_anchor(gen->board, row, col, dir)) {
 				gen->current_anchor_col = col;
-				recursive_gen(gen, col, rack, opp_rack, 0, col, col, !gen->vertical);
+				recursive_gen(gen, col, player, opp_rack, 0, col, col, !gen->vertical);
 				gen->last_anchor_col = col;
 			}
 		}
 	}
 }
 
-void generate_moves(Generator * gen, Rack * rack, Rack * opp_rack, int add_exchange) {
+void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_exchange) {
 	// Add plays
-	set_start_leave_index(gen, rack);
+	set_start_leave_index(player);
 	for (int dir = 0; dir < 2; dir++)
 	{
 		gen->vertical = dir%2 != 0;
-		gen_by_orientation(gen, rack, opp_rack, dir);
+		gen_by_orientation(gen, player, opp_rack, dir);
 		transpose(gen->board);
 	}
 
 	// Add exchanges
 	if (add_exchange) {
-		generate_exchange_moves(gen, rack, 0, 0);
+		generate_exchange_moves(gen, player, 0, 0);
 	}
 
 	// Add the pass move
-	if (gen->play_recorder_type == PLAY_RECORDER_TYPE_ALL || gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
+	if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL || gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
 		set_move(gen->move_list->moves[gen->move_list->count], gen->strip, 0, 0, 0, PASS_MOVE_EQUITY, 0, 0, 0, 0, MOVE_TYPE_PASS);
 		gen->move_list->count++;
 	}
@@ -292,16 +292,6 @@ void generate_moves(Generator * gen, Rack * rack, Rack * opp_rack, int add_excha
 		// if the sorting parameter is SORT_BY_SCORE.
 		sort_move_list(gen->move_list);
 	}
-}
-
-void set_gen_sorting_parameter(Generator * gen, int move_sorting) {
-	gen->sorting_parameter = move_sorting;
-	return;
-}
-
-void set_gen_play_recorder_type(Generator * gen, int play_recorder_type) {
-	gen->play_recorder_type = play_recorder_type;
-	return;
 }
 
 void reset_generator(Generator * gen) {
@@ -330,10 +320,7 @@ Generator * create_generator(Config * config) {
 	generator->move_list = create_move_list();
     generator->gaddag = config->gaddag;
     generator->letter_distribution = config->letter_distribution;
-	generator->laddag = config->laddag;
     generator->number_of_possible_letters = get_number_of_letters(generator->gaddag->alphabet);
-    generator->sorting_parameter = config->move_sorting;
-	generator->play_recorder_type = config->play_recorder_type;
 	generator->tiles_played = 0;
 	generator->vertical = 0;
 	generator->last_anchor_col = 0;

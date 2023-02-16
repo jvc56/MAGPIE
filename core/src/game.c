@@ -137,8 +137,10 @@ void reset_game(Game *  game) {
 Game * create_game(Config * config) {
 	Game * game = malloc(sizeof(Game));
 	game->gen = create_generator(config);
-	game->players[0] = create_player("player0");
-	game->players[1] = create_player("player1");
+	game->players[0] = create_player("player_1");
+	game->players[1] = create_player("player_2");
+	game->players[0]->strategy_params = config->player_1_strategy_params;
+	game->players[1]->strategy_params = config->player_2_strategy_params;
 	game->player_on_turn_index = 0;
 	game->consecutive_scoreless_turns = 0;
 	game->game_end_reason = GAME_END_REASON_NONE;

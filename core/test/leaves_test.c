@@ -16,7 +16,7 @@
 
 void test_english_leaves(TestConfig * test_config) {
     Config * config = get_csw_config(test_config);
-    Laddag * laddag = config->laddag;
+    Laddag * laddag = config->player_1_strategy_params->laddag;
     // Check the empty leave
     assert(within_epsilon(laddag->values[0], 0));
     assert(laddag->edges[get_take_edge_index(0, 0)] == (uint32_t)laddag->number_of_nodes);

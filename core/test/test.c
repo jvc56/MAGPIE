@@ -62,10 +62,13 @@ int main(int argc, char *argv[]) {
       "./data/lexica/CSW21.gaddag",
       "./data/lexica/CSW21.alph",
       "./data/letterdistributions/english.dist",
-      "./data/lexica/CSW21.laddag",
       "",
+      "./data/lexica/CSW21.laddag",
       SORT_BY_EQUITY,
-      PLAY_RECORDER_TYPE_ALL
+      PLAY_RECORDER_TYPE_ALL,
+      "",
+      -1,
+      -1
     );
     end = clock();
     printf("loading csw config took %0.6f seconds\n", (double)(end - begin) / CLOCKS_PER_SEC);
@@ -75,10 +78,13 @@ int main(int argc, char *argv[]) {
       "./data/lexica/America.gaddag",
       "./data/lexica/CSW21.alph",
       "./data/letterdistributions/english.dist",
-      "./data/lexica/CSW21.laddag",
       "",
+      "./data/lexica/CSW21.laddag",
       SORT_BY_SCORE,
-      PLAY_RECORDER_TYPE_ALL
+      PLAY_RECORDER_TYPE_ALL,
+      "",
+      -1,
+      -1
     );
     end = clock();
     printf("loading america config took %0.6f seconds\n", (double)(end - begin) / CLOCKS_PER_SEC);

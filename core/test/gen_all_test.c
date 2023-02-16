@@ -57,7 +57,7 @@ void test_gen_all(Config * config) {
     reset_game(game);
     load_cgp(game, config->cgp);
 
-    generate_moves(game->gen, game->players[game->player_on_turn_index]->rack, game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+    generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
     MoveList * ml = game->gen->move_list;
     char csv_move[30];
     for (int i = 0; i < ml->count; i++) {

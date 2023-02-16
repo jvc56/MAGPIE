@@ -41,7 +41,7 @@ int within_epsilon(double a, double b) {
     return fabs(a - b) < EPSILON;
 }
 
-double get_leave_value_for_move(Config * config, Move * move, Rack * rack) {
+double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack) {
     int valid_tiles = move->tiles_length;
     if (move->move_type == MOVE_TYPE_EXCHANGE) {
         valid_tiles = move->tiles_played;
@@ -55,12 +55,12 @@ double get_leave_value_for_move(Config * config, Move * move, Rack * rack) {
             }
         }
     }
-    go_to_leave(config->laddag, rack);
-    return get_current_value(config->laddag);
+    go_to_leave(laddag, rack);
+    return get_current_value(laddag);
 }
 
 void generate_moves_for_game(Game * game) {
-    generate_moves(game->gen, game->players[game->player_on_turn_index]->rack, game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+    generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
 }
 
 void write_rack_to_end_of_buffer(char * dest, Alphabet * alphabet, Rack * rack) {
