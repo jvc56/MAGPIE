@@ -10,7 +10,7 @@
 
 #include "game_print.h"
 #include "test_util.h"
-#include "test_config.h"
+#include "superconfig.h"
 
 void draw_rack_to_string(Bag * bag, Rack * rack, char * letters, Alphabet * alphabet) {
     for (size_t i = 0; i < strnlen(letters, 7); i++) {
@@ -157,8 +157,8 @@ void test_gameplay_by_turn(Config * config, char * cgps[], char * racks[], int a
     destroy_game(expected_game);
 }
 
-void test_six_exchanges_game(TestConfig * test_config) {
-    Config * config = get_csw_config(test_config);
+void test_six_exchanges_game(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
 
     char * racks[18] = {
 		"UUUVVWW",
@@ -206,8 +206,8 @@ void test_six_exchanges_game(TestConfig * test_config) {
     
 }
 
-void test_six_passes_game(TestConfig * test_config) {
-    Config * config = get_csw_config(test_config);
+void test_six_passes_game(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
 
 	char * racks[31] = {
 		"AEGILPR",
@@ -282,8 +282,8 @@ void test_six_passes_game(TestConfig * test_config) {
     
 }
 
-void test_standard_game(TestConfig * test_config) {
-    Config * config = get_csw_config(test_config);
+void test_standard_game(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
 
 	char * racks[23] = {
 		"EGIILNO",
@@ -342,8 +342,8 @@ void test_standard_game(TestConfig * test_config) {
     test_gameplay_by_turn(config, cgps, racks, 23);
 }
 
-void test_playmove(TestConfig * test_config) {
-    Config * config = get_csw_config(test_config);
+void test_playmove(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
 
     // Test play
@@ -418,9 +418,9 @@ void test_playmove(TestConfig * test_config) {
     
 }
 
-void test_gameplay(TestConfig * test_config) {
-    test_playmove(test_config);
-    test_six_exchanges_game(test_config);
-    test_six_passes_game(test_config);
-    test_standard_game(test_config);
+void test_gameplay(SuperConfig * superconfig) {
+    test_playmove(superconfig);
+    test_six_exchanges_game(superconfig);
+    test_six_passes_game(superconfig);
+    test_standard_game(superconfig);
 }

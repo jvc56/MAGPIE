@@ -13,8 +13,8 @@ void reset_and_load_game(Game * game, const char* cgp) {
     load_cgp(game, cgp);
 }
 
-void test_load_cgp(TestConfig * test_config) {
-    Config * config = get_america_config(test_config);
+void test_load_cgp(SuperConfig * superconfig) {
+    Config * config = get_america_config(superconfig);
     Game * game = create_game(config);
     // Test that loading various CGPs doesn't result in
     // any errors
@@ -44,8 +44,8 @@ void test_load_cgp(TestConfig * test_config) {
     
 }
 
-void test_game_main(TestConfig * test_config) {
-    Config * config = get_america_config(test_config);
+void test_game_main(SuperConfig * superconfig) {
+    Config * config = get_america_config(superconfig);
     Game * game = create_game(config);
     Rack * rack = create_rack();
 
@@ -82,7 +82,7 @@ void test_game_main(TestConfig * test_config) {
     destroy_game(game);
 }
 
-void test_game(TestConfig * test_config) {
-    test_game_main(test_config);
-    test_load_cgp(test_config);
+void test_game(SuperConfig * superconfig) {
+    test_game_main(superconfig);
+    test_load_cgp(superconfig);
 }

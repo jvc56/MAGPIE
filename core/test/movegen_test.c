@@ -17,7 +17,7 @@
 #include "move_print.h"
 #include "test_constants.h"
 #include "test_util.h"
-#include "test_config.h"
+#include "superconfig.h"
 
 int count_scoring_plays(MoveList * ml) {
     int sum = 0;
@@ -74,8 +74,8 @@ void test_simple_case(Game * game, Player * player, const char* rack_string, int
     reset_rack(player->rack);
 }
 
-void macondo_tests(TestConfig * test_config) {
-    Config * config = get_america_config(test_config);
+void macondo_tests(SuperConfig * superconfig) {
+    Config * config = get_america_config(superconfig);
     Game * game = create_game(config);
     Player * player = game->players[0];
     char test_string[100];
@@ -331,8 +331,8 @@ void macondo_tests(TestConfig * test_config) {
     destroy_game(game_two);    
 }
 
-void exchange_tests(TestConfig * test_config) {
-    Config * config = get_csw_config(test_config);
+void exchange_tests(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
 
     char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
@@ -354,8 +354,8 @@ void exchange_tests(TestConfig * test_config) {
     destroy_game(game);
 }
 
-void many_moves_tests(TestConfig * test_config) {
-    Config * config = get_csw_config(test_config);
+void many_moves_tests(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
 
     load_cgp(game, MANY_MOVES);
@@ -366,8 +366,8 @@ void many_moves_tests(TestConfig * test_config) {
     destroy_game(game);
 }
 
-void equity_test(TestConfig * test_config) {
-    Config * config = get_america_config(test_config);
+void equity_test(SuperConfig * superconfig) {
+    Config * config = get_america_config(superconfig);
 
     Game * game = create_game(config);
     Player * player = game->players[0];
@@ -399,8 +399,8 @@ void equity_test(TestConfig * test_config) {
     destroy_game(game);
 }
 
-void top_equity_play_recorder_test(TestConfig * test_config) {
-    Config * config = get_america_config(test_config);
+void top_equity_play_recorder_test(SuperConfig * superconfig) {
+    Config * config = get_america_config(superconfig);
 
     Game * game = create_game(config);
     Player * player = game->players[0];
@@ -430,9 +430,9 @@ void top_equity_play_recorder_test(TestConfig * test_config) {
     destroy_game(game);
 }
 
-void test_movegen(TestConfig * test_config) {
-    macondo_tests(test_config);
-    exchange_tests(test_config);
-    equity_test(test_config);
-    top_equity_play_recorder_test(test_config);
+void test_movegen(SuperConfig * superconfig) {
+    macondo_tests(superconfig);
+    exchange_tests(superconfig);
+    equity_test(superconfig);
+    top_equity_play_recorder_test(superconfig);
 }

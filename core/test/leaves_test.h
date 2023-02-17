@@ -1,8 +1,8 @@
 #ifndef LEAVES_TEST_H
 #define LEAVES_TEST_H
 
-#include "test_config.h"
+#include "superconfig.h"
 
-void test_leaves(TestConfig * test_config);
+void test_leaves(SuperConfig * superconfig);
 
 #endif

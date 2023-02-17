@@ -9,10 +9,10 @@
 
 #include "test_constants.h"
 #include "test_util.h"
-#include "test_config.h"
+#include "superconfig.h"
 
-void test_macondo_opening_equity_adjustments(TestConfig * test_config) {
-    Config * config = get_csw_config(test_config);
+void test_macondo_opening_equity_adjustments(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
     Rack * rack = game->players[0]->rack;
     Laddag * laddag = game->players[0]->strategy_params->laddag;
@@ -58,8 +58,8 @@ void test_macondo_opening_equity_adjustments(TestConfig * test_config) {
     destroy_game(game);
 }
 
-void test_macondo_endgame_equity_adjustments(TestConfig * test_config) {
-    Config * config = get_csw_config(test_config);
+void test_macondo_endgame_equity_adjustments(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
 
     load_cgp(game, "4RUMMAGED2C/7A6A/2H1G2T6V/2O1O2I6E/2WAB2PREBENDS/2ER3O3n3/2SI6COW2/3L2HUE2KANE/3LI3FILII2/J1TANGENT2T1Z1/A2TA5FA1OP/R2EN5Ok1OU/VILDE5YEX1D/I3R6SUQS/E13Y INR/OT 440/448 0 lex CSW21;");
@@ -112,7 +112,7 @@ void test_macondo_endgame_equity_adjustments(TestConfig * test_config) {
     
 }
 
-void test_equity_adjustments(TestConfig * test_config) {
-    test_macondo_opening_equity_adjustments(test_config);
-    test_macondo_endgame_equity_adjustments(test_config);
+void test_equity_adjustments(SuperConfig * superconfig) {
+    test_macondo_opening_equity_adjustments(superconfig);
+    test_macondo_endgame_equity_adjustments(superconfig);
 }

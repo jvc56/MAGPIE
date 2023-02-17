@@ -14,7 +14,6 @@ typedef struct Config {
     Gaddag * gaddag;
     LetterDistribution * letter_distribution;
     char * cgp;
-    int gaddag_is_shared;
     int laddag_is_shared;
     StrategyParams * player_1_strategy_params;
     StrategyParams * player_2_strategy_params;

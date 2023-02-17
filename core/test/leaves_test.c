@@ -12,10 +12,10 @@
 #include "../src/leaves.h"
 
 #include "test_util.h"
-#include "test_config.h"
+#include "superconfig.h"
 
-void test_english_leaves(TestConfig * test_config) {
-    Config * config = get_csw_config(test_config);
+void test_english_leaves(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
     Laddag * laddag = config->player_1_strategy_params->laddag;
     // Check the empty leave
     assert(within_epsilon(laddag->values[0], 0));
@@ -175,6 +175,6 @@ void test_english_leaves(TestConfig * test_config) {
     destroy_rack(rack);
 }
 
-void test_leaves(TestConfig * test_config) {
-    test_english_leaves(test_config);
+void test_leaves(SuperConfig * superconfig) {
+    test_english_leaves(superconfig);
 }
