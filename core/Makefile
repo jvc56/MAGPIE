@@ -17,11 +17,11 @@ BUILD := dev
 
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
-cflags.prof := -g -O0 -Wall -Wno-trigraphs -Wextra -pg
+cflags.prof := -g -O3 -Wall -Wno-trigraphs -Wextra -pg
 cflags.release := -O3 -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
-lflags.prof := -pg
+lflags.prof := -pg -g
 
 CPPFLAGS := -Iinclude -MMD -MP
 CFLAGS := ${cflags.${BUILD}}

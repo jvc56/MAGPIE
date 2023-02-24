@@ -132,17 +132,3 @@ void play_move(Game *  game, Move * move) {
         game->player_on_turn_index = 1 - game->player_on_turn_index;
     }
 }
-
-void play_top_n_equity_move(Game * game, int n) {
-    generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
-    play_move(game, game->gen->move_list->moves[n]);
-    reset_move_list(game->gen->move_list);
-}
-
-void play_random_top_equity_game(Game * game) {
-    draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, RACK_SIZE);
-    draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, RACK_SIZE);
-    while (!game->game_end_reason) {
-        play_top_n_equity_move(game, 0);
-    }
-}

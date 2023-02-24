@@ -92,7 +92,7 @@ void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstri
 	}
 
 	int score = 0;
-	uint8_t * strip;
+	uint8_t * strip = NULL;
 
 	if (move_type == MOVE_TYPE_PLAY) {
 		score = score_move(gen->board, gen->strip, leftstrip, rightstrip, start_row, start_col, tiles_played, !gen->vertical, gen->letter_distribution);
@@ -206,10 +206,8 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 		leftstrip = current_col;
 		int no_letter_directly_left = (current_col == 0) || is_empty(gen->board, gen->current_row_index, current_col - 1);
 
-		if (in_letter_set(gen->gaddag, L, oldnode_index) && no_letter_directly_left && gen->tiles_played > 0) {
-			if (unique_play || gen->tiles_played > 1) {
-				record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
-			}
+		if (in_letter_set(gen->gaddag, L, oldnode_index) && no_letter_directly_left && gen->tiles_played > 0 && (unique_play || gen->tiles_played > 1)) {
+			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
 		}
 
 		if (new_node_index == 0) {
@@ -236,10 +234,8 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 		rightstrip = current_col;
 		int no_letter_directly_right = (current_col == BOARD_DIM - 1) || is_empty(gen->board, gen->current_row_index, current_col + 1);
 
-		if (in_letter_set(gen->gaddag, L, oldnode_index) && no_letter_directly_right && gen->tiles_played > 0) {
-			if (unique_play || gen->tiles_played > 1) {
-				record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
-			}
+		if (in_letter_set(gen->gaddag, L, oldnode_index) && no_letter_directly_right && gen->tiles_played > 0 && (unique_play || gen->tiles_played > 1)) {
+			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
 		}
 
 		if (new_node_index != 0 && current_col < BOARD_DIM - 1) {

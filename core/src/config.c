@@ -9,14 +9,18 @@
 #include "letter_distribution.h"
 #include "leaves.h"
 
+static int game_pair_flag;
+
 Config * create_config(const char * gaddag_filename, const char * alphabet_filename, const char * letter_distribution_filename, const char * cgp,
                        const char * laddag_filename_1, int move_sorting_1, int play_recorder_type_1,
-                       const char * laddag_filename_2, int move_sorting_2, int play_recorder_type_2) {
+                       const char * laddag_filename_2, int move_sorting_2, int play_recorder_type_2, int game_pair_flag, int number_of_games_or_pairs) {
 
     Config * config = malloc(sizeof(Config));
     config->letter_distribution = create_letter_distribution(letter_distribution_filename);
     config->gaddag = create_gaddag(gaddag_filename, alphabet_filename);
     config->cgp = strdup(cgp);
+    config->game_pairs = game_pair_flag;
+    config->number_of_games_or_pairs = number_of_games_or_pairs;
 
     StrategyParams * player_1_strategy_params = malloc(sizeof(StrategyParams));
 
@@ -73,6 +77,7 @@ Config * create_config_from_args(int argc, char *argv[]) {
   char laddag_filename_2[(MAX_ARG_LENGTH)] = "";
   int play_recorder_type_2 = -1;
   int move_sorting_2 = -1;
+  int number_of_games_or_pairs = 10000;
 
   int c;
 
@@ -82,13 +87,15 @@ Config * create_config_from_args(int argc, char *argv[]) {
         {"a",  required_argument, 0, 1000},
         {"c",  required_argument, 0, 1001},
         {"d",  required_argument, 0, 1002},
-        {"g", required_argument, 0,  1003},
+        {"g",  required_argument, 0, 1003},
         {"l1", required_argument, 0, 1004},
         {"r1", required_argument, 0, 1005},
         {"s1", required_argument, 0, 1006},
         {"l2", required_argument, 0, 1007},
         {"r2", required_argument, 0, 1008},
         {"s2", required_argument, 0, 1009},
+        {"n",  required_argument, 0, 1010},
+        {"p",  no_argument, &game_pair_flag, 1},
         {0, 0, 0, 0}
       };
     int option_index = 0;
@@ -187,6 +194,12 @@ Config * create_config_from_args(int argc, char *argv[]) {
         }
         break;
 
+      case 1010:
+        check_arg_length(optarg);
+        long n = strtol(optarg, NULL, 10);
+        number_of_games_or_pairs = (int)n;
+        break;
+
       case '?':
         /* getopt_long already printed an error message. */
         break;
@@ -195,9 +208,10 @@ Config * create_config_from_args(int argc, char *argv[]) {
         abort ();
       }
   }
+
   return create_config(gaddag_filename, alphabet_filename, letter_distribution_filename, cgp,
   laddag_filename_1, move_sorting_1, play_recorder_type_1,
-  laddag_filename_2, move_sorting_2, play_recorder_type_2);
+  laddag_filename_2, move_sorting_2, play_recorder_type_2, game_pair_flag, number_of_games_or_pairs);
 }
 
 void destroy_config(Config * config) {

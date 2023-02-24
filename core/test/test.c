@@ -72,7 +72,9 @@ int main(int argc, char *argv[]) {
       PLAY_RECORDER_TYPE_ALL,
       "",
       -1,
-      -1
+      -1,
+      0,
+      10000
     );
     end = clock();
     printf("loading csw config took %0.6f seconds\n", (double)(end - begin) / CLOCKS_PER_SEC);
@@ -88,7 +90,9 @@ int main(int argc, char *argv[]) {
       PLAY_RECORDER_TYPE_ALL,
       "",
       -1,
-      -1
+      -1,
+      0,
+      10000
     );
     end = clock();
     printf("loading america config took %0.6f seconds\n", (double)(end - begin) / CLOCKS_PER_SEC);
