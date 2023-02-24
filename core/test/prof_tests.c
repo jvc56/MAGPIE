@@ -5,6 +5,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 
+#include "../src/autoplay.h"
 #include "../src/config.h"
 #include "../src/movegen.h"
 #include "../src/game.h"
@@ -20,5 +21,5 @@ void many_moves(Config * config) {
 }
 
 void prof_tests(Config * config) {
-    many_moves(config);
+    autoplay(config);
 }

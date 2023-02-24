@@ -1,8 +1,8 @@
 #ifndef GAMEPLAY_TEST_H
 #define GAMEPLAY_TEST_H
 
-#include "test_config.h"
+#include "superconfig.h"
 
-void test_gameplay(TestConfig * test_config);
+void test_gameplay(SuperConfig * superconfig);
 
 #endif

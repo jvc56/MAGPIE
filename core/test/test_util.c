@@ -6,6 +6,7 @@
 #include "../src/config.h"
 #include "../src/constants.h"
 #include "../src/game.h"
+#include "../src/gameplay.h"
 #include "../src/leaves.h"
 #include "../src/move.h"
 #include "../src/rack.h"
@@ -41,7 +42,7 @@ int within_epsilon(double a, double b) {
     return fabs(a - b) < EPSILON;
 }
 
-double get_leave_value_for_move(Config * config, Move * move, Rack * rack) {
+double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack) {
     int valid_tiles = move->tiles_length;
     if (move->move_type == MOVE_TYPE_EXCHANGE) {
         valid_tiles = move->tiles_played;
@@ -55,12 +56,18 @@ double get_leave_value_for_move(Config * config, Move * move, Rack * rack) {
             }
         }
     }
-    go_to_leave(config->laddag, rack);
-    return get_current_value(config->laddag);
+    go_to_leave(laddag, rack);
+    return get_current_value(laddag);
 }
 
 void generate_moves_for_game(Game * game) {
-    generate_moves(game->gen, game->players[game->player_on_turn_index]->rack, game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+    generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+}
+
+void play_top_n_equity_move(Game * game, int n) {
+    generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+    play_move(game, game->gen->move_list->moves[n]);
+    reset_move_list(game->gen->move_list);
 }
 
 void write_rack_to_end_of_buffer(char * dest, Alphabet * alphabet, Rack * rack) {

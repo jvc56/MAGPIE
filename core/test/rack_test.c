@@ -11,10 +11,10 @@
 
 #include "rack_test.h"
 #include "test_util.h"
-#include "test_config.h"
+#include "superconfig.h"
 
-void test_rack(TestConfig * test_config) {
-    Config * config = get_america_config(test_config);
+void test_rack(SuperConfig * superconfig) {
+    Config * config = get_america_config(superconfig);
     Rack * rack = create_rack();
     Rack * expected_rack = create_rack();
 

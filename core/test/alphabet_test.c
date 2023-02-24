@@ -5,10 +5,10 @@
 #include "../src/alphabet.h"
 
 #include "test_util.h"
-#include "test_config.h"
+#include "superconfig.h"
 
-void test_alphabet(TestConfig * test_config) {
-    Config * config = get_america_config(test_config);
+void test_alphabet(SuperConfig * superconfig) {
+    Config * config = get_america_config(superconfig);
     // Test blank
     assert(get_blanked_machine_letter(0) == BLANK_OFFSET);
     assert(get_blanked_machine_letter(1) == BLANK_OFFSET + 1);
