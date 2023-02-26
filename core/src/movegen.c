@@ -16,14 +16,15 @@
 
 void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, uint32_t oldnode_index, int leftstrip, int rightstrip, int unique_play);
 
-void add_letter_to_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
-	add_letter_to_rack(player->rack, letter);
+void add_letter_to_rack_and_recalculate_leave_index(Player * player, uint8_t letter, int nonzero_array_index) {
+	add_letter_to_rack(player->rack, letter, nonzero_array_index);
 	traverse_add_edge(player->strategy_params->laddag, letter);
 }
 
-void take_letter_from_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
-	take_letter_from_rack(player->rack, letter);
+int take_letter_from_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
+	int nonzero_array_index = take_letter_from_rack(player->rack, letter);
 	traverse_take_edge(player->strategy_params->laddag, letter);
+	return nonzero_array_index;
 }
 
 void set_start_leave_index(Player * player) {
@@ -80,7 +81,6 @@ double get_move_equity(Generator * gen, Player * player, Rack * opp_rack, Move *
 void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstrip, int rightstrip, int move_type) {
 	int start_row = gen->current_row_index;
 	int tiles_played = gen->tiles_played;
-
 	int start_col = leftstrip;
 	int row = start_row;
 	int col = start_col;
@@ -146,7 +146,7 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 			generate_exchange_moves(gen, player, ml+1, stripidx);
 		}
 		for (int i = 0; i < num_this; i++) {
-			add_letter_to_rack_and_recalculate_leave_index(player, ml);
+			add_letter_to_rack_and_recalculate_leave_index(player, ml, player->rack->number_of_nonzero_indexes);
 		}
 	}
 }
@@ -164,28 +164,26 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 		uint32_t next_node_index = get_next_node_index(gen->gaddag, node_index, get_unblanked_machine_letter(current_letter));
 		go_on(gen, col, current_letter, player, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
 	} else if (!player->rack->empty) {
-		for (uint8_t ml = 0; ml < gen->number_of_possible_letters; ml++)
-		{
-			if (player->rack->array[ml] == 0) {
-				continue;
-			}
-			if (allowed(cross_set, ml)) {
-				uint32_t next_node_index = get_next_node_index(gen->gaddag, node_index, ml);
-				take_letter_from_rack_and_recalculate_leave_index(player, ml);
-				gen->tiles_played++;
-				go_on(gen, col, ml, player, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
-				add_letter_to_rack_and_recalculate_leave_index(player, ml);
-				gen->tiles_played--;
-			}
-		}
-		if (player->rack->array[BLANK_MACHINE_LETTER] > 0) {
-			for (uint8_t i = 0; i < gen->number_of_possible_letters; i++) {
-				if (allowed(cross_set, i)) {
-					uint32_t next_node_index = get_next_node_index(gen->gaddag, node_index, i);
-					take_letter_from_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
+		for (int i = 0; i < player->rack->number_of_nonzero_indexes; i++) {
+			uint8_t ml = player->rack->array_nonzero_indexes[i];
+			if (ml == BLANK_MACHINE_LETTER) {
+				for (uint8_t k = 0; k < gen->number_of_possible_letters; k++) {
+					if (allowed(cross_set, k)) {
+						uint32_t next_node_index = get_next_node_index(gen->gaddag, node_index, k);
+						int nonzero_array_index = take_letter_from_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
+						gen->tiles_played++;
+						go_on(gen, col, get_blanked_machine_letter(k), player, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
+						add_letter_to_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER, nonzero_array_index);
+						gen->tiles_played--;
+					}
+				}
+			} else {
+				if (allowed(cross_set, ml)) {
+					uint32_t next_node_index = get_next_node_index(gen->gaddag, node_index, ml);
+					int nonzero_array_index = take_letter_from_rack_and_recalculate_leave_index(player, ml);
 					gen->tiles_played++;
-					go_on(gen, col, get_blanked_machine_letter(i), player, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
-					add_letter_to_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
+					go_on(gen, col, ml, player, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
+					add_letter_to_rack_and_recalculate_leave_index(player, ml, nonzero_array_index);
 					gen->tiles_played--;
 				}
 			}

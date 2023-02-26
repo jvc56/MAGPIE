@@ -104,7 +104,7 @@ func testDev() {
 	// fmt.Println(gcgio.GameHistoryToGCG(mg.History(), false))
 }
 
-func NondeterministicTests(threadName string) {
+func NondeterministicTests() {
 	zerolog.SetGlobalLevel(zerolog.Disabled)
 	threads := 12
 	var wg sync.WaitGroup
@@ -116,5 +116,6 @@ func NondeterministicTests(threadName string) {
 }
 
 func main() {
-	fmt.Println(ConvertGCGToCGP("many_moves.gcg"))
+	//fmt.Println(ConvertGCGToCGP("many_moves.gcg"))
+	NondeterministicTests()
 }

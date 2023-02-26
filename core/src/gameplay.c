@@ -10,7 +10,7 @@
 
 void draw_at_most_to_rack(Bag * bag, Rack * rack, int n) {
     while (n > 0 && bag->last_tile_index >= 0) {
-        add_letter_to_rack(rack, bag->tiles[bag->last_tile_index]);
+        add_letter_to_rack(rack, bag->tiles[bag->last_tile_index], rack->number_of_nonzero_indexes);
         bag->last_tile_index--;
         n--;
     }
