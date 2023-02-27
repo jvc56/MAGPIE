@@ -70,18 +70,24 @@ func createMoveMap(g *game.Game) map[string]bool {
 
 func getActualMoves(g *game.Game) map[string]bool {
 	cgp := gameToCGP(g, true)
+	gaddag := "data/lexica/CSW21.gaddag"
+	alphabet := "data/lexica/CSW21.alph"
+	dist := "data/letterdistributions/english.dist"
+	laddag := "/data/lexica/CSW21.laddag"
 	cmd := []string{
 		"gen",
-		"-g", "../core/data/lexica/CSW21.gaddag",
-		"-a", "../core/data/lexica/CSW21.alph",
-		"-d", "../core/data/letterdistributions/english.dist",
-		"-l", "../core/data/lexica/CSW21.laddag",
-		"-r", "all",
-		"-s", "equity",
+		"-g", "../core/" + gaddag,
+		"-a", "../core/" + alphabet,
+		"-d", "../core/" + dist,
+		"-l1", "../core/" + laddag,
+		"-r1", "all",
+		"-s1", "equity",
 		"-c", cgp,
 	}
 	outBytes, err := exec.Command("../core/bin/magpie_test", cmd...).Output()
 	if err != nil {
+		fmt.Println("Command to run from core to reproduce:")
+		fmt.Printf("./bin/magpie_test gen -g '%s' -a '%s' -d '%s' -l '%s' -r all -s equity -c '%s'\n", gaddag, alphabet, dist, laddag, cgp)
 		fmt.Println("panicked on game")
 		printGameInfo(g)
 		panic(err)

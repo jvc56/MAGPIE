@@ -43,7 +43,7 @@ void set_start_leave(Laddag * laddag, Rack * rack) {
     // we just have to find the index. If the
     // rack is RACK_SIZE tiles, we have to create the
     // RACK_SIZE tiles leave nodes in the leave graph.
-    if (rack->number_of_letters < RACK_SIZE) {
+    if (rack->number_of_letters < (RACK_SIZE)) {
         go_to_leave(laddag, rack);
         return;
     }
@@ -58,7 +58,7 @@ void set_start_leave(Laddag * laddag, Rack * rack) {
         if (rack->array[i] == 0) {
             laddag->edges[start_leave_take_edge_index] = laddag->number_of_nodes;
         } else {
-            take_letter_from_rack(rack, i);
+            int nonzero_array_index = take_letter_from_rack(rack, i);
             go_to_leave(laddag, rack);
             // The laddag->current_index is now the full rack minus this machine letter.
             // Set the take edge for the full rack and the add edge for the 
@@ -66,7 +66,7 @@ void set_start_leave(Laddag * laddag, Rack * rack) {
             full_rack_minus_one_add_edge_index = get_add_edge_index(laddag->current_index, i);
             laddag->edges[start_leave_take_edge_index] = laddag->current_index;
             laddag->edges[full_rack_minus_one_add_edge_index] = start_leave_index;
-            add_letter_to_rack(rack, i);
+            add_letter_to_rack(rack, i, nonzero_array_index);
         }
     }
 	laddag->current_index = start_leave_index;

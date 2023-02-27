@@ -26,7 +26,7 @@ char add_player_score(const char* cgp, int *cgp_index, Game * game, int player_i
 
 void draw_letter_to_rack(Bag * bag, Rack * rack, uint8_t letter) {
     draw_letter(bag, letter);
-    add_letter_to_rack(rack, letter);
+    add_letter_to_rack(rack, letter, rack->number_of_nonzero_indexes);
 }
 
 char add_player_rack(const char* cgp, int *cgp_index, Game * game, int player_index) {
