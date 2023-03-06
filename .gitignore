@@ -8,7 +8,9 @@ covhtml
 *.info
 *.gcg
 *.out
+perf*
 .env
 */data/lexica/*
 */data/letterdistributions/*
+oprofile_data
 

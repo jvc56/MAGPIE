@@ -16,6 +16,6 @@ void destroy_gaddag(Gaddag * gaddag);
 uint64_t get_letter_set(Gaddag* gaddag, uint32_t node_index);
 int in_letter_set(Gaddag* gaddag, uint8_t letter, uint32_t node_index);
 uint32_t get_next_node_index(Gaddag * gaddag, uint32_t node_index, uint8_t letter);
-uint8_t get_number_of_arcs(Gaddag * gaddag, uint32_t node_index);
+int get_number_of_arcs(Gaddag * gaddag, uint32_t node_index);
 
 #endif

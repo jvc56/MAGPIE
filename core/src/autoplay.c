@@ -26,7 +26,7 @@ void autoplay_without_using_game_pairs(Config * config) {
 }
 
 void autoplay_using_game_pairs(Config * config) {
-    printf("implemented: %s\n", config->cgp);
+    printf("unimplemented: %s\n", config->cgp);
 }
 
 void autoplay(Config * config) {

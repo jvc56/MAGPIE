@@ -114,14 +114,14 @@ void load_gaddag(Gaddag* gaddag, const char* gaddag_filename, const char* alphab
 	fclose(stream);
 }
 
-uint8_t get_number_of_arcs(Gaddag* gaddag, uint32_t node_index) {
+int get_number_of_arcs(Gaddag* gaddag, uint32_t node_index) {
 	return gaddag->nodes[node_index] >> GADDAG_NUM_ARCS_BIT_LOC;
 }
 
 uint32_t get_next_node_index(Gaddag* gaddag, uint32_t node_index, uint8_t letter) {
-	uint8_t number_of_arcs = get_number_of_arcs(gaddag, node_index);
-	for (uint32_t k = node_index + 1; k <= number_of_arcs + node_index; k++) {
-		uint8_t ml = (uint8_t)(gaddag->nodes[k] >> GADDAG_LETTER_BIT_LOC);
+	int number_of_arcs = get_number_of_arcs(gaddag, node_index);
+	for (int k = node_index + 1; k <= number_of_arcs + node_index; k++) {
+		int ml = (gaddag->nodes[k] >> GADDAG_LETTER_BIT_LOC);
 		if (letter == ml) {
 			return gaddag->nodes[k] & (GADDAG_NODE_IDX_BIT_MASK);
 		}
