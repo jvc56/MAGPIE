@@ -42,6 +42,11 @@ sudo perf record ./bin/magpie_test prof -g "./data/lexica/CSW21.gaddag" \
                       -n "100000"
 sudo perf report
 elif [ "$1" == "t" ]; then
+if [ -z "$2" ]; then
+    echo "must provide number of games to play"
+    exit 1
+fi
+git checkout main
 make magpie_test BUILD=release
 ./bin/magpie_test prof -g "./data/lexica/CSW21.gaddag" \
                       -a "./data/lexica/CSW21.alph" \
@@ -49,7 +54,16 @@ make magpie_test BUILD=release
                       -l1 "./data/lexica/CSW21.laddag" \
                       -r1 "top" \
                       -s1 "equity" \
-                      -n "300000"
+                      -n "$2"
+git checkout faster
+make magpie_test BUILD=release
+./bin/magpie_test prof -g "./data/lexica/CSW21.gaddag" \
+                      -a "./data/lexica/CSW21.alph" \
+                      -d "./data/letterdistributions/english.dist" \
+                      -l1 "./data/lexica/CSW21.laddag" \
+                      -r1 "top" \
+                      -s1 "equity" \
+                      -n "$2"
 elif [ "$1" == "m" ]; then
 make magpie_test
 ./bin/magpie_test gen -g "./data/lexica/CSW21.gaddag" \
