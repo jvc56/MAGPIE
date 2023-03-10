@@ -415,7 +415,6 @@ void test_playmove(SuperConfig * superconfig) {
     assert(game->gen->bag->last_tile_index + 1 == 0);
 
     destroy_game(game);
-    
 }
 
 void test_gameplay(SuperConfig * superconfig) {

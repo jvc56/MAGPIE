@@ -39,7 +39,7 @@ sudo perf record ./bin/magpie_test prof -g "./data/lexica/CSW21.gaddag" \
                       -l1 "./data/lexica/CSW21.laddag" \
                       -r1 "top" \
                       -s1 "equity" \
-                      -n "100000"
+                      -n "200000"
 sudo perf report
 elif [ "$1" == "t" ]; then
 if [ -z "$2" ]; then

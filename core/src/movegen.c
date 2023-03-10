@@ -57,17 +57,17 @@ double endgame_adjustment(Generator * gen, Rack * rack, Rack * opp_rack) {
 	return 2 * ((double)score_on_rack(gen->letter_distribution, opp_rack));
 }
 
-double get_move_equity(Generator * gen, Player * player, Rack * opp_rack, Move * move) {
+double get_spare_move_equity(Generator * gen, Player * player, Rack * opp_rack) {
 	double leave_adjustment = 0;
 	double other_adjustments = 0;
 
-	if (gen->board->tiles_played == 0 && move->move_type == MOVE_TYPE_PLAY) {
-		other_adjustments = placement_adjustment(gen, move);
+	if (gen->board->tiles_played == 0 && gen->move_list->spare_move->move_type == MOVE_TYPE_PLAY) {
+		other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
 	}
 
 	if (gen->bag->last_tile_index >= 0) {
 		leave_adjustment = get_current_value(player->strategy_params->laddag);
-		int bag_plus_rack_size = (gen->bag->last_tile_index+1) - move->tiles_played + RACK_SIZE;
+		int bag_plus_rack_size = (gen->bag->last_tile_index+1) - gen->move_list->spare_move->tiles_played + RACK_SIZE;
 		if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
 			other_adjustments += gen->preendgame_adjustment_values[bag_plus_rack_size];
 		}
@@ -75,7 +75,7 @@ double get_move_equity(Generator * gen, Player * player, Rack * opp_rack, Move *
 		other_adjustments += endgame_adjustment(gen, player->rack, opp_rack);
 	}
 
-	return ((double)move->score) + leave_adjustment + other_adjustments;
+	return ((double)gen->move_list->spare_move->score) + leave_adjustment + other_adjustments;
 }
 
 void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstrip, int rightstrip, int move_type) {
@@ -106,25 +106,19 @@ void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstri
 		strip = gen->exchange_strip;
 	}
 
+	// Set the move to more easily handle equity calculations
+	set_spare_move(gen->move_list, strip, leftstrip, rightstrip, score, row, col, tiles_played, gen->vertical, move_type);
+
 	if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL) {
-		// Set the move to more easily handle equity calculations
-		Move * move = new_move(gen->move_list);
-		set_move_without_equity(move, strip, leftstrip, rightstrip, score, row, col, tiles_played, gen->vertical, move_type);
 		double equity;
 		if (player->strategy_params->move_sorting == SORT_BY_EQUITY) {
-			equity = get_move_equity(gen, player, opp_rack, move);
+			equity = get_spare_move_equity(gen, player, opp_rack);
 		} else {
 			equity = score;
 		}
-		set_move_equity(move, equity);
+		insert_spare_move(gen->move_list, equity);
 	} else {
-		Move * move = new_top_equity_move(gen->move_list);
-		set_move_without_equity(move, strip, leftstrip, rightstrip, score, row, col, tiles_played, gen->vertical, move_type);
-		double equity = get_move_equity(gen, player, opp_rack, move);
-		if (gen->move_list->moves[0]->equity < equity) {
-			set_move_equity(move, equity);
-			set_top_equity_move(gen->move_list);
-		}
+		insert_spare_move_top_equity(gen->move_list, get_spare_move_equity(gen, player, opp_rack));
 	}
 }
 
@@ -276,15 +270,8 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 
 	// Add the pass move
 	if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL || gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
-		set_move(gen->move_list->moves[gen->move_list->count], gen->strip, 0, 0, 0, PASS_MOVE_EQUITY, 0, 0, 0, 0, MOVE_TYPE_PASS);
-		gen->move_list->count++;
-	}
-
-	if (gen->move_list->count > 1) {
-		// If there is more than one move, we need to sort the
-		// list by equity, which could be just the score
-		// if the sorting parameter is SORT_BY_SCORE.
-		sort_move_list(gen->move_list);
+		set_spare_move(gen->move_list, gen->strip, 0, 0, 0, 0, 0, 0, 0, MOVE_TYPE_PASS);
+		insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
 	}
 }
 
