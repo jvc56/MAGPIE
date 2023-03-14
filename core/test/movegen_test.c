@@ -58,7 +58,6 @@ void boards_equal(Board * b1, Board * b2) {
 void execute_recursive_gen(Generator * gen, int col, Player * player, uint32_t node_index, int leftstrip, int rightstrip, int unique_play) {
     set_start_leave_index(player);
     recursive_gen(gen, col, player, NULL, node_index, leftstrip, rightstrip, unique_play);
-    sort_move_list(gen->move_list);
 }
 
 void test_simple_case(Game * game, Player * player, const char* rack_string, int current_anchor_col, int row, const char* row_string, int expected_plays) {
@@ -133,13 +132,16 @@ void macondo_tests(SuperConfig * superconfig) {
 
     assert(game->gen->move_list->count == 2);
 
-    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, game->gen->move_list->moves[0], game->gen->gaddag->alphabet);
+    SortedMoveList * test_row_gen_sorted_move_list = create_sorted_move_list(game->gen->move_list);
+
+    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, test_row_gen_sorted_move_list->moves[0], game->gen->gaddag->alphabet);
     assert(!strcmp(test_string, "5B AIR(GLOWS) 12"));
     reset_string(test_string);
-    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, game->gen->move_list->moves[1], game->gen->gaddag->alphabet);
+    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, test_row_gen_sorted_move_list->moves[1], game->gen->gaddag->alphabet);
     assert(!strcmp(test_string, "5C RE(GLOWS) 11"));
     reset_string(test_string);
 
+    destroy_sorted_move_list(test_row_gen_sorted_move_list);
     reset_game(game);
     reset_rack(player->rack);
 
@@ -206,11 +208,15 @@ void macondo_tests(SuperConfig * superconfig) {
     assert(count_scoring_plays(game->gen->move_list) == 673);
     assert(count_nonscoring_plays(game->gen->move_list) == 96);
 
+    SortedMoveList * test_gen_all_moves_full_rack_sorted_move_list = create_sorted_move_list(game->gen->move_list);
+
     int highest_scores[] = {38, 36, 36, 34, 34, 33, 30, 30, 30, 28};
     int number_of_highest_scores = sizeof(highest_scores) / sizeof(int);
     for (int i = 0; i < number_of_highest_scores; i++) {
-        assert(game->gen->move_list->moves[i]->score == highest_scores[i]);
+        assert(test_gen_all_moves_full_rack_sorted_move_list->moves[i]->score == highest_scores[i]);
     }
+
+    destroy_sorted_move_list(test_gen_all_moves_full_rack_sorted_move_list);
 
     reset_game(game);
     reset_rack(player->rack);
@@ -252,13 +258,17 @@ void macondo_tests(SuperConfig * superconfig) {
     assert(count_scoring_plays(game->gen->move_list) == 8297);
     assert(count_nonscoring_plays(game->gen->move_list) == 1);
 
-    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, game->gen->move_list->moves[0], game->gen->gaddag->alphabet);
+    SortedMoveList * test_gen_all_moves_with_blanks_sorted_move_list = create_sorted_move_list(game->gen->move_list);
+
+    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, test_gen_all_moves_with_blanks_sorted_move_list->moves[0], game->gen->gaddag->alphabet);
     assert(!strcmp(test_string, "14B hEaDW(OR)DS 106"));
     reset_string(test_string);
 
-    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, game->gen->move_list->moves[1], game->gen->gaddag->alphabet);
+    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, test_gen_all_moves_with_blanks_sorted_move_list->moves[1], game->gen->gaddag->alphabet);
     assert(!strcmp(test_string, "14B hEaDW(OR)D 38"));
     reset_string(test_string);
+
+    destroy_sorted_move_list(test_gen_all_moves_with_blanks_sorted_move_list);
 
     reset_game(game);
     reset_rack(player->rack);
@@ -270,10 +280,13 @@ void macondo_tests(SuperConfig * superconfig) {
     assert(count_scoring_plays(game->gen->move_list) == 519);
     assert(count_nonscoring_plays(game->gen->move_list) == 1);
 
-    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, game->gen->move_list->moves[0], game->gen->gaddag->alphabet);
+    SortedMoveList * test_giant_twenty_seven_timer_sorted_move_list = create_sorted_move_list(game->gen->move_list);
+
+    write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, test_giant_twenty_seven_timer_sorted_move_list->moves[0], game->gen->gaddag->alphabet);
     assert(!strcmp(test_string, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780"));
     reset_string(test_string);
 
+    destroy_sorted_move_list(test_giant_twenty_seven_timer_sorted_move_list);
     reset_game(game);
     reset_rack(player->rack);
 
@@ -282,7 +295,10 @@ void macondo_tests(SuperConfig * superconfig) {
     generate_moves(game->gen, player, NULL, 1);
     assert(count_scoring_plays(game->gen->move_list) == 3313);
     assert(count_nonscoring_plays(game->gen->move_list) == 128);
-    Move * move = game->gen->move_list->moves[0];
+
+    SortedMoveList * test_generate_empty_board_sorted_move_list = create_sorted_move_list(game->gen->move_list);
+
+    Move * move = test_generate_empty_board_sorted_move_list->moves[0];
     assert(move->score == 80);
     assert(move->tiles_played == 7);
     assert(move->tiles_length == 7);
@@ -290,6 +306,7 @@ void macondo_tests(SuperConfig * superconfig) {
     assert(move->row_start == 7);
     assert(move->col_start == 7);
 
+    destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
     reset_game(game);
     reset_rack(player->rack);
 
@@ -341,7 +358,9 @@ void exchange_tests(SuperConfig * superconfig) {
     // so exchanges should not be possible.
     play_top_n_equity_move(game, 0);
     generate_moves_for_game(game);
-    assert(game->gen->move_list->moves[0]->move_type == MOVE_TYPE_PLAY);
+    SortedMoveList * test_not_an_exchange_sorted_move_list = create_sorted_move_list(game->gen->move_list);
+    assert(test_not_an_exchange_sorted_move_list->moves[0]->move_type == MOVE_TYPE_PLAY);
+    destroy_sorted_move_list(test_not_an_exchange_sorted_move_list);
     reset_game(game);
 
     load_cgp(game, cgp);
@@ -349,7 +368,9 @@ void exchange_tests(SuperConfig * superconfig) {
     // 4 tiles, so exchanges should be the best play.
     play_top_n_equity_move(game, 1);
     generate_moves_for_game(game);
-    assert(game->gen->move_list->moves[0]->move_type == MOVE_TYPE_EXCHANGE);
+    SortedMoveList * test_exchange_sorted_move_list = create_sorted_move_list(game->gen->move_list);
+    assert(test_exchange_sorted_move_list->moves[0]->move_type == MOVE_TYPE_EXCHANGE);
+    destroy_sorted_move_list(test_exchange_sorted_move_list);
 
     destroy_game(game);
 }
@@ -381,20 +402,23 @@ void equity_test(SuperConfig * superconfig) {
     assert(count_scoring_plays(game->gen->move_list) == 219);
     assert(count_nonscoring_plays(game->gen->move_list) == 64);
 
+    SortedMoveList * equity_test_sorted_move_list = create_sorted_move_list(game->gen->move_list);
+
     double previous_equity = 1000000.0;
     Rack * move_rack = create_rack();
-    int number_of_moves = game->gen->move_list->count;
+    int number_of_moves = equity_test_sorted_move_list->count;
 
     for (int i = 0; i < number_of_moves - 1; i++) {
-        Move * move = game->gen->move_list->moves[i];
+        Move * move = equity_test_sorted_move_list->moves[i];
         assert(move->equity <= previous_equity);
         set_rack_to_string(move_rack, "AFGIIIS", game->gen->gaddag->alphabet);
         double leave_value = get_leave_value_for_move(laddag, move, move_rack);
         assert(within_epsilon(move->equity, (((double)move->score) + leave_value)));
         previous_equity = move->equity;
     }
-    assert(game->gen->move_list->moves[number_of_moves - 1]->move_type == MOVE_TYPE_PASS);
+    assert(equity_test_sorted_move_list->moves[number_of_moves - 1]->move_type == MOVE_TYPE_PASS);
 
+    destroy_sorted_move_list(equity_test_sorted_move_list);
     destroy_rack(move_rack);
     destroy_game(game);
 }

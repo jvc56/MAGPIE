@@ -35,5 +35,4 @@ void test_board(SuperConfig * superconfig) {
     assert(!allowed(cs, 12));
 
     destroy_game(game);
-    
 }

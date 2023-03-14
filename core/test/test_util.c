@@ -13,6 +13,7 @@
 
 #include "alphabet_print.h"
 #include "test_constants.h"
+#include "test_util.h"
 
 void write_string_to_end_of_buffer(char * buffer, char * s) {
     sprintf(buffer + strlen(buffer), "%s", s);
@@ -64,9 +65,28 @@ void generate_moves_for_game(Game * game) {
     generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
 }
 
+SortedMoveList * create_sorted_move_list(MoveList * ml) {
+    int number_of_moves = ml->count;
+    SortedMoveList * sorted_move_list = malloc((sizeof(SortedMoveList)));
+    sorted_move_list->moves = malloc((sizeof(Move*)) * (number_of_moves));
+    sorted_move_list->count = number_of_moves;
+    for (int i = number_of_moves - 1; i >= 0; i--) {
+        Move * move = pop_move(ml);
+        sorted_move_list->moves[i] = move;
+    }
+    return sorted_move_list;
+}
+
+void destroy_sorted_move_list(SortedMoveList * sorted_move_list) {
+    free(sorted_move_list->moves);
+    free(sorted_move_list);
+}
+
 void play_top_n_equity_move(Game * game, int n) {
     generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
-    play_move(game, game->gen->move_list->moves[n]);
+    SortedMoveList * sorted_move_list = create_sorted_move_list(game->gen->move_list);
+    play_move(game, sorted_move_list->moves[n]);
+    destroy_sorted_move_list(sorted_move_list);
     reset_move_list(game->gen->move_list);
 }
 
