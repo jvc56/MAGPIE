@@ -114,17 +114,11 @@ int get_number_of_letters(Alphabet * alphabet) {
 }
 
 uint8_t get_blanked_machine_letter(uint8_t ml) {
-	if (ml < BLANK_OFFSET) {
-		return ml + BLANK_OFFSET;
-	}
-	return ml;
+	return ml | BLANK_MASK;
 }
 
 uint8_t get_unblanked_machine_letter(uint8_t ml) {
-	if (ml >= BLANK_OFFSET) {
-		return ml - BLANK_OFFSET;
-	}
-	return ml;
+	return ml & UNBLANK_MASK;
 }
 
 int is_vowel(uint8_t ml, Alphabet * alphabet) {

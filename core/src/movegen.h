@@ -8,7 +8,7 @@
 #include "board.h"
 #include "config.h"
 #include "constants.h"
-#include "gaddag.h"
+#include "kwg.h"
 #include "leaves.h"
 #include "letter_distribution.h"
 #include "move.h"
@@ -32,7 +32,7 @@ typedef struct Generator {
     Board * board;
     Bag * bag;
 
-    Gaddag * gaddag;
+    KWG * kwg;
     LetterDistribution * letter_distribution;
 } Generator;
 

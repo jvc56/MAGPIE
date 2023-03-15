@@ -9,14 +9,11 @@
 
 typedef struct Rack {
     int array[(RACK_ARRAY_SIZE)];
-    int letter_to_array_nonzero_index[(RACK_ARRAY_SIZE)];
-    int array_nonzero_indexes[(RACK_SIZE)];
-    int number_of_nonzero_indexes;
     int empty;
     int number_of_letters;
 } Rack;
 
-void add_letter_to_rack(Rack * rack, uint8_t letter, int nonzero_array_index);
+void add_letter_to_rack(Rack * rack, uint8_t letter);
 Rack * create_rack();
 void destroy_rack(Rack * rack);
 void reset_rack(Rack * rack);

@@ -22,6 +22,7 @@ const (
 	LexicaDirectory               = "lexica"
 	OutputDataDirectory           = "../core/data"
 	NumberOfUniqueMachineLetters  = alphabet.MaxAlphabetSize + 1
+	NumberOfUniqueEnglishTiles    = 27
 )
 
 // Internal struct only used to write laddag to file
@@ -104,25 +105,30 @@ func readLeaves(filePath string, alph *alphabet.Alphabet) ([]float64, []string, 
 	return values, leaves, leavesToIndex
 }
 
-func convertNodeIndexToFirstEdgeIndex(index int) int {
-	return index * NumberOfUniqueMachineLetters * 2
+func convertNodeIndexToFirstEdgeIndex(index int, alphabetSize int) int {
+	return index * alphabetSize * 2
 }
 
-func clearAdd(laddag *Laddag, index int) {
-	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index)
+func clearAdd(laddag *Laddag, index int, alphabetSize int) {
+	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, alphabetSize)
 	for i := 0; i < NumberOfUniqueMachineLetters; i++ {
 		laddag.edges[firstEdgeIndex+i] = laddag.invalidIndex
 	}
 }
 
-func populateAdd(laddag *Laddag, rack string, index int) {
+func populateAdd(laddag *Laddag, rack string, index int, alphabetSize int) {
 	if len(rack) >= 6 {
-		clearAdd(laddag, index)
+		clearAdd(laddag, index, alphabetSize)
 	} else {
 		mlRack := alphabet.RackFromString(rack, laddag.alphabet)
-		firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index)
-		for i := 0; i < NumberOfUniqueMachineLetters; i++ {
+		firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, alphabetSize)
+		for i := 0; i < alphabetSize; i++ {
 			thisEdgeIndex := firstEdgeIndex + i
+			// Blank is still some arbitrary number greater than 0
+			// Set the blank to this value.
+			if alphabetSize == NumberOfUniqueMachineLetters {
+
+			}
 			ml := alphabet.MachineLetter(i)
 			mlRack.Add(ml)
 			addedRackString := mlRack.String()
@@ -137,19 +143,19 @@ func populateAdd(laddag *Laddag, rack string, index int) {
 	}
 }
 
-func clearTake(laddag *Laddag, index int) {
-	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index)
-	for i := 0; i < NumberOfUniqueMachineLetters; i++ {
+func clearTake(laddag *Laddag, index int, alphabetSize int) {
+	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, alphabetSize)
+	for i := 0; i < alphabetSize; i++ {
 		laddag.edges[firstEdgeIndex+NumberOfUniqueMachineLetters+i] = laddag.invalidIndex
 	}
 }
 
-func populateTake(laddag *Laddag, rack string, index int) {
+func populateTake(laddag *Laddag, rack string, index int, alphabetSize int) {
 	mlRack := alphabet.RackFromString(rack, laddag.alphabet)
-	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index)
-	for i := 0; i < NumberOfUniqueMachineLetters; i++ {
+	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, alphabetSize)
+	for i := 0; i < alphabetSize; i++ {
 		ml := alphabet.MachineLetter(i)
-		thisEdgeIndex := firstEdgeIndex + NumberOfUniqueMachineLetters + i
+		thisEdgeIndex := firstEdgeIndex + alphabetSize + i
 		if mlRack.Has(ml) {
 			mlRack.Take(ml)
 			takenRackString := mlRack.String()
@@ -160,15 +166,19 @@ func populateTake(laddag *Laddag, rack string, index int) {
 		}
 	}
 }
-func createLaddag(lexicon string, alph *alphabet.Alphabet) {
+func createLaddag(lexicon string, alph *alphabet.Alphabet, zeroblank bool) {
 	values, leaves, leavesToIndex := readLeaves(getLeavesFilename(lexicon), alph)
 
+	alphabetSize := NumberOfUniqueMachineLetters
+	if zeroblank {
+		alphabetSize = NumberOfUniqueEnglishTiles
+	}
 	// Use max alphabet size + 1 so there is room for the blank
 	// Add 2 extra nodes, one for the empty leave and one for
 	// the full rack starting leave.
 	laddag := &Laddag{}
 	numberOfNodes := len(leaves) + 2
-	numberOfEdges := convertNodeIndexToFirstEdgeIndex(numberOfNodes)
+	numberOfEdges := convertNodeIndexToFirstEdgeIndex(numberOfNodes, alphabetSize)
 	laddagEdges := make([]uint32, numberOfEdges)
 	laddagValues := make([]float64, numberOfNodes)
 
@@ -184,13 +194,13 @@ func createLaddag(lexicon string, alph *alphabet.Alphabet) {
 
 	for i := 1; i < numberOfNodes-1; i++ {
 		laddag.values[i] = values[i-1]
-		populateAdd(laddag, leaves[i-1], i)
-		populateTake(laddag, leaves[i-1], i)
+		populateAdd(laddag, leaves[i-1], i, alphabetSize)
+		populateTake(laddag, leaves[i-1], i, alphabetSize)
 	}
 
 	laddag.values[numberOfNodes-1] = 0
-	clearAdd(laddag, numberOfNodes-1)
-	clearTake(laddag, numberOfNodes-1)
+	clearAdd(laddag, numberOfNodes-1, alphabetSize)
+	clearTake(laddag, numberOfNodes-1, alphabetSize)
 
 	saveLaddag(laddag, lexicon)
 }

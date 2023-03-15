@@ -5,19 +5,19 @@
 
 #include "config.h"
 #include "constants.h"
-#include "gaddag.h"
+#include "kwg.h"
 #include "letter_distribution.h"
 #include "leaves.h"
 
 static int game_pair_flag;
 
-Config * create_config(const char * gaddag_filename, const char * alphabet_filename, const char * letter_distribution_filename, const char * cgp,
+Config * create_config(const char * kwg_filename, const char * alphabet_filename, const char * letter_distribution_filename, const char * cgp,
                        const char * laddag_filename_1, int move_sorting_1, int play_recorder_type_1,
                        const char * laddag_filename_2, int move_sorting_2, int play_recorder_type_2, int game_pair_flag, int number_of_games_or_pairs) {
 
     Config * config = malloc(sizeof(Config));
     config->letter_distribution = create_letter_distribution(letter_distribution_filename);
-    config->gaddag = create_gaddag(gaddag_filename, alphabet_filename);
+    config->kwg = create_kwg(kwg_filename, alphabet_filename);
     config->cgp = strdup(cgp);
     config->game_pairs = game_pair_flag;
     config->number_of_games_or_pairs = number_of_games_or_pairs;
@@ -66,7 +66,7 @@ void check_arg_length(const char * arg) {
 
 Config * create_config_from_args(int argc, char *argv[]) {
   char alphabet_filename[(MAX_ARG_LENGTH)] = "";
-  char gaddag_filename[(MAX_ARG_LENGTH)] = "";
+  char kwg_filename[(MAX_ARG_LENGTH)] = "";
   char letter_distribution_filename[(MAX_ARG_LENGTH)] = "";
   char cgp[(MAX_ARG_LENGTH)] = "";
 
@@ -125,7 +125,7 @@ Config * create_config_from_args(int argc, char *argv[]) {
 
       case 1003:
         check_arg_length(optarg);
-        strcpy(gaddag_filename, optarg);
+        strcpy(kwg_filename, optarg);
         break;
 
       case 1004:
@@ -209,7 +209,7 @@ Config * create_config_from_args(int argc, char *argv[]) {
       }
   }
 
-  return create_config(gaddag_filename, alphabet_filename, letter_distribution_filename, cgp,
+  return create_config(kwg_filename, alphabet_filename, letter_distribution_filename, cgp,
   laddag_filename_1, move_sorting_1, play_recorder_type_1,
   laddag_filename_2, move_sorting_2, play_recorder_type_2, game_pair_flag, number_of_games_or_pairs);
 }
