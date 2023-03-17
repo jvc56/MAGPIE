@@ -119,7 +119,7 @@ int gaddag_get_number_of_arcs(Gaddag* gaddag, uint32_t node_index) {
 }
 
 uint32_t gaddag_get_next_node_index(Gaddag* gaddag, uint32_t node_index, uint8_t letter) {
-	int number_of_arcs = get_number_of_arcs(gaddag, node_index);
+	int number_of_arcs = gaddag_get_number_of_arcs(gaddag, node_index);
 	for (uint32_t k = node_index + 1; k <= number_of_arcs + node_index; k++) {
 		int ml = (gaddag->nodes[k] >> GADDAG_LETTER_BIT_LOC);
 		if (letter == ml) {
@@ -146,7 +146,7 @@ int gaddag_in_letter_set(Gaddag* gaddag, uint8_t letter, uint32_t node_index) {
 	if (letter >= BLANK_OFFSET) {
 		ltc = letter - BLANK_OFFSET;
 	}
-	uint64_t letter_set = get_letter_set(gaddag, node_index);
+	uint64_t letter_set = gaddag_get_letter_set(gaddag, node_index);
 	return (letter_set & (1 << ltc)) != 0;
 }
 

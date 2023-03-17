@@ -19,7 +19,7 @@ void shuffle(Bag * bag)
 
 void reset_bag(Bag * bag, LetterDistribution * letter_distribution) {
     int idx = 0;
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
+    for (uint32_t i = 0; i < (letter_distribution->size); i++) {
         for (uint32_t k = 0; k < letter_distribution->distribution[i]; k++) {
             bag->tiles[idx] = i;
             idx++;

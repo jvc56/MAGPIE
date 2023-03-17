@@ -14,7 +14,7 @@
 #include "player.h"
 #include "rack.h"
 
-void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, uint32_t oldnode_index, int leftstrip, int rightstrip, int unique_play);
+void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, int accepts, int leftstrip, int rightstrip, int unique_play);
 
 void add_letter_to_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
 	add_letter_to_rack(player->rack, letter);
@@ -122,10 +122,10 @@ void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstri
 }
 
 void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int stripidx) {
-	while (ml < (RACK_ARRAY_SIZE) && player->rack->array[ml] == 0) {
+	while (ml < (gen->letter_distribution->size) && player->rack->array[ml] == 0) {
 		ml++;
 	}
-	if (ml == (RACK_ARRAY_SIZE)) {
+	if (ml == (gen->letter_distribution->size)) {
 		// The recording of an exchange should never require
 		// the opponent's rack.
 		record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
@@ -139,7 +139,7 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 			generate_exchange_moves(gen, player, ml+1, stripidx);
 		}
 		for (int i = 0; i < num_this; i++) {
-			add_letter_to_rack_and_recalculate_leave_index(player, ml, player->rack->number_of_nonzero_indexes);
+			add_letter_to_rack_and_recalculate_leave_index(player, ml);
 		}
 	}
 }
@@ -154,51 +154,46 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 	}
 	uint64_t cross_set = get_cross_set(gen->board, gen->current_row_index, col, cs_direction);
 	if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-		uint32_t next_node_index = get_next_node_index(gen->kwg, node_index, get_unblanked_machine_letter(current_letter));
-		go_on(gen, col, current_letter, player, opp_rack, next_node_index, node_index, leftstrip, rightstrip, unique_play);
-	
 		int raw = get_unblanked_machine_letter(current_letter);
-
 		int next_node_index;
 		int accepts;
 		int i = node_index;
 		while(1) {
-			if (kwg_tile(kwg, i) == raw) {
-				next_node_index = kwg_arc_index(kwg, i);
-				accepts = kwg_accepts(kwg, i);
+			if (kwg_tile(gen->kwg, i) == raw) {
+				next_node_index = kwg_arc_index(gen->kwg, i);
+				accepts = kwg_accepts(gen->kwg, i);
 				break;
 			}
-			if (kwg_is_end(kwg, i)) {
+			if (kwg_is_end(gen->kwg, i)) {
 				break;
 			}
 			i++;
 		}
-		go_on(gen, col, current_letter, player, opp_rack, next_node_index, node_index, accepts, leftstrip, rightstrip, unique_play);
+		go_on(gen, col, current_letter, player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 	} else if (!player->rack->empty) {
-
 		int i = node_index;
 		while(1) {
-			int ml = kwg_tile(i);
-			if (ml != 0 && (rack->array[ml] != 0 || rack->array[0] != 0) && allowed(cross_set, ml)) {
-				int next_node_index = kwg_arc_index(i);
-				int accepts = kwg_accepts(kwg, i);
-				if (rack->array[ml] > 0) {
+			int ml = kwg_tile(gen->kwg, i);
+			if (ml != 0 && (player->rack->array[ml] != 0 || player->rack->array[0] != 0) && allowed(cross_set, ml)) {
+				int next_node_index = kwg_arc_index(gen->kwg, i);
+				int accepts = kwg_accepts(gen->kwg, i);
+				if (player->rack->array[ml] > 0) {
 					take_letter_from_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
 					gen->tiles_played++;
-					go_on(gen, col, get_blanked_machine_letter(k), player, opp_rack, next_node_index, node_index, accepts, leftstrip, rightstrip, unique_play);
+					go_on(gen, col, ml, player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 					gen->tiles_played--;
 					add_letter_to_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
 				}
 				// check blank
-				if (rack->array[0] > 0) {
+				if (player->rack->array[0] > 0) {
 					take_letter_from_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
 					gen->tiles_played++;
-					go_on(gen, col, get_blanked_machine_letter(k), player, opp_rack, next_node_index, node_index, accepts, leftstrip, rightstrip, unique_play);
+					go_on(gen, col, get_blanked_machine_letter(ml), player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 					gen->tiles_played--;
 					add_letter_to_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
 				}
 			}
-			if (kwg_is_end(kwg, i)) {
+			if (kwg_is_end(gen->kwg, i)) {
 				break;
 			}
 			i++;
@@ -206,7 +201,7 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 	}
 }
 
-void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, int accepts, uint32_t oldnode_index, int leftstrip, int rightstrip, int unique_play) {
+void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, int accepts, int leftstrip, int rightstrip, int unique_play) {
 	if (current_col <= gen->current_anchor_col) {
 		if (!is_empty(gen->board, gen->current_row_index, current_col)) {
 			gen->strip[current_col] = PLAYED_THROUGH_MARKER;
@@ -231,7 +226,7 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 			recursive_gen(gen, current_col - 1, player, opp_rack, new_node_index, leftstrip, rightstrip, unique_play);
 		}
 
-		uint32_t separation_node_index = get_next_node_index(gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
+		uint32_t separation_node_index = kwg_get_next_node_index(gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
 		if (separation_node_index != 0 && no_letter_directly_left && gen->current_anchor_col < BOARD_DIM - 1) {
 			recursive_gen(gen, gen->current_anchor_col+1, player, opp_rack, separation_node_index, leftstrip, rightstrip, unique_play);
 		}
@@ -327,6 +322,7 @@ Generator * create_generator(Config * config) {
 	generator->vertical = 0;
 	generator->last_anchor_col = 0;
 
+	generator->exchange_strip = (uint8_t *) malloc(config->letter_distribution->size*sizeof(uint8_t));
 	// Just load the zero values for now
 	load_zero_preendgame_adjustment_values(generator);
 
@@ -337,5 +333,6 @@ void destroy_generator(Generator * gen) {
 	destroy_bag(gen->bag);
 	destroy_board(gen->board);
 	destroy_move_list(gen->move_list);
+	free(gen->exchange_strip);
 	free(gen);
 }

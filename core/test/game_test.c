@@ -47,7 +47,7 @@ void test_load_cgp(SuperConfig * superconfig) {
 void test_game_main(SuperConfig * superconfig) {
     Config * config = get_america_config(superconfig);
     Game * game = create_game(config);
-    Rack * rack = create_rack();
+    Rack * rack = create_rack(config->letter_distribution->size);
 
     // Test Reset
     game->consecutive_scoreless_turns = 3;
@@ -58,17 +58,17 @@ void test_game_main(SuperConfig * superconfig) {
 
     // Test opening racks
     load_cgp(game, OPENING_CGP);
-    set_rack_to_string(rack, "ABCDEFG", config->gaddag->alphabet);
+    set_rack_to_string(rack, "ABCDEFG", config->kwg->alphabet);
     assert(equal_rack(rack, game->players[0]->rack));
-    set_rack_to_string(rack, "HIJKLM?", config->gaddag->alphabet);
+    set_rack_to_string(rack, "HIJKLM?", config->kwg->alphabet);
     assert(equal_rack(rack, game->players[1]->rack));
     reset_game(game);
 
     // Test CGP with excessive whitespace
     load_cgp(game, EXCESSIVE_WHITESPACE_CGP);
-    set_rack_to_string(rack, "ABCDEFG", config->gaddag->alphabet);
+    set_rack_to_string(rack, "ABCDEFG", config->kwg->alphabet);
     assert(equal_rack(rack, game->players[0]->rack));
-    set_rack_to_string(rack, "HIJKLM?", config->gaddag->alphabet);
+    set_rack_to_string(rack, "HIJKLM?", config->kwg->alphabet);
     assert(equal_rack(rack, game->players[1]->rack));
     assert(game->consecutive_scoreless_turns == 4);
     reset_game(game);

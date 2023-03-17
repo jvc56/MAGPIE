@@ -91,7 +91,7 @@ void play_top_n_equity_move(Game * game, int n) {
 }
 
 void write_rack_to_end_of_buffer(char * dest, Alphabet * alphabet, Rack * rack) {
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
+    for (int i = 0; i < (rack->array_size); i++) {
         for (int k = 0; k < rack->array[i]; k++) {
 			write_user_visible_letter_to_end_of_buffer(dest, alphabet, i);
         }

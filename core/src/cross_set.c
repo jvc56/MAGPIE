@@ -94,7 +94,7 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 			*cross_set = 0;
 
 			while (1) {
-				if (is_end(kwg, lnode_index)) {
+				if (kwg_is_end(kwg, lnode_index)) {
 					break;
 				}
 				int i = lnode_index + 1;
@@ -103,7 +103,7 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 					int next_node_index = kwg_arc_index(kwg, i);
 					// ** BEGIN FUNCTION **
 					if (t == 0) {
-						return
+						return;
 					}
 					traverse_backwards(board, row, col-1, next_node_index, 1, left_col, kwg);
 					if (board->traverse_backwards_return_values->path_is_valid) {
@@ -111,23 +111,6 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 					}
 					// ** END FUNCTION **
 					i++;
-				}
-			}
-
-
-
-
-
-			for (uint32_t i = lnode_index + 1; i <= number_of_arcs + lnode_index; i++) {
-				uint8_t ml = (kwg->nodes[i] >> GADDAG_LETTER_BIT_LOC);
-				if (ml == SEPARATION_MACHINE_LETTER) {
-					continue;
-				}
-				uint32_t next_node_index = gaddag->nodes[i] & (GADDAG_NODE_IDX_BIT_MASK);
-				traverse_backwards(board, row, col-1, next_node_index, 1, left_col, kwg);
-				lpath_is_valid = board->traverse_backwards_return_values->path_is_valid;
-				if (board->traverse_backwards_return_values->path_is_valid) {
-					set_cross_set_letter(cross_set, ml);
 				}
 			}
 		}

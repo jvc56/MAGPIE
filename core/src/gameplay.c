@@ -10,7 +10,7 @@
 
 void draw_at_most_to_rack(Bag * bag, Rack * rack, int n) {
     while (n > 0 && bag->last_tile_index >= 0) {
-        add_letter_to_rack(rack, bag->tiles[bag->last_tile_index], rack->number_of_nonzero_indexes);
+        add_letter_to_rack(rack, bag->tiles[bag->last_tile_index]);
         bag->last_tile_index--;
         n--;
     }
@@ -64,15 +64,15 @@ void calc_for_across(int row_start, int col_start, int csd, Game * game, Move * 
 
         int right_col = word_edge(game->gen->board, row, col_start, WORD_DIRECTION_RIGHT);
         int left_col = word_edge(game->gen->board, row, col_start, WORD_DIRECTION_LEFT);
-        gen_cross_set(game->gen->board, row, right_col+1, csd, game->gen->gaddag, game->gen->letter_distribution);
-        gen_cross_set(game->gen->board, row, left_col-1, csd, game->gen->gaddag, game->gen->letter_distribution);
-        gen_cross_set(game->gen->board, row, col_start, csd, game->gen->gaddag, game->gen->letter_distribution);
+        gen_cross_set(game->gen->board, row, right_col+1, csd, game->gen->kwg, game->gen->letter_distribution);
+        gen_cross_set(game->gen->board, row, left_col-1, csd, game->gen->kwg, game->gen->letter_distribution);
+        gen_cross_set(game->gen->board, row, col_start, csd, game->gen->kwg, game->gen->letter_distribution);
     }   
 }
 
 void calc_for_self(int row_start, int col_start, int csd, Game * game, Move * move) {
     for (int col = col_start - 1; col <= col_start + move->tiles_length; col++) {
-        gen_cross_set(game->gen->board, row_start, col, csd, game->gen->gaddag, game->gen->letter_distribution);
+        gen_cross_set(game->gen->board, row_start, col, csd, game->gen->kwg, game->gen->letter_distribution);
     }
 }
 

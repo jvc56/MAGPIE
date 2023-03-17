@@ -25,7 +25,7 @@ typedef struct Generator {
     int number_of_possible_letters;
 
     uint8_t strip[BOARD_DIM];
-    uint8_t exchange_strip[(RACK_ARRAY_SIZE)];
+    uint8_t * exchange_strip;
     double preendgame_adjustment_values[PREENDGAME_ADJUSTMENT_VALUES_LENGTH];
 
     MoveList * move_list;

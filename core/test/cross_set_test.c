@@ -29,7 +29,7 @@ void set_row(Game * game, int row, const char* row_content) {
 
     for (size_t i = 0; i < strlen(row_content); i++) {
         if (row_content[i] != ' ') {
-            set_letter(game->gen->board, row, i, val(game->gen->gaddag->alphabet, row_content[i]));
+            set_letter(game->gen->board, row, i, val(game->gen->kwg->alphabet, row_content[i]));
             game->gen->board->tiles_played++;
         }
     }
@@ -37,9 +37,9 @@ void set_row(Game * game, int row, const char* row_content) {
 
 void test_gen_cross_set(Game * game, int row, int col, int dir, const char* letters, int expected_cross_score, int run_gcs) {
     if (run_gcs) {
-        gen_cross_set(game->gen->board, row, col, dir, game->gen->gaddag, game->gen->letter_distribution);
+        gen_cross_set(game->gen->board, row, col, dir, game->gen->kwg, game->gen->letter_distribution);
     }
-    uint64_t expected_cross_set = cross_set_from_string(letters, game->gen->gaddag->alphabet);
+    uint64_t expected_cross_set = cross_set_from_string(letters, game->gen->kwg->alphabet);
     uint64_t actual_cross_set = get_cross_set(game->gen->board, row, col, dir);
     assert(expected_cross_set == actual_cross_set);
     int actual_cross_score = get_cross_score(game->gen->board, row, col, dir);
@@ -106,9 +106,9 @@ void test_cross_set(SuperConfig * superconfig) {
 	set_letter(game->gen->board, 9, 10, 0);
 	set_letter(game->gen->board, 10, 10, 4);
 	set_letter(game->gen->board, 11, 10, 11);
-    gen_cross_set(game->gen->board, 7, 10, BOARD_HORIZONTAL_DIRECTION, game->gen->gaddag, game->gen->letter_distribution);
+    gen_cross_set(game->gen->board, 7, 10, BOARD_HORIZONTAL_DIRECTION, game->gen->kwg, game->gen->letter_distribution);
     transpose(game->gen->board);
-    gen_cross_set(game->gen->board, 10, 7, BOARD_VERTICAL_DIRECTION, game->gen->gaddag, game->gen->letter_distribution);
+    gen_cross_set(game->gen->board, 10, 7, BOARD_VERTICAL_DIRECTION, game->gen->kwg, game->gen->letter_distribution);
     transpose(game->gen->board);
     assert(get_cross_set(game->gen->board, 7, 10, BOARD_HORIZONTAL_DIRECTION) == 0);
     assert(get_cross_set(game->gen->board, 7, 10, BOARD_VERTICAL_DIRECTION) == 0);

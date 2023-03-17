@@ -15,7 +15,6 @@
 #include "gen_all_test.h"
 #include "gameplay_test.h"
 #include "leaves_test.h"
-#include "letter_distribution_test.h"
 #include "movegen_test.h"
 #include "prof_tests.h"
 #include "rack_test.h"
@@ -29,7 +28,6 @@ void unit_tests(SuperConfig * superconfig) {
     // Test the readonly data first
     test_alphabet(superconfig);
     test_leaves(superconfig);
-    test_letter_distribution(superconfig);
 
     // Now test the rest
     test_bag(superconfig);
@@ -63,11 +61,11 @@ int main(int argc, char *argv[]) {
 
     begin = clock();
     Config * csw_config = create_config(
-      "./data/lexica/CSW21.gaddag",
-      "./data/lexica/CSW21.alph",
-      "./data/letterdistributions/english.dist",
+      "./data/lexica/CSW21.kwg",
+      "./data/lexica/CSW21_zeroblank.alph",
+      "./data/letterdistributions/english_zeroblank.dist",
       "",
-      "./data/lexica/CSW21.laddag",
+      "./data/lexica/CSW21_zeroblank.laddag",
       SORT_BY_EQUITY,
       PLAY_RECORDER_TYPE_ALL,
       "",
@@ -81,11 +79,11 @@ int main(int argc, char *argv[]) {
   
     begin = clock();
     Config * america_config = create_config(
-      "./data/lexica/America.gaddag",
-      "./data/lexica/CSW21.alph",
-      "./data/letterdistributions/english.dist",
+      "./data/lexica/America.kwg",
+      "./data/lexica/CSW21_zeroblank.alph",
+      "./data/letterdistributions/english_zeroblank.dist",
       "",
-      "./data/lexica/CSW21.laddag",
+      "./data/lexica/CSW21_zeroblank.laddag",
       SORT_BY_SCORE,
       PLAY_RECORDER_TYPE_ALL,
       "",

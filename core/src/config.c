@@ -23,8 +23,8 @@ Config * create_config(const char * kwg_filename, const char * alphabet_filename
     config->number_of_games_or_pairs = number_of_games_or_pairs;
 
     StrategyParams * player_1_strategy_params = malloc(sizeof(StrategyParams));
-
-	  player_1_strategy_params->laddag = create_laddag(laddag_filename_1);
+    
+	  player_1_strategy_params->laddag = create_laddag(laddag_filename_1, config->letter_distribution->size);
     player_1_strategy_params->move_sorting = move_sorting_1;
     player_1_strategy_params->play_recorder_type = play_recorder_type_1;
 
@@ -36,7 +36,7 @@ Config * create_config(const char * kwg_filename, const char * alphabet_filename
       player_2_strategy_params->laddag = player_1_strategy_params->laddag;
       config->laddag_is_shared = 1;
     } else {
-      player_2_strategy_params->laddag = create_laddag(laddag_filename_2);
+      player_2_strategy_params->laddag = create_laddag(laddag_filename_2, config->letter_distribution->size);
       config->laddag_is_shared = 0;
     }
 
@@ -224,7 +224,7 @@ void destroy_config(Config * config) {
 
   free(config->player_2_strategy_params);
 
-	destroy_gaddag(config->gaddag);
+	destroy_kwg(config->kwg);
 	destroy_letter_distribution(config->letter_distribution);
   free(config->cgp);
   free(config);

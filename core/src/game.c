@@ -26,13 +26,13 @@ char add_player_score(const char* cgp, int *cgp_index, Game * game, int player_i
 
 void draw_letter_to_rack(Bag * bag, Rack * rack, uint8_t letter) {
     draw_letter(bag, letter);
-    add_letter_to_rack(rack, letter, rack->number_of_nonzero_indexes);
+    add_letter_to_rack(rack, letter);
 }
 
 char add_player_rack(const char* cgp, int *cgp_index, Game * game, int player_index) {
 	char cgp_char = cgp[*cgp_index];
 	while (cgp_char != '/' && cgp_char != ' ') {
-		draw_letter_to_rack(game->gen->bag, game->players[player_index]->rack, val(game->gen->gaddag->alphabet, cgp_char));
+		draw_letter_to_rack(game->gen->bag, game->players[player_index]->rack, val(game->gen->kwg->alphabet, cgp_char));
 		(*cgp_index)++;
 		cgp_char = cgp[*cgp_index];
 	}
@@ -57,7 +57,7 @@ void load_cgp(Game * game, const char* cgp) {
 			current_digits[0] = '\0';
 		}
 		if (isalpha(cgp_char)) {
-			set_letter_by_index(game->gen->board, current_board_index, val(game->gen->gaddag->alphabet, cgp_char));
+			set_letter_by_index(game->gen->board, current_board_index, val(game->gen->kwg->alphabet, cgp_char));
 			draw_letter(game->gen->bag, get_letter_by_index(game->gen->board, current_board_index));
 			current_board_index++;
             game->gen->board->tiles_played++;
@@ -113,7 +113,7 @@ void load_cgp(Game * game, const char* cgp) {
 	game->consecutive_scoreless_turns = cgp_char - '0';
 	game->player_on_turn_index = 0;
 
-	generate_all_cross_sets(game->gen->board, game->gen->gaddag, game->gen->letter_distribution);
+	generate_all_cross_sets(game->gen->board, game->gen->kwg, game->gen->letter_distribution);
 	update_all_anchors(game->gen->board);
 
 	if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
@@ -137,8 +137,8 @@ void reset_game(Game *  game) {
 Game * create_game(Config * config) {
 	Game * game = malloc(sizeof(Game));
 	game->gen = create_generator(config);
-	game->players[0] = create_player("player_1");
-	game->players[1] = create_player("player_2");
+	game->players[0] = create_player("player_1", config->letter_distribution->size);
+	game->players[1] = create_player("player_2", config->letter_distribution->size);
 	game->players[0]->strategy_params = config->player_1_strategy_params;
 	game->players[1]->strategy_params = config->player_2_strategy_params;
 	game->player_on_turn_index = 0;

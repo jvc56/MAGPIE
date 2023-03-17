@@ -28,9 +28,9 @@ if [ -z "$2" ]; then
 fi
 make magpie_test BUILD=release
 ./bin/magpie_test prof -g "./data/lexica/CSW21.kwg" \
-                      -a "./data/lexica/CSW21.alph" \
-                      -d "./data/letterdistributions/english.dist" \
-                      -l1 "./data/lexica/CSW21.laddag" \
+                      -a "./data/lexica/CSW21_zeroblank.alph" \
+                      -d "./data/letterdistributions/english_zeroblank.dist" \
+                      -l1 "./data/lexica/CSW21_zeroblank.laddag" \
                       -r1 "top" \
                       -s1 "equity" \
                       -n "$2"
@@ -41,9 +41,9 @@ if [ -z "$2" ]; then
 fi
 make magpie_test BUILD=release
 sudo perf record ./bin/magpie_test prof -g "./data/lexica/CSW21.kwg" \
-                      -a "./data/lexica/CSW21.alph" \
-                      -d "./data/letterdistributions/english.dist" \
-                      -l1 "./data/lexica/CSW21.laddag" \
+                      -a "./data/lexica/CSW21_zeroblank.alph" \
+                      -d "./data/letterdistributions/english_zeroblank.dist" \
+                      -l1 "./data/lexica/CSW21_zeroblank.laddag" \
                       -r1 "top" \
                       -s1 "equity" \
                       -n "$2"
@@ -51,9 +51,9 @@ sudo perf report
 elif [ "$1" == "m" ]; then
 make magpie_test
 ./bin/magpie_test gen -g "./data/lexica/CSW21.kwg" \
-                      -a "./data/lexica/CSW21.alph" \
-                      -d "./data/letterdistributions/english.dist" \
-                      -l "./data/lexica/CSW21.laddag" \
+                      -a "./data/lexica/CSW21_zeroblank.alph" \
+                      -d "./data/letterdistributions/english_zeroblank.dist" \
+                      -l "./data/lexica/CSW21_zeroblank.laddag" \
                       -r "all" \
                       -s "equity" \
                       -c "1PACIFYING5/1IS12/YE13/1REQUALIFIED3/H1L12/EDS12/NO3T9/1RAINWASHING3/UM3O9/T2E1O9/1WAKEnERS6/1OnETIME7/OOT2E1B7/N6U7/1JACULATING4 ABEOPXZ/ 0/0 0 lex NWL18;"

@@ -8,12 +8,12 @@
 #include "leaves.h"
 #include "rack.h"
 
-int get_add_edge_index(int node_index, uint8_t letter) {
-    return (node_index * (RACK_ARRAY_SIZE) * 2) + letter;
+int get_add_edge_index(int node_index, uint8_t letter, int number_of_unique_tiles) {
+    return (node_index * (number_of_unique_tiles) * 2) + letter;
 }
 
-int get_take_edge_index(int node_index, uint8_t letter) {
-    return (node_index * (RACK_ARRAY_SIZE) * 2) + (RACK_ARRAY_SIZE) + letter;
+int get_take_edge_index(int node_index, uint8_t letter, int number_of_unique_tiles) {
+    return (node_index * (number_of_unique_tiles) * 2) + (number_of_unique_tiles) + letter;
 }
 
 double get_current_value(Laddag * laddag) {
@@ -21,16 +21,16 @@ double get_current_value(Laddag * laddag) {
 }
 
 void traverse_add_edge(Laddag * laddag, uint8_t letter) {
-    laddag->current_index = laddag->edges[get_add_edge_index(laddag->current_index, letter)];
+    laddag->current_index = laddag->edges[get_add_edge_index(laddag->current_index, letter, laddag->number_of_unique_tiles)];
 }
 
 void traverse_take_edge(Laddag * laddag, uint8_t letter) {
-    laddag->current_index = laddag->edges[get_take_edge_index(laddag->current_index, letter)];
+    laddag->current_index = laddag->edges[get_take_edge_index(laddag->current_index, letter, laddag->number_of_unique_tiles)];
 }
 
 void go_to_leave(Laddag * laddag, Rack * rack) {
     laddag->current_index = 0;
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
+    for (int i = 0; i < (laddag->number_of_unique_tiles); i++) {
         for (int j = 0; j < rack->array[i]; j++) {
             traverse_add_edge(laddag, i);
         }
@@ -50,23 +50,23 @@ void set_start_leave(Laddag * laddag, Rack * rack) {
     int start_leave_index = laddag->number_of_nodes - 1;
     int full_rack_minus_one_add_edge_index;
     laddag->values[start_leave_index] = 0;
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
-        int start_leave_add_edge_index = get_add_edge_index(start_leave_index, i);
+    for (int i = 0; i < (laddag->number_of_unique_tiles); i++) {
+        int start_leave_add_edge_index = get_add_edge_index(start_leave_index, i, laddag->number_of_unique_tiles);
         // Here we use the number of values as an invalid node.
         laddag->edges[start_leave_add_edge_index] = laddag->number_of_nodes;
-        int start_leave_take_edge_index = get_take_edge_index(start_leave_index, i);
+        int start_leave_take_edge_index = get_take_edge_index(start_leave_index, i, laddag->number_of_unique_tiles);
         if (rack->array[i] == 0) {
             laddag->edges[start_leave_take_edge_index] = laddag->number_of_nodes;
         } else {
-            int nonzero_array_index = take_letter_from_rack(rack, i);
+            take_letter_from_rack(rack, i);
             go_to_leave(laddag, rack);
             // The laddag->current_index is now the full rack minus this machine letter.
             // Set the take edge for the full rack and the add edge for the 
             // full rack minus this machine letter.
-            full_rack_minus_one_add_edge_index = get_add_edge_index(laddag->current_index, i);
+            full_rack_minus_one_add_edge_index = get_add_edge_index(laddag->current_index, i, laddag->number_of_unique_tiles);
             laddag->edges[start_leave_take_edge_index] = laddag->current_index;
             laddag->edges[full_rack_minus_one_add_edge_index] = start_leave_index;
-            add_letter_to_rack(rack, i, nonzero_array_index);
+            add_letter_to_rack(rack, i);
         }
     }
 	laddag->current_index = start_leave_index;
@@ -77,7 +77,7 @@ typedef union ReadDouble {
    double d;
 } ReadDouble;
 
-void load_laddag(Laddag * laddag, const char * laddag_filename) {
+void load_laddag(Laddag * laddag, const char * laddag_filename, int number_of_unique_tiles) {
 	FILE * stream;
 	stream = fopen(laddag_filename, "r");
 	if (stream == NULL) {
@@ -116,17 +116,17 @@ void load_laddag(Laddag * laddag, const char * laddag_filename) {
     uint32_t number_of_nodes;
 	result = fread(&number_of_nodes, sizeof(number_of_nodes), 1, stream);
 	if (result != 1) {
-		printf("fread failure: %zd != %d", result, 1);
+		printf("nodes fread failure: %zd != %d", result, 1);
 		exit(EXIT_FAILURE);
 	}
 	number_of_nodes = be32toh(number_of_nodes);
 
-    uint32_t number_of_edges = number_of_nodes * 2 * (RACK_ARRAY_SIZE);
+    uint32_t number_of_edges = number_of_nodes * 2 * (number_of_unique_tiles);
 
 	laddag->edges = (uint32_t *) malloc(number_of_edges*sizeof(uint32_t));
 	result = fread(laddag->edges, sizeof(uint32_t), number_of_edges, stream);
 	if (result != number_of_edges) {
-		printf("fread failure: %zd != %d", result, number_of_edges);
+		printf("edges fread failure: %zd != %d", result, number_of_edges);
 		exit(EXIT_FAILURE);
 	}
 	for (uint32_t i = 0; i < number_of_edges; i++) {
@@ -137,7 +137,7 @@ void load_laddag(Laddag * laddag, const char * laddag_filename) {
 	uint64_t * valuesAsInts =  (uint64_t *) malloc(number_of_nodes*sizeof(uint64_t));
 	result = fread(valuesAsInts, sizeof(uint64_t), number_of_nodes, stream);
 	if (result != number_of_nodes) {
-		printf("fread failure: %zd != %d", result, number_of_nodes);
+		printf("vals fread failure: %zd != %d", result, number_of_nodes);
 		exit(EXIT_FAILURE);
 	}
 
@@ -152,11 +152,12 @@ void load_laddag(Laddag * laddag, const char * laddag_filename) {
 	fclose(stream);
     laddag->current_index = 0;
     laddag->number_of_nodes = number_of_nodes;
+	laddag->number_of_unique_tiles = number_of_unique_tiles;
 }
 
-Laddag * create_laddag(const char* laddag_filename) {
+Laddag * create_laddag(const char* laddag_filename, int number_of_unique_tiles) {
     Laddag * laddag =  malloc(sizeof(Laddag));
-    load_laddag(laddag, laddag_filename);
+    load_laddag(laddag, laddag_filename, number_of_unique_tiles);
     return laddag;
 }
 

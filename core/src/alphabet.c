@@ -69,7 +69,6 @@ void load_alphabet(Alphabet * alphabet, const char * alphabet_filename) {
 	}
 	vals_size = be32toh(vals_size);
 
-
 	alphabet->vals = (uint32_t *) malloc(vals_size*sizeof(uint32_t));
 	result = fread(alphabet->vals, sizeof(uint32_t), vals_size, stream);
 	if (result != vals_size) {

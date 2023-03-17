@@ -62,7 +62,7 @@ void test_gen_all(Config * config) {
     char csv_move[30];
     for (int i = 0; i < ml->count; i++) {
         reset_string(csv_move);
-        write_test_move_to_end_of_buffer(csv_move, ml->moves[i], config->gaddag->alphabet);
+        write_test_move_to_end_of_buffer(csv_move, ml->moves[i], config->kwg->alphabet);
         printf("%s\n", csv_move);
     }
 

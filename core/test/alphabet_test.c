@@ -10,48 +10,42 @@
 void test_alphabet(SuperConfig * superconfig) {
     Config * config = get_america_config(superconfig);
     // Test blank
-    assert(get_blanked_machine_letter(0) == BLANK_OFFSET);
-    assert(get_blanked_machine_letter(1) == BLANK_OFFSET + 1);
-    assert(get_blanked_machine_letter(BLANK_OFFSET-1) == BLANK_OFFSET + (BLANK_OFFSET-1));
-    assert(get_blanked_machine_letter(BLANK_OFFSET) == BLANK_OFFSET);
-    assert(get_blanked_machine_letter(BLANK_OFFSET+1) == BLANK_OFFSET+1);
+    assert(get_blanked_machine_letter(1) == (1 | BLANK_MASK));
+    assert(get_blanked_machine_letter(5) == (5 | BLANK_MASK));
 
     // Test unblank
-    assert(get_unblanked_machine_letter(0) == 0);
-    assert(get_unblanked_machine_letter(1) == 1);
-    assert(get_unblanked_machine_letter(BLANK_OFFSET-1) == BLANK_OFFSET-1);
-    assert(get_unblanked_machine_letter(BLANK_OFFSET) == 0);
-    assert(get_unblanked_machine_letter(BLANK_OFFSET+1) == 1);
+    assert(get_unblanked_machine_letter(1) == (1 & UNBLANK_MASK));
+    assert(get_unblanked_machine_letter(5) == (5 & UNBLANK_MASK));
 
     // Test val
     // separation token
-    assert(val(config->gaddag->alphabet, SEPARATION_TOKEN) == SEPARATION_MACHINE_LETTER);
+    assert(val(config->kwg->alphabet, SEPARATION_TOKEN) == SEPARATION_MACHINE_LETTER);
     // blank
-    assert(val(config->gaddag->alphabet, BLANK_TOKEN) == BLANK_MACHINE_LETTER);
+    assert(val(config->kwg->alphabet, BLANK_TOKEN) == BLANK_MACHINE_LETTER);
     // played through
-    assert(val(config->gaddag->alphabet, ASCII_PLAYED_THROUGH) == PLAYED_THROUGH_MARKER);
-    // blank offset
-    assert(val(config->gaddag->alphabet, 'a') == 100);
-    assert(val(config->gaddag->alphabet, 'b') == 101);
-    // no blank offset
-    assert(val(config->gaddag->alphabet, 'C') == 2);
-    assert(val(config->gaddag->alphabet, 'D') == 3);
+    assert(val(config->kwg->alphabet, ASCII_PLAYED_THROUGH) == PLAYED_THROUGH_MARKER);
+    // blank
+    assert(val(config->kwg->alphabet, 'a') == get_blanked_machine_letter(1));
+    assert(val(config->kwg->alphabet, 'b') == get_blanked_machine_letter(2));
+    // not blank
+    assert(val(config->kwg->alphabet, 'C') == 3);
+    assert(val(config->kwg->alphabet, 'D') == 4);
 
     // Test user visible
     // separation token
     // The separation letter and machine letter should be the only machine
     // letters that map to the same value, since
     // SEPARATION_MACHINE_LETTER == BLANK_MACHINE_LETTER
-    assert(user_visible_letter(config->gaddag->alphabet, SEPARATION_MACHINE_LETTER) == BLANK_TOKEN);
+    assert(user_visible_letter(config->kwg->alphabet, SEPARATION_MACHINE_LETTER) == BLANK_TOKEN);
     // blank
-    assert(user_visible_letter(config->gaddag->alphabet, BLANK_MACHINE_LETTER) == BLANK_TOKEN);
+    assert(user_visible_letter(config->kwg->alphabet, BLANK_MACHINE_LETTER) == BLANK_TOKEN);
     // played through
-    assert(user_visible_letter(config->gaddag->alphabet, PLAYED_THROUGH_MARKER) == ASCII_PLAYED_THROUGH);
-    // blank offset
-    assert(user_visible_letter(config->gaddag->alphabet, 100) == 'a');
-    assert(user_visible_letter(config->gaddag->alphabet, 101) == 'b');
-    // no blank offset
-    assert(user_visible_letter(config->gaddag->alphabet, 2) == 'C');
-    assert(user_visible_letter(config->gaddag->alphabet, 3) == 'D');
+    assert(user_visible_letter(config->kwg->alphabet, PLAYED_THROUGH_MARKER) == BLANK_TOKEN);
+    // blank
+    assert(user_visible_letter(config->kwg->alphabet, get_blanked_machine_letter(1)) == 'a');
+    assert(user_visible_letter(config->kwg->alphabet, get_blanked_machine_letter(2)) == 'b');
+    // not blank
+    assert(user_visible_letter(config->kwg->alphabet, 3) == 'C');
+    assert(user_visible_letter(config->kwg->alphabet, 4) == 'D');
 
 }

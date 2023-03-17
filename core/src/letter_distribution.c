@@ -6,12 +6,6 @@
 #include "letter_distribution.h"
 
 void load_letter_distribution(LetterDistribution * letter_distribution, const char* letter_distribution_filename) {
-    for (int i = 0; i < (MACHINE_LETTER_MAX_VALUE + 1); i++) {
-        letter_distribution->distribution[i] = 0;
-        letter_distribution->scores[i] = 0;
-        letter_distribution->is_vowel[i] = 0;
-    }
-
 	FILE * stream;
 	stream = fopen(letter_distribution_filename, "r");
 	if (stream == NULL) {
@@ -47,30 +41,40 @@ void load_letter_distribution(LetterDistribution * letter_distribution, const ch
 		exit(EXIT_FAILURE);
 	}
 
-	result = fread(letter_distribution->distribution, sizeof(uint32_t), (RACK_ARRAY_SIZE), stream);
-	if (result != (RACK_ARRAY_SIZE)) {
-		printf("fread failure: %zd != %d", result, (RACK_ARRAY_SIZE));
+	result = fread(&letter_distribution->size, sizeof(uint32_t), 1, stream);
+	if (result != 1) {
+		printf("fread failure: %zd != %d", result, 1);
 		exit(EXIT_FAILURE);
 	}
-	for (uint32_t i = 0; i < (RACK_ARRAY_SIZE); i++) {
+	letter_distribution->size = be32toh(letter_distribution->size);
+
+	letter_distribution->distribution = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
+	result = fread(letter_distribution->distribution, sizeof(uint32_t), letter_distribution->size, stream);
+	if (result != letter_distribution->size) {
+		printf("fread failure: %zd != %d", result, letter_distribution->size);
+		exit(EXIT_FAILURE);
+	}
+	for (uint32_t i = 0; i < letter_distribution->size; i++) {
 		letter_distribution->distribution[i] = be32toh(letter_distribution->distribution[i]);
 	}
 
-	result = fread(letter_distribution->scores, sizeof(uint32_t), (RACK_ARRAY_SIZE), stream);
-	if (result != (RACK_ARRAY_SIZE)) {
-		printf("fread failure: %zd != %d", result, (RACK_ARRAY_SIZE));
+	letter_distribution->scores = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
+	result = fread(letter_distribution->scores, sizeof(uint32_t), letter_distribution->size, stream);
+	if (result != letter_distribution->size) {
+		printf("fread failure: %zd != %d", result, letter_distribution->size);
 		exit(EXIT_FAILURE);
 	}
-	for (uint32_t i = 0; i < (RACK_ARRAY_SIZE); i++) {
+	for (uint32_t i = 0; i < letter_distribution->size; i++) {
 		letter_distribution->scores[i] = be32toh(letter_distribution->scores[i]);
 	}
 
-	result = fread(letter_distribution->is_vowel, sizeof(uint32_t), (RACK_ARRAY_SIZE), stream);
-	if (result != (RACK_ARRAY_SIZE)) {
-		printf("fread failure: %zd != %d", result, (RACK_ARRAY_SIZE));
+	letter_distribution->is_vowel = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
+	result = fread(letter_distribution->is_vowel, sizeof(uint32_t), letter_distribution->size, stream);
+	if (result != letter_distribution->size) {
+		printf("fread failure: %zd != %d", result, letter_distribution->size);
 		exit(EXIT_FAILURE);
 	}
-	for (uint32_t i = 0; i < (RACK_ARRAY_SIZE); i++) {
+	for (uint32_t i = 0; i < letter_distribution->size; i++) {
 		letter_distribution->is_vowel[i] = be32toh(letter_distribution->is_vowel[i]);
 	}
 	fclose(stream);
