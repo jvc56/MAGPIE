@@ -24,7 +24,7 @@ void play_move_on_board(Game * game, Move * move) {
             continue;
         }
         set_letter(game->gen->board, move->row_start + (move->vertical*idx), move->col_start + ((1-move->vertical)*idx), letter);
-        if (letter >= BLANK_OFFSET) {
+        if (is_blanked(letter)) {
             letter = BLANK_MACHINE_LETTER;
         }
         take_letter_from_rack(game->players[game->player_on_turn_index]->rack, letter);

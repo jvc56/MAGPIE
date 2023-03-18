@@ -52,7 +52,7 @@ void test_gen_cross_set_row(Game * game, int row, int col, const char* row_conte
 }
 
 void test_cross_set(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
     Game * game = create_game(config);
 
     // TestGencross_setLoadedGame

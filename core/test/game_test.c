@@ -14,7 +14,7 @@ void reset_and_load_game(Game * game, const char* cgp) {
 }
 
 void test_load_cgp(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
     Game * game = create_game(config);
     // Test that loading various CGPs doesn't result in
     // any errors
@@ -45,7 +45,7 @@ void test_load_cgp(SuperConfig * superconfig) {
 }
 
 void test_game_main(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
     Game * game = create_game(config);
     Rack * rack = create_rack(config->letter_distribution->size);
 

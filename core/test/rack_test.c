@@ -37,7 +37,7 @@ int equal_rack(Rack * expected_rack, Rack * actual_rack) {
 
 
 void test_rack_main(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
     Rack * rack = create_rack(config->letter_distribution->size);
     Rack * expected_rack = create_rack(config->letter_distribution->size);
 

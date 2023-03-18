@@ -41,7 +41,7 @@ void destroy_bag(Bag * bag) {
 
 // This assumes the letter is in the bag
 void draw_letter(Bag * bag, uint8_t letter) {
-    if (letter >= BLANK_OFFSET) {
+    if (is_blanked(letter)) {
         letter = BLANK_MACHINE_LETTER;
     }
     for (int i = 0; i <= bag->last_tile_index; i++) {
@@ -54,7 +54,7 @@ void draw_letter(Bag * bag, uint8_t letter) {
 }
 
 void add_letter(Bag * bag, uint8_t letter) {
-    if (letter >= BLANK_OFFSET) {
+    if (is_blanked(letter)) {
         letter = BLANK_MACHINE_LETTER;
     }
     int insert_index = 0;

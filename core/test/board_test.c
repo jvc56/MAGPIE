@@ -12,7 +12,7 @@
 #include "superconfig.h"
 
 void test_board(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
     Game * game = create_game(config);
     load_cgp(game, VS_ED);
 

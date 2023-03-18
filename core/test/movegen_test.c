@@ -55,9 +55,9 @@ void boards_equal(Board * b1, Board * b2) {
     }
 }
 
-void execute_recursive_gen(Generator * gen, int col, Player * player, uint32_t node_index, int leftstrip, int rightstrip, int unique_play) {
+void execute_recursive_gen(Generator * gen, int col, Player * player, int leftstrip, int rightstrip, int unique_play) {
     set_start_leave_index(player);
-    recursive_gen(gen, col, player, NULL, node_index, leftstrip, rightstrip, unique_play);
+    recursive_gen(gen, col, player, NULL, kwg_get_root_node_index(gen->kwg), leftstrip, rightstrip, unique_play);
 }
 
 void test_simple_case(Game * game, Player * player, const char* rack_string, int current_anchor_col, int row, const char* row_string, int expected_plays) {
@@ -67,14 +67,14 @@ void test_simple_case(Game * game, Player * player, const char* rack_string, int
     set_rack_to_string(player->rack, rack_string, game->gen->kwg->alphabet);
     set_row(game, row, row_string);
     game->gen->current_row_index = row;
-    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, 0, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
+    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
     assert(expected_plays == game->gen->move_list->count);
     reset_game(game);
     reset_rack(player->rack);
 }
 
 void macondo_tests(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
     Game * game = create_game(config);
     Player * player = game->players[0];
     char test_string[100];
@@ -86,7 +86,7 @@ void macondo_tests(SuperConfig * superconfig) {
     game->gen->current_row_index = 4;
 
     set_rack_to_string(player->rack, "AEINRST", game->gen->kwg->alphabet);
-    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, 0, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
+    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
     assert(game->gen->move_list->count == 0);
 
     // TestSimpleRowGen
@@ -113,7 +113,7 @@ void macondo_tests(SuperConfig * superconfig) {
     uint8_t ml = val(game->gen->kwg->alphabet, 'I');
     clear_cross_set(game->gen->board, game->gen->current_row_index, 2, BOARD_VERTICAL_DIRECTION);
     set_cross_set_letter(get_cross_set_pointer(game->gen->board, game->gen->current_row_index, 2, BOARD_VERTICAL_DIRECTION), ml);
-    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, 0, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
+    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
     // it should generate HITHERMOST only
     assert(game->gen->move_list->count == 1);
     write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, game->gen->move_list->moves[0], game->gen->kwg->alphabet);
@@ -128,7 +128,7 @@ void macondo_tests(SuperConfig * superconfig) {
     set_rack_to_string(player->rack, "AAEIRST", game->gen->kwg->alphabet);
     game->gen->current_row_index = 4;
     game->gen->current_anchor_col = 8;
-    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, 0, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
+    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
 
     assert(game->gen->move_list->count == 2);
 
@@ -150,7 +150,7 @@ void macondo_tests(SuperConfig * superconfig) {
     set_rack_to_string(player->rack, "A", game->gen->kwg->alphabet);
     game->gen->current_row_index = 14;
     game->gen->current_anchor_col = 8;
-    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, 0, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
+    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
     assert(game->gen->move_list->count == 1);
 
     write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, game->gen->move_list->moves[0], game->gen->kwg->alphabet);
@@ -165,7 +165,7 @@ void macondo_tests(SuperConfig * superconfig) {
     set_rack_to_string(player->rack, "A", game->gen->kwg->alphabet);
     game->gen->current_row_index = 0;
     game->gen->current_anchor_col = 11;
-    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, 0, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
+    execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, game->gen->current_anchor_col, game->gen->current_anchor_col, 1);
     assert(game->gen->move_list->count == 1);
 
     write_user_visible_move_to_end_of_buffer(test_string, game->gen->board, game->gen->move_list->moves[0], game->gen->kwg->alphabet);
@@ -184,7 +184,7 @@ void macondo_tests(SuperConfig * superconfig) {
     game->gen->last_anchor_col = 100;
     for (int anchor_col = 8; anchor_col < 13; anchor_col++) {
         game->gen->current_anchor_col = anchor_col;
-        execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, 0, game->gen->current_anchor_col, game->gen->current_anchor_col, 0);
+        execute_recursive_gen(game->gen, game->gen->current_anchor_col, player, game->gen->current_anchor_col, game->gen->current_anchor_col, 0);
         game->gen->last_anchor_col = anchor_col;
     }
     assert(game->gen->move_list->count == 34);
@@ -388,7 +388,7 @@ void many_moves_tests(SuperConfig * superconfig) {
 }
 
 void equity_test(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
 
     Game * game = create_game(config);
     Player * player = game->players[0];
@@ -424,7 +424,7 @@ void equity_test(SuperConfig * superconfig) {
 }
 
 void top_equity_play_recorder_test(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
 
     Game * game = create_game(config);
     Player * player = game->players[0];

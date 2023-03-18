@@ -8,7 +8,7 @@
 #include "superconfig.h"
 
 void test_alphabet(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
     // Test blank
     assert(get_blanked_machine_letter(1) == (1 | BLANK_MASK));
     assert(get_blanked_machine_letter(5) == (5 | BLANK_MASK));

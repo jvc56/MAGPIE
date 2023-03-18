@@ -25,7 +25,7 @@ void test_add_letter(Config * config, Bag * bag, char r, char * expected_bag_str
 }
 
 void test_bag(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
     Bag * bag = create_bag(config->letter_distribution);
     Rack * rack = create_rack(config->letter_distribution->size);
 

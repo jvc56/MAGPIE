@@ -155,8 +155,8 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 	uint64_t cross_set = get_cross_set(gen->board, gen->current_row_index, col, cs_direction);
 	if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
 		int raw = get_unblanked_machine_letter(current_letter);
-		int next_node_index;
-		int accepts;
+		int next_node_index = 0;
+		int accepts = 0;
 		int i = node_index;
 		while(1) {
 			if (kwg_tile(gen->kwg, i) == raw) {
@@ -178,11 +178,11 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 				int next_node_index = kwg_arc_index(gen->kwg, i);
 				int accepts = kwg_accepts(gen->kwg, i);
 				if (player->rack->array[ml] > 0) {
-					take_letter_from_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
+					take_letter_from_rack_and_recalculate_leave_index(player, ml);
 					gen->tiles_played++;
 					go_on(gen, col, ml, player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 					gen->tiles_played--;
-					add_letter_to_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
+					add_letter_to_rack_and_recalculate_leave_index(player, ml);
 				}
 				// check blank
 				if (player->rack->array[0] > 0) {
@@ -262,7 +262,7 @@ void gen_by_orientation(Generator * gen, Player * player, Rack * opp_rack, int d
 		{
 			if (get_anchor(gen->board, row, col, dir)) {
 				gen->current_anchor_col = col;
-				recursive_gen(gen, col, player, opp_rack, 0, col, col, !gen->vertical);
+				recursive_gen(gen, col, player, opp_rack, kwg_get_root_node_index(gen->kwg), col, col, !gen->vertical);
 				gen->last_anchor_col = col;
 			}
 		}

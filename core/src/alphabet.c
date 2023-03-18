@@ -120,6 +120,10 @@ uint8_t get_unblanked_machine_letter(uint8_t ml) {
 	return ml & UNBLANK_MASK;
 }
 
+uint8_t is_blanked(uint8_t ml) {
+	return (ml & BLANK_MASK) > 0;
+}
+
 int is_vowel(uint8_t ml, Alphabet * alphabet) {
 	ml = get_unblanked_machine_letter(ml);
 	uint8_t rn = alphabet->letters[ml];
