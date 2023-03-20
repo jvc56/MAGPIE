@@ -7,7 +7,6 @@
 #include "board.h"
 #include "config.h"
 #include "cross_set.h"
-#include "gaddag.h"
 #include "game.h"
 #include "movegen.h"
 #include "player.h"

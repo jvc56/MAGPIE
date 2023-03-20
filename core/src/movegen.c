@@ -317,7 +317,6 @@ Generator * create_generator(Config * config) {
 	generator->move_list = create_move_list();
     generator->kwg = config->kwg;
     generator->letter_distribution = config->letter_distribution;
-    generator->number_of_possible_letters = get_number_of_letters(generator->kwg->alphabet);
 	generator->tiles_played = 0;
 	generator->vertical = 0;
 	generator->last_anchor_col = 0;

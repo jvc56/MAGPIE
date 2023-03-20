@@ -22,7 +22,6 @@ typedef struct Generator {
     int vertical;
     int tiles_played;
     int number_of_plays;
-    int number_of_possible_letters;
 
     uint8_t strip[BOARD_DIM];
     uint8_t * exchange_strip;

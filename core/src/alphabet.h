@@ -15,11 +15,9 @@ typedef struct Alphabet {
     uint32_t * letters;
 } Alphabet;
 
-Alphabet * create_alphabet_from_file(const char* alphabet_filename, int alphabet_size);
-Alphabet* create_alphabet_from_slice(uint32_t array[], uint32_t alphabet_size);
+Alphabet * create_alphabet_from_file(const char* alphabet_filename);
 void destroy_alphabet(Alphabet * alphabet);
 uint8_t get_blanked_machine_letter(uint8_t ml);
-int get_number_of_letters(Alphabet * alphabet);
 uint8_t get_unblanked_machine_letter(uint8_t letter);
 uint8_t is_blanked(uint8_t ml);
 int is_vowel(uint8_t ml, Alphabet * alphabet);
