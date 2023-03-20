@@ -87,5 +87,8 @@ LetterDistribution * create_letter_distribution(const char* filename) {
 }
 
 void destroy_letter_distribution(LetterDistribution * letter_distribution) {
+	free(letter_distribution->distribution);
+	free(letter_distribution->scores);
+	free(letter_distribution->is_vowel);
 	free(letter_distribution);
 }

@@ -29,9 +29,10 @@ void load_kwg(KWG * kwg, const char* kwg_filename, const char* alphabet_filename
 	for (uint32_t i = 0; i < number_of_nodes; i++) {
 		kwg->nodes[i] = le32toh(kwg->nodes[i]);
 	}
+	fclose(stream);
 
     // Alphabet size is not needed for kwg.
-	kwg->alphabet = create_alphabet_from_file(alphabet_filename, 0);
+	kwg->alphabet = create_alphabet_from_file(alphabet_filename);
 }
 
 KWG * create_kwg(const char* kwg_filename, const char* alphabet_filename) {
@@ -41,6 +42,7 @@ KWG * create_kwg(const char* kwg_filename, const char* alphabet_filename) {
 }
 
 void destroy_kwg(KWG * kwg) {
+    destroy_alphabet(kwg->alphabet);
     free(kwg->nodes);
     free(kwg);
 }

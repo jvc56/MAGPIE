@@ -5,7 +5,6 @@
 #include "../src/alphabet.h"
 #include "../src/config.h"
 #include "../src/constants.h"
-#include "../src/gaddag.h"
 #include "../src/letter_distribution.h"
 #include "../src/rack.h"
 

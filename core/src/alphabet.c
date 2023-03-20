@@ -81,24 +81,9 @@ void load_alphabet(Alphabet * alphabet, const char * alphabet_filename) {
 	fclose(stream);
 }
 
-void from_slice(Alphabet * alphabet, uint32_t array[], uint32_t letters_size) {
-	alphabet->size = letters_size;
-	for (int i = 0; i < alphabet->size; i++) {
-		alphabet->vals[array[i]] = i;
-		alphabet->letters[i] = array[i];
-	}
-}
-
-Alphabet * create_alphabet_from_slice(uint32_t array[], uint32_t letters_size) {
-	Alphabet * alphabet = malloc(sizeof(Alphabet));
-	from_slice(alphabet, array, letters_size);
-	return alphabet;
-}
-
-Alphabet * create_alphabet_from_file(const char* alphabet_filename, int alphabet_size) {
+Alphabet * create_alphabet_from_file(const char* alphabet_filename) {
 	Alphabet * alphabet = malloc(sizeof(Alphabet));
 	load_alphabet(alphabet, alphabet_filename);
-	alphabet->size = alphabet_size;
 	return alphabet;
 }
 
@@ -106,10 +91,6 @@ void destroy_alphabet(Alphabet * alphabet) {
 	free(alphabet->letters);
 	free(alphabet->vals);
 	free(alphabet);
-}
-
-int get_number_of_letters(Alphabet * alphabet) {
-	return alphabet->size;
 }
 
 uint8_t get_blanked_machine_letter(uint8_t ml) {

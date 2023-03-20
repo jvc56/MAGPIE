@@ -57,10 +57,10 @@ int main(int argc, char *argv[]) {
   } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
     Config * csw_config = create_config(
       "./data/lexica/CSW21.kwg",
-      "./data/lexica/CSW21_zeroblank.alph",
-      "./data/letterdistributions/english_zeroblank.dist",
+      "./data/lexica/CSW21.alph",
+      "./data/letterdistributions/english.dist",
       "",
-      "./data/lexica/CSW21_zeroblank.laddag",
+      "./data/lexica/CSW21.laddag",
       SORT_BY_EQUITY,
       PLAY_RECORDER_TYPE_ALL,
       "",
@@ -72,10 +72,10 @@ int main(int argc, char *argv[]) {
 
     Config * nwl_config = create_config(
       "./data/lexica/America.kwg",
-      "./data/lexica/CSW21_zeroblank.alph",
-      "./data/letterdistributions/english_zeroblank.dist",
+      "./data/lexica/CSW21.alph",
+      "./data/letterdistributions/english.dist",
       "",
-      "./data/lexica/CSW21_zeroblank.laddag",
+      "./data/lexica/CSW21.laddag",
       SORT_BY_SCORE,
       PLAY_RECORDER_TYPE_ALL,
       "",
