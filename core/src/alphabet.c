@@ -69,7 +69,6 @@ void load_alphabet(Alphabet * alphabet, const char * alphabet_filename) {
 	}
 	vals_size = be32toh(vals_size);
 
-
 	alphabet->vals = (uint32_t *) malloc(vals_size*sizeof(uint32_t));
 	result = fread(alphabet->vals, sizeof(uint32_t), vals_size, stream);
 	if (result != vals_size) {
@@ -114,17 +113,15 @@ int get_number_of_letters(Alphabet * alphabet) {
 }
 
 uint8_t get_blanked_machine_letter(uint8_t ml) {
-	if (ml < BLANK_OFFSET) {
-		return ml + BLANK_OFFSET;
-	}
-	return ml;
+	return ml | BLANK_MASK;
 }
 
 uint8_t get_unblanked_machine_letter(uint8_t ml) {
-	if (ml >= BLANK_OFFSET) {
-		return ml - BLANK_OFFSET;
-	}
-	return ml;
+	return ml & UNBLANK_MASK;
+}
+
+uint8_t is_blanked(uint8_t ml) {
+	return (ml & BLANK_MASK) > 0;
 }
 
 int is_vowel(uint8_t ml, Alphabet * alphabet) {

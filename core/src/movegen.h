@@ -8,7 +8,7 @@
 #include "board.h"
 #include "config.h"
 #include "constants.h"
-#include "gaddag.h"
+#include "kwg.h"
 #include "leaves.h"
 #include "letter_distribution.h"
 #include "move.h"
@@ -25,14 +25,14 @@ typedef struct Generator {
     int number_of_possible_letters;
 
     uint8_t strip[BOARD_DIM];
-    uint8_t exchange_strip[(RACK_ARRAY_SIZE)];
+    uint8_t * exchange_strip;
     double preendgame_adjustment_values[PREENDGAME_ADJUSTMENT_VALUES_LENGTH];
 
     MoveList * move_list;
     Board * board;
     Bag * bag;
 
-    Gaddag * gaddag;
+    KWG * kwg;
     LetterDistribution * letter_distribution;
 } Generator;
 

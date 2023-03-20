@@ -3,6 +3,8 @@
 #include <string.h>
 #include <math.h>
 
+#include "../src/alphabet.h"
+#include "../src/board.h"
 #include "../src/config.h"
 #include "../src/constants.h"
 #include "../src/game.h"
@@ -12,6 +14,7 @@
 #include "../src/rack.h"
 
 #include "alphabet_print.h"
+#include "move_print.h"
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -50,7 +53,7 @@ double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack) {
     }
     for (int i = 0; i < valid_tiles; i++) {
         if (move->tiles[i] != PLAYED_THROUGH_MARKER) {
-            if (move->tiles[i] >= BLANK_OFFSET) {
+            if (is_blanked(move->tiles[i])) {
                 take_letter_from_rack(rack, BLANK_MACHINE_LETTER);
             } else {
                 take_letter_from_rack(rack, move->tiles[i]);
@@ -82,6 +85,19 @@ void destroy_sorted_move_list(SortedMoveList * sorted_move_list) {
     free(sorted_move_list);
 }
 
+void print_move_list(Board * board, Alphabet * alphabet, MoveList * ml) {
+    int number_of_moves = ml->count;
+    SortedMoveList * sml = create_sorted_move_list(ml);
+    for (int i = 0; i < number_of_moves; i++) {
+        char move_string[40];
+        reset_string(move_string);
+        write_user_visible_move_to_end_of_buffer(move_string, board, sml->moves[i], alphabet);
+        printf("%s\n", move_string);
+    }
+    destroy_sorted_move_list(sml);
+}
+
+
 void play_top_n_equity_move(Game * game, int n) {
     generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
     SortedMoveList * sorted_move_list = create_sorted_move_list(game->gen->move_list);
@@ -91,7 +107,7 @@ void play_top_n_equity_move(Game * game, int n) {
 }
 
 void write_rack_to_end_of_buffer(char * dest, Alphabet * alphabet, Rack * rack) {
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
+    for (int i = 0; i < (rack->array_size); i++) {
         for (int k = 0; k < rack->array[i]; k++) {
 			write_user_visible_letter_to_end_of_buffer(dest, alphabet, i);
         }

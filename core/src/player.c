@@ -12,10 +12,10 @@ void reset_player(Player * player) {
     player->score = 0;
 }
 
-Player * create_player(const char* name) {
+Player * create_player(const char* name, int array_size) {
     Player * player = malloc(sizeof(Player));
     player->name = strdup(name);
-    player->rack = create_rack();
+    player->rack = create_rack(array_size);
     player->score = 0;
     return player;
 }

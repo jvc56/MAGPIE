@@ -12,7 +12,7 @@ typedef struct Player {
     StrategyParams * strategy_params;
 } Player;
 
-Player * create_player(const char* name);
+Player * create_player(const char* name, int array_size);
 void destroy_player(Player * player);
 void reset_player(Player * player);
 

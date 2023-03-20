@@ -19,20 +19,20 @@ void test_add_letter(Config * config, Bag * bag, char r, char * expected_bag_str
     char bag_string[100];
     reset_string(bag_string);
 
-    add_letter(bag, val(config->gaddag->alphabet, r));
-    write_bag_to_string(bag_string, bag, config->gaddag->alphabet);
+    add_letter(bag, val(config->kwg->alphabet, r));
+    write_bag_to_string(bag_string, bag, config->kwg->alphabet);
     assert(!strcmp(bag_string, expected_bag_string));
 }
 
 void test_bag(SuperConfig * superconfig) {
-    Config * config = get_america_config(superconfig);
+    Config * config = get_nwl_config(superconfig);
     Bag * bag = create_bag(config->letter_distribution);
-    Rack * rack = create_rack();
+    Rack * rack = create_rack(config->letter_distribution->size);
 
     // Check initial bag configuration
     assert(bag->last_tile_index == BAG_SIZE - 1);
 
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
+    for (uint32_t i = 0; i < (config->letter_distribution->size); i++) {
         uint32_t number_of_letters = 0;
         for (int k = 0; k <= bag->last_tile_index; k++) {
             if (bag->tiles[k] == i) {

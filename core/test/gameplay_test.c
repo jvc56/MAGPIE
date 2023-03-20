@@ -19,7 +19,7 @@ void draw_rack_to_string(Bag * bag, Rack * rack, char * letters, Alphabet * alph
 }
 
 void return_rack_to_bag(Rack * rack, Bag * bag) {
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
+    for (int i = 0; i < (rack->array_size); i++) {
         for (int j = 0; j < rack->array[i]; j++) {
             add_letter(bag, i);
         }
@@ -53,13 +53,13 @@ void assert_boards_are_equal(Board * b1, Board * b2) {
     }
 }
 
-void assert_bags_are_equal(Bag * b1, Bag * b2) {
+void assert_bags_are_equal(Bag * b1, Bag * b2, int rack_array_size) {
     assert(b1->last_tile_index == b2->last_tile_index);
 
-    uint8_t sb1[(RACK_ARRAY_SIZE)];
-    uint8_t sb2[(RACK_ARRAY_SIZE)];
+    uint8_t sb1[(rack_array_size)];
+    uint8_t sb2[(rack_array_size)];
 
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
+    for (int i = 0; i < (rack_array_size); i++) {
         sb1[i] = 0;
         sb2[i] = 0;
     }
@@ -69,7 +69,7 @@ void assert_bags_are_equal(Bag * b1, Bag * b2) {
         sb2[b2->tiles[i]]++;
     }
 
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
+    for (int i = 0; i < (rack_array_size); i++) {
         assert(sb1[i] == sb2[i]);
     }
 }
@@ -88,7 +88,7 @@ void assert_games_are_equal(Game * g1, Game * g2, int check_scores) {
     assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn, check_scores);
 
     assert_boards_are_equal(g1->gen->board, g2->gen->board);
-    assert_bags_are_equal(g1->gen->bag, g2->gen->bag);
+    assert_bags_are_equal(g1->gen->bag, g2->gen->bag, g1->gen->letter_distribution->size);
 }
 
 void test_gameplay_by_turn(Config * config, char * cgps[], char * racks[], int array_length) {
@@ -105,7 +105,7 @@ void test_gameplay_by_turn(Config * config, char * cgps[], char * racks[], int a
     for (int i = 0; i < array_length; i++) {
         assert(actual_game->game_end_reason == GAME_END_REASON_NONE);
         return_racks_to_bag(actual_game);
-        draw_rack_to_string(actual_game->gen->bag ,actual_game->players[actual_game->player_on_turn_index]->rack, racks[i], actual_game->gen->gaddag->alphabet);
+        draw_rack_to_string(actual_game->gen->bag ,actual_game->players[actual_game->player_on_turn_index]->rack, racks[i], actual_game->gen->kwg->alphabet);
         // If it's the last turn, have the opponent draw the remaining tiles
         // so the end of actual_game subtractions are correct. If the bag has less
         // than RACK_SIZE tiles, have the opponent draw the remaining tiles
@@ -347,7 +347,7 @@ void test_playmove(SuperConfig * superconfig) {
     Game * game = create_game(config);
 
     // Test play
-    draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY", game->gen->gaddag->alphabet);
+    draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY", game->gen->kwg->alphabet);
     play_top_n_equity_move(game, 0);
 
     assert(game->consecutive_scoreless_turns == 0);
@@ -356,18 +356,18 @@ void test_playmove(SuperConfig * superconfig) {
     assert(game->players[1]->score == 0);
     assert(!game->players[0]->rack->empty);
     assert(game->players[0]->rack->number_of_letters == 7);
-    assert(get_letter(game->gen->board, 7, 3) == val(game->gen->gaddag->alphabet, 'K'));
-    assert(get_letter(game->gen->board, 7, 4) == val(game->gen->gaddag->alphabet, 'Y'));
-    assert(get_letter(game->gen->board, 7, 5) == val(game->gen->gaddag->alphabet, 'N'));
-    assert(get_letter(game->gen->board, 7, 6) == val(game->gen->gaddag->alphabet, 'D'));
-    assert(get_letter(game->gen->board, 7, 7) == val(game->gen->gaddag->alphabet, 'E'));
+    assert(get_letter(game->gen->board, 7, 3) == val(game->gen->kwg->alphabet, 'K'));
+    assert(get_letter(game->gen->board, 7, 4) == val(game->gen->kwg->alphabet, 'Y'));
+    assert(get_letter(game->gen->board, 7, 5) == val(game->gen->kwg->alphabet, 'N'));
+    assert(get_letter(game->gen->board, 7, 6) == val(game->gen->kwg->alphabet, 'D'));
+    assert(get_letter(game->gen->board, 7, 7) == val(game->gen->kwg->alphabet, 'E'));
     assert(game->player_on_turn_index == 1);
     assert(game->gen->bag->last_tile_index + 1 == 88);
     assert(game->gen->board->tiles_played == 5);
     reset_game(game);
 
     // Test exchange
-    draw_rack_to_string(game->gen->bag, game->players[0]->rack, "UUUVVWW", game->gen->gaddag->alphabet);
+    draw_rack_to_string(game->gen->bag, game->players[0]->rack, "UUUVVWW", game->gen->kwg->alphabet);
     play_top_n_equity_move(game, 0);
 
     assert(game->consecutive_scoreless_turns == 1);
@@ -379,9 +379,9 @@ void test_playmove(SuperConfig * superconfig) {
     assert(game->player_on_turn_index == 1);
     assert(game->gen->bag->last_tile_index + 1 == 93);
     assert(game->gen->board->tiles_played == 0);
-    assert(game->players[0]->rack->array[val(game->gen->gaddag->alphabet, 'V')] == 0);
-    assert(game->players[0]->rack->array[val(game->gen->gaddag->alphabet, 'W')] == 0);
-    assert(game->players[0]->rack->array[val(game->gen->gaddag->alphabet, 'U')] < 2);
+    assert(game->players[0]->rack->array[val(game->gen->kwg->alphabet, 'V')] == 0);
+    assert(game->players[0]->rack->array[val(game->gen->kwg->alphabet, 'W')] == 0);
+    assert(game->players[0]->rack->array[val(game->gen->kwg->alphabet, 'U')] < 2);
     reset_game(game);
 
     // Test pass

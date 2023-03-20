@@ -134,7 +134,11 @@ int traverse_backwards_for_score(Board * board, int row, int col, LetterDistribu
 		if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
 			break;
 		}
-		score += letter_distribution->scores[ml];
+		if (is_blanked(ml)) {
+			score += letter_distribution->scores[BLANK_MACHINE_LETTER];
+		} else {
+			score += letter_distribution->scores[ml];
+		}
 		col--;
 	}
 	return score;
@@ -257,7 +261,10 @@ int score_move(Board * board, uint8_t word[], int word_start_index, int word_end
 			}
 		}
 		int cs = get_cross_score(board, row, col+idx, cross_dir);
-		if (ml >= BLANK_OFFSET) {
+		if (cs > 1000 ) {
+			printf("%d, %d, %d, %d, %d\n", cs, row, col, idx, cross_dir);
+		}
+		if (is_blanked(ml)) {
 			ls = 0;
 		} else {
 			ls = letter_distribution->scores[ml];

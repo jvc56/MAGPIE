@@ -3,11 +3,13 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/domino14/macondo/alphabet"
 	"github.com/domino14/macondo/gaddagmaker"
@@ -22,6 +24,9 @@ const (
 	LexicaDirectory               = "lexica"
 	OutputDataDirectory           = "../core/data"
 	NumberOfUniqueMachineLetters  = alphabet.MaxAlphabetSize + 1
+	NumberOfUniqueEnglishTiles    = 27
+	BlankMask                     = 0x80
+	UnblankMask                   = (0x80 - 1)
 )
 
 // Internal struct only used to write laddag to file
@@ -104,26 +109,37 @@ func readLeaves(filePath string, alph *alphabet.Alphabet) ([]float64, []string, 
 	return values, leaves, leavesToIndex
 }
 
-func convertNodeIndexToFirstEdgeIndex(index int) int {
-	return index * NumberOfUniqueMachineLetters * 2
+func convertNodeIndexToFirstEdgeIndex(index int, takeAddArrayLength int) int {
+	return index * takeAddArrayLength * 2
 }
 
-func clearAdd(laddag *Laddag, index int) {
-	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index)
-	for i := 0; i < NumberOfUniqueMachineLetters; i++ {
+func clearAdd(laddag *Laddag, index int, takeAddArrayLength int) {
+	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, takeAddArrayLength)
+	for i := 0; i < takeAddArrayLength; i++ {
 		laddag.edges[firstEdgeIndex+i] = laddag.invalidIndex
 	}
 }
 
-func populateAdd(laddag *Laddag, rack string, index int) {
+func populateAdd(laddag *Laddag, rack string, index int, takeAddArrayLength int) {
 	if len(rack) >= 6 {
-		clearAdd(laddag, index)
+		clearAdd(laddag, index, takeAddArrayLength)
 	} else {
 		mlRack := alphabet.RackFromString(rack, laddag.alphabet)
-		firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index)
-		for i := 0; i < NumberOfUniqueMachineLetters; i++ {
+		firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, takeAddArrayLength)
+		for i := 0; i < takeAddArrayLength; i++ {
 			thisEdgeIndex := firstEdgeIndex + i
-			ml := alphabet.MachineLetter(i)
+			// Blank is still some arbitrary number greater than 0
+			// Set the blank to this value.
+			tileVal := i
+			if takeAddArrayLength == NumberOfUniqueEnglishTiles {
+				// Old blank tile value
+				if i == 0 {
+					tileVal = 50
+				} else {
+					tileVal = i - 1
+				}
+			}
+			ml := alphabet.MachineLetter(tileVal)
 			mlRack.Add(ml)
 			addedRackString := mlRack.String()
 			leaveIndex, exists := laddag.leavesToIndex[addedRackString]
@@ -137,19 +153,28 @@ func populateAdd(laddag *Laddag, rack string, index int) {
 	}
 }
 
-func clearTake(laddag *Laddag, index int) {
-	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index)
-	for i := 0; i < NumberOfUniqueMachineLetters; i++ {
-		laddag.edges[firstEdgeIndex+NumberOfUniqueMachineLetters+i] = laddag.invalidIndex
+func clearTake(laddag *Laddag, index int, takeAddArrayLength int) {
+	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, takeAddArrayLength)
+	for i := 0; i < takeAddArrayLength; i++ {
+		laddag.edges[firstEdgeIndex+takeAddArrayLength+i] = laddag.invalidIndex
 	}
 }
 
-func populateTake(laddag *Laddag, rack string, index int) {
+func populateTake(laddag *Laddag, rack string, index int, takeAddArrayLength int) {
 	mlRack := alphabet.RackFromString(rack, laddag.alphabet)
-	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index)
-	for i := 0; i < NumberOfUniqueMachineLetters; i++ {
-		ml := alphabet.MachineLetter(i)
-		thisEdgeIndex := firstEdgeIndex + NumberOfUniqueMachineLetters + i
+	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, takeAddArrayLength)
+	for i := 0; i < takeAddArrayLength; i++ {
+		tileVal := i
+		if takeAddArrayLength == NumberOfUniqueEnglishTiles {
+			// Old blank tile value
+			if i == 0 {
+				tileVal = 50
+			} else {
+				tileVal = i - 1
+			}
+		}
+		ml := alphabet.MachineLetter(tileVal)
+		thisEdgeIndex := firstEdgeIndex + takeAddArrayLength + i
 		if mlRack.Has(ml) {
 			mlRack.Take(ml)
 			takenRackString := mlRack.String()
@@ -160,15 +185,20 @@ func populateTake(laddag *Laddag, rack string, index int) {
 		}
 	}
 }
-func createLaddag(lexicon string, alph *alphabet.Alphabet) {
+
+func createLaddag(lexicon string, alph *alphabet.Alphabet, zeroblank bool) {
 	values, leaves, leavesToIndex := readLeaves(getLeavesFilename(lexicon), alph)
 
+	takeAddArrayLength := NumberOfUniqueMachineLetters
+	if zeroblank {
+		takeAddArrayLength = NumberOfUniqueEnglishTiles
+	}
 	// Use max alphabet size + 1 so there is room for the blank
 	// Add 2 extra nodes, one for the empty leave and one for
 	// the full rack starting leave.
 	laddag := &Laddag{}
 	numberOfNodes := len(leaves) + 2
-	numberOfEdges := convertNodeIndexToFirstEdgeIndex(numberOfNodes)
+	numberOfEdges := convertNodeIndexToFirstEdgeIndex(numberOfNodes, takeAddArrayLength)
 	laddagEdges := make([]uint32, numberOfEdges)
 	laddagValues := make([]float64, numberOfNodes)
 
@@ -178,21 +208,21 @@ func createLaddag(lexicon string, alph *alphabet.Alphabet) {
 	laddag.invalidIndex = uint32(numberOfNodes)
 	laddag.alphabet = alph
 
-	populateAdd(laddag, "", 0)
-	clearTake(laddag, 0)
+	populateAdd(laddag, "", 0, takeAddArrayLength)
+	clearTake(laddag, 0, takeAddArrayLength)
 	laddag.values[0] = 0
 
 	for i := 1; i < numberOfNodes-1; i++ {
 		laddag.values[i] = values[i-1]
-		populateAdd(laddag, leaves[i-1], i)
-		populateTake(laddag, leaves[i-1], i)
+		populateAdd(laddag, leaves[i-1], i, takeAddArrayLength)
+		populateTake(laddag, leaves[i-1], i, takeAddArrayLength)
 	}
 
 	laddag.values[numberOfNodes-1] = 0
-	clearAdd(laddag, numberOfNodes-1)
-	clearTake(laddag, numberOfNodes-1)
+	clearAdd(laddag, numberOfNodes-1, takeAddArrayLength)
+	clearTake(laddag, numberOfNodes-1, takeAddArrayLength)
 
-	saveLaddag(laddag, lexicon)
+	saveLaddag(laddag, lexicon, zeroblank)
 }
 
 func float64ToByte(f float64) []byte {
@@ -201,8 +231,12 @@ func float64ToByte(f float64) []byte {
 	return buf[:]
 }
 
-func saveLaddag(laddag *Laddag, lexicon string) {
-	file, err := os.Create(getLaddagOutputFilename(lexicon))
+func saveLaddag(laddag *Laddag, lexicon string, zeroblank bool) {
+	lex := lexicon
+	if zeroblank {
+		lex += "_zeroblank"
+	}
+	file, err := os.Create(getLaddagOutputFilename(lex))
 	if err != nil {
 		panic(err)
 	}
@@ -247,19 +281,26 @@ func loadLetterDistribution(letterDistribution string) *alphabet.LetterDistribut
 	return ld
 }
 
-func createLetterDistribution(letterDistribution string) {
+func createLetterDistribution(letterDistribution string, zeroblank bool) {
 	ld := loadLetterDistribution(letterDistribution)
-	saveLetterDistribution(ld, letterDistribution)
+	saveLetterDistribution(ld, letterDistribution, zeroblank)
 }
 
-func saveLetterDistribution(ld *alphabet.LetterDistribution, ldName string) {
-	file, err := os.Create(getLetterDistributionOutputFilename(ldName))
+func saveLetterDistribution(ld *alphabet.LetterDistribution, ldName string, zeroblank bool) {
+	ldAdjustedName := ldName
+	if zeroblank {
+		ldAdjustedName += "_zeroblank"
+	}
+	file, err := os.Create(getLetterDistributionOutputFilename(ldAdjustedName))
 	if err != nil {
 		panic(err)
 	}
 
 	// Serialize the letter distribution
 	distSize := alphabet.MaxAlphabetSize + 1
+	if zeroblank {
+		distSize = len(ld.SortOrder)
+	}
 	dist := make([]uint32, distSize)
 	pointValues := make([]uint32, distSize)
 	isVowel := make([]uint32, distSize)
@@ -269,12 +310,19 @@ func saveLetterDistribution(ld *alphabet.LetterDistribution, ldName string) {
 		isVowelMap[vowel] = true
 	}
 
-	for runeLetter, _ := range ld.SortOrder {
+	for runeLetter := range ld.SortOrder {
 		ml, err := ld.Alphabet().Val(runeLetter)
 		if err != nil {
 			panic(err)
 		}
 		mlAsIndex := uint32(ml)
+		if zeroblank {
+			if mlAsIndex == 50 {
+				mlAsIndex = 0
+			} else {
+				mlAsIndex++
+			}
+		}
 		dist[mlAsIndex] = uint32(ld.Distribution[runeLetter])
 		pointValues[mlAsIndex] = uint32(ld.PointValues[runeLetter])
 		if isVowelMap[runeLetter] {
@@ -295,6 +343,9 @@ func saveLetterDistribution(ld *alphabet.LetterDistribution, ldName string) {
 	// We do not write the lengths because they are
 	// constants across all programs that deal with them
 
+	// Write the size of the distribution
+	binary.Write(file, binary.BigEndian, uint32(distSize))
+
 	// Write the distribution
 	binary.Write(file, binary.BigEndian, dist)
 
@@ -307,12 +358,49 @@ func saveLetterDistribution(ld *alphabet.LetterDistribution, ldName string) {
 	file.Close()
 }
 
-func createLetterConversion(lexicon string, alph *alphabet.Alphabet) {
-	saveLetterConversion(lexicon, alph)
+func zeroBlankVal(alph *alphabet.Alphabet, r rune) (alphabet.MachineLetter, error) {
+	if r == alphabet.BlankToken {
+		return 0, nil
+	}
+	val, ok := alph.Vals()[r]
+	val++
+	if ok {
+		return val, nil
+	}
+	if r == unicode.ToLower(r) {
+		val, ok = alph.Vals()[unicode.ToUpper(r)]
+		val++
+		if ok {
+			return (val | BlankMask), nil
+		}
+	}
+	if r == alphabet.ASCIIPlayedThrough {
+		return 0, nil
+	}
+	return 0, fmt.Errorf("letter `%c` not found in alphabet", r)
 }
 
-func saveLetterConversion(lexicon string, alph *alphabet.Alphabet) {
-	file, err := os.Create(getLetterConversionOutputFilename(lexicon))
+func zeroBlankUserVisible(alph *alphabet.Alphabet, ml alphabet.MachineLetter) rune {
+	if ml == 0 {
+		return alphabet.BlankToken
+	}
+	ml--
+	if (ml & BlankMask) > 0 {
+		return unicode.ToLower(alph.Letters()[ml&UnblankMask])
+	}
+	return alph.Letters()[ml]
+}
+
+func createLetterConversion(lexicon string, alph *alphabet.Alphabet, zeroblank bool) {
+	saveLetterConversion(lexicon, alph, zeroblank)
+}
+
+func saveLetterConversion(lexicon string, alph *alphabet.Alphabet, zeroblank bool) {
+	lex := lexicon
+	if zeroblank {
+		lex += "_zeroblank"
+	}
+	file, err := os.Create(getLetterConversionOutputFilename(lex))
 	if err != nil {
 		panic(err)
 	}
@@ -330,7 +418,11 @@ func saveLetterConversion(lexicon string, alph *alphabet.Alphabet) {
 	userVisibleLetters := make([]uint32, 256)
 	for i := 0; i < machineLetterMaxValue; i++ {
 		ml := alphabet.MachineLetter(i)
-		userVisibleLetters[i] = uint32(ml.UserVisible(alph))
+		if zeroblank {
+			userVisibleLetters[i] = uint32(zeroBlankUserVisible(alph, ml))
+		} else {
+			userVisibleLetters[i] = uint32(ml.UserVisible(alph))
+		}
 	}
 
 	// Write the machine letter -> user visible map
@@ -343,13 +435,30 @@ func saveLetterConversion(lexicon string, alph *alphabet.Alphabet) {
 	invalidMachineLetterValue := machineLetterMaxValue
 	machineLetters := make([]uint32, userVisibleLetterMaxValue)
 	for i := 0; i < userVisibleLetterMaxValue; i++ {
-		ml, err := alph.Val(rune(i))
+		thisRune := rune(i)
+		var val alphabet.MachineLetter
+		var err error
+		if zeroblank {
+			val, err = zeroBlankVal(alph, thisRune)
+		} else {
+			val, err = alph.Val(thisRune)
+		}
 		if err != nil {
 			machineLetters[i] = uint32(invalidMachineLetterValue)
-		} else {
-			machineLetters[i] = uint32(ml)
 		}
+		machineLetters[i] = uint32(val)
 	}
+
+	// if zeroblank {
+	// 	fmt.Print("\n\nuser visible:\n\n")
+	// 	for idx, v := range userVisibleLetters {
+	// 		fmt.Printf("%d: %s\n", idx, string(rune(v)))
+	// 	}
+	// 	fmt.Print("\n\nmachine letters:\n\n")
+	// 	for idx, v := range machineLetters {
+	// 		fmt.Printf("%d: %d\n", idx, v)
+	// 	}
+	// }
 
 	binary.Write(file, binary.BigEndian, uint32(userVisibleLetterMaxValue))
 	binary.Write(file, binary.BigEndian, machineLetters)
@@ -363,7 +472,10 @@ func main() {
 	letterDistribution := os.Args[2]
 
 	gaddag := createGaddag(lexicon)
-	createLaddag(lexicon, gaddag.Alphabet)
-	createLetterDistribution(letterDistribution)
-	createLetterConversion(lexicon, gaddag.Alphabet)
+	createLaddag(lexicon, gaddag.Alphabet, false)
+	createLaddag(lexicon, gaddag.Alphabet, true)
+	createLetterDistribution(letterDistribution, false)
+	createLetterDistribution(letterDistribution, true)
+	createLetterConversion(lexicon, gaddag.Alphabet, false)
+	createLetterConversion(lexicon, gaddag.Alphabet, true)
 }

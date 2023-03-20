@@ -19,7 +19,7 @@ void shuffle(Bag * bag)
 
 void reset_bag(Bag * bag, LetterDistribution * letter_distribution) {
     int idx = 0;
-    for (int i = 0; i < (RACK_ARRAY_SIZE); i++) {
+    for (uint32_t i = 0; i < (letter_distribution->size); i++) {
         for (uint32_t k = 0; k < letter_distribution->distribution[i]; k++) {
             bag->tiles[idx] = i;
             idx++;
@@ -41,7 +41,7 @@ void destroy_bag(Bag * bag) {
 
 // This assumes the letter is in the bag
 void draw_letter(Bag * bag, uint8_t letter) {
-    if (letter >= BLANK_OFFSET) {
+    if (is_blanked(letter)) {
         letter = BLANK_MACHINE_LETTER;
     }
     for (int i = 0; i <= bag->last_tile_index; i++) {
@@ -54,7 +54,7 @@ void draw_letter(Bag * bag, uint8_t letter) {
 }
 
 void add_letter(Bag * bag, uint8_t letter) {
-    if (letter >= BLANK_OFFSET) {
+    if (is_blanked(letter)) {
         letter = BLANK_MACHINE_LETTER;
     }
     int insert_index = 0;

@@ -1,6 +1,8 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+#include "../src/alphabet.h"
+#include "../src/board.h"
 #include "../src/config.h"
 #include "../src/game.h"
 #include "../src/leaves.h"
@@ -17,6 +19,7 @@ double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack);
 void play_top_n_equity_move(Game * game, int n);
 SortedMoveList * create_sorted_move_list(MoveList * ml);
 void destroy_sorted_move_list(SortedMoveList * sorted_move_list);
+void print_move_list(Board * board, Alphabet * alphabet, MoveList * ml);
 int within_epsilon(double a, double b);
 void reset_string(char * string);
 void write_char_to_end_of_buffer(char * buffer, char c);

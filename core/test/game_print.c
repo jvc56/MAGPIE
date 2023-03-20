@@ -46,23 +46,23 @@ void print_game(Game * game) {
 	}
 
 	write_string_to_end_of_buffer(gs, "   A B C D E F G H I J K L M N O   ");
-	write_player_row_to_end_of_buffer(gs, game->gen->gaddag->alphabet, game->players[0], player_0_on_turn_marker);
+	write_player_row_to_end_of_buffer(gs, game->gen->kwg->alphabet, game->players[0], player_0_on_turn_marker);
 	write_string_to_end_of_buffer(gs, "\n   ------------------------------  ");
-	write_player_row_to_end_of_buffer(gs, game->gen->gaddag->alphabet, game->players[1], player_1_on_turn_marker);
+	write_player_row_to_end_of_buffer(gs, game->gen->kwg->alphabet, game->players[1], player_1_on_turn_marker);
 	write_string_to_end_of_buffer(gs, "\n");
 
 	for (int i = 0; i < BOARD_DIM; i++) {
-		write_board_row_to_end_of_buffer(gs, game->gen->gaddag->alphabet, game->gen->board, i);
+		write_board_row_to_end_of_buffer(gs, game->gen->kwg->alphabet, game->gen->board, i);
 		if (i == 0) {
 			write_string_to_end_of_buffer(gs, " --Tracking-----------------------------------");
 		} else if (i == 1) {
 			write_string_to_end_of_buffer(gs, " ");
-			write_bag_to_end_of_buffer(gs, game->gen->bag, game->gen->gaddag->alphabet);
+			write_bag_to_end_of_buffer(gs, game->gen->bag, game->gen->kwg->alphabet);
 			write_string_to_end_of_buffer(gs, "  ");
 			write_int_to_end_of_buffer(gs, game->gen->bag->last_tile_index + 1);
 		} else if (i - 2 < game->gen->move_list->count) {
 			char move_string[24] = "";
-			write_user_visible_move_to_end_of_buffer(move_string, game->gen->board, game->gen->move_list->moves[i-2], game->gen->gaddag->alphabet);
+			write_user_visible_move_to_end_of_buffer(move_string, game->gen->board, game->gen->move_list->moves[i-2], game->gen->kwg->alphabet);
 			sprintf(gs + strlen(gs), " %-3d %-24s %0.2f", i-1, move_string, game->gen->move_list->moves[i-2]->equity);
 		}
 		write_string_to_end_of_buffer(gs, "\n");

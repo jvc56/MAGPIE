@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include "gaddag.h"
+#include "kwg.h"
 #include "letter_distribution.h"
 #include "leaves.h"
 
@@ -12,7 +12,7 @@ typedef struct StrategyParams {
 } StrategyParams;
 
 typedef struct Config {
-    Gaddag * gaddag;
+    KWG * kwg;
     LetterDistribution * letter_distribution;
     char * cgp;
     int laddag_is_shared;
@@ -22,7 +22,7 @@ typedef struct Config {
     StrategyParams * player_2_strategy_params;
 } Config;
 
-Config * create_config(const char * gaddag_filename, const char * alphabet_filename, const char * letter_distribution_filename, const char * cgp,
+Config * create_config(const char * kwg_filename, const char * alphabet_filename, const char * letter_distribution_filename, const char * cgp,
                        const char * laddag_filename_1, int move_sorting_1, int play_recorder_type_1,
                        const char * laddag_filename_2, int move_sorting_2, int play_recorder_type_2, int game_pair_flag, int number_of_games_or_pairs);
 Config * create_config_from_args(int argc, char *argv[]);
