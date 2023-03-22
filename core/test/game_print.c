@@ -24,7 +24,7 @@ void write_board_row_to_end_of_buffer(char * buf, Alphabet * alphabet, Board * b
 	for (int i = 0; i < BOARD_DIM; i++) {
 		uint8_t current_letter = get_letter(board, row, i);
 		if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-			write_char_to_end_of_buffer(buf, get_bonus_square(board, row, i));
+			write_char_to_end_of_buffer(buf, CROSSWORD_GAME_BOARD[(row*BOARD_DIM) + i]);
 		} else {
 			write_user_visible_letter_to_end_of_buffer(buf, alphabet, current_letter);
 		}
