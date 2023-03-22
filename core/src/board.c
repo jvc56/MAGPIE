@@ -258,7 +258,7 @@ int score_move(Board * board, uint8_t word[], int word_start_index, int word_end
 	int cross_scores = 0;
 	int bingo_bonus = 0;
 	if (tiles_played == RACK_SIZE) {
-		bingo_bonus = 50;
+		bingo_bonus = BINGO_BONUS;
 	}
 	int word_multiplier = 1;
 	for (int idx = 0; idx < word_end_index - word_start_index + 1; idx++) {

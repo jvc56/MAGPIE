@@ -23,7 +23,13 @@ typedef struct Generator {
     int tiles_played;
     int number_of_plays;
 
-    uint8_t strip[BOARD_DIM];
+    // Incremental score variables;
+    int incremental_score_index;
+    int incremental_main_word_score[(BOARD_DIM)+1];
+    int incremental_cross_scores[(BOARD_DIM)+1];
+    int incremental_word_multiplier[(BOARD_DIM)+1];
+
+    uint8_t strip[(BOARD_DIM)];
     uint8_t * exchange_strip;
     double preendgame_adjustment_values[PREENDGAME_ADJUSTMENT_VALUES_LENGTH];
 
