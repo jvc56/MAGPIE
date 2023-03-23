@@ -65,9 +65,6 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 		uint32_t lnode_index = board->traverse_backwards_return_values->node_index;
 		int lpath_is_valid = board->traverse_backwards_return_values->path_is_valid;
 		int score = traverse_backwards_for_score(board, row, col-1, letter_distribution);
-		if (score > 1000) {
-			printf("set 1: %d\n", score);
-		}
 		set_cross_score(board, row, col, score, dir);
 
 		if (!lpath_is_valid) {
@@ -84,9 +81,6 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 		int lpath_is_valid = board->traverse_backwards_return_values->path_is_valid;
 		int score_r = traverse_backwards_for_score(board, row, right_col, letter_distribution);
 		int score_l = traverse_backwards_for_score(board, row, col-1, letter_distribution);
-		if (score_l + score_r > 1000) {
-			printf("set 2: %d, %d, %d\n", score_r, score_l, score_r+score_l);
-		}
 		set_cross_score(board, row, col, score_r+score_l, dir);
 		if (!lpath_is_valid) {
 			set_cross_set(board, row, col, 0, dir);
@@ -101,13 +95,13 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 			if (kwg_is_end(kwg, lnode_index)) {
 				return;
 			}
-			int i = lnode_index + 1;
-			while(1) {
+			for(int i = lnode_index; ;i++) {
 				int t = kwg_tile(kwg, i);
-				int next_node_index = kwg_arc_index(kwg, i);
+				//printf("%d, %d, %d\n", lnode_index, t, i);
 				if (t == 0) {
-					return;
+					continue;
 				}
+				int next_node_index = kwg_arc_index(kwg, i);
 				traverse_backwards(board, row, col-1, next_node_index, 1, left_col, kwg);
 				if (board->traverse_backwards_return_values->path_is_valid) {
 					set_cross_set_letter(cross_set, t);
@@ -115,7 +109,6 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 				if (kwg_is_end(kwg, i)) {
 					break;
 				}
-				i++;
 			}
 		}
 	}

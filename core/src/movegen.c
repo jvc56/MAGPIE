@@ -215,7 +215,6 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 	if (square_is_empty) {
 		this_word_multiplier = bonus_square / 16;
 		letter_multiplier = bonus_square % 16;
-		// printf("setting inc word mult: %d: %d * %d\n", gen->incremental_score_index - 1, this_word_multiplier, gen->incremental_word_multiplier[gen->incremental_score_index - 1]);
 		gen->incremental_word_multiplier[gen->incremental_score_index] = this_word_multiplier * gen->incremental_word_multiplier[gen->incremental_score_index - 1];
 	} else {
 		gen->incremental_word_multiplier[gen->incremental_score_index] = gen->incremental_word_multiplier[gen->incremental_score_index - 1];
@@ -241,12 +240,6 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 	int score = gen->incremental_main_word_score[gen->incremental_score_index]*gen->incremental_word_multiplier[gen->incremental_score_index] +
 	            gen->incremental_cross_scores[gen->incremental_score_index] + bingo_bonus;
 
-	// printf("go_on %d: %d, %d, %d\n", gen->incremental_score_index, current_col, L, square_is_empty);
-	for (int i = 0; i <= gen->incremental_score_index; i++) {
-		// printf("inc %d: %d * %d + %d + bingo = score\n", i, gen->incremental_main_word_score[i], gen->incremental_word_multiplier[i], gen->incremental_cross_scores[i]);
-	}
-	// printf("final %d: %d * %d + %d + %d = %d\n", gen->incremental_score_index, gen->incremental_main_word_score[gen->incremental_score_index], gen->incremental_word_multiplier[gen->incremental_score_index], gen->incremental_cross_scores[gen->incremental_score_index], bingo_bonus, score);
-	
 	if (current_col <= gen->current_anchor_col) {
 		if (!square_is_empty) {
 			gen->strip[current_col] = PLAYED_THROUGH_MARKER;
@@ -270,9 +263,7 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 		}
 
 		if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
-			// printf("recurring with %d\n", current_col - 1);
 			recursive_gen(gen, current_col - 1, player, opp_rack, new_node_index, leftstrip, rightstrip, unique_play);
-			// printf("done recurring with %d\n", current_col - 1);
 		}
 
 		uint32_t separation_node_index = kwg_get_next_node_index(gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
@@ -292,18 +283,14 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 		int no_letter_directly_right = (current_col == BOARD_DIM - 1) || is_empty(gen->board, gen->current_row_index, current_col + 1);
 
 		if (accepts && no_letter_directly_right && gen->tiles_played > 0 && (unique_play || gen->tiles_played > 1)) {
-			// printf("RECORDING with score of %d\n", score);
 			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY, score);
 		}
 
 		if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
-			// printf("recurring with %d\n", current_col + 1);
 			recursive_gen(gen, current_col+1, player, opp_rack, new_node_index, leftstrip, rightstrip, unique_play);
-			// printf("done recurring with %d\n", current_col + 1);
 		}
 	}
 	gen->incremental_score_index--;
-	// printf("decremented score index, current value is: %d\n", gen->incremental_score_index);
 }
 
 void gen_by_orientation(Generator * gen, Player * player, Rack * opp_rack, int dir) {

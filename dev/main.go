@@ -106,7 +106,7 @@ func testDev() {
 
 func NondeterministicTests() {
 	zerolog.SetGlobalLevel(zerolog.Disabled)
-	threads := 12
+	threads := 3
 	var wg sync.WaitGroup
 	wg.Add(threads)
 	for i := 0; i < threads; i++ {
