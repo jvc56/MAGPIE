@@ -94,13 +94,12 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 			*cross_set = 0;
 			for(int i = lnode_index; ;i++) {
 				int t = kwg_tile(kwg, i);
-				if (t == 0) {
-					continue;
-				}
-				int next_node_index = kwg_arc_index(kwg, i);
-				traverse_backwards(board, row, col-1, next_node_index, 1, left_col, kwg);
-				if (board->traverse_backwards_return_values->path_is_valid) {
-					set_cross_set_letter(cross_set, t);
+				if (t != 0) {
+					int next_node_index = kwg_arc_index(kwg, i);
+					traverse_backwards(board, row, col-1, next_node_index, 1, left_col, kwg);
+					if (board->traverse_backwards_return_values->path_is_valid) {
+						set_cross_set_letter(cross_set, t);
+					}
 				}
 				if (kwg_is_end(kwg, i)) {
 					break;

@@ -165,7 +165,6 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 				break;
 			}
 		}
-		// printf("calling go_on with: %d\n", current_letter);
 		go_on(gen, col, current_letter, player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 	} else if (!player->rack->empty) {
 		for (int i = node_index; ;i++) {
@@ -176,29 +175,24 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 				if (player->rack->array[ml] > 0) {
 					take_letter_from_rack_and_recalculate_leave_index(player, ml);
 					gen->tiles_played++;
-					// printf("calling go_on with: %d\n", ml);
 					go_on(gen, col, ml, player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 					gen->tiles_played--;
-					// printf("adding back: %d\n", ml);
 					add_letter_to_rack_and_recalculate_leave_index(player, ml);
 				}
 				// check blank
 				if (player->rack->array[0] > 0) {
 					take_letter_from_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
 					gen->tiles_played++;
-					// printf("calling go_on with: %d\n", get_blanked_machine_letter(ml));
 					go_on(gen, col, get_blanked_machine_letter(ml), player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 					gen->tiles_played--;
 					add_letter_to_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
 				}
 			}
 			if (kwg_is_end(gen->kwg, i)) {
-				// printf("REACHED END\n");
 				break;
 			}
 		}
 	}
-	// printf("DONE WITH RECUR GEN\n");
 }
 
 void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, int accepts, int leftstrip, int rightstrip, int unique_play) {	
@@ -249,7 +243,6 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 		int no_letter_directly_left = (current_col == 0) || is_empty(gen->board, gen->current_row_index, current_col - 1);
 
 		if (accepts && no_letter_directly_left && gen->tiles_played > 0 && (unique_play || gen->tiles_played > 1)) {
-			// printf("RECORDING with score of %d\n", score);
 			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY, score);
 		}
 

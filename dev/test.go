@@ -73,7 +73,7 @@ func getActualMoves(g *game.Game) map[string]bool {
 	kwg := "data/lexica/CSW21.kwg"
 	alphabet := "data/lexica/CSW21.alph"
 	dist := "data/letterdistributions/english.dist"
-	laddag := "/data/lexica/CSW21.laddag"
+	laddag := "data/lexica/CSW21.laddag"
 	cmd := []string{
 		"gen",
 		"-g", "../core/" + kwg,
@@ -87,7 +87,7 @@ func getActualMoves(g *game.Game) map[string]bool {
 	outBytes, err := exec.Command("../core/bin/magpie_test", cmd...).Output()
 	if err != nil {
 		fmt.Println("Command to run from core to reproduce:")
-		fmt.Printf("./bin/magpie_test gen -g '%s' -a '%s' -d '%s' -l '%s' -r all -s equity -c '%s'\n", kwg, alphabet, dist, laddag, cgp)
+		fmt.Printf("./bin/magpie_test gen -g '%s' -a '%s' -d '%s' -l1 '%s' -r1 all -s1 equity -c '%s'\n", kwg, alphabet, dist, laddag, cgp)
 		fmt.Println("panicked on game")
 		printGameInfo(g)
 		panic(err)

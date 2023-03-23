@@ -35,15 +35,25 @@ void set_row(Game * game, int row, const char* row_content) {
     }
 }
 
+void set_col(Game * game, int col, const char* col_content) {
+    for (int i = 0; i < BOARD_DIM; i++) {
+        set_letter(game->gen->board, i, col, ALPHABET_EMPTY_SQUARE_MARKER);
+    }
+
+    for (size_t i = 0; i < strlen(col_content); i++) {
+        if (col_content[i] != ' ') {
+            set_letter(game->gen->board, i, col, val(game->gen->kwg->alphabet, col_content[i]));
+            game->gen->board->tiles_played++;
+        }
+    }
+}
+
 void test_gen_cross_set(Game * game, int row, int col, int dir, const char* letters, int expected_cross_score, int run_gcs) {
     if (run_gcs) {
         gen_cross_set(game->gen->board, row, col, dir, game->gen->kwg, game->gen->letter_distribution);
     }
     uint64_t expected_cross_set = cross_set_from_string(letters, game->gen->kwg->alphabet);
     uint64_t actual_cross_set = get_cross_set(game->gen->board, row, col, dir);
-    if (expected_cross_set != actual_cross_set) {
-        printf("%ld != %ld\n", expected_cross_set, actual_cross_set);
-    }
     assert(expected_cross_set == actual_cross_set);
     int actual_cross_score = get_cross_score(game->gen->board, row, col, dir);
     assert(expected_cross_score == actual_cross_score);
@@ -51,6 +61,11 @@ void test_gen_cross_set(Game * game, int row, int col, int dir, const char* lett
 
 void test_gen_cross_set_row(Game * game, int row, int col, int dir, const char* row_content, const char* letters, int expected_cross_score, int run_gcs) {
     set_row(game, row, row_content);
+    test_gen_cross_set(game, row, col, dir, letters, expected_cross_score, run_gcs);
+}
+
+void test_gen_cross_set_col(Game * game, int row, int col, int dir, const char* col_content, const char* letters, int expected_cross_score, int run_gcs) {
+    set_col(game, col, col_content);
     test_gen_cross_set(game, row, col, dir, letters, expected_cross_score, run_gcs);
 }
 
@@ -100,6 +115,8 @@ void test_cross_set(SuperConfig * superconfig) {
     test_gen_cross_set_row(game, 4, 6, 1, "STRONG L", "Y", 8, 1);
     test_gen_cross_set_row(game, 4, 1, 1, "W SIWYG", "Y", 16, 1);
     test_gen_cross_set_row(game, 4, 0, 1, " EMSTVO", "Z", 11, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "T UNFOLD", "", 11, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "S OBCONIc", "", 11, 1);
 
     // TestGenAllcross_sets
     reset_game(game);
