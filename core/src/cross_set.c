@@ -92,12 +92,8 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 		} else {
 			uint64_t * cross_set = get_cross_set_pointer(board, row, col, dir);
 			*cross_set = 0;
-			if (kwg_is_end(kwg, lnode_index)) {
-				return;
-			}
 			for(int i = lnode_index; ;i++) {
 				int t = kwg_tile(kwg, i);
-				//printf("%d, %d, %d\n", lnode_index, t, i);
 				if (t == 0) {
 					continue;
 				}

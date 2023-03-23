@@ -98,6 +98,8 @@ void test_cross_set(SuperConfig * superconfig) {
     test_gen_cross_set_row(game, 4, 2, 1, "BA ED", "AKLNRSTY", 7, 1);
     test_gen_cross_set_row(game, 4, 1, 1, "X Z", "", 18, 1);
     test_gen_cross_set_row(game, 4, 6, 1, "STRONG L", "Y", 8, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "W SIWYG", "Y", 16, 1);
+    test_gen_cross_set_row(game, 4, 0, 1, " EMSTVO", "Z", 11, 1);
 
     // TestGenAllcross_sets
     reset_game(game);

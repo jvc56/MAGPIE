@@ -155,8 +155,7 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 		int raw = get_unblanked_machine_letter(current_letter);
 		int next_node_index = 0;
 		int accepts = 0;
-		int i = node_index;
-		while(1) {
+		for (int i = node_index; ;i++) {
 			if (kwg_tile(gen->kwg, i) == raw) {
 				next_node_index = kwg_arc_index(gen->kwg, i);
 				accepts = kwg_accepts(gen->kwg, i);
@@ -165,13 +164,11 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 			if (kwg_is_end(gen->kwg, i)) {
 				break;
 			}
-			i++;
 		}
 		// printf("calling go_on with: %d\n", current_letter);
 		go_on(gen, col, current_letter, player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 	} else if (!player->rack->empty) {
-		int i = node_index;
-		while(1) {
+		for (int i = node_index; ;i++) {
 			int ml = kwg_tile(gen->kwg, i);
 			if (ml != 0 && (player->rack->array[ml] != 0 || player->rack->array[0] != 0) && allowed(cross_set, ml)) {
 				int next_node_index = kwg_arc_index(gen->kwg, i);
@@ -199,7 +196,6 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 				// printf("REACHED END\n");
 				break;
 			}
-			i++;
 		}
 	}
 	// printf("DONE WITH RECUR GEN\n");
