@@ -77,7 +77,7 @@ double get_spare_move_equity(Generator * gen, Player * player, Rack * opp_rack) 
 	return ((double)gen->move_list->spare_move->score) + leave_adjustment + other_adjustments;
 }
 
-void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstrip, int rightstrip, int move_type, int score) {
+void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstrip, int rightstrip, int move_type) {
 	int start_row = gen->current_row_index;
 	int tiles_played = gen->tiles_played;
 	int start_col = leftstrip;
@@ -90,9 +90,11 @@ void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstri
 		col = temp;
 	}
 
+	int score = 0;
 	uint8_t * strip = NULL;
 
 	if (move_type == MOVE_TYPE_PLAY) {
+		score = score_move(gen->board, gen->strip, leftstrip, rightstrip, start_row, start_col, tiles_played, !gen->vertical, gen->letter_distribution);
 		strip = gen->strip;
 	} else if (move_type == MOVE_TYPE_EXCHANGE) {
 		// ignore the empty exchange case
@@ -126,7 +128,7 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 	if (ml == (gen->letter_distribution->size)) {
 		// The recording of an exchange should never require
 		// the opponent's rack.
-		record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE, 0);
+		record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
 	} else {
 		generate_exchange_moves(gen, player, ml+1, stripidx);
 		int num_this = player->rack->array[ml];
@@ -196,42 +198,8 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 }
 
 void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, int accepts, int leftstrip, int rightstrip, int unique_play) {	
-	// Set the incremental score
-	gen->incremental_score_index++;
-	uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, current_col);
-	int letter_multiplier = 1;
-	int this_word_multiplier = 1;
-	int square_is_empty = is_empty(gen->board, gen->current_row_index, current_col);
-	if (square_is_empty) {
-		this_word_multiplier = bonus_square / 16;
-		letter_multiplier = bonus_square % 16;
-		gen->incremental_word_multiplier[gen->incremental_score_index] = this_word_multiplier * gen->incremental_word_multiplier[gen->incremental_score_index - 1];
-	} else {
-		gen->incremental_word_multiplier[gen->incremental_score_index] = gen->incremental_word_multiplier[gen->incremental_score_index - 1];
-	}
-	int cs = get_cross_score(gen->board, gen->current_row_index, current_col, !gen->vertical);
-	int letter_score;
-	if (is_blanked(L)) {
-		letter_score = 0;
-	} else {
-		letter_score = gen->letter_distribution->scores[L];
-	}
-	gen->incremental_main_word_score[gen->incremental_score_index] = (letter_score * letter_multiplier) + gen->incremental_main_word_score[gen->incremental_score_index - 1];
-	int actual_cross_word = (gen->current_row_index > 0 && !is_empty(gen->board, gen->current_row_index-1, current_col)) || ((gen->current_row_index < BOARD_DIM - 1) && !is_empty(gen->board, gen->current_row_index+1, current_col));
-	if (square_is_empty && actual_cross_word) {
-		gen->incremental_cross_scores[gen->incremental_score_index] = letter_score*letter_multiplier*this_word_multiplier + cs*this_word_multiplier + gen->incremental_cross_scores[gen->incremental_score_index - 1];
-	} else {
-		gen->incremental_cross_scores[gen->incremental_score_index] = gen->incremental_cross_scores[gen->incremental_score_index - 1];
-	}
-	int bingo_bonus = 0;
-	if (gen->tiles_played == RACK_SIZE) {
-		bingo_bonus = BINGO_BONUS;
-	}
-	int score = gen->incremental_main_word_score[gen->incremental_score_index]*gen->incremental_word_multiplier[gen->incremental_score_index] +
-	            gen->incremental_cross_scores[gen->incremental_score_index] + bingo_bonus;
-
 	if (current_col <= gen->current_anchor_col) {
-		if (!square_is_empty) {
+		if (!is_empty(gen->board, gen->current_row_index, current_col)) {
 			gen->strip[current_col] = PLAYED_THROUGH_MARKER;
 		} else {
 			gen->strip[current_col] = L;
@@ -243,11 +211,10 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 		int no_letter_directly_left = (current_col == 0) || is_empty(gen->board, gen->current_row_index, current_col - 1);
 
 		if (accepts && no_letter_directly_left && gen->tiles_played > 0 && (unique_play || gen->tiles_played > 1)) {
-			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY, score);
+			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
 		}
 
 		if (new_node_index == 0) {
-			gen->incremental_score_index--;
 			return;
 		}
 
@@ -260,7 +227,7 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 			recursive_gen(gen, gen->current_anchor_col+1, player, opp_rack, separation_node_index, leftstrip, rightstrip, unique_play);
 		}
 	} else {
-		if (!square_is_empty) {
+		if (!is_empty(gen->board, gen->current_row_index, current_col)) {
 			gen->strip[current_col] = PLAYED_THROUGH_MARKER;
 		} else {
 			gen->strip[current_col] = L;
@@ -272,14 +239,13 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 		int no_letter_directly_right = (current_col == BOARD_DIM - 1) || is_empty(gen->board, gen->current_row_index, current_col + 1);
 
 		if (accepts && no_letter_directly_right && gen->tiles_played > 0 && (unique_play || gen->tiles_played > 1)) {
-			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY, score);
+			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
 		}
 
 		if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
 			recursive_gen(gen, current_col+1, player, opp_rack, new_node_index, leftstrip, rightstrip, unique_play);
 		}
 	}
-	gen->incremental_score_index--;
 }
 
 void gen_by_orientation(Generator * gen, Player * player, Rack * opp_rack, int dir) {
@@ -321,18 +287,10 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 	}
 }
 
-void reset_incremental_move_scores(Generator * gen) {
-    gen->incremental_score_index = 0;
-    gen->incremental_main_word_score[0] = 0;
-    gen->incremental_cross_scores[0] = 0;
-    gen->incremental_word_multiplier[0] = 1;
-}
-
 void reset_generator(Generator * gen) {
 	reset_bag(gen->bag, gen->letter_distribution);
 	reset_board(gen->board);
 	reset_move_list(gen->move_list);
-	reset_incremental_move_scores(gen);
 }
 
 void load_quackle_preendgame_adjustment_values(Generator * gen) {
@@ -363,7 +321,6 @@ Generator * create_generator(Config * config) {
 	// Just load the zero values for now
 	load_zero_preendgame_adjustment_values(generator);
 
-	reset_incremental_move_scores(generator);
 	return generator;
 }
 
