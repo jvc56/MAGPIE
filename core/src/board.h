@@ -45,6 +45,8 @@ void set_letter(Board * board, int row, int col, uint8_t letter);
 void set_letter_by_index(Board * board, int index, uint8_t letter);
 int score_move(Board * board, uint8_t word[], int word_start_index, int word_end_index, int row, int col, int tiles_played, int cross_dir, LetterDistribution * letter_distribution);
 void transpose(Board * board);
+void reset_transpose(Board * board);
+void set_transpose(Board * board, int transpose);
 int traverse_backwards_for_score(Board * board, int row, int col, LetterDistribution * letter_distribution);
 void update_anchors(Board * board, int row, int col, int vertical);
 void update_all_anchors(Board * board);

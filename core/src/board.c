@@ -295,6 +295,14 @@ void transpose(Board * board) {
 	board->transposed = 1 - board->transposed;
 }
 
+void set_transpose(Board * board, int transpose) {
+	board->transposed = transpose;
+}
+
+void reset_transpose(Board * board) {
+	board->transposed = 0;
+}
+
 Board * create_board() {
 	Board * board = malloc(sizeof(Board));
 	board->traverse_backwards_return_values = malloc(sizeof(TraverseBackwardsReturnValues));

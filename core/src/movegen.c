@@ -248,8 +248,17 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 	}
 }
 
-void gen_by_orientation(Generator * gen, Player * player, Rack * opp_rack, int dir) {
+void shadow_play_for_anchor(Generator * gen, int col, Player * player) {
+	// ***
+	// Implement shadow playing
+	// ***
+
+	insert_anchor(gen->anchor_list, gen->current_row_index, col, gen->last_anchor_col, gen->board->transposed, gen->vertical, gen->current_row_index * col);
+}
+
+void shadow_by_orientation(Generator * gen, Player * player, int dir) {
 	// genByOrientation
+	int sum = 0;
 	for (int row = 0; row < BOARD_DIM; row++)
 	{
 		gen->current_row_index = row;
@@ -258,22 +267,35 @@ void gen_by_orientation(Generator * gen, Player * player, Rack * opp_rack, int d
 		{
 			if (get_anchor(gen->board, row, col, dir)) {
 				gen->current_anchor_col = col;
-				recursive_gen(gen, col, player, opp_rack, kwg_get_root_node_index(gen->kwg), col, col, !gen->vertical);
+				shadow_play_for_anchor(gen, col, player);
 				gen->last_anchor_col = col;
+				sum++;
 			}
 		}
 	}
 }
 
 void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_exchange) {
+	reset_anchor_list(gen->anchor_list);
 	// Add plays
 	set_start_leave_index(player);
 	for (int dir = 0; dir < 2; dir++)
 	{
 		gen->vertical = dir%2 != 0;
-		gen_by_orientation(gen, player, opp_rack, dir);
+		shadow_by_orientation(gen, player, dir);
 		transpose(gen->board);
 	}
+
+	for (int i = 0; i < gen->anchor_list->count; i++) {
+		gen->current_anchor_col = gen->anchor_list->anchors[i]->col;
+		gen->current_row_index = gen->anchor_list->anchors[i]->row;
+		gen->last_anchor_col = gen->anchor_list->anchors[i]->last_anchor_col;
+		gen->vertical = gen->anchor_list->anchors[i]->vertical;
+		set_transpose(gen->board, gen->anchor_list->anchors[i]->transpose_state);
+		recursive_gen(gen, gen->current_anchor_col, player, opp_rack, kwg_get_root_node_index(gen->kwg), gen->current_anchor_col, gen->current_anchor_col, !gen->vertical);
+	}
+
+	reset_transpose(gen->board);
 
 	// Add exchanges
 	if (add_exchange) {
@@ -311,6 +333,7 @@ Generator * create_generator(Config * config) {
 	generator->bag = create_bag(config->letter_distribution);
     generator->board = create_board();
 	generator->move_list = create_move_list();
+	generator->anchor_list = create_anchor_list();
     generator->kwg = config->kwg;
     generator->letter_distribution = config->letter_distribution;
 	generator->tiles_played = 0;
@@ -328,6 +351,7 @@ void destroy_generator(Generator * gen) {
 	destroy_bag(gen->bag);
 	destroy_board(gen->board);
 	destroy_move_list(gen->move_list);
+	destroy_anchor_list(gen->anchor_list);
 	free(gen->exchange_strip);
 	free(gen);
 }

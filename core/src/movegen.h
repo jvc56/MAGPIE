@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "alphabet.h"
+#include "anchor.h"
 #include "bag.h"
 #include "board.h"
 #include "config.h"
@@ -33,6 +34,9 @@ typedef struct Generator {
 
     KWG * kwg;
     LetterDistribution * letter_distribution;
+
+    // Shadow plays
+    AnchorList * anchor_list;
 } Generator;
 
 Generator * create_generator(Config * config);
