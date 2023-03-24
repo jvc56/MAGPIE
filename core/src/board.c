@@ -74,7 +74,7 @@ int get_cross_score(Board * board, int row, int col, int dir) {
 	return board->cross_scores[get_tindex_dir(board, row, col, dir)];
 }
 
-char get_bonus_square(Board * board, int row, int col) {
+uint8_t get_bonus_square(Board * board, int row, int col) {
 	return board->bonus_squares[get_tindex(board, row, col)];
 }
 
@@ -225,7 +225,30 @@ void reset_board(Board * board) {
 
 void set_bonus_squares(Board * board) {
 	for (int i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
-		board->bonus_squares[i] = CROSSWORD_GAME_BOARD[i];
+		uint8_t bonus_value;
+		char bonus_square = CROSSWORD_GAME_BOARD[i];
+		if (bonus_square == BONUS_TRIPLE_WORD_SCORE) {
+			bonus_value = 3;
+			bonus_value = bonus_value << 4;
+			bonus_value += 1;
+		} else if (bonus_square == BONUS_DOUBLE_WORD_SCORE) {
+			bonus_value = 2;
+			bonus_value = bonus_value << 4;
+			bonus_value += 1;
+		} else if (bonus_square == BONUS_DOUBLE_LETTER_SCORE) {
+			bonus_value = 1;
+			bonus_value = bonus_value << 4;
+			bonus_value += 2;
+		} else if (bonus_square == BONUS_TRIPLE_LETTER_SCORE) {
+			bonus_value = 1;
+			bonus_value = bonus_value << 4;
+			bonus_value += 3;
+		} else {
+			bonus_value = 1;
+			bonus_value = bonus_value << 4;
+			bonus_value += 1;
+		}
+		board->bonus_squares[i] = bonus_value;
 	}
 }
 
@@ -235,12 +258,12 @@ int score_move(Board * board, uint8_t word[], int word_start_index, int word_end
 	int cross_scores = 0;
 	int bingo_bonus = 0;
 	if (tiles_played == RACK_SIZE) {
-		bingo_bonus = 50;
+		bingo_bonus = BINGO_BONUS;
 	}
 	int word_multiplier = 1;
 	for (int idx = 0; idx < word_end_index - word_start_index + 1; idx++) {
 		uint8_t ml = word[idx + word_start_index];
-		char bonus_square = get_bonus_square(board, row, col + idx);
+		uint8_t bonus_square = get_bonus_square(board, row, col + idx);
 		int letter_multiplier = 1;
 		int this_word_multiplier = 1;
 		int fresh_tile = 0;
@@ -248,22 +271,11 @@ int score_move(Board * board, uint8_t word[], int word_start_index, int word_end
 			ml = get_letter(board, row, col + idx);
 		} else {
 			fresh_tile = 1;
-			if (bonus_square == BONUS_TRIPLE_WORD_SCORE) {
-				word_multiplier *= 3;
-				this_word_multiplier = 3;
-			} else if (bonus_square == BONUS_DOUBLE_WORD_SCORE) {
-				word_multiplier *= 2;
-				this_word_multiplier = 2;
-			} else if (bonus_square == BONUS_DOUBLE_LETTER_SCORE) {
-				letter_multiplier = 2;
-			} else if (bonus_square == BONUS_TRIPLE_LETTER_SCORE) {
-				letter_multiplier = 3;
-			}
+			this_word_multiplier = bonus_square / 16;
+			letter_multiplier = bonus_square % 16;
+			word_multiplier *= this_word_multiplier;
 		}
 		int cs = get_cross_score(board, row, col+idx, cross_dir);
-		if (cs > 1000 ) {
-			printf("%d, %d, %d, %d, %d\n", cs, row, col, idx, cross_dir);
-		}
 		if (is_blanked(ml)) {
 			ls = 0;
 		} else {

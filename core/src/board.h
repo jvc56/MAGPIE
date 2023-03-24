@@ -13,7 +13,7 @@ typedef struct TraverseBackwardsReturnValues {
 } TraverseBackwardsReturnValues;
 typedef struct Board {
     uint8_t letters[BOARD_DIM * BOARD_DIM];
-    char bonus_squares[BOARD_DIM * BOARD_DIM];
+    uint8_t bonus_squares[BOARD_DIM * BOARD_DIM];
     uint64_t cross_sets[BOARD_DIM * BOARD_DIM * 2];
     int cross_scores[BOARD_DIM * BOARD_DIM * 2];
     int anchors[BOARD_DIM * BOARD_DIM * 2];
@@ -27,7 +27,7 @@ void clear_cross_set(Board * board, int row, int col, int dir);
 Board * create_board();
 void destroy_board(Board * board);
 int get_anchor(Board * board, int row, int col, int vertical);
-char get_bonus_square(Board * board, int row, int col);
+uint8_t get_bonus_square(Board * board, int row, int col);
 int get_cross_score(Board * board, int row, int col, int dir);
 uint64_t get_cross_set(Board * board, int row, int col, int dir);
 uint64_t * get_cross_set_pointer(Board * board, int row, int col, int dir);

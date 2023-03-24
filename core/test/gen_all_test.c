@@ -43,7 +43,14 @@ void write_test_move_to_end_of_buffer(char * buf, Move * m, Alphabet * alphabet)
         }
     } else {
         for (int i = 0; i < m->tiles_played; i++) {
-            write_user_visible_letter_to_end_of_buffer(buf, alphabet, m->tiles[i]);
+            if (m->tiles[i] != BLANK_MACHINE_LETTER) {
+                write_user_visible_letter_to_end_of_buffer(buf, alphabet, m->tiles[i]);
+            }
+        }
+        for (int i = 0; i < m->tiles_played; i++) {
+            if (m->tiles[i] == BLANK_MACHINE_LETTER) {
+                write_user_visible_letter_to_end_of_buffer(buf, alphabet, m->tiles[i]);
+            }
         }
     }
 

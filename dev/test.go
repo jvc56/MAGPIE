@@ -70,13 +70,13 @@ func createMoveMap(g *game.Game) map[string]bool {
 
 func getActualMoves(g *game.Game) map[string]bool {
 	cgp := gameToCGP(g, true)
-	gaddag := "data/lexica/CSW21.gaddag"
+	kwg := "data/lexica/CSW21.kwg"
 	alphabet := "data/lexica/CSW21.alph"
 	dist := "data/letterdistributions/english.dist"
-	laddag := "/data/lexica/CSW21.laddag"
+	laddag := "data/lexica/CSW21.laddag"
 	cmd := []string{
 		"gen",
-		"-g", "../core/" + gaddag,
+		"-g", "../core/" + kwg,
 		"-a", "../core/" + alphabet,
 		"-d", "../core/" + dist,
 		"-l1", "../core/" + laddag,
@@ -87,7 +87,7 @@ func getActualMoves(g *game.Game) map[string]bool {
 	outBytes, err := exec.Command("../core/bin/magpie_test", cmd...).Output()
 	if err != nil {
 		fmt.Println("Command to run from core to reproduce:")
-		fmt.Printf("./bin/magpie_test gen -g '%s' -a '%s' -d '%s' -l '%s' -r all -s equity -c '%s'\n", gaddag, alphabet, dist, laddag, cgp)
+		fmt.Printf("./bin/magpie_test gen -g '%s' -a '%s' -d '%s' -l1 '%s' -r1 all -s1 equity -c '%s'\n", kwg, alphabet, dist, laddag, cgp)
 		fmt.Println("panicked on game")
 		printGameInfo(g)
 		panic(err)
@@ -150,13 +150,13 @@ func CompareMovesForGame(g *game.Game) bool {
 		if len(expectedMovesNotGenerated) > 0 {
 			errString += fmt.Sprintf("%d expected moves not generated:\n", len(expectedMovesNotGenerated))
 			for i := 0; i < len(expectedMovesNotGenerated); i++ {
-				errString += fmt.Sprintf(">%s<", expectedMovesNotGenerated[i])
+				errString += fmt.Sprintf(">%s<\n", expectedMovesNotGenerated[i])
 			}
 		}
 		if len(extraneousMovesGenerated) > 0 {
 			errString += fmt.Sprintf("%d extraneous moves generated:\n", len(extraneousMovesGenerated))
 			for i := 0; i < len(extraneousMovesGenerated); i++ {
-				errString += fmt.Sprintf(">%s<", extraneousMovesGenerated[i])
+				errString += fmt.Sprintf(">%s<\n", extraneousMovesGenerated[i])
 			}
 		}
 		if errString != "" {

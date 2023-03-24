@@ -35,6 +35,19 @@ void set_row(Game * game, int row, const char* row_content) {
     }
 }
 
+void set_col(Game * game, int col, const char* col_content) {
+    for (int i = 0; i < BOARD_DIM; i++) {
+        set_letter(game->gen->board, i, col, ALPHABET_EMPTY_SQUARE_MARKER);
+    }
+
+    for (size_t i = 0; i < strlen(col_content); i++) {
+        if (col_content[i] != ' ') {
+            set_letter(game->gen->board, i, col, val(game->gen->kwg->alphabet, col_content[i]));
+            game->gen->board->tiles_played++;
+        }
+    }
+}
+
 void test_gen_cross_set(Game * game, int row, int col, int dir, const char* letters, int expected_cross_score, int run_gcs) {
     if (run_gcs) {
         gen_cross_set(game->gen->board, row, col, dir, game->gen->kwg, game->gen->letter_distribution);
@@ -46,9 +59,14 @@ void test_gen_cross_set(Game * game, int row, int col, int dir, const char* lett
     assert(expected_cross_score == actual_cross_score);
 }
 
-void test_gen_cross_set_row(Game * game, int row, int col, const char* row_content, const char* letters, int expected_cross_score, int run_gcs) {
+void test_gen_cross_set_row(Game * game, int row, int col, int dir, const char* row_content, const char* letters, int expected_cross_score, int run_gcs) {
     set_row(game, row, row_content);
-    test_gen_cross_set(game, row, col, 0, letters, expected_cross_score, run_gcs);
+    test_gen_cross_set(game, row, col, dir, letters, expected_cross_score, run_gcs);
+}
+
+void test_gen_cross_set_col(Game * game, int row, int col, int dir, const char* col_content, const char* letters, int expected_cross_score, int run_gcs) {
+    set_col(game, col, col_content);
+    test_gen_cross_set(game, row, col, dir, letters, expected_cross_score, run_gcs);
 }
 
 void test_cross_set(SuperConfig * superconfig) {
@@ -67,21 +85,38 @@ void test_cross_set(SuperConfig * superconfig) {
 
     // TestGencross_setEdges
     reset_game(game);
-    test_gen_cross_set_row(game, 4, 0, " A", "ABDFHKLMNPTYZ", 1, 1);
-    test_gen_cross_set_row(game, 4, 1, "A", "ABDEGHILMNRSTWXY", 1, 1);
-    test_gen_cross_set_row(game, 4, 13, "              F", "EIO", 4, 1);
-    test_gen_cross_set_row(game, 4, 14, "             F ", "AE", 4, 1);
-    test_gen_cross_set_row(game, 4, 14, "          WECH ", "T", 12, 1);
-    test_gen_cross_set_row(game, 4, 14, "           ZZZ ", "", 30, 1);
-    test_gen_cross_set_row(game, 4, 14, "       ZYZZYVA ", "S", 43, 1);
-    test_gen_cross_set_row(game, 4, 14, "        ZYZZYV ", "A", 42, 1);
-    test_gen_cross_set_row(game, 4, 14, "       Z Z Y A ", "ABDEGHILMNRSTWXY", 1, 1);
-    test_gen_cross_set_row(game, 4, 12, "       z z Y A ", "E", 5, 1);
-    test_gen_cross_set_row(game, 4, 14, "OxYpHeNbUTAzON ", "E", 15, 1);
-    test_gen_cross_set_row(game, 4, 6, "OXYPHE BUTAZONE", "N", 40, 1);
-    test_gen_cross_set_row(game, 4, 0, " YHJKTKHKTLV", "", 42, 1);
-    test_gen_cross_set_row(game, 4, 14, "   YHJKTKHKTLV ", "", 42, 1);
-    test_gen_cross_set_row(game, 4, 6, "YHJKTK HKTLV", "", 42, 1);
+    test_gen_cross_set_row(game, 4, 0, 0, " A", "ABDFHKLMNPTYZ", 1, 1);
+    test_gen_cross_set_row(game, 4, 1, 0, "A", "ABDEGHILMNRSTWXY", 1, 1);
+    test_gen_cross_set_row(game, 4, 13, 0, "              F", "EIO", 4, 1);
+    test_gen_cross_set_row(game, 4, 14, 0, "             F ", "AE", 4, 1);
+    test_gen_cross_set_row(game, 4, 14, 0, "          WECH ", "T", 12, 1);
+    test_gen_cross_set_row(game, 4, 14, 0, "           ZZZ ", "", 30, 1);
+    test_gen_cross_set_row(game, 4, 14, 0, "       ZYZZYVA ", "S", 43, 1);
+    test_gen_cross_set_row(game, 4, 14, 0, "        ZYZZYV ", "A", 42, 1);
+    test_gen_cross_set_row(game, 4, 14, 0, "       Z Z Y A ", "ABDEGHILMNRSTWXY", 1, 1);
+    test_gen_cross_set_row(game, 4, 12, 0, "       z z Y A ", "E", 5, 1);
+    test_gen_cross_set_row(game, 4, 14, 0, "OxYpHeNbUTAzON ", "E", 15, 1);
+    test_gen_cross_set_row(game, 4, 6, 0, "OXYPHE BUTAZONE", "N", 40, 1);
+    test_gen_cross_set_row(game, 4, 0, 0, " YHJKTKHKTLV", "", 42, 1);
+    test_gen_cross_set_row(game, 4, 14, 0, "   YHJKTKHKTLV ", "", 42, 1);
+    test_gen_cross_set_row(game, 4, 6, 0, "YHJKTK HKTLV", "", 42, 1);
+
+    // Test setting cross sets with tiles on either side
+    test_gen_cross_set_row(game, 4, 1, 1, "D NATURES", "E", 9, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "D N", "AEIOU", 3, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "D NT", "EIU", 4, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "D NTS", "EIU", 5, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "R VOTED", "E", 10, 1);
+    test_gen_cross_set_row(game, 4, 5, 1, "PHENY BUTAZONE", "L", 32, 1);
+    test_gen_cross_set_row(game, 4, 6, 1, "OXYPHE BUTAZONE", "N", 40, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "R XED", "A", 12, 1);
+    test_gen_cross_set_row(game, 4, 2, 1, "BA ED", "AKLNRSTY", 7, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "X Z", "", 18, 1);
+    test_gen_cross_set_row(game, 4, 6, 1, "STRONG L", "Y", 8, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "W SIWYG", "Y", 16, 1);
+    test_gen_cross_set_row(game, 4, 0, 1, " EMSTVO", "Z", 11, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "T UNFOLD", "", 11, 1);
+    test_gen_cross_set_row(game, 4, 1, 1, "S OBCONIc", "", 11, 1);
 
     // TestGenAllcross_sets
     reset_game(game);
