@@ -36,6 +36,7 @@ typedef struct Generator {
     LetterDistribution * letter_distribution;
 
     // Shadow plays
+    int highest_shadow_score;
     AnchorList * anchor_list;
 } Generator;
 

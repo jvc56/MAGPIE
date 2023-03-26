@@ -77,6 +77,40 @@ void load_letter_distribution(LetterDistribution * letter_distribution, const ch
 	for (uint32_t i = 0; i < letter_distribution->size; i++) {
 		letter_distribution->is_vowel[i] = be32toh(letter_distribution->is_vowel[i]);
 	}
+
+	uint32_t * score_indexes = (uint32_t *) malloc(letter_distribution->size*2*sizeof(uint32_t));
+	for (uint32_t i = 0; i < letter_distribution->size; i++) {
+		score_indexes[i*2] = i;
+		score_indexes[i*2+1] = letter_distribution->scores[i];
+	}
+
+	// There's probably a better way, but I didn't want to create
+	// a new struct just for this and it's not on the critical path.
+    uint32_t i = 1;
+    int k;
+    int index_x;
+	int score_x;
+    while (letter_distribution->size*2) {
+        index_x = score_indexes[i*2];
+        score_x = score_indexes[i*2+1];
+        k = i - 1;
+        while (k >= 0 && score_x > score_indexes[k*2+1]) {
+        	score_indexes[(k+1)*2] = score_indexes[(k)*2];
+        	score_indexes[(k+1)*2+1] = score_indexes[(k)*2+1];
+            k--;
+        }
+        score_indexes[(k+1)*2] = index_x;
+        score_indexes[(k+1)*2+1] = score_x;
+        i++;
+    }
+
+	letter_distribution->score_order = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
+	for (uint32_t i = 0; i < letter_distribution->size; i++) {
+		letter_distribution->score_order[i] = score_indexes[i*2];
+	}
+
+	free(score_indexes);
+
 	fclose(stream);
 }
 

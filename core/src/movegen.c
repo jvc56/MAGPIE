@@ -248,12 +248,94 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 	}
 }
 
-void shadow_play_for_anchor(Generator * gen, int col, Player * player) {
-	// ***
-	// Implement shadow playing
-	// ***
+void shadow_record(Generator * gen, int left_col, int right_col, int letters_used) {
+	int played_through_word_score = 0;
+	int cross_scores = 0;
+	int word_multiplier = 1;
+	for (int current_col = left_col; current_col <= right_col; current_col++) {
+		uint8_t current_letter = get_letter(gen->board, gen->current_row_index, current_col);
+		uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, current_col);
+		int letter_multiplier = 1;
+		int this_word_multiplier = 1;
+		int fresh_tile = 0;
+		if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+			if (!is_blanked(current_letter)) {
+				played_through_word_score += gen->letter_distribution->scores[current_letter];
+			}
+		} else {
+			fresh_tile = 1;
+			this_word_multiplier = bonus_square / 16;
+			letter_multiplier = bonus_square % 16;
+			word_multiplier *= this_word_multiplier;
+			int cs = get_cross_score(gen->board, gen->current_row_index, current_col, !gen->vertical);
+			cross_scores += cs*this_word_multiplier;
+		}
+	}
 
-	insert_anchor(gen->anchor_list, gen->current_row_index, col, gen->last_anchor_col, gen->board->transposed, gen->vertical, gen->current_row_index * col);
+	
+
+	int bingo_bonus = 0;
+	if (gen->tiles_played == RACK_SIZE) {
+		bingo_bonus = BINGO_BONUS;
+	}
+
+	int score = 0;
+	if (score > gen->highest_shadow_score) {
+		gen->highest_shadow_score = score;
+	}
+}
+
+void shadow_play_for_anchor(Generator * gen, int col, Player * player) {
+	gen->highest_shadow_score = 0;
+	int leftmost_col = gen->last_anchor_col + 1;
+	if (leftmost_col == INITIAL_LAST_ANCHOR_COL) {
+		leftmost_col = 0;
+	}
+	int number_of_letters = player->rack->number_of_letters;
+	gen->tiles_played = 0;
+	while (leftmost_col <= gen->current_anchor_col) {
+		int current_left_col = col;
+		int current_right_col = col;
+		// Place tiles to the left
+		while (current_left_col > 0 && current_left_col >= leftmost_col && gen->tiles_played < number_of_letters) {
+			if (is_empty(gen->board, gen->current_row_index, current_left_col)) {
+				gen->tiles_played++;
+			} else {
+				current_left_col--;
+				continue;
+			}
+			if (gen->tiles_played > 0) {
+				shadow_record(gen, current_left_col, current_right_col, gen->tiles_played);
+			}
+			current_left_col--;
+		}
+
+		current_left_col++;
+
+		while (current_right_col < BOARD_DIM && gen->tiles_played < number_of_letters) {
+			if (is_empty(gen->board, gen->current_row_index, current_right_col)) {
+				gen->tiles_played++;
+			} else {
+				current_right_col++;
+				continue;
+			}
+			if (gen->tiles_played > 0) {
+				shadow_record(gen, current_left_col, current_right_col, gen->tiles_played);
+			}
+			current_right_col++;
+		}
+
+		// Shift the leftmost col over
+		leftmost_col++;
+
+		// If the new leftmost column is not valid, keep shifting it until it is.
+		while (leftmost_col < BOARD_DIM && leftmost_col < col && !is_empty(gen->board, gen->current_row_index, leftmost_col)) {
+			leftmost_col++;
+		}
+		gen->tiles_played = 0;
+	}
+
+	insert_anchor(gen->anchor_list, gen->current_row_index, col, gen->last_anchor_col, gen->board->transposed, gen->vertical, gen->highest_shadow_score);
 }
 
 void shadow_by_orientation(Generator * gen, Player * player, int dir) {
@@ -262,7 +344,7 @@ void shadow_by_orientation(Generator * gen, Player * player, int dir) {
 	for (int row = 0; row < BOARD_DIM; row++)
 	{
 		gen->current_row_index = row;
-		gen->last_anchor_col = 100;
+		gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
 		for (int col = 0; col < BOARD_DIM; col++)
 		{
 			if (get_anchor(gen->board, row, col, dir)) {

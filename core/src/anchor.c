@@ -6,7 +6,6 @@
 AnchorList * create_anchor_list() {
     AnchorList *al = malloc(sizeof(AnchorList));
     al->count = 0;
-    int anchor_list_size = ((BOARD_DIM) * (BOARD_DIM));
     al->anchors = malloc((sizeof(Anchor*)) * ((BOARD_DIM) * (BOARD_DIM)));
     for (int i = 0; i < ((BOARD_DIM) * (BOARD_DIM)); i++) {
         al->anchors[i] = malloc(sizeof(Anchor));
