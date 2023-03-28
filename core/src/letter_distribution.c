@@ -88,9 +88,9 @@ void load_letter_distribution(LetterDistribution * letter_distribution, const ch
 	// a new struct just for this and it's not on the critical path.
     uint32_t i = 1;
     int k;
-    int index_x;
-	int score_x;
-    while (letter_distribution->size*2) {
+    uint32_t index_x;
+	uint32_t score_x;
+    while (i < letter_distribution->size) {
         index_x = score_indexes[i*2];
         score_x = score_indexes[i*2+1];
         k = i - 1;

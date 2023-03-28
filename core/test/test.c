@@ -15,6 +15,7 @@
 #include "gen_all_test.h"
 #include "gameplay_test.h"
 #include "leaves_test.h"
+#include "letter_distribution_test.h"
 #include "movegen_test.h"
 #include "prof_tests.h"
 #include "rack_test.h"
@@ -28,6 +29,7 @@ void unit_tests(SuperConfig * superconfig) {
     // Test the readonly data first
     test_alphabet(superconfig);
     test_leaves(superconfig);
+    test_letter_distribution(superconfig);
 
     // Now test the rest
     test_bag(superconfig);

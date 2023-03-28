@@ -248,34 +248,42 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 	}
 }
 
-void shadow_record(Generator * gen, int left_col, int right_col, int letters_used) {
+void shadow_record(Generator * gen, int left_col, int right_col, int word_multiplier) {
 	int played_through_word_score = 0;
 	int cross_scores = 0;
-	int word_multiplier = 1;
+	int sorted_effective_letter_multipliers[(RACK_SIZE)];
+	int current_tiles_played = 0;
 	for (int current_col = left_col; current_col <= right_col; current_col++) {
 		uint8_t current_letter = get_letter(gen->board, gen->current_row_index, current_col);
 		int letter_multiplier = 1;
 		int this_word_multiplier = 1;
-		int fresh_tile = 0;
 		if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
 			if (!is_blanked(current_letter)) {
-				played_through_word_score += gen->letter_distribution->scores[current_letter];
+				played_through_word_score += gen->letter_distribution->scores[current_letter] * word_multiplier;
 			}
 		} else {
 			uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, current_col);
-			fresh_tile = 1;
 			this_word_multiplier = bonus_square >> 4;
 			letter_multiplier = bonus_square & 0x0F;
-			word_multiplier *= this_word_multiplier;
 			int cs = get_cross_score(gen->board, gen->current_row_index, current_col, !gen->vertical);
 			cross_scores += cs*this_word_multiplier;
-
-			int effective_letter_multiplier = 0;
+			int is_cross_word = (gen->current_row_index > 0 && !is_empty(gen->board, gen->current_row_index-1, current_col)) || ((gen->current_row_index < BOARD_DIM - 1) && !is_empty(gen->board, gen->current_row_index+1, current_col));
+			int effective_letter_multiplier = letter_multiplier * ((word_multiplier * is_cross_word) + word_multiplier);
+			// Insert the effective multiplier.
+			int insert_index = current_tiles_played;
+			for (; insert_index > 0 && sorted_effective_letter_multipliers[insert_index-1] < effective_letter_multiplier; insert_index--) {
+				sorted_effective_letter_multipliers[insert_index] = sorted_effective_letter_multipliers[insert_index-1];
+			}
+			sorted_effective_letter_multipliers[insert_index] = effective_letter_multiplier;
+			current_tiles_played++;
 		}
 	}
 
 	int tiles_played_score = 0;
-
+	for (int i = 0; i < current_tiles_played; i++) {
+		tiles_played_score += gen->descending_tile_scores[i] * sorted_effective_letter_multipliers[i];
+	}
+	
 	int bingo_bonus = 0;
 	if (gen->tiles_played == RACK_SIZE) {
 		bingo_bonus = BINGO_BONUS;
@@ -298,16 +306,20 @@ void shadow_play_for_anchor(Generator * gen, int col, Player * player) {
 	while (leftmost_col <= gen->current_anchor_col) {
 		int current_left_col = col;
 		int current_right_col = col;
+		int word_multiplier = 1;
 		// Place tiles to the left
 		while (current_left_col > 0 && current_left_col >= leftmost_col && gen->tiles_played < number_of_letters) {
 			if (is_empty(gen->board, gen->current_row_index, current_left_col)) {
 				gen->tiles_played++;
+				// Somewhat inefficient since we get the bonus square in record.
+				uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, current_left_col);
+				word_multiplier *= bonus_square >> 4;
 			} else {
 				current_left_col--;
 				continue;
 			}
 			if (gen->tiles_played > 0) {
-				shadow_record(gen, current_left_col, current_right_col, gen->tiles_played);
+				shadow_record(gen, current_left_col, current_right_col, word_multiplier);
 			}
 			current_left_col--;
 		}
@@ -317,12 +329,15 @@ void shadow_play_for_anchor(Generator * gen, int col, Player * player) {
 		while (current_right_col < BOARD_DIM && gen->tiles_played < number_of_letters) {
 			if (is_empty(gen->board, gen->current_row_index, current_right_col)) {
 				gen->tiles_played++;
+				// Somewhat inefficient since we get the bonus square in record.
+				uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, current_left_col);
+				word_multiplier *= bonus_square >> 4;
 			} else {
 				current_right_col++;
 				continue;
 			}
 			if (gen->tiles_played > 0) {
-				shadow_record(gen, current_left_col, current_right_col, gen->tiles_played);
+				shadow_record(gen, current_left_col, current_right_col, word_multiplier);
 			}
 			current_right_col++;
 		}
@@ -359,7 +374,7 @@ void shadow_by_orientation(Generator * gen, Player * player, int dir) {
 
 void set_descending_tile_scores(Generator * gen, Player * player) {
 	int i = 0;
-	for (int j = 0; j < gen->letter_distribution->size; j++) {
+	for (int j = 0; j < (int)gen->letter_distribution->size; j++) {
 		for (int k = 0; k < player->rack->array[gen->letter_distribution->score_order[j]]; k++) {
 			gen->descending_tile_scores[i] = gen->letter_distribution->scores[gen->letter_distribution->score_order[j]];
 			i++;
