@@ -254,7 +254,6 @@ void shadow_record(Generator * gen, int left_col, int right_col, int letters_use
 	int word_multiplier = 1;
 	for (int current_col = left_col; current_col <= right_col; current_col++) {
 		uint8_t current_letter = get_letter(gen->board, gen->current_row_index, current_col);
-		uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, current_col);
 		int letter_multiplier = 1;
 		int this_word_multiplier = 1;
 		int fresh_tile = 0;
@@ -263,23 +262,26 @@ void shadow_record(Generator * gen, int left_col, int right_col, int letters_use
 				played_through_word_score += gen->letter_distribution->scores[current_letter];
 			}
 		} else {
+			uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, current_col);
 			fresh_tile = 1;
-			this_word_multiplier = bonus_square / 16;
-			letter_multiplier = bonus_square % 16;
+			this_word_multiplier = bonus_square >> 4;
+			letter_multiplier = bonus_square & 0x0F;
 			word_multiplier *= this_word_multiplier;
 			int cs = get_cross_score(gen->board, gen->current_row_index, current_col, !gen->vertical);
 			cross_scores += cs*this_word_multiplier;
+
+			int effective_letter_multiplier = 0;
 		}
 	}
 
-	
+	int tiles_played_score = 0;
 
 	int bingo_bonus = 0;
 	if (gen->tiles_played == RACK_SIZE) {
 		bingo_bonus = BINGO_BONUS;
 	}
 
-	int score = 0;
+	int score = tiles_played_score + played_through_word_score + cross_scores + bingo_bonus;
 	if (score > gen->highest_shadow_score) {
 		gen->highest_shadow_score = score;
 	}
@@ -340,7 +342,6 @@ void shadow_play_for_anchor(Generator * gen, int col, Player * player) {
 
 void shadow_by_orientation(Generator * gen, Player * player, int dir) {
 	// genByOrientation
-	int sum = 0;
 	for (int row = 0; row < BOARD_DIM; row++)
 	{
 		gen->current_row_index = row;
@@ -351,14 +352,24 @@ void shadow_by_orientation(Generator * gen, Player * player, int dir) {
 				gen->current_anchor_col = col;
 				shadow_play_for_anchor(gen, col, player);
 				gen->last_anchor_col = col;
-				sum++;
 			}
+		}
+	}
+}
+
+void set_descending_tile_scores(Generator * gen, Player * player) {
+	int i = 0;
+	for (int j = 0; j < gen->letter_distribution->size; j++) {
+		for (int k = 0; k < player->rack->array[gen->letter_distribution->score_order[j]]; k++) {
+			gen->descending_tile_scores[i] = gen->letter_distribution->scores[gen->letter_distribution->score_order[j]];
+			i++;
 		}
 	}
 }
 
 void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_exchange) {
 	reset_anchor_list(gen->anchor_list);
+	set_descending_tile_scores(gen, player);
 	// Add plays
 	set_start_leave_index(player);
 	for (int dir = 0; dir < 2; dir++)
