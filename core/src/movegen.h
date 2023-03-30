@@ -37,8 +37,13 @@ typedef struct Generator {
 
     // Shadow plays
     int highest_shadow_score;
-    AnchorList * anchor_list;
+    int leftmost;
+    int rightmost;
+    int col_left;
+    uint64_t rack_cross_set;
+    int number_of_letters_on_rack;
     int descending_tile_scores[(RACK_SIZE)];
+    AnchorList * anchor_list;
 } Generator;
 
 Generator * create_generator(Config * config);

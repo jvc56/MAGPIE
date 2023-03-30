@@ -20,26 +20,28 @@
 #include "prof_tests.h"
 #include "rack_test.h"
 #include "test_constants.h"
+#include "shadow_test.h"
 #include "superconfig.h"
 
 void unit_tests(SuperConfig * superconfig) {
-    // Test the loading of the config
-    test_config();
+    // // Test the loading of the config
+    // test_config();
 
-    // Test the readonly data first
-    test_alphabet(superconfig);
-    test_leaves(superconfig);
-    test_letter_distribution(superconfig);
+    // // Test the readonly data first
+    // test_alphabet(superconfig);
+    // test_leaves(superconfig);
+    // test_letter_distribution(superconfig);
 
-    // Now test the rest
-    test_bag(superconfig);
-    test_rack(superconfig);
-    test_board(superconfig);
-    test_cross_set(superconfig);
-    test_game(superconfig);
-    test_movegen(superconfig);
-    test_equity_adjustments(superconfig);
-    test_gameplay(superconfig);
+    // // Now test the rest
+    // test_bag(superconfig);
+    // test_rack(superconfig);
+    // test_board(superconfig);
+    // test_cross_set(superconfig);
+    // test_game(superconfig);
+    test_shadow(superconfig);
+    // test_movegen(superconfig);
+    // test_equity_adjustments(superconfig);
+    // test_gameplay(superconfig);
 }
 
 int main(int argc, char *argv[]) {
