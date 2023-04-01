@@ -31,7 +31,7 @@ void quick_test(SuperConfig * superconfig) {
 
     printf("\n\n\nGEN START\n\n\n");
 
-    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "EE");
+    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "J");
 
     printf("\n\n\nDEBUG START\n\n\n");
     for (int i = 0; i < game->gen->anchor_list->count; i++) {
@@ -42,7 +42,7 @@ void quick_test(SuperConfig * superconfig) {
         game->gen->anchor_list->anchors[i]->highest_possible_score);
     }
 
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 7);
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 10);
 }
 
 void test_shadow(SuperConfig * superconfig) {
@@ -105,26 +105,34 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 102);
 
     load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "EE");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 12);
-    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 12);
-    assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 10);
-    assert(game->gen->anchor_list->anchors[3]->highest_possible_score == 9);
-    assert(game->gen->anchor_list->anchors[4]->highest_possible_score == 9);
-    assert(game->gen->anchor_list->anchors[5]->highest_possible_score == 8);
-    assert(game->gen->anchor_list->anchors[6]->highest_possible_score == 5);
-    assert(game->gen->anchor_list->anchors[7]->highest_possible_score == 5);
-    assert(game->gen->anchor_list->anchors[8]->highest_possible_score == 3);
+    // KAE and EE
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 10);
+    // EKE
+    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 9);
+    // KAEE
+    assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 8);
+    // EE and E(A)
+    assert(game->gen->anchor_list->anchors[3]->highest_possible_score == 5);
+    // EE and E(A)
+    assert(game->gen->anchor_list->anchors[4]->highest_possible_score == 5);
+    // EEE
+    assert(game->gen->anchor_list->anchors[5]->highest_possible_score == 3);
+    // The rest are prevented by invalid cross sets
+    assert(game->gen->anchor_list->anchors[6]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[7]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[8]->highest_possible_score == 0);
 
     load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "J");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 21);
-    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 21);
-    assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 21);
-    assert(game->gen->anchor_list->anchors[3]->highest_possible_score == 14);
-    assert(game->gen->anchor_list->anchors[4]->highest_possible_score == 14);
-    assert(game->gen->anchor_list->anchors[5]->highest_possible_score == 14);
-    assert(game->gen->anchor_list->anchors[6]->highest_possible_score == 9);
-    assert(game->gen->anchor_list->anchors[7]->highest_possible_score == 9);
-    assert(game->gen->anchor_list->anchors[8]->highest_possible_score == 9);
+    // Only J(KA) is a valid path, the rest are prevented by cross sets
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 14);
+    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[3]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[4]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[5]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[6]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[7]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[8]->highest_possible_score == 0);
 
     load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "JF");    
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 46);

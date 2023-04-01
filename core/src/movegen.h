@@ -36,11 +36,11 @@ typedef struct Generator {
     LetterDistribution * letter_distribution;
 
     // Shadow plays
+    int current_left_col;
+    int current_right_col;
     int highest_shadow_score;
-    int leftmost;
-    int rightmost;
-    int col_left;
     uint64_t rack_cross_set;
+    int played_through;
     int number_of_letters_on_rack;
     int descending_tile_scores[(RACK_SIZE)];
     AnchorList * anchor_list;
