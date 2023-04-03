@@ -31,7 +31,7 @@ void quick_test(SuperConfig * superconfig) {
 
     printf("\n\n\nGEN START\n\n\n");
 
-    load_and_generate(game, player, VS_OXY, "PB");
+    load_and_generate(game, player, KA_OPENING_CGP, "E?");
     print_game(game);
     transpose(game->gen->board);
     print_game(game);
@@ -45,12 +45,12 @@ void quick_test(SuperConfig * superconfig) {
         game->gen->anchor_list->anchors[i]->highest_possible_score);
     }
 
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 10);
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 156);
 }
 
 void test_shadow(SuperConfig * superconfig) {
-    quick_test(superconfig);
-    return;
+    // quick_test(superconfig);
+    // return;
     Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
     Player * player = game->players[0];
@@ -107,6 +107,22 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->count == 1);
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 102);
 
+    load_and_generate(game, player, EMPTY_CGP, "?");
+    assert(game->gen->anchor_list->count == 1);
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 0);
+
+    load_and_generate(game, player, EMPTY_CGP, "??");
+    assert(game->gen->anchor_list->count == 1);
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 0);
+
+    load_and_generate(game, player, EMPTY_CGP, "??OU");
+    assert(game->gen->anchor_list->count == 1);
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 4);
+
+    load_and_generate(game, player, EMPTY_CGP, "??OUA");
+    assert(game->gen->anchor_list->count == 1);
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 8);
+
     load_and_generate(game, player, KA_OPENING_CGP, "EE");
     // KAE and EE
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 10);
@@ -124,6 +140,26 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->anchors[6]->highest_possible_score == 0);
     assert(game->gen->anchor_list->anchors[7]->highest_possible_score == 0);
     assert(game->gen->anchor_list->anchors[8]->highest_possible_score == 0);
+
+    load_and_generate(game, player, KA_OPENING_CGP, "E?");
+    // oK, oE, EA
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 10);
+    // KA, aE, AE
+    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 10);
+    // KAe, Ee
+    assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 8);
+    // EKA, Ea
+    assert(game->gen->anchor_list->anchors[3]->highest_possible_score == 8);
+    // KAEe
+    assert(game->gen->anchor_list->anchors[4]->highest_possible_score == 7);
+    // E(K)e
+    assert(game->gen->anchor_list->anchors[5]->highest_possible_score == 7);
+    // Ea, EA
+    assert(game->gen->anchor_list->anchors[6]->highest_possible_score == 3);
+    // Ae, eE
+    assert(game->gen->anchor_list->anchors[7]->highest_possible_score == 3);
+    // E(A)a
+    assert(game->gen->anchor_list->anchors[8]->highest_possible_score == 2);
 
     load_and_generate(game, player, KA_OPENING_CGP, "J");
     // J(KA) or (KA)J
@@ -194,15 +230,6 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 230);
 
     load_and_generate(game, player, TRIPLE_LETTERS_CGP, "A");
-    print_game(game);
-    printf("DEBUG START\n\n\n");
-    for (int i = 0; i < game->gen->anchor_list->count; i++) {
-        printf("%d: %d, %d, %d, %d, %d\n", i, game->gen->anchor_list->anchors[i]->row, 
-        game->gen->anchor_list->anchors[i]->col, 
-        game->gen->anchor_list->anchors[i]->vertical, 
-        game->gen->anchor_list->anchors[i]->transpose_state, 
-        game->gen->anchor_list->anchors[i]->highest_possible_score);
-    }
     // WINDYA
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 13);
     // PROTEANA
@@ -227,6 +254,11 @@ void test_shadow(SuperConfig * superconfig) {
     // ZLWOW
     assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 40);
 
+    load_and_generate(game, player, TRIPLE_LETTERS_CGP, "ZLW?");
+    // The blank makes all cross sets valid
+    // LZW(WINDY)s
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 99);
+
     load_and_generate(game, player, TRIPLE_LETTERS_CGP, "QZLW");
     // ZQ, ZEN, QAD (L and W are in the AD cross set, but scored using the Q)
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 85);
@@ -237,6 +269,11 @@ void test_shadow(SuperConfig * superconfig) {
     load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KT");
     // KPAVT
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 26);
+
+    load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KT?");
+    // The blank makes PAVE, allowed all letters in the cross set
+    // KPAVT
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 39);
 
     load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "M");
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 8);
@@ -283,14 +320,46 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 63);
 
     load_and_generate(game, player, VS_OXY, "PB");
-    print_game(game);
-    printf("\n\n\nDEBUG START\n\n\n");
-    for (int i = 0; i < game->gen->anchor_list->count; i++) {
-        printf("%d: %d, %d, %d, %d, %d\n", i, game->gen->anchor_list->anchors[i]->row, 
-        game->gen->anchor_list->anchors[i]->col, 
-        game->gen->anchor_list->anchors[i]->vertical, 
-        game->gen->anchor_list->anchors[i]->transpose_state, 
-        game->gen->anchor_list->anchors[i]->highest_possible_score);
-    }
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 156);
+
+    load_and_generate(game, player, VS_OXY, "PA");
+    // Forms DORMPWOOAJ because the A fits in the cross set of T and N.
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 76);
+
+    load_and_generate(game, player, VS_OXY, "PBA");
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 174);
+
+    load_and_generate(game, player, VS_OXY, "Z");
+    // ZPACIFYING
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 90);
+
+    load_and_generate(game, player, VS_OXY, "ZE");
+    // ZONE
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 160);
+
+    load_and_generate(game, player, VS_OXY, "AZE");
+    // UTAZONE
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 184);
+
+    load_and_generate(game, player, VS_OXY, "AZEB");
+    // HENBUTAZONE
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 484);
+
+    load_and_generate(game, player, VS_OXY, "AZEBP");
+    // YPHENBUTAZONE
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 604);
+
+    load_and_generate(game, player, VS_OXY, "AZEBPX");
+    // A2 A(Y)X(HEN)P(UT)EZ(ON)B
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 740);
+
+    load_and_generate(game, player, VS_OXY, "AZEBPXO");
+    // A1 OA(Y)X(HEN)P(UT)EZ(ON)B
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 1924);
+
+    load_and_generate(game, player, VS_OXY, "AZEBPQO");
+    // A1 OA(Y)Q(HEN)P(UT)EZ(ON)B
+    // Only the letters AZEBPO are required to form acceptable
+    // plays in all cross sets
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 2036);    
 }

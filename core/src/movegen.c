@@ -248,6 +248,14 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 	}
 }
 
+int shadow_allowed_in_cross_set(Generator * gen, int col) {
+	uint64_t cross_set = get_cross_set(gen->board, gen->current_row_index, col, !gen->vertical);
+	// Allowed if
+	// there is a letter on the rack in the cross set or,
+	// there is anything in the cross set and the rack has a blank.
+	return (cross_set & gen->rack_cross_set) != 0 || ((gen->rack_cross_set & 1) && cross_set);
+}
+
 void shadow_record(Generator * gen, int left_col, int right_col, int main_played_through_score, int perpendicular_additional_score, int word_multiplier) {
 	printf("srecord: l %d, r %d, mpt %d, pas %d, wm %d\n", left_col, right_col, main_played_through_score, perpendicular_additional_score, word_multiplier);
 	int sorted_effective_letter_multipliers[(RACK_SIZE)];
@@ -302,43 +310,41 @@ void shadow_play_right(Generator * gen, int main_played_through_score, int perpe
 	int original_current_right_col = gen->current_right_col;
 	gen->current_right_col++;
 	gen->tiles_played++;
+	// current_letter will always be empty square since any previous
+	// calls to shadow_play_right will move to the edge of the word
 	uint8_t current_letter = get_letter(gen->board, gen->current_row_index, gen->current_right_col);
-	while (1) {
-		if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-			break;
-		}
-		gen->played_through = 1;
-		if (!is_blanked(current_letter) && gen->current_right_col > gen->current_anchor_col) {
-			main_played_through_score += gen->letter_distribution->scores[current_letter];
-		}
-		if (gen->current_right_col == BOARD_DIM - 1) {
-			break;
-		}
-		gen->current_right_col++;
-		current_letter = get_letter(gen->board, gen->current_row_index, gen->current_right_col);
-	}
 	printf("r, new mpt: %d\n", main_played_through_score);
+	printf("r, current letter empty: %d\n", current_letter);
+	// Only play a letter if a letter from the rack fits in the cross set
+	if (shadow_allowed_in_cross_set(gen, gen->current_right_col)) {
+		printf("r, allowed in cross set\n");
+		// Play tile and update scoring parameters
 
-	if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-		printf("r, current letter empty: %d\n", current_letter);
-		// Only play a letter if a letter from the rack fits in the cross set
-		if ((get_cross_set(gen->board, gen->current_row_index, gen->current_right_col, !gen->vertical) & gen->rack_cross_set) != 0) {
-			printf("r, allowed in cross set\n");
-			// Play tile and update scoring parameters
+		uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, gen->current_right_col);
+		int cross_score = get_cross_score(gen->board, gen->current_row_index, gen->current_right_col, !gen->vertical);
+		int this_word_multiplier = bonus_square >> 4;
+		printf("r, cs %d, twm %d\n", cross_score, this_word_multiplier);
+		perpendicular_additional_score += cross_score * this_word_multiplier;
+		word_multiplier *= this_word_multiplier;
 
-			uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, gen->current_right_col);
-			int cross_score = get_cross_score(gen->board, gen->current_row_index, gen->current_right_col, !gen->vertical);
-			int this_word_multiplier = bonus_square >> 4;
-			printf("r, cs %d, twm %d\n", cross_score, this_word_multiplier);
-			perpendicular_additional_score += cross_score * this_word_multiplier;
-			word_multiplier *= this_word_multiplier;
-			if (gen->tiles_played + is_unique >= 2) {
-				shadow_record(gen, gen->current_left_col, gen->current_right_col, main_played_through_score, perpendicular_additional_score, word_multiplier);
+		// Continue playing right until an empty square or the edge of board is hit
+		while (gen->current_right_col + 1 < BOARD_DIM) {
+			uint8_t next_letter = get_letter(gen->board, gen->current_row_index, gen->current_right_col + 1);
+			if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+				break;
 			}
-			printf("call from right\n");
-
-			shadow_play_right(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
+			if (!is_blanked(next_letter)) {
+				main_played_through_score += gen->letter_distribution->scores[next_letter];
+			}
+			gen->current_right_col++;
 		}
+
+		if (gen->tiles_played + is_unique >= 2) {
+			shadow_record(gen, gen->current_left_col, gen->current_right_col, main_played_through_score, perpendicular_additional_score, word_multiplier);
+		}
+		printf("call from right\n");
+
+		shadow_play_right(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
 	}
 	gen->tiles_played--;
 	gen->current_right_col = original_current_right_col;
@@ -358,49 +364,31 @@ void shadow_play_left(Generator * gen, int main_played_through_score, int perpen
 	int original_current_left_col = gen->current_left_col;
 	gen->current_left_col--;
 	gen->tiles_played++;
+	// current_letter will always be the empty square
+	// because we would have hit a previous anchor column
+	// before hitting a letter on the board.
 	uint8_t current_letter = get_letter(gen->board, gen->current_row_index, gen->current_left_col);
-	while (1) {
-		if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-			printf("at empty square, stop\n");
-			break;
-		}
-		gen->played_through = 1;
-		if (!is_blanked(current_letter)) {
-			main_played_through_score += gen->letter_distribution->scores[current_letter];
-		}
-		if (gen->current_left_col == 0 || gen->current_left_col == gen->last_anchor_col + 1) {
-			printf("at edge or anchor: gen->current_left_col %d, last_anchor_col %d, stop\n", gen->current_left_col, gen->last_anchor_col);
-			break;
-		}
-		gen->current_left_col--;
-		current_letter = get_letter(gen->board, gen->current_row_index, gen->current_left_col);
-	}
 	printf("r, new mpt: %d\n", main_played_through_score);
 
 	printf("current left col: %d\n", gen->current_left_col);
 
-	if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-		printf("l, current letter empty: %d\n", current_letter);
-		// Only play a letter if a letter from the rack fits in the cross set
-		if ((get_cross_set(gen->board, gen->current_row_index, gen->current_left_col, !gen->vertical) & gen->rack_cross_set) != 0) {
-			printf("l. allowed in cross set\n");
-			// Play tile and update scoring parameters
+	printf("l, current letter empty: %d\n", current_letter);
+	// Only play a letter if a letter from the rack fits in the cross set
+	if (shadow_allowed_in_cross_set(gen, gen->current_left_col)) {
+		printf("l. allowed in cross set\n");
+		// Play tile and update scoring parameters
 
-			uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, gen->current_left_col);
-			int cross_score = get_cross_score(gen->board, gen->current_row_index, gen->current_left_col, !gen->vertical);
-			int this_word_multiplier = bonus_square >> 4;
-			perpendicular_additional_score += cross_score * this_word_multiplier;
-			word_multiplier *= this_word_multiplier;
-			printf("l, cs %d, twm %d\n", cross_score, this_word_multiplier);
-			if (gen->tiles_played + is_unique >= 2) {
-				shadow_record(gen, gen->current_left_col, gen->current_right_col, main_played_through_score, perpendicular_additional_score, word_multiplier * (gen->played_through || gen->tiles_played > 0));
-			}
-			printf("call from left\n");
-			shadow_play_left(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
-		} else if (gen->current_left_col == gen->current_anchor_col) {
-			// Nothing hooks here, return
-			printf("l, no valid cross letters at anchor col, returning\n");
+		uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, gen->current_left_col);
+		int cross_score = get_cross_score(gen->board, gen->current_row_index, gen->current_left_col, !gen->vertical);
+		int this_word_multiplier = bonus_square >> 4;
+		perpendicular_additional_score += cross_score * this_word_multiplier;
+		word_multiplier *= this_word_multiplier;
+		printf("l, cs %d, twm %d\n", cross_score, this_word_multiplier);
+		if (gen->tiles_played + is_unique >= 2) {
+			shadow_record(gen, gen->current_left_col, gen->current_right_col, main_played_through_score, perpendicular_additional_score, word_multiplier * (gen->played_through || gen->tiles_played > 0));
 		}
+		printf("call from left\n");
+		shadow_play_left(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
 	}
 	printf("call right from left\n");
 	shadow_play_right(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
@@ -409,11 +397,6 @@ void shadow_play_left(Generator * gen, int main_played_through_score, int perpen
 }
 
 void shadow_start(Generator * gen) {
-	if (gen->current_left_col < 0 || gen->current_left_col == gen->last_anchor_col || gen->tiles_played >= gen->number_of_letters_on_rack) {
-		printf("start, hit bounds, returning: l %d, la %d, r %d, t %d, l %d\n\n\n", gen->current_left_col, gen->last_anchor_col, gen->current_right_col, gen->tiles_played, gen->number_of_letters_on_rack);
-		// We have gone all the way left or right.
-		return;
-	}
 	int main_played_through_score = 0;
 	int perpendicular_additional_score = 0;
 	int word_multiplier = 1;
@@ -423,7 +406,7 @@ void shadow_start(Generator * gen) {
 		printf("start, current letter empty: %d\n", current_letter);
 		// Only play a letter if a letter from the rack fits in the cross set
 		printf("start cross set: %ld\nstart rack cross set: %ld\n", get_cross_set(gen->board, gen->current_row_index, gen->current_left_col, !gen->vertical), gen->rack_cross_set);
-		if ((get_cross_set(gen->board, gen->current_row_index, gen->current_left_col, !gen->vertical) & gen->rack_cross_set) != 0) {
+		if (shadow_allowed_in_cross_set(gen, gen->current_left_col)) {
 			printf("start, allowed in cross set\n");
 			// Play tile and update scoring parameters
 
