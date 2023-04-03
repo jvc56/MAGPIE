@@ -31,8 +31,11 @@ void quick_test(SuperConfig * superconfig) {
 
     printf("\n\n\nGEN START\n\n\n");
 
-    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "J");
-
+    load_and_generate(game, player, VS_OXY, "PB");
+    print_game(game);
+    transpose(game->gen->board);
+    print_game(game);
+    transpose(game->gen->board);
     printf("\n\n\nDEBUG START\n\n\n");
     for (int i = 0; i < game->gen->anchor_list->count; i++) {
         printf("%d: %d, %d, %d, %d, %d\n", i, game->gen->anchor_list->anchors[i]->row, 
@@ -104,7 +107,7 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->count == 1);
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 102);
 
-    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "EE");
+    load_and_generate(game, player, KA_OPENING_CGP, "EE");
     // KAE and EE
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 10);
     // EKE
@@ -122,10 +125,12 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->anchors[7]->highest_possible_score == 0);
     assert(game->gen->anchor_list->anchors[8]->highest_possible_score == 0);
 
-    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "J");
-    // Only J(KA) is a valid path, the rest are prevented by cross sets
+    load_and_generate(game, player, KA_OPENING_CGP, "J");
+    // J(KA) or (KA)J
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 14);
-    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 0);
+    // JA
+    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 9);
+    // The rest are invalid cross sets.
     assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 0);
     assert(game->gen->anchor_list->anchors[3]->highest_possible_score == 0);
     assert(game->gen->anchor_list->anchors[4]->highest_possible_score == 0);
@@ -134,26 +139,47 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->anchors[7]->highest_possible_score == 0);
     assert(game->gen->anchor_list->anchors[8]->highest_possible_score == 0);
 
-    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "JF");    
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 46);
+    load_and_generate(game, player, AA_OPENING_CGP, "JF");
+    // JF, JA, and FA
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 42);
+    // JA and JF or FA and FJ
+    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 25);
+    // JAF with J and F doubled
+    assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 25);
+    // FAA is in cross set, so JAA and JF are used to score.
+    assert(game->gen->anchor_list->anchors[3]->highest_possible_score == 22);
+    // AAJF
+    assert(game->gen->anchor_list->anchors[4]->highest_possible_score == 14);
+    // AJF
+    assert(game->gen->anchor_list->anchors[5]->highest_possible_score == 13);
+    // Remaining anchors are prevented by invalid cross sets
+    assert(game->gen->anchor_list->anchors[6]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[7]->highest_possible_score == 0);
+    assert(game->gen->anchor_list->anchors[8]->highest_possible_score == 0);
 
-    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "JFU");    
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 48);
+    // Makeing JA, FA, and JFU, doubling the U on the double letter
+    load_and_generate(game, player, AA_OPENING_CGP, "JFU");
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 44);
 
-    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "JFUG");    
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 51);
+    // Making KAU (allowed by F in rack cross set) and JUF, doubling the F and J.
+    load_and_generate(game, player, KA_OPENING_CGP, "JFU");
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 32);
 
-    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "JFUGX");    
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 65);
+    load_and_generate(game, player, AA_OPENING_CGP, "JFUG");    
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 47);
 
-    load_and_generate(game, player, TWO_LETTER_OPENING_CGP, "JFUGXL");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 114);
+    load_and_generate(game, player, AA_OPENING_CGP, "JFUGX");    
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 61);
+
+    // Reaches the triple word
+    load_and_generate(game, player, AA_OPENING_CGP, "JFUGXL");
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 102);
 
     load_and_generate(game, player, DOUG_V_EMELY_CGP, "Q");
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 22);
 
     load_and_generate(game, player, DOUG_V_EMELY_CGP, "BD");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 22);
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 17);
 
     load_and_generate(game, player, DOUG_V_EMELY_CGP, "BOH");
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 60);
@@ -168,37 +194,55 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 230);
 
     load_and_generate(game, player, TRIPLE_LETTERS_CGP, "A");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 15);
+    print_game(game);
+    printf("DEBUG START\n\n\n");
+    for (int i = 0; i < game->gen->anchor_list->count; i++) {
+        printf("%d: %d, %d, %d, %d, %d\n", i, game->gen->anchor_list->anchors[i]->row, 
+        game->gen->anchor_list->anchors[i]->col, 
+        game->gen->anchor_list->anchors[i]->vertical, 
+        game->gen->anchor_list->anchors[i]->transpose_state, 
+        game->gen->anchor_list->anchors[i]->highest_possible_score);
+    }
+    // WINDYA
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 13);
+    // PROTEANA
+    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 11);
+    // ANY
+    assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 6);
+    // PA
+    assert(game->gen->anchor_list->anchors[3]->highest_possible_score == 4);
+    // AR
+    assert(game->gen->anchor_list->anchors[4]->highest_possible_score == 2);
+    // The rest are prevented by invalid cross sets
+    assert(game->gen->anchor_list->anchors[5]->highest_possible_score == 0);
 
     load_and_generate(game, player, TRIPLE_LETTERS_CGP, "Z");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 33);
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 32);
 
     load_and_generate(game, player, TRIPLE_LETTERS_CGP, "ZLW");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 80);
+    // ZEN, ZW, WAD
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 73);
+    // ZENLW
+    assert(game->gen->anchor_list->anchors[1]->highest_possible_score == 45);
+    // ZLWOW
+    assert(game->gen->anchor_list->anchors[2]->highest_possible_score == 40);
 
     load_and_generate(game, player, TRIPLE_LETTERS_CGP, "QZLW");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 135);
+    // ZQ, ZEN, QAD (L and W are in the AD cross set, but scored using the Q)
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 85);
 
     load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "K");
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 23);
 
     load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KT");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 39);
-
-    load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KTU");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 40);
-
-    load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KTUI");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 41);
-
-    load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KTUIA");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 61);
+    // KPAVT
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 26);
 
     load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "M");
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 8);
 
     load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MN");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 18);
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 16);
 
     load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MNA");
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 20);
@@ -213,7 +257,8 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 39);
 
     load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "Z");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 31);
+    // LATERZ
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 30);
 
     load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZL");
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 64);
@@ -234,8 +279,18 @@ void test_shadow(SuperConfig * superconfig) {
     assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 212);
 
     load_and_generate(game, player, VS_OXY, "A");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 84);
+    // APACIFYING
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 63);
 
-    load_and_generate(game, player, VS_OXY, "AB");
-    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 144);
+    load_and_generate(game, player, VS_OXY, "PB");
+    print_game(game);
+    printf("\n\n\nDEBUG START\n\n\n");
+    for (int i = 0; i < game->gen->anchor_list->count; i++) {
+        printf("%d: %d, %d, %d, %d, %d\n", i, game->gen->anchor_list->anchors[i]->row, 
+        game->gen->anchor_list->anchors[i]->col, 
+        game->gen->anchor_list->anchors[i]->vertical, 
+        game->gen->anchor_list->anchors[i]->transpose_state, 
+        game->gen->anchor_list->anchors[i]->highest_possible_score);
+    }
+    assert(game->gen->anchor_list->anchors[0]->highest_possible_score == 156);
 }
