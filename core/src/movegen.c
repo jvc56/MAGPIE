@@ -84,6 +84,7 @@ void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstri
 	int row = start_row;
 	int col = start_col;
 
+
 	if (gen->vertical) {
 		int temp = row;
 		row = col;
@@ -313,7 +314,12 @@ void shadow_play_right(Generator * gen, int main_played_through_score, int perpe
 	int original_current_right_col = gen->current_right_col;
 	gen->current_right_col++;
 	gen->tiles_played++;
-	if (shadow_allowed_in_cross_set(gen, gen->current_right_col)) {
+
+	uint64_t cross_set = get_cross_set(gen->board, gen->current_row_index, gen->current_right_col, !gen->vertical);
+	// Allowed if
+	// there is a letter on the rack in the cross set or,
+	// there is anything in the cross set and the rack has a blank.
+	if ((cross_set & gen->rack_cross_set) != 0 || ((gen->rack_cross_set & 1) && cross_set)) {
 		// Play tile and update scoring parameters
 
 		uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, gen->current_right_col);
@@ -322,6 +328,13 @@ void shadow_play_right(Generator * gen, int main_played_through_score, int perpe
 		perpendicular_additional_score += cross_score * this_word_multiplier;
 		word_multiplier *= this_word_multiplier;
 
+		if (cross_set == TRIVIAL_CROSS_SET) {
+			// If the horizontal direction is the trivial cross-set, this means
+			// that there are no letters perpendicular to where we just placed
+			// this letter. So any play we generate here should be unique.
+			// We use this to avoid generating duplicates of single-tile plays.
+			is_unique = 1;
+		}
 		// Continue playing right until an empty square or the edge of board is hit
 		while (gen->current_right_col + 1 < BOARD_DIM) {
 			uint8_t next_letter = get_letter(gen->board, gen->current_row_index, gen->current_right_col + 1);
@@ -355,8 +368,11 @@ void shadow_play_left(Generator * gen, int main_played_through_score, int perpen
 	int original_current_left_col = gen->current_left_col;
 	gen->current_left_col--;
 	gen->tiles_played++;
-	// Only play a letter if a letter from the rack fits in the cross set
-	if (shadow_allowed_in_cross_set(gen, gen->current_left_col)) {
+	uint64_t cross_set = get_cross_set(gen->board, gen->current_row_index, gen->current_left_col, !gen->vertical);
+	// Allowed if
+	// there is a letter on the rack in the cross set or,
+	// there is anything in the cross set and the rack has a blank.
+	if ((cross_set & gen->rack_cross_set) != 0 || ((gen->rack_cross_set & 1) && cross_set)) {
 		// Play tile and update scoring parameters
 
 		uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, gen->current_left_col);
@@ -364,6 +380,12 @@ void shadow_play_left(Generator * gen, int main_played_through_score, int perpen
 		int this_word_multiplier = bonus_square >> 4;
 		perpendicular_additional_score += cross_score * this_word_multiplier;
 		word_multiplier *= this_word_multiplier;
+
+		if (cross_set == TRIVIAL_CROSS_SET) {
+			// See equivalent in shadow_play_right for the reasoning here.
+			is_unique = 1;
+		}
+
 		if (gen->tiles_played + is_unique >= 2) {
 			shadow_record(gen, gen->current_left_col, gen->current_right_col, main_played_through_score, perpendicular_additional_score, word_multiplier);
 		}
@@ -489,11 +511,7 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 	// Set the best leaves and maybe add exchanges.
 	generate_exchange_moves(gen, player, 0, 0, add_exchange);
 
-	double best_leave = (double)(INITIAL_TOP_MOVE_EQUITY);
-	for (int i = 0; i < (RACK_SIZE); i++) {
-		if (gen->best_leaves[i] > best_leave) {
-			best_leave = gen->best_leaves[i];
-		}
+	if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_TOP_EQUITY) {
 	}
 
 	reset_anchor_list(gen->anchor_list);
@@ -527,6 +545,10 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 	if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL || gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
 		set_spare_move(gen->move_list, gen->strip, 0, 0, 0, 0, 0, 0, 0, MOVE_TYPE_PASS);
 		insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
+	} else if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_TOP_EQUITY) {
+		// The move list count is still 0 at this point, so set it to 1.
+		// This is done here to avoid repeatedly checking/updating the move count.
+		gen->move_list->count = 1;
 	}
 }
 

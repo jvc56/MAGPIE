@@ -91,6 +91,21 @@ void destroy_sorted_move_list(SortedMoveList * sorted_move_list) {
     free(sorted_move_list);
 }
 
+void print_anchor_list(Generator * gen) {
+    for (int i = 0; i < gen->anchor_list->count; i++) {
+        Anchor * anchor = gen->anchor_list->anchors[i];
+        int row = anchor->row;
+        int col = anchor->col;
+        char * dir = "Horizontal";
+        if (anchor->vertical) {
+            row = anchor->col;
+            col = anchor->row;
+            dir = "Vertical";
+        }
+        printf("Anchor %d: Row %d, Col %d, %s, %0.4f, %d\n", i, row, col, dir, anchor->highest_possible_equity, anchor->last_anchor_col);
+    }
+}
+
 void print_move_list(Board * board, Alphabet * alphabet, SortedMoveList * sml, int move_list_length) {
     for (int i = 0; i < move_list_length; i++) {
         char move_string[40];

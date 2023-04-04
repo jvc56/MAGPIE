@@ -18,6 +18,7 @@
 #include "letter_distribution_test.h"
 #include "movegen_test.h"
 #include "prof_tests.h"
+#include "play_recorder_test.h"
 #include "rack_test.h"
 #include "test_constants.h"
 #include "shadow_test.h"
@@ -41,7 +42,7 @@ void unit_tests(SuperConfig * superconfig) {
     test_shadow(superconfig);
     test_movegen(superconfig);
     test_equity_adjustments(superconfig);
-    // test_gameplay(superconfig);
+    test_gameplay(superconfig);
 }
 
 int main(int argc, char *argv[]) {
@@ -57,6 +58,10 @@ int main(int argc, char *argv[]) {
   } else if (!strcmp(argv[1], CMD_PROF)) { 
     Config * config = create_config_from_args(argc, argv);
     prof_tests(config);
+    destroy_config(config);
+  } else if (!strcmp(argv[1], CMD_TOPVALL)) {
+    Config * config = create_config_from_args(argc, argv);
+    test_play_recorder(config);
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
     Config * csw_config = create_config(

@@ -5,6 +5,7 @@
 #include "../src/config.h"
 #include "../src/game.h"
 
+#include "game_print.h"
 #include "superconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -140,13 +141,14 @@ void test_shadow_score(SuperConfig * superconfig) {
     assert(within_epsilon(game->gen->anchor_list->anchors[8]->highest_possible_equity, 2));
 
     load_and_generate(game, player, KA_OPENING_CGP, "J", 0);
+    // J(K) veritcally
+    assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 21));
     // J(KA) or (KA)J
-    assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 14));
-    // JA
-    assert(within_epsilon(game->gen->anchor_list->anchors[1]->highest_possible_equity, 9));
-    // The rest are invalid cross sets.
-    assert(within_epsilon(game->gen->anchor_list->anchors[2]->highest_possible_equity, 0));
-    assert(within_epsilon(game->gen->anchor_list->anchors[3]->highest_possible_equity, 0));
+    assert(within_epsilon(game->gen->anchor_list->anchors[1]->highest_possible_equity, 14));
+    // J(A) horitizontally
+    assert(within_epsilon(game->gen->anchor_list->anchors[2]->highest_possible_equity, 9));
+    // J(A) vertically
+    assert(within_epsilon(game->gen->anchor_list->anchors[3]->highest_possible_equity, 9));
     assert(within_epsilon(game->gen->anchor_list->anchors[4]->highest_possible_equity, 0));
     assert(within_epsilon(game->gen->anchor_list->anchors[5]->highest_possible_equity, 0));
     assert(within_epsilon(game->gen->anchor_list->anchors[6]->highest_possible_equity, 0));
@@ -208,21 +210,33 @@ void test_shadow_score(SuperConfig * superconfig) {
     assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 230));
 
     load_and_generate(game, player, TRIPLE_LETTERS_CGP, "A", 0);
+    
     // WINDYA
     assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 13));
     // PROTEANA
     assert(within_epsilon(game->gen->anchor_list->anchors[1]->highest_possible_equity, 11));
-    // ANY
+    // ANY horizontally
+    // ANY vertically
+    // A(P) vertically
+    // A(OW) vertically
     assert(within_epsilon(game->gen->anchor_list->anchors[2]->highest_possible_equity, 6));
-    // PA
-    assert(within_epsilon(game->gen->anchor_list->anchors[3]->highest_possible_equity, 4));
-    // AR
-    assert(within_epsilon(game->gen->anchor_list->anchors[4]->highest_possible_equity, 2));
-    // The rest are prevented by invalid cross sets
-    assert(within_epsilon(game->gen->anchor_list->anchors[5]->highest_possible_equity, 0));
+    assert(within_epsilon(game->gen->anchor_list->anchors[3]->highest_possible_equity, 6));
+    assert(within_epsilon(game->gen->anchor_list->anchors[4]->highest_possible_equity, 6));
+    assert(within_epsilon(game->gen->anchor_list->anchors[5]->highest_possible_equity, 6));
+    // A(EN)
+    // AD(A)
+    assert(within_epsilon(game->gen->anchor_list->anchors[6]->highest_possible_equity, 5));
+    assert(within_epsilon(game->gen->anchor_list->anchors[7]->highest_possible_equity, 5));
 
     load_and_generate(game, player, TRIPLE_LETTERS_CGP, "Z", 0);
-    assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 32));
+    // Z(P) vertically
+    assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 33));
+    // Z(EN) vert
+    // Z(EN) horiz
+    assert(within_epsilon(game->gen->anchor_list->anchors[1]->highest_possible_equity, 32));
+    assert(within_epsilon(game->gen->anchor_list->anchors[2]->highest_possible_equity, 32));
+    // (PROTEAN)Z
+    assert(within_epsilon(game->gen->anchor_list->anchors[3]->highest_possible_equity, 29));
 
     load_and_generate(game, player, TRIPLE_LETTERS_CGP, "ZLW", 0);
     // ZEN, ZW, WAD
@@ -272,8 +286,13 @@ void test_shadow_score(SuperConfig * superconfig) {
     assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 39));
 
     load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "Z", 0);
-    // LATERZ
-    assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 30));
+    // (L)Z and (R)Z
+    assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 31));
+    assert(within_epsilon(game->gen->anchor_list->anchors[1]->highest_possible_equity, 31));
+    // (LATER)Z
+    assert(within_epsilon(game->gen->anchor_list->anchors[2]->highest_possible_equity, 30));
+    // Z(T)
+    assert(within_epsilon(game->gen->anchor_list->anchors[3]->highest_possible_equity, 21));
 
     load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZL", 0);
     assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 64));
@@ -347,8 +366,6 @@ void test_shadow_score(SuperConfig * superconfig) {
 }
 
 void test_shadow_equity(SuperConfig * superconfig) {
-    // quick_test(superconfig);
-    // return;
     Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
     Player * player = game->players[0];
@@ -394,21 +411,18 @@ void test_shadow_equity(SuperConfig * superconfig) {
 }
 
 void test_shadow_top_move(SuperConfig * superconfig) {
-    // quick_test(superconfig);
-    // return;
     Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
     Player * player = game->players[0];
 
-    // This test checks scores only, so set the player strategy param
-    // to move sorting of type score.
     int original_move_sorting = player->strategy_params->move_sorting;
     int original_recorder_type = player->strategy_params->play_recorder_type;
     player->strategy_params->move_sorting = SORT_BY_EQUITY;
     player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
 
-    load_and_generate(game, player, VS_OXY, "AZEBPXO", 1);
-    assert(within_epsilon(game->gen->move_list->moves[0]->score, 1780));
+    // Top play should be L1 Q(I)
+    load_and_generate(game, player, UEY_CGP, "ACEQOOV", 1);
+    assert(within_epsilon(game->gen->move_list->moves[0]->score, 21));
 
     player->strategy_params->move_sorting = original_move_sorting;
     player->strategy_params->play_recorder_type = original_recorder_type;
