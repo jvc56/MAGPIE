@@ -38,11 +38,12 @@ typedef struct Generator {
     // Shadow plays
     int current_left_col;
     int current_right_col;
-    int highest_shadow_score;
+    double highest_shadow_equity;
     uint64_t rack_cross_set;
-    int played_through;
+    int move_sorting_type;
     int number_of_letters_on_rack;
     int descending_tile_scores[(RACK_SIZE)];
+    double best_leaves[(RACK_SIZE)];
     AnchorList * anchor_list;
 } Generator;
 

@@ -14,6 +14,7 @@
 #include "../src/rack.h"
 
 #include "alphabet_print.h"
+#include "game_print.h"
 #include "move_print.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -64,6 +65,11 @@ double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack) {
     return get_current_value(laddag);
 }
 
+double get_leave_value_for_rack(Laddag * laddag, Rack * rack) {
+    go_to_leave(laddag, rack);
+    return get_current_value(laddag);
+}
+
 void generate_moves_for_game(Game * game) {
     generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
 }
@@ -85,18 +91,20 @@ void destroy_sorted_move_list(SortedMoveList * sorted_move_list) {
     free(sorted_move_list);
 }
 
-void print_move_list(Board * board, Alphabet * alphabet, MoveList * ml) {
-    int number_of_moves = ml->count;
-    SortedMoveList * sml = create_sorted_move_list(ml);
-    for (int i = 0; i < number_of_moves; i++) {
+void print_move_list(Board * board, Alphabet * alphabet, SortedMoveList * sml, int move_list_length) {
+    for (int i = 0; i < move_list_length; i++) {
         char move_string[40];
         reset_string(move_string);
         write_user_visible_move_to_end_of_buffer(move_string, board, sml->moves[i], alphabet);
         printf("%s\n", move_string);
     }
-    destroy_sorted_move_list(sml);
 }
 
+void sort_and_print_move_list(Board * board, Alphabet * alphabet, MoveList * ml) {
+    SortedMoveList * sml = create_sorted_move_list(ml);
+    print_move_list(board, alphabet, sml, ml->count);
+    destroy_sorted_move_list(sml);
+}
 
 void play_top_n_equity_move(Game * game, int n) {
     generate_moves(game->gen, game->players[game->player_on_turn_index], game->players[1 - game->player_on_turn_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);

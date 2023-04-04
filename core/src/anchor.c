@@ -25,22 +25,22 @@ void destroy_anchor_list(AnchorList * al) {
     free(al);
 }
 
-void insert_anchor(AnchorList* al, int row, int col, int last_anchor_col, int transpose_state, int vertical, int highest_possible_score) {
+void insert_anchor(AnchorList* al, int row, int col, int last_anchor_col, int transpose_state, int vertical, double highest_possible_equity) {
     int i = al->count;
-    for (; i > 0 && al->anchors[i-1]->highest_possible_score < highest_possible_score; i--) {
+    for (; i > 0 && al->anchors[i-1]->highest_possible_equity < highest_possible_equity; i--) {
         al->anchors[i]->row = al->anchors[i-1]->row;
         al->anchors[i]->col = al->anchors[i-1]->col;
         al->anchors[i]->last_anchor_col = al->anchors[i-1]->last_anchor_col;
         al->anchors[i]->transpose_state = al->anchors[i-1]->transpose_state;
         al->anchors[i]->vertical = al->anchors[i-1]->vertical;
-        al->anchors[i]->highest_possible_score = al->anchors[i-1]->highest_possible_score;
+        al->anchors[i]->highest_possible_equity = al->anchors[i-1]->highest_possible_equity;
     }
     al->anchors[i]->row = row;
     al->anchors[i]->col = col;
     al->anchors[i]->last_anchor_col = last_anchor_col;
     al->anchors[i]->transpose_state = transpose_state;
     al->anchors[i]->vertical = vertical;
-    al->anchors[i]->highest_possible_score = highest_possible_score;
+    al->anchors[i]->highest_possible_equity = highest_possible_equity;
     al->count++;
 }
 

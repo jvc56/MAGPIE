@@ -121,22 +121,28 @@ void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstri
 	}
 }
 
-void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int stripidx) {
+void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int stripidx, int add_exchange) {
 	while (ml < (gen->letter_distribution->size) && player->rack->array[ml] == 0) {
 		ml++;
 	}
 	if (ml == (gen->letter_distribution->size)) {
 		// The recording of an exchange should never require
 		// the opponent's rack.
-		record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
+		double current_value = get_current_value(player->strategy_params->laddag);
+		if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
+			gen->best_leaves[player->rack->number_of_letters] = current_value;
+		}
+		if (add_exchange) {
+			record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
+		}
 	} else {
-		generate_exchange_moves(gen, player, ml+1, stripidx);
+		generate_exchange_moves(gen, player, ml+1, stripidx, add_exchange);
 		int num_this = player->rack->array[ml];
 		for (int i = 0; i < num_this; i++) {
 			gen->exchange_strip[stripidx] = ml;
 			stripidx += 1;
 			take_letter_from_rack_and_recalculate_leave_index(player, ml);
-			generate_exchange_moves(gen, player, ml+1, stripidx);
+			generate_exchange_moves(gen, player, ml+1, stripidx, add_exchange);
 		}
 		for (int i = 0; i < num_this; i++) {
 			add_letter_to_rack_and_recalculate_leave_index(player, ml);
@@ -257,7 +263,6 @@ int shadow_allowed_in_cross_set(Generator * gen, int col) {
 }
 
 void shadow_record(Generator * gen, int left_col, int right_col, int main_played_through_score, int perpendicular_additional_score, int word_multiplier) {
-	printf("srecord: l %d, r %d, mpt %d, pas %d, wm %d\n", left_col, right_col, main_played_through_score, perpendicular_additional_score, word_multiplier);
 	int sorted_effective_letter_multipliers[(RACK_SIZE)];
 	int current_tiles_played = 0;
 	for (int current_col = left_col; current_col <= right_col; current_col++) {
@@ -268,7 +273,6 @@ void shadow_record(Generator * gen, int left_col, int right_col, int main_played
 			int letter_multiplier = bonus_square & 0x0F;
 			int is_cross_word = (gen->current_row_index > 0 && !is_empty(gen->board, gen->current_row_index-1, current_col)) || ((gen->current_row_index < BOARD_DIM - 1) && !is_empty(gen->board, gen->current_row_index+1, current_col));
 			int effective_letter_multiplier = letter_multiplier * ((this_word_multiplier * is_cross_word) + word_multiplier);
-			printf("elm for %d: %d * ((%d * %d) + %d)\n", current_col, letter_multiplier, this_word_multiplier, is_cross_word, word_multiplier);
 			// Insert the effective multiplier.
 			int insert_index = current_tiles_played;
 			for (; insert_index > 0 && sorted_effective_letter_multipliers[insert_index-1] < effective_letter_multiplier; insert_index--) {
@@ -281,7 +285,6 @@ void shadow_record(Generator * gen, int left_col, int right_col, int main_played
 
 	int tiles_played_score = 0;
 	for (int i = 0; i < current_tiles_played; i++) {
-		printf("tps: %d, %d\n", gen->descending_tile_scores[i], sorted_effective_letter_multipliers[i]);
 		tiles_played_score += gen->descending_tile_scores[i] * sorted_effective_letter_multipliers[i];
 	}
 	
@@ -291,18 +294,18 @@ void shadow_record(Generator * gen, int left_col, int right_col, int main_played
 	}
 
 	int score = tiles_played_score + (main_played_through_score * word_multiplier) + perpendicular_additional_score + bingo_bonus;
-	printf("tiles played: %d\n", gen->tiles_played);
-	printf("score: %d + (%d * %d) + %d + %d = %d\n", tiles_played_score, main_played_through_score, word_multiplier, perpendicular_additional_score, bingo_bonus, score);
-	if (score > gen->highest_shadow_score) {
-		gen->highest_shadow_score = score;
+	double equity = (double)score;
+	if (gen->move_sorting_type == SORT_BY_EQUITY) {
+		equity += gen->best_leaves[gen->number_of_letters_on_rack - gen->tiles_played];
+	}
+	if (equity > gen->highest_shadow_equity) {
+		gen->highest_shadow_equity = equity;
 	}
 }
 
 void shadow_play_right(Generator * gen, int main_played_through_score, int perpendicular_additional_score, int word_multiplier, int is_unique) {
-	printf("\n\nright: l %d, r %d, t %d, mpt %d, pas %d, wm %d, uniq %d\n", gen->current_left_col, gen->current_right_col, gen->tiles_played, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
 
 	if (gen->current_right_col == (BOARD_DIM - 1) || gen->tiles_played >= gen->number_of_letters_on_rack) {
-		printf("hit bounds, returning: l %d, la %d, r %d, t %d, l %d\n\n\n", gen->current_left_col, gen->last_anchor_col, gen->current_right_col, gen->tiles_played, gen->number_of_letters_on_rack);
 		// We have gone all the way left or right.
 		return;
 	}
@@ -310,20 +313,12 @@ void shadow_play_right(Generator * gen, int main_played_through_score, int perpe
 	int original_current_right_col = gen->current_right_col;
 	gen->current_right_col++;
 	gen->tiles_played++;
-	// current_letter will always be empty square since any previous
-	// calls to shadow_play_right will move to the edge of the word
-	uint8_t current_letter = get_letter(gen->board, gen->current_row_index, gen->current_right_col);
-	printf("r, new mpt: %d\n", main_played_through_score);
-	printf("r, current letter empty: %d\n", current_letter);
-	// Only play a letter if a letter from the rack fits in the cross set
 	if (shadow_allowed_in_cross_set(gen, gen->current_right_col)) {
-		printf("r, allowed in cross set\n");
 		// Play tile and update scoring parameters
 
 		uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, gen->current_right_col);
 		int cross_score = get_cross_score(gen->board, gen->current_row_index, gen->current_right_col, !gen->vertical);
 		int this_word_multiplier = bonus_square >> 4;
-		printf("r, cs %d, twm %d\n", cross_score, this_word_multiplier);
 		perpendicular_additional_score += cross_score * this_word_multiplier;
 		word_multiplier *= this_word_multiplier;
 
@@ -342,21 +337,17 @@ void shadow_play_right(Generator * gen, int main_played_through_score, int perpe
 		if (gen->tiles_played + is_unique >= 2) {
 			shadow_record(gen, gen->current_left_col, gen->current_right_col, main_played_through_score, perpendicular_additional_score, word_multiplier);
 		}
-		printf("call from right\n");
 
 		shadow_play_right(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
 	}
 	gen->tiles_played--;
 	gen->current_right_col = original_current_right_col;
-	printf("leaving sp\n");
 }
 
 void shadow_play_left(Generator * gen, int main_played_through_score, int perpendicular_additional_score, int word_multiplier, int is_unique) {
-	printf("\n\nleft: l %d, r %d, t %d, mpt %d, pas %d, wm %d, uniq %d\n", gen->current_left_col, gen->current_right_col, gen->tiles_played, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
 	// Go left until hitting an empty square or the edge of the board.
 
 	if (gen->current_left_col == 0 || gen->current_left_col == gen->last_anchor_col + 1 || gen->tiles_played >= gen->number_of_letters_on_rack) {
-		printf("hit bounds, returning: l %d, la %d, r %d, t %d, l %d\n\n\n", gen->current_left_col, gen->last_anchor_col, gen->current_right_col, gen->tiles_played, gen->number_of_letters_on_rack);
 		// We have gone all the way left or right.
 		return;
 	}
@@ -364,18 +355,8 @@ void shadow_play_left(Generator * gen, int main_played_through_score, int perpen
 	int original_current_left_col = gen->current_left_col;
 	gen->current_left_col--;
 	gen->tiles_played++;
-	// current_letter will always be the empty square
-	// because we would have hit a previous anchor column
-	// before hitting a letter on the board.
-	uint8_t current_letter = get_letter(gen->board, gen->current_row_index, gen->current_left_col);
-	printf("r, new mpt: %d\n", main_played_through_score);
-
-	printf("current left col: %d\n", gen->current_left_col);
-
-	printf("l, current letter empty: %d\n", current_letter);
 	// Only play a letter if a letter from the rack fits in the cross set
 	if (shadow_allowed_in_cross_set(gen, gen->current_left_col)) {
-		printf("l. allowed in cross set\n");
 		// Play tile and update scoring parameters
 
 		uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, gen->current_left_col);
@@ -383,14 +364,11 @@ void shadow_play_left(Generator * gen, int main_played_through_score, int perpen
 		int this_word_multiplier = bonus_square >> 4;
 		perpendicular_additional_score += cross_score * this_word_multiplier;
 		word_multiplier *= this_word_multiplier;
-		printf("l, cs %d, twm %d\n", cross_score, this_word_multiplier);
 		if (gen->tiles_played + is_unique >= 2) {
-			shadow_record(gen, gen->current_left_col, gen->current_right_col, main_played_through_score, perpendicular_additional_score, word_multiplier * (gen->played_through || gen->tiles_played > 0));
+			shadow_record(gen, gen->current_left_col, gen->current_right_col, main_played_through_score, perpendicular_additional_score, word_multiplier);
 		}
-		printf("call from left\n");
 		shadow_play_left(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
 	}
-	printf("call right from left\n");
 	shadow_play_right(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, is_unique);
 	gen->current_left_col = original_current_left_col;
 	gen->tiles_played--;
@@ -403,11 +381,8 @@ void shadow_start(Generator * gen) {
 	uint8_t current_letter = get_letter(gen->board, gen->current_row_index, gen->current_left_col);
 
 	if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-		printf("start, current letter empty: %d\n", current_letter);
 		// Only play a letter if a letter from the rack fits in the cross set
-		printf("start cross set: %ld\nstart rack cross set: %ld\n", get_cross_set(gen->board, gen->current_row_index, gen->current_left_col, !gen->vertical), gen->rack_cross_set);
 		if (shadow_allowed_in_cross_set(gen, gen->current_left_col)) {
-			printf("start, allowed in cross set\n");
 			// Play tile and update scoring parameters
 
 			uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, gen->current_left_col);
@@ -422,7 +397,6 @@ void shadow_start(Generator * gen) {
 			}
 		} else {
 			// Nothing hooks here, return
-			printf("start, no valid cross letters at anchor col, returning\n");
 			return;
 		}
 	} else {
@@ -432,41 +406,37 @@ void shadow_start(Generator * gen) {
 				main_played_through_score += gen->letter_distribution->scores[current_letter];
 			}
 			if (gen->current_left_col == 0 || gen->current_left_col == gen->last_anchor_col + 1) {
-				printf("start, at edge or anchor: gen->current_left_col %d, last_anchor_col %d, stop\n", gen->current_left_col, gen->last_anchor_col);
 				break;
 			}
 			gen->current_left_col--;
 			current_letter = get_letter(gen->board, gen->current_row_index, gen->current_left_col);
 			if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
 				gen->current_left_col++;
-				printf("start, at empty square %d, stop\n", gen->current_left_col);
 				break;
 			}
 		}
 	}
-	printf("start playing LEFT\n");
 	shadow_play_left(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, !gen->vertical);
-	printf("start playing RIGHT");
 	shadow_play_right(gen, main_played_through_score, perpendicular_additional_score, word_multiplier, !gen->vertical);
 }
 
-void shadow_play_for_anchor(Generator * gen, int col, Rack * rack) {
+void shadow_play_for_anchor(Generator * gen, int col, Player * player) {
 
 	// set cols
 	gen->current_left_col = col;
 	gen->current_right_col = col;
 
 	// Reset shadow score
-	gen->highest_shadow_score = 0;
+	gen->highest_shadow_equity = 0;
 
 	// Set the number of letters
-	gen->number_of_letters_on_rack = rack->number_of_letters;
+	gen->number_of_letters_on_rack = player->rack->number_of_letters;
 
 	// Set the current anchor column
 	gen->current_anchor_col = col;
 
-	// Reset whether a tile has been played through
-	gen->played_through = 0;
+	// Set the recorder type
+	gen->move_sorting_type = player->strategy_params->move_sorting;
 
 	// Reset tiles played
 	gen->tiles_played = 0;
@@ -474,18 +444,16 @@ void shadow_play_for_anchor(Generator * gen, int col, Rack * rack) {
 	// Set rack cross set
 	gen->rack_cross_set = 0;
 	for (uint32_t i = 0; i < gen->letter_distribution->size; i++) {
-		if (rack->array[i] > 0) {
+		if (player->rack->array[i] > 0) {
 			gen->rack_cross_set = gen->rack_cross_set | (1 << i);
 		}
 	}
 
-	printf("\n\nSHADOW PLAY FOR ANCHOR: row %d, col %d, vert %d, trans %d, num letters %d\n\n", gen->current_row_index, col, gen->vertical, gen->board->transposed, gen->number_of_letters_on_rack);
 	shadow_start(gen);
-	insert_anchor(gen->anchor_list, gen->current_row_index, col, gen->last_anchor_col, gen->board->transposed, gen->vertical, gen->highest_shadow_score);
+	insert_anchor(gen->anchor_list, gen->current_row_index, col, gen->last_anchor_col, gen->board->transposed, gen->vertical, gen->highest_shadow_equity);
 }
 
 void shadow_by_orientation(Generator * gen, Player * player, int dir) {
-	// genByOrientation
 	for (int row = 0; row < BOARD_DIM; row++)
 	{
 		gen->current_row_index = row;
@@ -493,8 +461,7 @@ void shadow_by_orientation(Generator * gen, Player * player, int dir) {
 		for (int col = 0; col < BOARD_DIM; col++)
 		{
 			if (get_anchor(gen->board, row, col, dir)) {
-				gen->current_anchor_col = col;
-				shadow_play_for_anchor(gen, col, player->rack);
+				shadow_play_for_anchor(gen, col, player);
 				gen->last_anchor_col = col;
 			}
 		}
@@ -512,10 +479,26 @@ void set_descending_tile_scores(Generator * gen, Player * player) {
 }
 
 void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_exchange) {
-	reset_anchor_list(gen->anchor_list);
-	set_descending_tile_scores(gen, player);
+	// Reset the best leaves
+	for (int i = 0; i < (RACK_SIZE); i++) {
+		gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
+	}
+
 	// Add plays
 	set_start_leave_index(player);
+	// Set the best leaves and maybe add exchanges.
+	generate_exchange_moves(gen, player, 0, 0, add_exchange);
+
+	double best_leave = (double)(INITIAL_TOP_MOVE_EQUITY);
+	for (int i = 0; i < (RACK_SIZE); i++) {
+		if (gen->best_leaves[i] > best_leave) {
+			best_leave = gen->best_leaves[i];
+		}
+	}
+
+	reset_anchor_list(gen->anchor_list);
+	set_descending_tile_scores(gen, player);
+
 	for (int dir = 0; dir < 2; dir++)
 	{
 		gen->vertical = dir%2 != 0;
@@ -523,7 +506,13 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 		transpose(gen->board);
 	}
 
+	// Reset the reused generator fields
+	gen->tiles_played = 0;
+
 	for (int i = 0; i < gen->anchor_list->count; i++) {
+		if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_TOP_EQUITY && gen->anchor_list->anchors[i]->highest_possible_equity < gen->move_list->moves[0]->equity) {
+			break;
+		}
 		gen->current_anchor_col = gen->anchor_list->anchors[i]->col;
 		gen->current_row_index = gen->anchor_list->anchors[i]->row;
 		gen->last_anchor_col = gen->anchor_list->anchors[i]->last_anchor_col;
@@ -533,11 +522,6 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 	}
 
 	reset_transpose(gen->board);
-
-	// Add exchanges
-	if (add_exchange) {
-		generate_exchange_moves(gen, player, 0, 0);
-	}
 
 	// Add the pass move
 	if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL || gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
