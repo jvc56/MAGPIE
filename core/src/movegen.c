@@ -511,9 +511,6 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 	// Set the best leaves and maybe add exchanges.
 	generate_exchange_moves(gen, player, 0, 0, add_exchange);
 
-	if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_TOP_EQUITY) {
-	}
-
 	reset_anchor_list(gen->anchor_list);
 	set_descending_tile_scores(gen, player);
 
