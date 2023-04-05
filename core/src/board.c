@@ -305,13 +305,11 @@ void reset_transpose(Board * board) {
 
 Board * create_board() {
 	Board * board = malloc(sizeof(Board));
-	board->traverse_backwards_return_values = malloc(sizeof(TraverseBackwardsReturnValues));
 	reset_board(board);
 	set_bonus_squares(board);
 	return board;
 }
 
 void destroy_board(Board * board) {
-	free(board->traverse_backwards_return_values);
 	free(board);
 }

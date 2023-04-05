@@ -21,26 +21,26 @@ void traverse_backwards(Board * board, int row, int col, uint32_t node_index, in
 
 		if (check_letter_set && col == left_most_col) {
 			if (kwg_in_letter_set(kwg, ml, node_index)) {
-				board->traverse_backwards_return_values->node_index = node_index;
-				board->traverse_backwards_return_values->path_is_valid = 1;
+				board->node_index = node_index;
+				board->path_is_valid = 1;
 				return;
 			}
-			board->traverse_backwards_return_values->node_index = node_index;
-			board->traverse_backwards_return_values->path_is_valid = 0;
+			board->node_index = node_index;
+			board->path_is_valid = 0;
 			return;
 		}
 
 		node_index = kwg_get_next_node_index(kwg, node_index, get_unblanked_machine_letter(ml));
 		if (node_index == 0) {
-			board->traverse_backwards_return_values->node_index = node_index;
-			board->traverse_backwards_return_values->path_is_valid = 0;
+			board->node_index = node_index;
+			board->path_is_valid = 0;
 			return;
 		}
 
 		col--;
 	}
-	board->traverse_backwards_return_values->node_index = node_index;
-	board->traverse_backwards_return_values->path_is_valid = 1;
+	board->node_index = node_index;
+	board->path_is_valid = 1;
 }
 
 void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDistribution * letter_distribution) {
@@ -62,42 +62,38 @@ void gen_cross_set(Board * board, int row, int col, int dir, KWG * kwg, LetterDi
 	int right_col = word_edge(board, row, col+1, WORD_DIRECTION_RIGHT);
 	if (right_col == col) {
 		traverse_backwards(board, row, col-1, kwg_get_root_node_index(kwg), 0, 0, kwg);
-		uint32_t lnode_index = board->traverse_backwards_return_values->node_index;
-		int lpath_is_valid = board->traverse_backwards_return_values->path_is_valid;
 		int score = traverse_backwards_for_score(board, row, col-1, letter_distribution);
 		set_cross_score(board, row, col, score, dir);
 
-		if (!lpath_is_valid) {
+		if (!board->path_is_valid) {
 			set_cross_set(board, row, col, 0, dir);
 			return;
 		}
-		uint32_t s_index = kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
+		uint32_t s_index = kwg_get_next_node_index(kwg, board->node_index, SEPARATION_MACHINE_LETTER);
 		uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
 		set_cross_set(board, row, col, letter_set, dir);
 	} else {
 		int left_col = word_edge(board, row, col-1, WORD_DIRECTION_LEFT);
 		traverse_backwards(board, row, right_col, kwg_get_root_node_index(kwg), 0, 0, kwg);
-		uint32_t lnode_index = board->traverse_backwards_return_values->node_index;
-		int lpath_is_valid = board->traverse_backwards_return_values->path_is_valid;
 		int score_r = traverse_backwards_for_score(board, row, right_col, letter_distribution);
 		int score_l = traverse_backwards_for_score(board, row, col-1, letter_distribution);
 		set_cross_score(board, row, col, score_r+score_l, dir);
-		if (!lpath_is_valid) {
+		if (!board->path_is_valid) {
 			set_cross_set(board, row, col, 0, dir);
 			return;
 		}
 		if (left_col == col) {
-			uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
+			uint64_t letter_set = kwg_get_letter_set(kwg, board->node_index);
 			set_cross_set(board, row, col, letter_set, dir);
 		} else {
 			uint64_t * cross_set = get_cross_set_pointer(board, row, col, dir);
 			*cross_set = 0;
-			for(int i = lnode_index; ;i++) {
+			for(int i = board->node_index; ;i++) {
 				int t = kwg_tile(kwg, i);
 				if (t != 0) {
 					int next_node_index = kwg_arc_index(kwg, i);
 					traverse_backwards(board, row, col-1, next_node_index, 1, left_col, kwg);
-					if (board->traverse_backwards_return_values->path_is_valid) {
+					if (board->path_is_valid) {
 						set_cross_set_letter(cross_set, t);
 					}
 				}

@@ -7,10 +7,6 @@
 #include "letter_distribution.h"
 #include "constants.h"
 
-typedef struct TraverseBackwardsReturnValues {
-	uint32_t node_index;
-	int path_is_valid;
-} TraverseBackwardsReturnValues;
 typedef struct Board {
     uint8_t letters[BOARD_DIM * BOARD_DIM];
     uint8_t bonus_squares[BOARD_DIM * BOARD_DIM];
@@ -19,7 +15,8 @@ typedef struct Board {
     int anchors[BOARD_DIM * BOARD_DIM * 2];
     int transposed;
     int tiles_played;
-    TraverseBackwardsReturnValues * traverse_backwards_return_values;
+	uint32_t node_index;
+	int path_is_valid;
 } Board;
 
 void clear_all_crosses (Board * board);
