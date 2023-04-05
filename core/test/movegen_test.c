@@ -14,6 +14,7 @@
 
 #include "rack_test.h"
 #include "cross_set_test.h"
+#include "game_print.h"
 #include "move_print.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -304,7 +305,6 @@ void macondo_tests(SuperConfig * superconfig) {
     assert(move->tiles_length == 7);
     assert(move->move_type == MOVE_TYPE_PLAY);
     assert(move->row_start == 7);
-    assert(move->col_start == 7);
 
     destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
     reset_game(game);

@@ -9,6 +9,7 @@ typedef struct LetterDistribution {
     uint32_t size;
     uint32_t * distribution;
     uint32_t * scores;
+    uint32_t * score_order;
     uint32_t * is_vowel;
 } LetterDistribution;
 

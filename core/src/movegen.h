@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "alphabet.h"
+#include "anchor.h"
 #include "bag.h"
 #include "board.h"
 #include "config.h"
@@ -33,6 +34,17 @@ typedef struct Generator {
 
     KWG * kwg;
     LetterDistribution * letter_distribution;
+
+    // Shadow plays
+    int current_left_col;
+    int current_right_col;
+    double highest_shadow_equity;
+    uint64_t rack_cross_set;
+    int move_sorting_type;
+    int number_of_letters_on_rack;
+    int descending_tile_scores[(RACK_SIZE)];
+    double best_leaves[(RACK_SIZE)];
+    AnchorList * anchor_list;
 } Generator;
 
 Generator * create_generator(Config * config);

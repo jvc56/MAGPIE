@@ -271,8 +271,8 @@ int score_move(Board * board, uint8_t word[], int word_start_index, int word_end
 			ml = get_letter(board, row, col + idx);
 		} else {
 			fresh_tile = 1;
-			this_word_multiplier = bonus_square / 16;
-			letter_multiplier = bonus_square % 16;
+			this_word_multiplier = bonus_square >> 4;
+			letter_multiplier = bonus_square & 0x0F;
 			word_multiplier *= this_word_multiplier;
 		}
 		int cs = get_cross_score(board, row, col+idx, cross_dir);
@@ -293,6 +293,14 @@ int score_move(Board * board, uint8_t word[], int word_start_index, int word_end
 
 void transpose(Board * board) {
 	board->transposed = 1 - board->transposed;
+}
+
+void set_transpose(Board * board, int transpose) {
+	board->transposed = transpose;
+}
+
+void reset_transpose(Board * board) {
+	board->transposed = 0;
 }
 
 Board * create_board() {
