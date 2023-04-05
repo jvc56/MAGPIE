@@ -17,10 +17,19 @@ typedef struct Alphabet {
 
 Alphabet * create_alphabet_from_file(const char* alphabet_filename);
 void destroy_alphabet(Alphabet * alphabet);
-uint8_t get_blanked_machine_letter(uint8_t ml);
-uint8_t get_unblanked_machine_letter(uint8_t letter);
-uint8_t is_blanked(uint8_t ml);
-int is_vowel(uint8_t ml, Alphabet * alphabet);
+
+inline uint8_t get_blanked_machine_letter(uint8_t ml) {
+	return ml | BLANK_MASK;
+}
+
+inline uint8_t get_unblanked_machine_letter(uint8_t ml) {
+	return ml & UNBLANK_MASK;
+}
+
+inline uint8_t is_blanked(uint8_t ml) {
+	return (ml & BLANK_MASK) > 0;
+}
+
 uint8_t val(Alphabet * alphabet, unsigned char r);
 unsigned char user_visible_letter(Alphabet * alphabet, uint8_t ml);
 

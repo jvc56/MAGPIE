@@ -39,7 +39,7 @@ double placement_adjustment(Generator * gen, Move * move) {
 	double v_penalty = OPENING_HOTSPOT_PENALTY;
 
 	while (j < end) {
-		if (is_vowel(move->tiles[j-start], gen->kwg->alphabet) && (j == 2 || j == 6 || j == 8 || j == 12)) {
+		if (gen->letter_distribution->is_vowel[move->tiles[j-start]] && (j == 2 || j == 6 || j == 8 || j == 12)) {
 			penalty += v_penalty;
 		}
 		j++;
