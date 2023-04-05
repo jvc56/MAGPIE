@@ -93,23 +93,9 @@ void destroy_alphabet(Alphabet * alphabet) {
 	free(alphabet);
 }
 
-uint8_t get_blanked_machine_letter(uint8_t ml) {
-	return ml | BLANK_MASK;
-}
-
-uint8_t get_unblanked_machine_letter(uint8_t ml) {
-	return ml & UNBLANK_MASK;
-}
-
-uint8_t is_blanked(uint8_t ml) {
-	return (ml & BLANK_MASK) > 0;
-}
-
-int is_vowel(uint8_t ml, Alphabet * alphabet) {
-	ml = get_unblanked_machine_letter(ml);
-	uint8_t rn = alphabet->letters[ml];
-	return rn == 'A' || rn == 'E' || rn == 'I' || rn == 'O' || rn == 'U';
-}
+extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
+extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
+extern inline uint8_t is_blanked(uint8_t ml);
 
 // Assumes english
 uint8_t val(Alphabet * alphabet, unsigned char r) {

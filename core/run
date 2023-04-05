@@ -54,7 +54,7 @@ if [ -z "$2" ]; then
 fi
 
 # Set paranoia to 0 with
-# sudo sysctl -w kernel.perf_event_paranoid=1
+# sudo sysctl -w kernel.perf_event_paranoid=0
 
 # Then, as sudo
 # echo 0 > /proc/sys/kernel/kptr_restrict
