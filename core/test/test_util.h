@@ -6,7 +6,7 @@
 #include "../src/config.h"
 #include "../src/game.h"
 #include "../src/movegen.h"
-#include "../src/leaves.h"
+#include "../src/klv.h"
 #include "../src/move.h"
 #include "../src/rack.h"
 
@@ -16,8 +16,8 @@ typedef struct SortedMoveList {
 } SortedMoveList;
 
 void generate_moves_for_game(Game * game);
-double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack);
-double get_leave_value_for_rack(Laddag * laddag, Rack * rack);
+double get_leave_value_for_move(KLV * klv, Move * move, Rack * rack);
+double get_leave_value_for_rack(KLV * klv, Rack * rack);
 void play_top_n_equity_move(Game * game, int n);
 SortedMoveList * create_sorted_move_list(MoveList * ml);
 void destroy_sorted_move_list(SortedMoveList * sorted_move_list);

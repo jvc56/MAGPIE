@@ -42,7 +42,9 @@ KWG * create_kwg(const char* kwg_filename, const char* alphabet_filename) {
 }
 
 void destroy_kwg(KWG * kwg) {
-    destroy_alphabet(kwg->alphabet);
+    if (kwg->alphabet) {
+        destroy_alphabet(kwg->alphabet);
+    }
     free(kwg->nodes);
     free(kwg);
 }

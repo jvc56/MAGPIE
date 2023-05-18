@@ -57,7 +57,6 @@ void boards_equal(Board * b1, Board * b2) {
 }
 
 void execute_recursive_gen(Generator * gen, int col, Player * player, int leftstrip, int rightstrip, int unique_play) {
-    set_start_leave_index(player);
     recursive_gen(gen, col, player, NULL, kwg_get_root_node_index(gen->kwg), leftstrip, rightstrip, unique_play);
 }
 
@@ -393,7 +392,7 @@ void equity_test(SuperConfig * superconfig) {
     Game * game = create_game(config);
     Player * player = game->players[0];
     player->strategy_params->move_sorting = SORT_BY_EQUITY;
-    Laddag * laddag = player->strategy_params->laddag;
+    KLV * klv = player->strategy_params->klv;
     // A middlegame is chosen to avoid
     // the opening and endgame equity adjustments
     load_cgp(game, VS_ED);
@@ -412,7 +411,7 @@ void equity_test(SuperConfig * superconfig) {
         Move * move = equity_test_sorted_move_list->moves[i];
         assert(move->equity <= previous_equity);
         set_rack_to_string(move_rack, "AFGIIIS", game->gen->kwg->alphabet);
-        double leave_value = get_leave_value_for_move(laddag, move, move_rack);
+        double leave_value = get_leave_value_for_move(klv, move, move_rack);
         assert(within_epsilon(move->equity, (((double)move->score) + leave_value)));
         previous_equity = move->equity;
     }

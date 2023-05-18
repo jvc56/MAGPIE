@@ -9,7 +9,7 @@
 #include "../src/constants.h"
 #include "../src/game.h"
 #include "../src/gameplay.h"
-#include "../src/leaves.h"
+#include "../src/klv.h"
 #include "../src/move.h"
 #include "../src/rack.h"
 
@@ -47,7 +47,7 @@ int within_epsilon(double a, double b) {
     return fabs(a - b) < EPSILON;
 }
 
-double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack) {
+double get_leave_value_for_move(KLV * klv, Move * move, Rack * rack) {
     int valid_tiles = move->tiles_length;
     if (move->move_type == MOVE_TYPE_EXCHANGE) {
         valid_tiles = move->tiles_played;
@@ -61,13 +61,11 @@ double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack) {
             }
         }
     }
-    go_to_leave(laddag, rack);
-    return get_current_value(laddag);
+    return leave_value(klv, rack);
 }
 
-double get_leave_value_for_rack(Laddag * laddag, Rack * rack) {
-    go_to_leave(laddag, rack);
-    return get_current_value(laddag);
+double get_leave_value_for_rack(KLV * klv, Rack * rack) {
+    return leave_value(klv, rack);
 }
 
 void generate_moves_for_game(Game * game) {

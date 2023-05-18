@@ -9,26 +9,12 @@
 #include "constants.h"
 #include "cross_set.h"
 #include "kwg.h"
-#include "leaves.h"
+#include "klv.h"
 #include "movegen.h"
 #include "player.h"
 #include "rack.h"
 
 void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, int accepts, int leftstrip, int rightstrip, int unique_play);
-
-void add_letter_to_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
-	add_letter_to_rack(player->rack, letter);
-	traverse_add_edge(player->strategy_params->laddag, letter);
-}
-
-void take_letter_from_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
-	take_letter_from_rack(player->rack, letter);
-	traverse_take_edge(player->strategy_params->laddag, letter);
-}
-
-void set_start_leave_index(Player * player) {
-	set_start_leave(player->strategy_params->laddag, player->rack);
-}
 
 double placement_adjustment(Generator * gen, Move * move) {
 	int start = move->col_start;
@@ -65,7 +51,7 @@ double get_spare_move_equity(Generator * gen, Player * player, Rack * opp_rack) 
 	}
 
 	if (gen->bag->last_tile_index >= 0) {
-		leave_adjustment = get_current_value(player->strategy_params->laddag);
+		leave_adjustment = leave_value(player->strategy_params->klv, player->rack);
 		int bag_plus_rack_size = (gen->bag->last_tile_index+1) - gen->move_list->spare_move->tiles_played + RACK_SIZE;
 		if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
 			other_adjustments += gen->preendgame_adjustment_values[bag_plus_rack_size];
@@ -129,7 +115,7 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 	if (ml == (gen->letter_distribution->size)) {
 		// The recording of an exchange should never require
 		// the opponent's rack.
-		double current_value = get_current_value(player->strategy_params->laddag);
+		double current_value = leave_value(player->strategy_params->klv, player->rack);
 		if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
 			gen->best_leaves[player->rack->number_of_letters] = current_value;
 		}
@@ -142,11 +128,11 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 		for (int i = 0; i < num_this; i++) {
 			gen->exchange_strip[stripidx] = ml;
 			stripidx += 1;
-			take_letter_from_rack_and_recalculate_leave_index(player, ml);
+			take_letter_from_rack(player->rack, ml);
 			generate_exchange_moves(gen, player, ml+1, stripidx, add_exchange);
 		}
 		for (int i = 0; i < num_this; i++) {
-			add_letter_to_rack_and_recalculate_leave_index(player, ml);
+			add_letter_to_rack(player->rack, ml);
 		}
 	}
 }
@@ -182,19 +168,19 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 				int next_node_index = kwg_arc_index(gen->kwg, i);
 				int accepts = kwg_accepts(gen->kwg, i);
 				if (player->rack->array[ml] > 0) {
-					take_letter_from_rack_and_recalculate_leave_index(player, ml);
+					take_letter_from_rack(player->rack, ml);
 					gen->tiles_played++;
 					go_on(gen, col, ml, player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 					gen->tiles_played--;
-					add_letter_to_rack_and_recalculate_leave_index(player, ml);
+					add_letter_to_rack(player->rack, ml);
 				}
 				// check blank
 				if (player->rack->array[0] > 0) {
-					take_letter_from_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
+					take_letter_from_rack(player->rack, BLANK_MACHINE_LETTER);
 					gen->tiles_played++;
 					go_on(gen, col, get_blanked_machine_letter(ml), player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 					gen->tiles_played--;
-					add_letter_to_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
+					add_letter_to_rack(player->rack, BLANK_MACHINE_LETTER);
 				}
 			}
 			if (kwg_is_end(gen->kwg, i)) {
@@ -506,8 +492,6 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 		gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
 	}
 
-	// Add plays
-	set_start_leave_index(player);
 	// Set the best leaves and maybe add exchanges.
 	generate_exchange_moves(gen, player, 0, 0, add_exchange);
 

@@ -380,29 +380,29 @@ void test_shadow_equity(SuperConfig * superconfig) {
     load_and_generate(game, player, EMPTY_CGP, "ERSVQUW", 0);
 
     set_rack_to_string(leave_rack, "", game->gen->kwg->alphabet);
-    assert(within_epsilon(game->gen->best_leaves[0], get_leave_value_for_rack(player->strategy_params->laddag, leave_rack)));
+    assert(within_epsilon(game->gen->best_leaves[0], get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
 
     set_rack_to_string(leave_rack, "S", game->gen->kwg->alphabet);
-    assert(within_epsilon(game->gen->best_leaves[1], get_leave_value_for_rack(player->strategy_params->laddag, leave_rack)));
+    assert(within_epsilon(game->gen->best_leaves[1], get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
 
     set_rack_to_string(leave_rack, "ES", game->gen->kwg->alphabet);
-    assert(within_epsilon(game->gen->best_leaves[2], get_leave_value_for_rack(player->strategy_params->laddag, leave_rack)));
+    assert(within_epsilon(game->gen->best_leaves[2], get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
 
     set_rack_to_string(leave_rack, "ERS", game->gen->kwg->alphabet);
-    assert(within_epsilon(game->gen->best_leaves[3], get_leave_value_for_rack(player->strategy_params->laddag, leave_rack)));
+    assert(within_epsilon(game->gen->best_leaves[3], get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
 
     set_rack_to_string(leave_rack, "EQSU", game->gen->kwg->alphabet);
-    assert(within_epsilon(game->gen->best_leaves[4], get_leave_value_for_rack(player->strategy_params->laddag, leave_rack)));
+    assert(within_epsilon(game->gen->best_leaves[4], get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
 
     set_rack_to_string(leave_rack, "EQRSU", game->gen->kwg->alphabet);
-    assert(within_epsilon(game->gen->best_leaves[5], get_leave_value_for_rack(player->strategy_params->laddag, leave_rack)));
+    assert(within_epsilon(game->gen->best_leaves[5], get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
 
     set_rack_to_string(leave_rack, "EQRSUV", game->gen->kwg->alphabet);
-    assert(within_epsilon(game->gen->best_leaves[6], get_leave_value_for_rack(player->strategy_params->laddag, leave_rack)));
+    assert(within_epsilon(game->gen->best_leaves[6], get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
 
     load_and_generate(game, player, EMPTY_CGP, "ESQW", 1);
     set_rack_to_string(leave_rack, "ES", game->gen->kwg->alphabet);
-    assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 28 + get_leave_value_for_rack(player->strategy_params->laddag, leave_rack)));
+    assert(within_epsilon(game->gen->anchor_list->anchors[0]->highest_possible_equity, 28 + get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
 
     player->strategy_params->move_sorting = original_move_sorting;
 

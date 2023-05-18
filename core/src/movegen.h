@@ -10,7 +10,7 @@
 #include "config.h"
 #include "constants.h"
 #include "kwg.h"
-#include "leaves.h"
+#include "klv.h"
 #include "letter_distribution.h"
 #include "move.h"
 #include "player.h"
