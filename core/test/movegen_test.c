@@ -412,7 +412,7 @@ void equity_test(SuperConfig * superconfig) {
         assert(move->equity <= previous_equity);
         set_rack_to_string(move_rack, "AFGIIIS", game->gen->kwg->alphabet);
         double leave_value = get_leave_value_for_move(klv, move, move_rack);
-        assert(within_epsilon(move->equity, (((double)move->score) + leave_value)));
+        assert(within_epsilon_double(move->equity, (((double)move->score) + leave_value)));
         previous_equity = move->equity;
     }
     assert(equity_test_sorted_move_list->moves[number_of_moves - 1]->move_type == MOVE_TYPE_PASS);

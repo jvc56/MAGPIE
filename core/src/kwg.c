@@ -23,7 +23,7 @@ void load_kwg(KWG * kwg, const char* kwg_filename, const char* alphabet_filename
     kwg->nodes = (uint32_t *) malloc(number_of_nodes*sizeof(uint32_t));
 	result = fread(kwg->nodes, sizeof(uint32_t), number_of_nodes, stream);
 	if (result != number_of_nodes) {
-		printf("fread failure: %zd != %zd", result, number_of_nodes);
+		printf("kwg nodes fread failure: %zd != %zd", result, number_of_nodes);
 		exit(EXIT_FAILURE);
 	}
 	for (uint32_t i = 0; i < number_of_nodes; i++) {

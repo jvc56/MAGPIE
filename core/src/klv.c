@@ -41,6 +41,46 @@ void count_words(KLV * klv, size_t kwg_size) {
     }
 }
 
+void print_float_bits(float value) {
+    unsigned int* float_bits = (unsigned int*)&value;
+
+    // Obtain the bit representation
+    unsigned int bits = *float_bits;
+
+    // Print the bits
+    for (int i = sizeof(float) * 8 - 1; i >= 0; i--) {
+        unsigned int bit = (bits >> i) & 1;
+        printf("%u", bit);
+    }
+    printf("\n");
+}
+
+// Egregious hack to convert endianness of a float
+float convert_little_endian_to_host(float little_endian_float) {
+    uint32_t* little_endian_bits = (uint32_t*)&little_endian_float;
+    uint32_t host_bits = *little_endian_bits;
+
+    // Check if host machine is little-endian
+    union {
+        uint32_t i;
+        char c[4];
+    } endian_check = {0x01020304};
+
+    if (endian_check.c[0] == 4) {
+        // Host machine is little-endian
+        return *((float*)&host_bits);
+    } else {
+        // Host machine is big-endian, swap bytes
+        uint32_t big_endian_bits =
+            ((host_bits & 0xFF000000) >> 24) |
+            ((host_bits & 0x00FF0000) >> 8) |
+            ((host_bits & 0x0000FF00) << 8) |
+            ((host_bits & 0x000000FF) << 24);
+
+        return *((float*)&big_endian_bits);
+    }
+}
+
 void load_klv(KLV * klv, const char* klv_filename) {
 	FILE * stream;
 	stream = fopen(klv_filename, "r");
@@ -57,9 +97,7 @@ void load_klv(KLV * klv, const char* klv_filename) {
 		printf("kwg size fread failure: %zd != %d\n", result, 1);
 		exit(EXIT_FAILURE);
 	}
-    printf("kwg_size b: %d\n", kwg_size);
 	kwg_size = le32toh(kwg_size);
-    printf("kwg_size a: %d\n", kwg_size);
 
     klv->kwg = malloc(sizeof(KWG));
     klv->kwg->nodes = (uint32_t *) malloc(kwg_size*sizeof(uint32_t));
@@ -87,7 +125,7 @@ void load_klv(KLV * klv, const char* klv_filename) {
 		exit(EXIT_FAILURE);
 	}
 	for (uint32_t i = 0; i < number_of_leaves; i++) {
-		klv->leave_values[i] = le32toh(klv->leave_values[i]);
+		klv->leave_values[i] = convert_little_endian_to_host(klv->leave_values[i]);
 	}
 
     klv->word_counts =  (int *) malloc(kwg_size*sizeof(int));
@@ -118,15 +156,16 @@ int get_word_index_of(KLV * klv, uint32_t node_index, Rack * leave) {
     int idx = 0;
     int lidx = 0;
     int lidx_letter_count = leave->array[lidx];
+    int number_of_letters = leave->number_of_letters;
 
     // Advance lidx
-    if (lidx_letter_count == 0) {
+    while (lidx_letter_count == 0) {
         lidx++;
         lidx_letter_count = leave->array[lidx];
     }
 
     while (node_index != 0) {
-        while (kwg_tile(klv->kwg, node_index) != (uint8_t)leave->array[lidx]) {
+        while (kwg_tile(klv->kwg, node_index) != (uint8_t)lidx) {
             if (kwg_is_end(klv->kwg, node_index)) {
                 return -1;
             }
@@ -135,14 +174,15 @@ int get_word_index_of(KLV * klv, uint32_t node_index, Rack * leave) {
         }
 
         lidx_letter_count--;
+        number_of_letters--;
 
         // Advance lidx
-        if (lidx_letter_count == 0) {
+        while (lidx_letter_count == 0) {
             lidx++;
             lidx_letter_count = leave->array[lidx];
         }
 
-        if (lidx > leave->number_of_letters - 1) {
+        if (number_of_letters == 0) {
             if (kwg_accepts(klv->kwg, node_index)) {
                 return idx;
             }

@@ -43,8 +43,12 @@ void reset_string(char * string) {
     memset(string, 0, sizeof(*string));
 }
 
-int within_epsilon(double a, double b) {
-    return fabs(a - b) < EPSILON;
+int within_epsilon_double(double a, double b) {
+    return fabs(a - b) < DOUBLE_EPSILON;
+}
+
+int within_epsilon_float(float a, float b) {
+    return fabs(a - b) < FLOAT_EPSILON;
 }
 
 double get_leave_value_for_move(KLV * klv, Move * move, Rack * rack) {

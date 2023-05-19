@@ -30,7 +30,7 @@ void unit_tests(SuperConfig * superconfig) {
 
     // Test the readonly data first
     test_alphabet(superconfig);
-    test_leaves(superconfig);
+    test_leaves(superconfig, "./data/lexica/CSW21.csv");
     test_letter_distribution(superconfig);
 
     // Now test the rest
