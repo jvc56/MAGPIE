@@ -5,7 +5,7 @@
 #include "klv.h"
 #include "rack.h"
 
-int count_words_at(KLV * klv, int p, size_t kwg_size) {
+int count_words_at(KLV * klv, int p, int kwg_size) {
     if (p >= kwg_size) {
         return 0;
     }
@@ -35,24 +35,10 @@ int count_words_at(KLV * klv, int p, size_t kwg_size) {
     return klv->word_counts[p];
 }
 
-void count_words(KLV * klv, size_t kwg_size) {
+void count_words(KLV * klv, int kwg_size) {
     for (int p = kwg_size - 1; p >= 0; p--) {
         count_words_at(klv, p, kwg_size);
     }
-}
-
-void print_float_bits(float value) {
-    unsigned int* float_bits = (unsigned int*)&value;
-
-    // Obtain the bit representation
-    unsigned int bits = *float_bits;
-
-    // Print the bits
-    for (int i = sizeof(float) * 8 - 1; i >= 0; i--) {
-        unsigned int bit = (bits >> i) & 1;
-        printf("%u", bit);
-    }
-    printf("\n");
 }
 
 // Egregious hack to convert endianness of a float
@@ -129,11 +115,11 @@ void load_klv(KLV * klv, const char* klv_filename) {
 	}
 
     klv->word_counts =  (int *) malloc(kwg_size*sizeof(int));
-    for (int i = 0; i < kwg_size; i++) {
+    for (int i = 0; i < (int)kwg_size; i++) {
         klv->word_counts[i] = 0;
     }
 
-    count_words(klv, kwg_size);
+    count_words(klv, (int)kwg_size);
 
     // The KLV does not use the alphabet in the KWG
     klv->kwg->alphabet = NULL;
