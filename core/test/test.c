@@ -15,6 +15,7 @@
 #include "gen_all_test.h"
 #include "gameplay_test.h"
 #include "leaves_test.h"
+#include "leave_map_test.h"
 #include "letter_distribution_test.h"
 #include "movegen_test.h"
 #include "prof_tests.h"
@@ -31,6 +32,7 @@ void unit_tests(SuperConfig * superconfig) {
     // Test the readonly data first
     test_alphabet(superconfig);
     test_leaves(superconfig, "./data/lexica/CSW21.csv");
+    test_leave_map(superconfig);
     test_letter_distribution(superconfig);
 
     // Now test the rest

@@ -42,7 +42,7 @@ float get_current_value(LeaveMap * leave_map) {
     return leave_map->leave_values[leave_map->current_index];
 }
 
-LeaveMap * init_leave_map(LeaveMap * leave_map, Rack * rack) {
+void init_leave_map(LeaveMap * leave_map, Rack * rack) {
     int current_base_index = 0;
     for (int i = 0; i < rack->array_size; i++) {
         if (rack->array[i] > 0) {
@@ -50,5 +50,5 @@ LeaveMap * init_leave_map(LeaveMap * leave_map, Rack * rack) {
             current_base_index += rack->array[i];
         }
     }
-    leave_map->current_index = (1 << (current_base_index + 1)) - 1;
+    leave_map->current_index = (1 << current_base_index) - 1;
 }

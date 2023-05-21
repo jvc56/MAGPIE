@@ -5,7 +5,7 @@
 #include "klv.h"
 #include "rack.h"
 
-int count_words_at(KLV * klv, int p, size_t kwg_size) {
+int count_words_at(KLV * klv, int p, int kwg_size) {
     if (p >= kwg_size) {
         return 0;
     }
@@ -37,7 +37,7 @@ int count_words_at(KLV * klv, int p, size_t kwg_size) {
 
 void count_words(KLV * klv, size_t kwg_size) {
     for (int p = kwg_size - 1; p >= 0; p--) {
-        count_words_at(klv, p, kwg_size);
+        count_words_at(klv, p, (int)kwg_size);
     }
 }
 
@@ -129,7 +129,7 @@ void load_klv(KLV * klv, const char* klv_filename) {
 	}
 
     klv->word_counts =  (int *) malloc(kwg_size*sizeof(int));
-    for (int i = 0; i < kwg_size; i++) {
+    for (size_t i = 0; i < kwg_size; i++) {
         klv->word_counts[i] = 0;
     }
 
