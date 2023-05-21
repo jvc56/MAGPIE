@@ -115,7 +115,7 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 	if (ml == (gen->letter_distribution->size)) {
 		// The recording of an exchange should never require
 		// the opponent's rack.
-		double current_value = leave_value(player->strategy_params->klv, player->rack);
+		float current_value = leave_value(player->strategy_params->klv, player->rack);
 		if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
 			gen->best_leaves[player->rack->number_of_letters] = current_value;
 		}

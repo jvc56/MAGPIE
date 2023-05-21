@@ -8,10 +8,11 @@
 
 typedef struct LeaveMap {
     float * leave_values;
-    int current_bit_map;
+    int * letter_base_index_map;
+    int current_index;
 } LeaveMap;
 
-LeaveMap * create_leave_map(int rack_size);
+LeaveMap * create_leave_map(int rack_array_size);
 void destroy_leave_map(LeaveMap * LeaveMap);
 
 #endif
