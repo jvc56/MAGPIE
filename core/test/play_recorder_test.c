@@ -11,9 +11,9 @@
 
 void play_top_versus_all_game(Game * game) {
     int top_move_index;
-    double top_move_equity;
+    float top_move_equity;
 
-    double equity;
+    float equity;
     int score;
     int row_start;
     int col_start;

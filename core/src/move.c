@@ -90,7 +90,7 @@ void set_spare_move(MoveList * ml, uint8_t strip[], int leftstrip, int rightstri
     set_move(ml->spare_move, strip, leftstrip, rightstrip, score, row_start, col_start, tiles_played, vertical, move_type);
 }
 
-void insert_spare_move(MoveList * ml, double equity) {
+void insert_spare_move(MoveList * ml, float equity) {
     ml->spare_move->equity = equity;
 
     Move * swap = ml->moves[ml->count];
@@ -105,7 +105,7 @@ void insert_spare_move(MoveList * ml, double equity) {
     }
 }
 
-void insert_spare_move_top_equity(MoveList * ml, double equity) {
+void insert_spare_move_top_equity(MoveList * ml, float equity) {
     if (equity > ml->moves[0]->equity) {
         ml->spare_move->equity = equity;
         Move * swap = ml->moves[0];

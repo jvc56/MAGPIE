@@ -15,7 +15,7 @@ void load_and_generate(Game * game, Player * player, const char * cgp, const cha
     load_cgp(game, cgp);
     set_rack_to_string(player->rack, rack, game->gen->kwg->alphabet);
     generate_moves(game->gen, player, NULL, add_exchange);
-    double previous_equity;
+    float previous_equity;
     for (int i = 0; i < game->gen->anchor_list->count; i++) {
         if (i == 0) {
             previous_equity = game->gen->anchor_list->anchors[i]->highest_possible_equity;
@@ -173,7 +173,7 @@ void test_shadow_score(SuperConfig * superconfig) {
     assert(within_epsilon_double(game->gen->anchor_list->anchors[7]->highest_possible_equity, 0));
     assert(within_epsilon_double(game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
-    // Makeing JA, FA, and JFU, doubling the U on the double letter
+    // Makeing JA, FA, and JFU, doubling the U on the ldouble letter
     load_and_generate(game, player, AA_OPENING_CGP, "JFU", 0);
     assert(within_epsilon_double(game->gen->anchor_list->anchors[0]->highest_possible_equity, 44));
 
