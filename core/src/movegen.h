@@ -34,7 +34,7 @@ typedef struct Generator {
     Bag * bag;
 
     KWG * kwg;
-    LeaveMap * leave_map;
+    // LeaveMap * leave_map;
     LetterDistribution * letter_distribution;
 
     // Shadow plays
