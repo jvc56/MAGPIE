@@ -35,7 +35,7 @@ void write_char_to_end_of_buffer(char * buffer, char c) {
     sprintf(buffer + strlen(buffer), "%c", c);
 }
 
-void write_double_to_end_of_buffer(char * buffer, double d) {
+void write_float_to_end_of_buffer(char * buffer, float d) {
     sprintf(buffer + strlen(buffer), "%0.2f", d);
 }
 
@@ -43,15 +43,11 @@ void reset_string(char * string) {
     memset(string, 0, sizeof(*string));
 }
 
-int within_epsilon_double(double a, double b) {
+int within_epsilon_float(float a, float b) {
     return fabs(a - b) < DOUBLE_EPSILON;
 }
 
-int within_epsilon_float(float a, float b) {
-    return fabs(a - b) < FLOAT_EPSILON;
-}
-
-double get_leave_value_for_move(KLV * klv, Move * move, Rack * rack) {
+float get_leave_value_for_move(KLV * klv, Move * move, Rack * rack) {
     int valid_tiles = move->tiles_length;
     if (move->move_type == MOVE_TYPE_EXCHANGE) {
         valid_tiles = move->tiles_played;
@@ -68,7 +64,7 @@ double get_leave_value_for_move(KLV * klv, Move * move, Rack * rack) {
     return leave_value(klv, rack);
 }
 
-double get_leave_value_for_rack(KLV * klv, Rack * rack) {
+float get_leave_value_for_rack(KLV * klv, Rack * rack) {
     return leave_value(klv, rack);
 }
 

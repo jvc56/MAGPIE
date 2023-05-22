@@ -18,7 +18,7 @@ void destroy_leave_map(LeaveMap * leave_map) {
     free(leave_map);
 }
 
-void take_letter_and_update_current_value(LeaveMap * leave_map, Rack * rack, uint8_t letter) {
+void take_letter_and_update_current_index(LeaveMap * leave_map, Rack * rack, uint8_t letter) {
 	take_letter_from_rack(rack, letter);
     int base_index = leave_map->letter_base_index_map[letter];
     int offset = rack->array[letter];
@@ -26,7 +26,7 @@ void take_letter_and_update_current_value(LeaveMap * leave_map, Rack * rack, uin
     leave_map->current_index &= ~(1 << bit_index);
 }
 
-void add_letter_and_update_current_value(LeaveMap * leave_map, Rack * rack, uint8_t letter) {
+void add_letter_and_update_current_index(LeaveMap * leave_map, Rack * rack, uint8_t letter) {
 	add_letter_to_rack(rack, letter);
     int base_index = leave_map->letter_base_index_map[letter];
     int offset = rack->array[letter] - 1;

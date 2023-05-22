@@ -124,6 +124,9 @@ void load_klv(KLV * klv, const char* klv_filename) {
 		printf("edges fread failure: %zd != %d\n", result, number_of_leaves);
 		exit(EXIT_FAILURE);
 	}
+
+    fclose(stream);
+
 	for (uint32_t i = 0; i < number_of_leaves; i++) {
 		klv->leave_values[i] = convert_little_endian_to_host(klv->leave_values[i]);
 	}
@@ -179,6 +182,9 @@ int get_word_index_of(KLV * klv, uint32_t node_index, Rack * leave) {
         // Advance lidx
         while (lidx_letter_count == 0) {
             lidx++;
+            if (lidx >= leave->array_size) {
+                break;
+            }
             lidx_letter_count = leave->array[lidx];
         }
 

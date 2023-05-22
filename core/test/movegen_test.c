@@ -403,7 +403,7 @@ void equity_test(SuperConfig * superconfig) {
 
     SortedMoveList * equity_test_sorted_move_list = create_sorted_move_list(game->gen->move_list);
 
-    double previous_equity = 1000000.0;
+    float previous_equity = 1000000.0;
     Rack * move_rack = create_rack(config->letter_distribution->size);
     int number_of_moves = equity_test_sorted_move_list->count;
 
@@ -411,8 +411,8 @@ void equity_test(SuperConfig * superconfig) {
         Move * move = equity_test_sorted_move_list->moves[i];
         assert(move->equity <= previous_equity);
         set_rack_to_string(move_rack, "AFGIIIS", game->gen->kwg->alphabet);
-        double leave_value = get_leave_value_for_move(klv, move, move_rack);
-        assert(within_epsilon_double(move->equity, (((double)move->score) + leave_value)));
+        float leave_value = get_leave_value_for_move(klv, move, move_rack);
+        assert(within_epsilon_float(move->equity, (((float)move->score) + leave_value)));
         previous_equity = move->equity;
     }
     assert(equity_test_sorted_move_list->moves[number_of_moves - 1]->move_type == MOVE_TYPE_PASS);
