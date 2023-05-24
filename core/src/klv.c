@@ -55,11 +55,23 @@ void print_float_bits(float value) {
     printf("\n");
 }
 
+float reverse_float(const float in_float)
+{
+   float ret_val;
+   char *float_to_convert = (char*)&in_float;
+   char *return_float = (char*)&ret_val;
+
+   // swap the bytes into a temporary buffer
+   return_float[0] = float_to_convert[3];
+   return_float[1] = float_to_convert[2];
+   return_float[2] = float_to_convert[1];
+   return_float[3] = float_to_convert[0];
+
+   return ret_val;
+}
+
 // Egregious hack to convert endianness of a float
 float convert_little_endian_to_host(float little_endian_float) {
-    uint32_t* little_endian_bits = (uint32_t*)&little_endian_float;
-    uint32_t host_bits = *little_endian_bits;
-
     // Check if host machine is little-endian
     union {
         uint32_t i;
@@ -68,16 +80,10 @@ float convert_little_endian_to_host(float little_endian_float) {
 
     if (endian_check.c[0] == 4) {
         // Host machine is little-endian
-        return *((float*)&host_bits);
+        return little_endian_float;
     } else {
-        // Host machine is big-endian, swap bytes
-        uint32_t big_endian_bits =
-            ((host_bits & 0xFF000000) >> 24) |
-            ((host_bits & 0x00FF0000) >> 8) |
-            ((host_bits & 0x0000FF00) << 8) |
-            ((host_bits & 0x000000FF) << 24);
-
-        return *((float*)&big_endian_bits);
+        // Host machine is big-endian
+        return reverse_float(little_endian_float);
     }
 }
 
