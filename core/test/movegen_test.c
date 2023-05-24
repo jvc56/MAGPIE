@@ -57,7 +57,7 @@ void boards_equal(Board * b1, Board * b2) {
 }
 
 void execute_recursive_gen(Generator * gen, int col, Player * player, int leftstrip, int rightstrip, int unique_play) {
-	// init_leave_map(gen->leave_map, player->rack);
+	init_leave_map(gen->leave_map, player->rack);
     recursive_gen(gen, col, player, NULL, kwg_get_root_node_index(gen->kwg), leftstrip, rightstrip, unique_play);
 }
 
