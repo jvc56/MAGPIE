@@ -144,9 +144,23 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 	}
 }
 
+void load_row_letter_cache(Generator * gen, int row) {
+	for (int col = 0; col < BOARD_DIM; col++) {
+		gen->row_letter_cache[col] = get_letter(gen->board, row, col);
+	}
+}
+
+uint8_t get_letter_cache(Generator * gen, int col) {
+	return gen->row_letter_cache[col];
+}
+
+int is_empty_cache(Generator * gen, int col) {
+	return get_letter_cache(gen, col) == ALPHABET_EMPTY_SQUARE_MARKER;
+}
+
 void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, uint32_t node_index, int leftstrip, int rightstrip, int unique_play) {
 	int cs_direction;
-	uint8_t current_letter = get_letter(gen->board, gen->current_row_index, col);
+	uint8_t current_letter = get_letter_cache(gen, col);
 	if (gen->vertical) {
 		cs_direction = BOARD_HORIZONTAL_DIRECTION;
 	} else {
@@ -199,7 +213,7 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 
 void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, int accepts, int leftstrip, int rightstrip, int unique_play) {	
 	if (current_col <= gen->current_anchor_col) {
-		if (!is_empty(gen->board, gen->current_row_index, current_col)) {
+		if (!is_empty_cache(gen, current_col)) {
 			gen->strip[current_col] = PLAYED_THROUGH_MARKER;
 		} else {
 			gen->strip[current_col] = L;
@@ -208,7 +222,7 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 			}
 		}
 		leftstrip = current_col;
-		int no_letter_directly_left = (current_col == 0) || is_empty(gen->board, gen->current_row_index, current_col - 1);
+		int no_letter_directly_left = (current_col == 0) || is_empty_cache(gen, current_col - 1);
 
 		if (accepts && no_letter_directly_left && gen->tiles_played > 0 && (unique_play || gen->tiles_played > 1)) {
 			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
@@ -227,7 +241,7 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 			recursive_gen(gen, gen->current_anchor_col+1, player, opp_rack, separation_node_index, leftstrip, rightstrip, unique_play);
 		}
 	} else {
-		if (!is_empty(gen->board, gen->current_row_index, current_col)) {
+		if (!is_empty_cache(gen, current_col)) {
 			gen->strip[current_col] = PLAYED_THROUGH_MARKER;
 		} else {
 			gen->strip[current_col] = L;
@@ -236,7 +250,7 @@ void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * 
 			}
 		}
 		rightstrip = current_col;
-		int no_letter_directly_right = (current_col == BOARD_DIM - 1) || is_empty(gen->board, gen->current_row_index, current_col + 1);
+		int no_letter_directly_right = (current_col == BOARD_DIM - 1) || is_empty_cache(gen, current_col + 1);
 
 		if (accepts && no_letter_directly_right && gen->tiles_played > 0 && (unique_play || gen->tiles_played > 1)) {
 			record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
@@ -260,7 +274,7 @@ void shadow_record(Generator * gen, int left_col, int right_col, int main_played
 	int sorted_effective_letter_multipliers[(RACK_SIZE)];
 	int current_tiles_played = 0;
 	for (int current_col = left_col; current_col <= right_col; current_col++) {
-		uint8_t current_letter = get_letter(gen->board, gen->current_row_index, current_col);
+		uint8_t current_letter = get_letter_cache(gen, current_col);
 		if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
 			uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index, current_col);
 			int this_word_multiplier = bonus_square >> 4;
@@ -330,7 +344,7 @@ void shadow_play_right(Generator * gen, int main_played_through_score, int perpe
 		}
 		// Continue playing right until an empty square or the edge of board is hit
 		while (gen->current_right_col + 1 < BOARD_DIM) {
-			uint8_t next_letter = get_letter(gen->board, gen->current_row_index, gen->current_right_col + 1);
+			uint8_t next_letter = get_letter_cache(gen, gen->current_right_col + 1);
 			if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
 				break;
 			}
@@ -393,7 +407,7 @@ void shadow_start(Generator * gen) {
 	int main_played_through_score = 0;
 	int perpendicular_additional_score = 0;
 	int word_multiplier = 1;
-	uint8_t current_letter = get_letter(gen->board, gen->current_row_index, gen->current_left_col);
+	uint8_t current_letter = get_letter_cache(gen, gen->current_left_col);
 
 	if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
 		// Only play a letter if a letter from the rack fits in the cross set
@@ -424,7 +438,7 @@ void shadow_start(Generator * gen) {
 				break;
 			}
 			gen->current_left_col--;
-			current_letter = get_letter(gen->board, gen->current_row_index, gen->current_left_col);
+			current_letter = get_letter_cache(gen, gen->current_left_col);
 			if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
 				gen->current_left_col++;
 				break;
@@ -473,6 +487,7 @@ void shadow_by_orientation(Generator * gen, Player * player, int dir) {
 	{
 		gen->current_row_index = row;
 		gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+		load_row_letter_cache(gen, gen->current_row_index);
 		for (int col = 0; col < BOARD_DIM; col++)
 		{
 			if (get_anchor(gen->board, row, col, dir)) {
@@ -531,6 +546,7 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 		gen->last_anchor_col = gen->anchor_list->anchors[i]->last_anchor_col;
 		gen->vertical = gen->anchor_list->anchors[i]->vertical;
 		set_transpose(gen->board, gen->anchor_list->anchors[i]->transpose_state);
+		load_row_letter_cache(gen, gen->current_row_index);
 		recursive_gen(gen, gen->current_anchor_col, player, opp_rack, kwg_get_root_node_index(gen->kwg), gen->current_anchor_col, gen->current_anchor_col, !gen->vertical);
 	}
 

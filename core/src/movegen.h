@@ -25,6 +25,7 @@ typedef struct Generator {
     int tiles_played;
     int number_of_plays;
 
+    uint8_t row_letter_cache[(BOARD_DIM)];
     uint8_t strip[(BOARD_DIM)];
     uint8_t * exchange_strip;
     float preendgame_adjustment_values[PREENDGAME_ADJUSTMENT_VALUES_LENGTH];
@@ -54,6 +55,6 @@ void destroy_generator(Generator * gen);
 void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_exchange);
 void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, uint32_t node_index, int leftstrip, int rightstrip, int unique_play);
 void reset_generator(Generator * gen);
-void set_start_leave_index(Player * player);
+void load_row_letter_cache(Generator * gen, int row);
 
 #endif
