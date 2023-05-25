@@ -24,7 +24,7 @@ void load_alphabet(Alphabet * alphabet, const char * alphabet_filename) {
 	}
 	magic_string[4] = '\0';
 	if (strcmp(magic_string, ALPHABET_MAGIC_STRING) != 0) {
-		printf("magic number does not match laddag: >%s< != >%s<", magic_string, ALPHABET_MAGIC_STRING);
+		printf("magic number does not match klv: >%s< != >%s<", magic_string, ALPHABET_MAGIC_STRING);
 		exit(EXIT_FAILURE);
 	}
 

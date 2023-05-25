@@ -8,35 +8,22 @@
 #include "config.h"
 #include "constants.h"
 #include "cross_set.h"
+#include "leave_map.h"
 #include "kwg.h"
-#include "leaves.h"
+#include "klv.h"
 #include "movegen.h"
 #include "player.h"
 #include "rack.h"
 
 void go_on(Generator * gen, int current_col, uint8_t L, Player * player, Rack * opp_rack, uint32_t new_node_index, int accepts, int leftstrip, int rightstrip, int unique_play);
 
-void add_letter_to_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
-	add_letter_to_rack(player->rack, letter);
-	traverse_add_edge(player->strategy_params->laddag, letter);
-}
-
-void take_letter_from_rack_and_recalculate_leave_index(Player * player, uint8_t letter) {
-	take_letter_from_rack(player->rack, letter);
-	traverse_take_edge(player->strategy_params->laddag, letter);
-}
-
-void set_start_leave_index(Player * player) {
-	set_start_leave(player->strategy_params->laddag, player->rack);
-}
-
-double placement_adjustment(Generator * gen, Move * move) {
+float placement_adjustment(Generator * gen, Move * move) {
 	int start = move->col_start;
 	int end = start + move->tiles_played;
 
 	int j = start;
-	double penalty = 0;
-	double v_penalty = OPENING_HOTSPOT_PENALTY;
+	float penalty = 0;
+	float v_penalty = OPENING_HOTSPOT_PENALTY;
 
 	while (j < end) {
 		if (gen->letter_distribution->is_vowel[move->tiles[j-start]] && (j == 2 || j == 6 || j == 8 || j == 12)) {
@@ -47,25 +34,25 @@ double placement_adjustment(Generator * gen, Move * move) {
 	return penalty;
 }
 
-double endgame_adjustment(Generator * gen, Rack * rack, Rack * opp_rack) {
+float endgame_adjustment(Generator * gen, Rack * rack, Rack * opp_rack) {
 	if (!rack->empty) {
 		// This play is not going out. We should penalize it by our own score
 		// plus some constant.
-		return ((-(double)score_on_rack(gen->letter_distribution, rack)) * 2) - 10;
+		return ((-(float)score_on_rack(gen->letter_distribution, rack)) * 2) - 10;
 	}
-	return 2 * ((double)score_on_rack(gen->letter_distribution, opp_rack));
+	return 2 * ((float)score_on_rack(gen->letter_distribution, opp_rack));
 }
 
-double get_spare_move_equity(Generator * gen, Player * player, Rack * opp_rack) {
-	double leave_adjustment = 0;
-	double other_adjustments = 0;
+float get_spare_move_equity(Generator * gen, Player * player, Rack * opp_rack) {
+	float leave_adjustment = 0;
+	float other_adjustments = 0;
 
 	if (gen->board->tiles_played == 0 && gen->move_list->spare_move->move_type == MOVE_TYPE_PLAY) {
 		other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
 	}
 
 	if (gen->bag->last_tile_index >= 0) {
-		leave_adjustment = get_current_value(player->strategy_params->laddag);
+		leave_adjustment = get_current_value(gen->leave_map);
 		int bag_plus_rack_size = (gen->bag->last_tile_index+1) - gen->move_list->spare_move->tiles_played + RACK_SIZE;
 		if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
 			other_adjustments += gen->preendgame_adjustment_values[bag_plus_rack_size];
@@ -74,7 +61,7 @@ double get_spare_move_equity(Generator * gen, Player * player, Rack * opp_rack) 
 		other_adjustments += endgame_adjustment(gen, player->rack, opp_rack);
 	}
 
-	return ((double)gen->move_list->spare_move->score) + leave_adjustment + other_adjustments;
+	return ((float)gen->move_list->spare_move->score) + leave_adjustment + other_adjustments;
 }
 
 void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstrip, int rightstrip, int move_type) {
@@ -110,7 +97,7 @@ void record_play(Generator * gen, Player * player, Rack * opp_rack, int leftstri
 	set_spare_move(gen->move_list, strip, leftstrip, rightstrip, score, row, col, tiles_played, gen->vertical, move_type);
 
 	if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL) {
-		double equity;
+		float equity;
 		if (player->strategy_params->move_sorting == SORT_BY_EQUITY) {
 			equity = get_spare_move_equity(gen, player, opp_rack);
 		} else {
@@ -129,12 +116,18 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 	if (ml == (gen->letter_distribution->size)) {
 		// The recording of an exchange should never require
 		// the opponent's rack.
-		double current_value = get_current_value(player->strategy_params->laddag);
-		if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
-			gen->best_leaves[player->rack->number_of_letters] = current_value;
-		}
-		if (add_exchange) {
-			record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
+
+		// Ignore the empty exchange case for full racks
+		// to avoid out of bounds errors for the best_leaves array
+		if (player->rack->number_of_letters < RACK_SIZE) {
+			float current_value = leave_value(player->strategy_params->klv, player->rack);
+			set_current_value(gen->leave_map, current_value);
+			if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
+				gen->best_leaves[player->rack->number_of_letters] = current_value;
+			}
+			if (add_exchange) {
+				record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
+			}
 		}
 	} else {
 		generate_exchange_moves(gen, player, ml+1, stripidx, add_exchange);
@@ -142,11 +135,11 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 		for (int i = 0; i < num_this; i++) {
 			gen->exchange_strip[stripidx] = ml;
 			stripidx += 1;
-			take_letter_from_rack_and_recalculate_leave_index(player, ml);
+			take_letter_and_update_current_index(gen->leave_map, player->rack, ml);
 			generate_exchange_moves(gen, player, ml+1, stripidx, add_exchange);
 		}
 		for (int i = 0; i < num_this; i++) {
-			add_letter_to_rack_and_recalculate_leave_index(player, ml);
+			add_letter_and_update_current_index(gen->leave_map, player->rack, ml);
 		}
 	}
 }
@@ -182,19 +175,19 @@ void recursive_gen(Generator * gen, int col, Player * player, Rack * opp_rack, u
 				int next_node_index = kwg_arc_index(gen->kwg, i);
 				int accepts = kwg_accepts(gen->kwg, i);
 				if (player->rack->array[ml] > 0) {
-					take_letter_from_rack_and_recalculate_leave_index(player, ml);
+					take_letter_and_update_current_index(gen->leave_map, player->rack, ml);
 					gen->tiles_played++;
 					go_on(gen, col, ml, player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 					gen->tiles_played--;
-					add_letter_to_rack_and_recalculate_leave_index(player, ml);
+					add_letter_and_update_current_index(gen->leave_map, player->rack, ml);
 				}
 				// check blank
 				if (player->rack->array[0] > 0) {
-					take_letter_from_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
+					take_letter_and_update_current_index(gen->leave_map, player->rack, BLANK_MACHINE_LETTER);
 					gen->tiles_played++;
 					go_on(gen, col, get_blanked_machine_letter(ml), player, opp_rack, next_node_index, accepts, leftstrip, rightstrip, unique_play);
 					gen->tiles_played--;
-					add_letter_to_rack_and_recalculate_leave_index(player, BLANK_MACHINE_LETTER);
+					add_letter_and_update_current_index(gen->leave_map, player->rack, BLANK_MACHINE_LETTER);
 				}
 			}
 			if (kwg_is_end(gen->kwg, i)) {
@@ -295,7 +288,7 @@ void shadow_record(Generator * gen, int left_col, int right_col, int main_played
 	}
 
 	int score = tiles_played_score + (main_played_through_score * word_multiplier) + perpendicular_additional_score + bingo_bonus;
-	double equity = (double)score;
+	float equity = (float)score;
 	if (gen->move_sorting_type == SORT_BY_EQUITY) {
 		equity += gen->best_leaves[gen->number_of_letters_on_rack - gen->tiles_played];
 	}
@@ -503,11 +496,16 @@ void set_descending_tile_scores(Generator * gen, Player * player) {
 void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_exchange) {
 	// Reset the best leaves
 	for (int i = 0; i < (RACK_SIZE); i++) {
-		gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
+		gen->best_leaves[i] = (float)(INITIAL_TOP_MOVE_EQUITY);
 	}
 
-	// Add plays
-	set_start_leave_index(player);
+	init_leave_map(gen->leave_map, player->rack);
+	if (player->rack->number_of_letters < RACK_SIZE) {
+		set_current_value(gen->leave_map, leave_value(player->strategy_params->klv, player->rack));
+	} else {
+		set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
+	}
+
 	// Set the best leaves and maybe add exchanges.
 	generate_exchange_moves(gen, player, 0, 0, add_exchange);
 
@@ -556,7 +554,7 @@ void reset_generator(Generator * gen) {
 }
 
 void load_quackle_preendgame_adjustment_values(Generator * gen) {
-	double values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
+	float values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
 	for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
 		gen->preendgame_adjustment_values[i] = values[i];
 	}
@@ -574,6 +572,7 @@ Generator * create_generator(Config * config) {
     generator->board = create_board();
 	generator->move_list = create_move_list();
 	generator->anchor_list = create_anchor_list();
+	generator->leave_map = create_leave_map(config->letter_distribution->size);
     generator->kwg = config->kwg;
     generator->letter_distribution = config->letter_distribution;
 	generator->tiles_played = 0;
@@ -592,6 +591,7 @@ void destroy_generator(Generator * gen) {
 	destroy_board(gen->board);
 	destroy_move_list(gen->move_list);
 	destroy_anchor_list(gen->anchor_list);
+	destroy_leave_map(gen->leave_map);
 	free(gen->exchange_strip);
 	free(gen);
 }

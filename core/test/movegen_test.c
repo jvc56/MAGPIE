@@ -57,7 +57,7 @@ void boards_equal(Board * b1, Board * b2) {
 }
 
 void execute_recursive_gen(Generator * gen, int col, Player * player, int leftstrip, int rightstrip, int unique_play) {
-    set_start_leave_index(player);
+	init_leave_map(gen->leave_map, player->rack);
     recursive_gen(gen, col, player, NULL, kwg_get_root_node_index(gen->kwg), leftstrip, rightstrip, unique_play);
 }
 
@@ -393,7 +393,7 @@ void equity_test(SuperConfig * superconfig) {
     Game * game = create_game(config);
     Player * player = game->players[0];
     player->strategy_params->move_sorting = SORT_BY_EQUITY;
-    Laddag * laddag = player->strategy_params->laddag;
+    KLV * klv = player->strategy_params->klv;
     // A middlegame is chosen to avoid
     // the opening and endgame equity adjustments
     load_cgp(game, VS_ED);
@@ -404,7 +404,7 @@ void equity_test(SuperConfig * superconfig) {
 
     SortedMoveList * equity_test_sorted_move_list = create_sorted_move_list(game->gen->move_list);
 
-    double previous_equity = 1000000.0;
+    float previous_equity = 1000000.0;
     Rack * move_rack = create_rack(config->letter_distribution->size);
     int number_of_moves = equity_test_sorted_move_list->count;
 
@@ -412,8 +412,8 @@ void equity_test(SuperConfig * superconfig) {
         Move * move = equity_test_sorted_move_list->moves[i];
         assert(move->equity <= previous_equity);
         set_rack_to_string(move_rack, "AFGIIIS", game->gen->kwg->alphabet);
-        double leave_value = get_leave_value_for_move(laddag, move, move_rack);
-        assert(within_epsilon(move->equity, (((double)move->score) + leave_value)));
+        float leave_value = get_leave_value_for_move(klv, move, move_rack);
+        assert(within_epsilon_float(move->equity, (((float)move->score) + leave_value)));
         previous_equity = move->equity;
     }
     assert(equity_test_sorted_move_list->moves[number_of_moves - 1]->move_type == MOVE_TYPE_PASS);

@@ -2,7 +2,7 @@
 #define CONSTANTS_H
 
 #define GADDAG_MAGIC_STRING "cgdg"
-#define LADDAG_MAGIC_STRING "cldg"
+#define KLV_MAGIC_STRING "cldg"
 #define ALPHABET_MAGIC_STRING "clcv"
 #define LETTER_DISTRIBUTION_MAGIC_STRING "clds"
 #define MAX_ALPHABET_SIZE 50
@@ -54,7 +54,7 @@
 #define BONUS_TRIPLE_LETTER_SCORE '"'
 #define BONUS_DOUBLE_LETTER_SCORE '\''
 #define DATA_DIRECTORY "data"
-#define LADDAG_FILENAME_EXTENSION "lg"
+#define KLV_FILENAME_EXTENSION "lg"
 #define MAX_ARG_LENGTH 300
 
 #define CROSSWORD_GAME_BOARD "=  '   =   '  ="\

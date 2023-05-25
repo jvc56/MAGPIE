@@ -7,13 +7,13 @@
 #include "constants.h"
 #include "kwg.h"
 #include "letter_distribution.h"
-#include "leaves.h"
+#include "klv.h"
 
 static int game_pair_flag;
 
 Config * create_config(const char * kwg_filename, const char * alphabet_filename, const char * letter_distribution_filename, const char * cgp,
-                       const char * laddag_filename_1, int move_sorting_1, int play_recorder_type_1,
-                       const char * laddag_filename_2, int move_sorting_2, int play_recorder_type_2, int game_pair_flag, int number_of_games_or_pairs) {
+                       const char * klv_filename_1, int move_sorting_1, int play_recorder_type_1,
+                       const char * klv_filename_2, int move_sorting_2, int play_recorder_type_2, int game_pair_flag, int number_of_games_or_pairs) {
 
     Config * config = malloc(sizeof(Config));
     config->letter_distribution = create_letter_distribution(letter_distribution_filename);
@@ -24,7 +24,7 @@ Config * create_config(const char * kwg_filename, const char * alphabet_filename
 
     StrategyParams * player_1_strategy_params = malloc(sizeof(StrategyParams));
     
-	  player_1_strategy_params->laddag = create_laddag(laddag_filename_1, config->letter_distribution->size);
+	  player_1_strategy_params->klv = create_klv(klv_filename_1);
     player_1_strategy_params->move_sorting = move_sorting_1;
     player_1_strategy_params->play_recorder_type = play_recorder_type_1;
 
@@ -32,12 +32,12 @@ Config * create_config(const char * kwg_filename, const char * alphabet_filename
 
     StrategyParams * player_2_strategy_params = malloc(sizeof(StrategyParams));
 
-    if (!strcmp(laddag_filename_2, "") || !strcmp(laddag_filename_2, laddag_filename_1) ) {
-      player_2_strategy_params->laddag = player_1_strategy_params->laddag;
-      config->laddag_is_shared = 1;
+    if (!strcmp(klv_filename_2, "") || !strcmp(klv_filename_2, klv_filename_1) ) {
+      player_2_strategy_params->klv = player_1_strategy_params->klv;
+      config->klv_is_shared = 1;
     } else {
-      player_2_strategy_params->laddag = create_laddag(laddag_filename_2, config->letter_distribution->size);
-      config->laddag_is_shared = 0;
+      player_2_strategy_params->klv = create_klv(klv_filename_2);
+      config->klv_is_shared = 0;
     }
 
     if (move_sorting_2 < 0) {
@@ -70,11 +70,11 @@ Config * create_config_from_args(int argc, char *argv[]) {
   char letter_distribution_filename[(MAX_ARG_LENGTH)] = "";
   char cgp[(MAX_ARG_LENGTH)] = "";
 
-  char laddag_filename_1[(MAX_ARG_LENGTH)] = "";
+  char klv_filename_1[(MAX_ARG_LENGTH)] = "";
   int play_recorder_type_1 = PLAY_RECORDER_TYPE_ALL;
   int move_sorting_1 = SORT_BY_EQUITY;
 
-  char laddag_filename_2[(MAX_ARG_LENGTH)] = "";
+  char klv_filename_2[(MAX_ARG_LENGTH)] = "";
   int play_recorder_type_2 = -1;
   int move_sorting_2 = -1;
   int number_of_games_or_pairs = 10000;
@@ -130,7 +130,7 @@ Config * create_config_from_args(int argc, char *argv[]) {
 
       case 1004:
         check_arg_length(optarg);
-        strcpy(laddag_filename_1, optarg);
+        strcpy(klv_filename_1, optarg);
         break;
 
       case 1005:
@@ -163,7 +163,7 @@ Config * create_config_from_args(int argc, char *argv[]) {
 
       case 1007:
         check_arg_length(optarg);
-        strcpy(laddag_filename_2, optarg);
+        strcpy(klv_filename_2, optarg);
         break;
 
       case 1008:
@@ -210,16 +210,16 @@ Config * create_config_from_args(int argc, char *argv[]) {
   }
 
   return create_config(kwg_filename, alphabet_filename, letter_distribution_filename, cgp,
-  laddag_filename_1, move_sorting_1, play_recorder_type_1,
-  laddag_filename_2, move_sorting_2, play_recorder_type_2, game_pair_flag, number_of_games_or_pairs);
+  klv_filename_1, move_sorting_1, play_recorder_type_1,
+  klv_filename_2, move_sorting_2, play_recorder_type_2, game_pair_flag, number_of_games_or_pairs);
 }
 
 void destroy_config(Config * config) {
-	destroy_laddag(config->player_1_strategy_params->laddag);
+	destroy_klv(config->player_1_strategy_params->klv);
   free(config->player_1_strategy_params);
 
-  if (!config->laddag_is_shared) {
-    destroy_laddag(config->player_2_strategy_params->laddag);
+  if (!config->klv_is_shared) {
+    destroy_klv(config->player_2_strategy_params->klv);
   }
 
   free(config->player_2_strategy_params);

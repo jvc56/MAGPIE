@@ -1,7 +1,8 @@
 #ifndef TEST_CONSTANTS_H
 #define TEST_CONSTANTS_H
 
-#define EPSILON 0.000000001
+#define DOUBLE_EPSILON 0.000000001
+#define FLOAT_EPSILON 0.00001
 
 #define CMD_GEN "gen"
 #define CMD_UNIT_TESTS "unit"

@@ -25,7 +25,7 @@ void destroy_anchor_list(AnchorList * al) {
     free(al);
 }
 
-void insert_anchor(AnchorList* al, int row, int col, int last_anchor_col, int transpose_state, int vertical, double highest_possible_equity) {
+void insert_anchor(AnchorList* al, int row, int col, int last_anchor_col, int transpose_state, int vertical, float highest_possible_equity) {
     int i = al->count;
     for (; i > 0 && al->anchors[i-1]->highest_possible_equity < highest_possible_equity; i--) {
         al->anchors[i]->row = al->anchors[i-1]->row;

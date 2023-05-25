@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	LaddagMagicNumber             = "cldg"
+	KLVMagicNumber                = "cldg"
 	LetterDistributionMagicNumber = "clds"
 	LetterConversionMagicNumber   = "clcv"
 	InputDataDirectory            = "data"
@@ -29,8 +29,8 @@ const (
 	UnblankMask                   = (0x80 - 1)
 )
 
-// Internal struct only used to write laddag to file
-type Laddag struct {
+// Internal struct only used to write klv to file
+type KLV struct {
 	edges         []uint32
 	values        []float64
 	leavesToIndex map[string]int
@@ -54,8 +54,8 @@ func getGaddagOutputFilename(lexicon string) string {
 	return filepath.Join(OutputDataDirectory, LexicaDirectory, lexicon+".gaddag")
 }
 
-func getLaddagOutputFilename(lexicon string) string {
-	return filepath.Join(OutputDataDirectory, LexicaDirectory, lexicon+".laddag")
+func getKLVOutputFilename(lexicon string) string {
+	return filepath.Join(OutputDataDirectory, LexicaDirectory, lexicon+".klv2")
 }
 
 func getLetterDistributionOutputFilename(letterDistribution string) string {
@@ -113,18 +113,18 @@ func convertNodeIndexToFirstEdgeIndex(index int, takeAddArrayLength int) int {
 	return index * takeAddArrayLength * 2
 }
 
-func clearAdd(laddag *Laddag, index int, takeAddArrayLength int) {
+func clearAdd(klv *KLV, index int, takeAddArrayLength int) {
 	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, takeAddArrayLength)
 	for i := 0; i < takeAddArrayLength; i++ {
-		laddag.edges[firstEdgeIndex+i] = laddag.invalidIndex
+		klv.edges[firstEdgeIndex+i] = klv.invalidIndex
 	}
 }
 
-func populateAdd(laddag *Laddag, rack string, index int, takeAddArrayLength int) {
+func populateAdd(klv *KLV, rack string, index int, takeAddArrayLength int) {
 	if len(rack) >= 6 {
-		clearAdd(laddag, index, takeAddArrayLength)
+		clearAdd(klv, index, takeAddArrayLength)
 	} else {
-		mlRack := alphabet.RackFromString(rack, laddag.alphabet)
+		mlRack := alphabet.RackFromString(rack, klv.alphabet)
 		firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, takeAddArrayLength)
 		for i := 0; i < takeAddArrayLength; i++ {
 			thisEdgeIndex := firstEdgeIndex + i
@@ -139,26 +139,26 @@ func populateAdd(laddag *Laddag, rack string, index int, takeAddArrayLength int)
 			ml := alphabet.MachineLetter(tileVal)
 			mlRack.Add(ml)
 			addedRackString := mlRack.String()
-			leaveIndex, exists := laddag.leavesToIndex[addedRackString]
+			leaveIndex, exists := klv.leavesToIndex[addedRackString]
 			if exists {
-				laddag.edges[thisEdgeIndex] = uint32(leaveIndex)
+				klv.edges[thisEdgeIndex] = uint32(leaveIndex)
 			} else {
-				laddag.edges[thisEdgeIndex] = laddag.invalidIndex
+				klv.edges[thisEdgeIndex] = klv.invalidIndex
 			}
 			mlRack.Take(ml)
 		}
 	}
 }
 
-func clearTake(laddag *Laddag, index int, takeAddArrayLength int) {
+func clearTake(klv *KLV, index int, takeAddArrayLength int) {
 	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, takeAddArrayLength)
 	for i := 0; i < takeAddArrayLength; i++ {
-		laddag.edges[firstEdgeIndex+takeAddArrayLength+i] = laddag.invalidIndex
+		klv.edges[firstEdgeIndex+takeAddArrayLength+i] = klv.invalidIndex
 	}
 }
 
-func populateTake(laddag *Laddag, rack string, index int, takeAddArrayLength int) {
-	mlRack := alphabet.RackFromString(rack, laddag.alphabet)
+func populateTake(klv *KLV, rack string, index int, takeAddArrayLength int) {
+	mlRack := alphabet.RackFromString(rack, klv.alphabet)
 	firstEdgeIndex := convertNodeIndexToFirstEdgeIndex(index, takeAddArrayLength)
 	for i := 0; i < takeAddArrayLength; i++ {
 		tileVal := i
@@ -172,15 +172,15 @@ func populateTake(laddag *Laddag, rack string, index int, takeAddArrayLength int
 		if mlRack.Has(ml) {
 			mlRack.Take(ml)
 			takenRackString := mlRack.String()
-			laddag.edges[thisEdgeIndex] = uint32(laddag.leavesToIndex[takenRackString])
+			klv.edges[thisEdgeIndex] = uint32(klv.leavesToIndex[takenRackString])
 			mlRack.Add(ml)
 		} else {
-			laddag.edges[thisEdgeIndex] = laddag.invalidIndex
+			klv.edges[thisEdgeIndex] = klv.invalidIndex
 		}
 	}
 }
 
-func createLaddag(lexicon string, alph *alphabet.Alphabet) {
+func createKLV(lexicon string, alph *alphabet.Alphabet) {
 	values, leaves, leavesToIndex := readLeaves(getLeavesFilename(lexicon), alph)
 
 	takeAddArrayLength := int(alph.NumLetters() + 1)
@@ -188,33 +188,33 @@ func createLaddag(lexicon string, alph *alphabet.Alphabet) {
 	// Use max alphabet size + 1 so there is room for the blank
 	// Add 2 extra nodes, one for the empty leave and one for
 	// the full rack starting leave.
-	laddag := &Laddag{}
+	klv := &KLV{}
 	numberOfNodes := len(leaves) + 2
 	numberOfEdges := convertNodeIndexToFirstEdgeIndex(numberOfNodes, takeAddArrayLength)
-	laddagEdges := make([]uint32, numberOfEdges)
-	laddagValues := make([]float64, numberOfNodes)
+	klvEdges := make([]uint32, numberOfEdges)
+	klvValues := make([]float64, numberOfNodes)
 
-	laddag.edges = laddagEdges
-	laddag.values = laddagValues
-	laddag.leavesToIndex = leavesToIndex
-	laddag.invalidIndex = uint32(numberOfNodes)
-	laddag.alphabet = alph
+	klv.edges = klvEdges
+	klv.values = klvValues
+	klv.leavesToIndex = leavesToIndex
+	klv.invalidIndex = uint32(numberOfNodes)
+	klv.alphabet = alph
 
-	populateAdd(laddag, "", 0, takeAddArrayLength)
-	clearTake(laddag, 0, takeAddArrayLength)
-	laddag.values[0] = 0
+	populateAdd(klv, "", 0, takeAddArrayLength)
+	clearTake(klv, 0, takeAddArrayLength)
+	klv.values[0] = 0
 
 	for i := 1; i < numberOfNodes-1; i++ {
-		laddag.values[i] = values[i-1]
-		populateAdd(laddag, leaves[i-1], i, takeAddArrayLength)
-		populateTake(laddag, leaves[i-1], i, takeAddArrayLength)
+		klv.values[i] = values[i-1]
+		populateAdd(klv, leaves[i-1], i, takeAddArrayLength)
+		populateTake(klv, leaves[i-1], i, takeAddArrayLength)
 	}
 
-	laddag.values[numberOfNodes-1] = 0
-	clearAdd(laddag, numberOfNodes-1, takeAddArrayLength)
-	clearTake(laddag, numberOfNodes-1, takeAddArrayLength)
+	klv.values[numberOfNodes-1] = 0
+	clearAdd(klv, numberOfNodes-1, takeAddArrayLength)
+	clearTake(klv, numberOfNodes-1, takeAddArrayLength)
 
-	saveLaddag(laddag, lexicon)
+	saveKLV(klv, lexicon)
 }
 
 func float64ToByte(f float64) []byte {
@@ -223,13 +223,13 @@ func float64ToByte(f float64) []byte {
 	return buf[:]
 }
 
-func saveLaddag(laddag *Laddag, lexicon string) {
-	file, err := os.Create(getLaddagOutputFilename(lexicon))
+func saveKLV(klv *KLV, lexicon string) {
+	file, err := os.Create(getKLVOutputFilename(lexicon))
 	if err != nil {
 		panic(err)
 	}
 	// Write the magic number
-	file.WriteString(LaddagMagicNumber)
+	file.WriteString(KLVMagicNumber)
 
 	// Write the lexicon name
 	bts := []byte(lexicon)
@@ -237,15 +237,15 @@ func saveLaddag(laddag *Laddag, lexicon string) {
 	binary.Write(file, binary.BigEndian, bts)
 
 	// Write the number of values
-	binary.Write(file, binary.BigEndian, uint32(len(laddag.values)))
+	binary.Write(file, binary.BigEndian, uint32(len(klv.values)))
 
 	// Write the edges, these are already serialized
-	binary.Write(file, binary.BigEndian, laddag.edges)
+	binary.Write(file, binary.BigEndian, klv.edges)
 
 	// Serialize the values
 	serializedValues := []byte{}
-	for i := 0; i < len(laddag.values); i++ {
-		serializedValues = append(serializedValues, float64ToByte(laddag.values[i])...)
+	for i := 0; i < len(klv.values); i++ {
+		serializedValues = append(serializedValues, float64ToByte(klv.values[i])...)
 	}
 
 	// Write the values
@@ -426,7 +426,7 @@ func main() {
 	letterDistribution := os.Args[2]
 
 	gaddag := createGaddag(lexicon)
-	createLaddag(lexicon, gaddag.Alphabet)
+	createKLV(lexicon, gaddag.Alphabet)
 	createLetterDistribution(letterDistribution)
 	createLetterConversion(lexicon, gaddag.Alphabet)
 }

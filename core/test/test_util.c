@@ -9,7 +9,7 @@
 #include "../src/constants.h"
 #include "../src/game.h"
 #include "../src/gameplay.h"
-#include "../src/leaves.h"
+#include "../src/klv.h"
 #include "../src/move.h"
 #include "../src/rack.h"
 
@@ -35,7 +35,7 @@ void write_char_to_end_of_buffer(char * buffer, char c) {
     sprintf(buffer + strlen(buffer), "%c", c);
 }
 
-void write_double_to_end_of_buffer(char * buffer, double d) {
+void write_float_to_end_of_buffer(char * buffer, float d) {
     sprintf(buffer + strlen(buffer), "%0.2f", d);
 }
 
@@ -43,11 +43,11 @@ void reset_string(char * string) {
     memset(string, 0, sizeof(*string));
 }
 
-int within_epsilon(double a, double b) {
-    return fabs(a - b) < EPSILON;
+int within_epsilon_float(float a, float b) {
+    return fabs(a - b) < DOUBLE_EPSILON;
 }
 
-double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack) {
+float get_leave_value_for_move(KLV * klv, Move * move, Rack * rack) {
     int valid_tiles = move->tiles_length;
     if (move->move_type == MOVE_TYPE_EXCHANGE) {
         valid_tiles = move->tiles_played;
@@ -61,13 +61,11 @@ double get_leave_value_for_move(Laddag * laddag, Move * move, Rack * rack) {
             }
         }
     }
-    go_to_leave(laddag, rack);
-    return get_current_value(laddag);
+    return leave_value(klv, rack);
 }
 
-double get_leave_value_for_rack(Laddag * laddag, Rack * rack) {
-    go_to_leave(laddag, rack);
-    return get_current_value(laddag);
+float get_leave_value_for_rack(KLV * klv, Rack * rack) {
+    return leave_value(klv, rack);
 }
 
 void generate_moves_for_game(Game * game) {
