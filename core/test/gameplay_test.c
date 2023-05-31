@@ -12,9 +12,9 @@
 #include "test_util.h"
 #include "superconfig.h"
 
-void draw_rack_to_string(Bag * bag, Rack * rack, char * letters, Alphabet * alphabet) {
+void draw_rack_to_string(Bag * bag, Rack * rack, char * letters, LetterDistribution * letter_distribution) {
     for (size_t i = 0; i < strnlen(letters, 7); i++) {
-        draw_letter_to_rack(bag, rack, val(alphabet, letters[i]));
+        draw_letter_to_rack(bag, rack, human_readable_letter_to_machine_letter(letter_distribution, letters[i]));
     }
 }
 
@@ -105,7 +105,7 @@ void test_gameplay_by_turn(Config * config, char * cgps[], char * racks[], int a
     for (int i = 0; i < array_length; i++) {
         assert(actual_game->game_end_reason == GAME_END_REASON_NONE);
         return_racks_to_bag(actual_game);
-        draw_rack_to_string(actual_game->gen->bag ,actual_game->players[actual_game->player_on_turn_index]->rack, racks[i], actual_game->gen->kwg->alphabet);
+        draw_rack_to_string(actual_game->gen->bag ,actual_game->players[actual_game->player_on_turn_index]->rack, racks[i], actual_game->gen->letter_distribution);
         // If it's the last turn, have the opponent draw the remaining tiles
         // so the end of actual_game subtractions are correct. If the bag has less
         // than RACK_SIZE tiles, have the opponent draw the remaining tiles
@@ -347,7 +347,7 @@ void test_playmove(SuperConfig * superconfig) {
     Game * game = create_game(config);
 
     // Test play
-    draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY", game->gen->kwg->alphabet);
+    draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY", game->gen->letter_distribution);
     play_top_n_equity_move(game, 0);
 
     assert(game->consecutive_scoreless_turns == 0);
@@ -356,18 +356,18 @@ void test_playmove(SuperConfig * superconfig) {
     assert(game->players[1]->score == 0);
     assert(!game->players[0]->rack->empty);
     assert(game->players[0]->rack->number_of_letters == 7);
-    assert(get_letter(game->gen->board, 7, 3) == val(game->gen->kwg->alphabet, 'K'));
-    assert(get_letter(game->gen->board, 7, 4) == val(game->gen->kwg->alphabet, 'Y'));
-    assert(get_letter(game->gen->board, 7, 5) == val(game->gen->kwg->alphabet, 'N'));
-    assert(get_letter(game->gen->board, 7, 6) == val(game->gen->kwg->alphabet, 'D'));
-    assert(get_letter(game->gen->board, 7, 7) == val(game->gen->kwg->alphabet, 'E'));
+    assert(get_letter(game->gen->board, 7, 3) == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'K'));
+    assert(get_letter(game->gen->board, 7, 4) == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Y'));
+    assert(get_letter(game->gen->board, 7, 5) == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'N'));
+    assert(get_letter(game->gen->board, 7, 6) == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'D'));
+    assert(get_letter(game->gen->board, 7, 7) == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'));
     assert(game->player_on_turn_index == 1);
     assert(game->gen->bag->last_tile_index + 1 == 88);
     assert(game->gen->board->tiles_played == 5);
     reset_game(game);
 
     // Test exchange
-    draw_rack_to_string(game->gen->bag, game->players[0]->rack, "UUUVVWW", game->gen->kwg->alphabet);
+    draw_rack_to_string(game->gen->bag, game->players[0]->rack, "UUUVVWW", game->gen->letter_distribution);
     play_top_n_equity_move(game, 0);
 
     assert(game->consecutive_scoreless_turns == 1);
@@ -379,9 +379,9 @@ void test_playmove(SuperConfig * superconfig) {
     assert(game->player_on_turn_index == 1);
     assert(game->gen->bag->last_tile_index + 1 == 93);
     assert(game->gen->board->tiles_played == 0);
-    assert(game->players[0]->rack->array[val(game->gen->kwg->alphabet, 'V')] == 0);
-    assert(game->players[0]->rack->array[val(game->gen->kwg->alphabet, 'W')] == 0);
-    assert(game->players[0]->rack->array[val(game->gen->kwg->alphabet, 'U')] < 2);
+    assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'V')] == 0);
+    assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'W')] == 0);
+    assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'U')] < 2);
     reset_game(game);
 
     // Test pass

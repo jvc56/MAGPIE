@@ -4,7 +4,6 @@
 #include <time.h>
 #include <stdlib.h>
 
-#include "../src/alphabet.h"
 
 #include "test_util.h"
 #include "superconfig.h"
@@ -12,7 +11,7 @@
 void test_leaves(SuperConfig * superconfig, const char* leaves_csv_filename) {
     Config * config = get_csw_config(superconfig);
     KLV * klv = config->player_1_strategy_params->klv;
-    Alphabet * alphabet = config->kwg->alphabet;
+    LetterDistribution * letter_distribution = config->letter_distribution;
     Rack * rack = create_rack(config->letter_distribution->size);
 
 
@@ -33,7 +32,7 @@ void test_leaves(SuperConfig * superconfig, const char* leaves_csv_filename) {
         token = strtok(NULL, ",");
         float actual_value = strtof(token, NULL);
 
-        set_rack_to_string(rack, leave, alphabet);
+        set_rack_to_string(rack, leave, letter_distribution);
         float klv_leave_value = leave_value(klv, rack);
         assert(within_epsilon_float(klv_leave_value, actual_value));
 

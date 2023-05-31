@@ -1,10 +1,11 @@
 #include "../src/move.h"
+#include "../src/letter_distribution.h"
 
 #include "alphabet_print.h"
 #include "move_print.h"
 #include "test_util.h"
 
-void write_user_visible_move_to_end_of_buffer(char * buf, Board * b, Move * m, Alphabet * alphabet) {
+void write_user_visible_move_to_end_of_buffer(char * buf, Board * b, Move * m, LetterDistribution * letter_distribution) {
     if (m->move_type == MOVE_TYPE_PASS) {
         write_string_to_end_of_buffer(buf, "pass 0");
         return;
@@ -13,7 +14,7 @@ void write_user_visible_move_to_end_of_buffer(char * buf, Board * b, Move * m, A
     if (m->move_type == MOVE_TYPE_EXCHANGE) {
         write_string_to_end_of_buffer(buf, "(exch ");
         for (int i = 0; i < m->tiles_played; i++) {
-            write_user_visible_letter_to_end_of_buffer(buf, alphabet, m->tiles[i]);
+            write_user_visible_letter_to_end_of_buffer(buf, letter_distribution, m->tiles[i]);
         }
         write_string_to_end_of_buffer(buf, ")");
         return;
@@ -45,7 +46,7 @@ void write_user_visible_move_to_end_of_buffer(char * buf, Board * b, Move * m, A
         if (tile == PLAYED_THROUGH_MARKER && !b) {
             write_string_to_end_of_buffer(buf, ".");
         } else {
-            write_user_visible_letter_to_end_of_buffer(buf, alphabet, print_tile);
+            write_user_visible_letter_to_end_of_buffer(buf, letter_distribution, print_tile);
         }
 
         if (b && (tile == PLAYED_THROUGH_MARKER) && (i == m->tiles_length - 1 || m->tiles[i+1] != PLAYED_THROUGH_MARKER)) {
@@ -68,9 +69,9 @@ void write_user_visible_move_to_end_of_buffer(char * buf, Board * b, Move * m, A
     }
 }
 
-void write_move_list_to_end_of_buffer(char * buf, MoveList * ml, Board * b, Alphabet * alph) {
+void write_move_list_to_end_of_buffer(char * buf, MoveList * ml, Board * b, LetterDistribution * letter_distribution) {
     for (int i = 0; i < ml->count; i++) {
-        write_user_visible_move_to_end_of_buffer(buf, b, ml->moves[i], alph);
+        write_user_visible_move_to_end_of_buffer(buf, b, ml->moves[i], letter_distribution);
         write_string_to_end_of_buffer(buf, "\n");
     }
 }

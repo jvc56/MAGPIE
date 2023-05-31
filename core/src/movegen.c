@@ -4,7 +4,6 @@
 #include <string.h>
 #include <stdint.h>
 
-#include "alphabet.h"
 #include "config.h"
 #include "constants.h"
 #include "cross_set.h"
@@ -295,7 +294,7 @@ void shadow_record(Generator * gen, int left_col, int right_col, int main_played
 	for (int i = 0; i < current_tiles_played; i++) {
 		tiles_played_score += gen->descending_tile_scores[i] * sorted_effective_letter_multipliers[i];
 	}
-	
+
 	int bingo_bonus = 0;
 	if (gen->tiles_played == RACK_SIZE) {
 		bingo_bonus = BINGO_BONUS;

@@ -3,7 +3,6 @@
 #include <string.h>
 #include <math.h>
 
-#include "../src/alphabet.h"
 #include "../src/board.h"
 #include "../src/config.h"
 #include "../src/constants.h"
@@ -104,18 +103,18 @@ void print_anchor_list(Generator * gen) {
     }
 }
 
-void print_move_list(Board * board, Alphabet * alphabet, SortedMoveList * sml, int move_list_length) {
+void print_move_list(Board * board, LetterDistribution * letter_distribution, SortedMoveList * sml, int move_list_length) {
     for (int i = 0; i < move_list_length; i++) {
         char move_string[40];
         reset_string(move_string);
-        write_user_visible_move_to_end_of_buffer(move_string, board, sml->moves[i], alphabet);
+        write_user_visible_move_to_end_of_buffer(move_string, board, sml->moves[i], letter_distribution);
         printf("%s\n", move_string);
     }
 }
 
-void sort_and_print_move_list(Board * board, Alphabet * alphabet, MoveList * ml) {
+void sort_and_print_move_list(Board * board, LetterDistribution * letter_distribution, MoveList * ml) {
     SortedMoveList * sml = create_sorted_move_list(ml);
-    print_move_list(board, alphabet, sml, ml->count);
+    print_move_list(board, letter_distribution, sml, ml->count);
     destroy_sorted_move_list(sml);
 }
 
@@ -127,10 +126,10 @@ void play_top_n_equity_move(Game * game, int n) {
     reset_move_list(game->gen->move_list);
 }
 
-void write_rack_to_end_of_buffer(char * dest, Alphabet * alphabet, Rack * rack) {
+void write_rack_to_end_of_buffer(char * dest, LetterDistribution * letter_distribution, Rack * rack) {
     for (int i = 0; i < (rack->array_size); i++) {
         for (int k = 0; k < rack->array[i]; k++) {
-			write_user_visible_letter_to_end_of_buffer(dest, alphabet, i);
+			write_user_visible_letter_to_end_of_buffer(dest, letter_distribution, i);
         }
     }
 }

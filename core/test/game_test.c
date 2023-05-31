@@ -58,17 +58,17 @@ void test_game_main(SuperConfig * superconfig) {
 
     // Test opening racks
     load_cgp(game, OPENING_CGP);
-    set_rack_to_string(rack, "ABCDEFG", config->kwg->alphabet);
+    set_rack_to_string(rack, "ABCDEFG", config->letter_distribution);
     assert(equal_rack(rack, game->players[0]->rack));
-    set_rack_to_string(rack, "HIJKLM?", config->kwg->alphabet);
+    set_rack_to_string(rack, "HIJKLM?", config->letter_distribution);
     assert(equal_rack(rack, game->players[1]->rack));
     reset_game(game);
 
     // Test CGP with excessive whitespace
     load_cgp(game, EXCESSIVE_WHITESPACE_CGP);
-    set_rack_to_string(rack, "ABCDEFG", config->kwg->alphabet);
+    set_rack_to_string(rack, "ABCDEFG", config->letter_distribution);
     assert(equal_rack(rack, game->players[0]->rack));
-    set_rack_to_string(rack, "HIJKLM?", config->kwg->alphabet);
+    set_rack_to_string(rack, "HIJKLM?", config->letter_distribution);
     assert(equal_rack(rack, game->players[1]->rack));
     assert(game->consecutive_scoreless_turns == 4);
     reset_game(game);

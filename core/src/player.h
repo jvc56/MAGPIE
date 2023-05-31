@@ -1,7 +1,6 @@
 #ifndef PLAYER_H
 #define PLAYER_H
 
-#include "alphabet.h"
 #include "config.h"
 #include "rack.h"
 

@@ -11,13 +11,13 @@
 
 static int game_pair_flag;
 
-Config * create_config(const char * kwg_filename, const char * alphabet_filename, const char * letter_distribution_filename, const char * cgp,
+Config * create_config(const char * kwg_filename, const char * letter_distribution_filename, const char * cgp,
                        const char * klv_filename_1, int move_sorting_1, int play_recorder_type_1,
                        const char * klv_filename_2, int move_sorting_2, int play_recorder_type_2, int game_pair_flag, int number_of_games_or_pairs) {
 
     Config * config = malloc(sizeof(Config));
     config->letter_distribution = create_letter_distribution(letter_distribution_filename);
-    config->kwg = create_kwg(kwg_filename, alphabet_filename);
+    config->kwg = create_kwg(kwg_filename);
     config->cgp = strdup(cgp);
     config->game_pairs = game_pair_flag;
     config->number_of_games_or_pairs = number_of_games_or_pairs;
@@ -65,7 +65,6 @@ void check_arg_length(const char * arg) {
 }
 
 Config * create_config_from_args(int argc, char *argv[]) {
-  char alphabet_filename[(MAX_ARG_LENGTH)] = "";
   char kwg_filename[(MAX_ARG_LENGTH)] = "";
   char letter_distribution_filename[(MAX_ARG_LENGTH)] = "";
   char cgp[(MAX_ARG_LENGTH)] = "";
@@ -84,7 +83,6 @@ Config * create_config_from_args(int argc, char *argv[]) {
   while (1) {
     static struct option long_options[] =
       {
-        {"a",  required_argument, 0, 1000},
         {"c",  required_argument, 0, 1001},
         {"d",  required_argument, 0, 1002},
         {"g",  required_argument, 0, 1003},
@@ -108,11 +106,6 @@ Config * create_config_from_args(int argc, char *argv[]) {
     }
 
     switch (c) {
-      case 1000:
-        check_arg_length(optarg);
-        strcpy(alphabet_filename, optarg);
-        break;
-
       case 1001:
         check_arg_length(optarg);
         strcpy(cgp, optarg);
@@ -209,7 +202,7 @@ Config * create_config_from_args(int argc, char *argv[]) {
       }
   }
 
-  return create_config(kwg_filename, alphabet_filename, letter_distribution_filename, cgp,
+  return create_config(kwg_filename, letter_distribution_filename, cgp,
   klv_filename_1, move_sorting_1, play_recorder_type_1,
   klv_filename_2, move_sorting_2, play_recorder_type_2, game_pair_flag, number_of_games_or_pairs);
 }

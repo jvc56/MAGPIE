@@ -29,7 +29,7 @@ fi
 make magpie_test BUILD=release
 ./bin/magpie_test prof -g "./data/lexica/CSW21.kwg" \
                       -a "./data/lexica/CSW21.alph" \
-                      -d "./data/letterdistributions/english.dist" \
+                      -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
                       -s1 "equity" \
@@ -42,7 +42,7 @@ fi
 make magpie_test BUILD=release
 ./bin/magpie_test topvall -g "./data/lexica/CSW21.kwg" \
                       -a "./data/lexica/CSW21.alph" \
-                      -d "./data/letterdistributions/english.dist" \
+                      -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
                       -s1 "equity" \
@@ -62,7 +62,7 @@ fi
 make magpie_test BUILD=release
 perf record ./bin/magpie_test prof -g "./data/lexica/CSW21.kwg" \
                       -a "./data/lexica/CSW21.alph" \
-                      -d "./data/letterdistributions/english.dist" \
+                      -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
                       -s1 "equity" \
@@ -72,7 +72,7 @@ elif [ "$1" == "m" ]; then
 make magpie_test
 ./bin/magpie_test gen -g "./data/lexica/CSW21.kwg" \
                       -a "./data/lexica/CSW21.alph" \
-                      -d "./data/letterdistributions/english.dist" \
+                      -d "./data/letterdistributions/english.csv" \
                       -l "./data/lexica/CSW21.klv2" \
                       -r "all" \
                       -s "equity" \

@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-#include "alphabet.h"
 #include "board.h"
 #include "constants.h"
 #include "cross_set.h"

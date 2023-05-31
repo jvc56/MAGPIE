@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "rack.h"
+#include "letter_distribution.h"
 
 void reset_rack(Rack * rack) {
 	for (int i = 0; i < (rack->array_size); i++) {
@@ -49,9 +50,9 @@ int score_on_rack(LetterDistribution * letter_distribution, Rack * rack) {
     return sum;
 }
 
-void set_rack_to_string(Rack * rack, const char* rack_string, Alphabet * alphabet) {
+void set_rack_to_string(Rack * rack, const char* rack_string, LetterDistribution * letter_distribution) {
     reset_rack(rack);
     for (size_t i = 0; i < strlen(rack_string); i++) {
-        add_letter_to_rack(rack, val(alphabet, rack_string[i]));
+        add_letter_to_rack(rack, human_readable_letter_to_machine_letter(letter_distribution, rack_string[i]));
     }
 }
