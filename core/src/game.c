@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "alphabet.h"
 #include "board.h"
 #include "config.h"
 #include "cross_set.h"
@@ -31,7 +30,7 @@ void draw_letter_to_rack(Bag * bag, Rack * rack, uint8_t letter) {
 char add_player_rack(const char* cgp, int *cgp_index, Game * game, int player_index) {
 	char cgp_char = cgp[*cgp_index];
 	while (cgp_char != '/' && cgp_char != ' ') {
-		draw_letter_to_rack(game->gen->bag, game->players[player_index]->rack, val(game->gen->kwg->alphabet, cgp_char));
+		draw_letter_to_rack(game->gen->bag, game->players[player_index]->rack, human_readable_letter_to_machine_letter(game->gen->letter_distribution, cgp_char));
 		(*cgp_index)++;
 		cgp_char = cgp[*cgp_index];
 	}
@@ -56,7 +55,7 @@ void load_cgp(Game * game, const char* cgp) {
 			current_digits[0] = '\0';
 		}
 		if (isalpha(cgp_char)) {
-			set_letter_by_index(game->gen->board, current_board_index, val(game->gen->kwg->alphabet, cgp_char));
+			set_letter_by_index(game->gen->board, current_board_index, human_readable_letter_to_machine_letter(game->gen->letter_distribution, cgp_char));
 			draw_letter(game->gen->bag, get_letter_by_index(game->gen->board, current_board_index));
 			current_board_index++;
             game->gen->board->tiles_played++;

@@ -1,7 +1,6 @@
 #ifndef CROSS_SET_H
 #define CROSS_SET_H
 
-#include "alphabet.h"
 #include "board.h"
 #include "kwg.h"
 

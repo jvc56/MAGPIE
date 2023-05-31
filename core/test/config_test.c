@@ -7,8 +7,7 @@
 void test_config_empty_string_laddag() {
     Config * config = create_config(
       "./data/lexica/CSW21.gaddag",
-      "./data/lexica/CSW21.alph",
-      "./data/letterdistributions/english.dist",
+      "./data/letterdistributions/english.csv",
       "",
       "./data/lexica/CSW21.klv2",
       SORT_BY_EQUITY,
@@ -33,8 +32,7 @@ void test_config_empty_string_laddag() {
 void test_config_identical_laddag() {
     Config * config = create_config(
       "./data/lexica/CSW21.gaddag",
-      "./data/lexica/CSW21.alph",
-      "./data/letterdistributions/english.dist",
+      "./data/letterdistributions/english.csv",
       "",
       "./data/lexica/CSW21.klv2",
       SORT_BY_EQUITY,
@@ -58,8 +56,7 @@ void test_config_identical_laddag() {
 void test_config_different_laddag() {
     Config * config = create_config(
       "./data/lexica/CSW21.gaddag",
-      "./data/lexica/CSW21.alph",
-      "./data/letterdistributions/english.dist",
+      "./data/letterdistributions/english.csv",
       "",
       "./data/lexica/CSW21.klv2",
       SORT_BY_EQUITY,

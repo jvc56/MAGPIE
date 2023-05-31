@@ -4,12 +4,13 @@
 #include "../src/game.h"
 #include "../src/movegen.h"
 #include "../src/move.h"
+#include "../src/letter_distribution.h"
 
 #include "alphabet_print.h"
 #include "gen_all_test.h"
 #include "test_util.h"
 
-void write_test_move_to_end_of_buffer(char * buf, Move * m, Alphabet * alphabet) {
+void write_test_move_to_end_of_buffer(char * buf, Move * m, LetterDistribution * letter_distribution) {
     if (m->move_type == MOVE_TYPE_PASS) {
         write_string_to_end_of_buffer(buf, "pass");
         return;
@@ -38,18 +39,18 @@ void write_test_move_to_end_of_buffer(char * buf, Move * m, Alphabet * alphabet)
             if (tile == PLAYED_THROUGH_MARKER) {
                 write_char_to_end_of_buffer(buf, ASCII_PLAYED_THROUGH);
             } else {
-                write_user_visible_letter_to_end_of_buffer(buf, alphabet, print_tile);
+                write_user_visible_letter_to_end_of_buffer(buf, letter_distribution, print_tile);
             }
         }
     } else {
         for (int i = 0; i < m->tiles_played; i++) {
             if (m->tiles[i] != BLANK_MACHINE_LETTER) {
-                write_user_visible_letter_to_end_of_buffer(buf, alphabet, m->tiles[i]);
+                write_user_visible_letter_to_end_of_buffer(buf, letter_distribution, m->tiles[i]);
             }
         }
         for (int i = 0; i < m->tiles_played; i++) {
             if (m->tiles[i] == BLANK_MACHINE_LETTER) {
-                write_user_visible_letter_to_end_of_buffer(buf, alphabet, m->tiles[i]);
+                write_user_visible_letter_to_end_of_buffer(buf, letter_distribution, m->tiles[i]);
             }
         }
     }
@@ -69,7 +70,7 @@ void test_gen_all(Config * config) {
     char csv_move[30];
     for (int i = 0; i < ml->count; i++) {
         reset_string(csv_move);
-        write_test_move_to_end_of_buffer(csv_move, ml->moves[i], config->kwg->alphabet);
+        write_test_move_to_end_of_buffer(csv_move, ml->moves[i], config->letter_distribution);
         printf("%s\n", csv_move);
     }
 

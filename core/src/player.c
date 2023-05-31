@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include "player.h"
-#include "alphabet.h"
 
 void reset_player(Player * player) {
     reset_rack(player->rack);

@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 
-#include "alphabet.h"
 #include "anchor.h"
 #include "bag.h"
 #include "board.h"

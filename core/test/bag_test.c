@@ -2,25 +2,25 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../src/alphabet.h"
 #include "../src/config.h"
 #include "../src/gameplay.h"
+#include "../src/letter_distribution.h"
 
 #include "bag_print.h"
 #include "test_util.h"
 #include "superconfig.h"
 
-void write_bag_to_string(char * bag_string, Bag * bag, Alphabet * alphabet) {
+void write_bag_to_string(char * bag_string, Bag * bag, LetterDistribution * letter_distribution) {
     reset_string(bag_string);
-    write_bag_to_end_of_buffer(bag_string, bag, alphabet);
+    write_bag_to_end_of_buffer(bag_string, bag, letter_distribution);
 }
 
 void test_add_letter(Config * config, Bag * bag, char r, char * expected_bag_string) {
     char bag_string[100];
     reset_string(bag_string);
 
-    add_letter(bag, val(config->kwg->alphabet, r));
-    write_bag_to_string(bag_string, bag, config->kwg->alphabet);
+    add_letter(bag, human_readable_letter_to_machine_letter(config->letter_distribution, r));
+    write_bag_to_string(bag_string, bag, config->letter_distribution);
     assert(!strcmp(bag_string, expected_bag_string));
 }
 

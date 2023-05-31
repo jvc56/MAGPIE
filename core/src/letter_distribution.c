@@ -5,113 +5,104 @@
 
 #include "letter_distribution.h"
 
-void load_letter_distribution(LetterDistribution * letter_distribution, const char* letter_distribution_filename) {
-	FILE * stream;
-	stream = fopen(letter_distribution_filename, "r");
-	if (stream == NULL) {
-		perror(letter_distribution_filename);
-		exit(EXIT_FAILURE);
-	}
-	size_t result;
+extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
+extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
+extern inline uint8_t is_blanked(uint8_t ml);
 
-	char magic_string[5];
-	result = fread(&magic_string, sizeof(char), 4, stream);
-	if (result != 4) {
-		printf("fread failure: %zd != %d", result, 4);
-		exit(EXIT_FAILURE);
-	}
-	magic_string[4] = '\0';
-	if (strcmp(magic_string, LETTER_DISTRIBUTION_MAGIC_STRING) != 0) {
-		printf("magic number does not match letter_distribution: >%s< != >%s<", magic_string, LETTER_DISTRIBUTION_MAGIC_STRING);
-		exit(EXIT_FAILURE);
-	}
-
-	uint8_t letter_distribution_name_length;
-	result = fread(&letter_distribution_name_length, sizeof(letter_distribution_name_length), 1, stream);
-	if (result != 1) {
-		printf("fread failure: %zd != %d", result, 1);
-		exit(EXIT_FAILURE);
-	}
-
-	char letter_distribution_name[letter_distribution_name_length+1];
-	letter_distribution_name[letter_distribution_name_length] = '\0';
-	result = fread(&letter_distribution_name, sizeof(char), letter_distribution_name_length, stream);
-	if (result != letter_distribution_name_length) {
-		printf("fread failure: %zd != %d", result, letter_distribution_name_length);
-		exit(EXIT_FAILURE);
-	}
-
-	result = fread(&letter_distribution->size, sizeof(uint32_t), 1, stream);
-	if (result != 1) {
-		printf("fread failure: %zd != %d", result, 1);
-		exit(EXIT_FAILURE);
-	}
-	letter_distribution->size = be32toh(letter_distribution->size);
-
-	letter_distribution->distribution = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
-	result = fread(letter_distribution->distribution, sizeof(uint32_t), letter_distribution->size, stream);
-	if (result != letter_distribution->size) {
-		printf("fread failure: %zd != %d", result, letter_distribution->size);
-		exit(EXIT_FAILURE);
-	}
-	for (uint32_t i = 0; i < letter_distribution->size; i++) {
-		letter_distribution->distribution[i] = be32toh(letter_distribution->distribution[i]);
-	}
-
-	letter_distribution->scores = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
-	result = fread(letter_distribution->scores, sizeof(uint32_t), letter_distribution->size, stream);
-	if (result != letter_distribution->size) {
-		printf("fread failure: %zd != %d", result, letter_distribution->size);
-		exit(EXIT_FAILURE);
-	}
-	for (uint32_t i = 0; i < letter_distribution->size; i++) {
-		letter_distribution->scores[i] = be32toh(letter_distribution->scores[i]);
-	}
-
-	letter_distribution->is_vowel = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
-	result = fread(letter_distribution->is_vowel, sizeof(uint32_t), letter_distribution->size, stream);
-	if (result != letter_distribution->size) {
-		printf("fread failure: %zd != %d", result, letter_distribution->size);
-		exit(EXIT_FAILURE);
-	}
-	for (uint32_t i = 0; i < letter_distribution->size; i++) {
-		letter_distribution->is_vowel[i] = be32toh(letter_distribution->is_vowel[i]);
-	}
-
-	uint32_t * score_indexes = (uint32_t *) malloc(letter_distribution->size*2*sizeof(uint32_t));
-	for (uint32_t i = 0; i < letter_distribution->size; i++) {
-		score_indexes[i*2] = i;
-		score_indexes[i*2+1] = letter_distribution->scores[i];
-	}
-
-	// There's probably a better way, but I didn't want to create
-	// a new struct just for this and it's not on the critical path.
-    uint32_t i = 1;
-    int k;
-    uint32_t index_x;
-	uint32_t score_x;
-    while (i < letter_distribution->size) {
-        index_x = score_indexes[i*2];
-        score_x = score_indexes[i*2+1];
-        k = i - 1;
-        while (k >= 0 && score_x > score_indexes[k*2+1]) {
-        	score_indexes[(k+1)*2] = score_indexes[(k)*2];
-        	score_indexes[(k+1)*2+1] = score_indexes[(k)*2+1];
-            k--;
-        }
-        score_indexes[(k+1)*2] = index_x;
-        score_indexes[(k+1)*2+1] = score_x;
-        i++;
+int count_number_of_newline_characters_in_file(const char* filename) {
+    FILE* file = fopen(filename, "r");
+    if (file == NULL) {
+        printf("Error opening file to count lines: %s\n", filename);
+        return -1;
     }
 
+    int line_count = 0;
+    int ch;
+    while ((ch = fgetc(file)) != EOF) {
+        if (ch == '\n') {
+            line_count++;
+        }
+    }
+
+    fclose(file);
+    return line_count;
+}
+
+void load_letter_distribution(LetterDistribution * letter_distribution, const char* letter_distribution_filename) {
+	// This function call opens and closes the file, so
+	// call it before the fopen to prevent a nested file read
+    letter_distribution->size = count_number_of_newline_characters_in_file(letter_distribution_filename) + 1;
+
+    FILE* file = fopen(letter_distribution_filename, "r");
+    if (file == NULL) {
+        printf("Error opening letter distribution file: %s\n", letter_distribution_filename);
+        abort();
+    }
+
+	letter_distribution->distribution = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
+	letter_distribution->scores = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
 	letter_distribution->score_order = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
-	for (uint32_t i = 0; i < letter_distribution->size; i++) {
-		letter_distribution->score_order[i] = score_indexes[i*2];
-	}
+	letter_distribution->is_vowel = (uint32_t *) malloc(letter_distribution->size*sizeof(uint32_t));
+	letter_distribution->human_readable_letter_to_machine_letter = (uint32_t *) malloc((MACHINE_LETTER_MAX_VALUE + 1)*sizeof(uint32_t));
+	letter_distribution->machine_letter_to_human_readable_letter = (uint32_t *) malloc((MACHINE_LETTER_MAX_VALUE + 1)*sizeof(uint32_t));
 
-	free(score_indexes);
+	int machine_letter = 0;
+    char line[100];
+    while (fgets(line, sizeof(line), file)) {
+		// For now, we assume 1 char == 1 letter
+		// This does not hold true for all languages
+		// and will have to be updated.
 
-	fclose(stream);
+        char* token;
+
+		// letter, lower case, dist, score, is_vowel
+        token = strtok(line, ",");
+        char letter = token[0];
+
+        token = strtok(NULL, ",");
+        char lower_case_letter = token[0];
+
+        token = strtok(NULL, ",");
+		int dist = atoi(token);
+
+		token = strtok(NULL, ",");
+		int score = atoi(token);
+
+		token = strtok(NULL, ",");
+		int is_vowel = atoi(token);
+
+		letter_distribution->distribution[machine_letter] = dist;
+		letter_distribution->scores[machine_letter] = score;
+		letter_distribution->is_vowel[machine_letter] = is_vowel;
+
+		letter_distribution->human_readable_letter_to_machine_letter[(int)letter] = machine_letter;
+		letter_distribution->machine_letter_to_human_readable_letter[machine_letter] = letter;
+
+		if (machine_letter > 0) {
+			uint8_t blanked_machine_letter = get_blanked_machine_letter(machine_letter);
+			letter_distribution->human_readable_letter_to_machine_letter[(int)lower_case_letter] = blanked_machine_letter;
+			letter_distribution->machine_letter_to_human_readable_letter[blanked_machine_letter] = lower_case_letter;
+		}
+
+		int i = machine_letter;
+		for (; i > 0 && (int)letter_distribution->scores[(int)letter_distribution->score_order[i-1]] < score; i--) {
+			letter_distribution->score_order[i] = letter_distribution->score_order[i-1];
+		}
+		letter_distribution->score_order[i] = machine_letter;
+
+		machine_letter++;
+    }
+
+    fclose(file);
+}
+
+// Assumes english
+uint8_t human_readable_letter_to_machine_letter(LetterDistribution * letter_distribution, unsigned char r) {
+    return (uint8_t)letter_distribution->human_readable_letter_to_machine_letter[r];
+}
+
+unsigned char machine_letter_to_human_readable_letter(LetterDistribution * letter_distribution, uint8_t ml) {
+    return (unsigned char)letter_distribution->machine_letter_to_human_readable_letter[ml];
 }
 
 LetterDistribution * create_letter_distribution(const char* filename) {
@@ -125,5 +116,7 @@ void destroy_letter_distribution(LetterDistribution * letter_distribution) {
 	free(letter_distribution->scores);
 	free(letter_distribution->is_vowel);
 	free(letter_distribution->score_order);
+	free(letter_distribution->human_readable_letter_to_machine_letter);
+	free(letter_distribution->machine_letter_to_human_readable_letter);
 	free(letter_distribution);
 }

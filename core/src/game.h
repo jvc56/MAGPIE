@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 
-#include "alphabet.h"
 #include "bag.h"
 #include "config.h"
 #include "movegen.h"

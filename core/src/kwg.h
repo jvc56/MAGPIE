@@ -3,14 +3,12 @@
 
 #include <stdint.h>
 
-#include "alphabet.h"
 
 typedef struct KWG {
     uint32_t * nodes;
-    Alphabet * alphabet;
 } KWG;
 
-KWG * create_kwg(const char* kwg_filename, const char* alphabet_filename);
+KWG * create_kwg(const char* kwg_filename);
 void destroy_kwg(KWG * kwg);
 
 inline int kwg_is_end(KWG * kwg, int node_index) {

@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../src/alphabet.h"
 #include "../src/config.h"
 #include "../src/constants.h"
 #include "../src/letter_distribution.h"
@@ -41,20 +40,20 @@ void test_rack_main(SuperConfig * superconfig) {
     Rack * expected_rack = create_rack(config->letter_distribution->size);
 
     // Test score on rack
-    set_rack_to_string(rack, "ABCDEFG", config->kwg->alphabet);
+    set_rack_to_string(rack, "ABCDEFG", config->letter_distribution);
     assert(score_on_rack(config->letter_distribution, rack) == 16);
-    set_rack_to_string(rack, "XYZ", config->kwg->alphabet);
+    set_rack_to_string(rack, "XYZ", config->letter_distribution);
     assert(score_on_rack(config->letter_distribution, rack) == 22);
-    set_rack_to_string(rack, "??", config->kwg->alphabet);
+    set_rack_to_string(rack, "??", config->letter_distribution);
     assert(score_on_rack(config->letter_distribution, rack) == 0);
-    set_rack_to_string(rack, "?QWERTY", config->kwg->alphabet);
+    set_rack_to_string(rack, "?QWERTY", config->letter_distribution);
     assert(score_on_rack(config->letter_distribution, rack) == 21);
-    set_rack_to_string(rack, "RETINAO", config->kwg->alphabet);
+    set_rack_to_string(rack, "RETINAO", config->letter_distribution);
     assert(score_on_rack(config->letter_distribution, rack) == 7);
-    set_rack_to_string(rack, "AABBEWW", config->kwg->alphabet);
+    set_rack_to_string(rack, "AABBEWW", config->letter_distribution);
     assert(score_on_rack(config->letter_distribution, rack) == 17);
 
-    set_rack_to_string(rack, "AENPPSW", config->kwg->alphabet);
+    set_rack_to_string(rack, "AENPPSW", config->letter_distribution);
 
     for (int i = 0; i < (expected_rack->array_size); i++) {
         expected_rack->array[i] = 0;

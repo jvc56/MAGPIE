@@ -1,9 +1,9 @@
-#include "../src/alphabet.h"
+#include "../src/letter_distribution.h"
 #include "../src/bag.h"
 #include "alphabet_print.h"
 #include "bag_print.h"
 
-void write_bag_to_end_of_buffer(char * dest, Bag * bag, Alphabet * alphabet) {
+void write_bag_to_end_of_buffer(char * dest, Bag * bag, LetterDistribution * letter_distribution) {
 	// Must be lower than the max uint8_t value
 	int blank_sort_value = 100;
     uint8_t sorted_bag[BAG_SIZE];
@@ -33,6 +33,6 @@ void write_bag_to_end_of_buffer(char * dest, Bag * bag, Alphabet * alphabet) {
 		if (sorted_bag[i] == blank_sort_value) {
 			sorted_bag[i] = 0;
 		}
-        write_user_visible_letter_to_end_of_buffer(dest, alphabet, sorted_bag[i]);
+        write_user_visible_letter_to_end_of_buffer(dest, letter_distribution, sorted_bag[i]);
     }
 }

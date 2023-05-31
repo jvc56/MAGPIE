@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 
-#include "alphabet.h"
 #include "board.h"
 #include "constants.h"
 

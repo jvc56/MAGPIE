@@ -1,10 +1,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include "alphabet.h"
 #include "kwg.h"
+#include "letter_distribution.h"
 
-void load_kwg(KWG * kwg, const char* kwg_filename, const char* alphabet_filename) {
+void load_kwg(KWG * kwg, const char* kwg_filename) {
 	FILE * stream;
 	stream = fopen(kwg_filename, "r");
 	if (stream == NULL) {
@@ -30,21 +30,15 @@ void load_kwg(KWG * kwg, const char* kwg_filename, const char* alphabet_filename
 		kwg->nodes[i] = le32toh(kwg->nodes[i]);
 	}
 	fclose(stream);
-
-    // Alphabet size is not needed for kwg.
-	kwg->alphabet = create_alphabet_from_file(alphabet_filename);
 }
 
-KWG * create_kwg(const char* kwg_filename, const char* alphabet_filename) {
+KWG * create_kwg(const char* kwg_filename) {
     KWG * kwg =  malloc(sizeof(KWG));
-    load_kwg(kwg, kwg_filename, alphabet_filename);
+    load_kwg(kwg, kwg_filename);
     return kwg;
 }
 
 void destroy_kwg(KWG * kwg) {
-    if (kwg->alphabet) {
-        destroy_alphabet(kwg->alphabet);
-    }
     free(kwg->nodes);
     free(kwg);
 }

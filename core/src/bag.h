@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 
-#include "alphabet.h"
 #include "constants.h"
 #include "letter_distribution.h"
 

@@ -1,7 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include "alphabet.h"
 #include "klv.h"
 #include "rack.h"
 
@@ -143,9 +142,6 @@ void load_klv(KLV * klv, const char* klv_filename) {
     }
 
     count_words(klv, kwg_size);
-
-    // The KLV does not use the alphabet in the KWG
-    klv->kwg->alphabet = NULL;
 }
 
 KLV * create_klv(const char* klv_filename) {

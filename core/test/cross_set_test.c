@@ -6,18 +6,19 @@
 #include "../src/config.h"
 #include "../src/cross_set.h"
 #include "../src/game.h"
+#include "../src/letter_distribution.h"
 
 #include "test_constants.h"
 #include "test_util.h"
 #include "superconfig.h"
 
-uint64_t cross_set_from_string(const char* letters, Alphabet* alph) {
+uint64_t cross_set_from_string(const char* letters, LetterDistribution * letter_distribution) {
     if (strcmp(letters, "TRIVIAL") == 0) {
         return TRIVIAL_CROSS_SET;
     }
     uint64_t c = 0;
     for (size_t i = 0; i < strlen(letters); i++) {
-        set_cross_set_letter(&c,  val(alph, letters[i]));
+        set_cross_set_letter(&c,  human_readable_letter_to_machine_letter(letter_distribution, letters[i]));
     }
     return c;
 }
@@ -29,7 +30,7 @@ void set_row(Game * game, int row, const char* row_content) {
 
     for (size_t i = 0; i < strlen(row_content); i++) {
         if (row_content[i] != ' ') {
-            set_letter(game->gen->board, row, i, val(game->gen->kwg->alphabet, row_content[i]));
+            set_letter(game->gen->board, row, i, human_readable_letter_to_machine_letter(game->gen->letter_distribution, row_content[i]));
             game->gen->board->tiles_played++;
         }
     }
@@ -42,7 +43,7 @@ void set_col(Game * game, int col, const char* col_content) {
 
     for (size_t i = 0; i < strlen(col_content); i++) {
         if (col_content[i] != ' ') {
-            set_letter(game->gen->board, i, col, val(game->gen->kwg->alphabet, col_content[i]));
+            set_letter(game->gen->board, i, col, human_readable_letter_to_machine_letter(game->gen->letter_distribution, col_content[i]));
             game->gen->board->tiles_played++;
         }
     }
@@ -52,7 +53,7 @@ void test_gen_cross_set(Game * game, int row, int col, int dir, const char* lett
     if (run_gcs) {
         gen_cross_set(game->gen->board, row, col, dir, game->gen->kwg, game->gen->letter_distribution);
     }
-    uint64_t expected_cross_set = cross_set_from_string(letters, game->gen->kwg->alphabet);
+    uint64_t expected_cross_set = cross_set_from_string(letters, game->gen->letter_distribution);
     uint64_t actual_cross_set = get_cross_set(game->gen->board, row, col, dir);
     assert(expected_cross_set == actual_cross_set);
     int actual_cross_score = get_cross_score(game->gen->board, row, col, dir);

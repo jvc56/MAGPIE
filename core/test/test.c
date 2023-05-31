@@ -31,9 +31,10 @@ void unit_tests(SuperConfig * superconfig) {
 
     // Test the readonly data first
     // test_alphabet(superconfig);
+  
+    test_letter_distribution(superconfig);
     test_leaves(superconfig, "./data/lexica/CSW21.csv");
     test_leave_map(superconfig);
-    test_letter_distribution(superconfig);
 
     // Now test the rest
     test_bag(superconfig);
@@ -68,8 +69,7 @@ int main(int argc, char *argv[]) {
   } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
     Config * csw_config = create_config(
       "./data/lexica/CSW21.kwg",
-      "./data/lexica/CSW21.alph",
-      "./data/letterdistributions/english.dist",
+      "./data/letterdistributions/english.csv",
       "",
       "./data/lexica/CSW21.klv2",
       SORT_BY_EQUITY,
@@ -83,8 +83,7 @@ int main(int argc, char *argv[]) {
 
     Config * nwl_config = create_config(
       "./data/lexica/America.kwg",
-      "./data/lexica/CSW21.alph",
-      "./data/letterdistributions/english.dist",
+      "./data/letterdistributions/english.csv",
       "",
       "./data/lexica/CSW21.klv2",
       SORT_BY_SCORE,
