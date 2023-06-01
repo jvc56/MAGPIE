@@ -72,7 +72,7 @@ func getActualMoves(g *game.Game) map[string]bool {
 	cgp := gameToCGP(g, true)
 	kwg := "data/lexica/CSW21.kwg"
 	alphabet := "data/lexica/CSW21.alph"
-	dist := "data/letterdistributions/english.dist"
+	dist := "data/letterdistributions/english.csv"
 	klv := "data/lexica/CSW21.klv2"
 	cmd := []string{
 		"gen",

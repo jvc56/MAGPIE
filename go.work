@@ -1,6 +1,5 @@
 go 1.19
 
 use (
-	./create_data
 	./dev
 )
