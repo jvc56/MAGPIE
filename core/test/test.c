@@ -14,6 +14,7 @@
 #include "game_test.h"
 #include "gen_all_test.h"
 #include "gameplay_test.h"
+#include "infer_test.h"
 #include "leaves_test.h"
 #include "leave_map_test.h"
 #include "letter_distribution_test.h"
@@ -30,8 +31,7 @@ void unit_tests(SuperConfig * superconfig) {
     test_config();
 
     // Test the readonly data first
-    // test_alphabet(superconfig);
-  
+    test_alphabet(superconfig);
     test_letter_distribution(superconfig);
     test_leaves(superconfig, "./data/lexica/CSW21.csv");
     test_leave_map(superconfig);
@@ -46,6 +46,7 @@ void unit_tests(SuperConfig * superconfig) {
     test_movegen(superconfig);
     test_equity_adjustments(superconfig);
     test_gameplay(superconfig);
+    test_infer(superconfig);
 }
 
 int main(int argc, char *argv[]) {
