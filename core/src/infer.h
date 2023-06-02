@@ -2,12 +2,14 @@
 #define INFER_h
 
 #include "game.h"
+#include "klv.h"
 #include "move.h"
 #include "rack.h"
 
 typedef struct Inference {
     // Records
     int status;
+    int distribution_size;
     int total_possible_leaves;
     int * leaves_including_letter;
 
@@ -16,10 +18,9 @@ typedef struct Inference {
     Rack * player_on_turn_rack;
     Rack * bag_as_rack;
     Rack * player_leave;
-    int current_node_index;
-    int leave_tiles_remaining;
     int actual_score;
     float equity_margin;
+    KLV * klv;
 } Inference;
 
 Inference * infer(Game * game, Rack * actual_tiles_played, int actual_score, float equity_margin);
