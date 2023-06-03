@@ -23,6 +23,7 @@ typedef struct Generator {
     int vertical;
     int tiles_played;
     int number_of_plays;
+    int apply_placement_adjustment;
 
     uint8_t row_letter_cache[(BOARD_DIM)];
     uint8_t strip[(BOARD_DIM)];

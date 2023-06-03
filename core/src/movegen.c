@@ -46,7 +46,7 @@ float get_spare_move_equity(Generator * gen, Player * player, Rack * opp_rack) {
 	float leave_adjustment = 0;
 	float other_adjustments = 0;
 
-	if (gen->board->tiles_played == 0 && gen->move_list->spare_move->move_type == MOVE_TYPE_PLAY) {
+	if (gen->apply_placement_adjustment && gen->board->tiles_played == 0 && gen->move_list->spare_move->move_type == MOVE_TYPE_PLAY) {
 		other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
 	}
 
@@ -593,6 +593,8 @@ Generator * create_generator(Config * config) {
 	generator->tiles_played = 0;
 	generator->vertical = 0;
 	generator->last_anchor_col = 0;
+	// On by default
+	generator->apply_placement_adjustment = 1;
 
 	generator->exchange_strip = (uint8_t *) malloc(config->letter_distribution->size*sizeof(uint8_t));
 	// Just load the zero values for now
