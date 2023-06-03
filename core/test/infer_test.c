@@ -43,7 +43,6 @@ void test_infer_no_tiles_played(SuperConfig * superconfig) {
     Inference * inference = create_inference(game->gen->letter_distribution->size);
     infer(inference, game, rack, 0, 0, 0);
     assert(inference->status == INFERENCE_STATUS_NO_TILES_PLAYED);
-    assert(inference->total_possible_leaves == 0);
 
     destroy_rack(rack);
     destroy_inference(inference);
@@ -59,7 +58,6 @@ void test_infer_tiles_played_not_in_bag(SuperConfig * superconfig) {
     Inference * inference = create_inference(game->gen->letter_distribution->size);
     infer(inference, game, rack, 0, 0, 0);
     assert(inference->status == INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG);
-    assert(inference->total_possible_leaves == 0);
 
     destroy_rack(rack);
     destroy_inference(inference);
@@ -78,12 +76,14 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     assert(inference->status == INFERENCE_STATUS_SUCCESS);
     // With this rack, only keeping an S is possible, and
     // there are 3 S remaining.
-    assert(inference->total_possible_leaves == 3);
+    assert(inference->total_draws == 3);
+    assert(inference->total_leaves == 1);
     for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
         if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'S')) {
-            assert(inference->leaves_including_letter[i] == 3);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 3);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
         } else {
-            assert(inference->leaves_including_letter[i] == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
         }
     }
     reset_game(game);
@@ -97,6 +97,8 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     // K - none in bag
     // Q - QUAKY
     // Z - none in bag
+    assert(inference->total_draws == 83);
+    assert(inference->total_leaves == 22);
     for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
         if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'A')
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'B')
@@ -104,12 +106,12 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Q')
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Z')
         ) {
-            assert(inference->leaves_including_letter[i] == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 0);
         } else {
-            assert(inference->leaves_including_letter[i] != 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
         }
     }
-    assert(inference->total_possible_leaves == 83);
     reset_game(game);
 
     set_rack_to_string(rack, "MUZAK", game->gen->letter_distribution);
@@ -123,9 +125,9 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Y')
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Z')
         ) {
-            assert(inference->leaves_including_letter[i] == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
         } else {
-            assert(inference->leaves_including_letter[i] != 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
         }
     }
     reset_game(game);
@@ -138,17 +140,23 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     // contain an E.
     set_rack_to_string(rack, "E", game->gen->letter_distribution);
     infer(inference, game, rack, 0, 22, 0);
+    print_inference(inference, rack);
     assert(inference->status == INFERENCE_STATUS_SUCCESS);
-    assert(inference->total_possible_leaves == 1);
+    assert(inference->total_draws == 1);
+    assert(inference->total_leaves == 1);
     for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
-        if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'D')
-        ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'S')
+        if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'S')
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'W')
+        ) {
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 1);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
+        } else if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'D')
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, '?')
         ) {
-            assert(inference->leaves_including_letter[i] == 1);
+            assert(get_subtotal(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 1);
+            assert(get_subtotal(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
         } else {
-            assert(inference->leaves_including_letter[i] == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
         }
     }
     reset_game(game);
@@ -162,24 +170,29 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     // 3) ENNRRTT keeping NRT = 5 * 5 * 5  = 125 possible draws
     // which sums to 450 total draws.
     // We use this case to easily check that the combinatorial math is correct
-    assert(inference->total_possible_leaves == 450);
+    assert(inference->total_draws == 450);
     for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
         if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, '?')) {
             // The blank was only in leave 1
-            assert(inference->leaves_including_letter[i] == 50);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 50);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
         } else if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E')) {
             // The E was only in leave 2
-            assert(inference->leaves_including_letter[i] == 275);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 275);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
         } else if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'N')) {
             // The N was in leaves 1 and 3
-            assert(inference->leaves_including_letter[i] == 175);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 175);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 2);
         } else if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'R')) {
             // The R was found in all of the leaves
-            assert(inference->leaves_including_letter[i] == 450);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 450);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 3);
         } else if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'T')) {
-            assert(inference->leaves_including_letter[i] == 400);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 400);
         } else {
-            assert(inference->leaves_including_letter[i] == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 0);
         }
     }
     reset_game(game);
@@ -213,14 +226,44 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     // EIIIIII = 4 possible draws for E = 4  * 3 possible draws for the Is = 12
     // IIIIIII = 1 possible draw for the Is = 1
     // For a total of 35 possible draws
-    assert(inference->total_possible_leaves == 35);
+    assert(inference->total_draws == 35);
+    assert(inference->total_leaves == 4);
     for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
         if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E')) {
-            assert(inference->leaves_including_letter[i] == 34);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 12);
+            assert(get_subtotal_sum_with_minimum(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 34);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
+            assert(get_subtotal_sum_with_minimum(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 3);
+
+            assert(get_subtotal(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 18);
+            assert(get_subtotal_sum_with_minimum(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 22);
+            assert(get_subtotal(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
+            assert(get_subtotal_sum_with_minimum(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 2);
+
+            assert(get_subtotal(inference, i, 3, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 4);
+            assert(get_subtotal_sum_with_minimum(inference, i, 3, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 4);
+            assert(get_subtotal(inference, i, 3, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
+            assert(get_subtotal_sum_with_minimum(inference, i, 3, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
         } else if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'I')) {
-            assert(inference->leaves_including_letter[i] == 31);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 18);
+            assert(get_subtotal_sum_with_minimum(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 31);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
+            assert(get_subtotal_sum_with_minimum(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 3);
+
+            assert(get_subtotal(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 12);
+            assert(get_subtotal_sum_with_minimum(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 13);
+            assert(get_subtotal(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
+            assert(get_subtotal_sum_with_minimum(inference, i, 2, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 2);
+
+            assert(get_subtotal(inference, i, 3, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 1);
+            assert(get_subtotal_sum_with_minimum(inference, i, 3, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 1);
+            assert(get_subtotal(inference, i, 3, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
+            assert(get_subtotal_sum_with_minimum(inference, i, 3, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
         } else {
-            assert(inference->leaves_including_letter[i] == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
+            assert(get_subtotal_sum_with_minimum(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 0);
+            assert(get_subtotal_sum_with_minimum(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 0);
         }
     }
     reset_game(game);
@@ -236,16 +279,16 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     // Z - none in bag
     // Letters now possible because of the additional 5 equity buffer:
     // A - YAKUZA
-    assert(inference->total_possible_leaves == 91);
+    assert(inference->total_draws == 91);
     for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
         if (i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'B')
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'K')
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Q')
         ||  i == human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Z')
         ) {
-            assert(inference->leaves_including_letter[i] == 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
         } else {
-            assert(inference->leaves_including_letter[i] != 0);
+            assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
         }
     }
     reset_game(game);

@@ -15,7 +15,8 @@
 Inference * create_inference(int distribution_size) {
     Inference * inference =  malloc(sizeof(Inference));
     inference->distribution_size = distribution_size;
-    inference->leaves_including_letter = (int *) malloc(distribution_size*sizeof(int));
+    inference->draw_and_leave_subtotals_size = distribution_size*(RACK_SIZE)*2;
+    inference->draw_and_leave_subtotals = (int *) malloc(inference->draw_and_leave_subtotals_size*sizeof(int));
     inference->player_leave = create_rack(distribution_size);
     inference->bag_as_rack = create_rack(distribution_size);
     return inference;
@@ -24,17 +25,30 @@ Inference * create_inference(int distribution_size) {
 void destroy_inference(Inference * inference) {
     destroy_rack(inference->player_leave);
     destroy_rack(inference->bag_as_rack);
-    free(inference->leaves_including_letter);
+    free(inference->draw_and_leave_subtotals);
     free(inference);
 }
 
-void set_inference_to_remaining_tiles(Inference * inference, Rack * actual_tiles_played) {
-    inference->total_possible_leaves = 1;
-    for (int i = 0; i <= inference->distribution_size; i++) {
-        if (inference->bag_as_rack->array[i] > actual_tiles_played->array[i]) {
-            inference->leaves_including_letter[i] = 1;
-        }
+// Functions for the inference record
+
+int get_letter_subtotal_index(uint8_t letter, int number_of_letters, int subtotal_index_offset) {
+    return (letter * 2 * (RACK_SIZE)) + ((number_of_letters - 1) * 2) + subtotal_index_offset;
+}
+
+int get_subtotal(Inference * inference, uint8_t letter, int number_of_letters, int subtotal_index_offset) {
+    return inference->draw_and_leave_subtotals[get_letter_subtotal_index(letter, number_of_letters, subtotal_index_offset)];
+}
+
+void add_to_letter_subtotal(Inference * inference, uint8_t letter, int number_of_letters, int subtotal_index_offset, int delta) {
+    inference->draw_and_leave_subtotals[get_letter_subtotal_index(letter, number_of_letters, subtotal_index_offset)] += delta;
+}
+
+int get_subtotal_sum_with_minimum(Inference * inference, uint8_t letter, int minimum_number_of_letters, int subtotal_index_offset) {
+    int sum = 0;
+    for (int i = minimum_number_of_letters; i <= (RACK_SIZE); i++) {
+        sum += get_subtotal(inference, letter, i, subtotal_index_offset);
     }
+    return sum;
 }
 
 int choose(int n, int k) {
@@ -44,7 +58,7 @@ int choose(int n, int k) {
     return (n * choose(n - 1, k - 1)) / k;
 }
 
-int compute_number_of_ways_to_draw_leave(Inference * inference) {
+int get_number_of_draws_for_leave(Inference * inference) {
     int number_of_ways = 1;
     for (int i = 0; i < inference->player_leave->array_size; i++) {
         if (inference->player_leave->array[i] > 0) {
@@ -52,6 +66,30 @@ int compute_number_of_ways_to_draw_leave(Inference * inference) {
         }
     }
     return number_of_ways;
+}
+
+void record_valid_leave(Inference * inference) {
+    int number_of_draws_for_leave = get_number_of_draws_for_leave(inference);
+    inference->total_draws += number_of_draws_for_leave;
+    inference->total_leaves += 1;
+    for (int i = 0; i < inference->distribution_size; i++) {
+        if (inference->player_leave->array[i] > 0) {
+            add_to_letter_subtotal(inference, i, inference->player_leave->array[i], INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW, number_of_draws_for_leave);
+            add_to_letter_subtotal(inference, i, inference->player_leave->array[i], INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE, 1);
+        }
+    }
+}
+
+void set_inference_to_remaining_tiles(Inference * inference, Rack * actual_tiles_played) {
+    inference->total_draws = 1;
+    inference->total_leaves = 1;
+    for (int i = 0; i < inference->distribution_size; i++) {
+        int number_of_remaining_letters = inference->bag_as_rack->array[i] - actual_tiles_played->array[i];
+        if (number_of_remaining_letters > 0) {
+            add_to_letter_subtotal(inference, i, number_of_remaining_letters, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW, 1);
+            add_to_letter_subtotal(inference, i, number_of_remaining_letters, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE, 1);
+        }
+    }
 }
 
 Move * get_top_move(Inference * inference) {
@@ -70,16 +108,6 @@ Move * get_top_move(Inference * inference) {
 int within_equity_margin(Inference * inference, float current_leave_value) {
     Move * top_move = get_top_move(inference);
     return inference->actual_score + current_leave_value + inference->equity_margin + (INFERENCE_EQUITY_EPSILON) >= top_move->equity;
-}
-
-void record_valid_leave(Inference * inference) {
-    int number_of_ways_to_draw_leave = compute_number_of_ways_to_draw_leave(inference);
-    inference->total_possible_leaves += number_of_ways_to_draw_leave;
-    for (int i = 0; i < inference->player_leave->array_size; i++) {
-        if (inference->player_leave->array[i] > 0) {
-            inference->leaves_including_letter[i] += number_of_ways_to_draw_leave;
-        }
-    }
 }
 
 void evaluate_possible_leave(Inference * inference, float current_leave_value) {
@@ -118,10 +146,11 @@ void iterate_through_all_possible_leaves(Inference * inference, int leave_tiles_
 
 void initialize_inference_for_evaluation(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, float equity_margin) {    
     // Reset record
-    inference->total_possible_leaves = 0;
+    inference->total_draws = 0;
+    inference->total_leaves = 0;
     inference->status = INFERENCE_STATUS_INITIALIZED;
-    for (int i = 0; i < inference->distribution_size; i++) {
-        inference->leaves_including_letter[i] = 0;
+    for (int i = 0; i < inference->draw_and_leave_subtotals_size; i++) {
+        inference->draw_and_leave_subtotals[i] = 0;
     }
 
     inference->game = game;
