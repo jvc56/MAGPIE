@@ -85,9 +85,6 @@ void record_valid_leave(Inference * inference) {
 void evaluate_possible_leave(Inference * inference, float current_leave_value) {
     if (within_equity_margin(inference, current_leave_value)) {
         record_valid_leave(inference);
-        char rack_string[40] = "";
-        write_rack_to_end_of_buffer(rack_string, inference->game->gen->letter_distribution, inference->player_to_infer_rack);
-        printf("%s\n", rack_string);
     }
 }
 
