@@ -10,8 +10,8 @@ typedef struct Inference {
     // Records
     int status;
     int distribution_size;
-    int total_draws;
-    int total_leaves;
+    uint64_t total_draws;
+    uint64_t total_leaves;
     int draw_and_leave_subtotals_size;
     int * draw_and_leave_subtotals;
 

@@ -192,6 +192,14 @@ void initialize_inference_for_evaluation(Inference * inference, Game * game, Rac
         return;
     }
 
+    // Add any existing tiles on the player's rack
+    // to the player's leave for partial inferences
+    for (int i = 0; i < inference->player_to_infer_rack->array_size; i++) {
+        for (int j = 0; j < inference->player_to_infer_rack->array[i]; j++) {
+            add_letter_to_rack(inference->player_leave, i);
+        }
+    }
+
     // Remove the tiles played in the move from the game bag
     // and add them to the player's rack
     for (int i = 0; i < actual_tiles_played->array_size; i++) {
@@ -208,6 +216,6 @@ void infer(Inference * inference, Game * game, Rack * actual_tiles_played, int p
     if (inference->status != INFERENCE_STATUS_INITIALIZED) {
         return;
     }
-    iterate_through_all_possible_leaves(inference, (RACK_SIZE) - game->players[player_to_infer_index]->rack->number_of_letters, BLANK_MACHINE_LETTER);
+    iterate_through_all_possible_leaves(inference, (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters, BLANK_MACHINE_LETTER);
     reset_rack(inference->player_to_infer_rack);
 }
