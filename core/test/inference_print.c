@@ -8,29 +8,88 @@
 #include "game_print.h"
 #include "test_util.h"
 
+void write_letter_minimum(Inference * inference, char * inference_string, uint8_t letter, int minimum, uint64_t total_draws) {
+    int draw_subtotal = get_subtotal_sum_with_minimum(inference, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
+    if (draw_subtotal == 0) {
+        return;
+    }
+    int leave_subtotal = get_subtotal_sum_with_minimum(inference, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE);
+    double inference_probability = ((double)draw_subtotal) / (double)total_draws;
+    double random_probability = get_probability_for_random_minimum_draw(inference, letter, minimum);
+    double inference_probability_difference_from_random = inference_probability - random_probability;
+    sprintf(inference_string + strlen(inference_string), " | %-7.2f %-7.2f%-5d%-5d",
+    inference_probability * 100,
+    inference_probability_difference_from_random * 100,
+    draw_subtotal,
+    leave_subtotal);
+}
+
+void write_letter_line(Inference * inference, Stat * letter_stat, char * inference_string, uint8_t letter, uint64_t total_draws, int max_duplicate_letter_draw) {
+    get_stat_for_letter(inference, letter_stat, letter);
+    sprintf(inference_string + strlen(inference_string), "%c: %4.2f %4.2f",
+    machine_letter_to_human_readable_letter(inference->game->gen->letter_distribution, letter),
+    mean(letter_stat),
+    stdev(letter_stat));
+
+    for (int i = 1; i <= max_duplicate_letter_draw; i++) {
+        write_letter_minimum(inference, inference_string, letter, i, total_draws);
+    }
+    write_string_to_end_of_buffer(inference_string, "\n");
+}
+
 void print_inference(Inference * inference, Rack * actual_tiles_played) {
-	char inference_string[2700] = "";
+	char inference_string[6000] = "";
+
+    // Create a transient stat to use the stat functions
+    Stat * letter_stat = create_stat();
 
     Game * game = inference->game;
     uint64_t total_draws = weight(inference->leave_values);
     uint64_t total_leaves = cardinality(inference->leave_values);
-    write_string_to_end_of_buffer(inference_string, "Played tiles: ");
+    write_string_to_end_of_buffer(inference_string, "Played tiles:          ");
     write_rack_to_end_of_buffer(inference_string, inference->game->gen->letter_distribution, actual_tiles_played);
-    sprintf(inference_string + strlen(inference_string), "\nScore:        %d\n", inference->actual_score);
+    sprintf(inference_string + strlen(inference_string), "\n");
+    sprintf(inference_string + strlen(inference_string), "Score:                 %d\n", inference->actual_score);
     sprintf(inference_string + strlen(inference_string), "Total possible draws:  %ld\n", total_draws);
     sprintf(inference_string + strlen(inference_string), "Total possible leaves: %ld\n", total_leaves);
     sprintf(inference_string + strlen(inference_string), "Average leave value:   %0.2f\n", mean(inference->leave_values));
     sprintf(inference_string + strlen(inference_string), "Stdev leave value:     %0.2f\n\n", stdev(inference->leave_values));
-    if (total_draws > 0) {
-        for (int i = 0; i < (int)game->gen->letter_distribution->size; i++) {
-            int draw_subtotal = get_subtotal_sum_with_minimum(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
-            sprintf(inference_string + strlen(inference_string), "%c: %6.2f%% %d\n",
-            game->gen->letter_distribution->machine_letter_to_human_readable_letter[i],
-            ((float)draw_subtotal) / ((float)total_draws) * 100.0,
-            draw_subtotal);
+
+    int max_duplicate_letter_draw = 0;
+    for (int letter = 0; letter < (int)inference->game->gen->letter_distribution->size; letter++) {
+        for (int number_of_letter = 1; number_of_letter <= (RACK_SIZE); number_of_letter++) {
+            int draws = get_subtotal_sum_with_minimum(inference, letter, number_of_letter, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
+            if (draws == 0) {
+                break;
+            }
+            if (number_of_letter > max_duplicate_letter_draw) {
+                max_duplicate_letter_draw = number_of_letter;
+            }
         }
     }
 
+    sprintf(inference_string + strlen(inference_string), "               ");
+    for (int i = 0; i < max_duplicate_letter_draw; i++) {
+        sprintf(inference_string + strlen(inference_string), "Has at least %d of           ", i + 1);
+    }
+    sprintf(inference_string + strlen(inference_string), "\n");
+    sprintf(inference_string + strlen(inference_string), "\n");
+
+    sprintf(inference_string + strlen(inference_string), "   Avg  Std ");
+
+
+    for (int i = 0; i < max_duplicate_letter_draw; i++) {
+        sprintf(inference_string + strlen(inference_string), " | %%       Diff   Tot  Unq  ");
+    }
+    sprintf(inference_string + strlen(inference_string), "\n");
+    
+    if (total_draws > 0) {
+        for (int i = 0; i < (int)game->gen->letter_distribution->size; i++) {
+            write_letter_line(inference, letter_stat, inference_string, i, total_draws, max_duplicate_letter_draw);
+        }
+    }
+
+    destroy_stat(letter_stat);
 
     printf("\n\nInference Report:\n\n");
     print_game(inference->game);

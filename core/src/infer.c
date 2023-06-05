@@ -11,6 +11,7 @@
 #include "stats.h"
 
 #include "../test/game_print.h"
+#include "../test/inference_print.h"
 #include "../test/test_util.h"
 
 Inference * create_inference(int distribution_size) {
@@ -69,6 +70,25 @@ int get_number_of_draws_for_leave(Inference * inference) {
         }
     }
     return number_of_ways;
+}
+
+void get_stat_for_letter(Inference * inference, Stat * stat, uint8_t letter) {
+    reset_stat(stat);
+    for (int i = 1; i <= (RACK_SIZE); i++) {
+        int number_of_draws_with_exactly_i_of_letter = get_subtotal(inference, letter, i, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
+        if (number_of_draws_with_exactly_i_of_letter > 0) {
+            push(stat, i, number_of_draws_with_exactly_i_of_letter);
+        }
+    }
+    // Add the zero case to the stat
+    // We do not have direct stats for when the letter
+    // was never drawn so we infer it here
+    uint64_t number_of_draws_without_letter = weight(inference->leave_values) - weight(stat);
+    push(stat, 0, number_of_draws_without_letter);
+}
+
+double get_probability_for_random_minimum_draw(Inference * inference, uint8_t letter, int minimum) {
+    return 0.0;
 }
 
 void record_valid_leave(Inference * inference, float current_leave_value) {
@@ -205,5 +225,6 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
     iterate_through_all_possible_leaves(inference, (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters, BLANK_MACHINE_LETTER);
 
     reset_rack(inference->player_to_infer_rack);
+    print_inference(inference, actual_tiles_played);
     return INFERENCE_STATUS_SUCCESS;
 }
