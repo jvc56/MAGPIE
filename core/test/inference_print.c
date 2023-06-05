@@ -12,12 +12,15 @@ void print_inference(Inference * inference, Rack * actual_tiles_played) {
 	char inference_string[2700] = "";
 
     Game * game = inference->game;
-    int total_draws = inference->total_draws;
-    int total_leaves = inference->total_leaves;
+    uint64_t total_draws = weight(inference->leave_values);
+    uint64_t total_leaves = cardinality(inference->leave_values);
     write_string_to_end_of_buffer(inference_string, "Played tiles: ");
     write_rack_to_end_of_buffer(inference_string, inference->game->gen->letter_distribution, actual_tiles_played);
-    sprintf(inference_string + strlen(inference_string), "\nScore:        %d\n\nTotal possible draws:  %d\nTotal possible leaves: %d\n\n", inference->actual_score, total_draws, total_leaves);
-
+    sprintf(inference_string + strlen(inference_string), "\nScore:        %d\n", inference->actual_score);
+    sprintf(inference_string + strlen(inference_string), "Total possible draws:  %ld\n", total_draws);
+    sprintf(inference_string + strlen(inference_string), "Total possible leaves: %ld\n", total_leaves);
+    sprintf(inference_string + strlen(inference_string), "Average leave value:   %0.2f\n", mean(inference->leave_values));
+    sprintf(inference_string + strlen(inference_string), "Stdev leave value:     %0.2f\n\n", stdev(inference->leave_values));
     if (total_draws > 0) {
         for (int i = 0; i < (int)game->gen->letter_distribution->size; i++) {
             int draw_subtotal = get_subtotal_sum_with_minimum(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);

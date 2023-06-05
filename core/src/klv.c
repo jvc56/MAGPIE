@@ -205,7 +205,7 @@ int get_word_index_of(KLV * klv, uint32_t node_index, Rack * leave) {
 }
 
 
-float leave_value(KLV * klv, Rack * leave) {
+float get_leave_value(KLV * klv, Rack * leave) {
     if (leave->empty) {
         return 0.0;
     }

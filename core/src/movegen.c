@@ -119,7 +119,7 @@ void generate_exchange_moves(Generator * gen, Player * player, uint8_t ml, int s
 		// Ignore the empty exchange case for full racks
 		// to avoid out of bounds errors for the best_leaves array
 		if (player->rack->number_of_letters < RACK_SIZE) {
-			float current_value = leave_value(player->strategy_params->klv, player->rack);
+			float current_value = get_leave_value(player->strategy_params->klv, player->rack);
 			set_current_value(gen->leave_map, current_value);
 			if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
 				gen->best_leaves[player->rack->number_of_letters] = current_value;
@@ -515,7 +515,7 @@ void generate_moves(Generator * gen, Player * player, Rack * opp_rack, int add_e
 
 	init_leave_map(gen->leave_map, player->rack);
 	if (player->rack->number_of_letters < RACK_SIZE) {
-		set_current_value(gen->leave_map, leave_value(player->strategy_params->klv, player->rack));
+		set_current_value(gen->leave_map, get_leave_value(player->strategy_params->klv, player->rack));
 	} else {
 		set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
 	}

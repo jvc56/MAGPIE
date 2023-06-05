@@ -46,6 +46,10 @@ int within_epsilon_float(float a, float b) {
     return fabs(a - b) < DOUBLE_EPSILON;
 }
 
+int within_epsilon_double(double a, double b) {
+    return fabs(a - b) < DOUBLE_EPSILON;
+}
+
 float get_leave_value_for_move(KLV * klv, Move * move, Rack * rack) {
     int valid_tiles = move->tiles_length;
     if (move->move_type == MOVE_TYPE_EXCHANGE) {
@@ -60,11 +64,11 @@ float get_leave_value_for_move(KLV * klv, Move * move, Rack * rack) {
             }
         }
     }
-    return leave_value(klv, rack);
+    return get_leave_value(klv, rack);
 }
 
 float get_leave_value_for_rack(KLV * klv, Rack * rack) {
-    return leave_value(klv, rack);
+    return get_leave_value(klv, rack);
 }
 
 void generate_moves_for_game(Game * game) {

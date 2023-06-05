@@ -14,6 +14,6 @@ typedef struct KLV {
 
 KLV * create_klv(const char* klv_filename);
 void destroy_klv(KLV * klv);
-float leave_value(KLV * klv, Rack * rack);
+float get_leave_value(KLV * klv, Rack * rack);
 
 #endif

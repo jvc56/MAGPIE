@@ -22,6 +22,7 @@
 #include "prof_tests.h"
 #include "play_recorder_test.h"
 #include "rack_test.h"
+#include "stats_test.h"
 #include "test_constants.h"
 #include "shadow_test.h"
 #include "superconfig.h"
@@ -46,6 +47,7 @@ void unit_tests(SuperConfig * superconfig) {
     test_movegen(superconfig);
     test_equity_adjustments(superconfig);
     test_gameplay(superconfig);
+    test_stats();
     test_infer(superconfig);
 }
 
