@@ -14,6 +14,73 @@
 #include "test_constants.h"
 #include "superconfig.h"
 
+void test_trivial_random_probability(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
+    Game * game = create_game(config);
+    Inference * inference = create_inference(game->gen->letter_distribution->size);
+
+    // A minimum of zero should always be 100% probability
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Z'),
+            0,
+            3),
+        1
+    ));
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Z'),
+            0,
+            4),
+        1
+    ));
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
+            0,
+            6),
+        1
+    ));
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
+            -1,
+            4),
+        1
+    ));
+
+    // Minimum N where letters in bag is M and M > N
+    // should always be 0
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
+            20,
+            4),
+        0
+    ));
+
+    // If the player is emptying the bag and there are the minimum
+    // number of leaves remaining, the probability is trivially 1.
+    add_letter_to_rack(inference->bag_as_rack, human_readable_letter_to_machine_letter(config->letter_distribution, 'E'));
+    add_letter_to_rack(inference->bag_as_rack, human_readable_letter_to_machine_letter(config->letter_distribution, 'E'));
+    add_letter_to_rack(inference->bag_as_rack, human_readable_letter_to_machine_letter(config->letter_distribution, 'E'));
+    add_letter_to_rack(inference->bag_as_rack, human_readable_letter_to_machine_letter(config->letter_distribution, 'E'));
+    add_letter_to_rack(inference->bag_as_rack, human_readable_letter_to_machine_letter(config->letter_distribution, 'E'));
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
+            4,
+            1),
+        1
+    ));
+}
+
 void test_infer_rack_overflow(SuperConfig * superconfig) {
     Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
@@ -94,6 +161,15 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     get_stat_for_letter(inference, letter_stat, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'S'));
     assert(within_epsilon_double(mean(letter_stat), 1));
     assert(within_epsilon_double(stdev(letter_stat), 0));
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'S'),
+            1,
+            6),
+        (double) 3 / 94
+    ));
+
     reset_game(game);
 
     set_rack_to_string(rack, "MUZAKY", game->gen->letter_distribution);
@@ -122,9 +198,26 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     }
     get_stat_for_letter(inference, letter_stat, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'));
     assert(within_epsilon_double(mean(letter_stat), (double)12 / 83));
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Q'),
+            1,
+            6),
+        (double) 1 / 94
+    ));
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'B'),
+            1,
+            6),
+        (double) 2 / 94
+    ));
     reset_game(game);
 
     set_rack_to_string(rack, "MUZAK", game->gen->letter_distribution);
+    printf("INFER MUZAK!\n");
     status = infer(inference, game, rack, 0, 50, 0);
     assert(status == INFERENCE_STATUS_SUCCESS);
     // Can't have B or Y because of ZAMBUK and MUZAKY
@@ -140,6 +233,14 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
         }
     }
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'B'),
+            2,
+            5),
+        (double) 1 / choose(95, 2)
+    ));
     reset_game(game);
 
     load_cgp(game, VS_JEREMY_WITH_P2_RACK);
@@ -283,6 +384,14 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             assert(get_subtotal_sum_with_minimum(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 0);
         }
     }
+    assert(within_epsilon_double(
+        get_probability_for_random_minimum_draw(
+            inference,
+            human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
+            3,
+            4),
+        (double) 4 / choose(8, 3)
+    ));
     reset_game(game);
 
     // Check that the equity margin works
@@ -373,6 +482,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
 }
 
 void test_infer(SuperConfig * superconfig) {
+    test_trivial_random_probability(superconfig);
     test_infer_rack_overflow(superconfig);
     test_infer_no_tiles_played(superconfig);
     test_infer_tiles_played_not_in_bag(superconfig);

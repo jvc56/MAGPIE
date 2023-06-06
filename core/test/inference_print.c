@@ -8,23 +8,19 @@
 #include "game_print.h"
 #include "test_util.h"
 
-void write_letter_minimum(Inference * inference, char * inference_string, uint8_t letter, int minimum, uint64_t total_draws) {
+void write_letter_minimum(Inference * inference, char * inference_string, uint8_t letter, int minimum, int number_of_actual_tiles_played) {
     int draw_subtotal = get_subtotal_sum_with_minimum(inference, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
-    if (draw_subtotal == 0) {
-        return;
-    }
     int leave_subtotal = get_subtotal_sum_with_minimum(inference, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE);
-    double inference_probability = ((double)draw_subtotal) / (double)total_draws;
-    double random_probability = get_probability_for_random_minimum_draw(inference, letter, minimum);
-    double inference_probability_difference_from_random = inference_probability - random_probability;
+    double inference_probability = ((double)draw_subtotal) / (double)weight(inference->leave_values);
+    double random_probability = get_probability_for_random_minimum_draw(inference, letter, minimum, number_of_actual_tiles_played);
     sprintf(inference_string + strlen(inference_string), " | %-7.2f %-7.2f%-5d%-5d",
     inference_probability * 100,
-    inference_probability_difference_from_random * 100,
+    random_probability * 100,
     draw_subtotal,
     leave_subtotal);
 }
 
-void write_letter_line(Inference * inference, Stat * letter_stat, char * inference_string, uint8_t letter, uint64_t total_draws, int max_duplicate_letter_draw) {
+void write_letter_line(Inference * inference, Stat * letter_stat, char * inference_string, uint8_t letter, int max_duplicate_letter_draw, int number_of_actual_tiles_played) {
     get_stat_for_letter(inference, letter_stat, letter);
     sprintf(inference_string + strlen(inference_string), "%c: %4.2f %4.2f",
     machine_letter_to_human_readable_letter(inference->game->gen->letter_distribution, letter),
@@ -32,7 +28,7 @@ void write_letter_line(Inference * inference, Stat * letter_stat, char * inferen
     stdev(letter_stat));
 
     for (int i = 1; i <= max_duplicate_letter_draw; i++) {
-        write_letter_minimum(inference, inference_string, letter, i, total_draws);
+        write_letter_minimum(inference, inference_string, letter, i, number_of_actual_tiles_played);
     }
     write_string_to_end_of_buffer(inference_string, "\n");
 }
@@ -80,13 +76,13 @@ void print_inference(Inference * inference, Rack * actual_tiles_played) {
 
 
     for (int i = 0; i < max_duplicate_letter_draw; i++) {
-        sprintf(inference_string + strlen(inference_string), " | %%       Diff   Tot  Unq  ");
+        sprintf(inference_string + strlen(inference_string), " | %%       Rand   Tot  Unq  ");
     }
     sprintf(inference_string + strlen(inference_string), "\n");
     
     if (total_draws > 0) {
         for (int i = 0; i < (int)game->gen->letter_distribution->size; i++) {
-            write_letter_line(inference, letter_stat, inference_string, i, total_draws, max_duplicate_letter_draw);
+            write_letter_line(inference, letter_stat, inference_string, i, max_duplicate_letter_draw, actual_tiles_played->number_of_letters);
         }
     }
 
