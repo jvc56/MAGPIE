@@ -72,6 +72,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     Rack * rack = create_rack(game->players[0]->rack->array_size);
     KLV * klv = game->players[0]->strategy_params->klv;
     Inference * inference = create_inference(game->gen->letter_distribution->size);
+    Stat * letter_stat = create_stat();
 
     set_rack_to_string(rack, "MUZAKS", game->gen->letter_distribution);
     int status = infer(inference, game, rack, 0, 52, 0);
@@ -90,6 +91,9 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
         }
     }
+    get_stat_for_letter(inference, letter_stat, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'S'));
+    assert(within_epsilon_double(mean(letter_stat), 1));
+    assert(within_epsilon_double(stdev(letter_stat), 0));
     reset_game(game);
 
     set_rack_to_string(rack, "MUZAKY", game->gen->letter_distribution);
@@ -116,6 +120,8 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
         }
     }
+    get_stat_for_letter(inference, letter_stat, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'));
+    assert(within_epsilon_double(mean(letter_stat), (double)12 / 83));
     reset_game(game);
 
     set_rack_to_string(rack, "MUZAK", game->gen->letter_distribution);
@@ -201,6 +207,11 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             assert(get_subtotal(inference, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 0);
         }
     }
+    get_stat_for_letter(inference, letter_stat, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'));
+    assert(within_epsilon_double(mean(letter_stat), (double)275 / 450));
+    get_stat_for_letter(inference, letter_stat, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'R'));
+    assert(within_epsilon_double(mean(letter_stat), 1));
+    assert(within_epsilon_double(stdev(letter_stat), 0));
     reset_game(game);
 
     // Contrive an impossible situation to easily test
@@ -285,6 +296,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     // Z - none in bag
     // Letters now possible because of the additional 5 equity buffer:
     // A - YAKUZA
+    // 2 Bs and 1 Q with 6 played tiles is 100 - (2 + 1 + 6) = 91
     assert(weight(inference->leave_values) == 91);
     // All letters except the 4 described above are possible, so 27 - 4 = 23
     assert(cardinality(inference->leave_values) == 23);

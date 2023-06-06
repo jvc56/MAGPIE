@@ -46,6 +46,7 @@ void print_inference(Inference * inference, Rack * actual_tiles_played) {
     Game * game = inference->game;
     uint64_t total_draws = weight(inference->leave_values);
     uint64_t total_leaves = cardinality(inference->leave_values);
+    sprintf(inference_string + strlen(inference_string), "Equity margin:         %0.2f\n", inference->equity_margin);
     write_string_to_end_of_buffer(inference_string, "Played tiles:          ");
     write_rack_to_end_of_buffer(inference_string, inference->game->gen->letter_distribution, actual_tiles_played);
     sprintf(inference_string + strlen(inference_string), "\n");

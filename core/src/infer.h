@@ -32,5 +32,6 @@ int get_subtotal(Inference * inference, uint8_t letter, int number_of_letters, i
 int get_subtotal_sum_with_minimum(Inference * inference, uint8_t letter, int minimum_number_of_letters, int subtotal_index);
 void get_stat_for_letter(Inference * inference, Stat * stat, uint8_t letter);
 double get_probability_for_random_minimum_draw(Inference * inference, uint8_t letter, int minimum);
+void get_stat_for_letter(Inference * inference, Stat * stat, uint8_t letter);
 
 #endif
