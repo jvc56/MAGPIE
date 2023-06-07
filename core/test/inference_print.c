@@ -8,6 +8,12 @@
 #include "game_print.h"
 #include "test_util.h"
 
+void print_leave_rack(LeaveRack * leave_rack, int index, uint64_t total_draws, LetterDistribution * letter_distribution) {
+    char leave_string[(RACK_SIZE)] = "";
+    write_rack_to_end_of_buffer(leave_string, letter_distribution, leave_rack->rack);
+    printf("%-3d %-7s %-6.2f %-6d %0.2f\n", index + 1, leave_string, ((double)leave_rack->draws/total_draws) * 100, leave_rack->draws, leave_rack->equity);
+}
+
 void write_letter_minimum(Inference * inference, char * inference_string, uint8_t letter, int minimum, int number_of_actual_tiles_played) {
     int draw_subtotal = get_subtotal_sum_with_minimum(inference, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
     int leave_subtotal = get_subtotal_sum_with_minimum(inference, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE);
@@ -39,14 +45,27 @@ void print_inference(Inference * inference, Rack * actual_tiles_played) {
     // Create a transient stat to use the stat functions
     Stat * letter_stat = create_stat();
 
+
+    for (int i = 0; i < inference->player_to_infer_rack->array_size; i++) {
+        for (int j = 0; j < actual_tiles_played->array[i]; j++) {
+            take_letter_from_rack(inference->player_to_infer_rack, i);
+        }
+    }
+    
+
     Game * game = inference->game;
     uint64_t total_draws = weight(inference->leave_values);
     uint64_t total_leaves = cardinality(inference->leave_values);
-    sprintf(inference_string + strlen(inference_string), "Equity margin:         %0.2f\n", inference->equity_margin);
     write_string_to_end_of_buffer(inference_string, "Played tiles:          ");
     write_rack_to_end_of_buffer(inference_string, inference->game->gen->letter_distribution, actual_tiles_played);
     sprintf(inference_string + strlen(inference_string), "\n");
     sprintf(inference_string + strlen(inference_string), "Score:                 %d\n", inference->actual_score);
+    if (inference->player_to_infer_rack->number_of_letters > 0) {
+        write_string_to_end_of_buffer(inference_string, "Partial Rack:          ");
+        write_rack_to_end_of_buffer(inference_string, inference->game->gen->letter_distribution, inference->player_to_infer_rack);
+        sprintf(inference_string + strlen(inference_string), "\n");
+    }
+    sprintf(inference_string + strlen(inference_string), "Equity margin:         %0.2f\n", inference->equity_margin);
     sprintf(inference_string + strlen(inference_string), "Total possible draws:  %ld\n", total_draws);
     sprintf(inference_string + strlen(inference_string), "Total possible leaves: %ld\n", total_leaves);
     sprintf(inference_string + strlen(inference_string), "Average leave value:   %0.2f\n", mean(inference->leave_values));
@@ -91,4 +110,18 @@ void print_inference(Inference * inference, Rack * actual_tiles_played) {
     printf("\n\nInference Report:\n\n");
     print_game(inference->game);
 	printf("\n%s\n", inference_string);
+    // Get the list of most common leaves
+    int number_of_common_leaves = inference->leave_rack_list->count;
+    for (int i = 1; i < number_of_common_leaves; i++) {
+        LeaveRack * leave_rack = pop_leave_rack(inference->leave_rack_list);
+        // Use a swap var to preserve the spare leave pointer
+        LeaveRack * swap = inference->leave_rack_list->leave_racks[inference->leave_rack_list->count];
+        inference->leave_rack_list->leave_racks[inference->leave_rack_list->count] = leave_rack;
+        inference->leave_rack_list->spare_leave_rack = swap;
+    }
+    printf("Most Common Leaves\n\n#   Leave   %%      Draws  Equity\n");
+    for (int common_leave_index = 0; common_leave_index < number_of_common_leaves; common_leave_index++) {
+        LeaveRack * leave_rack = inference->leave_rack_list->leave_racks[common_leave_index];
+        print_leave_rack(leave_rack, common_leave_index, weight(inference->leave_values), inference->game->gen->letter_distribution);
+    }
 }

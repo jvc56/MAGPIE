@@ -115,6 +115,10 @@ void insert_spare_move_top_equity(MoveList * ml, float equity) {
 }
 
 Move * pop_move(MoveList * ml) {
+    if (ml->count == 1) {
+        ml->count--;
+        return ml->moves[0];
+    }
     Move * swap = ml->spare_move;
     ml->spare_move = ml->moves[0];
     ml->moves[0] = ml->moves[ml->count-1];

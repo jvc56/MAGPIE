@@ -140,9 +140,10 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     KLV * klv = game->players[0]->strategy_params->klv;
     Inference * inference = create_inference(game->gen->letter_distribution->size);
     Stat * letter_stat = create_stat();
+    int status;
 
     set_rack_to_string(rack, "MUZAKS", game->gen->letter_distribution);
-    int status = infer(inference, game, rack, 0, 52, 0);
+    status = infer(inference, game, rack, 0, 52, 0);
     assert(status == INFERENCE_STATUS_SUCCESS);
     // With this rack, only keeping an S is possible, and
     // there are 3 S remaining.
@@ -169,7 +170,6 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             6),
         (double) 3 / 94
     ));
-
     reset_game(game);
 
     set_rack_to_string(rack, "MUZAKY", game->gen->letter_distribution);
@@ -217,7 +217,6 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     reset_game(game);
 
     set_rack_to_string(rack, "MUZAK", game->gen->letter_distribution);
-    printf("INFER MUZAK!\n");
     status = infer(inference, game, rack, 0, 50, 0);
     assert(status == INFERENCE_STATUS_SUCCESS);
     // Can't have B or Y because of ZAMBUK and MUZAKY

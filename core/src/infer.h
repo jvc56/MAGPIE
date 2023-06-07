@@ -3,6 +3,7 @@
 
 #include "game.h"
 #include "klv.h"
+#include "leave_rack.h"
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
@@ -13,6 +14,7 @@ typedef struct Inference {
     Stat * leave_values;
     int draw_and_leave_subtotals_size;
     int * draw_and_leave_subtotals;
+    LeaveRackList * leave_rack_list;
 
     // Recursive vars
     Game * game;

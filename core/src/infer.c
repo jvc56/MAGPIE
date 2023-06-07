@@ -6,6 +6,7 @@
 #include "infer.h"
 #include "kwg.h"
 #include "klv.h"
+#include "leave_rack.h"
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
@@ -22,6 +23,7 @@ Inference * create_inference(int distribution_size) {
     inference->player_leave = create_rack(distribution_size);
     inference->bag_as_rack = create_rack(distribution_size);
     inference->leave_values = create_stat();
+    inference->leave_rack_list = create_leave_rack_list(20, distribution_size);
     return inference;
 }
 
@@ -29,6 +31,7 @@ void destroy_inference(Inference * inference) {
     destroy_rack(inference->player_leave);
     destroy_rack(inference->bag_as_rack);
     destroy_stat(inference->leave_values);
+    destroy_leave_rack_list(inference->leave_rack_list);
     free(inference->draw_and_leave_subtotals);
     free(inference);
 }
@@ -131,6 +134,7 @@ double get_probability_for_random_minimum_draw(Inference * inference, uint8_t th
 void record_valid_leave(Inference * inference, float current_leave_value) {
     int number_of_draws_for_leave = get_number_of_draws_for_leave(inference);
     push(inference->leave_values, (double) current_leave_value, number_of_draws_for_leave);
+    insert_leave_rack(inference->leave_rack_list, inference->player_leave, number_of_draws_for_leave, current_leave_value);
     for (int i = 0; i < inference->distribution_size; i++) {
         if (inference->player_leave->array[i] > 0) {
             add_to_letter_subtotal(inference, i, inference->player_leave->array[i], INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW, number_of_draws_for_leave);
@@ -207,6 +211,7 @@ void initialize_inference_for_evaluation(Inference * inference, Game * game, Rac
     for (int i = 0; i < inference->draw_and_leave_subtotals_size; i++) {
         inference->draw_and_leave_subtotals[i] = 0;
     }
+    reset_leave_rack_list(inference->leave_rack_list);
 
     inference->game = game;
     inference->actual_score = actual_score;
@@ -261,7 +266,7 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
 
     iterate_through_all_possible_leaves(inference, (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters, BLANK_MACHINE_LETTER);
 
-    reset_rack(inference->player_to_infer_rack);
     print_inference(inference, actual_tiles_played);
+    reset_rack(inference->player_to_infer_rack);
     return INFERENCE_STATUS_SUCCESS;
 }
