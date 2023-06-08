@@ -23,6 +23,7 @@ typedef struct Inference {
     Rack * player_leave;
     int player_to_infer_index;
     int actual_score;
+    int number_of_tiles_exchanged;
     float equity_margin;
     KLV * klv;
 } Inference;

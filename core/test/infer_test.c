@@ -132,6 +132,41 @@ void test_infer_both_play_and_exchange(SuperConfig * superconfig) {
     destroy_game(game);
 }
 
+void test_infer_exchange_score_not_zero(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
+    Game * game = create_game(config);
+    Rack * rack = create_rack(game->players[0]->rack->array_size);
+    
+    Inference * inference = create_inference(game->gen->letter_distribution->size);
+    int status = infer(inference, game, rack, 0, 3, 1, 0);
+    assert(status == INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
+
+    destroy_rack(rack);
+    destroy_inference(inference);
+    destroy_game(game);
+}
+
+void test_infer_exchange_not_allowed(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
+    Game * game = create_game(config);
+    Rack * rack = create_rack(game->players[0]->rack->array_size);
+    
+    // There are 13 tiles in the bag
+    load_cgp(game, VS_JEREMY);
+    Inference * inference = create_inference(game->gen->letter_distribution->size);
+    int status = infer(inference, game, rack, 0, 3, 1, 0);
+    assert(status == INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED);
+
+    add_letter(game->gen->bag, BLANK_MACHINE_LETTER);
+    // There should now be 14 tiles in the bag
+    status = infer(inference, game, rack, 0, 3, 1, 0);
+    assert(status == INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
+
+    destroy_rack(rack);
+    destroy_inference(inference);
+    destroy_game(game);
+}
+
 void test_infer_tiles_played_not_in_bag(SuperConfig * superconfig) {
     Config * config = get_csw_config(superconfig);
     Game * game = create_game(config);
@@ -490,6 +525,27 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     assert(within_epsilon_double(mean(inference->leave_values), mean_rin_leave_value));
     reset_game(game);
 
+
+    // Test exchanges
+    load_cgp(game, VS_JEREMY);
+    // Take out good letters and throw in bad ones to force certain
+    // racks to have exchange as the best play
+    draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, '?'));
+    draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, '?'));
+    draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'));
+    draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'A'));
+    draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'A'));
+
+    add_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Q'));
+    add_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'W'));
+    add_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'W'));
+    add_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'V'));
+    add_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'V'));
+
+    reset_rack(rack);
+    status = infer(inference, game, rack, 0, 0, 6, 0);
+    assert(status == INFERENCE_STATUS_SUCCESS);
+
     destroy_rack(rack);
     destroy_inference(inference);
     destroy_game(game);
@@ -500,6 +556,8 @@ void test_infer(SuperConfig * superconfig) {
     test_infer_rack_overflow(superconfig);
     test_infer_no_tiles_played(superconfig);
     test_infer_both_play_and_exchange(superconfig);
+    test_infer_exchange_score_not_zero(superconfig);
+    test_infer_exchange_not_allowed(superconfig);
     test_infer_tiles_played_not_in_bag(superconfig);
     test_infer_nonerror_cases(superconfig);
 }

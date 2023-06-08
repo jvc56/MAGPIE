@@ -12,6 +12,7 @@
 #include "stats.h"
 
 #include "../test/game_print.h"
+#include "../test/move_print.h"
 #include "../test/inference_print.h"
 #include "../test/test_util.h"
 
@@ -177,13 +178,15 @@ Move * get_top_move(Inference * inference) {
     return game->gen->move_list->moves[0];
 }
 
-int within_equity_margin(Inference * inference, float current_leave_value) {
+int within_equity_margin_or_matching_exchange(Inference * inference, float current_leave_value) {
     Move * top_move = get_top_move(inference);
-    return inference->actual_score + current_leave_value + inference->equity_margin + (INFERENCE_EQUITY_EPSILON) >= top_move->equity;
+    int is_within_equity_margin = inference->actual_score + current_leave_value + inference->equity_margin + (INFERENCE_EQUITY_EPSILON) >= top_move->equity;
+    int number_exchanged_matches = top_move->move_type == MOVE_TYPE_EXCHANGE && top_move->tiles_played == inference->number_of_tiles_exchanged;
+    return is_within_equity_margin || number_exchanged_matches;
 }
 
 void evaluate_possible_leave(Inference * inference, float current_leave_value) {
-    if (within_equity_margin(inference, current_leave_value) || inference->bag_as_rack->empty) {
+    if (within_equity_margin_or_matching_exchange(inference, current_leave_value) || inference->bag_as_rack->empty) {
         record_valid_leave(inference, current_leave_value);
     }
 }
@@ -202,7 +205,11 @@ void decrement_letter_for_inference(Inference * inference, uint8_t letter) {
 
 void iterate_through_all_possible_leaves(Inference * inference, int leave_tiles_remaining, int start_letter) {
     if (leave_tiles_remaining == 0) {
-        evaluate_possible_leave(inference, get_leave_value(inference->klv, inference->player_leave));
+        double current_leave_value = 0;
+        if (inference->number_of_tiles_exchanged == 0) {
+            current_leave_value = get_leave_value(inference->klv, inference->player_leave);
+        }
+        evaluate_possible_leave(inference, current_leave_value);
         return;
     }
 	for (int letter = start_letter; letter < inference->distribution_size; letter++) {
@@ -215,7 +222,7 @@ void iterate_through_all_possible_leaves(Inference * inference, int leave_tiles_
     reset_move_list(inference->game->gen->move_list);
 }
 
-void initialize_inference_for_evaluation(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, float equity_margin) {    
+void initialize_inference_for_evaluation(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin) {    
     // Reset record
     reset_stat(inference->leave_values);
     for (int i = 0; i < inference->draw_and_leave_subtotals_size; i++) {
@@ -225,6 +232,7 @@ void initialize_inference_for_evaluation(Inference * inference, Game * game, Rac
 
     inference->game = game;
     inference->actual_score = actual_score;
+    inference->number_of_tiles_exchanged = number_of_tiles_exchanged;
     inference->equity_margin = equity_margin;
 
     inference->player_to_infer_index = player_to_infer_index;
@@ -258,7 +266,7 @@ void initialize_inference_for_evaluation(Inference * inference, Game * game, Rac
 }
 
 int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin) {
-    initialize_inference_for_evaluation(inference, game, actual_tiles_played, player_to_infer_index, actual_score, equity_margin);
+    initialize_inference_for_evaluation(inference, game, actual_tiles_played, player_to_infer_index, actual_score, number_of_tiles_exchanged, equity_margin);
 
     for (int i = 0; i < inference->distribution_size; i++) {
         if (inference->bag_as_rack->array[i] < 0) {
@@ -272,6 +280,14 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
 
     if (actual_tiles_played->number_of_letters != 0 && number_of_tiles_exchanged != 0) {
         return INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE;
+    }
+
+    if (number_of_tiles_exchanged != 0 && inference->bag_as_rack->number_of_letters < (RACK_SIZE) * 2) {
+        return INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
+    }
+
+    if (number_of_tiles_exchanged != 0 && actual_score != 0) {
+        return INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO;
     }
 
     if (game->players[player_to_infer_index]->rack->number_of_letters > (RACK_SIZE)) {
