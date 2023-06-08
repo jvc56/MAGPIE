@@ -111,15 +111,9 @@ void print_inference(Inference * inference, Rack * actual_tiles_played) {
     print_game(inference->game);
 	printf("\n%s\n", inference_string);
     // Get the list of most common leaves
-    int number_of_common_leaves = inference->leave_rack_list->count;
-    for (int i = 1; i < number_of_common_leaves; i++) {
-        LeaveRack * leave_rack = pop_leave_rack(inference->leave_rack_list);
-        // Use a swap var to preserve the spare leave pointer
-        LeaveRack * swap = inference->leave_rack_list->leave_racks[inference->leave_rack_list->count];
-        inference->leave_rack_list->leave_racks[inference->leave_rack_list->count] = leave_rack;
-        inference->leave_rack_list->spare_leave_rack = swap;
-    }
     printf("Most Common Leaves\n\n#   Leave   %%      Draws  Equity\n");
+    int number_of_common_leaves = inference->leave_rack_list->count;
+    sort_leave_racks(inference);
     for (int common_leave_index = 0; common_leave_index < number_of_common_leaves; common_leave_index++) {
         LeaveRack * leave_rack = inference->leave_rack_list->leave_racks[common_leave_index];
         print_leave_rack(leave_rack, common_leave_index, weight(inference->leave_values), inference->game->gen->letter_distribution);

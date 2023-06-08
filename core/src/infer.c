@@ -36,6 +36,16 @@ void destroy_inference(Inference * inference) {
     free(inference);
 }
 
+void sort_leave_racks(Inference * inference) {
+    for (int i = 1; i < inference->leave_rack_list->count; i++) {
+        LeaveRack * leave_rack = pop_leave_rack(inference->leave_rack_list);
+        // Use a swap var to preserve the spare leave pointer
+        LeaveRack * swap = inference->leave_rack_list->leave_racks[inference->leave_rack_list->count];
+        inference->leave_rack_list->leave_racks[inference->leave_rack_list->count] = leave_rack;
+        inference->leave_rack_list->spare_leave_rack = swap;
+    }
+}
+
 // Functions for the inference record
 
 int get_letter_subtotal_index(uint8_t letter, int number_of_letters, int subtotal_index_offset) {
@@ -247,7 +257,7 @@ void initialize_inference_for_evaluation(Inference * inference, Game * game, Rac
     }
 }
 
-int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, float equity_margin) {
+int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin) {
     initialize_inference_for_evaluation(inference, game, actual_tiles_played, player_to_infer_index, actual_score, equity_margin);
 
     for (int i = 0; i < inference->distribution_size; i++) {
@@ -256,8 +266,12 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
         }
     }
 
-    if (actual_tiles_played->number_of_letters == 0) {
+    if (actual_tiles_played->number_of_letters == 0 && number_of_tiles_exchanged == 0) {
         return INFERENCE_STATUS_NO_TILES_PLAYED;
+    }
+
+    if (actual_tiles_played->number_of_letters != 0 && number_of_tiles_exchanged != 0) {
+        return INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE;
     }
 
     if (game->players[player_to_infer_index]->rack->number_of_letters > (RACK_SIZE)) {

@@ -27,7 +27,7 @@ typedef struct Inference {
     KLV * klv;
 } Inference;
 
-int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, float equity_margin);
+int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin);
 Inference * create_inference(int distribution_size);
 void destroy_inference(Inference * inference);
 int get_subtotal(Inference * inference, uint8_t letter, int number_of_letters, int subtotal_index_offset);
@@ -35,6 +35,7 @@ int get_subtotal_sum_with_minimum(Inference * inference, uint8_t letter, int min
 void get_stat_for_letter(Inference * inference, Stat * stat, uint8_t letter);
 double get_probability_for_random_minimum_draw(Inference * inference, uint8_t letter, int minimum, int number_of_actual_tiles_played);
 void get_stat_for_letter(Inference * inference, Stat * stat, uint8_t letter);
+void sort_leave_racks(Inference * inference);
 int choose(int n, int k);
 
 #endif
