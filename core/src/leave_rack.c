@@ -40,7 +40,6 @@ void destroy_leave_rack_list(LeaveRackList * lrl) {
 
 void reset_leave_rack_list(LeaveRackList * lrl) {
     lrl->count = 0;
-    lrl->leave_racks[0]->draws = 0;
 }
 
 void up_heapify_leave_rack(LeaveRackList * lrl, int index){
@@ -113,4 +112,15 @@ LeaveRack * pop_leave_rack(LeaveRackList * lrl) {
     lrl->count--;
     down_heapify_leave_rack(lrl, 0);
     return lrl->spare_leave_rack;
+}
+
+void sort_leave_racks(LeaveRackList * lrl) {
+    int number_of_leave_racks = lrl->count;
+    for (int i = 1; i < number_of_leave_racks; i++) {
+        LeaveRack * leave_rack = pop_leave_rack(lrl);
+        // Use a swap var to preserve the spare leave pointer
+        LeaveRack * swap = lrl->leave_racks[lrl->count];
+        lrl->leave_racks[lrl->count] = leave_rack;
+        lrl->spare_leave_rack = swap;
+    }
 }

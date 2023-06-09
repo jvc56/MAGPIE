@@ -16,35 +16,40 @@
 #include "../test/inference_print.h"
 #include "../test/test_util.h"
 
+InferenceRecord * create_inference_record(int distribution_size, int draw_and_leave_subtotals_size) {
+    InferenceRecord * record = malloc(sizeof(InferenceRecord));
+    record->rack_leave = create_rack(distribution_size);
+    record->draw_and_leave_subtotals = (int *) malloc(draw_and_leave_subtotals_size*sizeof(int));
+    record->equity_values = create_stat();
+    record->leave_rack_list = create_leave_rack_list(20, distribution_size);
+    return record;
+}
+
+void destroy_inference_record(InferenceRecord * record) {
+    destroy_rack(record->rack_leave);
+    destroy_stat(record->equity_values);
+    destroy_leave_rack_list(record->leave_rack_list);
+    free(record->draw_and_leave_subtotals);
+    free(record);
+}
+
 Inference * create_inference(int distribution_size) {
     Inference * inference =  malloc(sizeof(Inference));
     inference->distribution_size = distribution_size;
     inference->draw_and_leave_subtotals_size = distribution_size*(RACK_SIZE)*2;
-    inference->draw_and_leave_subtotals = (int *) malloc(inference->draw_and_leave_subtotals_size*sizeof(int));
-    inference->player_leave = create_rack(distribution_size);
     inference->bag_as_rack = create_rack(distribution_size);
-    inference->leave_values = create_stat();
-    inference->leave_rack_list = create_leave_rack_list(20, distribution_size);
+    inference->leave_record = create_inference_record(distribution_size, inference->draw_and_leave_subtotals_size);
+    inference->exchanged_record = create_inference_record(distribution_size, inference->draw_and_leave_subtotals_size);
+    inference->rack_record = create_inference_record(distribution_size, inference->draw_and_leave_subtotals_size);
     return inference;
 }
 
 void destroy_inference(Inference * inference) {
-    destroy_rack(inference->player_leave);
     destroy_rack(inference->bag_as_rack);
-    destroy_stat(inference->leave_values);
-    destroy_leave_rack_list(inference->leave_rack_list);
-    free(inference->draw_and_leave_subtotals);
+    destroy_inference_record(inference->leave_record);
+    destroy_inference_record(inference->exchanged_record);
+    destroy_inference_record(inference->rack_record);
     free(inference);
-}
-
-void sort_leave_racks(Inference * inference) {
-    for (int i = 1; i < inference->leave_rack_list->count; i++) {
-        LeaveRack * leave_rack = pop_leave_rack(inference->leave_rack_list);
-        // Use a swap var to preserve the spare leave pointer
-        LeaveRack * swap = inference->leave_rack_list->leave_racks[inference->leave_rack_list->count];
-        inference->leave_rack_list->leave_racks[inference->leave_rack_list->count] = leave_rack;
-        inference->leave_rack_list->spare_leave_rack = swap;
-    }
 }
 
 // Functions for the inference record
@@ -53,18 +58,18 @@ int get_letter_subtotal_index(uint8_t letter, int number_of_letters, int subtota
     return (letter * 2 * (RACK_SIZE)) + ((number_of_letters - 1) * 2) + subtotal_index_offset;
 }
 
-int get_subtotal(Inference * inference, uint8_t letter, int number_of_letters, int subtotal_index_offset) {
-    return inference->draw_and_leave_subtotals[get_letter_subtotal_index(letter, number_of_letters, subtotal_index_offset)];
+int get_subtotal(InferenceRecord * record, uint8_t letter, int number_of_letters, int subtotal_index_offset) {
+    return record->draw_and_leave_subtotals[get_letter_subtotal_index(letter, number_of_letters, subtotal_index_offset)];
 }
 
-void add_to_letter_subtotal(Inference * inference, uint8_t letter, int number_of_letters, int subtotal_index_offset, int delta) {
-    inference->draw_and_leave_subtotals[get_letter_subtotal_index(letter, number_of_letters, subtotal_index_offset)] += delta;
+void add_to_letter_subtotal(InferenceRecord * record, uint8_t letter, int number_of_letters, int subtotal_index_offset, int delta) {
+    record->draw_and_leave_subtotals[get_letter_subtotal_index(letter, number_of_letters, subtotal_index_offset)] += delta;
 }
 
-int get_subtotal_sum_with_minimum(Inference * inference, uint8_t letter, int minimum_number_of_letters, int subtotal_index_offset) {
+int get_subtotal_sum_with_minimum(InferenceRecord * record, uint8_t letter, int minimum_number_of_letters, int subtotal_index_offset) {
     int sum = 0;
     for (int i = minimum_number_of_letters; i <= (RACK_SIZE); i++) {
-        sum += get_subtotal(inference, letter, i, subtotal_index_offset);
+        sum += get_subtotal(record, letter, i, subtotal_index_offset);
     }
     return sum;
 }
@@ -79,20 +84,20 @@ int choose(int n, int k) {
     return (n * choose(n - 1, k - 1)) / k;
 }
 
-int get_number_of_draws_for_leave(Inference * inference) {
+int get_number_of_draws_for_rack(Rack * bag_as_rack, Rack * rack) {
     int number_of_ways = 1;
-    for (int i = 0; i < inference->player_leave->array_size; i++) {
-        if (inference->player_leave->array[i] > 0) {
-            number_of_ways *= choose(inference->bag_as_rack->array[i] + inference->player_leave->array[i], inference->player_leave->array[i]);
+    for (int i = 0; i < rack->array_size; i++) {
+        if (rack->array[i] > 0) {
+            number_of_ways *= choose(bag_as_rack->array[i] + rack->array[i], rack->array[i]);
         }
     }
     return number_of_ways;
 }
 
-void get_stat_for_letter(Inference * inference, Stat * stat, uint8_t letter) {
+void get_stat_for_letter(InferenceRecord * record, Stat * stat, uint8_t letter) {
     reset_stat(stat);
     for (int i = 1; i <= (RACK_SIZE); i++) {
-        int number_of_draws_with_exactly_i_of_letter = get_subtotal(inference, letter, i, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
+        int number_of_draws_with_exactly_i_of_letter = get_subtotal(record, letter, i, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
         if (number_of_draws_with_exactly_i_of_letter > 0) {
             push(stat, i, number_of_draws_with_exactly_i_of_letter);
         }
@@ -100,21 +105,21 @@ void get_stat_for_letter(Inference * inference, Stat * stat, uint8_t letter) {
     // Add the zero case to the stat
     // We do not have direct stats for when the letter
     // was never drawn so we infer it here
-    uint64_t number_of_draws_without_letter = weight(inference->leave_values) - weight(stat);
+    uint64_t number_of_draws_without_letter = weight(record->equity_values) - weight(stat);
     push(stat, 0, number_of_draws_without_letter);
 }
 
-double get_probability_for_random_minimum_draw(Inference * inference, uint8_t this_letter, int minimum, int number_of_actual_tiles_played) {
-    int number_of_this_letters_already_on_rack = inference->player_leave->array[this_letter];
+double get_probability_for_random_minimum_draw(Rack * bag_as_rack, Rack * rack, uint8_t this_letter, int minimum, int number_of_actual_tiles_played) {
+    int number_of_this_letters_already_on_rack = rack->array[this_letter];
     int minimum_adjusted_for_partial_rack = minimum - number_of_this_letters_already_on_rack;
     // If the partial leave already has the minimum
     // number of letters, the probability is trivially 1.
     if (minimum_adjusted_for_partial_rack <= 0) {
         return 1;
     }
-    int total_number_of_letters_in_bag = inference->bag_as_rack->number_of_letters;
-    int total_number_of_letters_on_rack = inference->player_leave->number_of_letters;
-    int number_of_this_letter_in_bag = inference->bag_as_rack->array[this_letter];
+    int total_number_of_letters_in_bag = bag_as_rack->number_of_letters;
+    int total_number_of_letters_on_rack = rack->number_of_letters;
+    int number_of_this_letter_in_bag = bag_as_rack->array[this_letter];
 
     // If there are not enough letters to meet the minimum, the probability
     // is trivially 0.
@@ -142,25 +147,25 @@ double get_probability_for_random_minimum_draw(Inference * inference, uint8_t th
     return ((double)total_draws_for_this_letter_minimum)/total_draws;
 }
 
-void record_valid_leave(Inference * inference, float current_leave_value) {
-    int number_of_draws_for_leave = get_number_of_draws_for_leave(inference);
-    push(inference->leave_values, (double) current_leave_value, number_of_draws_for_leave);
-    insert_leave_rack(inference->leave_rack_list, inference->player_leave, number_of_draws_for_leave, current_leave_value);
-    for (int i = 0; i < inference->distribution_size; i++) {
-        if (inference->player_leave->array[i] > 0) {
-            add_to_letter_subtotal(inference, i, inference->player_leave->array[i], INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW, number_of_draws_for_leave);
-            add_to_letter_subtotal(inference, i, inference->player_leave->array[i], INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE, 1);
+void record_valid_leave(InferenceRecord * record, Rack * bag_as_rack, Rack * rack, float current_leave_value, int distribution_size) {
+    int number_of_draws_for_leave = get_number_of_draws_for_rack(bag_as_rack, rack);
+    push(record->equity_values, (double) current_leave_value, number_of_draws_for_leave);
+    insert_leave_rack(record->leave_rack_list, rack, number_of_draws_for_leave, current_leave_value);
+    for (int i = 0; i < distribution_size; i++) {
+        if (rack->array[i] > 0) {
+            add_to_letter_subtotal(record, i, rack->array[i], INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW, number_of_draws_for_leave);
+            add_to_letter_subtotal(record, i, rack->array[i], INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE, 1);
         }
     }
 }
 
-void set_inference_to_remaining_tiles(Inference * inference, Rack * actual_tiles_played) {
-    push(inference->leave_values, (double) get_leave_value(inference->klv, inference->player_leave), 1);
+void record_tiles_in_bag_as_player_leave(Inference * inference, Rack * actual_tiles_played) {
+    push(inference->leave_record->equity_values, (double) get_leave_value(inference->klv, inference->leave_record->rack_leave), 1);
     for (int i = 0; i < inference->distribution_size; i++) {
         int number_of_remaining_letters = inference->bag_as_rack->array[i] - actual_tiles_played->array[i];
         if (number_of_remaining_letters > 0) {
-            add_to_letter_subtotal(inference, i, number_of_remaining_letters, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW, 1);
-            add_to_letter_subtotal(inference, i, number_of_remaining_letters, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE, 1);
+            add_to_letter_subtotal(inference->leave_record, i, number_of_remaining_letters, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW, 1);
+            add_to_letter_subtotal(inference->leave_record, i, number_of_remaining_letters, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE, 1);
         }
     }
 }
@@ -187,27 +192,27 @@ int within_equity_margin_or_matching_exchange(Inference * inference, float curre
 
 void evaluate_possible_leave(Inference * inference, float current_leave_value) {
     if (within_equity_margin_or_matching_exchange(inference, current_leave_value) || inference->bag_as_rack->empty) {
-        record_valid_leave(inference, current_leave_value);
+        record_valid_leave(inference->leave_record, inference->bag_as_rack, inference->leave_record->rack_leave, current_leave_value, inference->distribution_size);
     }
 }
 
 void increment_letter_for_inference(Inference * inference, uint8_t letter) {
     take_letter_from_rack(inference->bag_as_rack, letter);
     add_letter_to_rack(inference->player_to_infer_rack, letter);
-    add_letter_to_rack(inference->player_leave, letter);
+    add_letter_to_rack(inference->leave_record->rack_leave, letter);
 }
 
 void decrement_letter_for_inference(Inference * inference, uint8_t letter) {
     add_letter_to_rack(inference->bag_as_rack, letter);
     take_letter_from_rack(inference->player_to_infer_rack, letter);
-    take_letter_from_rack(inference->player_leave, letter);
+    take_letter_from_rack(inference->leave_record->rack_leave, letter);
 }
 
 void iterate_through_all_possible_leaves(Inference * inference, int leave_tiles_remaining, int start_letter) {
     if (leave_tiles_remaining == 0) {
         double current_leave_value = 0;
         if (inference->number_of_tiles_exchanged == 0) {
-            current_leave_value = get_leave_value(inference->klv, inference->player_leave);
+            current_leave_value = get_leave_value(inference->klv, inference->leave_record->rack_leave);
         }
         evaluate_possible_leave(inference, current_leave_value);
         return;
@@ -222,13 +227,19 @@ void iterate_through_all_possible_leaves(Inference * inference, int leave_tiles_
     reset_move_list(inference->game->gen->move_list);
 }
 
-void initialize_inference_for_evaluation(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin) {    
+void initialize_inference_record_for_evaluation(InferenceRecord * record, int draw_and_leave_subtotals_size) {
     // Reset record
-    reset_stat(inference->leave_values);
-    for (int i = 0; i < inference->draw_and_leave_subtotals_size; i++) {
-        inference->draw_and_leave_subtotals[i] = 0;
+    reset_stat(record->equity_values);
+    for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
+        record->draw_and_leave_subtotals[i] = 0;
     }
-    reset_leave_rack_list(inference->leave_rack_list);
+    reset_leave_rack_list(record->leave_rack_list);
+}
+
+void initialize_inference_for_evaluation(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin) {    
+    initialize_inference_record_for_evaluation(inference->leave_record, inference->draw_and_leave_subtotals_size);
+    initialize_inference_record_for_evaluation(inference->exchanged_record, inference->draw_and_leave_subtotals_size);
+    initialize_inference_record_for_evaluation(inference->rack_record, inference->draw_and_leave_subtotals_size);
 
     inference->game = game;
     inference->actual_score = actual_score;
@@ -240,7 +251,7 @@ void initialize_inference_for_evaluation(Inference * inference, Game * game, Rac
     inference->player_to_infer_rack = game->players[player_to_infer_index]->rack;
 
     reset_rack(inference->bag_as_rack);
-    reset_rack(inference->player_leave);
+    reset_rack(inference->leave_record->rack_leave);
 
     // Create the bag as a rack
     for (int i = 0; i <= game->gen->bag->last_tile_index; i++) {
@@ -251,7 +262,7 @@ void initialize_inference_for_evaluation(Inference * inference, Game * game, Rac
     // to the player's leave for partial inferences
     for (int i = 0; i < inference->player_to_infer_rack->array_size; i++) {
         for (int j = 0; j < inference->player_to_infer_rack->array[i]; j++) {
-            add_letter_to_rack(inference->player_leave, i);
+            add_letter_to_rack(inference->leave_record->rack_leave, i);
         }
     }
 
