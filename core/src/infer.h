@@ -11,7 +11,6 @@
 typedef struct InferenceRecord {
     Stat * equity_values;
     int * draw_and_leave_subtotals;
-    LeaveRackList * leave_rack_list;
 } InferenceRecord;
 
 typedef struct Inference {
@@ -19,6 +18,7 @@ typedef struct Inference {
     InferenceRecord * leave_record;
     InferenceRecord * exchanged_record;
     InferenceRecord * rack_record;
+    LeaveRackList * leave_rack_list;
 
     // Recursive vars
     // Malloc'd by the game:

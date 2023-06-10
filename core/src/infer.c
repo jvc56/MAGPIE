@@ -16,17 +16,15 @@
 #include "../test/inference_print.h"
 #include "../test/test_util.h"
 
-InferenceRecord * create_inference_record(int distribution_size, int draw_and_leave_subtotals_size) {
+InferenceRecord * create_inference_record(int draw_and_leave_subtotals_size) {
     InferenceRecord * record = malloc(sizeof(InferenceRecord));
     record->draw_and_leave_subtotals = (int *) malloc(draw_and_leave_subtotals_size*sizeof(int));
     record->equity_values = create_stat();
-    record->leave_rack_list = create_leave_rack_list(20, distribution_size);
     return record;
 }
 
 void destroy_inference_record(InferenceRecord * record) {
     destroy_stat(record->equity_values);
-    destroy_leave_rack_list(record->leave_rack_list);
     free(record->draw_and_leave_subtotals);
     free(record);
 }
@@ -38,9 +36,10 @@ Inference * create_inference(int distribution_size) {
     inference->bag_as_rack = create_rack(distribution_size);
     inference->leave = create_rack(distribution_size);
     inference->exchanged = create_rack(distribution_size);
-    inference->leave_record = create_inference_record(distribution_size, inference->draw_and_leave_subtotals_size);
-    inference->exchanged_record = create_inference_record(distribution_size, inference->draw_and_leave_subtotals_size);
-    inference->rack_record = create_inference_record(distribution_size, inference->draw_and_leave_subtotals_size);
+    inference->leave_record = create_inference_record(inference->draw_and_leave_subtotals_size);
+    inference->exchanged_record = create_inference_record(inference->draw_and_leave_subtotals_size);
+    inference->rack_record = create_inference_record(inference->draw_and_leave_subtotals_size);
+    inference->leave_rack_list = create_leave_rack_list(20, distribution_size);
     return inference;
 }
 
@@ -48,6 +47,7 @@ void destroy_inference(Inference * inference) {
     destroy_rack(inference->bag_as_rack);
     destroy_rack(inference->leave);
     destroy_rack(inference->exchanged);
+    destroy_leave_rack_list(inference->leave_rack_list);
     destroy_inference_record(inference->leave_record);
     destroy_inference_record(inference->exchanged_record);
     destroy_inference_record(inference->rack_record);
@@ -149,16 +149,18 @@ double get_probability_for_random_minimum_draw(Rack * bag_as_rack, Rack * rack, 
     return ((double)total_draws_for_this_letter_minimum)/total_draws;
 }
 
-void record_valid_leave(InferenceRecord * record, Rack * bag_as_rack, Rack * rack, float current_leave_value, int distribution_size) {
-    int number_of_draws_for_leave = get_number_of_draws_for_rack(bag_as_rack, rack);
-    push(record->equity_values, (double) current_leave_value, number_of_draws_for_leave);
-    insert_leave_rack(record->leave_rack_list, rack, number_of_draws_for_leave, current_leave_value);
-    for (int i = 0; i < distribution_size; i++) {
+void increment_subtotals_for_record(InferenceRecord * record, Rack * rack, int number_of_draws_for_leave) {
+    for (int i = 0; i < rack->array_size; i++) {
         if (rack->array[i] > 0) {
             add_to_letter_subtotal(record, i, rack->array[i], INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW, number_of_draws_for_leave);
             add_to_letter_subtotal(record, i, rack->array[i], INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE, 1);
         }
     }
+}
+
+void record_valid_leave(InferenceRecord * record, Rack * rack, float current_leave_value, int number_of_draws_for_leave) {
+    push(record->equity_values, (double) current_leave_value, number_of_draws_for_leave);
+    increment_subtotals_for_record(record, rack, number_of_draws_for_leave);
 }
 
 void record_remaining_tiles_in_bag_as_player_leave(Inference * inference, Rack * actual_tiles_played) {
@@ -191,9 +193,9 @@ void evaluate_possible_leave(Inference * inference, float current_leave_value) {
     int number_exchanged_matches = top_move->move_type == MOVE_TYPE_EXCHANGE && top_move->tiles_played == inference->number_of_tiles_exchanged;
     int recordable = is_within_equity_margin || number_exchanged_matches || inference->bag_as_rack->empty;
     if (recordable) {
+        int number_of_draws_for_leave = get_number_of_draws_for_rack(inference->bag_as_rack, inference->leave);
         if (inference->number_of_tiles_exchanged > 0) {
-            // This is guaranteed to be unique
-            record_valid_leave(inference->rack_record, inference->bag_as_rack, inference->leave, current_leave_value, inference->distribution_size);
+            record_valid_leave(inference->rack_record, inference->leave, current_leave_value, number_of_draws_for_leave);
             // The full rack for the exchange was recorded above,
             // but now we have to record the leave and the exchanged tiles
             for (int exchanged_tile_index = 0; exchanged_tile_index < top_move->tiles_played; exchanged_tile_index++) {
@@ -201,16 +203,17 @@ void evaluate_possible_leave(Inference * inference, float current_leave_value) {
                 add_letter_to_rack(inference->exchanged, tile_exchanged);
                 take_letter_from_rack(inference->leave, tile_exchanged);
             }
-            // The leave and tiles 
-            record_valid_leave(inference->leave_record, inference->bag_as_rack, inference->leave, current_leave_value, inference->distribution_size);
-            record_valid_leave(inference->exchanged_record, inference->bag_as_rack, inference->exchanged, current_leave_value, inference->distribution_size);
+            record_valid_leave(inference->leave_record, inference->leave, get_leave_value(inference->klv, inference->leave), number_of_draws_for_leave);
+            record_valid_leave(inference->exchanged_record, inference->exchanged, get_leave_value(inference->klv, inference->exchanged), number_of_draws_for_leave);
+            insert_leave_rack(inference->leave_rack_list, inference->leave, inference->exchanged, number_of_draws_for_leave, current_leave_value);
             reset_rack(inference->exchanged);
             for (int exchanged_tile_index = 0; exchanged_tile_index < top_move->tiles_played; exchanged_tile_index++) {
                 uint8_t tile_exchanged = top_move->tiles[exchanged_tile_index];
                 add_letter_to_rack(inference->leave, tile_exchanged);
             }
         } else {
-            record_valid_leave(inference->leave_record, inference->bag_as_rack, inference->leave, current_leave_value, inference->distribution_size);
+            record_valid_leave(inference->leave_record, inference->leave, current_leave_value, number_of_draws_for_leave);
+            insert_leave_rack(inference->leave_rack_list, inference->leave, NULL, number_of_draws_for_leave, current_leave_value);
         }
     }
 }
@@ -252,13 +255,13 @@ void initialize_inference_record_for_evaluation(InferenceRecord * record, int dr
     for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
         record->draw_and_leave_subtotals[i] = 0;
     }
-    reset_leave_rack_list(record->leave_rack_list);
 }
 
 void initialize_inference_for_evaluation(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin) {    
     initialize_inference_record_for_evaluation(inference->leave_record, inference->draw_and_leave_subtotals_size);
     initialize_inference_record_for_evaluation(inference->exchanged_record, inference->draw_and_leave_subtotals_size);
     initialize_inference_record_for_evaluation(inference->rack_record, inference->draw_and_leave_subtotals_size);
+    reset_leave_rack_list(inference->leave_rack_list);
 
     inference->game = game;
     inference->actual_score = actual_score;

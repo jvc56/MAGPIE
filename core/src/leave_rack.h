@@ -8,6 +8,7 @@
 
 typedef struct LeaveRack {
     Rack * rack;
+    Rack * exchanged;
     int draws;
     double equity;
 } LeaveRack;
@@ -21,7 +22,7 @@ typedef struct LeaveRackList {
 
 LeaveRackList * create_leave_rack_list(int capacity, int distribution_size);
 void destroy_leave_rack_list(LeaveRackList * lrl);
-void insert_leave_rack(LeaveRackList * lrl, Rack * rack, int number_of_draws_for_leave, double equity);
+void insert_leave_rack(LeaveRackList * lrl, Rack * leave, Rack * exchanged, int number_of_draws_for_leave, double equity);
 LeaveRack * pop_leave_rack(LeaveRackList * lrl);
 void reset_leave_rack_list(LeaveRackList * lrl);
 void sort_leave_racks(LeaveRackList * lrl);
