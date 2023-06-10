@@ -23,7 +23,7 @@ void test_trivial_random_probability(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Z'),
             0,
             3),
@@ -32,7 +32,7 @@ void test_trivial_random_probability(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Z'),
             0,
             4),
@@ -41,7 +41,7 @@ void test_trivial_random_probability(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
             0,
             6),
@@ -50,7 +50,7 @@ void test_trivial_random_probability(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
             -1,
             4),
@@ -62,7 +62,7 @@ void test_trivial_random_probability(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
             20,
             4),
@@ -79,7 +79,7 @@ void test_trivial_random_probability(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
             4,
             1),
@@ -221,7 +221,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'S'),
             1,
             6),
@@ -258,7 +258,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'Q'),
             1,
             6),
@@ -267,7 +267,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'B'),
             1,
             6),
@@ -294,7 +294,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'B'),
             2,
             5),
@@ -446,7 +446,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     assert(within_epsilon_double(
         get_probability_for_random_minimum_draw(
             inference->bag_as_rack,
-            inference->leave_record->rack_leave,
+            inference->leave,
             human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'E'),
             3,
             4),

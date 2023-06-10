@@ -9,7 +9,6 @@
 #include "stats.h"
 
 typedef struct InferenceRecord {
-    Rack * rack_leave;
     Stat * equity_values;
     int * draw_and_leave_subtotals;
     LeaveRackList * leave_rack_list;
@@ -28,6 +27,8 @@ typedef struct Inference {
     Rack * player_to_infer_rack;
     // Malloc'd by inference:
     Rack * bag_as_rack;
+    Rack * leave;
+    Rack * exchanged;
     int distribution_size;
     int player_to_infer_index;
     int actual_score;
