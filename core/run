@@ -35,7 +35,7 @@ make magpie_test BUILD=release
                       -n "$2"
 elif [ "$1" == "i" ]; then
 make magpie_test BUILD=release
-./bin/magpie_test infer -g "./data/lexica/CSW21.kwg" \
+time ./bin/magpie_test infer -g "./data/lexica/CSW21.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \

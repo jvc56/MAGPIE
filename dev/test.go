@@ -6,9 +6,10 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/domino14/macondo/ai/runner"
+	"github.com/domino14/macondo/ai/turnplayer"
 	"github.com/domino14/macondo/automatic"
 	"github.com/domino14/macondo/config"
+	"github.com/domino14/macondo/equity"
 	"github.com/domino14/macondo/game"
 	"github.com/domino14/macondo/gcgio"
 	pb "github.com/domino14/macondo/gen/api/proto/macondo"
@@ -40,7 +41,12 @@ func playGameToTurn(g *game.Game, turnNumber int) *game.Game {
 }
 
 func createMoveMap(g *game.Game) map[string]bool {
-	agr, err := runner.NewAIGameRunnerFromGame(g, nil, pb.BotRequest_HASTY_BOT)
+	eqCalc, err := equity.NewCombinedStaticCalculator(g.LexiconName(), &DefaultConfig, "", "")
+	if err != nil {
+		panic(err)
+	}
+
+	agr, err := turnplayer.NewAIStaticTurnPlayerFromGame(g, nil, []equity.EquityCalculator{eqCalc})
 	if err != nil {
 		panic(err)
 	}

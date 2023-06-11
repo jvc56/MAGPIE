@@ -77,7 +77,7 @@ void write_inference_record(char * buffer, InferenceRecord * record, Game * game
 
 
     for (int i = 0; i < max_duplicate_letter_draw; i++) {
-        sprintf(buffer + strlen(buffer), " | %%       Rand   Tot      Unq      ");
+        sprintf(buffer + strlen(buffer), " | Pct     Rand   Tot      Unq      ");
     }
     sprintf(buffer + strlen(buffer), "\n");
     
@@ -130,9 +130,9 @@ void print_inference(Inference * inference, Rack * actual_tiles_played) {
         write_inference_record(records_string, inference->exchanged_record, game, inference->leave, inference->bag_as_rack, letter_stat, (RACK_SIZE) - inference->number_of_tiles_exchanged);
 	    sprintf(records_string + strlen(records_string), "\n\nRack\n\n");
         write_inference_record(records_string, inference->rack_record, game, inference->leave, inference->bag_as_rack, letter_stat, 0);
-        sprintf(records_string + strlen(records_string), "\nMost Common       \n\n#   Leave   Exch    %%      Draws\n");
+        sprintf(records_string + strlen(records_string), "\nMost Common       \n\n#   Leave   Exch    Pct    Draws\n");
     } else {
-        sprintf(records_string + strlen(records_string), "\nMost Common       \n\n#   Leave   %%      Draws  Equity\n");
+        sprintf(records_string + strlen(records_string), "\nMost Common       \n\n#   Leave   Pct    Draws  Equity\n");
     }
     destroy_stat(letter_stat);
 
@@ -144,7 +144,6 @@ void print_inference(Inference * inference, Rack * actual_tiles_played) {
         write_leave_rack(records_string, leave_rack, common_leave_index, weight(common_leaves_record->equity_values), game->gen->letter_distribution);
     }
 
-    printf("\n\nInference Report:\n\n");
     print_game(inference->game);
 	printf("\n%s\n", inference_string);
 	printf("\n%s\n", records_string);

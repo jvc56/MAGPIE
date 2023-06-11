@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"sync"
 
@@ -116,6 +117,21 @@ func NondeterministicTests() {
 }
 
 func main() {
-	//fmt.Println(ConvertGCGToCGP("many_moves.gcg"))
-	NondeterministicTests()
+	// Define flags
+	lexicon := flag.String("lexicon", "", "the lexicon argument")
+	gcg := flag.String("gcg", "", "the gcg argument")
+	turnNumber := flag.Int("turn_number", 0, "the turn_number argument")
+	margin := flag.Float64("margin", 0.0, "the margin argument")
+	partial := flag.Bool("partial", false, "use racks in the GCG to infer partial leaves")
+
+	// Parse command line arguments
+	flag.Parse()
+
+	// Check if all required flags are provided
+	if *lexicon == "" || *gcg == "" || *turnNumber == 0 {
+		flag.PrintDefaults()
+		return
+	}
+
+	Infer(*lexicon, *gcg, *turnNumber, *margin, *partial)
 }

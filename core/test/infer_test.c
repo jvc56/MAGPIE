@@ -575,6 +575,7 @@ void test_infer(SuperConfig * superconfig) {
 
 void infer_from_config(Config * config) {
     Game * game = create_game(config);
+    load_cgp(game, config->cgp);
     Inference * inference = create_inference(game->gen->letter_distribution->size);
     int status = infer(inference, game, config->actual_tiles_played, config->player_to_infer_index, config->actual_score, config->number_of_tiles_exchanged, config->equity_margin);
     if (status != INFERENCE_STATUS_SUCCESS) {

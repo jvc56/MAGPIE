@@ -323,6 +323,5 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
     }
 
     iterate_through_all_possible_leaves(inference, (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters, BLANK_MACHINE_LETTER);
-    reset_rack(inference->player_to_infer_rack);
     return INFERENCE_STATUS_SUCCESS;
 }

@@ -5,13 +5,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/domino14/macondo/ai/runner"
-	"github.com/domino14/macondo/alphabet"
+	"github.com/domino14/macondo/ai/turnplayer"
 	"github.com/domino14/macondo/board"
 	"github.com/domino14/macondo/config"
+	"github.com/domino14/macondo/equity"
 	"github.com/domino14/macondo/game"
 	"github.com/domino14/macondo/gcgio"
 	pb "github.com/domino14/macondo/gen/api/proto/macondo"
+	"github.com/domino14/macondo/tilemapping"
 )
 
 var DefaultConfig = config.Config{
@@ -19,10 +20,11 @@ var DefaultConfig = config.Config{
 	LexiconPath:               os.Getenv("LEXICON_PATH"),
 	LetterDistributionPath:    os.Getenv("LETTER_DISTRIBUTION_PATH"),
 	DefaultLexicon:            os.Getenv("DEFAULT_LEXICON"),
+	DataPath:                  os.Getenv("DATA_PATH"),
 	DefaultLetterDistribution: "English",
 }
 
-func ConvertGCGToCGP(gcgFile string) string {
+func ConvertGCGToCGP(gcgFile string, turnNumber int) string {
 	hist, err := gcgio.ParseGCG(&DefaultConfig, gcgFile)
 	if err != nil {
 		panic(err)
@@ -41,16 +43,17 @@ func ConvertGCGToCGP(gcgFile string) string {
 	if err != nil {
 		panic(err)
 	}
+	g.PlayToTurn(turnNumber)
 	return gameToCGP(g, true)
 }
 
-func ConvertMacondoBoardStringToCGP(boardString string, alph *alphabet.Alphabet, player0Rack string, player1Rack string, player0Points int, player1Points int, scorelessTurns int, lexicon string) string {
+func ConvertMacondoBoardStringToCGP(boardString string, tm *tilemapping.TileMapping, player0Rack string, player1Rack string, player0Points int, player1Points int, scorelessTurns int, lexicon string) string {
 	b := board.MakeBoard(board.CrosswordGameBoard)
-	b.SetToGame(alph, board.VsWho(boardString))
+	b.SetToGame(tm, board.VsWho(boardString))
 
 	b.Dim()
 	var cgp strings.Builder
-	cgp.WriteString(gameBoardToCGP(b, alph))
+	cgp.WriteString(gameBoardToCGP(b, tm))
 
 	// Write the racks
 	fmt.Fprint(&cgp, gameStateToCGPString(
@@ -91,15 +94,20 @@ func ConvertRacksToCGP(racks []string) []string {
 		panic(err)
 	}
 
+	eqCalc, err := equity.NewCombinedStaticCalculator(macondoGame.LexiconName(), &DefaultConfig, "", "")
+	if err != nil {
+		panic(err)
+	}
+
 	macondoGame.StartGame()
 	// Overwrite the player on turn to be JD:
-	alph := macondoGame.Alphabet()
+	tm := macondoGame.Alphabet()
 	macondoGame.SetPlayerOnTurn(0)
 	cgps := []string{}
 	for i := 0; i < len(racks); i++ {
 		rack := racks[i]
-		macondoGame.SetRackFor(i%2, alphabet.RackFromString(rack, alph))
-		gameRunner, err := runner.NewAIGameRunnerFromGame(macondoGame, &DefaultConfig, pb.BotRequest_HASTY_BOT)
+		macondoGame.SetRackFor(i%2, tilemapping.RackFromString(rack, tm))
+		gameRunner, err := turnplayer.NewAIStaticTurnPlayerFromGame(macondoGame, &DefaultConfig, []equity.EquityCalculator{eqCalc})
 		if err != nil {
 			panic(err)
 		}
@@ -180,13 +188,16 @@ func RandomTopEquity() *game.Game {
 	if err != nil {
 		panic(err)
 	}
-
+	eqCalc, err := equity.NewCombinedStaticCalculator(macondoGame.LexiconName(), &DefaultConfig, "", "")
+	if err != nil {
+		panic(err)
+	}
 	macondoGame.StartGame()
 	// Overwrite the player on turn to be JD:
 	macondoGame.SetPlayerOnTurn(0)
 	for macondoGame.Playing() == pb.PlayState_PLAYING {
-		macondoGame.SetRandomRack(macondoGame.PlayerOnTurn())
-		gameRunner, err := runner.NewAIGameRunnerFromGame(macondoGame, &DefaultConfig, pb.BotRequest_HASTY_BOT)
+		macondoGame.SetRandomRack(macondoGame.PlayerOnTurn(), []tilemapping.MachineLetter{})
+		gameRunner, err := turnplayer.NewAIStaticTurnPlayerFromGame(macondoGame, &DefaultConfig, []equity.EquityCalculator{eqCalc})
 		if err != nil {
 			panic(err)
 		}
@@ -228,7 +239,7 @@ func gameToCGP(g *game.Game, includeRacks bool) string {
 	return cgp.String()
 }
 
-func gameBoardToCGP(board *board.GameBoard, alphabet *alphabet.Alphabet) string {
+func gameBoardToCGP(board *board.GameBoard, tm *tilemapping.TileMapping) string {
 	board.Dim()
 	var cgp strings.Builder
 
@@ -243,7 +254,7 @@ func gameBoardToCGP(board *board.GameBoard, alphabet *alphabet.Alphabet) string 
 					fmt.Fprintf(&cgp, "%d", consecutiveEmptySquares)
 					consecutiveEmptySquares = 0
 				}
-				cgp.WriteString(string(board.GetLetter(i, j).UserVisible(alphabet)))
+				cgp.WriteString(string(board.GetLetter(i, j).UserVisible(tm, false)))
 			}
 		}
 		if consecutiveEmptySquares > 0 {
