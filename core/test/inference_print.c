@@ -25,7 +25,7 @@ void write_letter_minimum(InferenceRecord * record, Rack * rack, Rack * bag_as_r
     int leave_subtotal = get_subtotal_sum_with_minimum(record, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE);
     double inference_probability = ((double)draw_subtotal) / (double)weight(record->equity_values);
     double random_probability = get_probability_for_random_minimum_draw(bag_as_rack, rack, letter, minimum, number_of_tiles_played_or_exchanged);
-    sprintf(inference_string + strlen(inference_string), " | %-7.2f %-7.2f%-5d%-5d",
+    sprintf(inference_string + strlen(inference_string), " | %-7.2f %-7.2f%-9d%-9d",
     inference_probability * 100,
     random_probability * 100,
     draw_subtotal,
@@ -68,7 +68,7 @@ void write_inference_record(char * buffer, InferenceRecord * record, Game * game
 
     sprintf(buffer + strlen(buffer), "               ");
     for (int i = 0; i < max_duplicate_letter_draw; i++) {
-        sprintf(buffer + strlen(buffer), "Has at least %d of           ", i + 1);
+        sprintf(buffer + strlen(buffer), "Has at least %d of                   ", i + 1);
     }
     sprintf(buffer + strlen(buffer), "\n");
     sprintf(buffer + strlen(buffer), "\n");
@@ -77,7 +77,7 @@ void write_inference_record(char * buffer, InferenceRecord * record, Game * game
 
 
     for (int i = 0; i < max_duplicate_letter_draw; i++) {
-        sprintf(buffer + strlen(buffer), " | %%       Rand   Tot  Unq  ");
+        sprintf(buffer + strlen(buffer), " | %%       Rand   Tot      Unq      ");
     }
     sprintf(buffer + strlen(buffer), "\n");
     

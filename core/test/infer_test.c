@@ -572,3 +572,16 @@ void test_infer(SuperConfig * superconfig) {
     test_infer_tiles_played_not_in_bag(superconfig);
     test_infer_nonerror_cases(superconfig);
 }
+
+void infer_from_config(Config * config) {
+    Game * game = create_game(config);
+    Inference * inference = create_inference(game->gen->letter_distribution->size);
+    int status = infer(inference, game, config->actual_tiles_played, config->player_to_infer_index, config->actual_score, config->number_of_tiles_exchanged, config->equity_margin);
+    if (status != INFERENCE_STATUS_SUCCESS) {
+        printf("inference failed with error code: %d\n", status);
+    } else {
+        print_inference(inference, config->actual_tiles_played);
+    }
+    destroy_game(game);
+    destroy_inference(inference);
+}

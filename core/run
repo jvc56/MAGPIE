@@ -28,12 +28,24 @@ if [ -z "$2" ]; then
 fi
 make magpie_test BUILD=release
 ./bin/magpie_test prof -g "./data/lexica/CSW21.kwg" \
-                      -a "./data/lexica/CSW21.alph" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
                       -s1 "equity" \
                       -n "$2"
+elif [ "$1" == "i" ]; then
+make magpie_test BUILD=release
+./bin/magpie_test infer -g "./data/lexica/CSW21.kwg" \
+                      -d "./data/letterdistributions/english.csv" \
+                      -l1 "./data/lexica/CSW21.klv2" \
+                      -r1 "top" \
+                      -s1 "equity" \
+                      -c "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;" \
+                      -t "QI" \
+                      -i 0 \
+                      -a 22 \
+                      -e 0 \
+                      -q 0
 elif [ "$1" == "tva" ]; then
 if [ -z "$2" ]; then
     echo "must provide number of games to play"
@@ -41,7 +53,6 @@ if [ -z "$2" ]; then
 fi
 make magpie_test BUILD=release
 ./bin/magpie_test topvall -g "./data/lexica/CSW21.kwg" \
-                      -a "./data/lexica/CSW21.alph" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
@@ -61,7 +72,6 @@ fi
 
 make magpie_test BUILD=release
 perf record ./bin/magpie_test prof -g "./data/lexica/CSW21.kwg" \
-                      -a "./data/lexica/CSW21.alph" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
@@ -71,7 +81,6 @@ perf report
 elif [ "$1" == "m" ]; then
 make magpie_test
 ./bin/magpie_test gen -g "./data/lexica/CSW21.kwg" \
-                      -a "./data/lexica/CSW21.alph" \
                       -d "./data/letterdistributions/english.csv" \
                       -l "./data/lexica/CSW21.klv2" \
                       -r "all" \

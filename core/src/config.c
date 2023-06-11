@@ -13,14 +13,23 @@ static int game_pair_flag;
 
 Config * create_config(const char * kwg_filename, const char * letter_distribution_filename, const char * cgp,
                        const char * klv_filename_1, int move_sorting_1, int play_recorder_type_1,
-                       const char * klv_filename_2, int move_sorting_2, int play_recorder_type_2, int game_pair_flag, int number_of_games_or_pairs) {
+                       const char * klv_filename_2, int move_sorting_2, int play_recorder_type_2, int game_pair_flag, int number_of_games_or_pairs,
+                       const char * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin) {
 
     Config * config = malloc(sizeof(Config));
     config->letter_distribution = create_letter_distribution(letter_distribution_filename);
     config->kwg = create_kwg(kwg_filename);
     config->cgp = strdup(cgp);
+    config->actual_tiles_played = create_rack(config->letter_distribution->size);
+    if (actual_tiles_played != NULL) {
+      set_rack_to_string(config->actual_tiles_played, actual_tiles_played, config->letter_distribution);
+    }
     config->game_pairs = game_pair_flag;
     config->number_of_games_or_pairs = number_of_games_or_pairs;
+    config->player_to_infer_index = player_to_infer_index;
+    config->actual_score = actual_score;
+    config->number_of_tiles_exchanged = number_of_tiles_exchanged;
+    config->equity_margin = equity_margin;
 
     StrategyParams * player_1_strategy_params = malloc(sizeof(StrategyParams));
     
@@ -78,7 +87,14 @@ Config * create_config_from_args(int argc, char *argv[]) {
   int move_sorting_2 = -1;
   int number_of_games_or_pairs = 10000;
 
+  char actual_tiles_played[(MAX_ARG_LENGTH)] = "";
+  int player_to_infer_index = -1;
+  int actual_score = -1;
+  int number_of_tiles_exchanged = 0;
+  float equity_margin = -1.0;
+
   int c;
+  long n;
 
   while (1) {
     static struct option long_options[] =
@@ -93,6 +109,11 @@ Config * create_config_from_args(int argc, char *argv[]) {
         {"r2", required_argument, 0, 1008},
         {"s2", required_argument, 0, 1009},
         {"n",  required_argument, 0, 1010},
+        {"t",  required_argument, 0, 1011},
+        {"i",  required_argument, 0, 1012},
+        {"a",  required_argument, 0, 1013},
+        {"e",  required_argument, 0, 1014},
+        {"q",  required_argument, 0, 1015},
         {"p",  no_argument, &game_pair_flag, 1},
         {0, 0, 0, 0}
       };
@@ -189,8 +210,36 @@ Config * create_config_from_args(int argc, char *argv[]) {
 
       case 1010:
         check_arg_length(optarg);
-        long n = strtol(optarg, NULL, 10);
+        n = strtol(optarg, NULL, 10);
         number_of_games_or_pairs = (int)n;
+        break;
+
+      case 1011:
+        check_arg_length(optarg);
+        strcpy(actual_tiles_played, optarg);
+        break;
+
+      case 1012:
+        check_arg_length(optarg);
+        n = strtol(optarg, NULL, 10);
+        player_to_infer_index = (int)n;
+        break;
+
+      case 1013:
+        check_arg_length(optarg);
+        n = strtol(optarg, NULL, 10);
+        actual_score = (int)n;
+        break;
+
+      case 1014:
+        check_arg_length(optarg);
+        n = strtol(optarg, NULL, 10);
+        number_of_tiles_exchanged = (int)n;
+        break;
+
+      case 1015:
+        check_arg_length(optarg);
+        equity_margin = atof(optarg);
         break;
 
       case '?':
@@ -204,7 +253,8 @@ Config * create_config_from_args(int argc, char *argv[]) {
 
   return create_config(kwg_filename, letter_distribution_filename, cgp,
   klv_filename_1, move_sorting_1, play_recorder_type_1,
-  klv_filename_2, move_sorting_2, play_recorder_type_2, game_pair_flag, number_of_games_or_pairs);
+  klv_filename_2, move_sorting_2, play_recorder_type_2, game_pair_flag, number_of_games_or_pairs,
+  actual_tiles_played, player_to_infer_index, actual_score, number_of_tiles_exchanged, equity_margin);
 }
 
 void destroy_config(Config * config) {
@@ -219,6 +269,7 @@ void destroy_config(Config * config) {
 
 	destroy_kwg(config->kwg);
 	destroy_letter_distribution(config->letter_distribution);
+  destroy_rack(config->actual_tiles_played);
   free(config->cgp);
   free(config);
 }

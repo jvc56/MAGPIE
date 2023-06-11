@@ -7,6 +7,7 @@
 #define CMD_GEN "gen"
 #define CMD_UNIT_TESTS "unit"
 #define CMD_PROF "prof"
+#define CMD_INFER "infer"
 #define CMD_TOPVALL "topvall"
 
 #define EMPTY_CGP "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;"

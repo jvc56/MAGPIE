@@ -61,6 +61,10 @@ int main(int argc, char *argv[]) {
     Config * config = create_config_from_args(argc, argv);
     test_gen_all(config);
     destroy_config(config);
+  } else if (!strcmp(argv[1], CMD_INFER)) {
+    Config * config = create_config_from_args(argc, argv);
+    infer_from_config(config);
+    destroy_config(config);
   } else if (!strcmp(argv[1], CMD_PROF)) { 
     Config * config = create_config_from_args(argc, argv);
     prof_tests(config);
@@ -81,7 +85,12 @@ int main(int argc, char *argv[]) {
       -1,
       -1,
       0,
-      10000
+      10000,
+      NULL,
+      0,
+      0,
+      0,
+      0
     );
 
     Config * nwl_config = create_config(
@@ -95,7 +104,12 @@ int main(int argc, char *argv[]) {
       -1,
       -1,
       0,
-      10000
+      10000,
+      NULL,
+      0,
+      0,
+      0,
+      0
     );
     SuperConfig * superconfig = create_superconfig(csw_config, nwl_config);
     unit_tests(superconfig);

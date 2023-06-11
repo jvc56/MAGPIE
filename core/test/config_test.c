@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stddef.h>
 
 #include "../src/config.h"
 
@@ -16,7 +17,12 @@ void test_config_empty_string_laddag() {
       -1,
       -1,
       0,
-      3
+      3,
+      NULL,
+      0,
+      0,
+      0,
+      0
     );
 
     assert(config->klv_is_shared);
@@ -41,7 +47,12 @@ void test_config_identical_laddag() {
       -1,
       -1,
       0,
-      10000
+      10000,
+      NULL,
+      0,
+      0,
+      0,
+      0
     );
 
     assert(config->klv_is_shared);
@@ -65,7 +76,12 @@ void test_config_different_laddag() {
       -1,
       -1,
       1,
-      10000
+      10000,
+      NULL,
+      0,
+      0,
+      0,
+      0
     );
 
     assert(!config->klv_is_shared);

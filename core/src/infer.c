@@ -11,11 +11,6 @@
 #include "rack.h"
 #include "stats.h"
 
-#include "../test/game_print.h"
-#include "../test/move_print.h"
-#include "../test/inference_print.h"
-#include "../test/test_util.h"
-
 InferenceRecord * create_inference_record(int draw_and_leave_subtotals_size) {
     InferenceRecord * record = malloc(sizeof(InferenceRecord));
     record->draw_and_leave_subtotals = (int *) malloc(draw_and_leave_subtotals_size*sizeof(int));
@@ -328,8 +323,6 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
     }
 
     iterate_through_all_possible_leaves(inference, (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters, BLANK_MACHINE_LETTER);
-
-    print_inference(inference, actual_tiles_played);
     reset_rack(inference->player_to_infer_rack);
     return INFERENCE_STATUS_SUCCESS;
 }
