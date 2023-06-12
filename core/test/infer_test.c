@@ -188,6 +188,31 @@ void test_infer_tiles_played_not_in_bag(SuperConfig * superconfig) {
     destroy_game(game);
 }
 
+void test_infer_count_possible_leaves(SuperConfig * superconfig) {
+    Config * config = get_csw_config(superconfig);
+    Game * game = create_game(config);
+    Rack * rack = create_rack(game->players[0]->rack->array_size);
+    Inference * inference = create_inference(game->gen->letter_distribution->size);
+    int status;
+    uint64_t count = 0;
+    double equity_margin = 1000;
+
+    // The large equity margin should make all leaves recordable
+    set_rack_to_string(rack, "MUZAKS", game->gen->letter_distribution);
+    status = infer(inference, game, rack, 0, 52, 0, equity_margin);
+    assert(status == INFERENCE_STATUS_SUCCESS);
+    count_all_possible_leaves(inference->bag_as_rack, 1, BLANK_MACHINE_LETTER, &count);
+    assert(cardinality(inference->leave_record->equity_values) == count);
+    count = 0;
+
+    set_rack_to_string(rack, "MUZAK", game->gen->letter_distribution);
+    status = infer(inference, game, rack, 0, 50, 0, equity_margin);
+    printf("status: %d\n", status);
+    assert(status == INFERENCE_STATUS_SUCCESS);
+    count_all_possible_leaves(inference->bag_as_rack, 2, BLANK_MACHINE_LETTER, &count);
+    assert(cardinality(inference->leave_record->equity_values) == count);
+    count = 0;
+}
 
 void test_infer_nonerror_cases(SuperConfig * superconfig) {
     Config * config = get_csw_config(superconfig);
@@ -227,7 +252,6 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             6),
         (double) 3 / 94
     ));
-    reset_game(game);
 
     set_rack_to_string(rack, "MUZAKY", game->gen->letter_distribution);
     status = infer(inference, game, rack, 0, 58, 0, 0);
@@ -273,7 +297,6 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             6),
         (double) 2 / 94
     ));
-    reset_game(game);
 
     set_rack_to_string(rack, "MUZAK", game->gen->letter_distribution);
     status = infer(inference, game, rack, 0, 50, 0, 0);
@@ -300,7 +323,6 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             5),
         (double) 1 / choose(95, 2)
     ));
-    reset_game(game);
 
     load_cgp(game, VS_JEREMY_WITH_P2_RACK);
     // Score doesn't matter since the bag
@@ -372,7 +394,6 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     get_stat_for_letter(inference->leave_record, letter_stat, human_readable_letter_to_machine_letter(game->gen->letter_distribution, 'R'));
     assert(within_epsilon_double(mean(letter_stat), 1));
     assert(within_epsilon_double(stdev(letter_stat), 0));
-    reset_game(game);
 
     // Contrive an impossible situation to easily test
     // more combinatorics
@@ -480,7 +501,6 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             assert(get_subtotal(inference->leave_record, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
         }
     }
-    reset_game(game);
 
     // Test partial leaves
     // play GRIND with partial leave of ?
@@ -507,8 +527,6 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
             assert(get_subtotal(inference->leave_record, i, 1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
         }
     }
-    reset_game(game);
-
 
     set_rack_to_string(rack, "RIN", game->gen->letter_distribution);
     set_rack_to_string(game->players[0]->rack, "H", game->gen->letter_distribution);
@@ -534,7 +552,6 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     double hirn_weighted_value = hirn_value * 400;
     double mean_rin_leave_value = (bhir_weighted_value + bhnr_weighted_value + hirn_weighted_value) / 660;
     assert(within_epsilon_double(mean(inference->leave_record->equity_values), mean_rin_leave_value));
-    reset_game(game);
 
 
     // Test exchanges
@@ -556,6 +573,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig) {
     reset_rack(rack);
     status = infer(inference, game, rack, 0, 0, 6, 0);
     assert(status == INFERENCE_STATUS_SUCCESS);
+    reset_game(game);
 
     destroy_rack(rack);
     destroy_inference(inference);
@@ -570,6 +588,7 @@ void test_infer(SuperConfig * superconfig) {
     test_infer_exchange_score_not_zero(superconfig);
     test_infer_exchange_not_allowed(superconfig);
     test_infer_tiles_played_not_in_bag(superconfig);
+    test_infer_count_possible_leaves(superconfig);
     test_infer_nonerror_cases(superconfig);
 }
 

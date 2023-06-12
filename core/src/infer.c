@@ -225,6 +225,20 @@ void decrement_letter_for_inference(Inference * inference, uint8_t letter) {
     take_letter_from_rack(inference->leave, letter);
 }
 
+void count_all_possible_leaves(Rack * bag_as_rack, int leave_tiles_remaining, int start_letter, uint64_t * count) {
+    if (leave_tiles_remaining == 0) {
+        *count += 1;
+        return;
+    }
+	for (int letter = start_letter; letter < bag_as_rack->array_size; letter++) {
+        if (bag_as_rack->array[letter] > 0) {
+            take_letter_from_rack(bag_as_rack, letter);
+            count_all_possible_leaves(bag_as_rack, leave_tiles_remaining - 1, letter, count);
+            add_letter_to_rack(bag_as_rack, letter);
+        }
+    }
+}
+
 void iterate_through_all_possible_leaves(Inference * inference, int leave_tiles_remaining, int start_letter) {
     if (leave_tiles_remaining == 0) {
         double current_leave_value = 0;
@@ -323,5 +337,14 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
     }
 
     iterate_through_all_possible_leaves(inference, (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters, BLANK_MACHINE_LETTER);
+
+    // Return the player to infer rack to it's original
+    // state since the inference does not own that struct
+    for (int i = 0; i < actual_tiles_played->array_size; i++) {
+        for (int j = 0; j < actual_tiles_played->array[i]; j++) {
+            take_letter_from_rack(inference->player_to_infer_rack, i);
+        }
+    }
+
     return INFERENCE_STATUS_SUCCESS;
 }

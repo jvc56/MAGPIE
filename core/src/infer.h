@@ -44,6 +44,7 @@ int get_subtotal(InferenceRecord * record, uint8_t letter, int number_of_letters
 int get_subtotal_sum_with_minimum(InferenceRecord * record, uint8_t letter, int minimum_number_of_letters, int subtotal_index_offset);
 void get_stat_for_letter(InferenceRecord * record, Stat * stat, uint8_t letter);
 double get_probability_for_random_minimum_draw(Rack * bag_as_rack, Rack * rack, uint8_t this_letter, int minimum, int number_of_actual_tiles_played);
+void count_all_possible_leaves(Rack * bag_as_rack, int leave_tiles_remaining, int start_letter, uint64_t * count);
 int choose(int n, int k);
 
 #endif

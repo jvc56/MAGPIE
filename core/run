@@ -35,7 +35,7 @@ make magpie_test BUILD=release
                       -n "$2"
 elif [ "$1" == "i" ]; then
 make magpie_test BUILD=release
-time ./bin/magpie_test infer -g "./data/lexica/CSW21.kwg" \
+perf record ./bin/magpie_test infer -g "./data/lexica/CSW21.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
@@ -46,6 +46,7 @@ time ./bin/magpie_test infer -g "./data/lexica/CSW21.kwg" \
                       -a 22 \
                       -e 0 \
                       -q 0
+perf report
 elif [ "$1" == "tva" ]; then
 if [ -z "$2" ]; then
     echo "must provide number of games to play"
