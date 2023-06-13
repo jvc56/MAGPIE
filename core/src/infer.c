@@ -158,17 +158,6 @@ void record_valid_leave(InferenceRecord * record, Rack * rack, float current_lea
     increment_subtotals_for_record(record, rack, number_of_draws_for_leave);
 }
 
-void record_remaining_tiles_in_bag_as_player_leave(Inference * inference, Rack * actual_tiles_played) {
-    push(inference->leave_record->equity_values, (double) get_leave_value(inference->klv, inference->leave), 1);
-    for (int i = 0; i < inference->distribution_size; i++) {
-        int number_of_remaining_letters = inference->bag_as_rack->array[i] - actual_tiles_played->array[i];
-        if (number_of_remaining_letters > 0) {
-            add_to_letter_subtotal(inference->leave_record, i, number_of_remaining_letters, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW, 1);
-            add_to_letter_subtotal(inference->leave_record, i, number_of_remaining_letters, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE, 1);
-        }
-    }
-}
-
 Move * get_top_move(Inference * inference) {
     Game * game = inference->game;
     int original_recorder_type = game->players[inference->player_to_infer_index]->strategy_params->play_recorder_type;
@@ -225,33 +214,37 @@ void decrement_letter_for_inference(Inference * inference, uint8_t letter) {
     take_letter_from_rack(inference->leave, letter);
 }
 
-void count_all_possible_leaves(Rack * bag_as_rack, int leave_tiles_remaining, int start_letter, uint64_t * count) {
-    if (leave_tiles_remaining == 0) {
+void count_all_possible_leaves(Rack * bag_as_rack, int tiles_to_infer, int start_letter, uint64_t * count) {
+    if (tiles_to_infer == 0) {
         *count += 1;
         return;
     }
 	for (int letter = start_letter; letter < bag_as_rack->array_size; letter++) {
         if (bag_as_rack->array[letter] > 0) {
             take_letter_from_rack(bag_as_rack, letter);
-            count_all_possible_leaves(bag_as_rack, leave_tiles_remaining - 1, letter, count);
+            count_all_possible_leaves(bag_as_rack, tiles_to_infer - 1, letter, count);
             add_letter_to_rack(bag_as_rack, letter);
         }
     }
 }
 
-void iterate_through_all_possible_leaves(Inference * inference, int leave_tiles_remaining, int start_letter) {
-    if (leave_tiles_remaining == 0) {
-        double current_leave_value = 0;
-        if (inference->number_of_tiles_exchanged == 0) {
-            current_leave_value = get_leave_value(inference->klv, inference->leave);
-        }
-        evaluate_possible_leave(inference, current_leave_value);
+void iterate_through_all_possible_leaves(Inference * inference, int tiles_to_infer, int start_letter) {
+    if (tiles_to_infer == 0) {
+        if (inference->lower_inclusive_bound <= inference->current_rack_index &&
+            inference->upper_inclusive_bound >= inference->current_rack_index) {
+                double current_leave_value = 0;
+                if (inference->number_of_tiles_exchanged == 0) {
+                    current_leave_value = get_leave_value(inference->klv, inference->leave);
+                }
+                evaluate_possible_leave(inference, current_leave_value);
+            }
+        inference->current_rack_index++;
         return;
     }
 	for (int letter = start_letter; letter < inference->distribution_size; letter++) {
         if (inference->bag_as_rack->array[letter] > 0) {
             increment_letter_for_inference(inference, letter);
-            iterate_through_all_possible_leaves(inference, leave_tiles_remaining - 1, letter);
+            iterate_through_all_possible_leaves(inference, tiles_to_infer - 1, letter);
             decrement_letter_for_inference(inference, letter);
         }
     }
@@ -264,6 +257,36 @@ void initialize_inference_record_for_evaluation(InferenceRecord * record, int dr
     for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
         record->draw_and_leave_subtotals[i] = 0;
     }
+}
+
+void set_bounds_for_worker(Inference * inference, int thread_index, int number_of_threads, uint64_t racks_to_iterate_through) {
+    // This assumes that racks_to_iterate_through >= number_of_threads
+    // Set the lower and upper bounds for the thread
+    if (racks_to_iterate_through == (uint64_t)number_of_threads) {
+        // Handle the trivial case
+        inference->lower_inclusive_bound = thread_index;
+        inference->upper_inclusive_bound = thread_index;
+    } else {
+        int number_of_evaluations_for_thread = racks_to_iterate_through / number_of_threads;
+        int remainder_evaluations = racks_to_iterate_through % number_of_threads;
+        int lower_remainder_adjustment = 0;
+        int upper_remainder_adjustment = 0;
+        // There is a remainder after the modulus, so
+        // spread out the remaining evaluations for a remainder of R
+        // among the first R threads. Since this will assign bounds,
+        // adjustments need to be propagated.
+        if (remainder_evaluations > 0) {
+            int remainder_adjustment = thread_index;
+            if (thread_index >= remainder_evaluations) {
+                remainder_adjustment = remainder_evaluations;
+            }
+            lower_remainder_adjustment = remainder_adjustment;
+            upper_remainder_adjustment = remainder_adjustment + 1;
+        }
+        inference->lower_inclusive_bound = thread_index * number_of_evaluations_for_thread + lower_remainder_adjustment;
+        inference->upper_inclusive_bound = (thread_index + 1) * number_of_evaluations_for_thread + upper_remainder_adjustment;
+    }
+    inference->current_rack_index = 0;
 }
 
 void initialize_inference_for_evaluation(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin) {    
@@ -307,7 +330,42 @@ void initialize_inference_for_evaluation(Inference * inference, Game * game, Rac
     }
 }
 
-int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin) {
+Inference * copy_inference(Inference * inference) {
+    return NULL;
+}
+
+void infer_worker(Inference * inference, int tiles_to_infer) {
+    iterate_through_all_possible_leaves(inference, tiles_to_infer, BLANK_MACHINE_LETTER);
+}
+
+void infer_manager(Inference * inference, int number_of_threads, int racks_to_iterate_through, int tiles_to_infer) {
+    if (number_of_threads == 1) {
+        set_bounds_for_worker(inference, 0, 1, racks_to_iterate_through);
+        infer_worker(inference, tiles_to_infer);
+        return;
+    }
+
+    printf("unimplemented\n");
+    abort();
+
+    Inference ** inference_workers = malloc((sizeof(Inference*)) * (number_of_threads));
+    for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+        inference_workers[thread_index] = copy_inference(inference);
+        set_bounds_for_worker(inference_workers[thread_index], thread_index, number_of_threads, racks_to_iterate_through);
+        // Spin off infer_worker on a separate thread
+        // infer_worker(inference_workers->[thread_index]);
+    }
+
+    // Combine and free
+    for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+        // inference_workers->[thread_index].join;
+        // add_to_inference(inference, inference_workers->[thread_index]);
+        destroy_inference(inference_workers[thread_index]);
+    }
+    free(inference_workers);
+}
+
+int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin, int number_of_threads) {
     initialize_inference_for_evaluation(inference, game, actual_tiles_played, player_to_infer_index, actual_score, number_of_tiles_exchanged, equity_margin);
 
     for (int i = 0; i < inference->distribution_size; i++) {
@@ -336,7 +394,17 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
         return INFERENCE_STATUS_RACK_OVERFLOW;
     }
 
-    iterate_through_all_possible_leaves(inference, (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters, BLANK_MACHINE_LETTER);
+    if (number_of_threads < 1) {
+        return INFERENCE_STATUS_INVALID_NUMBER_OF_THREADS;
+    }
+
+    int tiles_to_infer = (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters;
+    uint64_t racks_to_iterate_through = 0;
+    count_all_possible_leaves(inference->bag_as_rack, tiles_to_infer, BLANK_MACHINE_LETTER, &racks_to_iterate_through);
+    if (racks_to_iterate_through < (uint64_t)number_of_threads) {
+        number_of_threads = racks_to_iterate_through;
+    }
+    infer_manager(inference, number_of_threads, racks_to_iterate_through, tiles_to_infer);
 
     // Return the player to infer rack to it's original
     // state since the inference does not own that struct
