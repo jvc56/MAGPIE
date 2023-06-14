@@ -49,6 +49,18 @@ void destroy_inference(Inference * inference) {
     free(inference);
 }
 
+void destroy_inference_copy(Inference * inference) {
+    destroy_rack(inference->bag_as_rack);
+    destroy_rack(inference->leave);
+    destroy_rack(inference->exchanged);
+    destroy_leave_rack_list(inference->leave_rack_list);
+    destroy_inference_record(inference->leave_record);
+    destroy_inference_record(inference->exchanged_record);
+    destroy_inference_record(inference->rack_record);
+    destroy_game(inference->game);
+    free(inference);
+}
+
 // Functions for the inference record
 
 int get_letter_subtotal_index(uint8_t letter, int number_of_letters, int subtotal_index_offset) {
@@ -237,7 +249,7 @@ void iterate_through_all_possible_leaves(Inference * inference, int tiles_to_inf
                     current_leave_value = get_leave_value(inference->klv, inference->leave);
                 }
                 evaluate_possible_leave(inference, current_leave_value);
-            }
+        }
         inference->current_rack_index++;
         return;
     }
@@ -270,18 +282,18 @@ void set_bounds_for_worker(Inference * inference, int thread_index, int number_o
         int number_of_evaluations_for_thread = racks_to_iterate_through / number_of_threads;
         int remainder_evaluations = racks_to_iterate_through % number_of_threads;
         int lower_remainder_adjustment = 0;
-        int upper_remainder_adjustment = 0;
-        // There is a remainder after the modulus, so
+        // Bounds are inclusive, so use -1 for upper to start.
+        int upper_remainder_adjustment = -1;
+        // If there is a remainder after the modulus,
         // spread out the remaining evaluations for a remainder of R
         // among the first R threads. Since this will assign bounds,
         // adjustments need to be propagated.
-        if (remainder_evaluations > 0) {
-            int remainder_adjustment = thread_index;
-            if (thread_index >= remainder_evaluations) {
-                remainder_adjustment = remainder_evaluations;
-            }
-            lower_remainder_adjustment = remainder_adjustment;
-            upper_remainder_adjustment = remainder_adjustment + 1;
+        if (thread_index < remainder_evaluations) {
+            lower_remainder_adjustment += thread_index;
+            upper_remainder_adjustment += thread_index + 1;
+        } else {
+            lower_remainder_adjustment += remainder_evaluations;
+            upper_remainder_adjustment += remainder_evaluations;
         }
         inference->lower_inclusive_bound = thread_index * number_of_evaluations_for_thread + lower_remainder_adjustment;
         inference->upper_inclusive_bound = (thread_index + 1) * number_of_evaluations_for_thread + upper_remainder_adjustment;
@@ -330,8 +342,59 @@ void initialize_inference_for_evaluation(Inference * inference, Game * game, Rac
     }
 }
 
+InferenceRecord * copy_inference_record(InferenceRecord * inference_record, int draw_and_leave_subtotals_size) {
+    InferenceRecord * new_record = malloc(sizeof(InferenceRecord));
+    new_record->draw_and_leave_subtotals = (int *) malloc(draw_and_leave_subtotals_size*sizeof(int));
+    for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
+        new_record->draw_and_leave_subtotals[i] = inference_record->draw_and_leave_subtotals[i];
+    }
+    new_record->equity_values = copy_stat(inference_record->equity_values);
+    return new_record;
+}
+
 Inference * copy_inference(Inference * inference) {
-    return NULL;
+    Inference * new_inference = create_inference(inference->distribution_size);
+    new_inference->leave_record = copy_inference_record(inference->leave_record, inference->draw_and_leave_subtotals_size);
+    new_inference->exchanged_record = copy_inference_record(inference->exchanged_record, inference->draw_and_leave_subtotals_size);
+    new_inference->rack_record = copy_inference_record(inference->rack_record, inference->draw_and_leave_subtotals_size);
+    
+    // leave rack list can be new
+    new_inference->leave_rack_list = create_leave_rack_list(inference->leave_rack_list->capacity, inference->distribution_size);
+
+    // Game must be deep copied since we use the move generator
+    new_inference->game = copy_game(inference->game);
+    // KLV can just be a pointer since it is read only
+    new_inference->klv = inference->klv;
+    // Need the rack from the newly copied game
+    new_inference->player_to_infer_rack = new_inference->game->players[inference->player_to_infer_index]->rack;
+
+    new_inference->bag_as_rack = copy_rack(inference->bag_as_rack);
+    new_inference->leave = copy_rack(inference->leave);
+    new_inference->exchanged = copy_rack(inference->exchanged);
+
+    new_inference->player_to_infer_index = inference->player_to_infer_index;
+    new_inference->actual_score = inference->actual_score;
+    new_inference->number_of_tiles_exchanged = inference->number_of_tiles_exchanged;
+    new_inference->draw_and_leave_subtotals_size = inference->draw_and_leave_subtotals_size;
+    new_inference->equity_margin = inference->equity_margin;
+    return new_inference;
+}
+
+void add_inference_record(InferenceRecord * inference_record_1, InferenceRecord * inference_record_2, int draw_and_leave_subtotals_size) {
+    push_stat(inference_record_1->equity_values, inference_record_2->equity_values);
+    for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
+        inference_record_1->draw_and_leave_subtotals[i] += inference_record_2->draw_and_leave_subtotals[i];
+    }
+}
+
+void add_inference(Inference * inference_1, Inference * inference_2) {
+    add_inference_record(inference_1->leave_record, inference_2->leave_record, inference_1->draw_and_leave_subtotals_size);
+    add_inference_record(inference_1->exchanged_record, inference_2->exchanged_record, inference_1->draw_and_leave_subtotals_size);
+    add_inference_record(inference_1->rack_record, inference_2->rack_record, inference_1->draw_and_leave_subtotals_size);
+    while (inference_2->leave_rack_list->count > 0) {
+        LeaveRack * leave_rack_2 = pop_leave_rack(inference_2->leave_rack_list);
+        insert_leave_rack(inference_1->leave_rack_list, leave_rack_2->leave, leave_rack_2->exchanged, leave_rack_2->draws, leave_rack_2->equity);
+    }
 }
 
 void infer_worker(Inference * inference, int tiles_to_infer) {
@@ -345,22 +408,17 @@ void infer_manager(Inference * inference, int number_of_threads, int racks_to_it
         return;
     }
 
-    printf("unimplemented\n");
-    abort();
-
     Inference ** inference_workers = malloc((sizeof(Inference*)) * (number_of_threads));
     for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
         inference_workers[thread_index] = copy_inference(inference);
         set_bounds_for_worker(inference_workers[thread_index], thread_index, number_of_threads, racks_to_iterate_through);
-        // Spin off infer_worker on a separate thread
-        // infer_worker(inference_workers->[thread_index]);
+        infer_worker(inference_workers[thread_index], tiles_to_infer);
     }
 
     // Combine and free
     for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-        // inference_workers->[thread_index].join;
-        // add_to_inference(inference, inference_workers->[thread_index]);
-        destroy_inference(inference_workers[thread_index]);
+        add_inference(inference, inference_workers[thread_index]);
+        destroy_inference_copy(inference_workers[thread_index]);
     }
     free(inference_workers);
 }

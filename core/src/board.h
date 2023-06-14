@@ -24,6 +24,7 @@ typedef struct Board {
 void clear_all_crosses (Board * board);
 void clear_cross_set(Board * board, int row, int col, int dir);
 Board * create_board();
+Board * copy_board(Board * board);
 void destroy_board(Board * board);
 int get_anchor(Board * board, int row, int col, int vertical);
 uint8_t get_bonus_square(Board * board, int row, int col);

@@ -15,6 +15,7 @@ typedef struct Rack {
 
 void add_letter_to_rack(Rack * rack, uint8_t letter);
 Rack * create_rack(int array_size);
+Rack * copy_rack(Rack * rack);
 void destroy_rack(Rack * rack);
 void reset_rack(Rack * rack);
 int score_on_rack(LetterDistribution * letter_distribution, Rack * rack);

@@ -19,6 +19,15 @@ Player * create_player(const char* name, int array_size) {
     return player;
 }
 
+Player * copy_player(Player * player) {
+    Player * new_player = malloc(sizeof(Player));
+    new_player->name = strdup(player->name);
+    new_player->rack = copy_rack(player->rack);
+    new_player->score = player->score;
+    new_player->strategy_params = player->strategy_params;
+    return new_player;
+}
+
 void destroy_player(Player * player) {
     destroy_rack(player->rack);
     free(player->name);

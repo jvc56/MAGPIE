@@ -19,6 +19,7 @@ typedef struct Game {
 
 void reset_game(Game *  game);
 Game * create_game(Config * config);
+Game * copy_game(Game * game);
 void destroy_game(Game * game);
 void load_cgp(Game * game, const char* cgp);
 void draw_letter_to_rack(Bag * bag, Rack * rack, uint8_t letter);

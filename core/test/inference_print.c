@@ -10,7 +10,7 @@
 
 void write_leave_rack(char * buffer, LeaveRack * leave_rack, int index, uint64_t total_draws, LetterDistribution * letter_distribution) {
     char leave_string[(RACK_SIZE)] = "";
-    write_rack_to_end_of_buffer(leave_string, letter_distribution, leave_rack->rack);
+    write_rack_to_end_of_buffer(leave_string, letter_distribution, leave_rack->leave);
     if (leave_rack->exchanged->empty) {
         sprintf(buffer + strlen(buffer),"%-3d %-7s %-6.2f %-6d %0.2f\n", index + 1, leave_string, ((double)leave_rack->draws/total_draws) * 100, leave_rack->draws, leave_rack->equity);
     } else {

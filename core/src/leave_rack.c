@@ -8,13 +8,13 @@ LeaveRack * create_leave_rack(int distribution_size) {
     LeaveRack * leave_rack = malloc(sizeof(LeaveRack));
     leave_rack->draws = 0;
     leave_rack->equity = 0;
-    leave_rack->rack = create_rack(distribution_size);
+    leave_rack->leave = create_rack(distribution_size);
     leave_rack->exchanged = create_rack(distribution_size);
     return leave_rack;
 }
 
 void destroy_leave_rack(LeaveRack * leave_rack) {
-    destroy_rack(leave_rack->rack);
+    destroy_rack(leave_rack->leave);
     destroy_rack(leave_rack->exchanged);
     free(leave_rack);
 }
@@ -83,10 +83,10 @@ void down_heapify_leave_rack(LeaveRackList * lrl, int parent_node){
 }
 
 void insert_leave_rack(LeaveRackList * lrl, Rack * leave, Rack * exchanged, int number_of_draws_for_leave, double equity) {
-    reset_rack(lrl->spare_leave_rack->rack);
+    reset_rack(lrl->spare_leave_rack->leave);
     for (int i = 0; i < leave->array_size; i++) {
         for (int j = 0; j < leave->array[i]; j++) {
-            add_letter_to_rack(lrl->spare_leave_rack->rack, i);
+            add_letter_to_rack(lrl->spare_leave_rack->leave, i);
         }
     }
     lrl->spare_leave_rack->draws = number_of_draws_for_leave;

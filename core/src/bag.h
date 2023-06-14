@@ -15,6 +15,7 @@ void add_letter(Bag * bag, uint8_t letter);
 void draw_letter(Bag * bag, uint8_t letter);
 void destroy_bag(Bag * bag);
 Bag* create_bag(LetterDistribution * letter_distribution);
+Bag * copy_bag(Bag * bag);
 void reset_bag(Bag * bag, LetterDistribution * letter_distribution);
 
 #endif

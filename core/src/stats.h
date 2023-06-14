@@ -13,7 +13,9 @@ typedef struct Stat {
 Stat * create_stat();
 void destroy_stat(Stat * stat);
 void reset_stat(Stat * stat);
+Stat * copy_stat(Stat * original_stat);
 void push(Stat * stat, double value, int weight);
+void push_stat(Stat * stat_1, Stat * stat_2);
 uint64_t cardinality(Stat * stat);
 uint64_t weight(Stat * stat);
 double mean(Stat * stat);

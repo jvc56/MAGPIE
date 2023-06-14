@@ -7,7 +7,7 @@
 #include "rack.h"
 
 typedef struct LeaveRack {
-    Rack * rack;
+    Rack * leave;
     Rack * exchanged;
     int draws;
     double equity;

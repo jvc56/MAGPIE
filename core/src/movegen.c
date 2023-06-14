@@ -603,6 +603,31 @@ Generator * create_generator(Config * config) {
 	return generator;
 }
 
+Generator * copy_generator(Generator * gen) {
+    Generator * new_generator = malloc(sizeof(Generator));
+	new_generator->bag = copy_bag(gen->bag);
+    new_generator->board = copy_board(gen->board);
+	// Move list, anchor list, and leave map can be new
+	new_generator->move_list = create_move_list();
+	new_generator->anchor_list = create_anchor_list();
+	new_generator->leave_map = create_leave_map(gen->letter_distribution->size);
+	// KWG and letter distribution are read only and can share pointers
+    new_generator->kwg = gen->kwg;
+    new_generator->letter_distribution = gen->letter_distribution;
+	new_generator->tiles_played = 0;
+	new_generator->vertical = 0;
+	new_generator->last_anchor_col = 0;
+	// On by default
+	new_generator->apply_placement_adjustment = 1;
+
+	new_generator->exchange_strip = (uint8_t *) malloc(gen->letter_distribution->size*sizeof(uint8_t));
+	// Just load the zero values for now
+	load_zero_preendgame_adjustment_values(new_generator);
+
+	return new_generator;
+}
+
+
 void destroy_generator(Generator * gen) {
 	destroy_bag(gen->bag);
 	destroy_board(gen->board);

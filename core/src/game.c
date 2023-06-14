@@ -145,6 +145,17 @@ Game * create_game(Config * config) {
 	return game;
 }
 
+Game * copy_game(Game * game) {
+	Game * new_game = malloc(sizeof(Game));
+	new_game->gen = copy_generator(game->gen);
+	new_game->players[0] = copy_player(game->players[0]);
+	new_game->players[1] = copy_player(game->players[1]);
+	new_game->player_on_turn_index = game->player_on_turn_index;
+	new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
+	new_game->game_end_reason = game->game_end_reason;
+	return new_game;
+}
+
 void destroy_game(Game * game) {
     destroy_generator(game->gen);
 	destroy_player(game->players[0]);

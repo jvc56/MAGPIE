@@ -20,6 +20,15 @@ void destroy_stat(Stat * stat) {
     free(stat);
 }
 
+Stat * copy_stat(Stat * original_stat) {
+    Stat * copy_stat = create_stat();
+    copy_stat->cardinality = original_stat->cardinality;
+    copy_stat->weight = original_stat->weight;
+    copy_stat->sum_of_mean_differences_squared = original_stat->sum_of_mean_differences_squared;
+    copy_stat->mean = original_stat->mean;
+    return copy_stat;
+}
+
 void push(Stat * stat, double value, int value_weight) {
     stat->cardinality++;
     stat->weight += value_weight;
@@ -40,6 +49,10 @@ uint64_t weight(Stat * stat) {
 
 double mean(Stat * stat) {
     return stat->mean;
+}
+
+void push_stat(Stat * stat_1, Stat * stat_2) {
+    push(stat_1, mean(stat_2), weight(stat_2));
 }
 
 double variance(Stat * stat) {

@@ -310,6 +310,30 @@ Board * create_board() {
 	return board;
 }
 
+Board * copy_board(Board * board) {
+	Board * new_board = malloc(sizeof(Board));
+	new_board->traverse_backwards_return_values = malloc(sizeof(TraverseBackwardsReturnValues));
+
+	for (int board_index = 0; board_index < (BOARD_DIM * BOARD_DIM); board_index++) {
+		new_board->letters[board_index] = board->letters[board_index];
+		new_board->bonus_squares[board_index] = board->bonus_squares[board_index];
+		int directional_board_index = board_index * 2;
+		new_board->cross_sets[directional_board_index] = board->cross_sets[directional_board_index];
+		new_board->cross_sets[directional_board_index+1] = board->cross_sets[directional_board_index+1];
+		new_board->cross_scores[directional_board_index] = board->cross_scores[directional_board_index];
+		new_board->cross_scores[directional_board_index+1] = board->cross_scores[directional_board_index+1];
+		new_board->anchors[directional_board_index] = board->anchors[directional_board_index];
+		new_board->anchors[directional_board_index+1] = board->anchors[directional_board_index+1];
+		if (board_index >= (BOARD_DIM * BOARD_DIM) || directional_board_index + 1>= (BOARD_DIM * BOARD_DIM) * 2) {
+			printf("out of bounds: %d, %d\n", board_index, directional_board_index + 1);
+			abort();
+		}
+	}
+	new_board->transposed = board->transposed;
+	new_board->tiles_played = board->tiles_played;
+	return new_board;
+}
+
 void destroy_board(Board * board) {
 	free(board->traverse_backwards_return_values);
 	free(board);
