@@ -24,15 +24,17 @@ LeaveRackList * create_leave_rack_list(int capacity, int distribution_size) {
     lrl->count = 0;
     lrl->capacity = capacity;
     lrl->spare_leave_rack = create_leave_rack(distribution_size);
-    lrl->leave_racks = malloc((sizeof(LeaveRack*)) * (lrl->capacity));
-    for (int i = 0; i < lrl->capacity; i++) {
+    // Use capacity + 1 to temporarily hold a new insertion
+    // before popping it.
+    lrl->leave_racks = malloc((sizeof(LeaveRack*)) * (lrl->capacity + 1));
+    for (int i = 0; i < lrl->capacity + 1; i++) {
         lrl->leave_racks[i] = create_leave_rack(distribution_size);
     }
     return lrl;
 }
 
 void destroy_leave_rack_list(LeaveRackList * lrl) {
-    for (int i = 0; i < lrl->capacity; i++) {
+    for (int i = 0; i < lrl->capacity + 1; i++) {
         destroy_leave_rack(lrl->leave_racks[i]);
     }
     destroy_leave_rack(lrl->spare_leave_rack);
@@ -47,7 +49,6 @@ void reset_leave_rack_list(LeaveRackList * lrl) {
 void up_heapify_leave_rack(LeaveRackList * lrl, int index){
     LeaveRack * temp;
     int parent_node = (index-1)/2;
-
     if(lrl->leave_racks[parent_node]->draws > lrl->leave_racks[index]->draws){
         temp = lrl->leave_racks[parent_node];
         lrl->leave_racks[parent_node] = lrl->leave_racks[index];

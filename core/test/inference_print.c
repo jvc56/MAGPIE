@@ -91,12 +91,6 @@ void write_inference_record(char * buffer, InferenceRecord * record, Game * game
 void print_inference(Inference * inference, Rack * actual_tiles_played) {
 	char inference_string[6000] = "";
 
-    for (int i = 0; i < inference->player_to_infer_rack->array_size; i++) {
-        for (int j = 0; j < actual_tiles_played->array[i]; j++) {
-            take_letter_from_rack(inference->player_to_infer_rack, i);
-        }
-    }
-
     int is_exchange = inference->number_of_tiles_exchanged > 0;
     int number_of_tiles_played_or_exchanged;
     Game * game = inference->game;

@@ -24,7 +24,7 @@ void destroy_inference_record(InferenceRecord * record) {
     free(record);
 }
 
-Inference * create_inference(int distribution_size) {
+Inference * create_inference(int capacity, int distribution_size) {
     Inference * inference =  malloc(sizeof(Inference));
     inference->distribution_size = distribution_size;
     inference->draw_and_leave_subtotals_size = distribution_size*(RACK_SIZE)*2;
@@ -34,7 +34,7 @@ Inference * create_inference(int distribution_size) {
     inference->leave_record = create_inference_record(inference->draw_and_leave_subtotals_size);
     inference->exchanged_record = create_inference_record(inference->draw_and_leave_subtotals_size);
     inference->rack_record = create_inference_record(inference->draw_and_leave_subtotals_size);
-    inference->leave_rack_list = create_leave_rack_list(20, distribution_size);
+    inference->leave_rack_list = create_leave_rack_list(capacity, distribution_size);
     return inference;
 }
 
@@ -226,7 +226,7 @@ void decrement_letter_for_inference(Inference * inference, uint8_t letter) {
     take_letter_from_rack(inference->leave, letter);
 }
 
-void count_all_possible_leaves(Rack * bag_as_rack, int tiles_to_infer, int start_letter, uint64_t * count) {
+void count_all_racks_to_iterate_through(Rack * bag_as_rack, int tiles_to_infer, int start_letter, uint64_t * count) {
     if (tiles_to_infer == 0) {
         *count += 1;
         return;
@@ -234,7 +234,7 @@ void count_all_possible_leaves(Rack * bag_as_rack, int tiles_to_infer, int start
 	for (int letter = start_letter; letter < bag_as_rack->array_size; letter++) {
         if (bag_as_rack->array[letter] > 0) {
             take_letter_from_rack(bag_as_rack, letter);
-            count_all_possible_leaves(bag_as_rack, tiles_to_infer - 1, letter, count);
+            count_all_racks_to_iterate_through(bag_as_rack, tiles_to_infer - 1, letter, count);
             add_letter_to_rack(bag_as_rack, letter);
         }
     }
@@ -353,12 +353,15 @@ InferenceRecord * copy_inference_record(InferenceRecord * inference_record, int 
 }
 
 Inference * copy_inference(Inference * inference) {
-    Inference * new_inference = create_inference(inference->distribution_size);
+    Inference * new_inference =  malloc(sizeof(Inference));
+    new_inference->distribution_size = inference->distribution_size;
+    new_inference->draw_and_leave_subtotals_size = inference->distribution_size*(RACK_SIZE)*2;
+    new_inference->bag_as_rack = copy_rack(inference->bag_as_rack);
+    new_inference->leave = copy_rack(inference->leave);
+    new_inference->exchanged = copy_rack(inference->exchanged);
     new_inference->leave_record = copy_inference_record(inference->leave_record, inference->draw_and_leave_subtotals_size);
     new_inference->exchanged_record = copy_inference_record(inference->exchanged_record, inference->draw_and_leave_subtotals_size);
     new_inference->rack_record = copy_inference_record(inference->rack_record, inference->draw_and_leave_subtotals_size);
-    
-    // leave rack list can be new
     new_inference->leave_rack_list = create_leave_rack_list(inference->leave_rack_list->capacity, inference->distribution_size);
 
     // Game must be deep copied since we use the move generator
@@ -367,10 +370,6 @@ Inference * copy_inference(Inference * inference) {
     new_inference->klv = inference->klv;
     // Need the rack from the newly copied game
     new_inference->player_to_infer_rack = new_inference->game->players[inference->player_to_infer_index]->rack;
-
-    new_inference->bag_as_rack = copy_rack(inference->bag_as_rack);
-    new_inference->leave = copy_rack(inference->leave);
-    new_inference->exchanged = copy_rack(inference->exchanged);
 
     new_inference->player_to_infer_index = inference->player_to_infer_index;
     new_inference->actual_score = inference->actual_score;
@@ -381,6 +380,9 @@ Inference * copy_inference(Inference * inference) {
 }
 
 void add_inference_record(InferenceRecord * inference_record_1, InferenceRecord * inference_record_2, int draw_and_leave_subtotals_size) {
+    if (cardinality(inference_record_2->equity_values) == 0) {
+        return;
+    }
     push_stat(inference_record_1->equity_values, inference_record_2->equity_values);
     for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
         inference_record_1->draw_and_leave_subtotals[i] += inference_record_2->draw_and_leave_subtotals[i];
@@ -389,8 +391,10 @@ void add_inference_record(InferenceRecord * inference_record_1, InferenceRecord 
 
 void add_inference(Inference * inference_1, Inference * inference_2) {
     add_inference_record(inference_1->leave_record, inference_2->leave_record, inference_1->draw_and_leave_subtotals_size);
-    add_inference_record(inference_1->exchanged_record, inference_2->exchanged_record, inference_1->draw_and_leave_subtotals_size);
-    add_inference_record(inference_1->rack_record, inference_2->rack_record, inference_1->draw_and_leave_subtotals_size);
+    if (inference_2->number_of_tiles_exchanged > 0) {
+        add_inference_record(inference_1->exchanged_record, inference_2->exchanged_record, inference_1->draw_and_leave_subtotals_size);
+        add_inference_record(inference_1->rack_record, inference_2->rack_record, inference_1->draw_and_leave_subtotals_size);
+    }
     while (inference_2->leave_rack_list->count > 0) {
         LeaveRack * leave_rack_2 = pop_leave_rack(inference_2->leave_rack_list);
         insert_leave_rack(inference_1->leave_rack_list, leave_rack_2->leave, leave_rack_2->exchanged, leave_rack_2->draws, leave_rack_2->equity);
@@ -458,7 +462,7 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
 
     int tiles_to_infer = (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters;
     uint64_t racks_to_iterate_through = 0;
-    count_all_possible_leaves(inference->bag_as_rack, tiles_to_infer, BLANK_MACHINE_LETTER, &racks_to_iterate_through);
+    count_all_racks_to_iterate_through(inference->bag_as_rack, tiles_to_infer, BLANK_MACHINE_LETTER, &racks_to_iterate_through);
     if (racks_to_iterate_through < (uint64_t)number_of_threads) {
         number_of_threads = racks_to_iterate_through;
     }

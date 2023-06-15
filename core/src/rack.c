@@ -22,7 +22,7 @@ Rack * create_rack(int array_size) {
 }
 
 Rack * copy_rack(Rack * rack) {
-    Rack * new_rack = malloc(sizeof(new_rack));
+    Rack * new_rack = malloc(sizeof(Rack));
 	new_rack->array_size = rack->array_size;
 	new_rack->array = (int *) malloc(rack->array_size*sizeof(int));
 	reset_rack(new_rack);
