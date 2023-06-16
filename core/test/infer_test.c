@@ -808,7 +808,6 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
 
   reset_rack(rack);
   status = infer_for_test(inference, game, rack, 0, 0, 6, 0, number_of_threads);
-  print_inference(inference, rack, number_of_threads);
 
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Keeping any one of D, H, R, or S is valid

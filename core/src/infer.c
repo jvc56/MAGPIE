@@ -531,25 +531,40 @@ void *infer_worker(void *uncasted_inference) {
 
 void infer_manager(Inference *inference, int number_of_threads,
                    int racks_to_iterate_through) {
+  // Set the bounds for the main threads
+  // but do not malloc a new inference.
+  set_bounds_for_worker(inference, 0, number_of_threads,
+                        racks_to_iterate_through);
   if (number_of_threads == 1) {
-    set_bounds_for_worker(inference, 0, 1, racks_to_iterate_through);
     infer_worker(inference);
     return;
   }
 
+  int number_of_nonmain_threads = number_of_threads - 1;
   Inference **inferences_for_workers =
-      malloc((sizeof(Inference *)) * (number_of_threads));
-  pthread_t *worker_ids = malloc((sizeof(pthread_t)) * (number_of_threads));
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+      malloc((sizeof(Inference *)) * (number_of_nonmain_threads));
+  pthread_t *worker_ids =
+      malloc((sizeof(pthread_t)) * (number_of_nonmain_threads));
+  for (int thread_index = 0; thread_index < number_of_nonmain_threads;
+       thread_index++) {
     inferences_for_workers[thread_index] = copy_inference(inference);
-    set_bounds_for_worker(inferences_for_workers[thread_index], thread_index,
-                          number_of_threads, racks_to_iterate_through);
+    // Use thread_index + 1 since the main thread will
+    // use index 0. When setting the bounds, note that
+    // we need to use number_of_threads instead of number_of_nonmain_threads.
+    set_bounds_for_worker(inferences_for_workers[thread_index],
+                          thread_index + 1, number_of_threads,
+                          racks_to_iterate_through);
     pthread_create(&worker_ids[thread_index], NULL, infer_worker,
                    inferences_for_workers[thread_index]);
   }
 
+  // Run inference for the main thread after
+  // spawning all the other number_of_threads - 1 threads.
+  infer_worker(inference);
+
   // Combine and free
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+  for (int thread_index = 0; thread_index < number_of_nonmain_threads;
+       thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
     add_inference(inference, inferences_for_workers[thread_index]);
     destroy_inference_copy(inferences_for_workers[thread_index]);
