@@ -583,6 +583,7 @@ void test_infer_nonerror_cases(SuperConfig * superconfig, int number_of_threads)
     // Partially known leaves that are on the player's rack
     // before the inference are not removed from the bag, so
     // we have to remove it here.
+    // game->players[0]->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
     set_rack_to_string(game->players[0]->rack, "?", game->gen->letter_distribution);
     draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(game->gen->letter_distribution, '?'));
     status = infer_for_test(inference, game, rack, 0, 18, 0, 0, number_of_threads);

@@ -1,5 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 #include "bag.h"
 #include "game.h"
@@ -10,6 +14,10 @@
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
+
+#include "../test/move_print.h"
+#include "../test/game_print.h"
+#include "../test/test_util.h"
 
 InferenceRecord * create_inference_record(int draw_and_leave_subtotals_size) {
     InferenceRecord * record = malloc(sizeof(InferenceRecord));
@@ -172,14 +180,9 @@ void record_valid_leave(InferenceRecord * record, Rack * rack, float current_lea
 
 Move * get_top_move(Inference * inference) {
     Game * game = inference->game;
-    int original_recorder_type = game->players[inference->player_to_infer_index]->strategy_params->play_recorder_type;
-    int original_apply_placement_adjustment = game->gen->apply_placement_adjustment;
-    game->gen->apply_placement_adjustment = 0;
-    game->players[inference->player_to_infer_index]->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
+    Player * player = game->players[inference->player_to_infer_index];
     reset_move_list(game->gen->move_list);
-    generate_moves(game->gen, game->players[inference->player_to_infer_index], game->players[1 - inference->player_to_infer_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
-    game->players[inference->player_to_infer_index]->strategy_params->play_recorder_type = original_recorder_type;
-    game->gen->apply_placement_adjustment = original_apply_placement_adjustment;
+    generate_moves(game->gen, player, game->players[1 - inference->player_to_infer_index]->rack, game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
     return game->gen->move_list->moves[0];
 }
 
@@ -375,6 +378,7 @@ Inference * copy_inference(Inference * inference) {
     new_inference->actual_score = inference->actual_score;
     new_inference->number_of_tiles_exchanged = inference->number_of_tiles_exchanged;
     new_inference->draw_and_leave_subtotals_size = inference->draw_and_leave_subtotals_size;
+    new_inference->initial_tiles_to_infer = inference->initial_tiles_to_infer;
     new_inference->equity_margin = inference->equity_margin;
     return new_inference;
 }
@@ -401,30 +405,35 @@ void add_inference(Inference * inference_1, Inference * inference_2) {
     }
 }
 
-void infer_worker(Inference * inference, int tiles_to_infer) {
-    iterate_through_all_possible_leaves(inference, tiles_to_infer, BLANK_MACHINE_LETTER);
+void * infer_worker(void * uncasted_inference) {
+    Inference * inference = (Inference *) uncasted_inference;
+    iterate_through_all_possible_leaves(inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER);
+    return NULL;
 }
 
-void infer_manager(Inference * inference, int number_of_threads, int racks_to_iterate_through, int tiles_to_infer) {
+void infer_manager(Inference * inference, int number_of_threads, int racks_to_iterate_through) {
     if (number_of_threads == 1) {
         set_bounds_for_worker(inference, 0, 1, racks_to_iterate_through);
-        infer_worker(inference, tiles_to_infer);
+        infer_worker(inference);
         return;
     }
 
-    Inference ** inference_workers = malloc((sizeof(Inference*)) * (number_of_threads));
+    Inference ** inferences_for_workers = malloc((sizeof(Inference*)) * (number_of_threads));
+    pthread_t * worker_ids = malloc((sizeof(pthread_t)) * (number_of_threads));
     for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-        inference_workers[thread_index] = copy_inference(inference);
-        set_bounds_for_worker(inference_workers[thread_index], thread_index, number_of_threads, racks_to_iterate_through);
-        infer_worker(inference_workers[thread_index], tiles_to_infer);
+        inferences_for_workers[thread_index] = copy_inference(inference);
+        set_bounds_for_worker(inferences_for_workers[thread_index], thread_index, number_of_threads, racks_to_iterate_through);
+        pthread_create(&worker_ids[thread_index], NULL, infer_worker, inferences_for_workers[thread_index]);
     }
 
     // Combine and free
     for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-        add_inference(inference, inference_workers[thread_index]);
-        destroy_inference_copy(inference_workers[thread_index]);
+        pthread_join(worker_ids[thread_index], NULL);
+        add_inference(inference, inferences_for_workers[thread_index]);
+        destroy_inference_copy(inferences_for_workers[thread_index]);
     }
-    free(inference_workers);
+    free(inferences_for_workers);
+    free(worker_ids);
 }
 
 int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int player_to_infer_index, int actual_score, int number_of_tiles_exchanged, float equity_margin, int number_of_threads) {
@@ -461,12 +470,24 @@ int infer(Inference * inference, Game * game, Rack * actual_tiles_played, int pl
     }
 
     int tiles_to_infer = (RACK_SIZE) - inference->player_to_infer_rack->number_of_letters;
+    inference->initial_tiles_to_infer = tiles_to_infer;
     uint64_t racks_to_iterate_through = 0;
+
+    // Prepare the game for inference calculations
+    Player * player = game->players[inference->player_to_infer_index];
+    int original_recorder_type = player->strategy_params->play_recorder_type;
+    int original_apply_placement_adjustment = game->gen->apply_placement_adjustment;
+    game->gen->apply_placement_adjustment = 0;
+    player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
+
     count_all_racks_to_iterate_through(inference->bag_as_rack, tiles_to_infer, BLANK_MACHINE_LETTER, &racks_to_iterate_through);
     if (racks_to_iterate_through < (uint64_t)number_of_threads) {
         number_of_threads = racks_to_iterate_through;
     }
-    infer_manager(inference, number_of_threads, racks_to_iterate_through, tiles_to_infer);
+    infer_manager(inference, number_of_threads, racks_to_iterate_through);
+
+    player->strategy_params->play_recorder_type = original_recorder_type;
+    game->gen->apply_placement_adjustment = original_apply_placement_adjustment;
 
     // Return the player to infer rack to it's original
     // state since the inference does not own that struct

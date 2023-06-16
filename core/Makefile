@@ -26,7 +26,7 @@ lflags.prof := -pg -g
 CPPFLAGS := -Iinclude -MMD -MP
 CFLAGS := ${cflags.${BUILD}}
 LFLAGS := ${lflags.${BUILD}}
-LDFLAGS  := -Llib
+LDFLAGS  := -Llib -pthread
 LDLIBS   := -lm
 
 .PHONY: all clean

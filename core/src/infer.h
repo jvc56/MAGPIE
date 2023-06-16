@@ -34,6 +34,7 @@ typedef struct Inference {
     int actual_score;
     int number_of_tiles_exchanged;
     int draw_and_leave_subtotals_size;
+    int initial_tiles_to_infer;
     float equity_margin;
     uint64_t lower_inclusive_bound;
     uint64_t upper_inclusive_bound;
