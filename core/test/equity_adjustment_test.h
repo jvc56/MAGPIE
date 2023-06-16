@@ -3,6 +3,6 @@
 
 #include "superconfig.h"
 
-void test_equity_adjustments(SuperConfig * superconfig);
+void test_equity_adjustments(SuperConfig *superconfig);
 
 #endif

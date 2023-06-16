@@ -3,6 +3,6 @@
 
 #include "superconfig.h"
 
-void test_leave_map(SuperConfig * superconfig);
+void test_leave_map(SuperConfig *superconfig);
 
 #endif

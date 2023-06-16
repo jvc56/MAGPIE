@@ -3,6 +3,6 @@
 
 #include "superconfig.h"
 
-void test_gameplay(SuperConfig * superconfig);
+void test_gameplay(SuperConfig *superconfig);
 
 #endif

@@ -8,7 +8,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func testDev() {
+func teget_stdev() {
 	// racks := []string{
 	// 	"UUUVVWW",
 	// 	"AEFRWYZ",

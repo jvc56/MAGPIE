@@ -3,7 +3,7 @@
 
 #include "superconfig.h"
 
-void test_infer(SuperConfig * superconfig);
-void infer_from_config(Config * config);
+void test_infer(SuperConfig *superconfig);
+void infer_from_config(Config *config);
 
 #endif

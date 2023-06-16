@@ -7,24 +7,25 @@
 #include "rack.h"
 
 typedef struct LeaveRack {
-    Rack * leave;
-    Rack * exchanged;
-    int draws;
-    double equity;
+  Rack *leave;
+  Rack *exchanged;
+  int draws;
+  double equity;
 } LeaveRack;
 
 typedef struct LeaveRackList {
-    int count;
-    int capacity;
-    LeaveRack * spare_leave_rack;
-    LeaveRack ** leave_racks;
+  int count;
+  int capacity;
+  LeaveRack *spare_leave_rack;
+  LeaveRack **leave_racks;
 } LeaveRackList;
 
-LeaveRackList * create_leave_rack_list(int capacity, int distribution_size);
-void destroy_leave_rack_list(LeaveRackList * lrl);
-void insert_leave_rack(LeaveRackList * lrl, Rack * leave, Rack * exchanged, int number_of_draws_for_leave, double equity);
-LeaveRack * pop_leave_rack(LeaveRackList * lrl);
-void reset_leave_rack_list(LeaveRackList * lrl);
-void sort_leave_racks(LeaveRackList * lrl);
+LeaveRackList *create_leave_rack_list(int capacity, int distribution_size);
+void destroy_leave_rack_list(LeaveRackList *lrl);
+void insert_leave_rack(LeaveRackList *lrl, Rack *leave, Rack *exchanged,
+                       int number_of_draws_for_leave, double equity);
+LeaveRack *pop_leave_rack(LeaveRackList *lrl);
+void reset_leave_rack_list(LeaveRackList *lrl);
+void sort_leave_racks(LeaveRackList *lrl);
 
 #endif

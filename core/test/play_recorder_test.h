@@ -3,6 +3,6 @@
 
 #include "../src/config.h"
 
-void test_play_recorder(Config * config);
+void test_play_recorder(Config *config);
 
 #endif

@@ -55,6 +55,8 @@
 #define INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO 6
 #define INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED 7
 #define INFERENCE_STATUS_INVALID_NUMBER_OF_THREADS 8
+#define NUMBER_OF_ROUNDED_EQUITY_VALUES 201
+#define START_ROUNDED_EQUITY_VALUE -100
 #define MOVE_LIST_CAPACITY 1000000
 #define PASS_MOVE_EQUITY -10000
 #define INITIAL_TOP_MOVE_EQUITY -100000
@@ -69,20 +71,21 @@
 #define KLV_FILENAME_EXTENSION "lg"
 #define MAX_ARG_LENGTH 300
 
-#define CROSSWORD_GAME_BOARD "=  '   =   '  ="\
-		" -   \"   \"   - "\
-		"  -   ' '   -  "\
-		"'  -   '   -  '"\
-		"    -     -    "\
-		" \"   \"   \"   \" "\
-		"  '   ' '   '  "\
-		"=  '   -   '  ="\
-		"  '   ' '   '  "\
-		" \"   \"   \"   \" "\
-		"    -     -    "\
-		"'  -   '   -  '"\
-		"  -   ' '   -  "\
-		" -   \"   \"   - "\
-		"=  '   =   '  ="\
+#define CROSSWORD_GAME_BOARD                                                   \
+  "=  '   =   '  ="                                                            \
+  " -   \"   \"   - "                                                          \
+  "  -   ' '   -  "                                                            \
+  "'  -   '   -  '"                                                            \
+  "    -     -    "                                                            \
+  " \"   \"   \"   \" "                                                        \
+  "  '   ' '   '  "                                                            \
+  "=  '   -   '  ="                                                            \
+  "  '   ' '   '  "                                                            \
+  " \"   \"   \"   \" "                                                        \
+  "    -     -    "                                                            \
+  "'  -   '   -  '"                                                            \
+  "  -   ' '   -  "                                                            \
+  " -   \"   \"   - "                                                          \
+  "=  '   =   '  ="
 
 #endif

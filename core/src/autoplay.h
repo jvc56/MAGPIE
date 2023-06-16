@@ -3,6 +3,6 @@
 
 #include "config.h"
 
-void autoplay(Config * config);
+void autoplay(Config *config);
 
 #endif

@@ -3,6 +3,6 @@
 
 #include "../src/config.h"
 
-void prof_tests(Config * config);
+void prof_tests(Config *config);
 
 #endif
