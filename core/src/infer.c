@@ -1,9 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <sys/syscall.h>
 
 #include "bag.h"
 #include "game.h"
@@ -14,10 +11,6 @@
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
-
-#include "../test/move_print.h"
-#include "../test/game_print.h"
-#include "../test/test_util.h"
 
 InferenceRecord * create_inference_record(int draw_and_leave_subtotals_size) {
     InferenceRecord * record = malloc(sizeof(InferenceRecord));
