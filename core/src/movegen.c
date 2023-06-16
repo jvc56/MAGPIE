@@ -25,7 +25,11 @@ float placement_adjustment(Generator * gen, Move * move) {
 	float v_penalty = OPENING_HOTSPOT_PENALTY;
 
 	while (j < end) {
-		if (gen->letter_distribution->is_vowel[move->tiles[j-start]] && (j == 2 || j == 6 || j == 8 || j == 12)) {
+		int tile = move->tiles[j-start];
+		if (is_blanked(tile)) {
+			tile = get_unblanked_machine_letter(tile);
+		}
+		if (gen->letter_distribution->is_vowel[tile] && (j == 2 || j == 6 || j == 8 || j == 12)) {
 			penalty += v_penalty;
 		}
 		j++;
