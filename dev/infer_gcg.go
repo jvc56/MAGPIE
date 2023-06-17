@@ -11,6 +11,7 @@ import (
 	"github.com/domino14/macondo/gcgio"
 	"github.com/domino14/macondo/gen/api/proto/macondo"
 	"github.com/domino14/macondo/tilemapping"
+
 )
 
 func InferGame(lexicon string, gcgFilename string, turnNumber int, margin float64, usePartial bool, numberOfThreads int) {
@@ -158,6 +159,7 @@ func getGameFromGCG(lexicon string, gcgFilename string) (*game.Game, error) {
 	if err != nil {
 		return nil, err
 	}
+	hist.ChallengeRule = macondo.ChallengeRule_SINGLE
 	rules, err := game.NewBasicGameRules(
 		&DefaultConfig,
 		lexicon,
