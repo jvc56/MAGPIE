@@ -26,7 +26,7 @@ typedef struct Config {
   int player_to_infer_index;
   int actual_score;
   int number_of_tiles_exchanged;
-  float equity_margin;
+  double equity_margin;
   int number_of_threads;
 } Config;
 
@@ -38,7 +38,7 @@ Config *create_config(const char *kwg_filename,
                       int game_pair_flag, int number_of_games_or_pairs,
                       const char *actual_tiles_played,
                       int player_to_infer_index, int actual_score,
-                      int number_of_tiles_exchanged, float equity_margin,
+                      int number_of_tiles_exchanged, double equity_margin,
                       int number_of_threads);
 Config *create_config_from_args(int argc, char *argv[]);
 void destroy_config(Config *config);

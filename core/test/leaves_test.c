@@ -28,11 +28,11 @@ void test_leaves(SuperConfig *superconfig, const char *leaves_csv_filename) {
 
     // Value token
     token = strtok(NULL, ",");
-    float actual_value = strtof(token, NULL);
+    double actual_value = strtof(token, NULL);
 
     set_rack_to_string(rack, leave, letter_distribution);
-    float klv_leave_value = get_leave_value(klv, rack);
-    assert(within_epsilon_float(klv_leave_value, actual_value));
+    double klv_leave_value = get_leave_value(klv, rack);
+    assert(within_epsilon(klv_leave_value, actual_value));
 
     free(leave);
   }

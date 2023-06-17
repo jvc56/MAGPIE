@@ -204,7 +204,7 @@ void increment_subtotals_for_record(InferenceRecord *record, Rack *rack,
 }
 
 void record_valid_leave(InferenceRecord *record, Rack *rack,
-                        float current_leave_value,
+                        double current_leave_value,
                         uint64_t number_of_draws_for_leave) {
   push(record->equity_values, (double)current_leave_value,
        number_of_draws_for_leave);
@@ -314,7 +314,7 @@ void initialize_inference_for_evaluation(Inference *inference, Game *game,
                                          int player_to_infer_index,
                                          int actual_score,
                                          int number_of_tiles_exchanged,
-                                         float equity_margin) {
+                                         double equity_margin) {
   initialize_inference_record_for_evaluation(
       inference->leave_record, inference->draw_and_leave_subtotals_size);
   initialize_inference_record_for_evaluation(
@@ -570,7 +570,7 @@ void infer_manager(Inference *inference, int number_of_threads) {
 
 int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
           int player_to_infer_index, int actual_score,
-          int number_of_tiles_exchanged, float equity_margin,
+          int number_of_tiles_exchanged, double equity_margin,
           int number_of_threads) {
   initialize_inference_for_evaluation(inference, game, actual_tiles_played,
                                       player_to_infer_index, actual_score,

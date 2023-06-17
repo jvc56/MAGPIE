@@ -11,9 +11,9 @@
 
 void play_top_versus_all_game(Game *game) {
   int top_move_index;
-  float top_move_equity;
+  double top_move_equity;
 
-  float equity;
+  double equity;
   int score;
   int row_start;
   int col_start;
@@ -61,7 +61,7 @@ void play_top_versus_all_game(Game *game) {
 
     // Ensure that the top move found by gen all matches the top
     // move found by recording the top move only.
-    if (!within_epsilon_float(
+    if (!within_epsilon(
             top_move_equity,
             game->gen->move_list->moves[top_move_index]->equity) ||
         move_type != game->gen->move_list->moves[top_move_index]->move_type) {

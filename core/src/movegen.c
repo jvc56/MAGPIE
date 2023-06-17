@@ -18,13 +18,13 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
            Rack *opp_rack, uint32_t new_node_index, int accepts, int leftstrip,
            int rightstrip, int unique_play);
 
-float placement_adjustment(Generator *gen, Move *move) {
+double placement_adjustment(Generator *gen, Move *move) {
   int start = move->col_start;
   int end = start + move->tiles_played;
 
   int j = start;
-  float penalty = 0;
-  float v_penalty = OPENING_HOTSPOT_PENALTY;
+  double penalty = 0;
+  double v_penalty = OPENING_HOTSPOT_PENALTY;
 
   while (j < end) {
     int tile = move->tiles[j - start];
@@ -40,18 +40,18 @@ float placement_adjustment(Generator *gen, Move *move) {
   return penalty;
 }
 
-float endgame_adjustment(Generator *gen, Rack *rack, Rack *opp_rack) {
+double endgame_adjustment(Generator *gen, Rack *rack, Rack *opp_rack) {
   if (!rack->empty) {
     // This play is not going out. We should penalize it by our own score
     // plus some constant.
-    return ((-(float)score_on_rack(gen->letter_distribution, rack)) * 2) - 10;
+    return ((-(double)score_on_rack(gen->letter_distribution, rack)) * 2) - 10;
   }
-  return 2 * ((float)score_on_rack(gen->letter_distribution, opp_rack));
+  return 2 * ((double)score_on_rack(gen->letter_distribution, opp_rack));
 }
 
-float get_spare_move_equity(Generator *gen, Player *player, Rack *opp_rack) {
-  float leave_adjustment = 0;
-  float other_adjustments = 0;
+double get_spare_move_equity(Generator *gen, Player *player, Rack *opp_rack) {
+  double leave_adjustment = 0;
+  double other_adjustments = 0;
 
   if (gen->apply_placement_adjustment && gen->board->tiles_played == 0 &&
       gen->move_list->spare_move->move_type == MOVE_TYPE_PLAY) {
@@ -71,7 +71,7 @@ float get_spare_move_equity(Generator *gen, Player *player, Rack *opp_rack) {
     other_adjustments += endgame_adjustment(gen, player->rack, opp_rack);
   }
 
-  return ((float)gen->move_list->spare_move->score) + leave_adjustment +
+  return ((double)gen->move_list->spare_move->score) + leave_adjustment +
          other_adjustments;
 }
 
@@ -111,7 +111,7 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
                  tiles_played, gen->vertical, move_type);
 
   if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL) {
-    float equity;
+    double equity;
     if (player->strategy_params->move_sorting == SORT_BY_EQUITY) {
       equity = get_spare_move_equity(gen, player, opp_rack);
     } else {
@@ -137,7 +137,7 @@ void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
     // Ignore the empty exchange case for full racks
     // to avoid out of bounds errors for the best_leaves array
     if (player->rack->number_of_letters < RACK_SIZE) {
-      float current_value =
+      double current_value =
           get_leave_value(player->strategy_params->klv, player->rack);
       set_current_value(gen->leave_map, current_value);
       if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
@@ -365,7 +365,7 @@ void shadow_record(Generator *gen, int left_col, int right_col,
   int score = tiles_played_score +
               (main_played_through_score * word_multiplier) +
               perpendicular_additional_score + bingo_bonus;
-  float equity = (float)score;
+  double equity = (double)score;
   if (gen->move_sorting_type == SORT_BY_EQUITY) {
     equity +=
         gen->best_leaves[gen->number_of_letters_on_rack - gen->tiles_played];
@@ -617,7 +617,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
                     int add_exchange) {
   // Reset the best leaves
   for (int i = 0; i < (RACK_SIZE); i++) {
-    gen->best_leaves[i] = (float)(INITIAL_TOP_MOVE_EQUITY);
+    gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
   }
 
   init_leave_map(gen->leave_map, player->rack);
@@ -685,7 +685,7 @@ void reset_generator(Generator *gen) {
 }
 
 void load_quackle_preendgame_adjustment_values(Generator *gen) {
-  float values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
+  double values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
   for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
     gen->preendgame_adjustment_values[i] = values[i];
   }

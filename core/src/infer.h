@@ -44,7 +44,7 @@ typedef struct Inference {
   int number_of_tiles_exchanged;
   int draw_and_leave_subtotals_size;
   int initial_tiles_to_infer;
-  float equity_margin;
+  double equity_margin;
   uint64_t current_rack_index;
   uint64_t *shared_rack_index;
   pthread_mutex_t *shared_rack_index_lock;
@@ -52,7 +52,7 @@ typedef struct Inference {
 
 int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
           int player_to_infer_index, int actual_score,
-          int number_of_tiles_exchanged, float equity_margin,
+          int number_of_tiles_exchanged, double equity_margin,
           int number_of_threads);
 Inference *create_inference(int capacity, int distribution_size);
 void destroy_inference(Inference *inference);

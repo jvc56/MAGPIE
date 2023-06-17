@@ -28,7 +28,7 @@ typedef struct Generator {
   uint8_t row_letter_cache[(BOARD_DIM)];
   uint8_t strip[(BOARD_DIM)];
   uint8_t *exchange_strip;
-  float preendgame_adjustment_values[PREENDGAME_ADJUSTMENT_VALUES_LENGTH];
+  double preendgame_adjustment_values[PREENDGAME_ADJUSTMENT_VALUES_LENGTH];
 
   MoveList *move_list;
   Board *board;
@@ -41,12 +41,12 @@ typedef struct Generator {
   // Shadow plays
   int current_left_col;
   int current_right_col;
-  float highest_shadow_equity;
+  double highest_shadow_equity;
   uint64_t rack_cross_set;
   int move_sorting_type;
   int number_of_letters_on_rack;
   int descending_tile_scores[(RACK_SIZE)];
-  float best_leaves[(RACK_SIZE)];
+  double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
 } Generator;
 

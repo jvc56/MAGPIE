@@ -7,7 +7,7 @@
 LeaveMap *create_leave_map(int rack_array_size) {
   int number_of_values = 1 << RACK_SIZE;
   LeaveMap *leave_map = malloc(sizeof(LeaveMap));
-  leave_map->leave_values = (float *)malloc(number_of_values * sizeof(float));
+  leave_map->leave_values = (double *)malloc(number_of_values * sizeof(double));
   leave_map->letter_base_index_map =
       (int *)malloc(rack_array_size * sizeof(int));
   return leave_map;
@@ -37,11 +37,11 @@ void add_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
   leave_map->current_index |= 1 << bit_index;
 }
 
-void set_current_value(LeaveMap *leave_map, float value) {
+void set_current_value(LeaveMap *leave_map, double value) {
   leave_map->leave_values[leave_map->current_index] = value;
 }
 
-float get_current_value(LeaveMap *leave_map) {
+double get_current_value(LeaveMap *leave_map) {
   return leave_map->leave_values[leave_map->current_index];
 }
 

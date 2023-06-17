@@ -203,13 +203,13 @@ int get_word_index_of(KLV *klv, uint32_t node_index, Rack *leave) {
   return -1;
 }
 
-float get_leave_value(KLV *klv, Rack *leave) {
+double get_leave_value(KLV *klv, Rack *leave) {
   if (leave->empty) {
     return 0.0;
   }
   int index = get_word_index_of(klv, kwg_arc_index(klv->kwg, 0), leave);
   if (index != -1) {
-    return klv->leave_values[index];
+    return (double)klv->leave_values[index];
   }
   return 0.0;
 }

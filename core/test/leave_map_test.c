@@ -11,7 +11,7 @@
 
 void take_set(LeaveMap *leave_map, Rack *rack,
               LetterDistribution *letter_distribution, uint64_t letter,
-              int expected_take_index, float value) {
+              int expected_take_index, double value) {
   take_letter_and_update_current_index(
       leave_map, rack,
       human_readable_letter_to_machine_letter(letter_distribution, letter));
@@ -24,7 +24,7 @@ void take_set(LeaveMap *leave_map, Rack *rack,
 
 void take_set_add(LeaveMap *leave_map, Rack *rack,
                   LetterDistribution *letter_distribution, uint64_t letter,
-                  int expected_take_index, int expected_add_index, float value,
+                  int expected_take_index, int expected_add_index, double value,
                   int set) {
   take_letter_and_update_current_index(
       leave_map, rack,
@@ -33,7 +33,7 @@ void take_set_add(LeaveMap *leave_map, Rack *rack,
   if (set) {
     set_current_value(leave_map, value);
   } else {
-    assert(within_epsilon_float(get_current_value(leave_map), value));
+    assert(within_epsilon(get_current_value(leave_map), value));
   }
   add_letter_and_update_current_index(
       leave_map, rack,
@@ -102,7 +102,7 @@ void test_leave_map(SuperConfig *superconfig) {
       leave_map, rack,
       human_readable_letter_to_machine_letter(letter_distribution, 'U'));
   assert(leave_map->current_index == 41);
-  assert(within_epsilon_float(get_current_value(leave_map), 14.0));
+  assert(within_epsilon(get_current_value(leave_map), 14.0));
 
   add_letter_and_update_current_index(
       leave_map, rack,
@@ -111,7 +111,7 @@ void test_leave_map(SuperConfig *superconfig) {
       leave_map, rack,
       human_readable_letter_to_machine_letter(letter_distribution, 'I'));
   assert(leave_map->current_index == 59);
-  assert(within_epsilon_float(get_current_value(leave_map), 12.0));
+  assert(within_epsilon(get_current_value(leave_map), 12.0));
 
   add_letter_and_update_current_index(
       leave_map, rack,
@@ -120,7 +120,7 @@ void test_leave_map(SuperConfig *superconfig) {
       leave_map, rack,
       human_readable_letter_to_machine_letter(letter_distribution, 'D'));
   assert(leave_map->current_index == 127);
-  assert(within_epsilon_float(get_current_value(leave_map), 100.0));
+  assert(within_epsilon(get_current_value(leave_map), 100.0));
 
   destroy_rack(rack);
   destroy_leave_map(leave_map);

@@ -17,7 +17,7 @@ void many_moves(Config *config) {
   generate_moves_for_game(game);
   clock_t end = clock();
   printf("many_moves took %0.6f seconds\n",
-         (float)(end - begin) / CLOCKS_PER_SEC);
+         (double)(end - begin) / CLOCKS_PER_SEC);
   destroy_game(game);
 }
 
