@@ -297,70 +297,6 @@ void decrement_letter_for_inference(Inference *inference, uint8_t letter) {
   take_letter_from_rack(inference->leave, letter);
 }
 
-void count_all_racks_to_iterate_through(Rack *bag_as_rack, int tiles_to_infer,
-                                        int start_letter, uint64_t *count) {
-  if (tiles_to_infer == 0) {
-    *count += 1;
-    return;
-  }
-  for (int letter = start_letter; letter < bag_as_rack->array_size; letter++) {
-    if (bag_as_rack->array[letter] > 0) {
-      take_letter_from_rack(bag_as_rack, letter);
-      count_all_racks_to_iterate_through(bag_as_rack, tiles_to_infer - 1,
-                                         letter, count);
-      add_letter_to_rack(bag_as_rack, letter);
-    }
-  }
-}
-
-void iterate_through_all_possible_leaves(Inference *inference,
-                                         int tiles_to_infer, int start_letter) {
-  if (tiles_to_infer == 0) {
-    int perform_evaluation = 0;
-    pthread_mutex_lock(inference->shared_rack_index_lock);
-    if (inference->current_rack_index == *inference->shared_rack_index) {
-      perform_evaluation = 1;
-      *inference->shared_rack_index += 1;
-    }
-    pthread_mutex_unlock(inference->shared_rack_index_lock);
-
-    if (perform_evaluation) {
-      evaluate_possible_leave(inference);
-    }
-    inference->current_rack_index++;
-    return;
-  }
-  for (int letter = start_letter; letter < inference->distribution_size;
-       letter++) {
-    if (inference->bag_as_rack->array[letter] > 0) {
-      increment_letter_for_inference(inference, letter);
-      iterate_through_all_possible_leaves(inference, tiles_to_infer - 1,
-                                          letter);
-      decrement_letter_for_inference(inference, letter);
-    }
-  }
-  reset_move_list(inference->game->gen->move_list);
-}
-
-void iterate_through_all_possible_leaves_single_threaded(Inference *inference,
-                                                         int tiles_to_infer,
-                                                         int start_letter) {
-  if (tiles_to_infer == 0) {
-    evaluate_possible_leave(inference);
-    return;
-  }
-  for (int letter = start_letter; letter < inference->distribution_size;
-       letter++) {
-    if (inference->bag_as_rack->array[letter] > 0) {
-      increment_letter_for_inference(inference, letter);
-      iterate_through_all_possible_leaves_single_threaded(
-          inference, tiles_to_infer - 1, letter);
-      decrement_letter_for_inference(inference, letter);
-    }
-  }
-  reset_move_list(inference->game->gen->move_list);
-}
-
 void initialize_inference_record_for_evaluation(
     InferenceRecord *record, int draw_and_leave_subtotals_size) {
   // Reset record
@@ -512,6 +448,55 @@ void add_inference(Inference *inference_1, Inference *inference_2) {
                       leave_rack_2->exchanged, leave_rack_2->draws,
                       leave_rack_2->equity);
   }
+}
+
+void iterate_through_all_possible_leaves(Inference *inference,
+                                         int tiles_to_infer, int start_letter) {
+  if (tiles_to_infer == 0) {
+    int perform_evaluation = 0;
+    pthread_mutex_lock(inference->shared_rack_index_lock);
+    if (inference->current_rack_index == *inference->shared_rack_index) {
+      perform_evaluation = 1;
+      *inference->shared_rack_index += 1;
+    }
+    pthread_mutex_unlock(inference->shared_rack_index_lock);
+
+    if (perform_evaluation) {
+      evaluate_possible_leave(inference);
+    }
+    inference->current_rack_index++;
+    return;
+  }
+  for (int letter = start_letter; letter < inference->distribution_size;
+       letter++) {
+    if (inference->bag_as_rack->array[letter] > 0) {
+      increment_letter_for_inference(inference, letter);
+      iterate_through_all_possible_leaves(inference, tiles_to_infer - 1,
+                                          letter);
+      decrement_letter_for_inference(inference, letter);
+    }
+  }
+  reset_move_list(inference->game->gen->move_list);
+}
+
+void iterate_through_all_possible_leaves_single_threaded(Inference *inference,
+                                                         int tiles_to_infer,
+                                                         int start_letter) {
+  if (tiles_to_infer == 0) {
+    evaluate_possible_leave(inference);
+    inference->current_rack_index++;
+    return;
+  }
+  for (int letter = start_letter; letter < inference->distribution_size;
+       letter++) {
+    if (inference->bag_as_rack->array[letter] > 0) {
+      increment_letter_for_inference(inference, letter);
+      iterate_through_all_possible_leaves_single_threaded(
+          inference, tiles_to_infer - 1, letter);
+      decrement_letter_for_inference(inference, letter);
+    }
+  }
+  reset_move_list(inference->game->gen->move_list);
 }
 
 void *infer_worker(void *uncasted_inference) {

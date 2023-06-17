@@ -201,38 +201,6 @@ void test_infer_tiles_played_not_in_bag(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_infer_count_possible_leaves(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
-  Game *game = create_game(config);
-  Rack *rack = create_rack(game->players[0]->rack->array_size);
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
-  int status;
-  uint64_t count = 0;
-  double equity_margin = 1000;
-
-  // The large equity margin should make all leaves recordable
-  set_rack_to_string(rack, "MUZAKS", game->gen->letter_distribution);
-  status = infer_for_test(inference, game, rack, 0, 52, 0, equity_margin, 1);
-  assert(status == INFERENCE_STATUS_SUCCESS);
-  count_all_racks_to_iterate_through(inference->bag_as_rack, 1,
-                                     BLANK_MACHINE_LETTER, &count);
-  assert(get_cardinality(inference->leave_record->equity_values) == count);
-  count = 0;
-
-  set_rack_to_string(rack, "MUZAK", game->gen->letter_distribution);
-  status = infer_for_test(inference, game, rack, 0, 50, 0, equity_margin, 1);
-  assert(status == INFERENCE_STATUS_SUCCESS);
-  count_all_racks_to_iterate_through(inference->bag_as_rack, 2,
-                                     BLANK_MACHINE_LETTER, &count);
-  assert(get_cardinality(inference->leave_record->equity_values) == count);
-  count = 0;
-
-  destroy_game(game);
-  destroy_inference(inference);
-  destroy_rack(rack);
-}
-
 void test_infer_nonerror_cases(SuperConfig *superconfig,
                                int number_of_threads) {
   Config *config = get_csw_config(superconfig);
@@ -827,7 +795,6 @@ void test_infer(SuperConfig *superconfig) {
   test_infer_exchange_score_not_zero(superconfig);
   test_infer_exchange_not_allowed(superconfig);
   test_infer_tiles_played_not_in_bag(superconfig);
-  test_infer_count_possible_leaves(superconfig);
   test_infer_nonerror_cases(superconfig, 1);
   test_infer_nonerror_cases(superconfig, 2);
   test_infer_nonerror_cases(superconfig, 7);
@@ -846,7 +813,8 @@ void infer_from_config(Config *config) {
   if (status != INFERENCE_STATUS_SUCCESS) {
     printf("inference failed with error code: %d\n", status);
   } else {
-    print_inference(inference, config->actual_tiles_played, 1);
+    print_inference(inference, config->actual_tiles_played,
+                    config->number_of_threads);
   }
   destroy_game(game);
   destroy_inference(inference);

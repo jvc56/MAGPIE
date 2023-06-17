@@ -67,9 +67,6 @@ get_probability_for_random_minimum_draw(Rack *bag_as_rack, Rack *rack,
                                         uint8_t this_letter, int minimum,
                                         int number_of_actual_tiles_played);
 double get_estimated_stdev_for_record(InferenceRecord *record);
-void count_all_racks_to_iterate_through(Rack *bag_as_rack,
-                                        int leave_tiles_remaining,
-                                        int start_letter, uint64_t *count);
 uint64_t choose(uint64_t n, uint64_t k);
 
 #endif

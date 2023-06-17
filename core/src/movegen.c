@@ -734,8 +734,8 @@ Generator *copy_generator(Generator *gen) {
   new_generator->tiles_played = 0;
   new_generator->vertical = 0;
   new_generator->last_anchor_col = 0;
-  // On by default
-  new_generator->apply_placement_adjustment = 1;
+
+  new_generator->apply_placement_adjustment = gen->apply_placement_adjustment;
 
   new_generator->exchange_strip =
       (uint8_t *)malloc(gen->letter_distribution->size * sizeof(uint8_t));
