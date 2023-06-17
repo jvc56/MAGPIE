@@ -10,14 +10,14 @@
 
 typedef struct InferenceRecord {
   Stat *equity_values;
-  int *draw_and_leave_subtotals;
+  uint64_t *draw_and_leave_subtotals;
   // This array is used to store the weights
   // of rounded equity values for multithreaded
   // inferences. To avoid holding every floating point
   // equity value in memory at once, we quantize them
   // to integer values so storing the weights takes
   // a reasonable amount of memory.
-  int rounded_equity_values[(NUMBER_OF_ROUNDED_EQUITY_VALUES)];
+  uint64_t rounded_equity_values[(NUMBER_OF_ROUNDED_EQUITY_VALUES)];
 } InferenceRecord;
 
 typedef struct Inference {
@@ -54,11 +54,11 @@ int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
           int number_of_threads);
 Inference *create_inference(int capacity, int distribution_size);
 void destroy_inference(Inference *inference);
-int get_subtotal(InferenceRecord *record, uint8_t letter, int number_of_letters,
-                 int subtotal_index_offset);
-int get_subtotal_sum_with_minimum(InferenceRecord *record, uint8_t letter,
-                                  int minimum_number_of_letters,
-                                  int subtotal_index_offset);
+uint64_t get_subtotal(InferenceRecord *record, uint8_t letter,
+                      int number_of_letters, int subtotal_index_offset);
+uint64_t get_subtotal_sum_with_minimum(InferenceRecord *record, uint8_t letter,
+                                       int minimum_number_of_letters,
+                                       int subtotal_index_offset);
 void get_stat_for_letter(InferenceRecord *record, Stat *stat, uint8_t letter);
 double
 get_probability_for_random_minimum_draw(Rack *bag_as_rack, Rack *rack,
@@ -71,6 +71,6 @@ void count_all_racks_to_iterate_through(Rack *bag_as_rack,
 void set_bounds_for_worker(Inference *inference, int thread_index,
                            int number_of_threads,
                            uint64_t racks_to_iterate_through);
-int choose(int n, int k);
+uint64_t choose(uint64_t n, uint64_t k);
 
 #endif

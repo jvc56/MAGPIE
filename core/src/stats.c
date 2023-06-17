@@ -74,13 +74,13 @@ int round_to_nearest_int(double a) {
   return (int)(a + 0.5 - (a < 0)); // truncated to 55
 }
 
-double get_variance_for_weighted_int_array(int *weighted_population,
+double get_variance_for_weighted_int_array(uint64_t *weighted_population,
                                            int value_offset) {
   uint64_t sum_of_weights = 0;
   int64_t sum_of_values = 0;
   uint64_t sum_of_values_squared = 0;
   for (int value = 0; value < (NUMBER_OF_ROUNDED_EQUITY_VALUES); value++) {
-    int weight = weighted_population[value];
+    uint64_t weight = weighted_population[value];
     sum_of_weights += weight;
     int adjusted_value = value + value_offset;
     sum_of_values += weight * adjusted_value;
@@ -94,7 +94,7 @@ double get_variance_for_weighted_int_array(int *weighted_population,
          (mean * mean);
 }
 
-double get_stdev_for_weighted_int_array(int *weighted_population,
+double get_stdev_for_weighted_int_array(uint64_t *weighted_population,
                                         int value_offset) {
   double variance =
       get_variance_for_weighted_int_array(weighted_population, value_offset);

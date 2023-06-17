@@ -19,7 +19,8 @@ Config *create_config(const char *kwg_filename,
                       int game_pair_flag, int number_of_games_or_pairs,
                       const char *actual_tiles_played,
                       int player_to_infer_index, int actual_score,
-                      int number_of_tiles_exchanged, float equity_margin) {
+                      int number_of_tiles_exchanged, float equity_margin,
+                      int number_of_threads) {
 
   Config *config = malloc(sizeof(Config));
   config->letter_distribution =
@@ -37,6 +38,7 @@ Config *create_config(const char *kwg_filename,
   config->actual_score = actual_score;
   config->number_of_tiles_exchanged = number_of_tiles_exchanged;
   config->equity_margin = equity_margin;
+  config->number_of_threads = number_of_threads;
 
   StrategyParams *player_1_strategy_params = malloc(sizeof(StrategyParams));
 
@@ -101,6 +103,7 @@ Config *create_config_from_args(int argc, char *argv[]) {
   int actual_score = -1;
   int number_of_tiles_exchanged = 0;
   float equity_margin = -1.0;
+  int number_of_threads = 1;
 
   int c;
   long n;
@@ -122,6 +125,7 @@ Config *create_config_from_args(int argc, char *argv[]) {
         {"a", required_argument, 0, 1013},
         {"e", required_argument, 0, 1014},
         {"q", required_argument, 0, 1015},
+        {"h", required_argument, 0, 1016},
         {"p", no_argument, &game_pair_flag, 1},
         {0, 0, 0, 0}};
     int option_index = 0;
@@ -248,6 +252,12 @@ Config *create_config_from_args(int argc, char *argv[]) {
       equity_margin = atof(optarg);
       break;
 
+    case 1016:
+      check_arg_length(optarg);
+      n = strtol(optarg, NULL, 10);
+      number_of_threads = (int)n;
+      break;
+
     case '?':
       /* getopt_long already printed an error message. */
       break;
@@ -257,12 +267,12 @@ Config *create_config_from_args(int argc, char *argv[]) {
     }
   }
 
-  return create_config(kwg_filename, letter_distribution_filename, cgp,
-                       klv_filename_1, move_sorting_1, play_recorder_type_1,
-                       klv_filename_2, move_sorting_2, play_recorder_type_2,
-                       game_pair_flag, number_of_games_or_pairs,
-                       actual_tiles_played, player_to_infer_index, actual_score,
-                       number_of_tiles_exchanged, equity_margin);
+  return create_config(
+      kwg_filename, letter_distribution_filename, cgp, klv_filename_1,
+      move_sorting_1, play_recorder_type_1, klv_filename_2, move_sorting_2,
+      play_recorder_type_2, game_pair_flag, number_of_games_or_pairs,
+      actual_tiles_played, player_to_infer_index, actual_score,
+      number_of_tiles_exchanged, equity_margin, number_of_threads);
 }
 
 void destroy_config(Config *config) {

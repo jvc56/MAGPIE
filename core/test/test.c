@@ -77,12 +77,12 @@ int main(int argc, char *argv[]) {
     Config *csw_config = create_config(
         "./data/lexica/CSW21.kwg", "./data/letterdistributions/english.csv", "",
         "./data/lexica/CSW21.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "",
-        -1, -1, 0, 10000, NULL, 0, 0, 0, 0);
+        -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1);
 
     Config *nwl_config = create_config(
         "./data/lexica/America.kwg", "./data/letterdistributions/english.csv",
         "", "./data/lexica/CSW21.klv2", SORT_BY_SCORE, PLAY_RECORDER_TYPE_ALL,
-        "", -1, -1, 0, 10000, NULL, 0, 0, 0, 0);
+        "", -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1);
     SuperConfig *superconfig = create_superconfig(csw_config, nwl_config);
     unit_tests(superconfig);
     // This also frees the nested configs

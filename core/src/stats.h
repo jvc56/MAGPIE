@@ -22,9 +22,9 @@ double get_mean(Stat *stat);
 double get_variance(Stat *stat);
 double get_stdev(Stat *stat);
 int round_to_nearest_int(double a);
-double get_variance_for_weighted_int_array(int *weighted_population,
+double get_variance_for_weighted_int_array(uint64_t *weighted_population,
                                            int value_offset);
-double get_stdev_for_weighted_int_array(int *weighted_population,
+double get_stdev_for_weighted_int_array(uint64_t *weighted_population,
                                         int value_offset);
 
 #endif

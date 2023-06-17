@@ -118,20 +118,22 @@ func NondeterministicTests() {
 
 func main() {
 	// Define flags
+	zerolog.SetGlobalLevel(zerolog.Disabled)
 	lexicon := flag.String("lexicon", "", "the lexicon argument")
 	gcg := flag.String("gcg", "", "the gcg argument")
-	turnNumber := flag.Int("turn_number", 0, "the turn_number argument")
+	turnNumber := flag.Int("turn_number", -1, "the turn_number argument")
 	margin := flag.Float64("margin", 0.0, "the margin argument")
 	partial := flag.Bool("partial", false, "use racks in the GCG to infer partial leaves")
+	numberOfThreads := flag.Int("threads", 1, "number of threads")
 
 	// Parse command line arguments
 	flag.Parse()
 
 	// Check if all required flags are provided
-	if *lexicon == "" || *gcg == "" || *turnNumber == 0 {
+	if *lexicon == "" || *gcg == "" {
 		flag.PrintDefaults()
 		return
 	}
 
-	Infer(*lexicon, *gcg, *turnNumber, *margin, *partial)
+	InferGame(*lexicon, *gcg, *turnNumber, *margin, *partial, *numberOfThreads)
 }

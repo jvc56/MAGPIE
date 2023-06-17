@@ -894,10 +894,11 @@ void infer_from_config(Config *config) {
   load_cgp(game, config->cgp);
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(
-      inference, game, config->actual_tiles_played,
-      config->player_to_infer_index, config->actual_score,
-      config->number_of_tiles_exchanged, config->equity_margin, 1);
+  int status =
+      infer_for_test(inference, game, config->actual_tiles_played,
+                     config->player_to_infer_index, config->actual_score,
+                     config->number_of_tiles_exchanged, config->equity_margin,
+                     config->number_of_threads);
   if (status != INFERENCE_STATUS_SUCCESS) {
     printf("inference failed with error code: %d\n", status);
   } else {

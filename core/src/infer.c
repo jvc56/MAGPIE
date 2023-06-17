@@ -1,6 +1,10 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/syscall.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "bag.h"
 #include "game.h"
@@ -15,7 +19,7 @@
 InferenceRecord *create_inference_record(int draw_and_leave_subtotals_size) {
   InferenceRecord *record = malloc(sizeof(InferenceRecord));
   record->draw_and_leave_subtotals =
-      (int *)malloc(draw_and_leave_subtotals_size * sizeof(int));
+      (uint64_t *)malloc(draw_and_leave_subtotals_size * sizeof(uint64_t));
   record->equity_values = create_stat();
   return record;
 }
@@ -75,30 +79,30 @@ int get_letter_subtotal_index(uint8_t letter, int number_of_letters,
          subtotal_index_offset;
 }
 
-int get_subtotal(InferenceRecord *record, uint8_t letter, int number_of_letters,
-                 int subtotal_index_offset) {
+uint64_t get_subtotal(InferenceRecord *record, uint8_t letter,
+                      int number_of_letters, int subtotal_index_offset) {
   return record->draw_and_leave_subtotals[get_letter_subtotal_index(
       letter, number_of_letters, subtotal_index_offset)];
 }
 
 void add_to_letter_subtotal(InferenceRecord *record, uint8_t letter,
                             int number_of_letters, int subtotal_index_offset,
-                            int delta) {
+                            uint64_t delta) {
   record->draw_and_leave_subtotals[get_letter_subtotal_index(
       letter, number_of_letters, subtotal_index_offset)] += delta;
 }
 
-int get_subtotal_sum_with_minimum(InferenceRecord *record, uint8_t letter,
-                                  int minimum_number_of_letters,
-                                  int subtotal_index_offset) {
-  int sum = 0;
+uint64_t get_subtotal_sum_with_minimum(InferenceRecord *record, uint8_t letter,
+                                       int minimum_number_of_letters,
+                                       int subtotal_index_offset) {
+  uint64_t sum = 0;
   for (int i = minimum_number_of_letters; i <= (RACK_SIZE); i++) {
     sum += get_subtotal(record, letter, i, subtotal_index_offset);
   }
   return sum;
 }
 
-int choose(int n, int k) {
+uint64_t choose(uint64_t n, uint64_t k) {
   if (n < k) {
     return 0;
   }
@@ -108,8 +112,8 @@ int choose(int n, int k) {
   return (n * choose(n - 1, k - 1)) / k;
 }
 
-int get_number_of_draws_for_rack(Rack *bag_as_rack, Rack *rack) {
-  int number_of_ways = 1;
+uint64_t get_number_of_draws_for_rack(Rack *bag_as_rack, Rack *rack) {
+  uint64_t number_of_ways = 1;
   for (int i = 0; i < rack->array_size; i++) {
     if (rack->array[i] > 0) {
       number_of_ways *=
@@ -122,7 +126,7 @@ int get_number_of_draws_for_rack(Rack *bag_as_rack, Rack *rack) {
 void get_stat_for_letter(InferenceRecord *record, Stat *stat, uint8_t letter) {
   reset_stat(stat);
   for (int i = 1; i <= (RACK_SIZE); i++) {
-    int number_of_draws_with_exactly_i_of_letter =
+    uint64_t number_of_draws_with_exactly_i_of_letter =
         get_subtotal(record, letter, i, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
     if (number_of_draws_with_exactly_i_of_letter > 0) {
       push(stat, i, number_of_draws_with_exactly_i_of_letter);
@@ -169,11 +173,11 @@ get_probability_for_random_minimum_draw(Rack *bag_as_rack, Rack *rack,
     return 1;
   }
 
-  int total_draws =
+  uint64_t total_draws =
       choose(total_number_of_letters_in_bag, total_number_of_letters_to_draw);
   int number_of_other_letters_in_bag =
       total_number_of_letters_in_bag - number_of_this_letter_in_bag;
-  int total_draws_for_this_letter_minimum = 0;
+  uint64_t total_draws_for_this_letter_minimum = 0;
   for (int i = minimum_adjusted_for_partial_rack;
        i <= total_number_of_letters_to_draw; i++) {
     total_draws_for_this_letter_minimum +=
@@ -191,7 +195,7 @@ double get_estimated_stdev_for_record(InferenceRecord *record) {
 }
 
 void increment_subtotals_for_record(InferenceRecord *record, Rack *rack,
-                                    int number_of_draws_for_leave) {
+                                    uint64_t number_of_draws_for_leave) {
   for (int i = 0; i < rack->array_size; i++) {
     if (rack->array[i] > 0) {
       add_to_letter_subtotal(record, i, rack->array[i],
@@ -205,7 +209,7 @@ void increment_subtotals_for_record(InferenceRecord *record, Rack *rack,
 
 void record_valid_leave(InferenceRecord *record, Rack *rack,
                         float current_leave_value,
-                        int number_of_draws_for_leave) {
+                        uint64_t number_of_draws_for_leave) {
   push(record->equity_values, (double)current_leave_value,
        number_of_draws_for_leave);
   increment_subtotals_for_record(record, rack, number_of_draws_for_leave);
@@ -230,7 +234,11 @@ Move *get_top_move(Inference *inference) {
   return game->gen->move_list->moves[0];
 }
 
-void evaluate_possible_leave(Inference *inference, float current_leave_value) {
+void evaluate_possible_leave(Inference *inference) {
+  double current_leave_value = 0;
+  if (inference->number_of_tiles_exchanged == 0) {
+    current_leave_value = get_leave_value(inference->klv, inference->leave);
+  }
   Move *top_move = get_top_move(inference);
   int is_within_equity_margin = inference->actual_score + current_leave_value +
                                     inference->equity_margin +
@@ -242,7 +250,7 @@ void evaluate_possible_leave(Inference *inference, float current_leave_value) {
   int recordable = is_within_equity_margin || number_exchanged_matches ||
                    inference->bag_as_rack->empty;
   if (recordable) {
-    int number_of_draws_for_leave =
+    uint64_t number_of_draws_for_leave =
         get_number_of_draws_for_rack(inference->bag_as_rack, inference->leave);
     if (inference->number_of_tiles_exchanged > 0) {
       record_valid_leave(inference->rack_record, inference->leave,
@@ -314,11 +322,21 @@ void iterate_through_all_possible_leaves(Inference *inference,
   if (tiles_to_infer == 0) {
     if (inference->lower_inclusive_bound <= inference->current_rack_index &&
         inference->upper_inclusive_bound >= inference->current_rack_index) {
-      double current_leave_value = 0;
-      if (inference->number_of_tiles_exchanged == 0) {
-        current_leave_value = get_leave_value(inference->klv, inference->leave);
+      if (inference->current_rack_index == inference->lower_inclusive_bound) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        printf("thread %ld reached lower bound [%ld, %ld] at %ld : %ld\n",
+               syscall(__NR_gettid), inference->lower_inclusive_bound,
+               inference->upper_inclusive_bound, tv.tv_sec, tv.tv_usec);
+      } else if (inference->current_rack_index ==
+                 inference->upper_inclusive_bound) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        printf("thread %ld reached upper bound [%ld, %ld] at %ld : %ld\n",
+               syscall(__NR_gettid), inference->lower_inclusive_bound,
+               inference->upper_inclusive_bound, tv.tv_sec, tv.tv_usec);
       }
-      evaluate_possible_leave(inference, current_leave_value);
+      evaluate_possible_leave(inference);
     }
     inference->current_rack_index++;
     return;
@@ -357,9 +375,10 @@ void set_bounds_for_worker(Inference *inference, int thread_index,
     inference->lower_inclusive_bound = thread_index;
     inference->upper_inclusive_bound = thread_index;
   } else {
-    int number_of_evaluations_for_thread =
+    uint64_t number_of_evaluations_for_thread =
         racks_to_iterate_through / number_of_threads;
-    int remainder_evaluations = racks_to_iterate_through % number_of_threads;
+    uint64_t remainder_evaluations =
+        racks_to_iterate_through % number_of_threads;
     int lower_remainder_adjustment = 0;
     // Bounds are inclusive, so use -1 for upper to start.
     int upper_remainder_adjustment = -1;
@@ -367,7 +386,7 @@ void set_bounds_for_worker(Inference *inference, int thread_index,
     // spread out the remaining evaluations for a remainder of R
     // among the first R threads. Since this will assign bounds,
     // adjustments need to be propagated.
-    if (thread_index < remainder_evaluations) {
+    if ((uint64_t)thread_index < remainder_evaluations) {
       lower_remainder_adjustment += thread_index;
       upper_remainder_adjustment += thread_index + 1;
     } else {
@@ -437,7 +456,7 @@ InferenceRecord *copy_inference_record(InferenceRecord *inference_record,
                                        int draw_and_leave_subtotals_size) {
   InferenceRecord *new_record = malloc(sizeof(InferenceRecord));
   new_record->draw_and_leave_subtotals =
-      (int *)malloc(draw_and_leave_subtotals_size * sizeof(int));
+      (uint64_t *)malloc(draw_and_leave_subtotals_size * sizeof(uint64_t));
   for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
     new_record->draw_and_leave_subtotals[i] =
         inference_record->draw_and_leave_subtotals[i];
@@ -530,7 +549,7 @@ void *infer_worker(void *uncasted_inference) {
 }
 
 void infer_manager(Inference *inference, int number_of_threads,
-                   int racks_to_iterate_through) {
+                   uint64_t racks_to_iterate_through) {
   // Set the bounds for the main threads
   // but do not malloc a new inference.
   set_bounds_for_worker(inference, 0, number_of_threads,

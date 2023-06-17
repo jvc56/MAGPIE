@@ -11,47 +11,63 @@ import (
 	"github.com/domino14/macondo/gcgio"
 	"github.com/domino14/macondo/gen/api/proto/macondo"
 	"github.com/domino14/macondo/tilemapping"
-	"github.com/rs/zerolog"
 )
 
-func Infer(lexicon string, gcgFilename string, turnNumber int, margin float64, usePartial bool) {
-	zerolog.SetGlobalLevel(zerolog.Disabled)
+func InferGame(lexicon string, gcgFilename string, turnNumber int, margin float64, usePartial bool, numberOfThreads int) {
+	g, err := getGameFromGCG(lexicon, gcgFilename)
+	if err != nil {
+		panic(err)
+	}
+	events := g.History().Events
+
+	relevantTurnNumber := 0
+	for i := 0; i < len(events); i++ {
+		if events[i].Type == macondo.GameEvent_TILE_PLACEMENT_MOVE ||
+			events[i].Type == macondo.GameEvent_EXCHANGE ||
+			events[i].Type == macondo.GameEvent_PASS {
+			relevantTurnNumber++
+			if turnNumber < 0 || turnNumber == relevantTurnNumber {
+				err := infer(lexicon, g, relevantTurnNumber, margin, usePartial, numberOfThreads)
+
+				if err != nil {
+					fmt.Printf("Error: %s", err.Error())
+				}
+			}
+		}
+	}
+}
+
+func infer(lexicon string, g *game.Game, turnNumber int, margin float64, usePartial bool, numberOfThreads int) error {
+
 	kwgFilename := fmt.Sprintf("../core/data/lexica/%s.kwg", lexicon)
 	klvFilename := fmt.Sprintf("../core/data/lexica/%s.klv2", lexicon)
-
-	hist, err := gcgio.ParseGCG(&DefaultConfig, gcgFilename)
-	if err != nil {
-		panic(err)
-	}
-	rules, err := game.NewBasicGameRules(
-		&DefaultConfig,
-		lexicon,
-		board.CrosswordGameLayout,
-		"english",
-		game.CrossScoreAndSet,
-		"")
-	if err != nil {
-		panic(err)
-	}
-	g, err := game.NewFromHistory(hist, rules, len(hist.Events))
-	if err != nil {
-		panic(err)
-	}
 
 	gameTM := g.Bag().LetterDistribution().TileMapping()
 	events := g.History().Events
 	if turnNumber >= len(events) {
 		panic(fmt.Sprintf("turn number out of range: %d", turnNumber))
 	}
-	eventIndexToInfer := turnNumber
-	for events[eventIndexToInfer].Type != macondo.GameEvent_TILE_PLACEMENT_MOVE &&
-		events[eventIndexToInfer].Type != macondo.GameEvent_EXCHANGE &&
-		eventIndexToInfer > 0 {
-		fmt.Printf("turn number %d is a %s event, going to previous event\n", eventIndexToInfer, events[eventIndexToInfer].Type.String())
-		eventIndexToInfer--
+	eventIndexToInfer := 0
+	relevantEventCount := 0
+	for i := 0; i < turnNumber; i++ {
+		if events[i].Type == macondo.GameEvent_TILE_PLACEMENT_MOVE ||
+			events[i].Type == macondo.GameEvent_EXCHANGE ||
+			events[i].Type == macondo.GameEvent_PASS {
+			relevantEventCount++
+		}
+		eventIndexToInfer++
+		if relevantEventCount == turnNumber {
+			break
+		}
+	}
+	if events[eventIndexToInfer].Type == macondo.GameEvent_PASS {
+		return fmt.Errorf("passes unimplemented: turn number %d\n", turnNumber)
 	}
 	otherPlayerRack := tilemapping.NewRack(gameTM)
 	otherPlayerRackML, err := tilemapping.ToMachineLetters(events[eventIndexToInfer].GetRack(), gameTM)
+	if err != nil {
+		return err
+	}
 	otherPlayerRack.Set(otherPlayerRackML)
 	eventIndexToInfer--
 	eventToInfer := events[eventIndexToInfer]
@@ -63,13 +79,13 @@ func Infer(lexicon string, gcgFilename string, turnNumber int, margin float64, u
 		rackString := eventToInfer.GetRack()
 		rackMachineLetters, err := tilemapping.ToMachineLetters(rackString, gameTM)
 		if err != nil {
-			panic(err)
+			return err
 		}
 
 		tilesPlayedString := eventToInfer.GetPlayedTiles()
 		tilesPlayedMachineLetters, err := tilemapping.ToMachineLetters(tilesPlayedString, gameTM)
 		if err != nil {
-			panic(err)
+			return err
 		}
 
 		if usePartial {
@@ -113,6 +129,7 @@ func Infer(lexicon string, gcgFilename string, turnNumber int, margin float64, u
 		"-a", strconv.Itoa(int(score)),
 		"-e", strconv.Itoa(int(numberOfTilesExchanged)),
 		"-q", strconv.FormatFloat(margin, 'f', -1, 64),
+		"-h", strconv.Itoa(numberOfThreads),
 	}
 	outBytes, err := exec.Command("../core/bin/magpie_test", cmd...).Output()
 	if err != nil {
@@ -120,12 +137,11 @@ func Infer(lexicon string, gcgFilename string, turnNumber int, margin float64, u
 		fmt.Printf("../core/bin/magpie_test %s", strings.Join(cmd, " "))
 		printGameInfo(g)
 		fmt.Printf("output:\n%s\n", string(outBytes))
-		panic(err)
+		return err
 	} else {
 		fmt.Printf("Command:\n../core/bin/magpie_test %s\n\n", strings.Join(cmd, " "))
 		// Process the command line arguments
 		fmt.Println("Lexicon:     ", lexicon)
-		fmt.Println("GCG:         ", gcgFilename)
 		fmt.Println("Turn Number: ", turnNumber)
 		fmt.Println("Partial:     ", fmt.Sprintf("%t", usePartial))
 		// fmt.Println("\nText Display:")
@@ -134,4 +150,27 @@ func Infer(lexicon string, gcgFilename string, turnNumber int, margin float64, u
 		// fmt.Println(gameToCGP(g, true))
 		fmt.Printf(string(outBytes))
 	}
+	return nil
+}
+
+func getGameFromGCG(lexicon string, gcgFilename string) (*game.Game, error) {
+	hist, err := gcgio.ParseGCG(&DefaultConfig, gcgFilename)
+	if err != nil {
+		return nil, err
+	}
+	rules, err := game.NewBasicGameRules(
+		&DefaultConfig,
+		lexicon,
+		board.CrosswordGameLayout,
+		"english",
+		game.CrossScoreAndSet,
+		"")
+	if err != nil {
+		return nil, err
+	}
+	g, err := game.NewFromHistory(hist, rules, len(hist.Events))
+	if err != nil {
+		return nil, err
+	}
+	return g, nil
 }
