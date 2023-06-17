@@ -546,9 +546,6 @@ void infer_manager(Inference *inference, int number_of_threads) {
   for (int thread_index = 0; thread_index < number_of_nonmain_threads;
        thread_index++) {
     inferences_for_workers[thread_index] = copy_inference(inference);
-    // Use thread_index + 1 since the main thread will
-    // use index 0. When setting the bounds, note that
-    // we need to use number_of_threads instead of number_of_nonmain_threads.
     set_shared_variables_for_inference(inferences_for_workers[thread_index],
                                        &shared_rack_index,
                                        &shared_rack_index_lock);
