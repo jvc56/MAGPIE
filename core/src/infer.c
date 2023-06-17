@@ -542,7 +542,7 @@ void infer_manager(Inference *inference, int number_of_threads) {
     return;
   }
 
-  uint64_t shared_rack_index;
+  uint64_t shared_rack_index = 0;
   pthread_mutex_t shared_rack_index_lock;
 
   if (pthread_mutex_init(&shared_rack_index_lock, NULL) != 0) {
