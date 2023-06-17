@@ -1,10 +1,6 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/syscall.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 #include "bag.h"
 #include "game.h"
@@ -320,22 +316,15 @@ void count_all_racks_to_iterate_through(Rack *bag_as_rack, int tiles_to_infer,
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
   if (tiles_to_infer == 0) {
-    if (inference->lower_inclusive_bound <= inference->current_rack_index &&
-        inference->upper_inclusive_bound >= inference->current_rack_index) {
-      if (inference->current_rack_index == inference->lower_inclusive_bound) {
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        printf("thread %ld reached lower bound [%ld, %ld] at %ld : %ld\n",
-               syscall(__NR_gettid), inference->lower_inclusive_bound,
-               inference->upper_inclusive_bound, tv.tv_sec, tv.tv_usec);
-      } else if (inference->current_rack_index ==
-                 inference->upper_inclusive_bound) {
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        printf("thread %ld reached upper bound [%ld, %ld] at %ld : %ld\n",
-               syscall(__NR_gettid), inference->lower_inclusive_bound,
-               inference->upper_inclusive_bound, tv.tv_sec, tv.tv_usec);
-      }
+    int perform_evaluation = 0;
+    pthread_mutex_lock(inference->shared_rack_index_lock);
+    if (inference->current_rack_index == *inference->shared_rack_index) {
+      perform_evaluation = 1;
+      *inference->shared_rack_index += 1;
+    }
+    pthread_mutex_unlock(inference->shared_rack_index_lock);
+
+    if (perform_evaluation) {
       evaluate_possible_leave(inference);
     }
     inference->current_rack_index++;
@@ -353,6 +342,25 @@ void iterate_through_all_possible_leaves(Inference *inference,
   reset_move_list(inference->game->gen->move_list);
 }
 
+void iterate_through_all_possible_leaves_single_threaded(Inference *inference,
+                                                         int tiles_to_infer,
+                                                         int start_letter) {
+  if (tiles_to_infer == 0) {
+    evaluate_possible_leave(inference);
+    return;
+  }
+  for (int letter = start_letter; letter < inference->distribution_size;
+       letter++) {
+    if (inference->bag_as_rack->array[letter] > 0) {
+      increment_letter_for_inference(inference, letter);
+      iterate_through_all_possible_leaves_single_threaded(
+          inference, tiles_to_infer - 1, letter);
+      decrement_letter_for_inference(inference, letter);
+    }
+  }
+  reset_move_list(inference->game->gen->move_list);
+}
+
 void initialize_inference_record_for_evaluation(
     InferenceRecord *record, int draw_and_leave_subtotals_size) {
   // Reset record
@@ -363,44 +371,6 @@ void initialize_inference_record_for_evaluation(
   for (int i = 0; i < (NUMBER_OF_ROUNDED_EQUITY_VALUES); i++) {
     record->rounded_equity_values[i] = 0;
   }
-}
-
-void set_bounds_for_worker(Inference *inference, int thread_index,
-                           int number_of_threads,
-                           uint64_t racks_to_iterate_through) {
-  // This assumes that racks_to_iterate_through >= number_of_threads
-  // Set the lower and upper bounds for the thread
-  if (racks_to_iterate_through == (uint64_t)number_of_threads) {
-    // Handle the trivial case
-    inference->lower_inclusive_bound = thread_index;
-    inference->upper_inclusive_bound = thread_index;
-  } else {
-    uint64_t number_of_evaluations_for_thread =
-        racks_to_iterate_through / number_of_threads;
-    uint64_t remainder_evaluations =
-        racks_to_iterate_through % number_of_threads;
-    int lower_remainder_adjustment = 0;
-    // Bounds are inclusive, so use -1 for upper to start.
-    int upper_remainder_adjustment = -1;
-    // If there is a remainder after the modulus,
-    // spread out the remaining evaluations for a remainder of R
-    // among the first R threads. Since this will assign bounds,
-    // adjustments need to be propagated.
-    if ((uint64_t)thread_index < remainder_evaluations) {
-      lower_remainder_adjustment += thread_index;
-      upper_remainder_adjustment += thread_index + 1;
-    } else {
-      lower_remainder_adjustment += remainder_evaluations;
-      upper_remainder_adjustment += remainder_evaluations;
-    }
-    inference->lower_inclusive_bound =
-        thread_index * number_of_evaluations_for_thread +
-        lower_remainder_adjustment;
-    inference->upper_inclusive_bound =
-        (thread_index + 1) * number_of_evaluations_for_thread +
-        upper_remainder_adjustment;
-  }
-  inference->current_rack_index = 0;
 }
 
 void initialize_inference_for_evaluation(Inference *inference, Game *game,
@@ -421,6 +391,7 @@ void initialize_inference_for_evaluation(Inference *inference, Game *game,
   inference->actual_score = actual_score;
   inference->number_of_tiles_exchanged = number_of_tiles_exchanged;
   inference->equity_margin = equity_margin;
+  inference->current_rack_index = 0;
 
   inference->player_to_infer_index = player_to_infer_index;
   inference->klv = game->players[player_to_infer_index]->strategy_params->klv;
@@ -502,6 +473,8 @@ Inference *copy_inference(Inference *inference) {
       inference->draw_and_leave_subtotals_size;
   new_inference->initial_tiles_to_infer = inference->initial_tiles_to_infer;
   new_inference->equity_margin = inference->equity_margin;
+  new_inference->current_rack_index = inference->current_rack_index;
+
   return new_inference;
 }
 
@@ -548,16 +521,37 @@ void *infer_worker(void *uncasted_inference) {
   return NULL;
 }
 
-void infer_manager(Inference *inference, int number_of_threads,
-                   uint64_t racks_to_iterate_through) {
-  // Set the bounds for the main threads
-  // but do not malloc a new inference.
-  set_bounds_for_worker(inference, 0, number_of_threads,
-                        racks_to_iterate_through);
+void *infer_worker_single_threaded(void *uncasted_inference) {
+  Inference *inference = (Inference *)uncasted_inference;
+  iterate_through_all_possible_leaves_single_threaded(
+      inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER);
+  return NULL;
+}
+
+void set_shared_variables_for_inference(
+    Inference *inference, uint64_t *shared_rack_index,
+    pthread_mutex_t *shared_rack_index_lock) {
+  inference->shared_rack_index = shared_rack_index;
+  inference->shared_rack_index_lock = shared_rack_index_lock;
+}
+
+void infer_manager(Inference *inference, int number_of_threads) {
+
   if (number_of_threads == 1) {
-    infer_worker(inference);
+    infer_worker_single_threaded(inference);
     return;
   }
+
+  uint64_t shared_rack_index;
+  pthread_mutex_t shared_rack_index_lock;
+
+  if (pthread_mutex_init(&shared_rack_index_lock, NULL) != 0) {
+    printf("mutex init failed\n");
+    abort();
+  }
+
+  set_shared_variables_for_inference(inference, &shared_rack_index,
+                                     &shared_rack_index_lock);
 
   int number_of_nonmain_threads = number_of_threads - 1;
   Inference **inferences_for_workers =
@@ -570,9 +564,9 @@ void infer_manager(Inference *inference, int number_of_threads,
     // Use thread_index + 1 since the main thread will
     // use index 0. When setting the bounds, note that
     // we need to use number_of_threads instead of number_of_nonmain_threads.
-    set_bounds_for_worker(inferences_for_workers[thread_index],
-                          thread_index + 1, number_of_threads,
-                          racks_to_iterate_through);
+    set_shared_variables_for_inference(inferences_for_workers[thread_index],
+                                       &shared_rack_index,
+                                       &shared_rack_index_lock);
     pthread_create(&worker_ids[thread_index], NULL, infer_worker,
                    inferences_for_workers[thread_index]);
   }
@@ -637,7 +631,6 @@ int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
   int tiles_to_infer =
       (RACK_SIZE)-inference->player_to_infer_rack->number_of_letters;
   inference->initial_tiles_to_infer = tiles_to_infer;
-  uint64_t racks_to_iterate_through = 0;
 
   // Prepare the game for inference calculations
   Player *player = game->players[inference->player_to_infer_index];
@@ -647,13 +640,7 @@ int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
   game->gen->apply_placement_adjustment = 0;
   player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
 
-  count_all_racks_to_iterate_through(inference->bag_as_rack, tiles_to_infer,
-                                     BLANK_MACHINE_LETTER,
-                                     &racks_to_iterate_through);
-  if (racks_to_iterate_through < (uint64_t)number_of_threads) {
-    number_of_threads = racks_to_iterate_through;
-  }
-  infer_manager(inference, number_of_threads, racks_to_iterate_through);
+  infer_manager(inference, number_of_threads);
 
   player->strategy_params->play_recorder_type = original_recorder_type;
   game->gen->apply_placement_adjustment = original_apply_placement_adjustment;

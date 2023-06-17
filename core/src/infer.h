@@ -1,6 +1,8 @@
 #ifndef INFER_h
 #define INFER_h
 
+#include <pthread.h>
+
 #include "game.h"
 #include "klv.h"
 #include "leave_rack.h"
@@ -43,9 +45,9 @@ typedef struct Inference {
   int draw_and_leave_subtotals_size;
   int initial_tiles_to_infer;
   float equity_margin;
-  uint64_t lower_inclusive_bound;
-  uint64_t upper_inclusive_bound;
   uint64_t current_rack_index;
+  uint64_t *shared_rack_index;
+  pthread_mutex_t *shared_rack_index_lock;
 } Inference;
 
 int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
@@ -68,9 +70,6 @@ double get_estimated_stdev_for_record(InferenceRecord *record);
 void count_all_racks_to_iterate_through(Rack *bag_as_rack,
                                         int leave_tiles_remaining,
                                         int start_letter, uint64_t *count);
-void set_bounds_for_worker(Inference *inference, int thread_index,
-                           int number_of_threads,
-                           uint64_t racks_to_iterate_through);
 uint64_t choose(uint64_t n, uint64_t k);
 
 #endif

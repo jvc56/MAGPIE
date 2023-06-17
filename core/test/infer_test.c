@@ -233,61 +233,6 @@ void test_infer_count_possible_leaves(SuperConfig *superconfig) {
   destroy_rack(rack);
 }
 
-void test_infer_set_bounds(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
-  Inference *inference =
-      create_inference(20, config->letter_distribution->size);
-
-  // More threads than racks
-  set_bounds_for_worker(inference, 0, 6, 6);
-  assert(inference->lower_inclusive_bound == 0);
-  assert(inference->upper_inclusive_bound == 0);
-
-  set_bounds_for_worker(inference, 1, 6, 6);
-  assert(inference->lower_inclusive_bound == 1);
-  assert(inference->upper_inclusive_bound == 1);
-
-  set_bounds_for_worker(inference, 5, 6, 6);
-  assert(inference->lower_inclusive_bound == 5);
-  assert(inference->upper_inclusive_bound == 5);
-
-  // Without remainder
-  set_bounds_for_worker(inference, 0, 7, 42);
-  assert(inference->lower_inclusive_bound == 0);
-  assert(inference->upper_inclusive_bound == 5);
-
-  set_bounds_for_worker(inference, 1, 7, 42);
-  assert(inference->lower_inclusive_bound == 6);
-  assert(inference->upper_inclusive_bound == 11);
-
-  set_bounds_for_worker(inference, 5, 7, 42);
-  assert(inference->lower_inclusive_bound == 30);
-  assert(inference->upper_inclusive_bound == 35);
-
-  set_bounds_for_worker(inference, 6, 7, 42);
-  assert(inference->lower_inclusive_bound == 36);
-  assert(inference->upper_inclusive_bound == 41);
-
-  // With remainder
-  set_bounds_for_worker(inference, 0, 4, 34);
-  assert(inference->lower_inclusive_bound == 0);
-  assert(inference->upper_inclusive_bound == 8);
-
-  set_bounds_for_worker(inference, 1, 4, 34);
-  assert(inference->lower_inclusive_bound == 9);
-  assert(inference->upper_inclusive_bound == 17);
-
-  set_bounds_for_worker(inference, 2, 4, 34);
-  assert(inference->lower_inclusive_bound == 18);
-  assert(inference->upper_inclusive_bound == 25);
-
-  set_bounds_for_worker(inference, 3, 4, 34);
-  assert(inference->lower_inclusive_bound == 26);
-  assert(inference->upper_inclusive_bound == 33);
-
-  destroy_inference(inference);
-}
-
 void test_infer_nonerror_cases(SuperConfig *superconfig,
                                int number_of_threads) {
   Config *config = get_csw_config(superconfig);
@@ -883,7 +828,6 @@ void test_infer(SuperConfig *superconfig) {
   test_infer_exchange_not_allowed(superconfig);
   test_infer_tiles_played_not_in_bag(superconfig);
   test_infer_count_possible_leaves(superconfig);
-  test_infer_set_bounds(superconfig);
   test_infer_nonerror_cases(superconfig, 1);
   test_infer_nonerror_cases(superconfig, 2);
   test_infer_nonerror_cases(superconfig, 7);
