@@ -171,6 +171,9 @@ get_probability_for_random_minimum_draw(Rack *bag_as_rack, Rack *rack,
 
   uint64_t total_draws =
       choose(total_number_of_letters_in_bag, total_number_of_letters_to_draw);
+  if (total_draws == 0) {
+    return 0;
+  }
   int number_of_other_letters_in_bag =
       total_number_of_letters_in_bag - number_of_this_letter_in_bag;
   uint64_t total_draws_for_this_letter_minimum = 0;

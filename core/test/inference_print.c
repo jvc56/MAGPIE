@@ -126,7 +126,7 @@ void write_inference_record(char *buffer, InferenceRecord *record, Game *game,
 
 void print_inference(Inference *inference, Rack *actual_tiles_played,
                      int number_of_threads) {
-  char inference_string[6000] = "";
+  char inference_string[50000] = "";
 
   int is_exchange = inference->number_of_tiles_exchanged > 0;
   int number_of_tiles_played_or_exchanged;
@@ -160,7 +160,7 @@ void print_inference(Inference *inference, Rack *actual_tiles_played,
   // Create a transient stat to use the stat functions
   Stat *letter_stat = create_stat();
 
-  char records_string[10000] = "";
+  char records_string[500000] = "";
   write_inference_record(records_string, inference->leave_record, game,
                          inference->leave, inference->bag_as_rack, letter_stat,
                          number_of_tiles_played_or_exchanged,
@@ -169,10 +169,12 @@ void print_inference(Inference *inference, Rack *actual_tiles_played,
   if (is_exchange) {
     common_leaves_record = inference->rack_record;
     sprintf(records_string + strlen(records_string), "\n\nTiles Exchanged\n\n");
+    Rack * unknown_exchange_rack = create_rack(inference->leave->array_size);
     write_inference_record(
-        records_string, inference->exchanged_record, game, inference->leave,
+        records_string, inference->exchanged_record, game, unknown_exchange_rack,
         inference->bag_as_rack, letter_stat,
-        (RACK_SIZE)-inference->number_of_tiles_exchanged, number_of_threads);
+        inference->number_of_tiles_exchanged, number_of_threads);
+    destroy_rack(unknown_exchange_rack);
     sprintf(records_string + strlen(records_string), "\n\nRack\n\n");
     write_inference_record(records_string, inference->rack_record, game,
                            inference->leave, inference->bag_as_rack,
