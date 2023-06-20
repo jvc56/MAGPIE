@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <time.h>
 
+#include "autoplay_test.h"
 #include "prof_tests.h"
 #include "test_constants.h"
 #include "test_util.h"
-#include "autoplay_test.h"
 
 #include "../src/config.h"
 #include "../src/game.h"

@@ -1,6 +1,6 @@
-#include <stdio.h>
 #include <assert.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -10,66 +10,69 @@
 #include "../src/infer.h"
 
 #include "game_print.h"
-#include "test_util.h"
-#include "move_print.h"
 #include "inference_print.h"
+#include "move_print.h"
+#include "test_util.h"
 
-int are_stats_equal(Stat* stat_1, Stat* stat_2) {
+int are_stats_equal(Stat *stat_1, Stat *stat_2) {
   if (stat_1 == stat_2) {
-    return 1;  // Pointers are the same, this should never be true
+    return 1; // Pointers are the same, this should never be true
   }
 
   if (stat_1 == NULL || stat_2 == NULL) {
-    return 2;  // One of the stats is NULL
+    return 2; // One of the stats is NULL
   }
 
   if (!(stat_1->cardinality == stat_2->cardinality &&
-          stat_1->weight == stat_2->weight &&
-          fabs(stat_1->mean - stat_2->mean) < 0.000000001 )) {
-            return 3;
-          }
+        stat_1->weight == stat_2->weight &&
+        fabs(stat_1->mean - stat_2->mean) < 0.000000001)) {
+    return 3;
+  }
   return 0;
 }
 
-int are_inference_records_equal(InferenceRecord* record_1, InferenceRecord* record_2, int draw_and_leave_subtotals_size) {
+int are_inference_records_equal(InferenceRecord *record_1,
+                                InferenceRecord *record_2,
+                                int draw_and_leave_subtotals_size) {
   if (record_1 == record_2) {
-    return 4;  // Pointers are the same, the records are equal
+    return 4; // Pointers are the same, the records are equal
   }
 
   if (record_1 == NULL || record_2 == NULL) {
-    return 5;  // One of the records is NULL
+    return 5; // One of the records is NULL
   }
 
-  int are_stats_equal_value = are_stats_equal(record_1->equity_values, record_2->equity_values);
+  int are_stats_equal_value =
+      are_stats_equal(record_1->equity_values, record_2->equity_values);
 
   if (are_stats_equal_value != 0) {
     return are_stats_equal_value;
   }
 
-  for (int i = 0; i < draw_and_leave_subtotals_size; i++)
-  {
-    if (record_1->draw_and_leave_subtotals[i] != record_2->draw_and_leave_subtotals[i]) {
+  for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
+    if (record_1->draw_and_leave_subtotals[i] !=
+        record_2->draw_and_leave_subtotals[i]) {
       return 6;
     }
   }
-  
-  for (int i = 0; i < (NUMBER_OF_ROUNDED_EQUITY_VALUES); i++)
-  {
-    if (record_1->rounded_equity_values[i] != record_2->rounded_equity_values[i]) {
+
+  for (int i = 0; i < (NUMBER_OF_ROUNDED_EQUITY_VALUES); i++) {
+    if (record_1->rounded_equity_values[i] !=
+        record_2->rounded_equity_values[i]) {
       return 7;
     }
   }
-  
+
   return 0;
 }
 
-int are_leave_racks_equal(LeaveRack* rack_1, LeaveRack* rack_2) {
+int are_leave_racks_equal(LeaveRack *rack_1, LeaveRack *rack_2) {
   if (rack_1 == rack_2) {
-    return 8;  // Pointers are the same, this should never happen
+    return 8; // Pointers are the same, this should never happen
   }
 
   if (rack_1 == NULL || rack_2 == NULL) {
-    return 9;  // One of the racks is NULL
+    return 9; // One of the racks is NULL
   }
 
   if (rack_1->draws != rack_2->draws) {
@@ -78,18 +81,20 @@ int are_leave_racks_equal(LeaveRack* rack_1, LeaveRack* rack_2) {
   return 0;
 }
 
-int are_leave_rack_lists_equal(LeaveRackList* list_1, LeaveRackList* list_2, int number_of_listed_racks) {
+int are_leave_rack_lists_equal(LeaveRackList *list_1, LeaveRackList *list_2,
+                               int number_of_listed_racks) {
   if (list_1 == list_2) {
-    return 11;  // Pointers are the same, the lists are equal
+    return 11; // Pointers are the same, the lists are equal
   }
 
   if (list_1 == NULL || list_2 == NULL) {
-    return 12;  // One of the lists is NULL
+    return 12; // One of the lists is NULL
   }
 
   // Check each pointer
   for (int i = 0; i < number_of_listed_racks; i++) {
-    int are_leave_racks_equal_value = are_leave_racks_equal(list_1->leave_racks[i], list_2->leave_racks[i]);
+    int are_leave_racks_equal_value =
+        are_leave_racks_equal(list_1->leave_racks[i], list_2->leave_racks[i]);
     if (are_leave_racks_equal_value != 0) {
       return are_leave_racks_equal_value + 1000 * i;
     }
@@ -98,52 +103,73 @@ int are_leave_rack_lists_equal(LeaveRackList* list_1, LeaveRackList* list_2, int
   return 0;
 }
 
-int are_inferences_equal(Inference* inference_1, Inference* inference_2) {
+int are_inferences_equal(Inference *inference_1, Inference *inference_2) {
   if (inference_1 == inference_2) {
-    return 14;  // Pointers are the same, the inferences are equal
+    return 14; // Pointers are the same, the inferences are equal
   }
 
   if (inference_1 == NULL || inference_2 == NULL) {
-    return 15;  // One of the inferences is NULL
+    return 15; // One of the inferences is NULL
   }
 
-  if (inference_1->number_of_tiles_exchanged != inference_2->number_of_tiles_exchanged) {
+  if (inference_1->number_of_tiles_exchanged !=
+      inference_2->number_of_tiles_exchanged) {
     return 16;
   }
 
-  if (inference_1->draw_and_leave_subtotals_size != inference_2->draw_and_leave_subtotals_size) {
+  if (inference_1->draw_and_leave_subtotals_size !=
+      inference_2->draw_and_leave_subtotals_size) {
     return 17;
   }
 
-  int leave_records_equal_value = are_inference_records_equal(inference_1->leave_record, inference_2->leave_record, inference_1->draw_and_leave_subtotals_size);
+  int leave_records_equal_value = are_inference_records_equal(
+      inference_1->leave_record, inference_2->leave_record,
+      inference_1->draw_and_leave_subtotals_size);
   if (leave_records_equal_value != 0) {
     return leave_records_equal_value + 20;
   }
 
   if (inference_1->number_of_tiles_exchanged > 0) {
-    int exchanged_records_equal_value = are_inference_records_equal(inference_1->exchanged_record, inference_2->exchanged_record, inference_1->draw_and_leave_subtotals_size);
+    int exchanged_records_equal_value = are_inference_records_equal(
+        inference_1->exchanged_record, inference_2->exchanged_record,
+        inference_1->draw_and_leave_subtotals_size);
     if (exchanged_records_equal_value != 0) {
       return exchanged_records_equal_value + 40;
     }
-    int rack_records_equal_value = are_inference_records_equal(inference_1->rack_record, inference_2->rack_record, inference_1->draw_and_leave_subtotals_size);
+    int rack_records_equal_value = are_inference_records_equal(
+        inference_1->rack_record, inference_2->rack_record,
+        inference_1->draw_and_leave_subtotals_size);
     if (rack_records_equal_value != 0) {
       return rack_records_equal_value + 60;
     }
   }
 
   int number_of_listed_racks = inference_1->leave_rack_list->capacity;
-  if (inference_1->exchanged == 0 && get_cardinality(inference_1->leave_record->equity_values) < number_of_listed_racks) {
-    number_of_listed_racks = get_cardinality(inference_1->leave_record->equity_values) < number_of_listed_racks;
-  } else if (inference_1->exchanged != 0 && get_cardinality(inference_1->rack_record->equity_values) < number_of_listed_racks) {
-    number_of_listed_racks = get_cardinality(inference_1->rack_record->equity_values);
+  if (inference_1->exchanged == 0 &&
+      get_cardinality(inference_1->leave_record->equity_values) <
+          number_of_listed_racks) {
+    number_of_listed_racks =
+        get_cardinality(inference_1->leave_record->equity_values) <
+        number_of_listed_racks;
+  } else if (inference_1->exchanged != 0 &&
+             get_cardinality(inference_1->rack_record->equity_values) <
+                 number_of_listed_racks) {
+    number_of_listed_racks =
+        get_cardinality(inference_1->rack_record->equity_values);
   }
-  return are_leave_rack_lists_equal(inference_1->leave_rack_list, inference_2->leave_rack_list, number_of_listed_racks);
+  return are_leave_rack_lists_equal(inference_1->leave_rack_list,
+                                    inference_2->leave_rack_list,
+                                    number_of_listed_racks);
 }
 
-void print_error_case(Game *game, Inference *inference_1, Inference *inference_2, Rack *tiles_played, int player_on_turn_index, int score, int number_of_tiles_exchanged, int number_of_threads) {
+void print_error_case(Game *game, Inference *inference_1,
+                      Inference *inference_2, Rack *tiles_played,
+                      int player_on_turn_index, int score,
+                      int number_of_tiles_exchanged, int number_of_threads) {
   print_game(game);
   char rack_string[50] = "";
-  write_rack_to_end_of_buffer(rack_string, game->gen->letter_distribution, tiles_played);
+  write_rack_to_end_of_buffer(rack_string, game->gen->letter_distribution,
+                              tiles_played);
   printf("tiles played: %s\n", rack_string);
   printf("pindex: %d\n", player_on_turn_index);
   printf("score: %d\n", score);
@@ -155,8 +181,9 @@ void print_error_case(Game *game, Inference *inference_1, Inference *inference_2
   print_inference(inference_2, tiles_played, number_of_threads);
 }
 
-void play_game(Game *game, Inference *inference_1, Inference *inference_2, Rack *tiles_played, Rack *full_rack, time_t seed, int test_inference)
-{
+void play_game(Game *game, Inference *inference_1, Inference *inference_2,
+               Rack *tiles_played, Rack *full_rack, time_t seed,
+               int test_inference) {
   draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, RACK_SIZE);
   draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, RACK_SIZE);
   while (!game->game_end_reason) {
@@ -167,15 +194,13 @@ void play_game(Game *game, Inference *inference_1, Inference *inference_2, Rack 
     Move *move_to_play = create_move();
     copy_move(game->gen->move_list->moves[0], move_to_play);
     if (test_inference && (move_to_play->move_type == MOVE_TYPE_EXCHANGE ||
-    move_to_play->move_type == MOVE_TYPE_PLAY)) {
+                           move_to_play->move_type == MOVE_TYPE_PLAY)) {
       reset_rack(tiles_played);
       reset_rack(full_rack);
-      for (int i = 0; i < move_to_play->tiles_length; i++)
-      {
+      for (int i = 0; i < move_to_play->tiles_length; i++) {
         uint8_t letter = move_to_play->tiles[i];
         if (letter != PLAYED_THROUGH_MARKER) {
-          if (is_blanked(letter))
-          {
+          if (is_blanked(letter)) {
             letter = BLANK_MACHINE_LETTER;
           }
           add_letter_to_rack(tiles_played, letter);
@@ -183,12 +208,14 @@ void play_game(Game *game, Inference *inference_1, Inference *inference_2, Rack 
       }
 
       // Remove tiles from rack for the inference
-      for (int ml = 0; ml < game->players[game->player_on_turn_index]->rack->array_size; ml++)
-      {
-        int number_of_ml = game->players[game->player_on_turn_index]->rack->array[ml];
-        for (int li = 0; li < number_of_ml; li++)
-        {
-          take_letter_from_rack(game->players[game->player_on_turn_index]->rack, ml);
+      for (int ml = 0;
+           ml < game->players[game->player_on_turn_index]->rack->array_size;
+           ml++) {
+        int number_of_ml =
+            game->players[game->player_on_turn_index]->rack->array[ml];
+        for (int li = 0; li < number_of_ml; li++) {
+          take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
+                                ml);
           add_letter_to_rack(full_rack, ml);
           add_letter(game->gen->bag, ml);
         }
@@ -201,54 +228,67 @@ void play_game(Game *game, Inference *inference_1, Inference *inference_2, Rack 
       }
 
       // Single threaded infer
-      int status = infer(inference_1, game, tiles_played, game->player_on_turn_index, 
-      move_to_play->score, number_of_tiles_exchanged, 0, 1);
+      int status =
+          infer(inference_1, game, tiles_played, game->player_on_turn_index,
+                move_to_play->score, number_of_tiles_exchanged, 0, 1);
       sort_leave_racks(inference_1->leave_rack_list);
       if (status != INFERENCE_STATUS_SUCCESS) {
-        printf("bad status for single threaded %d, seed is >%ld<\n", status, seed);
-        print_error_case(game, inference_1, inference_2, tiles_played, game->player_on_turn_index,
-        move_to_play->score, number_of_tiles_exchanged, 7);
+        printf("bad status for single threaded %d, seed is >%ld<\n", status,
+               seed);
+        print_error_case(game, inference_1, inference_2, tiles_played,
+                         game->player_on_turn_index, move_to_play->score,
+                         number_of_tiles_exchanged, 7);
       }
 
-      status = infer(inference_2, game, tiles_played, game->player_on_turn_index, 
-      move_to_play->score, number_of_tiles_exchanged, 0, 7);
+      status =
+          infer(inference_2, game, tiles_played, game->player_on_turn_index,
+                move_to_play->score, number_of_tiles_exchanged, 0, 7);
       sort_leave_racks(inference_2->leave_rack_list);
       if (status != INFERENCE_STATUS_SUCCESS) {
         printf("bad status for 7 threads %d, seed is >%ld<\n", status, seed);
-        print_error_case(game, inference_1, inference_2, tiles_played, game->player_on_turn_index,
-        move_to_play->score, number_of_tiles_exchanged, 7);
+        print_error_case(game, inference_1, inference_2, tiles_played,
+                         game->player_on_turn_index, move_to_play->score,
+                         number_of_tiles_exchanged, 7);
       }
 
-      int are_inferences_equal_value = are_inferences_equal(inference_1, inference_2);
+      int are_inferences_equal_value =
+          are_inferences_equal(inference_1, inference_2);
 
       if (are_inferences_equal_value != 0) {
-        printf("1 and 7 not equal %d, seed is >%ld<\n", are_inferences_equal_value, seed);
-        print_error_case(game, inference_1, inference_2, tiles_played, game->player_on_turn_index,
-        move_to_play->score, number_of_tiles_exchanged, 7);
+        printf("1 and 7 not equal %d, seed is >%ld<\n",
+               are_inferences_equal_value, seed);
+        print_error_case(game, inference_1, inference_2, tiles_played,
+                         game->player_on_turn_index, move_to_play->score,
+                         number_of_tiles_exchanged, 7);
       }
 
-      infer(inference_2, game, tiles_played, game->player_on_turn_index, 
-      move_to_play->score, number_of_tiles_exchanged, 0, 10);
+      infer(inference_2, game, tiles_played, game->player_on_turn_index,
+            move_to_play->score, number_of_tiles_exchanged, 0, 10);
       sort_leave_racks(inference_2->leave_rack_list);
       if (status != INFERENCE_STATUS_SUCCESS) {
         printf("bad status for 10 threads %d, seed is >%ld<\n", status, seed);
-        print_error_case(game, inference_1, inference_2, tiles_played, game->player_on_turn_index,
-        move_to_play->score, number_of_tiles_exchanged, 7);
+        print_error_case(game, inference_1, inference_2, tiles_played,
+                         game->player_on_turn_index, move_to_play->score,
+                         number_of_tiles_exchanged, 7);
       }
 
-      are_inferences_equal_value = are_inferences_equal(inference_1, inference_2);
+      are_inferences_equal_value =
+          are_inferences_equal(inference_1, inference_2);
       if (are_inferences_equal_value != 0) {
-        printf("1 and 10 not equal %d, seed is >%ld<\n", are_inferences_equal_value, seed);
-        print_error_case(game, inference_1, inference_2, tiles_played, game->player_on_turn_index,
-        move_to_play->score, number_of_tiles_exchanged, 10);
+        printf("1 and 10 not equal %d, seed is >%ld<\n",
+               are_inferences_equal_value, seed);
+        print_error_case(game, inference_1, inference_2, tiles_played,
+                         game->player_on_turn_index, move_to_play->score,
+                         number_of_tiles_exchanged, 10);
       }
 
       // Add tiles back to rack
-      for (int ml = 0; ml < game->players[game->player_on_turn_index]->rack->array_size; ml++)
-      {
-        for (int li = 0; li < full_rack->array[ml]; li++)
-        {
-          add_letter_to_rack(game->players[game->player_on_turn_index]->rack, ml);
+      for (int ml = 0;
+           ml < game->players[game->player_on_turn_index]->rack->array_size;
+           ml++) {
+        for (int li = 0; li < full_rack->array[ml]; li++) {
+          add_letter_to_rack(game->players[game->player_on_turn_index]->rack,
+                             ml);
           draw_letter(game->gen->bag, ml);
         }
       }
@@ -264,23 +304,26 @@ void autoplay_without_using_game_pairs(Config *config) {
   // Use the player_to_infer_index as a intean
   // indicating whether to test inferences in autoplay.
   int test_inference = config->player_to_infer_index >= 0;
-  Rack * full_rack = create_rack(config->letter_distribution->size);
+  Rack *full_rack = create_rack(config->letter_distribution->size);
   Rack *tiles_played = create_rack(config->letter_distribution->size);
-  Inference *inference_1 = create_inference(30, config->letter_distribution->size);
-  Inference *inference_2 = create_inference(30, config->letter_distribution->size);
+  Inference *inference_1 =
+      create_inference(30, config->letter_distribution->size);
+  Inference *inference_2 =
+      create_inference(30, config->letter_distribution->size);
   time_t seed;
   for (int i = 0; i < config->number_of_games_or_pairs; i++) {
     seed = time(NULL);
     srand(seed);
     reset_game(game);
-    play_game(game, inference_1, inference_2, tiles_played, full_rack, seed, test_inference);
+    play_game(game, inference_1, inference_2, tiles_played, full_rack, seed,
+              test_inference);
   }
 
   destroy_game(game);
-    destroy_rack(full_rack);
-    destroy_rack(tiles_played);
-    destroy_inference(inference_1);
-    destroy_inference(inference_2);
+  destroy_rack(full_rack);
+  destroy_rack(tiles_played);
+  destroy_inference(inference_1);
+  destroy_inference(inference_2);
 }
 
 void autoplay_using_game_pairs(Config *config) {

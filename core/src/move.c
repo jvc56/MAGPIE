@@ -5,9 +5,7 @@
 #include "constants.h"
 #include "move.h"
 
-Move * create_move() {
-  return malloc(sizeof(Move));
-}
+Move *create_move() { return malloc(sizeof(Move)); }
 
 MoveList *create_move_list() {
   MoveList *ml = malloc(sizeof(MoveList));
@@ -91,8 +89,7 @@ void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
 }
 
 void copy_move(Move *src_move, Move *dest_move) {
-  for (int i = 0; i < (BOARD_DIM); i++)
-  {
+  for (int i = 0; i < (BOARD_DIM); i++) {
     dest_move->tiles[i] = src_move->tiles[i];
   }
   dest_move->score = src_move->score;

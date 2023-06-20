@@ -33,38 +33,38 @@ void test_trivial_random_probability(SuperConfig *superconfig) {
 
   // A minimum of zero should always be 100% probability
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'Z'),
-                                   0, 3),
-                               1));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'Z'),
+                            0, 3),
+                        1));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'Z'),
-                                   0, 4),
-                               1));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'Z'),
+                            0, 4),
+                        1));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'E'),
-                                   0, 6),
-                               1));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'E'),
+                            0, 6),
+                        1));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'E'),
-                                   -1, 4),
-                               1));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'E'),
+                            -1, 4),
+                        1));
 
   // Minimum N where letters in bag is M and M > N
   // should always be 0
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'E'),
-                                   20, 4),
-                               0));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'E'),
+                            20, 4),
+                        0));
 
   // If the player is emptying the bag and there are the minimum
   // number of leaves remaining, the probability is trivially 1.
@@ -84,11 +84,11 @@ void test_trivial_random_probability(SuperConfig *superconfig) {
                      human_readable_letter_to_machine_letter(
                          config->letter_distribution, 'E'));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'E'),
-                                   4, 1),
-                               1));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'E'),
+                            4, 1),
+                        1));
 
   destroy_game(game);
   destroy_inference(inference);
@@ -222,7 +222,7 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   assert(get_cardinality(inference->leave_record->equity_values) == 1);
   set_rack_to_string(rack, "S", game->gen->letter_distribution);
   assert(within_epsilon(get_mean(inference->leave_record->equity_values),
-                               get_leave_value(klv, rack)));
+                        get_leave_value(klv, rack)));
   for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
     if (i == human_readable_letter_to_machine_letter(
                  game->gen->letter_distribution, 'S')) {
@@ -240,14 +240,14 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
                           game->gen->letter_distribution, 'S'));
   assert(within_epsilon(get_mean(letter_stat), 1));
   assert(within_epsilon(get_stdev(letter_stat), 0));
-  assert(within_epsilon(
-      get_estimated_stdev_for_record(inference->leave_record), 0));
+  assert(within_epsilon(get_estimated_stdev_for_record(inference->leave_record),
+                        0));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'S'),
-                                   1, 6),
-                               (double)3 / 94));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'S'),
+                            1, 6),
+                        (double)3 / 94));
   // Both game racks should be empty
   assert(game->players[0]->rack->number_of_letters == 0);
   assert(game->players[1]->rack->number_of_letters == 0);
@@ -289,17 +289,17 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
                           game->gen->letter_distribution, 'E'));
   assert(within_epsilon(get_mean(letter_stat), (double)12 / 83));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'Q'),
-                                   1, 6),
-                               (double)1 / 94));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'Q'),
+                            1, 6),
+                        (double)1 / 94));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'B'),
-                                   1, 6),
-                               (double)2 / 94));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'B'),
+                            1, 6),
+                        (double)2 / 94));
   // Both game racks should be empty
   assert(game->players[0]->rack->number_of_letters == 0);
   assert(game->players[1]->rack->number_of_letters == 0);
@@ -327,11 +327,11 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
     }
   }
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'B'),
-                                   2, 5),
-                               (double)1 / choose(95, 2)));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'B'),
+                            2, 5),
+                        (double)1 / choose(95, 2)));
   // Both game racks should be empty
   assert(game->players[0]->rack->number_of_letters == 0);
   assert(game->players[1]->rack->number_of_letters == 0);
@@ -350,7 +350,7 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   assert(get_cardinality(inference->leave_record->equity_values) == 1);
   set_rack_to_string(rack, "DDSW??", game->gen->letter_distribution);
   assert(within_epsilon(get_mean(inference->leave_record->equity_values),
-                               get_leave_value(klv, rack)));
+                        get_leave_value(klv, rack)));
   for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
     if (i == human_readable_letter_to_machine_letter(
                  game->gen->letter_distribution, 'S') ||
@@ -444,15 +444,13 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   if (number_of_threads == 1) {
     // Exact stdev values are only valid for single threaded
     // runs. See infer.h for an explanation.
-    assert(
-        within_epsilon(get_stdev(inference->leave_record->equity_values),
-                              6.53225818584641171327));
+    assert(within_epsilon(get_stdev(inference->leave_record->equity_values),
+                          6.53225818584641171327));
   }
   // Estimated stdev
   // estimates should work for any number of threads.
-  assert(within_epsilon(
-      get_estimated_stdev_for_record(inference->leave_record),
-      6.52464463816390516371));
+  assert(within_epsilon(get_estimated_stdev_for_record(inference->leave_record),
+                        6.52464463816390516371));
 
   // Contrive an impossible situation to easily test
   // more combinatorics
@@ -585,11 +583,11 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
     }
   }
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                                   inference->bag_as_rack, inference->leave,
-                                   human_readable_letter_to_machine_letter(
-                                       game->gen->letter_distribution, 'E'),
-                                   3, 4),
-                               (double)4 / choose(8, 3)));
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, 'E'),
+                            3, 4),
+                        (double)4 / choose(8, 3)));
   reset_game(game);
 
   // Check that the equity margin works
@@ -646,7 +644,7 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   assert(get_cardinality(inference->leave_record->equity_values) == 1);
   set_rack_to_string(rack, "X?", game->gen->letter_distribution);
   assert(within_epsilon(get_mean(inference->leave_record->equity_values),
-                               get_leave_value(klv, rack)));
+                        get_leave_value(klv, rack)));
   for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
     if (i == human_readable_letter_to_machine_letter(
                  game->gen->letter_distribution, '?') ||
@@ -690,7 +688,7 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   double mean_rin_leave_value =
       (bhir_weighted_value + bhnr_weighted_value + hirn_weighted_value) / 660;
   assert(within_epsilon(get_mean(inference->leave_record->equity_values),
-                               mean_rin_leave_value));
+                        mean_rin_leave_value));
   reset_game(game);
 
   // Test exchanges

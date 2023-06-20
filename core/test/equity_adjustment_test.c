@@ -46,10 +46,10 @@ void test_macondo_opening_equity_adjustments(SuperConfig *superconfig) {
   assert(top_move->col_start == 3);
   assert(top_move->tiles_played == 5);
   assert(top_move->score == 46);
-  assert(within_epsilon(
-      (double)(top_move->score + get_leave_value_for_move(klv, top_move, rack) +
-              OPENING_HOTSPOT_PENALTY),
-      top_move->equity));
+  assert(within_epsilon((double)(top_move->score +
+                                 get_leave_value_for_move(klv, top_move, rack) +
+                                 OPENING_HOTSPOT_PENALTY),
+                        top_move->equity));
 
   destroy_sorted_move_list(jibed_sorted_move_list);
   reset_game(game);
@@ -63,10 +63,10 @@ void test_macondo_opening_equity_adjustments(SuperConfig *superconfig) {
   assert(top_move->col_start == 3);
   assert(top_move->tiles_played == 6);
   assert(top_move->score == 30);
-  assert(within_epsilon(
-      (double)(top_move->score + get_leave_value_for_move(klv, top_move, rack) +
-              (2 * OPENING_HOTSPOT_PENALTY)),
-      top_move->equity));
+  assert(within_epsilon((double)(top_move->score +
+                                 get_leave_value_for_move(klv, top_move, rack) +
+                                 (2 * OPENING_HOTSPOT_PENALTY)),
+                        top_move->equity));
   destroy_sorted_move_list(facete_sorted_move_list);
   reset_game(game);
 
@@ -79,10 +79,10 @@ void test_macondo_opening_equity_adjustments(SuperConfig *superconfig) {
   assert(top_move->col_start == 6);
   assert(top_move->tiles_played == 7);
   assert(top_move->score == 78);
-  assert(within_epsilon(
-      (double)(top_move->score + get_leave_value_for_move(klv, top_move, rack) +
-              (3 * OPENING_HOTSPOT_PENALTY)),
-      top_move->equity));
+  assert(within_epsilon((double)(top_move->score +
+                                 get_leave_value_for_move(klv, top_move, rack) +
+                                 (3 * OPENING_HOTSPOT_PENALTY)),
+                        top_move->equity));
 
   destroy_sorted_move_list(atalaya_sorted_move_list);
   destroy_game(game);
