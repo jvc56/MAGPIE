@@ -32,7 +32,8 @@ make magpie_test BUILD=release
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
                       -s1 "equity" \
-                      -n "$2"
+                      -n "$2" \
+                      -i 0
 elif [ "$1" == "i" ]; then
 make magpie_test BUILD=release
 perf record ./bin/magpie_test infer -g "./data/lexica/CSW21.kwg" \

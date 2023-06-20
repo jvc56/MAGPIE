@@ -4,8 +4,8 @@
 #include "prof_tests.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "autoplay_test.h"
 
-#include "../src/autoplay.h"
 #include "../src/config.h"
 #include "../src/game.h"
 #include "../src/movegen.h"

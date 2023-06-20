@@ -5,13 +5,17 @@
 #include "constants.h"
 #include "move.h"
 
+Move * create_move() {
+  return malloc(sizeof(Move));
+}
+
 MoveList *create_move_list() {
   MoveList *ml = malloc(sizeof(MoveList));
   ml->count = 0;
-  ml->spare_move = malloc(sizeof(Move));
+  ml->spare_move = create_move();
   ml->moves = malloc((sizeof(Move *)) * (MOVE_LIST_CAPACITY));
   for (int i = 0; i < MOVE_LIST_CAPACITY; i++) {
-    ml->moves[i] = malloc(sizeof(Move));
+    ml->moves[i] = create_move();
   }
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
   return ml;
@@ -84,6 +88,21 @@ void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
   for (int i = 0; i < move->tiles_length; i++) {
     move->tiles[i] = strip[leftstrip + i];
   }
+}
+
+void copy_move(Move *src_move, Move *dest_move) {
+  for (int i = 0; i < (BOARD_DIM); i++)
+  {
+    dest_move->tiles[i] = src_move->tiles[i];
+  }
+  dest_move->score = src_move->score;
+  dest_move->row_start = src_move->row_start;
+  dest_move->col_start = src_move->col_start;
+  dest_move->tiles_played = src_move->tiles_played;
+  dest_move->tiles_length = src_move->tiles_length;
+  dest_move->equity = src_move->equity;
+  dest_move->vertical = src_move->vertical;
+  dest_move->move_type = src_move->move_type;
 }
 
 void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,

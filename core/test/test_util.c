@@ -41,7 +41,7 @@ void write_float_to_end_of_buffer(char *buffer, double d) {
 void reset_string(char *string) { memset(string, 0, sizeof(*string)); }
 
 int within_epsilon(double a, double b) {
-  return fabs(a - b) < DOUBLE_EPSILON;
+  return fabs(a - b) < __DBL_EPSILON__;
 }
 
 double get_leave_value_for_move(KLV *klv, Move *move, Rack *rack) {

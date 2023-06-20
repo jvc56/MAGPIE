@@ -25,6 +25,9 @@ typedef struct MoveList {
   Move **moves;
 } MoveList;
 
+Move * create_move();
+void copy_move(Move *src_move, Move *dest_move);
+void destroy_move(Move *move);
 MoveList *create_move_list();
 void destroy_move_list(MoveList *ml);
 void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,

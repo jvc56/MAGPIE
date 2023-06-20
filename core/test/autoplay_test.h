@@ -1,7 +1,7 @@
 #ifndef AUTOPLAY_H
 #define AUTOPLAY_H
 
-#include "config.h"
+#include "../src/config.h"
 
 void autoplay(Config *config);
 
