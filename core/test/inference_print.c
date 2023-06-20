@@ -169,11 +169,11 @@ void print_inference(Inference *inference, Rack *actual_tiles_played,
   if (is_exchange) {
     common_leaves_record = inference->rack_record;
     sprintf(records_string + strlen(records_string), "\n\nTiles Exchanged\n\n");
-    Rack * unknown_exchange_rack = create_rack(inference->leave->array_size);
-    write_inference_record(
-        records_string, inference->exchanged_record, game, unknown_exchange_rack,
-        inference->bag_as_rack, letter_stat,
-        inference->number_of_tiles_exchanged, number_of_threads);
+    Rack *unknown_exchange_rack = create_rack(inference->leave->array_size);
+    write_inference_record(records_string, inference->exchanged_record, game,
+                           unknown_exchange_rack, inference->bag_as_rack,
+                           letter_stat, inference->number_of_tiles_exchanged,
+                           number_of_threads);
     destroy_rack(unknown_exchange_rack);
     sprintf(records_string + strlen(records_string), "\n\nRack\n\n");
     write_inference_record(records_string, inference->rack_record, game,
