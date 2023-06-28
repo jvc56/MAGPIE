@@ -126,7 +126,7 @@ void write_inference_record(char *buffer, InferenceRecord *record, Game *game,
 
 void print_inference(Inference *inference, Rack *actual_tiles_played,
                      int number_of_threads) {
-  char inference_string[50000] = "";
+  char inference_string[500000] = "";
 
   int is_exchange = inference->number_of_tiles_exchanged > 0;
   int number_of_tiles_played_or_exchanged;
