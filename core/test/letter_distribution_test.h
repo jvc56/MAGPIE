@@ -3,6 +3,6 @@
 
 #include "superconfig.h"
 
-void test_letter_distribution(SuperConfig * superconfig);
+void test_letter_distribution(SuperConfig *superconfig);
 
 #endif

@@ -3,6 +3,6 @@
 
 #include "superconfig.h"
 
-void test_movegen(SuperConfig * superconfig);
+void test_movegen(SuperConfig *superconfig);
 
 #endif

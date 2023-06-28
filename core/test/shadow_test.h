@@ -3,6 +3,6 @@
 
 #include "superconfig.h"
 
-void test_shadow(SuperConfig * superconfig);
+void test_shadow(SuperConfig *superconfig);
 
 #endif

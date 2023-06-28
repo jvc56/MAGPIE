@@ -3,6 +3,6 @@
 
 #include "superconfig.h"
 
-void test_board(SuperConfig * superconfig);
+void test_board(SuperConfig *superconfig);
 
 #endif

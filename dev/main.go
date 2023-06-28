@@ -1,13 +1,14 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"sync"
 
 	"github.com/rs/zerolog"
 )
 
-func testDev() {
+func teget_stdev() {
 	// racks := []string{
 	// 	"UUUVVWW",
 	// 	"AEFRWYZ",
@@ -116,6 +117,23 @@ func NondeterministicTests() {
 }
 
 func main() {
-	//fmt.Println(ConvertGCGToCGP("many_moves.gcg"))
-	NondeterministicTests()
+	// Define flags
+	zerolog.SetGlobalLevel(zerolog.Disabled)
+	lexicon := flag.String("lexicon", "", "the lexicon argument")
+	gcg := flag.String("gcg", "", "the gcg argument")
+	turnNumber := flag.Int("turn_number", -1, "the turn_number argument")
+	margin := flag.Float64("margin", 0.0, "the margin argument")
+	partial := flag.Bool("partial", false, "use racks in the GCG to infer partial leaves")
+	numberOfThreads := flag.Int("threads", 1, "number of threads")
+
+	// Parse command line arguments
+	flag.Parse()
+
+	// Check if all required flags are provided
+	if *lexicon == "" || *gcg == "" {
+		flag.PrintDefaults()
+		return
+	}
+
+	InferGame(*lexicon, *gcg, *turnNumber, *margin, *partial, *numberOfThreads)
 }

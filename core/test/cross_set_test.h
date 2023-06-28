@@ -5,7 +5,7 @@
 
 #include "superconfig.h"
 
-void set_row(Game * game, int row, const char* row_content);
-void test_cross_set(SuperConfig * superconfig);
+void set_row(Game *game, int row, const char *row_content);
+void test_cross_set(SuperConfig *superconfig);
 
 #endif

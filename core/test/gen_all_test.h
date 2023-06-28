@@ -3,6 +3,6 @@
 
 #include "../src/config.h"
 
-void test_gen_all(Config * config);
+void test_gen_all(Config *config);
 
 #endif

@@ -34,6 +34,9 @@
 #define GAME_END_REASON_NONE 0
 #define GAME_END_REASON_STANDARD 1
 #define GAME_END_REASON_CONSECUTIVE_ZEROS 2
+#define INFERENCE_EQUITY_EPSILON 0.000000001
+#define INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW 0
+#define INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE 1
 #define MOVE_TYPE_PLAY 0
 #define MOVE_TYPE_EXCHANGE 1
 #define MOVE_TYPE_PASS 2
@@ -43,6 +46,17 @@
 #define PLAY_RECORDER_TYPE_TOP_EQUITY 1
 #define PREENDGAME_ADJUSTMENT_VALUES_TYPE_ZERO 0
 #define PREENDGAME_ADJUSTMENT_VALUES_TYPE_QUACKLE 1
+#define INFERENCE_STATUS_SUCCESS 0
+#define INFERENCE_STATUS_INITIALIZED 1
+#define INFERENCE_STATUS_NO_TILES_PLAYED 2
+#define INFERENCE_STATUS_RACK_OVERFLOW 3
+#define INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG 4
+#define INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE 5
+#define INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO 6
+#define INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED 7
+#define INFERENCE_STATUS_INVALID_NUMBER_OF_THREADS 8
+#define NUMBER_OF_ROUNDED_EQUITY_VALUES 201
+#define START_ROUNDED_EQUITY_VALUE -100
 #define MOVE_LIST_CAPACITY 1000000
 #define PASS_MOVE_EQUITY -10000
 #define INITIAL_TOP_MOVE_EQUITY -100000
@@ -57,20 +71,21 @@
 #define KLV_FILENAME_EXTENSION "lg"
 #define MAX_ARG_LENGTH 300
 
-#define CROSSWORD_GAME_BOARD "=  '   =   '  ="\
-		" -   \"   \"   - "\
-		"  -   ' '   -  "\
-		"'  -   '   -  '"\
-		"    -     -    "\
-		" \"   \"   \"   \" "\
-		"  '   ' '   '  "\
-		"=  '   -   '  ="\
-		"  '   ' '   '  "\
-		" \"   \"   \"   \" "\
-		"    -     -    "\
-		"'  -   '   -  '"\
-		"  -   ' '   -  "\
-		" -   \"   \"   - "\
-		"=  '   =   '  ="\
+#define CROSSWORD_GAME_BOARD                                                   \
+  "=  '   =   '  ="                                                            \
+  " -   \"   \"   - "                                                          \
+  "  -   ' '   -  "                                                            \
+  "'  -   '   -  '"                                                            \
+  "    -     -    "                                                            \
+  " \"   \"   \"   \" "                                                        \
+  "  '   ' '   '  "                                                            \
+  "=  '   -   '  ="                                                            \
+  "  '   ' '   '  "                                                            \
+  " \"   \"   \"   \" "                                                        \
+  "    -     -    "                                                            \
+  "'  -   '   -  '"                                                            \
+  "  -   ' '   -  "                                                            \
+  " -   \"   \"   - "                                                          \
+  "=  '   =   '  ="
 
 #endif

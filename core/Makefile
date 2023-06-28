@@ -15,7 +15,9 @@ OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 #dev is default, for another flavor : make BUILD=release
 BUILD := dev
 
-cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra
+FSAN_ARG := -fsanitize=address,leak,undefined,pointer-compare,pointer-subtract
+
+cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra $(FSAN_ARG)
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.prof := -g -O3 -Wall -Wno-trigraphs -Wextra -pg
 cflags.release := -O3 -Wall -Wno-trigraphs
@@ -23,10 +25,13 @@ cflags.release := -O3 -Wall -Wno-trigraphs
 lflags.cov := --coverage
 lflags.prof := -pg -g
 
+ldflags.dev := -Llib -pthread $(FSAN_ARG)
+ldflags.release := -Llib -pthread
+
 CPPFLAGS := -Iinclude -MMD -MP
 CFLAGS := ${cflags.${BUILD}}
 LFLAGS := ${lflags.${BUILD}}
-LDFLAGS  := -Llib
+LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
 .PHONY: all clean

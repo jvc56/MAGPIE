@@ -3,6 +3,6 @@
 
 #include "superconfig.h"
 
-void test_bag(SuperConfig * superconfig);
+void test_bag(SuperConfig *superconfig);
 
 #endif

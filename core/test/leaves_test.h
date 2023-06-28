@@ -3,6 +3,6 @@
 
 #include "superconfig.h"
 
-void test_leaves(SuperConfig * superconfig, const char* leaves_csv_filename);
+void test_leaves(SuperConfig *superconfig, const char *leaves_csv_filename);
 
 #endif
