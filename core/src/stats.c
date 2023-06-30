@@ -70,6 +70,10 @@ double get_variance(Stat *stat) {
 
 double get_stdev(Stat *stat) { return sqrt(get_variance(stat)); }
 
+double get_standard_error(Stat *stat, double m) {
+  return m * sqrt(get_variance(stat) / (double)stat->cardinality);
+}
+
 int round_to_nearest_int(double a) {
   return (int)(a + 0.5 - (a < 0)); // truncated to 55
 }

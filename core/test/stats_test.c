@@ -40,6 +40,7 @@ void test_stats() {
   assert(within_epsilon(get_mean(stat), 11.0 / 3.0));
   assert(within_epsilon(get_variance(stat), 6.222222222222222));
   assert(within_epsilon(get_stdev(stat), 2.494438257849294));
+  assert(within_epsilon(get_standard_error(stat, 2.5), 3.600411499115477));
 
   // Push a weighted value
   push(stat, 10, 4);
