@@ -1,5 +1,5 @@
-#ifndef UTIL_H
-#define UTIL_H
+#ifndef TEST_UTIL_H
+#define TEST_UTIL_H
 
 #include "../src/board.h"
 #include "../src/config.h"
@@ -16,7 +16,6 @@ typedef struct SortedMoveList {
 } SortedMoveList;
 
 void generate_moves_for_game(Game *game);
-double get_leave_value_for_move(KLV *klv, Move *move, Rack *rack);
 double get_leave_value_for_rack(KLV *klv, Rack *rack);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *create_sorted_move_list(MoveList *ml);

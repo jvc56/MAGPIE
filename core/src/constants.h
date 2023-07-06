@@ -70,24 +70,30 @@
 #define DATA_DIRECTORY "data"
 #define KLV_FILENAME_EXTENSION "lg"
 #define MAX_ARG_LENGTH 300
+#define SIM_STOPPING_CONDITION_NONE 0
+#define SIM_STOPPING_CONDITION_95PCT 1
+#define SIM_STOPPING_CONDITION_98PCT 2
+#define SIM_STOPPING_CONDITION_99PCT 3
 #define BACKUP_MODE_OFF 0
 #define BACKUP_MODE_SIMULATION 1
 
-#define CROSSWORD_GAME_BOARD                                                   \
-  "=  '   =   '  ="                                                            \
-  " -   \"   \"   - "                                                          \
-  "  -   ' '   -  "                                                            \
-  "'  -   '   -  '"                                                            \
-  "    -     -    "                                                            \
-  " \"   \"   \"   \" "                                                        \
-  "  '   ' '   '  "                                                            \
-  "=  '   -   '  ="                                                            \
-  "  '   ' '   '  "                                                            \
-  " \"   \"   \"   \" "                                                        \
-  "    -     -    "                                                            \
-  "'  -   '   -  '"                                                            \
-  "  -   ' '   -  "                                                            \
-  " -   \"   \"   - "                                                          \
+#define CROSSWORD_GAME_BOARD \
+  "=  '   =   '  ="          \
+  " -   \"   \"   - "        \
+  "  -   ' '   -  "          \
+  "'  -   '   -  '"          \
+  "    -     -    "          \
+  " \"   \"   \"   \" "      \
+  "  '   ' '   '  "          \
+  "=  '   -   '  ="          \
+  "  '   ' '   '  "          \
+  " \"   \"   \"   \" "      \
+  "    -     -    "          \
+  "'  -   '   -  '"          \
+  "  -   ' '   -  "          \
+  " -   \"   \"   - "        \
   "=  '   =   '  ="
+
+// want superOMG board as well.
 
 #endif

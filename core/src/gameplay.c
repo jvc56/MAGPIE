@@ -163,6 +163,10 @@ void play_move(Game *game, Move *move) {
 void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   Rack *prack = game->players[pidx]->rack;
   int ntiles = prack->number_of_letters;
+  // always try to fill rack if possible.
+  if (ntiles < RACK_SIZE) {
+    ntiles = RACK_SIZE;
+  }
   // throw in existing rack, then redraw from the bag.
   for (int i = 0; i < prack->array_size; i++) {
     if (prack->array[i] > 0) {

@@ -228,8 +228,8 @@ void test_six_passes_game(SuperConfig *superconfig) {
                      "EEEKMNO", "AAEHINT", "CDEGORZ", "EGNOQRS", "AFIQRRT",
                      "ERSSTTX", "BGHNOOU", "AENRTUZ", "AFIMNRV", "AEELNOT",
                      "?EORTUW", "ILNOOST", "EEINRUY", "?AENRTU", "EEINRUW",
-                     "AJNPRV",  "INRU",    "PRV",     "U",       "RV",
-                     "U",       "V",       "U",       "V",       "U",
+                     "AJNPRV", "INRU", "PRV", "U", "RV",
+                     "U", "V", "U", "V", "U",
                      "V"};
 
   char *cgps[31] = {

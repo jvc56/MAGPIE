@@ -6,6 +6,7 @@
 #include "../src/game.h"
 #include "../src/gameplay.h"
 #include "../src/klv.h"
+#include "../src/util.h"
 
 #include "superconfig.h"
 #include "test_constants.h"

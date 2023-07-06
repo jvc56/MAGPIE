@@ -75,3 +75,13 @@ void set_rack_to_string(Rack *rack, const char *rack_string,
                                  letter_distribution, rack_string[i]));
   }
 }
+
+void rack_to_string(Rack *rack, char *rack_string, LetterDistribution *letter_distribution) {
+  char *rp = rack_string;
+  for (int i = 0; i < rack->array_size; i++) {
+    for (int j = 0; j < rack->array[i]; j++) {
+      unsigned char letter = machine_letter_to_human_readable_letter(letter_distribution, i);
+      rp += sprintf(rp, "%c", letter);
+    }
+  }
+}

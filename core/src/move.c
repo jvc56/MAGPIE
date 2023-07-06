@@ -147,3 +147,40 @@ Move *pop_move(MoveList *ml) {
   down_heapify(ml, 0);
   return ml->spare_move;
 }
+
+void sort_moves(MoveList *ml) {
+  int number_of_moves = ml->count;
+  for (int i = 1; i < number_of_moves; i++) {
+    Move *move = pop_move(ml);
+    // Use a swap var to preserve the spare leave pointer
+    Move *swap = ml->moves[ml->count];
+    ml->moves[ml->count] = move;
+    ml->spare_move = swap;
+  }
+}
+
+void store_move_description(Move *move, char *placeholder, LetterDistribution *ld) {
+  char tiles[20];
+  char *tp = tiles;
+  for (int i = 0; i < move->tiles_length; i++) {
+    tp += sprintf(tp, "%c",
+                  machine_letter_to_human_readable_letter(ld, move->tiles[i]));
+  }
+  char coords[20];
+  tp = coords;
+
+  if (move->move_type == MOVE_TYPE_PLAY) {
+    if (move->vertical) {
+      tp += sprintf(tp, "%c", move->col_start + 'A');
+      tp += sprintf(tp, "%d", move->row_start + 1);
+    } else {
+      tp += sprintf(tp, "%d", move->row_start + 1);
+      tp += sprintf(tp, "%c", move->col_start + 'A');
+    }
+    sprintf(placeholder, "%s %s", coords, tiles);
+  } else if (move->move_type == MOVE_TYPE_EXCHANGE) {
+    sprintf(placeholder, "(Exch %s)", tiles);
+  } else if (move->move_type == MOVE_TYPE_PASS) {
+    sprintf(placeholder, "(Pass)");
+  }
+}

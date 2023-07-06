@@ -42,23 +42,6 @@ void reset_string(char *string) { memset(string, 0, sizeof(*string)); }
 
 int within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
-double get_leave_value_for_move(KLV *klv, Move *move, Rack *rack) {
-  int valid_tiles = move->tiles_length;
-  if (move->move_type == MOVE_TYPE_EXCHANGE) {
-    valid_tiles = move->tiles_played;
-  }
-  for (int i = 0; i < valid_tiles; i++) {
-    if (move->tiles[i] != PLAYED_THROUGH_MARKER) {
-      if (is_blanked(move->tiles[i])) {
-        take_letter_from_rack(rack, BLANK_MACHINE_LETTER);
-      } else {
-        take_letter_from_rack(rack, move->tiles[i]);
-      }
-    }
-  }
-  return get_leave_value(klv, rack);
-}
-
 double get_leave_value_for_rack(KLV *klv, Rack *rack) {
   return get_leave_value(klv, rack);
 }
