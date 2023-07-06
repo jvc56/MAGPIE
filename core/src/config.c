@@ -20,7 +20,8 @@ Config *create_config(const char *kwg_filename,
                       const char *actual_tiles_played,
                       int player_to_infer_index, int actual_score,
                       int number_of_tiles_exchanged, double equity_margin,
-                      int number_of_threads) {
+                      int number_of_threads,
+                      const char *winpct_filename) {
 
   Config *config = malloc(sizeof(Config));
   config->letter_distribution =
@@ -74,6 +75,12 @@ Config *create_config(const char *kwg_filename,
 
   config->player_2_strategy_params = player_2_strategy_params;
 
+  // XXX: do we want to do it this way? not consistent with rest of config.
+  if (strcmp(winpct_filename, "")) {
+    config->win_pcts = create_winpct(winpct_filename);
+  } else {
+    config->win_pcts = NULL;
+  }
   return config;
 }
 
@@ -105,6 +112,8 @@ Config *create_config_from_args(int argc, char *argv[]) {
   double equity_margin = -1.0;
   int number_of_threads = 1;
 
+  char winpct_filename[(MAX_ARG_LENGTH)] = "";
+
   int c;
   long n;
 
@@ -126,6 +135,7 @@ Config *create_config_from_args(int argc, char *argv[]) {
         {"e", required_argument, 0, 1014},
         {"q", required_argument, 0, 1015},
         {"h", required_argument, 0, 1016},
+        {"w", required_argument, 0, 1017},
         {"p", no_argument, &game_pair_flag, 1},
         {0, 0, 0, 0}};
     int option_index = 0;
@@ -258,6 +268,11 @@ Config *create_config_from_args(int argc, char *argv[]) {
       number_of_threads = (int)n;
       break;
 
+    case 1017:
+      check_arg_length(optarg);
+      strcpy(winpct_filename, optarg);
+      break;
+
     case '?':
       /* getopt_long already printed an error message. */
       break;
@@ -272,7 +287,8 @@ Config *create_config_from_args(int argc, char *argv[]) {
       move_sorting_1, play_recorder_type_1, klv_filename_2, move_sorting_2,
       play_recorder_type_2, game_pair_flag, number_of_games_or_pairs,
       actual_tiles_played, player_to_infer_index, actual_score,
-      number_of_tiles_exchanged, equity_margin, number_of_threads);
+      number_of_tiles_exchanged, equity_margin, number_of_threads,
+      winpct_filename);
 }
 
 void destroy_config(Config *config) {
@@ -289,5 +305,8 @@ void destroy_config(Config *config) {
   destroy_letter_distribution(config->letter_distribution);
   destroy_rack(config->actual_tiles_played);
   free(config->cgp);
+
+  destroy_winpct(config->win_pcts);
+
   free(config);
 }

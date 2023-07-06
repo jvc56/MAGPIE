@@ -5,6 +5,7 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "rack.h"
+#include "winpct.h"
 
 typedef struct StrategyParams {
   KLV *klv;
@@ -28,6 +29,8 @@ typedef struct Config {
   int number_of_tiles_exchanged;
   double equity_margin;
   int number_of_threads;
+  // Sim params
+  WinPct *win_pcts;
 } Config;
 
 Config *create_config(const char *kwg_filename,
@@ -39,7 +42,8 @@ Config *create_config(const char *kwg_filename,
                       const char *actual_tiles_played,
                       int player_to_infer_index, int actual_score,
                       int number_of_tiles_exchanged, double equity_margin,
-                      int number_of_threads);
+                      int number_of_threads,
+                      const char *winpct_filename);
 Config *create_config_from_args(int argc, char *argv[]);
 void destroy_config(Config *config);
 
