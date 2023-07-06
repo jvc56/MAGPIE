@@ -34,11 +34,15 @@ Bag *create_bag(LetterDistribution *letter_distribution) {
 
 Bag *copy_bag(Bag *bag) {
   Bag *new_bag = malloc(sizeof(Bag));
-  for (int tile_index = 0; tile_index <= bag->last_tile_index; tile_index++) {
-    new_bag->tiles[tile_index] = bag->tiles[tile_index];
-  }
-  new_bag->last_tile_index = bag->last_tile_index;
+  copy_bag_into(new_bag, bag);
   return new_bag;
+}
+
+void copy_bag_into(Bag *dst, Bag *src) {
+  for (int tile_index = 0; tile_index <= src->last_tile_index; tile_index++) {
+    dst->tiles[tile_index] = src->tiles[tile_index];
+  }
+  dst->last_tile_index = src->last_tile_index;
 }
 
 void destroy_bag(Bag *bag) { free(bag); }

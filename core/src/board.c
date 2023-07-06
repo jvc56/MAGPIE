@@ -317,24 +317,29 @@ Board *copy_board(Board *board) {
   Board *new_board = malloc(sizeof(Board));
   new_board->traverse_backwards_return_values =
       malloc(sizeof(TraverseBackwardsReturnValues));
+  copy_board_into(new_board, board);
+  return new_board;
+}
 
+// copy src into dst; assume dst is already allocated.
+void copy_board_into(Board *dst, Board *src) {
   for (int board_index = 0; board_index < (BOARD_DIM * BOARD_DIM);
        board_index++) {
-    new_board->letters[board_index] = board->letters[board_index];
-    new_board->bonus_squares[board_index] = board->bonus_squares[board_index];
+    dst->letters[board_index] = src->letters[board_index];
+    dst->bonus_squares[board_index] = src->bonus_squares[board_index];
     int directional_board_index = board_index * 2;
-    new_board->cross_sets[directional_board_index] =
-        board->cross_sets[directional_board_index];
-    new_board->cross_sets[directional_board_index + 1] =
-        board->cross_sets[directional_board_index + 1];
-    new_board->cross_scores[directional_board_index] =
-        board->cross_scores[directional_board_index];
-    new_board->cross_scores[directional_board_index + 1] =
-        board->cross_scores[directional_board_index + 1];
-    new_board->anchors[directional_board_index] =
-        board->anchors[directional_board_index];
-    new_board->anchors[directional_board_index + 1] =
-        board->anchors[directional_board_index + 1];
+    dst->cross_sets[directional_board_index] =
+        src->cross_sets[directional_board_index];
+    dst->cross_sets[directional_board_index + 1] =
+        src->cross_sets[directional_board_index + 1];
+    dst->cross_scores[directional_board_index] =
+        src->cross_scores[directional_board_index];
+    dst->cross_scores[directional_board_index + 1] =
+        src->cross_scores[directional_board_index + 1];
+    dst->anchors[directional_board_index] =
+        src->anchors[directional_board_index];
+    dst->anchors[directional_board_index + 1] =
+        src->anchors[directional_board_index + 1];
     if (board_index >= (BOARD_DIM * BOARD_DIM) ||
         directional_board_index + 1 >= (BOARD_DIM * BOARD_DIM) * 2) {
       printf("out of bounds: %d, %d\n", board_index,
@@ -342,9 +347,8 @@ Board *copy_board(Board *board) {
       abort();
     }
   }
-  new_board->transposed = board->transposed;
-  new_board->tiles_played = board->tiles_played;
-  return new_board;
+  dst->transposed = src->transposed;
+  dst->tiles_played = src->tiles_played;
 }
 
 void destroy_board(Board *board) {

@@ -70,6 +70,8 @@
 #define DATA_DIRECTORY "data"
 #define KLV_FILENAME_EXTENSION "lg"
 #define MAX_ARG_LENGTH 300
+#define BACKUP_MODE_OFF 0
+#define BACKUP_MODE_SIMULATION 1
 
 #define CROSSWORD_GAME_BOARD                                                   \
   "=  '   =   '  ="                                                            \

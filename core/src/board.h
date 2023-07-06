@@ -25,6 +25,7 @@ void clear_all_crosses(Board *board);
 void clear_cross_set(Board *board, int row, int col, int dir);
 Board *create_board();
 Board *copy_board(Board *board);
+void copy_board_into(Board *dst, Board *src);
 void destroy_board(Board *board);
 int get_anchor(Board *board, int row, int col, int vertical);
 uint8_t get_bonus_square(Board *board, int row, int col);

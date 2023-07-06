@@ -23,16 +23,19 @@ Rack *create_rack(int array_size) {
 
 Rack *copy_rack(Rack *rack) {
   Rack *new_rack = malloc(sizeof(Rack));
-  new_rack->array_size = rack->array_size;
   new_rack->array = (int *)malloc(rack->array_size * sizeof(int));
+  new_rack->array_size = rack->array_size;
   reset_rack(new_rack);
-
-  for (int i = 0; i < rack->array_size; i++) {
-    new_rack->array[i] = rack->array[i];
-  }
-  new_rack->number_of_letters = rack->number_of_letters;
-  new_rack->empty = rack->empty;
+  copy_rack_into(new_rack, rack);
   return new_rack;
+}
+
+void copy_rack_into(Rack *dst, Rack *src) {
+  for (int i = 0; i < src->array_size; i++) {
+    dst->array[i] = src->array[i];
+  }
+  dst->number_of_letters = src->number_of_letters;
+  dst->empty = src->empty;
 }
 
 void destroy_rack(Rack *rack) {

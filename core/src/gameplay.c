@@ -126,6 +126,9 @@ void standard_end_of_game_calculations(Game *game) {
 }
 
 void play_move(Game *game, Move *move) {
+  if (game->backup_mode == BACKUP_MODE_SIMULATION) {
+    backup_game(game);
+  }
   if (move->move_type == MOVE_TYPE_PLAY) {
     play_move_on_board(game, move);
     update_cross_set_for_move(game, move);

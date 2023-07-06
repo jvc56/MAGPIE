@@ -485,9 +485,60 @@ void test_playmove(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
+void test_backups(SuperConfig *superconfig) {
+  Config *config = get_csw_config(superconfig);
+  Game *game = create_game(config);
+  // draw some random rack.
+  draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
+                      game->gen->letter_distribution);
+
+  draw_rack_to_string(game->gen->bag, game->players[1]->rack, "AOQRTUZ",
+                      game->gen->letter_distribution);
+  assert(game->gen->bag->last_tile_index == 85);
+
+  // backup
+  set_backup_mode(game, BACKUP_MODE_SIMULATION);
+  play_top_n_equity_move(game, 0);
+  play_top_n_equity_move(game, 0);
+  assert(game->gen->bag->last_tile_index == 73);
+
+  assert(game->players[0]->score == 36);
+  assert(game->players[1]->score == 131);
+  assert(game->gen->board->letters[7] == human_readable_letter_to_machine_letter(
+                                             game->gen->letter_distribution, 'Q'));
+  // let's unplay QUATORZE
+  unplay_last_move(game);
+  assert(game->players[0]->score == 36);
+  assert(game->players[1]->score == 0);
+
+  assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
+             game->gen->letter_distribution, 'A')] == 1);
+  assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
+             game->gen->letter_distribution, 'O')] == 1);
+  assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
+             game->gen->letter_distribution, 'Q')] == 1);
+  assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
+             game->gen->letter_distribution, 'R')] == 1);
+  assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
+             game->gen->letter_distribution, 'T')] == 1);
+  assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
+             game->gen->letter_distribution, 'U')] == 1);
+  assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
+             game->gen->letter_distribution, 'Z')] == 1);
+  assert(game->players[1]->rack->number_of_letters == 7);
+
+  assert(game->gen->board->letters[7] == 0);
+  // was 85 after drawing racks for both players, then was 80 after KYNDE
+  // and drawing 5 replacement tiles, then 73 after QUATORZ(E) and 7 replacement
+  // tiles, then back to 80 after unplay.
+  assert(game->gen->bag->last_tile_index == 80);
+  destroy_game(game);
+}
+
 void test_gameplay(SuperConfig *superconfig) {
   test_playmove(superconfig);
   test_six_exchanges_game(superconfig);
   test_six_passes_game(superconfig);
   test_standard_game(superconfig);
+  test_backups(superconfig);
 }
