@@ -159,3 +159,27 @@ void play_move(Game *game, Move *move) {
     game->player_on_turn_index = 1 - game->player_on_turn_index;
   }
 }
+
+void set_random_rack(Game *game, int pidx, Rack *known_rack) {
+  Rack *prack = game->players[pidx]->rack;
+  int ntiles = prack->number_of_letters;
+  // throw in existing rack, then redraw from the bag.
+  for (int i = 0; i < prack->array_size; i++) {
+    if (prack->array[i] > 0) {
+      for (int j = 0; j < prack->array[i]; j++) {
+        add_letter(game->gen->bag, i);
+      }
+    }
+  }
+  reset_rack(prack);
+  int ndrawn = 0;
+  if (known_rack != NULL && known_rack->number_of_letters > 0) {
+    for (int i = 0; i < known_rack->array_size; i++) {
+      for (int j = 0; j < known_rack->array[i]; j++) {
+        draw_letter_to_rack(game->gen->bag, prack, i);
+        ndrawn++;
+      }
+    }
+  }
+  draw_at_most_to_rack(game->gen->bag, prack, ntiles - ndrawn);
+}

@@ -485,6 +485,46 @@ void test_playmove(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
+void test_set_random_rack(SuperConfig *superconfig) {
+  Config *config = get_csw_config(superconfig);
+  Game *game = create_game(config);
+  assert(game->gen->bag->last_tile_index == 99);
+  // draw some random rack.
+  draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
+                      game->gen->letter_distribution);
+  assert(game->gen->bag->last_tile_index == 92);
+
+  set_random_rack(game, 0, NULL);
+  assert(game->gen->bag->last_tile_index == 92);
+  assert(game->players[0]->rack->number_of_letters == 7);
+
+  // draw some random rack, but with 5 fixed tiles
+  Rack *known_rack = create_rack(superconfig->csw_config->letter_distribution->size);
+  set_rack_to_string(known_rack, "CESAR", superconfig->csw_config->letter_distribution);
+  set_random_rack(game, 0, known_rack);
+  assert(game->gen->bag->last_tile_index == 92);
+  assert(game->players[0]->rack->number_of_letters == 7);
+
+  // C E S A R
+  take_letter_from_rack(game->players[0]->rack, 3);
+  take_letter_from_rack(game->players[0]->rack, 5);
+  take_letter_from_rack(game->players[0]->rack, 19);
+  take_letter_from_rack(game->players[0]->rack, 1);
+  take_letter_from_rack(game->players[0]->rack, 18);
+
+  assert(!game->players[0]->rack->empty);
+  assert(game->players[0]->rack->number_of_letters == 2);
+  // ensure the rack isn't corrupt
+  int ct = 0;
+  for (int i = 0; i < game->players[0]->rack->array_size; i++) {
+    ct += game->players[0]->rack->array[i];
+  }
+  assert(ct == 2);
+
+  destroy_rack(known_rack);
+  destroy_game(game);
+}
+
 void test_backups(SuperConfig *superconfig) {
   Config *config = get_csw_config(superconfig);
   Game *game = create_game(config);
@@ -540,5 +580,6 @@ void test_gameplay(SuperConfig *superconfig) {
   test_six_exchanges_game(superconfig);
   test_six_passes_game(superconfig);
   test_standard_game(superconfig);
+  test_set_random_rack(superconfig);
   test_backups(superconfig);
 }
