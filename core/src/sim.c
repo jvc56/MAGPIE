@@ -1,4 +1,5 @@
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -18,14 +19,25 @@ Simmer *create_simmer(Config *config, Game *game) {
 }
 
 void add_score_stat(SimmedPlay *sp, int score, int is_bingo, int ply) {
-  // remember the mutex locking later.
+  if (sp->multithreaded) {
+    pthread_mutex_lock(&sp->mutex);
+  }
   push(sp->score_stat[ply], (double)score, 1);
   push(sp->bingo_stat[ply], (double)is_bingo, 1);
+  if (sp->multithreaded) {
+    pthread_mutex_unlock(&sp->mutex);
+  }
 }
 
 void add_equity_stat(SimmedPlay *sp, int initial_spread, int spread, float leftover) {
+  if (sp->multithreaded) {
+    pthread_mutex_lock(&sp->mutex);
+  }
   push(sp->equity_stat, (double)(spread - initial_spread) + (double)(leftover), 1);
   push(sp->leftover_stat, (double)leftover, 1);
+  if (sp->multithreaded) {
+    pthread_mutex_unlock(&sp->mutex);
+  }
 }
 
 void add_winpct_stat(SimmedPlay *sp, WinPct *wp, int spread,
@@ -56,16 +68,25 @@ void add_winpct_stat(SimmedPlay *sp, WinPct *wp, int spread,
       wpct = 1.0 - wpct;
     }
   }
+  if (sp->multithreaded) {
+    pthread_mutex_lock(&sp->mutex);
+  }
   push(sp->win_pct_stat, wpct, 1);
+  if (sp->multithreaded) {
+    pthread_mutex_unlock(&sp->mutex);
+  }
 }
 
 void make_game_copies(Simmer *simmer) {
   simmer->game_copies = malloc((sizeof(Game)) * simmer->threads);
   simmer->rack_placeholders = malloc((sizeof(Rack)) * simmer->threads);
+  simmer->thread_control = malloc((sizeof(ThreadControl)) * simmer->threads);
+
   for (int i = 0; i < simmer->threads; i++) {
     simmer->game_copies[i] = copy_game(simmer->game);
     set_backup_mode(simmer->game_copies[i], BACKUP_MODE_SIMULATION);
     simmer->rack_placeholders[i] = create_rack(simmer->game->gen->letter_distribution->size);
+    simmer->thread_control[i] = malloc(sizeof(ThreadControl));
   }
 }
 
@@ -73,9 +94,10 @@ void make_game_copies(Simmer *simmer) {
 // note: this does not check that num_plays and the actual number of plays
 // are the same. Caller should make sure we are not going to have a buffer
 // overrun here.
-void prepare_simmer(Simmer *simmer, int plies, Move **plays, int num_plays,
+void prepare_simmer(Simmer *simmer, int plies, int threads, Move **plays, int num_plays,
                     Rack *known_opp_rack) {
   simmer->max_plies = plies;
+  simmer->threads = threads;
   make_game_copies(simmer);
   if (known_opp_rack != NULL) {
     simmer->known_opp_rack = copy_rack(known_opp_rack);
@@ -84,6 +106,11 @@ void prepare_simmer(Simmer *simmer, int plies, Move **plays, int num_plays,
   }
   simmer->simmed_plays = malloc((sizeof(SimmedPlay)) * num_plays);
   simmer->num_simmed_plays = num_plays;
+  for (int i = 0; i < simmer->threads; i++) {
+    simmer->thread_control[i]->status = THREAD_CONTROL_IDLE;
+    simmer->thread_control[i]->thread_number = i;
+    simmer->thread_control[i]->simmer = simmer;
+  }
 
   for (int i = 0; i < num_plays; i++) {
     SimmedPlay *sp = malloc(sizeof(SimmedPlay));
@@ -100,6 +127,8 @@ void prepare_simmer(Simmer *simmer, int plies, Move **plays, int num_plays,
       sp->bingo_stat[j] = create_stat();
     }
     sp->ignore = 0;
+    sp->multithreaded = threads > 1 ? 1 : 0;
+    pthread_mutex_init(&sp->mutex, NULL);
     simmer->simmed_plays[i] = sp;
   }
 
@@ -107,11 +136,6 @@ void prepare_simmer(Simmer *simmer, int plies, Move **plays, int num_plays,
   simmer->initial_player = gc->player_on_turn_index;
   simmer->initial_spread = gc->players[gc->player_on_turn_index]->score -
                            gc->players[1 - gc->player_on_turn_index]->score;
-}
-
-void simulate(Simmer *simmer) {
-  // assume that prepare_simmer has already been called.
-  simmer->simming = 1;
 }
 
 Move *best_equity_play(Game *game) {
@@ -125,6 +149,39 @@ Move *best_equity_play(Game *game) {
   // restore old recorder type
   sp->play_recorder_type = recorder_type;
   return game->gen->move_list->moves[0];
+}
+
+void *single_thread_simmer(void *ptr) {
+  ThreadControl *tc = (ThreadControl *)ptr;
+  while (tc->status != THREAD_CONTROL_SHOULD_STOP) {
+    sim_single_iteration(tc->simmer, tc->simmer->max_plies, tc->thread_number);
+  }
+  return NULL;
+}
+
+void simulate(Simmer *simmer) {
+  // assume that prepare_simmer has already been called.
+  if (simmer->num_simmed_plays == 0) {
+    printf("Please prepare simmer first.\n");
+    return;
+  }
+
+  simmer->simming = 1;
+  for (int t = 0; t < simmer->threads; t++) {
+    pthread_create(&simmer->thread_control[t]->thread, NULL, single_thread_simmer, simmer->thread_control[t]);
+    simmer->thread_control[t]->status = THREAD_CONTROL_RUNNING;
+  }
+}
+
+void stop_simming(Simmer *simmer) {
+  for (int t = 0; t < simmer->threads; t++) {
+    simmer->thread_control[t]->status = THREAD_CONTROL_SHOULD_STOP;
+  }
+  for (int t = 0; t < simmer->threads; t++) {
+    pthread_join(simmer->thread_control[t]->thread, NULL);
+    simmer->thread_control[t]->status = THREAD_CONTROL_IDLE;
+  }
+  simmer->simming = 0;
 }
 
 void sim_single_iteration(Simmer *simmer, int plies, int thread) {
@@ -238,6 +295,7 @@ void print_sim_stats(Simmer *simmer) {
     store_move_description(play->move, placeholder, simmer->game->gen->letter_distribution);
     printf("%-20s%-9d%-16s%-16s%s\n", placeholder, play->move->score, wp, eq, ignore);
   }
+  printf("Iterations: %ld\n", simmer->simmed_plays[0]->win_pct_stat->cardinality);
 }
 
 // destructors
@@ -254,6 +312,7 @@ void free_simmed_plays(Simmer *simmer) {
     destroy_stat(simmer->simmed_plays[i]->leftover_stat);
     destroy_stat(simmer->simmed_plays[i]->win_pct_stat);
     destroy_move(simmer->simmed_plays[i]->move);
+    pthread_mutex_destroy(&simmer->simmed_plays[i]->mutex);
     free(simmer->simmed_plays[i]);
   }
   free(simmer->simmed_plays);
@@ -273,6 +332,13 @@ void free_rack_placeholders(Simmer *simmer) {
   free(simmer->rack_placeholders);
 }
 
+void free_thread_controllers(Simmer *simmer) {
+  for (int i = 0; i < simmer->threads; i++) {
+    free(simmer->thread_control[i]);
+  }
+  free(simmer->thread_control);
+}
+
 void destroy_simmer(Simmer *simmer) {
   free_simmed_plays(simmer);
   if (simmer->known_opp_rack != NULL) {
@@ -280,5 +346,6 @@ void destroy_simmer(Simmer *simmer) {
   }
   free_game_copies(simmer);
   free_rack_placeholders(simmer);
+  free_thread_controllers(simmer);
   free(simmer);
 }

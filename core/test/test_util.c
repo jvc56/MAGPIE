@@ -124,3 +124,12 @@ void write_rack_to_end_of_buffer(char *dest,
     }
   }
 }
+
+void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
+                         LetterDistribution *letter_distribution) {
+  for (size_t i = 0; i < strnlen(letters, 7); i++) {
+    draw_letter_to_rack(bag, rack,
+                        human_readable_letter_to_machine_letter(
+                            letter_distribution, letters[i]));
+  }
+}

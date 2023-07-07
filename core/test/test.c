@@ -77,7 +77,7 @@ int main(int argc, char *argv[]) {
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_SIM)) {
     Config *config = create_config_from_args(argc, argv);
-    perf_test_sim(config);
+    perf_test_multithread_sim(config);
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
     Config *csw_config = create_config(

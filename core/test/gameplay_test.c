@@ -12,15 +12,6 @@
 #include "superconfig.h"
 #include "test_util.h"
 
-void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
-                         LetterDistribution *letter_distribution) {
-  for (size_t i = 0; i < strnlen(letters, 7); i++) {
-    draw_letter_to_rack(bag, rack,
-                        human_readable_letter_to_machine_letter(
-                            letter_distribution, letters[i]));
-  }
-}
-
 void return_rack_to_bag(Rack *rack, Bag *bag) {
   for (int i = 0; i < (rack->array_size); i++) {
     for (int j = 0; j < rack->array[i]; j++) {

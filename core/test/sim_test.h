@@ -7,5 +7,6 @@
 void test_sim(SuperConfig *superconfig);
 
 void perf_test_sim(Config *config);
+void perf_test_multithread_sim(Config *config);
 
 #endif
