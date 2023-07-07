@@ -75,6 +75,10 @@ int main(int argc, char *argv[]) {
     Config *config = create_config_from_args(argc, argv);
     test_play_recorder(config);
     destroy_config(config);
+  } else if (!strcmp(argv[1], CMD_SIM)) {
+    Config *config = create_config_from_args(argc, argv);
+    perf_test_sim(config);
+    destroy_config(config);
   } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
     Config *csw_config = create_config(
         "./data/lexica/CSW21.kwg", "./data/letterdistributions/english.csv", "",

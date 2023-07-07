@@ -163,8 +163,12 @@ void store_move_description(Move *move, char *placeholder, LetterDistribution *l
   char tiles[20];
   char *tp = tiles;
   for (int i = 0; i < move->tiles_length; i++) {
-    tp += sprintf(tp, "%c",
-                  machine_letter_to_human_readable_letter(ld, move->tiles[i]));
+    if (move->tiles[i] == 0) {
+      tp += sprintf(tp, ".");
+    } else {
+      tp += sprintf(tp, "%c",
+                    machine_letter_to_human_readable_letter(ld, move->tiles[i]));
+    }
   }
   char coords[20];
   tp = coords;
