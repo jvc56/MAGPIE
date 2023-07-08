@@ -91,9 +91,9 @@ int main(int argc, char *argv[]) {
         "./data/strategy/default_english/winpct.csv");
 
     Config *nwl_config = create_config(
-        "./data/lexica/America.kwg", "./data/letterdistributions/english.csv",
-        "", "./data/lexica/CSW21.klv2", SORT_BY_SCORE, PLAY_RECORDER_TYPE_ALL,
-        "", -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
+        "./data/lexica/NWL20.kwg", "./data/letterdistributions/english.csv", "",
+        "./data/lexica/CSW21.klv2", SORT_BY_SCORE, PLAY_RECORDER_TYPE_ALL, "",
+        -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
         "./data/strategy/default_english/winpct.csv");
     SuperConfig *superconfig = create_superconfig(csw_config, nwl_config);
     unit_tests(superconfig);
