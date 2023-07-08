@@ -311,9 +311,9 @@ void autoplay_without_using_game_pairs(Config *config) {
   Inference *inference_2 =
       create_inference(30, config->letter_distribution->size);
   time_t seed;
+  seed = time(NULL);
+  reseed_prng(game->gen->bag, seed);
   for (int i = 0; i < config->number_of_games_or_pairs; i++) {
-    seed = time(NULL);
-    srand(seed);
     reset_game(game);
     play_game(game, inference_1, inference_2, tiles_played, full_rack, seed,
               test_inference);

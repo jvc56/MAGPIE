@@ -1,12 +1,14 @@
 #include <stdlib.h>
 
 #include "bag.h"
+#include "xoshiro.h"
 
 void shuffle(Bag *bag) {
-  if (bag->last_tile_index + 1 > 1) {
+  if (bag->last_tile_index > 0) {
     int i;
-    for (i = 0; i < bag->last_tile_index + 1 - 1; i++) {
-      int j = i + rand() / (RAND_MAX / (bag->last_tile_index + 1 - i) + 1);
+    for (i = 0; i < bag->last_tile_index; i++) {
+      int j = i + xoshiro_next(bag->prng) /
+                      (XOSHIRO_MAX / (bag->last_tile_index + 1 - i) + 1);
       int t = bag->tiles[j];
       bag->tiles[j] = bag->tiles[i];
       bag->tiles[i] = t;
@@ -28,20 +30,31 @@ void reset_bag(Bag *bag, LetterDistribution *letter_distribution) {
 
 Bag *create_bag(LetterDistribution *letter_distribution) {
   Bag *bag = malloc(sizeof(Bag));
+  // call reseed_prng if needed.
+  bag->prng = create_prng(42);
   reset_bag(bag, letter_distribution);
   return bag;
 }
 
 Bag *copy_bag(Bag *bag) {
   Bag *new_bag = malloc(sizeof(Bag));
-  for (int tile_index = 0; tile_index <= bag->last_tile_index; tile_index++) {
-    new_bag->tiles[tile_index] = bag->tiles[tile_index];
-  }
-  new_bag->last_tile_index = bag->last_tile_index;
+  new_bag->prng = create_prng(42);
+  copy_bag_into(new_bag, bag);
   return new_bag;
 }
 
-void destroy_bag(Bag *bag) { free(bag); }
+void copy_bag_into(Bag *dst, Bag *src) {
+  for (int tile_index = 0; tile_index <= src->last_tile_index; tile_index++) {
+    dst->tiles[tile_index] = src->tiles[tile_index];
+  }
+  dst->last_tile_index = src->last_tile_index;
+  copy_prng_into(dst->prng, src->prng);
+}
+
+void destroy_bag(Bag *bag) {
+  destroy_prng(bag->prng);
+  free(bag);
+}
 
 // This assumes the letter is in the bag
 void draw_letter(Bag *bag, uint8_t letter) {
@@ -63,9 +76,12 @@ void add_letter(Bag *bag, uint8_t letter) {
   }
   int insert_index = 0;
   if (bag->last_tile_index >= 0) {
-    insert_index = rand() % (bag->last_tile_index + 1);
+    // XXX: should use division instead?
+    insert_index = xoshiro_next(bag->prng) % (bag->last_tile_index + 1);
   }
   bag->tiles[bag->last_tile_index + 1] = bag->tiles[insert_index];
   bag->tiles[insert_index] = letter;
   bag->last_tile_index++;
 }
+
+void reseed_prng(Bag *bag, uint64_t seed) { seed_prng(bag->prng, seed); }

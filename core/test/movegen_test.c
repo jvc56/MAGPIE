@@ -10,6 +10,7 @@
 #include "../src/move.h"
 #include "../src/movegen.h"
 #include "../src/player.h"
+#include "../src/util.h"
 
 #include "cross_set_test.h"
 #include "game_print.h"
@@ -490,6 +491,7 @@ void top_equity_play_recorder_test(SuperConfig *superconfig) {
 
   Game *game = create_game(config);
   Player *player = game->players[0];
+  int saved_recorder_type = player->strategy_params->play_recorder_type;
   player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
   char test_string[100];
   reset_string(test_string);
@@ -516,6 +518,8 @@ void top_equity_play_recorder_test(SuperConfig *superconfig) {
                                            game->gen->letter_distribution);
   assert(!strcmp(test_string, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780"));
   reset_string(test_string);
+  // reset play recorder type as this is a shared config.
+  player->strategy_params->play_recorder_type = saved_recorder_type;
 
   destroy_game(game);
 }

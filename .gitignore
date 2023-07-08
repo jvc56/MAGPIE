@@ -12,5 +12,6 @@ perf*
 .env
 */data/lexica/*
 */data/letterdistributions/*
+*/data/strategy/*
 oprofile_data
 TODO

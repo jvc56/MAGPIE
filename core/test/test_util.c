@@ -40,24 +40,7 @@ void write_float_to_end_of_buffer(char *buffer, double d) {
 
 void reset_string(char *string) { memset(string, 0, sizeof(*string)); }
 
-int within_epsilon(double a, double b) { return fabs(a - b) < __DBL_EPSILON__; }
-
-double get_leave_value_for_move(KLV *klv, Move *move, Rack *rack) {
-  int valid_tiles = move->tiles_length;
-  if (move->move_type == MOVE_TYPE_EXCHANGE) {
-    valid_tiles = move->tiles_played;
-  }
-  for (int i = 0; i < valid_tiles; i++) {
-    if (move->tiles[i] != PLAYED_THROUGH_MARKER) {
-      if (is_blanked(move->tiles[i])) {
-        take_letter_from_rack(rack, BLANK_MACHINE_LETTER);
-      } else {
-        take_letter_from_rack(rack, move->tiles[i]);
-      }
-    }
-  }
-  return get_leave_value(klv, rack);
-}
+int within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
 double get_leave_value_for_rack(KLV *klv, Rack *rack) {
   return get_leave_value(klv, rack);
@@ -139,5 +122,14 @@ void write_rack_to_end_of_buffer(char *dest,
     for (int k = 0; k < rack->array[i]; k++) {
       write_user_visible_letter_to_end_of_buffer(dest, letter_distribution, i);
     }
+  }
+}
+
+void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
+                         LetterDistribution *letter_distribution) {
+  for (size_t i = 0; i < strnlen(letters, 7); i++) {
+    draw_letter_to_rack(bag, rack,
+                        human_readable_letter_to_machine_letter(
+                            letter_distribution, letters[i]));
   }
 }

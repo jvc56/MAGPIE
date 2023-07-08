@@ -23,16 +23,19 @@ Rack *create_rack(int array_size) {
 
 Rack *copy_rack(Rack *rack) {
   Rack *new_rack = malloc(sizeof(Rack));
-  new_rack->array_size = rack->array_size;
   new_rack->array = (int *)malloc(rack->array_size * sizeof(int));
+  new_rack->array_size = rack->array_size;
   reset_rack(new_rack);
-
-  for (int i = 0; i < rack->array_size; i++) {
-    new_rack->array[i] = rack->array[i];
-  }
-  new_rack->number_of_letters = rack->number_of_letters;
-  new_rack->empty = rack->empty;
+  copy_rack_into(new_rack, rack);
   return new_rack;
+}
+
+void copy_rack_into(Rack *dst, Rack *src) {
+  for (int i = 0; i < src->array_size; i++) {
+    dst->array[i] = src->array[i];
+  }
+  dst->number_of_letters = src->number_of_letters;
+  dst->empty = src->empty;
 }
 
 void destroy_rack(Rack *rack) {
@@ -70,5 +73,15 @@ void set_rack_to_string(Rack *rack, const char *rack_string,
   for (size_t i = 0; i < strlen(rack_string); i++) {
     add_letter_to_rack(rack, human_readable_letter_to_machine_letter(
                                  letter_distribution, rack_string[i]));
+  }
+}
+
+void rack_to_string(Rack *rack, char *rack_string, LetterDistribution *letter_distribution) {
+  char *rp = rack_string;
+  for (int i = 0; i < rack->array_size; i++) {
+    for (int j = 0; j < rack->array[i]; j++) {
+      unsigned char letter = machine_letter_to_human_readable_letter(letter_distribution, i);
+      rp += sprintf(rp, "%c", letter);
+    }
   }
 }

@@ -8,5 +8,6 @@
 
 void draw_at_most_to_rack(Bag *bag, Rack *rack, int n);
 void play_move(Game *game, Move *move);
+void set_random_rack(Game *game, int pidx, Rack *existing_rack);
 
 #endif

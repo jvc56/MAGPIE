@@ -139,6 +139,27 @@ void reset_game(Game *game) {
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
+  game->backup_cursor = 0;
+}
+
+void pre_allocate_backups(Game *game) {
+  // pre-allocate heap backup structures to make backups as fast as possible.
+  for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+    game->game_backups[i] = malloc(sizeof(MinimalGameBackup));
+    game->game_backups[i]->bag = create_bag(game->gen->letter_distribution);
+    game->game_backups[i]->board = create_board();
+    game->game_backups[i]->p0rack = create_rack(game->gen->letter_distribution->size);
+    game->game_backups[i]->p1rack = create_rack(game->gen->letter_distribution->size);
+  }
+}
+
+void set_backup_mode(Game *game, int backup_mode) {
+  game->backup_mode = backup_mode;
+  if (backup_mode == BACKUP_MODE_SIMULATION && !game->backups_preallocated) {
+    game->backup_cursor = 0;
+    pre_allocate_backups(game);
+    game->backups_preallocated = 1;
+  }
 }
 
 Game *create_game(Config *config) {
@@ -153,6 +174,9 @@ Game *create_game(Config *config) {
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
+  game->backup_cursor = 0;
+  game->backup_mode = BACKUP_MODE_OFF;
+  game->backups_preallocated = 0;
   return game;
 }
 
@@ -164,12 +188,70 @@ Game *copy_game(Game *game) {
   new_game->player_on_turn_index = game->player_on_turn_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
+  // note: game backups must be explicitly handled by the caller if they want
+  // game copies to have backups.
+  new_game->backup_cursor = 0;
+  new_game->backup_mode = BACKUP_MODE_OFF;
+  new_game->backups_preallocated = 0;
   return new_game;
+}
+
+void backup_game(Game *game) {
+  if (game->backup_mode == BACKUP_MODE_OFF) {
+    return;
+  }
+  if (game->backup_mode == BACKUP_MODE_SIMULATION) {
+    MinimalGameBackup *state = game->game_backups[game->backup_cursor];
+    copy_board_into(state->board, game->gen->board);
+    copy_bag_into(state->bag, game->gen->bag);
+    state->game_end_reason = game->game_end_reason;
+    state->player_on_turn_index = game->player_on_turn_index;
+    state->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
+    copy_rack_into(state->p0rack, game->players[0]->rack);
+    state->p0score = game->players[0]->score;
+    copy_rack_into(state->p1rack, game->players[1]->rack);
+    state->p1score = game->players[1]->score;
+
+    game->backup_cursor++;
+  }
+}
+
+void unplay_last_move(Game *game) {
+  // restore from backup (pop the last element).
+  if (game->backup_cursor == 0) {
+    printf("error: no backup\n");
+    abort();
+  }
+  MinimalGameBackup *state = game->game_backups[game->backup_cursor - 1];
+  game->backup_cursor--;
+
+  game->consecutive_scoreless_turns = state->consecutive_scoreless_turns;
+  game->game_end_reason = state->game_end_reason;
+  game->player_on_turn_index = state->player_on_turn_index;
+  game->players[0]->score = state->p0score;
+  game->players[1]->score = state->p1score;
+  copy_rack_into(game->players[0]->rack, state->p0rack);
+  copy_rack_into(game->players[1]->rack, state->p1rack);
+  copy_bag_into(game->gen->bag, state->bag);
+  copy_board_into(game->gen->board, state->board);
+}
+
+void destroy_backups(Game *game) {
+  for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+    destroy_rack(game->game_backups[i]->p0rack);
+    destroy_rack(game->game_backups[i]->p1rack);
+    destroy_bag(game->game_backups[i]->bag);
+    destroy_board(game->game_backups[i]->board);
+    free(game->game_backups[i]);
+  }
 }
 
 void destroy_game(Game *game) {
   destroy_generator(game->gen);
   destroy_player(game->players[0]);
   destroy_player(game->players[1]);
+  if (game->backups_preallocated) {
+    destroy_backups(game);
+  }
   free(game);
 }
