@@ -10,4 +10,4 @@ jobs:
         with:
           version: latest
           platform: x64
-      - run: ./run u
+      - run: cd core && ./run u
