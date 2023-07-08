@@ -10,4 +10,15 @@ jobs:
         with:
           version: latest
           platform: x64
+      - run: wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/NWL20.kwg
+      - run: wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.kwg
+      - run: wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.klv2
+      - run: wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/english.klv2
+      - run: wget https://github.com/domino14/macondo/raw/master/data/strategy/default_english/winpct.csv
+      - run: wget https://woogles-prod-assets.s3.amazonaws.com/CSW21.csv.gz
+      - run: mkdir core/data/lexica && mkdir -p core/data/strategy/default_english
+      - run: mv *.kwg core/data/lexica
+      - run: mv *.klv2 core/data/lexica
+      - run: mv winpct.csv core/data/strategy/default_english
+      - run: gunzip CSW21.csv.gz && mv CSW21.csv core/data/lexica
       - run: cd core && ./run u
