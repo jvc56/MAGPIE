@@ -11,36 +11,31 @@ jobs:
           version: latest
           platform: x64
 
-      - name: Get lexica cache
-        id: cache-lexica
+      - name: Get datafile cache
+        id: cache-datafiles
         uses: actions/cache@v3
         with:
-          path: ~/downloaded-lexica
-          key: ${{runner.os}}-downloaded-lexica
+          path: |
+            core/data/lexica
+            core/data/strategy
+          key: downloaded-data-files
 
-      - name: Download lexica files
-        if: steps.cache-lexica.outputs.cache-hit != 'true'
+      - name: Download data files
+        if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: >
-          mkdir ~/downloaded-lexica &&
+          mkdir -p core/data/strategy/default_english &&
+          mkdir -p core/data/lexica &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/NWL20.kwg &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.kwg &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.klv2 &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/english.klv2 &&
           wget https://github.com/domino14/macondo/raw/master/data/strategy/default_english/winpct.csv &&
           wget https://woogles-prod-assets.s3.amazonaws.com/CSW21.csv.gz &&
-          mv *.kwg ~/downloaded-lexica &&
-          mv *.klv2 ~/downloaded-lexica &&
-          mv *.csv ~/downloaded-lexica &&
-          mv *.csv.gz ~/downloaded-lexica 
-
-      - name: Move lexica files in place
-        run: >
-          mkdir core/data/lexica && mkdir -p core/data/strategy/default_english &&
-          mv ~/downloaded-lexica/*.kwg core/data/lexica &&
-          mv ~/downloaded-lexica/*.klv2 core/data/lexica &&
-          mv ~/downloaded-lexica/winpct.csv core/data/strategy/default_english &&
-          mv ~/downloaded-lexica/CSW21.csv.gz core/data/lexica &&
-          cd core/data/lexica && gunzip CSW21.csv.gz 
+          mv *.kwg core/data/lexica &&
+          mv *.klv2 core/data/lexica &&
+          mv *.csv core/data/strategy/default_english &&
+          gunzip CSW21.csv.gz &&
+          mv *.csv core/data/lexica
 
       - name: Run unit tests
         run: cd core && ./run u
