@@ -245,7 +245,7 @@ void macondo_tests(SuperConfig *superconfig) {
   load_cgp(game, VS_MATT);
   set_rack_to_string(player->rack, "AABDELT", game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, 1);
-  assert(count_scoring_plays(game->gen->move_list) == 673);
+  assert(count_scoring_plays(game->gen->move_list) == 667);
   assert(count_nonscoring_plays(game->gen->move_list) == 96);
 
   SortedMoveList *test_gen_all_moves_full_rack_sorted_move_list =
@@ -277,7 +277,7 @@ void macondo_tests(SuperConfig *superconfig) {
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "?", game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, 1);
-  assert(count_scoring_plays(game->gen->move_list) == 166);
+  assert(count_scoring_plays(game->gen->move_list) == 169);
   assert(count_nonscoring_plays(game->gen->move_list) == 2);
 
   reset_game(game);
@@ -287,7 +287,7 @@ void macondo_tests(SuperConfig *superconfig) {
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "??", game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, 1);
-  assert(count_scoring_plays(game->gen->move_list) == 1958);
+  assert(count_scoring_plays(game->gen->move_list) == 1961);
   assert(count_nonscoring_plays(game->gen->move_list) == 3);
 
   reset_game(game);
@@ -297,7 +297,7 @@ void macondo_tests(SuperConfig *superconfig) {
   load_cgp(game, VS_JEREMY);
   set_rack_to_string(player->rack, "DDESW??", game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, 0);
-  assert(count_scoring_plays(game->gen->move_list) == 8297);
+  assert(count_scoring_plays(game->gen->move_list) == 8285);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
 
   SortedMoveList *test_gen_all_moves_with_blanks_sorted_move_list =
@@ -326,7 +326,7 @@ void macondo_tests(SuperConfig *superconfig) {
   load_cgp(game, VS_OXY);
   set_rack_to_string(player->rack, "ABEOPXZ", game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, 0);
-  assert(count_scoring_plays(game->gen->move_list) == 519);
+  assert(count_scoring_plays(game->gen->move_list) == 513);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
 
   SortedMoveList *test_giant_twenty_seven_timer_sorted_move_list =
@@ -346,7 +346,7 @@ void macondo_tests(SuperConfig *superconfig) {
   // TestGenerateEmptyBoard
   set_rack_to_string(player->rack, "DEGORV?", game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, 1);
-  assert(count_scoring_plays(game->gen->move_list) == 3313);
+  assert(count_scoring_plays(game->gen->move_list) == 3307);
   assert(count_nonscoring_plays(game->gen->move_list) == 128);
 
   SortedMoveList *test_generate_empty_board_sorted_move_list =

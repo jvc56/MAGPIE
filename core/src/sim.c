@@ -1,5 +1,7 @@
+#include <assert.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -10,12 +12,17 @@
 #include "util.h"
 #include "xoshiro.h"
 
+#define MAX_STOPPING_ITERATION_CT 4000
+#define PER_PLY_STOPPING_SCALING 1250
+#define SIMILAR_PLAYS_ITER_CUTOFF 1000
+
 Simmer *create_simmer(Config *config, Game *game) {
   Simmer *simmer = malloc(sizeof(Simmer));
   simmer->game = game;
   simmer->threads = 1;
   simmer->simming = 0;
   simmer->win_pcts = config->win_pcts;
+  simmer->stopping_condition = SIM_STOPPING_CONDITION_NONE;
   return simmer;
 }
 
@@ -74,6 +81,16 @@ void add_winpct_stat(SimmedPlay *sp, WinPct *wp, int spread, float leftover,
     pthread_mutex_lock(&sp->mutex);
   }
   push(sp->win_pct_stat, wpct, 1);
+  if (sp->multithreaded) {
+    pthread_mutex_unlock(&sp->mutex);
+  }
+}
+
+void ignore_play(SimmedPlay *sp) {
+  if (sp->multithreaded) {
+    pthread_mutex_lock(&sp->mutex);
+  }
+  sp->ignore = 1;
   if (sp->multithreaded) {
     pthread_mutex_unlock(&sp->mutex);
   }
@@ -139,14 +156,28 @@ void prepare_simmer(Simmer *simmer, int plies, int threads, Move **plays,
     }
     sp->ignore = 0;
     sp->multithreaded = threads > 1 ? 1 : 0;
+    sp->play_id = i;
     pthread_mutex_init(&sp->mutex, NULL);
     simmer->simmed_plays[i] = sp;
   }
-
+  simmer->iteration_count = 0;
   Game *gc = simmer->game_copies[0];
+  pthread_mutex_init(&simmer->simmed_plays_mutex, NULL);
   simmer->initial_player = gc->player_on_turn_index;
   simmer->initial_spread = gc->players[gc->player_on_turn_index]->score -
                            gc->players[1 - gc->player_on_turn_index]->score;
+
+  simmer->play_similarity_cache = malloc(sizeof(int) * num_plays * num_plays);
+  for (int i = 0; i < num_plays; i++) {
+    for (int j = 0; j < num_plays; j++) {
+      if (i == j) {
+        simmer->play_similarity_cache[i * num_plays + j] = PLAYS_IDENTICAL;
+      } else {
+        simmer->play_similarity_cache[i * num_plays + j] =
+            UNINITIALIZED_SIMILARITY;
+      }
+    }
+  }
 }
 
 Move *best_equity_play(Game *game) {
@@ -163,12 +194,191 @@ Move *best_equity_play(Game *game) {
   return game->gen->move_list->moves[0];
 }
 
+void set_stop_flags(Simmer *simmer) {
+  for (int t = 0; t < simmer->threads; t++) {
+    simmer->thread_control[t]->status = THREAD_CONTROL_SHOULD_STOP;
+  }
+}
+
+void stop_simming(Simmer *simmer) {
+  set_stop_flags(simmer);
+  for (int t = 0; t < simmer->threads; t++) {
+    pthread_join(simmer->thread_control[t]->thread, NULL);
+    simmer->thread_control[t]->status = THREAD_CONTROL_IDLE;
+  }
+  simmer->simming = 0;
+}
+
+int handle_potential_stopping_condition(Simmer *simmer) {
+  if (simmer->num_simmed_plays < 2) {
+    return 1; // should stop
+  }
+  if (simmer->iteration_count >
+      (MAX_STOPPING_ITERATION_CT +
+       (simmer->max_plies * PER_PLY_STOPPING_SCALING))) {
+    return 1;
+  }
+  int ignored_plays = 0;
+  for (int i = 0; i < simmer->num_simmed_plays; i++) {
+    if (simmer->simmed_plays[i]->ignore) {
+      ignored_plays++;
+    }
+  }
+  if (ignored_plays >= simmer->num_simmed_plays - 1) {
+    // There is only one unignored play; exit.
+    return 1;
+  }
+  pthread_mutex_lock(&simmer->simmed_plays_mutex);
+  sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
+
+  double zval = 0;
+  switch (simmer->stopping_condition) {
+  case SIM_STOPPING_CONDITION_95PCT:
+    zval = STATS_Z95;
+    break;
+  case SIM_STOPPING_CONDITION_98PCT:
+    zval = STATS_Z98;
+    break;
+  case SIM_STOPPING_CONDITION_99PCT:
+    zval = STATS_Z99;
+    break;
+  }
+
+  SimmedPlay *tentative_winner = simmer->simmed_plays[0];
+  double mu = tentative_winner->win_pct_stat->mean;
+  double stderr = get_standard_error(tentative_winner->win_pct_stat, zval);
+  int new_ignored = 0;
+  for (int i = 1; i < simmer->num_simmed_plays; i++) {
+    if (simmer->simmed_plays[i]->ignore) {
+      continue;
+    }
+    double mu_i = simmer->simmed_plays[i]->win_pct_stat->mean;
+    double stderr_i =
+        get_standard_error(simmer->simmed_plays[i]->win_pct_stat, zval);
+
+    if ((mu - stderr) > (mu_i + stderr_i)) {
+      ignore_play(simmer->simmed_plays[i]);
+      new_ignored++;
+    } else if (simmer->iteration_count > SIMILAR_PLAYS_ITER_CUTOFF) {
+      if (plays_are_similar(simmer, tentative_winner,
+                            simmer->simmed_plays[i])) {
+        ignore_play(simmer->simmed_plays[i]);
+        new_ignored++;
+      }
+    }
+  }
+  pthread_mutex_unlock(&simmer->simmed_plays_mutex);
+
+  if (ignored_plays + new_ignored >= simmer->num_simmed_plays - 1) {
+    // if there is only 1 unignored play, exit.
+    // printf("Only one unignored play, we should stop simming.\n");
+    return 1;
+  }
+  return 0;
+}
+
 void *single_thread_simmer(void *ptr) {
   ThreadControl *tc = (ThreadControl *)ptr;
+  int th_iteration_ct = 0;
   while (tc->status != THREAD_CONTROL_SHOULD_STOP) {
     sim_single_iteration(tc->simmer, tc->simmer->max_plies, tc->thread_number);
+    th_iteration_ct++;
+    if (tc->thread_number == 0 &&
+        tc->simmer->stopping_condition != SIM_STOPPING_CONDITION_NONE) {
+      // Let's let this thread also be the "main" thread; only this one can
+      // decide to ignore plays and/or stop the simulation if there is a
+      // stopping condition set.
+      // We should check every 512 iterations or so, across all different
+      // threads.
+      int estimated_num_iterations = tc->simmer->threads * th_iteration_ct;
+      int should_stop = 0;
+      if ((estimated_num_iterations & 511) < tc->simmer->threads) {
+        should_stop = handle_potential_stopping_condition(tc->simmer);
+      }
+      if (should_stop) {
+        set_stop_flags(tc->simmer);
+      }
+    }
   }
   return NULL;
+}
+
+int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2) {
+  // look in the cache first
+  int cache_value =
+      simmer->play_similarity_cache[m1->play_id +
+                                    simmer->num_simmed_plays * m2->play_id];
+  assert(cache_value != PLAYS_IDENTICAL);
+  if (cache_value == PLAYS_SIMILAR) {
+    return 1;
+  } else if (cache_value == PLAYS_NOT_SIMILAR) {
+    return 0;
+  }
+  int cache_index1 = m1->play_id + simmer->num_simmed_plays * m2->play_id;
+  int cache_index2 = m2->play_id + simmer->num_simmed_plays * m1->play_id;
+
+  if (m1->move->move_type != m2->move->move_type) {
+    simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
+    simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
+    return 0;
+  }
+
+  // Otherwise, we must compute play similarity and fill in the cache.
+  // two plays are "similar" if they use the same tiles, and they start at
+  // the same square.
+  if (!(m1->move->vertical == m2->move->vertical &&
+        m1->move->col_start == m2->move->col_start &&
+        m1->move->row_start == m2->move->row_start)) {
+
+    simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
+    simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
+    return 0;
+  }
+  if (!(m1->move->tiles_played == m2->move->tiles_played &&
+        m1->move->tiles_length == m2->move->tiles_length)) {
+    simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
+    simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
+    return 0;
+  }
+
+  // Re-use thread 0's rack placeholder (this should only run in thread 0).
+  Rack *ph = simmer->rack_placeholders[0];
+  // Create a rack from m1, then subtract the rack from m2. The final
+  // rack should have all zeroes.
+  reset_rack(ph);
+  for (int i = 0; i < m1->move->tiles_length; i++) {
+    if (m1->move->tiles[i] == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    int ml = m1->move->tiles[i];
+    if (is_blanked(ml)) {
+      ml = 0;
+    }
+    ph->array[ml]++;
+  }
+
+  for (int i = 0; i < m2->move->tiles_length; i++) {
+    if (m2->move->tiles[i] == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    int ml = m2->move->tiles[i];
+    if (is_blanked(ml)) {
+      ml = 0;
+    }
+    ph->array[ml]--;
+  }
+
+  for (int i = 0; i < ph->array_size; i++) {
+    if (ph->array[i] != 0) {
+      simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
+      simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
+      return 0;
+    }
+  }
+  simmer->play_similarity_cache[cache_index1] = PLAYS_SIMILAR;
+  simmer->play_similarity_cache[cache_index2] = PLAYS_SIMILAR;
+
+  return 1;
 }
 
 void simulate(Simmer *simmer) {
@@ -186,10 +396,23 @@ void simulate(Simmer *simmer) {
   }
 }
 
-void stop_simming(Simmer *simmer) {
-  for (int t = 0; t < simmer->threads; t++) {
-    simmer->thread_control[t]->status = THREAD_CONTROL_SHOULD_STOP;
+void blocking_simulate(Simmer *simmer) {
+  // Like simulate, but it blocks. This function must only be called if we
+  // have a stopping condition set up.
+  if (simmer->num_simmed_plays == 0) {
+    printf("Please prepare simmer first.\n");
+    return;
   }
+  if (simmer->stopping_condition == SIM_STOPPING_CONDITION_NONE) {
+    printf("You must have a stopping condition set to use this function.\n");
+  }
+  simmer->simming = 1;
+  for (int t = 0; t < simmer->threads; t++) {
+    pthread_create(&simmer->thread_control[t]->thread, NULL,
+                   single_thread_simmer, simmer->thread_control[t]);
+    simmer->thread_control[t]->status = THREAD_CONTROL_RUNNING;
+  }
+
   for (int t = 0; t < simmer->threads; t++) {
     pthread_join(simmer->thread_control[t]->thread, NULL);
     simmer->thread_control[t]->status = THREAD_CONTROL_IDLE;
@@ -260,11 +483,22 @@ void sim_single_iteration(Simmer *simmer, int plies, int thread) {
     // reset to first state. we only need to restore one backup.
     unplay_last_move(gc);
   }
+  atomic_fetch_add(&simmer->iteration_count, 1);
+}
+
+void set_stopping_condition(Simmer *simmer, int sc) {
+  simmer->stopping_condition = sc;
 }
 
 int compare_simmed_plays(const void *a, const void *b) {
   const SimmedPlay *play_a = *(const SimmedPlay **)a;
   const SimmedPlay *play_b = *(const SimmedPlay **)b;
+
+  if (play_a->ignore && !play_b->ignore) {
+    return 1;
+  } else if (play_b->ignore && !play_a->ignore) {
+    return -1;
+  }
 
   // Compare the mean values of win_pct_stat
   double mean_a = play_a->win_pct_stat->mean;
@@ -295,7 +529,10 @@ void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
 }
 
 void print_sim_stats(Simmer *simmer) {
+  pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
+  pthread_mutex_unlock(&simmer->simmed_plays_mutex);
+
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
   for (int i = 0; i < simmer->num_simmed_plays; i++) {
     SimmedPlay *play = simmer->simmed_plays[i];
@@ -317,8 +554,7 @@ void print_sim_stats(Simmer *simmer) {
     printf("%-20s%-9d%-16s%-16s%s\n", placeholder, play->move->score, wp, eq,
            ignore);
   }
-  printf("Iterations: %ld\n",
-         simmer->simmed_plays[0]->win_pct_stat->cardinality);
+  printf("Iterations: %d\n", simmer->iteration_count);
 }
 
 // destructors
@@ -370,5 +606,6 @@ void destroy_simmer(Simmer *simmer) {
   free_game_copies(simmer);
   free_rack_placeholders(simmer);
   free_thread_controllers(simmer);
+  free(simmer->play_similarity_cache);
   free(simmer);
 }

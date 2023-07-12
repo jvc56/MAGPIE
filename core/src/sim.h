@@ -1,6 +1,7 @@
 #ifndef SIM_H
 #define SIM_H
 #include <pthread.h>
+#include <stdatomic.h>
 
 #include "game.h"
 #include "move.h"
@@ -12,6 +13,11 @@
 #define THREAD_CONTROL_RUNNING 1
 #define THREAD_CONTROL_SHOULD_STOP 2
 
+#define PLAYS_NOT_SIMILAR 0
+#define PLAYS_SIMILAR 1
+#define UNINITIALIZED_SIMILARITY 2
+#define PLAYS_IDENTICAL 3
+
 typedef struct SimmedPlay {
   Move *move;
   Stat **score_stat;
@@ -21,6 +27,7 @@ typedef struct SimmedPlay {
   Stat *win_pct_stat;
   int ignore;
   int multithreaded;
+  int play_id;
   pthread_mutex_t mutex;
 } SimmedPlay;
 
@@ -35,17 +42,21 @@ struct simmer {
   int initial_spread;
   int max_plies;
   int initial_player;
-  int iteration_count;
+  atomic_int iteration_count;
   int threads;
   int num_simmed_plays;
 
-  // Actually bool:
   int simming;
   ThreadControl **thread_control;
+  int stopping_condition;
 
   SimmedPlay **simmed_plays;
+  pthread_mutex_t simmed_plays_mutex;
+
   Rack *known_opp_rack;
   WinPct *win_pcts;
+
+  int *play_similarity_cache;
 };
 
 struct threadcontrol {
@@ -56,9 +67,11 @@ struct threadcontrol {
 };
 
 Simmer *create_simmer(Config *config, Game *game);
+void blocking_simulate(Simmer *simmer);
 void destroy_simmer(Simmer *simmer);
-void prepare_simmer(Simmer *simmer, int plies, int threads, Move **plays, int num_plays,
-                    Rack *known_opp_rack);
+int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);
+void prepare_simmer(Simmer *simmer, int plies, int threads, Move **plays,
+                    int num_plays, Rack *known_opp_rack);
 void print_sim_stats(Simmer *simmer);
 void set_stopping_condition(Simmer *simmer, int sc);
 void simulate(Simmer *simmer);
