@@ -12,8 +12,8 @@
 #include "util.h"
 #include "xoshiro.h"
 
-#define MAX_STOPPING_ITERATION_CT 4500
-#define PER_PLY_STOPPING_SCALING 1500
+#define MAX_STOPPING_ITERATION_CT 4000
+#define PER_PLY_STOPPING_SCALING 1250
 #define SIMILAR_PLAYS_ITER_CUTOFF 1000
 
 Simmer *create_simmer(Config *config, Game *game) {
@@ -493,6 +493,12 @@ void set_stopping_condition(Simmer *simmer, int sc) {
 int compare_simmed_plays(const void *a, const void *b) {
   const SimmedPlay *play_a = *(const SimmedPlay **)a;
   const SimmedPlay *play_b = *(const SimmedPlay **)b;
+
+  if (play_a->ignore && !play_b->ignore) {
+    return 1;
+  } else if (play_b->ignore && !play_a->ignore) {
+    return -1;
+  }
 
   // Compare the mean values of win_pct_stat
   double mean_a = play_a->win_pct_stat->mean;
