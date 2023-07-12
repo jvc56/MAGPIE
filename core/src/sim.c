@@ -230,7 +230,6 @@ int handle_potential_stopping_condition(Simmer *simmer) {
   }
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
-  pthread_mutex_unlock(&simmer->simmed_plays_mutex);
 
   double zval = 0;
   switch (simmer->stopping_condition) {
@@ -268,6 +267,8 @@ int handle_potential_stopping_condition(Simmer *simmer) {
       }
     }
   }
+  pthread_mutex_unlock(&simmer->simmed_plays_mutex);
+
   if (ignored_plays + new_ignored >= simmer->num_simmed_plays - 1) {
     // if there is only 1 unignored play, exit.
     // printf("Only one unignored play, we should stop simming.\n");
