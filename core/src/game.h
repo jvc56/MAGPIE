@@ -44,5 +44,7 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter);
 void set_backup_mode(Game *game, int backup_mode);
 void backup_game(Game *game);
 void unplay_last_move(Game *game);
+void lexicon_ld_from_cgp(char *cgp, char *lexicon, char *ldname);
+int tiles_unseen(Game *game);
 
 #endif

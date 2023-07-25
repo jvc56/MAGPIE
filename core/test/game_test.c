@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "../src/config.h"
 #include "../src/game.h"
@@ -81,7 +82,24 @@ void test_game_main(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
+void test_lexicon_ld_from_cgp() {
+  char lexicon[20] = "";
+  char ldname[20] = "";
+  char g1[] = "15/15/15/15/15/15/1FlAREUP7/7AGAVE3/15/15/15/15/15/15/15 "
+              "AEINNO?/AHIOSTU 0/86 0 lex CSW21;";
+  lexicon_ld_from_cgp(g1, lexicon, ldname);
+  assert(strcmp(lexicon, "CSW21") == 0);
+  assert(strcmp(ldname, "english") == 0);
+
+  char g2[] = "15/15/15/15/15/15/1FlAREUP7/7AGAVE3/15/15/15/15/15/15/15 "
+              "AEINNO?/AHIOSTU 0/86 0 ld messedupenglish; lex NWL20;";
+  lexicon_ld_from_cgp(g2, lexicon, ldname);
+  assert(strcmp(lexicon, "NWL20") == 0);
+  assert(strcmp(ldname, "messedupenglish") == 0);
+}
+
 void test_game(SuperConfig *superconfig) {
   test_game_main(superconfig);
   test_load_cgp(superconfig);
+  test_lexicon_ld_from_cgp();
 }

@@ -12,6 +12,7 @@
 #define THREAD_CONTROL_IDLE 0
 #define THREAD_CONTROL_RUNNING 1
 #define THREAD_CONTROL_SHOULD_STOP 2
+#define THREAD_CONTROL_EXITING 3
 
 #define PLAYS_NOT_SIMILAR 0
 #define PLAYS_SIMILAR 1
@@ -34,6 +35,8 @@ typedef struct SimmedPlay {
 typedef struct threadcontrol ThreadControl;
 typedef struct simmer Simmer;
 
+typedef void (*callback_fn)(void);
+
 struct simmer {
   Game *game; // contains a generator already.
   Game **game_copies;
@@ -45,8 +48,8 @@ struct simmer {
   atomic_int iteration_count;
   int threads;
   int num_simmed_plays;
+  int ucgi_mode;
 
-  int simming;
   ThreadControl **thread_control;
   int stopping_condition;
 
@@ -57,12 +60,13 @@ struct simmer {
   WinPct *win_pcts;
 
   int *play_similarity_cache;
+  callback_fn endsim_callback;
 };
 
 struct threadcontrol {
   Simmer *simmer;
   int thread_number;
-  int status;
+  volatile int status;
   pthread_t thread;
 };
 
@@ -72,8 +76,11 @@ void destroy_simmer(Simmer *simmer);
 int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);
 void prepare_simmer(Simmer *simmer, int plies, int threads, Move **plays,
                     int num_plays, Rack *known_opp_rack);
+void print_ucgi_stats(Simmer *simmer, int print_best_play);
 void print_sim_stats(Simmer *simmer);
 void set_stopping_condition(Simmer *simmer, int sc);
+void set_ucgi_mode(Simmer *simmer, int mode);
+void set_endsim_callback(Simmer *, callback_fn);
 void simulate(Simmer *simmer);
 void sim_single_iteration(Simmer *simmer, int plies, int thread);
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays);
