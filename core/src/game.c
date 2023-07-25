@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,13 +31,23 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter) {
 
 char add_player_rack(const char *cgp, int *cgp_index, Game *game,
                      int player_index) {
+  char rack_placeholder[30];
   char cgp_char = cgp[*cgp_index];
+  int rpidx = 0;
   while (cgp_char != '/' && cgp_char != ' ') {
-    draw_letter_to_rack(game->gen->bag, game->players[player_index]->rack,
-                        human_readable_letter_to_machine_letter(
-                            game->gen->letter_distribution, cgp_char));
+    rack_placeholder[rpidx] = cgp_char;
+    rpidx++;
     (*cgp_index)++;
     cgp_char = cgp[*cgp_index];
+  }
+  rack_placeholder[rpidx] = '\0';
+  uint8_t mls[RACK_SIZE];
+  int num_mls = str_to_machine_letters(game->gen->letter_distribution,
+                                       rack_placeholder, mls);
+  assert(num_mls <= RACK_SIZE);
+  for (int i = 0; i < num_mls; i++) {
+    draw_letter_to_rack(game->gen->bag, game->players[player_index]->rack,
+                        mls[i]);
   }
   return cgp_char;
 }
@@ -50,23 +61,83 @@ void load_cgp(Game *game, const char *cgp) {
   int is_digit = 0;
   int previous_was_digit = 0;
   char current_digits[5] = "";
+
+  int began_multi = 0;
+  int multi_idx = 0;
+  char multitile[MAX_LETTER_CHAR_LENGTH];
+  char row_aggreg[45]; // idk, some big size.
+  int row_aggreg_idx = 0;
+  uint8_t mls[25];
   while (cgp_char != ' ') {
     is_digit = isdigit(cgp_char);
+
     if (is_digit) {
       sprintf(current_digits + strlen(current_digits), "%c", cgp_char);
     } else if (previous_was_digit) {
       current_board_index += atoi(current_digits);
       current_digits[0] = '\0';
     }
-    if (isalpha(cgp_char)) {
-      set_letter_by_index(game->gen->board, current_board_index,
-                          human_readable_letter_to_machine_letter(
-                              game->gen->letter_distribution, cgp_char));
-      draw_letter(game->gen->bag,
-                  get_letter_by_index(game->gen->board, current_board_index));
-      current_board_index++;
-      game->gen->board->tiles_played++;
+    if (!is_digit && cgp_char != '/') {
+      // it's a letter or a portion of a letter.
+      if (cgp_char == '[') {
+        // this is a multi-letter tile by the cgp spec.
+        // If we've been building up a string of characters already,
+        // let's convert these first.
+        if (row_aggreg_idx > 0) {
+          row_aggreg[row_aggreg_idx] = '\0';
+
+          int num_mls = str_to_machine_letters(game->gen->letter_distribution,
+                                               row_aggreg, mls);
+          row_aggreg_idx = 0;
+          for (int i = 0; i < num_mls; i++) {
+            set_letter_by_index(game->gen->board, current_board_index, mls[i]);
+            draw_letter(
+                game->gen->bag,
+                get_letter_by_index(game->gen->board, current_board_index));
+            current_board_index++;
+            game->gen->board->tiles_played++;
+          }
+        }
+
+        began_multi = 1;
+        multi_idx = 0;
+      } else if (cgp_char == ']') {
+        began_multi = 0;
+        multitile[multi_idx] = '\0';
+        int ml = human_readable_letter_to_machine_letter(
+            game->gen->letter_distribution, multitile);
+        set_letter_by_index(game->gen->board, current_board_index, ml);
+        draw_letter(game->gen->bag,
+                    get_letter_by_index(game->gen->board, current_board_index));
+        current_board_index++;
+        game->gen->board->tiles_played++;
+
+      } else {
+        if (began_multi) {
+          multitile[multi_idx] = cgp_char;
+          multi_idx++;
+        } else {
+          row_aggreg[row_aggreg_idx] = cgp_char;
+          row_aggreg_idx++;
+        }
+      }
     }
+
+    if (row_aggreg_idx > 0) {
+      row_aggreg[row_aggreg_idx] = '\0';
+
+      int num_mls = str_to_machine_letters(game->gen->letter_distribution,
+                                           row_aggreg, mls);
+      row_aggreg_idx = 0;
+      for (int i = 0; i < num_mls; i++) {
+        set_letter_by_index(game->gen->board, current_board_index, mls[i]);
+        draw_letter(game->gen->bag,
+                    get_letter_by_index(game->gen->board, current_board_index));
+        current_board_index++;
+        game->gen->board->tiles_played++;
+      }
+    }
+
     cgp_index++;
     cgp_char = cgp[cgp_index];
     previous_was_digit = is_digit;
@@ -148,8 +219,10 @@ void pre_allocate_backups(Game *game) {
     game->game_backups[i] = malloc(sizeof(MinimalGameBackup));
     game->game_backups[i]->bag = create_bag(game->gen->letter_distribution);
     game->game_backups[i]->board = create_board();
-    game->game_backups[i]->p0rack = create_rack(game->gen->letter_distribution->size);
-    game->game_backups[i]->p1rack = create_rack(game->gen->letter_distribution->size);
+    game->game_backups[i]->p0rack =
+        create_rack(game->gen->letter_distribution->size);
+    game->game_backups[i]->p1rack =
+        create_rack(game->gen->letter_distribution->size);
   }
 }
 

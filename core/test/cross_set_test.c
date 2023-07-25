@@ -12,44 +12,57 @@
 #include "test_constants.h"
 #include "test_util.h"
 
+// this test func only works for single-char alphabets
 uint64_t cross_set_from_string(const char *letters,
                                LetterDistribution *letter_distribution) {
   if (strcmp(letters, "TRIVIAL") == 0) {
     return TRIVIAL_CROSS_SET;
   }
   uint64_t c = 0;
+  char letter[2];
+  letter[1] = '\0';
+
   for (size_t i = 0; i < strlen(letters); i++) {
+    letter[0] = letters[i];
     set_cross_set_letter(&c, human_readable_letter_to_machine_letter(
-                                 letter_distribution, letters[i]));
+                                 letter_distribution, letter));
   }
   return c;
 }
 
+// This test function only works for single-char alphabets
 void set_row(Game *game, int row, const char *row_content) {
   for (int i = 0; i < BOARD_DIM; i++) {
     set_letter(game->gen->board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
   }
-
+  char letter[2];
+  letter[1] = '\0';
   for (size_t i = 0; i < strlen(row_content); i++) {
     if (row_content[i] != ' ') {
+      letter[0] = row_content[i];
       set_letter(game->gen->board, row, i,
                  human_readable_letter_to_machine_letter(
-                     game->gen->letter_distribution, row_content[i]));
+                     game->gen->letter_distribution, letter));
       game->gen->board->tiles_played++;
     }
   }
 }
 
+// This test function only works for single-char alphabets
 void set_col(Game *game, int col, const char *col_content) {
   for (int i = 0; i < BOARD_DIM; i++) {
     set_letter(game->gen->board, i, col, ALPHABET_EMPTY_SQUARE_MARKER);
   }
 
+  char letter[2];
+  letter[1] = '\0';
+
   for (size_t i = 0; i < strlen(col_content); i++) {
     if (col_content[i] != ' ') {
+      letter[0] = col_content[i];
       set_letter(game->gen->board, i, col,
                  human_readable_letter_to_machine_letter(
-                     game->gen->letter_distribution, col_content[i]));
+                     game->gen->letter_distribution, letter));
       game->gen->board->tiles_played++;
     }
   }

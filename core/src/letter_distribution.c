@@ -51,15 +51,15 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
       (uint32_t *)malloc(letter_distribution->size * sizeof(uint32_t));
   letter_distribution->is_vowel =
       (uint32_t *)malloc(letter_distribution->size * sizeof(uint32_t));
-  letter_distribution->human_readable_letter_to_machine_letter =
-      (uint32_t *)malloc((MACHINE_LETTER_MAX_VALUE + 1) * sizeof(uint32_t));
-  letter_distribution->machine_letter_to_human_readable_letter =
-      (uint32_t *)malloc((MACHINE_LETTER_MAX_VALUE + 1) * sizeof(uint32_t));
+
+  for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
+    letter_distribution->machine_letter_to_human_readable_letter[i][0] = '\0';
+  }
 
   int machine_letter = 0;
   char line[100];
+  int max_tile_length = 0;
   while (fgets(line, sizeof(line), file)) {
-    // For now, we assume 1 char == 1 letter
     // This does not hold true for all languages
     // and will have to be updated.
 
@@ -67,10 +67,17 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
 
     // letter, lower case, dist, score, is_vowel
     token = strtok(line, ",");
-    char letter = token[0];
+    char letter[5];
+    char lower_case_letter[5];
+    strcpy(letter, token);
 
     token = strtok(NULL, ",");
-    char lower_case_letter = token[0];
+    strcpy(lower_case_letter, token);
+
+    int nl = strlen(letter);
+    if (nl > max_tile_length) {
+      max_tile_length = nl;
+    }
 
     token = strtok(NULL, ",");
     int dist = atoi(token);
@@ -85,20 +92,17 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     letter_distribution->scores[machine_letter] = score;
     letter_distribution->is_vowel[machine_letter] = is_vowel;
 
-    letter_distribution->human_readable_letter_to_machine_letter[(int)letter] =
-        machine_letter;
-    letter_distribution
-        ->machine_letter_to_human_readable_letter[machine_letter] = letter;
+    strcpy(letter_distribution
+               ->machine_letter_to_human_readable_letter[machine_letter],
+           letter);
 
     if (machine_letter > 0) {
       uint8_t blanked_machine_letter =
           get_blanked_machine_letter(machine_letter);
-      letter_distribution
-          ->human_readable_letter_to_machine_letter[(int)lower_case_letter] =
-          blanked_machine_letter;
-      letter_distribution
-          ->machine_letter_to_human_readable_letter[blanked_machine_letter] =
-          lower_case_letter;
+      strcpy(
+          letter_distribution
+              ->machine_letter_to_human_readable_letter[blanked_machine_letter],
+          lower_case_letter);
     }
 
     int i = machine_letter;
@@ -114,23 +118,66 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
 
     machine_letter++;
   }
-
+  letter_distribution->max_tile_length = max_tile_length;
   fclose(file);
 }
 
-// Assumes english
+// This is a linear search. This function should not be used for anything
+// that is speed-critical. If we ever need to use this in anything
+// speed-critical, we should use a hash.
 uint8_t
 human_readable_letter_to_machine_letter(LetterDistribution *letter_distribution,
-                                        unsigned char r) {
-  return (uint8_t)
-      letter_distribution->human_readable_letter_to_machine_letter[r];
+                                        char *letter) {
+
+  for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
+    if (strcmp(letter_distribution->machine_letter_to_human_readable_letter[i],
+               letter) == 0) {
+      return i;
+    }
+  }
+  // It better find it
+  return INVALID_LETTER;
 }
 
-unsigned char
-machine_letter_to_human_readable_letter(LetterDistribution *letter_distribution,
-                                        uint8_t ml) {
-  return (unsigned char)
-      letter_distribution->machine_letter_to_human_readable_letter[ml];
+void machine_letter_to_human_readable_letter(
+    LetterDistribution *letter_distribution, uint8_t ml,
+    char letter[MAX_LETTER_CHAR_LENGTH]) {
+  strcpy(letter,
+         letter_distribution->machine_letter_to_human_readable_letter[ml]);
+}
+
+// Convert a string of arbitrary characters into an array of machine letters,
+// returning the number of machine letters. This function does not allocate
+// the ml array; it is the caller's responsibility to make this array big
+// enough.
+// Note: This is a slow function that should not be used in any hot loops.
+int str_to_machine_letters(LetterDistribution *letter_distribution,
+                           const char *str, uint8_t *mls) {
+
+  int num_mls = 0;
+  int num_bytes = strlen(str);
+  int i = 0;
+  while (i < num_bytes) {
+    for (int j = i + letter_distribution->max_tile_length; j > i; j--) {
+      if (j > num_bytes) {
+        continue;
+      }
+      // possible letter goes from index i to j. Search for it.
+      char possible_letter[MAX_LETTER_CHAR_LENGTH];
+      memcpy(possible_letter, str + i, j - i);
+      possible_letter[j - i] = '\0';
+      uint8_t ml = human_readable_letter_to_machine_letter(letter_distribution,
+                                                           possible_letter);
+      if (ml == INVALID_LETTER) {
+        continue;
+      }
+      // Otherwise, we found the letter we're looking for
+      mls[num_mls] = ml;
+      num_mls++;
+      i = j;
+    }
+  }
+  return num_mls;
 }
 
 LetterDistribution *create_letter_distribution(const char *filename) {
@@ -144,7 +191,5 @@ void destroy_letter_distribution(LetterDistribution *letter_distribution) {
   free(letter_distribution->scores);
   free(letter_distribution->is_vowel);
   free(letter_distribution->score_order);
-  free(letter_distribution->human_readable_letter_to_machine_letter);
-  free(letter_distribution->machine_letter_to_human_readable_letter);
   free(letter_distribution);
 }

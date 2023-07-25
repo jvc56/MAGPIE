@@ -42,8 +42,7 @@ Config *create_config(const char *kwg_filename,
                       const char *actual_tiles_played,
                       int player_to_infer_index, int actual_score,
                       int number_of_tiles_exchanged, double equity_margin,
-                      int number_of_threads,
-                      const char *winpct_filename);
+                      int number_of_threads, const char *winpct_filename);
 Config *create_config_from_args(int argc, char *argv[]);
 void destroy_config(Config *config);
 

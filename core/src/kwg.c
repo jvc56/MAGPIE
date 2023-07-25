@@ -1,3 +1,8 @@
+#if defined(__APPLE__)
+#include "../compat/endian.h"
+#else
+#include <endian.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 
