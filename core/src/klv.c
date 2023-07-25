@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "fileproxy.h"
 #include "klv.h"
 #include "rack.h"
 
@@ -91,8 +92,7 @@ float convert_little_endian_to_host(float little_endian_float) {
 }
 
 void load_klv(KLV *klv, const char *klv_filename) {
-  FILE *stream;
-  stream = fopen(klv_filename, "r");
+  FILE *stream = stream_from_filename(klv_filename);
   if (stream == NULL) {
     perror(klv_filename);
     exit(EXIT_FAILURE);

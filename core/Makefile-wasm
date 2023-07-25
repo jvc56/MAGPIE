@@ -1,0 +1,47 @@
+SRC_DIR := src
+TEST_DIR := test
+CMD_DIR := wasmentry
+OBJ_DIR := obj
+BIN_DIR := bin
+
+SRC := $(wildcard $(SRC_DIR)/*.c)
+CMD := $(wildcard $(CMD_DIR)/*.c)
+OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
+OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
+
+BUILD := release
+
+cflags.release := -O3 -Wall -Wextra -Werror -Wno-trigraphs -pthread
+ldflags.release := -Llib -pthread
+
+CFLAGS := ${cflags.${BUILD}}
+LFLAGS := ${lflags.${BUILD}} \
+	-s EXPORTED_RUNTIME_METHODS=["ccall","stringToNewUTF8"] \
+	-s EXPORTED_FUNCTIONS=["_free","_main","_malloc","_precache_file_data"] \
+	-sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency \
+	-sPROXY_TO_PTHREAD=1 -s ALLOW_BLOCKING_ON_MAIN_THREAD=0
+LDFLAGS  := ${ldflags.${BUILD}}
+LDLIBS   := -lm
+
+.PHONY: all clean
+
+all: magpie_wasm
+
+magpie_wasm: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
+	emcc $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@.html \
+	-sALLOW_MEMORY_GROWTH  --shell-file wasm_shell.html
+
+$(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR)
+	emcc $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
+	emcc $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR):
+	mkdir -p $@
+
+clean:
+	@$(RM) -rv $(BIN_DIR) $(OBJ_DIR)
+
+-include $(OBJ_SRC:.o=.d)
+-include $(OBJ_CMD:.o=.d)
