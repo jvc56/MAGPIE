@@ -6,9 +6,11 @@
 #include <stdlib.h>
 
 #include "gameplay.h"
+#include "log.h"
 #include "rack.h"
 #include "sim.h"
 #include "stats.h"
+#include "ucgi_formats.h"
 #include "util.h"
 #include "xoshiro.h"
 
@@ -20,9 +22,10 @@ Simmer *create_simmer(Config *config, Game *game) {
   Simmer *simmer = malloc(sizeof(Simmer));
   simmer->game = game;
   simmer->threads = 1;
-  simmer->simming = 0;
   simmer->win_pcts = config->win_pcts;
   simmer->stopping_condition = SIM_STOPPING_CONDITION_NONE;
+  simmer->ucgi_mode = UCGI_MODE_OFF;
+  simmer->endsim_callback = NULL;
   return simmer;
 }
 
@@ -206,18 +209,16 @@ Move *best_equity_play(Game *game) {
 }
 
 void set_stop_flags(Simmer *simmer) {
+  log_debug("setting stop flags");
   for (int t = 0; t < simmer->threads; t++) {
     simmer->thread_control[t]->status = THREAD_CONTROL_SHOULD_STOP;
   }
 }
 
-void stop_simming(Simmer *simmer) {
-  set_stop_flags(simmer);
-  for (int t = 0; t < simmer->threads; t++) {
-    pthread_join(simmer->thread_control[t]->thread, NULL);
-    simmer->thread_control[t]->status = THREAD_CONTROL_IDLE;
-  }
-  simmer->simming = 0;
+void stop_simming(Simmer *simmer) { set_stop_flags(simmer); }
+
+void set_endsim_callback(Simmer *simmer, callback_fn f) {
+  simmer->endsim_callback = f;
 }
 
 int handle_potential_stopping_condition(Simmer *simmer) {
@@ -294,23 +295,51 @@ void *single_thread_simmer(void *ptr) {
   while (tc->status != THREAD_CONTROL_SHOULD_STOP) {
     sim_single_iteration(tc->simmer, tc->simmer->max_plies, tc->thread_number);
     th_iteration_ct++;
-    if (tc->thread_number == 0 &&
-        tc->simmer->stopping_condition != SIM_STOPPING_CONDITION_NONE) {
-      // Let's let this thread also be the "main" thread; only this one can
-      // decide to ignore plays and/or stop the simulation if there is a
-      // stopping condition set.
-      // We should check every 512 iterations or so, across all different
-      // threads.
+    if (tc->thread_number == 0) {
       int estimated_num_iterations = tc->simmer->threads * th_iteration_ct;
-      int should_stop = 0;
-      if ((estimated_num_iterations & 511) < tc->simmer->threads) {
-        should_stop = handle_potential_stopping_condition(tc->simmer);
+      if (tc->simmer->stopping_condition != SIM_STOPPING_CONDITION_NONE) {
+        // Let's let this thread also be the "main" thread; only this one can
+        // decide to ignore plays and/or stop the simulation if there is a
+        // stopping condition set.
+        // We should check every 512 iterations or so, across all different
+        // threads.
+        int should_stop = 0;
+        if ((estimated_num_iterations & 511) < tc->simmer->threads) {
+          should_stop = handle_potential_stopping_condition(tc->simmer);
+        }
+        if (should_stop) {
+          set_stop_flags(tc->simmer);
+        }
       }
-      if (should_stop) {
-        set_stop_flags(tc->simmer);
+      if (tc->simmer->ucgi_mode == UCGI_MODE_ON &&
+          (estimated_num_iterations & 64) < tc->simmer->threads) {
+        // Print out an estimate of how it's going in UCGI format.
+        print_ucgi_stats(tc->simmer, 0);
       }
     }
   }
+  tc->status = THREAD_CONTROL_EXITING;
+
+  // if we're here, this thread is about to stop.
+  if (tc->thread_number == 0) {
+  // Wait until all the other threads are done.
+  waitfordone:
+    for (int i = 0; i < tc->simmer->threads; i++) {
+      if (tc->simmer->thread_control[i]->status != THREAD_CONTROL_EXITING) {
+        // https://xkcd.com/292/
+        goto waitfordone;
+      }
+    }
+    log_debug("all threads about to exit");
+    // Print out the bestplay, UCGI. (and the final rankings/data)
+    if (tc->simmer->ucgi_mode == UCGI_MODE_ON) {
+      print_ucgi_stats(tc->simmer, 1);
+    }
+    if (tc->simmer->endsim_callback != NULL) {
+      tc->simmer->endsim_callback();
+    }
+  }
+  log_trace("thread %d exiting", tc->thread_number);
   return NULL;
 }
 
@@ -399,11 +428,15 @@ void simulate(Simmer *simmer) {
     return;
   }
 
-  simmer->simming = 1;
   for (int t = 0; t < simmer->threads; t++) {
     pthread_create(&simmer->thread_control[t]->thread, NULL,
                    single_thread_simmer, simmer->thread_control[t]);
     simmer->thread_control[t]->status = THREAD_CONTROL_RUNNING;
+  }
+  // We're going to detach the threads and let them stop on their own,
+  // or via a command.
+  for (int t = 0; t < simmer->threads; t++) {
+    pthread_detach(simmer->thread_control[t]->thread);
   }
 }
 
@@ -417,7 +450,6 @@ void blocking_simulate(Simmer *simmer) {
   if (simmer->stopping_condition == SIM_STOPPING_CONDITION_NONE) {
     printf("You must have a stopping condition set to use this function.\n");
   }
-  simmer->simming = 1;
   for (int t = 0; t < simmer->threads; t++) {
     pthread_create(&simmer->thread_control[t]->thread, NULL,
                    single_thread_simmer, simmer->thread_control[t]);
@@ -428,7 +460,6 @@ void blocking_simulate(Simmer *simmer) {
     pthread_join(simmer->thread_control[t]->thread, NULL);
     simmer->thread_control[t]->status = THREAD_CONTROL_IDLE;
   }
-  simmer->simming = 0;
 }
 
 void sim_single_iteration(Simmer *simmer, int plies, int thread) {
@@ -501,6 +532,8 @@ void set_stopping_condition(Simmer *simmer, int sc) {
   simmer->stopping_condition = sc;
 }
 
+void set_ucgi_mode(Simmer *simmer, int mode) { simmer->ucgi_mode = mode; }
+
 int compare_simmed_plays(const void *a, const void *b) {
   const SimmedPlay *play_a = *(const SimmedPlay **)a;
   const SimmedPlay *play_b = *(const SimmedPlay **)b;
@@ -537,6 +570,56 @@ int compare_simmed_plays(const void *a, const void *b) {
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
   qsort(simmed_plays, num_simmed_plays, sizeof(SimmedPlay *),
         compare_simmed_plays);
+}
+
+void print_ucgi_stats(Simmer *simmer, int print_best_play) {
+  pthread_mutex_lock(&simmer->simmed_plays_mutex);
+  sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
+  pthread_mutex_unlock(&simmer->simmed_plays_mutex);
+  // No need to keep the mutex locked too long here. This is because this
+  // function (print_ucgi_stats) will only execute on a single thread.
+
+  // info currmove h4.HADJI sc 40 wp 3.5 wpe 0.731 eq 7.2 eqe 0.812 it 12345 ig
+  // 0 plies ply 1 scm 30 scd 3.7 bp 23 ply 2 ...
+
+  // sc - score, wp(e) - win perc
+  // (error), eq(e) - equity (error) scm - mean of score, scd - stdev of score,
+  // bp - bingo perc ig - this play has been cut-off
+  // plies ply 1 ... ply 2 ... ply 3 ...
+
+  for (int i = 0; i < simmer->num_simmed_plays; i++) {
+    SimmedPlay *play = simmer->simmed_plays[i];
+    char move[30];
+    double wp_mean = play->win_pct_stat->mean * 100.0;
+    double wp_se = get_standard_error(play->win_pct_stat, STATS_Z99) * 100.0;
+
+    double eq_mean = play->equity_stat->mean;
+    double eq_se = get_standard_error(play->equity_stat, STATS_Z99);
+    uint64_t niters = play->equity_stat->cardinality;
+    store_move_ucgi(play->move, simmer->game->gen->board, move,
+                    simmer->game->gen->letter_distribution);
+
+    fprintf(stdout,
+            "info currmove %s sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %ld "
+            "ig %d ",
+            move, play->move->score, wp_mean, wp_se, eq_mean, eq_se, niters,
+            play->ignore);
+    fprintf(stdout, "plies ");
+    for (int i = 0; i < simmer->max_plies; i++) {
+      fprintf(stdout, "ply %d ", i + 1);
+      fprintf(stdout, "scm %.3f scd %.3f bp %.3f ", play->score_stat[i]->mean,
+              get_stdev(play->score_stat[i]),
+              play->bingo_stat[i]->mean * 100.0);
+    }
+    fprintf(stdout, "\n");
+  }
+  if (print_best_play) {
+    char move[30];
+    SimmedPlay *play = simmer->simmed_plays[0];
+    store_move_ucgi(play->move, simmer->game->gen->board, move,
+                    simmer->game->gen->letter_distribution);
+    fprintf(stdout, "bestmove %s\n", move);
+  }
 }
 
 void print_sim_stats(Simmer *simmer) {
