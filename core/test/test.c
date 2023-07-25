@@ -99,9 +99,9 @@ int main(int argc, char *argv[]) {
 
     Config *osps_config = create_config(
         // no OSPS kwg yet, use later when we have tests.
-        "", "./data/letterdistributions/polish.csv", "", "", SORT_BY_EQUITY,
-        PLAY_RECORDER_TYPE_ALL, "", -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv");
+        "./data/lexica/OSPS44.kwg", "./data/letterdistributions/polish.csv", "",
+        "", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "", -1, -1, 0, 10000, NULL,
+        0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv");
 
     Config *disc_config = create_config(
         "./data/lexica/DISC2.kwg", "./data/letterdistributions/catalan.csv", "",
