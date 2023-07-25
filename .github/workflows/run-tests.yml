@@ -12,16 +12,16 @@ jobs:
           platform: x64
 
       - name: Get datafile cache
-        id: cache-datafiles-x
+        id: cache-datafiles
         uses: actions/cache@v3
         with:
           path: |
             core/data/lexica
             core/data/strategy
-          key: downloaded-data-files
+          key: downloaded-data-files-x # use a better cache busting strategy
 
       - name: Download data files
-        if: steps.cache-datafiles-x.outputs.cache-hit != 'true'
+        if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: >
           mkdir -p core/data/strategy/default_english &&
           mkdir -p core/data/lexica &&
