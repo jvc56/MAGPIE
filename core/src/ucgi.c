@@ -5,6 +5,7 @@
 #include "game.h"
 #include "log.h"
 #include "sim.h"
+#include "ucgi.h"
 
 #define CMD_MAX 256
 
@@ -162,37 +163,47 @@ void ucgi_scan_loop() {
     }
     // replace newline with 0 for ease in comparison
     cmd[strcspn(cmd, "\n")] = 0;
-    // basic commands
-    if (strcmp(cmd, "ucgi") == 0) {
-      fprintf(stdout, "id name MAGPIE 0.1\n");
-      fprintf(stdout, "ucgiok\n");
-    } else if (strcmp(cmd, "quit") == 0) {
+
+    int should_end = process_ucgi_command(cmd);
+    if (should_end) {
       return;
     }
+  }
+}
 
-    // other commands
-    if (prefix("position cgp ", cmd)) {
-      char *cgpstr = cmd + strlen("position cgp ");
-      char lexicon[20] = "";
-      char ldname[20] = "";
-      lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
-      if (strcmp(lexicon, "") == 0) {
-        continue;
-      }
-      load_position(cgpstr, lexicon, ldname);
-    } else if (prefix("go", cmd)) {
-      if (current_mode == MODE_STOPPED) {
-        GoParams params = parse_go_cmd(cmd + strlen("go"));
-        start_search(params);
-      } else {
-        log_info("There is already a search ongoing.");
-      }
-    } else if (strcmp(cmd, "stop") == 0) {
-      if (current_mode == MODE_SEARCHING) {
-        stop_search();
-      } else {
-        log_info("There is no search to stop.");
-      }
+int process_ucgi_command(char *cmd) {
+  // basic commands
+  if (strcmp(cmd, "ucgi") == 0) {
+    fprintf(stdout, "id name MAGPIE 0.1\n");
+    fprintf(stdout, "ucgiok\n");
+  } else if (strcmp(cmd, "quit") == 0) {
+    return 1;
+  }
+
+  // other commands
+  if (prefix("position cgp ", cmd)) {
+    char *cgpstr = cmd + strlen("position cgp ");
+    char lexicon[20] = "";
+    char ldname[20] = "";
+    lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
+    if (strcmp(lexicon, "") == 0) {
+      return 0;
+    }
+    load_position(cgpstr, lexicon, ldname);
+  } else if (prefix("go", cmd)) {
+    if (current_mode == MODE_STOPPED) {
+      GoParams params = parse_go_cmd(cmd + strlen("go"));
+      start_search(params);
+    } else {
+      log_info("There is already a search ongoing.");
+    }
+  } else if (strcmp(cmd, "stop") == 0) {
+    if (current_mode == MODE_SEARCHING) {
+      stop_search();
+    } else {
+      log_info("There is no search to stop.");
     }
   }
+
+  return 0;
 }
