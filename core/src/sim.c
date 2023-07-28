@@ -589,7 +589,7 @@ void print_ucgi_stats(Simmer *simmer, int print_best_play) {
                     simmer->game->gen->letter_distribution);
 
     fprintf(stdout,
-            "info currmove %s sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %ld "
+            "info currmove %s sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %llu "
             "ig %d ",
             move, play->move->score, wp_mean, wp_se, eq_mean, eq_se, niters,
             play->ignore);

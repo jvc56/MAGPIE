@@ -17,7 +17,7 @@ ldflags.release := -Llib -pthread
 CFLAGS := ${cflags.${BUILD}}
 LFLAGS := ${lflags.${BUILD}} \
 	-s EXPORTED_RUNTIME_METHODS=["ccall","stringToNewUTF8"] \
-	-s EXPORTED_FUNCTIONS=["_free","_main","_malloc","_precache_file_data"] \
+	-s EXPORTED_FUNCTIONS=["_free","_main","_malloc","_precache_file_data","_process_ucgi_command"] \
 	-sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency \
 	-sPROXY_TO_PTHREAD=1 -s ALLOW_BLOCKING_ON_MAIN_THREAD=0
 LDFLAGS  := ${ldflags.${BUILD}}
@@ -41,7 +41,7 @@ $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(T
 	mkdir -p $@
 
 clean:
-	@$(RM) -rv $(BIN_DIR) $(OBJ_DIR)
+	@$(RM) -rv $(OBJ_DIR)
 
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)

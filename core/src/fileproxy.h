@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 #define MAX_CACHE_SIZE 32
-#define MAX_FILENAME_LENGTH 20
+#define MAX_FILENAME_LENGTH 60
 
 typedef struct FileCacheEntry {
   char filename[MAX_FILENAME_LENGTH];

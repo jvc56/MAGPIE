@@ -30,8 +30,9 @@ void precache_file_data(const char *filename, char *raw_data, int num_bytes) {
   file_cache.entries[file_cache.num_items].raw_data = data_copy;
   file_cache.entries[file_cache.num_items].byte_size = num_bytes;
   file_cache.num_items++;
-  log_debug("Cached %s (%d) in cache, with a size of %d", filename,
-            strlen(filename), num_bytes);
+  log_debug("Cached %s (%d) in cache, with a size of %d",
+            file_cache.entries[file_cache.num_items].filename, strlen(filename),
+            num_bytes);
 }
 
 void destroy_cache() {
