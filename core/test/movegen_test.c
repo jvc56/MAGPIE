@@ -125,7 +125,7 @@ void macondo_tests(SuperConfig *superconfig) {
   set_row(game, 4, "   THERMOS  A");
   game->gen->current_row_index = 4;
   uint8_t ml = human_readable_letter_to_machine_letter(
-      game->gen->letter_distribution, 'I');
+      game->gen->letter_distribution, "I");
   clear_cross_set(game->gen->board, game->gen->current_row_index, 2,
                   BOARD_VERTICAL_DIRECTION);
   set_cross_set_letter(get_cross_set_pointer(game->gen->board,

@@ -35,6 +35,7 @@ void unit_tests(SuperConfig *superconfig) {
   // Test the readonly data first
   test_alphabet(superconfig);
   test_letter_distribution(superconfig);
+  test_str_to_machine_letters(superconfig);
   test_leaves(superconfig, "./data/lexica/CSW21.csv");
   test_leave_map(superconfig);
 
@@ -95,7 +96,21 @@ int main(int argc, char *argv[]) {
         "./data/lexica/CSW21.klv2", SORT_BY_SCORE, PLAY_RECORDER_TYPE_ALL, "",
         -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
         "./data/strategy/default_english/winpct.csv");
-    SuperConfig *superconfig = create_superconfig(csw_config, nwl_config);
+
+    Config *osps_config = create_config(
+        // no OSPS kwg yet, use later when we have tests.
+        "./data/lexica/OSPS44.kwg", "./data/letterdistributions/polish.csv", "",
+        "", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "", -1, -1, 0, 10000, NULL,
+        0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv");
+
+    Config *disc_config = create_config(
+        "./data/lexica/DISC2.kwg", "./data/letterdistributions/catalan.csv", "",
+        "./data/lexica/catalan.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL,
+        "", -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
+        "./data/strategy/default_english/winpct.csv");
+
+    SuperConfig *superconfig =
+        create_superconfig(csw_config, nwl_config, osps_config, disc_config);
     unit_tests(superconfig);
     // This also frees the nested configs
     destroy_superconfig(superconfig);

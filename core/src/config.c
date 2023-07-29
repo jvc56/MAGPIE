@@ -20,8 +20,7 @@ Config *create_config(const char *kwg_filename,
                       const char *actual_tiles_played,
                       int player_to_infer_index, int actual_score,
                       int number_of_tiles_exchanged, double equity_margin,
-                      int number_of_threads,
-                      const char *winpct_filename) {
+                      int number_of_threads, const char *winpct_filename) {
 
   Config *config = malloc(sizeof(Config));
   config->letter_distribution =
@@ -42,8 +41,11 @@ Config *create_config(const char *kwg_filename,
   config->number_of_threads = number_of_threads;
 
   StrategyParams *player_1_strategy_params = malloc(sizeof(StrategyParams));
-
-  player_1_strategy_params->klv = create_klv(klv_filename_1);
+  if (strcmp(klv_filename_1, "") != 0) {
+    player_1_strategy_params->klv = create_klv(klv_filename_1);
+  } else {
+    player_1_strategy_params->klv = NULL;
+  }
   player_1_strategy_params->move_sorting = move_sorting_1;
   player_1_strategy_params->play_recorder_type = play_recorder_type_1;
 
@@ -282,17 +284,19 @@ Config *create_config_from_args(int argc, char *argv[]) {
     }
   }
 
-  return create_config(
-      kwg_filename, letter_distribution_filename, cgp, klv_filename_1,
-      move_sorting_1, play_recorder_type_1, klv_filename_2, move_sorting_2,
-      play_recorder_type_2, game_pair_flag, number_of_games_or_pairs,
-      actual_tiles_played, player_to_infer_index, actual_score,
-      number_of_tiles_exchanged, equity_margin, number_of_threads,
-      winpct_filename);
+  return create_config(kwg_filename, letter_distribution_filename, cgp,
+                       klv_filename_1, move_sorting_1, play_recorder_type_1,
+                       klv_filename_2, move_sorting_2, play_recorder_type_2,
+                       game_pair_flag, number_of_games_or_pairs,
+                       actual_tiles_played, player_to_infer_index, actual_score,
+                       number_of_tiles_exchanged, equity_margin,
+                       number_of_threads, winpct_filename);
 }
 
 void destroy_config(Config *config) {
-  destroy_klv(config->player_1_strategy_params->klv);
+  if (config->player_1_strategy_params->klv != NULL) {
+    destroy_klv(config->player_1_strategy_params->klv);
+  }
   free(config->player_1_strategy_params);
 
   if (!config->klv_is_shared) {

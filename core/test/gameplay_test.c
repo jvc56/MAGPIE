@@ -219,8 +219,8 @@ void test_six_passes_game(SuperConfig *superconfig) {
                      "EEEKMNO", "AAEHINT", "CDEGORZ", "EGNOQRS", "AFIQRRT",
                      "ERSSTTX", "BGHNOOU", "AENRTUZ", "AFIMNRV", "AEELNOT",
                      "?EORTUW", "ILNOOST", "EEINRUY", "?AENRTU", "EEINRUW",
-                     "AJNPRV", "INRU", "PRV", "U", "RV",
-                     "U", "V", "U", "V", "U",
+                     "AJNPRV",  "INRU",    "PRV",     "U",       "RV",
+                     "U",       "V",       "U",       "V",       "U",
                      "V"};
 
   char *cgps[31] = {
@@ -396,19 +396,19 @@ void test_playmove(SuperConfig *superconfig) {
   assert(game->players[0]->rack->number_of_letters == 7);
   assert(get_letter(game->gen->board, 7, 3) ==
          human_readable_letter_to_machine_letter(game->gen->letter_distribution,
-                                                 'K'));
+                                                 "K"));
   assert(get_letter(game->gen->board, 7, 4) ==
          human_readable_letter_to_machine_letter(game->gen->letter_distribution,
-                                                 'Y'));
+                                                 "Y"));
   assert(get_letter(game->gen->board, 7, 5) ==
          human_readable_letter_to_machine_letter(game->gen->letter_distribution,
-                                                 'N'));
+                                                 "N"));
   assert(get_letter(game->gen->board, 7, 6) ==
          human_readable_letter_to_machine_letter(game->gen->letter_distribution,
-                                                 'D'));
+                                                 "D"));
   assert(get_letter(game->gen->board, 7, 7) ==
          human_readable_letter_to_machine_letter(game->gen->letter_distribution,
-                                                 'E'));
+                                                 "E"));
   assert(game->player_on_turn_index == 1);
   assert(game->gen->bag->last_tile_index + 1 == 88);
   assert(game->gen->board->tiles_played == 5);
@@ -429,11 +429,11 @@ void test_playmove(SuperConfig *superconfig) {
   assert(game->gen->bag->last_tile_index + 1 == 93);
   assert(game->gen->board->tiles_played == 0);
   assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'V')] == 0);
+             game->gen->letter_distribution, "V")] == 0);
   assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'W')] == 0);
+             game->gen->letter_distribution, "W")] == 0);
   assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'U')] < 2);
+             game->gen->letter_distribution, "U")] < 2);
   reset_game(game);
 
   // Test pass
@@ -490,8 +490,10 @@ void test_set_random_rack(SuperConfig *superconfig) {
   assert(game->players[0]->rack->number_of_letters == 7);
 
   // draw some random rack, but with 5 fixed tiles
-  Rack *known_rack = create_rack(superconfig->csw_config->letter_distribution->size);
-  set_rack_to_string(known_rack, "CESAR", superconfig->csw_config->letter_distribution);
+  Rack *known_rack =
+      create_rack(superconfig->csw_config->letter_distribution->size);
+  set_rack_to_string(known_rack, "CESAR",
+                     superconfig->csw_config->letter_distribution);
   set_random_rack(game, 0, known_rack);
   assert(game->gen->bag->last_tile_index == 92);
   assert(game->players[0]->rack->number_of_letters == 7);
@@ -535,27 +537,28 @@ void test_backups(SuperConfig *superconfig) {
 
   assert(game->players[0]->score == 36);
   assert(game->players[1]->score == 131);
-  assert(game->gen->board->letters[7] == human_readable_letter_to_machine_letter(
-                                             game->gen->letter_distribution, 'Q'));
+  assert(game->gen->board->letters[7] ==
+         human_readable_letter_to_machine_letter(game->gen->letter_distribution,
+                                                 "Q"));
   // let's unplay QUATORZE
   unplay_last_move(game);
   assert(game->players[0]->score == 36);
   assert(game->players[1]->score == 0);
 
   assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'A')] == 1);
+             game->gen->letter_distribution, "A")] == 1);
   assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'O')] == 1);
+             game->gen->letter_distribution, "O")] == 1);
   assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'Q')] == 1);
+             game->gen->letter_distribution, "Q")] == 1);
   assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'R')] == 1);
+             game->gen->letter_distribution, "R")] == 1);
   assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'T')] == 1);
+             game->gen->letter_distribution, "T")] == 1);
   assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'U')] == 1);
+             game->gen->letter_distribution, "U")] == 1);
   assert(game->players[1]->rack->array[human_readable_letter_to_machine_letter(
-             game->gen->letter_distribution, 'Z')] == 1);
+             game->gen->letter_distribution, "Z")] == 1);
   assert(game->players[1]->rack->number_of_letters == 7);
 
   assert(game->gen->board->letters[7] == 0);

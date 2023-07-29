@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "../src/config.h"
 
@@ -22,34 +23,45 @@ void test_alphabet(SuperConfig *superconfig) {
              config->letter_distribution, BLANK_TOKEN) == BLANK_MACHINE_LETTER);
   // blank
   assert(human_readable_letter_to_machine_letter(config->letter_distribution,
-                                                 'a') ==
+                                                 "a") ==
          get_blanked_machine_letter(1));
   assert(human_readable_letter_to_machine_letter(config->letter_distribution,
-                                                 'b') ==
+                                                 "b") ==
          get_blanked_machine_letter(2));
   // not blank
   assert(human_readable_letter_to_machine_letter(config->letter_distribution,
-                                                 'C') == 3);
+                                                 "C") == 3);
   assert(human_readable_letter_to_machine_letter(config->letter_distribution,
-                                                 'D') == 4);
+                                                 "D") == 4);
 
   // Test user visible
   // separation token
   // The separation letter and machine letter should be the only machine
   // letters that map to the same value, since
   // blank
-  assert(machine_letter_to_human_readable_letter(
-             config->letter_distribution, BLANK_MACHINE_LETTER) == BLANK_TOKEN);
+  char letter[MAX_LETTER_CHAR_LENGTH];
+  machine_letter_to_human_readable_letter(config->letter_distribution,
+                                          BLANK_MACHINE_LETTER, letter);
+
+  assert(strcmp(letter, BLANK_TOKEN) == 0);
   // blank
-  assert(machine_letter_to_human_readable_letter(
-             config->letter_distribution, get_blanked_machine_letter(1)) ==
-         'a');
-  assert(machine_letter_to_human_readable_letter(
-             config->letter_distribution, get_blanked_machine_letter(2)) ==
-         'b');
+  machine_letter_to_human_readable_letter(
+      config->letter_distribution, get_blanked_machine_letter(1), letter);
+  assert(strcmp(letter, "a") == 0);
+  machine_letter_to_human_readable_letter(
+      config->letter_distribution, get_blanked_machine_letter(2), letter);
+  assert(strcmp(letter, "b") == 0);
   // not blank
-  assert(machine_letter_to_human_readable_letter(config->letter_distribution,
-                                                 3) == 'C');
-  assert(machine_letter_to_human_readable_letter(config->letter_distribution,
-                                                 4) == 'D');
+  machine_letter_to_human_readable_letter(config->letter_distribution, 3,
+                                          letter);
+  assert(strcmp(letter, "C") == 0);
+  machine_letter_to_human_readable_letter(config->letter_distribution, 4,
+                                          letter);
+  assert(strcmp(letter, "D") == 0);
+
+  Config *catalan_config = get_disc_config(superconfig);
+  machine_letter_to_human_readable_letter(catalan_config->letter_distribution,
+                                          get_blanked_machine_letter(13),
+                                          letter);
+  assert(strcmp(letter, "l·l") == 0);
 }

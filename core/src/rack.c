@@ -70,18 +70,22 @@ int score_on_rack(LetterDistribution *letter_distribution, Rack *rack) {
 void set_rack_to_string(Rack *rack, const char *rack_string,
                         LetterDistribution *letter_distribution) {
   reset_rack(rack);
-  for (size_t i = 0; i < strlen(rack_string); i++) {
-    add_letter_to_rack(rack, human_readable_letter_to_machine_letter(
-                                 letter_distribution, rack_string[i]));
+
+  uint8_t mls[BAG_SIZE];
+  int num_mls = str_to_machine_letters(letter_distribution, rack_string, mls);
+  for (int i = 0; i < num_mls; i++) {
+    add_letter_to_rack(rack, mls[i]);
   }
 }
 
-void rack_to_string(Rack *rack, char *rack_string, LetterDistribution *letter_distribution) {
+void rack_to_string(Rack *rack, char *rack_string,
+                    LetterDistribution *letter_distribution) {
   char *rp = rack_string;
   for (int i = 0; i < rack->array_size; i++) {
     for (int j = 0; j < rack->array[i]; j++) {
-      unsigned char letter = machine_letter_to_human_readable_letter(letter_distribution, i);
-      rp += sprintf(rp, "%c", letter);
+      char tile[MAX_LETTER_CHAR_LENGTH];
+      machine_letter_to_human_readable_letter(letter_distribution, i, tile);
+      rp += sprintf(rp, "%s", tile);
     }
   }
 }

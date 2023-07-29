@@ -1,3 +1,8 @@
+#if defined(__APPLE__)
+#include "../compat/endian.h"
+#else
+#include <endian.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -205,6 +210,9 @@ int get_word_index_of(KLV *klv, uint32_t node_index, Rack *leave) {
 
 double get_leave_value(KLV *klv, Rack *leave) {
   if (leave->empty) {
+    return 0.0;
+  }
+  if (klv == NULL) {
     return 0.0;
   }
   int index = get_word_index_of(klv, kwg_arc_index(klv->kwg, 0), leave);

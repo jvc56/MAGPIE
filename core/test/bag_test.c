@@ -16,7 +16,7 @@ void write_bag_to_string(char *bag_string, Bag *bag,
   write_bag_to_end_of_buffer(bag_string, bag, letter_distribution);
 }
 
-void test_add_letter(Config *config, Bag *bag, char r,
+void test_add_letter(Config *config, Bag *bag, char *r,
                      char *expected_bag_string) {
   char bag_string[100];
   reset_string(bag_string);
@@ -65,13 +65,13 @@ void test_bag(SuperConfig *superconfig) {
 
   // Check adding letters to the bag
 
-  test_add_letter(config, bag, 'A', "A");
-  test_add_letter(config, bag, 'F', "AF");
-  test_add_letter(config, bag, 'Z', "AFZ");
-  test_add_letter(config, bag, 'B', "ABFZ");
-  test_add_letter(config, bag, 'a', "ABFZ?");
-  test_add_letter(config, bag, 'b', "ABFZ??");
-  test_add_letter(config, bag, 'z', "ABFZ???");
+  test_add_letter(config, bag, "A", "A");
+  test_add_letter(config, bag, "F", "AF");
+  test_add_letter(config, bag, "Z", "AFZ");
+  test_add_letter(config, bag, "B", "ABFZ");
+  test_add_letter(config, bag, "a", "ABFZ?");
+  test_add_letter(config, bag, "b", "ABFZ??");
+  test_add_letter(config, bag, "z", "ABFZ???");
 
   destroy_bag(bag);
   destroy_rack(rack);

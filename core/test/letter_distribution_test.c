@@ -1,6 +1,7 @@
 #include <assert.h>
 
 #include "../src/config.h"
+#include "../src/letter_distribution.h"
 
 #include "superconfig.h"
 
@@ -16,4 +17,30 @@ void test_letter_distribution(SuperConfig *superconfig) {
     assert(config->letter_distribution->scores[score_order_index] <=
            previous_score);
   }
+}
+
+void test_str_to_machine_letters(SuperConfig *superconfig) {
+  Config *config = get_nwl_config(superconfig);
+  uint8_t mls[4];
+  int num_mls = str_to_machine_letters(config->letter_distribution, "??", mls);
+  assert(num_mls == 2);
+  assert(mls[0] == 0);
+  assert(mls[1] == 0);
+
+  // catalan:
+  config = get_disc_config(superconfig);
+  uint8_t cmls[20];
+  num_mls = str_to_machine_letters(config->letter_distribution,
+                                   "Al·lOQUIMIquES", cmls);
+  assert(num_mls == 10);
+  assert(cmls[0] == 1);
+  assert(cmls[1] == (13 | 0x80));
+  assert(cmls[2] == 17);
+  assert(cmls[3] == 19);
+  assert(cmls[4] == 10);
+  assert(cmls[5] == 14);
+  assert(cmls[6] == 10);
+  assert(cmls[7] == (19 | 0x80));
+  assert(cmls[8] == 6);
+  assert(cmls[9] == 21);
 }

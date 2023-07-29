@@ -51,10 +51,12 @@ void write_letter_line(Game *game, InferenceRecord *record, Rack *rack,
                        int max_duplicate_letter_draw,
                        int number_of_tiles_played_or_exchanged) {
   get_stat_for_letter(record, letter_stat, letter);
-  sprintf(inference_string + strlen(inference_string), "%c: %4.2f %4.2f",
-          machine_letter_to_human_readable_letter(
-              game->gen->letter_distribution, letter),
-          get_mean(letter_stat), get_stdev(letter_stat));
+  char readable_letter[MAX_LETTER_CHAR_LENGTH];
+  machine_letter_to_human_readable_letter(game->gen->letter_distribution,
+                                          letter, readable_letter);
+
+  sprintf(inference_string + strlen(inference_string), "%s: %4.2f %4.2f",
+          readable_letter, get_mean(letter_stat), get_stdev(letter_stat));
 
   for (int i = 1; i <= max_duplicate_letter_draw; i++) {
     write_letter_minimum(record, rack, bag_as_rack, inference_string, letter, i,

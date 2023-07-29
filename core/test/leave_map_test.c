@@ -10,7 +10,7 @@
 #include "test_util.h"
 
 void take_set(LeaveMap *leave_map, Rack *rack,
-              LetterDistribution *letter_distribution, uint64_t letter,
+              LetterDistribution *letter_distribution, char *letter,
               int expected_take_index, double value) {
   take_letter_and_update_current_index(
       leave_map, rack,
@@ -23,7 +23,7 @@ void take_set(LeaveMap *leave_map, Rack *rack,
 }
 
 void take_set_add(LeaveMap *leave_map, Rack *rack,
-                  LetterDistribution *letter_distribution, uint64_t letter,
+                  LetterDistribution *letter_distribution, char *letter,
                   int expected_take_index, int expected_add_index, double value,
                   int set) {
   take_letter_and_update_current_index(
@@ -54,15 +54,15 @@ void test_leave_map(SuperConfig *superconfig) {
   // 1111111
   assert(leave_map->current_index == 127);
 
-  take_set_add(leave_map, rack, letter_distribution, 'A', 126, 127, 7.0, 1);
-  take_set_add(leave_map, rack, letter_distribution, 'B', 125, 127, 8.0, 1);
-  take_set_add(leave_map, rack, letter_distribution, 'E', 111, 127, 9.0, 1);
-  take_set_add(leave_map, rack, letter_distribution, 'G', 63, 127, 10.0, 1);
+  take_set_add(leave_map, rack, letter_distribution, "A", 126, 127, 7.0, 1);
+  take_set_add(leave_map, rack, letter_distribution, "B", 125, 127, 8.0, 1);
+  take_set_add(leave_map, rack, letter_distribution, "E", 111, 127, 9.0, 1);
+  take_set_add(leave_map, rack, letter_distribution, "G", 63, 127, 10.0, 1);
 
-  take_set_add(leave_map, rack, letter_distribution, 'A', 126, 127, 7.0, 0);
-  take_set_add(leave_map, rack, letter_distribution, 'B', 125, 127, 8.0, 0);
-  take_set_add(leave_map, rack, letter_distribution, 'E', 111, 127, 9.0, 0);
-  take_set_add(leave_map, rack, letter_distribution, 'G', 63, 127, 10.0, 0);
+  take_set_add(leave_map, rack, letter_distribution, "A", 126, 127, 7.0, 0);
+  take_set_add(leave_map, rack, letter_distribution, "B", 125, 127, 8.0, 0);
+  take_set_add(leave_map, rack, letter_distribution, "E", 111, 127, 9.0, 0);
+  take_set_add(leave_map, rack, letter_distribution, "G", 63, 127, 10.0, 0);
 
   // Multiple letters
   set_rack_to_string(rack, "DDDIIUU", letter_distribution);
@@ -71,54 +71,54 @@ void test_leave_map(SuperConfig *superconfig) {
   set_current_value(leave_map, 100.0);
   // 1111011
   // DDIIUU
-  take_set(leave_map, rack, letter_distribution, 'D', 123, 11.0);
+  take_set(leave_map, rack, letter_distribution, "D", 123, 11.0);
   // 0111011
   // DDIIU
-  take_set(leave_map, rack, letter_distribution, 'U', 59, 12.0);
+  take_set(leave_map, rack, letter_distribution, "U", 59, 12.0);
   // 0111001
   // DIIU
-  take_set(leave_map, rack, letter_distribution, 'D', 57, 13.0);
+  take_set(leave_map, rack, letter_distribution, "D", 57, 13.0);
   // 0101001
   // DIU
-  take_set(leave_map, rack, letter_distribution, 'I', 41, 14.0);
+  take_set(leave_map, rack, letter_distribution, "I", 41, 14.0);
   // 0101000
   // IU
-  take_set(leave_map, rack, letter_distribution, 'D', 40, 15.0);
+  take_set(leave_map, rack, letter_distribution, "D", 40, 15.0);
   // 0100000
   // U
-  take_set(leave_map, rack, letter_distribution, 'I', 32, 16.0);
+  take_set(leave_map, rack, letter_distribution, "I", 32, 16.0);
   // 0000000
   // empty leave
-  take_set(leave_map, rack, letter_distribution, 'U', 0, 17.0);
+  take_set(leave_map, rack, letter_distribution, "U", 0, 17.0);
 
   // Add back in a different order and check the value
   add_letter_and_update_current_index(
       leave_map, rack,
-      human_readable_letter_to_machine_letter(letter_distribution, 'D'));
+      human_readable_letter_to_machine_letter(letter_distribution, "D"));
   add_letter_and_update_current_index(
       leave_map, rack,
-      human_readable_letter_to_machine_letter(letter_distribution, 'I'));
+      human_readable_letter_to_machine_letter(letter_distribution, "I"));
   add_letter_and_update_current_index(
       leave_map, rack,
-      human_readable_letter_to_machine_letter(letter_distribution, 'U'));
+      human_readable_letter_to_machine_letter(letter_distribution, "U"));
   assert(leave_map->current_index == 41);
   assert(within_epsilon(get_current_value(leave_map), 14.0));
 
   add_letter_and_update_current_index(
       leave_map, rack,
-      human_readable_letter_to_machine_letter(letter_distribution, 'D'));
+      human_readable_letter_to_machine_letter(letter_distribution, "D"));
   add_letter_and_update_current_index(
       leave_map, rack,
-      human_readable_letter_to_machine_letter(letter_distribution, 'I'));
+      human_readable_letter_to_machine_letter(letter_distribution, "I"));
   assert(leave_map->current_index == 59);
   assert(within_epsilon(get_current_value(leave_map), 12.0));
 
   add_letter_and_update_current_index(
       leave_map, rack,
-      human_readable_letter_to_machine_letter(letter_distribution, 'U'));
+      human_readable_letter_to_machine_letter(letter_distribution, "U"));
   add_letter_and_update_current_index(
       leave_map, rack,
-      human_readable_letter_to_machine_letter(letter_distribution, 'D'));
+      human_readable_letter_to_machine_letter(letter_distribution, "D"));
   assert(leave_map->current_index == 127);
   assert(within_epsilon(get_current_value(leave_map), 100.0));
 

@@ -159,15 +159,17 @@ void sort_moves(MoveList *ml) {
   }
 }
 
-void store_move_description(Move *move, char *placeholder, LetterDistribution *ld) {
+void store_move_description(Move *move, char *placeholder,
+                            LetterDistribution *ld) {
   char tiles[20];
   char *tp = tiles;
   for (int i = 0; i < move->tiles_length; i++) {
     if (move->tiles[i] == 0) {
       tp += sprintf(tp, ".");
     } else {
-      tp += sprintf(tp, "%c",
-                    machine_letter_to_human_readable_letter(ld, move->tiles[i]));
+      char tile[MAX_LETTER_CHAR_LENGTH];
+      machine_letter_to_human_readable_letter(ld, move->tiles[i], tile);
+      tp += sprintf(tp, "%s", tile);
     }
   }
   char coords[20];
