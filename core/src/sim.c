@@ -4,6 +4,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "gameplay.h"
 #include "log.h"
@@ -176,6 +177,7 @@ void prepare_simmer(Simmer *simmer, int plies, int threads, Move **plays,
     simmer->simmed_plays[i] = sp;
   }
   simmer->iteration_count = 0;
+  simmer->node_count = 0;
   Game *gc = simmer->game_copies[0];
   pthread_mutex_init(&simmer->simmed_plays_mutex, NULL);
   simmer->initial_player = gc->player_on_turn_index;
@@ -331,13 +333,26 @@ void *single_thread_simmer(void *ptr) {
       }
     }
     log_debug("all threads about to exit");
+
+    struct timespec finish;
+    double elapsed;
+
+    clock_gettime(CLOCK_MONOTONIC, &finish);
+
+    elapsed = (finish.tv_sec - tc->simmer->start_time.tv_sec);
+    elapsed += (finish.tv_nsec - tc->simmer->start_time.tv_nsec) / 1000000000.0;
+    double nps = (double)tc->simmer->node_count / elapsed;
     // Print out the bestplay, UCGI. (and the final rankings/data)
     if (tc->simmer->ucgi_mode == UCGI_MODE_ON) {
       print_ucgi_stats(tc->simmer, 1);
+      fprintf(stdout, "info nps %f\n", nps);
     }
     if (tc->simmer->endsim_callback != NULL) {
       tc->simmer->endsim_callback();
     }
+
+    log_debug("elapsed time %f s\n", elapsed);
+    log_debug("nps %f\n", nps);
   }
   log_trace("thread %d exiting", tc->thread_number);
   return NULL;
@@ -427,6 +442,7 @@ void simulate(Simmer *simmer) {
     printf("Please prepare simmer first.\n");
     return;
   }
+  clock_gettime(CLOCK_MONOTONIC, &simmer->start_time);
 
   for (int t = 0; t < simmer->threads; t++) {
     pthread_create(&simmer->thread_control[t]->thread, NULL,
@@ -449,7 +465,10 @@ void blocking_simulate(Simmer *simmer) {
   }
   if (simmer->stopping_condition == SIM_STOPPING_CONDITION_NONE) {
     printf("You must have a stopping condition set to use this function.\n");
+    return;
   }
+  clock_gettime(CLOCK_MONOTONIC, &simmer->start_time);
+
   for (int t = 0; t < simmer->threads; t++) {
     pthread_create(&simmer->thread_control[t]->thread, NULL,
                    single_thread_simmer, simmer->thread_control[t]);
@@ -480,7 +499,7 @@ void sim_single_iteration(Simmer *simmer, int plies, int thread) {
     set_backup_mode(gc, BACKUP_MODE_SIMULATION);
     // play move
     play_move(gc, simmer->simmed_plays[i]->move);
-
+    atomic_fetch_add(&simmer->node_count, 1);
     set_backup_mode(gc, BACKUP_MODE_OFF);
     // further plies will NOT be backed up.
     for (int ply = 0; ply < plies; ply++) {
@@ -493,7 +512,7 @@ void sim_single_iteration(Simmer *simmer, int plies, int thread) {
       Move *best_play = best_equity_play(gc);
       copy_rack_into(rack_placeholder, gc->players[onturn]->rack);
       play_move(gc, best_play);
-
+      atomic_fetch_add(&simmer->node_count, 1);
       char placeholder[80];
       store_move_description(best_play, placeholder,
                              simmer->game->gen->letter_distribution);

@@ -128,6 +128,8 @@
           if (element) element.value = ""; // clear browser cache
           var lastIter = 0;
           return function (text) {
+            console.log(text);
+
             if (arguments.length > 1)
               text = Array.prototype.slice.call(arguments).join(" ");
             // These replacements are necessary if you render to raw HTML
@@ -146,8 +148,12 @@
                   toPrint = text[i] + ' ' + lastIter;
                 }
                 break;
-              } else if (text[i] === 'bestplay') {
-                toPrint = ''.join(text);
+              } else if (text[i] === 'bestmove') {
+                toPrint = ' '.join(text);
+                break;
+              } else if (text[i] === 'nps') {
+                toPrint = ' '.join(text);
+
                 break;
               }
             }
