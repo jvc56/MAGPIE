@@ -2,6 +2,7 @@
 #define SIM_H
 #include <pthread.h>
 #include <stdatomic.h>
+#include <time.h>
 
 #include "game.h"
 #include "move.h"
@@ -46,9 +47,11 @@ struct simmer {
   int max_plies;
   int initial_player;
   atomic_int iteration_count;
+  atomic_int node_count;
   int threads;
   int num_simmed_plays;
   int ucgi_mode;
+  struct timespec start_time;
 
   ThreadControl **thread_control;
   int stopping_condition;
