@@ -66,7 +66,9 @@ struct simmer {
 struct threadcontrol {
   Simmer *simmer;
   int thread_number;
-  volatile int status;
+  int last_iteration_ct;
+  volatile int status; // another thread can change this, so i think this needs
+                       // to be volatile.
   pthread_t thread;
 };
 

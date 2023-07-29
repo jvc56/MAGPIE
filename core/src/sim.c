@@ -152,6 +152,7 @@ void prepare_simmer(Simmer *simmer, int plies, int threads, Move **plays,
     simmer->thread_control[i]->status = THREAD_CONTROL_IDLE;
     simmer->thread_control[i]->thread_number = i;
     simmer->thread_control[i]->simmer = simmer;
+    simmer->thread_control[i]->last_iteration_ct = 0;
   }
 
   for (int i = 0; i < num_plays; i++) {
@@ -291,12 +292,10 @@ int handle_potential_stopping_condition(Simmer *simmer) {
 
 void *single_thread_simmer(void *ptr) {
   ThreadControl *tc = (ThreadControl *)ptr;
-  int th_iteration_ct = 0;
   while (tc->status != THREAD_CONTROL_SHOULD_STOP) {
     sim_single_iteration(tc->simmer, tc->simmer->max_plies, tc->thread_number);
-    th_iteration_ct++;
     if (tc->thread_number == 0) {
-      int estimated_num_iterations = tc->simmer->threads * th_iteration_ct;
+      int total_iterations = atomic_load(&tc->simmer->iteration_count);
       if (tc->simmer->stopping_condition != SIM_STOPPING_CONDITION_NONE) {
         // Let's let this thread also be the "main" thread; only this one can
         // decide to ignore plays and/or stop the simulation if there is a
@@ -304,15 +303,16 @@ void *single_thread_simmer(void *ptr) {
         // We should check every 512 iterations or so, across all different
         // threads.
         int should_stop = 0;
-        if ((estimated_num_iterations & 511) < tc->simmer->threads) {
+        if (total_iterations - tc->last_iteration_ct > 500) {
           should_stop = handle_potential_stopping_condition(tc->simmer);
+          tc->last_iteration_ct = total_iterations;
         }
         if (should_stop) {
           set_stop_flags(tc->simmer);
         }
       }
       if (tc->simmer->ucgi_mode == UCGI_MODE_ON &&
-          (estimated_num_iterations & 64) < tc->simmer->threads) {
+          (total_iterations % 100) < tc->simmer->threads) {
         // Print out an estimate of how it's going in UCGI format.
         print_ucgi_stats(tc->simmer, 0);
       }
