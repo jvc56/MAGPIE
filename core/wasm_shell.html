@@ -129,8 +129,6 @@
           var element = document.getElementById("output");
           if (element) element.value = ""; // clear browser cache
           return function (text) {
-            console.log(text);
-
             if (arguments.length > 1)
               text = Array.prototype.slice.call(arguments).join(" ");
             // These replacements are necessary if you render to raw HTML
@@ -139,25 +137,25 @@
             //text = text.replace(/>/g, "&gt;");
             //text = text.replace('\n', '<br>', 'g');
             // console.log(text);
-            text = text.split(' ');
+            text = text.split(" ");
             var toPrint = "";
             for (var i = 0; i < text.length; i++) {
-              if (text[i] === 'it') {
-                var iterct = parseInt(text[i+1], 10);
+              if (text[i] === "it") {
+                var iterct = parseInt(text[i + 1], 10);
                 if (iterct > lastIterCt) {
                   lastIterCt = iterct;
-                  toPrint = text[i] + ' ' + lastIterCt;
+                  toPrint = text[i] + " " + lastIterCt;
                 }
                 break;
-              } else if (text[i] === 'bestmove') {
-                toPrint = text.join(' ');
+              } else if (text[i] === "bestmove") {
+                toPrint = text.join(" ");
                 break;
-              } else if (text[i] === 'nps') {
-                toPrint = text.join(' ');
+              } else if (text[i] === "nps") {
+                toPrint = text.join(" ");
                 break;
               }
             }
-            
+
             if (toPrint !== "" && element) {
               element.value += toPrint + "\n";
               element.scrollTop = element.scrollHeight; // focus on bottom
@@ -305,7 +303,7 @@
         if (nthreads > 20) {
           nthreads = 20;
         }
-        console.log('Using nthreads: ' + nthreads);
+        console.log("Using nthreads: " + nthreads);
         const goCmd = `go threads ${nthreads} stopcondition 99 depth 5`;
 
         const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);

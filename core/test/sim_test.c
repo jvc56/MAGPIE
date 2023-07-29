@@ -148,7 +148,6 @@ void perf_test_multithread_blocking_sim(Config *config) {
   int num_threads = config->number_of_threads;
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config->cgp);
-  /* ... */
 
   int sorting_type = game->players[0]->strategy_params->move_sorting;
   game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
@@ -163,7 +162,6 @@ void perf_test_multithread_blocking_sim(Config *config) {
   prepare_simmer(simmer, 5, num_threads, ml->moves, 80, NULL);
   set_stopping_condition(simmer, SIM_STOPPING_CONDITION_99PCT);
   blocking_simulate(simmer);
-
   print_sim_stats(simmer);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
