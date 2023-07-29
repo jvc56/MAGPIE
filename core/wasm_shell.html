@@ -126,6 +126,7 @@
         print: (function () {
           var element = document.getElementById("output");
           if (element) element.value = ""; // clear browser cache
+          var lastIter = 0;
           return function (text) {
             if (arguments.length > 1)
               text = Array.prototype.slice.call(arguments).join(" ");
@@ -134,9 +135,25 @@
             //text = text.replace(/</g, "&lt;");
             //text = text.replace(/>/g, "&gt;");
             //text = text.replace('\n', '<br>', 'g');
-            console.log(text);
-            if (element) {
-              element.value += text + "\n";
+            // console.log(text);
+            text = text.split(' ');
+            var toPrint = "";
+            for (var i = 0; i < text.length; i++) {
+              if (text[i] === 'it') {
+                var iterct = parseInt(text[i+1], 10);
+                if (iterct > lastIter) {
+                  lastIter = iterct;
+                  toPrint = text[i] + ' ' + lastIter;
+                }
+                break;
+              } else if (text[i] === 'bestplay') {
+                toPrint = ''.join(text);
+                break;
+              }
+            }
+            
+            if (toPrint !== "" && element) {
+              element.value += toPrint + "\n";
               element.scrollTop = element.scrollHeight; // focus on bottom
             }
           };
@@ -271,7 +288,7 @@
         }
 
         const ucgiLoadCmd = "position cgp " + cgpstring;
-        const goCmd = "go threads 10 stopcondition 99 depth 5";
+        const goCmd = "go threads 15 stopcondition 99 depth 5";
 
         const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);
         const cmd2C = Module.stringToNewUTF8(goCmd);

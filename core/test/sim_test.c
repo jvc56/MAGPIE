@@ -149,6 +149,13 @@ void perf_test_multithread_blocking_sim(Config *config) {
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config->cgp);
 
+  struct timespec start, finish;
+  double elapsed;
+
+  clock_gettime(CLOCK_MONOTONIC, &start);
+
+  /* ... */
+
   int sorting_type = game->players[0]->strategy_params->move_sorting;
   game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
 
@@ -162,6 +169,12 @@ void perf_test_multithread_blocking_sim(Config *config) {
   prepare_simmer(simmer, 5, num_threads, ml->moves, 80, NULL);
   set_stopping_condition(simmer, SIM_STOPPING_CONDITION_99PCT);
   blocking_simulate(simmer);
+
+  clock_gettime(CLOCK_MONOTONIC, &finish);
+
+  elapsed = (finish.tv_sec - start.tv_sec);
+  elapsed += (finish.tv_nsec - start.tv_nsec) / 1000000000.0;
+
   print_sim_stats(simmer);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
@@ -171,6 +184,7 @@ void perf_test_multithread_blocking_sim(Config *config) {
                          simmer->game->gen->letter_distribution);
 
   assert(strcmp(placeholder, "14F ZI.E") == 0);
+  printf("time taken %f\n", elapsed);
   destroy_game(game);
   destroy_simmer(simmer);
 }
