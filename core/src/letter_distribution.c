@@ -60,9 +60,6 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   char line[100];
   int max_tile_length = 0;
   while (fgets(line, sizeof(line), file)) {
-    // This does not hold true for all languages
-    // and will have to be updated.
-
     char *token;
 
     // letter, lower case, dist, score, is_vowel
@@ -135,7 +132,6 @@ human_readable_letter_to_machine_letter(LetterDistribution *letter_distribution,
       return i;
     }
   }
-  // It better find it
   return INVALID_LETTER;
 }
 
