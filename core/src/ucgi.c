@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,10 @@
 #define MODE_SEARCHING 1
 #define MODE_STOPPED 0
 
+#define SEARCH_TYPE_MONTECARLO 1
+#define SEARCH_TYPE_INFERENCE 2
+#define SEARCH_TYPE_ENDGAME 3
+#define SEARCH_TYPE_PREENDGAME 4
 typedef struct GoParams {
   int infinite;
   int depth;
@@ -23,6 +28,11 @@ static Game *loaded_game = NULL;
 static Config *config = NULL;
 static Simmer *simmer = NULL;
 static int current_mode = MODE_STOPPED;
+static pthread_t manager_thread;
+
+struct ucgithreadcontrol {
+  int search_type;
+};
 
 int prefix(const char *pre, const char *str) {
   return strncmp(pre, str, strlen(pre)) == 0;
@@ -57,6 +67,16 @@ void load_position(const char *cgp, char *lexicon_name, char *ldname) {
   log_debug("created game. loading cgp: %s", config->cgp);
   load_cgp(loaded_game, config->cgp);
   log_debug("loaded game");
+}
+
+void *ucgi_manager_thread(void *ptr) {
+  struct ucgithreadcontrol *tc = (struct ucgithreadcontrol *)ptr;
+  if (tc->search_type == SEARCH_TYPE_MONTECARLO) {
+    simulate(simmer);
+  }
+  // Join when we are done. This will block, but in its own separate thread.
+  join_threads(simmer);
+  return NULL;
 }
 
 void start_search(GoParams params) {
@@ -101,8 +121,13 @@ void start_search(GoParams params) {
   if (params.stop_condition != SIM_STOPPING_CONDITION_NONE) {
     set_stopping_condition(simmer, params.stop_condition);
   }
-  simulate(simmer);
+
+  struct ucgithreadcontrol ctrl = {.search_type = SEARCH_TYPE_MONTECARLO};
+
   current_mode = MODE_SEARCHING;
+
+  pthread_create(&manager_thread, NULL, ucgi_manager_thread, &ctrl);
+  pthread_detach(manager_thread);
 }
 
 void stop_search() { // stop simming for now, more later.

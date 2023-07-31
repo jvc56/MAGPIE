@@ -321,39 +321,6 @@ void *single_thread_simmer(void *ptr) {
     }
   }
   tc->status = THREAD_CONTROL_EXITING;
-
-  // if we're here, this thread is about to stop.
-  if (tc->thread_number == 0) {
-  // Wait until all the other threads are done.
-  waitfordone:
-    for (int i = 0; i < tc->simmer->threads; i++) {
-      if (tc->simmer->thread_control[i]->status != THREAD_CONTROL_EXITING) {
-        // https://xkcd.com/292/
-        goto waitfordone;
-      }
-    }
-    log_debug("all threads about to exit");
-
-    struct timespec finish;
-    double elapsed;
-
-    clock_gettime(CLOCK_MONOTONIC, &finish);
-
-    elapsed = (finish.tv_sec - tc->simmer->start_time.tv_sec);
-    elapsed += (finish.tv_nsec - tc->simmer->start_time.tv_nsec) / 1000000000.0;
-    double nps = (double)tc->simmer->node_count / elapsed;
-    // Print out the bestplay, UCGI. (and the final rankings/data)
-    if (tc->simmer->ucgi_mode == UCGI_MODE_ON) {
-      print_ucgi_stats(tc->simmer, 1);
-      fprintf(stdout, "info nps %f\n", nps);
-    }
-    if (tc->simmer->endsim_callback != NULL) {
-      tc->simmer->endsim_callback();
-    }
-
-    log_debug("elapsed time %f s\n", elapsed);
-    log_debug("nps %f\n", nps);
-  }
   log_trace("thread %d exiting", tc->thread_number);
   return NULL;
 }
@@ -449,11 +416,38 @@ void simulate(Simmer *simmer) {
                    single_thread_simmer, simmer->thread_control[t]);
     simmer->thread_control[t]->status = THREAD_CONTROL_RUNNING;
   }
-  // We're going to detach the threads and let them stop on their own,
-  // or via a command.
+}
+
+void join_threads(Simmer *simmer) {
+  log_debug("join_threads waiting...");
+
   for (int t = 0; t < simmer->threads; t++) {
-    pthread_detach(simmer->thread_control[t]->thread);
+    pthread_join(simmer->thread_control[t]->thread, NULL);
+    simmer->thread_control[t]->status = THREAD_CONTROL_IDLE;
   }
+  log_debug("all sim threads joined");
+
+  // We're done simming now. Print out all stats, etc.
+
+  struct timespec finish;
+  double elapsed;
+
+  clock_gettime(CLOCK_MONOTONIC, &finish);
+
+  elapsed = (finish.tv_sec - simmer->start_time.tv_sec);
+  elapsed += (finish.tv_nsec - simmer->start_time.tv_nsec) / 1000000000.0;
+  double nps = (double)simmer->node_count / elapsed;
+  // Print out the bestplay, UCGI. (and the final rankings/data)
+  if (simmer->ucgi_mode == UCGI_MODE_ON) {
+    print_ucgi_stats(simmer, 1);
+    fprintf(stdout, "info nps %f\n", nps);
+  }
+  if (simmer->endsim_callback != NULL) {
+    simmer->endsim_callback();
+  }
+
+  log_debug("elapsed time %f s\n", elapsed);
+  log_debug("nps %f\n", nps);
 }
 
 void blocking_simulate(Simmer *simmer) {
@@ -474,11 +468,7 @@ void blocking_simulate(Simmer *simmer) {
                    single_thread_simmer, simmer->thread_control[t]);
     simmer->thread_control[t]->status = THREAD_CONTROL_RUNNING;
   }
-
-  for (int t = 0; t < simmer->threads; t++) {
-    pthread_join(simmer->thread_control[t]->thread, NULL);
-    simmer->thread_control[t]->status = THREAD_CONTROL_IDLE;
-  }
+  join_threads(simmer);
 }
 
 void sim_single_iteration(Simmer *simmer, int plies, int thread) {

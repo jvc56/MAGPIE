@@ -78,6 +78,7 @@ struct threadcontrol {
 Simmer *create_simmer(Config *config, Game *game);
 void blocking_simulate(Simmer *simmer);
 void destroy_simmer(Simmer *simmer);
+void join_threads(Simmer *simmer);
 int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);
 void prepare_simmer(Simmer *simmer, int plies, int threads, Move **plays,
                     int num_plays, Rack *known_opp_rack);
