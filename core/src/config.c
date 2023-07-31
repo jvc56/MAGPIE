@@ -20,7 +20,8 @@ Config *create_config(const char *kwg_filename,
                       const char *actual_tiles_played,
                       int player_to_infer_index, int actual_score,
                       int number_of_tiles_exchanged, double equity_margin,
-                      int number_of_threads, const char *winpct_filename) {
+                      int number_of_threads, const char *winpct_filename,
+                      int move_list_capacity) {
 
   Config *config = malloc(sizeof(Config));
   config->letter_distribution =
@@ -83,6 +84,7 @@ Config *create_config(const char *kwg_filename,
   } else {
     config->win_pcts = NULL;
   }
+  config->move_list_capacity = move_list_capacity;
   return config;
 }
 
@@ -290,7 +292,7 @@ Config *create_config_from_args(int argc, char *argv[]) {
                        game_pair_flag, number_of_games_or_pairs,
                        actual_tiles_played, player_to_infer_index, actual_score,
                        number_of_tiles_exchanged, equity_margin,
-                       number_of_threads, winpct_filename);
+                       number_of_threads, winpct_filename, MOVE_LIST_CAPACITY);
 }
 
 void destroy_config(Config *config) {

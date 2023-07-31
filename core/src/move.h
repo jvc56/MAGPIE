@@ -28,10 +28,11 @@ typedef struct MoveList {
 Move *create_move();
 void copy_move(Move *src_move, Move *dest_move);
 void destroy_move(Move *move);
-MoveList *create_move_list();
+MoveList *create_move_list(int capacity);
 void destroy_move_list(MoveList *ml);
 void sort_moves(MoveList *ml);
-void store_move_description(Move *move, char *placeholder, LetterDistribution *ld);
+void store_move_description(Move *move, char *placeholder,
+                            LetterDistribution *ld);
 void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
                     int rightstrip, int score, int row_start, int col_start,
                     int tiles_played, int vertical, int move_type);

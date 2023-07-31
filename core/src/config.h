@@ -31,18 +31,17 @@ typedef struct Config {
   int number_of_threads;
   // Sim params
   WinPct *win_pcts;
+  int move_list_capacity;
 } Config;
 
-Config *create_config(const char *kwg_filename,
-                      const char *letter_distribution_filename, const char *cgp,
-                      const char *klv_filename_1, int move_sorting_1,
-                      int play_recorder_type_1, const char *klv_filename_2,
-                      int move_sorting_2, int play_recorder_type_2,
-                      int game_pair_flag, int number_of_games_or_pairs,
-                      const char *actual_tiles_played,
-                      int player_to_infer_index, int actual_score,
-                      int number_of_tiles_exchanged, double equity_margin,
-                      int number_of_threads, const char *winpct_filename);
+Config *create_config(
+    const char *kwg_filename, const char *letter_distribution_filename,
+    const char *cgp, const char *klv_filename_1, int move_sorting_1,
+    int play_recorder_type_1, const char *klv_filename_2, int move_sorting_2,
+    int play_recorder_type_2, int game_pair_flag, int number_of_games_or_pairs,
+    const char *actual_tiles_played, int player_to_infer_index,
+    int actual_score, int number_of_tiles_exchanged, double equity_margin,
+    int number_of_threads, const char *winpct_filename, int move_list_capacity);
 Config *create_config_from_args(int argc, char *argv[]);
 void destroy_config(Config *config);
 

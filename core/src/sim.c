@@ -101,9 +101,17 @@ void make_game_copies(Simmer *simmer) {
   simmer->rack_placeholders = malloc((sizeof(Rack)) * simmer->threads);
   simmer->thread_control = malloc((sizeof(ThreadControl)) * simmer->threads);
 
+  int p0rectype = simmer->game->players[0]->strategy_params->play_recorder_type;
+  int p1rectype = simmer->game->players[1]->strategy_params->play_recorder_type;
+
+  // Simmer only needs to record top equity plays:
+  simmer->game->players[0]->strategy_params->play_recorder_type =
+      PLAY_RECORDER_TYPE_TOP_EQUITY;
+  simmer->game->players[1]->strategy_params->play_recorder_type =
+      PLAY_RECORDER_TYPE_TOP_EQUITY;
   uint64_t seed = time(NULL);
   for (int i = 0; i < simmer->threads; i++) {
-    simmer->game_copies[i] = copy_game(simmer->game);
+    simmer->game_copies[i] = copy_game(simmer->game, 1);
     set_backup_mode(simmer->game_copies[i], BACKUP_MODE_SIMULATION);
     simmer->rack_placeholders[i] =
         create_rack(simmer->game->gen->letter_distribution->size);
@@ -115,6 +123,9 @@ void make_game_copies(Simmer *simmer) {
       xoshiro_jump(simmer->game_copies[i]->gen->bag->prng);
     }
   }
+  // Restore the play recorder types for these players.
+  simmer->game->players[0]->strategy_params->play_recorder_type = p0rectype;
+  simmer->game->players[1]->strategy_params->play_recorder_type = p1rectype;
 }
 
 // this does all the reset work.

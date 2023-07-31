@@ -397,7 +397,7 @@ Inference *copy_inference(Inference *inference) {
       inference->leave_rack_list->capacity, inference->distribution_size);
 
   // Game must be deep copied since we use the move generator
-  new_inference->game = copy_game(inference->game);
+  new_inference->game = copy_game(inference->game, MOVE_LIST_CAPACITY);
   // KLV can just be a pointer since it is read only
   new_inference->klv = inference->klv;
   // Need the rack from the newly copied game
