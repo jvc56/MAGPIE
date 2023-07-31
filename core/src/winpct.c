@@ -2,13 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "fileproxy.h"
 #include "winpct.h"
 
-extern inline float win_pct(WinPct *wp, int spread_plus_leftover, unsigned int tiles_unseen);
+extern inline float win_pct(WinPct *wp, int spread_plus_leftover,
+                            unsigned int tiles_unseen);
 
 // note: this function was largely written by ChatGPT.
 void parse_winpct_csv(WinPct *wp, const char *filename) {
-  FILE *file = fopen(filename, "r");
+  FILE *file = stream_from_filename(filename);
   if (file == NULL) {
     printf("Error opening file: %s\n", filename);
     return;
@@ -21,7 +23,8 @@ void parse_winpct_csv(WinPct *wp, const char *filename) {
   }
 
   // Read and process the CSV file
-  char line[MAX_COLS * 10]; // Assuming each field is no longer than 10 characters
+  // Assuming each field is no longer than 10 characters
+  char line[MAX_COLS * 10];
 
   // Read the header line
   fgets(line, sizeof(line), file);

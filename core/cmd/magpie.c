@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-int main() {
-  printf("unimplemented\n");
-  exit(EXIT_FAILURE);
-}
+#include "../src/ucgi.h"
+
+int main() { ucgi_scan_loop(); }

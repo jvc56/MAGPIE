@@ -6,12 +6,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "fileproxy.h"
 #include "kwg.h"
 #include "letter_distribution.h"
 
 void load_kwg(KWG *kwg, const char *kwg_filename) {
-  FILE *stream;
-  stream = fopen(kwg_filename, "r");
+  FILE *stream = stream_from_filename(kwg_filename);
   if (stream == NULL) {
     perror(kwg_filename);
     exit(EXIT_FAILURE);

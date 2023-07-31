@@ -78,7 +78,8 @@
 #define SIM_STOPPING_CONDITION_99PCT 3
 #define BACKUP_MODE_OFF 0
 #define BACKUP_MODE_SIMULATION 1
-
+#define UCGI_MODE_OFF 0
+#define UCGI_MODE_ON 1
 #define CROSSWORD_GAME_BOARD                                                   \
   "=  '   =   '  ="                                                            \
   " -   \"   \"   - "                                                          \

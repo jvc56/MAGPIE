@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "fileproxy.h"
 #include "letter_distribution.h"
 
 extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
@@ -10,7 +11,7 @@ extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
 extern inline uint8_t is_blanked(uint8_t ml);
 
 int count_number_of_newline_characters_in_file(const char *filename) {
-  FILE *file = fopen(filename, "r");
+  FILE *file = stream_from_filename(filename);
   if (file == NULL) {
     printf("Error opening file to count lines: %s\n", filename);
     return -1;
@@ -36,7 +37,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
       count_number_of_newline_characters_in_file(letter_distribution_filename) +
       1;
 
-  FILE *file = fopen(letter_distribution_filename, "r");
+  FILE *file = stream_from_filename(letter_distribution_filename);
   if (file == NULL) {
     printf("Error opening letter distribution file: %s\n",
            letter_distribution_filename);

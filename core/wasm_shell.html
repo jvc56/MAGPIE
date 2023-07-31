@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Emscripten-Generated Code</title>
+    <style>
+      .emscripten {
+        padding-right: 0;
+        margin-left: auto;
+        margin-right: auto;
+        display: block;
+      }
+      textarea.emscripten {
+        font-family: monospace;
+        width: 80%;
+      }
+      div.emscripten {
+        text-align: center;
+      }
+      div.emscripten_border {
+        border: 1px solid black;
+      }
+      /* the canvas *must not* have any border or padding, or mouse coords will be wrong */
+      canvas.emscripten {
+        border: 0px none;
+        background-color: black;
+      }
+
+      .spinner {
+        height: 50px;
+        width: 50px;
+        margin: 0px auto;
+        -webkit-animation: rotation 0.8s linear infinite;
+        -moz-animation: rotation 0.8s linear infinite;
+        -o-animation: rotation 0.8s linear infinite;
+        animation: rotation 0.8s linear infinite;
+        border-left: 10px solid rgb(0, 150, 240);
+        border-right: 10px solid rgb(0, 150, 240);
+        border-bottom: 10px solid rgb(0, 150, 240);
+        border-top: 10px solid rgb(100, 0, 200);
+        border-radius: 100%;
+        background-color: rgb(200, 100, 250);
+      }
+      @-webkit-keyframes rotation {
+        from {
+          -webkit-transform: rotate(0deg);
+        }
+        to {
+          -webkit-transform: rotate(360deg);
+        }
+      }
+      @-moz-keyframes rotation {
+        from {
+          -moz-transform: rotate(0deg);
+        }
+        to {
+          -moz-transform: rotate(360deg);
+        }
+      }
+      @-o-keyframes rotation {
+        from {
+          -o-transform: rotate(0deg);
+        }
+        to {
+          -o-transform: rotate(360deg);
+        }
+      }
+      @keyframes rotation {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <hr />
+    <figure style="overflow: visible" id="spinner">
+      <div class="spinner"></div>
+      <center style="margin-top: 0.5em"><strong>emscripten</strong></center>
+    </figure>
+    <div class="emscripten" id="status">Downloading...</div>
+    <div class="emscripten">
+      <progress value="0" max="100" id="progress" hidden="1"></progress>
+    </div>
+    <div class="emscripten_border">
+      <canvas
+        class="emscripten"
+        id="canvas"
+        oncontextmenu="event.preventDefault()"
+        tabindex="-1"
+      ></canvas>
+    </div>
+    <hr />
+    <div class="emscripten">
+      <input type="checkbox" id="resize" />Resize canvas
+      <input type="checkbox" id="pointerLock" checked />Lock/hide mouse pointer
+      &nbsp;&nbsp;&nbsp;
+      <input
+        type="button"
+        value="Fullscreen"
+        onclick="Module.requestFullscreen(document.getElementById('pointerLock').checked, 
+                                                                                document.getElementById('resize').checked)"
+      />
+    </div>
+
+    <hr />
+    <textarea class="emscripten" id="output" rows="20"></textarea>
+    <hr />
+    <hr />
+    <h4>Input:</h4>
+    <textarea class="emscripten" id="inputParams" rows="4"></textarea>
+    <button type="button" id="submitButton">Submit</button>
+    <script type="text/javascript">
+      var statusElement = document.getElementById("status");
+      var progressElement = document.getElementById("progress");
+      var spinnerElement = document.getElementById("spinner");
+      var buttonElement = document.getElementById("submitButton");
+      var inputElement = document.getElementById("inputParams");
+      var lastIterCt = 0;
+
+      var Module = {
+        preRun: [],
+        postRun: [],
+        print: (function () {
+          var element = document.getElementById("output");
+          if (element) element.value = ""; // clear browser cache
+          return function (text) {
+            if (arguments.length > 1)
+              text = Array.prototype.slice.call(arguments).join(" ");
+            // These replacements are necessary if you render to raw HTML
+            //text = text.replace(/&/g, "&amp;");
+            //text = text.replace(/</g, "&lt;");
+            //text = text.replace(/>/g, "&gt;");
+            //text = text.replace('\n', '<br>', 'g');
+            // console.log(text);
+            text = text.split(" ");
+            var toPrint = "";
+            for (var i = 0; i < text.length; i++) {
+              if (text[i] === "it") {
+                var iterct = parseInt(text[i + 1], 10);
+                if (iterct > lastIterCt) {
+                  lastIterCt = iterct;
+                  toPrint = text[i] + " " + lastIterCt;
+                }
+                break;
+              } else if (text[i] === "bestmove") {
+                toPrint = text.join(" ");
+                break;
+              } else if (text[i] === "nps") {
+                toPrint = text.join(" ");
+                break;
+              }
+            }
+
+            if (toPrint !== "" && element) {
+              element.value += toPrint + "\n";
+              element.scrollTop = element.scrollHeight; // focus on bottom
+            }
+          };
+        })(),
+        canvas: (() => {
+          var canvas = document.getElementById("canvas");
+
+          // As a default initial behavior, pop up an alert when webgl context is lost. To make your
+          // application robust, you may want to override this behavior before shipping!
+          // See http://www.khronos.org/registry/webgl/specs/latest/1.0/#5.15.2
+          canvas.addEventListener(
+            "webglcontextlost",
+            (e) => {
+              alert("WebGL context lost. You will need to reload the page.");
+              e.preventDefault();
+            },
+            false
+          );
+
+          return canvas;
+        })(),
+        setStatus: (text) => {
+          if (!Module.setStatus.last)
+            Module.setStatus.last = { time: Date.now(), text: "" };
+          if (text === Module.setStatus.last.text) return;
+          var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+          var now = Date.now();
+          if (m && now - Module.setStatus.last.time < 30) return; // if this is a progress update, skip it if too soon
+          Module.setStatus.last.time = now;
+          Module.setStatus.last.text = text;
+          if (m) {
+            text = m[1];
+            progressElement.value = parseInt(m[2]) * 100;
+            progressElement.max = parseInt(m[4]) * 100;
+            progressElement.hidden = false;
+            spinnerElement.hidden = false;
+          } else {
+            progressElement.value = null;
+            progressElement.max = null;
+            progressElement.hidden = true;
+            if (!text) spinnerElement.hidden = true;
+          }
+          statusElement.innerHTML = text;
+        },
+        totalDependencies: 0,
+        monitorRunDependencies: (left) => {
+          this.totalDependencies = Math.max(this.totalDependencies, left);
+          Module.setStatus(
+            left
+              ? "Preparing... (" +
+                  (this.totalDependencies - left) +
+                  "/" +
+                  this.totalDependencies +
+                  ")"
+              : "All downloads complete."
+          );
+        },
+      };
+      Module.setStatus("Downloading...");
+      window.onerror = () => {
+        Module.setStatus("Exception thrown, see JavaScript console");
+        spinnerElement.style.display = "none";
+        Module.setStatus = (text) => {
+          if (text) console.error("[post-exception status] " + text);
+        };
+      };
+      buttonElement.addEventListener("click", async () => {
+        // assume input is a CGP string.
+        const cgpstring = inputElement.value.trim();
+        var vals = cgpstring.split(" ");
+        if (vals.length < 6) {
+          Module.setStatus("Error: need valid CGP string.");
+          return;
+        }
+        var lexicon = "";
+        // [0] is the fen, [1] is the racks, [2] the scores, [3] the # of zero turns.
+        for (var i = 4; i < vals.length; i += 2) {
+          var opcode = vals[i];
+          var value = vals[i + 1];
+          switch (opcode) {
+            case "lex":
+              lexicon = value.substring(0, value.length - 1);
+              break;
+          }
+        }
+        if (lexicon === "") {
+          Module.setStatus("Error: need lexicon in CGP.");
+          return;
+        }
+        // these are the paths as MAGPIE knows them, but when we distribute
+        // WASM let's put the files in the same folder as the WASM.
+        // so we need to change what `fetch` fetches.
+        var distFile = "data/letterdistributions/english.csv";
+        var leavesFile = "data/lexica/english.klv2";
+        var winPctFile = "data/strategy/default_english/winpct.csv";
+        switch (lexicon) {
+          case "CSW21":
+            leavesFile = "data/lexica/CSW21.klv2";
+        }
+        var filenames = [
+          `data/lexica/${lexicon}.kwg`,
+          distFile,
+          leavesFile,
+          winPctFile,
+        ];
+        for (var i = 0; i < filenames.length; i++) {
+          var filename = filenames[i];
+          console.log("trying to cache", filename);
+          const filenameCharArr = Module.stringToNewUTF8(filename);
+          const fetchFilename = filename.substring(
+            filename.lastIndexOf("/") + 1
+          );
+          const resp = await fetch(fetchFilename);
+          if (resp.ok) {
+            const arrBuffer = new Uint8Array(await resp.arrayBuffer());
+            var buf = Module._malloc(
+              arrBuffer.length * arrBuffer.BYTES_PER_ELEMENT
+            );
+            Module.HEAPU8.set(arrBuffer, buf);
+            Module.ccall(
+              "precache_file_data",
+              null,
+              ["number", "number", "number"],
+              [filenameCharArr, buf, arrBuffer.length]
+            );
+            Module._free(buf);
+            Module._free(filenameCharArr);
+          } else {
+            Module.setStatus("Unable to cache " + filename);
+            return;
+          }
+        }
+
+        var element = document.getElementById("output");
+        if (element) element.value = ""; // clear output
+        lastIterCt = 0;
+
+        const ucgiLoadCmd = "position cgp " + cgpstring;
+        const nthreads = navigator.hardwareConcurrency - 1;
+        if (nthreads < 1) {
+          nthreads = 1;
+        }
+        if (nthreads > 20) {
+          nthreads = 20;
+        }
+        console.log("Using nthreads: " + nthreads);
+        const goCmd = `go threads ${nthreads} stopcondition 99 depth 5`;
+
+        const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);
+        const cmd2C = Module.stringToNewUTF8(goCmd);
+
+        Module.ccall("process_ucgi_command", null, ["number"], [cmd1C]);
+        Module.ccall("process_ucgi_command", null, ["number"], [cmd2C]);
+        Module._free(cmd1C);
+        Module._free(cmd2C);
+      });
+    </script>
+    {{{ SCRIPT }}}
+  </body>
+</html>

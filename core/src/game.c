@@ -203,6 +203,44 @@ void load_cgp(Game *game, const char *cgp) {
   }
 }
 
+// return lexicon and letter distribution from the cgp string.
+void lexicon_ld_from_cgp(char *cgp, char *lexicon, char *ldname) {
+  // copy string since we are going to modify it with strtok :(
+  char cgpcopy[512];
+  strcpy(cgpcopy, cgp);
+  char *token;
+  token = strtok(cgpcopy, " ");
+  // cgp consists of FEN racks scores zeroturns opcode val; opcode val; ...
+  int getting_lex = 0;
+  int getting_ld = 0;
+  while (token != NULL) {
+    if (getting_lex) {
+      strcpy(lexicon, token);
+      lexicon[strlen(lexicon) - 1] = '\0'; // overwrite the semicolon
+    } else if (getting_ld) {
+      strcpy(ldname, token);
+      ldname[strlen(ldname) - 1] = '\0'; // overwrite the semicolon
+    }
+
+    getting_lex = strcmp(token, "lex") == 0;
+    getting_ld = strcmp(token, "ld") == 0;
+    token = strtok(NULL, " ");
+  }
+  // if not specified, the default ld will be english, at least according to our
+  // program.
+  if (strcmp(ldname, "") == 0) {
+    strcpy(ldname, "english");
+  }
+}
+
+int tiles_unseen(Game *game) {
+  int bag_idx = game->gen->bag->last_tile_index;
+  int their_rack_tiles =
+      game->players[1 - game->player_on_turn_index]->rack->number_of_letters;
+
+  return (their_rack_tiles + bag_idx + 1);
+}
+
 void reset_game(Game *game) {
   reset_generator(game->gen);
   reset_player(game->players[0]);
