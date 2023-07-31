@@ -701,7 +701,7 @@ Generator *create_generator(Config *config) {
   Generator *generator = malloc(sizeof(Generator));
   generator->bag = create_bag(config->letter_distribution);
   generator->board = create_board();
-  generator->move_list = create_move_list();
+  generator->move_list = create_move_list(config->move_list_capacity);
   generator->anchor_list = create_anchor_list();
   generator->leave_map = create_leave_map(config->letter_distribution->size);
   generator->kwg = config->kwg;
@@ -720,12 +720,12 @@ Generator *create_generator(Config *config) {
   return generator;
 }
 
-Generator *copy_generator(Generator *gen) {
+Generator *copy_generator(Generator *gen, int move_list_size) {
   Generator *new_generator = malloc(sizeof(Generator));
   new_generator->bag = copy_bag(gen->bag);
   new_generator->board = copy_board(gen->board);
   // Move list, anchor list, and leave map can be new
-  new_generator->move_list = create_move_list();
+  new_generator->move_list = create_move_list(move_list_size);
   new_generator->anchor_list = create_anchor_list();
   new_generator->leave_map = create_leave_map(gen->letter_distribution->size);
   // KWG and letter distribution are read only and can share pointers

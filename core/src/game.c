@@ -253,9 +253,9 @@ Game *create_game(Config *config) {
   return game;
 }
 
-Game *copy_game(Game *game) {
+Game *copy_game(Game *game, int move_list_size) {
   Game *new_game = malloc(sizeof(Game));
-  new_game->gen = copy_generator(game->gen);
+  new_game->gen = copy_generator(game->gen, move_list_size);
   new_game->players[0] = copy_player(game->players[0]);
   new_game->players[1] = copy_player(game->players[1]);
   new_game->player_on_turn_index = game->player_on_turn_index;

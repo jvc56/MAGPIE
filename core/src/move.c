@@ -7,12 +7,13 @@
 
 Move *create_move() { return malloc(sizeof(Move)); }
 
-MoveList *create_move_list() {
+MoveList *create_move_list(int capacity) {
   MoveList *ml = malloc(sizeof(MoveList));
   ml->count = 0;
+  ml->capacity = capacity;
   ml->spare_move = create_move();
-  ml->moves = malloc((sizeof(Move *)) * (MOVE_LIST_CAPACITY));
-  for (int i = 0; i < MOVE_LIST_CAPACITY; i++) {
+  ml->moves = malloc(sizeof(Move *) * capacity);
+  for (int i = 0; i < capacity; i++) {
     ml->moves[i] = create_move();
   }
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
@@ -22,7 +23,7 @@ MoveList *create_move_list() {
 void destroy_move(Move *move) { free(move); }
 
 void destroy_move_list(MoveList *ml) {
-  for (int i = 0; i < MOVE_LIST_CAPACITY; i++) {
+  for (int i = 0; i < ml->capacity; i++) {
     destroy_move(ml->moves[i]);
   }
   destroy_move(ml->spare_move);
@@ -119,7 +120,7 @@ void insert_spare_move(MoveList *ml, double equity) {
   up_heapify(ml, ml->count);
   ml->count++;
 
-  if (ml->count == MOVE_LIST_CAPACITY) {
+  if (ml->count == ml->capacity) {
     pop_move(ml);
   }
 }

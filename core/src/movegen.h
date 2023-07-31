@@ -51,7 +51,7 @@ typedef struct Generator {
 } Generator;
 
 Generator *create_generator(Config *config);
-Generator *copy_generator(Generator *gen);
+Generator *copy_generator(Generator *gen, int move_list_size);
 void destroy_generator(Generator *gen);
 void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
                     int add_exchange);
