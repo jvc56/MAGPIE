@@ -29,7 +29,7 @@ all: magpie_wasm
 
 magpie_wasm: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	emcc $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@.html \
-	-s INITIAL_MEMORY=1200MB \
+	-s INITIAL_MEMORY=128MB \
 	--shell-file wasm_shell.html
 
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR)

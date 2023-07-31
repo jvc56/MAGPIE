@@ -43,7 +43,8 @@ void set_mode_stopped_callback() {
   log_debug("setting current mode to stopped");
 }
 
-void load_position(const char *cgp, char *lexicon_name, char *ldname) {
+void load_position(const char *cgp, char *lexicon_name, char *ldname,
+                   int move_list_capacity) {
   char dist[50];
   sprintf(dist, "data/letterdistributions/%s.csv", ldname);
   char leaves[50] = "data/lexica/english.klv2";
@@ -56,10 +57,10 @@ void load_position(const char *cgp, char *lexicon_name, char *ldname) {
   if (config != NULL) {
     destroy_config(config);
   }
-  config =
-      create_config(lexicon_file, dist, cgp, leaves, SORT_BY_EQUITY,
-                    PLAY_RECORDER_TYPE_ALL, "", SORT_BY_EQUITY,
-                    PLAY_RECORDER_TYPE_ALL, 0, 0, "", 0, 0, 0, 0, 1, winpct);
+  config = create_config(lexicon_file, dist, cgp, leaves, SORT_BY_EQUITY,
+                         PLAY_RECORDER_TYPE_ALL, "", SORT_BY_EQUITY,
+                         PLAY_RECORDER_TYPE_ALL, 0, 0, "", 0, 0, 0, 0, 1,
+                         winpct, move_list_capacity);
   if (loaded_game != NULL) {
     destroy_game(loaded_game);
   }
@@ -214,7 +215,7 @@ int process_ucgi_command(char *cmd) {
     if (strcmp(lexicon, "") == 0) {
       return 0;
     }
-    load_position(cgpstr, lexicon, ldname);
+    load_position(cgpstr, lexicon, ldname, 100);
   } else if (prefix("go", cmd)) {
     if (current_mode == MODE_STOPPED) {
       GoParams params = parse_go_cmd(cmd + strlen("go"));
