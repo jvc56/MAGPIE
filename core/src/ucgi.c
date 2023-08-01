@@ -24,15 +24,16 @@ typedef struct GoParams {
   int threads;
 } GoParams;
 
+struct ucgithreadcontrol {
+  int search_type;
+};
+
 static Game *loaded_game = NULL;
 static Config *config = NULL;
 static Simmer *simmer = NULL;
 static int current_mode = MODE_STOPPED;
 static pthread_t manager_thread;
-
-struct ucgithreadcontrol {
-  int search_type;
-};
+static struct ucgithreadcontrol manager_thread_controller;
 
 int prefix(const char *pre, const char *str) {
   return strncmp(pre, str, strlen(pre)) == 0;
@@ -71,12 +72,17 @@ void load_position(const char *cgp, char *lexicon_name, char *ldname,
 }
 
 void *ucgi_manager_thread(void *ptr) {
-  struct ucgithreadcontrol *tc = (struct ucgithreadcontrol *)ptr;
-  if (tc->search_type == SEARCH_TYPE_MONTECARLO) {
+  struct ucgithreadcontrol *tc = ptr;
+  switch (tc->search_type) {
+  case SEARCH_TYPE_MONTECARLO:
     simulate(simmer);
+    // Join when we are done. This will block, but in its own separate thread.
+    join_threads(simmer);
+    break;
+  default:
+    log_warn("Search type not set; exiting immediately.");
   }
-  // Join when we are done. This will block, but in its own separate thread.
-  join_threads(simmer);
+
   return NULL;
 }
 
@@ -123,11 +129,12 @@ void start_search(GoParams params) {
     set_stopping_condition(simmer, params.stop_condition);
   }
 
-  struct ucgithreadcontrol ctrl = {.search_type = SEARCH_TYPE_MONTECARLO};
+  manager_thread_controller.search_type = SEARCH_TYPE_MONTECARLO;
 
   current_mode = MODE_SEARCHING;
 
-  pthread_create(&manager_thread, NULL, ucgi_manager_thread, &ctrl);
+  pthread_create(&manager_thread, NULL, ucgi_manager_thread,
+                 &manager_thread_controller);
   pthread_detach(manager_thread);
 }
 
