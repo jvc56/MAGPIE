@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "config.h"
 #include "player.h"
 
 void reset_player(Player *player) {
@@ -24,12 +25,13 @@ Player *copy_player(Player *player) {
   new_player->name = strdup(player->name);
   new_player->rack = copy_rack(player->rack);
   new_player->score = player->score;
-  new_player->strategy_params = player->strategy_params;
+  new_player->strategy_params = copy_strategy_params(player->strategy_params);
   return new_player;
 }
 
 void destroy_player(Player *player) {
   destroy_rack(player->rack);
+  destroy_strategy_params(player->strategy_params);
   free(player->name);
   free(player);
 }

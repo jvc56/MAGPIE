@@ -97,6 +97,8 @@
   " -   \"   \"   - "                                                          \
   "=  '   =   '  ="
 
+#define MAX_DATA_FILENAME_LENGTH 64
+
 // want superOMG board as well.
 
 #endif

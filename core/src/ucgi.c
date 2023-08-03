@@ -7,6 +7,8 @@
 #include "log.h"
 #include "sim.h"
 #include "ucgi.h"
+#include "ucgi_formats.h"
+#include "util.h"
 
 #define CMD_MAX 256
 
@@ -34,10 +36,8 @@ static Simmer *simmer = NULL;
 static int current_mode = MODE_STOPPED;
 static pthread_t manager_thread;
 static struct ucgithreadcontrol manager_thread_controller;
-
-int prefix(const char *pre, const char *str) {
-  return strncmp(pre, str, strlen(pre)) == 0;
-}
+static char last_lexicon_name[16] = "";
+static char last_ld_name[16] = "";
 
 void set_mode_stopped_callback() {
   current_mode = MODE_STOPPED;
@@ -46,13 +46,13 @@ void set_mode_stopped_callback() {
 
 void load_position(const char *cgp, char *lexicon_name, char *ldname,
                    int move_list_capacity) {
-  char dist[50];
-  sprintf(dist, "data/letterdistributions/%s.csv", ldname);
-  char leaves[50] = "data/lexica/english.klv2";
-  char winpct[50] = "data/strategy/default_english/winpct.csv";
-  char lexicon_file[50];
-  sprintf(lexicon_file, "data/lexica/%s.kwg", lexicon_name);
-  if (strcmp(lexicon_name, "CSW21") == 0) {
+
+  load_config_from_lexargs(&config, cgp, lexicon_name, ldname);
+  config->move_list_capacity = move_list_capacity;
+
+  if (loaded_game == NULL || strcmp(last_lexicon_name, lexicon_name) ||
+      strcmp(last_ld_name, ldname)) {
+    log_debug("creating game");
     strcpy(leaves, "data/lexica/CSW21.klv2");
   }
   if (config != NULL) {
@@ -62,13 +62,22 @@ void load_position(const char *cgp, char *lexicon_name, char *ldname,
                          PLAY_RECORDER_TYPE_ALL, "", SORT_BY_EQUITY,
                          PLAY_RECORDER_TYPE_ALL, 0, 0, "", 0, 0, 0, 0, 1,
                          winpct, move_list_capacity);
-  if (loaded_game != NULL) {
-    destroy_game(loaded_game);
+    if (loaded_game != NULL) {
+      destroy_game(loaded_game);
+    }
+    loaded_game = create_game(config);
+  } else {
+    // assume config is the same so just reset the game.
+    log_debug("resetting game");
+    reset_game(loaded_game);
   }
-  loaded_game = create_game(config);
-  log_debug("created game. loading cgp: %s", config->cgp);
+
+  log_debug("loading cgp: %s", config->cgp);
   load_cgp(loaded_game, config->cgp);
   log_debug("loaded game");
+
+  strcpy(last_lexicon_name, lexicon_name);
+  strcpy(last_ld_name, ldname);
 }
 
 void *ucgi_manager_thread(void *ptr) {
@@ -93,6 +102,19 @@ void start_search(GoParams params) {
     log_warn("No game loaded.");
     return;
   }
+
+  // unseen_tiles are the number of tiles not on the board and not
+  // on the player-on-turn's rack. They're split up between the bag
+  // and the opponent's rack. Only when that number is RACK_SIZE*2 or
+  // bigger should we allow an exchange.
+  int unseen_tiles = tiles_unseen(game);
+  reset_move_list(game->gen->move_list);
+  generate_moves(game->gen, game->players[game->player_on_turn_index],
+                 game->players[1 - game->player_on_turn_index]->rack,
+                 unseen_tiles >= RACK_SIZE * 2);
+  MoveList *ml = game->gen->move_list;
+  int nmoves = ml->count;
+  sort_moves(ml);
   if (params.depth == 0) {
     log_warn("Need a depth.");
     return;
@@ -101,14 +123,9 @@ void start_search(GoParams params) {
     log_warn("Cannot search with 0 threads.");
     return;
   }
-  int unseen_tiles = tiles_unseen(game);
-  generate_moves(game->gen, game->players[game->player_on_turn_index],
-                 game->players[1 - game->player_on_turn_index]->rack,
-                 unseen_tiles >= RACK_SIZE);
-  MoveList *ml = game->gen->move_list;
-  int nmoves = ml->count;
-  sort_moves(ml);
+
   if (simmer != NULL) {
+    log_debug("Destroying old simmer");
     destroy_simmer(simmer);
   }
   simmer = create_simmer(config, game);
@@ -192,15 +209,26 @@ void ucgi_scan_loop() {
   while (1) {
     char cmd[CMD_MAX];
     if (fgets(cmd, CMD_MAX, stdin) == NULL) {
-      return;
+      break;
     }
     // replace newline with 0 for ease in comparison
     cmd[strcspn(cmd, "\n")] = 0;
 
     int should_end = process_ucgi_command(cmd);
     if (should_end) {
-      return;
+      break;
     }
+  }
+
+  // clean up
+  if (loaded_game != NULL) {
+    destroy_game(loaded_game);
+  }
+  if (config != NULL) {
+    destroy_config(config);
+  }
+  if (simmer != NULL) {
+    destroy_simmer(simmer);
   }
 }
 
@@ -216,8 +244,8 @@ int process_ucgi_command(char *cmd) {
   // other commands
   if (prefix("position cgp ", cmd)) {
     char *cgpstr = cmd + strlen("position cgp ");
-    char lexicon[20] = "";
-    char ldname[20] = "";
+    char lexicon[16] = "";
+    char ldname[16] = "";
     lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
     if (strcmp(lexicon, "") == 0) {
       return 0;
