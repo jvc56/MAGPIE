@@ -19,11 +19,14 @@
 #define SEARCH_TYPE_INFERENCE 2
 #define SEARCH_TYPE_ENDGAME 3
 #define SEARCH_TYPE_PREENDGAME 4
+#define SEARCH_TYPE_STATICONLY 5
+
 typedef struct GoParams {
   int infinite;
   int depth;
   int stop_condition;
   int threads;
+  int static_search_only;
 } GoParams;
 
 struct ucgithreadcontrol {
@@ -53,15 +56,6 @@ void load_position(const char *cgp, char *lexicon_name, char *ldname,
   if (loaded_game == NULL || strcmp(last_lexicon_name, lexicon_name) ||
       strcmp(last_ld_name, ldname)) {
     log_debug("creating game");
-    strcpy(leaves, "data/lexica/CSW21.klv2");
-  }
-  if (config != NULL) {
-    destroy_config(config);
-  }
-  config = create_config(lexicon_file, dist, cgp, leaves, SORT_BY_EQUITY,
-                         PLAY_RECORDER_TYPE_ALL, "", SORT_BY_EQUITY,
-                         PLAY_RECORDER_TYPE_ALL, 0, 0, "", 0, 0, 0, 0, 1,
-                         winpct, move_list_capacity);
     if (loaded_game != NULL) {
       destroy_game(loaded_game);
     }
@@ -78,6 +72,16 @@ void load_position(const char *cgp, char *lexicon_name, char *ldname,
 
   strcpy(last_lexicon_name, lexicon_name);
   strcpy(last_ld_name, ldname);
+}
+
+void ucgi_print_moves(MoveList *ml, Game *game, int nmoves) {
+  for (int i = 0; i < nmoves; i++) {
+    char move[30];
+    store_move_ucgi(ml->moves[i], game->gen->board, move,
+                    game->gen->letter_distribution);
+    fprintf(stdout, "info currmove %s sc %d eq %.3f it 0\n", move,
+            ml->moves[i]->score, ml->moves[i]->equity);
+  }
 }
 
 void *ucgi_manager_thread(void *ptr) {
@@ -115,6 +119,13 @@ void start_search(GoParams params) {
   MoveList *ml = game->gen->move_list;
   int nmoves = ml->count;
   sort_moves(ml);
+
+  // No sim needed.
+  if (params.static_search_only) {
+    ucgi_print_moves(ml, game, 15);
+    return;
+  }
+
   if (params.depth == 0) {
     log_warn("Need a depth.");
     return;
@@ -186,14 +197,17 @@ GoParams parse_go_cmd(char *params) {
     if (strcmp(token, "infinite") == 0) {
       gparams.infinite = 1;
     }
+    if (strcmp(token, "static") == 0) {
+      gparams.static_search_only = 1;
+    }
     reading_depth = strcmp(token, "depth") == 0;
     reading_stop_condition = strcmp(token, "stopcondition") == 0;
     reading_threads = strcmp(token, "threads") == 0;
     token = strtok(NULL, " ");
   }
-  log_debug("Returning gparams; inf %d stop %d depth %d threads %d",
+  log_debug("Returning gparams; inf %d stop %d depth %d threads %d ss %d",
             gparams.infinite, gparams.stop_condition, gparams.depth,
-            gparams.threads);
+            gparams.threads, gparams.static_search_only);
   if (gparams.stop_condition != SIM_STOPPING_CONDITION_NONE &&
       gparams.infinite) {
     log_warn("Cannot have a stopping condition and also search infinitely.");
