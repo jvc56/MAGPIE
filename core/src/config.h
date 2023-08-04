@@ -9,13 +9,16 @@
 
 typedef struct StrategyParams {
   KLV *klv;
+  char klv_filename[MAX_DATA_FILENAME_LENGTH];
   int move_sorting;
   int play_recorder_type;
 } StrategyParams;
 
 typedef struct Config {
   KWG *kwg;
+  char kwg_filename[MAX_DATA_FILENAME_LENGTH];
   LetterDistribution *letter_distribution;
+  char ld_filename[MAX_DATA_FILENAME_LENGTH];
   char *cgp;
   int klv_is_shared;
   int game_pairs;
@@ -31,9 +34,12 @@ typedef struct Config {
   int number_of_threads;
   // Sim params
   WinPct *win_pcts;
+  char win_pct_filename[MAX_DATA_FILENAME_LENGTH];
   int move_list_capacity;
 } Config;
 
+void load_config_from_lexargs(Config **config, const char *cgp,
+                              char *lexicon_name, char *ldname);
 Config *create_config(
     const char *kwg_filename, const char *letter_distribution_filename,
     const char *cgp, const char *klv_filename_1, int move_sorting_1,
@@ -44,5 +50,7 @@ Config *create_config(
     int number_of_threads, const char *winpct_filename, int move_list_capacity);
 Config *create_config_from_args(int argc, char *argv[]);
 void destroy_config(Config *config);
+StrategyParams *copy_strategy_params(StrategyParams *orig);
+void destroy_strategy_params(StrategyParams *sp);
 
 #endif

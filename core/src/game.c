@@ -280,8 +280,10 @@ Game *create_game(Config *config) {
       create_player("player_1", config->letter_distribution->size);
   game->players[1] =
       create_player("player_2", config->letter_distribution->size);
-  game->players[0]->strategy_params = config->player_1_strategy_params;
-  game->players[1]->strategy_params = config->player_2_strategy_params;
+  game->players[0]->strategy_params =
+      copy_strategy_params(config->player_1_strategy_params);
+  game->players[1]->strategy_params =
+      copy_strategy_params(config->player_2_strategy_params);
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
@@ -294,8 +296,9 @@ Game *create_game(Config *config) {
 Game *copy_game(Game *game, int move_list_size) {
   Game *new_game = malloc(sizeof(Game));
   new_game->gen = copy_generator(game->gen, move_list_size);
-  new_game->players[0] = copy_player(game->players[0]);
-  new_game->players[1] = copy_player(game->players[1]);
+  for (int j = 0; j < 2; j++) {
+    new_game->players[j] = copy_player(game->players[j]);
+  }
   new_game->player_on_turn_index = game->player_on_turn_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
