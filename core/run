@@ -87,7 +87,7 @@ make magpie_test
                       -l "./data/lexica/CSW21.klv2" \
                       -r "all" \
                       -s "equity" \
-                      -c "1PACIFYING5/1IS12/YE13/1REQUALIFIED3/H1L12/EDS12/NO3T9/1RAINWASHING3/UM3O9/T2E1O9/1WAKEnERS6/1OnETIME7/OOT2E1B7/N6U7/1JACULATING4 ABEOPXZ/ 0/0 0 lex America;"
+                      -c "1PACIFYING5/1IS12/YE13/1REQUALIFIED3/H1L12/EDS12/NO3T9/1RAINWASHING3/UM3O9/T2E1O9/1WAKEnERS6/1OnETIME7/OOT2E1B7/N6U7/1JACULATING4 ABEOPXZ/ 0/0 0 lex NWL20;"
 elif [ "$1" == "sim" ]; then
 make magpie_test BUILD=release
 ./bin/magpie_test sim -g "./data/lexica/NWL20.kwg" \
