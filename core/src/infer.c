@@ -11,6 +11,31 @@
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
+#include "thread_control.h"
+
+typedef struct InferencePrintParams {
+  uint64_t *shared_rack_index;
+  pthread_mutex_t *shared_rack_index_lock;
+  pthread_cond_t *print_info_cond;
+  int *halt;
+} InferencePrintParams;
+
+InferencePrintParams *
+create_inference_print_params(uint64_t *shared_rack_index,
+                              pthread_mutex_t *shared_rack_index_lock,
+                              pthread_cond_t *print_info_cond, int *halt) {
+  InferencePrintParams *inference_print_params =
+      malloc(sizeof(InferencePrintParams));
+  inference_print_params->shared_rack_index = shared_rack_index;
+  inference_print_params->shared_rack_index_lock = shared_rack_index_lock;
+  inference_print_params->print_info_cond = print_info_cond;
+  inference_print_params->halt = halt;
+}
+
+void destroy_inference_print_params(
+    InferencePrintParams *inference_print_params) {
+  free(inference_print_params);
+}
 
 InferenceRecord *create_inference_record(int draw_and_leave_subtotals_size) {
   InferenceRecord *record = malloc(sizeof(InferenceRecord));
@@ -41,6 +66,7 @@ Inference *create_inference(int capacity, int distribution_size) {
       create_inference_record(inference->draw_and_leave_subtotals_size);
   inference->leave_rack_list =
       create_leave_rack_list(capacity, distribution_size);
+  inference->finished = 0;
   return inference;
 }
 
@@ -379,7 +405,9 @@ InferenceRecord *copy_inference_record(InferenceRecord *inference_record,
   return new_record;
 }
 
-Inference *copy_inference(Inference *inference) {
+Inference *copy_inference(Inference *inference, int *halt,
+                          pthread_cond_t *print_info_cond,
+                          int print_info_interval) {
   Inference *new_inference = malloc(sizeof(Inference));
   new_inference->distribution_size = inference->distribution_size;
   new_inference->draw_and_leave_subtotals_size =
@@ -413,6 +441,12 @@ Inference *copy_inference(Inference *inference) {
   new_inference->initial_tiles_to_infer = inference->initial_tiles_to_infer;
   new_inference->equity_margin = inference->equity_margin;
   new_inference->current_rack_index = inference->current_rack_index;
+
+  // Multithreading
+  new_inference->halt = halt;
+  new_inference->finished = 0;
+  new_inference->print_info_cond = print_info_cond;
+  new_inference->print_info_interval = print_info_interval;
 
   return new_inference;
 }
@@ -453,6 +487,8 @@ void add_inference(Inference *inference_1, Inference *inference_2) {
   }
 }
 
+void finish_inference(Inference *inference) { inference->finished = 1; }
+
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
   if (tiles_to_infer == 0) {
@@ -460,6 +496,9 @@ void iterate_through_all_possible_leaves(Inference *inference,
     pthread_mutex_lock(inference->shared_rack_index_lock);
     if (inference->current_rack_index == *inference->shared_rack_index) {
       perform_evaluation = 1;
+      if (inference->current_rack_index % inference->print_info_interval == 0) {
+        pthread_cond_broadcast(inference->print_info_cond);
+      }
       *inference->shared_rack_index += 1;
     }
     pthread_mutex_unlock(inference->shared_rack_index_lock);
@@ -472,6 +511,9 @@ void iterate_through_all_possible_leaves(Inference *inference,
   }
   for (int letter = start_letter; letter < inference->distribution_size;
        letter++) {
+    if (inference->halt) {
+      return;
+    }
     if (inference->bag_as_rack->array[letter] > 0) {
       increment_letter_for_inference(inference, letter);
       iterate_through_all_possible_leaves(inference, tiles_to_infer - 1,
@@ -479,7 +521,6 @@ void iterate_through_all_possible_leaves(Inference *inference,
       decrement_letter_for_inference(inference, letter);
     }
   }
-  reset_move_list(inference->game->gen->move_list);
 }
 
 void iterate_through_all_possible_leaves_single_threaded(Inference *inference,
@@ -506,6 +547,8 @@ void *infer_worker(void *uncasted_inference) {
   Inference *inference = (Inference *)uncasted_inference;
   iterate_through_all_possible_leaves(
       inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER);
+  reset_move_list(inference->game->gen->move_list);
+  finish_inference(inference);
   return NULL;
 }
 
@@ -513,6 +556,8 @@ void *infer_worker_single_threaded(void *uncasted_inference) {
   Inference *inference = (Inference *)uncasted_inference;
   iterate_through_all_possible_leaves_single_threaded(
       inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER);
+  reset_move_list(inference->game->gen->move_list);
+  finish_inference(inference);
   return NULL;
 }
 
@@ -523,7 +568,32 @@ void set_shared_variables_for_inference(
   inference->shared_rack_index_lock = shared_rack_index_lock;
 }
 
-void infer_manager(Inference *inference, int number_of_threads) {
+void print_status(InferencePrintParams *inference_print_params) {
+  uint64_t current_rack_index;
+  pthread_mutex_lock(inference_print_params->shared_rack_index_lock);
+  current_rack_index = *inference_print_params->shared_rack_index;
+  pthread_mutex_unlock(inference_print_params->shared_rack_index_lock);
+  printf("inference is at index %ld\n", current_rack_index);
+}
+
+void print_inference_info(void *uncasted_inference_print_params) {
+  InferencePrintParams *inference_print_params =
+      (InferencePrintParams *)uncasted_inference_print_params;
+  pthread_mutex_t *print_info_mutex;
+  pthread_mutex_init(print_info_mutex);
+  while (1) {
+    pthread_cond_wait(inference_print_params->print_info_cond,
+                      print_info_mutex);
+    if (!inference_print_params->halt) {
+      print_status(inference_print_params);
+    } else {
+      return;
+    }
+  }
+}
+
+int infer_manager(ThreadControl *thread_control, Inference *inference,
+                  int number_of_threads) {
 
   if (number_of_threads == 1) {
     infer_worker_single_threaded(inference);
@@ -538,17 +608,22 @@ void infer_manager(Inference *inference, int number_of_threads) {
     abort();
   }
 
-  set_shared_variables_for_inference(inference, &shared_rack_index,
-                                     &shared_rack_index_lock);
+  // Create a print info thread
+  pthread_t *print_info_worker_id;
+  InferencePrintParams *inference_print_params;
+  if (thread_control->print_info_interval > 0) {
+    print_info_worker_id = malloc(sizeof(pthread_t));
+    inference_print_params = create_inference_print_params();
+    pthread_create(print_info_worker_id, NULL, print_inference_info,
+                   thread_control);
+  }
 
-  int number_of_nonmain_threads = number_of_threads - 1;
   Inference **inferences_for_workers =
-      malloc((sizeof(Inference *)) * (number_of_nonmain_threads));
-  pthread_t *worker_ids =
-      malloc((sizeof(pthread_t)) * (number_of_nonmain_threads));
-  for (int thread_index = 0; thread_index < number_of_nonmain_threads;
-       thread_index++) {
-    inferences_for_workers[thread_index] = copy_inference(inference);
+      malloc((sizeof(Inference *)) * (number_of_threads));
+  pthread_t *worker_ids = malloc((sizeof(pthread_t)) * (number_of_threads));
+  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+    inferences_for_workers[thread_index] =
+        copy_inference(inference, thread_control->halt);
     set_shared_variables_for_inference(inferences_for_workers[thread_index],
                                        &shared_rack_index,
                                        &shared_rack_index_lock);
@@ -556,24 +631,37 @@ void infer_manager(Inference *inference, int number_of_threads) {
                    inferences_for_workers[thread_index]);
   }
 
-  // Run inference for the main thread after
-  // spawning all the other number_of_threads - 1 threads.
-  infer_worker(inference);
-
   // Combine and free
-  for (int thread_index = 0; thread_index < number_of_nonmain_threads;
-       thread_index++) {
+  int inference_status = INFERENCE_STATUS_SUCCESS;
+  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
-    add_inference(inference, inferences_for_workers[thread_index]);
+    if (inferences_for_workers[thread_index]->finished) {
+      add_inference(inference, inferences_for_workers[thread_index]);
+    } else {
+      inference_status = INFERENCE_STATUS_INTERRUPTED;
+    }
     destroy_inference_copy(inferences_for_workers[thread_index]);
   }
   free(inferences_for_workers);
   free(worker_ids);
+
+  // Now stop the printing thread if it was started
+  if (thread_control->print_info_interval > 0) {
+    // Send the halt signal and broadcast the
+    // print condition and wait for print info worker
+    // to finish
+    halt(thread_control);
+    pthread_cond_broadcast();
+    pthread_join(print_info_worker_id, NULL);
+    free(print_info_worker_id);
+    destroy_inference_print_params(inference_print_params);
+  }
+  return inference_status;
 }
 
-int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
-          int player_to_infer_index, int actual_score,
-          int number_of_tiles_exchanged, double equity_margin,
+int infer(ThreadControl *thread_control, Inference *inference, Game *game,
+          Rack *actual_tiles_played, int player_to_infer_index,
+          int actual_score, int number_of_tiles_exchanged, double equity_margin,
           int number_of_threads) {
   initialize_inference_for_evaluation(inference, game, actual_tiles_played,
                                       player_to_infer_index, actual_score,
@@ -625,7 +713,8 @@ int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
   game->gen->apply_placement_adjustment = 0;
   player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
 
-  infer_manager(inference, number_of_threads);
+  int inference_status =
+      infer_manager(thread_control, inference, number_of_threads);
 
   player->strategy_params->play_recorder_type = original_recorder_type;
   game->gen->apply_placement_adjustment = original_apply_placement_adjustment;
@@ -638,5 +727,5 @@ int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
     }
   }
 
-  return INFERENCE_STATUS_SUCCESS;
+  return inference_status;
 }

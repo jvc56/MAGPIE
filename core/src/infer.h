@@ -44,10 +44,15 @@ typedef struct Inference {
   int number_of_tiles_exchanged;
   int draw_and_leave_subtotals_size;
   int initial_tiles_to_infer;
+  int finished;
   double equity_margin;
   uint64_t current_rack_index;
+  // Multithreading fields
   uint64_t *shared_rack_index;
   pthread_mutex_t *shared_rack_index_lock;
+  pthread_cond_t *print_info_cond;
+  int print_info_interval;
+  int *halt;
 } Inference;
 
 int infer(Inference *inference, Game *game, Rack *actual_tiles_played,

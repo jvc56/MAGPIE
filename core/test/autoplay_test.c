@@ -144,7 +144,7 @@ int are_inferences_equal(Inference *inference_1, Inference *inference_2) {
     }
   }
 
-  int number_of_listed_racks = inference_1->leave_rack_list->capacity;
+  uint64_t number_of_listed_racks = inference_1->leave_rack_list->capacity;
   if (inference_1->exchanged == 0 &&
       get_cardinality(inference_1->leave_record->equity_values) <
           number_of_listed_racks) {
