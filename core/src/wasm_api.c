@@ -14,7 +14,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   char lexicon[20] = "";
   char ldname[20] = "";
   lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
-  Config *config;
+  Config *config = NULL;
   load_config_from_lexargs(&config, cgpstr, lexicon, ldname);
 
   Game *game = create_game(config);
