@@ -1,12 +1,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "board.h"
 #include "constants.h"
 #include "cross_set.h"
-#include "log.h"
 
 // Current index
 // depends on tranposition of the board

@@ -2,10 +2,8 @@
 
 #include "constants.h"
 #include "klv.h"
-#include "kwg.h"
 #include "move.h"
 #include "rack.h"
-#include "util.h"
 
 double get_leave_value_for_move(KLV *klv, Move *move, Rack *rack) {
   int valid_tiles = move->tiles_length;
