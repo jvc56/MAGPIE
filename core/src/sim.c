@@ -26,7 +26,6 @@ Simmer *create_simmer(Config *config, Game *game) {
   simmer->win_pcts = config->win_pcts;
   simmer->stopping_condition = SIM_STOPPING_CONDITION_NONE;
   simmer->ucgi_mode = UCGI_MODE_OFF;
-  simmer->endsim_callback = NULL;
   simmer->game_copies = NULL;
   simmer->rack_placeholders = NULL;
   simmer->simmed_plays = NULL;
@@ -222,10 +221,6 @@ void set_stop_flags(Simmer *simmer) {
 }
 
 void stop_simming(Simmer *simmer) { set_stop_flags(simmer); }
-
-void set_endsim_callback(Simmer *simmer, callback_fn f) {
-  simmer->endsim_callback = f;
-}
 
 int handle_potential_stopping_condition(Simmer *simmer) {
   if (simmer->num_simmed_plays < 2) {
@@ -444,9 +439,6 @@ void join_threads(Simmer *simmer) {
   if (simmer->ucgi_mode == UCGI_MODE_ON) {
     print_ucgi_stats(simmer, 1);
     fprintf(stdout, "info nps %f\n", nps);
-  }
-  if (simmer->endsim_callback != NULL) {
-    simmer->endsim_callback();
   }
 
   log_debug("elapsed time %f s\n", elapsed);

@@ -55,7 +55,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   }
 
   char *retstr = malloc(sizeof(char) * 256);
-  Rack *leave_rack;
+  Rack *leave_rack = NULL;
   int phonies_exist = 0;
   char phonies[200];
 
@@ -102,7 +102,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
 
   destroy_config(config);
   destroy_game(game);
-  if (nleave > 0) {
+  if (leave_rack != NULL) {
     destroy_rack(leave_rack);
   }
 

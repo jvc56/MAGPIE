@@ -36,8 +36,6 @@ typedef struct SimmedPlay {
 typedef struct threadcontrol ThreadControl;
 typedef struct simmer Simmer;
 
-typedef void (*callback_fn)(void);
-
 struct simmer {
   Game *game; // contains a generator already.
   Game **game_copies;
@@ -63,7 +61,6 @@ struct simmer {
   WinPct *win_pcts;
 
   int *play_similarity_cache;
-  callback_fn endsim_callback;
 };
 
 struct threadcontrol {
@@ -86,7 +83,6 @@ void print_ucgi_stats(Simmer *simmer, int print_best_play);
 void print_sim_stats(Simmer *simmer);
 void set_stopping_condition(Simmer *simmer, int sc);
 void set_ucgi_mode(Simmer *simmer, int mode);
-void set_endsim_callback(Simmer *, callback_fn);
 void simulate(Simmer *simmer);
 void sim_single_iteration(Simmer *simmer, int plies, int thread);
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays);
