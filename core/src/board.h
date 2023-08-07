@@ -10,6 +10,7 @@ typedef struct TraverseBackwardsReturnValues {
   uint32_t node_index;
   int path_is_valid;
 } TraverseBackwardsReturnValues;
+
 typedef struct Board {
   uint8_t letters[BOARD_DIM * BOARD_DIM];
   uint8_t bonus_squares[BOARD_DIM * BOARD_DIM];

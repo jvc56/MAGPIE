@@ -27,6 +27,8 @@
 #include "stats_test.h"
 #include "superconfig.h"
 #include "test_constants.h"
+#include "wasm_api_test.h"
+#include "word_test.h"
 
 void unit_tests(SuperConfig *superconfig) {
   // Test the loading of the config
@@ -43,6 +45,7 @@ void unit_tests(SuperConfig *superconfig) {
   test_bag(superconfig);
   test_rack(superconfig);
   test_board(superconfig);
+  test_words(superconfig);
   test_cross_set(superconfig);
   test_game(superconfig);
   test_shadow(superconfig);
@@ -52,6 +55,7 @@ void unit_tests(SuperConfig *superconfig) {
   test_stats();
   test_infer(superconfig);
   test_sim(superconfig);
+  test_wasm_api();
 }
 
 int main(int argc, char *argv[]) {

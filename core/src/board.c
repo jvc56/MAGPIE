@@ -252,6 +252,8 @@ void set_bonus_squares(Board *board) {
   }
 }
 
+// this fn assumes the word is always horizontal. If this isn't the case,
+// the board needs to be transposed ahead of time.
 int score_move(Board *board, uint8_t word[], int word_start_index,
                int word_end_index, int row, int col, int tiles_played,
                int cross_dir, LetterDistribution *letter_distribution) {
