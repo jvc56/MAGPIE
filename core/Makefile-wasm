@@ -28,7 +28,7 @@ LDLIBS   := -lm
 all: magpie_wasm
 
 magpie_wasm: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
-	emcc $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@.html \
+	emcc $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@.mjs \
 	-s INITIAL_MEMORY=128MB \
 	--shell-file wasm_shell.html
 
