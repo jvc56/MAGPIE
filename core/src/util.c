@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "constants.h"
 #include "klv.h"
 #include "move.h"
@@ -18,4 +20,8 @@ double get_leave_value_for_move(KLV *klv, Move *move, Rack *rack) {
     }
   }
   return get_leave_value(klv, rack);
+}
+
+int prefix(const char *pre, const char *str) {
+  return strncmp(pre, str, strlen(pre)) == 0;
 }

@@ -16,7 +16,7 @@ ldflags.release := -Llib -pthread
 
 CFLAGS := ${cflags.${BUILD}}
 LFLAGS := ${lflags.${BUILD}} \
-	-s EXPORTED_RUNTIME_METHODS=["ccall","stringToNewUTF8"] \
+	-s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8"] \
 	-s EXPORTED_FUNCTIONS=["_free","_main","_malloc","_precache_file_data","_process_ucgi_command"] \
 	-sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency \
 	-s ALLOW_BLOCKING_ON_MAIN_THREAD=0

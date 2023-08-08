@@ -27,6 +27,13 @@ Simmer *create_simmer(Config *config, Game *game) {
   simmer->stopping_condition = SIM_STOPPING_CONDITION_NONE;
   simmer->ucgi_mode = UCGI_MODE_OFF;
   simmer->endsim_callback = NULL;
+  simmer->game_copies = NULL;
+  simmer->rack_placeholders = NULL;
+  simmer->simmed_plays = NULL;
+  simmer->known_opp_rack = NULL;
+  simmer->play_similarity_cache = NULL;
+  simmer->num_simmed_plays = 0;
+  simmer->thread_control = NULL;
   return simmer;
 }
 
@@ -105,31 +112,27 @@ void make_game_copies(Simmer *simmer) {
   simmer->rack_placeholders = malloc((sizeof(Rack)) * simmer->threads);
   simmer->thread_control = malloc((sizeof(ThreadControl)) * simmer->threads);
 
-  int p0rectype = simmer->game->players[0]->strategy_params->play_recorder_type;
-  int p1rectype = simmer->game->players[1]->strategy_params->play_recorder_type;
-
-  // Simmer only needs to record top equity plays:
-  simmer->game->players[0]->strategy_params->play_recorder_type =
-      PLAY_RECORDER_TYPE_TOP_EQUITY;
-  simmer->game->players[1]->strategy_params->play_recorder_type =
-      PLAY_RECORDER_TYPE_TOP_EQUITY;
   uint64_t seed = time(NULL);
   for (int i = 0; i < simmer->threads; i++) {
-    simmer->game_copies[i] = copy_game(simmer->game, 1);
-    set_backup_mode(simmer->game_copies[i], BACKUP_MODE_SIMULATION);
+    Game *cp = copy_game(simmer->game, 1);
+    set_backup_mode(cp, BACKUP_MODE_SIMULATION);
+    for (int j = 0; j < 2; j++) {
+      // Simmer only needs to record top equity plays:
+      cp->players[j]->strategy_params->play_recorder_type =
+          PLAY_RECORDER_TYPE_TOP_EQUITY;
+    }
+
     simmer->rack_placeholders[i] =
         create_rack(simmer->game->gen->letter_distribution->size);
     simmer->thread_control[i] = malloc(sizeof(ThreadControl));
     // Give each game bag the same seed, but then change these:
-    seed_prng(simmer->game_copies[i]->gen->bag->prng, seed);
+    seed_prng(cp->gen->bag->prng, seed);
     // "jump" each bag's prng thread number of times.
     for (int j = 0; j < i; j++) {
-      xoshiro_jump(simmer->game_copies[i]->gen->bag->prng);
+      xoshiro_jump(cp->gen->bag->prng);
     }
+    simmer->game_copies[i] = cp;
   }
-  // Restore the play recorder types for these players.
-  simmer->game->players[0]->strategy_params->play_recorder_type = p0rectype;
-  simmer->game->players[1]->strategy_params->play_recorder_type = p1rectype;
 }
 
 // this does all the reset work.
@@ -702,13 +705,23 @@ void free_thread_controllers(Simmer *simmer) {
 }
 
 void destroy_simmer(Simmer *simmer) {
-  free_simmed_plays(simmer);
+  if (simmer->num_simmed_plays > 0) {
+    free_simmed_plays(simmer);
+  }
   if (simmer->known_opp_rack != NULL) {
     destroy_rack(simmer->known_opp_rack);
   }
-  free_game_copies(simmer);
-  free_rack_placeholders(simmer);
-  free_thread_controllers(simmer);
-  free(simmer->play_similarity_cache);
+  if (simmer->game_copies != NULL) {
+    free_game_copies(simmer);
+  }
+  if (simmer->rack_placeholders != NULL) {
+    free_rack_placeholders(simmer);
+  }
+  if (simmer->thread_control != NULL) {
+    free_thread_controllers(simmer);
+  }
+  if (simmer->play_similarity_cache != NULL) {
+    free(simmer->play_similarity_cache);
+  }
   free(simmer);
 }

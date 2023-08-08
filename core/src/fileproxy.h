@@ -1,13 +1,13 @@
 #ifndef FILEPROXY_H
 #define FILEPROXY_H
 
+#include "constants.h"
 #include <stdio.h>
 
 #define MAX_CACHE_SIZE 32
-#define MAX_FILENAME_LENGTH 60
 
 typedef struct FileCacheEntry {
-  char filename[MAX_FILENAME_LENGTH];
+  char filename[MAX_DATA_FILENAME_LENGTH];
   char *raw_data;
   int byte_size;
 } FileCacheEntry;

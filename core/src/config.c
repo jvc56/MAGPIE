@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +9,8 @@
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "log.h"
+#include "util.h"
 
 static int game_pair_flag;
 
@@ -26,7 +29,9 @@ Config *create_config(const char *kwg_filename,
   Config *config = malloc(sizeof(Config));
   config->letter_distribution =
       create_letter_distribution(letter_distribution_filename);
+  strcpy(config->ld_filename, letter_distribution_filename);
   config->kwg = create_kwg(kwg_filename);
+  strcpy(config->kwg_filename, kwg_filename);
   config->cgp = strdup(cgp);
   config->actual_tiles_played = create_rack(config->letter_distribution->size);
   if (actual_tiles_played != NULL) {
@@ -44,6 +49,7 @@ Config *create_config(const char *kwg_filename,
   StrategyParams *player_1_strategy_params = malloc(sizeof(StrategyParams));
   if (strcmp(klv_filename_1, "") != 0) {
     player_1_strategy_params->klv = create_klv(klv_filename_1);
+    strcpy(player_1_strategy_params->klv_filename, klv_filename_1);
   } else {
     player_1_strategy_params->klv = NULL;
   }
@@ -56,8 +62,10 @@ Config *create_config(const char *kwg_filename,
 
   if (!strcmp(klv_filename_2, "") || !strcmp(klv_filename_2, klv_filename_1)) {
     player_2_strategy_params->klv = player_1_strategy_params->klv;
+    strcpy(player_2_strategy_params->klv_filename, klv_filename_1);
     config->klv_is_shared = 1;
   } else {
+    strcpy(player_2_strategy_params->klv_filename, klv_filename_2);
     player_2_strategy_params->klv = create_klv(klv_filename_2);
     config->klv_is_shared = 0;
   }
@@ -81,6 +89,7 @@ Config *create_config(const char *kwg_filename,
   // XXX: do we want to do it this way? not consistent with rest of config.
   if (strcmp(winpct_filename, "")) {
     config->win_pcts = create_winpct(winpct_filename);
+    strcpy(config->win_pct_filename, winpct_filename);
   } else {
     config->win_pcts = NULL;
   }
@@ -316,3 +325,72 @@ void destroy_config(Config *config) {
 
   free(config);
 }
+
+// potentially edit an existing config, or create a brand new one
+void load_config_from_lexargs(Config **config, const char *cgp,
+                              char *lexicon_name, char *ldname) {
+
+  char dist[50];
+  sprintf(dist, "data/letterdistributions/%s.csv", ldname);
+  char leaves[50] = "data/lexica/english.klv2";
+  char winpct[50] = "data/strategy/default_english/winpct.csv";
+  char lexicon_file[50];
+  sprintf(lexicon_file, "data/lexica/%s.kwg", lexicon_name);
+  if (strcmp(lexicon_name, "CSW21") == 0) {
+    strcpy(leaves, "data/lexica/CSW21.klv2");
+  } else if (prefix("NSF", lexicon_name)) {
+    strcpy(leaves, "data/lexica/norwegian.klv2");
+  } else if (prefix("RD", lexicon_name)) {
+    strcpy(leaves, "data/lexica/german.klv2");
+  } else if (prefix("DISC", lexicon_name)) {
+    strcpy(leaves, "data/lexica/catalan.klv2");
+  } else if (prefix("FRA", lexicon_name)) {
+    strcpy(leaves, "data/lexica/french.klv2");
+  }
+
+  if (*config == NULL) {
+    *config = create_config(lexicon_file, dist, cgp, leaves, SORT_BY_EQUITY,
+                            PLAY_RECORDER_TYPE_ALL, "", SORT_BY_EQUITY,
+                            PLAY_RECORDER_TYPE_ALL, 0, 0, "", 0, 0, 0, 0, 0,
+                            winpct, 100);
+  } else {
+    Config *c = (*config);
+    // check each filename
+    if (strcmp(c->ld_filename, dist)) {
+      // They're different; reload.
+      log_debug("reloading letter distribution");
+      destroy_letter_distribution(c->letter_distribution);
+      c->letter_distribution = create_letter_distribution(dist);
+    }
+    if (strcmp(c->kwg_filename, lexicon_file)) {
+      log_debug("reloading kwg");
+      destroy_kwg(c->kwg);
+      c->kwg = create_kwg(lexicon_file);
+    }
+    if (strcmp(c->player_1_strategy_params->klv_filename, leaves)) {
+      log_debug("reloading klv #1");
+      destroy_klv(c->player_1_strategy_params->klv);
+      c->player_1_strategy_params->klv = create_klv(leaves);
+      // assume the klv applies to both players if we're using this function
+      assert(c->klv_is_shared);
+      c->player_2_strategy_params->klv = c->player_1_strategy_params->klv;
+      strcpy(c->player_2_strategy_params->klv_filename, leaves);
+    }
+
+    free(c->cgp);
+    c->cgp = strdup(cgp);
+  }
+}
+
+StrategyParams *copy_strategy_params(StrategyParams *orig) {
+  StrategyParams *sp = malloc(sizeof(StrategyParams));
+  // No need to copy the klv itself.
+  sp->klv = orig->klv;
+  strcpy(sp->klv_filename, orig->klv_filename);
+  sp->move_sorting = orig->move_sorting;
+  sp->play_recorder_type = orig->play_recorder_type;
+
+  return sp;
+}
+
+void destroy_strategy_params(StrategyParams *sp) { free(sp); }

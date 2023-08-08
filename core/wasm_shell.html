@@ -122,6 +122,9 @@
       var inputElement = document.getElementById("inputParams");
       var lastIterCt = 0;
 
+      var precacheFileData = null;
+      var processUCGICommand = null;
+
       var Module = {
         preRun: [],
         postRun: [],
@@ -215,7 +218,18 @@
               : "All downloads complete."
           );
         },
+        onRuntimeInitialized: () => {
+          precacheFileData = Module.cwrap("precache_file_data", null, [
+            "number",
+            "number",
+            "number",
+          ]);
+          processUCGICommand = Module.cwrap("process_ucgi_command", null, [
+            "number",
+          ]);
+        },
       };
+
       Module.setStatus("Downloading...");
       window.onerror = () => {
         Module.setStatus("Exception thrown, see JavaScript console");
@@ -224,6 +238,7 @@
           if (text) console.error("[post-exception status] " + text);
         };
       };
+
       buttonElement.addEventListener("click", async () => {
         // assume input is a CGP string.
         const cgpstring = inputElement.value.trim();
@@ -277,12 +292,7 @@
               arrBuffer.length * arrBuffer.BYTES_PER_ELEMENT
             );
             Module.HEAPU8.set(arrBuffer, buf);
-            Module.ccall(
-              "precache_file_data",
-              null,
-              ["number", "number", "number"],
-              [filenameCharArr, buf, arrBuffer.length]
-            );
+            precacheFileData(filenameCharArr, buf, arrBuffer.length);
             Module._free(buf);
             Module._free(filenameCharArr);
           } else {
@@ -308,9 +318,8 @@
 
         const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);
         const cmd2C = Module.stringToNewUTF8(goCmd);
-
-        Module.ccall("process_ucgi_command", null, ["number"], [cmd1C]);
-        Module.ccall("process_ucgi_command", null, ["number"], [cmd2C]);
+        processUCGICommand(cmd1C);
+        processUCGICommand(cmd2C);
         Module._free(cmd1C);
         Module._free(cmd2C);
       });
