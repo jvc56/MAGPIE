@@ -9,6 +9,7 @@
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
+#include "thread_control.h"
 
 typedef struct InferenceRecord {
   Stat *equity_values;
@@ -44,20 +45,17 @@ typedef struct Inference {
   int number_of_tiles_exchanged;
   int draw_and_leave_subtotals_size;
   int initial_tiles_to_infer;
-  int finished;
   double equity_margin;
   uint64_t current_rack_index;
   // Multithreading fields
   uint64_t *shared_rack_index;
   pthread_mutex_t *shared_rack_index_lock;
-  pthread_cond_t *print_info_cond;
-  int print_info_interval;
-  int *halt;
+  ThreadControl *thread_control;
 } Inference;
 
-int infer(Inference *inference, Game *game, Rack *actual_tiles_played,
-          int player_to_infer_index, int actual_score,
-          int number_of_tiles_exchanged, double equity_margin,
+int infer(ThreadControl *thread_control, Inference *inference, Game *game,
+          Rack *actual_tiles_played, int player_to_infer_index,
+          int actual_score, int number_of_tiles_exchanged, double equity_margin,
           int number_of_threads);
 Inference *create_inference(int capacity, int distribution_size);
 void destroy_inference(Inference *inference);

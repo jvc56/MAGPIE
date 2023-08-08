@@ -8,6 +8,7 @@
 #include "../src/game.h"
 #include "../src/gameplay.h"
 #include "../src/infer.h"
+#include "../src/thread_control.h"
 
 #include "game_print.h"
 #include "inference_print.h"
@@ -181,7 +182,8 @@ void print_error_case(Game *game, Inference *inference_1,
   print_inference(inference_2, tiles_played, number_of_threads);
 }
 
-void play_game(Game *game, Inference *inference_1, Inference *inference_2,
+void play_game(ThreadControl *thread_control, Game *game,
+               Inference *inference_1, Inference *inference_2,
                Rack *tiles_played, Rack *full_rack, time_t seed,
                int test_inference) {
   draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, RACK_SIZE);
@@ -228,9 +230,9 @@ void play_game(Game *game, Inference *inference_1, Inference *inference_2,
       }
 
       // Single threaded infer
-      int status =
-          infer(inference_1, game, tiles_played, game->player_on_turn_index,
-                move_to_play->score, number_of_tiles_exchanged, 0, 1);
+      int status = infer(thread_control, inference_1, game, tiles_played,
+                         game->player_on_turn_index, move_to_play->score,
+                         number_of_tiles_exchanged, 0, 1);
       sort_leave_racks(inference_1->leave_rack_list);
       if (status != INFERENCE_STATUS_SUCCESS) {
         printf("bad status for single threaded %d, seed is >%ld<\n", status,
@@ -240,9 +242,9 @@ void play_game(Game *game, Inference *inference_1, Inference *inference_2,
                          number_of_tiles_exchanged, 7);
       }
 
-      status =
-          infer(inference_2, game, tiles_played, game->player_on_turn_index,
-                move_to_play->score, number_of_tiles_exchanged, 0, 7);
+      status = infer(thread_control, inference_2, game, tiles_played,
+                     game->player_on_turn_index, move_to_play->score,
+                     number_of_tiles_exchanged, 0, 7);
       sort_leave_racks(inference_2->leave_rack_list);
       if (status != INFERENCE_STATUS_SUCCESS) {
         printf("bad status for 7 threads %d, seed is >%ld<\n", status, seed);
@@ -262,8 +264,9 @@ void play_game(Game *game, Inference *inference_1, Inference *inference_2,
                          number_of_tiles_exchanged, 7);
       }
 
-      infer(inference_2, game, tiles_played, game->player_on_turn_index,
-            move_to_play->score, number_of_tiles_exchanged, 0, 10);
+      infer(thread_control, inference_2, game, tiles_played,
+            game->player_on_turn_index, move_to_play->score,
+            number_of_tiles_exchanged, 0, 10);
       sort_leave_racks(inference_2->leave_rack_list);
       if (status != INFERENCE_STATUS_SUCCESS) {
         printf("bad status for 10 threads %d, seed is >%ld<\n", status, seed);
@@ -301,6 +304,7 @@ void play_game(Game *game, Inference *inference_1, Inference *inference_2,
 
 void autoplay_without_using_game_pairs(Config *config) {
   Game *game = create_game(config);
+  ThreadControl *thread_control = create_thread_control(0);
   // Use the player_to_infer_index as a intean
   // indicating whether to test inferences in autoplay.
   int test_inference = config->player_to_infer_index >= 0;
@@ -315,8 +319,8 @@ void autoplay_without_using_game_pairs(Config *config) {
   reseed_prng(game->gen->bag, seed);
   for (int i = 0; i < config->number_of_games_or_pairs; i++) {
     reset_game(game);
-    play_game(game, inference_1, inference_2, tiles_played, full_rack, seed,
-              test_inference);
+    play_game(thread_control, game, inference_1, inference_2, tiles_played,
+              full_rack, seed, test_inference);
   }
 
   destroy_game(game);
@@ -324,6 +328,7 @@ void autoplay_without_using_game_pairs(Config *config) {
   destroy_rack(tiles_played);
   destroy_inference(inference_1);
   destroy_inference(inference_2);
+  destroy_thread_control(thread_control);
 }
 
 void autoplay_using_game_pairs(Config *config) {

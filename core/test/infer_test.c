@@ -8,6 +8,7 @@
 #include "../src/infer.h"
 #include "../src/klv.h"
 #include "../src/move.h"
+#include "../src/thread_control.h"
 
 #include "inference_print.h"
 #include "superconfig.h"
@@ -18,10 +19,12 @@ int infer_for_test(Inference *inference, Game *game, Rack *actual_tiles_played,
                    int player_to_infer_index, int actual_score,
                    int number_of_tiles_exchanged, double equity_margin,
                    int number_of_threads) {
-  int status = infer(
-      inference, game, actual_tiles_played, player_to_infer_index, actual_score,
-      number_of_tiles_exchanged, equity_margin, number_of_threads);
-  // print_inference(inference, actual_tiles_played, number_of_threads);
+  ThreadControl *thread_control = create_thread_control(0);
+  int status =
+      infer(thread_control, inference, game, actual_tiles_played,
+            player_to_infer_index, actual_score, number_of_tiles_exchanged,
+            equity_margin, number_of_threads);
+  destroy_thread_control(thread_control);
   return status;
 }
 
