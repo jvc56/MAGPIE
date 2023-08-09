@@ -42,11 +42,6 @@ static struct ucgithreadcontrol manager_thread_controller;
 static char last_lexicon_name[16] = "";
 static char last_ld_name[16] = "";
 
-void set_mode_stopped_callback() {
-  current_mode = MODE_STOPPED;
-  log_debug("setting current mode to stopped");
-}
-
 void load_position(const char *cgp, char *lexicon_name, char *ldname,
                    int move_list_capacity) {
 
@@ -95,7 +90,8 @@ void *ucgi_manager_thread(void *ptr) {
   default:
     log_warn("Search type not set; exiting immediately.");
   }
-
+  current_mode = MODE_STOPPED;
+  log_debug("setting current mode to stopped");
   return NULL;
 }
 
@@ -141,7 +137,6 @@ void start_search(GoParams params) {
   }
   simmer = create_simmer(config, game);
   simmer->ucgi_mode = UCGI_MODE_ON;
-  set_endsim_callback(simmer, set_mode_stopped_callback);
   log_debug("nmoves: %d, unseen_tiles: %d", nmoves, unseen_tiles);
   int limit = 0;
   if (unseen_tiles >= RACK_SIZE) {

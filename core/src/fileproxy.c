@@ -16,7 +16,8 @@ FILE *stream_from_filename(const char *filename) {
                       file_cache.entries[i].byte_size, "r");
     }
   }
-  log_debug("%s not found in cache, opening", filename);
+  log_debug("%s not found in cache (size %d), opening", filename,
+            file_cache.num_items);
   FILE *stream;
   stream = fopen(filename, "r");
   return stream;

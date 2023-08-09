@@ -27,6 +27,8 @@
 #include "stats_test.h"
 #include "superconfig.h"
 #include "test_constants.h"
+#include "wasm_api_test.h"
+#include "word_test.h"
 
 void unit_tests(SuperConfig *superconfig) {
   // // Test the loading of the config
