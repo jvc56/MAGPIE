@@ -468,19 +468,24 @@ void iterate_through_all_possible_leaves(Inference *inference,
   }
   if (tiles_to_infer == 0) {
     int perform_evaluation = 0;
+    int print_info = 0;
+
     pthread_mutex_lock(inference->shared_rack_index_lock);
     if (inference->current_rack_index == *inference->shared_rack_index) {
       if (inference->thread_control->print_info_interval > 0 &&
           inference->current_rack_index %
                   inference->thread_control->print_info_interval ==
               0) {
-        print_inference_info(inference->current_rack_index);
+        print_info = 1;
       }
       perform_evaluation = 1;
       *inference->shared_rack_index += 1;
     }
     pthread_mutex_unlock(inference->shared_rack_index_lock);
 
+    if (print_info) {
+      print_inference_info(inference->current_rack_index);
+    }
     if (perform_evaluation) {
       evaluate_possible_leave(inference);
     }
