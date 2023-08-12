@@ -4,6 +4,7 @@
 #include <pthread.h>
 
 #include "game.h"
+#include "go_params.h"
 #include "klv.h"
 #include "leave_rack.h"
 #include "move.h"

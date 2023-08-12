@@ -27,6 +27,7 @@
 #include "stats_test.h"
 #include "superconfig.h"
 #include "test_constants.h"
+#include "ucgi_command_test.h"
 #include "wasm_api_test.h"
 #include "word_test.h"
 
@@ -52,8 +53,9 @@ void unit_tests(SuperConfig *superconfig) {
   // test_equity_adjustments(superconfig);
   // test_gameplay(superconfig);
   // test_stats();
-  test_infer(superconfig);
+  // test_infer(superconfig);
   // test_sim(superconfig);
+  test_ucgi_command();
 }
 
 int main(int argc, char *argv[]) {

@@ -187,3 +187,17 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   }
   draw_at_most_to_rack(game->gen->bag, prack, ntiles - ndrawn);
 }
+
+Move *get_top_equity_move(Game *game) {
+  StrategyParams *sp =
+      game->players[game->player_on_turn_index]->strategy_params;
+  int recorder_type = sp->play_recorder_type;
+  sp->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
+  reset_move_list(game->gen->move_list);
+  generate_moves(game->gen, game->players[game->player_on_turn_index],
+                 game->players[1 - game->player_on_turn_index]->rack,
+                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+  // restore old recorder type
+  sp->play_recorder_type = recorder_type;
+  return game->gen->move_list->moves[0];
+}

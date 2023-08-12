@@ -463,7 +463,7 @@ void print_inference_info(uint64_t current_rack_index) {
 
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
-  if (inference->thread_control->halt) {
+  if (is_halted(inference->thread_control)) {
     return;
   }
   if (tiles_to_infer == 0) {
@@ -506,7 +506,7 @@ void iterate_through_all_possible_leaves(Inference *inference,
 void iterate_through_all_possible_leaves_single_threaded(Inference *inference,
                                                          int tiles_to_infer,
                                                          int start_letter) {
-  if (inference->thread_control->halt) {
+  if (is_halted(inference->thread_control)) {
     return;
   }
   if (tiles_to_infer == 0) {
@@ -557,7 +557,7 @@ int infer_manager(ThreadControl *thread_control, Inference *inference,
   if (number_of_threads == 1) {
     inference->thread_control = thread_control;
     infer_worker_single_threaded(inference);
-    if (inference->thread_control->halt) {
+    if (is_halted(inference->thread_control)) {
       inference_status = INFERENCE_STATUS_HALTED;
     }
     return inference_status;
@@ -585,7 +585,7 @@ int infer_manager(ThreadControl *thread_control, Inference *inference,
   }
 
   // Combine and free
-  if (thread_control->halt) {
+  if (is_halted(thread_control)) {
     inference_status = INFERENCE_STATUS_HALTED;
   }
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {

@@ -63,12 +63,48 @@ double get_variance(Stat *stat) {
   if (stat->weight <= 1) {
     return 0.0;
   }
-  // Use population variance since the stat
-  // has data for the entire probability space.
+  // BIAS_FIXME: maybe use weight - 1 instead
   return stat->sum_of_mean_differences_squared / (((double)stat->weight));
 }
 
 double get_stdev(Stat *stat) { return sqrt(get_variance(stat)); }
+
+double get_combined_variance(Stat **stats, int number_of_stats) {
+  int combined_weight = 0;
+  double combined_mean = 0;
+  for (int i = 0; i < number_of_stats; i++) {
+    int weight = get_weight(stats[i]);
+    combined_weight += weight;
+    combined_mean += get_mean(stats[i]) * weight;
+  }
+  if (combined_weight <= 1) {
+    return 0;
+  }
+  combined_mean = combined_mean / combined_weight;
+
+  double combined_error_sum_of_squares = 0;
+  for (int i = 0; i < number_of_stats; i++) {
+    double stdev = get_stdev(stats[i]);
+    int weight = get_weight(stats[i]);
+    // BIAS_FIXME: maybe use weight - 1 instead
+    combined_error_sum_of_squares += (stdev * stdev) * (weight);
+  }
+
+  double combined_sum_of_squares = 0;
+  for (int i = 0; i < number_of_stats; i++) {
+    int weight = get_weight(stats[i]);
+    double mean = get_mean(stats[i]);
+    double mean_diff = (mean - combined_mean);
+    combined_sum_of_squares += (mean_diff * mean_diff) * weight;
+  }
+  // BIAS_FIXME: maybe use combined_weight - 1 instead
+  return (combined_sum_of_squares + combined_error_sum_of_squares) /
+         (combined_weight);
+}
+
+double get_combined_stdev(Stat **stats, int number_of_stats) {
+  return sqrt(get_combined_variance(stats, number_of_stats));
+}
 
 double get_standard_error(Stat *stat, double m) {
   return m * sqrt(get_variance(stat) / (double)stat->cardinality);

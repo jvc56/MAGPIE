@@ -8,7 +8,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void test_stats() {
+void test_single_stat() {
   Stat *stat = create_stat();
 
   // Test the empty stat
@@ -68,4 +68,59 @@ void test_stats() {
   assert(within_epsilon(get_stdev(stat), 5.5506756345511671923));
 
   destroy_stat(stat);
+}
+
+void test_combined_stats() {
+  Stat **combined_stats = malloc(sizeof(Stat *) * 10);
+
+  Stat *singular_stat = create_stat();
+  combined_stats[0] = create_stat();
+  combined_stats[1] = create_stat();
+  combined_stats[2] = create_stat();
+  double combined_stdev;
+  double singular_stdev;
+
+  combined_stdev = get_combined_stdev(combined_stats, 3);
+  assert(combined_stdev == 0);
+
+  push(combined_stats[0], 7, 1);
+  push(singular_stat, 7, 1);
+
+  combined_stdev = get_combined_stdev(combined_stats, 3);
+  assert(combined_stdev == 0);
+
+  push(combined_stats[1], 3, 1);
+  push(singular_stat, 3, 1);
+
+  push(combined_stats[2], 6, 1);
+  push(singular_stat, 6, 1);
+
+  combined_stdev = get_combined_stdev(combined_stats, 3);
+  singular_stdev = get_stdev(singular_stat);
+  assert(within_epsilon(combined_stdev, singular_stdev));
+
+  push(combined_stats[1], 10, 3);
+  push(singular_stat, 10, 3);
+
+  combined_stdev = get_combined_stdev(combined_stats, 3);
+  singular_stdev = get_stdev(singular_stat);
+  assert(within_epsilon(combined_stdev, singular_stdev));
+
+  push(combined_stats[2], 4, 6);
+  push(singular_stat, 4, 6);
+
+  combined_stdev = get_combined_stdev(combined_stats, 3);
+  singular_stdev = get_stdev(singular_stat);
+  assert(within_epsilon(combined_stdev, singular_stdev));
+
+  for (int i = 0; i < 3; i++) {
+    destroy_stat(combined_stats[i]);
+  }
+  destroy_stat(singular_stat);
+  free(combined_stats);
+}
+
+void test_stats() {
+  test_single_stat();
+  test_combined_stats();
 }

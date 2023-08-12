@@ -34,4 +34,7 @@ double get_variance_for_weighted_int_array(uint64_t *weighted_population,
 double get_stdev_for_weighted_int_array(uint64_t *weighted_population,
                                         int value_offset);
 
+double get_combined_variance(Stat **stats, int number_of_stats);
+double get_combined_stdev(Stat **stats, int number_of_stats);
+
 #endif
