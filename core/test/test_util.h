@@ -38,5 +38,6 @@ void write_rack_to_end_of_buffer(char *dest,
                                  Rack *rack);
 void write_spaces_to_end_of_buffer(char *buffer, int n);
 void write_string_to_end_of_buffer(char *buffer, char *s);
+int count_newlines(const char *str);
 
 #endif

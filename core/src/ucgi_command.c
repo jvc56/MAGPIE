@@ -14,13 +14,13 @@
 #define GO_PARAMS_PARSE_SUCCESS 0
 #define GO_PARAMS_PARSE_FAILURE 1
 
-UCGICommandVars *create_ucgi_command_vars() {
+UCGICommandVars *create_ucgi_command_vars(FILE *outfile) {
   UCGICommandVars *ucgi_command_vars = malloc(sizeof(UCGICommandVars));
   ucgi_command_vars->loaded_game = NULL;
   ucgi_command_vars->config = NULL;
   ucgi_command_vars->simmer = NULL;
   ucgi_command_vars->inference = NULL;
-  ucgi_command_vars->outfile = NULL;
+  ucgi_command_vars->outfile = outfile;
   ucgi_command_vars->go_params = create_go_params();
   ucgi_command_vars->thread_control = create_thread_control();
   return ucgi_command_vars;
@@ -55,12 +55,13 @@ int parse_go_cmd(char *params, GoParams *go_params) {
   // parse the go cmd.
   char *token;
   token = strtok(params, " ");
-  int reading_search_type = 0;
   int reading_depth = 0;
   int reading_stop_condition = 0;
   int reading_threads = 0;
   int reading_num_plays = 0;
   int reading_max_iterations = 0;
+  int reading_print_info_interval = 0;
+  int reading_check_stopping_condition_interval = 0;
   while (token != NULL) {
     if (reading_num_plays) {
       go_params->num_plays = atoi(token);
@@ -68,6 +69,10 @@ int parse_go_cmd(char *params, GoParams *go_params) {
       go_params->max_iterations = atoi(token);
     } else if (reading_depth) {
       go_params->depth = atoi(token);
+    } else if (reading_print_info_interval) {
+      go_params->print_info_interval = atoi(token);
+    } else if (reading_check_stopping_condition_interval) {
+      go_params->check_stopping_condition_interval = atoi(token);
     } else if (reading_threads) {
       go_params->threads = atoi(token);
     } else if (reading_stop_condition) {
@@ -81,9 +86,6 @@ int parse_go_cmd(char *params, GoParams *go_params) {
         log_warn("Did not understand stopping condition %s", token);
         return GO_PARAMS_PARSE_FAILURE;
       }
-    }
-    if (strcmp(token, "infinite") == 0) {
-      go_params->infinite = 1;
     }
     if (strcmp(token, "static") == 0) {
       go_params->static_search_only = 1;
@@ -104,17 +106,20 @@ int parse_go_cmd(char *params, GoParams *go_params) {
     }
 
     reading_num_plays = strcmp(token, "plays") == 0;
+    reading_print_info_interval = strcmp(token, "info") == 0;
+    reading_check_stopping_condition_interval = strcmp(token, "checkstop") == 0;
     reading_max_iterations = strcmp(token, "i") == 0;
     reading_depth = strcmp(token, "depth") == 0;
     reading_stop_condition = strcmp(token, "stopcondition") == 0;
     reading_threads = strcmp(token, "threads") == 0;
     token = strtok(NULL, " ");
   }
-  log_debug("Returning go_params; inf %d stop %d depth %d threads %d ss %d",
-            go_params->infinite, go_params->stop_condition, go_params->depth,
-            go_params->threads, go_params->static_search_only);
+  log_debug("Returning go_params; i %d stop %d depth %d threads %d ss %d",
+            go_params->max_iterations, go_params->stop_condition,
+            go_params->depth, go_params->threads,
+            go_params->static_search_only);
   if (go_params->stop_condition != SIM_STOPPING_CONDITION_NONE &&
-      go_params->infinite) {
+      go_params->max_iterations <= 0) {
     log_warn("Cannot have a stopping condition and also search infinitely.");
     return GO_PARAMS_PARSE_FAILURE;
   }
@@ -131,16 +136,20 @@ int parse_go_cmd(char *params, GoParams *go_params) {
 }
 
 void ucgi_simulate(UCGICommandVars *ucgi_command_vars) {
+  // Save locally here in case go_params are modified
+  // during the 'simulate' call.
+  if (ucgi_command_vars->simmer == NULL) {
+    ucgi_command_vars->simmer =
+        create_simmer(ucgi_command_vars->config, ucgi_command_vars->outfile);
+  }
   simulate(ucgi_command_vars->thread_control, ucgi_command_vars->simmer,
            ucgi_command_vars->loaded_game, NULL,
            ucgi_command_vars->go_params->depth,
            ucgi_command_vars->go_params->threads,
            ucgi_command_vars->go_params->num_plays,
            ucgi_command_vars->go_params->max_iterations,
-           ucgi_command_vars->go_params->stop_condition);
-  // Print out the stats
-  print_ucgi_stats(ucgi_command_vars->simmer, ucgi_command_vars->loaded_game,
-                   1);
+           ucgi_command_vars->go_params->stop_condition,
+           ucgi_command_vars->go_params->static_search_only);
 }
 
 void ucgi_infer(UCGICommandVars *ucgi_command_vars) {
@@ -162,12 +171,17 @@ void *execute_ucgi_command(void *uncasted_ucgi_command_vars) {
     log_warn("Search type not set; exiting immediately.");
   }
   log_debug("setting current mode to stopped");
-  set_mode(ucgi_command_vars->thread_control, MODE_STOPPED);
+  set_mode_stopped(ucgi_command_vars->thread_control);
   return NULL;
 }
 
 void *execute_ucgi_command_async(UCGICommandVars *ucgi_command_vars) {
-  set_mode(ucgi_command_vars->thread_control, MODE_SEARCHING);
+  set_print_info_interval(ucgi_command_vars->thread_control,
+                          ucgi_command_vars->go_params->print_info_interval);
+  set_check_stopping_condition_interval(
+      ucgi_command_vars->thread_control,
+      ucgi_command_vars->go_params->check_stopping_condition_interval);
+  unhalt(ucgi_command_vars->thread_control);
   pthread_t cmd_execution_thread;
   pthread_create(&cmd_execution_thread, NULL, execute_ucgi_command,
                  ucgi_command_vars);
@@ -177,11 +191,14 @@ void *execute_ucgi_command_async(UCGICommandVars *ucgi_command_vars) {
 
 int ucgi_go_async(char *go_cmd, UCGICommandVars *ucgi_command_vars) {
   int status = UCGI_COMMAND_STATUS_SUCCESS;
-  if (get_mode(ucgi_command_vars->thread_control) == MODE_STOPPED) {
+  if (set_mode_searching(ucgi_command_vars->thread_control)) {
     int parse_status = parse_go_cmd(go_cmd, ucgi_command_vars->go_params);
     if (parse_status == GO_PARAMS_PARSE_SUCCESS) {
       execute_ucgi_command_async(ucgi_command_vars);
     } else {
+      // No async command was started, so set the search
+      // status to stopped
+      set_mode_stopped(ucgi_command_vars->thread_control);
       status = UCGI_COMMAND_STATUS_PARSE_FAILED;
     }
   } else {
@@ -248,8 +265,11 @@ int process_ucgi_command_async(char *cmd, UCGICommandVars *ucgi_command_vars) {
     }
     return command_status;
   } else if (strcmp(cmd, "stop") == 0) {
-    if (get_mode(ucgi_command_vars->thread_control) == MODE_SEARCHING) {
-      halt(ucgi_command_vars->thread_control);
+    if (get_mode(ucgi_command_vars->thread_control)) {
+      if (!halt(ucgi_command_vars->thread_control,
+                HALT_STATUS_USER_INTERRUPT)) {
+        log_warn("Search already received stop signal but has not stopped.");
+      }
     } else {
       log_info("There is no search to stop.");
     }

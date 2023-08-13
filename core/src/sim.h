@@ -49,6 +49,8 @@ typedef struct Simmer {
   SimmedPlay **simmed_plays;
   pthread_mutex_t simmed_plays_mutex;
 
+  pthread_mutex_t print_output_mutex;
+
   Rack *known_opp_rack;
   Rack *similar_plays_rack;
   WinPct *win_pcts;
@@ -61,6 +63,7 @@ typedef struct Simmer {
 
 typedef struct SimmerWorker {
   int thread_index;
+  uint64_t node_count;
   Game *game;
   Rack *rack_placeholder;
   Simmer *simmer;
@@ -73,7 +76,8 @@ int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);
 void print_ucgi_stats(Simmer *simmer, Game *game, int print_best_play);
 void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
               Rack *known_opp_rack, int plies, int threads, int num_plays,
-              int max_iterations, int stopping_condition);
+              int max_iterations, int stopping_condition,
+              int static_search_only);
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays);
 
 #endif

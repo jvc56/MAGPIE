@@ -5,13 +5,14 @@
 
 void reset_go_params(GoParams *go_params) {
   go_params->search_type = SEARCH_TYPE_NONE;
-  go_params->infinite = 0;
   go_params->depth = 0;
   go_params->stop_condition = SIM_STOPPING_CONDITION_NONE;
   go_params->threads = 0;
   go_params->static_search_only = 0;
   go_params->num_plays = 0;
   go_params->max_iterations = 0;
+  go_params->print_info_interval = 0;
+  go_params->check_stopping_condition_interval = 0;
 }
 
 GoParams *create_go_params() {

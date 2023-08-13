@@ -134,3 +134,16 @@ void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
     draw_letter_to_rack(bag, rack, mls[i]);
   }
 }
+
+int count_newlines(const char *str) {
+  int count = 0;
+
+  while (*str != '\0') {
+    if (*str == '\n') {
+      count++;
+    }
+    str++;
+  }
+
+  return count;
+}

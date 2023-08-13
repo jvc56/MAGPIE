@@ -142,5 +142,8 @@
 #define OOPSYCHOLOGY_CGP                                                       \
   "1OOPSYCHOLOGY2/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex "      \
   "CSW21;"
+#define DELDAR_VS_HARSHAN_CGP                                                  \
+  "15/15/10LAZED/6EPITAXES1/7R7/7o7/7T7/7E7/7G7/7E7/2SNIFTER6/15/15/15/15 "    \
+  "IJLNOPS/ 149/154 0 lex CSW21;"
 
 #endif

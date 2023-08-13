@@ -53,7 +53,7 @@ void test_sim_single_iteration(SuperConfig *superconfig,
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config, NULL);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1,
-           SIM_STOPPING_CONDITION_NONE);
+           SIM_STOPPING_CONDITION_NONE, 0);
 
   assert(game->gen->board->tiles_played == 0);
 
@@ -69,7 +69,7 @@ void test_more_iterations(SuperConfig *superconfig,
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config, NULL);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 200,
-           SIM_STOPPING_CONDITION_NONE);
+           SIM_STOPPING_CONDITION_NONE, 0);
 
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
@@ -92,7 +92,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   int iters = 10000;
   clock_t begin = clock();
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, iters,
-           SIM_STOPPING_CONDITION_NONE);
+           SIM_STOPPING_CONDITION_NONE, 0);
   clock_t end = clock();
   printf("%d iters took %0.6f seconds\n", iters,
          (double)(end - begin) / CLOCKS_PER_SEC);
@@ -116,7 +116,7 @@ void perf_test_multithread_sim(Config *config, ThreadControl *thread_control) {
   load_cgp(game, config->cgp);
   Simmer *simmer = create_simmer(config, NULL);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1000,
-           SIM_STOPPING_CONDITION_NONE);
+           SIM_STOPPING_CONDITION_NONE, 0);
 
   print_sim_stats(simmer, game);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
@@ -139,7 +139,7 @@ void perf_test_multithread_blocking_sim(Config *config,
 
   Simmer *simmer = create_simmer(config, NULL);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1000000,
-           SIM_STOPPING_CONDITION_99PCT);
+           SIM_STOPPING_CONDITION_99PCT, 0);
 
   print_sim_stats(simmer, game);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
@@ -162,7 +162,7 @@ void test_play_similarity(SuperConfig *superconfig,
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config, NULL);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 0,
-           SIM_STOPPING_CONDITION_NONE);
+           SIM_STOPPING_CONDITION_NONE, 0);
   // The first four plays all score 74. Only
   // 8F ATRESIC and 8F STEARIC should show up as similar, though.
   // These are play indexes 1 and 2.

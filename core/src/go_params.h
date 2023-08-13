@@ -10,13 +10,14 @@
 
 typedef struct GoParams {
   int search_type;
-  int infinite;
   int depth;
   int stop_condition;
   int threads;
   int static_search_only;
   int num_plays;
   int max_iterations;
+  int print_info_interval;
+  int check_stopping_condition_interval;
 } GoParams;
 
 GoParams *create_go_params();

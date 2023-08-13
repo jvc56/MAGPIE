@@ -13,6 +13,7 @@
 #include "sim.h"
 #include "stats.h"
 #include "ucgi_formats.h"
+#include "ucgi_print.h"
 #include "util.h"
 #include "xoshiro.h"
 
@@ -31,6 +32,7 @@ Simmer *create_simmer(Config *config, FILE *outfile) {
   simmer->play_similarity_cache = NULL;
   simmer->num_simmed_plays = 0;
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
+  pthread_mutex_init(&simmer->print_output_mutex, NULL);
   simmer->similar_plays_rack = create_rack(config->letter_distribution->size);
   if (outfile == NULL) {
     simmer->outfile = stdout;
@@ -40,12 +42,68 @@ Simmer *create_simmer(Config *config, FILE *outfile) {
   return simmer;
 }
 
+void create_simmed_plays(Simmer *simmer, Game *game) {
+  simmer->simmed_plays =
+      malloc((sizeof(SimmedPlay)) * simmer->num_simmed_plays);
+  for (int i = 0; i < simmer->num_simmed_plays; i++) {
+    SimmedPlay *sp = malloc(sizeof(SimmedPlay));
+    sp->move = create_move();
+    copy_move(game->gen->move_list->moves[i], sp->move);
+
+    sp->score_stat = malloc(sizeof(Stat *) * simmer->max_plies);
+    sp->bingo_stat = malloc(sizeof(Stat *) * simmer->max_plies);
+    sp->equity_stat = create_stat();
+    sp->leftover_stat = create_stat();
+    sp->win_pct_stat = create_stat();
+    for (int j = 0; j < simmer->max_plies; j++) {
+      sp->score_stat[j] = create_stat();
+      sp->bingo_stat[j] = create_stat();
+    }
+    sp->ignore = 0;
+    sp->play_id = i;
+    pthread_mutex_init(&sp->mutex, NULL);
+    simmer->simmed_plays[i] = sp;
+  }
+  pthread_mutex_init(&simmer->simmed_plays_mutex, NULL);
+}
+
+// destructors
+
+void destroy_simmed_plays(Simmer *simmer) {
+  for (int i = 0; i < simmer->num_simmed_plays; i++) {
+    for (int j = 0; j < simmer->max_plies; j++) {
+      destroy_stat(simmer->simmed_plays[i]->bingo_stat[j]);
+      destroy_stat(simmer->simmed_plays[i]->score_stat[j]);
+    }
+    free(simmer->simmed_plays[i]->bingo_stat);
+    free(simmer->simmed_plays[i]->score_stat);
+    destroy_stat(simmer->simmed_plays[i]->equity_stat);
+    destroy_stat(simmer->simmed_plays[i]->leftover_stat);
+    destroy_stat(simmer->simmed_plays[i]->win_pct_stat);
+    destroy_move(simmer->simmed_plays[i]->move);
+    pthread_mutex_destroy(&simmer->simmed_plays[i]->mutex);
+    free(simmer->simmed_plays[i]);
+  }
+  free(simmer->simmed_plays);
+  // Use defensive style to catch bugs earlier.
+  simmer->simmed_plays = NULL;
+}
+
+void destroy_simmer(Simmer *simmer) {
+  if (simmer->simmed_plays != NULL) {
+    destroy_simmed_plays(simmer);
+  }
+  destroy_rack(simmer->similar_plays_rack);
+  free(simmer);
+}
+
 SimmerWorker *create_simmer_worker(Simmer *simmer, Game *game,
                                    int worker_index) {
   SimmerWorker *simmer_worker = malloc(sizeof(SimmerWorker));
 
   simmer_worker->simmer = simmer;
   simmer_worker->thread_index = worker_index;
+  simmer_worker->node_count = 0;
   uint64_t seed = time(NULL);
   Game *new_game = copy_game(game, 1);
   simmer_worker->game = new_game;
@@ -73,6 +131,8 @@ void destroy_simmer_worker(SimmerWorker *simmer_worker) {
   destroy_rack(simmer_worker->rack_placeholder);
   free(simmer_worker);
 }
+
+int is_multithreaded(Simmer *simmer) { return simmer->threads > 1; }
 
 void add_score_stat(SimmedPlay *sp, int score, int is_bingo, int ply,
                     int lock) {
@@ -194,12 +254,12 @@ int handle_potential_stopping_condition(Simmer *simmer) {
         get_standard_error(simmer->simmed_plays[i]->win_pct_stat, zval);
 
     if ((mu - stderr) > (mu_i + stderr_i)) {
-      ignore_play(simmer->simmed_plays[i], simmer->threads);
+      ignore_play(simmer->simmed_plays[i], is_multithreaded(simmer));
       new_ignored++;
     } else if (simmer->iteration_count > SIMILAR_PLAYS_ITER_CUTOFF) {
       if (plays_are_similar(simmer, tentative_winner,
                             simmer->simmed_plays[i])) {
-        ignore_play(simmer->simmed_plays[i], simmer->threads);
+        ignore_play(simmer->simmed_plays[i], is_multithreaded(simmer));
         new_ignored++;
       }
     }
@@ -234,6 +294,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
     set_backup_mode(game, BACKUP_MODE_SIMULATION);
     // play move
     play_move(game, simmer->simmed_plays[i]->move);
+    simmer_worker->node_count++;
     set_backup_mode(game, BACKUP_MODE_OFF);
     // further plies will NOT be backed up.
     for (int ply = 0; ply < plies; ply++) {
@@ -246,6 +307,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
       Move *best_play = get_top_equity_move(game);
       copy_rack_into(rack_placeholder, game->players[onturn]->rack);
       play_move(game, best_play);
+      simmer_worker->node_count++;
       char placeholder[80];
       store_move_description(best_play, placeholder,
                              game->gen->letter_distribution);
@@ -261,24 +323,24 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
         }
       }
       add_score_stat(simmer->simmed_plays[i], best_play->score,
-                     best_play->tiles_played == 7, ply, simmer->threads);
+                     best_play->tiles_played == 7, ply,
+                     is_multithreaded(simmer));
     }
 
     int spread = game->players[simmer->initial_player]->score -
                  game->players[1 - simmer->initial_player]->score;
     add_equity_stat(simmer->simmed_plays[i], simmer->initial_spread, spread,
-                    leftover, simmer->threads);
+                    leftover, is_multithreaded(simmer));
     add_winpct_stat(
         simmer->simmed_plays[i], simmer->win_pcts, spread, leftover,
         game->game_end_reason,
         // number of tiles unseen to us: bag tiles + tiles on opp rack.
         game->gen->bag->last_tile_index + 1 +
             game->players[1 - simmer->initial_player]->rack->number_of_letters,
-        plies % 2, simmer->threads);
+        plies % 2, is_multithreaded(simmer));
     // reset to first state. we only need to restore one backup.
     unplay_last_move(game);
   }
-  atomic_fetch_add(&simmer->iteration_count, 1);
 }
 
 void *simmer_worker(void *uncasted_simmer_worker) {
@@ -287,26 +349,30 @@ void *simmer_worker(void *uncasted_simmer_worker) {
   ThreadControl *thread_control = simmer->thread_control;
   while (!is_halted(thread_control)) {
     int current_iteration_count;
-    if (simmer->threads) {
+    int reached_max_iteration = 0;
+    if (is_multithreaded(simmer)) {
       pthread_mutex_lock(&simmer->iteration_count_mutex);
     }
-    if (simmer->iteration_count < simmer->max_iterations) {
+    if (simmer->iteration_count == simmer->max_iterations) {
+      reached_max_iteration = 1;
+    } else {
       simmer->iteration_count++;
+      current_iteration_count = simmer->iteration_count;
     }
-    current_iteration_count = simmer->iteration_count;
-    if (simmer->threads) {
+    if (is_multithreaded(simmer)) {
       pthread_mutex_unlock(&simmer->iteration_count_mutex);
     }
 
-    if (simmer->iteration_count >= simmer->max_iterations) {
+    if (reached_max_iteration) {
+      halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
       break;
     }
-
     sim_single_iteration(simmer_worker);
 
     if (thread_control->print_info_interval > 0 &&
+        current_iteration_count > 0 &&
         current_iteration_count % thread_control->print_info_interval == 0) {
-      print_ucgi_stats(simmer, simmer_worker->game, 0);
+      print_ucgi_sim_stats(simmer, simmer_worker->game, -1, 0);
     }
 
     if (thread_control->check_stopping_condition_interval > 0 &&
@@ -314,7 +380,7 @@ void *simmer_worker(void *uncasted_simmer_worker) {
                 thread_control->check_stopping_condition_interval ==
             0 &&
         handle_potential_stopping_condition(simmer)) {
-      halt(thread_control);
+      halt(thread_control, HALT_STATUS_PROBABILISTIC);
     }
   }
   log_trace("thread %d exiting", simmer_worker->thread_index);
@@ -435,21 +501,13 @@ void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
         compare_simmed_plays);
 }
 
-void ucgi_print_moves(Game *game, int nmoves, FILE *outfile) {
-  for (int i = 0; i < nmoves; i++) {
-    char move[30];
-    store_move_ucgi(game->gen->move_list->moves[i], game->gen->board, move,
-                    game->gen->letter_distribution);
-    fprintf(outfile, "info currmove %s sc %d eq %.3f it 0\n", move,
-            game->gen->move_list->moves[i]->score,
-            game->gen->move_list->moves[i]->equity);
-    fflush(outfile);
-  }
-}
-
 void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
               Rack *known_opp_rack, int plies, int threads, int num_plays,
-              int max_iterations, int stopping_condition) {
+              int max_iterations, int stopping_condition,
+              int static_search_only) {
+
+  struct timespec start_time;
+  clock_gettime(CLOCK_MONOTONIC, &start_time);
 
   int sorting_type = game->players[0]->strategy_params->move_sorting;
   game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
@@ -459,50 +517,42 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   sort_moves(game->gen->move_list);
   game->players[0]->strategy_params->move_sorting = sorting_type;
 
-  if (max_iterations <= 0) {
-    ucgi_print_moves(game, num_plays, simmer->outfile);
+  if (static_search_only) {
+    print_ucgi_static_moves(game, num_plays, simmer->outfile,
+                            &simmer->print_output_mutex);
+    return;
   }
+
+  game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
+
+  // It is important that we first destroy the simmed plays
+  // then set the new values for the simmer. The destructor
+  // relies on the previous values of the simmer to properly
+  // free everything.
+  if (simmer->simmed_plays != NULL) {
+    destroy_simmed_plays(simmer);
+  }
+
   // Prepare the shared simmer attributes
   simmer->thread_control = thread_control;
   simmer->max_plies = plies;
   simmer->threads = threads;
   simmer->max_iterations = max_iterations;
   simmer->stopping_condition = stopping_condition;
-  if (known_opp_rack != NULL) {
-    simmer->known_opp_rack = copy_rack(known_opp_rack);
-  } else {
-    simmer->known_opp_rack = NULL;
-  }
-  simmer->simmed_plays = malloc((sizeof(SimmedPlay)) * num_plays);
+
   simmer->num_simmed_plays = num_plays;
   simmer->iteration_count = 0;
   simmer->initial_player = game->player_on_turn_index;
   simmer->initial_spread = game->players[game->player_on_turn_index]->score -
                            game->players[1 - game->player_on_turn_index]->score;
 
-  game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
+  create_simmed_plays(simmer, game);
 
-  for (int i = 0; i < num_plays; i++) {
-    SimmedPlay *sp = malloc(sizeof(SimmedPlay));
-    sp->move = create_move();
-    copy_move(game->gen->move_list->moves[i], sp->move);
-
-    sp->score_stat = malloc(sizeof(Stat *) * plies);
-    sp->bingo_stat = malloc(sizeof(Stat *) * plies);
-    sp->equity_stat = create_stat();
-    sp->leftover_stat = create_stat();
-    sp->win_pct_stat = create_stat();
-    for (int j = 0; j < plies; j++) {
-      sp->score_stat[j] = create_stat();
-      sp->bingo_stat[j] = create_stat();
-    }
-    sp->ignore = 0;
-    sp->play_id = i;
-    pthread_mutex_init(&sp->mutex, NULL);
-    simmer->simmed_plays[i] = sp;
+  if (known_opp_rack != NULL) {
+    simmer->known_opp_rack = copy_rack(known_opp_rack);
+  } else {
+    simmer->known_opp_rack = NULL;
   }
-  pthread_mutex_init(&simmer->simmed_plays_mutex, NULL);
-
   simmer->play_similarity_cache = malloc(sizeof(int) * num_plays * num_plays);
   for (int i = 0; i < num_plays; i++) {
     for (int j = 0; j < num_plays; j++) {
@@ -524,99 +574,32 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
                    simmer_workers[thread_index]);
   }
 
+  uint64_t total_node_count = 0;
   for (int thread_index = 0; thread_index < threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
+    total_node_count += simmer_workers[thread_index]->node_count;
     destroy_simmer_worker(simmer_workers[thread_index]);
   }
 
   game->players[0]->strategy_params->move_sorting = sorting_type;
 
+  // Destroy intrasim structs
   free(simmer_workers);
   free(worker_ids);
-}
-
-void print_ucgi_stats(Simmer *simmer, Game *game, int print_best_play) {
-  pthread_mutex_lock(&simmer->simmed_plays_mutex);
-  sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
-  pthread_mutex_unlock(&simmer->simmed_plays_mutex);
-  // No need to keep the mutex locked too long here. This is because this
-  // function (print_ucgi_stats) will only execute on a single thread.
-
-  // info currmove h4.HADJI sc 40 wp 3.5 wpe 0.731 eq 7.2 eqe 0.812 it 12345 ig
-  // 0 plies ply 1 scm 30 scd 3.7 bp 23 ply 2 ...
-
-  // sc - score, wp(e) - win perc
-  // (error), eq(e) - equity (error) scm - mean of score, scd - stdev of score,
-  // bp - bingo perc ig - this play has been cut-off
-  // plies ply 1 ... ply 2 ... ply 3 ...
-
-  for (int i = 0; i < simmer->num_simmed_plays; i++) {
-    SimmedPlay *play = simmer->simmed_plays[i];
-    char move[30];
-    double wp_mean = play->win_pct_stat->mean * 100.0;
-    double wp_se = get_standard_error(play->win_pct_stat, STATS_Z99) * 100.0;
-
-    double eq_mean = play->equity_stat->mean;
-    double eq_se = get_standard_error(play->equity_stat, STATS_Z99);
-    uint64_t niters = play->equity_stat->cardinality;
-    store_move_ucgi(play->move, game->gen->board, move,
-                    game->gen->letter_distribution);
-
-    fprintf(simmer->outfile,
-            "info currmove %s sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %lu "
-            "ig %d ",
-            move, play->move->score, wp_mean, wp_se, eq_mean, eq_se, niters,
-            play->ignore);
-    fprintf(simmer->outfile, "plies ");
-    for (int i = 0; i < simmer->max_plies; i++) {
-      fprintf(simmer->outfile, "ply %d ", i + 1);
-      fprintf(simmer->outfile, "scm %.3f scd %.3f bp %.3f ",
-              play->score_stat[i]->mean, get_stdev(play->score_stat[i]),
-              play->bingo_stat[i]->mean * 100.0);
-    }
-    fprintf(simmer->outfile, "\n");
-    fflush(simmer->outfile);
-  }
-  if (print_best_play) {
-    char move[30];
-    SimmedPlay *play = simmer->simmed_plays[0];
-    store_move_ucgi(play->move, game->gen->board, move,
-                    game->gen->letter_distribution);
-    fprintf(simmer->outfile, "bestmove %s\n", move);
-    fflush(simmer->outfile);
-  }
-}
-
-// destructors
-
-void free_simmed_plays(Simmer *simmer) {
-  for (int i = 0; i < simmer->num_simmed_plays; i++) {
-    for (int j = 0; j < simmer->max_plies; j++) {
-      destroy_stat(simmer->simmed_plays[i]->bingo_stat[j]);
-      destroy_stat(simmer->simmed_plays[i]->score_stat[j]);
-    }
-    free(simmer->simmed_plays[i]->bingo_stat);
-    free(simmer->simmed_plays[i]->score_stat);
-    destroy_stat(simmer->simmed_plays[i]->equity_stat);
-    destroy_stat(simmer->simmed_plays[i]->leftover_stat);
-    destroy_stat(simmer->simmed_plays[i]->win_pct_stat);
-    destroy_move(simmer->simmed_plays[i]->move);
-    pthread_mutex_destroy(&simmer->simmed_plays[i]->mutex);
-    free(simmer->simmed_plays[i]);
-  }
-  free(simmer->simmed_plays);
-}
-
-void destroy_simmer(Simmer *simmer) {
-  destroy_rack(simmer->similar_plays_rack);
-  if (simmer->num_simmed_plays > 0) {
-    free_simmed_plays(simmer);
-  }
   if (simmer->known_opp_rack != NULL) {
     destroy_rack(simmer->known_opp_rack);
   }
-  if (simmer->play_similarity_cache != NULL) {
-    free(simmer->play_similarity_cache);
-  }
-  free(simmer);
+  free(simmer->play_similarity_cache);
+
+  struct timespec finish_time;
+  double elapsed;
+
+  clock_gettime(CLOCK_MONOTONIC, &finish_time);
+
+  elapsed = (finish_time.tv_sec - start_time.tv_sec);
+  elapsed += (finish_time.tv_nsec - start_time.tv_nsec) / 1000000000.0;
+  double nps = (double)total_node_count / elapsed;
+
+  // Print out the stats
+  print_ucgi_sim_stats(simmer, game, nps, 1);
 }
