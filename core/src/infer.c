@@ -12,6 +12,7 @@
 #include "rack.h"
 #include "stats.h"
 #include "thread_control.h"
+#include "ucgi_print.h"
 
 InferenceRecord *create_inference_record(int draw_and_leave_subtotals_size) {
   InferenceRecord *record = malloc(sizeof(InferenceRecord));
@@ -462,7 +463,8 @@ void print_inference_info(uint64_t current_rack_index) {
 }
 
 void iterate_through_all_possible_leaves(Inference *inference,
-                                         int tiles_to_infer, int start_letter) {
+                                         int tiles_to_infer, int start_letter,
+                                         int multithreaded) {
   if (is_halted(inference->thread_control)) {
     return;
   }
@@ -470,77 +472,57 @@ void iterate_through_all_possible_leaves(Inference *inference,
     int perform_evaluation = 0;
     int print_info = 0;
 
-    pthread_mutex_lock(inference->shared_rack_index_lock);
-    if (inference->current_rack_index == *inference->shared_rack_index) {
-      if (inference->thread_control->print_info_interval > 0 &&
-          inference->current_rack_index %
-                  inference->thread_control->print_info_interval ==
-              0) {
-        print_info = 1;
+    if (multithreaded) {
+      pthread_mutex_lock(inference->shared_rack_index_lock);
+      if (inference->current_rack_index == *inference->shared_rack_index) {
+        print_info = inference->thread_control->print_info_interval > 0 &&
+                     inference->current_rack_index %
+                             inference->thread_control->print_info_interval ==
+                         0;
+        perform_evaluation = 1;
+        *inference->shared_rack_index += 1;
       }
+      pthread_mutex_unlock(inference->shared_rack_index_lock);
+    } else {
+      print_info = inference->thread_control->print_info_interval > 0 &&
+                   inference->current_rack_index %
+                           inference->thread_control->print_info_interval ==
+                       0;
       perform_evaluation = 1;
-      *inference->shared_rack_index += 1;
-    }
-    pthread_mutex_unlock(inference->shared_rack_index_lock);
-
-    if (print_info) {
-      print_inference_info(inference->current_rack_index);
     }
     if (perform_evaluation) {
       evaluate_possible_leave(inference);
     }
     inference->current_rack_index++;
+    if (print_info) {
+      print_ucgi_inference_current_rack_index(inference->current_rack_index,
+                                              inference->thread_control);
+    }
     return;
   }
   for (int letter = start_letter; letter < inference->distribution_size;
        letter++) {
     if (inference->bag_as_rack->array[letter] > 0) {
       increment_letter_for_inference(inference, letter);
-      iterate_through_all_possible_leaves(inference, tiles_to_infer - 1,
-                                          letter);
+      iterate_through_all_possible_leaves(inference, tiles_to_infer - 1, letter,
+                                          multithreaded);
       decrement_letter_for_inference(inference, letter);
     }
   }
-}
-
-void iterate_through_all_possible_leaves_single_threaded(Inference *inference,
-                                                         int tiles_to_infer,
-                                                         int start_letter) {
-  if (is_halted(inference->thread_control)) {
-    return;
-  }
-  if (tiles_to_infer == 0) {
-    evaluate_possible_leave(inference);
-    inference->current_rack_index++;
-    return;
-  }
-  for (int letter = start_letter; letter < inference->distribution_size;
-       letter++) {
-
-    if (inference->bag_as_rack->array[letter] > 0) {
-      increment_letter_for_inference(inference, letter);
-      iterate_through_all_possible_leaves_single_threaded(
-          inference, tiles_to_infer - 1, letter);
-      decrement_letter_for_inference(inference, letter);
-    }
-  }
-  reset_move_list(inference->game->gen->move_list);
 }
 
 void *infer_worker(void *uncasted_inference) {
   Inference *inference = (Inference *)uncasted_inference;
   iterate_through_all_possible_leaves(
-      inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER);
+      inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER, 1);
   reset_move_list(inference->game->gen->move_list);
   return NULL;
 }
 
-void *infer_worker_single_threaded(void *uncasted_inference) {
-  Inference *inference = (Inference *)uncasted_inference;
-  iterate_through_all_possible_leaves_single_threaded(
-      inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER);
+void infer_worker_single_threaded(Inference *inference) {
+  iterate_through_all_possible_leaves(
+      inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER, 0);
   reset_move_list(inference->game->gen->move_list);
-  return NULL;
 }
 
 void set_shared_variables_for_inference(
@@ -550,17 +532,13 @@ void set_shared_variables_for_inference(
   inference->shared_rack_index_lock = shared_rack_index_lock;
 }
 
-int infer_manager(ThreadControl *thread_control, Inference *inference,
-                  int number_of_threads) {
+void infer_manager(ThreadControl *thread_control, Inference *inference,
+                   int number_of_threads) {
 
-  int inference_status = INFERENCE_STATUS_SUCCESS;
   if (number_of_threads == 1) {
     inference->thread_control = thread_control;
     infer_worker_single_threaded(inference);
-    if (is_halted(inference->thread_control)) {
-      inference_status = INFERENCE_STATUS_HALTED;
-    }
-    return inference_status;
+    return;
   }
 
   uint64_t shared_rack_index = 0;
@@ -585,62 +563,65 @@ int infer_manager(ThreadControl *thread_control, Inference *inference,
   }
 
   // Combine and free
-  if (is_halted(thread_control)) {
-    inference_status = INFERENCE_STATUS_HALTED;
-  }
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
-    if (inference_status == INFERENCE_STATUS_SUCCESS) {
-      add_inference(inference, inferences_for_workers[thread_index]);
-    }
+    add_inference(inference, inferences_for_workers[thread_index]);
     destroy_inference_copy(inferences_for_workers[thread_index]);
   }
 
   free(inferences_for_workers);
   free(worker_ids);
-  return inference_status;
 }
 
-int infer(ThreadControl *thread_control, Inference *inference, Game *game,
-          Rack *actual_tiles_played, int player_to_infer_index,
-          int actual_score, int number_of_tiles_exchanged, double equity_margin,
-          int number_of_threads) {
+void infer(ThreadControl *thread_control, Inference *inference, Game *game,
+           Rack *actual_tiles_played, int player_to_infer_index,
+           int actual_score, int number_of_tiles_exchanged,
+           double equity_margin, int number_of_threads) {
+  inference->status = INFERENCE_STATUS_RUNNING;
+
   initialize_inference_for_evaluation(inference, game, actual_tiles_played,
                                       player_to_infer_index, actual_score,
                                       number_of_tiles_exchanged, equity_margin);
 
   for (int i = 0; i < inference->distribution_size; i++) {
     if (inference->bag_as_rack->array[i] < 0) {
-      return INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG;
+      inference->status = INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG;
+      return;
     }
   }
 
   if (actual_tiles_played->number_of_letters == 0 &&
       number_of_tiles_exchanged == 0) {
-    return INFERENCE_STATUS_NO_TILES_PLAYED;
+    inference->status = INFERENCE_STATUS_NO_TILES_PLAYED;
+    return;
   }
 
   if (actual_tiles_played->number_of_letters != 0 &&
       number_of_tiles_exchanged != 0) {
-    return INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE;
+    inference->status = INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE;
+    return;
   }
 
   if (number_of_tiles_exchanged != 0 &&
       inference->bag_as_rack->number_of_letters < (RACK_SIZE)*2) {
-    return INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
+    inference->status = INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
+    return;
   }
 
   if (number_of_tiles_exchanged != 0 && actual_score != 0) {
-    return INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO;
+    inference->status = INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO;
+    return;
   }
 
   if (game->players[player_to_infer_index]->rack->number_of_letters >
       (RACK_SIZE)) {
-    return INFERENCE_STATUS_RACK_OVERFLOW;
+    inference->status = INFERENCE_STATUS_RACK_OVERFLOW;
+    return;
   }
 
   if (number_of_threads < 1) {
-    return INFERENCE_STATUS_INVALID_NUMBER_OF_THREADS;
+    inference->status = INFERENCE_STATUS_INVALID_NUMBER_OF_THREADS;
+    return;
   }
 
   int tiles_to_infer =
@@ -655,8 +636,7 @@ int infer(ThreadControl *thread_control, Inference *inference, Game *game,
   game->gen->apply_placement_adjustment = 0;
   player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
 
-  int inference_status =
-      infer_manager(thread_control, inference, number_of_threads);
+  infer_manager(thread_control, inference, number_of_threads);
 
   player->strategy_params->play_recorder_type = original_recorder_type;
   game->gen->apply_placement_adjustment = original_apply_placement_adjustment;
@@ -668,6 +648,5 @@ int infer(ThreadControl *thread_control, Inference *inference, Game *game,
       take_letter_from_rack(inference->player_to_infer_rack, i);
     }
   }
-
-  return inference_status;
+  inference->status = INFERENCE_STATUS_SUCCESS;
 }

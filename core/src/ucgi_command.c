@@ -22,7 +22,7 @@ UCGICommandVars *create_ucgi_command_vars(FILE *outfile) {
   ucgi_command_vars->inference = NULL;
   ucgi_command_vars->outfile = outfile;
   ucgi_command_vars->go_params = create_go_params();
-  ucgi_command_vars->thread_control = create_thread_control();
+  ucgi_command_vars->thread_control = create_thread_control(outfile);
   return ucgi_command_vars;
 }
 
@@ -60,6 +60,11 @@ int parse_go_cmd(char *params, GoParams *go_params) {
   int reading_threads = 0;
   int reading_num_plays = 0;
   int reading_max_iterations = 0;
+  int reading_tiles = 0;
+  int reading_player_index = 0;
+  int reading_score = 0;
+  int reading_number_of_tiles_exchanged = 0;
+  int reading_equity_margin = 0;
   int reading_print_info_interval = 0;
   int reading_check_stopping_condition_interval = 0;
   while (token != NULL) {
@@ -71,6 +76,28 @@ int parse_go_cmd(char *params, GoParams *go_params) {
       go_params->depth = atoi(token);
     } else if (reading_print_info_interval) {
       go_params->print_info_interval = atoi(token);
+    } else if (reading_tiles) {
+      size_t tiles_size = strlen(token);
+      if (tiles_size > (RACK_SIZE)) {
+        log_warn("Too many played tiles for inference.");
+        return GO_PARAMS_PARSE_FAILURE;
+      }
+      for (size_t i = 0; i < tiles_size; i++) {
+        go_params->tiles[i] = token[i];
+      }
+      go_params->tiles[tiles_size] = '\0';
+    } else if (reading_player_index) {
+      go_params->player_index = atoi(token);
+      if (go_params->player_index < 0 || go_params->player_index > 1) {
+        log_warn("Player index not 0 or 1.");
+        return GO_PARAMS_PARSE_FAILURE;
+      }
+    } else if (reading_score) {
+      go_params->score = atoi(token);
+    } else if (reading_number_of_tiles_exchanged) {
+      go_params->number_of_tiles_exchanged = atoi(token);
+    } else if (reading_equity_margin) {
+      go_params->equity_margin = strtod(token, NULL);
     } else if (reading_check_stopping_condition_interval) {
       go_params->check_stopping_condition_interval = atoi(token);
     } else if (reading_threads) {
@@ -112,6 +139,11 @@ int parse_go_cmd(char *params, GoParams *go_params) {
     reading_depth = strcmp(token, "depth") == 0;
     reading_stop_condition = strcmp(token, "stopcondition") == 0;
     reading_threads = strcmp(token, "threads") == 0;
+    reading_tiles = strcmp(token, "tiles") == 0;
+    reading_player_index = strcmp(token, "pidx") == 0;
+    reading_score = strcmp(token, "score") == 0;
+    reading_number_of_tiles_exchanged = strcmp(token, "exch") == 0;
+    reading_equity_margin = strcmp(token, "eqmargin") == 0;
     token = strtok(NULL, " ");
   }
   log_debug("Returning go_params; i %d stop %d depth %d threads %d ss %d",
@@ -136,11 +168,8 @@ int parse_go_cmd(char *params, GoParams *go_params) {
 }
 
 void ucgi_simulate(UCGICommandVars *ucgi_command_vars) {
-  // Save locally here in case go_params are modified
-  // during the 'simulate' call.
   if (ucgi_command_vars->simmer == NULL) {
-    ucgi_command_vars->simmer =
-        create_simmer(ucgi_command_vars->config, ucgi_command_vars->outfile);
+    ucgi_command_vars->simmer = create_simmer(ucgi_command_vars->config);
   }
   simulate(ucgi_command_vars->thread_control, ucgi_command_vars->simmer,
            ucgi_command_vars->loaded_game, NULL,
@@ -153,8 +182,23 @@ void ucgi_simulate(UCGICommandVars *ucgi_command_vars) {
 }
 
 void ucgi_infer(UCGICommandVars *ucgi_command_vars) {
-  abort();
-  printf("%p\n", ucgi_command_vars);
+  if (ucgi_command_vars->inference == NULL) {
+    ucgi_command_vars->inference = create_inference(
+        ucgi_command_vars->go_params->num_plays,
+        ucgi_command_vars->loaded_game->gen->letter_distribution->size);
+  }
+  Rack *actual_tiles_played = create_rack(
+      ucgi_command_vars->loaded_game->gen->letter_distribution->size);
+  set_rack_to_string(actual_tiles_played, ucgi_command_vars->go_params->tiles,
+                     ucgi_command_vars->loaded_game->gen->letter_distribution);
+  infer(ucgi_command_vars->thread_control, ucgi_command_vars->inference,
+        ucgi_command_vars->loaded_game, actual_tiles_played,
+        ucgi_command_vars->go_params->player_index,
+        ucgi_command_vars->go_params->score,
+        ucgi_command_vars->go_params->number_of_tiles_exchanged,
+        ucgi_command_vars->go_params->equity_margin,
+        ucgi_command_vars->go_params->threads);
+  destroy_rack(actual_tiles_played);
 }
 
 void *execute_ucgi_command(void *uncasted_ucgi_command_vars) {
@@ -197,7 +241,7 @@ int ucgi_go_async(char *go_cmd, UCGICommandVars *ucgi_command_vars) {
       execute_ucgi_command_async(ucgi_command_vars);
     } else {
       // No async command was started, so set the search
-      // status to stopped
+      // status to stopped.
       set_mode_stopped(ucgi_command_vars->thread_control);
       status = UCGI_COMMAND_STATUS_PARSE_FAILED;
     }

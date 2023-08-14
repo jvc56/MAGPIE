@@ -5,20 +5,23 @@
 #include "game.h"
 #include "sim.h"
 #include "stats.h"
+#include "thread_control.h"
 #include "ucgi_formats.h"
 
-void print_to_file(FILE *outfile, const char *content,
-                   pthread_mutex_t *print_output_mutex) {
-  // Lock to print unconditionally even if we might not need
-  // to for simplicity. The performance cost is negligible.
-  pthread_mutex_lock(print_output_mutex);
-  fprintf(outfile, "%s", content);
-  fflush(outfile);
-  pthread_mutex_unlock(print_output_mutex);
+// Inference
+
+void print_ucgi_inference_current_rack_index(uint64_t current_rack_index,
+                                             ThreadControl *thread_control) {
+  char info_output[20];
+  info_output[0] = '\0';
+  sprintf(info_output, "info inferidx %ld\n", current_rack_index);
+  print_to_file(thread_control, info_output);
 }
 
-void print_ucgi_static_moves(Game *game, int nmoves, FILE *outfile,
-                             pthread_mutex_t *print_output_mutex) {
+// Sim
+
+void print_ucgi_static_moves(Game *game, int nmoves,
+                             ThreadControl *thread_control) {
   int moves_size = nmoves * sizeof(char) * 90;
   char *moves_string = (char *)malloc(moves_size);
   moves_string[0] = '\0';
@@ -31,7 +34,7 @@ void print_ucgi_static_moves(Game *game, int nmoves, FILE *outfile,
             game->gen->move_list->moves[i]->score,
             game->gen->move_list->moves[i]->equity);
   }
-  print_to_file(outfile, moves_string, print_output_mutex);
+  print_to_file(thread_control, moves_string);
   free(moves_string);
 }
 
@@ -93,6 +96,6 @@ void print_ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
   if (nps > 0) {
     sprintf(stats_string + strlen(stats_string), "info nps %f\n", nps);
   }
-  print_to_file(simmer->outfile, stats_string, &simmer->print_output_mutex);
+  print_to_file(simmer->thread_control, stats_string);
   free(stats_string);
 }

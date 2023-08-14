@@ -11,6 +11,11 @@ void reset_go_params(GoParams *go_params) {
   go_params->static_search_only = 0;
   go_params->num_plays = 0;
   go_params->max_iterations = 0;
+  go_params->tiles[0] = '\0';
+  go_params->player_index = 0;
+  go_params->score = 0;
+  go_params->number_of_tiles_exchanged = 0;
+  go_params->equity_margin = 0;
   go_params->print_info_interval = 0;
   go_params->check_stopping_condition_interval = 0;
 }

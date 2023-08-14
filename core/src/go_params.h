@@ -16,6 +16,11 @@ typedef struct GoParams {
   int static_search_only;
   int num_plays;
   int max_iterations;
+  char tiles[(RACK_SIZE) + 1];
+  int player_index;
+  int score;
+  int number_of_tiles_exchanged;
+  double equity_margin;
   int print_info_interval;
   int check_stopping_condition_interval;
 } GoParams;

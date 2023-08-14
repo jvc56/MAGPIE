@@ -51,7 +51,7 @@ void test_sim_single_iteration(SuperConfig *superconfig,
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AAADERW",
                       game->gen->letter_distribution);
-  Simmer *simmer = create_simmer(config, NULL);
+  Simmer *simmer = create_simmer(config);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1,
            SIM_STOPPING_CONDITION_NONE, 0);
 
@@ -67,7 +67,7 @@ void test_more_iterations(SuperConfig *superconfig,
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AEIQRST",
                       game->gen->letter_distribution);
-  Simmer *simmer = create_simmer(config, NULL);
+  Simmer *simmer = create_simmer(config);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 200,
            SIM_STOPPING_CONDITION_NONE, 0);
 
@@ -87,7 +87,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   Game *game = create_game(config);
 
   load_cgp(game, config->cgp);
-  Simmer *simmer = create_simmer(config, NULL);
+  Simmer *simmer = create_simmer(config);
 
   int iters = 10000;
   clock_t begin = clock();
@@ -114,7 +114,7 @@ void perf_test_multithread_sim(Config *config, ThreadControl *thread_control) {
   int num_threads = config->number_of_threads;
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config->cgp);
-  Simmer *simmer = create_simmer(config, NULL);
+  Simmer *simmer = create_simmer(config);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1000,
            SIM_STOPPING_CONDITION_NONE, 0);
 
@@ -137,7 +137,7 @@ void perf_test_multithread_blocking_sim(Config *config,
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config->cgp);
 
-  Simmer *simmer = create_simmer(config, NULL);
+  Simmer *simmer = create_simmer(config);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1000000,
            SIM_STOPPING_CONDITION_99PCT, 0);
 
@@ -160,7 +160,7 @@ void test_play_similarity(SuperConfig *superconfig,
 
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
                       game->gen->letter_distribution);
-  Simmer *simmer = create_simmer(config, NULL);
+  Simmer *simmer = create_simmer(config);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 0,
            SIM_STOPPING_CONDITION_NONE, 0);
   // The first four plays all score 74. Only
@@ -199,7 +199,7 @@ void test_play_similarity(SuperConfig *superconfig,
 }
 
 void test_sim(SuperConfig *superconfig) {
-  ThreadControl *thread_control = create_thread_control();
+  ThreadControl *thread_control = create_thread_control(NULL);
   test_win_pct(superconfig);
   test_sim_single_iteration(superconfig, thread_control);
   test_more_iterations(superconfig, thread_control);

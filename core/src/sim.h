@@ -49,8 +49,6 @@ typedef struct Simmer {
   SimmedPlay **simmed_plays;
   pthread_mutex_t simmed_plays_mutex;
 
-  pthread_mutex_t print_output_mutex;
-
   Rack *known_opp_rack;
   Rack *similar_plays_rack;
   WinPct *win_pcts;
@@ -58,7 +56,6 @@ typedef struct Simmer {
   int *play_similarity_cache;
 
   ThreadControl *thread_control;
-  FILE *outfile;
 } Simmer;
 
 typedef struct SimmerWorker {
@@ -69,7 +66,7 @@ typedef struct SimmerWorker {
   Simmer *simmer;
 } SimmerWorker;
 
-Simmer *create_simmer(Config *config, FILE *outfile);
+Simmer *create_simmer(Config *config);
 void destroy_simmer(Simmer *simmer);
 void join_threads(Simmer *simmer);
 int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);

@@ -230,9 +230,10 @@ void play_game(ThreadControl *thread_control, Game *game,
       }
 
       // Single threaded infer
-      int status = infer(thread_control, inference_1, game, tiles_played,
-                         game->player_on_turn_index, move_to_play->score,
-                         number_of_tiles_exchanged, 0, 1);
+      infer(thread_control, inference_1, game, tiles_played,
+            game->player_on_turn_index, move_to_play->score,
+            number_of_tiles_exchanged, 0, 1);
+      int status = inference_1->status;
       sort_leave_racks(inference_1->leave_rack_list);
       if (status != INFERENCE_STATUS_SUCCESS) {
         printf("bad status for single threaded %d, seed is >%ld<\n", status,
@@ -242,9 +243,10 @@ void play_game(ThreadControl *thread_control, Game *game,
                          number_of_tiles_exchanged, 7);
       }
 
-      status = infer(thread_control, inference_2, game, tiles_played,
-                     game->player_on_turn_index, move_to_play->score,
-                     number_of_tiles_exchanged, 0, 7);
+      infer(thread_control, inference_2, game, tiles_played,
+            game->player_on_turn_index, move_to_play->score,
+            number_of_tiles_exchanged, 0, 7);
+      status = inference_2->status;
       sort_leave_racks(inference_2->leave_rack_list);
       if (status != INFERENCE_STATUS_SUCCESS) {
         printf("bad status for 7 threads %d, seed is >%ld<\n", status, seed);

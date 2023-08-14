@@ -26,7 +26,7 @@ typedef struct UCGICommandVars {
   FILE *outfile;
 } UCGICommandVars;
 
-UCGICommandVars *create_ucgi_command_vars();
+UCGICommandVars *create_ucgi_command_vars(FILE *outfile);
 void destroy_ucgi_command_vars(UCGICommandVars *ucgi_command_vars);
 
 int ucgi_go_async(char *go_cmd, UCGICommandVars *ucgi_command_vars);

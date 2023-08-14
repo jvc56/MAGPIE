@@ -16,11 +16,13 @@ typedef struct ThreadControl {
   int halt_status;
   pthread_mutex_t current_mode_mutex;
   int current_mode;
+  pthread_mutex_t print_output_mutex;
   int print_info_interval;
   int check_stopping_condition_interval;
+  FILE *outfile;
 } ThreadControl;
 
-ThreadControl *create_thread_control();
+ThreadControl *create_thread_control(FILE *outfile);
 void destroy_thread_control(ThreadControl *thread_control);
 int halt(ThreadControl *thread_control, int halt_status);
 int unhalt(ThreadControl *thread_control);
@@ -33,5 +35,6 @@ void set_check_stopping_condition_interval(
 int set_mode_searching(ThreadControl *thread_control);
 int set_mode_stopped(ThreadControl *thread_control);
 int get_mode(ThreadControl *thread_control);
+void print_to_file(ThreadControl *thread_control, const char *content);
 
 #endif

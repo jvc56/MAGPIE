@@ -48,16 +48,17 @@ typedef struct Inference {
   int initial_tiles_to_infer;
   double equity_margin;
   uint64_t current_rack_index;
+  int status;
   // Multithreading fields
   uint64_t *shared_rack_index;
   pthread_mutex_t *shared_rack_index_lock;
   ThreadControl *thread_control;
 } Inference;
 
-int infer(ThreadControl *thread_control, Inference *inference, Game *game,
-          Rack *actual_tiles_played, int player_to_infer_index,
-          int actual_score, int number_of_tiles_exchanged, double equity_margin,
-          int number_of_threads);
+void infer(ThreadControl *thread_control, Inference *inference, Game *game,
+           Rack *actual_tiles_played, int player_to_infer_index,
+           int actual_score, int number_of_tiles_exchanged,
+           double equity_margin, int number_of_threads);
 Inference *create_inference(int capacity, int distribution_size);
 void destroy_inference(Inference *inference);
 uint64_t get_subtotal(InferenceRecord *record, uint8_t letter,

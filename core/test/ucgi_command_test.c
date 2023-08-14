@@ -22,7 +22,6 @@ void block_for_search(UCGICommandVars *ucgi_command_vars, int max_seconds) {
     if (get_mode(ucgi_command_vars->thread_control) == MODE_STOPPED) {
       break;
     } else {
-      printf("Still searching, sleeping for 1 second.\n");
       sleep(1);
     }
     seconds_elapsed++;
@@ -34,8 +33,6 @@ void block_for_search(UCGICommandVars *ucgi_command_vars, int max_seconds) {
 }
 
 void test_ucgi_command() {
-  UCGICommandVars *ucgi_command_vars = create_ucgi_command_vars();
-
   int depth;
   int stopcondition;
   int threads;
@@ -51,7 +48,7 @@ void test_ucgi_command() {
   char *output_buffer;
   FILE *file_handler = open_memstream(&output_buffer, &len);
 
-  set_outfile(ucgi_command_vars, file_handler);
+  UCGICommandVars *ucgi_command_vars = create_ucgi_command_vars(file_handler);
 
   // Test the ucgi command
   int result = process_ucgi_command_async("ucgi", ucgi_command_vars);
@@ -172,7 +169,7 @@ void test_ucgi_command() {
 
   // This test assumes that the 95pct condition was
   // met at the first check, which is 300 in this case.
-  // If this isn't true then the universe implodes or something.
+  // If this isn't true then buy a lotto ticket or something.
 
   // Use checkstop / info to get the number of prints
   // made during the sim.
@@ -244,6 +241,9 @@ void test_ucgi_command() {
   memset(move_placeholder, 0, 80);
 
   // Test user interrupt
+  // With these params, sim shouldn't stop
+  // for a long time which will ensure that
+  // we can always halt it before it finishes.
   depth = 2;
   threads = 10;
   plays = 15;

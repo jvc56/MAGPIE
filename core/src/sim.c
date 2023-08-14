@@ -21,7 +21,7 @@
 #define PER_PLY_STOPPING_SCALING 1250
 #define SIMILAR_PLAYS_ITER_CUTOFF 1000
 
-Simmer *create_simmer(Config *config, FILE *outfile) {
+Simmer *create_simmer(Config *config) {
   Simmer *simmer = malloc(sizeof(Simmer));
   simmer->threads = config->number_of_threads;
   simmer->win_pcts = config->win_pcts;
@@ -32,13 +32,7 @@ Simmer *create_simmer(Config *config, FILE *outfile) {
   simmer->play_similarity_cache = NULL;
   simmer->num_simmed_plays = 0;
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
-  pthread_mutex_init(&simmer->print_output_mutex, NULL);
   simmer->similar_plays_rack = create_rack(config->letter_distribution->size);
-  if (outfile == NULL) {
-    simmer->outfile = stdout;
-  } else {
-    simmer->outfile = outfile;
-  }
   return simmer;
 }
 
@@ -94,6 +88,15 @@ void destroy_simmer(Simmer *simmer) {
     destroy_simmed_plays(simmer);
   }
   destroy_rack(simmer->similar_plays_rack);
+
+  if (simmer->known_opp_rack != NULL) {
+    destroy_rack(simmer->known_opp_rack);
+  }
+
+  if (simmer->play_similarity_cache != NULL) {
+    free(simmer->play_similarity_cache);
+  }
+
   free(simmer);
 }
 
@@ -518,8 +521,7 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   game->players[0]->strategy_params->move_sorting = sorting_type;
 
   if (static_search_only) {
-    print_ucgi_static_moves(game, num_plays, simmer->outfile,
-                            &simmer->print_output_mutex);
+    print_ucgi_static_moves(game, num_plays, thread_control);
     return;
   }
 
@@ -549,9 +551,16 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   create_simmed_plays(simmer, game);
 
   if (known_opp_rack != NULL) {
+    if (simmer->known_opp_rack != NULL) {
+      destroy_rack(simmer->known_opp_rack);
+    }
     simmer->known_opp_rack = copy_rack(known_opp_rack);
   } else {
     simmer->known_opp_rack = NULL;
+  }
+
+  if (simmer->play_similarity_cache != NULL) {
+    free(simmer->play_similarity_cache);
   }
   simmer->play_similarity_cache = malloc(sizeof(int) * num_plays * num_plays);
   for (int i = 0; i < num_plays; i++) {
@@ -586,10 +595,6 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   // Destroy intrasim structs
   free(simmer_workers);
   free(worker_ids);
-  if (simmer->known_opp_rack != NULL) {
-    destroy_rack(simmer->known_opp_rack);
-  }
-  free(simmer->play_similarity_cache);
 
   struct timespec finish_time;
   double elapsed;
