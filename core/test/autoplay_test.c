@@ -56,14 +56,6 @@ int are_inference_records_equal(InferenceRecord *record_1,
       return 6;
     }
   }
-
-  for (int i = 0; i < (NUMBER_OF_ROUNDED_EQUITY_VALUES); i++) {
-    if (record_1->rounded_equity_values[i] !=
-        record_2->rounded_equity_values[i]) {
-      return 7;
-    }
-  }
-
   return 0;
 }
 
@@ -177,9 +169,9 @@ void print_error_case(Game *game, Inference *inference_1,
   printf("exch: %d\n", number_of_tiles_exchanged);
   printf("threads: %d\n", number_of_threads);
   printf("inf 1\n");
-  print_inference(inference_1, tiles_played, number_of_threads);
+  print_inference(inference_1, tiles_played);
   printf("inf 2\n");
-  print_inference(inference_2, tiles_played, number_of_threads);
+  print_inference(inference_2, tiles_played);
 }
 
 void play_game(ThreadControl *thread_control, Game *game,
@@ -306,7 +298,7 @@ void play_game(ThreadControl *thread_control, Game *game,
 
 void autoplay_without_using_game_pairs(Config *config) {
   Game *game = create_game(config);
-  ThreadControl *thread_control = create_thread_control(0);
+  ThreadControl *thread_control = create_thread_control(NULL);
   // Use the player_to_infer_index as a intean
   // indicating whether to test inferences in autoplay.
   int test_inference = config->player_to_infer_index >= 0;

@@ -71,53 +71,64 @@ void test_single_stat() {
 }
 
 void test_combined_stats() {
-  Stat **combined_stats = malloc(sizeof(Stat *) * 10);
+  Stat **fragmented_stats = malloc(sizeof(Stat *) * 10);
 
   Stat *singular_stat = create_stat();
-  combined_stats[0] = create_stat();
-  combined_stats[1] = create_stat();
-  combined_stats[2] = create_stat();
-  double combined_stdev;
-  double singular_stdev;
+  Stat *combined_stat = create_stat();
+  fragmented_stats[0] = create_stat();
+  fragmented_stats[1] = create_stat();
+  fragmented_stats[2] = create_stat();
 
-  combined_stdev = get_combined_stdev(combined_stats, 3);
-  assert(combined_stdev == 0);
+  combine_stats(fragmented_stats, 3, combined_stat);
+  assert(get_cardinality(combined_stat) == 0);
+  assert(get_weight(combined_stat) == 0);
+  assert(get_mean(combined_stat) == 0);
+  assert(get_stdev(combined_stat) == 0);
 
-  push(combined_stats[0], 7, 1);
+  push(fragmented_stats[0], 7, 1);
   push(singular_stat, 7, 1);
 
-  combined_stdev = get_combined_stdev(combined_stats, 3);
-  assert(combined_stdev == 0);
+  combine_stats(fragmented_stats, 3, combined_stat);
+  assert(within_epsilon(get_stdev(combined_stat), get_stdev(singular_stat)));
+  assert(within_epsilon(get_mean(combined_stat), get_mean(singular_stat)));
+  assert(get_weight(combined_stat) == get_weight(singular_stat));
+  assert(get_cardinality(combined_stat) == get_cardinality(singular_stat));
 
-  push(combined_stats[1], 3, 1);
+  push(fragmented_stats[1], 3, 1);
   push(singular_stat, 3, 1);
 
-  push(combined_stats[2], 6, 1);
+  push(fragmented_stats[2], 6, 1);
   push(singular_stat, 6, 1);
 
-  combined_stdev = get_combined_stdev(combined_stats, 3);
-  singular_stdev = get_stdev(singular_stat);
-  assert(within_epsilon(combined_stdev, singular_stdev));
+  combine_stats(fragmented_stats, 3, combined_stat);
+  assert(within_epsilon(get_stdev(combined_stat), get_stdev(singular_stat)));
+  assert(within_epsilon(get_mean(combined_stat), get_mean(singular_stat)));
+  assert(get_weight(combined_stat) == get_weight(singular_stat));
+  assert(get_cardinality(combined_stat) == get_cardinality(singular_stat));
 
-  push(combined_stats[1], 10, 3);
+  push(fragmented_stats[1], 10, 3);
   push(singular_stat, 10, 3);
 
-  combined_stdev = get_combined_stdev(combined_stats, 3);
-  singular_stdev = get_stdev(singular_stat);
-  assert(within_epsilon(combined_stdev, singular_stdev));
-
-  push(combined_stats[2], 4, 6);
+  combine_stats(fragmented_stats, 3, combined_stat);
+  assert(within_epsilon(get_stdev(combined_stat), get_stdev(singular_stat)));
+  assert(within_epsilon(get_mean(combined_stat), get_mean(singular_stat)));
+  assert(get_weight(combined_stat) == get_weight(singular_stat));
+  assert(get_cardinality(combined_stat) == get_cardinality(singular_stat));
+  push(fragmented_stats[2], 4, 6);
   push(singular_stat, 4, 6);
 
-  combined_stdev = get_combined_stdev(combined_stats, 3);
-  singular_stdev = get_stdev(singular_stat);
-  assert(within_epsilon(combined_stdev, singular_stdev));
+  combine_stats(fragmented_stats, 3, combined_stat);
+  assert(within_epsilon(get_stdev(combined_stat), get_stdev(singular_stat)));
+  assert(within_epsilon(get_mean(combined_stat), get_mean(singular_stat)));
+  assert(get_weight(combined_stat) == get_weight(singular_stat));
+  assert(get_cardinality(combined_stat) == get_cardinality(singular_stat));
 
   for (int i = 0; i < 3; i++) {
-    destroy_stat(combined_stats[i]);
+    destroy_stat(fragmented_stats[i]);
   }
   destroy_stat(singular_stat);
-  free(combined_stats);
+  destroy_stat(combined_stat);
+  free(fragmented_stats);
 }
 
 void test_stats() {

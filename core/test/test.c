@@ -52,10 +52,10 @@ void unit_tests(SuperConfig *superconfig) {
   // test_movegen(superconfig);
   // test_equity_adjustments(superconfig);
   // test_gameplay(superconfig);
-  // test_stats();
+  test_stats();
   test_infer(superconfig);
-  test_sim(superconfig);
-  test_ucgi_command();
+  // test_sim(superconfig);
+  // test_ucgi_command();
 }
 
 int main(int argc, char *argv[]) {

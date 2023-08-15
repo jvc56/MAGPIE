@@ -190,11 +190,6 @@ get_probability_for_random_minimum_draw(Rack *bag_as_rack, Rack *rack,
   return ((double)total_draws_for_this_letter_minimum) / total_draws;
 }
 
-double get_estimated_stdev_for_record(InferenceRecord *record) {
-  return get_stdev_for_weighted_int_array(record->rounded_equity_values,
-                                          (START_ROUNDED_EQUITY_VALUE));
-}
-
 void increment_subtotals_for_record(InferenceRecord *record, Rack *rack,
                                     uint64_t number_of_draws_for_leave) {
   for (int i = 0; i < rack->array_size; i++) {
@@ -214,15 +209,6 @@ void record_valid_leave(InferenceRecord *record, Rack *rack,
   push(record->equity_values, (double)current_leave_value,
        number_of_draws_for_leave);
   increment_subtotals_for_record(record, rack, number_of_draws_for_leave);
-  int rounded_equity_index =
-      round_to_nearest_int(current_leave_value) - (START_ROUNDED_EQUITY_VALUE);
-  if (rounded_equity_index < 0 ||
-      rounded_equity_index >= (NUMBER_OF_ROUNDED_EQUITY_VALUES)) {
-    printf("equity value out of range: %0.2f\n", current_leave_value);
-    abort();
-  }
-  record->rounded_equity_values[rounded_equity_index] +=
-      number_of_draws_for_leave;
 }
 
 Move *get_top_move(Inference *inference) {
@@ -309,9 +295,6 @@ void initialize_inference_record_for_evaluation(
   for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
     record->draw_and_leave_subtotals[i] = 0;
   }
-  for (int i = 0; i < (NUMBER_OF_ROUNDED_EQUITY_VALUES); i++) {
-    record->rounded_equity_values[i] = 0;
-  }
 }
 
 void initialize_inference_for_evaluation(Inference *inference, Game *game,
@@ -373,10 +356,6 @@ InferenceRecord *copy_inference_record(InferenceRecord *inference_record,
     new_record->draw_and_leave_subtotals[i] =
         inference_record->draw_and_leave_subtotals[i];
   }
-  for (int i = 0; i < (NUMBER_OF_ROUNDED_EQUITY_VALUES); i++) {
-    new_record->rounded_equity_values[i] =
-        inference_record->rounded_equity_values[i];
-  }
   new_record->equity_values = copy_stat(inference_record->equity_values);
   return new_record;
 }
@@ -425,18 +404,9 @@ Inference *copy_inference(Inference *inference, ThreadControl *thread_control) {
 void add_inference_record(InferenceRecord *inference_record_1,
                           InferenceRecord *inference_record_2,
                           int draw_and_leave_subtotals_size) {
-  if (get_cardinality(inference_record_2->equity_values) == 0) {
-    return;
-  }
-  push_stat(inference_record_1->equity_values,
-            inference_record_2->equity_values);
   for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
     inference_record_1->draw_and_leave_subtotals[i] +=
         inference_record_2->draw_and_leave_subtotals[i];
-  }
-  for (int i = 0; i < (NUMBER_OF_ROUNDED_EQUITY_VALUES); i++) {
-    inference_record_1->rounded_equity_values[i] +=
-        inference_record_2->rounded_equity_values[i];
   }
 }
 
@@ -458,8 +428,20 @@ void add_inference(Inference *inference_1, Inference *inference_2) {
   }
 }
 
-void print_inference_info(uint64_t current_rack_index) {
-  printf("inference is at %ld\n", current_rack_index);
+void get_max_rack_index(Inference *inference, int tiles_to_infer,
+                        int start_letter, uint64_t *max_rack_index) {
+  if (tiles_to_infer == 0) {
+    *max_rack_index += 1;
+    return;
+  }
+  for (int letter = start_letter; letter < inference->distribution_size;
+       letter++) {
+    if (inference->bag_as_rack->array[letter] > 0) {
+      increment_letter_for_inference(inference, letter);
+      get_max_rack_index(inference, tiles_to_infer - 1, letter, max_rack_index);
+      decrement_letter_for_inference(inference, letter);
+    }
+  }
 }
 
 void iterate_through_all_possible_leaves(Inference *inference,
@@ -535,6 +517,12 @@ void set_shared_variables_for_inference(
 void infer_manager(ThreadControl *thread_control, Inference *inference,
                    int number_of_threads) {
 
+  uint64_t max_rack_index = 0;
+  get_max_rack_index(inference, inference->initial_tiles_to_infer,
+                     BLANK_MACHINE_LETTER, &max_rack_index);
+
+  print_ucgi_inference_max_rack_index(max_rack_index, thread_control);
+
   if (number_of_threads == 1) {
     inference->thread_control = thread_control;
     infer_worker_single_threaded(inference);
@@ -562,12 +550,46 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
                    inferences_for_workers[thread_index]);
   }
 
+  Stat **leave_stats = malloc((sizeof(Stat *)) * (number_of_threads));
+
+  Stat **exchanged_stats;
+  Stat **rack_stats;
+
+  if (inference->number_of_tiles_exchanged > 0) {
+    exchanged_stats = malloc((sizeof(Stat *)) * (number_of_threads));
+    rack_stats = malloc((sizeof(Stat *)) * (number_of_threads));
+  }
+
   // Combine and free
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
-    add_inference(inference, inferences_for_workers[thread_index]);
+    Inference *inference_worker = inferences_for_workers[thread_index];
+    add_inference(inference, inference_worker);
+    leave_stats[thread_index] = inference_worker->leave_record->equity_values;
+    if (inference->number_of_tiles_exchanged > 0) {
+      exchanged_stats[thread_index] =
+          inference_worker->exchanged_record->equity_values;
+      rack_stats[thread_index] = inference_worker->rack_record->equity_values;
+    }
+  }
+
+  combine_stats(leave_stats, number_of_threads,
+                inference->leave_record->equity_values);
+  free(leave_stats);
+  if (inference->number_of_tiles_exchanged > 0) {
+    combine_stats(exchanged_stats, number_of_threads,
+                  inference->exchanged_record->equity_values);
+    combine_stats(rack_stats, number_of_threads,
+                  inference->rack_record->equity_values);
+    free(exchanged_stats);
+    free(rack_stats);
+  }
+
+  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     destroy_inference_copy(inferences_for_workers[thread_index]);
   }
+
+  print_ucgi_inference(inference, thread_control);
 
   free(inferences_for_workers);
   free(worker_ids);

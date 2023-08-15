@@ -19,7 +19,7 @@ int infer_for_test(Inference *inference, Game *game, Rack *actual_tiles_played,
                    int player_to_infer_index, int actual_score,
                    int number_of_tiles_exchanged, double equity_margin,
                    int number_of_threads) {
-  ThreadControl *thread_control = create_thread_control(0);
+  ThreadControl *thread_control = create_thread_control(NULL);
 
   infer(thread_control, inference, game, actual_tiles_played,
         player_to_infer_index, actual_score, number_of_tiles_exchanged,
@@ -243,8 +243,6 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
                           game->gen->letter_distribution, "S"));
   assert(within_epsilon(get_mean(letter_stat), 1));
   assert(within_epsilon(get_stdev(letter_stat), 0));
-  assert(within_epsilon(get_estimated_stdev_for_record(inference->leave_record),
-                        0));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
                             inference->bag_as_rack, inference->leave,
                             human_readable_letter_to_machine_letter(
@@ -443,17 +441,10 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   assert(within_epsilon(get_mean(letter_stat), 1));
   assert(within_epsilon(get_stdev(letter_stat), 0));
 
-  // Actual stdev
-  if (number_of_threads == 1) {
-    // Exact stdev values are only valid for single threaded
-    // runs. See infer.h for an explanation.
-    assert(within_epsilon(get_stdev(inference->leave_record->equity_values),
-                          6.53225818584641171327));
-  }
-  // Estimated stdev
-  // estimates should work for any number of threads.
-  assert(within_epsilon(get_estimated_stdev_for_record(inference->leave_record),
-                        6.52464463816390516371));
+  // Exact stdev values are only valid for single threaded
+  // runs. See infer.h for an explanation.
+  assert(within_epsilon(get_stdev(inference->leave_record->equity_values),
+                        6.53225818584641171327));
 
   // Contrive an impossible situation to easily test
   // more combinatorics
@@ -775,11 +766,6 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
                           game->gen->letter_distribution, "I"),
                       1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
 
-  // Ensure the estimation works for negative values
-  assert(get_estimated_stdev_for_record(inference->exchanged_record) ==
-         2.33846153846155546674);
-  // Check stdev here
-
   reset_game(game);
 
   destroy_stat(letter_stat);
@@ -814,8 +800,7 @@ void infer_from_config(Config *config) {
   if (status != INFERENCE_STATUS_SUCCESS) {
     printf("inference failed with error code: %d\n", status);
   } else {
-    print_inference(inference, config->actual_tiles_played,
-                    config->number_of_threads);
+    print_inference(inference, config->actual_tiles_played);
   }
   destroy_game(game);
   destroy_inference(inference);

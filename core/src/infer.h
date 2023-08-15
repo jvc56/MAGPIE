@@ -12,16 +12,12 @@
 #include "stats.h"
 #include "thread_control.h"
 
+#define INFER_TYPE_LEAVE 0
+#define INFER_TYPE_EXCHANGED 1
+#define INFER_TYPE_RACK 2
 typedef struct InferenceRecord {
   Stat *equity_values;
   uint64_t *draw_and_leave_subtotals;
-  // This array is used to store the weights
-  // of rounded equity values for multithreaded
-  // inferences. To avoid holding every floating point
-  // equity value in memory at once, we quantize them
-  // to integer values so storing the weights takes
-  // a reasonable amount of memory.
-  uint64_t rounded_equity_values[(NUMBER_OF_ROUNDED_EQUITY_VALUES)];
 } InferenceRecord;
 
 typedef struct Inference {
@@ -71,7 +67,6 @@ double
 get_probability_for_random_minimum_draw(Rack *bag_as_rack, Rack *rack,
                                         uint8_t this_letter, int minimum,
                                         int number_of_actual_tiles_played);
-double get_estimated_stdev_for_record(InferenceRecord *record);
 uint64_t choose(uint64_t n, uint64_t k);
 
 #endif
