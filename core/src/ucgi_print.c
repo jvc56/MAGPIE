@@ -13,62 +13,49 @@
 
 // Inference
 
-void print_ucgi_inference_current_rack_index(uint64_t current_rack_index,
-                                             ThreadControl *thread_control) {
+void print_ucgi_inference_current_rack(uint64_t current_rack_index,
+                                       ThreadControl *thread_control) {
   char info_output[40];
   info_output[0] = '\0';
-  sprintf(info_output, "info infercurridx %ld\n", current_rack_index);
+  sprintf(info_output, "info infercurrrack %ld\n", current_rack_index);
   print_to_file(thread_control, info_output);
 }
 
-void print_ucgi_inference_max_rack_index(uint64_t max_rack_index,
-                                         ThreadControl *thread_control) {
+void print_ucgi_inference_total_racks_evaluated(uint64_t total_racks_evaluated,
+                                                ThreadControl *thread_control) {
   char info_output[40];
   info_output[0] = '\0';
-  sprintf(info_output, "info infermaxidx %ld\n", max_rack_index);
+  sprintf(info_output, "info infertotalracks %ld\n", total_racks_evaluated);
   print_to_file(thread_control, info_output);
 }
 
 void ucgi_write_leave_rack(char *buffer, LeaveRack *leave_rack, int index,
                            uint64_t total_draws,
                            LetterDistribution *letter_distribution,
-                           int infer_type) {
+                           int is_exchange) {
   char leave_string[(RACK_SIZE)] = "";
   write_rack_to_end_of_buffer(leave_string, letter_distribution,
                               leave_rack->leave);
-  char infer_type_string[6] = "";
-  if (infer_type == INFER_TYPE_LEAVE) {
-    sprintf(infer_type_string + strlen(infer_type_string), "%s", "leave");
-  } else if (infer_type == INFER_TYPE_EXCHANGED) {
-    sprintf(infer_type_string + strlen(infer_type_string), "%s", "exch");
-  } else {
-    sprintf(infer_type_string + strlen(infer_type_string), "%s", "rack");
-  }
-
-  if (infer_type != INFER_TYPE_RACK) {
-    sprintf(buffer + strlen(buffer), "inferleave %s %d %s %f %d %f\n",
-            infer_type_string, index + 1, leave_string,
-            ((double)leave_rack->draws / total_draws) * 100, leave_rack->draws,
-            leave_rack->equity);
+  if (!is_exchange) {
+    sprintf(buffer + strlen(buffer), "infercommon %d %s %f %d %f\n", index + 1,
+            leave_string, ((double)leave_rack->draws / total_draws) * 100,
+            leave_rack->draws, leave_rack->equity);
   } else {
     char exchanged_string[(RACK_SIZE)] = "";
     write_rack_to_end_of_buffer(exchanged_string, letter_distribution,
                                 leave_rack->exchanged);
-    sprintf(buffer + strlen(buffer), "inferleave %s %d %s %s %f %d\n",
-            infer_type_string, index + 1, leave_string, exchanged_string,
+    sprintf(buffer + strlen(buffer), "inferleave %d %s %s %f %d\n", index + 1,
+            leave_string, exchanged_string,
             ((double)leave_rack->draws / total_draws) * 100, leave_rack->draws);
   }
 }
 
-void ucgi_write_letter_minimum(InferenceRecord *record, Rack *rack,
-                               Rack *bag_as_rack, char *inference_string,
-                               uint8_t letter, int minimum,
-                               int number_of_tiles_played_or_exchanged) {
+int ucgi_write_letter_minimum(InferenceRecord *record, Rack *rack,
+                              Rack *bag_as_rack, char *inference_string,
+                              uint8_t letter, int minimum,
+                              int number_of_tiles_played_or_exchanged) {
   int draw_subtotal = get_subtotal_sum_with_minimum(
       record, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
-  if (draw_subtotal == 0) {
-    return;
-  }
   int leave_subtotal = get_subtotal_sum_with_minimum(
       record, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE);
   double inference_probability =
@@ -78,19 +65,22 @@ void ucgi_write_letter_minimum(InferenceRecord *record, Rack *rack,
   sprintf(inference_string + strlen(inference_string), " %f %f %d %d",
           inference_probability * 100, random_probability * 100, draw_subtotal,
           leave_subtotal);
+  return 0;
 }
 
 void ucgi_write_letter_line(Game *game, InferenceRecord *record, Rack *rack,
                             Rack *bag_as_rack, Stat *letter_stat,
                             char *inference_string, uint8_t letter,
-                            int number_of_tiles_played_or_exchanged) {
+                            int number_of_tiles_played_or_exchanged,
+                            const char *inference_record_type) {
   get_stat_for_letter(record, letter_stat, letter);
   char readable_letter[MAX_LETTER_CHAR_LENGTH];
   machine_letter_to_human_readable_letter(game->gen->letter_distribution,
                                           letter, readable_letter);
 
-  sprintf(inference_string + strlen(inference_string), "infertile %s %f %f",
-          readable_letter, get_mean(letter_stat), get_stdev(letter_stat));
+  sprintf(inference_string + strlen(inference_string), "infertile %s %s %f %f",
+          inference_record_type, readable_letter, get_mean(letter_stat),
+          get_stdev(letter_stat));
 
   for (int i = 1; i <= (RACK_SIZE); i++) {
     ucgi_write_letter_minimum(record, rack, bag_as_rack, inference_string,
@@ -102,19 +92,23 @@ void ucgi_write_letter_line(Game *game, InferenceRecord *record, Rack *rack,
 void ucgi_write_inference_record(char *buffer, InferenceRecord *record,
                                  Game *game, Rack *rack, Rack *bag_as_rack,
                                  Stat *letter_stat,
-                                 int number_of_tiles_played_or_exchanged) {
+                                 int number_of_tiles_played_or_exchanged,
+                                 const char *inference_record_type) {
   uint64_t total_draws = get_weight(record->equity_values);
   uint64_t total_leaves = get_cardinality(record->equity_values);
-  sprintf(buffer + strlen(buffer), "infertotaldraws %ld\n", total_draws);
-  sprintf(buffer + strlen(buffer), "inferuniqueleaves %ld\n", total_leaves);
-  sprintf(buffer + strlen(buffer), "inferleaveavg %f\n",
-          get_mean(record->equity_values));
-  // FIXME: get actual stdev
-  sprintf(buffer + strlen(buffer), "inferleavestdev %f\n", 0.1);
+  sprintf(buffer + strlen(buffer), "infertotaldraws %s %ld\n",
+          inference_record_type, total_draws);
+  sprintf(buffer + strlen(buffer), "inferuniqueleaves %s %ld\n",
+          inference_record_type, total_leaves);
+  sprintf(buffer + strlen(buffer), "inferleaveavg %s %f\n",
+          inference_record_type, get_mean(record->equity_values));
+  sprintf(buffer + strlen(buffer), "inferleavestdev %s %f\n",
+          inference_record_type, get_stdev(record->equity_values));
 
   for (int i = 0; i < (int)game->gen->letter_distribution->size; i++) {
     ucgi_write_letter_line(game, record, rack, bag_as_rack, letter_stat, buffer,
-                           i, number_of_tiles_played_or_exchanged);
+                           i, number_of_tiles_played_or_exchanged,
+                           inference_record_type);
   }
 }
 
@@ -123,7 +117,8 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
   int number_of_tiles_played_or_exchanged =
       inference->number_of_tiles_exchanged;
   if (number_of_tiles_played_or_exchanged == 0) {
-    number_of_tiles_played_or_exchanged = inference->initial_tiles_to_infer;
+    number_of_tiles_played_or_exchanged =
+        (RACK_SIZE)-inference->initial_tiles_to_infer;
   }
   Game *game = inference->game;
 
@@ -133,21 +128,20 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
   char records_string[500000] = "";
   ucgi_write_inference_record(records_string, inference->leave_record, game,
                               inference->leave, inference->bag_as_rack,
-                              letter_stat, number_of_tiles_played_or_exchanged);
+                              letter_stat, number_of_tiles_played_or_exchanged,
+                              "leave");
   InferenceRecord *common_leaves_record = inference->leave_record;
-  int common_leaves_type = INFER_TYPE_LEAVE;
   if (is_exchange) {
     common_leaves_record = inference->rack_record;
-    common_leaves_type = INFER_TYPE_RACK;
     Rack *unknown_exchange_rack = create_rack(inference->leave->array_size);
     ucgi_write_inference_record(records_string, inference->exchanged_record,
                                 game, unknown_exchange_rack,
                                 inference->bag_as_rack, letter_stat,
-                                inference->number_of_tiles_exchanged);
+                                inference->number_of_tiles_exchanged, "exch");
     destroy_rack(unknown_exchange_rack);
     ucgi_write_inference_record(records_string, inference->rack_record, game,
                                 inference->leave, inference->bag_as_rack,
-                                letter_stat, 0);
+                                letter_stat, 0, "rack");
   }
   destroy_stat(letter_stat);
 
@@ -160,7 +154,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
         inference->leave_rack_list->leave_racks[common_leave_index];
     ucgi_write_leave_rack(records_string, leave_rack, common_leave_index,
                           get_weight(common_leaves_record->equity_values),
-                          game->gen->letter_distribution, common_leaves_type);
+                          game->gen->letter_distribution, is_exchange);
   }
   print_to_file(thread_control, records_string);
 }

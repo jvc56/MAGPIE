@@ -36,6 +36,10 @@ void test_ucgi_command() {
   int depth;
   int stopcondition;
   int threads;
+  char tiles[(RACK_SIZE)];
+  int player_index;
+  int score;
+  int number_of_tiles_exchanged;
   int plays;
   int iters;
   int checkstop;
@@ -227,7 +231,7 @@ void test_ucgi_command() {
            plays, iters, info);
   result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
-  // Check the go params
+  // This shouldn't take more than 30 seconds.
   block_for_search(ucgi_command_vars, 30);
   // Command is done
   assert(ucgi_command_vars->thread_control->halt_status ==
@@ -277,12 +281,198 @@ void test_ucgi_command() {
   // It should only print the moves once at the end when
   // it finishes.
   assert(plays + 2 == count_newlines(output_buffer + prev_len));
+  prev_len = len;
+  memset(test_stdin_input, 0, 256);
+  memset(move_placeholder, 0, 80);
+
+  // Test infer
+  Stat *letter_stat = create_stat();
+
+  strncpy(tiles, "MUZAKY", RACK_SIZE);
+  player_index = 0;
+  score = 58;
+  number_of_tiles_exchanged = 0;
+  info = 4;
+  plays = 20;
+  threads = 4;
+  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
+           EMPTY_CGP);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+
+  snprintf(
+      test_stdin_input, sizeof(test_stdin_input),
+      "go infer tiles %s pidx %d score %d exch %d plays %d info %d threads %d",
+      tiles, player_index, score, number_of_tiles_exchanged, plays, info,
+      threads);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+
+  // Check the go params
+  assert(ucgi_command_vars->go_params->player_index == player_index);
+  assert(ucgi_command_vars->go_params->score == score);
+  assert(ucgi_command_vars->go_params->number_of_tiles_exchanged ==
+         number_of_tiles_exchanged);
+  assert(!strcmp(ucgi_command_vars->go_params->tiles, tiles));
+
+  // It shouldn't take too long to run an inference for a 2 tile leave.
+  block_for_search(ucgi_command_vars, 5);
+  assert(ucgi_command_vars->thread_control->halt_status ==
+         HALT_STATUS_MAX_ITERATIONS);
+  assert(ucgi_command_vars->inference->status == INFERENCE_STATUS_SUCCESS);
+  Inference *inference = ucgi_command_vars->inference;
+  Game *game = ucgi_command_vars->loaded_game;
+  // Letters not possible:
+  // A - YAKUZA
+  // B - ZAMBUK
+  // K - none in bag
+  // Q - QUAKY
+  // Z - none in bag
+  assert(get_weight(inference->leave_record->equity_values) == 83);
+  assert(get_cardinality(inference->leave_record->equity_values) == 22);
+  for (uint32_t i = 0; i < game->gen->letter_distribution->size; i++) {
+    if (i == human_readable_letter_to_machine_letter(
+                 game->gen->letter_distribution, "A") ||
+        i == human_readable_letter_to_machine_letter(
+                 game->gen->letter_distribution, "B") ||
+        i == human_readable_letter_to_machine_letter(
+                 game->gen->letter_distribution, "K") ||
+        i == human_readable_letter_to_machine_letter(
+                 game->gen->letter_distribution, "Q") ||
+        i == human_readable_letter_to_machine_letter(
+                 game->gen->letter_distribution, "Z")) {
+      assert(get_subtotal(inference->leave_record, i, 1,
+                          INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
+      assert(get_subtotal(inference->leave_record, i, 1,
+                          INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 0);
+    } else {
+      assert(get_subtotal(inference->leave_record, i, 1,
+                          INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
+    }
+  }
+  get_stat_for_letter(inference->leave_record, letter_stat,
+                      human_readable_letter_to_machine_letter(
+                          game->gen->letter_distribution, "E"));
+  assert(within_epsilon(get_mean(letter_stat), (double)12 / 83));
+  assert(within_epsilon(get_probability_for_random_minimum_draw(
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, "Q"),
+                            1, 6),
+                        (double)1 / 94));
+  assert(within_epsilon(get_probability_for_random_minimum_draw(
+                            inference->bag_as_rack, inference->leave,
+                            human_readable_letter_to_machine_letter(
+                                game->gen->letter_distribution, "B"),
+                            1, 6),
+                        (double)2 / 94));
+  // 1: for printing the max index +
+  // dist size / info: for the number of current index prints +
+  // 4: for inference info +
+  // dist size: for info about each tile
+  // plays: for most common leaves
+  number_of_output_lines =
+      1 +
+      (ucgi_command_vars->loaded_game->gen->letter_distribution->size / info) +
+      4 + ucgi_command_vars->loaded_game->gen->letter_distribution->size +
+      plays;
+  assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
   prev_len = len;
   memset(test_stdin_input, 0, 256);
   memset(move_placeholder, 0, 80);
 
+  // test exchange
+  player_index = 0;
+  score = 0;
+  number_of_tiles_exchanged = 5;
+  info = 500;
+  plays = 20;
+  threads = 10;
+  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
+           VS_MATT);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+
+  snprintf(test_stdin_input, sizeof(test_stdin_input),
+           "go infer pidx %d score %d exch %d plays %d info %d threads %d",
+           player_index, score, number_of_tiles_exchanged, plays, info,
+           threads);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+  block_for_search(ucgi_command_vars, 20);
+  assert(ucgi_command_vars->inference->status == INFERENCE_STATUS_SUCCESS);
+  number_of_output_lines =
+      1 + (inference->total_racks_evaluated / info) +
+      (4 + ucgi_command_vars->loaded_game->gen->letter_distribution->size) * 3 +
+      plays;
+  assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
+
+  prev_len = len;
+  memset(test_stdin_input, 0, 256);
+  memset(move_placeholder, 0, 80);
+
+  // test interrupt
+  player_index = 0;
+  score = 0;
+  number_of_tiles_exchanged = 3;
+  plays = 20;
+  info = 5000000;
+  threads = 5;
+  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
+           EMPTY_CGP);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+
+  snprintf(test_stdin_input, sizeof(test_stdin_input),
+           "go infer pidx %d score %d exch %d plays %d info %d threads %d",
+           player_index, score, number_of_tiles_exchanged, plays, info,
+           threads);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+  // Let the command run for a bit
+  sleep(2);
+  // Send the halt signal
+  memset(test_stdin_input, 0, 256);
+  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s", "stop");
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+  // It should not take more than 5 seconds to halt.
+  block_for_search(ucgi_command_vars, 5);
+  // Command is done
+  assert(ucgi_command_vars->thread_control->halt_status ==
+         HALT_STATUS_USER_INTERRUPT);
+  prev_len = len;
+  memset(test_stdin_input, 0, 256);
+  memset(move_placeholder, 0, 80);
+
+  // test exchange
+  player_index = 0;
+  score = 30;
+  number_of_tiles_exchanged = 5;
+  info = 500;
+  plays = 20;
+  threads = 10;
+  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
+           EMPTY_CGP);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+
+  snprintf(test_stdin_input, sizeof(test_stdin_input),
+           "go infer pidx %d score %d exch %d plays %d info %d threads %d",
+           player_index, score, number_of_tiles_exchanged, plays, info,
+           threads);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+  // The inference should fail
+  block_for_search(ucgi_command_vars, 5);
+  assert(ucgi_command_vars->inference->status ==
+         INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
+  number_of_output_lines = 1;
+  assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
+
   fclose(file_handler);
   free(output_buffer);
   destroy_ucgi_command_vars(ucgi_command_vars);
+  destroy_stat(letter_stat);
 }

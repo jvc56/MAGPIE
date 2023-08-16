@@ -199,6 +199,12 @@ void ucgi_infer(UCGICommandVars *ucgi_command_vars) {
         ucgi_command_vars->go_params->equity_margin,
         ucgi_command_vars->go_params->threads);
   destroy_rack(actual_tiles_played);
+  if (ucgi_command_vars->inference->status != INFERENCE_STATUS_SUCCESS) {
+    char failure_message[50];
+    sprintf(failure_message + strlen(failure_message), "inferfail %d\n",
+            ucgi_command_vars->inference->status);
+    print_to_file(ucgi_command_vars->thread_control, failure_message);
+  }
 }
 
 void *execute_ucgi_command(void *uncasted_ucgi_command_vars) {

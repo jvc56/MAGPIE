@@ -32,6 +32,7 @@ Inference *create_inference(int capacity, int distribution_size) {
   Inference *inference = malloc(sizeof(Inference));
   inference->distribution_size = distribution_size;
   inference->draw_and_leave_subtotals_size = distribution_size * (RACK_SIZE)*2;
+  inference->total_racks_evaluated = 0;
   inference->bag_as_rack = create_rack(distribution_size);
   inference->leave = create_rack(distribution_size);
   inference->exchanged = create_rack(distribution_size);
@@ -428,20 +429,30 @@ void add_inference(Inference *inference_1, Inference *inference_2) {
   }
 }
 
-void get_max_rack_index(Inference *inference, int tiles_to_infer,
-                        int start_letter, uint64_t *max_rack_index) {
+void get_total_racks_evaluated(Inference *inference, int tiles_to_infer,
+                               int start_letter,
+                               uint64_t *total_racks_evaluated) {
   if (tiles_to_infer == 0) {
-    *max_rack_index += 1;
+    *total_racks_evaluated += 1;
     return;
   }
   for (int letter = start_letter; letter < inference->distribution_size;
        letter++) {
     if (inference->bag_as_rack->array[letter] > 0) {
       increment_letter_for_inference(inference, letter);
-      get_max_rack_index(inference, tiles_to_infer - 1, letter, max_rack_index);
+      get_total_racks_evaluated(inference, tiles_to_infer - 1, letter,
+                                total_racks_evaluated);
       decrement_letter_for_inference(inference, letter);
     }
   }
+}
+
+int should_print_info(Inference *inference) {
+  return inference->thread_control->print_info_interval > 0 &&
+         inference->current_rack_index > 0 &&
+         inference->current_rack_index %
+                 inference->thread_control->print_info_interval ==
+             0;
 }
 
 void iterate_through_all_possible_leaves(Inference *inference,
@@ -457,29 +468,24 @@ void iterate_through_all_possible_leaves(Inference *inference,
     if (multithreaded) {
       pthread_mutex_lock(inference->shared_rack_index_lock);
       if (inference->current_rack_index == *inference->shared_rack_index) {
-        print_info = inference->thread_control->print_info_interval > 0 &&
-                     inference->current_rack_index %
-                             inference->thread_control->print_info_interval ==
-                         0;
+        print_info = should_print_info(inference);
         perform_evaluation = 1;
         *inference->shared_rack_index += 1;
       }
       pthread_mutex_unlock(inference->shared_rack_index_lock);
     } else {
-      print_info = inference->thread_control->print_info_interval > 0 &&
-                   inference->current_rack_index %
-                           inference->thread_control->print_info_interval ==
-                       0;
+      print_info = should_print_info(inference);
       perform_evaluation = 1;
     }
+
     if (perform_evaluation) {
       evaluate_possible_leave(inference);
     }
-    inference->current_rack_index++;
     if (print_info) {
-      print_ucgi_inference_current_rack_index(inference->current_rack_index,
-                                              inference->thread_control);
+      print_ucgi_inference_current_rack(inference->current_rack_index,
+                                        inference->thread_control);
     }
+    inference->current_rack_index++;
     return;
   }
   for (int letter = start_letter; letter < inference->distribution_size;
@@ -517,11 +523,13 @@ void set_shared_variables_for_inference(
 void infer_manager(ThreadControl *thread_control, Inference *inference,
                    int number_of_threads) {
 
-  uint64_t max_rack_index = 0;
-  get_max_rack_index(inference, inference->initial_tiles_to_infer,
-                     BLANK_MACHINE_LETTER, &max_rack_index);
+  uint64_t total_racks_evaluated = 0;
+  get_total_racks_evaluated(inference, inference->initial_tiles_to_infer,
+                            BLANK_MACHINE_LETTER, &total_racks_evaluated);
+  inference->total_racks_evaluated = total_racks_evaluated;
 
-  print_ucgi_inference_max_rack_index(max_rack_index, thread_control);
+  print_ucgi_inference_total_racks_evaluated(total_racks_evaluated,
+                                             thread_control);
 
   if (number_of_threads == 1) {
     inference->thread_control = thread_control;
@@ -572,6 +580,10 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
       rack_stats[thread_index] = inference_worker->rack_record->equity_values;
     }
   }
+
+  // Infer was able to finish normally, which is when it
+  // iterates through every rack
+  halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
 
   combine_stats(leave_stats, number_of_threads,
                 inference->leave_record->equity_values);

@@ -12,9 +12,6 @@
 #include "stats.h"
 #include "thread_control.h"
 
-#define INFER_TYPE_LEAVE 0
-#define INFER_TYPE_EXCHANGED 1
-#define INFER_TYPE_RACK 2
 typedef struct InferenceRecord {
   Stat *equity_values;
   uint64_t *draw_and_leave_subtotals;
@@ -45,6 +42,7 @@ typedef struct Inference {
   double equity_margin;
   uint64_t current_rack_index;
   int status;
+  uint64_t total_racks_evaluated;
   // Multithreading fields
   uint64_t *shared_rack_index;
   pthread_mutex_t *shared_rack_index_lock;
