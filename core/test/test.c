@@ -42,16 +42,16 @@ void unit_tests(SuperConfig *superconfig) {
   // test_leaves(superconfig, "./data/lexica/CSW21.csv");
   // test_leave_map(superconfig);
 
-  // // Now test the rest
-  // test_bag(superconfig);
-  // test_rack(superconfig);
-  // test_board(superconfig);
-  // test_cross_set(superconfig);
-  // test_game(superconfig);
-  // test_shadow(superconfig);
-  // test_movegen(superconfig);
-  // test_equity_adjustments(superconfig);
-  // test_gameplay(superconfig);
+  // Now test the rest
+  test_bag(superconfig);
+  test_rack(superconfig);
+  test_board(superconfig);
+  test_cross_set(superconfig);
+  test_game(superconfig);
+  test_shadow(superconfig);
+  test_movegen(superconfig);
+  test_equity_adjustments(superconfig);
+  test_gameplay(superconfig);
   test_stats();
   test_infer(superconfig);
   test_sim(superconfig);
