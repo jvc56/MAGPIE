@@ -16,11 +16,11 @@ ldflags.release := -Llib -pthread
 
 CFLAGS := ${cflags.${BUILD}}
 LFLAGS := ${lflags.${BUILD}} \
-	-s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8"] \
+	-s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8","UTF8ToString"] \
 	-s EXPORTED_FUNCTIONS=["_free","_main","_malloc","_precache_file_data","_process_ucgi_command","_score_play"] \
 	-sPTHREAD_POOL_SIZE="navigator.hardwareConcurrency + 3"\
 	-s ALLOW_BLOCKING_ON_MAIN_THREAD=0 \
-  -s MODULARIZE=1 --closure 1 -sEXPORT_NAME="MAGPIE"
+  -s MODULARIZE=1 --closure 1 -sEXPORT_NAME="MAGPIE" -s ENVIRONMENT='web,worker'
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 

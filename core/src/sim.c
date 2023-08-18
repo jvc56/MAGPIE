@@ -576,7 +576,7 @@ void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
         compare_simmed_plays);
 }
 
-void print_ucgi_stats(Simmer *simmer, int print_best_play) {
+void print_ucgi_stats(Simmer *simmer, int best_known) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
@@ -584,12 +584,11 @@ void print_ucgi_stats(Simmer *simmer, int print_best_play) {
   // function (print_ucgi_stats) will only execute on a single thread.
 
   // info currmove h4.HADJI sc 40 wp 3.5 wpe 0.731 eq 7.2 eqe 0.812 it 12345 ig
-  // 0 plies ply 1 scm 30 scd 3.7 bp 23 ply 2 ...
+  // 0 ply1-scm 30 ply1-scd 3.7 ply1-bp 23 ply2-scm ...
 
   // sc - score, wp(e) - win perc
   // (error), eq(e) - equity (error) scm - mean of score, scd - stdev of score,
   // bp - bingo perc ig - this play has been cut-off
-  // plies ply 1 ... ply 2 ... ply 3 ...
 
   for (int i = 0; i < simmer->num_simmed_plays; i++) {
     SimmedPlay *play = simmer->simmed_plays[i];
@@ -608,21 +607,21 @@ void print_ucgi_stats(Simmer *simmer, int print_best_play) {
             "ig %d ",
             move, play->move->score, wp_mean, wp_se, eq_mean, eq_se, niters,
             play->ignore);
-    fprintf(stdout, "plies ");
     for (int i = 0; i < simmer->max_plies; i++) {
-      fprintf(stdout, "ply %d ", i + 1);
-      fprintf(stdout, "scm %.3f scd %.3f bp %.3f ", play->score_stat[i]->mean,
-              get_stdev(play->score_stat[i]),
-              play->bingo_stat[i]->mean * 100.0);
+      fprintf(stdout, "ply%d-scm %.3f ply%d-scd %.3f ply%d-bp %.3f ", i + 1,
+              play->score_stat[i]->mean, i + 1, get_stdev(play->score_stat[i]),
+              i + 1, play->bingo_stat[i]->mean * 100.0);
     }
     fprintf(stdout, "\n");
   }
-  if (print_best_play) {
-    char move[30];
-    SimmedPlay *play = simmer->simmed_plays[0];
-    store_move_ucgi(play->move, simmer->game->gen->board, move,
-                    simmer->game->gen->letter_distribution);
+  char move[30];
+  SimmedPlay *play = simmer->simmed_plays[0];
+  store_move_ucgi(play->move, simmer->game->gen->board, move,
+                  simmer->game->gen->letter_distribution);
+  if (best_known) {
     fprintf(stdout, "bestmove %s\n", move);
+  } else {
+    fprintf(stdout, "bestsofar %s\n", move);
   }
 }
 

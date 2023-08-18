@@ -17,15 +17,17 @@ void test_wasm_api() {
   // score is 57
   // equity of ERS is 15.947
   // -> total equity is 72.947
-  assert(strcmp(retstr, "result scored valid false invalid_words "
-                        "WIFAY,ZGENUINE,DIPETAZ score 57 equity 72.947") == 0);
+  assert(strcmp(retstr,
+                "currmove 6g.DIPETAZ result scored valid false invalid_words "
+                "WIFAY,ZGENUINE,DIPETAZ sc 57 eq 72.947") == 0);
 
   free(retstr);
 
   // Score an exchange keeping AEINR (equity is 12.610)
   retstr = score_play(VS_ED, MOVE_TYPE_EXCHANGE, 0, 0, 0, (uint8_t[]){17, 23},
                       (uint8_t[]){1, 5, 9, 14, 18}, 2, 5);
-  assert(strcmp(retstr, "result scored valid true score 0 equity 12.610") == 0);
+  assert(strcmp(retstr,
+                "currmove ex.QW result scored valid true sc 0 eq 12.610") == 0);
 
   free(retstr);
 }

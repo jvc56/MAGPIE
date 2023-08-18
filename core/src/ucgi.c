@@ -77,6 +77,11 @@ void ucgi_print_moves(MoveList *ml, Game *game, int nmoves) {
     fprintf(stdout, "info currmove %s sc %d eq %.3f it 0\n", move,
             ml->moves[i]->score, ml->moves[i]->equity);
   }
+  char move[30];
+  store_move_ucgi(ml->moves[0], game->gen->board, move,
+                  game->gen->letter_distribution);
+
+  fprintf(stdout, "bestmove %s\n", move);
 }
 
 void *ucgi_manager_thread(void *ptr) {
