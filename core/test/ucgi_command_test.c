@@ -18,7 +18,6 @@
 void block_for_search(UCGICommandVars *ucgi_command_vars, int max_seconds) {
   // Poll for the end of the command
   int seconds_elapsed = 0;
-  printf("Waiting for %d seconds\n", max_seconds);
   while (1) {
     if (get_mode(ucgi_command_vars->thread_control) == MODE_STOPPED) {
       break;
@@ -26,9 +25,8 @@ void block_for_search(UCGICommandVars *ucgi_command_vars, int max_seconds) {
       sleep(1);
     }
     seconds_elapsed++;
-    printf("Waited for %d seconds\n", seconds_elapsed);
     if (seconds_elapsed >= max_seconds) {
-      printf("Test aborted after searching for %d seconds.\n", max_seconds);
+      perror("Test aborted after timing out.");
       abort();
     }
   }
@@ -402,7 +400,7 @@ void test_ucgi_command() {
            threads);
   result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
-  block_for_search(ucgi_command_vars, 20);
+  block_for_search(ucgi_command_vars, 2);
   assert(ucgi_command_vars->inference->status == INFERENCE_STATUS_SUCCESS);
   number_of_output_lines =
       1 + (inference->total_racks_evaluated / info) +
