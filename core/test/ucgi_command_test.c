@@ -49,7 +49,7 @@ void test_ucgi_command() {
 
   size_t len;
   size_t prev_len = 0;
-  char *output_buffer;
+  char *output_buffer = NULL;
   FILE *file_handler = open_memstream(&output_buffer, &len);
 
   UCGICommandVars *ucgi_command_vars = create_ucgi_command_vars(file_handler);
