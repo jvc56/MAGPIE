@@ -3,8 +3,8 @@
 
 #include "../src/letter_distribution.h"
 #include "../src/rack.h"
+#include "../src/util.h"
 
-#include "alphabet_print.h"
 #include "bag_print.h"
 #include "game_print.h"
 #include "move_print.h"

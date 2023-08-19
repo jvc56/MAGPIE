@@ -67,8 +67,7 @@ void write_letter_line(Game *game, InferenceRecord *record, Rack *rack,
 
 void write_inference_record(char *buffer, InferenceRecord *record, Game *game,
                             Rack *rack, Rack *bag_as_rack, Stat *letter_stat,
-                            int number_of_tiles_played_or_exchanged,
-                            int number_of_threads) {
+                            int number_of_tiles_played_or_exchanged) {
   uint64_t total_draws = get_weight(record->equity_values);
   uint64_t total_leaves = get_cardinality(record->equity_values);
   sprintf(buffer + strlen(buffer), "Total possible leave draws:   %ld\n",
@@ -77,13 +76,8 @@ void write_inference_record(char *buffer, InferenceRecord *record, Game *game,
           total_leaves);
   sprintf(buffer + strlen(buffer), "Average leave value:          %0.2f\n",
           get_mean(record->equity_values));
-  if (number_of_threads == 1) {
-    sprintf(buffer + strlen(buffer), "Stdev leave value:            %0.2f\n\n",
-            get_stdev(record->equity_values));
-  } else {
-    sprintf(buffer + strlen(buffer), "Stdev leave value:            %0.2f\n\n",
-            get_estimated_stdev_for_record(record));
-  }
+  sprintf(buffer + strlen(buffer), "Stdev leave value:            %0.2f\n\n",
+          get_stdev(record->equity_values));
 
   int max_duplicate_letter_draw = 0;
   for (int letter = 0; letter < (int)game->gen->letter_distribution->size;
@@ -126,8 +120,7 @@ void write_inference_record(char *buffer, InferenceRecord *record, Game *game,
   }
 }
 
-void print_inference(Inference *inference, Rack *actual_tiles_played,
-                     int number_of_threads) {
+void print_inference(Inference *inference, Rack *actual_tiles_played) {
   char inference_string[500000] = "";
 
   int is_exchange = inference->number_of_tiles_exchanged > 0;
@@ -165,8 +158,7 @@ void print_inference(Inference *inference, Rack *actual_tiles_played,
   char records_string[500000] = "";
   write_inference_record(records_string, inference->leave_record, game,
                          inference->leave, inference->bag_as_rack, letter_stat,
-                         number_of_tiles_played_or_exchanged,
-                         number_of_threads);
+                         number_of_tiles_played_or_exchanged);
   InferenceRecord *common_leaves_record = inference->leave_record;
   if (is_exchange) {
     common_leaves_record = inference->rack_record;
@@ -174,13 +166,12 @@ void print_inference(Inference *inference, Rack *actual_tiles_played,
     Rack *unknown_exchange_rack = create_rack(inference->leave->array_size);
     write_inference_record(records_string, inference->exchanged_record, game,
                            unknown_exchange_rack, inference->bag_as_rack,
-                           letter_stat, inference->number_of_tiles_exchanged,
-                           number_of_threads);
+                           letter_stat, inference->number_of_tiles_exchanged);
     destroy_rack(unknown_exchange_rack);
     sprintf(records_string + strlen(records_string), "\n\nRack\n\n");
     write_inference_record(records_string, inference->rack_record, game,
                            inference->leave, inference->bag_as_rack,
-                           letter_stat, 0, number_of_threads);
+                           letter_stat, 0);
     sprintf(records_string + strlen(records_string),
             "\nMost Common       \n\n#   Leave   Exch    Pct    Draws\n");
   } else {

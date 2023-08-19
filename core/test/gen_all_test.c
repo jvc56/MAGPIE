@@ -5,8 +5,8 @@
 #include "../src/letter_distribution.h"
 #include "../src/move.h"
 #include "../src/movegen.h"
+#include "../src/util.h"
 
-#include "alphabet_print.h"
 #include "gen_all_test.h"
 #include "test_util.h"
 

@@ -1,7 +1,7 @@
 #include "../src/letter_distribution.h"
 #include "../src/move.h"
+#include "../src/util.h"
 
-#include "alphabet_print.h"
 #include "move_print.h"
 #include "test_util.h"
 

@@ -11,8 +11,8 @@
 #include "../src/klv.h"
 #include "../src/move.h"
 #include "../src/rack.h"
+#include "../src/util.h"
 
-#include "alphabet_print.h"
 #include "game_print.h"
 #include "move_print.h"
 #include "test_constants.h"
@@ -115,16 +115,6 @@ void play_top_n_equity_move(Game *game, int n) {
   reset_move_list(game->gen->move_list);
 }
 
-void write_rack_to_end_of_buffer(char *dest,
-                                 LetterDistribution *letter_distribution,
-                                 Rack *rack) {
-  for (int i = 0; i < (rack->array_size); i++) {
-    for (int k = 0; k < rack->array[i]; k++) {
-      write_user_visible_letter_to_end_of_buffer(dest, letter_distribution, i);
-    }
-  }
-}
-
 void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
                          LetterDistribution *letter_distribution) {
 
@@ -133,4 +123,17 @@ void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
   for (int i = 0; i < num_mls; i++) {
     draw_letter_to_rack(bag, rack, mls[i]);
   }
+}
+
+int count_newlines(const char *str) {
+  int count = 0;
+
+  while (*str != '\0') {
+    if (*str == '\n') {
+      count++;
+    }
+    str++;
+  }
+
+  return count;
 }

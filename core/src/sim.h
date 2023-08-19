@@ -8,6 +8,7 @@
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
+#include "thread_control.h"
 #include "winpct.h"
 
 #define THREAD_CONTROL_IDLE 0
@@ -28,64 +29,52 @@ typedef struct SimmedPlay {
   Stat *leftover_stat;
   Stat *win_pct_stat;
   int ignore;
-  int multithreaded;
   int play_id;
   pthread_mutex_t mutex;
 } SimmedPlay;
 
-typedef struct threadcontrol ThreadControl;
-typedef struct simmer Simmer;
-
-struct simmer {
-  Game *game; // contains a generator already.
-  Game **game_copies;
-  Rack **rack_placeholders;
-
+typedef struct Simmer {
   int initial_spread;
   int max_plies;
   int initial_player;
-  atomic_int iteration_count;
-  atomic_int node_count;
-  int threads;
+  int iteration_count;
+  pthread_mutex_t iteration_count_mutex;
+  int max_iterations;
   int num_simmed_plays;
-  int ucgi_mode;
   struct timespec start_time;
 
-  ThreadControl **thread_control;
   int stopping_condition;
+  int threads;
 
   SimmedPlay **simmed_plays;
   pthread_mutex_t simmed_plays_mutex;
 
   Rack *known_opp_rack;
+  Rack *similar_plays_rack;
   WinPct *win_pcts;
 
   int *play_similarity_cache;
-};
 
-struct threadcontrol {
+  ThreadControl *thread_control;
+} Simmer;
+
+typedef struct SimmerWorker {
+  int thread_index;
+  uint64_t node_count;
+  Game *game;
+  Rack *rack_placeholder;
   Simmer *simmer;
-  int thread_number;
-  int last_iteration_ct;
-  volatile int status; // another thread can change this, so i think this needs
-                       // to be volatile.
-  pthread_t thread;
-};
+} SimmerWorker;
 
-Simmer *create_simmer(Config *config, Game *game);
-void blocking_simulate(Simmer *simmer);
+Simmer *create_simmer(Config *config);
 void destroy_simmer(Simmer *simmer);
 void join_threads(Simmer *simmer);
 int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);
-void prepare_simmer(Simmer *simmer, int plies, int threads, Move **plays,
-                    int num_plays, Rack *known_opp_rack);
-void print_ucgi_stats(Simmer *simmer, int print_best_play);
-void print_sim_stats(Simmer *simmer);
-void set_stopping_condition(Simmer *simmer, int sc);
-void set_ucgi_mode(Simmer *simmer, int mode);
-void simulate(Simmer *simmer);
-void sim_single_iteration(Simmer *simmer, int plies, int thread);
+void print_ucgi_stats(Simmer *simmer, Game *game, int print_best_play);
+void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
+              Rack *known_opp_rack, int plies, int threads, int num_plays,
+              int max_iterations, int stopping_condition,
+              int static_search_only);
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays);
-void stop_simming(Simmer *simmer);
 
 #endif
