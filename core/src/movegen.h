@@ -34,7 +34,6 @@ typedef struct Generator {
   Board *board;
   Bag *bag;
 
-  KWG *kwg;
   LeaveMap *leave_map;
   LetterDistribution *letter_distribution;
 

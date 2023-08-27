@@ -174,10 +174,10 @@ void print_error_case(Game *game, Inference *inference_1,
   print_inference(inference_2, tiles_played);
 }
 
-void play_game(ThreadControl *thread_control, Game *game,
-               Inference *inference_1, Inference *inference_2,
-               Rack *tiles_played, Rack *full_rack, time_t seed,
-               int test_inference) {
+void play_game_test(ThreadControl *thread_control, Game *game,
+                    Inference *inference_1, Inference *inference_2,
+                    Rack *tiles_played, Rack *full_rack, time_t seed,
+                    int test_inference) {
   draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, RACK_SIZE);
   draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, RACK_SIZE);
   while (!game->game_end_reason) {
@@ -296,7 +296,7 @@ void play_game(ThreadControl *thread_control, Game *game,
   }
 }
 
-void autoplay_without_using_game_pairs(Config *config) {
+void autoplay_test(Config *config) {
   Game *game = create_game(config);
   ThreadControl *thread_control = create_thread_control(NULL);
   // Use the player_to_infer_index as a intean
@@ -313,8 +313,8 @@ void autoplay_without_using_game_pairs(Config *config) {
   reseed_prng(game->gen->bag, seed);
   for (int i = 0; i < config->number_of_games_or_pairs; i++) {
     reset_game(game);
-    play_game(thread_control, game, inference_1, inference_2, tiles_played,
-              full_rack, seed, test_inference);
+    play_game_test(thread_control, game, inference_1, inference_2, tiles_played,
+                   full_rack, seed, test_inference);
   }
 
   destroy_game(game);
@@ -323,16 +323,4 @@ void autoplay_without_using_game_pairs(Config *config) {
   destroy_inference(inference_1);
   destroy_inference(inference_2);
   destroy_thread_control(thread_control);
-}
-
-void autoplay_using_game_pairs(Config *config) {
-  printf("unimplemented: %s\n", config->cgp);
-}
-
-void autoplay(Config *config) {
-  if (config->game_pairs) {
-    autoplay_using_game_pairs(config);
-  } else {
-    autoplay_without_using_game_pairs(config);
-  }
 }

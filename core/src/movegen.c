@@ -193,12 +193,12 @@ void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
     int next_node_index = 0;
     int accepts = 0;
     for (int i = node_index;; i++) {
-      if (kwg_tile(gen->kwg, i) == raw) {
-        next_node_index = kwg_arc_index(gen->kwg, i);
-        accepts = kwg_accepts(gen->kwg, i);
+      if (kwg_tile(player->strategy_params->kwg, i) == raw) {
+        next_node_index = kwg_arc_index(player->strategy_params->kwg, i);
+        accepts = kwg_accepts(player->strategy_params->kwg, i);
         break;
       }
-      if (kwg_is_end(gen->kwg, i)) {
+      if (kwg_is_end(player->strategy_params->kwg, i)) {
         break;
       }
     }
@@ -206,12 +206,12 @@ void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
           leftstrip, rightstrip, unique_play);
   } else if (!player->rack->empty) {
     for (int i = node_index;; i++) {
-      int ml = kwg_tile(gen->kwg, i);
+      int ml = kwg_tile(player->strategy_params->kwg, i);
       if (ml != 0 &&
           (player->rack->array[ml] != 0 || player->rack->array[0] != 0) &&
           allowed(cross_set, ml)) {
-        int next_node_index = kwg_arc_index(gen->kwg, i);
-        int accepts = kwg_accepts(gen->kwg, i);
+        int next_node_index = kwg_arc_index(player->strategy_params->kwg, i);
+        int accepts = kwg_accepts(player->strategy_params->kwg, i);
         if (player->rack->array[ml] > 0) {
           take_letter_and_update_current_index(gen->leave_map, player->rack,
                                                ml);
@@ -233,7 +233,7 @@ void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
                                               BLANK_MACHINE_LETTER);
         }
       }
-      if (kwg_is_end(gen->kwg, i)) {
+      if (kwg_is_end(player->strategy_params->kwg, i)) {
         break;
       }
     }
@@ -272,8 +272,9 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
                     leftstrip, rightstrip, unique_play);
     }
 
-    uint32_t separation_node_index = kwg_get_next_node_index(
-        gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
+    uint32_t separation_node_index =
+        kwg_get_next_node_index(player->strategy_params->kwg, new_node_index,
+                                SEPARATION_MACHINE_LETTER);
     if (separation_node_index != 0 && no_letter_directly_left &&
         gen->current_anchor_col < BOARD_DIM - 1) {
       recursive_gen(gen, gen->current_anchor_col + 1, player, opp_rack,
@@ -658,8 +659,9 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     set_transpose(gen->board, gen->anchor_list->anchors[i]->transpose_state);
     load_row_letter_cache(gen, gen->current_row_index);
     recursive_gen(gen, gen->current_anchor_col, player, opp_rack,
-                  kwg_get_root_node_index(gen->kwg), gen->current_anchor_col,
-                  gen->current_anchor_col, !gen->vertical);
+                  kwg_get_root_node_index(player->strategy_params->kwg),
+                  gen->current_anchor_col, gen->current_anchor_col,
+                  !gen->vertical);
   }
 
   reset_transpose(gen->board);
@@ -704,7 +706,6 @@ Generator *create_generator(Config *config) {
   generator->move_list = create_move_list(config->move_list_capacity);
   generator->anchor_list = create_anchor_list();
   generator->leave_map = create_leave_map(config->letter_distribution->size);
-  generator->kwg = config->kwg;
   generator->letter_distribution = config->letter_distribution;
   generator->tiles_played = 0;
   generator->vertical = 0;
@@ -729,7 +730,6 @@ Generator *copy_generator(Generator *gen, int move_list_size) {
   new_generator->anchor_list = create_anchor_list();
   new_generator->leave_map = create_leave_map(gen->letter_distribution->size);
   // KWG and letter distribution are read only and can share pointers
-  new_generator->kwg = gen->kwg;
   new_generator->letter_distribution = gen->letter_distribution;
   new_generator->tiles_played = 0;
   new_generator->vertical = 0;

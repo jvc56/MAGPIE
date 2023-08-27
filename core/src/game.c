@@ -251,6 +251,10 @@ void reset_game(Game *game) {
   game->backup_cursor = 0;
 }
 
+void set_player_on_turn(Game *game, int player_on_turn_index) {
+  game->player_on_turn_index = player_on_turn_index;
+}
+
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {

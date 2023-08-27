@@ -21,4 +21,4 @@ void many_moves(Config *config) {
   destroy_game(game);
 }
 
-void prof_tests(Config *config) { autoplay(config); }
+void prof_tests(Config *config) { autoplay_test(config); }
