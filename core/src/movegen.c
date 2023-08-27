@@ -18,6 +18,10 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
            Rack *opp_rack, uint32_t new_node_index, int accepts, int leftstrip,
            int rightstrip, int unique_play);
 
+int get_cross_set_index(Generator *gen, int player_index) {
+  return gen->kwgs_are_distinct && player_index;
+}
+
 double placement_adjustment(Generator *gen, Move *move) {
   int start = move->col_start;
   int end = start + move->tiles_played;
@@ -94,7 +98,8 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
 
   if (move_type == MOVE_TYPE_PLAY) {
     score = score_move(gen->board, gen->strip, leftstrip, rightstrip, start_row,
-                       start_col, tiles_played, !gen->vertical, player->index,
+                       start_col, tiles_played, !gen->vertical,
+                       get_cross_set_index(gen, player->index),
                        gen->letter_distribution);
     strip = gen->strip;
   } else if (move_type == MOVE_TYPE_EXCHANGE) {
@@ -186,8 +191,9 @@ void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
   } else {
     cs_direction = BOARD_VERTICAL_DIRECTION;
   }
-  uint64_t cross_set = get_cross_set(gen->board, gen->current_row_index, col,
-                                     cs_direction, player->index);
+  uint64_t cross_set =
+      get_cross_set(gen->board, gen->current_row_index, col, cs_direction,
+                    get_cross_set_index(gen, player->index));
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     int raw = get_unblanked_machine_letter(current_letter);
     int next_node_index = 0;
@@ -251,7 +257,8 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
       if (gen->vertical &&
           (get_cross_set(gen->board, gen->current_row_index, current_col,
                          BOARD_HORIZONTAL_DIRECTION,
-                         player->index) == TRIVIAL_CROSS_SET)) {
+                         get_cross_set_index(gen, player->index)) ==
+           TRIVIAL_CROSS_SET)) {
         unique_play = 1;
       }
     }
@@ -289,7 +296,8 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
       if (gen->vertical &&
           (get_cross_set(gen->board, gen->current_row_index, current_col,
                          BOARD_HORIZONTAL_DIRECTION,
-                         player->index) == TRIVIAL_CROSS_SET)) {
+                         get_cross_set_index(gen, player->index)) ==
+           TRIVIAL_CROSS_SET)) {
         unique_play = 1;
       }
     }
@@ -309,9 +317,9 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
   }
 }
 
-int shadow_allowed_in_cross_set(Generator *gen, int col, int player_index) {
+int shadow_allowed_in_cross_set(Generator *gen, int col, int cross_set_index) {
   uint64_t cross_set = get_cross_set(gen->board, gen->current_row_index, col,
-                                     !gen->vertical, player_index);
+                                     !gen->vertical, cross_set_index);
   // Allowed if
   // there is a letter on the rack in the cross set or,
   // there is anything in the cross set and the rack has a blank.
@@ -380,7 +388,7 @@ void shadow_record(Generator *gen, int left_col, int right_col,
 
 void shadow_play_right(Generator *gen, int main_played_through_score,
                        int perpendicular_additional_score, int word_multiplier,
-                       int is_unique, int player_index) {
+                       int is_unique, int cross_set_index) {
 
   if (gen->current_right_col == (BOARD_DIM - 1) ||
       gen->tiles_played >= gen->number_of_letters_on_rack) {
@@ -394,7 +402,7 @@ void shadow_play_right(Generator *gen, int main_played_through_score,
 
   uint64_t cross_set =
       get_cross_set(gen->board, gen->current_row_index, gen->current_right_col,
-                    !gen->vertical, player_index);
+                    !gen->vertical, cross_set_index);
   // Allowed if
   // there is a letter on the rack in the cross set or,
   // there is anything in the cross set and the rack has a blank.
@@ -404,9 +412,9 @@ void shadow_play_right(Generator *gen, int main_played_through_score,
 
     uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index,
                                             gen->current_right_col);
-    int cross_score =
-        get_cross_score(gen->board, gen->current_row_index,
-                        gen->current_right_col, !gen->vertical, player_index);
+    int cross_score = get_cross_score(gen->board, gen->current_row_index,
+                                      gen->current_right_col, !gen->vertical,
+                                      cross_set_index);
     int this_word_multiplier = bonus_square >> 4;
     perpendicular_additional_score += cross_score * this_word_multiplier;
     word_multiplier *= this_word_multiplier;
@@ -439,7 +447,7 @@ void shadow_play_right(Generator *gen, int main_played_through_score,
 
     shadow_play_right(gen, main_played_through_score,
                       perpendicular_additional_score, word_multiplier,
-                      is_unique, player_index);
+                      is_unique, cross_set_index);
   }
   gen->tiles_played--;
   gen->current_right_col = original_current_right_col;
@@ -447,7 +455,7 @@ void shadow_play_right(Generator *gen, int main_played_through_score,
 
 void shadow_play_left(Generator *gen, int main_played_through_score,
                       int perpendicular_additional_score, int word_multiplier,
-                      int is_unique, int player_index) {
+                      int is_unique, int cross_set_index) {
   // Go left until hitting an empty square or the edge of the board.
 
   if (gen->current_left_col == 0 ||
@@ -462,7 +470,7 @@ void shadow_play_left(Generator *gen, int main_played_through_score,
   gen->tiles_played++;
   uint64_t cross_set =
       get_cross_set(gen->board, gen->current_row_index, gen->current_left_col,
-                    !gen->vertical, player_index);
+                    !gen->vertical, cross_set_index);
   // Allowed if
   // there is a letter on the rack in the cross set or,
   // there is anything in the cross set and the rack has a blank.
@@ -474,7 +482,7 @@ void shadow_play_left(Generator *gen, int main_played_through_score,
                                             gen->current_left_col);
     int cross_score =
         get_cross_score(gen->board, gen->current_row_index,
-                        gen->current_left_col, !gen->vertical, player_index);
+                        gen->current_left_col, !gen->vertical, cross_set_index);
     int this_word_multiplier = bonus_square >> 4;
     perpendicular_additional_score += cross_score * this_word_multiplier;
     word_multiplier *= this_word_multiplier;
@@ -491,16 +499,16 @@ void shadow_play_left(Generator *gen, int main_played_through_score,
     }
     shadow_play_left(gen, main_played_through_score,
                      perpendicular_additional_score, word_multiplier, is_unique,
-                     player_index);
+                     cross_set_index);
   }
   shadow_play_right(gen, main_played_through_score,
                     perpendicular_additional_score, word_multiplier, is_unique,
-                    player_index);
+                    cross_set_index);
   gen->current_left_col = original_current_left_col;
   gen->tiles_played--;
 }
 
-void shadow_start(Generator *gen, int player_index) {
+void shadow_start(Generator *gen, int cross_set_index) {
   int main_played_through_score = 0;
   int perpendicular_additional_score = 0;
   int word_multiplier = 1;
@@ -508,14 +516,15 @@ void shadow_start(Generator *gen, int player_index) {
 
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
     // Only play a letter if a letter from the rack fits in the cross set
-    if (shadow_allowed_in_cross_set(gen, gen->current_left_col, player_index)) {
+    if (shadow_allowed_in_cross_set(gen, gen->current_left_col,
+                                    cross_set_index)) {
       // Play tile and update scoring parameters
 
       uint8_t bonus_square = get_bonus_square(
           gen->board, gen->current_row_index, gen->current_left_col);
-      int cross_score =
-          get_cross_score(gen->board, gen->current_row_index,
-                          gen->current_left_col, !gen->vertical, player_index);
+      int cross_score = get_cross_score(gen->board, gen->current_row_index,
+                                        gen->current_left_col, !gen->vertical,
+                                        cross_set_index);
       int this_word_multiplier = bonus_square >> 4;
       perpendicular_additional_score += (cross_score * this_word_multiplier);
       word_multiplier = this_word_multiplier;
@@ -553,10 +562,10 @@ void shadow_start(Generator *gen, int player_index) {
   }
   shadow_play_left(gen, main_played_through_score,
                    perpendicular_additional_score, word_multiplier,
-                   !gen->vertical, player_index);
+                   !gen->vertical, cross_set_index);
   shadow_play_right(gen, main_played_through_score,
                     perpendicular_additional_score, word_multiplier,
-                    !gen->vertical, player_index);
+                    !gen->vertical, cross_set_index);
 }
 
 void shadow_play_for_anchor(Generator *gen, int col, Player *player) {
@@ -588,7 +597,7 @@ void shadow_play_for_anchor(Generator *gen, int col, Player *player) {
     }
   }
 
-  shadow_start(gen, player->index);
+  shadow_start(gen, get_cross_set_index(gen, player->index));
   insert_anchor(gen->anchor_list, gen->current_row_index, col,
                 gen->last_anchor_col, gen->board->transposed, gen->vertical,
                 gen->highest_shadow_equity);
@@ -718,6 +727,8 @@ Generator *create_generator(Config *config) {
   generator->tiles_played = 0;
   generator->vertical = 0;
   generator->last_anchor_col = 0;
+  generator->kwgs_are_distinct = !config->kwg_is_shared;
+
   // On by default
   generator->apply_placement_adjustment = 1;
 
@@ -742,6 +753,7 @@ Generator *copy_generator(Generator *gen, int move_list_size) {
   new_generator->tiles_played = 0;
   new_generator->vertical = 0;
   new_generator->last_anchor_col = 0;
+  new_generator->kwgs_are_distinct = gen->kwgs_are_distinct;
 
   new_generator->apply_placement_adjustment = gen->apply_placement_adjustment;
 

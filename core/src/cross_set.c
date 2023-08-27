@@ -44,20 +44,20 @@ void traverse_backwards(Board *board, int row, int col, uint32_t node_index,
   board->traverse_backwards_return_values->path_is_valid = 1;
 }
 
-void gen_cross_set(Board *board, int row, int col, int dir, int player_index,
+void gen_cross_set(Board *board, int row, int col, int dir, int cross_set_index,
                    KWG *kwg, LetterDistribution *letter_distribution) {
   if (!pos_exists(row, col)) {
     return;
   }
 
   if (!is_empty(board, row, col)) {
-    set_cross_set(board, row, col, 0, dir, player_index);
-    set_cross_score(board, row, col, 0, dir, player_index);
+    set_cross_set(board, row, col, 0, dir, cross_set_index);
+    set_cross_score(board, row, col, 0, dir, cross_set_index);
     return;
   }
   if (left_and_right_empty(board, row, col)) {
-    set_cross_set(board, row, col, TRIVIAL_CROSS_SET, dir, player_index);
-    set_cross_score(board, row, col, 0, dir, player_index);
+    set_cross_set(board, row, col, TRIVIAL_CROSS_SET, dir, cross_set_index);
+    set_cross_score(board, row, col, 0, dir, cross_set_index);
     return;
   }
 
@@ -69,16 +69,16 @@ void gen_cross_set(Board *board, int row, int col, int dir, int player_index,
     int lpath_is_valid = board->traverse_backwards_return_values->path_is_valid;
     int score =
         traverse_backwards_for_score(board, row, col - 1, letter_distribution);
-    set_cross_score(board, row, col, score, dir, player_index);
+    set_cross_score(board, row, col, score, dir, cross_set_index);
 
     if (!lpath_is_valid) {
-      set_cross_set(board, row, col, 0, dir, player_index);
+      set_cross_set(board, row, col, 0, dir, cross_set_index);
       return;
     }
     uint32_t s_index =
         kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
     uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
-    set_cross_set(board, row, col, letter_set, dir, player_index);
+    set_cross_set(board, row, col, letter_set, dir, cross_set_index);
   } else {
     int left_col = word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
     traverse_backwards(board, row, right_col, kwg_get_root_node_index(kwg), 0,
@@ -89,17 +89,17 @@ void gen_cross_set(Board *board, int row, int col, int dir, int player_index,
                                                letter_distribution);
     int score_l =
         traverse_backwards_for_score(board, row, col - 1, letter_distribution);
-    set_cross_score(board, row, col, score_r + score_l, dir, player_index);
+    set_cross_score(board, row, col, score_r + score_l, dir, cross_set_index);
     if (!lpath_is_valid) {
-      set_cross_set(board, row, col, 0, dir, player_index);
+      set_cross_set(board, row, col, 0, dir, cross_set_index);
       return;
     }
     if (left_col == col) {
       uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
-      set_cross_set(board, row, col, letter_set, dir, player_index);
+      set_cross_set(board, row, col, letter_set, dir, cross_set_index);
     } else {
       uint64_t *cross_set =
-          get_cross_set_pointer(board, row, col, dir, player_index);
+          get_cross_set_pointer(board, row, col, dir, cross_set_index);
       *cross_set = 0;
       for (int i = lnode_index;; i++) {
         int t = kwg_tile(kwg, i);

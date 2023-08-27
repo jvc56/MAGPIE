@@ -79,7 +79,7 @@ void calc_for_across(int row_start, int col_start, int csd, Game *game,
     gen_cross_set(game->gen->board, row, col_start, csd, 0,
                   game->players[0]->strategy_params->kwg,
                   game->gen->letter_distribution);
-    if (game->kwgs_are_distinct) {
+    if (game->gen->kwgs_are_distinct) {
       gen_cross_set(game->gen->board, row, right_col + 1, csd, 1,
                     game->players[1]->strategy_params->kwg,
                     game->gen->letter_distribution);
@@ -99,7 +99,7 @@ void calc_for_self(int row_start, int col_start, int csd, Game *game,
     gen_cross_set(game->gen->board, row_start, col, csd, 0,
                   game->players[0]->strategy_params->kwg,
                   game->gen->letter_distribution);
-    if (game->kwgs_are_distinct) {
+    if (game->gen->kwgs_are_distinct) {
       gen_cross_set(game->gen->board, row_start, col, csd, 1,
                     game->players[1]->strategy_params->kwg,
                     game->gen->letter_distribution);

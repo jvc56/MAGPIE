@@ -413,19 +413,9 @@ void exchange_tests(SuperConfig *superconfig) {
                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
                   "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
-  print_game(game);
   // The top equity plays uses 7 tiles,
   // so exchanges should not be possible.
   play_top_n_equity_move(game, 0);
-
-  for (int i = 0; i < NUMBER_OF_CROSSES; i++) {
-    printf("%ld\n", game->gen->board->cross_sets[i]);
-  }
-  printf("\n\n");
-
-  for (int i = 0; i < NUMBER_OF_CROSSES; i++) {
-    printf("%ld\n", game->gen->board->cross_scores[i]);
-  }
 
   generate_moves_for_game(game);
   SortedMoveList *test_not_an_exchange_sorted_move_list =
@@ -442,9 +432,6 @@ void exchange_tests(SuperConfig *superconfig) {
   generate_moves_for_game(game);
   SortedMoveList *test_exchange_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
-
-  // print_move_list(game->gen->board, game->gen->letter_distribution,
-  //                 test_exchange_sorted_move_list, 40);
 
   assert(test_exchange_sorted_move_list->moves[0]->move_type ==
          MOVE_TYPE_EXCHANGE);

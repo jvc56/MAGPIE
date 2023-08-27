@@ -24,6 +24,7 @@ typedef struct Generator {
   int tiles_played;
   int number_of_plays;
   int apply_placement_adjustment;
+  int kwgs_are_distinct;
 
   uint8_t row_letter_cache[(BOARD_DIM)];
   uint8_t strip[(BOARD_DIM)];
@@ -59,5 +60,6 @@ void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
                    int unique_play);
 void reset_generator(Generator *gen);
 void load_row_letter_cache(Generator *gen, int row);
+int get_cross_set_index(Generator *gen, int player_index);
 
 #endif

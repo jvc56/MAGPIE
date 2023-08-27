@@ -29,7 +29,6 @@ typedef struct Game {
   int player_on_turn_index;
   int consecutive_scoreless_turns;
   int game_end_reason;
-  int kwgs_are_distinct;
   MinimalGameBackup *game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
   int backup_mode;

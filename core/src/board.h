@@ -29,18 +29,20 @@ typedef struct Board {
 } Board;
 
 void clear_all_crosses(Board *board);
-void clear_cross_set(Board *board, int row, int col, int dir, int player_index);
+void clear_cross_set(Board *board, int row, int col, int dir,
+                     int cross_set_index);
 Board *create_board();
 Board *copy_board(Board *board);
 void copy_board_into(Board *dst, Board *src);
 void destroy_board(Board *board);
 int get_anchor(Board *board, int row, int col, int vertical);
 uint8_t get_bonus_square(Board *board, int row, int col);
-int get_cross_score(Board *board, int row, int col, int dir, int player_index);
+int get_cross_score(Board *board, int row, int col, int dir,
+                    int cross_set_index);
 uint64_t get_cross_set(Board *board, int row, int col, int dir,
-                       int player_index);
+                       int cross_set_index);
 uint64_t *get_cross_set_pointer(Board *board, int row, int col, int dir,
-                                int player_index);
+                                int cross_set_index);
 uint8_t get_letter(Board *board, int row, int col);
 uint8_t get_letter_by_index(Board *board, int index);
 int is_empty(Board *board, int row, int col);
@@ -49,15 +51,15 @@ int pos_exists(int row, int col);
 void reset_board(Board *board);
 void set_all_crosses(Board *board);
 void set_cross_score(Board *board, int row, int col, int score, int dir,
-                     int player_index);
+                     int cross_set_index);
 void set_cross_set(Board *board, int row, int col, uint64_t letter, int dir,
-                   int player_index);
+                   int cross_set_index);
 void set_cross_set_letter(uint64_t *cross_set, uint8_t letter);
 void set_letter(Board *board, int row, int col, uint8_t letter);
 void set_letter_by_index(Board *board, int index, uint8_t letter);
 int score_move(Board *board, uint8_t word[], int word_start_index,
                int word_end_index, int row, int col, int tiles_played,
-               int cross_dir, int player_index,
+               int cross_dir, int cross_set_index,
                LetterDistribution *letter_distribution);
 void transpose(Board *board);
 void reset_transpose(Board *board);

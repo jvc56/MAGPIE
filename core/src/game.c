@@ -293,7 +293,6 @@ Game *create_game(Config *config) {
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
-  game->kwgs_are_distinct = !config->kwg_is_shared;
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->backups_preallocated = 0;
@@ -309,7 +308,6 @@ Game *copy_game(Game *game, int move_list_size) {
   new_game->player_on_turn_index = game->player_on_turn_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
-  new_game->kwgs_are_distinct = game->kwgs_are_distinct;
   // note: game backups must be explicitly handled by the caller if they want
   // game copies to have backups.
   new_game->backup_cursor = 0;

@@ -407,14 +407,14 @@ void load_config_from_lexargs(Config **config, const char *cgp,
       destroy_letter_distribution(c->letter_distribution);
       c->letter_distribution = create_letter_distribution(dist);
     }
-    if (strcmp(c->player_1_strategy_params->kwg_filename, leaves)) {
+    if (strcmp(c->player_1_strategy_params->kwg_filename, lexicon_file)) {
       log_debug("reloading kwg #1");
       destroy_kwg(c->player_1_strategy_params->kwg);
-      c->player_1_strategy_params->kwg = create_kwg(leaves);
+      c->player_1_strategy_params->kwg = create_kwg(lexicon_file);
       // assume the kwg applies to both players if we're using this function
       assert(c->kwg_is_shared);
       c->player_2_strategy_params->kwg = c->player_1_strategy_params->kwg;
-      strcpy(c->player_2_strategy_params->kwg_filename, leaves);
+      strcpy(c->player_2_strategy_params->kwg_filename, lexicon_file);
     }
     if (strcmp(c->player_1_strategy_params->klv_filename, leaves)) {
       log_debug("reloading klv #1");

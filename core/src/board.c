@@ -19,9 +19,9 @@ int get_tindex_dir(Board *board, int row, int col, int dir) {
 }
 
 int get_tindex_player_cross(Board *board, int row, int col, int dir,
-                            int player_index) {
+                            int cross_set_index) {
   return get_tindex_dir(board, row, col, dir) +
-         (BOARD_DIM * BOARD_DIM * 2) * player_index;
+         (BOARD_DIM * BOARD_DIM * 2) * cross_set_index;
 }
 
 // Letters
@@ -64,26 +64,27 @@ void reset_anchors(Board *board, int row, int col) {
 // Cross sets and scores
 
 uint64_t *get_cross_set_pointer(Board *board, int row, int col, int dir,
-                                int player_index) {
+                                int cross_set_index) {
   return &board->cross_sets[get_tindex_player_cross(board, row, col, dir,
-                                                    player_index)];
+                                                    cross_set_index)];
 }
 
 uint64_t get_cross_set(Board *board, int row, int col, int dir,
-                       int player_index) {
-  return board
-      ->cross_sets[get_tindex_player_cross(board, row, col, dir, player_index)];
+                       int cross_set_index) {
+  return board->cross_sets[get_tindex_player_cross(board, row, col, dir,
+                                                   cross_set_index)];
 }
 
 void set_cross_score(Board *board, int row, int col, int score, int dir,
-                     int player_index) {
+                     int cross_set_index) {
   board->cross_scores[get_tindex_player_cross(board, row, col, dir,
-                                              player_index)] = score;
+                                              cross_set_index)] = score;
 }
 
-int get_cross_score(Board *board, int row, int col, int dir, int player_index) {
+int get_cross_score(Board *board, int row, int col, int dir,
+                    int cross_set_index) {
   return board->cross_scores[get_tindex_player_cross(board, row, col, dir,
-                                                     player_index)];
+                                                     cross_set_index)];
 }
 
 uint8_t get_bonus_square(Board *board, int row, int col) {
@@ -95,15 +96,15 @@ void set_cross_set_letter(uint64_t *cross_set, uint8_t letter) {
 }
 
 void set_cross_set(Board *board, int row, int col, uint64_t letter, int dir,
-                   int player_index) {
+                   int cross_set_index) {
   board->cross_sets[get_tindex_player_cross(board, row, col, dir,
-                                            player_index)] = letter;
+                                            cross_set_index)] = letter;
 }
 
 void clear_cross_set(Board *board, int row, int col, int dir,
-                     int player_index) {
+                     int cross_set_index) {
   board->cross_sets[get_tindex_player_cross(board, row, col, dir,
-                                            player_index)] = 0;
+                                            cross_set_index)] = 0;
 }
 
 void set_all_crosses(Board *board) {
@@ -270,7 +271,7 @@ void set_bonus_squares(Board *board) {
 // the board needs to be transposed ahead of time.
 int score_move(Board *board, uint8_t word[], int word_start_index,
                int word_end_index, int row, int col, int tiles_played,
-               int cross_dir, int player_index,
+               int cross_dir, int cross_set_index,
                LetterDistribution *letter_distribution) {
   int ls;
   int main_word_score = 0;
@@ -294,7 +295,7 @@ int score_move(Board *board, uint8_t word[], int word_start_index,
       letter_multiplier = bonus_square & 0x0F;
       word_multiplier *= this_word_multiplier;
     }
-    int cs = get_cross_score(board, row, col + idx, cross_dir, player_index);
+    int cs = get_cross_score(board, row, col + idx, cross_dir, cross_set_index);
     if (is_blanked(ml)) {
       ls = 0;
     } else {

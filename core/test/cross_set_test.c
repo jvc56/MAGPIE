@@ -71,18 +71,19 @@ void set_col(Game *game, int col, const char *col_content) {
 void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
                         const char *letters, int expected_cross_score,
                         int run_gcs) {
+  int cross_set_index = get_cross_set_index(game->gen, player_index);
   if (run_gcs) {
-    gen_cross_set(game->gen->board, row, col, dir, player_index,
+    gen_cross_set(game->gen->board, row, col, dir, cross_set_index,
                   game->players[player_index]->strategy_params->kwg,
                   game->gen->letter_distribution);
   }
   uint64_t expected_cross_set =
       cross_set_from_string(letters, game->gen->letter_distribution);
   uint64_t actual_cross_set =
-      get_cross_set(game->gen->board, row, col, dir, player_index);
+      get_cross_set(game->gen->board, row, col, dir, cross_set_index);
   assert(expected_cross_set == actual_cross_set);
   int actual_cross_score =
-      get_cross_score(game->gen->board, row, col, dir, player_index);
+      get_cross_score(game->gen->board, row, col, dir, cross_set_index);
   assert(expected_cross_score == actual_cross_score);
 }
 
