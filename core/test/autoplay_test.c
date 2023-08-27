@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "../src/autoplay.h"
 #include "../src/config.h"
 #include "../src/game.h"
 #include "../src/gameplay.h"
@@ -13,6 +14,7 @@
 #include "game_print.h"
 #include "inference_print.h"
 #include "move_print.h"
+#include "superconfig.h"
 #include "test_util.h"
 
 int are_stats_equal(Stat *stat_1, Stat *stat_2) {
@@ -296,7 +298,7 @@ void play_game_test(ThreadControl *thread_control, Game *game,
   }
 }
 
-void autoplay_test(Config *config) {
+void autoplay_inference_test(Config *config) {
   Game *game = create_game(config);
   ThreadControl *thread_control = create_thread_control(NULL);
   // Use the player_to_infer_index as a intean
@@ -323,4 +325,42 @@ void autoplay_test(Config *config) {
   destroy_inference(inference_1);
   destroy_inference(inference_2);
   destroy_thread_control(thread_control);
+}
+
+void autoplay_game_pairs_test(SuperConfig *superconfig) {
+  Config *csw_config = get_csw_config(superconfig);
+  int game_pairs = 100;
+  int number_of_threads = 11;
+  int original_number_of_game_pairs = csw_config->number_of_games_or_pairs;
+  csw_config->number_of_games_or_pairs = game_pairs;
+  int original_number_of_threads = csw_config->number_of_threads;
+  csw_config->number_of_threads = number_of_threads;
+  int original_use_game_pairs = csw_config->use_game_pairs;
+  csw_config->use_game_pairs = 1;
+
+  ThreadControl *thread_control = create_thread_control_from_config(csw_config);
+  AutoplayResults *autoplay_results = create_autoplay_results();
+
+  autoplay(thread_control, autoplay_results, csw_config, 0);
+
+  assert(autoplay_results->total_games == game_pairs * 2);
+  assert(autoplay_results->p1_firsts == game_pairs);
+  assert(get_weight(autoplay_results->p1_score) ==
+         get_weight(autoplay_results->p2_score));
+  assert(get_cardinality(autoplay_results->p1_score) ==
+         get_cardinality(autoplay_results->p2_score));
+  assert(within_epsilon(get_mean(autoplay_results->p1_score),
+                        get_mean(autoplay_results->p2_score)));
+  assert(within_epsilon(get_stdev(autoplay_results->p1_score),
+                        get_stdev(autoplay_results->p2_score)));
+  csw_config->number_of_games_or_pairs = original_number_of_game_pairs;
+  csw_config->number_of_threads = original_number_of_threads;
+  csw_config->use_game_pairs = original_use_game_pairs;
+
+  destroy_thread_control(thread_control);
+  destroy_autoplay_results(autoplay_results);
+}
+
+void test_autoplay(SuperConfig *superconfig) {
+  autoplay_game_pairs_test(superconfig);
 }

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 #include "autoplay_test.h"
@@ -21,4 +22,7 @@ void many_moves(Config *config) {
   destroy_game(game);
 }
 
-void prof_tests(Config *config) { autoplay_test(config); }
+void prof_tests(Config *config) {
+  printf("unimplemented: %p\n", config);
+  abort();
+}

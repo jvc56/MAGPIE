@@ -8,6 +8,7 @@
 #include "../src/thread_control.h"
 
 #include "alphabet_test.h"
+#include "autoplay_test.h"
 #include "bag_test.h"
 #include "board_test.h"
 #include "config_test.h"
@@ -58,6 +59,7 @@ void unit_tests(SuperConfig *superconfig) {
   test_infer(superconfig);
   test_sim(superconfig);
   test_ucgi_command();
+  test_autoplay(superconfig);
 }
 
 int main(int argc, char *argv[]) {
@@ -77,8 +79,11 @@ int main(int argc, char *argv[]) {
   } else if (!strcmp(argv[1], CMD_AUTOPLAY)) {
     Config *config = create_config_from_args(argc, argv);
     ThreadControl *thread_control = create_thread_control_from_config(config);
-    autoplay(config, thread_control);
+    AutoplayResults *autoplay_results = create_autoplay_results();
+    autoplay(thread_control, autoplay_results, config, time(NULL));
     destroy_config(config);
+    destroy_autoplay_results(autoplay_results);
+    destroy_thread_control(thread_control);
   } else if (!strcmp(argv[1], CMD_PROF)) {
     Config *config = create_config_from_args(argc, argv);
     prof_tests(config);
@@ -121,8 +126,15 @@ int main(int argc, char *argv[]) {
         "", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
         "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
 
+    Config *distinct_lexica_config = create_config(
+        "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
+        "./data/lexica/CSW21.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL,
+        "./data/lexica/NWL20.kwg", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0,
+        1, "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+
     SuperConfig *superconfig =
-        create_superconfig(csw_config, nwl_config, osps_config, disc_config);
+        create_superconfig(csw_config, nwl_config, osps_config, disc_config,
+                           distinct_lexica_config);
     unit_tests(superconfig);
     // This also frees the nested configs
     destroy_superconfig(superconfig);

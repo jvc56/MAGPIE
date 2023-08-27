@@ -6,7 +6,6 @@
 #include "thread_control.h"
 
 typedef struct AutoplayResults {
-  pthread_mutex_t update_results_mutex;
   int total_games;
   int p1_wins;
   int p1_losses;
@@ -16,6 +15,9 @@ typedef struct AutoplayResults {
   Stat *p2_score;
 } AutoplayResults;
 
-void autoplay(Config *config, ThreadControl *thread_control);
+void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
+              Config *config, uint64_t seed);
+AutoplayResults *create_autoplay_results();
+void destroy_autoplay_results(AutoplayResults *autoplay_results);
 
 #endif

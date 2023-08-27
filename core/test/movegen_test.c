@@ -528,9 +528,90 @@ void top_equity_play_recorder_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
+void distinct_lexica_test(SuperConfig *superconfig) {
+  Config *config = get_distinct_lexica_config(superconfig);
+
+  Game *game = create_game(config);
+  int player_1_saved_recorder_type =
+      game->players[0]->strategy_params->play_recorder_type;
+  int player_2_saved_recorder_type =
+      game->players[1]->strategy_params->play_recorder_type;
+  game->players[0]->strategy_params->play_recorder_type =
+      PLAY_RECORDER_TYPE_TOP_EQUITY;
+  game->players[1]->strategy_params->play_recorder_type =
+      PLAY_RECORDER_TYPE_TOP_EQUITY;
+
+  char test_string[100];
+  reset_string(test_string);
+
+  // Play SPORK, better than best NWL move of PORKS
+  set_rack_to_string(game->players[0]->rack, "KOPRRSS",
+                     game->gen->letter_distribution);
+  generate_moves_for_game(game);
+  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
+                                           game->gen->move_list->moves[0],
+                                           game->gen->letter_distribution);
+  assert(!strcmp(test_string, "8H SPORK 32"));
+  reset_string(test_string);
+
+  play_move(game, game->gen->move_list->moves[0]);
+  reset_move_list(game->gen->move_list);
+
+  // Play SCHIZIER, better than best CSW word of SCHERZI
+  set_rack_to_string(game->players[1]->rack, "CEHIIRZ",
+                     game->gen->letter_distribution);
+  generate_moves_for_game(game);
+
+  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
+                                           game->gen->move_list->moves[0],
+                                           game->gen->letter_distribution);
+  assert(!strcmp(test_string, "H8 (S)CHIZIER 146"));
+  reset_string(test_string);
+
+  play_move(game, game->gen->move_list->moves[0]);
+  reset_move_list(game->gen->move_list);
+
+  // Play WIGGLY, not GOLLYWOG because that's NWL only
+  set_rack_to_string(game->players[0]->rack, "GGLLOWY",
+                     game->gen->letter_distribution);
+  generate_moves_for_game(game);
+
+  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
+                                           game->gen->move_list->moves[0],
+                                           game->gen->letter_distribution);
+  assert(!strcmp(test_string, "11G W(I)GGLY 28"));
+  reset_string(test_string);
+
+  play_move(game, game->gen->move_list->moves[0]);
+  reset_move_list(game->gen->move_list);
+
+  // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
+  set_rack_to_string(game->players[1]->rack, "AEEQRSU",
+                     game->gen->letter_distribution);
+  generate_moves_for_game(game);
+
+  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
+                                           game->gen->move_list->moves[0],
+                                           game->gen->letter_distribution);
+  assert(!strcmp(test_string, "13C QUEAS(I)ER 88"));
+  reset_string(test_string);
+
+  play_move(game, game->gen->move_list->moves[0]);
+  reset_move_list(game->gen->move_list);
+
+  game->players[0]->strategy_params->play_recorder_type =
+      player_1_saved_recorder_type;
+
+  game->players[1]->strategy_params->play_recorder_type =
+      player_2_saved_recorder_type;
+
+  destroy_game(game);
+}
+
 void test_movegen(SuperConfig *superconfig) {
   macondo_tests(superconfig);
   exchange_tests(superconfig);
   equity_test(superconfig);
   top_equity_play_recorder_test(superconfig);
+  distinct_lexica_test(superconfig);
 }

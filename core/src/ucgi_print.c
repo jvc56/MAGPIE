@@ -257,7 +257,7 @@ void print_ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
 void print_ucgi_autoplay_results(AutoplayResults *autoplay_results,
                                  ThreadControl *thread_control) {
   char results_string[300];
-  sprintf(results_string, "autoplay %d %d %d %d %d %f %f %f %f",
+  sprintf(results_string, "autoplay %d %d %d %d %d %f %f %f %f\n",
           autoplay_results->total_games, autoplay_results->p1_wins,
           autoplay_results->p1_losses, autoplay_results->p1_ties,
           autoplay_results->p1_firsts, get_mean(autoplay_results->p1_score),

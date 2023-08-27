@@ -20,13 +20,19 @@ Config *get_disc_config(SuperConfig *superconfig) {
   return superconfig->disc_config;
 }
 
+Config *get_distinct_lexica_config(SuperConfig *superconfig) {
+  return superconfig->distinct_lexica_config;
+}
+
 SuperConfig *create_superconfig(Config *csw_config, Config *nwl_config,
-                                Config *osps_config, Config *disc_config) {
+                                Config *osps_config, Config *disc_config,
+                                Config *distinct_lexica_config) {
   SuperConfig *superconfig = malloc(sizeof(SuperConfig));
   superconfig->csw_config = csw_config;
   superconfig->nwl_config = nwl_config;
   superconfig->osps_config = osps_config;
   superconfig->disc_config = disc_config;
+  superconfig->distinct_lexica_config = distinct_lexica_config;
   return superconfig;
 }
 
@@ -35,5 +41,6 @@ void destroy_superconfig(SuperConfig *superconfig) {
   destroy_config(superconfig->nwl_config);
   destroy_config(superconfig->osps_config);
   destroy_config(superconfig->disc_config);
+  destroy_config(superconfig->distinct_lexica_config);
   free(superconfig);
 }

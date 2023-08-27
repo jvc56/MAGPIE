@@ -12,8 +12,6 @@
 #include "log.h"
 #include "util.h"
 
-static int game_pair_flag;
-
 Config *create_config(const char *letter_distribution_filename, const char *cgp,
                       const char *kwg_filename_1, const char *klv_filename_1,
                       int move_sorting_1, int play_recorder_type_1,
@@ -147,34 +145,24 @@ Config *create_config_from_args(int argc, char *argv[]) {
   int number_of_threads = 1;
 
   char winpct_filename[(MAX_ARG_LENGTH)] = "";
+  int use_game_pairs = 1;
 
   int c;
   long n;
 
   while (1) {
     static struct option long_options[] = {
-        {"c", required_argument, 0, 1001},
-        {"d", required_argument, 0, 1002},
-        {"g1", required_argument, 0, 1003},
-        {"l1", required_argument, 0, 1004},
-        {"r1", required_argument, 0, 1005},
-        {"s1", required_argument, 0, 1006},
-        {"g2", required_argument, 0, 1007},
-        {"l2", required_argument, 0, 1008},
-        {"r2", required_argument, 0, 1009},
-        {"s2", required_argument, 0, 1010},
-        {"n", required_argument, 0, 1011},
-        {"t", required_argument, 0, 1012},
-        {"i", required_argument, 0, 1013},
-        {"a", required_argument, 0, 1014},
-        {"e", required_argument, 0, 1015},
-        {"q", required_argument, 0, 1016},
-        {"h", required_argument, 0, 1017},
-        {"w", required_argument, 0, 1018},
-        {"f", required_argument, 0, 1019},
-        {"k", required_argument, 0, 1020},
-        {"p", no_argument, &game_pair_flag, 1},
-        {0, 0, 0, 0}};
+        {"c", required_argument, 0, 1001},  {"d", required_argument, 0, 1002},
+        {"g1", required_argument, 0, 1003}, {"l1", required_argument, 0, 1004},
+        {"r1", required_argument, 0, 1005}, {"s1", required_argument, 0, 1006},
+        {"g2", required_argument, 0, 1007}, {"l2", required_argument, 0, 1008},
+        {"r2", required_argument, 0, 1009}, {"s2", required_argument, 0, 1010},
+        {"n", required_argument, 0, 1011},  {"t", required_argument, 0, 1012},
+        {"i", required_argument, 0, 1013},  {"a", required_argument, 0, 1014},
+        {"e", required_argument, 0, 1015},  {"q", required_argument, 0, 1016},
+        {"h", required_argument, 0, 1017},  {"w", required_argument, 0, 1018},
+        {"f", required_argument, 0, 1019},  {"k", required_argument, 0, 1020},
+        {"p", required_argument, 0, 1021},  {0, 0, 0, 0}};
     int option_index = 0;
     c = getopt_long_only(argc, argv, "", long_options, &option_index);
 
@@ -234,7 +222,7 @@ Config *create_config_from_args(int argc, char *argv[]) {
 
     case 1007:
       check_arg_length(optarg);
-      strcpy(kwg_filename_1, optarg);
+      strcpy(kwg_filename_2, optarg);
       break;
 
     case 1008:
@@ -327,6 +315,12 @@ Config *create_config_from_args(int argc, char *argv[]) {
       checkstop = (int)n;
       break;
 
+    case 1021:
+      check_arg_length(optarg);
+      n = strtol(optarg, NULL, 10);
+      use_game_pairs = (int)n;
+      break;
+
     case '?':
       /* getopt_long already printed an error message. */
       break;
@@ -339,7 +333,7 @@ Config *create_config_from_args(int argc, char *argv[]) {
   return create_config(
       letter_distribution_filename, cgp, kwg_filename_1, klv_filename_1,
       move_sorting_1, play_recorder_type_1, kwg_filename_2, klv_filename_2,
-      move_sorting_2, play_recorder_type_2, game_pair_flag,
+      move_sorting_2, play_recorder_type_2, use_game_pairs,
       number_of_games_or_pairs, print_info, checkstop, actual_tiles_played,
       player_to_infer_index, actual_score, number_of_tiles_exchanged,
       equity_margin, number_of_threads, winpct_filename, MOVE_LIST_CAPACITY);
