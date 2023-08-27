@@ -14,6 +14,7 @@
 #include "ucgi_print.h"
 
 #include "../test/game_print.h"
+#include "../test/move_print.h"
 
 typedef struct AutoplayWorker {
   Config *config;
@@ -87,7 +88,7 @@ void add_autoplay_results(AutoplayResults *autoplay_results_1,
 }
 
 void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
-               int starting_player_index) {
+               int starting_player_index, char **moves_buffer) {
   reseed_prng(game->gen->bag, seed);
   reset_game(game);
   set_player_on_turn(game, starting_player_index);
@@ -100,6 +101,19 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
     generate_moves(game->gen, game->players[game->player_on_turn_index],
                    game->players[1 - game->player_on_turn_index]->rack,
                    game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+
+    char move_string[30] = "";
+    write_user_visible_move_to_end_of_buffer(move_string, game->gen->board,
+                                             game->gen->move_list->moves[0],
+                                             game->gen->letter_distribution);
+
+    char rack_string[10] = "";
+    rack_to_string(game->players[game->player_on_turn_index]->rack, rack_string,
+                   game->gen->letter_distribution);
+    *moves_buffer +=
+        sprintf(*moves_buffer, "Player%d> %s %s\n",
+                game->player_on_turn_index + 1, move_string, rack_string);
+
     play_move(game, game->gen->move_list->moves[0]);
     reset_move_list(game->gen->move_list);
   }
@@ -109,26 +123,53 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
 
-  Game *game = create_game(autoplay_worker->config);
+  Game *game_1 = create_game(autoplay_worker->config);
+  Game *game_2 = create_game(autoplay_worker->config);
   uint64_t seed;
 
   int starting_player_for_thread = autoplay_worker->worker_index % 2;
 
+  int number_of_printed_games = 0;
   for (int i = 0; i < autoplay_worker->max_games_for_worker; i++) {
     if (is_halted(autoplay_worker->thread_control)) {
       break;
     }
+    char *game_1_moves_string = (char *)malloc(sizeof(char) * 3000);
+    char *starting_game_1_moves_string = game_1_moves_string;
+    char *game_2_moves_string = (char *)malloc(sizeof(char) * 3000);
+    char *starting_game_2_moves_string = game_2_moves_string;
     seed = rand_uint64();
     int starting_player_index = (i + starting_player_for_thread) % 2;
-    play_game(game, seed, autoplay_worker->autoplay_results,
-              starting_player_index);
+    game_1_moves_string[0] = '\0';
+    play_game(game_1, seed, autoplay_worker->autoplay_results,
+              starting_player_index, &game_1_moves_string);
+    int player_1_score = game_1->players[0]->score;
+    int player_2_score = game_1->players[1]->score;
     if (autoplay_worker->config->use_game_pairs) {
-      play_game(game, seed, autoplay_worker->autoplay_results,
-                1 - starting_player_index);
+      game_2_moves_string[0] = '\0';
+      play_game(game_2, seed, autoplay_worker->autoplay_results,
+                1 - starting_player_index, &game_2_moves_string);
+      if (number_of_printed_games < 1 &&
+          (player_1_score != game_2->players[1]->score ||
+           player_2_score != game_2->players[0]->score)) {
+        pthread_mutex_lock(
+            &autoplay_worker->thread_control->print_output_mutex);
+        printf("Game 1 Moves:\n%s\n", starting_game_1_moves_string);
+        print_game(game_1);
+        printf("\n");
+        printf("Game 2 Moves:\n%s\n", starting_game_2_moves_string);
+        print_game(game_2);
+        pthread_mutex_unlock(
+            &autoplay_worker->thread_control->print_output_mutex);
+        number_of_printed_games++;
+      }
     }
+    free(starting_game_1_moves_string);
+    free(starting_game_2_moves_string);
   }
 
-  destroy_game(game);
+  destroy_game(game_1);
+  destroy_game(game_2);
   return NULL;
 }
 
