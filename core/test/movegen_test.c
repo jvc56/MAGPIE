@@ -46,14 +46,14 @@ void boards_equal(Board *b1, Board *b2) {
     for (int j = 0; j < BOARD_DIM; j++) {
       assert(get_letter(b1, i, j) == get_letter(b2, i, j));
       assert(get_bonus_square(b1, i, j) == get_bonus_square(b2, i, j));
-      assert(get_cross_score(b1, i, j, BOARD_HORIZONTAL_DIRECTION) ==
-             get_cross_score(b2, i, j, BOARD_HORIZONTAL_DIRECTION));
-      assert(get_cross_score(b1, i, j, BOARD_VERTICAL_DIRECTION) ==
-             get_cross_score(b2, i, j, BOARD_VERTICAL_DIRECTION));
-      assert(get_cross_set(b1, i, j, BOARD_HORIZONTAL_DIRECTION) ==
-             get_cross_set(b2, i, j, BOARD_HORIZONTAL_DIRECTION));
-      assert(get_cross_set(b1, i, j, BOARD_VERTICAL_DIRECTION) ==
-             get_cross_set(b2, i, j, BOARD_VERTICAL_DIRECTION));
+      assert(get_cross_score(b1, i, j, BOARD_HORIZONTAL_DIRECTION, 0) ==
+             get_cross_score(b2, i, j, BOARD_HORIZONTAL_DIRECTION, 0));
+      assert(get_cross_score(b1, i, j, BOARD_VERTICAL_DIRECTION, 0) ==
+             get_cross_score(b2, i, j, BOARD_VERTICAL_DIRECTION, 0));
+      assert(get_cross_set(b1, i, j, BOARD_HORIZONTAL_DIRECTION, 0) ==
+             get_cross_set(b2, i, j, BOARD_HORIZONTAL_DIRECTION, 0));
+      assert(get_cross_set(b1, i, j, BOARD_VERTICAL_DIRECTION, 0) ==
+             get_cross_set(b2, i, j, BOARD_VERTICAL_DIRECTION, 0));
       assert(get_anchor(b1, i, j, 0) == get_anchor(b2, i, j, 0));
       assert(get_anchor(b1, i, j, 1) == get_anchor(b2, i, j, 1));
     }
@@ -64,7 +64,8 @@ void execute_recursive_gen(Generator *gen, int col, Player *player,
                            int leftstrip, int rightstrip, int unique_play) {
   init_leave_map(gen->leave_map, player->rack);
   load_row_letter_cache(gen, gen->current_row_index);
-  recursive_gen(gen, col, player, NULL, kwg_get_root_node_index(gen->kwg),
+  recursive_gen(gen, col, player, NULL,
+                kwg_get_root_node_index(player->strategy_params->kwg),
                 leftstrip, rightstrip, unique_play);
 }
 
@@ -89,6 +90,7 @@ void macondo_tests(SuperConfig *superconfig) {
   Config *config = get_nwl_config(superconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
+  KWG *kwg = player->strategy_params->kwg;
   char test_string[100];
   reset_string(test_string);
 
@@ -127,10 +129,10 @@ void macondo_tests(SuperConfig *superconfig) {
   uint8_t ml = human_readable_letter_to_machine_letter(
       game->gen->letter_distribution, "I");
   clear_cross_set(game->gen->board, game->gen->current_row_index, 2,
-                  BOARD_VERTICAL_DIRECTION);
+                  BOARD_VERTICAL_DIRECTION, 0);
   set_cross_set_letter(get_cross_set_pointer(game->gen->board,
                                              game->gen->current_row_index, 2,
-                                             BOARD_VERTICAL_DIRECTION),
+                                             BOARD_VERTICAL_DIRECTION, 0),
                        ml);
   execute_recursive_gen(game->gen, game->gen->current_anchor_col, player,
                         game->gen->current_anchor_col,
@@ -376,8 +378,8 @@ void macondo_tests(SuperConfig *superconfig) {
 
   // TestRowEquivalent
   load_cgp(game, TEST_DUPE);
-  generate_all_cross_sets(game->gen->board, game->gen->kwg,
-                          game->gen->letter_distribution);
+  generate_all_cross_sets(game->gen->board, kwg, kwg,
+                          game->gen->letter_distribution, 0);
 
   Game *game_two = create_game(config);
 
@@ -385,8 +387,8 @@ void macondo_tests(SuperConfig *superconfig) {
   set_row(game_two, 8, "IS");
   set_row(game_two, 9, "T");
   update_all_anchors(game_two->gen->board);
-  generate_all_cross_sets(game_two->gen->board, game_two->gen->kwg,
-                          game_two->gen->letter_distribution);
+  generate_all_cross_sets(game_two->gen->board, kwg, kwg,
+                          game_two->gen->letter_distribution, 0);
 
   boards_equal(game->gen->board, game_two->gen->board);
 
@@ -414,6 +416,7 @@ void exchange_tests(SuperConfig *superconfig) {
   // The top equity plays uses 7 tiles,
   // so exchanges should not be possible.
   play_top_n_equity_move(game, 0);
+
   generate_moves_for_game(game);
   SortedMoveList *test_not_an_exchange_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
@@ -429,6 +432,7 @@ void exchange_tests(SuperConfig *superconfig) {
   generate_moves_for_game(game);
   SortedMoveList *test_exchange_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
+
   assert(test_exchange_sorted_move_list->moves[0]->move_type ==
          MOVE_TYPE_EXCHANGE);
   destroy_sorted_move_list(test_exchange_sorted_move_list);
@@ -524,9 +528,90 @@ void top_equity_play_recorder_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
+void distinct_lexica_test(SuperConfig *superconfig) {
+  Config *config = get_distinct_lexica_config(superconfig);
+
+  Game *game = create_game(config);
+  int player_1_saved_recorder_type =
+      game->players[0]->strategy_params->play_recorder_type;
+  int player_2_saved_recorder_type =
+      game->players[1]->strategy_params->play_recorder_type;
+  game->players[0]->strategy_params->play_recorder_type =
+      PLAY_RECORDER_TYPE_TOP_EQUITY;
+  game->players[1]->strategy_params->play_recorder_type =
+      PLAY_RECORDER_TYPE_TOP_EQUITY;
+
+  char test_string[100];
+  reset_string(test_string);
+
+  // Play SPORK, better than best NWL move of PORKS
+  set_rack_to_string(game->players[0]->rack, "KOPRRSS",
+                     game->gen->letter_distribution);
+  generate_moves_for_game(game);
+  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
+                                           game->gen->move_list->moves[0],
+                                           game->gen->letter_distribution);
+  assert(!strcmp(test_string, "8H SPORK 32"));
+  reset_string(test_string);
+
+  play_move(game, game->gen->move_list->moves[0]);
+  reset_move_list(game->gen->move_list);
+
+  // Play SCHIZIER, better than best CSW word of SCHERZI
+  set_rack_to_string(game->players[1]->rack, "CEHIIRZ",
+                     game->gen->letter_distribution);
+  generate_moves_for_game(game);
+
+  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
+                                           game->gen->move_list->moves[0],
+                                           game->gen->letter_distribution);
+  assert(!strcmp(test_string, "H8 (S)CHIZIER 146"));
+  reset_string(test_string);
+
+  play_move(game, game->gen->move_list->moves[0]);
+  reset_move_list(game->gen->move_list);
+
+  // Play WIGGLY, not GOLLYWOG because that's NWL only
+  set_rack_to_string(game->players[0]->rack, "GGLLOWY",
+                     game->gen->letter_distribution);
+  generate_moves_for_game(game);
+
+  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
+                                           game->gen->move_list->moves[0],
+                                           game->gen->letter_distribution);
+  assert(!strcmp(test_string, "11G W(I)GGLY 28"));
+  reset_string(test_string);
+
+  play_move(game, game->gen->move_list->moves[0]);
+  reset_move_list(game->gen->move_list);
+
+  // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
+  set_rack_to_string(game->players[1]->rack, "AEEQRSU",
+                     game->gen->letter_distribution);
+  generate_moves_for_game(game);
+
+  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
+                                           game->gen->move_list->moves[0],
+                                           game->gen->letter_distribution);
+  assert(!strcmp(test_string, "13C QUEAS(I)ER 88"));
+  reset_string(test_string);
+
+  play_move(game, game->gen->move_list->moves[0]);
+  reset_move_list(game->gen->move_list);
+
+  game->players[0]->strategy_params->play_recorder_type =
+      player_1_saved_recorder_type;
+
+  game->players[1]->strategy_params->play_recorder_type =
+      player_2_saved_recorder_type;
+
+  destroy_game(game);
+}
+
 void test_movegen(SuperConfig *superconfig) {
   macondo_tests(superconfig);
   exchange_tests(superconfig);
   equity_test(superconfig);
   top_equity_play_recorder_test(superconfig);
+  distinct_lexica_test(superconfig);
 }

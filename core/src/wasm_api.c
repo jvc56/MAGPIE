@@ -37,9 +37,10 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   double leave_value = 0.0;
   FormedWords *fw = NULL;
   if (move_type == MOVE_TYPE_PLAY) {
+    // Assume that that kwg is shared
     points =
         score_move(game->gen->board, tiles, 0, ntiles - 1, row, col,
-                   tiles_played, !vertical, game->gen->letter_distribution);
+                   tiles_played, !vertical, 0, game->gen->letter_distribution);
 
     if (vertical) {
       // transpose back.
@@ -51,7 +52,8 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
 
     fw = words_played(game->gen->board, tiles, 0, ntiles - 1, row, col,
                       vertical);
-    populate_word_validities(fw, game->gen->kwg);
+    // Assume that that kwg is shared
+    populate_word_validities(fw, game->players[0]->strategy_params->kwg);
   }
 
   char *retstr = malloc(sizeof(char) * 256);

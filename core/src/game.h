@@ -46,5 +46,6 @@ void backup_game(Game *game);
 void unplay_last_move(Game *game);
 void lexicon_ld_from_cgp(char *cgp, char *lexicon, char *ldname);
 int tiles_unseen(Game *game);
+void set_player_on_turn(Game *game, int player_on_turn_index);
 
 #endif

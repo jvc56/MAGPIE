@@ -93,6 +93,7 @@ void print_move_list(Board *board, LetterDistribution *letter_distribution,
     write_user_visible_move_to_end_of_buffer(move_string, board, sml->moves[i],
                                              letter_distribution);
     printf("%s\n", move_string);
+    printf("equity: %f\n", sml->moves[i]->equity);
   }
 }
 

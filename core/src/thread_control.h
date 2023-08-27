@@ -3,6 +3,8 @@
 
 #include <pthread.h>
 
+#include "config.h"
+
 #define MODE_STOPPED 0
 #define MODE_SEARCHING 1
 
@@ -23,6 +25,7 @@ typedef struct ThreadControl {
 } ThreadControl;
 
 ThreadControl *create_thread_control(FILE *outfile);
+ThreadControl *create_thread_control_from_config(Config *config);
 void destroy_thread_control(ThreadControl *thread_control);
 int halt(ThreadControl *thread_control, int halt_status);
 int unhalt(ThreadControl *thread_control);

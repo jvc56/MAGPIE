@@ -1,8 +1,8 @@
-#ifndef AUTOPLAY_H
-#define AUTOPLAY_H
+#ifndef AUTOPLAY_TEST_H
+#define AUTOPLAY_TEST_H
 
-#include "../src/config.h"
+#include "superconfig.h"
 
-void autoplay(Config *config);
+void test_autoplay(SuperConfig *config);
 
 #endif
