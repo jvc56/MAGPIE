@@ -5,13 +5,14 @@
 #include "rack.h"
 
 typedef struct Player {
+  int index;
   char *name;
   Rack *rack;
   int score;
   StrategyParams *strategy_params;
 } Player;
 
-Player *create_player(const char *name, int array_size);
+Player *create_player(int index, const char *name, int array_size);
 Player *copy_player(Player *player);
 void destroy_player(Player *player);
 void reset_player(Player *player);

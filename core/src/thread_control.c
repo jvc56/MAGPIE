@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "config.h"
 #include "thread_control.h"
 
 ThreadControl *create_thread_control(FILE *outfile) {
@@ -34,6 +35,13 @@ void set_check_stopping_condition_interval(
     ThreadControl *thread_control, int check_stopping_condition_interval) {
   thread_control->check_stopping_condition_interval =
       check_stopping_condition_interval;
+}
+
+ThreadControl *create_thread_control_from_config(Config *config) {
+  ThreadControl *thread_control = create_thread_control(NULL);
+  set_print_info_interval(thread_control, config->print_info);
+  set_check_stopping_condition_interval(thread_control, config->checkstop);
+  return thread_control;
 }
 
 int get_halt_status(ThreadControl *thread_control) {

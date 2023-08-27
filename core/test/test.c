@@ -5,6 +5,7 @@
 
 #include "../src/autoplay.h"
 #include "../src/config.h"
+#include "../src/thread_control.h"
 
 #include "alphabet_test.h"
 #include "bag_test.h"
@@ -75,7 +76,8 @@ int main(int argc, char *argv[]) {
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_AUTOPLAY)) {
     Config *config = create_config_from_args(argc, argv);
-    autoplay(config, NULL);
+    ThreadControl *thread_control = create_thread_control_from_config(config);
+    autoplay(config, thread_control);
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_PROF)) {
     Config *config = create_config_from_args(argc, argv);
@@ -97,26 +99,26 @@ int main(int argc, char *argv[]) {
     Config *csw_config = create_config(
         "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
         "./data/lexica/CSW21.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "",
-        "", -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
+        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
         "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
 
     Config *nwl_config = create_config(
         "./data/letterdistributions/english.csv", "", "./data/lexica/NWL20.kwg",
         "./data/lexica/CSW21.klv2", SORT_BY_SCORE, PLAY_RECORDER_TYPE_ALL, "",
-        "", -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
+        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
         "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
 
     Config *osps_config = create_config(
         // no OSPS kwg yet, use later when we have tests.
         "./data/letterdistributions/polish.csv", "", "./data/lexica/OSPS44.kwg",
-        "", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "", "", -1, -1, 0, 10000,
-        NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
+        "", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "", "", -1, -1, 0, 10000, 0,
+        0, NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
         MOVE_LIST_CAPACITY);
 
     Config *disc_config = create_config(
         "./data/letterdistributions/catalan.csv", "", "./data/lexica/DISC2.kwg",
         "./data/lexica/catalan.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL,
-        "", "", -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
+        "", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
         "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
 
     SuperConfig *superconfig =

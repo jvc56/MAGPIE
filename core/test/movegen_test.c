@@ -46,14 +46,14 @@ void boards_equal(Board *b1, Board *b2) {
     for (int j = 0; j < BOARD_DIM; j++) {
       assert(get_letter(b1, i, j) == get_letter(b2, i, j));
       assert(get_bonus_square(b1, i, j) == get_bonus_square(b2, i, j));
-      assert(get_cross_score(b1, i, j, BOARD_HORIZONTAL_DIRECTION) ==
-             get_cross_score(b2, i, j, BOARD_HORIZONTAL_DIRECTION));
-      assert(get_cross_score(b1, i, j, BOARD_VERTICAL_DIRECTION) ==
-             get_cross_score(b2, i, j, BOARD_VERTICAL_DIRECTION));
-      assert(get_cross_set(b1, i, j, BOARD_HORIZONTAL_DIRECTION) ==
-             get_cross_set(b2, i, j, BOARD_HORIZONTAL_DIRECTION));
-      assert(get_cross_set(b1, i, j, BOARD_VERTICAL_DIRECTION) ==
-             get_cross_set(b2, i, j, BOARD_VERTICAL_DIRECTION));
+      assert(get_cross_score(b1, i, j, BOARD_HORIZONTAL_DIRECTION, 0) ==
+             get_cross_score(b2, i, j, BOARD_HORIZONTAL_DIRECTION, 0));
+      assert(get_cross_score(b1, i, j, BOARD_VERTICAL_DIRECTION, 0) ==
+             get_cross_score(b2, i, j, BOARD_VERTICAL_DIRECTION, 0));
+      assert(get_cross_set(b1, i, j, BOARD_HORIZONTAL_DIRECTION, 0) ==
+             get_cross_set(b2, i, j, BOARD_HORIZONTAL_DIRECTION, 0));
+      assert(get_cross_set(b1, i, j, BOARD_VERTICAL_DIRECTION, 0) ==
+             get_cross_set(b2, i, j, BOARD_VERTICAL_DIRECTION, 0));
       assert(get_anchor(b1, i, j, 0) == get_anchor(b2, i, j, 0));
       assert(get_anchor(b1, i, j, 1) == get_anchor(b2, i, j, 1));
     }
@@ -64,7 +64,8 @@ void execute_recursive_gen(Generator *gen, int col, Player *player,
                            int leftstrip, int rightstrip, int unique_play) {
   init_leave_map(gen->leave_map, player->rack);
   load_row_letter_cache(gen, gen->current_row_index);
-  recursive_gen(gen, col, player, NULL, kwg_get_root_node_index(gen->kwg),
+  recursive_gen(gen, col, player, NULL,
+                kwg_get_root_node_index(player->strategy_params->kwg),
                 leftstrip, rightstrip, unique_play);
 }
 
@@ -89,6 +90,7 @@ void macondo_tests(SuperConfig *superconfig) {
   Config *config = get_nwl_config(superconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
+  KWG *kwg = player->strategy_params->kwg;
   char test_string[100];
   reset_string(test_string);
 
@@ -127,10 +129,10 @@ void macondo_tests(SuperConfig *superconfig) {
   uint8_t ml = human_readable_letter_to_machine_letter(
       game->gen->letter_distribution, "I");
   clear_cross_set(game->gen->board, game->gen->current_row_index, 2,
-                  BOARD_VERTICAL_DIRECTION);
+                  BOARD_VERTICAL_DIRECTION, 0);
   set_cross_set_letter(get_cross_set_pointer(game->gen->board,
                                              game->gen->current_row_index, 2,
-                                             BOARD_VERTICAL_DIRECTION),
+                                             BOARD_VERTICAL_DIRECTION, 0),
                        ml);
   execute_recursive_gen(game->gen, game->gen->current_anchor_col, player,
                         game->gen->current_anchor_col,
@@ -376,8 +378,8 @@ void macondo_tests(SuperConfig *superconfig) {
 
   // TestRowEquivalent
   load_cgp(game, TEST_DUPE);
-  generate_all_cross_sets(game->gen->board, game->gen->kwg,
-                          game->gen->letter_distribution);
+  generate_all_cross_sets(game->gen->board, kwg, kwg,
+                          game->gen->letter_distribution, 0);
 
   Game *game_two = create_game(config);
 
@@ -385,8 +387,8 @@ void macondo_tests(SuperConfig *superconfig) {
   set_row(game_two, 8, "IS");
   set_row(game_two, 9, "T");
   update_all_anchors(game_two->gen->board);
-  generate_all_cross_sets(game_two->gen->board, game_two->gen->kwg,
-                          game_two->gen->letter_distribution);
+  generate_all_cross_sets(game_two->gen->board, kwg, kwg,
+                          game_two->gen->letter_distribution, 0);
 
   boards_equal(game->gen->board, game_two->gen->board);
 
@@ -411,9 +413,20 @@ void exchange_tests(SuperConfig *superconfig) {
                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
                   "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
+  print_game(game);
   // The top equity plays uses 7 tiles,
   // so exchanges should not be possible.
   play_top_n_equity_move(game, 0);
+
+  for (int i = 0; i < NUMBER_OF_CROSSES; i++) {
+    printf("%ld\n", game->gen->board->cross_sets[i]);
+  }
+  printf("\n\n");
+
+  for (int i = 0; i < NUMBER_OF_CROSSES; i++) {
+    printf("%ld\n", game->gen->board->cross_scores[i]);
+  }
+
   generate_moves_for_game(game);
   SortedMoveList *test_not_an_exchange_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
@@ -429,6 +442,10 @@ void exchange_tests(SuperConfig *superconfig) {
   generate_moves_for_game(game);
   SortedMoveList *test_exchange_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
+
+  // print_move_list(game->gen->board, game->gen->letter_distribution,
+  //                 test_exchange_sorted_move_list, 40);
+
   assert(test_exchange_sorted_move_list->moves[0]->move_type ==
          MOVE_TYPE_EXCHANGE);
   destroy_sorted_move_list(test_exchange_sorted_move_list);

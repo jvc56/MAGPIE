@@ -189,8 +189,10 @@ void load_cgp(Game *game, const char *cgp) {
   game->consecutive_scoreless_turns = cgp_char - '0';
   game->player_on_turn_index = 0;
 
-  generate_all_cross_sets(game->gen->board, game->gen->kwg,
-                          game->gen->letter_distribution);
+  generate_all_cross_sets(game->gen->board,
+                          game->players[0]->strategy_params->kwg,
+                          game->players[1]->strategy_params->kwg,
+                          game->gen->letter_distribution, 0);
   update_all_anchors(game->gen->board);
 
   if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
@@ -281,9 +283,9 @@ Game *create_game(Config *config) {
   Game *game = malloc(sizeof(Game));
   game->gen = create_generator(config);
   game->players[0] =
-      create_player("player_1", config->letter_distribution->size);
+      create_player(0, "player_1", config->letter_distribution->size);
   game->players[1] =
-      create_player("player_2", config->letter_distribution->size);
+      create_player(1, "player_2", config->letter_distribution->size);
   game->players[0]->strategy_params =
       copy_strategy_params(config->player_1_strategy_params);
   game->players[1]->strategy_params =
@@ -291,6 +293,7 @@ Game *create_game(Config *config) {
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
+  game->kwgs_are_distinct = !config->kwg_is_shared;
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->backups_preallocated = 0;
@@ -306,6 +309,7 @@ Game *copy_game(Game *game, int move_list_size) {
   new_game->player_on_turn_index = game->player_on_turn_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
+  new_game->kwgs_are_distinct = game->kwgs_are_distinct;
   // note: game backups must be explicitly handled by the caller if they want
   // game copies to have backups.
   new_game->backup_cursor = 0;

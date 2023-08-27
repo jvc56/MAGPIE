@@ -20,6 +20,7 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
                       const char *kwg_filename_2, const char *klv_filename_2,
                       int move_sorting_2, int play_recorder_type_2,
                       int game_pair_flag, int number_of_games_or_pairs,
+                      int print_info, int checkstop,
                       const char *actual_tiles_played,
                       int player_to_infer_index, int actual_score,
                       int number_of_tiles_exchanged, double equity_margin,
@@ -38,6 +39,8 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
   }
   config->use_game_pairs = game_pair_flag;
   config->number_of_games_or_pairs = number_of_games_or_pairs;
+  config->print_info = print_info;
+  config->checkstop = checkstop;
   config->player_to_infer_index = player_to_infer_index;
   config->actual_score = actual_score;
   config->number_of_tiles_exchanged = number_of_tiles_exchanged;
@@ -132,7 +135,9 @@ Config *create_config_from_args(int argc, char *argv[]) {
   int play_recorder_type_2 = -1;
   int move_sorting_2 = -1;
 
-  int number_of_games_or_pairs = 10000;
+  int number_of_games_or_pairs = 0;
+  int print_info = 0;
+  int checkstop = 0;
 
   char actual_tiles_played[(MAX_ARG_LENGTH)] = "";
   int player_to_infer_index = -1;
@@ -166,6 +171,8 @@ Config *create_config_from_args(int argc, char *argv[]) {
         {"q", required_argument, 0, 1016},
         {"h", required_argument, 0, 1017},
         {"w", required_argument, 0, 1018},
+        {"f", required_argument, 0, 1019},
+        {"k", required_argument, 0, 1020},
         {"p", no_argument, &game_pair_flag, 1},
         {0, 0, 0, 0}};
     int option_index = 0;
@@ -308,6 +315,18 @@ Config *create_config_from_args(int argc, char *argv[]) {
       strcpy(winpct_filename, optarg);
       break;
 
+    case 1019:
+      check_arg_length(optarg);
+      n = strtol(optarg, NULL, 10);
+      print_info = (int)n;
+      break;
+
+    case 1020:
+      check_arg_length(optarg);
+      n = strtol(optarg, NULL, 10);
+      checkstop = (int)n;
+      break;
+
     case '?':
       /* getopt_long already printed an error message. */
       break;
@@ -321,9 +340,9 @@ Config *create_config_from_args(int argc, char *argv[]) {
       letter_distribution_filename, cgp, kwg_filename_1, klv_filename_1,
       move_sorting_1, play_recorder_type_1, kwg_filename_2, klv_filename_2,
       move_sorting_2, play_recorder_type_2, game_pair_flag,
-      number_of_games_or_pairs, actual_tiles_played, player_to_infer_index,
-      actual_score, number_of_tiles_exchanged, equity_margin, number_of_threads,
-      winpct_filename, MOVE_LIST_CAPACITY);
+      number_of_games_or_pairs, print_info, checkstop, actual_tiles_played,
+      player_to_infer_index, actual_score, number_of_tiles_exchanged,
+      equity_margin, number_of_threads, winpct_filename, MOVE_LIST_CAPACITY);
 }
 
 void destroy_config(Config *config) {
@@ -377,8 +396,8 @@ void load_config_from_lexargs(Config **config, const char *cgp,
   if (*config == NULL) {
     *config = create_config(dist, cgp, lexicon_file, leaves, SORT_BY_EQUITY,
                             PLAY_RECORDER_TYPE_ALL, "", "", SORT_BY_EQUITY,
-                            PLAY_RECORDER_TYPE_ALL, 0, 0, "", 0, 0, 0, 0, 0,
-                            winpct, 100);
+                            PLAY_RECORDER_TYPE_ALL, 0, 0, 9, 0, "", 0, 0, 0, 0,
+                            0, winpct, 100);
   } else {
     Config *c = (*config);
     // check each filename
@@ -416,6 +435,7 @@ StrategyParams *copy_strategy_params(StrategyParams *orig) {
   StrategyParams *sp = malloc(sizeof(StrategyParams));
   // No need to copy the klv itself.
   sp->klv = orig->klv;
+  sp->kwg = orig->kwg;
   strcpy(sp->klv_filename, orig->klv_filename);
   sp->move_sorting = orig->move_sorting;
   sp->play_recorder_type = orig->play_recorder_type;
