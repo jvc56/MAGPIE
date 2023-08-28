@@ -601,7 +601,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
     destroy_inference_copy(inferences_for_workers[thread_index]);
   }
 
-  print_ucgi_inference(inference, thread_control);
+  // print_ucgi_inference(inference, thread_control);
 
   free(inferences_for_workers);
   free(worker_ids);
