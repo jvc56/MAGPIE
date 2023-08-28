@@ -40,7 +40,7 @@ void create_simmed_plays(Simmer *simmer, Game *game,
                          int number_of_moves_generated) {
   simmer->simmed_plays =
       malloc((sizeof(SimmedPlay)) * simmer->num_simmed_plays);
-  for (int i = 0; i < simmer->num_simmed_plays && number_of_moves_generated;
+  for (int i = 0; i < simmer->num_simmed_plays && i < number_of_moves_generated;
        i++) {
     SimmedPlay *sp = malloc(sizeof(SimmedPlay));
     sp->move = create_move();
@@ -581,12 +581,12 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
       destroy_simmer_worker(simmer_workers[thread_index]);
     }
 
-    game->players[0]->strategy_params->move_sorting = sorting_type;
-
     // Destroy intrasim structs
     free(simmer_workers);
     free(worker_ids);
   }
+
+  game->players[0]->strategy_params->move_sorting = sorting_type;
 
   struct timespec finish_time;
   double elapsed;
