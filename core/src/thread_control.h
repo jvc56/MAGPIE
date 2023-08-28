@@ -5,6 +5,9 @@
 
 #include "config.h"
 
+#define CHECK_STOP_INACTIVE 0
+#define CHECK_STOP_ACTIVE 1
+
 #define MODE_STOPPED 0
 #define MODE_SEARCHING 1
 
@@ -20,7 +23,9 @@ typedef struct ThreadControl {
   int current_mode;
   pthread_mutex_t print_output_mutex;
   int print_info_interval;
+  pthread_mutex_t check_stopping_condition_mutex;
   int check_stopping_condition_interval;
+  int check_stop_status;
   FILE *outfile;
 } ThreadControl;
 
@@ -38,6 +43,8 @@ void set_check_stopping_condition_interval(
 int set_mode_searching(ThreadControl *thread_control);
 int set_mode_stopped(ThreadControl *thread_control);
 int get_mode(ThreadControl *thread_control);
+int set_check_stop_active(ThreadControl *thread_control);
+int set_check_stop_inactive(ThreadControl *thread_control);
 void print_to_file(ThreadControl *thread_control, const char *content);
 
 #endif

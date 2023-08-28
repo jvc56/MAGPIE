@@ -13,7 +13,9 @@ ThreadControl *create_thread_control(FILE *outfile) {
   thread_control->current_mode = MODE_STOPPED;
   pthread_mutex_init(&thread_control->print_output_mutex, NULL);
   thread_control->print_info_interval = 0;
+  pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
   thread_control->check_stopping_condition_interval = 0;
+  thread_control->check_stop_status = CHECK_STOP_INACTIVE;
   if (outfile == NULL) {
     thread_control->outfile = stdout;
   } else {
@@ -110,6 +112,28 @@ int get_mode(ThreadControl *thread_control) {
   mode = thread_control->current_mode;
   pthread_mutex_unlock(&thread_control->current_mode_mutex);
   return mode;
+}
+
+int set_check_stop_active(ThreadControl *thread_control) {
+  int success = 0;
+  pthread_mutex_lock(&thread_control->check_stopping_condition_mutex);
+  if (thread_control->check_stop_status == CHECK_STOP_INACTIVE) {
+    thread_control->check_stop_status = CHECK_STOP_ACTIVE;
+    success = 1;
+  }
+  pthread_mutex_unlock(&thread_control->check_stopping_condition_mutex);
+  return success;
+}
+
+int set_check_stop_inactive(ThreadControl *thread_control) {
+  int success = 0;
+  pthread_mutex_lock(&thread_control->check_stopping_condition_mutex);
+  if (thread_control->check_stop_status == CHECK_STOP_ACTIVE) {
+    thread_control->check_stop_status = CHECK_STOP_INACTIVE;
+    success = 1;
+  }
+  pthread_mutex_unlock(&thread_control->check_stopping_condition_mutex);
+  return success;
 }
 
 void print_to_file(ThreadControl *thread_control, const char *content) {
