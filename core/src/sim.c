@@ -368,7 +368,8 @@ void *simmer_worker(void *uncasted_simmer_worker) {
                 thread_control->check_stopping_condition_interval ==
             0 &&
         set_check_stop_active(thread_control)) {
-      if (handle_potential_stopping_condition(simmer)) {
+      if (!is_halted(thread_control) &&
+          handle_potential_stopping_condition(simmer)) {
         halt(thread_control, HALT_STATUS_PROBABILISTIC);
       }
       set_check_stop_inactive(thread_control);
