@@ -94,11 +94,17 @@ int main(int argc, char *argv[]) {
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_SIM)) {
     Config *config = create_config_from_args(argc, argv);
-    perf_test_multithread_sim(config);
+    ThreadControl *thread_control = create_thread_control_from_config(config);
+    perf_test_multithread_sim(config, thread_control);
+    destroy_thread_control(thread_control);
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_SIM_STOPPING)) {
     Config *config = create_config_from_args(argc, argv);
-    perf_test_multithread_blocking_sim(config);
+    ThreadControl *thread_control = create_thread_control_from_config(config);
+    thread_control->print_info_interval = 500;
+    thread_control->check_stopping_condition_interval = 500;
+    perf_test_multithread_blocking_sim(config, thread_control);
+    destroy_thread_control(thread_control);
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
     Config *csw_config = create_config(

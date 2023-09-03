@@ -27,7 +27,7 @@ if [ -z "$2" ]; then
     exit 1
 fi
 make magpie_test BUILD=release
-./bin/magpie_test prof -g "./data/lexica/CSW21.kwg" \
+./bin/magpie_test prof -g1 "./data/lexica/CSW21.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
@@ -36,7 +36,7 @@ make magpie_test BUILD=release
                       -i 0
 elif [ "$1" == "i" ]; then
 make magpie_test BUILD=release
-perf record ./bin/magpie_test infer -g "./data/lexica/CSW21.kwg" \
+perf record ./bin/magpie_test infer -g1 "./data/lexica/CSW21.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
@@ -54,7 +54,7 @@ if [ -z "$2" ]; then
     exit 1
 fi
 make magpie_test BUILD=release
-./bin/magpie_test topvall -g "./data/lexica/CSW21.kwg" \
+./bin/magpie_test topvall -g1 "./data/lexica/CSW21.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
@@ -73,7 +73,7 @@ fi
 # echo 0 > /proc/sys/kernel/kptr_restrict
 
 make magpie_test BUILD=release
-perf record ./bin/magpie_test prof -g "./data/lexica/CSW21.kwg" \
+perf record ./bin/magpie_test prof -g1 "./data/lexica/CSW21.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \
@@ -82,7 +82,7 @@ perf record ./bin/magpie_test prof -g "./data/lexica/CSW21.kwg" \
 perf report
 elif [ "$1" == "m" ]; then
 make magpie_test
-./bin/magpie_test gen -g "./data/lexica/CSW21.kwg" \
+./bin/magpie_test gen -g1 "./data/lexica/CSW21.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -l "./data/lexica/CSW21.klv2" \
                       -r "all" \
@@ -90,7 +90,7 @@ make magpie_test
                       -c "1PACIFYING5/1IS12/YE13/1REQUALIFIED3/H1L12/EDS12/NO3T9/1RAINWASHING3/UM3O9/T2E1O9/1WAKEnERS6/1OnETIME7/OOT2E1B7/N6U7/1JACULATING4 ABEOPXZ/ 0/0 0 lex NWL20;"
 elif [ "$1" == "sim" ]; then
 make magpie_test BUILD=release
-./bin/magpie_test sim -g "./data/lexica/NWL20.kwg" \
+./bin/magpie_test sim -g1 "./data/lexica/NWL20.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -w "./data/strategy/default_english/winpct.csv" \
                       -l1 "./data/lexica/english.klv2" \
@@ -98,7 +98,7 @@ make magpie_test BUILD=release
                       -c "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ 336/298 0 lex NWL20;"
 elif [ "$1" == "simstopping" ]; then
 make magpie_test BUILD=release
-./bin/magpie_test simstopping -g "./data/lexica/NWL20.kwg" \
+./bin/magpie_test simstopping -g1 "./data/lexica/NWL20.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -w "./data/strategy/default_english/winpct.csv" \
                       -l1 "./data/lexica/english.klv2" \
@@ -108,6 +108,6 @@ fi
 
 # Bugs:
 # Gives negative for random:
-# time ../core/bin/magpie_test infer -g ../core/data/lexica/CSW21.kwg -d ../core/data/letterdistributions/english.csv -l1 ../core/data/lexica/CSW21.klv2 -r1 top -s1 equity -c '15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 /CDEIPSW 0/0 0 lex CSW21;' -t A -i 0 -a 2 -e 0 -q 0 -h 10
+# time ../core/bin/magpie_test infer -g1 ../core/data/lexica/CSW21.kwg -d ../core/data/letterdistributions/english.csv -l1 ../core/data/lexica/CSW21.klv2 -r1 top -s1 equity -c '15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 /CDEIPSW 0/0 0 lex CSW21;' -t A -i 0 -a 2 -e 0 -q 0 -h 10
 # Number of draws looks incorrect:
-# time ../core/bin/magpie_test infer -g ../core/data/lexica/CSW21.kwg -d ../core/data/letterdistributions/english.csv -l1 ../core/data/lexica/CSW21.klv2 -r1 top -s1 equity -c '15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AENT/CDEIPSW 0/0 0 lex CSW21;' -t A -i 0 -a 2 -e 0 -q 0 -h 1
+# time ../core/bin/magpie_test infer -g1 ../core/data/lexica/CSW21.kwg -d ../core/data/letterdistributions/english.csv -l1 ../core/data/lexica/CSW21.klv2 -r1 top -s1 equity -c '15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AENT/CDEIPSW 0/0 0 lex CSW21;' -t A -i 0 -a 2 -e 0 -q 0 -h 1
