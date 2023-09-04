@@ -202,9 +202,12 @@ void test_sim(SuperConfig *superconfig) {
   ThreadControl *thread_control = create_thread_control(NULL);
   test_win_pct(superconfig);
   test_sim_single_iteration(superconfig, thread_control);
+  unhalt(thread_control);
   test_more_iterations(superconfig, thread_control);
+  unhalt(thread_control);
   test_play_similarity(superconfig, thread_control);
 
+  unhalt(thread_control);
   // And run a perf test.
   int threads = superconfig->nwl_config->number_of_threads;
   char *backup_cgp = superconfig->nwl_config->cgp;
