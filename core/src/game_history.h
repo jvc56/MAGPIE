@@ -3,8 +3,6 @@
 
 #include <stdint.h>
 
-#include "constants.h"
-
 typedef struct GameEvent {
   int event_type;
 } GameEvent;
