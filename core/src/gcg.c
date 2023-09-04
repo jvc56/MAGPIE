@@ -1,22 +1,31 @@
 #include <regex.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "game_history.h"
 
 #define MAX_GCG_LINE_LENGTH 256
+#define MAX_GROUPS 3
 
 typedef enum {
-  UTF8,
+  GCG_ENCODING_ISO_8859_1,
+  GCG_ENCODING_UTF8,
 } gcg_encoding_t;
 
 typedef enum {
-  DUPLICATE_NAMES,
-  PRAGMA_PRECEDENT_EVENT,
-  ENCODING_WRONG_PLACE,
-  PLAYER_NOT_SUPPORTED,
-  PLAYER_DOES_NOT_EXIST,
-} gcg_error_t;
+  GCG_PARSE_STATUS_SUCCESS,
+  GCG_PARSE_STATUS_DUPLICATE_NAMES,
+  GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT,
+  GCG_PARSE_STATUS_ENCODING_WRONG_PLACE,
+  GCG_PARSE_STATUS_PLAYER_NOT_SUPPORTED,
+  GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST,
+  GCG_PARSE_STATUS_LINE_OVERFLOW,
+  GCG_PARSE_STATUS_UNSUPPORTED_CHARACTER_ENCODING,
+} gcg_parse_status_t;
 
-// A Token is an event in a GCG file.
+// A Token is an event in a gcg_string file.
 
 typedef enum {
   UNDEFINED_TOKEN,
@@ -45,8 +54,9 @@ typedef enum {
   CONTINUATION_TOKEN,
   INCOMPLETE_TOKEN,
   TILE_DECLARATION_TOKEN,
-  NUMBER_OF_TOKENS
 } gcg_token_t;
+
+#define NUMBER_OF_VALID_TOKENS (TILE_DECLARATION_TOKEN)
 
 typedef struct TokenRegexPair {
   gcg_token_t token;
@@ -101,8 +111,9 @@ const char *incomplete_regex = "#incomplete.*";
 const char *tile_declaration_regex =
     "#tile (?P<uppercase>\\S+)\\s+(?P<lowercase>\\S+)";
 
-void init_token_regex_pair(TokenRegexPair *token_regex_pair, gcg_token_t token,
-                           const char *regex_string) {
+TokenRegexPair *create_token_regex_pair(gcg_token_t token,
+                                        const char *regex_string) {
+  TokenRegexPair *token_regex_pair = malloc(sizeof(TokenRegexPair));
   token_regex_pair->token = token;
   int regex_compilation_result =
       regcomp(&token_regex_pair->regex, regex_string, 0);
@@ -110,18 +121,11 @@ void init_token_regex_pair(TokenRegexPair *token_regex_pair, gcg_token_t token,
     fprintf(stderr, "Could not compile regex\n");
     abort();
   }
+  return token_regex_pair
 }
 
-TokenRegexPair *get_token_regex_pair_by_token(GCGRegexes *gcg_regexes,
-                                              gcg_token_t token) {
-  // Linear search is fine since this code does not
-  // need to be performant.
-  for (int i = 0; i < (NUMBER_OF_TOKENS - 1); i++) {
-    if (gcg_regexes->token_regex_pairs[i]->token == token) {
-      return gcg_regexes->token_regex_pairs[i];
-    }
-  }
-  return NULL;
+TokenRegexPair *destroy_token_regex_pair(TokenRegexPair *token_regex_pair) {
+  free(token_regex_pair);
 }
 
 GCGRegexes *create_gcg_regexes() {
@@ -129,9 +133,31 @@ GCGRegexes *create_gcg_regexes() {
   // All tokens have associated regexes except for the
   // undefined token.
   gcg_regexes->token_regex_pairs =
-      malloc(sizeof(TokenRegexPair) * (NUMBER_OF_TOKENS - 1));
-  init_token_regex_pair(token_regex_pairs[0], PLAYER_TOKEN, player_regex);
+      malloc(sizeof(TokenRegexPair) * (NUMBER_OF_VALID_TOKENS));
+  int token_regex_pair_index = 0;
+  token_regex_pairs[token_regex_pair_index++] =
+      create_token_regex_pair(PLAYER_TOKEN, player_regex);
   return gcg_regexes;
+}
+
+void destroy_gcg_regexes(GCGRegexes *gcg_regexes) {
+  for (int i = 0; i < (NUMBER_OF_VALID_TOKENS); i++) {
+    destroy_token_regex_pair(gcg_regexes->token_regex_pairs[i]);
+  }
+  free(gcg_regexes->token_regex_pairs);
+  free(gcg_regexes);
+}
+
+TokenRegexPair *get_token_regex_pair_by_token(GCGRegexes *gcg_regexes,
+                                              gcg_token_t token) {
+  // Linear search is fine since this code does not
+  // need to be performant.
+  for (int i = 0; i < (NUMBER_OF_VALID_TOKENS); i++) {
+    if (gcg_regexes->token_regex_pairs[i]->token == token) {
+      return gcg_regexes->token_regex_pairs[i];
+    }
+  }
+  return NULL;
 }
 
 void utf8_encode(const unsigned char *input, unsigned char *output) {
@@ -148,50 +174,68 @@ void utf8_encode(const unsigned char *input, unsigned char *output) {
   }
 }
 
-int write_gcg_line_to_buffer(const char *input_gcg, char *buffer,
-                             int *current_gcg_char_index) {
-  while (input_gcg[current_gcg_char_index] != '\n' &&
-         input_gcg[current_gcg_char_index] != '\r' &&
-         input_gcg[current_gcg_char_index] != '\0') {
-    buffer[current_gcg_char_index] = input_gcg[current_gcg_char_index];
+gcg_parse_status_t write_gcg_line_to_buffer(const char *input_gcg_string,
+                                            char *buffer,
+                                            int *current_gcg_char_index) {
+  while (input_gcg_string[current_gcg_char_index] != '\n' &&
+         input_gcg_string[current_gcg_char_index] != '\r' &&
+         input_gcg_string[current_gcg_char_index] != '\0') {
+    buffer[current_gcg_char_index] = input_gcg_string[current_gcg_char_index];
     *current_gcg_char_index++;
     if (current_gcg_char_index > MAX_GCG_LINE_LENGTH) {
-      return 1;
+      return GCG_PARSE_STATUS_LINE_OVERFLOW;
     }
   }
-  return 0;
+  return GCG_PARSE_STATUS_SUCCESS;
 }
 
-gcg_error_t parse_gcg(const char *input_gcg, GameHistory *game_history) {
+void get_utf8_encoded_gcg_string(char *input_gcg_string,
+                                 char *utf8_encoded_gcg_string,
+                                 gcg_parse_status_t *gcg_parse_status) {}
+
+gcg_parse_status_t parse_gcg(const char *input_gcg_string,
+                             GameHistory *game_history) {
+
+  gcg_parse_status_t gcg_parse_status = GCG_PARSE_STATUS_SUCCESS;
 
   GCGRegexes *gcg_regexes = create_gcg_regexes();
 
   int current_gcg_char_index = 0;
   char line_buffer[MAX_GCG_LINE_LENGTH];
 
-  write_gcg_line_to_buffer(input_gcg, line_buffer, &current_gcg_char_index);
-
-  // Determine encoding
-  // character-encoding matches
-  //   if encoding is neither utf-8 or utf8: error
-  //   else: use as is
-  // no match
-  //   assume iso8859_1 and attempt to convert
+  gcg_parse_status = write_gcg_line_to_buffer(input_gcg_string, line_buffer,
+                                              &current_gcg_char_index);
+  if (gcg_parse_status != GCG_PARSE_STATUS_SUCCESS) {
+    destroy_gcg_regexes();
+    return gcg_parse_status;
+  }
 
   /* Execute regular expression */
   TokenRegexPair *encoding_token_regex_pair =
       get_token_regex_pair_by_token(gcg_regexes, ENCODING_TOKEN);
-  if (encoding_token_regex_pair == NULL) {
-    fprintf(stderr, "encoding regex not found\n");
-    abort();
-  }
-  int regexec_result =
-      regexec(&encoding_token_regex_pair->regex, line_buffer, 0, NULL, 0);
+
+  // ISO_8859-1 is considered the default encoding
+  gcg_encoding_t gcg_encoding = GCG_ENCODING_ISO_8859_1;
+  regmatch_t group_array[(MAX_GROUPS)];
+  int regexec_result = regexec(&encoding_token_regex_pair->regex, line_buffer,
+                               (MAX_GROUPS), group_array, 0);
   if (!regexec_result) {
-    puts("Match");
-  } else if (regexec_result == REG_NOMATCH) {
-    puts("No match");
-  } else {
+    // TODO: maybe make a string copy func
+    char encoding_string[6];
+    int matching_group_start_index = group_array[1].rm_so;
+    int matching_group_end_index = group_array[1].rm_eo;
+    int length_of_matching_group =
+        matching_group_end_index - matching_group_start_index;
+    strncpy(encoding_string, line_buffer + matching_group_start_index,
+            length_of_matching_group);
+    encoding_string[length_of_matching_group] = '\0';
+
+    if (!strcmp("utf-8", encoding_string) || strcmp("utf8", encoding_string)) {
+      gcg_encoding = GCG_ENCODING_UTF8;
+    } else {
+      gcg_parse_status = GCG_PARSE_STATUS_UNSUPPORTED_CHARACTER_ENCODING;
+    }
+  } else if (regexec_result != REG_NOMATCH) {
     char msgbuf[100];
     regerror(regexec_result, &encoding_token_regex_pair->regex, msgbuf,
              sizeof(msgbuf));
@@ -199,19 +243,21 @@ gcg_error_t parse_gcg(const char *input_gcg, GameHistory *game_history) {
     exit(1);
   }
 
-  gcg_encoding_t gcg_encoding = get_encoding_or_first_line(input_gcg);
-  char *gcg;
-  if (gcg_encoding != UTF8) {
-    // Convert gcg to UTF8
-    gcg = (char *)malloc(sizeof(char) * 2 * strlen(gcg));
+  gcg_encoding_t gcg_encoding = get_encoding_or_first_line(input_gcg_string);
+
+  if (gcg_encoding != GCG_ENCODING_UTF8) {
+    // Convert gcg_string to UTF8
+    gcg_string = (char *)malloc(sizeof(char) * 2 * strlen(gcg_string));
+    utf8_encode(input_gcg_string, gcg_string);
   } else {
-    gcg = input_gcg;
+    gcg_string = input_gcg_string;
   }
 
   // Do the stuff
 
-  if (gcg_encoding != UTF8) {
-    // Convert gcg to UTF8
-    free(gcg);
+  if (gcg_encoding != GCG_ENCODING_UTF8) {
+    free(gcg_string);
   }
+
+  destroy_gcg_regexes();
 }
