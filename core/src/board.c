@@ -6,6 +6,17 @@
 #include "constants.h"
 #include "cross_set.h"
 
+board_layout_t
+board_layout_string_to_board_layout(const char *board_layout_string) {
+  if (!strcmp(board_layout_string, "CrosswordGame")) {
+    return BOARD_LAYOUT_CROSSWORD_GAME;
+  }
+  if (!strcmp(board_layout_string, "SuperCrosswordGame")) {
+    return BOARD_LAYOUT_SUPER_CROSSWORD_GAME;
+  }
+  return BOARD_LAYOUT_UNKNOWN;
+}
+
 // Current index
 // depends on tranposition of the board
 

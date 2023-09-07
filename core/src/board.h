@@ -6,6 +6,12 @@
 #include "constants.h"
 #include "letter_distribution.h"
 
+typedef enum {
+  BOARD_LAYOUT_UNKNOWN,
+  BOARD_LAYOUT_CROSSWORD_GAME,
+  BOARD_LAYOUT_SUPER_CROSSWORD_GAME,
+} board_layout_t;
+
 typedef struct TraverseBackwardsReturnValues {
   uint32_t node_index;
   int path_is_valid;
@@ -22,6 +28,8 @@ typedef struct Board {
   TraverseBackwardsReturnValues *traverse_backwards_return_values;
 } Board;
 
+board_layout_t
+board_layout_string_to_board_layout(const char *board_layout_string);
 void clear_all_crosses(Board *board);
 void clear_cross_set(Board *board, int row, int col, int dir);
 Board *create_board();

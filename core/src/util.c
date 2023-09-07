@@ -1,3 +1,4 @@
+#include <regex.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -46,4 +47,14 @@ void write_rack_to_end_of_buffer(char *dest,
       write_user_visible_letter_to_end_of_buffer(dest, letter_distribution, i);
     }
   }
+}
+
+int contains_all_whitespace(const char *str) {
+  while (*str) {
+    if (!isspace((unsigned char)*str)) {
+      return 0; // Found a non-whitespace character
+    }
+    str++;
+  }
+  return 1; // All characters are whitespace
 }

@@ -12,4 +12,6 @@ void write_user_visible_letter_to_end_of_buffer(
 void write_rack_to_end_of_buffer(char *dest,
                                  LetterDistribution *letter_distribution,
                                  Rack *rack);
+int contains_all_whitespace(const char *str);
+
 #endif
