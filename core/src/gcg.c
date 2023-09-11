@@ -34,6 +34,8 @@ typedef enum {
   GCG_PARSE_STATUS_RACK_OVERFLOW,
   GCG_PARSE_STATUS_NOTE_PRECEDENT_EVENT,
   GCG_PARSE_STATUS_NO_MATCHING_TOKEN,
+  GCG_PARSE_STATUS_PHONY_TILES_RETURNED_WITHOUT_PLAY,
+  GCG_PARSE_STATUS_LAST_RACK_PENALTY_MALFORMED,
 } gcg_parse_status_t;
 
 // A Token is an event in a gcg_string file.
@@ -413,6 +415,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
     }
     game_history->description = get_matching_group_as_string(gcg_parser, 1);
+    break;
   case GCG_ID_TOKEN:
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
@@ -428,6 +431,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     }
     game_history->players[0]->last_known_rack =
         get_rack_from_matching(gcg_parser, 1);
+    break;
   case GCG_RACK2_TOKEN:
     int char_rack_length = gcg_parser->matching_groups[1].rm_eo -
                            gcg_parser->matching_groups[1].rm_so;
@@ -436,6 +440,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     }
     game_history->players[1]->last_known_rack =
         get_rack_from_matching(gcg_parser, 1);
+    break;
   case GCG_ENCODING_TOKEN:
     return GCG_PARSE_STATUS_ENCODING_WRONG_PLACE;
     break;
@@ -473,6 +478,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     }
     char *note = get_matching_group_as_string(gcg_parser, 1);
     string_builder_add_string(gcg_parser->note_builder, note, strlen(note));
+    free(note);
     break;
   case GCG_LEXICON_TOKEN:
     if (game_history->number_of_events > 0) {
@@ -511,6 +517,93 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
 
+    if (game_history->number_of_events == 0 ||
+        game_history->events[game_history->number_of_events - 1]->event_type !=
+            GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      return GCG_PARSE_STATUS_PHONY_TILES_RETURNED_WITHOUT_PLAY;
+    }
+
+    GameEvent *game_event = create_game_event(game_history);
+
+    game_event->event_type = GAME_EVENT_PHONY_TILES_RETURNED;
+    game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
+
+    break;
+  case GCG_TIME_PENALTY_TOKEN:
+    int player_index = get_player_index(gcg_parser, 1);
+    if (player_index < 0) {
+      return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
+    }
+    GameEvent *game_event = create_game_event(game_history);
+    game_event->event_type = GAME_EVENT_TIME_PENALTY;
+    game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
+    break;
+  case GCG_LAST_RACK_PENALTY_TOKEN:
+    int player_index = get_player_index(gcg_parser, 1);
+    if (player_index < 0) {
+      return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
+    }
+    GameEvent *game_event = create_game_event(game_history);
+    game_event->event_type = GAME_EVENT_END_RACK_PENALTY;
+    game_event->rack = get_rack_from_matching(gcg_parser, 2);
+
+    Rack *should_be_identical_rack = get_rack_from_matching(gcg_parser, 3);
+
+    bool racks_are_identical = true;
+    for (int i = 0; i < game_event->rack->array_size; i++) {
+      should_be_identical_rack->array[i] -= game_event->rack[i];
+      if (should_be_identical_rack->array[i] != 0) {
+        racks_are_identical = false;
+        break;
+      }
+    }
+
+    destroy_rack(should_be_identical_rack);
+
+    if (!racks_are_identical) {
+      return GCG_PARSE_STATUS_LAST_RACK_PENALTY_MALFORMED;
+    }
+
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, 5);
+
+    break;
+  case GCG_PASS_TOKEN:
+    int player_index = get_player_index(gcg_parser, 1);
+    if (player_index < 0) {
+      return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
+    }
+    GameEvent *game_event = create_game_event(game_history);
+    game_event->event_type = GAME_EVENT_PASS;
+    game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, 3);
+    break;
+  case GCG_CHALLENGE_BONUS_TOKEN:
+  case GCG_END_RACK_POINTS_TOKEN:
+    int player_index = get_player_index(gcg_parser, 1);
+    if (player_index < 0) {
+      return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
+    }
+    GameEvent *game_event = create_game_event(game_history);
+    game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
+    if (token == GCG_CHALLENGE_BONUS_TOKEN) {
+      game_event->event_type = GAME_EVENT_CHALLENGE_BONUS;
+    } else if (token == GCG_END_RACK_POINTS_TOKEN) {
+      game_event->event_type = GAME_EVENT_END_RACK_POINTS;
+    }
+    break;
+  case GCG_EXCHANGE_TOKEN:
+    int player_index = get_player_index(gcg_parser, 1);
+    if (player_index < 0) {
+      return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
+    }
+    GameEvent *game_event = create_game_event(game_history);
+    game_event->event_type = GAME_EVENT_EXCHANGE;
+    game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    copy_exchanged_to_game_event(gcg_parser, game_event, 3);
+    copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
     break;
   case GCG_UNKNOWN_TOKEN:
     if (gcg_parser->previous_token == GCG_NOTE_TOKEN) {
