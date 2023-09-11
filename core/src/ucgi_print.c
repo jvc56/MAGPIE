@@ -188,11 +188,12 @@ void print_ucgi_static_moves(Game *game, int nmoves,
   free(starting_moves_string_pointer);
 }
 
-void print_ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
-                          int print_best_play) {
+char *ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
+                     int print_best_play) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
+
   // No need to keep the mutex locked too long here. This is because this
   // function (print_ucgi_stats_string) will only execute on a single thread.
 
@@ -248,6 +249,13 @@ void print_ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
   if (nps > 0) {
     stats_string += sprintf(stats_string, "info nps %f\n", nps);
   }
+  return starting_stats_string_pointer;
+}
+
+void print_ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
+                          int print_best_play) {
+  char *starting_stats_string_pointer =
+      ucgi_sim_stats(simmer, game, nps, print_best_play);
   print_to_file(simmer->thread_control, starting_stats_string_pointer);
   free(starting_stats_string_pointer);
 }

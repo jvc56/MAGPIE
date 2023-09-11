@@ -12,6 +12,7 @@
 #include "ucgi.h"
 #include "ucgi_command.h"
 #include "ucgi_formats.h"
+#include "ucgi_print.h"
 #include "util.h"
 
 #define CMD_MAX 256

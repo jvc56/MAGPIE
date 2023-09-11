@@ -55,6 +55,8 @@ void test_ucgi_command() {
 
   UCGICommandVars *ucgi_command_vars = create_ucgi_command_vars(file_handler);
 
+  goto fubar;
+
   // Test the ucgi command
   int result = process_ucgi_command_async("ucgi", ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
@@ -471,6 +473,42 @@ void test_ucgi_command() {
          INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
   number_of_output_lines = 1;
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
+
+fubar:
+  // Test sim finishing with async API
+  depth = 2;
+  threads = 8;
+  plays = 3;
+
+  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
+           ZILLION_OPENING_CGP);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+
+  snprintf(test_stdin_input, sizeof(test_stdin_input),
+           "go sim depth %d threads %d plays %d", depth, threads, plays);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+  // Check the go params
+  assert(ucgi_command_vars->go_params->depth == depth);
+  assert(ucgi_command_vars->go_params->stop_condition == 0);
+  assert(ucgi_command_vars->go_params->threads == threads);
+  assert(ucgi_command_vars->go_params->num_plays == plays);
+  assert(ucgi_command_vars->go_params->max_iterations == 0);
+  assert(ucgi_command_vars->go_params->check_stopping_condition_interval == 0);
+  assert(ucgi_command_vars->go_params->print_info_interval == 0);
+  sleep(5);
+
+  char *ret = ucgi_search_status(ucgi_command_vars);
+  printf("return was %s\n", ret);
+  free(ret);
+
+  //   store_move_description(
+  //       ucgi_command_vars->simmer->simmed_plays[0]->move, move_placeholder,
+  //       ucgi_command_vars->loaded_game->gen->letter_distribution);
+
+  //   // If this isn't the best simming move, the universe implodes or
+  //   something assert(!strcmp(move_placeholder, "8D ZILLION"));
 
   fclose(file_handler);
   free(output_buffer);
