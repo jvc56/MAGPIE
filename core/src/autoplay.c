@@ -101,18 +101,18 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
     generate_moves(game->gen, game->players[game->player_on_turn_index],
                    game->players[1 - game->player_on_turn_index]->rack,
                    game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+    // char move_string[30] = "";
+    // write_user_visible_move_to_end_of_buffer(move_string, game->gen->board,
+    //                                          game->gen->move_list->moves[0],
+    //                                          game->gen->letter_distribution);
 
-    char move_string[30] = "";
-    write_user_visible_move_to_end_of_buffer(move_string, game->gen->board,
-                                             game->gen->move_list->moves[0],
-                                             game->gen->letter_distribution);
-
-    char rack_string[10] = "";
-    rack_to_string(game->players[game->player_on_turn_index]->rack, rack_string,
-                   game->gen->letter_distribution);
-    *moves_buffer +=
-        sprintf(*moves_buffer, "Player%d> %s %s\n",
-                game->player_on_turn_index + 1, move_string, rack_string);
+    // char rack_string[10] = "";
+    // rack_to_string(game->players[game->player_on_turn_index]->rack,
+    // rack_string,
+    //                game->gen->letter_distribution);
+    // *moves_buffer +=
+    //     sprintf(*moves_buffer, "Player%d> %s %s\n",
+    //             game->player_on_turn_index + 1, move_string, rack_string);
 
     play_move(game, game->gen->move_list->moves[0]);
     reset_move_list(game->gen->move_list);
@@ -155,10 +155,11 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
         pthread_mutex_lock(
             &autoplay_worker->thread_control->print_output_mutex);
         printf("Game 1 Moves:\n%s\n", starting_game_1_moves_string);
-        print_game(game_1);
+        // FIXME: print functions should move to game.h
+        // print_game(game_1);
         printf("\n");
         printf("Game 2 Moves:\n%s\n", starting_game_2_moves_string);
-        print_game(game_2);
+        // print_game(game_2);
         pthread_mutex_unlock(
             &autoplay_worker->thread_control->print_output_mutex);
         number_of_printed_games++;
