@@ -169,7 +169,7 @@ void test_play_similarity(SuperConfig *superconfig,
                           ThreadControl *thread_control) {
   Config *config = superconfig->nwl_config;
   Game *game = create_game(config);
-
+  printf("abc\n");
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
@@ -180,6 +180,7 @@ void test_play_similarity(SuperConfig *superconfig,
   // The first four plays all score 74. Only
   // 8F ATRESIC and 8F STEARIC should show up as similar, though.
   // These are play indexes 1 and 2.
+  printf("abc2\n");
 
   for (int i = 0; i < 4; i++) {
     for (int j = i + 1; j < 4; j++) {
@@ -204,12 +205,14 @@ void test_play_similarity(SuperConfig *superconfig,
       }
     }
   }
+  printf("abc3\n");
 
   assert(!plays_are_similar(simmer, simmer->simmed_plays[3],
                             simmer->simmed_plays[4]));
   assert(unhalt(thread_control));
   destroy_game(game);
   destroy_simmer(simmer);
+  printf("abc4\n");
 }
 
 void test_sim(SuperConfig *superconfig) {
