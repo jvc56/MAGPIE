@@ -17,12 +17,9 @@
 
 #define CMD_MAX 256
 
-static UCGICommandVars *ucgi_command_vars = NULL;
-
 void ucgi_scan_loop() {
-  if (ucgi_command_vars == NULL) {
-    ucgi_command_vars = create_ucgi_command_vars(stdout);
-  }
+  UCGICommandVars *ucgi_command_vars = create_ucgi_command_vars(stdout);
+
   while (1) {
     char cmd[CMD_MAX];
     if (fgets(cmd, CMD_MAX, stdin) == NULL) {

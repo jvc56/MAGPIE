@@ -54,9 +54,6 @@ void test_ucgi_command() {
   FILE *file_handler = open_memstream(&output_buffer, &len);
 
   UCGICommandVars *ucgi_command_vars = create_ucgi_command_vars(file_handler);
-
-  goto fubar;
-
   // Test the ucgi command
   int result = process_ucgi_command_async("ucgi", ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
@@ -474,7 +471,6 @@ void test_ucgi_command() {
   number_of_output_lines = 1;
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
-fubar:
   // Test sim finishing with async API
   depth = 2;
   threads = 8;
@@ -500,15 +496,16 @@ fubar:
   sleep(5);
 
   char *ret = ucgi_search_status(ucgi_command_vars);
-  printf("return was %s\n", ret);
+  assert(strcmp(ret + strlen(ret) - 22, "bestmove 8d.ZILLION\n"));
   free(ret);
+  // Sleep a couple more seconds and then stop the search.
+  sleep(2);
+  char *ret2 = ucgi_stop_search(ucgi_command_vars);
+  assert(strcmp(ret2 + strlen(ret2) - 22, "bestmove 8d.ZILLION\n"));
+  free(ret2);
 
-  //   store_move_description(
-  //       ucgi_command_vars->simmer->simmed_plays[0]->move, move_placeholder,
-  //       ucgi_command_vars->loaded_game->gen->letter_distribution);
-
-  //   // If this isn't the best simming move, the universe implodes or
-  //   something assert(!strcmp(move_placeholder, "8D ZILLION"));
+  assert(ucgi_command_vars->thread_control->halt_status ==
+         HALT_STATUS_USER_INTERRUPT);
 
   fclose(file_handler);
   free(output_buffer);

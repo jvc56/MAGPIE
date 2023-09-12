@@ -216,9 +216,11 @@ void test_sim(SuperConfig *superconfig) {
   ThreadControl *thread_control = create_thread_control(NULL);
   test_win_pct(superconfig);
   test_sim_single_iteration(superconfig, thread_control);
+  printf("--\n");
   test_more_iterations(superconfig, thread_control);
+  printf("---\n");
   test_play_similarity(superconfig, thread_control);
-
+  printf("----\n");
   // And run a perf test.
   int threads = superconfig->nwl_config->number_of_threads;
   char *backup_cgp = superconfig->nwl_config->cgp;
@@ -227,9 +229,12 @@ void test_sim(SuperConfig *superconfig) {
       "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"
       "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ "
       "336/298 0 lex NWL20;";
+  printf("-----\n");
   perf_test_multithread_sim(superconfig->nwl_config, thread_control);
+  printf("------\n");
   // restore superconfig
   superconfig->nwl_config->cgp = backup_cgp;
   superconfig->nwl_config->number_of_threads = threads;
   destroy_thread_control(thread_control);
+  printf("-------\n");
 }

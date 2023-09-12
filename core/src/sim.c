@@ -341,7 +341,8 @@ void *simmer_worker(void *uncasted_simmer_worker) {
     if (is_multithreaded(simmer)) {
       pthread_mutex_lock(&simmer->iteration_count_mutex);
     }
-    if (simmer->iteration_count == simmer->max_iterations) {
+    if (simmer->max_iterations > 0 &&
+        simmer->iteration_count == simmer->max_iterations) {
       reached_max_iteration = 1;
     } else {
       simmer->iteration_count++;
