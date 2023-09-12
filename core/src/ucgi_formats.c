@@ -18,9 +18,15 @@ void store_move_ucgi(Move *move, Board *board, char *placeholder,
     ci = 1;
   }
 
-  for (int i = 0; i < move->tiles_length; i++) {
+  int number_of_tiles_to_print = move->tiles_length;
+
+  if (move->move_type == MOVE_TYPE_EXCHANGE) {
+    number_of_tiles_to_print = move->tiles_played;
+  }
+
+  for (int i = 0; i < number_of_tiles_to_print; i++) {
     int letter = move->tiles[i];
-    if (letter == 0) {
+    if (letter == 0 && move->move_type == MOVE_TYPE_PLAY) {
       int r = move->row_start + (ri * i);
       int c = move->col_start + (ci * i);
       letter = get_letter(board, r, c);
