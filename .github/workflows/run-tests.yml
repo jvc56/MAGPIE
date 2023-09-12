@@ -44,4 +44,4 @@ jobs:
         run: cd core && ./run u
 
       - name: Build release
-        run: cd core && make magpie BUILD=release
+        run: cd core && make clean && make magpie BUILD=release
