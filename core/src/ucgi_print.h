@@ -20,4 +20,7 @@ void print_ucgi_inference_total_racks_evaluated(uint64_t total_racks_evaluated,
 void print_ucgi_inference(Inference *inference, ThreadControl *thread_control);
 void print_ucgi_autoplay_results(AutoplayResults *autoplay_results,
                                  ThreadControl *thread_control);
+
+char *ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
+                     int print_best_play);
 #endif

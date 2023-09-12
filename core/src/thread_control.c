@@ -21,6 +21,7 @@ ThreadControl *create_thread_control(FILE *outfile) {
   } else {
     thread_control->outfile = outfile;
   }
+  pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
   return thread_control;
 }
 
@@ -91,6 +92,8 @@ int set_mode_searching(ThreadControl *thread_control) {
     thread_control->current_mode = MODE_SEARCHING;
     success = 1;
   }
+  // Searching mode mutex should remain locked while we are searching.
+  pthread_mutex_lock(&thread_control->searching_mode_mutex);
   pthread_mutex_unlock(&thread_control->current_mode_mutex);
   return success;
 }
@@ -102,6 +105,7 @@ int set_mode_stopped(ThreadControl *thread_control) {
     thread_control->current_mode = MODE_STOPPED;
     success = 1;
   }
+  pthread_mutex_unlock(&thread_control->searching_mode_mutex);
   pthread_mutex_unlock(&thread_control->current_mode_mutex);
   return success;
 }
@@ -143,4 +147,10 @@ void print_to_file(ThreadControl *thread_control, const char *content) {
   fprintf(thread_control->outfile, "%s", content);
   fflush(thread_control->outfile);
   pthread_mutex_unlock(&thread_control->print_output_mutex);
+}
+
+void wait_for_mode_stopped(ThreadControl *thread_control) {
+  pthread_mutex_lock(&thread_control->searching_mode_mutex);
+  // We can only acquire the lock once the search has stopped.
+  pthread_mutex_unlock(&thread_control->searching_mode_mutex);
 }

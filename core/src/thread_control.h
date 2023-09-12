@@ -27,6 +27,7 @@ typedef struct ThreadControl {
   int check_stopping_condition_interval;
   int check_stop_status;
   FILE *outfile;
+  pthread_mutex_t searching_mode_mutex;
 } ThreadControl;
 
 ThreadControl *create_thread_control(FILE *outfile);
@@ -46,5 +47,6 @@ int get_mode(ThreadControl *thread_control);
 int set_check_stop_active(ThreadControl *thread_control);
 int set_check_stop_inactive(ThreadControl *thread_control);
 void print_to_file(ThreadControl *thread_control, const char *content);
+void wait_for_mode_stopped(ThreadControl *thread_control);
 
 #endif

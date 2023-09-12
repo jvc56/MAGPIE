@@ -72,7 +72,7 @@ void test_more_iterations(SuperConfig *superconfig,
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
   assert(thread_control->halt_status == HALT_STATUS_NONE);
-  simulate(thread_control, simmer, game, NULL, 2, 1, 15, 200,
+  simulate(thread_control, simmer, game, NULL, 2, 1, 15, 400,
            SIM_STOPPING_CONDITION_NONE, 0);
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
@@ -169,7 +169,6 @@ void test_play_similarity(SuperConfig *superconfig,
                           ThreadControl *thread_control) {
   Config *config = superconfig->nwl_config;
   Game *game = create_game(config);
-
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
@@ -218,7 +217,6 @@ void test_sim(SuperConfig *superconfig) {
   test_sim_single_iteration(superconfig, thread_control);
   test_more_iterations(superconfig, thread_control);
   test_play_similarity(superconfig, thread_control);
-
   // And run a perf test.
   int threads = superconfig->nwl_config->number_of_threads;
   char *backup_cgp = superconfig->nwl_config->cgp;

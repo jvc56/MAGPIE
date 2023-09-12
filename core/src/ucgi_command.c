@@ -9,6 +9,7 @@
 #include "sim.h"
 #include "thread_control.h"
 #include "ucgi_command.h"
+#include "ucgi_print.h"
 #include "util.h"
 
 #define GO_PARAMS_PARSE_SUCCESS 0
@@ -326,4 +327,75 @@ int process_ucgi_command_async(char *cmd, UCGICommandVars *ucgi_command_vars) {
   }
 
   return UCGI_COMMAND_STATUS_SUCCESS;
+}
+
+// ucgi_search_status returns the current status of the ongoing search. The
+// returned string must be freed by the caller.
+char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
+  if (ucgi_command_vars == NULL) {
+    log_warn("The UCGI Command variables struct has not been initialized.");
+    return NULL;
+  }
+  if (ucgi_command_vars->thread_control == NULL) {
+    log_warn("Thread controller has not been initialized.");
+    return NULL;
+  }
+  if (ucgi_command_vars->go_params == NULL) {
+    log_warn("Search params have not been initialized.");
+    return NULL;
+  }
+
+  // Don't check to see if we're searching. Maybe the search is done already;
+  // in that case, we want to see the last results.
+  switch (ucgi_command_vars->go_params->search_type) {
+  case SEARCH_TYPE_SIM_MONTECARLO:
+    if (ucgi_command_vars->simmer == NULL) {
+      log_warn("Simmer has not been initialized.");
+      return NULL;
+    }
+    return ucgi_sim_stats(ucgi_command_vars->simmer,
+                          ucgi_command_vars->loaded_game, 0, 1);
+    break;
+
+  default:
+    log_warn("Search type not yet handled.");
+    return NULL;
+  }
+}
+
+char *ucgi_stop_search(UCGICommandVars *ucgi_command_vars) {
+  if (ucgi_command_vars == NULL) {
+    log_warn("The UCGI Command variables struct has not been initialized.");
+    return NULL;
+  }
+  if (ucgi_command_vars->thread_control == NULL) {
+    log_warn("Thread controller has not been initialized.");
+    return NULL;
+  }
+  if (ucgi_command_vars->go_params == NULL) {
+    log_warn("Search params have not been initialized.");
+    return NULL;
+  }
+
+  int mode = get_mode(ucgi_command_vars->thread_control);
+  if (mode != MODE_SEARCHING) {
+    log_warn("Not currently searching.");
+    return NULL;
+  }
+  switch (ucgi_command_vars->go_params->search_type) {
+  case SEARCH_TYPE_SIM_MONTECARLO:
+    if (ucgi_command_vars->simmer == NULL) {
+      log_warn("Simmer has not been initialized.");
+      return NULL;
+    }
+    halt(ucgi_command_vars->thread_control, HALT_STATUS_USER_INTERRUPT);
+    wait_for_mode_stopped(ucgi_command_vars->thread_control);
+    return ucgi_sim_stats(ucgi_command_vars->simmer,
+                          ucgi_command_vars->loaded_game, 0, 1);
+    break;
+
+  default:
+    log_warn("Search type not yet handled.");
+    return NULL;
+  }
 }

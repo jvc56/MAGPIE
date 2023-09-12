@@ -33,4 +33,7 @@ int ucgi_go_async(char *go_cmd, UCGICommandVars *ucgi_command_vars);
 int process_ucgi_command_async(char *cmd, UCGICommandVars *ucgi_command_vars);
 void set_outfile(UCGICommandVars *ucgi_command_vars, FILE *outfile);
 
+char *ucgi_search_status(UCGICommandVars *ucgi_command_vars);
+char *ucgi_stop_search(UCGICommandVars *ucgi_command_vars);
+
 #endif
