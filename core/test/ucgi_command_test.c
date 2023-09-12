@@ -482,7 +482,8 @@ void test_ucgi_command() {
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
   snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go sim depth %d threads %d plays %d", depth, threads, plays);
+           "go sim depth %d threads %d plays %d i %d", depth, threads, plays,
+           100000);
   result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // Check the go params
@@ -490,22 +491,57 @@ void test_ucgi_command() {
   assert(ucgi_command_vars->go_params->stop_condition == 0);
   assert(ucgi_command_vars->go_params->threads == threads);
   assert(ucgi_command_vars->go_params->num_plays == plays);
-  assert(ucgi_command_vars->go_params->max_iterations == 0);
+  assert(ucgi_command_vars->go_params->max_iterations == 100000);
   assert(ucgi_command_vars->go_params->check_stopping_condition_interval == 0);
   assert(ucgi_command_vars->go_params->print_info_interval == 0);
   sleep(5);
 
   char *ret = ucgi_search_status(ucgi_command_vars);
-  assert(strcmp(ret + strlen(ret) - 22, "bestmove 8d.ZILLION\n"));
+  assert(strcmp(ret + strlen(ret) - 20, "bestmove 8d.ZILLION\n") == 0);
   free(ret);
   // Sleep a couple more seconds and then stop the search.
   sleep(2);
   char *ret2 = ucgi_stop_search(ucgi_command_vars);
-  assert(strcmp(ret2 + strlen(ret2) - 22, "bestmove 8d.ZILLION\n"));
+  assert(strcmp(ret2 + strlen(ret2) - 20, "bestmove 8d.ZILLION\n") == 0);
   free(ret2);
 
   assert(ucgi_command_vars->thread_control->halt_status ==
          HALT_STATUS_USER_INTERRUPT);
+
+  // Test async API with a sim that finished fast.
+  // 100 iterations should finish faster than in 5 seconds.
+  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
+           ZILLION_OPENING_CGP);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+
+  snprintf(test_stdin_input, sizeof(test_stdin_input),
+           "go sim depth %d threads %d plays %d i %d", depth, threads, plays,
+           100);
+  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
+  // Check the go params
+  assert(ucgi_command_vars->go_params->depth == depth);
+  assert(ucgi_command_vars->go_params->stop_condition == 0);
+  assert(ucgi_command_vars->go_params->threads == threads);
+  assert(ucgi_command_vars->go_params->num_plays == plays);
+  assert(ucgi_command_vars->go_params->max_iterations == 100);
+  assert(ucgi_command_vars->go_params->check_stopping_condition_interval == 0);
+  assert(ucgi_command_vars->go_params->print_info_interval == 0);
+  sleep(5);
+  // sim should have ended by now
+  int mode = get_mode(ucgi_command_vars->thread_control);
+  assert(mode != MODE_SEARCHING);
+  ret = ucgi_search_status(ucgi_command_vars);
+  assert(strcmp(ret + strlen(ret) - 20, "bestmove 8d.ZILLION\n") == 0);
+  free(ret);
+  // Sleep a couple more seconds and then try to stop the search. It shouldn't
+  // work.
+  sleep(2);
+  ret2 = ucgi_stop_search(ucgi_command_vars);
+  assert(ret2 == NULL);
+  assert(ucgi_command_vars->thread_control->halt_status ==
+         HALT_STATUS_MAX_ITERATIONS);
 
   fclose(file_handler);
   free(output_buffer);

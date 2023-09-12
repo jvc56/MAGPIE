@@ -345,11 +345,8 @@ char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
     return NULL;
   }
 
-  int mode = get_mode(ucgi_command_vars->thread_control);
-  if (mode != MODE_SEARCHING) {
-    log_warn("Not currently searching.");
-    return NULL;
-  }
+  // Don't check to see if we're searching. Maybe the search is done already;
+  // in that case, we want to see the last results.
   switch (ucgi_command_vars->go_params->search_type) {
   case SEARCH_TYPE_SIM_MONTECARLO:
     if (ucgi_command_vars->simmer == NULL) {

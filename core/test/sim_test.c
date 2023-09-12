@@ -72,7 +72,7 @@ void test_more_iterations(SuperConfig *superconfig,
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
   assert(thread_control->halt_status == HALT_STATUS_NONE);
-  simulate(thread_control, simmer, game, NULL, 2, 1, 15, 200,
+  simulate(thread_control, simmer, game, NULL, 2, 1, 15, 400,
            SIM_STOPPING_CONDITION_NONE, 0);
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
@@ -169,7 +169,6 @@ void test_play_similarity(SuperConfig *superconfig,
                           ThreadControl *thread_control) {
   Config *config = superconfig->nwl_config;
   Game *game = create_game(config);
-  printf("abc\n");
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
@@ -180,7 +179,6 @@ void test_play_similarity(SuperConfig *superconfig,
   // The first four plays all score 74. Only
   // 8F ATRESIC and 8F STEARIC should show up as similar, though.
   // These are play indexes 1 and 2.
-  printf("abc2\n");
 
   for (int i = 0; i < 4; i++) {
     for (int j = i + 1; j < 4; j++) {
@@ -205,25 +203,20 @@ void test_play_similarity(SuperConfig *superconfig,
       }
     }
   }
-  printf("abc3\n");
 
   assert(!plays_are_similar(simmer, simmer->simmed_plays[3],
                             simmer->simmed_plays[4]));
   assert(unhalt(thread_control));
   destroy_game(game);
   destroy_simmer(simmer);
-  printf("abc4\n");
 }
 
 void test_sim(SuperConfig *superconfig) {
   ThreadControl *thread_control = create_thread_control(NULL);
   test_win_pct(superconfig);
   test_sim_single_iteration(superconfig, thread_control);
-  printf("--\n");
   test_more_iterations(superconfig, thread_control);
-  printf("---\n");
   test_play_similarity(superconfig, thread_control);
-  printf("----\n");
   // And run a perf test.
   int threads = superconfig->nwl_config->number_of_threads;
   char *backup_cgp = superconfig->nwl_config->cgp;
@@ -232,12 +225,9 @@ void test_sim(SuperConfig *superconfig) {
       "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"
       "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ "
       "336/298 0 lex NWL20;";
-  printf("-----\n");
   perf_test_multithread_sim(superconfig->nwl_config, thread_control);
-  printf("------\n");
   // restore superconfig
   superconfig->nwl_config->cgp = backup_cgp;
   superconfig->nwl_config->number_of_threads = threads;
   destroy_thread_control(thread_control);
-  printf("-------\n");
 }
