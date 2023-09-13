@@ -5,6 +5,8 @@
 
 #include "config.h"
 #include "game.h"
+#include "move.h"
+#include "ucgi_formats.h"
 #include "words.h"
 
 // tiles must contain 0 for play-through tiles!
@@ -56,7 +58,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
     populate_word_validities(fw, game->players[0]->strategy_params->kwg);
   }
 
-  char *retstr = malloc(sizeof(char) * 256);
+  char *retstr = malloc(sizeof(char) * 400);
   Rack *leave_rack = NULL;
   int phonies_exist = 0;
   char phonies[200];
@@ -91,16 +93,26 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
 
   // Return a simple string
   // result <scored|error> valid <true|false> invalid_words FU,BARZ
-  // equity 123.45 score 100
+  // eq 123.45 sc 100 currmove f3.FU etc
 
   char *tp = retstr;
+  char move_placeholder[30];
+
+  Move *move = create_move();
+  set_move(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, vertical,
+           move_type);
+
+  store_move_ucgi(move, game->gen->board, move_placeholder,
+                  game->gen->letter_distribution);
+  destroy_move(move);
+
+  tp += sprintf(tp, "currmove %s", move_placeholder);
   tp += sprintf(tp, "result %s valid %s", "scored",
                 phonies_exist ? "false" : "true");
   if (phonies_exist) {
     tp += sprintf(tp, " invalid_words %s", phonies);
   }
-  tp += sprintf(tp, " score %d equity %.3f", points,
-                (double)points + leave_value);
+  tp += sprintf(tp, " sc %d eq %.3f", points, (double)points + leave_value);
 
   destroy_config(config);
   destroy_game(game);

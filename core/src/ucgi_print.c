@@ -184,27 +184,29 @@ void print_ucgi_static_moves(Game *game, int nmoves,
                 game->gen->move_list->moves[i]->score,
                 game->gen->move_list->moves[i]->equity);
   }
+  char move[30];
+  store_move_ucgi(game->gen->move_list->moves[0], game->gen->board, move,
+                  game->gen->letter_distribution);
+  sprintf(moves_string, "bestmove %s\n", move);
   print_to_file(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
 }
 
 char *ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
-                     int print_best_play) {
+                     int best_known_play) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
 
   // No need to keep the mutex locked too long here. This is because this
-  // function (print_ucgi_stats_string) will only execute on a single thread.
+  // function (ucgi_sim_stats) will only execute on a single thread.
 
   // info currmove h4.HADJI sc 40 wp 3.5 wpe 0.731 eq 7.2 eqe 0.812 it 12345
-  // ig 0 plies ply 1 scm 30 scd 3.7 bp 23 ply 2 ...
+  // ig 0 ply1-scm 30 ply1-scd 3.7 ply1-bp 23 ply2-scm ...
 
   // sc - score, wp(e) - win perc
   // (error), eq(e) - equity (error) scm - mean of score, scd - stdev of
-  // score, bp - bingo perc ig - this play has been cut-off plies ply 1 ...
-  // ply 2 ... ply 3 ...
-
+  // score, bp - bingo perc ig - this play has been cut-off
   // FIXME: get better numbers
   int max_line_length = 120 + (simmer->max_plies * 50);
   int output_size =
@@ -230,21 +232,23 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
         "ig %d ",
         move, play->move->score, wp_mean, wp_se, eq_mean, eq_se, niters,
         play->ignore);
-    stats_string += sprintf(stats_string, "plies ");
     for (int i = 0; i < simmer->max_plies; i++) {
-      stats_string += sprintf(stats_string, "ply %d ", i + 1);
+      // stats_string += sprintf(stats_string, "ply %d ", i + 1);
       stats_string += sprintf(
-          stats_string, "scm %.3f scd %.3f bp %.3f ", play->score_stat[i]->mean,
-          get_stdev(play->score_stat[i]), play->bingo_stat[i]->mean * 100.0);
+          stats_string, "ply%d-scm %.3f ply%d-scd %.3f ply%d-bp %.3f ", i + 1,
+          play->score_stat[i]->mean, i + 1, get_stdev(play->score_stat[i]),
+          i + 1, play->bingo_stat[i]->mean * 100.0);
     }
     stats_string += sprintf(stats_string, "\n");
   }
-  if (print_best_play) {
-    char move[30];
-    SimmedPlay *play = simmer->simmed_plays[0];
-    store_move_ucgi(play->move, game->gen->board, move,
-                    game->gen->letter_distribution);
+  char move[30];
+  SimmedPlay *play = simmer->simmed_plays[0];
+  store_move_ucgi(play->move, game->gen->board, move,
+                  game->gen->letter_distribution);
+  if (best_known_play) {
     stats_string += sprintf(stats_string, "bestmove %s\n", move);
+  } else {
+    stats_string += sprintf(stats_string, "bestsofar %s\n", move);
   }
   if (nps > 0) {
     stats_string += sprintf(stats_string, "info nps %f\n", nps);

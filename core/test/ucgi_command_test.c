@@ -179,11 +179,10 @@ void test_ucgi_command() {
   // made during the sim.
   // Add 1 since the info is printed one last time
   // when the sim finished.
-  // Multiply it by the number of plays because each play
-  // gets its own line.
-  // Add 2 for the 'bestmove' printed at the end of the sim
-  // and the nps stats.
-  int number_of_output_lines = plays * ((checkstop / info) + 1) + 2;
+  // Multiply it by the number of plays + 1 because each play
+  // gets its own line, and there's a line for bestsofar (or bestmove).
+  // Add 1 for the nps stats.
+  int number_of_output_lines = (plays + 1) * ((checkstop / info) + 1) + 1;
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
   prev_len = len;
@@ -209,8 +208,8 @@ void test_ucgi_command() {
   // Command is done
   assert(ucgi_command_vars->thread_control->halt_status == HALT_STATUS_NONE);
   // A static search should only print out the number
-  // of plays specified.
-  assert(plays == count_newlines(output_buffer + prev_len));
+  // of plays specified plus a "bestmove" line.
+  assert((plays + 1) == count_newlines(output_buffer + prev_len));
   prev_len = len;
   memset(test_stdin_input, 0, 256);
   memset(move_placeholder, 0, 80);
@@ -237,7 +236,7 @@ void test_ucgi_command() {
   assert(ucgi_command_vars->thread_control->halt_status ==
          HALT_STATUS_MAX_ITERATIONS);
   assert(ucgi_command_vars->simmer->iteration_count == iters);
-  number_of_output_lines = plays * ((iters / info) + 1) + 2;
+  number_of_output_lines = (plays + 1) * ((iters / info) + 1) + 1;
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
   prev_len = len;

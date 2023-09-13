@@ -136,6 +136,5 @@ int count_newlines(const char *str) {
     }
     str++;
   }
-
   return count;
 }
