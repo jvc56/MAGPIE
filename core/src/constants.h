@@ -1,6 +1,8 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
+#define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"
+#define LETTER_DISTRIBUTION_FILEPATH "../data/letterdistributions/"
 #define GADDAG_MAGIC_STRING "cgdg"
 #define KLV_MAGIC_STRING "cldg"
 #define ALPHABET_MAGIC_STRING "clcv"

@@ -190,3 +190,40 @@ void destroy_letter_distribution(LetterDistribution *letter_distribution) {
   free(letter_distribution->score_order);
   free(letter_distribution);
 }
+
+char *get_letter_distribution_filepath(const char *ld_name) {
+  // Check for invalid inputs
+  if (ld_name == NULL) {
+    return NULL;
+  }
+
+  const char *directory_path = LETTER_DISTRIBUTION_FILEPATH;
+
+  // Calculate the lengths of the input strings
+  size_t directory_path_len = strlen(directory_path);
+  size_t ld_name_len = strlen(ld_name);
+
+  // Allocate memory for the result string
+  char *result =
+      (char *)malloc((directory_path_len + ld_name_len +
+                      strlen(LETTER_DISTRIBUTION_FILE_EXTENSION) + 1) *
+                     sizeof(char));
+
+  // Copy the directory_path into the result
+  strcpy(result, directory_path);
+
+  // Check if directory_path ends with a directory separator (e.g., '/' or '\')
+  if (directory_path_len > 0 && directory_path[directory_path_len - 1] != '/' &&
+      directory_path[directory_path_len - 1] != '\\') {
+    // Add a directory separator if it's missing
+    strcat(result, "/");
+  }
+
+  // Concatenate the ld_name
+  strcat(result, ld_name);
+
+  // Add the ".csv" extension
+  strcat(result, LETTER_DISTRIBUTION_FILE_EXTENSION);
+
+  return result;
+}

@@ -1,5 +1,7 @@
+#include <ctype.h>
 #include <regex.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "constants.h"
@@ -57,4 +59,31 @@ int contains_all_whitespace(const char *str) {
     str++;
   }
   return 1; // All characters are whitespace
+}
+
+char *concatenate_strings(const char *str1, const char *str2) {
+  // Check for invalid inputs
+  if (str1 == NULL || str2 == NULL) {
+    return NULL;
+  }
+
+  // Calculate the lengths of the input strings
+  size_t len1 = strlen(str1);
+  size_t len2 = strlen(str2);
+
+  // Allocate memory for the concatenated string plus one additional byte for
+  // the null terminator
+  char *result = (char *)malloc((len1 + len2 + 1) * sizeof(char));
+
+  if (result == NULL) {
+    return NULL; // Memory allocation failed
+  }
+
+  // Copy the first string into the result
+  strcpy(result, str1);
+
+  // Concatenate the second string to the result
+  strcat(result, str2);
+
+  return result;
 }

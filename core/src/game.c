@@ -277,9 +277,9 @@ Game *create_game(Config *config) {
   Game *game = malloc(sizeof(Game));
   game->gen = create_generator(config);
   game->players[0] =
-      create_player("player_1", "p1", config->letter_distribution->size);
+      create_player("player_1", config->letter_distribution->size);
   game->players[1] =
-      create_player("player_2", "p2", config->letter_distribution->size);
+      create_player("player_2", config->letter_distribution->size);
   game->players[0]->strategy_params =
       copy_strategy_params(config->player_1_strategy_params);
   game->players[1]->strategy_params =

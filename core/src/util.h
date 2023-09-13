@@ -13,5 +13,6 @@ void write_rack_to_end_of_buffer(char *dest,
                                  LetterDistribution *letter_distribution,
                                  Rack *rack);
 int contains_all_whitespace(const char *str);
+char *concatenate_strings(const char *str1, const char *str2);
 
 #endif

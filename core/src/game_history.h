@@ -1,9 +1,12 @@
-#ifndef GCG_H
-#define GCG_H
+#ifndef GAME_HISTORY_H
+#define GAME_HISTORY_H
 
 #include <stdint.h>
 
+#include "board.h"
+#include "move.h"
 #include "player.h"
+
 #define MAX_GAME_EVENTS 100
 
 typedef enum {
@@ -40,7 +43,7 @@ typedef struct GameHistory {
   char *id_auth;
   char *uid;
   char *lexicon_name;
-  char *letter_distribution_name;
+  char *letter_distribution_filepath;
   char *variant;
   board_layout_t board_layout;
   GameHistoryPlayer *players[2];

@@ -18,8 +18,8 @@ StringBuilder *create_string_builder() {
   StringBuilder *string_builder;
 
   string_builder = calloc(1, sizeof(*string_builder));
-  string_builder->str = malloc(string_builder_min_size);
-  *string_builder->str = '\0';
+  string_builder->string = malloc(string_builder_min_size);
+  *string_builder->string = '\0';
   string_builder->alloced = string_builder_min_size;
   string_builder->len = 0;
 
@@ -30,7 +30,7 @@ void destroy_string_builder(StringBuilder *string_builder) {
   if (string_builder == NULL) {
     return;
   }
-  free(string_builder->str);
+  free(string_builder->string);
   free(string_builder);
 }
 
@@ -57,7 +57,8 @@ static void string_builder_ensure_space(StringBuilder *string_builder,
       string_builder->alloced--;
     }
   }
-  string_builder->str = realloc(string_builder->str, string_builder->alloced);
+  string_builder->string =
+      realloc(string_builder->string, string_builder->alloced);
 }
 
 void string_builder_add_string(StringBuilder *string_builder, const char *str,
@@ -71,16 +72,9 @@ void string_builder_add_string(StringBuilder *string_builder, const char *str,
   }
 
   string_builder_ensure_space(string_builder, len);
-  memmove(string_builder->str + string_builder->len, str, len);
+  memmove(string_builder->string + string_builder->len, str, len);
   string_builder->len += len;
-  string_builder->str[string_builder->len] = '\0';
-}
-
-void string_builder_clear(StringBuilder *string_builder) {
-  if (string_builder == NULL) {
-    return;
-  }
-  string_builder_truncate(string_builder, 0);
+  string_builder->string[string_builder->len] = '\0';
 }
 
 void string_builder_truncate(StringBuilder *string_builder, size_t len) {
@@ -89,7 +83,14 @@ void string_builder_truncate(StringBuilder *string_builder, size_t len) {
   }
 
   string_builder->len = len;
-  string_builder->str[string_builder->len] = '\0';
+  string_builder->string[string_builder->len] = '\0';
+}
+
+void string_builder_clear(StringBuilder *string_builder) {
+  if (string_builder == NULL) {
+    return;
+  }
+  string_builder_truncate(string_builder, 0);
 }
 
 size_t string_builder_length(const StringBuilder *string_builder) {
@@ -103,7 +104,7 @@ const char *string_builder_peek(const StringBuilder *string_builder) {
   if (string_builder == NULL) {
     return NULL;
   }
-  return string_builder->str;
+  return string_builder->string;
 }
 
 char *string_builder_dump(const StringBuilder *string_builder, size_t *len) {
@@ -117,6 +118,6 @@ char *string_builder_dump(const StringBuilder *string_builder, size_t *len) {
     *len = string_builder->len;
   }
   out = malloc(string_builder->len + 1);
-  memcpy(out, string_builder->str, string_builder->len + 1);
+  memcpy(out, string_builder->string, string_builder->len + 1);
   return out;
 }
