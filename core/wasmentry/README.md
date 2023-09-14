@@ -1,3 +1,5 @@
+If you want to test the wasm shell HTML file you have to change the Makefile-wasm a bit. Comment out the line that starts with `-s MODULARIZE=1` and change the line that ends in `$@.mjs \` to `$@.html`. Then,
+
 To compile:
 
 ```

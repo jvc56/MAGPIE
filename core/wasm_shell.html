@@ -141,14 +141,7 @@
           text = text.split(" ");
           var toPrint = "";
           for (var i = 0; i < text.length; i++) {
-            if (text[i] === "it") {
-              var iterct = parseInt(text[i + 1], 10);
-              if (iterct > lastIterCt) {
-                lastIterCt = iterct;
-                toPrint = text[i] + " " + lastIterCt;
-              }
-              break;
-            } else if (text[i] === "bestmove") {
+            if (text[i] === "bestmove") {
               toPrint = text.join(" ");
               break;
             } else if (text[i] === "nps") {
@@ -156,6 +149,13 @@
               break;
             } else if (text[i] === "bestsofar") {
               toPrint = text.join(" ");
+              break;
+            } else if (text[i] === "it") {
+              var iterct = parseInt(text[i + 1], 10);
+              if (iterct > lastIterCt) {
+                lastIterCt = iterct;
+                toPrint = text[i] + " " + lastIterCt;
+              }
               break;
             }
           }
@@ -169,7 +169,9 @@
       var Module = {
         preRun: [],
         postRun: [],
-        print: print,
+        print: (text) => {
+          console.log(text);
+        },
         canvas: (() => {
           var canvas = document.getElementById("canvas");
 
@@ -332,7 +334,7 @@
         const commandVars = createUcgiCommandVars();
         console.log("got commandvars", commandVars);
 
-        const goCmd = `go sim threads ${nthreads} plays 40 stopcondition 99 depth 5 i 100000 checkstop 500`;
+        const goCmd = `go sim threads ${nthreads} plays 5 stopcondition 99 depth 5 i 10000 checkstop 100 info 100`;
 
         const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);
         const cmd2C = Module.stringToNewUTF8(goCmd);
@@ -343,10 +345,15 @@
         // commandVars should only be freed when we unload?
         // Module._free(commandVars);
         // poll
-        setInterval(() => {
+        const interval = setInterval(() => {
           const status = ucgiSearchStatus(commandVars);
           const str = Module.UTF8ToString(status);
           print(str);
+          console.log(str);
+          if (str.includes("bestmove ")) {
+            console.log("stop interval");
+            clearInterval(interval);
+          }
           Module._free(str);
         }, 1000);
       });

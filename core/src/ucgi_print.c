@@ -6,6 +6,7 @@
 #include "game.h"
 #include "infer.h"
 #include "leave_rack.h"
+#include "log.h"
 #include "sim.h"
 #include "stats.h"
 #include "thread_control.h"
@@ -18,7 +19,8 @@ void print_ucgi_inference_current_rack(uint64_t current_rack_index,
                                        ThreadControl *thread_control) {
   char info_output[40];
   info_output[0] = '\0';
-  sprintf(info_output, "info infercurrrack %ld\n", current_rack_index);
+  sprintf(info_output, "info infercurrrack %llu\n",
+          (long long unsigned int)current_rack_index);
   print_to_file(thread_control, info_output);
 }
 
@@ -26,7 +28,8 @@ void print_ucgi_inference_total_racks_evaluated(uint64_t total_racks_evaluated,
                                                 ThreadControl *thread_control) {
   char info_output[40];
   info_output[0] = '\0';
-  sprintf(info_output, "info infertotalracks %ld\n", total_racks_evaluated);
+  sprintf(info_output, "info infertotalracks %llu\n",
+          (long long unsigned int)total_racks_evaluated);
   print_to_file(thread_control, info_output);
 }
 
@@ -98,10 +101,12 @@ void ucgi_write_inference_record(char **buffer, InferenceRecord *record,
                                  const char *inference_record_type) {
   uint64_t total_draws = get_weight(record->equity_values);
   uint64_t total_leaves = get_cardinality(record->equity_values);
-  *buffer += sprintf(*buffer, "infertotaldraws %s %ld\n", inference_record_type,
-                     total_draws);
-  *buffer += sprintf(*buffer, "inferuniqueleaves %s %ld\n",
-                     inference_record_type, total_leaves);
+  *buffer +=
+      sprintf(*buffer, "infertotaldraws %s %llu\n", inference_record_type,
+              (long long unsigned int)total_draws);
+  *buffer +=
+      sprintf(*buffer, "inferuniqueleaves %s %llu\n", inference_record_type,
+              (long long unsigned int)total_leaves);
   *buffer += sprintf(*buffer, "inferleaveavg %s %f\n", inference_record_type,
                      get_mean(record->equity_values));
   *buffer += sprintf(*buffer, "inferleavestdev %s %f\n", inference_record_type,
@@ -225,13 +230,14 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
     uint64_t niters = play->equity_stat->cardinality;
     store_move_ucgi(play->move, game->gen->board, move,
                     game->gen->letter_distribution);
-
+    int ignore = play->ignore;
     stats_string += sprintf(
         stats_string,
-        "info currmove %s sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %lu "
+        "info currmove %s sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %llu "
         "ig %d ",
-        move, play->move->score, wp_mean, wp_se, eq_mean, eq_se, niters,
-        play->ignore);
+        move, play->move->score, wp_mean, wp_se, eq_mean, eq_se,
+        // need cast for WASM:
+        (long long unsigned int)niters, ignore);
     for (int i = 0; i < simmer->max_plies; i++) {
       // stats_string += sprintf(stats_string, "ply %d ", i + 1);
       stats_string += sprintf(

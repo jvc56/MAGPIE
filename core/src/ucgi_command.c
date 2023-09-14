@@ -344,9 +344,9 @@ char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
     log_warn("Search params have not been initialized.");
     return NULL;
   }
-
-  // Don't check to see if we're searching. Maybe the search is done already;
-  // in that case, we want to see the last results.
+  int mode = get_mode(ucgi_command_vars->thread_control);
+  // Maybe the search is done already; in that case, we want to see the last
+  // results.
   switch (ucgi_command_vars->go_params->search_type) {
   case SEARCH_TYPE_SIM_MONTECARLO:
     if (ucgi_command_vars->simmer == NULL) {
@@ -354,7 +354,8 @@ char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
       return NULL;
     }
     return ucgi_sim_stats(ucgi_command_vars->simmer,
-                          ucgi_command_vars->loaded_game, 0, 0);
+                          ucgi_command_vars->loaded_game, 0,
+                          mode == MODE_STOPPED);
     break;
 
   default:
