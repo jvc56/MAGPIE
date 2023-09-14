@@ -213,9 +213,9 @@ void destroy_gcg_parser(GCGParser *gcg_parser) {
   free(gcg_parser);
 }
 
-void utf8_encode(const unsigned char *input, unsigned char *output) {
-  const unsigned char *in = input;
-  unsigned char *out = output;
+void utf8_encode(const char *input, char *output) {
+  const unsigned char *in = (unsigned char *)input;
+  unsigned char *out = (unsigned char *)output;
 
   while (*in) {
     if (*in < 128) {
