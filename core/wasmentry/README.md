@@ -1,12 +1,20 @@
-If you want to test the wasm shell HTML file you have to change the Makefile-wasm a bit. Comment out the line that starts with `-s MODULARIZE=1` and change the line that ends in `$@.mjs \` to `$@.html`. Then,
-
 To compile:
 
 ```
-make -f Makefile-wasm all
+make -f Makefile-wasm magpie_wasm
 ```
 
-To test:
+Then copy the wasm files in the `bin` directory where needed.
+
+### Test HTML shell
+
+If you want to test the wasm shell HTML file you have to change the compile command to:
+
+```
+make -f Makefile-wasm magpie_shell
+```
+
+To test the shell:
 
 ```
 python cors_server.py
