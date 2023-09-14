@@ -354,7 +354,7 @@ char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
       return NULL;
     }
     return ucgi_sim_stats(ucgi_command_vars->simmer,
-                          ucgi_command_vars->loaded_game, 0, 1);
+                          ucgi_command_vars->loaded_game, 0, 0);
     break;
 
   default:

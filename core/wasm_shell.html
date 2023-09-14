@@ -124,47 +124,52 @@
 
       var precacheFileData = null;
       var processUCGICommand = null;
+      var ucgiSearchStatus = null;
+      var createUcgiCommandVars = null;
+      var print = (function () {
+        var element = document.getElementById("output");
+        if (element) element.value = ""; // clear browser cache
+        return function (text) {
+          if (arguments.length > 1)
+            text = Array.prototype.slice.call(arguments).join(" ");
+          // These replacements are necessary if you render to raw HTML
+          //text = text.replace(/&/g, "&amp;");
+          //text = text.replace(/</g, "&lt;");
+          //text = text.replace(/>/g, "&gt;");
+          //text = text.replace('\n', '<br>', 'g');
+          // console.log(text);
+          text = text.split(" ");
+          var toPrint = "";
+          for (var i = 0; i < text.length; i++) {
+            if (text[i] === "it") {
+              var iterct = parseInt(text[i + 1], 10);
+              if (iterct > lastIterCt) {
+                lastIterCt = iterct;
+                toPrint = text[i] + " " + lastIterCt;
+              }
+              break;
+            } else if (text[i] === "bestmove") {
+              toPrint = text.join(" ");
+              break;
+            } else if (text[i] === "nps") {
+              toPrint = text.join(" ");
+              break;
+            } else if (text[i] === "bestsofar") {
+              toPrint = text.join(" ");
+              break;
+            }
+          }
 
+          if (toPrint !== "" && element) {
+            element.value += toPrint + "\n";
+            element.scrollTop = element.scrollHeight; // focus on bottom
+          }
+        };
+      })();
       var Module = {
         preRun: [],
         postRun: [],
-        print: (function () {
-          var element = document.getElementById("output");
-          if (element) element.value = ""; // clear browser cache
-          return function (text) {
-            if (arguments.length > 1)
-              text = Array.prototype.slice.call(arguments).join(" ");
-            // These replacements are necessary if you render to raw HTML
-            //text = text.replace(/&/g, "&amp;");
-            //text = text.replace(/</g, "&lt;");
-            //text = text.replace(/>/g, "&gt;");
-            //text = text.replace('\n', '<br>', 'g');
-            // console.log(text);
-            text = text.split(" ");
-            var toPrint = "";
-            for (var i = 0; i < text.length; i++) {
-              if (text[i] === "it") {
-                var iterct = parseInt(text[i + 1], 10);
-                if (iterct > lastIterCt) {
-                  lastIterCt = iterct;
-                  toPrint = text[i] + " " + lastIterCt;
-                }
-                break;
-              } else if (text[i] === "bestmove") {
-                toPrint = text.join(" ");
-                break;
-              } else if (text[i] === "nps") {
-                toPrint = text.join(" ");
-                break;
-              }
-            }
-
-            if (toPrint !== "" && element) {
-              element.value += toPrint + "\n";
-              element.scrollTop = element.scrollHeight; // focus on bottom
-            }
-          };
-        })(),
+        print: print,
         canvas: (() => {
           var canvas = document.getElementById("canvas");
 
@@ -224,9 +229,19 @@
             "number",
             "number",
           ]);
-          processUCGICommand = Module.cwrap("process_ucgi_command", null, [
+          processUCGICommand = Module.cwrap(
+            "process_ucgi_command_async",
+            null,
+            ["number", "number"]
+          );
+          ucgiSearchStatus = Module.cwrap("ucgi_search_status", "number", [
             "number",
           ]);
+          createUcgiCommandVars = Module.cwrap(
+            "create_ucgi_command_vars",
+            "number",
+            []
+          );
         },
       };
 
@@ -314,14 +329,26 @@
           nthreads = 20;
         }
         console.log("Using nthreads: " + nthreads);
-        const goCmd = `go threads ${nthreads} stopcondition 99 depth 5`;
+        const commandVars = createUcgiCommandVars();
+        console.log("got commandvars", commandVars);
+
+        const goCmd = `go sim threads ${nthreads} plays 40 stopcondition 99 depth 5 i 100000 checkstop 500`;
 
         const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);
         const cmd2C = Module.stringToNewUTF8(goCmd);
-        processUCGICommand(cmd1C);
-        processUCGICommand(cmd2C);
+        processUCGICommand(cmd1C, commandVars);
+        processUCGICommand(cmd2C, commandVars);
         Module._free(cmd1C);
         Module._free(cmd2C);
+        // commandVars should only be freed when we unload?
+        // Module._free(commandVars);
+        // poll
+        setInterval(() => {
+          const status = ucgiSearchStatus(commandVars);
+          const str = Module.UTF8ToString(status);
+          print(str);
+          Module._free(str);
+        }, 1000);
       });
     </script>
     {{{ SCRIPT }}}

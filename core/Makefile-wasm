@@ -11,16 +11,16 @@ OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
 
 BUILD := release
 
-cflags.release := -O3 -Wall -Wextra -Werror -Wno-trigraphs -pthread
+cflags.release := -O3 -Wall -Wextra -Wno-trigraphs -pthread
 ldflags.release := -Llib -pthread
 
 CFLAGS := ${cflags.${BUILD}}
 LFLAGS := ${lflags.${BUILD}} \
 	-s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8","UTF8ToString"] \
-	-s EXPORTED_FUNCTIONS=["_free","_main","_malloc","_precache_file_data","_process_ucgi_command","_score_play","_destroy_cache"] \
+	-s EXPORTED_FUNCTIONS=["_free","_main","_malloc","_precache_file_data","_process_ucgi_command_async","_score_play","_destroy_cache","_ucgi_search_status","_ucgi_stop_search","_create_ucgi_command_vars"] \
 	-sPTHREAD_POOL_SIZE="navigator.hardwareConcurrency + 3"\
-	-s ALLOW_BLOCKING_ON_MAIN_THREAD=0 \
-	-s MODULARIZE=1 --closure 1 -sEXPORT_NAME="MAGPIE" -s ENVIRONMENT='web,worker'
+	-s ALLOW_BLOCKING_ON_MAIN_THREAD=0 #\
+	# -s MODULARIZE=1 --closure 1 -sEXPORT_NAME="MAGPIE" -s ENVIRONMENT='web,worker'
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
@@ -29,7 +29,7 @@ LDLIBS   := -lm
 all: magpie_wasm
 
 magpie_wasm: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
-	emcc $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@.mjs \
+	emcc $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@.html \
 	-s INITIAL_MEMORY=128MB \
 	--shell-file wasm_shell.html
 
