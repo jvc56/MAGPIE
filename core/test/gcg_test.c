@@ -1,11 +1,12 @@
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "../src/game_history.h"
 #include "../src/gcg.h"
 
-#define GCG_DIRECTORY_FILEPATH "../testdata/"
+#define GCG_DIRECTORY_FILEPATH "testdata/"
 
 char *get_gcg_filepath(const char *filename) {
   // Calculate the lengths of the input strings
@@ -42,6 +43,7 @@ void test_single_error_case(const char *gcg_filename,
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   destroy_game_history(game_history);
+  printf("actual: %d\n", gcg_parse_status);
   assert(gcg_parse_status == expected_gcg_parse_status);
 }
 

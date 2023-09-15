@@ -4,6 +4,7 @@
 #include <time.h>
 
 #include "../src/config.h"
+#include "../src/log.h"
 
 #include "alphabet_test.h"
 #include "bag_test.h"
@@ -65,6 +66,7 @@ int main(int argc, char *argv[]) {
     printf("must specify exactly one command\n");
     exit(EXIT_FAILURE);
   }
+  log_set_level(3);
 
   if (!strcmp(argv[1], CMD_GEN)) {
     Config *config = create_config_from_args(argc, argv);
