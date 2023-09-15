@@ -6,8 +6,11 @@
 #include "config.h"
 #include "game.h"
 #include "move.h"
+#include "ucgi_command.h"
 #include "ucgi_formats.h"
 #include "words.h"
+
+static UCGICommandVars *ucgi_command_vars = NULL;
 
 // tiles must contain 0 for play-through tiles!
 char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
@@ -124,3 +127,16 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   // this string after it's done with it!
   return retstr;
 }
+
+int process_ucgi_command_wasm(char *cmd) {
+  if (ucgi_command_vars == NULL) {
+    ucgi_command_vars = create_ucgi_command_vars(NULL);
+  }
+  return process_ucgi_command_async(cmd, ucgi_command_vars);
+}
+
+char *ucgi_search_status_wasm() {
+  return ucgi_search_status(ucgi_command_vars);
+}
+
+char *ucgi_stop_search_wasm() { return ucgi_stop_search(ucgi_command_vars); }

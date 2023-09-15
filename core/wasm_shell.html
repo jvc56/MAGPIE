@@ -125,7 +125,6 @@
       var precacheFileData = null;
       var processUCGICommand = null;
       var ucgiSearchStatus = null;
-      var createUcgiCommandVars = null;
       var print = (function () {
         var element = document.getElementById("output");
         if (element) element.value = ""; // clear browser cache
@@ -231,16 +230,11 @@
             "number",
             "number",
           ]);
-          processUCGICommand = Module.cwrap(
-            "process_ucgi_command_async",
-            null,
-            ["number", "number"]
-          );
-          ucgiSearchStatus = Module.cwrap("ucgi_search_status", "number", [
+          processUCGICommand = Module.cwrap("process_ucgi_command_wasm", null, [
             "number",
           ]);
-          createUcgiCommandVars = Module.cwrap(
-            "create_ucgi_command_vars",
+          ucgiSearchStatus = Module.cwrap(
+            "ucgi_search_status_wasm",
             "number",
             []
           );
@@ -331,22 +325,18 @@
           nthreads = 20;
         }
         console.log("Using nthreads: " + nthreads);
-        const commandVars = createUcgiCommandVars();
-        console.log("got commandvars", commandVars);
 
         const goCmd = `go sim threads ${nthreads} plays 5 stopcondition 99 depth 5 i 10000 checkstop 100 info 100`;
 
         const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);
         const cmd2C = Module.stringToNewUTF8(goCmd);
-        processUCGICommand(cmd1C, commandVars);
-        processUCGICommand(cmd2C, commandVars);
+        processUCGICommand(cmd1C);
+        processUCGICommand(cmd2C);
         Module._free(cmd1C);
         Module._free(cmd2C);
-        // commandVars should only be freed when we unload?
-        // Module._free(commandVars);
-        // poll
+
         const interval = setInterval(() => {
-          const status = ucgiSearchStatus(commandVars);
+          const status = ucgiSearchStatus();
           const str = Module.UTF8ToString(status);
           print(str);
           console.log(str);
