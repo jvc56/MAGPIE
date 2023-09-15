@@ -29,7 +29,7 @@ void destroy_game_history_player(GameHistoryPlayer *player) {
 
 GameEvent *create_game_event(GameHistory *game_history) {
   if (game_history->number_of_events == MAX_GAME_EVENTS) {
-    log_fatal("Game events overflow.");
+    return NULL;
   }
   GameEvent *game_event = malloc(sizeof(GameEvent));
   game_event->cumulative_score = 0;

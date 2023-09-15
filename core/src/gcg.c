@@ -718,13 +718,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
 
 gcg_parse_status_t parse_gcg_with_parser(GCGParser *gcg_parser) {
   gcg_parse_status_t gcg_parse_status = handle_encoding(gcg_parser);
-  int count = 100;
   while (gcg_parse_status == GCG_PARSE_STATUS_SUCCESS &&
          !gcg_parser->at_end_of_gcg) {
     gcg_parse_status = parse_next_gcg_line(gcg_parser);
-    if (count-- == 0) {
-      break;
-    }
   }
   return gcg_parse_status;
 }
