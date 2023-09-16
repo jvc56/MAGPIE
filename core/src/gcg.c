@@ -75,14 +75,15 @@ typedef struct GCGParser {
 
 const char *player_regex =
     "#player([1-2])[[:space:]]+([^[:space:]]+)[[:space:]]+(.+)";
-const char *title_regex = "#title\\s*(.*)";
-const char *description_regex = "#description\\s*(.*)";
-const char *id_regex = "#id\\s*(^[[:space:]]+)\\s+(^[[:space:]]+)";
-const char *rack1_regex = "#rack1 (^[[:space:]]+)";
-const char *rack2_regex = "#rack2 (^[[:space:]]+)";
-const char *move_regex =
-    ">(^[[:space:]]+):\\s+(^[[:space:]]+)\\s+(\\w+)\\s+(^[[:space:]]+)\\s+"
-    "\\+(\\d+)\\s+(\\d+)";
+const char *title_regex = "#title[[:space:]]*(.*)";
+const char *description_regex = "#description[[:space:]]*(.*)";
+const char *id_regex =
+    "#id[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)";
+const char *rack1_regex = "#rack1 ([^[:space:]]+)";
+const char *rack2_regex = "#rack2 ([^[:space:]]+)";
+const char *move_regex = ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
+                         "]]+(\\w+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
+                         "\\+([[:digit:]]+)[[:space:]]+([[:digit:]]+)";
 const char *note_regex = "#note (.+)";
 const char *lexicon_name_regex = "#lexicon_name (.+)";
 const char *character_encoding_regex = "#character-encoding ([[:graph:]]+)";
@@ -93,24 +94,31 @@ const char *board_layout_regex = "#board-layout (.*)";
 const char *tile_distribution_name_regex = "#tile-distribution (.*)";
 const char *continuation_regex = "#- (.*)";
 const char *phony_tiles_returned_regex =
-    ">(^[[:space:]]+):\\s+(^[[:space:]]+)\\s+--\\s+-(\\d+)\\s+(\\d+)";
-const char *pass_regex =
-    ">(^[[:space:]]+):\\s+(^[[:space:]]+)\\s+-\\s+\\+0\\s+(\\d+)";
+    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+--[[:space:]]+-([["
+    ":digit:]]+)[[:space:]]+([[:digit:]]+)";
+const char *pass_regex = ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
+                         "]]+-[[:space:]]+\\+0[[:space:]]+([[:digit:]]+)";
 const char *challenge_bonus_regex =
-    ">(^[[:space:]]+):\\s+(^[[:space:]]*)\\s+\\(challenge\\)\\s+\\+(\\d+"
-    ")\\s+(\\d+)";
-const char *exchange_regex = ">(^[[:space:]]+):\\s+(^[[:space:]]+)\\s+-(^[[:"
-                             "space:]]+)\\s+\\+0\\s+(\\d+)";
+    ">([^[:space:]]+):[[:space:]]+([^[:space:]]*)[[:space:]]+\\(challenge\\)[[:"
+    "space:]]+\\+([[:digit:]]+"
+    ")[[:space:]]+([[:digit:]]+)";
+const char *exchange_regex =
+    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+-(^[[:"
+    "space:]]+)[[:space:]]+\\+0[[:space:]]+([[:digit:]]+)";
 const char *end_rack_points_regex =
-    ">(^[[:space:]]+):\\s+\\((^[[:space:]]+)\\)\\s+\\+(\\d+)\\s+(-?\\d+)";
+    ">([^[:space:]]+):[[:space:]]+\\(([^[:space:]]+)\\)[[:space:]]+\\+([[:"
+    "digit:]]+)[[:space:]]+(-?[[:digit:]]+)";
 const char *time_penalty_regex =
-    ">(^[[:space:]]+):\\s+(^[[:space:]]*)\\s+\\(time\\)\\s+\\-(\\d+)"
-    "\\s+(-?\\d+)";
+    ">([^[:space:]]+):[[:space:]]+([^[:space:]]*)[[:space:]]+\\(time\\)[[:"
+    "space:]]+\\-([[:digit:]]+)"
+    "[[:space:]]+(-?[[:digit:]]+)";
 const char *points_lost_for_last_rack_regex =
-    ">(^[[:space:]]+):\\s+(^[[:space:]]+)\\s+\\((^[[:space:]]+)\\)\\s+\\-(\\d+)"
-    "\\s+(-?\\d+)";
+    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+\\(([^[:space:]]+)"
+    "\\)[[:space:]]+\\-([[:digit:]]+)"
+    "[[:space:]]+(-?[[:digit:]]+)";
 const char *incomplete_regex = "#incomplete.*";
-const char *tile_declaration_regex = "#tile (^[[:space:]]+)\\s+(^[[:space:]]+)";
+const char *tile_declaration_regex =
+    "#tile ([^[:space:]]+)[[:space:]]+([^[:space:]]+)";
 
 TokenRegexPair *create_token_regex_pair(gcg_token_t token,
                                         const char *regex_string) {
@@ -125,6 +133,7 @@ TokenRegexPair *create_token_regex_pair(gcg_token_t token,
 }
 
 void destroy_token_regex_pair(TokenRegexPair *token_regex_pair) {
+  regfree(&token_regex_pair->regex);
   free(token_regex_pair);
 }
 
@@ -268,6 +277,14 @@ char *get_matching_group_as_string(GCGParser *gcg_parser, int group_index) {
   return matching_group_string;
 }
 
+int get_matching_group_as_int(GCGParser *gcg_parser, int group_index) {
+  char *matching_group_string =
+      get_matching_group_as_string(gcg_parser, group_index);
+  int matching_group_int = strtol(matching_group_string, NULL, 10);
+  free(matching_group_string);
+  return matching_group_int;
+}
+
 gcg_parse_status_t handle_encoding(GCGParser *gcg_parser) {
   gcg_parse_status_t gcg_parse_status = GCG_PARSE_STATUS_SUCCESS;
 
@@ -319,7 +336,8 @@ gcg_parse_status_t handle_encoding(GCGParser *gcg_parser) {
                     gcg_parser->current_gcg_char_index,
                 gcg_parser->utf8_gcg_string);
   } else {
-    gcg_parser->utf8_gcg_string = strdup(gcg_parser->input_gcg_string);
+    gcg_parser->utf8_gcg_string = strdup(gcg_parser->input_gcg_string +
+                                         gcg_parser->current_gcg_char_index);
   }
   gcg_parser->current_gcg_char_index = 0;
   return gcg_parse_status;
@@ -457,6 +475,23 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     string_builder_clear(gcg_parser->note_builder);
   }
   gcg_parser->previous_token = token;
+
+  if (token == GCG_MOVE_TOKEN || token == GCG_PASS_TOKEN ||
+      token == GCG_EXCHANGE_TOKEN) {
+    if (game_history->letter_distribution_name != NULL) {
+
+      char *letter_distribution_filepath = get_letter_distribution_filepath(
+          game_history->letter_distribution_name);
+
+      load_letter_distribution(game_history->letter_distribution,
+                               letter_distribution_filepath);
+      free(letter_distribution_filepath);
+    } else {
+      printf("load a default letter distribution here\n");
+      abort();
+    }
+  }
+
   GameEvent *game_event = NULL;
   int player_index = -1;
   int char_rack_length;
@@ -465,28 +500,29 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
     }
-    player_index = get_player_index(gcg_parser, 1);
+    player_index = get_matching_group_as_int(gcg_parser, 1) - 1;
     if (player_index != 0 && player_index != 1) {
       return GCG_PARSE_STATUS_PLAYER_NOT_SUPPORTED;
     }
     if (game_history->players[player_index]) {
       return GCG_PARSE_STATUS_PLAYER_NUMBER_REDUNDANT;
     }
-    char *player_name = get_matching_group_as_string(gcg_parser, 2);
-    char *player_nickname = get_matching_group_as_string(gcg_parser, 3);
-    if (game_history->players[1 - player_index] &&
-        !strcmp(player_name, game_history->players[1 - player_index]->name)) {
-      return GCG_PARSE_STATUS_DUPLICATE_NAMES;
-    }
-    if (game_history->players[1 - player_index] &&
-        !strcmp(player_nickname,
-                game_history->players[1 - player_index]->nickname)) {
-      return GCG_PARSE_STATUS_DUPLICATE_NICKNAMES;
-    }
+    char *player_nickname = get_matching_group_as_string(gcg_parser, 2);
+    char *player_name = get_matching_group_as_string(gcg_parser, 3);
     game_history->players[player_index] =
         create_game_history_player(player_name, player_nickname);
     free(player_name);
     free(player_nickname);
+    if (game_history->players[1 - player_index] &&
+        !strcmp(game_history->players[player_index]->name,
+                game_history->players[1 - player_index]->name)) {
+      return GCG_PARSE_STATUS_DUPLICATE_NAMES;
+    }
+    if (game_history->players[1 - player_index] &&
+        !strcmp(game_history->players[player_index]->nickname,
+                game_history->players[1 - player_index]->nickname)) {
+      return GCG_PARSE_STATUS_DUPLICATE_NICKNAMES;
+    }
     break;
   case GCG_TITLE_TOKEN:
     if (game_history->number_of_events > 0) {
@@ -587,22 +623,14 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
     }
-    char *letter_distribution_name =
+    game_history->letter_distribution_name =
         get_matching_group_as_string(gcg_parser, 1);
-
-    game_history->letter_distribution_filepath =
-        get_letter_distribution_filepath(letter_distribution_name);
-
-    free(letter_distribution_name);
-
-    load_letter_distribution(game_history->letter_distribution,
-                             game_history->letter_distribution_filepath);
     break;
   case GCG_GAME_TYPE_TOKEN:
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
     }
-    game_history->variant = get_matching_group_as_string(gcg_parser, 1);
+    game_history->variant_name = get_matching_group_as_string(gcg_parser, 1);
     break;
   case GCG_PHONY_TILES_RETURNED_TOKEN:
     player_index = get_player_index(gcg_parser, 1);

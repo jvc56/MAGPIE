@@ -15,6 +15,7 @@ GameHistoryPlayer *create_game_history_player(const char *name,
   player->name = strdup(name);
   player->nickname = strdup(nickname);
   player->score = 0;
+  player->last_known_rack = NULL;
   return player;
 }
 
@@ -60,6 +61,7 @@ GameHistory *create_game_history() {
   game_history->id_auth = NULL;
   game_history->uid = NULL;
   game_history->lexicon_name = NULL;
+  game_history->letter_distribution_name = NULL;
   game_history->board_layout = BOARD_LAYOUT_CROSSWORD_GAME;
   game_history->players[0] = NULL;
   game_history->players[1] = NULL;
@@ -83,6 +85,9 @@ void destroy_game_history(GameHistory *game_history) {
   }
   if (game_history->lexicon_name != NULL) {
     free(game_history->lexicon_name);
+  }
+  if (game_history->letter_distribution_name != NULL) {
+    free(game_history->letter_distribution_name);
   }
 
   for (int i = 0; i < 2; i++) {

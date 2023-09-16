@@ -48,8 +48,13 @@ void test_single_error_case(const char *gcg_filename,
 }
 
 void test_error_cases() {
+  test_single_error_case("empty.gcg", GCG_PARSE_STATUS_GCG_EMPTY);
   test_single_error_case("duplicate_nicknames.gcg",
+                         GCG_PARSE_STATUS_DUPLICATE_NICKNAMES);
+  test_single_error_case("duplicate_names.gcg",
                          GCG_PARSE_STATUS_DUPLICATE_NAMES);
+  test_single_error_case("description_after_events.gcg",
+                         GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT);
 }
 
 void test_gcg() { test_error_cases(); }

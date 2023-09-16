@@ -43,8 +43,8 @@ typedef struct GameHistory {
   char *id_auth;
   char *uid;
   char *lexicon_name;
-  char *letter_distribution_filepath;
-  char *variant;
+  char *letter_distribution_name;
+  char *variant_name;
   board_layout_t board_layout;
   GameHistoryPlayer *players[2];
   int number_of_events;
