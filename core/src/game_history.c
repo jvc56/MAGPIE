@@ -33,6 +33,7 @@ GameEvent *create_game_event(GameHistory *game_history) {
     return NULL;
   }
   GameEvent *game_event = malloc(sizeof(GameEvent));
+  game_event->player_index = -1;
   game_event->cumulative_score = 0;
   game_event->move = NULL;
   game_event->rack = NULL;
@@ -62,9 +63,11 @@ GameHistory *create_game_history() {
   game_history->uid = NULL;
   game_history->lexicon_name = NULL;
   game_history->letter_distribution_name = NULL;
-  game_history->board_layout = BOARD_LAYOUT_CROSSWORD_GAME;
+  game_history->game_variant = GAME_VARIANT_UNKNOWN;
+  game_history->board_layout = BOARD_LAYOUT_UNKNOWN;
   game_history->players[0] = NULL;
   game_history->players[1] = NULL;
+  game_history->letter_distribution = NULL;
   game_history->number_of_events = 0;
   game_history->events = malloc(sizeof(GameEvent) * (MAX_GAME_EVENTS));
   return game_history;
@@ -88,6 +91,10 @@ void destroy_game_history(GameHistory *game_history) {
   }
   if (game_history->letter_distribution_name != NULL) {
     free(game_history->letter_distribution_name);
+  }
+
+  if (game_history->letter_distribution != NULL) {
+    destroy_letter_distribution(game_history->letter_distribution);
   }
 
   for (int i = 0; i < 2; i++) {

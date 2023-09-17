@@ -27,6 +27,14 @@ void test_str_to_machine_letters(SuperConfig *superconfig) {
   assert(mls[0] == 0);
   assert(mls[1] == 0);
 
+  // english:
+  uint8_t emls[20];
+  num_mls = str_to_machine_letters(config->letter_distribution, "ABZ", emls);
+  assert(num_mls == 3);
+  assert(emls[0] == 1);
+  assert(emls[1] == 2);
+  assert(emls[2] == 26);
+
   // catalan:
   config = get_disc_config(superconfig);
   uint8_t cmls[20];
@@ -43,4 +51,12 @@ void test_str_to_machine_letters(SuperConfig *superconfig) {
   assert(cmls[7] == (19 | 0x80));
   assert(cmls[8] == 6);
   assert(cmls[9] == 21);
+
+  // Ensure invalid racks return -1
+  uint8_t imls[40];
+  assert(str_to_machine_letters(config->letter_distribution, "2", imls));
+  assert(str_to_machine_letters(config->letter_distribution, "ABC9EFG", imls));
+  assert(str_to_machine_letters(config->letter_distribution, "AB#F", imls));
+  assert(str_to_machine_letters(config->letter_distribution, "BEHF&", imls));
+  assert(str_to_machine_letters(config->letter_distribution, "-BDEF", imls));
 }

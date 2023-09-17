@@ -16,6 +16,12 @@
 #define MAX_GCG_LINE_LENGTH 512
 #define MAX_GROUPS 7
 
+// FIXME: handle these defaults in the config
+#define DEFAULT_LEXICON "CSW21"
+#define DEFAULT_LETTER_DISTRIBUTION "english"
+#define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
+#define DEFAULT_VARIANT GAME_VARIANT_CLASSIC
+
 typedef enum {
   GCG_ENCODING_ISO_8859_1,
   GCG_ENCODING_UTF8,
@@ -219,7 +225,7 @@ void destroy_gcg_parser(GCGParser *gcg_parser) {
   free(gcg_parser);
 }
 
-void utf8_encode(const char *input, char *output) {
+void convert_iso_8859_1_to_utf8(const char *input, char *output) {
   const unsigned char *in = (unsigned char *)input;
   unsigned char *out = (unsigned char *)output;
 
@@ -257,22 +263,18 @@ gcg_parse_status_t load_next_gcg_line(GCGParser *gcg_parser) {
   gcg_parser->gcg_line_buffer[buffer_index] = '\0';
   // Increment the char index to read the next line
   gcg_parser->current_gcg_char_index++;
-  printf("loaded buffer:>%s<\n", gcg_parser->gcg_line_buffer);
   return gcg_parse_status;
 }
 
 char *get_matching_group_as_string(GCGParser *gcg_parser, int group_index) {
   int start_index = gcg_parser->matching_groups[group_index].rm_so;
   int end_index = gcg_parser->matching_groups[group_index].rm_eo;
-  int matching_group_string_length = end_index - start_index + 1;
-
+  int matching_group_string_length = end_index - start_index;
   char *matching_group_string =
       (char *)malloc((matching_group_string_length + 1) * sizeof(char));
-
-  for (int i = start_index, j = 0; i <= end_index; i++, j++) {
-    matching_group_string[j] = gcg_parser->gcg_line_buffer[i];
+  for (int i = start_index; i < end_index; i++) {
+    matching_group_string[i - start_index] = gcg_parser->gcg_line_buffer[i];
   }
-
   matching_group_string[matching_group_string_length] = '\0';
   return matching_group_string;
 }
@@ -311,16 +313,22 @@ gcg_parse_status_t handle_encoding(GCGParser *gcg_parser) {
   int regexec_result =
       regexec(&encoding_token_regex_pair->regex, gcg_parser->gcg_line_buffer,
               (MAX_GROUPS), gcg_parser->matching_groups, 0);
+  int gcg_start_write_offset = 0;
   if (!regexec_result) {
     char *encoding_string = get_matching_group_as_string(gcg_parser, 1);
-    bool is_utf8 =
-        !strcmp("utf-8", encoding_string) || strcmp("utf8", encoding_string);
+    bool is_utf8 = !strcasecmp("utf-8", encoding_string) ||
+                   !strcasecmp("utf8", encoding_string);
+    bool is_iso_8859_1 = !strcasecmp("iso-8859-1", encoding_string) ||
+                         !strcasecmp("iso 8859-1", encoding_string);
     free(encoding_string);
     if (is_utf8) {
       gcg_encoding = GCG_ENCODING_UTF8;
-    } else {
+    } else if (!is_iso_8859_1) {
       return GCG_PARSE_STATUS_UNSUPPORTED_CHARACTER_ENCODING;
     }
+    // If the first line was the encoding line, we want
+    // to ignore this when processing the GCG.
+    gcg_start_write_offset = gcg_parser->current_gcg_char_index;
   } else if (regexec_result != REG_NOMATCH) {
     char msgbuf[100];
     regerror(regexec_result, &encoding_token_regex_pair->regex, msgbuf,
@@ -329,15 +337,14 @@ gcg_parse_status_t handle_encoding(GCGParser *gcg_parser) {
   }
 
   if (gcg_encoding == GCG_ENCODING_ISO_8859_1) {
-    // Convert to utf8.
     gcg_parser->utf8_gcg_string =
         malloc(sizeof(char) * 2 * strlen(gcg_parser->input_gcg_string));
-    utf8_encode(gcg_parser->input_gcg_string +
-                    gcg_parser->current_gcg_char_index,
-                gcg_parser->utf8_gcg_string);
+    convert_iso_8859_1_to_utf8(gcg_parser->input_gcg_string +
+                                   gcg_start_write_offset,
+                               gcg_parser->utf8_gcg_string);
   } else {
-    gcg_parser->utf8_gcg_string = strdup(gcg_parser->input_gcg_string +
-                                         gcg_parser->current_gcg_char_index);
+    gcg_parser->utf8_gcg_string =
+        strdup(gcg_parser->input_gcg_string + gcg_start_write_offset);
   }
   gcg_parser->current_gcg_char_index = 0;
   return gcg_parse_status;
@@ -365,8 +372,8 @@ int get_player_index(GCGParser *gcg_parser, int group_index) {
 
   int player_index = -1;
   for (int i = 0; i < 2; i++) {
-    if (strcmp(gcg_parser->game_history->players[0]->nickname,
-               player_nickname)) {
+    if (!strcmp(gcg_parser->game_history->players[i]->nickname,
+                player_nickname)) {
       player_index = i;
       break;
     }
@@ -433,14 +440,18 @@ Rack *get_rack_from_matching(GCGParser *gcg_parser, int group_index) {
   set_rack_to_string(rack, player_rack_string,
                      gcg_parser->game_history->letter_distribution);
   free(player_rack_string);
+  if (rack->empty) {
+    return NULL;
+  }
   return rack;
 }
 
 gcg_parse_status_t copy_position_to_game_event(GCGParser *gcg_parser,
                                                GameEvent *game_event,
                                                int group_index) {
+  game_event->move->row_start = 0;
   for (int i = gcg_parser->matching_groups[group_index].rm_so;
-       i <= gcg_parser->matching_groups[group_index].rm_eo; i++) {
+       i < gcg_parser->matching_groups[group_index].rm_eo; i++) {
     char position_char = gcg_parser->gcg_line_buffer[i];
     if (position_char >= 48 && position_char <= 57) {
       if (i == 0) {
@@ -452,10 +463,16 @@ gcg_parse_status_t copy_position_to_game_event(GCGParser *gcg_parser,
       if (i == 0) {
         game_event->move->vertical = 1;
       }
-      game_event->move->row_start = position_char - 65;
+      game_event->move->col_start = position_char - 65;
     } else {
       return GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION;
     }
+  }
+  if (game_event->move->col_start < 0 ||
+      game_event->move->col_start > BOARD_DIM ||
+      game_event->move->row_start < 0 ||
+      game_event->move->row_start > BOARD_DIM) {
+    return GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION;
   }
   return GCG_PARSE_STATUS_SUCCESS;
 }
@@ -467,43 +484,58 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   }
   GameHistory *game_history = gcg_parser->game_history;
   gcg_token_t token = find_matching_gcg_token(gcg_parser);
+  gcg_token_t previous_token = gcg_parser->previous_token;
+  gcg_parser->previous_token = token;
+  GameEvent *previous_game_event = NULL;
+  if (game_history->number_of_events > 0) {
+    previous_game_event =
+        game_history->events[game_history->number_of_events - 1];
+  }
   // Perform logic with previous token here because it
   // is set.
-  if (gcg_parser->previous_token == GCG_NOTE_TOKEN && token != GCG_NOTE_TOKEN) {
+  if (previous_token == GCG_NOTE_TOKEN && token != GCG_NOTE_TOKEN) {
     game_history->events[game_history->number_of_events - 1]->note =
         string_builder_dump(gcg_parser->note_builder, NULL);
     string_builder_clear(gcg_parser->note_builder);
   }
-  gcg_parser->previous_token = token;
 
   if (token == GCG_MOVE_TOKEN || token == GCG_PASS_TOKEN ||
       token == GCG_EXCHANGE_TOKEN) {
-    if (game_history->letter_distribution_name != NULL) {
+    if (game_history->players[0] == NULL || game_history->players[1] == NULL) {
+      return GCG_PARSE_STATUS_MOVE_BEFORE_PLAYER;
+    }
+    if (game_history->letter_distribution == NULL) {
 
+      if (game_history->lexicon_name == NULL) {
+        game_history->lexicon_name = strdup(DEFAULT_LEXICON);
+      }
+      if (game_history->letter_distribution_name == NULL) {
+        game_history->letter_distribution_name =
+            get_letter_distribution_name_from_lexicon_name(
+                game_history->lexicon_name);
+      }
+      if (game_history->board_layout == BOARD_LAYOUT_UNKNOWN) {
+        game_history->board_layout = BOARD_LAYOUT_CROSSWORD_GAME;
+      }
+      if (game_history->game_variant == GAME_VARIANT_UNKNOWN) {
+        game_history->game_variant = GAME_VARIANT_CLASSIC;
+      }
       char *letter_distribution_filepath = get_letter_distribution_filepath(
           game_history->letter_distribution_name);
-
-      load_letter_distribution(game_history->letter_distribution,
-                               letter_distribution_filepath);
+      game_history->letter_distribution =
+          create_letter_distribution(letter_distribution_filepath);
       free(letter_distribution_filepath);
-    } else {
-      printf("load a default letter distribution here\n");
-      abort();
     }
   }
 
   GameEvent *game_event = NULL;
   int player_index = -1;
-  int char_rack_length;
   switch (token) {
   case GCG_PLAYER_TOKEN:
     if (game_history->number_of_events > 0) {
-      return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
+      return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
     player_index = get_matching_group_as_int(gcg_parser, 1) - 1;
-    if (player_index != 0 && player_index != 1) {
-      return GCG_PARSE_STATUS_PLAYER_NOT_SUPPORTED;
-    }
     if (game_history->players[player_index]) {
       return GCG_PARSE_STATUS_PLAYER_NUMBER_REDUNDANT;
     }
@@ -526,40 +558,36 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     break;
   case GCG_TITLE_TOKEN:
     if (game_history->number_of_events > 0) {
-      return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
+      return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
     game_history->title = get_matching_group_as_string(gcg_parser, 1);
     break;
   case GCG_DESCRIPTION_TOKEN:
     if (game_history->number_of_events > 0) {
-      return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
+      return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
     game_history->description = get_matching_group_as_string(gcg_parser, 1);
     break;
   case GCG_ID_TOKEN:
     if (game_history->number_of_events > 0) {
-      return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
+      return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
     game_history->id_auth = get_matching_group_as_string(gcg_parser, 1);
     game_history->uid = get_matching_group_as_string(gcg_parser, 2);
     break;
   case GCG_RACK1_TOKEN:
-    char_rack_length = gcg_parser->matching_groups[1].rm_eo -
-                       gcg_parser->matching_groups[1].rm_so;
-    if (char_rack_length > MAX_CHAR_RACK_SIZE) {
-      return GCG_PARSE_STATUS_RACK_OVERFLOW;
-    }
     game_history->players[0]->last_known_rack =
         get_rack_from_matching(gcg_parser, 1);
+    if (game_history->players[0]->last_known_rack == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
+    }
     break;
   case GCG_RACK2_TOKEN:
-    char_rack_length = gcg_parser->matching_groups[1].rm_eo -
-                       gcg_parser->matching_groups[1].rm_so;
-    if (char_rack_length > MAX_CHAR_RACK_SIZE) {
-      return GCG_PARSE_STATUS_RACK_OVERFLOW;
-    }
     game_history->players[1]->last_known_rack =
         get_rack_from_matching(gcg_parser, 1);
+    if (game_history->players[1]->last_known_rack == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
+    }
     break;
   case GCG_ENCODING_TOKEN:
     return GCG_PARSE_STATUS_ENCODING_WRONG_PLACE;
@@ -571,14 +599,16 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     }
 
     game_event = create_game_event(game_history);
-
+    game_event->player_index = player_index;
     // Write the move rack
     game_event->event_type = GAME_EVENT_TILE_PLACEMENT_MOVE;
     game_event->move = create_move();
 
     // Rack
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
-
+    if (game_event->rack == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
+    }
     // Position
     gcg_parse_status_t gcg_parse_status =
         copy_position_to_game_event(gcg_parser, game_event, 3);
@@ -594,7 +624,6 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
 
     // Cumulative score
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 6);
-
     break;
   case GCG_NOTE_TOKEN:
     if (game_history->number_of_events == 0) {
@@ -606,13 +635,13 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     break;
   case GCG_LEXICON_TOKEN:
     if (game_history->number_of_events > 0) {
-      return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
+      return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
     game_history->lexicon_name = get_matching_group_as_string(gcg_parser, 1);
     break;
   case GCG_BOARD_LAYOUT_TOKEN:
     if (game_history->number_of_events > 0) {
-      return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
+      return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
     char *board_layout_string = get_matching_group_as_string(gcg_parser, 1);
     game_history->board_layout =
@@ -621,16 +650,19 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     break;
   case GCG_TILE_DISTRIBUTION_NAME_TOKEN:
     if (game_history->number_of_events > 0) {
-      return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
+      return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
     game_history->letter_distribution_name =
         get_matching_group_as_string(gcg_parser, 1);
     break;
   case GCG_GAME_TYPE_TOKEN:
     if (game_history->number_of_events > 0) {
-      return GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT;
+      return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    game_history->variant_name = get_matching_group_as_string(gcg_parser, 1);
+    char *game_variant_name = get_matching_group_as_string(gcg_parser, 1);
+    game_history->game_variant =
+        get_game_variant_type_from_name(game_variant_name);
+    free(game_variant_name);
     break;
   case GCG_PHONY_TILES_RETURNED_TOKEN:
     player_index = get_player_index(gcg_parser, 1);
@@ -638,16 +670,22 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
 
-    if (game_history->number_of_events == 0 ||
-        game_history->events[game_history->number_of_events - 1]->event_type !=
-            GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    Rack *phony_tiles_returned_rack = get_rack_from_matching(gcg_parser, 2);
+    if (phony_tiles_returned_rack == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
+    }
+    if (game_history->number_of_events == 0 || previous_game_event == NULL ||
+        previous_game_event->player_index != player_index ||
+        !racks_are_equal(phony_tiles_returned_rack,
+                         previous_game_event->rack)) {
       return GCG_PARSE_STATUS_PHONY_TILES_RETURNED_WITHOUT_PLAY;
     }
 
     game_event = create_game_event(game_history);
+    game_event->player_index = player_index;
 
     game_event->event_type = GAME_EVENT_PHONY_TILES_RETURNED;
-    game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    game_event->rack = phony_tiles_returned_rack;
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
 
     break;
@@ -657,8 +695,12 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
     game_event = create_game_event(game_history);
+    game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_TIME_PENALTY;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    if (game_event->rack == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
+    }
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
     break;
   case GCG_LAST_RACK_PENALTY_TOKEN:
@@ -667,23 +709,22 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
     game_event = create_game_event(game_history);
+    game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_END_RACK_PENALTY;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
-
-    Rack *should_be_identical_rack = get_rack_from_matching(gcg_parser, 3);
-
-    bool racks_are_identical = true;
-    for (int i = 0; i < game_event->rack->array_size; i++) {
-      should_be_identical_rack->array[i] -= game_event->rack->array[i];
-      if (should_be_identical_rack->array[i] != 0) {
-        racks_are_identical = false;
-        break;
-      }
+    if (game_event->rack == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
+    Rack *penalty_tiles = get_rack_from_matching(gcg_parser, 3);
+    if (penalty_tiles == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
+    }
+    bool penalty_tiles_equals_rack =
+        racks_are_equal(game_event->rack, penalty_tiles);
 
-    destroy_rack(should_be_identical_rack);
+    destroy_rack(penalty_tiles);
 
-    if (!racks_are_identical) {
+    if (!penalty_tiles_equals_rack) {
       return GCG_PARSE_STATUS_LAST_RACK_PENALTY_MALFORMED;
     }
 
@@ -696,8 +737,12 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
     game_event = create_game_event(game_history);
+    game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_PASS;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    if (game_event->rack == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
+    }
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 3);
     break;
   case GCG_CHALLENGE_BONUS_TOKEN:
@@ -707,7 +752,11 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
     game_event = create_game_event(game_history);
+    game_event->player_index = player_index;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    if (game_event->rack == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
+    }
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
     if (token == GCG_CHALLENGE_BONUS_TOKEN) {
       game_event->event_type = GAME_EVENT_CHALLENGE_BONUS;
@@ -721,20 +770,23 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
     game_event = create_game_event(game_history);
+    game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_EXCHANGE;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    if (game_event->rack == NULL) {
+      return GCG_PARSE_STATUS_RACK_MALFORMED;
+    }
     copy_exchanged_tiles_to_game_event(gcg_parser, game_event, 3);
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
     break;
   case GCG_UNKNOWN_TOKEN:
-    if (gcg_parser->previous_token == GCG_NOTE_TOKEN) {
+    if (previous_token == GCG_NOTE_TOKEN) {
       // Assume this is the continuation of a note
       string_builder_add_string(gcg_parser->note_builder,
                                 gcg_parser->gcg_line_buffer,
                                 strlen(gcg_parser->gcg_line_buffer));
     }
     if (!contains_all_whitespace(gcg_parser->gcg_line_buffer)) {
-      printf("no matching token: >%s<\n", gcg_parser->gcg_line_buffer);
       return GCG_PARSE_STATUS_NO_MATCHING_TOKEN;
     }
     break;
@@ -746,9 +798,13 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
 
 gcg_parse_status_t parse_gcg_with_parser(GCGParser *gcg_parser) {
   gcg_parse_status_t gcg_parse_status = handle_encoding(gcg_parser);
+  int count = 100;
   while (gcg_parse_status == GCG_PARSE_STATUS_SUCCESS &&
          !gcg_parser->at_end_of_gcg) {
     gcg_parse_status = parse_next_gcg_line(gcg_parser);
+    if (count-- == 0) {
+      break;
+    }
   }
   return gcg_parse_status;
 }

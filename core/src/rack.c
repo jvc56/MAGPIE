@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,4 +89,20 @@ void rack_to_string(Rack *rack, char *rack_string,
       rp += sprintf(rp, "%s", tile);
     }
   }
+}
+
+bool racks_are_equal(Rack *rack1, Rack *rack2) {
+  if (rack1 == NULL && rack2 == NULL) {
+    return true;
+  }
+  if (rack1 == NULL || rack2 == NULL ||
+      rack1->array_size != rack2->array_size || rack1->empty != rack2->empty) {
+    return false;
+  }
+  for (int i = 0; i < rack1->array_size; i++) {
+    if (rack1->array[i] != rack2->array[i]) {
+      return false;
+    }
+  }
+  return true;
 }

@@ -43,18 +43,40 @@ void test_single_error_case(const char *gcg_filename,
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   destroy_game_history(game_history);
-  printf("actual: %d\n", gcg_parse_status);
+  printf("%d == %d\n", gcg_parse_status, expected_gcg_parse_status);
   assert(gcg_parse_status == expected_gcg_parse_status);
 }
 
 void test_error_cases() {
   test_single_error_case("empty.gcg", GCG_PARSE_STATUS_GCG_EMPTY);
+  test_single_error_case("unsupported_character_encoding.gcg",
+                         GCG_PARSE_STATUS_UNSUPPORTED_CHARACTER_ENCODING);
   test_single_error_case("duplicate_nicknames.gcg",
                          GCG_PARSE_STATUS_DUPLICATE_NICKNAMES);
   test_single_error_case("duplicate_names.gcg",
                          GCG_PARSE_STATUS_DUPLICATE_NAMES);
   test_single_error_case("description_after_events.gcg",
-                         GCG_PARSE_STATUS_PRAGMA_PRECEDENT_EVENT);
+                         GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT);
+  test_single_error_case("move_before_player.gcg",
+                         GCG_PARSE_STATUS_MOVE_BEFORE_PLAYER);
+  test_single_error_case("player_number_redundant.gcg",
+                         GCG_PARSE_STATUS_PLAYER_NUMBER_REDUNDANT);
+  test_single_error_case("encoding_wrong_place.gcg",
+                         GCG_PARSE_STATUS_ENCODING_WRONG_PLACE);
+  test_single_error_case("player_does_not_exist.gcg",
+                         GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST);
+  test_single_error_case("note_before_events.gcg",
+                         GCG_PARSE_STATUS_NOTE_PRECEDENT_EVENT);
+  test_single_error_case("phony_tiles_returned_with_no_play.gcg",
+                         GCG_PARSE_STATUS_PHONY_TILES_RETURNED_WITHOUT_PLAY);
+  test_single_error_case("no_matching_token.gcg",
+                         GCG_PARSE_STATUS_NO_MATCHING_TOKEN);
+  test_single_error_case("line_overflow.gcg", GCG_PARSE_STATUS_LINE_OVERFLOW);
+  test_single_error_case("lowercase_tile_placement.gcg",
+                         GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+  test_single_error_case("invalid_tile_placement.gcg",
+                         GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION);
+  test_single_error_case("malformed_rack.gcg", GCG_PARSE_STATUS_RACK_MALFORMED);
 }
 
 void test_gcg() { test_error_cases(); }

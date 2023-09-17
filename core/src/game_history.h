@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "board.h"
+#include "game.h"
 #include "move.h"
 #include "player.h"
 
@@ -24,6 +25,7 @@ typedef enum {
 
 typedef struct GameEvent {
   game_event_t event_type;
+  int player_index;
   int cumulative_score;
   Rack *rack;
   Move *move;
@@ -44,7 +46,7 @@ typedef struct GameHistory {
   char *uid;
   char *lexicon_name;
   char *letter_distribution_name;
-  char *variant_name;
+  game_variant_t game_variant;
   board_layout_t board_layout;
   GameHistoryPlayer *players[2];
   int number_of_events;

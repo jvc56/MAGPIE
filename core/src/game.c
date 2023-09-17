@@ -369,3 +369,13 @@ void destroy_game(Game *game) {
   }
   free(game);
 }
+
+game_variant_t get_game_variant_type_from_name(const char *variant_name) {
+  game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
+  if (strcmp(variant_name, "classic")) {
+    game_variant = GAME_VARIANT_CLASSIC;
+  } else if (strcmp(variant_name, "wordsmog")) {
+    game_variant = GAME_VARIANT_WORDSMOG;
+  }
+  return game_variant;
+}

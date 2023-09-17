@@ -62,7 +62,6 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   int max_tile_length = 0;
   while (fgets(line, sizeof(line), file)) {
     char *token;
-
     // letter, lower case, dist, score, is_vowel
     token = strtok(line, ",");
     char letter[5];
@@ -154,6 +153,7 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
   int num_mls = 0;
   int num_bytes = strlen(str);
   int i = 0;
+  int prev_i = -1;
   while (i < num_bytes) {
     for (int j = i + letter_distribution->max_tile_length; j > i; j--) {
       if (j > num_bytes) {
@@ -173,6 +173,13 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
       num_mls++;
       i = j;
     }
+    if (i == prev_i) {
+      // Search is not finding any valid machine letters
+      // and is not making progress. Return now with -1
+      // to signify an error to avoid an infinite loop.
+      return -1;
+    }
+    prev_i = i;
   }
   return num_mls;
 }
@@ -226,4 +233,9 @@ char *get_letter_distribution_filepath(const char *ld_name) {
   strcat(result, LETTER_DISTRIBUTION_FILE_EXTENSION);
 
   return result;
+}
+
+// FIXME: return letter distrubitions other than english
+char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name) {
+  return strdup("english");
 }
