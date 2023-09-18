@@ -6,7 +6,6 @@ covhtml
 *.gcda
 *.gcno
 *.info
-*.gcg
 *.out
 dev/*.txt
 perf*

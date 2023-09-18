@@ -77,6 +77,10 @@ void test_error_cases() {
   test_single_error_case("invalid_tile_placement.gcg",
                          GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION);
   test_single_error_case("malformed_rack.gcg", GCG_PARSE_STATUS_RACK_MALFORMED);
+  test_single_error_case("six_pass_last_rack_malformed.gcg",
+                         GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
+  test_single_error_case("exchange_malformed.gcg",
+                         GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
 }
 
 void test_gcg() { test_error_cases(); }

@@ -109,7 +109,7 @@ const char *challenge_bonus_regex =
     "space:]]+\\+([[:digit:]]+"
     ")[[:space:]]+([[:digit:]]+)";
 const char *exchange_regex =
-    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+-(^[[:"
+    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:]]+-([^[:"
     "space:]]+)[[:space:]]+\\+0[[:space:]]+([[:digit:]]+)";
 const char *end_rack_points_regex =
     ">([^[:space:]]+):[[:space:]]+\\(([^[:space:]]+)\\)[[:space:]]+\\+([[:"
@@ -399,38 +399,77 @@ void copy_cumulative_score_to_game_event(GCGParser *gcg_parser,
              NULL, 10);
 }
 
-void copy_played_tiles_to_game_event(GCGParser *gcg_parser,
-                                     GameEvent *game_event, int group_index) {
-  char played_tiles_string[MAX_CHAR_PLAY_SIZE] = "";
-  for (int i = gcg_parser->matching_groups[group_index].rm_so;
-       i <= gcg_parser->matching_groups[group_index].rm_eo; i++) {
-    played_tiles_string[i] = gcg_parser->gcg_line_buffer[i];
+uint8_t *
+convert_tiles_string_to_machine_letters(GCGParser *gcg_parser, int group_index,
+                                        int *number_of_machine_letters) {
+
+  int start_index = gcg_parser->matching_groups[group_index].rm_so;
+  int end_index = gcg_parser->matching_groups[group_index].rm_eo;
+  int matching_group_length = end_index - start_index;
+  char *tiles_string = malloc(sizeof(char) * (matching_group_length + 1));
+  for (int i = start_index; i < end_index; i++) {
+    tiles_string[i - start_index] = gcg_parser->gcg_line_buffer[i];
   }
-  game_event->move->tiles_length =
+  tiles_string[matching_group_length] = '\0';
+
+  uint8_t *machine_letters = malloc(sizeof(char) * (matching_group_length + 1));
+  *number_of_machine_letters =
       str_to_machine_letters(gcg_parser->game_history->letter_distribution,
-                             played_tiles_string, game_event->move->tiles);
-  // Calculate tiles played
-  game_event->move->tiles_played = 0;
-  for (int i = 0; i < game_event->move->tiles_length; i++) {
-    if (game_event->move->tiles[i] != PLAYED_THROUGH_MARKER) {
-      game_event->move->tiles_played++;
-    }
+                             tiles_string, machine_letters);
+  free(tiles_string);
+  if (*number_of_machine_letters < 0) {
+    return NULL;
   }
+  return machine_letters;
 }
 
-void copy_exchanged_tiles_to_game_event(GCGParser *gcg_parser,
-                                        GameEvent *game_event,
-                                        int group_index) {
-  char exchanged_tiles_string[MAX_CHAR_PLAY_SIZE] = "";
-  for (int i = gcg_parser->matching_groups[group_index].rm_so;
-       i <= gcg_parser->matching_groups[group_index].rm_eo; i++) {
-    exchanged_tiles_string[i] = gcg_parser->gcg_line_buffer[i];
+bool copy_played_tiles_to_game_event(GCGParser *gcg_parser,
+                                     GameEvent *game_event, int group_index) {
+  int number_of_machine_letters;
+  uint8_t *played_tiles = convert_tiles_string_to_machine_letters(
+      gcg_parser, group_index, &number_of_machine_letters);
+
+  bool success =
+      number_of_machine_letters <= BOARD_DIM && number_of_machine_letters > 0;
+  if (success) {
+    game_event->move->tiles_length = number_of_machine_letters;
+    for (int i = 0; i < game_event->move->tiles_length; i++) {
+      game_event->move->tiles[i] = played_tiles[i];
+    }
+    // Calculate tiles played
+    game_event->move->tiles_played = 0;
+    for (int i = 0; i < game_event->move->tiles_length; i++) {
+      if (game_event->move->tiles[i] != PLAYED_THROUGH_MARKER) {
+        game_event->move->tiles_played++;
+      }
+    }
   }
 
-  game_event->move->tiles_played =
-      str_to_machine_letters(gcg_parser->game_history->letter_distribution,
-                             exchanged_tiles_string, game_event->move->tiles);
-  game_event->move->tiles_length = game_event->move->tiles_played + 1;
+  free(played_tiles);
+
+  return success;
+}
+
+bool copy_exchanged_tiles_to_game_event(GCGParser *gcg_parser,
+                                        GameEvent *game_event,
+                                        int group_index) {
+  int number_of_machine_letters;
+  uint8_t *played_tiles = convert_tiles_string_to_machine_letters(
+      gcg_parser, group_index, &number_of_machine_letters);
+
+  bool success =
+      number_of_machine_letters < RACK_SIZE && number_of_machine_letters > 0;
+  if (success) {
+    game_event->move->tiles_played = number_of_machine_letters;
+    for (int i = 0; i < game_event->move->tiles_played; i++) {
+      game_event->move->tiles[i] = played_tiles[i];
+    }
+    game_event->move->tiles_length = game_event->move->tiles_played + 1;
+  }
+
+  free(played_tiles);
+
+  return success;
 }
 
 Rack *get_rack_from_matching(GCGParser *gcg_parser, int group_index) {
@@ -441,6 +480,7 @@ Rack *get_rack_from_matching(GCGParser *gcg_parser, int group_index) {
                      gcg_parser->game_history->letter_distribution);
   free(player_rack_string);
   if (rack->empty) {
+    destroy_rack(rack);
     return NULL;
   }
   return rack;
@@ -530,6 +570,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
 
   GameEvent *game_event = NULL;
   int player_index = -1;
+  bool success;
   switch (token) {
   case GCG_PLAYER_TOKEN:
     if (game_history->number_of_events > 0) {
@@ -617,8 +658,10 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     }
 
     // Played tiles
-    copy_played_tiles_to_game_event(gcg_parser, game_event, 4);
-
+    success = copy_played_tiles_to_game_event(gcg_parser, game_event, 4);
+    if (!success) {
+      return GCG_PARSE_STATUS_PLAY_MALFORMED;
+    }
     // Score
     copy_score_to_game_event(gcg_parser, game_event, 5);
 
@@ -670,22 +713,21 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
 
-    Rack *phony_tiles_returned_rack = get_rack_from_matching(gcg_parser, 2);
-    if (phony_tiles_returned_rack == NULL) {
+    game_event = create_game_event(game_history);
+
+    game_event->rack = get_rack_from_matching(gcg_parser, 2);
+    if (game_event->rack == NULL) {
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
     if (game_history->number_of_events == 0 || previous_game_event == NULL ||
         previous_game_event->player_index != player_index ||
-        !racks_are_equal(phony_tiles_returned_rack,
-                         previous_game_event->rack)) {
+        !racks_are_equal(game_event->rack, previous_game_event->rack)) {
       return GCG_PARSE_STATUS_PHONY_TILES_RETURNED_WITHOUT_PLAY;
     }
 
-    game_event = create_game_event(game_history);
     game_event->player_index = player_index;
 
     game_event->event_type = GAME_EVENT_PHONY_TILES_RETURNED;
-    game_event->rack = phony_tiles_returned_rack;
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
 
     break;
@@ -725,7 +767,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     destroy_rack(penalty_tiles);
 
     if (!penalty_tiles_equals_rack) {
-      return GCG_PARSE_STATUS_LAST_RACK_PENALTY_MALFORMED;
+      return GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK;
     }
 
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 5);
@@ -770,14 +812,33 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
     game_event = create_game_event(game_history);
+    game_event->move = create_move();
     game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_EXCHANGE;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
     if (game_event->rack == NULL) {
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
-    copy_exchanged_tiles_to_game_event(gcg_parser, game_event, 3);
+    success = copy_exchanged_tiles_to_game_event(gcg_parser, game_event, 3);
+    if (!success) {
+      return GCG_PARSE_STATUS_PLAY_MALFORMED;
+    }
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
+    bool exchanged_tiles_not_in_rack = false;
+    for (int i = 0; i < game_event->move->tiles_played; i++) {
+      game_event->rack->array[game_event->move->tiles[i]]--;
+      if (game_event->rack->array[game_event->move->tiles[i]] < 0) {
+        exchanged_tiles_not_in_rack = true;
+      }
+    }
+    // Undo the operation so we don't have to allocate
+    // an additional rack.
+    for (int i = 0; i < game_event->move->tiles_played; i++) {
+      game_event->rack->array[game_event->move->tiles[i]]++;
+    }
+    if (exchanged_tiles_not_in_rack) {
+      return GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK;
+    }
     break;
   case GCG_UNKNOWN_TOKEN:
     if (previous_token == GCG_NOTE_TOKEN) {
