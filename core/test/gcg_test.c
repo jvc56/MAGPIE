@@ -43,7 +43,19 @@ void test_single_error_case(const char *gcg_filename,
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   destroy_game_history(game_history);
-  printf("%d == %d\n", gcg_parse_status, expected_gcg_parse_status);
+  printf("%s: %d == %d\n", gcg_filename, gcg_parse_status,
+         expected_gcg_parse_status);
+  assert(gcg_parse_status == expected_gcg_parse_status);
+}
+
+void test_single_error_case(const char *gcg_filename,
+                            gcg_parse_status_t expected_gcg_parse_status) {
+  GameHistory *game_history = create_game_history();
+  gcg_parse_status_t gcg_parse_status =
+      test_parse_gcg(gcg_filename, game_history);
+  destroy_game_history(game_history);
+  printf("%s: %d == %d\n", gcg_filename, gcg_parse_status,
+         expected_gcg_parse_status);
   assert(gcg_parse_status == expected_gcg_parse_status);
 }
 
@@ -79,8 +91,20 @@ void test_error_cases() {
   test_single_error_case("malformed_rack.gcg", GCG_PARSE_STATUS_RACK_MALFORMED);
   test_single_error_case("six_pass_last_rack_malformed.gcg",
                          GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
-  test_single_error_case("exchange_malformed.gcg",
+  test_single_error_case("exchange_not_in_rack.gcg",
                          GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
+  test_single_error_case("exchange_malformed.gcg",
+                         GCG_PARSE_STATUS_PLAY_MALFORMED);
+  test_single_error_case("malformed_play.gcg", GCG_PARSE_STATUS_PLAY_MALFORMED);
+  test_single_error_case("played_tile_not_in_rack.gcg",
+                         GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
+  test_single_error_case("play_out_of_bounds.gcg",
+                         GCG_PARSE_STATUS_PLAY_OUT_OF_BOUNDS);
 }
+
+// Need to test
+// iso-8859-1 encoding string
+// errors in play through
+// play through success logic
 
 void test_gcg() { test_error_cases(); }

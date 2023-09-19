@@ -119,7 +119,8 @@ void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
                          LetterDistribution *letter_distribution) {
 
   uint8_t mls[50];
-  int num_mls = str_to_machine_letters(letter_distribution, letters, mls);
+  int num_mls =
+      str_to_machine_letters(letter_distribution, letters, false, mls);
   for (int i = 0; i < num_mls; i++) {
     draw_letter_to_rack(bag, rack, mls[i]);
   }

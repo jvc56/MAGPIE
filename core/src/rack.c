@@ -73,7 +73,8 @@ void set_rack_to_string(Rack *rack, const char *rack_string,
   reset_rack(rack);
 
   uint8_t mls[BAG_SIZE];
-  int num_mls = str_to_machine_letters(letter_distribution, rack_string, mls);
+  int num_mls =
+      str_to_machine_letters(letter_distribution, rack_string, false, mls);
   for (int i = 0; i < num_mls; i++) {
     add_letter_to_rack(rack, mls[i]);
   }

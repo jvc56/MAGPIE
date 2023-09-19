@@ -401,6 +401,7 @@ void copy_cumulative_score_to_game_event(GCGParser *gcg_parser,
 
 uint8_t *
 convert_tiles_string_to_machine_letters(GCGParser *gcg_parser, int group_index,
+                                        bool allow_played_through_marker,
                                         int *number_of_machine_letters) {
 
   int start_index = gcg_parser->matching_groups[group_index].rm_so;
@@ -413,11 +414,12 @@ convert_tiles_string_to_machine_letters(GCGParser *gcg_parser, int group_index,
   tiles_string[matching_group_length] = '\0';
 
   uint8_t *machine_letters = malloc(sizeof(char) * (matching_group_length + 1));
-  *number_of_machine_letters =
-      str_to_machine_letters(gcg_parser->game_history->letter_distribution,
-                             tiles_string, machine_letters);
+  *number_of_machine_letters = str_to_machine_letters(
+      gcg_parser->game_history->letter_distribution, tiles_string,
+      allow_played_through_marker, machine_letters);
   free(tiles_string);
   if (*number_of_machine_letters < 0) {
+    free(machine_letters);
     return NULL;
   }
   return machine_letters;
@@ -427,7 +429,7 @@ bool copy_played_tiles_to_game_event(GCGParser *gcg_parser,
                                      GameEvent *game_event, int group_index) {
   int number_of_machine_letters;
   uint8_t *played_tiles = convert_tiles_string_to_machine_letters(
-      gcg_parser, group_index, &number_of_machine_letters);
+      gcg_parser, group_index, true, &number_of_machine_letters);
 
   bool success =
       number_of_machine_letters <= BOARD_DIM && number_of_machine_letters > 0;
@@ -455,7 +457,7 @@ bool copy_exchanged_tiles_to_game_event(GCGParser *gcg_parser,
                                         int group_index) {
   int number_of_machine_letters;
   uint8_t *played_tiles = convert_tiles_string_to_machine_letters(
-      gcg_parser, group_index, &number_of_machine_letters);
+      gcg_parser, group_index, false, &number_of_machine_letters);
 
   bool success =
       number_of_machine_letters < RACK_SIZE && number_of_machine_letters > 0;
@@ -490,24 +492,28 @@ gcg_parse_status_t copy_position_to_game_event(GCGParser *gcg_parser,
                                                GameEvent *game_event,
                                                int group_index) {
   game_event->move->row_start = 0;
-  for (int i = gcg_parser->matching_groups[group_index].rm_so;
-       i < gcg_parser->matching_groups[group_index].rm_eo; i++) {
+  int start_index = gcg_parser->matching_groups[group_index].rm_so;
+  int end_index = gcg_parser->matching_groups[group_index].rm_eo;
+  for (int i = start_index; i < end_index; i++) {
     char position_char = gcg_parser->gcg_line_buffer[i];
-    if (position_char >= 48 && position_char <= 57) {
-      if (i == 0) {
+    if (position_char >= '0' && position_char <= '9') {
+      if (i == start_index) {
         game_event->move->vertical = 0;
       }
+      // Build the 1-indexed row_start
       game_event->move->row_start =
-          game_event->move->row_start * 10 + (position_char - 48);
-    } else if (position_char >= 65 && position_char <= 90) {
-      if (i == 0) {
+          game_event->move->row_start * 10 + (position_char - '0');
+    } else if (position_char >= 'A' && position_char <= 'Z') {
+      if (i == start_index) {
         game_event->move->vertical = 1;
       }
-      game_event->move->col_start = position_char - 65;
+      game_event->move->col_start = position_char - 'A';
     } else {
       return GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION;
     }
   }
+  // Convert the 1-index row start into 0-indexed row start
+  game_event->move->row_start--;
   if (game_event->move->col_start < 0 ||
       game_event->move->col_start > BOARD_DIM ||
       game_event->move->row_start < 0 ||
@@ -662,6 +668,41 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (!success) {
       return GCG_PARSE_STATUS_PLAY_MALFORMED;
     }
+
+    // Check if the play goes off the board
+    if ((game_event->move->vertical &&
+         game_event->move->row_start + game_event->move->tiles_length >
+             BOARD_DIM) ||
+        (!game_event->move->vertical &&
+         game_event->move->col_start + game_event->move->tiles_length >
+             BOARD_DIM)) {
+      return GCG_PARSE_STATUS_PLAY_OUT_OF_BOUNDS;
+    }
+
+    for (int i = 0; i < game_event->move->tiles_length; i++) {
+      if (game_event->move->tiles[i] != PLAYED_THROUGH_MARKER) {
+        uint8_t played_letter = game_event->move->tiles[i];
+        if (is_blanked(played_letter)) {
+          played_letter = BLANK_MACHINE_LETTER;
+        }
+        game_event->rack->array[played_letter]--;
+        if (game_event->rack->array[played_letter] < 0) {
+          return GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK;
+        }
+      }
+    }
+
+    // Restore the rack
+    for (int i = 0; i < game_event->move->tiles_length; i++) {
+      if (game_event->move->tiles[i] != PLAYED_THROUGH_MARKER) {
+        uint8_t played_letter = game_event->move->tiles[i];
+        if (is_blanked(played_letter)) {
+          played_letter = BLANK_MACHINE_LETTER;
+        }
+        game_event->rack->array[played_letter]++;
+      }
+    }
+
     // Score
     copy_score_to_game_event(gcg_parser, game_event, 5);
 

@@ -23,6 +23,7 @@ typedef enum {
   GCG_PARSE_STATUS_PLAY_MALFORMED,
   GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION,
   GCG_PARSE_STATUS_MOVE_BEFORE_PLAYER,
+  GCG_PARSE_STATUS_PLAY_OUT_OF_BOUNDS,
 } gcg_parse_status_t;
 
 gcg_parse_status_t parse_gcg(const char *gcg_filename,

@@ -1,6 +1,7 @@
 #ifndef LETTER_DISTRIBUTION_H
 #define LETTER_DISTRIBUTION_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "constants.h"
@@ -38,7 +39,8 @@ inline uint8_t get_unblanked_machine_letter(uint8_t ml) {
 inline uint8_t is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
 
 int str_to_machine_letters(LetterDistribution *letter_distribution,
-                           const char *str, uint8_t *mls);
+                           const char *str, bool allow_played_through_marker,
+                           uint8_t *mls);
 char *get_letter_distribution_filepath(const char *ld_name);
 char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name);
 #endif

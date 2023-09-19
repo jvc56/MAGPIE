@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -148,7 +149,8 @@ void machine_letter_to_human_readable_letter(
 // enough.
 // Note: This is a slow function that should not be used in any hot loops.
 int str_to_machine_letters(LetterDistribution *letter_distribution,
-                           const char *str, uint8_t *mls) {
+                           const char *str, bool allow_played_through_marker,
+                           uint8_t *mls) {
 
   int num_mls = 0;
   int num_bytes = strlen(str);
@@ -166,7 +168,12 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
       uint8_t ml = human_readable_letter_to_machine_letter(letter_distribution,
                                                            possible_letter);
       if (ml == INVALID_LETTER) {
-        continue;
+        if (j - i == 1 && allow_played_through_marker &&
+            possible_letter[0] == ASCII_PLAYED_THROUGH) {
+          ml = PLAYED_THROUGH_MARKER;
+        } else {
+          continue;
+        }
       }
       // Otherwise, we found the letter we're looking for
       mls[num_mls] = ml;
