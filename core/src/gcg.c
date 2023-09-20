@@ -237,6 +237,7 @@ void convert_iso_8859_1_to_utf8(const char *input, char *output) {
       *out++ = (*in++ & 0x3F) + 0x80;
     }
   }
+  *out = '\0';
 }
 
 gcg_parse_status_t load_next_gcg_line(GCGParser *gcg_parser) {
@@ -263,6 +264,12 @@ gcg_parse_status_t load_next_gcg_line(GCGParser *gcg_parser) {
   gcg_parser->gcg_line_buffer[buffer_index] = '\0';
   // Increment the char index to read the next line
   gcg_parser->current_gcg_char_index++;
+  if (gcg_parser->gcg_line_buffer[gcg_parser->current_gcg_char_index] == '\n') {
+    // We've mostly hit a carriage return, so increment
+    // the char index so we don't unnecessary regex matching
+    // on an empty line.
+    gcg_parser->current_gcg_char_index++;
+  }
   return gcg_parse_status;
 }
 
@@ -531,7 +538,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   GameHistory *game_history = gcg_parser->game_history;
   gcg_token_t token = find_matching_gcg_token(gcg_parser);
   gcg_token_t previous_token = gcg_parser->previous_token;
-  gcg_parser->previous_token = token;
+  if (token != GCG_UNKNOWN_TOKEN) {
+    gcg_parser->previous_token = token;
+  }
   GameEvent *previous_game_event = NULL;
   if (game_history->number_of_events > 0) {
     previous_game_event =
@@ -577,6 +586,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   GameEvent *game_event = NULL;
   int player_index = -1;
   bool success;
+  printf("%d: >%s<\n", token, gcg_parser->gcg_line_buffer);
   switch (token) {
   case GCG_PLAYER_TOKEN:
     if (game_history->number_of_events > 0) {

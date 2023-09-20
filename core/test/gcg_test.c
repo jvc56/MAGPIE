@@ -48,17 +48,6 @@ void test_single_error_case(const char *gcg_filename,
   assert(gcg_parse_status == expected_gcg_parse_status);
 }
 
-void test_single_error_case(const char *gcg_filename,
-                            gcg_parse_status_t expected_gcg_parse_status) {
-  GameHistory *game_history = create_game_history();
-  gcg_parse_status_t gcg_parse_status =
-      test_parse_gcg(gcg_filename, game_history);
-  destroy_game_history(game_history);
-  printf("%s: %d == %d\n", gcg_filename, gcg_parse_status,
-         expected_gcg_parse_status);
-  assert(gcg_parse_status == expected_gcg_parse_status);
-}
-
 void test_error_cases() {
   test_single_error_case("empty.gcg", GCG_PARSE_STATUS_GCG_EMPTY);
   test_single_error_case("unsupported_character_encoding.gcg",
@@ -102,9 +91,54 @@ void test_error_cases() {
                          GCG_PARSE_STATUS_PLAY_OUT_OF_BOUNDS);
 }
 
-// Need to test
-// iso-8859-1 encoding string
-// errors in play through
-// play through success logic
+void test_parse_special_char() {
+  const char *gcg_filename = "name_iso8859-1.gcg";
+  GameHistory *game_history = create_game_history();
+  gcg_parse_status_t gcg_parse_status =
+      test_parse_gcg(gcg_filename, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(!strcmp(game_history->players[0]->name, "césar"));
+  assert(!strcmp(game_history->players[1]->name, "hércules"));
+  destroy_game_history(game_history);
+}
 
-void test_gcg() { test_error_cases(); }
+void test_parse_special_utf8_no_header() {
+  const char *gcg_filename = "name_utf8_noheader.gcg";
+  GameHistory *game_history = create_game_history();
+  gcg_parse_status_t gcg_parse_status =
+      test_parse_gcg(gcg_filename, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(!strcmp(game_history->players[0]->name, "cÃ©sar"));
+  destroy_game_history(game_history);
+}
+
+void test_parse_special_utf8_with_header() {
+  const char *gcg_filename = "name_utf8_with_header.gcg";
+  GameHistory *game_history = create_game_history();
+  gcg_parse_status_t gcg_parse_status =
+      test_parse_gcg(gcg_filename, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(!strcmp(game_history->players[0]->name, "césar"));
+  destroy_game_history(game_history);
+}
+
+void test_parse_dos_mode() {
+  const char *gcg_filename = "utf8_dos.gcg";
+  GameHistory *game_history = create_game_history();
+  gcg_parse_status_t gcg_parse_status =
+      test_parse_gcg(gcg_filename, game_history);
+  printf("ps: %d\n", gcg_parse_status);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(!strcmp(game_history->players[0]->name, "angwantibo"));
+  assert(!strcmp(game_history->players[1]->name, "Michal_Josko"));
+  destroy_game_history(game_history);
+}
+
+void test_gcg() {
+  // test_error_cases();
+  test_parse_special_char();
+  test_parse_special_utf8_no_header();
+  test_parse_special_utf8_with_header();
+  test_parse_dos_mode();
+  // test multiline note
+}
