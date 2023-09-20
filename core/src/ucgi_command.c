@@ -331,6 +331,8 @@ int process_ucgi_command_async(char *cmd, UCGICommandVars *ucgi_command_vars) {
 
 // ucgi_search_status returns the current status of the ongoing search. The
 // returned string must be freed by the caller.
+// Note: this function does not currently work with the `sim static` search.
+// It will deadlock.
 char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
   if (ucgi_command_vars == NULL) {
     log_warn("The UCGI Command variables struct has not been initialized.");

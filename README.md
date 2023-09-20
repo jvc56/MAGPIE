@@ -15,6 +15,7 @@ then
 
 `go sim threads 7 plays 5 stopcondition 99 i 10000 info 100 checkstop 500 depth 5`
 
+
 - threads: The number of threads to use (7 in this case)
 - plays: How many plays to sim (The top 5 in this case)
 - stopcondition: Stop after 95, 98, or 99 percent sureness level. We must be this percent sure that the top play is the best one before stopping.
@@ -22,3 +23,8 @@ then
 - info: Print out information every this many iterations
 - checkstop: Check the stopping condition every this many iterations
 - depth: How deep to search (number of plies)
+
+
+For a static search (no simming):
+
+`go sim static depth 1 threads 1 plays 15`

@@ -496,12 +496,12 @@ void test_ucgi_command() {
   sleep(5);
 
   char *ret = ucgi_search_status(ucgi_command_vars);
-  assert(strcmp(ret + strlen(ret) - 20, "bestmove 8d.ZILLION\n") == 0);
+  assert_strings_equal(ret + strlen(ret) - 21, "bestsofar 8d.ZILLION\n");
   free(ret);
   // Sleep a couple more seconds and then stop the search.
   sleep(2);
   char *ret2 = ucgi_stop_search(ucgi_command_vars);
-  assert(strcmp(ret2 + strlen(ret2) - 20, "bestmove 8d.ZILLION\n") == 0);
+  assert_strings_equal(ret2 + strlen(ret2) - 20, "bestmove 8d.ZILLION\n");
   free(ret2);
 
   assert(ucgi_command_vars->thread_control->halt_status ==

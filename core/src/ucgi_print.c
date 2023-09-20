@@ -174,8 +174,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
 
 // Sim
 
-void print_ucgi_static_moves(Game *game, int nmoves,
-                             ThreadControl *thread_control) {
+char *ucgi_static_moves(Game *game, int nmoves) {
   int moves_size = nmoves * sizeof(char) * 90;
   char *moves_string = (char *)malloc(moves_size);
   char *starting_moves_string_pointer = moves_string;
@@ -193,6 +192,12 @@ void print_ucgi_static_moves(Game *game, int nmoves,
   store_move_ucgi(game->gen->move_list->moves[0], game->gen->board, move,
                   game->gen->letter_distribution);
   sprintf(moves_string, "bestmove %s\n", move);
+  return starting_moves_string_pointer;
+}
+
+void print_ucgi_static_moves(Game *game, int nmoves,
+                             ThreadControl *thread_control) {
+  char *starting_moves_string_pointer = ucgi_static_moves(game, nmoves);
   print_to_file(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
 }

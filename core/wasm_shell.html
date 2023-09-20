@@ -326,8 +326,8 @@
         }
         console.log("Using nthreads: " + nthreads);
 
-        const goCmd = `go sim threads ${nthreads} plays 5 stopcondition 99 depth 5 i 10000 checkstop 100 info 100`;
-
+        // const goCmd = `go sim threads ${nthreads} plays 5 stopcondition 99 depth 5 i 10000 checkstop 100 info 100`;
+        const goCmd = `go sim static threads ${nthreads} depth 1 plays 15`;
         const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);
         const cmd2C = Module.stringToNewUTF8(goCmd);
         processUCGICommand(cmd1C);
@@ -336,6 +336,7 @@
         Module._free(cmd2C);
 
         const interval = setInterval(() => {
+          console.log("gonna get search status");
           const status = ucgiSearchStatus();
           const str = Module.UTF8ToString(status);
           print(str);

@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -137,4 +138,11 @@ int count_newlines(const char *str) {
     str++;
   }
   return count;
+}
+
+void assert_strings_equal(char *str1, char *str2) {
+  if (strcmp(str1, str2) != 0) {
+    fprintf(stderr, "strings are not equal: %s != %s", str1, str2);
+    assert(0);
+  }
 }

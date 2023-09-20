@@ -5,9 +5,11 @@
 
 #include "config.h"
 #include "game.h"
+#include "log.h"
 #include "move.h"
 #include "ucgi_command.h"
 #include "ucgi_formats.h"
+#include "ucgi_print.h"
 #include "words.h"
 
 static UCGICommandVars *ucgi_command_vars = NULL;
@@ -15,7 +17,7 @@ static UCGICommandVars *ucgi_command_vars = NULL;
 // tiles must contain 0 for play-through tiles!
 char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
                  uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
-
+  log_debug("got str %s", cgpstr);
   char lexicon[20] = "";
   char ldname[20] = "";
   lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
@@ -110,7 +112,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   destroy_move(move);
 
   tp += sprintf(tp, "currmove %s", move_placeholder);
-  tp += sprintf(tp, "result %s valid %s", "scored",
+  tp += sprintf(tp, " result %s valid %s", "scored",
                 phonies_exist ? "false" : "true");
   if (phonies_exist) {
     tp += sprintf(tp, " invalid_words %s", phonies);
@@ -126,6 +128,32 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   // Caller can use UTF8ToString on the returned pointer but it MUST FREE
   // this string after it's done with it!
   return retstr;
+}
+
+// a synchronous function to return a static eval of a position.
+char *static_evaluation(char *cgpstr, int num_plays) {
+  char lexicon[20] = "";
+  char ldname[20] = "";
+  lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
+  Config *config = NULL;
+  load_config_from_lexargs(&config, cgpstr, lexicon, ldname);
+
+  Game *game = create_game(config);
+  load_cgp(game, cgpstr);
+
+  int sorting_type = game->players[0]->strategy_params->move_sorting;
+  game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
+  generate_moves(game->gen, game->players[game->player_on_turn_index],
+                 game->players[1 - game->player_on_turn_index]->rack,
+                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+  int number_of_moves_generated = game->gen->move_list->count;
+  if (number_of_moves_generated < num_plays) {
+    num_plays = number_of_moves_generated;
+  }
+  sort_moves(game->gen->move_list);
+  game->players[0]->strategy_params->move_sorting = sorting_type;
+  // This pointer needs to be freed by the caller:
+  return ucgi_static_moves(game, num_plays);
 }
 
 int process_ucgi_command_wasm(char *cmd) {

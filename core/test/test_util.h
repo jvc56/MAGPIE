@@ -39,5 +39,6 @@ void write_rack_to_end_of_buffer(char *dest,
 void write_spaces_to_end_of_buffer(char *buffer, int n);
 void write_string_to_end_of_buffer(char *buffer, char *s);
 int count_newlines(const char *str);
+void assert_strings_equal(char *str1, char *str2);
 
 #endif

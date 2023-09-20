@@ -252,6 +252,7 @@ int handle_potential_stopping_condition(Simmer *simmer) {
       }
     }
   }
+
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
   log_debug("total ignored: %d\n", total_ignored);
   if (total_ignored >= simmer->num_simmed_plays - 1) {
