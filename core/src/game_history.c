@@ -30,7 +30,7 @@ void destroy_game_history_player(GameHistoryPlayer *player) {
 
 GameEvent *create_game_event(GameHistory *game_history) {
   if (game_history->number_of_events == MAX_GAME_EVENTS) {
-    return NULL;
+    log_fatal("game events overflow");
   }
   GameEvent *game_event = malloc(sizeof(GameEvent));
   game_event->player_index = -1;
@@ -107,4 +107,16 @@ void destroy_game_history(GameHistory *game_history) {
   }
   free(game_history->events);
   free(game_history);
+}
+
+void set_cumulative_scores(GameHistory *game_history) {
+  for (int i = 0; i < 2; i++) {
+    for (int j = game_history->number_of_events - 1; j >= 0; j--) {
+      if (game_history->events[j]->player_index == i) {
+        game_history->players[i]->score =
+            game_history->events[j]->cumulative_score;
+        break;
+      }
+    }
+  }
 }

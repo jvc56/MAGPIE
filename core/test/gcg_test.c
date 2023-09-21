@@ -43,8 +43,6 @@ void test_single_error_case(const char *gcg_filename,
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   destroy_game_history(game_history);
-  printf("%s: %d == %d\n", gcg_filename, gcg_parse_status,
-         expected_gcg_parse_status);
   assert(gcg_parse_status == expected_gcg_parse_status);
 }
 
@@ -89,6 +87,10 @@ void test_error_cases() {
                          GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
   test_single_error_case("play_out_of_bounds.gcg",
                          GCG_PARSE_STATUS_PLAY_OUT_OF_BOUNDS);
+  test_single_error_case("redundant_pragma.gcg",
+                         GCG_PARSE_STATUS_REDUNDANT_PRAGMA);
+  test_single_error_case("game_events_overflow.gcg",
+                         GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW);
 }
 
 void test_parse_special_char() {
@@ -127,18 +129,42 @@ void test_parse_dos_mode() {
   GameHistory *game_history = create_game_history();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
-  printf("ps: %d\n", gcg_parse_status);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  assert(!strcmp(game_history->players[0]->name, "angwantibo"));
-  assert(!strcmp(game_history->players[1]->name, "Michal_Josko"));
+  assert(!strcmp(game_history->players[0]->nickname, "angwantibo"));
+  assert(!strcmp(game_history->players[1]->nickname, "Michal_Josko"));
+  destroy_game_history(game_history);
+}
+
+void test_success_standard() {
+  const char *gcg_filename = "success_standard.gcg";
+  GameHistory *game_history = create_game_history();
+  gcg_parse_status_t gcg_parse_status =
+      test_parse_gcg(gcg_filename, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  assert(!strcmp(game_history->title, "test game"));
+  assert(!strcmp(game_history->description, "Created with Macondo"));
+  assert(!strcmp(game_history->id_auth, "io.woogles"));
+  assert(!strcmp(game_history->uid, "p6QRjJHG"));
+  assert(!strcmp(game_history->lexicon_name, "CSW21"));
+  assert(!strcmp(game_history->letter_distribution_name, "english"));
+  assert(game_history->game_variant == GAME_VARIANT_CLASSIC);
+  assert(game_history->board_layout == BOARD_LAYOUT_CROSSWORD_GAME);
+  assert(!strcmp(game_history->players[0]->nickname, "HastyBot"));
+  assert(game_history->players[0]->score == 516);
+  assert(game_history->players[0]->last_known_rack == NULL);
+  assert(!strcmp(game_history->players[1]->nickname, "RightBehindYou"));
+  assert(game_history->players[1]->score == 358);
+  assert(game_history->players[1]->last_known_rack == NULL);
+  assert(game_history->number_of_events == 29);
   destroy_game_history(game_history);
 }
 
 void test_gcg() {
-  // test_error_cases();
+  test_error_cases();
   test_parse_special_char();
   test_parse_special_utf8_no_header();
   test_parse_special_utf8_with_header();
   test_parse_dos_mode();
+  test_success_standard();
   // test multiline note
 }

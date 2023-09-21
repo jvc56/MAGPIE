@@ -91,7 +91,7 @@ const char *move_regex = ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
                          "]]+(\\w+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
                          "\\+([[:digit:]]+)[[:space:]]+([[:digit:]]+)";
 const char *note_regex = "#note (.+)";
-const char *lexicon_name_regex = "#lexicon_name (.+)";
+const char *lexicon_name_regex = "#lexicon (.+)";
 const char *character_encoding_regex = "#character-encoding ([[:graph:]]+)";
 const char *game_type_regex = "#game-type (.*)";
 const char *tile_set_regex = "#tile-set (.*)";
@@ -247,8 +247,7 @@ gcg_parse_status_t load_next_gcg_line(GCGParser *gcg_parser) {
   if (gcg_string == NULL) {
     gcg_string = gcg_parser->input_gcg_string;
   }
-  while (gcg_string[gcg_parser->current_gcg_char_index] != '\n' &&
-         gcg_string[gcg_parser->current_gcg_char_index] != '\r') {
+  while (gcg_string[gcg_parser->current_gcg_char_index] != '\n') {
     if (buffer_index == MAX_GCG_LINE_LENGTH) {
       gcg_parse_status = GCG_PARSE_STATUS_LINE_OVERFLOW;
       break;
@@ -256,20 +255,17 @@ gcg_parse_status_t load_next_gcg_line(GCGParser *gcg_parser) {
       gcg_parser->at_end_of_gcg = true;
       break;
     }
-    gcg_parser->gcg_line_buffer[buffer_index] =
-        gcg_string[gcg_parser->current_gcg_char_index];
+    if (gcg_string[gcg_parser->current_gcg_char_index] != '\r') {
+      // ignore carriage returns
+      gcg_parser->gcg_line_buffer[buffer_index] =
+          gcg_string[gcg_parser->current_gcg_char_index];
+      buffer_index++;
+    }
     gcg_parser->current_gcg_char_index++;
-    buffer_index++;
   }
   gcg_parser->gcg_line_buffer[buffer_index] = '\0';
   // Increment the char index to read the next line
   gcg_parser->current_gcg_char_index++;
-  if (gcg_parser->gcg_line_buffer[gcg_parser->current_gcg_char_index] == '\n') {
-    // We've mostly hit a carriage return, so increment
-    // the char index so we don't unnecessary regex matching
-    // on an empty line.
-    gcg_parser->current_gcg_char_index++;
-  }
   return gcg_parse_status;
 }
 
@@ -530,6 +526,16 @@ gcg_parse_status_t copy_position_to_game_event(GCGParser *gcg_parser,
   return GCG_PARSE_STATUS_SUCCESS;
 }
 
+void finalize_note(GCGParser *gcg_parser) {
+  if (string_builder_length(gcg_parser->note_builder) == 0) {
+    return;
+  }
+  gcg_parser->game_history
+      ->events[gcg_parser->game_history->number_of_events - 1]
+      ->note = string_builder_dump(gcg_parser->note_builder, NULL);
+  string_builder_clear(gcg_parser->note_builder);
+}
+
 gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   gcg_parse_status_t gcg_parse_status = load_next_gcg_line(gcg_parser);
   if (gcg_parse_status != GCG_PARSE_STATUS_SUCCESS) {
@@ -548,10 +554,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   }
   // Perform logic with previous token here because it
   // is set.
-  if (previous_token == GCG_NOTE_TOKEN && token != GCG_NOTE_TOKEN) {
-    game_history->events[game_history->number_of_events - 1]->note =
-        string_builder_dump(gcg_parser->note_builder, NULL);
-    string_builder_clear(gcg_parser->note_builder);
+  if (previous_token == GCG_NOTE_TOKEN && token != GCG_NOTE_TOKEN &&
+      token != GCG_UNKNOWN_TOKEN) {
+    finalize_note(gcg_parser);
   }
 
   if (token == GCG_MOVE_TOKEN || token == GCG_PASS_TOKEN ||
@@ -586,7 +591,6 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   GameEvent *game_event = NULL;
   int player_index = -1;
   bool success;
-  printf("%d: >%s<\n", token, gcg_parser->gcg_line_buffer);
   switch (token) {
   case GCG_PLAYER_TOKEN:
     if (game_history->number_of_events > 0) {
@@ -617,17 +621,26 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
+    if (game_history->title != NULL) {
+      return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
+    }
     game_history->title = get_matching_group_as_string(gcg_parser, 1);
     break;
   case GCG_DESCRIPTION_TOKEN:
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
+    if (game_history->description != NULL) {
+      return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
+    }
     game_history->description = get_matching_group_as_string(gcg_parser, 1);
     break;
   case GCG_ID_TOKEN:
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
+    }
+    if (game_history->id_auth != NULL || game_history->uid != NULL) {
+      return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     game_history->id_auth = get_matching_group_as_string(gcg_parser, 1);
     game_history->uid = get_matching_group_as_string(gcg_parser, 2);
@@ -654,7 +667,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (player_index < 0) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
-
+    if (game_history->number_of_events == MAX_GAME_EVENTS) {
+      return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
+    }
     game_event = create_game_event(game_history);
     game_event->player_index = player_index;
     // Write the move rack
@@ -731,11 +746,17 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
+    if (game_history->lexicon_name != NULL) {
+      return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
+    }
     game_history->lexicon_name = get_matching_group_as_string(gcg_parser, 1);
     break;
   case GCG_BOARD_LAYOUT_TOKEN:
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
+    }
+    if (game_history->board_layout != BOARD_LAYOUT_UNKNOWN) {
+      return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *board_layout_string = get_matching_group_as_string(gcg_parser, 1);
     game_history->board_layout =
@@ -746,12 +767,18 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
+    if (game_history->letter_distribution_name != NULL) {
+      return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
+    }
     game_history->letter_distribution_name =
         get_matching_group_as_string(gcg_parser, 1);
     break;
   case GCG_GAME_TYPE_TOKEN:
     if (game_history->number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
+    }
+    if (game_history->game_variant != GAME_VARIANT_UNKNOWN) {
+      return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *game_variant_name = get_matching_group_as_string(gcg_parser, 1);
     game_history->game_variant =
@@ -763,7 +790,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (player_index < 0) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
-
+    if (game_history->number_of_events == MAX_GAME_EVENTS) {
+      return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
+    }
     game_event = create_game_event(game_history);
 
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
@@ -787,19 +816,22 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (player_index < 0) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
+    if (game_history->number_of_events == MAX_GAME_EVENTS) {
+      return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
+    }
     game_event = create_game_event(game_history);
     game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_TIME_PENALTY;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
-    if (game_event->rack == NULL) {
-      return GCG_PARSE_STATUS_RACK_MALFORMED;
-    }
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 4);
     break;
   case GCG_LAST_RACK_PENALTY_TOKEN:
     player_index = get_player_index(gcg_parser, 1);
     if (player_index < 0) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
+    }
+    if (game_history->number_of_events == MAX_GAME_EVENTS) {
+      return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
     game_event = create_game_event(game_history);
     game_event->player_index = player_index;
@@ -829,6 +861,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (player_index < 0) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
     }
+    if (game_history->number_of_events == MAX_GAME_EVENTS) {
+      return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
+    }
     game_event = create_game_event(game_history);
     game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_PASS;
@@ -843,6 +878,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     player_index = get_player_index(gcg_parser, 1);
     if (player_index < 0) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
+    }
+    if (game_history->number_of_events == MAX_GAME_EVENTS) {
+      return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
     game_event = create_game_event(game_history);
     game_event->player_index = player_index;
@@ -861,6 +899,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     player_index = get_player_index(gcg_parser, 1);
     if (player_index < 0) {
       return GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST;
+    }
+    if (game_history->number_of_events == MAX_GAME_EVENTS) {
+      return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
     game_event = create_game_event(game_history);
     game_event->move = create_move();
@@ -897,10 +938,12 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       string_builder_add_string(gcg_parser->note_builder,
                                 gcg_parser->gcg_line_buffer,
                                 strlen(gcg_parser->gcg_line_buffer));
-    }
-    if (!contains_all_whitespace(gcg_parser->gcg_line_buffer)) {
+    } else if (!contains_all_whitespace(gcg_parser->gcg_line_buffer)) {
       return GCG_PARSE_STATUS_NO_MATCHING_TOKEN;
     }
+    break;
+  case GCG_TILE_SET_TOKEN:
+    // For now, don't do anything
     break;
   default:
     log_fatal("Unhandled token");
@@ -910,14 +953,12 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
 
 gcg_parse_status_t parse_gcg_with_parser(GCGParser *gcg_parser) {
   gcg_parse_status_t gcg_parse_status = handle_encoding(gcg_parser);
-  int count = 100;
   while (gcg_parse_status == GCG_PARSE_STATUS_SUCCESS &&
          !gcg_parser->at_end_of_gcg) {
     gcg_parse_status = parse_next_gcg_line(gcg_parser);
-    if (count-- == 0) {
-      break;
-    }
   }
+  finalize_note(gcg_parser);
+  set_cumulative_scores(gcg_parser->game_history);
   return gcg_parse_status;
 }
 

@@ -8,7 +8,7 @@
 #include "move.h"
 #include "player.h"
 
-#define MAX_GAME_EVENTS 100
+#define MAX_GAME_EVENTS 200
 
 typedef enum {
   GAME_EVENT_TILE_PLACEMENT_MOVE,
@@ -60,5 +60,6 @@ void destroy_game_history(GameHistory *game_history);
 GameHistoryPlayer *create_game_history_player(const char *name,
                                               const char *nickname);
 void destroy_game_history_player(GameHistoryPlayer *player);
+void set_cumulative_scores(GameHistory *game_history);
 
 #endif
