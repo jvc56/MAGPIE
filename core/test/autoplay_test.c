@@ -329,7 +329,7 @@ void autoplay_inference_test(Config *config) {
 
 void autoplay_game_pairs_test(SuperConfig *superconfig) {
   Config *csw_config = get_csw_config(superconfig);
-  int game_pairs = 100;
+  int game_pairs = 1000;
   int number_of_threads = 11;
   int original_number_of_game_pairs = csw_config->number_of_games_or_pairs;
   csw_config->number_of_games_or_pairs = game_pairs;

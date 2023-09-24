@@ -31,7 +31,8 @@ void destroy_inference_record(InferenceRecord *record) {
 Inference *create_inference(int capacity, int distribution_size) {
   Inference *inference = malloc(sizeof(Inference));
   inference->distribution_size = distribution_size;
-  inference->draw_and_leave_subtotals_size = distribution_size * (RACK_SIZE)*2;
+  inference->draw_and_leave_subtotals_size =
+      distribution_size * (RACK_SIZE) * 2;
   inference->total_racks_evaluated = 0;
   inference->bag_as_rack = create_rack(distribution_size);
   inference->leave = create_rack(distribution_size);
@@ -365,7 +366,7 @@ Inference *copy_inference(Inference *inference, ThreadControl *thread_control) {
   Inference *new_inference = malloc(sizeof(Inference));
   new_inference->distribution_size = inference->distribution_size;
   new_inference->draw_and_leave_subtotals_size =
-      inference->distribution_size * (RACK_SIZE)*2;
+      inference->distribution_size * (RACK_SIZE) * 2;
   new_inference->bag_as_rack = copy_rack(inference->bag_as_rack);
   new_inference->leave = copy_rack(inference->leave);
   new_inference->exchanged = copy_rack(inference->exchanged);
@@ -601,7 +602,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
     destroy_inference_copy(inferences_for_workers[thread_index]);
   }
 
-  // print_ucgi_inference(inference, thread_control);
+  print_ucgi_inference(inference, thread_control);
 
   free(inferences_for_workers);
   free(worker_ids);
@@ -637,7 +638,7 @@ void infer(ThreadControl *thread_control, Inference *inference, Game *game,
   }
 
   if (number_of_tiles_exchanged != 0 &&
-      inference->bag_as_rack->number_of_letters < (RACK_SIZE)*2) {
+      inference->bag_as_rack->number_of_letters < (RACK_SIZE) * 2) {
     inference->status = INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
     return;
   }

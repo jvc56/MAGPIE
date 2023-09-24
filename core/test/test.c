@@ -61,8 +61,8 @@ void unit_tests(SuperConfig *superconfig) {
   test_infer(superconfig);
   test_sim(superconfig);
   test_ucgi_command();
-  test_autoplay(superconfig);
   test_gcg();
+  test_autoplay(superconfig);
 }
 
 int main(int argc, char *argv[]) {
