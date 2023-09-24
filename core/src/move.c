@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -36,11 +37,39 @@ void reset_move_list(MoveList *ml) {
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
 }
 
+int within_epsilon_for_equity(double a, double b) { return fabs(a - b) < 1e-6; }
+
+// Enforce arbitrary order to keep
+// move order deterministic
+int compare_moves(Move *move_1, Move *move_2) {
+  if (!within_epsilon_for_equity(move_1->equity, move_2->equity)) {
+    return move_1->equity > move_2->equity;
+  }
+  if (move_1->row_start != move_2->row_start) {
+    return move_1->row_start < move_2->row_start;
+  }
+  if (move_1->col_start != move_2->col_start) {
+    return move_1->col_start < move_2->col_start;
+  }
+  if (move_1->tiles_played != move_2->tiles_played) {
+    return move_1->tiles_played < move_2->tiles_played;
+  }
+  if (move_1->tiles_length != move_2->tiles_length) {
+    return move_1->tiles_length < move_2->tiles_length;
+  }
+  for (int i = 0; i < move_1->tiles_length; i++) {
+    if (move_1->tiles[i] != move_2->tiles[i]) {
+      return move_1->tiles[i] < move_2->tiles[i];
+    }
+  }
+  return 0;
+}
+
 void up_heapify(MoveList *ml, int index) {
   Move *temp;
   int parent_node = (index - 1) / 2;
 
-  if (ml->moves[parent_node]->equity > ml->moves[index]->equity) {
+  if (compare_moves(ml->moves[parent_node], ml->moves[index])) {
     temp = ml->moves[parent_node];
     ml->moves[parent_node] = ml->moves[index];
     ml->moves[index] = temp;
@@ -59,11 +88,11 @@ void down_heapify(MoveList *ml, int parent_node) {
   if (right >= ml->count || right < 0)
     right = -1;
 
-  if (left != -1 && ml->moves[left]->equity < ml->moves[parent_node]->equity)
+  if (left != -1 && compare_moves(ml->moves[parent_node], ml->moves[left]))
     min = left;
   else
     min = parent_node;
-  if (right != -1 && ml->moves[right]->equity < ml->moves[min]->equity)
+  if (right != -1 && compare_moves(ml->moves[min], ml->moves[right]))
     min = right;
 
   if (min != parent_node) {
@@ -134,8 +163,8 @@ void insert_spare_move(MoveList *ml, double equity) {
 }
 
 void insert_spare_move_top_equity(MoveList *ml, double equity) {
-  if (equity > ml->moves[0]->equity) {
-    ml->spare_move->equity = equity;
+  ml->spare_move->equity = equity;
+  if (compare_moves(ml->spare_move, ml->moves[0])) {
     Move *swap = ml->moves[0];
     ml->moves[0] = ml->spare_move;
     ml->spare_move = swap;

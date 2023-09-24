@@ -4,6 +4,7 @@
 #define CMD_GEN "gen"
 #define CMD_UNIT_TESTS "unit"
 #define CMD_PROF "prof"
+#define CMD_AUTOPLAY "autoplay"
 #define CMD_INFER "infer"
 #define CMD_TOPVALL "topvall"
 #define CMD_SIM "sim"

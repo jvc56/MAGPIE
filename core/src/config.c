@@ -12,14 +12,13 @@
 #include "log.h"
 #include "util.h"
 
-static int game_pair_flag;
-
-Config *create_config(const char *kwg_filename,
-                      const char *letter_distribution_filename, const char *cgp,
-                      const char *klv_filename_1, int move_sorting_1,
-                      int play_recorder_type_1, const char *klv_filename_2,
+Config *create_config(const char *letter_distribution_filename, const char *cgp,
+                      const char *kwg_filename_1, const char *klv_filename_1,
+                      int move_sorting_1, int play_recorder_type_1,
+                      const char *kwg_filename_2, const char *klv_filename_2,
                       int move_sorting_2, int play_recorder_type_2,
                       int game_pair_flag, int number_of_games_or_pairs,
+                      int print_info, int checkstop,
                       const char *actual_tiles_played,
                       int player_to_infer_index, int actual_score,
                       int number_of_tiles_exchanged, double equity_margin,
@@ -30,16 +29,16 @@ Config *create_config(const char *kwg_filename,
   config->letter_distribution =
       create_letter_distribution(letter_distribution_filename);
   strcpy(config->ld_filename, letter_distribution_filename);
-  config->kwg = create_kwg(kwg_filename);
-  strcpy(config->kwg_filename, kwg_filename);
   config->cgp = strdup(cgp);
   config->actual_tiles_played = create_rack(config->letter_distribution->size);
   if (actual_tiles_played != NULL) {
     set_rack_to_string(config->actual_tiles_played, actual_tiles_played,
                        config->letter_distribution);
   }
-  config->game_pairs = game_pair_flag;
+  config->use_game_pairs = game_pair_flag;
   config->number_of_games_or_pairs = number_of_games_or_pairs;
+  config->print_info = print_info;
+  config->checkstop = checkstop;
   config->player_to_infer_index = player_to_infer_index;
   config->actual_score = actual_score;
   config->number_of_tiles_exchanged = number_of_tiles_exchanged;
@@ -47,6 +46,13 @@ Config *create_config(const char *kwg_filename,
   config->number_of_threads = number_of_threads;
 
   StrategyParams *player_1_strategy_params = malloc(sizeof(StrategyParams));
+  if (strcmp(kwg_filename_1, "") != 0) {
+    player_1_strategy_params->kwg = create_kwg(kwg_filename_1);
+    strcpy(player_1_strategy_params->kwg_filename, kwg_filename_1);
+  } else {
+    player_1_strategy_params->kwg = NULL;
+  }
+
   if (strcmp(klv_filename_1, "") != 0) {
     player_1_strategy_params->klv = create_klv(klv_filename_1);
     strcpy(player_1_strategy_params->klv_filename, klv_filename_1);
@@ -59,6 +65,15 @@ Config *create_config(const char *kwg_filename,
   config->player_1_strategy_params = player_1_strategy_params;
 
   StrategyParams *player_2_strategy_params = malloc(sizeof(StrategyParams));
+  if (!strcmp(kwg_filename_2, "") || !strcmp(kwg_filename_2, kwg_filename_1)) {
+    player_2_strategy_params->kwg = player_1_strategy_params->kwg;
+    strcpy(player_2_strategy_params->kwg_filename, kwg_filename_1);
+    config->kwg_is_shared = 1;
+  } else {
+    strcpy(player_2_strategy_params->kwg_filename, kwg_filename_2);
+    player_2_strategy_params->kwg = create_kwg(kwg_filename_2);
+    config->kwg_is_shared = 0;
+  }
 
   if (!strcmp(klv_filename_2, "") || !strcmp(klv_filename_2, klv_filename_1)) {
     player_2_strategy_params->klv = player_1_strategy_params->klv;
@@ -105,18 +120,22 @@ void check_arg_length(const char *arg) {
 }
 
 Config *create_config_from_args(int argc, char *argv[]) {
-  char kwg_filename[(MAX_ARG_LENGTH)] = "";
   char letter_distribution_filename[(MAX_ARG_LENGTH)] = "";
   char cgp[(MAX_ARG_LENGTH)] = "";
 
+  char kwg_filename_1[(MAX_ARG_LENGTH)] = "";
   char klv_filename_1[(MAX_ARG_LENGTH)] = "";
   int play_recorder_type_1 = PLAY_RECORDER_TYPE_ALL;
   int move_sorting_1 = SORT_BY_EQUITY;
 
+  char kwg_filename_2[(MAX_ARG_LENGTH)] = "";
   char klv_filename_2[(MAX_ARG_LENGTH)] = "";
   int play_recorder_type_2 = -1;
   int move_sorting_2 = -1;
-  int number_of_games_or_pairs = 10000;
+
+  int number_of_games_or_pairs = 0;
+  int print_info = 0;
+  int checkstop = 0;
 
   char actual_tiles_played[(MAX_ARG_LENGTH)] = "";
   int player_to_infer_index = -1;
@@ -126,31 +145,24 @@ Config *create_config_from_args(int argc, char *argv[]) {
   int number_of_threads = 1;
 
   char winpct_filename[(MAX_ARG_LENGTH)] = "";
+  int use_game_pairs = 1;
 
   int c;
   long n;
 
   while (1) {
     static struct option long_options[] = {
-        {"c", required_argument, 0, 1001},
-        {"d", required_argument, 0, 1002},
-        {"g", required_argument, 0, 1003},
-        {"l1", required_argument, 0, 1004},
-        {"r1", required_argument, 0, 1005},
-        {"s1", required_argument, 0, 1006},
-        {"l2", required_argument, 0, 1007},
-        {"r2", required_argument, 0, 1008},
-        {"s2", required_argument, 0, 1009},
-        {"n", required_argument, 0, 1010},
-        {"t", required_argument, 0, 1011},
-        {"i", required_argument, 0, 1012},
-        {"a", required_argument, 0, 1013},
-        {"e", required_argument, 0, 1014},
-        {"q", required_argument, 0, 1015},
-        {"h", required_argument, 0, 1016},
-        {"w", required_argument, 0, 1017},
-        {"p", no_argument, &game_pair_flag, 1},
-        {0, 0, 0, 0}};
+        {"c", required_argument, 0, 1001},  {"d", required_argument, 0, 1002},
+        {"g1", required_argument, 0, 1003}, {"l1", required_argument, 0, 1004},
+        {"r1", required_argument, 0, 1005}, {"s1", required_argument, 0, 1006},
+        {"g2", required_argument, 0, 1007}, {"l2", required_argument, 0, 1008},
+        {"r2", required_argument, 0, 1009}, {"s2", required_argument, 0, 1010},
+        {"n", required_argument, 0, 1011},  {"t", required_argument, 0, 1012},
+        {"i", required_argument, 0, 1013},  {"a", required_argument, 0, 1014},
+        {"e", required_argument, 0, 1015},  {"q", required_argument, 0, 1016},
+        {"h", required_argument, 0, 1017},  {"w", required_argument, 0, 1018},
+        {"f", required_argument, 0, 1019},  {"k", required_argument, 0, 1020},
+        {"p", required_argument, 0, 1021},  {0, 0, 0, 0}};
     int option_index = 0;
     c = getopt_long_only(argc, argv, "", long_options, &option_index);
 
@@ -172,7 +184,7 @@ Config *create_config_from_args(int argc, char *argv[]) {
 
     case 1003:
       check_arg_length(optarg);
-      strcpy(kwg_filename, optarg);
+      strcpy(kwg_filename_1, optarg);
       break;
 
     case 1004:
@@ -210,10 +222,15 @@ Config *create_config_from_args(int argc, char *argv[]) {
 
     case 1007:
       check_arg_length(optarg);
-      strcpy(klv_filename_2, optarg);
+      strcpy(kwg_filename_2, optarg);
       break;
 
     case 1008:
+      check_arg_length(optarg);
+      strcpy(klv_filename_2, optarg);
+      break;
+
+    case 1009:
       check_arg_length(optarg);
       if (!strcmp("all", optarg)) {
         play_recorder_type_2 = PLAY_RECORDER_TYPE_ALL;
@@ -227,7 +244,7 @@ Config *create_config_from_args(int argc, char *argv[]) {
       }
       break;
 
-    case 1009:
+    case 1010:
       check_arg_length(optarg);
       if (!strcmp("score", optarg)) {
         move_sorting_2 = SORT_BY_SCORE;
@@ -241,49 +258,67 @@ Config *create_config_from_args(int argc, char *argv[]) {
       }
       break;
 
-    case 1010:
+    case 1011:
       check_arg_length(optarg);
       n = strtol(optarg, NULL, 10);
       number_of_games_or_pairs = (int)n;
       break;
 
-    case 1011:
-      check_arg_length(optarg);
-      strcpy(actual_tiles_played, optarg);
-      break;
-
     case 1012:
       check_arg_length(optarg);
-      n = strtol(optarg, NULL, 10);
-      player_to_infer_index = (int)n;
+      strcpy(actual_tiles_played, optarg);
       break;
 
     case 1013:
       check_arg_length(optarg);
       n = strtol(optarg, NULL, 10);
-      actual_score = (int)n;
+      player_to_infer_index = (int)n;
       break;
 
     case 1014:
       check_arg_length(optarg);
       n = strtol(optarg, NULL, 10);
-      number_of_tiles_exchanged = (int)n;
+      actual_score = (int)n;
       break;
 
     case 1015:
       check_arg_length(optarg);
-      equity_margin = atof(optarg);
+      n = strtol(optarg, NULL, 10);
+      number_of_tiles_exchanged = (int)n;
       break;
 
     case 1016:
+      check_arg_length(optarg);
+      equity_margin = atof(optarg);
+      break;
+
+    case 1017:
       check_arg_length(optarg);
       n = strtol(optarg, NULL, 10);
       number_of_threads = (int)n;
       break;
 
-    case 1017:
+    case 1018:
       check_arg_length(optarg);
       strcpy(winpct_filename, optarg);
+      break;
+
+    case 1019:
+      check_arg_length(optarg);
+      n = strtol(optarg, NULL, 10);
+      print_info = (int)n;
+      break;
+
+    case 1020:
+      check_arg_length(optarg);
+      n = strtol(optarg, NULL, 10);
+      checkstop = (int)n;
+      break;
+
+    case 1021:
+      check_arg_length(optarg);
+      n = strtol(optarg, NULL, 10);
+      use_game_pairs = (int)n;
       break;
 
     case '?':
@@ -295,28 +330,32 @@ Config *create_config_from_args(int argc, char *argv[]) {
     }
   }
 
-  return create_config(kwg_filename, letter_distribution_filename, cgp,
-                       klv_filename_1, move_sorting_1, play_recorder_type_1,
-                       klv_filename_2, move_sorting_2, play_recorder_type_2,
-                       game_pair_flag, number_of_games_or_pairs,
-                       actual_tiles_played, player_to_infer_index, actual_score,
-                       number_of_tiles_exchanged, equity_margin,
-                       number_of_threads, winpct_filename, MOVE_LIST_CAPACITY);
+  return create_config(
+      letter_distribution_filename, cgp, kwg_filename_1, klv_filename_1,
+      move_sorting_1, play_recorder_type_1, kwg_filename_2, klv_filename_2,
+      move_sorting_2, play_recorder_type_2, use_game_pairs,
+      number_of_games_or_pairs, print_info, checkstop, actual_tiles_played,
+      player_to_infer_index, actual_score, number_of_tiles_exchanged,
+      equity_margin, number_of_threads, winpct_filename, MOVE_LIST_CAPACITY);
 }
 
 void destroy_config(Config *config) {
   if (config->player_1_strategy_params->klv != NULL) {
     destroy_klv(config->player_1_strategy_params->klv);
   }
+  if (config->player_1_strategy_params->kwg != NULL) {
+    destroy_kwg(config->player_1_strategy_params->kwg);
+  }
   free(config->player_1_strategy_params);
 
   if (!config->klv_is_shared) {
     destroy_klv(config->player_2_strategy_params->klv);
   }
-
+  if (!config->kwg_is_shared) {
+    destroy_kwg(config->player_2_strategy_params->kwg);
+  }
   free(config->player_2_strategy_params);
 
-  destroy_kwg(config->kwg);
   destroy_letter_distribution(config->letter_distribution);
   destroy_rack(config->actual_tiles_played);
   free(config->cgp);
@@ -349,10 +388,10 @@ void load_config_from_lexargs(Config **config, const char *cgp,
   }
 
   if (*config == NULL) {
-    *config = create_config(lexicon_file, dist, cgp, leaves, SORT_BY_EQUITY,
-                            PLAY_RECORDER_TYPE_ALL, "", SORT_BY_EQUITY,
-                            PLAY_RECORDER_TYPE_ALL, 0, 0, "", 0, 0, 0, 0, 0,
-                            winpct, 100);
+    *config = create_config(dist, cgp, lexicon_file, leaves, SORT_BY_EQUITY,
+                            PLAY_RECORDER_TYPE_ALL, "", "", SORT_BY_EQUITY,
+                            PLAY_RECORDER_TYPE_ALL, 0, 0, 9, 0, "", 0, 0, 0, 0,
+                            0, winpct, 100);
   } else {
     Config *c = (*config);
     // check each filename
@@ -362,10 +401,14 @@ void load_config_from_lexargs(Config **config, const char *cgp,
       destroy_letter_distribution(c->letter_distribution);
       c->letter_distribution = create_letter_distribution(dist);
     }
-    if (strcmp(c->kwg_filename, lexicon_file)) {
-      log_debug("reloading kwg");
-      destroy_kwg(c->kwg);
-      c->kwg = create_kwg(lexicon_file);
+    if (strcmp(c->player_1_strategy_params->kwg_filename, lexicon_file)) {
+      log_debug("reloading kwg #1");
+      destroy_kwg(c->player_1_strategy_params->kwg);
+      c->player_1_strategy_params->kwg = create_kwg(lexicon_file);
+      // assume the kwg applies to both players if we're using this function
+      assert(c->kwg_is_shared);
+      c->player_2_strategy_params->kwg = c->player_1_strategy_params->kwg;
+      strcpy(c->player_2_strategy_params->kwg_filename, lexicon_file);
     }
     if (strcmp(c->player_1_strategy_params->klv_filename, leaves)) {
       log_debug("reloading klv #1");
@@ -386,6 +429,7 @@ StrategyParams *copy_strategy_params(StrategyParams *orig) {
   StrategyParams *sp = malloc(sizeof(StrategyParams));
   // No need to copy the klv itself.
   sp->klv = orig->klv;
+  sp->kwg = orig->kwg;
   strcpy(sp->klv_filename, orig->klv_filename);
   sp->move_sorting = orig->move_sorting;
   sp->play_recorder_type = orig->play_recorder_type;

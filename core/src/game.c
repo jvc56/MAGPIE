@@ -190,8 +190,10 @@ void load_cgp(Game *game, const char *cgp) {
   game->consecutive_scoreless_turns = cgp_char - '0';
   game->player_on_turn_index = 0;
 
-  generate_all_cross_sets(game->gen->board, game->gen->kwg,
-                          game->gen->letter_distribution);
+  generate_all_cross_sets(game->gen->board,
+                          game->players[0]->strategy_params->kwg,
+                          game->players[1]->strategy_params->kwg,
+                          game->gen->letter_distribution, 0);
   update_all_anchors(game->gen->board);
 
   if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
@@ -252,6 +254,10 @@ void reset_game(Game *game) {
   game->backup_cursor = 0;
 }
 
+void set_player_on_turn(Game *game, int player_on_turn_index) {
+  game->player_on_turn_index = player_on_turn_index;
+}
+
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
@@ -278,9 +284,9 @@ Game *create_game(Config *config) {
   Game *game = malloc(sizeof(Game));
   game->gen = create_generator(config);
   game->players[0] =
-      create_player("player_1", config->letter_distribution->size);
+      create_player(0, "player_1", config->letter_distribution->size);
   game->players[1] =
-      create_player("player_2", config->letter_distribution->size);
+      create_player(1, "player_2", config->letter_distribution->size);
   game->players[0]->strategy_params =
       copy_strategy_params(config->player_1_strategy_params);
   game->players[1]->strategy_params =

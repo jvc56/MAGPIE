@@ -3,10 +3,13 @@
 #include <string.h>
 #include <time.h>
 
+#include "../src/autoplay.h"
 #include "../src/config.h"
 #include "../src/log.h"
+#include "../src/thread_control.h"
 
 #include "alphabet_test.h"
+#include "autoplay_test.h"
 #include "bag_test.h"
 #include "board_test.h"
 #include "config_test.h"
@@ -58,6 +61,7 @@ void unit_tests(SuperConfig *superconfig) {
   test_infer(superconfig);
   test_sim(superconfig);
   test_ucgi_command();
+  test_autoplay(superconfig);
   test_gcg();
 }
 
@@ -76,6 +80,14 @@ int main(int argc, char *argv[]) {
     Config *config = create_config_from_args(argc, argv);
     infer_from_config(config);
     destroy_config(config);
+  } else if (!strcmp(argv[1], CMD_AUTOPLAY)) {
+    Config *config = create_config_from_args(argc, argv);
+    ThreadControl *thread_control = create_thread_control_from_config(config);
+    AutoplayResults *autoplay_results = create_autoplay_results();
+    autoplay(thread_control, autoplay_results, config, time(NULL));
+    destroy_config(config);
+    destroy_autoplay_results(autoplay_results);
+    destroy_thread_control(thread_control);
   } else if (!strcmp(argv[1], CMD_PROF)) {
     Config *config = create_config_from_args(argc, argv);
     prof_tests(config);
@@ -86,40 +98,53 @@ int main(int argc, char *argv[]) {
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_SIM)) {
     Config *config = create_config_from_args(argc, argv);
-    perf_test_multithread_sim(config);
+    ThreadControl *thread_control = create_thread_control_from_config(config);
+    perf_test_multithread_sim(config, thread_control);
+    destroy_thread_control(thread_control);
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_SIM_STOPPING)) {
     Config *config = create_config_from_args(argc, argv);
-    perf_test_multithread_blocking_sim(config);
+    ThreadControl *thread_control = create_thread_control_from_config(config);
+    thread_control->print_info_interval = 500;
+    thread_control->check_stopping_condition_interval = 500;
+    perf_test_multithread_blocking_sim(config, thread_control);
+    destroy_thread_control(thread_control);
     destroy_config(config);
   } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
     Config *csw_config = create_config(
-        "./data/lexica/CSW21.kwg", "./data/letterdistributions/english.csv", "",
+        "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
         "./data/lexica/CSW21.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "",
-        -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
+        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
         "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
 
     Config *nwl_config = create_config(
-        "./data/lexica/NWL20.kwg", "./data/letterdistributions/english.csv", "",
+        "./data/letterdistributions/english.csv", "", "./data/lexica/NWL20.kwg",
         "./data/lexica/CSW21.klv2", SORT_BY_SCORE, PLAY_RECORDER_TYPE_ALL, "",
-        -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
+        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
         "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
 
     Config *osps_config = create_config(
         // no OSPS kwg yet, use later when we have tests.
-        "./data/lexica/OSPS44.kwg", "./data/letterdistributions/polish.csv", "",
-        "", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "", -1, -1, 0, 10000, NULL,
-        0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
+        "./data/letterdistributions/polish.csv", "", "./data/lexica/OSPS44.kwg",
+        "", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "", "", -1, -1, 0, 10000, 0,
+        0, NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
         MOVE_LIST_CAPACITY);
 
     Config *disc_config = create_config(
-        "./data/lexica/DISC2.kwg", "./data/letterdistributions/catalan.csv", "",
+        "./data/letterdistributions/catalan.csv", "", "./data/lexica/DISC2.kwg",
         "./data/lexica/catalan.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL,
-        "", -1, -1, 0, 10000, NULL, 0, 0, 0, 0, 1,
+        "", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
         "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
 
+    Config *distinct_lexica_config = create_config(
+        "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
+        "./data/lexica/CSW21.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL,
+        "./data/lexica/NWL20.kwg", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0,
+        1, "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+
     SuperConfig *superconfig =
-        create_superconfig(csw_config, nwl_config, osps_config, disc_config);
+        create_superconfig(csw_config, nwl_config, osps_config, disc_config,
+                           distinct_lexica_config);
     unit_tests(superconfig);
     // This also frees the nested configs
     destroy_superconfig(superconfig);
