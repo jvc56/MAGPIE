@@ -34,30 +34,30 @@
 #include "word_test.h"
 
 void unit_tests(SuperConfig *superconfig) {
-  // // Test the loading of the config
-  // test_config();
+  // Test the loading of the config
+  test_config();
 
-  // // Test the readonly data first
-  // test_alphabet(superconfig);
-  // test_letter_distribution(superconfig);
+  // Test the readonly data first
+  test_alphabet(superconfig);
+  test_letter_distribution(superconfig);
   test_str_to_machine_letters(superconfig);
-  // test_leaves(superconfig, "./data/lexica/CSW21.csv");
-  // test_leave_map(superconfig);
+  test_leaves(superconfig, "./data/lexica/CSW21.csv");
+  test_leave_map(superconfig);
 
-  // // Now test the rest
-  // test_bag(superconfig);
-  // test_rack(superconfig);
-  // test_board(superconfig);
-  // test_cross_set(superconfig);
-  // test_game(superconfig);
-  // test_shadow(superconfig);
-  // test_movegen(superconfig);
-  // test_equity_adjustments(superconfig);
-  // test_gameplay(superconfig);
-  // test_stats();
-  // test_infer(superconfig);
-  // test_sim(superconfig);
-  // test_ucgi_command();
+  // Now test the rest
+  test_bag(superconfig);
+  test_rack(superconfig);
+  test_board(superconfig);
+  test_cross_set(superconfig);
+  test_game(superconfig);
+  test_shadow(superconfig);
+  test_movegen(superconfig);
+  test_equity_adjustments(superconfig);
+  test_gameplay(superconfig);
+  test_stats();
+  test_infer(superconfig);
+  test_sim(superconfig);
+  test_ucgi_command();
   test_gcg();
 }
 

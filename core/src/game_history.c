@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "game.h"
 #include "game_history.h"
 #include "log.h"
 #include "move.h"
@@ -107,6 +108,11 @@ void destroy_game_history(GameHistory *game_history) {
   }
   free(game_history->events);
   free(game_history);
+}
+
+Game *play_to_turn(GameHistory *game_history, int turn_number) {
+  log_fatal("unimplemented");
+  return NULL;
 }
 
 void set_cumulative_scores(GameHistory *game_history) {

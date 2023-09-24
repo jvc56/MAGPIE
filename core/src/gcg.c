@@ -676,6 +676,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     game_event->event_type = GAME_EVENT_TILE_PLACEMENT_MOVE;
     game_event->move = create_move();
 
+    game_event->move->move_type = MOVE_TYPE_PLAY;
     // Rack
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
     if (game_event->rack == NULL) {
@@ -740,6 +741,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     }
     char *note = get_matching_group_as_string(gcg_parser, 1);
     string_builder_add_string(gcg_parser->note_builder, note, strlen(note));
+    string_builder_add_string(gcg_parser->note_builder, " ", 1);
     free(note);
     break;
   case GCG_LEXICON_TOKEN:
@@ -872,6 +874,8 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
     copy_cumulative_score_to_game_event(gcg_parser, game_event, 3);
+    game_event->move = create_move();
+    set_move_as_pass(game_event->move);
     break;
   case GCG_CHALLENGE_BONUS_TOKEN:
   case GCG_END_RACK_POINTS_TOKEN:
@@ -904,7 +908,11 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
     game_event = create_game_event(game_history);
+
     game_event->move = create_move();
+    game_event->move->move_type = MOVE_TYPE_EXCHANGE;
+    game_event->move->score = 0;
+
     game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_EXCHANGE;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
@@ -938,6 +946,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       string_builder_add_string(gcg_parser->note_builder,
                                 gcg_parser->gcg_line_buffer,
                                 strlen(gcg_parser->gcg_line_buffer));
+      string_builder_add_string(gcg_parser->note_builder, " ", 1);
     } else if (!contains_all_whitespace(gcg_parser->gcg_line_buffer)) {
       return GCG_PARSE_STATUS_NO_MATCHING_TOKEN;
     }

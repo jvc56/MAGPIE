@@ -43,5 +43,7 @@ void reset_move_list(MoveList *ml);
 void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
               int score, int row_start, int col_start, int tiles_played,
               int vertical, int move_type);
+void set_move_as_pass(Move *move);
+void set_spare_move_as_pass(MoveList *ml);
 
 #endif

@@ -19,8 +19,6 @@ typedef enum {
   GAME_EVENT_END_RACK_POINTS,
   GAME_EVENT_TIME_PENALTY,
   GAME_EVENT_END_RACK_PENALTY,
-  GAME_EVENT_UNSUCCESSFUL_CHALLENGE_TURN_LOSS,
-  GAME_EVENT_CHALLENGE
 } game_event_t;
 
 typedef struct GameEvent {
@@ -61,5 +59,6 @@ GameHistoryPlayer *create_game_history_player(const char *name,
                                               const char *nickname);
 void destroy_game_history_player(GameHistoryPlayer *player);
 void set_cumulative_scores(GameHistory *game_history);
+Game *play_to_turn(GameHistory *game_history, int turn_number);
 
 #endif
