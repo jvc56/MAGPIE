@@ -127,6 +127,13 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
     if (autoplay_worker->config->use_game_pairs) {
       play_game(game_2, seed, autoplay_worker->autoplay_results,
                 1 - starting_player_index);
+      if (game_1->players[0]->score != game_2->players[1]->score ||
+          game_1->players[1]->score != game_2->players[0]->score) {
+        print_game(game_1);
+        print_game(game_2);
+        printf("seed: %lu\n", seed);
+        assert(0);
+      }
     }
   }
 
