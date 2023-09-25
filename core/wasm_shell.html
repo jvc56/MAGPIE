@@ -124,47 +124,53 @@
 
       var precacheFileData = null;
       var processUCGICommand = null;
+      var ucgiSearchStatus = null;
+      var print = (function () {
+        var element = document.getElementById("output");
+        if (element) element.value = ""; // clear browser cache
+        return function (text) {
+          if (arguments.length > 1)
+            text = Array.prototype.slice.call(arguments).join(" ");
+          // These replacements are necessary if you render to raw HTML
+          //text = text.replace(/&/g, "&amp;");
+          //text = text.replace(/</g, "&lt;");
+          //text = text.replace(/>/g, "&gt;");
+          //text = text.replace('\n', '<br>', 'g');
+          // console.log(text);
+          text = text.split(" ");
+          var toPrint = "";
+          for (var i = 0; i < text.length; i++) {
+            if (text[i] === "bestmove") {
+              toPrint = text.join(" ");
+              break;
+            } else if (text[i] === "nps") {
+              toPrint = text.join(" ");
+              break;
+            } else if (text[i] === "bestsofar") {
+              toPrint = text.join(" ");
+              break;
+            } else if (text[i] === "it") {
+              var iterct = parseInt(text[i + 1], 10);
+              if (iterct > lastIterCt) {
+                lastIterCt = iterct;
+                toPrint = text[i] + " " + lastIterCt;
+              }
+              break;
+            }
+          }
 
+          if (toPrint !== "" && element) {
+            element.value += toPrint + "\n";
+            element.scrollTop = element.scrollHeight; // focus on bottom
+          }
+        };
+      })();
       var Module = {
         preRun: [],
         postRun: [],
-        print: (function () {
-          var element = document.getElementById("output");
-          if (element) element.value = ""; // clear browser cache
-          return function (text) {
-            if (arguments.length > 1)
-              text = Array.prototype.slice.call(arguments).join(" ");
-            // These replacements are necessary if you render to raw HTML
-            //text = text.replace(/&/g, "&amp;");
-            //text = text.replace(/</g, "&lt;");
-            //text = text.replace(/>/g, "&gt;");
-            //text = text.replace('\n', '<br>', 'g');
-            // console.log(text);
-            text = text.split(" ");
-            var toPrint = "";
-            for (var i = 0; i < text.length; i++) {
-              if (text[i] === "it") {
-                var iterct = parseInt(text[i + 1], 10);
-                if (iterct > lastIterCt) {
-                  lastIterCt = iterct;
-                  toPrint = text[i] + " " + lastIterCt;
-                }
-                break;
-              } else if (text[i] === "bestmove") {
-                toPrint = text.join(" ");
-                break;
-              } else if (text[i] === "nps") {
-                toPrint = text.join(" ");
-                break;
-              }
-            }
-
-            if (toPrint !== "" && element) {
-              element.value += toPrint + "\n";
-              element.scrollTop = element.scrollHeight; // focus on bottom
-            }
-          };
-        })(),
+        print: (text) => {
+          console.log(text);
+        },
         canvas: (() => {
           var canvas = document.getElementById("canvas");
 
@@ -224,9 +230,14 @@
             "number",
             "number",
           ]);
-          processUCGICommand = Module.cwrap("process_ucgi_command", null, [
+          processUCGICommand = Module.cwrap("process_ucgi_command_wasm", null, [
             "number",
           ]);
+          ucgiSearchStatus = Module.cwrap(
+            "ucgi_search_status_wasm",
+            "number",
+            []
+          );
         },
       };
 
@@ -314,14 +325,28 @@
           nthreads = 20;
         }
         console.log("Using nthreads: " + nthreads);
-        const goCmd = `go threads ${nthreads} stopcondition 99 depth 5`;
 
+        // const goCmd = `go sim threads ${nthreads} plays 5 stopcondition 99 depth 5 i 10000 checkstop 100 info 100`;
+        const goCmd = `go sim static threads ${nthreads} depth 1 plays 15`;
         const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);
         const cmd2C = Module.stringToNewUTF8(goCmd);
         processUCGICommand(cmd1C);
         processUCGICommand(cmd2C);
         Module._free(cmd1C);
         Module._free(cmd2C);
+
+        const interval = setInterval(() => {
+          console.log("gonna get search status");
+          const status = ucgiSearchStatus();
+          const str = Module.UTF8ToString(status);
+          print(str);
+          console.log(str);
+          if (str.includes("bestmove ")) {
+            console.log("stop interval");
+            clearInterval(interval);
+          }
+          Module._free(str);
+        }, 1000);
       });
     </script>
     {{{ SCRIPT }}}

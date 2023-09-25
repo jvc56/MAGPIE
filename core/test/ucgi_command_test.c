@@ -33,6 +33,20 @@ void block_for_search(UCGICommandVars *ucgi_command_vars, int max_seconds) {
   }
 }
 
+char *nthline(int n, char *text) {
+  // returns the nth line of the text (0-indexed)
+  char *token = strtok(text, "\n");
+  int ct = 0;
+  while (token != NULL) {
+    if (ct == n) {
+      return token;
+    }
+    ct++;
+    token = strtok(NULL, "\n");
+  }
+  return NULL;
+}
+
 void test_ucgi_command() {
   int depth;
   int stopcondition;
@@ -179,11 +193,10 @@ void test_ucgi_command() {
   // made during the sim.
   // Add 1 since the info is printed one last time
   // when the sim finished.
-  // Multiply it by the number of plays because each play
-  // gets its own line.
-  // Add 2 for the 'bestmove' printed at the end of the sim
-  // and the nps stats.
-  int number_of_output_lines = plays * ((checkstop / info) + 1) + 2;
+  // Multiply it by the number of plays + 2 because each play
+  // gets its own line, and there's a line for bestsofar (or bestmove)
+  // and another line for nps stats.
+  int number_of_output_lines = (plays + 2) * ((checkstop / info) + 1);
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
   prev_len = len;
@@ -209,8 +222,8 @@ void test_ucgi_command() {
   // Command is done
   assert(ucgi_command_vars->thread_control->halt_status == HALT_STATUS_NONE);
   // A static search should only print out the number
-  // of plays specified.
-  assert(plays == count_newlines(output_buffer + prev_len));
+  // of plays specified plus a "bestmove" line.
+  assert((plays + 1) == count_newlines(output_buffer + prev_len));
   prev_len = len;
   memset(test_stdin_input, 0, 256);
   memset(move_placeholder, 0, 80);
@@ -237,7 +250,7 @@ void test_ucgi_command() {
   assert(ucgi_command_vars->thread_control->halt_status ==
          HALT_STATUS_MAX_ITERATIONS);
   assert(ucgi_command_vars->simmer->iteration_count == iters);
-  number_of_output_lines = plays * ((iters / info) + 1) + 2;
+  number_of_output_lines = (plays + 2) * ((iters / info) + 1);
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
   prev_len = len;
@@ -497,12 +510,12 @@ void test_ucgi_command() {
   sleep(5);
 
   char *ret = ucgi_search_status(ucgi_command_vars);
-  assert(strcmp(ret + strlen(ret) - 20, "bestmove 8d.ZILLION\n") == 0);
+  assert_strings_equal(nthline(3, ret), "bestsofar 8d.ZILLION");
   free(ret);
   // Sleep a couple more seconds and then stop the search.
   sleep(2);
   char *ret2 = ucgi_stop_search(ucgi_command_vars);
-  assert(strcmp(ret2 + strlen(ret2) - 20, "bestmove 8d.ZILLION\n") == 0);
+  assert_strings_equal(nthline(3, ret2), "bestmove 8d.ZILLION");
   free(ret2);
 
   assert(ucgi_command_vars->thread_control->halt_status ==
@@ -533,7 +546,7 @@ void test_ucgi_command() {
   int mode = get_mode(ucgi_command_vars->thread_control);
   assert(mode != MODE_SEARCHING);
   ret = ucgi_search_status(ucgi_command_vars);
-  assert(strcmp(ret + strlen(ret) - 20, "bestmove 8d.ZILLION\n") == 0);
+  assert(strcmp(nthline(3, ret), "bestmove 8d.ZILLION") == 0);
   free(ret);
   // Sleep a couple more seconds and then try to stop the search. It shouldn't
   // work.

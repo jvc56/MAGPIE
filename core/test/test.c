@@ -63,6 +63,7 @@ void unit_tests(SuperConfig *superconfig) {
   test_ucgi_command();
   test_gcg();
   test_autoplay(superconfig);
+  test_wasm_api();
 }
 
 int main(int argc, char *argv[]) {

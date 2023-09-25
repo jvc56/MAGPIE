@@ -54,13 +54,12 @@ typedef struct Simmer {
   WinPct *win_pcts;
 
   int *play_similarity_cache;
-
+  atomic_int node_count;
   ThreadControl *thread_control;
 } Simmer;
 
 typedef struct SimmerWorker {
   int thread_index;
-  uint64_t node_count;
   Game *game;
   Rack *rack_placeholder;
   Simmer *simmer;
@@ -70,7 +69,6 @@ Simmer *create_simmer(Config *config);
 void destroy_simmer(Simmer *simmer);
 void join_threads(Simmer *simmer);
 int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);
-void print_ucgi_stats(Simmer *simmer, Game *game, int print_best_play);
 void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
               Rack *known_opp_rack, int plies, int threads, int num_plays,
               int max_iterations, int stopping_condition,

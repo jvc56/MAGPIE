@@ -2,8 +2,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "constants.h"
 #include "fileproxy.h"
 #include "log.h"
+
+#define MAX_CACHE_SIZE 32
+
+typedef struct FileCacheEntry {
+  char filename[MAX_DATA_FILENAME_LENGTH];
+  char *raw_data;
+  int byte_size;
+} FileCacheEntry;
+
+typedef struct FileCache {
+  FileCacheEntry entries[MAX_CACHE_SIZE];
+  int num_items;
+} FileCache;
 
 static FileCache file_cache = {0};
 

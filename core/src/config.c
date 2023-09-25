@@ -397,7 +397,8 @@ void load_config_from_lexargs(Config **config, const char *cgp,
     // check each filename
     if (strcmp(c->ld_filename, dist)) {
       // They're different; reload.
-      log_debug("reloading letter distribution");
+      log_debug("reloading letter distribution; was %s, new %s", c->ld_filename,
+                dist);
       destroy_letter_distribution(c->letter_distribution);
       c->letter_distribution = create_letter_distribution(dist);
     }

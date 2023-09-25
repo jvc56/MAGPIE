@@ -6,6 +6,7 @@
 #include "game.h"
 #include "infer.h"
 #include "leave_rack.h"
+#include "log.h"
 #include "sim.h"
 #include "stats.h"
 #include "thread_control.h"
@@ -18,7 +19,8 @@ void print_ucgi_inference_current_rack(uint64_t current_rack_index,
                                        ThreadControl *thread_control) {
   char info_output[40];
   info_output[0] = '\0';
-  sprintf(info_output, "info infercurrrack %ld\n", current_rack_index);
+  sprintf(info_output, "info infercurrrack %llu\n",
+          (long long unsigned int)current_rack_index);
   print_to_file(thread_control, info_output);
 }
 
@@ -26,7 +28,8 @@ void print_ucgi_inference_total_racks_evaluated(uint64_t total_racks_evaluated,
                                                 ThreadControl *thread_control) {
   char info_output[40];
   info_output[0] = '\0';
-  sprintf(info_output, "info infertotalracks %ld\n", total_racks_evaluated);
+  sprintf(info_output, "info infertotalracks %llu\n",
+          (long long unsigned int)total_racks_evaluated);
   print_to_file(thread_control, info_output);
 }
 
@@ -98,10 +101,12 @@ void ucgi_write_inference_record(char **buffer, InferenceRecord *record,
                                  const char *inference_record_type) {
   uint64_t total_draws = get_weight(record->equity_values);
   uint64_t total_leaves = get_cardinality(record->equity_values);
-  *buffer += sprintf(*buffer, "infertotaldraws %s %ld\n", inference_record_type,
-                     total_draws);
-  *buffer += sprintf(*buffer, "inferuniqueleaves %s %ld\n",
-                     inference_record_type, total_leaves);
+  *buffer +=
+      sprintf(*buffer, "infertotaldraws %s %llu\n", inference_record_type,
+              (long long unsigned int)total_draws);
+  *buffer +=
+      sprintf(*buffer, "inferuniqueleaves %s %llu\n", inference_record_type,
+              (long long unsigned int)total_leaves);
   *buffer += sprintf(*buffer, "inferleaveavg %s %f\n", inference_record_type,
                      get_mean(record->equity_values));
   *buffer += sprintf(*buffer, "inferleavestdev %s %f\n", inference_record_type,
@@ -169,8 +174,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
 
 // Sim
 
-void print_ucgi_static_moves(Game *game, int nmoves,
-                             ThreadControl *thread_control) {
+char *ucgi_static_moves(Game *game, int nmoves) {
   int moves_size = nmoves * sizeof(char) * 90;
   char *moves_string = (char *)malloc(moves_size);
   char *starting_moves_string_pointer = moves_string;
@@ -184,27 +188,45 @@ void print_ucgi_static_moves(Game *game, int nmoves,
                 game->gen->move_list->moves[i]->score,
                 game->gen->move_list->moves[i]->equity);
   }
+  char move[30];
+  store_move_ucgi(game->gen->move_list->moves[0], game->gen->board, move,
+                  game->gen->letter_distribution);
+  sprintf(moves_string, "bestmove %s\n", move);
+  return starting_moves_string_pointer;
+}
+
+void print_ucgi_static_moves(Game *game, int nmoves,
+                             ThreadControl *thread_control) {
+  char *starting_moves_string_pointer = ucgi_static_moves(game, nmoves);
   print_to_file(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
 }
 
-char *ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
-                     int print_best_play) {
+char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
 
+  struct timespec finish_time;
+  double elapsed;
+
+  clock_gettime(CLOCK_MONOTONIC, &finish_time);
+
+  elapsed = (finish_time.tv_sec - simmer->thread_control->start_time.tv_sec);
+  elapsed +=
+      (finish_time.tv_nsec - simmer->thread_control->start_time.tv_nsec) /
+      1000000000.0;
+  int total_node_count = atomic_load(&simmer->node_count);
+  double nps = (double)total_node_count / elapsed;
   // No need to keep the mutex locked too long here. This is because this
-  // function (print_ucgi_stats_string) will only execute on a single thread.
+  // function (ucgi_sim_stats) will only execute on a single thread.
 
   // info currmove h4.HADJI sc 40 wp 3.5 wpe 0.731 eq 7.2 eqe 0.812 it 12345
-  // ig 0 plies ply 1 scm 30 scd 3.7 bp 23 ply 2 ...
+  // ig 0 ply1-scm 30 ply1-scd 3.7 ply1-bp 23 ply2-scm ...
 
   // sc - score, wp(e) - win perc
   // (error), eq(e) - equity (error) scm - mean of score, scd - stdev of
-  // score, bp - bingo perc ig - this play has been cut-off plies ply 1 ...
-  // ply 2 ... ply 3 ...
-
+  // score, bp - bingo perc ig - this play has been cut-off
   // FIXME: get better numbers
   int max_line_length = 120 + (simmer->max_plies * 50);
   int output_size =
@@ -223,39 +245,39 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
     uint64_t niters = play->equity_stat->cardinality;
     store_move_ucgi(play->move, game->gen->board, move,
                     game->gen->letter_distribution);
-
+    int ignore = play->ignore;
     stats_string += sprintf(
         stats_string,
-        "info currmove %s sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %lu "
+        "info currmove %s sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %llu "
         "ig %d ",
-        move, play->move->score, wp_mean, wp_se, eq_mean, eq_se, niters,
-        play->ignore);
-    stats_string += sprintf(stats_string, "plies ");
+        move, play->move->score, wp_mean, wp_se, eq_mean, eq_se,
+        // need cast for WASM:
+        (long long unsigned int)niters, ignore);
     for (int i = 0; i < simmer->max_plies; i++) {
-      stats_string += sprintf(stats_string, "ply %d ", i + 1);
+      // stats_string += sprintf(stats_string, "ply %d ", i + 1);
       stats_string += sprintf(
-          stats_string, "scm %.3f scd %.3f bp %.3f ", play->score_stat[i]->mean,
-          get_stdev(play->score_stat[i]), play->bingo_stat[i]->mean * 100.0);
+          stats_string, "ply%d-scm %.3f ply%d-scd %.3f ply%d-bp %.3f ", i + 1,
+          play->score_stat[i]->mean, i + 1, get_stdev(play->score_stat[i]),
+          i + 1, play->bingo_stat[i]->mean * 100.0);
     }
     stats_string += sprintf(stats_string, "\n");
   }
-  if (print_best_play) {
-    char move[30];
-    SimmedPlay *play = simmer->simmed_plays[0];
-    store_move_ucgi(play->move, game->gen->board, move,
-                    game->gen->letter_distribution);
+  char move[30];
+  SimmedPlay *play = simmer->simmed_plays[0];
+  store_move_ucgi(play->move, game->gen->board, move,
+                  game->gen->letter_distribution);
+  if (best_known_play) {
     stats_string += sprintf(stats_string, "bestmove %s\n", move);
+  } else {
+    stats_string += sprintf(stats_string, "bestsofar %s\n", move);
   }
-  if (nps > 0) {
-    stats_string += sprintf(stats_string, "info nps %f\n", nps);
-  }
+  stats_string += sprintf(stats_string, "info nps %f\n", nps);
   return starting_stats_string_pointer;
 }
 
-void print_ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
-                          int print_best_play) {
+void print_ucgi_sim_stats(Simmer *simmer, Game *game, int print_best_play) {
   char *starting_stats_string_pointer =
-      ucgi_sim_stats(simmer, game, nps, print_best_play);
+      ucgi_sim_stats(simmer, game, print_best_play);
   print_to_file(simmer->thread_control, starting_stats_string_pointer);
   free(starting_stats_string_pointer);
 }

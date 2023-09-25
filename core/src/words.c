@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "log.h"
 #include "words.h"
 
 FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
@@ -45,6 +46,10 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
           break;
         }
       }
+      if (rbegin < 0) {
+        rbegin = 0;
+      }
+
       for (rend = rbegin; rend < BOARD_DIM; rend++) {
         if (rend != row && is_empty(board, rend, col + idx)) {
           rend--;
