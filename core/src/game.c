@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <ctype.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,7 +44,7 @@ char add_player_rack(const char *cgp, int *cgp_index, Game *game,
   rack_placeholder[rpidx] = '\0';
   uint8_t mls[RACK_SIZE];
   int num_mls = str_to_machine_letters(game->gen->letter_distribution,
-                                       rack_placeholder, mls);
+                                       rack_placeholder, false, mls);
   assert(num_mls <= RACK_SIZE);
   for (int i = 0; i < num_mls; i++) {
     draw_letter_to_rack(game->gen->bag, game->players[player_index]->rack,
@@ -87,7 +88,7 @@ void load_cgp(Game *game, const char *cgp) {
           row_aggreg[row_aggreg_idx] = '\0';
 
           int num_mls = str_to_machine_letters(game->gen->letter_distribution,
-                                               row_aggreg, mls);
+                                               row_aggreg, false, mls);
           row_aggreg_idx = 0;
           for (int i = 0; i < num_mls; i++) {
             set_letter_by_index(game->gen->board, current_board_index, mls[i]);
@@ -127,7 +128,7 @@ void load_cgp(Game *game, const char *cgp) {
       row_aggreg[row_aggreg_idx] = '\0';
 
       int num_mls = str_to_machine_letters(game->gen->letter_distribution,
-                                           row_aggreg, mls);
+                                           row_aggreg, false, mls);
       row_aggreg_idx = 0;
       for (int i = 0; i < num_mls; i++) {
         set_letter_by_index(game->gen->board, current_board_index, mls[i]);
@@ -374,4 +375,14 @@ void destroy_game(Game *game) {
     destroy_backups(game);
   }
   free(game);
+}
+
+game_variant_t get_game_variant_type_from_name(const char *variant_name) {
+  game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
+  if (!strcmp(variant_name, "classic")) {
+    game_variant = GAME_VARIANT_CLASSIC;
+  } else if (!strcmp(variant_name, "wordsmog")) {
+    game_variant = GAME_VARIANT_WORDSMOG;
+  }
+  return game_variant;
 }

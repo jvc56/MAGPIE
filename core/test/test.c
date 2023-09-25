@@ -5,6 +5,7 @@
 
 #include "../src/autoplay.h"
 #include "../src/config.h"
+#include "../src/log.h"
 #include "../src/thread_control.h"
 
 #include "alphabet_test.h"
@@ -16,6 +17,7 @@
 #include "equity_adjustment_test.h"
 #include "game_test.h"
 #include "gameplay_test.h"
+#include "gcg_test.h"
 #include "gen_all_test.h"
 #include "infer_test.h"
 #include "leave_map_test.h"
@@ -59,6 +61,7 @@ void unit_tests(SuperConfig *superconfig) {
   test_infer(superconfig);
   test_sim(superconfig);
   test_ucgi_command();
+  test_gcg();
   test_autoplay(superconfig);
 }
 
@@ -67,6 +70,7 @@ int main(int argc, char *argv[]) {
     printf("must specify exactly one command\n");
     exit(EXIT_FAILURE);
   }
+  log_set_level(3);
 
   if (!strcmp(argv[1], CMD_GEN)) {
     Config *config = create_config_from_args(argc, argv);

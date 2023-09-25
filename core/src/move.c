@@ -113,8 +113,10 @@ void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
   move->vertical = vertical;
   move->move_type = move_type;
   move->tiles_length = rightstrip - leftstrip + 1;
-  for (int i = 0; i < move->tiles_length; i++) {
-    move->tiles[i] = strip[leftstrip + i];
+  if (move_type != MOVE_TYPE_PASS) {
+    for (int i = 0; i < move->tiles_length; i++) {
+      move->tiles[i] = strip[leftstrip + i];
+    }
   }
 }
 
@@ -131,6 +133,12 @@ void copy_move(Move *src_move, Move *dest_move) {
   dest_move->vertical = src_move->vertical;
   dest_move->move_type = src_move->move_type;
 }
+
+void set_move_as_pass(Move *move) {
+  set_move(move, NULL, 0, 0, 0, 0, 0, 0, 0, MOVE_TYPE_PASS);
+}
+
+void set_spare_move_as_pass(MoveList *ml) { set_move_as_pass(ml->spare_move); }
 
 void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
                     int rightstrip, int score, int row_start, int col_start,

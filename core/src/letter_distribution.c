@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,7 +63,6 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   int max_tile_length = 0;
   while (fgets(line, sizeof(line), file)) {
     char *token;
-
     // letter, lower case, dist, score, is_vowel
     token = strtok(line, ",");
     char letter[5];
@@ -149,11 +149,13 @@ void machine_letter_to_human_readable_letter(
 // enough.
 // Note: This is a slow function that should not be used in any hot loops.
 int str_to_machine_letters(LetterDistribution *letter_distribution,
-                           const char *str, uint8_t *mls) {
+                           const char *str, bool allow_played_through_marker,
+                           uint8_t *mls) {
 
   int num_mls = 0;
   int num_bytes = strlen(str);
   int i = 0;
+  int prev_i = -1;
   while (i < num_bytes) {
     for (int j = i + letter_distribution->max_tile_length; j > i; j--) {
       if (j > num_bytes) {
@@ -166,13 +168,25 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
       uint8_t ml = human_readable_letter_to_machine_letter(letter_distribution,
                                                            possible_letter);
       if (ml == INVALID_LETTER) {
-        continue;
+        if (j - i == 1 && allow_played_through_marker &&
+            possible_letter[0] == ASCII_PLAYED_THROUGH) {
+          ml = PLAYED_THROUGH_MARKER;
+        } else {
+          continue;
+        }
       }
       // Otherwise, we found the letter we're looking for
       mls[num_mls] = ml;
       num_mls++;
       i = j;
     }
+    if (i == prev_i) {
+      // Search is not finding any valid machine letters
+      // and is not making progress. Return now with -1
+      // to signify an error to avoid an infinite loop.
+      return -1;
+    }
+    prev_i = i;
   }
   return num_mls;
 }
@@ -189,4 +203,46 @@ void destroy_letter_distribution(LetterDistribution *letter_distribution) {
   free(letter_distribution->is_vowel);
   free(letter_distribution->score_order);
   free(letter_distribution);
+}
+
+char *get_letter_distribution_filepath(const char *ld_name) {
+  // Check for invalid inputs
+  if (ld_name == NULL) {
+    return NULL;
+  }
+
+  const char *directory_path = LETTER_DISTRIBUTION_FILEPATH;
+
+  // Calculate the lengths of the input strings
+  size_t directory_path_len = strlen(directory_path);
+  size_t ld_name_len = strlen(ld_name);
+
+  // Allocate memory for the result string
+  char *result =
+      (char *)malloc((directory_path_len + ld_name_len +
+                      strlen(LETTER_DISTRIBUTION_FILE_EXTENSION) + 1) *
+                     sizeof(char));
+
+  // Copy the directory_path into the result
+  strcpy(result, directory_path);
+
+  // Check if directory_path ends with a directory separator (e.g., '/' or '\')
+  if (directory_path_len > 0 && directory_path[directory_path_len - 1] != '/' &&
+      directory_path[directory_path_len - 1] != '\\') {
+    // Add a directory separator if it's missing
+    strcat(result, "/");
+  }
+
+  // Concatenate the ld_name
+  strcat(result, ld_name);
+
+  // Add the ".csv" extension
+  strcat(result, LETTER_DISTRIBUTION_FILE_EXTENSION);
+
+  return result;
+}
+
+// FIXME: return letter distrubitions other than english
+char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name) {
+  return strdup("english");
 }

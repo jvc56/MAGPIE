@@ -19,6 +19,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
+#include <stdlib.h>
 
 #include "log.h"
 
@@ -145,4 +146,9 @@ void log_log(int level, const char *file, int line, const char *fmt, ...) {
   }
 
   unlock();
+
+  // Exit if log level is FATAL
+  if (level == 5) {
+    exit(1);
+  }
 }

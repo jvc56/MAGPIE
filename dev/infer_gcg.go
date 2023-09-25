@@ -11,7 +11,6 @@ import (
 	"github.com/domino14/macondo/gcgio"
 	"github.com/domino14/macondo/gen/api/proto/macondo"
 	"github.com/domino14/macondo/tilemapping"
-
 )
 
 func InferGame(lexicon string, gcgFilename string, turnNumber int, margin float64, usePartial bool, numberOfThreads int) {
@@ -119,7 +118,7 @@ func infer(lexicon string, g *game.Game, turnNumber int, margin float64, usePart
 
 	cmd := []string{
 		"infer",
-		"-g", kwgFilename,
+		"-g1", kwgFilename,
 		"-d", "../core/data/letterdistributions/english.csv",
 		"-l1", klvFilename,
 		"-r1", "top",
@@ -132,6 +131,7 @@ func infer(lexicon string, g *game.Game, turnNumber int, margin float64, usePart
 		"-q", strconv.FormatFloat(margin, 'f', -1, 64),
 		"-h", strconv.Itoa(numberOfThreads),
 	}
+	fmt.Println("../core/bin/magpie_test", strings.Join(cmd, " "))
 	outBytes, err := exec.Command("../core/bin/magpie_test", cmd...).Output()
 	if err != nil {
 		fmt.Println("Command to run from core to reproduce:")

@@ -686,8 +686,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   // Add the pass move
   if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL ||
       gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
-    set_spare_move(gen->move_list, gen->strip, 0, 0, 0, 0, 0, 0, 0,
-                   MOVE_TYPE_PASS);
+    set_spare_move_as_pass(gen->move_list);
     insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
   } else if (player->strategy_params->play_recorder_type ==
              PLAY_RECORDER_TYPE_TOP_EQUITY) {

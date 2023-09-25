@@ -11,6 +11,12 @@
 
 #define MAX_SEARCH_DEPTH 25
 
+typedef enum {
+  GAME_VARIANT_UNKNOWN,
+  GAME_VARIANT_CLASSIC,
+  GAME_VARIANT_WORDSMOG,
+} game_variant_t;
+
 typedef struct MinimalGameBackup {
   Board *board;
   Bag *bag;
@@ -46,6 +52,7 @@ void backup_game(Game *game);
 void unplay_last_move(Game *game);
 void lexicon_ld_from_cgp(char *cgp, char *lexicon, char *ldname);
 int tiles_unseen(Game *game);
+game_variant_t get_game_variant_type_from_name(const char *variant_name);
 void set_player_on_turn(Game *game, int player_on_turn_index);
 
 #endif

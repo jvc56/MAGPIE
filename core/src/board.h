@@ -11,6 +11,11 @@
 // player 1 and player 2 sets, when using different lexica
 #define NUMBER_OF_CROSSES BOARD_DIM *BOARD_DIM * 2 * 2
 
+typedef enum {
+  BOARD_LAYOUT_UNKNOWN,
+  BOARD_LAYOUT_CROSSWORD_GAME,
+  BOARD_LAYOUT_SUPER_CROSSWORD_GAME,
+} board_layout_t;
 typedef struct TraverseBackwardsReturnValues {
   uint32_t node_index;
   int path_is_valid;
@@ -28,6 +33,8 @@ typedef struct Board {
   TraverseBackwardsReturnValues *traverse_backwards_return_values;
 } Board;
 
+board_layout_t
+board_layout_string_to_board_layout(const char *board_layout_string);
 void clear_all_crosses(Board *board);
 void clear_cross_set(Board *board, int row, int col, int dir,
                      int cross_set_index);
