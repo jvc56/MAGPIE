@@ -2,6 +2,7 @@
 #define THREAD_CONTROL_H
 
 #include <pthread.h>
+#include <stdatomic.h>
 
 #include "config.h"
 
@@ -28,6 +29,7 @@ typedef struct ThreadControl {
   int check_stop_status;
   FILE *outfile;
   pthread_mutex_t searching_mode_mutex;
+  struct timespec start_time;
 } ThreadControl;
 
 ThreadControl *create_thread_control(FILE *outfile);

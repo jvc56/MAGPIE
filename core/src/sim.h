@@ -54,13 +54,12 @@ typedef struct Simmer {
   WinPct *win_pcts;
 
   int *play_similarity_cache;
-
+  atomic_int node_count;
   ThreadControl *thread_control;
 } Simmer;
 
 typedef struct SimmerWorker {
   int thread_index;
-  uint64_t node_count;
   Game *game;
   Rack *rack_placeholder;
   Simmer *simmer;

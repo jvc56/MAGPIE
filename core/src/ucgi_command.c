@@ -356,8 +356,7 @@ char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
       return NULL;
     }
     return ucgi_sim_stats(ucgi_command_vars->simmer,
-                          ucgi_command_vars->loaded_game, 0,
-                          mode == MODE_STOPPED);
+                          ucgi_command_vars->loaded_game, mode == MODE_STOPPED);
     break;
 
   default:
@@ -394,7 +393,7 @@ char *ucgi_stop_search(UCGICommandVars *ucgi_command_vars) {
     halt(ucgi_command_vars->thread_control, HALT_STATUS_USER_INTERRUPT);
     wait_for_mode_stopped(ucgi_command_vars->thread_control);
     return ucgi_sim_stats(ucgi_command_vars->simmer,
-                          ucgi_command_vars->loaded_game, 0, 1);
+                          ucgi_command_vars->loaded_game, 1);
     break;
 
   default:

@@ -108,7 +108,6 @@ SimmerWorker *create_simmer_worker(Simmer *simmer, Game *game,
 
   simmer_worker->simmer = simmer;
   simmer_worker->thread_index = worker_index;
-  simmer_worker->node_count = 0;
   uint64_t seed = time(NULL);
   Game *new_game = copy_game(game, 1);
   simmer_worker->game = new_game;
@@ -283,7 +282,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
     set_backup_mode(game, BACKUP_MODE_SIMULATION);
     // play move
     play_move(game, simmer->simmed_plays[i]->move);
-    simmer_worker->node_count++;
+    atomic_fetch_add(&simmer->node_count, 1);
     set_backup_mode(game, BACKUP_MODE_OFF);
     // further plies will NOT be backed up.
     for (int ply = 0; ply < plies; ply++) {
@@ -296,7 +295,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
       Move *best_play = get_top_equity_move(game);
       copy_rack_into(rack_placeholder, game->players[onturn]->rack);
       play_move(game, best_play);
-      simmer_worker->node_count++;
+      atomic_fetch_add(&simmer->node_count, 1);
       char placeholder[80];
       store_move_description(best_play, placeholder,
                              game->gen->letter_distribution);
@@ -361,7 +360,7 @@ void *simmer_worker(void *uncasted_simmer_worker) {
     if (thread_control->print_info_interval > 0 &&
         current_iteration_count > 0 &&
         current_iteration_count % thread_control->print_info_interval == 0) {
-      print_ucgi_sim_stats(simmer, simmer_worker->game, -1, 0);
+      print_ucgi_sim_stats(simmer, simmer_worker->game, 0);
     }
 
     if (thread_control->check_stopping_condition_interval > 0 &&
@@ -499,9 +498,6 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
               int max_iterations, int stopping_condition,
               int static_search_only) {
 
-  struct timespec start_time;
-  clock_gettime(CLOCK_MONOTONIC, &start_time);
-
   int sorting_type = game->players[0]->strategy_params->move_sorting;
   game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
   generate_moves(game->gen, game->players[game->player_on_turn_index],
@@ -538,9 +534,8 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   simmer->initial_player = game->player_on_turn_index;
   simmer->initial_spread = game->players[game->player_on_turn_index]->score -
                            game->players[1 - game->player_on_turn_index]->score;
-
+  atomic_init(&simmer->node_count, 0);
   create_simmed_plays(simmer, game, number_of_moves_generated);
-  uint64_t total_node_count = 0;
 
   if (simmer->num_simmed_plays > 1 && number_of_moves_generated > 1) {
     if (known_opp_rack != NULL) {
@@ -570,6 +565,8 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
     SimmerWorker **simmer_workers =
         malloc((sizeof(SimmerWorker *)) * (threads));
     pthread_t *worker_ids = malloc((sizeof(pthread_t)) * (threads));
+
+    clock_gettime(CLOCK_MONOTONIC, &thread_control->start_time);
     for (int thread_index = 0; thread_index < threads; thread_index++) {
       simmer_workers[thread_index] =
           create_simmer_worker(simmer, game, thread_index);
@@ -579,7 +576,6 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
 
     for (int thread_index = 0; thread_index < threads; thread_index++) {
       pthread_join(worker_ids[thread_index], NULL);
-      total_node_count += simmer_workers[thread_index]->node_count;
       destroy_simmer_worker(simmer_workers[thread_index]);
     }
 
@@ -590,15 +586,6 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
 
   game->players[0]->strategy_params->move_sorting = sorting_type;
 
-  struct timespec finish_time;
-  double elapsed;
-
-  clock_gettime(CLOCK_MONOTONIC, &finish_time);
-
-  elapsed = (finish_time.tv_sec - start_time.tv_sec);
-  elapsed += (finish_time.tv_nsec - start_time.tv_nsec) / 1000000000.0;
-  double nps = (double)total_node_count / elapsed;
-
   // Print out the stats
-  print_ucgi_sim_stats(simmer, game, nps, 1);
+  print_ucgi_sim_stats(simmer, game, 1);
 }

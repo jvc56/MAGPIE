@@ -202,12 +202,22 @@ void print_ucgi_static_moves(Game *game, int nmoves,
   free(starting_moves_string_pointer);
 }
 
-char *ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
-                     int best_known_play) {
+char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
 
+  struct timespec finish_time;
+  double elapsed;
+
+  clock_gettime(CLOCK_MONOTONIC, &finish_time);
+
+  elapsed = (finish_time.tv_sec - simmer->thread_control->start_time.tv_sec);
+  elapsed +=
+      (finish_time.tv_nsec - simmer->thread_control->start_time.tv_nsec) /
+      1000000000.0;
+  int total_node_count = atomic_load(&simmer->node_count);
+  double nps = (double)total_node_count / elapsed;
   // No need to keep the mutex locked too long here. This is because this
   // function (ucgi_sim_stats) will only execute on a single thread.
 
@@ -261,16 +271,13 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
   } else {
     stats_string += sprintf(stats_string, "bestsofar %s\n", move);
   }
-  if (nps > 0) {
-    stats_string += sprintf(stats_string, "info nps %f\n", nps);
-  }
+  stats_string += sprintf(stats_string, "info nps %f\n", nps);
   return starting_stats_string_pointer;
 }
 
-void print_ucgi_sim_stats(Simmer *simmer, Game *game, double nps,
-                          int print_best_play) {
+void print_ucgi_sim_stats(Simmer *simmer, Game *game, int print_best_play) {
   char *starting_stats_string_pointer =
-      ucgi_sim_stats(simmer, game, nps, print_best_play);
+      ucgi_sim_stats(simmer, game, print_best_play);
   print_to_file(simmer->thread_control, starting_stats_string_pointer);
   free(starting_stats_string_pointer);
 }
