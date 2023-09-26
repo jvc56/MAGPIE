@@ -19,6 +19,8 @@ void test_load_cgp(SuperConfig *superconfig) {
   Game *game = create_game(config);
   // Test that loading various CGPs doesn't result in
   // any errors
+  reset_and_load_game(game, "");
+  reset_and_load_game(game, "                 ");
   reset_and_load_game(game, EMPTY_CGP);
   reset_and_load_game(game, EMPTY_PLAYER0_RACK_CGP);
   reset_and_load_game(game, EMPTY_PLAYER1_RACK_CGP);

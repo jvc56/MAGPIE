@@ -54,7 +54,9 @@ char add_player_rack(const char *cgp, int *cgp_index, Game *game,
 }
 
 void load_cgp(Game *game, const char *cgp) {
-
+  if (cgp[0] == '\0' || isspace((unsigned char)*cgp)) {
+    return;
+  }
   // Set all tiles:
   int cgp_index = 0;
   char cgp_char = cgp[cgp_index];
