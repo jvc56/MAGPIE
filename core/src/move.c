@@ -39,18 +39,36 @@ void reset_move_list(MoveList *ml) {
 
 int within_epsilon_for_equity(double a, double b) { return fabs(a - b) < 1e-6; }
 
+void print_move(Move *m) {
+  printf("%2.6f %4d %2d %2d %2d %2d %d %d", m->equity, m->score, m->row_start,
+         m->col_start, m->tiles_played, m->tiles_length, m->vertical,
+         m->move_type);
+  for (int i = 0; i < m->tiles_length; i++) {
+    printf("%d ", m->tiles[i]);
+  }
+  printf("\n");
+}
 // Enforce arbitrary order to keep
 // move order deterministic
 int compare_moves(Move *move_1, Move *move_2) {
   if (!within_epsilon_for_equity(move_1->equity, move_2->equity)) {
     return move_1->equity > move_2->equity;
   }
+  // if (move_1->score != move_2->score) {
+  //   return move_1->score > move_2->score;
+  // }
+  // if (move_1->move_type != move_2->move_type) {
+  //   return move_1->move_type < move_2->move_type;
+  // }
   if (move_1->row_start != move_2->row_start) {
     return move_1->row_start < move_2->row_start;
   }
   if (move_1->col_start != move_2->col_start) {
     return move_1->col_start < move_2->col_start;
   }
+  // if (move_1->vertical != move_2->vertical) {
+  //   return move_2->vertical;
+  // }
   if (move_1->tiles_played != move_2->tiles_played) {
     return move_1->tiles_played < move_2->tiles_played;
   }
@@ -62,6 +80,13 @@ int compare_moves(Move *move_1, Move *move_2) {
       return move_1->tiles[i] < move_2->tiles[i];
     }
   }
+  if (move_1->move_type == MOVE_TYPE_PASS) {
+    return 0;
+  }
+  print_move(move_1);
+  print_move(move_2);
+  printf("impossible\n");
+  abort();
   return 0;
 }
 

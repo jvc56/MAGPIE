@@ -15,8 +15,9 @@
 static UCGICommandVars *ucgi_command_vars = NULL;
 static Config *config = NULL;
 // tiles must contain 0 for play-through tiles!
-char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
-                 uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
+char *score_play(const char *cgpstr, int move_type, int row, int col,
+                 int vertical, uint8_t *tiles, uint8_t *leave, int ntiles,
+                 int nleave) {
   clock_t begin = clock();
 
   char lexicon[20] = "";

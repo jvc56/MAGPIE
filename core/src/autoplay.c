@@ -109,7 +109,7 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
-
+  seed_random(time(NULL) + autoplay_worker->worker_index);
   Game *game_1 = create_game(autoplay_worker->config);
   Game *game_2 = create_game(autoplay_worker->config);
   uint64_t seed;

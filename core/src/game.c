@@ -207,7 +207,7 @@ void load_cgp(Game *game, const char *cgp) {
 }
 
 // return lexicon and letter distribution from the cgp string.
-void lexicon_ld_from_cgp(char *cgp, char *lexicon, char *ldname) {
+void lexicon_ld_from_cgp(const char *cgp, char *lexicon, char *ldname) {
   // copy string since we are going to modify it with strtok :(
   char cgpcopy[512];
   strcpy(cgpcopy, cgp);
