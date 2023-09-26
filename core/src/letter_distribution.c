@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,23 +12,22 @@ extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
 extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
 extern inline uint8_t is_blanked(uint8_t ml);
 
-int count_number_of_newline_characters_in_file(const char *filename) {
+int get_letter_distribution_size(const char *filename) {
   FILE *file = stream_from_filename(filename);
   if (file == NULL) {
     printf("Error opening file to count lines: %s\n", filename);
     return -1;
   }
 
-  int line_count = 0;
-  int ch;
-  while ((ch = fgetc(file)) != EOF) {
-    if (ch == '\n') {
-      line_count++;
+  char line[100];
+  int letter_distribution_size = 0;
+  while (fgets(line, sizeof(line), file)) {
+    if (!isspace((unsigned char)*line)) {
+      letter_distribution_size++;
     }
   }
-
   fclose(file);
-  return line_count;
+  return letter_distribution_size;
 }
 
 void load_letter_distribution(LetterDistribution *letter_distribution,
@@ -35,8 +35,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   // This function call opens and closes the file, so
   // call it before the fopen to prevent a nested file read
   letter_distribution->size =
-      count_number_of_newline_characters_in_file(letter_distribution_filename) +
-      1;
+      get_letter_distribution_size(letter_distribution_filename);
 
   FILE *file = stream_from_filename(letter_distribution_filename);
   if (file == NULL) {
@@ -62,6 +61,9 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   char line[100];
   int max_tile_length = 0;
   while (fgets(line, sizeof(line), file)) {
+    if (isspace((unsigned char)*line)) {
+      continue;
+    }
     char *token;
     // letter, lower case, dist, score, is_vowel
     token = strtok(line, ",");
