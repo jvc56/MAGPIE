@@ -102,7 +102,7 @@ void sort_and_print_move_list(Board *board,
                               LetterDistribution *letter_distribution,
                               MoveList *ml) {
   SortedMoveList *sml = create_sorted_move_list(ml);
-  print_move_list(board, letter_distribution, sml, ml->count);
+  print_move_list(board, letter_distribution, sml, sml->count);
   destroy_sorted_move_list(sml);
 }
 
