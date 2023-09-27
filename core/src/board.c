@@ -6,6 +6,7 @@
 #include "board.h"
 #include "constants.h"
 #include "cross_set.h"
+#include "log.h"
 
 board_layout_t
 board_layout_string_to_board_layout(const char *board_layout_string) {
@@ -372,9 +373,8 @@ void copy_board_into(Board *dst, Board *src) {
         src->anchors[directional_board_index + 1];
     if (board_index >= (BOARD_DIM * BOARD_DIM) ||
         directional_board_index + 1 >= (BOARD_DIM * BOARD_DIM) * 2) {
-      printf("out of bounds: %d, %d\n", board_index,
-             directional_board_index + 1);
-      abort();
+      log_fatal("out of bounds error during board copy: %d, %d\n", board_index,
+                directional_board_index + 1);
     }
   }
   dst->transposed = src->transposed;

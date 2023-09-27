@@ -9,6 +9,7 @@
 
 #include "../src/config.h"
 #include "../src/game.h"
+#include "../src/log.h"
 #include "../src/movegen.h"
 
 void many_moves(Config *config) {
@@ -22,7 +23,4 @@ void many_moves(Config *config) {
   destroy_game(game);
 }
 
-void prof_tests(Config *config) {
-  printf("unimplemented: %p\n", config);
-  abort();
-}
+void prof_tests(Config *config) { log_fatal("unimplemented: %p\n", config); }

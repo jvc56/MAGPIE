@@ -326,7 +326,7 @@ Config *create_config_from_args(int argc, char *argv[]) {
       break;
 
     default:
-      abort();
+      log_fatal("arg not handled: %d\n", c);
     }
   }
 

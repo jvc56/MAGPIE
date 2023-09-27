@@ -9,6 +9,7 @@
 #include "config.h"
 #include "cross_set.h"
 #include "game.h"
+#include "log.h"
 #include "movegen.h"
 #include "player.h"
 
@@ -342,8 +343,7 @@ void backup_game(Game *game) {
 void unplay_last_move(Game *game) {
   // restore from backup (pop the last element).
   if (game->backup_cursor == 0) {
-    printf("error: no backup\n");
-    abort();
+    log_fatal("error: no backup\n");
   }
   MinimalGameBackup *state = game->game_backups[game->backup_cursor - 1];
   game->backup_cursor--;

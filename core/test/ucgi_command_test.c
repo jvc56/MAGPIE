@@ -26,9 +26,7 @@ void block_for_search(UCGICommandVars *ucgi_command_vars, int max_seconds) {
     }
     seconds_elapsed++;
     if (seconds_elapsed >= max_seconds) {
-      fprintf(stderr, "Test aborted after searching for %d seconds",
-              max_seconds);
-      abort();
+      log_fatal("Test aborted after searching for %d seconds", max_seconds);
     }
   }
 }

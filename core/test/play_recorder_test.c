@@ -5,6 +5,7 @@
 #include "../src/config.h"
 #include "../src/game.h"
 #include "../src/gameplay.h"
+#include "../src/log.h"
 
 #include "game_print.h"
 #include "test_util.h"
@@ -81,7 +82,7 @@ void play_top_versus_all_game(Game *game) {
              game->gen->move_list->moves[top_move_index]->vertical);
       printf("move_type: %d, %d\n", move_type,
              game->gen->move_list->moves[top_move_index]->move_type);
-      abort();
+      log_fatal("top moves for record all and record top do not match\n");
     }
 
     play_move(game, game->gen->move_list->moves[top_move_index]);

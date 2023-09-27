@@ -8,6 +8,7 @@
 
 #include "fileproxy.h"
 #include "klv.h"
+#include "log.h"
 #include "rack.h"
 
 int count_words_at(KLV *klv, int p, int kwg_size) {
@@ -15,8 +16,7 @@ int count_words_at(KLV *klv, int p, int kwg_size) {
     return 0;
   }
   if (klv->word_counts[p] == -1) {
-    printf("unexpected -1 at %d\n", p);
-    abort();
+    log_fatal("unexpected -1 at %d\n", p);
   }
   if (klv->word_counts[p] == 0) {
     klv->word_counts[p] = -1;

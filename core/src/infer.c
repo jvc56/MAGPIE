@@ -8,6 +8,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "leave_rack.h"
+#include "log.h"
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
@@ -542,8 +543,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
   pthread_mutex_t shared_rack_index_lock;
 
   if (pthread_mutex_init(&shared_rack_index_lock, NULL) != 0) {
-    printf("mutex init failed\n");
-    abort();
+    log_fatal("mutex init failed for inference\n");
   }
 
   Inference **inferences_for_workers =

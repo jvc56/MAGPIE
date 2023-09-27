@@ -7,6 +7,7 @@
 
 #include "fileproxy.h"
 #include "letter_distribution.h"
+#include "log.h"
 
 extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
 extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
@@ -39,9 +40,8 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
 
   FILE *file = stream_from_filename(letter_distribution_filename);
   if (file == NULL) {
-    printf("Error opening letter distribution file: %s\n",
-           letter_distribution_filename);
-    abort();
+    log_fatal("Error opening letter distribution file: %s\n",
+              letter_distribution_filename);
   }
 
   letter_distribution->distribution =

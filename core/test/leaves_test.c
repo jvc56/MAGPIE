@@ -4,6 +4,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "../src/log.h"
+
 #include "superconfig.h"
 #include "test_util.h"
 
@@ -15,8 +17,7 @@ void test_leaves(SuperConfig *superconfig, const char *leaves_csv_filename) {
 
   FILE *file = fopen(leaves_csv_filename, "r");
   if (file == NULL) {
-    printf("Error opening file: %s\n", leaves_csv_filename);
-    abort();
+    log_fatal("Error opening file: %s\n", leaves_csv_filename);
   }
 
   char line[100];
