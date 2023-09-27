@@ -7,6 +7,12 @@
 #include "constants.h"
 #include "cross_set.h"
 #include "log.h"
+#include "rack.h"
+
+#define BONUS_TRIPLE_WORD_SCORE '='
+#define BONUS_DOUBLE_WORD_SCORE '-'
+#define BONUS_TRIPLE_LETTER_SCORE '"'
+#define BONUS_DOUBLE_LETTER_SCORE '\''
 
 board_layout_t
 board_layout_string_to_board_layout(const char *board_layout_string) {

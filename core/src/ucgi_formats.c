@@ -20,13 +20,13 @@ void store_move_ucgi(Move *move, Board *board, char *placeholder,
 
   int number_of_tiles_to_print = move->tiles_length;
 
-  if (move->move_type == MOVE_TYPE_EXCHANGE) {
+  if (move->move_type == GAME_EVENT_EXCHANGE) {
     number_of_tiles_to_print = move->tiles_played;
   }
 
   for (int i = 0; i < number_of_tiles_to_print; i++) {
     int letter = move->tiles[i];
-    if (letter == 0 && move->move_type == MOVE_TYPE_PLAY) {
+    if (letter == 0 && move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       int r = move->row_start + (ri * i);
       int c = move->col_start + (ci * i);
       letter = get_letter(board, r, c);
@@ -38,7 +38,7 @@ void store_move_ucgi(Move *move, Board *board, char *placeholder,
   char coords[20];
   tp = coords;
 
-  if (move->move_type == MOVE_TYPE_PLAY) {
+  if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     if (move->vertical) {
       tp += sprintf(tp, "%c", move->col_start + 'a');
       tp += sprintf(tp, "%d", move->row_start + 1);
@@ -47,9 +47,9 @@ void store_move_ucgi(Move *move, Board *board, char *placeholder,
       tp += sprintf(tp, "%c", move->col_start + 'a');
     }
     sprintf(placeholder, "%s.%s", coords, tiles);
-  } else if (move->move_type == MOVE_TYPE_EXCHANGE) {
+  } else if (move->move_type == GAME_EVENT_EXCHANGE) {
     sprintf(placeholder, "ex.%s", tiles);
-  } else if (move->move_type == MOVE_TYPE_PASS) {
+  } else if (move->move_type == GAME_EVENT_PASS) {
     sprintf(placeholder, "pass");
   }
 }

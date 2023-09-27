@@ -1,15 +1,18 @@
 #ifndef GO_PARAMS_H
 #define GO_PARAMS_H
 
-#define SEARCH_TYPE_NONE 0
-#define SEARCH_TYPE_SIM_MONTECARLO 1
-#define SEARCH_TYPE_INFERENCE_SOLVE 2
-#define SEARCH_TYPE_ENDGAME 3
-#define SEARCH_TYPE_PREENDGAME 4
-#define SEARCH_TYPE_STATICONLY 5
+#include "rack.h"
 
+typedef enum {
+  SEARCH_TYPE_NONE,
+  SEARCH_TYPE_SIM_MONTECARLO,
+  SEARCH_TYPE_INFERENCE_SOLVE,
+  SEARCH_TYPE_ENDGAME,
+  SEARCH_TYPE_PREENDGAME,
+  SEARCH_TYPE_STATICONLY,
+} search_t;
 typedef struct GoParams {
-  int search_type;
+  search_t search_type;
   int depth;
   int stop_condition;
   int threads;

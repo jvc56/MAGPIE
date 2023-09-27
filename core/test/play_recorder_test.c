@@ -21,12 +21,12 @@ void play_top_versus_all_game(Game *game) {
   int tiles_played;
   int tiles_length;
   int vertical;
-  int move_type;
+  game_event_t move_type;
   draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, RACK_SIZE);
   draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, RACK_SIZE);
   while (!game->game_end_reason) {
     game->players[game->player_on_turn_index]
-        ->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
+        ->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
     generate_moves(game->gen, game->players[game->player_on_turn_index],
                    game->players[1 - game->player_on_turn_index]->rack,
                    game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
@@ -44,7 +44,7 @@ void play_top_versus_all_game(Game *game) {
     reset_move_list(game->gen->move_list);
 
     game->players[game->player_on_turn_index]
-        ->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_ALL;
+        ->strategy_params->play_recorder_type = MOVE_RECORDER_ALL;
     generate_moves(game->gen, game->players[game->player_on_turn_index],
                    game->players[1 - game->player_on_turn_index]->rack,
                    game->gen->bag->last_tile_index + 1 >= RACK_SIZE);

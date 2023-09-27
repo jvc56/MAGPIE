@@ -16,6 +16,9 @@
 #include "player.h"
 #include "rack.h"
 
+#define OPENING_HOTSPOT_PENALTY -0.7
+#define PREENDGAME_ADJUSTMENT_VALUES_LENGTH 13
+
 typedef struct Generator {
   int current_row_index;
   int current_anchor_col;

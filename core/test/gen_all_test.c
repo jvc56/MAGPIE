@@ -12,7 +12,7 @@
 
 void write_test_move_to_end_of_buffer(char *buf, Move *m,
                                       LetterDistribution *letter_distribution) {
-  if (m->move_type == MOVE_TYPE_PASS) {
+  if (m->move_type == GAME_EVENT_PASS) {
     write_string_to_end_of_buffer(buf, "pass");
     return;
   }
@@ -22,7 +22,7 @@ void write_test_move_to_end_of_buffer(char *buf, Move *m,
   write_char_to_end_of_buffer(buf, ',');
 
   // Write the coords
-  if (m->move_type == MOVE_TYPE_EXCHANGE) {
+  if (m->move_type == GAME_EVENT_EXCHANGE) {
     write_string_to_end_of_buffer(buf, "1A");
   } else if (m->vertical) {
     write_char_to_end_of_buffer(buf, m->col_start + 'A');
@@ -33,7 +33,7 @@ void write_test_move_to_end_of_buffer(char *buf, Move *m,
   }
   write_char_to_end_of_buffer(buf, ',');
 
-  if (m->move_type == MOVE_TYPE_PLAY) {
+  if (m->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     for (int i = 0; i < m->tiles_length; i++) {
       uint8_t tile = m->tiles[i];
       uint8_t print_tile = tile;

@@ -6,6 +6,12 @@
 
 #include "constants.h"
 
+#define BLANK_MASK 0x80
+#define UNBLANK_MASK (0x80 - 1)
+#define MAX_ALPHABET_SIZE 50
+#define MACHINE_LETTER_MAX_VALUE 255
+#define MAX_LETTER_CHAR_LENGTH 6
+
 typedef struct LetterDistribution {
   uint32_t size;
   uint32_t *distribution;

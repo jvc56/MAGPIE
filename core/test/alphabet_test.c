@@ -19,8 +19,8 @@ void test_alphabet(SuperConfig *superconfig) {
 
   // Test val
   // blank
-  assert(human_readable_letter_to_machine_letter(
-             config->letter_distribution, BLANK_TOKEN) == BLANK_MACHINE_LETTER);
+  assert(human_readable_letter_to_machine_letter(config->letter_distribution,
+                                                 "?") == BLANK_MACHINE_LETTER);
   // blank
   assert(human_readable_letter_to_machine_letter(config->letter_distribution,
                                                  "a") ==
@@ -43,7 +43,7 @@ void test_alphabet(SuperConfig *superconfig) {
   machine_letter_to_human_readable_letter(config->letter_distribution,
                                           BLANK_MACHINE_LETTER, letter);
 
-  assert(strcmp(letter, BLANK_TOKEN) == 0);
+  assert(strcmp(letter, "?") == 0);
   // blank
   machine_letter_to_human_readable_letter(
       config->letter_distribution, get_blanked_machine_letter(1), letter);

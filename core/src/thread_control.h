@@ -6,16 +6,22 @@
 
 #include "config.h"
 
-#define CHECK_STOP_INACTIVE 0
-#define CHECK_STOP_ACTIVE 1
+typedef enum {
+  CHECK_STOP_INACTIVE,
+  CHECK_STOP_ACTIVE,
+} check_stop_status_t;
 
-#define MODE_STOPPED 0
-#define MODE_SEARCHING 1
+typedef enum {
+  MODE_STOPPED,
+  MODE_SEARCHING,
+} mode_search_status_t;
 
-#define HALT_STATUS_NONE 0
-#define HALT_STATUS_PROBABILISTIC 1
-#define HALT_STATUS_MAX_ITERATIONS 2
-#define HALT_STATUS_USER_INTERRUPT 3
+typedef enum {
+  HALT_STATUS_NONE,
+  HALT_STATUS_PROBABILISTIC,
+  HALT_STATUS_MAX_ITERATIONS,
+  HALT_STATUS_USER_INTERRUPT,
+} halt_status_t;
 
 typedef struct ThreadControl {
   pthread_mutex_t halt_status_mutex;

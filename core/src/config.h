@@ -7,6 +7,8 @@
 #include "rack.h"
 #include "winpct.h"
 
+#define DEFAULT_MOVE_LIST_CAPACITY 1000000
+
 typedef struct StrategyParams {
   KWG *kwg;
   char kwg_filename[MAX_DATA_FILENAME_LENGTH];

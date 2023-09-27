@@ -9,6 +9,10 @@
 #include "letter_distribution.h"
 #include "log.h"
 
+#define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"
+#define LETTER_DISTRIBUTION_FILEPATH "data/letterdistributions/"
+#define INVALID_LETTER (0x80 - 1)
+
 extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
 extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
 extern inline uint8_t is_blanked(uint8_t ml);

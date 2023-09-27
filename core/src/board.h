@@ -6,10 +6,32 @@
 #include "constants.h"
 #include "letter_distribution.h"
 
+#define BOARD_DIM 15
 // Use 2 * 2 for
 // vertical and horizontal sets and
 // player 1 and player 2 sets, when using different lexica
 #define NUMBER_OF_CROSSES BOARD_DIM *BOARD_DIM * 2 * 2
+#define BINGO_BONUS 50
+#define BOARD_HORIZONTAL_DIRECTION 0
+#define BOARD_VERTICAL_DIRECTION 1
+
+// TODO: read this from file to make it easier to configure custom boards
+#define CROSSWORD_GAME_BOARD                                                   \
+  "=  '   =   '  ="                                                            \
+  " -   \"   \"   - "                                                          \
+  "  -   ' '   -  "                                                            \
+  "'  -   '   -  '"                                                            \
+  "    -     -    "                                                            \
+  " \"   \"   \"   \" "                                                        \
+  "  '   ' '   '  "                                                            \
+  "=  '   -   '  ="                                                            \
+  "  '   ' '   '  "                                                            \
+  " \"   \"   \"   \" "                                                        \
+  "    -     -    "                                                            \
+  "'  -   '   -  '"                                                            \
+  "  -   ' '   -  "                                                            \
+  " -   \"   \"   - "                                                          \
+  "=  '   =   '  ="
 
 typedef enum {
   BOARD_LAYOUT_UNKNOWN,

@@ -12,6 +12,8 @@
 #include "log.h"
 #include "util.h"
 
+#define MAX_ARG_LENGTH 300
+
 Config *create_config(const char *letter_distribution_filename, const char *cgp,
                       const char *kwg_filename_1, const char *klv_filename_1,
                       int move_sorting_1, int play_recorder_type_1,
@@ -125,8 +127,8 @@ Config *create_config_from_args(int argc, char *argv[]) {
 
   char kwg_filename_1[(MAX_ARG_LENGTH)] = "";
   char klv_filename_1[(MAX_ARG_LENGTH)] = "";
-  int play_recorder_type_1 = PLAY_RECORDER_TYPE_ALL;
-  int move_sorting_1 = SORT_BY_EQUITY;
+  int play_recorder_type_1 = MOVE_RECORDER_ALL;
+  int move_sorting_1 = MOVE_SORT_EQUITY;
 
   char kwg_filename_2[(MAX_ARG_LENGTH)] = "";
   char klv_filename_2[(MAX_ARG_LENGTH)] = "";
@@ -195,11 +197,11 @@ Config *create_config_from_args(int argc, char *argv[]) {
     case 1005:
       check_arg_length(optarg);
       if (!strcmp("all", optarg)) {
-        play_recorder_type_1 = PLAY_RECORDER_TYPE_ALL;
+        play_recorder_type_1 = MOVE_RECORDER_ALL;
       } else if (!strcmp("top", optarg)) {
         // Not strictly necessary since this
         // is the default.
-        play_recorder_type_1 = PLAY_RECORDER_TYPE_TOP_EQUITY;
+        play_recorder_type_1 = MOVE_RECORDER_BEST;
       } else {
         printf("invalid play recorder option: %s\n", optarg);
         exit(EXIT_FAILURE);
@@ -209,11 +211,11 @@ Config *create_config_from_args(int argc, char *argv[]) {
     case 1006:
       check_arg_length(optarg);
       if (!strcmp("score", optarg)) {
-        move_sorting_1 = SORT_BY_SCORE;
+        move_sorting_1 = MOVE_SORT_SCORE;
       } else if (!strcmp("equity", optarg)) {
         // Not strictly necessary since this
         // is the default.
-        move_sorting_1 = SORT_BY_EQUITY;
+        move_sorting_1 = MOVE_SORT_EQUITY;
       } else {
         printf("invalid sort option: %s\n", optarg);
         exit(EXIT_FAILURE);
@@ -233,11 +235,11 @@ Config *create_config_from_args(int argc, char *argv[]) {
     case 1009:
       check_arg_length(optarg);
       if (!strcmp("all", optarg)) {
-        play_recorder_type_2 = PLAY_RECORDER_TYPE_ALL;
+        play_recorder_type_2 = MOVE_RECORDER_ALL;
       } else if (!strcmp("top", optarg)) {
         // Not strictly necessary since this
         // is the default.
-        play_recorder_type_2 = PLAY_RECORDER_TYPE_TOP_EQUITY;
+        play_recorder_type_2 = MOVE_RECORDER_BEST;
       } else {
         printf("invalid play recorder option: %s\n", optarg);
         exit(EXIT_FAILURE);
@@ -247,11 +249,11 @@ Config *create_config_from_args(int argc, char *argv[]) {
     case 1010:
       check_arg_length(optarg);
       if (!strcmp("score", optarg)) {
-        move_sorting_2 = SORT_BY_SCORE;
+        move_sorting_2 = MOVE_SORT_SCORE;
       } else if (!strcmp("equity", optarg)) {
         // Not strictly necessary since this
         // is the default.
-        move_sorting_2 = SORT_BY_EQUITY;
+        move_sorting_2 = MOVE_SORT_EQUITY;
       } else {
         printf("invalid sort option: %s\n", optarg);
         exit(EXIT_FAILURE);
@@ -336,7 +338,8 @@ Config *create_config_from_args(int argc, char *argv[]) {
       move_sorting_2, play_recorder_type_2, use_game_pairs,
       number_of_games_or_pairs, print_info, checkstop, actual_tiles_played,
       player_to_infer_index, actual_score, number_of_tiles_exchanged,
-      equity_margin, number_of_threads, winpct_filename, MOVE_LIST_CAPACITY);
+      equity_margin, number_of_threads, winpct_filename,
+      DEFAULT_MOVE_LIST_CAPACITY);
 }
 
 void destroy_config(Config *config) {
@@ -388,10 +391,10 @@ void load_config_from_lexargs(Config **config, const char *cgp,
   }
 
   if (*config == NULL) {
-    *config = create_config(dist, cgp, lexicon_file, leaves, SORT_BY_EQUITY,
-                            PLAY_RECORDER_TYPE_ALL, "", "", SORT_BY_EQUITY,
-                            PLAY_RECORDER_TYPE_ALL, 0, 0, 9, 0, "", 0, 0, 0, 0,
-                            0, winpct, 100);
+    *config = create_config(dist, cgp, lexicon_file, leaves, MOVE_SORT_EQUITY,
+                            MOVE_RECORDER_ALL, "", "", MOVE_SORT_EQUITY,
+                            MOVE_RECORDER_ALL, 0, 0, 9, 0, "", 0, 0, 0, 0, 0,
+                            winpct, 100);
   } else {
     Config *c = (*config);
     // check each filename

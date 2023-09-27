@@ -23,7 +23,7 @@
 int count_scoring_plays(MoveList *ml) {
   int sum = 0;
   for (int i = 0; i < ml->count; i++) {
-    if (ml->moves[i]->move_type == MOVE_TYPE_PLAY) {
+    if (ml->moves[i]->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       sum++;
     }
   }
@@ -33,7 +33,7 @@ int count_scoring_plays(MoveList *ml) {
 int count_nonscoring_plays(MoveList *ml) {
   int sum = 0;
   for (int i = 0; i < ml->count; i++) {
-    if (ml->moves[i]->move_type != MOVE_TYPE_PLAY) {
+    if (ml->moves[i]->move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
       sum++;
     }
   }
@@ -358,7 +358,7 @@ void macondo_tests(SuperConfig *superconfig) {
   assert(move->score == 80);
   assert(move->tiles_played == 7);
   assert(move->tiles_length == 7);
-  assert(move->move_type == MOVE_TYPE_PLAY);
+  assert(move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE);
   assert(move->row_start == 7);
 
   destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
@@ -371,7 +371,7 @@ void macondo_tests(SuperConfig *superconfig) {
   generate_moves(game->gen, player, NULL, 0);
   assert(count_scoring_plays(game->gen->move_list) == 0);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
-  assert(game->gen->move_list->moves[0]->move_type == MOVE_TYPE_PASS);
+  assert(game->gen->move_list->moves[0]->move_type == GAME_EVENT_PASS);
 
   reset_game(game);
   reset_rack(player->rack);
@@ -421,7 +421,7 @@ void exchange_tests(SuperConfig *superconfig) {
   SortedMoveList *test_not_an_exchange_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
   assert(test_not_an_exchange_sorted_move_list->moves[0]->move_type ==
-         MOVE_TYPE_PLAY);
+         GAME_EVENT_TILE_PLACEMENT_MOVE);
   destroy_sorted_move_list(test_not_an_exchange_sorted_move_list);
   reset_game(game);
 
@@ -434,7 +434,7 @@ void exchange_tests(SuperConfig *superconfig) {
       create_sorted_move_list(game->gen->move_list);
 
   assert(test_exchange_sorted_move_list->moves[0]->move_type ==
-         MOVE_TYPE_EXCHANGE);
+         GAME_EVENT_EXCHANGE);
   destroy_sorted_move_list(test_exchange_sorted_move_list);
 
   destroy_game(game);
@@ -457,7 +457,7 @@ void equity_test(SuperConfig *superconfig) {
 
   Game *game = create_game(config);
   Player *player = game->players[0];
-  player->strategy_params->move_sorting = SORT_BY_EQUITY;
+  player->strategy_params->move_sorting = MOVE_SORT_EQUITY;
   KLV *klv = player->strategy_params->klv;
   // A middlegame is chosen to avoid
   // the opening and endgame equity adjustments
@@ -483,7 +483,7 @@ void equity_test(SuperConfig *superconfig) {
     previous_equity = move->equity;
   }
   assert(equity_test_sorted_move_list->moves[number_of_moves - 1]->move_type ==
-         MOVE_TYPE_PASS);
+         GAME_EVENT_PASS);
 
   destroy_sorted_move_list(equity_test_sorted_move_list);
   destroy_rack(move_rack);
@@ -496,7 +496,7 @@ void top_equity_play_recorder_test(SuperConfig *superconfig) {
   Game *game = create_game(config);
   Player *player = game->players[0];
   int saved_recorder_type = player->strategy_params->play_recorder_type;
-  player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
+  player->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
   char test_string[100];
   reset_string(test_string);
 
@@ -537,9 +537,9 @@ void distinct_lexica_test(SuperConfig *superconfig) {
   int player_2_saved_recorder_type =
       game->players[1]->strategy_params->play_recorder_type;
   game->players[0]->strategy_params->play_recorder_type =
-      PLAY_RECORDER_TYPE_TOP_EQUITY;
+      MOVE_RECORDER_BEST;
   game->players[1]->strategy_params->play_recorder_type =
-      PLAY_RECORDER_TYPE_TOP_EQUITY;
+      MOVE_RECORDER_BEST;
 
   char test_string[100];
   reset_string(test_string);

@@ -624,7 +624,7 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   // before the inference are not removed from the bag, so
   // we have to remove it here.
   // game->players[0]->strategy_params->play_recorder_type =
-  // PLAY_RECORDER_TYPE_TOP_EQUITY;
+  // MOVE_RECORDER_BEST;
   set_rack_to_string(game->players[0]->rack, "?",
                      game->gen->letter_distribution);
   draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(

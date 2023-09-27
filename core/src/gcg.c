@@ -670,13 +670,13 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event(game_history);
+    game_event = create_game_event_and_add_to_history(game_history);
     game_event->player_index = player_index;
     // Write the move rack
     game_event->event_type = GAME_EVENT_TILE_PLACEMENT_MOVE;
     game_event->move = create_move();
 
-    game_event->move->move_type = MOVE_TYPE_PLAY;
+    game_event->move->move_type = GAME_EVENT_TILE_PLACEMENT_MOVE;
     // Rack
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
     if (game_event->rack == NULL) {
@@ -795,7 +795,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event(game_history);
+    game_event = create_game_event_and_add_to_history(game_history);
 
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
     if (game_event->rack == NULL) {
@@ -821,7 +821,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event(game_history);
+    game_event = create_game_event_and_add_to_history(game_history);
     game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_TIME_PENALTY;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
@@ -835,7 +835,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event(game_history);
+    game_event = create_game_event_and_add_to_history(game_history);
     game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_END_RACK_PENALTY;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
@@ -866,7 +866,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event(game_history);
+    game_event = create_game_event_and_add_to_history(game_history);
     game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_PASS;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
@@ -886,7 +886,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event(game_history);
+    game_event = create_game_event_and_add_to_history(game_history);
     game_event->player_index = player_index;
     game_event->rack = get_rack_from_matching(gcg_parser, 2);
     if (game_event->rack == NULL) {
@@ -907,10 +907,10 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (game_history->number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event(game_history);
+    game_event = create_game_event_and_add_to_history(game_history);
 
     game_event->move = create_move();
-    game_event->move->move_type = MOVE_TYPE_EXCHANGE;
+    game_event->move->move_type = GAME_EVENT_EXCHANGE;
     game_event->move->score = 0;
 
     game_event->player_index = player_index;

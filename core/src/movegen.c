@@ -14,6 +14,8 @@
 #include "player.h"
 #include "rack.h"
 
+#define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
+
 void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
            Rack *opp_rack, uint32_t new_node_index, int accepts, int leftstrip,
            int rightstrip, int unique_play);
@@ -58,7 +60,7 @@ double get_spare_move_equity(Generator *gen, Player *player, Rack *opp_rack) {
   double other_adjustments = 0;
 
   if (gen->apply_placement_adjustment && gen->board->tiles_played == 0 &&
-      gen->move_list->spare_move->move_type == MOVE_TYPE_PLAY) {
+      gen->move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
   }
 
@@ -96,13 +98,13 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
   int score = 0;
   uint8_t *strip = NULL;
 
-  if (move_type == MOVE_TYPE_PLAY) {
+  if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     score = score_move(gen->board, gen->strip, leftstrip, rightstrip, start_row,
                        start_col, tiles_played, !gen->vertical,
                        get_cross_set_index(gen, player->index),
                        gen->letter_distribution);
     strip = gen->strip;
-  } else if (move_type == MOVE_TYPE_EXCHANGE) {
+  } else if (move_type == GAME_EVENT_EXCHANGE) {
     // ignore the empty exchange case
     if (rightstrip == 0) {
       return;
@@ -115,9 +117,9 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
   set_spare_move(gen->move_list, strip, leftstrip, rightstrip, score, row, col,
                  tiles_played, gen->vertical, move_type);
 
-  if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL) {
+  if (player->strategy_params->play_recorder_type == MOVE_RECORDER_ALL) {
     double equity;
-    if (player->strategy_params->move_sorting == SORT_BY_EQUITY) {
+    if (player->strategy_params->move_sorting == MOVE_SORT_EQUITY) {
       equity = get_spare_move_equity(gen, player, opp_rack);
     } else {
       equity = score;
@@ -149,7 +151,7 @@ void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
         gen->best_leaves[player->rack->number_of_letters] = current_value;
       }
       if (add_exchange) {
-        record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
+        record_play(gen, player, NULL, 0, stripidx, GAME_EVENT_EXCHANGE);
       }
     }
   } else {
@@ -268,7 +270,8 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
 
     if (accepts && no_letter_directly_left && gen->tiles_played > 0 &&
         (unique_play || gen->tiles_played > 1)) {
-      record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
+      record_play(gen, player, opp_rack, leftstrip, rightstrip,
+                  GAME_EVENT_TILE_PLACEMENT_MOVE);
     }
 
     if (new_node_index == 0) {
@@ -307,7 +310,8 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
 
     if (accepts && no_letter_directly_right && gen->tiles_played > 0 &&
         (unique_play || gen->tiles_played > 1)) {
-      record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
+      record_play(gen, player, opp_rack, leftstrip, rightstrip,
+                  GAME_EVENT_TILE_PLACEMENT_MOVE);
     }
 
     if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
@@ -377,7 +381,7 @@ void shadow_record(Generator *gen, int left_col, int right_col,
               (main_played_through_score * word_multiplier) +
               perpendicular_additional_score + bingo_bonus;
   double equity = (double)score;
-  if (gen->move_sorting_type == SORT_BY_EQUITY) {
+  if (gen->move_sorting_type == MOVE_SORT_EQUITY) {
     equity +=
         gen->best_leaves[gen->number_of_letters_on_rack - gen->tiles_played];
   }
@@ -664,7 +668,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
 
   for (int i = 0; i < gen->anchor_list->count; i++) {
     if (player->strategy_params->play_recorder_type ==
-            PLAY_RECORDER_TYPE_TOP_EQUITY &&
+            MOVE_RECORDER_BEST &&
         gen->anchor_list->anchors[i]->highest_possible_equity <
             gen->move_list->moves[0]->equity) {
       break;
@@ -684,12 +688,12 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   reset_transpose(gen->board);
 
   // Add the pass move
-  if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL ||
+  if (player->strategy_params->play_recorder_type == MOVE_RECORDER_ALL ||
       gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
     set_spare_move_as_pass(gen->move_list);
     insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
   } else if (player->strategy_params->play_recorder_type ==
-             PLAY_RECORDER_TYPE_TOP_EQUITY) {
+             MOVE_RECORDER_BEST) {
     // The move list count is still 0 at this point, so set it to 1.
     // This is done here to avoid repeatedly checking/updating the move count.
     gen->move_list->count = 1;

@@ -138,7 +138,7 @@ void test_parse_dos_mode() {
 void assert_game_event(GameHistory *game_history, int event_index,
                        game_event_t event_type, int player_index,
                        int cumulative_score, const char *rack_string,
-                       const char *note, int move_type, int vertical,
+                       const char *note, game_event_t move_type, int vertical,
                        int move_row_start, int move_col_start, int move_score,
                        int tiles_played, int tiles_length,
                        const char *tiles_string,
@@ -171,15 +171,15 @@ void assert_game_event(GameHistory *game_history, int event_index,
     assert(move->move_type == move_type);
     assert(move->score == move_score);
 
-    if (move_type != MOVE_TYPE_PASS) {
+    if (move_type != GAME_EVENT_PASS) {
       assert(move->tiles_played == tiles_played);
       assert(move->tiles_length == tiles_length);
       uint8_t *machine_letters = malloc(sizeof(char) * (tiles_length + 1));
       int number_of_machine_letters = str_to_machine_letters(
           game_history->letter_distribution, tiles_string,
-          move_type == MOVE_TYPE_PLAY, machine_letters);
+          move_type == GAME_EVENT_TILE_PLACEMENT_MOVE, machine_letters);
       int corrected_tiles_length = tiles_length;
-      if (move_type == MOVE_TYPE_EXCHANGE) {
+      if (move_type == GAME_EVENT_EXCHANGE) {
         corrected_tiles_length--;
       }
       bool tiles_match = number_of_machine_letters == corrected_tiles_length;
@@ -192,7 +192,7 @@ void assert_game_event(GameHistory *game_history, int event_index,
       assert(tiles_match);
     }
 
-    if (move_type == MOVE_TYPE_PLAY) {
+    if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       assert(move->vertical == vertical);
       assert(move->row_start == move_row_start);
       assert(move->col_start == move_col_start);
@@ -222,37 +222,38 @@ void test_success_standard() {
   assert(game_history->players[1]->last_known_rack == NULL);
   assert(game_history->number_of_events == 29);
   assert_game_event(game_history, 0, GAME_EVENT_EXCHANGE, 0, 0, "DIIIILU", "",
-                    MOVE_TYPE_EXCHANGE, 0, 0, 0, 0, 5, 6, "IIILU",
+                    GAME_EVENT_EXCHANGE, 0, 0, 0, 0, 5, 6, "IIILU",
                     game_history->letter_distribution);
   assert_game_event(game_history, 1, GAME_EVENT_TILE_PLACEMENT_MOVE, 1, 22,
-                    "AAENRSZ", "", MOVE_TYPE_PLAY, 0, 7, 6, 22, 2, 2, "ZA",
-                    game_history->letter_distribution);
+                    "AAENRSZ", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 7, 6, 22,
+                    2, 2, "ZA", game_history->letter_distribution);
   assert_game_event(game_history, 2, GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 79,
-                    "?CDEIRW", "", MOVE_TYPE_PLAY, 0, 8, 4, 79, 7, 7, "CRoWDIE",
-                    game_history->letter_distribution);
+                    "?CDEIRW", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 8, 4, 79,
+                    7, 7, "CRoWDIE", game_history->letter_distribution);
   assert_game_event(game_history, 4, GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 149,
-                    "?AGNOTT", "", MOVE_TYPE_PLAY, 1, 0, 11, 70, 7, 8,
-                    "TANGOi.T", game_history->letter_distribution);
+                    "?AGNOTT", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 1, 0, 11, 70,
+                    7, 8, "TANGOi.T", game_history->letter_distribution);
   assert_game_event(game_history, 7, GAME_EVENT_PASS, 1, 131, "ADGKOSV", "",
-                    MOVE_TYPE_PASS, 0, 0, 0, 0, 0, 0, "",
+                    GAME_EVENT_PASS, 0, 0, 0, 0, 0, 0, "",
                     game_history->letter_distribution);
   assert_game_event(game_history, 9, GAME_EVENT_TILE_PLACEMENT_MOVE, 1, 158,
-                    "ADGKOSV", "", MOVE_TYPE_PLAY, 0, 5, 1, 27, 5, 5, "VOKDA",
-                    game_history->letter_distribution);
+                    "ADGKOSV", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 5, 1, 27,
+                    5, 5, "VOKDA", game_history->letter_distribution);
   assert_game_event(game_history, 10, GAME_EVENT_PHONY_TILES_RETURNED, 1, 131,
-                    "ADGKOSV", "", MOVE_TYPE_PLAY, 0, 5, 1, 27, 5, 5, "VOKDA",
-                    game_history->letter_distribution);
+                    "ADGKOSV", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 5, 1, 27,
+                    5, 5, "VOKDA", game_history->letter_distribution);
   assert_game_event(game_history, 16, GAME_EVENT_PASS, 1, 232, "HLMOORY",
-                    "this is a multiline note ", MOVE_TYPE_PASS, 0, 0, 0, 0, 0,
+                    "this is a multiline note ", GAME_EVENT_PASS, 0, 0, 0, 0, 0,
                     0, "", game_history->letter_distribution);
   assert_game_event(game_history, 19, GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 437,
-                    "CEGIIOX", "single line note ", MOVE_TYPE_PLAY, 0, 0, 2, 36,
-                    5, 6, "C.IGOE", game_history->letter_distribution);
+                    "CEGIIOX", "single line note ",
+                    GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 2, 36, 5, 6, "C.IGOE",
+                    game_history->letter_distribution);
   assert_game_event(game_history, 27, GAME_EVENT_END_RACK_POINTS, 1, 378, "I",
-                    "", MOVE_TYPE_PLAY, 0, 0, 0, 0, 0, 0, "",
+                    "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0, 0, "",
                     game_history->letter_distribution);
   assert_game_event(game_history, 28, GAME_EVENT_TIME_PENALTY, 1, 358, "", "",
-                    MOVE_TYPE_PLAY, 0, 0, 0, 0, 0, 0, "",
+                    GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0, 0, "",
                     game_history->letter_distribution);
   destroy_game_history(game_history);
 }
@@ -264,13 +265,13 @@ void test_success_five_point_challenge() {
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   assert_game_event(game_history, 16, GAME_EVENT_CHALLENGE_BONUS, 1, 398,
-                    "DEIINRR", "", MOVE_TYPE_PLAY, 0, 0, 0, 0, 0, 0, "",
-                    game_history->letter_distribution);
+                    "DEIINRR", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0,
+                    0, 0, "", game_history->letter_distribution);
   assert_game_event(game_history, 23, GAME_EVENT_END_RACK_POINTS, 1, 532,
-                    "AGLO", "", MOVE_TYPE_PLAY, 0, 0, 0, 0, 0, 0, "",
-                    game_history->letter_distribution);
+                    "AGLO", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0,
+                    0, "", game_history->letter_distribution);
   assert_game_event(game_history, 24, GAME_EVENT_TIME_PENALTY, 0, 339, "AGLO",
-                    "", MOVE_TYPE_PLAY, 0, 0, 0, 0, 0, 0, "",
+                    "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0, 0, "",
                     game_history->letter_distribution);
   destroy_game_history(game_history);
 }

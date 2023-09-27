@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "game.h"
+#include "game_event.h"
 #include "game_history.h"
 #include "log.h"
 #include "move.h"
@@ -29,31 +30,13 @@ void destroy_game_history_player(GameHistoryPlayer *player) {
   free(player);
 }
 
-GameEvent *create_game_event(GameHistory *game_history) {
+GameEvent *create_game_event_and_add_to_history(GameHistory *game_history) {
   if (game_history->number_of_events == MAX_GAME_EVENTS) {
     log_fatal("game events overflow");
   }
-  GameEvent *game_event = malloc(sizeof(GameEvent));
-  game_event->player_index = -1;
-  game_event->cumulative_score = 0;
-  game_event->move = NULL;
-  game_event->rack = NULL;
-  game_event->note = NULL;
+  GameEvent *game_event = create_game_event();
   game_history->events[game_history->number_of_events++] = game_event;
   return game_event;
-}
-
-void destroy_game_event(GameEvent *game_event) {
-  if (game_event->move != NULL) {
-    destroy_move(game_event->move);
-  }
-  if (game_event->rack != NULL) {
-    destroy_rack(game_event->rack);
-  }
-  if (game_event->note != NULL) {
-    free(game_event->note);
-  }
-  free(game_event);
 }
 
 GameHistory *create_game_history() {

@@ -12,8 +12,10 @@
 #include "ucgi_print.h"
 #include "util.h"
 
-#define GO_PARAMS_PARSE_SUCCESS 0
-#define GO_PARAMS_PARSE_FAILURE 1
+typedef enum {
+  GO_PARAMS_PARSE_SUCCESS,
+  GO_PARAMS_PARSE_FAILURE,
+} go_params_parse_status_t;
 
 UCGICommandVars *create_ucgi_command_vars(FILE *outfile) {
   UCGICommandVars *ucgi_command_vars = malloc(sizeof(UCGICommandVars));

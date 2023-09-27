@@ -7,6 +7,8 @@
 #include "constants.h"
 #include "letter_distribution.h"
 
+#define RACK_SIZE 7
+
 typedef struct Rack {
   int array_size;
   int *array;

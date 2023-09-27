@@ -1,6 +1,7 @@
 #include <stdlib.h>
 
 #include "anchor.h"
+#include "board.h"
 #include "constants.h"
 
 AnchorList *create_anchor_list() {

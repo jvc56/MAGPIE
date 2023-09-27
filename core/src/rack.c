@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bag.h"
 #include "letter_distribution.h"
+#include "log.h"
 #include "rack.h"
 
 void reset_rack(Rack *rack) {
@@ -75,6 +77,9 @@ void set_rack_to_string(Rack *rack, const char *rack_string,
   uint8_t mls[BAG_SIZE];
   int num_mls =
       str_to_machine_letters(letter_distribution, rack_string, false, mls);
+  if (num_mls > BAG_SIZE) {
+    log_fatal("rack contains more letters than the bag: %d\n", num_mls);
+  }
   for (int i = 0; i < num_mls; i++) {
     add_letter_to_rack(rack, mls[i]);
   }

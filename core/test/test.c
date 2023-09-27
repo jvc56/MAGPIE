@@ -114,34 +114,38 @@ int main(int argc, char *argv[]) {
   } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
     Config *csw_config = create_config(
         "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
-        "./data/lexica/CSW21.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "",
-        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+        "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "",
+        -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
+        "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     Config *nwl_config = create_config(
         "./data/letterdistributions/english.csv", "", "./data/lexica/NWL20.kwg",
-        "./data/lexica/CSW21.klv2", SORT_BY_SCORE, PLAY_RECORDER_TYPE_ALL, "",
-        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+        "./data/lexica/CSW21.klv2", MOVE_SORT_SCORE, MOVE_RECORDER_ALL, "", "",
+        -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
+        "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     Config *osps_config = create_config(
         // no OSPS kwg yet, use later when we have tests.
         "./data/letterdistributions/polish.csv", "", "./data/lexica/OSPS44.kwg",
-        "", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "", "", -1, -1, 0, 10000, 0,
-        0, NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
-        MOVE_LIST_CAPACITY);
+        "", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "", -1, -1, 0, 10000, 0, 0,
+        NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     Config *disc_config = create_config(
         "./data/letterdistributions/catalan.csv", "", "./data/lexica/DISC2.kwg",
-        "./data/lexica/catalan.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL,
-        "", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+        "./data/lexica/catalan.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "",
+        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
+        "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     Config *distinct_lexica_config = create_config(
         "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
-        "./data/lexica/CSW21.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL,
+        "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL,
         "./data/lexica/NWL20.kwg", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0,
-        1, "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+        1, "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     SuperConfig *superconfig =
         create_superconfig(csw_config, nwl_config, osps_config, disc_config,

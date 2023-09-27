@@ -235,7 +235,7 @@ void evaluate_possible_leave(Inference *inference) {
                                     (INFERENCE_EQUITY_EPSILON) >=
                                 top_move->equity;
   int number_exchanged_matches =
-      top_move->move_type == MOVE_TYPE_EXCHANGE &&
+      top_move->move_type == GAME_EVENT_EXCHANGE &&
       top_move->tiles_played == inference->number_of_tiles_exchanged;
   int recordable = is_within_equity_margin || number_exchanged_matches ||
                    inference->bag_as_rack->empty;
@@ -381,7 +381,8 @@ Inference *copy_inference(Inference *inference, ThreadControl *thread_control) {
       inference->leave_rack_list->capacity, inference->distribution_size);
 
   // Game must be deep copied since we use the move generator
-  new_inference->game = copy_game(inference->game, MOVE_LIST_CAPACITY);
+  new_inference->game =
+      copy_game(inference->game, inference->game->gen->move_list->capacity);
   // KLV can just be a pointer since it is read only
   new_inference->klv = inference->klv;
   // Need the rack from the newly copied game
@@ -669,7 +670,7 @@ void infer(ThreadControl *thread_control, Inference *inference, Game *game,
   int original_apply_placement_adjustment =
       game->gen->apply_placement_adjustment;
   game->gen->apply_placement_adjustment = 0;
-  player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
+  player->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
 
   infer_manager(thread_control, inference, number_of_threads);
 

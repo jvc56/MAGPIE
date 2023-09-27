@@ -43,7 +43,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   int points = 0;
   double leave_value = 0.0;
   FormedWords *fw = NULL;
-  if (move_type == MOVE_TYPE_PLAY) {
+  if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Assume that that kwg is shared
     points =
         score_move(game->gen->board, tiles, 0, ntiles - 1, row, col,
@@ -77,7 +77,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
         get_leave_value(game->players[0]->strategy_params->klv, leave_rack);
   }
 
-  if (move_type == MOVE_TYPE_PLAY) {
+  if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     char *pp = phonies;
     char tile[MAX_LETTER_CHAR_LENGTH];
     for (int i = 0; i < fw->num_words; i++) {
@@ -146,7 +146,7 @@ char *static_evaluation(char *cgpstr, int num_plays) {
   load_cgp(game, cgpstr);
 
   int sorting_type = game->players[0]->strategy_params->move_sorting;
-  game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
+  game->players[0]->strategy_params->move_sorting = MOVE_SORT_EQUITY;
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
                  game->gen->bag->last_tile_index + 1 >= RACK_SIZE);

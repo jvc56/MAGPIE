@@ -7,12 +7,12 @@
 
 void write_user_visible_move_to_end_of_buffer(
     char *buf, Board *b, Move *m, LetterDistribution *letter_distribution) {
-  if (m->move_type == MOVE_TYPE_PASS) {
+  if (m->move_type == GAME_EVENT_PASS) {
     write_string_to_end_of_buffer(buf, "pass 0");
     return;
   }
 
-  if (m->move_type == MOVE_TYPE_EXCHANGE) {
+  if (m->move_type == GAME_EVENT_EXCHANGE) {
     write_string_to_end_of_buffer(buf, "(exch ");
     for (int i = 0; i < m->tiles_played; i++) {
       write_user_visible_letter_to_end_of_buffer(buf, letter_distribution,

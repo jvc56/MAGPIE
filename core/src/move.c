@@ -82,7 +82,7 @@ int compare_moves(Move *move_1, Move *move_2) {
       return move_1->tiles[i] < move_2->tiles[i];
     }
   }
-  if (move_1->move_type == MOVE_TYPE_PASS) {
+  if (move_1->move_type == GAME_EVENT_PASS) {
     return 0;
   }
   log_fatal("duplicate move in move list detected\n");
@@ -129,7 +129,7 @@ void down_heapify(MoveList *ml, int parent_node) {
 
 void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
               int score, int row_start, int col_start, int tiles_played,
-              int vertical, int move_type) {
+              int vertical, game_event_t move_type) {
   move->score = score;
   move->row_start = row_start;
   move->col_start = col_start;
@@ -137,7 +137,7 @@ void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
   move->vertical = vertical;
   move->move_type = move_type;
   move->tiles_length = rightstrip - leftstrip + 1;
-  if (move_type != MOVE_TYPE_PASS) {
+  if (move_type != GAME_EVENT_PASS) {
     for (int i = 0; i < move->tiles_length; i++) {
       move->tiles[i] = strip[leftstrip + i];
     }
@@ -159,14 +159,14 @@ void copy_move(Move *src_move, Move *dest_move) {
 }
 
 void set_move_as_pass(Move *move) {
-  set_move(move, NULL, 0, 0, 0, 0, 0, 0, 0, MOVE_TYPE_PASS);
+  set_move(move, NULL, 0, 0, 0, 0, 0, 0, 0, GAME_EVENT_PASS);
 }
 
 void set_spare_move_as_pass(MoveList *ml) { set_move_as_pass(ml->spare_move); }
 
 void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
                     int rightstrip, int score, int row_start, int col_start,
-                    int tiles_played, int vertical, int move_type) {
+                    int tiles_played, int vertical, game_event_t move_type) {
   set_move(ml->spare_move, strip, leftstrip, rightstrip, score, row_start,
            col_start, tiles_played, vertical, move_type);
 }
@@ -237,7 +237,7 @@ void store_move_description(Move *move, char *placeholder,
   char coords[20];
   tp = coords;
 
-  if (move->move_type == MOVE_TYPE_PLAY) {
+  if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     if (move->vertical) {
       tp += sprintf(tp, "%c", move->col_start + 'A');
       tp += sprintf(tp, "%d", move->row_start + 1);
@@ -246,9 +246,9 @@ void store_move_description(Move *move, char *placeholder,
       tp += sprintf(tp, "%c", move->col_start + 'A');
     }
     sprintf(placeholder, "%s %s", coords, tiles);
-  } else if (move->move_type == MOVE_TYPE_EXCHANGE) {
+  } else if (move->move_type == GAME_EVENT_EXCHANGE) {
     sprintf(placeholder, "(Exch %s)", tiles);
-  } else if (move->move_type == MOVE_TYPE_PASS) {
+  } else if (move->move_type == GAME_EVENT_PASS) {
     sprintf(placeholder, "(Pass)");
   }
 }

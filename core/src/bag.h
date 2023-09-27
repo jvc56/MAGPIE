@@ -3,10 +3,10 @@
 
 #include <stdint.h>
 
-#include "constants.h"
 #include "letter_distribution.h"
 #include "xoshiro.h"
 
+#define BAG_SIZE 100
 typedef struct Bag {
   uint8_t tiles[BAG_SIZE];
   int last_tile_index;

@@ -4,31 +4,13 @@
 #include <stdint.h>
 
 #include "board.h"
+#include "constants.h"
 #include "game.h"
+#include "game_event.h"
 #include "move.h"
 #include "player.h"
 
 #define MAX_GAME_EVENTS 200
-
-typedef enum {
-  GAME_EVENT_TILE_PLACEMENT_MOVE,
-  GAME_EVENT_PHONY_TILES_RETURNED,
-  GAME_EVENT_PASS,
-  GAME_EVENT_CHALLENGE_BONUS,
-  GAME_EVENT_EXCHANGE,
-  GAME_EVENT_END_RACK_POINTS,
-  GAME_EVENT_TIME_PENALTY,
-  GAME_EVENT_END_RACK_PENALTY,
-} game_event_t;
-
-typedef struct GameEvent {
-  game_event_t event_type;
-  int player_index;
-  int cumulative_score;
-  Rack *rack;
-  Move *move;
-  char *note;
-} GameEvent;
 
 typedef struct GameHistoryPlayer {
   char *name;
@@ -52,7 +34,7 @@ typedef struct GameHistory {
   GameEvent **events;
 } GameHistory;
 
-GameEvent *create_game_event(GameHistory *game_history);
+GameEvent *create_game_event_and_add_to_history(GameHistory *game_history);
 GameHistory *create_game_history();
 void destroy_game_history(GameHistory *game_history);
 GameHistoryPlayer *create_game_history_player(const char *name,

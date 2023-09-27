@@ -115,7 +115,7 @@ SimmerWorker *create_simmer_worker(Simmer *simmer, Game *game,
   for (int j = 0; j < 2; j++) {
     // Simmer only needs to record top equity plays:
     new_game->players[j]->strategy_params->play_recorder_type =
-        PLAY_RECORDER_TYPE_TOP_EQUITY;
+        MOVE_RECORDER_BEST;
   }
 
   simmer_worker->rack_placeholder =
@@ -499,7 +499,7 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
               int static_search_only) {
 
   int sorting_type = game->players[0]->strategy_params->move_sorting;
-  game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
+  game->players[0]->strategy_params->move_sorting = MOVE_SORT_EQUITY;
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
                  game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
@@ -512,7 +512,7 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
     return;
   }
 
-  game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
+  game->players[0]->strategy_params->move_sorting = MOVE_SORT_EQUITY;
 
   // It is important that we first destroy the simmed plays
   // then set the new values for the simmer. The destructor

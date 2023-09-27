@@ -10,12 +10,19 @@
 #include "rack.h"
 
 #define MAX_SEARCH_DEPTH 25
+#define MAX_SCORELESS_TURNS 6
 
 typedef enum {
   GAME_VARIANT_UNKNOWN,
   GAME_VARIANT_CLASSIC,
   GAME_VARIANT_WORDSMOG,
 } game_variant_t;
+
+typedef enum {
+  GAME_END_REASON_NONE,
+  GAME_END_REASON_STANDARD,
+  GAME_END_REASON_CONSECUTIVE_ZEROS,
+} game_end_reason_t;
 
 typedef struct MinimalGameBackup {
   Board *board;

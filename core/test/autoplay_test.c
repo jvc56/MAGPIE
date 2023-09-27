@@ -189,8 +189,8 @@ void play_game_test(ThreadControl *thread_control, Game *game,
 
     Move *move_to_play = create_move();
     copy_move(game->gen->move_list->moves[0], move_to_play);
-    if (test_inference && (move_to_play->move_type == MOVE_TYPE_EXCHANGE ||
-                           move_to_play->move_type == MOVE_TYPE_PLAY)) {
+    if (test_inference && (move_to_play->move_type == GAME_EVENT_EXCHANGE ||
+                           move_to_play->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE)) {
       reset_rack(tiles_played);
       reset_rack(full_rack);
       for (int i = 0; i < move_to_play->tiles_length; i++) {
@@ -218,7 +218,7 @@ void play_game_test(ThreadControl *thread_control, Game *game,
       }
 
       int number_of_tiles_exchanged = 0;
-      if (move_to_play->move_type == MOVE_TYPE_EXCHANGE) {
+      if (move_to_play->move_type == GAME_EVENT_EXCHANGE) {
         number_of_tiles_exchanged = move_to_play->tiles_played;
         reset_rack(tiles_played);
       }

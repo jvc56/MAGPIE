@@ -6,6 +6,7 @@
 #include "board.h"
 #include "constants.h"
 #include "kwg.h"
+#include "rack.h"
 
 typedef struct FormedWord {
   uint8_t word[BOARD_DIM];

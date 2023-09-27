@@ -11,7 +11,7 @@
 
 double get_leave_value_for_move(KLV *klv, Move *move, Rack *rack) {
   int valid_tiles = move->tiles_length;
-  if (move->move_type == MOVE_TYPE_EXCHANGE) {
+  if (move->move_type == GAME_EVENT_EXCHANGE) {
     valid_tiles = move->tiles_played;
   }
   for (int i = 0; i < valid_tiles; i++) {
