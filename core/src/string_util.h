@@ -8,10 +8,14 @@
 struct StringBuilder;
 typedef struct StringBuilder StringBuilder;
 
+char *format_string(const char *format, ...);
+
 StringBuilder *create_string_builder();
 void destroy_string_builder(StringBuilder *string_builder);
 void string_builder_add_string(StringBuilder *string_builder,
                                const char *string, size_t length);
+void string_builder_add_formatted_string(StringBuilder *string_builder,
+                                         const char *format, ...);
 void string_builder_add_spaces(StringBuilder *string_builder,
                                int number_of_spaces, size_t length);
 void string_builder_add_int(StringBuilder *string_builder, int64_t n,

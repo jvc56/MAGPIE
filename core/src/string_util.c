@@ -1,11 +1,33 @@
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "string_builder.h"
+#include "string_util.h"
 #include "util.h"
+
+// String utility functions
+
+char *format_string(const char *format, ...) {
+  int size;
+  va_list args;
+
+  va_start(args, format);
+  size = vsnprintf(NULL, 0, format, args) + 1;
+  va_end(args);
+
+  char *string_buffer = malloc_or_die(size);
+
+  va_start(args, format);
+  vsnprintf(string_buffer, size, format, args);
+  va_end(args);
+
+  return string_buffer;
+}
+
+// String Builder function
 
 static const size_t string_builder_min_size = 32;
 
@@ -76,6 +98,16 @@ void string_builder_add_string(StringBuilder *string_builder, const char *str,
   memmove(string_builder->string + string_builder->len, str, len);
   string_builder->len += len;
   string_builder->string[string_builder->len] = '\0';
+}
+
+void string_builder_add_formatted_string(StringBuilder *string_builder,
+                                         const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  char *formatted_string = format_string(format, args);
+  va_end(args);
+  string_builder_add_string(string_builder, formatted_string, 0);
+  free(formatted_string);
 }
 
 void string_builder_add_spaces(StringBuilder *string_builder,

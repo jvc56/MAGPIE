@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include "constants.h"
-#include "string_builder.h"
+#include "string_util.h"
 
 #define BLANK_MASK 0x80
 #define UNBLANK_MASK (0x80 - 1)

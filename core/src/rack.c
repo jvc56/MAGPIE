@@ -7,7 +7,7 @@
 #include "letter_distribution.h"
 #include "log.h"
 #include "rack.h"
-#include "string_builder.h"
+#include "string_util.h"
 #include "util.h"
 
 void reset_rack(Rack *rack) {

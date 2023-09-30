@@ -1,7 +1,7 @@
 #include <stdlib.h>
 
 #include "bag.h"
-#include "string_builder.h"
+#include "string_util.h"
 #include "util.h"
 #include "xoshiro.h"
 

@@ -8,7 +8,7 @@
 #include "fileproxy.h"
 #include "letter_distribution.h"
 #include "log.h"
-#include "string_builder.h"
+#include "string_util.h"
 #include "util.h"
 
 #define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"

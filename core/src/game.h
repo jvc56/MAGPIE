@@ -8,7 +8,7 @@
 #include "movegen.h"
 #include "player.h"
 #include "rack.h"
-#include "string_builder.h"
+#include "string_util.h"
 
 #define MAX_SEARCH_DEPTH 25
 #define MAX_SCORELESS_TURNS 6

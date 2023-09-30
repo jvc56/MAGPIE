@@ -6,7 +6,7 @@
 #include "constants.h"
 #include "log.h"
 #include "move.h"
-#include "string_builder.h"
+#include "string_util.h"
 #include "util.h"
 
 Move *create_move() { return malloc_or_die(sizeof(Move)); }

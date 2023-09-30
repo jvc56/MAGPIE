@@ -12,7 +12,7 @@
 #include "log.h"
 #include "movegen.h"
 #include "player.h"
-#include "string_builder.h"
+#include "string_util.h"
 #include "util.h"
 
 char add_player_score(const char *cgp, int *cgp_index, Game *game,
@@ -404,21 +404,18 @@ void string_builder_add_player_row(LetterDistribution *letter_distribution,
     player_marker = player_off_turn_marker;
   }
 
-  string_builder_add_string(game_string, player_marker, 0);
-  string_builder_add_string(game_string, player->name, 0);
-  string_builder_add_spaces(game_string, 25 - strlen(player->name), 0);
+  string_builder_add_formatted_string(game_string, "%s%s", player_marker,
+                                      player->name);
   string_builder_add_rack(player->rack, letter_distribution, game_string);
-  string_builder_add_spaces(game_string, 10 - player->rack->number_of_letters,
-                            0);
-  string_builder_add_int(game_string, player->score, 0);
+  string_builder_add_formatted_string(game_string, "%*s%d",
+                                      10 - player->rack->number_of_letters, "",
+                                      player->score);
 }
 
 void string_builder_add_board_row(LetterDistribution *letter_distribution,
                                   Board *board, int row,
                                   StringBuilder *game_string) {
-  char row_number[5] = "";
-  sprintf(row_number, "%2d|", row + 1);
-  string_builder_add_string(game_string, row_number, 0);
+  string_builder_add_formatted_string(game_string, "%2d|", row + 1);
   for (int i = 0; i < BOARD_DIM; i++) {
     uint8_t current_letter = get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {

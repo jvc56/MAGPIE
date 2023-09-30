@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "letter_distribution.h"
-#include "string_builder.h"
+#include "string_util.h"
 #include "xoshiro.h"
 
 #define BAG_SIZE 100

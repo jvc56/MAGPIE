@@ -12,7 +12,7 @@
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
-#include "string_builder.h"
+#include "string_util.h"
 #include "thread_control.h"
 #include "ucgi_print.h"
 #include "util.h"

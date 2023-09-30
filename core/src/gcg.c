@@ -10,7 +10,7 @@
 #include "game_history.h"
 #include "gcg.h"
 #include "log.h"
-#include "string_builder.h"
+#include "string_util.h"
 #include "util.h"
 
 #define MAX_GCG_FILE_SIZE 100000

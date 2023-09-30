@@ -6,7 +6,7 @@
 #include "../src/config.h"
 #include "../src/gameplay.h"
 #include "../src/letter_distribution.h"
-#include "../src/string_builder.h"
+#include "../src/string_util.h"
 
 #include "superconfig.h"
 #include "test_util.h"
