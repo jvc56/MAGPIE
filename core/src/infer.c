@@ -15,11 +15,12 @@
 #include "string_builder.h"
 #include "thread_control.h"
 #include "ucgi_print.h"
+#include "util.h"
 
 InferenceRecord *create_inference_record(int draw_and_leave_subtotals_size) {
-  InferenceRecord *record = malloc(sizeof(InferenceRecord));
-  record->draw_and_leave_subtotals =
-      (uint64_t *)malloc(draw_and_leave_subtotals_size * sizeof(uint64_t));
+  InferenceRecord *record = malloc_or_die(sizeof(InferenceRecord));
+  record->draw_and_leave_subtotals = (uint64_t *)malloc_or_die(
+      draw_and_leave_subtotals_size * sizeof(uint64_t));
   record->equity_values = create_stat();
   return record;
 }
@@ -31,7 +32,7 @@ void destroy_inference_record(InferenceRecord *record) {
 }
 
 Inference *create_inference(int capacity, int distribution_size) {
-  Inference *inference = malloc(sizeof(Inference));
+  Inference *inference = malloc_or_die(sizeof(Inference));
   inference->distribution_size = distribution_size;
   inference->draw_and_leave_subtotals_size =
       distribution_size * (RACK_SIZE) * 2;
@@ -353,9 +354,9 @@ void initialize_inference_for_evaluation(Inference *inference, Game *game,
 
 InferenceRecord *copy_inference_record(InferenceRecord *inference_record,
                                        int draw_and_leave_subtotals_size) {
-  InferenceRecord *new_record = malloc(sizeof(InferenceRecord));
-  new_record->draw_and_leave_subtotals =
-      (uint64_t *)malloc(draw_and_leave_subtotals_size * sizeof(uint64_t));
+  InferenceRecord *new_record = malloc_or_die(sizeof(InferenceRecord));
+  new_record->draw_and_leave_subtotals = (uint64_t *)malloc_or_die(
+      draw_and_leave_subtotals_size * sizeof(uint64_t));
   for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
     new_record->draw_and_leave_subtotals[i] =
         inference_record->draw_and_leave_subtotals[i];
@@ -365,7 +366,7 @@ InferenceRecord *copy_inference_record(InferenceRecord *inference_record,
 }
 
 Inference *copy_inference(Inference *inference, ThreadControl *thread_control) {
-  Inference *new_inference = malloc(sizeof(Inference));
+  Inference *new_inference = malloc_or_die(sizeof(Inference));
   new_inference->distribution_size = inference->distribution_size;
   new_inference->draw_and_leave_subtotals_size =
       inference->distribution_size * (RACK_SIZE) * 2;
@@ -549,8 +550,9 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
   }
 
   Inference **inferences_for_workers =
-      malloc((sizeof(Inference *)) * (number_of_threads));
-  pthread_t *worker_ids = malloc((sizeof(pthread_t)) * (number_of_threads));
+      malloc_or_die((sizeof(Inference *)) * (number_of_threads));
+  pthread_t *worker_ids =
+      malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     inferences_for_workers[thread_index] =
         copy_inference(inference, thread_control);
@@ -561,14 +563,14 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
                    inferences_for_workers[thread_index]);
   }
 
-  Stat **leave_stats = malloc((sizeof(Stat *)) * (number_of_threads));
+  Stat **leave_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
 
   Stat **exchanged_stats;
   Stat **rack_stats;
 
   if (inference->number_of_tiles_exchanged > 0) {
-    exchanged_stats = malloc((sizeof(Stat *)) * (number_of_threads));
-    rack_stats = malloc((sizeof(Stat *)) * (number_of_threads));
+    exchanged_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
+    rack_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
   }
 
   // Combine and free

@@ -32,8 +32,8 @@ void generate_moves_for_game(Game *game) {
 
 SortedMoveList *create_sorted_move_list(MoveList *ml) {
   int number_of_moves = ml->count;
-  SortedMoveList *sorted_move_list = malloc((sizeof(SortedMoveList)));
-  sorted_move_list->moves = malloc((sizeof(Move *)) * (number_of_moves));
+  SortedMoveList *sorted_move_list = malloc_or_die((sizeof(SortedMoveList)));
+  sorted_move_list->moves = malloc_or_die((sizeof(Move *)) * (number_of_moves));
   sorted_move_list->count = number_of_moves;
   for (int i = number_of_moves - 1; i >= 0; i--) {
     Move *move = pop_move(ml);

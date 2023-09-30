@@ -129,7 +129,7 @@ const char *tile_declaration_regex =
 
 TokenRegexPair *create_token_regex_pair(gcg_token_t token,
                                         const char *regex_string) {
-  TokenRegexPair *token_regex_pair = malloc(sizeof(TokenRegexPair));
+  TokenRegexPair *token_regex_pair = malloc_or_die(sizeof(TokenRegexPair));
   token_regex_pair->token = token;
   int regex_compilation_result =
       regcomp(&token_regex_pair->regex, regex_string, REG_EXTENDED);
@@ -146,7 +146,7 @@ void destroy_token_regex_pair(TokenRegexPair *token_regex_pair) {
 
 GCGParser *create_gcg_parser(const char *input_gcg_string,
                              GameHistory *game_history) {
-  GCGParser *gcg_parser = malloc(sizeof(GCGParser));
+  GCGParser *gcg_parser = malloc_or_die(sizeof(GCGParser));
   gcg_parser->input_gcg_string = input_gcg_string;
   gcg_parser->utf8_gcg_string = NULL;
   gcg_parser->current_gcg_char_index = 0;
@@ -155,7 +155,7 @@ GCGParser *create_gcg_parser(const char *input_gcg_string,
   gcg_parser->note_builder = create_string_builder();
   // Allocate enough space for all of the tokens
   gcg_parser->token_regex_pairs =
-      malloc(sizeof(TokenRegexPair) * (MAX_NUMBER_OF_TOKENS));
+      malloc_or_die(sizeof(TokenRegexPair) * (MAX_NUMBER_OF_TOKENS));
   gcg_parser->number_of_token_regex_pairs = 0;
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       create_token_regex_pair(GCG_PLAYER_TOKEN, player_regex);
@@ -275,7 +275,7 @@ char *get_matching_group_as_string(GCGParser *gcg_parser, int group_index) {
   int end_index = gcg_parser->matching_groups[group_index].rm_eo;
   int matching_group_string_length = end_index - start_index;
   char *matching_group_string =
-      (char *)malloc((matching_group_string_length + 1) * sizeof(char));
+      (char *)malloc_or_die((matching_group_string_length + 1) * sizeof(char));
   for (int i = start_index; i < end_index; i++) {
     matching_group_string[i - start_index] = gcg_parser->gcg_line_buffer[i];
   }
@@ -342,7 +342,7 @@ gcg_parse_status_t handle_encoding(GCGParser *gcg_parser) {
 
   if (gcg_encoding == GCG_ENCODING_ISO_8859_1) {
     gcg_parser->utf8_gcg_string =
-        malloc(sizeof(char) * 2 * strlen(gcg_parser->input_gcg_string));
+        malloc_or_die(sizeof(char) * 2 * strlen(gcg_parser->input_gcg_string));
     convert_iso_8859_1_to_utf8(gcg_parser->input_gcg_string +
                                    gcg_start_write_offset,
                                gcg_parser->utf8_gcg_string);
@@ -411,13 +411,13 @@ convert_tiles_string_to_machine_letters(GCGParser *gcg_parser, int group_index,
   int start_index = gcg_parser->matching_groups[group_index].rm_so;
   int end_index = gcg_parser->matching_groups[group_index].rm_eo;
   int matching_group_length = end_index - start_index;
-  char *tiles_string = malloc(sizeof(char) * (matching_group_length + 1));
+  char *tiles_string = malloc_or_die(sizeof(char) * (matching_group_length + 1));
   for (int i = start_index; i < end_index; i++) {
     tiles_string[i - start_index] = gcg_parser->gcg_line_buffer[i];
   }
   tiles_string[matching_group_length] = '\0';
 
-  uint8_t *machine_letters = malloc(sizeof(char) * (matching_group_length + 1));
+  uint8_t *machine_letters = malloc_or_die(sizeof(char) * (matching_group_length + 1));
   *number_of_machine_letters = str_to_machine_letters(
       gcg_parser->game_history->letter_distribution, tiles_string,
       allow_played_through_marker, machine_letters);
@@ -1002,7 +1002,7 @@ gcg_parse_status_t parse_gcg(const char *gcg_filename,
               MAX_GCG_FILE_SIZE);
   }
 
-  char *gcg_string = (char *)malloc(file_size + 1); // +1 for null terminator
+  char *gcg_string = (char *)malloc_or_die(file_size + 1); // +1 for null terminator
   if (gcg_string == NULL) {
     fclose(gcg_file_handle);
     log_fatal("Memory allocation error.\n");

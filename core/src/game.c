@@ -266,7 +266,7 @@ void set_player_on_turn(Game *game, int player_on_turn_index) {
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
-    game->game_backups[i] = malloc(sizeof(MinimalGameBackup));
+    game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
     game->game_backups[i]->bag = create_bag(game->gen->letter_distribution);
     game->game_backups[i]->board = create_board();
     game->game_backups[i]->p0rack =
@@ -286,7 +286,7 @@ void set_backup_mode(Game *game, int backup_mode) {
 }
 
 Game *create_game(Config *config) {
-  Game *game = malloc(sizeof(Game));
+  Game *game = malloc_or_die(sizeof(Game));
   game->gen = create_generator(config);
   game->players[0] =
       create_player(0, "player_1", config->letter_distribution->size);
@@ -306,7 +306,7 @@ Game *create_game(Config *config) {
 }
 
 Game *copy_game(Game *game, int move_list_size) {
-  Game *new_game = malloc(sizeof(Game));
+  Game *new_game = malloc_or_die(sizeof(Game));
   new_game->gen = copy_generator(game->gen, move_list_size);
   for (int j = 0; j < 2; j++) {
     new_game->players[j] = copy_player(game->players[j]);

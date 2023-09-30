@@ -8,6 +8,7 @@
 #include "log.h"
 #include "rack.h"
 #include "string_builder.h"
+#include "util.h"
 
 void reset_rack(Rack *rack) {
   for (int i = 0; i < (rack->array_size); i++) {
@@ -18,16 +19,16 @@ void reset_rack(Rack *rack) {
 }
 
 Rack *create_rack(int array_size) {
-  Rack *rack = malloc(sizeof(Rack));
+  Rack *rack = malloc_or_die(sizeof(Rack));
   rack->array_size = array_size;
-  rack->array = (int *)malloc(rack->array_size * sizeof(int));
+  rack->array = (int *)malloc_or_die(rack->array_size * sizeof(int));
   reset_rack(rack);
   return rack;
 }
 
 Rack *copy_rack(Rack *rack) {
-  Rack *new_rack = malloc(sizeof(Rack));
-  new_rack->array = (int *)malloc(rack->array_size * sizeof(int));
+  Rack *new_rack = malloc_or_die(sizeof(Rack));
+  new_rack->array = (int *)malloc_or_die(rack->array_size * sizeof(int));
   new_rack->array_size = rack->array_size;
   reset_rack(new_rack);
   copy_rack_into(new_rack, rack);

@@ -3,13 +3,14 @@
 #include "anchor.h"
 #include "board.h"
 #include "constants.h"
+#include "util.h"
 
 AnchorList *create_anchor_list() {
-  AnchorList *al = malloc(sizeof(AnchorList));
+  AnchorList *al = malloc_or_die(sizeof(AnchorList));
   al->count = 0;
-  al->anchors = malloc((sizeof(Anchor *)) * ((BOARD_DIM) * (BOARD_DIM)));
+  al->anchors = malloc_or_die((sizeof(Anchor *)) * ((BOARD_DIM) * (BOARD_DIM)));
   for (int i = 0; i < ((BOARD_DIM) * (BOARD_DIM)); i++) {
-    al->anchors[i] = malloc(sizeof(Anchor));
+    al->anchors[i] = malloc_or_die(sizeof(Anchor));
   }
   return al;
 }

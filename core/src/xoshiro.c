@@ -11,6 +11,7 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "util.h"
 #include "xoshiro.h"
 
 /* This is xoshiro256++ 1.0, one of our all-purpose, rock-solid generators.
@@ -142,7 +143,7 @@ void seed_prng(XoshiroPRNG *prng, uint64_t seed) {
 // initializer
 // create and seed PRNG.
 XoshiroPRNG *create_prng(uint64_t seed) {
-  XoshiroPRNG *prng = malloc(sizeof(XoshiroPRNG));
+  XoshiroPRNG *prng = malloc_or_die(sizeof(XoshiroPRNG));
   seed_prng(prng, seed);
   return prng;
 }

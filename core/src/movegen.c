@@ -13,6 +13,7 @@
 #include "movegen.h"
 #include "player.h"
 #include "rack.h"
+#include "util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
@@ -667,8 +668,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   gen->tiles_played = 0;
 
   for (int i = 0; i < gen->anchor_list->count; i++) {
-    if (player->strategy_params->play_recorder_type ==
-            MOVE_RECORDER_BEST &&
+    if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST &&
         gen->anchor_list->anchors[i]->highest_possible_equity <
             gen->move_list->moves[0]->equity) {
       break;
@@ -720,7 +720,7 @@ void load_zero_preendgame_adjustment_values(Generator *gen) {
 }
 
 Generator *create_generator(Config *config) {
-  Generator *generator = malloc(sizeof(Generator));
+  Generator *generator = malloc_or_die(sizeof(Generator));
   generator->bag = create_bag(config->letter_distribution);
   generator->board = create_board();
   generator->move_list = create_move_list(config->move_list_capacity);
@@ -735,8 +735,8 @@ Generator *create_generator(Config *config) {
   // On by default
   generator->apply_placement_adjustment = 1;
 
-  generator->exchange_strip =
-      (uint8_t *)malloc(config->letter_distribution->size * sizeof(uint8_t));
+  generator->exchange_strip = (uint8_t *)malloc_or_die(
+      config->letter_distribution->size * sizeof(uint8_t));
   // Just load the zero values for now
   load_zero_preendgame_adjustment_values(generator);
 
@@ -744,7 +744,7 @@ Generator *create_generator(Config *config) {
 }
 
 Generator *copy_generator(Generator *gen, int move_list_size) {
-  Generator *new_generator = malloc(sizeof(Generator));
+  Generator *new_generator = malloc_or_die(sizeof(Generator));
   new_generator->bag = copy_bag(gen->bag);
   new_generator->board = copy_board(gen->board);
   // Move list, anchor list, and leave map can be new
@@ -760,8 +760,8 @@ Generator *copy_generator(Generator *gen, int move_list_size) {
 
   new_generator->apply_placement_adjustment = gen->apply_placement_adjustment;
 
-  new_generator->exchange_strip =
-      (uint8_t *)malloc(gen->letter_distribution->size * sizeof(uint8_t));
+  new_generator->exchange_strip = (uint8_t *)malloc_or_die(
+      gen->letter_distribution->size * sizeof(uint8_t));
   // Just load the zero values for now
   load_zero_preendgame_adjustment_values(new_generator);
 

@@ -5,6 +5,7 @@
 
 #include "../src/game_history.h"
 #include "../src/gcg.h"
+#include "../src/util.h"
 
 #define GCG_DIRECTORY_FILEPATH "testdata/"
 
@@ -15,7 +16,7 @@ char *get_gcg_filepath(const char *filename) {
 
   // Allocate memory for the result string
   char *result =
-      (char *)malloc((directory_path_len + str_len + 1) * sizeof(char));
+      (char *)malloc_or_die((directory_path_len + str_len + 1) * sizeof(char));
 
   if (result == NULL) {
     return NULL; // Memory allocation failed
@@ -174,7 +175,8 @@ void assert_game_event(GameHistory *game_history, int event_index,
     if (move_type != GAME_EVENT_PASS) {
       assert(move->tiles_played == tiles_played);
       assert(move->tiles_length == tiles_length);
-      uint8_t *machine_letters = malloc(sizeof(char) * (tiles_length + 1));
+      uint8_t *machine_letters =
+          malloc_or_die(sizeof(char) * (tiles_length + 1));
       int number_of_machine_letters = str_to_machine_letters(
           game_history->letter_distribution, tiles_string,
           move_type == GAME_EVENT_TILE_PLACEMENT_MOVE, machine_letters);

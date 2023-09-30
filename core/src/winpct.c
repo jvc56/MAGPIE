@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "fileproxy.h"
+#include "util.h"
 #include "winpct.h"
 
 extern inline float win_pct(WinPct *wp, int spread_plus_leftover,
@@ -17,9 +18,9 @@ void parse_winpct_csv(WinPct *wp, const char *filename) {
   }
   int max_rows = MAX_SPREAD * 2 + 1;
   // Allocate memory for the 2D array
-  float **array = (float **)malloc(max_rows * sizeof(float *));
+  float **array = (float **)malloc_or_die(max_rows * sizeof(float *));
   for (int i = 0; i < max_rows; i++) {
-    array[i] = (float *)malloc(MAX_COLS * sizeof(float));
+    array[i] = (float *)malloc_or_die(MAX_COLS * sizeof(float));
   }
 
   // Read and process the CSV file
@@ -56,7 +57,7 @@ void parse_winpct_csv(WinPct *wp, const char *filename) {
 }
 
 WinPct *create_winpct(const char *winpct_filename) {
-  WinPct *wp = malloc(sizeof(WinPct));
+  WinPct *wp = malloc_or_die(sizeof(WinPct));
   parse_winpct_csv(wp, winpct_filename);
   return wp;
 }

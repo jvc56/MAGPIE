@@ -133,7 +133,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
   if (is_exchange) {
     records_string_size = 20000;
   }
-  char *records_string = (char *)malloc(sizeof(char) * records_string_size);
+  char *records_string = (char *)malloc_or_die(sizeof(char) * records_string_size);
   char *starting_records_string_pointer = records_string;
   records_string[0] = '\0';
   ucgi_write_inference_record(&records_string, inference->leave_record, game,
@@ -174,7 +174,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
 
 char *ucgi_static_moves(Game *game, int nmoves) {
   int moves_size = nmoves * sizeof(char) * 90;
-  char *moves_string = (char *)malloc(moves_size);
+  char *moves_string = (char *)malloc_or_die(moves_size);
   char *starting_moves_string_pointer = moves_string;
   moves_string[0] = '\0';
   for (int i = 0; i < nmoves; i++) {
@@ -229,7 +229,7 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
   int max_line_length = 120 + (simmer->max_plies * 50);
   int output_size =
       (simmer->num_simmed_plays + 2) * sizeof(char) * max_line_length;
-  char *stats_string = (char *)malloc(output_size);
+  char *stats_string = (char *)malloc_or_die(output_size);
   char *starting_stats_string_pointer = stats_string;
   stats_string[0] = '\0';
   for (int i = 0; i < simmer->num_simmed_plays; i++) {

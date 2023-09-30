@@ -11,5 +11,6 @@ void write_user_visible_letter(char *dest,
                                LetterDistribution *letter_distribution,
                                uint8_t ml);
 int is_all_whitespace_or_empty(const char *str);
+void *malloc_or_die(size_t size);
 
 #endif

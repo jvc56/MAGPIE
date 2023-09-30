@@ -1,6 +1,7 @@
 #include <stdlib.h>
 
 #include "../src/config.h"
+#include "../src/util.h"
 
 #include "superconfig.h"
 
@@ -27,7 +28,7 @@ Config *get_distinct_lexica_config(SuperConfig *superconfig) {
 SuperConfig *create_superconfig(Config *csw_config, Config *nwl_config,
                                 Config *osps_config, Config *disc_config,
                                 Config *distinct_lexica_config) {
-  SuperConfig *superconfig = malloc(sizeof(SuperConfig));
+  SuperConfig *superconfig = malloc_or_die(sizeof(SuperConfig));
   superconfig->csw_config = csw_config;
   superconfig->nwl_config = nwl_config;
   superconfig->osps_config = osps_config;

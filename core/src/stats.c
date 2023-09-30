@@ -4,6 +4,7 @@
 
 #include "constants.h"
 #include "stats.h"
+#include "util.h"
 
 void reset_stat(Stat *stat) {
   stat->cardinality = 0;
@@ -13,7 +14,7 @@ void reset_stat(Stat *stat) {
 }
 
 Stat *create_stat() {
-  Stat *stat = malloc(sizeof(Stat));
+  Stat *stat = malloc_or_die(sizeof(Stat));
   reset_stat(stat);
   return stat;
 }

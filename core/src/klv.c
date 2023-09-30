@@ -10,6 +10,7 @@
 #include "klv.h"
 #include "log.h"
 #include "rack.h"
+#include "util.h"
 
 int count_words_at(KLV *klv, int p, int kwg_size) {
   if (p >= kwg_size) {
@@ -108,8 +109,8 @@ void load_klv(KLV *klv, const char *klv_filename) {
   }
   kwg_size = le32toh(kwg_size);
 
-  klv->kwg = malloc(sizeof(KWG));
-  klv->kwg->nodes = (uint32_t *)malloc(kwg_size * sizeof(uint32_t));
+  klv->kwg = malloc_or_die(sizeof(KWG));
+  klv->kwg->nodes = (uint32_t *)malloc_or_die(kwg_size * sizeof(uint32_t));
   result = fread(klv->kwg->nodes, sizeof(uint32_t), kwg_size, stream);
   if (result != kwg_size) {
     printf("kwg nodes fread failure: %zd != %d\n", result, kwg_size);
@@ -127,7 +128,7 @@ void load_klv(KLV *klv, const char *klv_filename) {
   }
   number_of_leaves = le32toh(number_of_leaves);
 
-  klv->leave_values = (float *)malloc(number_of_leaves * sizeof(float));
+  klv->leave_values = (float *)malloc_or_die(number_of_leaves * sizeof(float));
   result = fread(klv->leave_values, sizeof(float), number_of_leaves, stream);
   if (result != number_of_leaves) {
     printf("edges fread failure: %zd != %d\n", result, number_of_leaves);
@@ -140,7 +141,7 @@ void load_klv(KLV *klv, const char *klv_filename) {
     klv->leave_values[i] = convert_little_endian_to_host(klv->leave_values[i]);
   }
 
-  klv->word_counts = (int *)malloc(kwg_size * sizeof(int));
+  klv->word_counts = (int *)malloc_or_die(kwg_size * sizeof(int));
   for (size_t i = 0; i < kwg_size; i++) {
     klv->word_counts[i] = 0;
   }
@@ -149,7 +150,7 @@ void load_klv(KLV *klv, const char *klv_filename) {
 }
 
 KLV *create_klv(const char *klv_filename) {
-  KLV *klv = malloc(sizeof(KLV));
+  KLV *klv = malloc_or_die(sizeof(KLV));
   load_klv(klv, klv_filename);
   return klv;
 }

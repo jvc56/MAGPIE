@@ -9,6 +9,7 @@
 #include "fileproxy.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "util.h"
 
 void load_kwg(KWG *kwg, const char *kwg_filename) {
   FILE *stream = stream_from_filename(kwg_filename);
@@ -25,7 +26,7 @@ void load_kwg(KWG *kwg, const char *kwg_filename) {
 
   size_t result;
 
-  kwg->nodes = (uint32_t *)malloc(number_of_nodes * sizeof(uint32_t));
+  kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
   result = fread(kwg->nodes, sizeof(uint32_t), number_of_nodes, stream);
   if (result != number_of_nodes) {
     printf("kwg nodes fread failure: %zd != %zd", result, number_of_nodes);
@@ -38,7 +39,7 @@ void load_kwg(KWG *kwg, const char *kwg_filename) {
 }
 
 KWG *create_kwg(const char *kwg_filename) {
-  KWG *kwg = malloc(sizeof(KWG));
+  KWG *kwg = malloc_or_die(sizeof(KWG));
   load_kwg(kwg, kwg_filename);
   return kwg;
 }

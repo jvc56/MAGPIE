@@ -2,6 +2,7 @@
 
 #include "constants.h"
 #include "go_params.h"
+#include "util.h"
 
 void reset_go_params(GoParams *go_params) {
   go_params->search_type = SEARCH_TYPE_NONE;
@@ -21,7 +22,7 @@ void reset_go_params(GoParams *go_params) {
 }
 
 GoParams *create_go_params() {
-  GoParams *go_params = malloc(sizeof(GoParams));
+  GoParams *go_params = malloc_or_die(sizeof(GoParams));
   reset_go_params(go_params);
   return go_params;
 }

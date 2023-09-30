@@ -27,7 +27,7 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
                       int number_of_threads, const char *winpct_filename,
                       int move_list_capacity) {
 
-  Config *config = malloc(sizeof(Config));
+  Config *config = malloc_or_die(sizeof(Config));
   config->letter_distribution =
       create_letter_distribution(letter_distribution_filename);
   strcpy(config->ld_filename, letter_distribution_filename);
@@ -47,7 +47,7 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
   config->equity_margin = equity_margin;
   config->number_of_threads = number_of_threads;
 
-  StrategyParams *player_1_strategy_params = malloc(sizeof(StrategyParams));
+  StrategyParams *player_1_strategy_params = malloc_or_die(sizeof(StrategyParams));
   if (strcmp(kwg_filename_1, "") != 0) {
     player_1_strategy_params->kwg = create_kwg(kwg_filename_1);
     strcpy(player_1_strategy_params->kwg_filename, kwg_filename_1);
@@ -66,7 +66,7 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
 
   config->player_1_strategy_params = player_1_strategy_params;
 
-  StrategyParams *player_2_strategy_params = malloc(sizeof(StrategyParams));
+  StrategyParams *player_2_strategy_params = malloc_or_die(sizeof(StrategyParams));
   if (!strcmp(kwg_filename_2, "") || !strcmp(kwg_filename_2, kwg_filename_1)) {
     player_2_strategy_params->kwg = player_1_strategy_params->kwg;
     strcpy(player_2_strategy_params->kwg_filename, kwg_filename_1);
@@ -430,7 +430,7 @@ void load_config_from_lexargs(Config **config, const char *cgp,
 }
 
 StrategyParams *copy_strategy_params(StrategyParams *orig) {
-  StrategyParams *sp = malloc(sizeof(StrategyParams));
+  StrategyParams *sp = malloc_or_die(sizeof(StrategyParams));
   // No need to copy the klv itself.
   sp->klv = orig->klv;
   sp->kwg = orig->kwg;

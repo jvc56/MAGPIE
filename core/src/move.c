@@ -7,15 +7,16 @@
 #include "log.h"
 #include "move.h"
 #include "string_builder.h"
+#include "util.h"
 
-Move *create_move() { return malloc(sizeof(Move)); }
+Move *create_move() { return malloc_or_die(sizeof(Move)); }
 
 MoveList *create_move_list(int capacity) {
-  MoveList *ml = malloc(sizeof(MoveList));
+  MoveList *ml = malloc_or_die(sizeof(MoveList));
   ml->count = 0;
   ml->capacity = capacity;
   ml->spare_move = create_move();
-  ml->moves = malloc(sizeof(Move *) * capacity);
+  ml->moves = malloc_or_die(sizeof(Move *) * capacity);
   for (int i = 0; i < capacity; i++) {
     ml->moves[i] = create_move();
   }

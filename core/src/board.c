@@ -8,6 +8,7 @@
 #include "cross_set.h"
 #include "log.h"
 #include "rack.h"
+#include "util.h"
 
 #define BONUS_TRIPLE_WORD_SCORE '='
 #define BONUS_DOUBLE_WORD_SCORE '-'
@@ -342,18 +343,18 @@ void set_transpose(Board *board, int transpose) {
 void reset_transpose(Board *board) { board->transposed = 0; }
 
 Board *create_board() {
-  Board *board = malloc(sizeof(Board));
+  Board *board = malloc_or_die(sizeof(Board));
   board->traverse_backwards_return_values =
-      malloc(sizeof(TraverseBackwardsReturnValues));
+      malloc_or_die(sizeof(TraverseBackwardsReturnValues));
   reset_board(board);
   set_bonus_squares(board);
   return board;
 }
 
 Board *copy_board(Board *board) {
-  Board *new_board = malloc(sizeof(Board));
+  Board *new_board = malloc_or_die(sizeof(Board));
   new_board->traverse_backwards_return_values =
-      malloc(sizeof(TraverseBackwardsReturnValues));
+      malloc_or_die(sizeof(TraverseBackwardsReturnValues));
   copy_board_into(new_board, board);
   return new_board;
 }

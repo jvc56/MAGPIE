@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "../src/stats.h"
+#include "../src/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -71,7 +72,7 @@ void test_single_stat() {
 }
 
 void test_combined_stats() {
-  Stat **fragmented_stats = malloc(sizeof(Stat *) * 10);
+  Stat **fragmented_stats = malloc_or_die(sizeof(Stat *) * 10);
 
   Stat *singular_stat = create_stat();
   Stat *combined_stat = create_stat();

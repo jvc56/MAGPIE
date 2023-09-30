@@ -10,6 +10,7 @@
 #include "ucgi_command.h"
 #include "ucgi_formats.h"
 #include "ucgi_print.h"
+#include "util.h"
 #include "words.h"
 
 static UCGICommandVars *ucgi_command_vars = NULL;
@@ -63,7 +64,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
     populate_word_validities(fw, game->players[0]->strategy_params->kwg);
   }
 
-  char *retstr = malloc(sizeof(char) * 400);
+  char *retstr = malloc_or_die(sizeof(char) * 400);
   Rack *leave_rack = NULL;
   int phonies_exist = 0;
   char phonies[200];

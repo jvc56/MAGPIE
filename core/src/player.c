@@ -6,6 +6,7 @@
 
 #include "config.h"
 #include "player.h"
+#include "util.h"
 
 void reset_player(Player *player) {
   reset_rack(player->rack);
@@ -13,7 +14,7 @@ void reset_player(Player *player) {
 }
 
 Player *create_player(int index, const char *name, int array_size) {
-  Player *player = malloc(sizeof(Player));
+  Player *player = malloc_or_die(sizeof(Player));
   player->index = index;
   player->name = strdup(name);
   player->rack = create_rack(array_size);
@@ -22,7 +23,7 @@ Player *create_player(int index, const char *name, int array_size) {
 }
 
 Player *copy_player(Player *player) {
-  Player *new_player = malloc(sizeof(Player));
+  Player *new_player = malloc_or_die(sizeof(Player));
   new_player->name = strdup(player->name);
   new_player->rack = copy_rack(player->rack);
   new_player->score = player->score;

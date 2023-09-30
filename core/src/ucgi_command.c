@@ -18,7 +18,7 @@ typedef enum {
 } go_params_parse_status_t;
 
 UCGICommandVars *create_ucgi_command_vars(FILE *outfile) {
-  UCGICommandVars *ucgi_command_vars = malloc(sizeof(UCGICommandVars));
+  UCGICommandVars *ucgi_command_vars = malloc_or_die(sizeof(UCGICommandVars));
   ucgi_command_vars->loaded_game = NULL;
   ucgi_command_vars->config = NULL;
   ucgi_command_vars->simmer = NULL;

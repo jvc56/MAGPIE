@@ -10,10 +10,11 @@
 #include "log.h"
 #include "move.h"
 #include "rack.h"
+#include "util.h"
 
 GameHistoryPlayer *create_game_history_player(const char *name,
                                               const char *nickname) {
-  GameHistoryPlayer *player = malloc(sizeof(GameHistoryPlayer));
+  GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
   player->name = strdup(name);
   player->nickname = strdup(nickname);
   player->score = 0;
@@ -40,7 +41,7 @@ GameEvent *create_game_event_and_add_to_history(GameHistory *game_history) {
 }
 
 GameHistory *create_game_history() {
-  GameHistory *game_history = malloc(sizeof(GameHistory));
+  GameHistory *game_history = malloc_or_die(sizeof(GameHistory));
   game_history->title = NULL;
   game_history->description = NULL;
   game_history->id_auth = NULL;
@@ -53,7 +54,7 @@ GameHistory *create_game_history() {
   game_history->players[1] = NULL;
   game_history->letter_distribution = NULL;
   game_history->number_of_events = 0;
-  game_history->events = malloc(sizeof(GameEvent) * (MAX_GAME_EVENTS));
+  game_history->events = malloc_or_die(sizeof(GameEvent) * (MAX_GAME_EVENTS));
   return game_history;
 }
 

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "string_builder.h"
+#include "util.h"
 
 static const size_t string_builder_min_size = 32;
 
@@ -18,7 +19,7 @@ StringBuilder *create_string_builder() {
   StringBuilder *string_builder;
 
   string_builder = calloc(1, sizeof(*string_builder));
-  string_builder->string = malloc(string_builder_min_size);
+  string_builder->string = malloc_or_die(string_builder_min_size);
   *string_builder->string = '\0';
   string_builder->alloced = string_builder_min_size;
   string_builder->len = 0;
@@ -79,8 +80,8 @@ void string_builder_add_string(StringBuilder *string_builder, const char *str,
 
 void string_builder_add_spaces(StringBuilder *string_builder,
                                int number_of_spaces, size_t len) {
-  // TODO: low priority, but find a better way than malloc'ing
-  char *spaces_string = malloc(sizeof(char) * (number_of_spaces + 1));
+  // TODO: low priority, but find a better way than malloc_or_die'ing
+  char *spaces_string = malloc_or_die(sizeof(char) * (number_of_spaces + 1));
   spaces_string[0] = '\0';
   sprintf(spaces_string, "%*s", number_of_spaces, "");
   string_builder_add_string(string_builder, spaces_string, len);
@@ -103,7 +104,7 @@ void string_builder_add_uint(StringBuilder *string_builder, uint64_t n,
 
 void string_builder_add_double(StringBuilder *string_builder, double val,
                                size_t len) {
-  // TODO: low priority, but find a better way than malloc'ing
+  // TODO: low priority, but find a better way than malloc_or_die'ing
   char float_string[200] = "";
   sprintf(float_string, "%0.2f", val);
   string_builder_add_string(string_builder, float_string, len);
@@ -157,7 +158,7 @@ char *string_builder_dump(const StringBuilder *string_builder, size_t *len) {
   if (len != NULL) {
     *len = string_builder->len;
   }
-  out = malloc(string_builder->len + 1);
+  out = malloc_or_die(string_builder->len + 1);
   memcpy(out, string_builder->string, string_builder->len + 1);
   return out;
 }

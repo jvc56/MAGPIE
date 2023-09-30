@@ -51,13 +51,13 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   }
 
   letter_distribution->distribution =
-      (uint32_t *)malloc(letter_distribution->size * sizeof(uint32_t));
+      (uint32_t *)malloc_or_die(letter_distribution->size * sizeof(uint32_t));
   letter_distribution->scores =
-      (uint32_t *)malloc(letter_distribution->size * sizeof(uint32_t));
+      (uint32_t *)malloc_or_die(letter_distribution->size * sizeof(uint32_t));
   letter_distribution->score_order =
-      (uint32_t *)malloc(letter_distribution->size * sizeof(uint32_t));
+      (uint32_t *)malloc_or_die(letter_distribution->size * sizeof(uint32_t));
   letter_distribution->is_vowel =
-      (uint32_t *)malloc(letter_distribution->size * sizeof(uint32_t));
+      (uint32_t *)malloc_or_die(letter_distribution->size * sizeof(uint32_t));
 
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
     letter_distribution->machine_letter_to_human_readable_letter[i][0] = '\0';
@@ -200,7 +200,8 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
 }
 
 LetterDistribution *create_letter_distribution(const char *filename) {
-  LetterDistribution *letter_distribution = malloc(sizeof(LetterDistribution));
+  LetterDistribution *letter_distribution =
+      malloc_or_die(sizeof(LetterDistribution));
   load_letter_distribution(letter_distribution, filename);
   return letter_distribution;
 }
@@ -227,9 +228,9 @@ char *get_letter_distribution_filepath(const char *ld_name) {
 
   // Allocate memory for the result string
   char *result =
-      (char *)malloc((directory_path_len + ld_name_len +
-                      strlen(LETTER_DISTRIBUTION_FILE_EXTENSION) + 1) *
-                     sizeof(char));
+      (char *)malloc_or_die((directory_path_len + ld_name_len +
+                             strlen(LETTER_DISTRIBUTION_FILE_EXTENSION) + 1) *
+                            sizeof(char));
 
   // Copy the directory_path into the result
   strcpy(result, directory_path);

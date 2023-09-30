@@ -7,9 +7,10 @@
 #include "game_event.h"
 #include "move.h"
 #include "rack.h"
+#include "util.h"
 
 GameEvent *create_game_event() {
-  GameEvent *game_event = malloc(sizeof(GameEvent));
+  GameEvent *game_event = malloc_or_die(sizeof(GameEvent));
   game_event->event_type = GAME_EVENT_UNKNOWN;
   game_event->player_index = -1;
   game_event->cumulative_score = 0;

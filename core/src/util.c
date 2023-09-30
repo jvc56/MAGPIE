@@ -6,6 +6,7 @@
 
 #include "constants.h"
 #include "klv.h"
+#include "log.h"
 #include "move.h"
 #include "rack.h"
 
@@ -38,4 +39,12 @@ int is_all_whitespace_or_empty(const char *str) {
     str++;
   }
   return 1;
+}
+
+void *malloc_or_die(size_t size) {
+  void *uncasted_pointer = malloc(size);
+  if (!uncasted_pointer) {
+    log_fatal("failed to malloc size of %lu.\n", size);
+  }
+  return uncasted_pointer;
 }

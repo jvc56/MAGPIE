@@ -31,7 +31,7 @@ void reset_bag(Bag *bag, LetterDistribution *letter_distribution) {
 }
 
 Bag *create_bag(LetterDistribution *letter_distribution) {
-  Bag *bag = malloc(sizeof(Bag));
+  Bag *bag = malloc_or_die(sizeof(Bag));
   // call reseed_prng if needed.
   bag->prng = create_prng(42);
   reset_bag(bag, letter_distribution);
@@ -39,7 +39,7 @@ Bag *create_bag(LetterDistribution *letter_distribution) {
 }
 
 Bag *copy_bag(Bag *bag) {
-  Bag *new_bag = malloc(sizeof(Bag));
+  Bag *new_bag = malloc_or_die(sizeof(Bag));
   new_bag->prng = create_prng(42);
   copy_bag_into(new_bag, bag);
   return new_bag;

@@ -5,6 +5,7 @@
 #include "constants.h"
 #include "fileproxy.h"
 #include "log.h"
+#include "util.h"
 
 #define MAX_CACHE_SIZE 32
 
@@ -38,7 +39,7 @@ FILE *stream_from_filename(const char *filename) {
 }
 
 void precache_file_data(const char *filename, char *raw_data, int num_bytes) {
-  char *data_copy = malloc(sizeof(char) * num_bytes);
+  char *data_copy = malloc_or_die(sizeof(char) * num_bytes);
   memcpy(data_copy, raw_data, num_bytes);
 
   strcpy(file_cache.entries[file_cache.num_items].filename, filename);
