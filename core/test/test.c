@@ -18,7 +18,6 @@
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
-#include "gen_all_test.h"
 #include "infer_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
@@ -73,11 +72,7 @@ int main(int argc, char *argv[]) {
   }
   log_set_level(3);
 
-  if (!strcmp(argv[1], CMD_GEN)) {
-    Config *config = create_config_from_args(argc, argv);
-    test_gen_all(config);
-    destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_INFER)) {
+  if (!strcmp(argv[1], CMD_INFER)) {
     Config *config = create_config_from_args(argc, argv);
     infer_from_config(config);
     destroy_config(config);

@@ -8,6 +8,8 @@
 #include "fileproxy.h"
 #include "letter_distribution.h"
 #include "log.h"
+#include "string_builder.h"
+#include "util.h"
 
 #define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"
 #define LETTER_DISTRIBUTION_FILEPATH "data/letterdistributions/"
@@ -27,7 +29,7 @@ int get_letter_distribution_size(const char *filename) {
   char line[100];
   int letter_distribution_size = 0;
   while (fgets(line, sizeof(line), file)) {
-    if (!isspace((unsigned char)*line)) {
+    if (!is_all_whitespace_or_empty(line)) {
       letter_distribution_size++;
     }
   }
@@ -65,7 +67,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   char line[100];
   int max_tile_length = 0;
   while (fgets(line, sizeof(line), file)) {
-    if (isspace((unsigned char)*line)) {
+    if (is_all_whitespace_or_empty(line)) {
       continue;
     }
     char *token;
@@ -250,5 +252,27 @@ char *get_letter_distribution_filepath(const char *ld_name) {
 
 // FIXME: return letter distrubitions other than english
 char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name) {
+  log_warn("returning 'english' for %s", lexicon_name);
   return strdup("english");
+}
+
+void write_user_visible_letter(char *dest,
+                               LetterDistribution *letter_distribution,
+                               uint8_t ml) {
+
+  char human_letter[MAX_LETTER_CHAR_LENGTH] = "";
+  machine_letter_to_human_readable_letter(letter_distribution, ml,
+                                          human_letter);
+  for (size_t i = 0; i < strlen(human_letter); i++) {
+    sprintf(dest + strlen(dest), "%c", human_letter[i]);
+  }
+}
+
+void string_builder_add_user_visible_letter(
+    LetterDistribution *letter_distribution, uint8_t ml, size_t len,
+    StringBuilder *string_builder) {
+
+  char human_letter[MAX_LETTER_CHAR_LENGTH] = "";
+  write_user_visible_letter(human_letter, letter_distribution, ml);
+  string_builder_add_string(string_builder, human_letter, len);
 }

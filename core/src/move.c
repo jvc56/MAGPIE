@@ -6,6 +6,7 @@
 #include "constants.h"
 #include "log.h"
 #include "move.h"
+#include "string_builder.h"
 
 Move *create_move() { return malloc(sizeof(Move)); }
 
@@ -38,7 +39,9 @@ void reset_move_list(MoveList *ml) {
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
 }
 
-int within_epsilon_for_equity(double a, double b) { return fabs(a - b) < 1e-6; }
+int within_epsilon_for_equity(double a, double board) {
+  return fabs(a - board) < 1e-6;
+}
 
 void print_move(Move *m) {
   printf("%2.6f %4d %2d %2d %2d %2d %d %d", m->equity, m->score, m->row_start,
@@ -250,5 +253,78 @@ void store_move_description(Move *move, char *placeholder,
     sprintf(placeholder, "(Exch %s)", tiles);
   } else if (move->move_type == GAME_EVENT_PASS) {
     sprintf(placeholder, "(Pass)");
+  }
+}
+
+// Human readable print function
+
+void string_builder_add_move(Board *board, Move *m,
+                             LetterDistribution *letter_distribution,
+                             StringBuilder *string_builder) {
+  if (m->move_type == GAME_EVENT_PASS) {
+    string_builder_add_string(string_builder, "pass 0", 0);
+    return;
+  }
+
+  if (m->move_type == GAME_EVENT_EXCHANGE) {
+    string_builder_add_string(string_builder, "(exch ", 0);
+    for (int i = 0; i < m->tiles_played; i++) {
+      string_builder_add_user_visible_letter(letter_distribution, m->tiles[i],
+                                             0, string_builder);
+    }
+    string_builder_add_string(string_builder, ")", 0);
+    return;
+  }
+
+  if (m->vertical) {
+    string_builder_add_char(string_builder, m->col_start + 'A', 0);
+    string_builder_add_int(string_builder, m->row_start + 1, 0);
+  } else {
+    string_builder_add_int(string_builder, m->row_start + 1, 0);
+    string_builder_add_char(string_builder, m->col_start + 'A', 0);
+  }
+
+  string_builder_add_spaces(string_builder, 1, 0);
+  int current_row = m->row_start;
+  int current_col = m->col_start;
+  for (int i = 0; i < m->tiles_length; i++) {
+    uint8_t tile = m->tiles[i];
+    uint8_t print_tile = tile;
+    if (tile == PLAYED_THROUGH_MARKER) {
+      if (board) {
+        print_tile = get_letter(board, current_row, current_col);
+      }
+      if (i == 0 && board) {
+        string_builder_add_string(string_builder, "(", 0);
+      }
+    }
+
+    if (tile == PLAYED_THROUGH_MARKER && !board) {
+      string_builder_add_string(string_builder, ".", 0);
+    } else {
+      string_builder_add_user_visible_letter(letter_distribution, print_tile, 0,
+                                             string_builder);
+    }
+
+    if (board && (tile == PLAYED_THROUGH_MARKER) &&
+        (i == m->tiles_length - 1 ||
+         m->tiles[i + 1] != PLAYED_THROUGH_MARKER)) {
+      string_builder_add_string(string_builder, ")", 0);
+    }
+
+    if (board && tile != PLAYED_THROUGH_MARKER && (i + 1 < m->tiles_length) &&
+        m->tiles[i + 1] == PLAYED_THROUGH_MARKER) {
+      string_builder_add_string(string_builder, "(", 0);
+    }
+
+    if (m->vertical) {
+      current_row++;
+    } else {
+      current_col++;
+    }
+  }
+  string_builder_add_spaces(string_builder, 1, 0);
+  if (board) {
+    string_builder_add_int(string_builder, m->score, 0);
   }
 }

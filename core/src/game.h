@@ -8,6 +8,7 @@
 #include "movegen.h"
 #include "player.h"
 #include "rack.h"
+#include "string_builder.h"
 
 #define MAX_SEARCH_DEPTH 25
 #define MAX_SCORELESS_TURNS 6
@@ -61,5 +62,6 @@ void lexicon_ld_from_cgp(char *cgp, char *lexicon, char *ldname);
 int tiles_unseen(Game *game);
 game_variant_t get_game_variant_type_from_name(const char *variant_name);
 void set_player_on_turn(Game *game, int player_on_turn_index);
+void string_builder_add_game(Game *game, StringBuilder *game_string);
 
 #endif

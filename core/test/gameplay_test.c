@@ -8,7 +8,6 @@
 #include "../src/gameplay.h"
 #include "../src/player.h"
 
-#include "game_print.h"
 #include "superconfig.h"
 #include "test_util.h"
 

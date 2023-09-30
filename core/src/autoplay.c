@@ -13,9 +13,6 @@
 #include "thread_control.h"
 #include "ucgi_print.h"
 
-#include "../test/game_print.h"
-#include "../test/move_print.h"
-
 typedef struct AutoplayWorker {
   Config *config;
   ThreadControl *thread_control;
@@ -151,12 +148,10 @@ void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
 
   int saved_player_1_recorder_type =
       config->player_1_strategy_params->play_recorder_type;
-  config->player_1_strategy_params->play_recorder_type =
-      MOVE_RECORDER_BEST;
+  config->player_1_strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
   int saved_player_2_recorder_type =
       config->player_2_strategy_params->play_recorder_type;
-  config->player_2_strategy_params->play_recorder_type =
-      MOVE_RECORDER_BEST;
+  config->player_2_strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
   int save_move_list_capacity = config->move_list_capacity;
   config->move_list_capacity = 1;
 

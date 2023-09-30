@@ -60,5 +60,7 @@ void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
               int vertical, game_event_t move_type);
 void set_move_as_pass(Move *move);
 void set_spare_move_as_pass(MoveList *ml);
-
+void string_builder_add_move(Board *board, Move *m,
+                             LetterDistribution *letter_distribution,
+                             StringBuilder *string_builder);
 #endif

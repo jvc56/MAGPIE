@@ -1,6 +1,8 @@
 #include <stdlib.h>
 
 #include "bag.h"
+#include "string_builder.h"
+#include "util.h"
 #include "xoshiro.h"
 
 void shuffle(Bag *bag) {
@@ -85,3 +87,45 @@ void add_letter(Bag *bag, uint8_t letter) {
 }
 
 void reseed_prng(Bag *bag, uint64_t seed) { seed_prng(bag->prng, seed); }
+
+void write_bag(char *dest, Bag *bag, LetterDistribution *letter_distribution) {
+  // Must be lower than the max uint8_t value
+  int blank_sort_value = 200;
+  uint8_t sorted_bag[BAG_SIZE];
+  for (int i = 0; i <= bag->last_tile_index; i++) {
+    sorted_bag[i] = bag->tiles[i];
+    // Make blanks some arbitrarily large number
+    // so that they are printed last.
+    if (sorted_bag[i] == BLANK_MACHINE_LETTER) {
+      sorted_bag[i] = blank_sort_value;
+    }
+  }
+  int x;
+  int i = 1;
+  int k;
+  while (i < bag->last_tile_index + 1) {
+    x = sorted_bag[i];
+    k = i - 1;
+    while (k >= 0 && x < sorted_bag[k]) {
+      sorted_bag[k + 1] = sorted_bag[k];
+      k--;
+    }
+    sorted_bag[k + 1] = x;
+    i++;
+  }
+
+  for (int i = 0; i <= bag->last_tile_index; i++) {
+    if (sorted_bag[i] == blank_sort_value) {
+      sorted_bag[i] = 0;
+    }
+    write_user_visible_letter(dest, letter_distribution, sorted_bag[i]);
+  }
+}
+
+void string_builder_add_bag(Bag *bag, LetterDistribution *letter_distribution,
+                            size_t len, StringBuilder *string_builder) {
+
+  char bag_string[BAG_SIZE * MAX_LETTER_CHAR_LENGTH] = "";
+  write_bag(bag_string, bag, letter_distribution);
+  string_builder_add_string(string_builder, bag_string, len);
+}

@@ -10,7 +10,6 @@
 #include "../src/move.h"
 #include "../src/thread_control.h"
 
-#include "inference_print.h"
 #include "superconfig.h"
 #include "test_constants.h"
 #include "test_util.h"

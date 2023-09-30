@@ -38,8 +38,7 @@ void ucgi_write_leave_rack(char **buffer, LeaveRack *leave_rack, int index,
                            LetterDistribution *letter_distribution,
                            int is_exchange) {
   char leave_string[(RACK_SIZE)] = "";
-  write_rack_to_end_of_buffer(leave_string, letter_distribution,
-                              leave_rack->leave);
+  write_rack(leave_rack->leave, letter_distribution, leave_string);
   if (!is_exchange) {
     *buffer +=
         sprintf(*buffer, "infercommon %d %s %f %d %f\n", index + 1,
@@ -47,8 +46,7 @@ void ucgi_write_leave_rack(char **buffer, LeaveRack *leave_rack, int index,
                 leave_rack->draws, leave_rack->equity);
   } else {
     char exchanged_string[(RACK_SIZE)] = "";
-    write_rack_to_end_of_buffer(exchanged_string, letter_distribution,
-                                leave_rack->exchanged);
+    write_rack(leave_rack->exchanged, letter_distribution, exchanged_string);
     *buffer += sprintf(*buffer, "inferleave %d %s %s %f %d\n", index + 1,
                        leave_string, exchanged_string,
                        ((double)leave_rack->draws / total_draws) * 100,

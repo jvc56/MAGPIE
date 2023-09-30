@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <regex.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -947,7 +948,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
                                 gcg_parser->gcg_line_buffer,
                                 strlen(gcg_parser->gcg_line_buffer));
       string_builder_add_string(gcg_parser->note_builder, " ", 1);
-    } else if (!contains_all_whitespace(gcg_parser->gcg_line_buffer)) {
+    } else if (!is_all_whitespace_or_empty(gcg_parser->gcg_line_buffer)) {
       return GCG_PARSE_STATUS_NO_MATCHING_TOKEN;
     }
     break;

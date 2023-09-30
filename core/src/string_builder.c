@@ -77,6 +77,46 @@ void string_builder_add_string(StringBuilder *string_builder, const char *str,
   string_builder->string[string_builder->len] = '\0';
 }
 
+void string_builder_add_spaces(StringBuilder *string_builder,
+                               int number_of_spaces, size_t len) {
+  // TODO: low priority, but find a better way than malloc'ing
+  char *spaces_string = malloc(sizeof(char) * (number_of_spaces + 1));
+  spaces_string[0] = '\0';
+  sprintf(spaces_string, "%*s", number_of_spaces, "");
+  string_builder_add_string(string_builder, spaces_string, len);
+  free(spaces_string);
+}
+
+void string_builder_add_int(StringBuilder *string_builder, int64_t n,
+                            size_t len) {
+  char integer_string[200] = "";
+  sprintf(integer_string, "%ld", n);
+  string_builder_add_string(string_builder, integer_string, len);
+}
+
+void string_builder_add_uint(StringBuilder *string_builder, uint64_t n,
+                             size_t len) {
+  char integer_string[200] = "";
+  sprintf(integer_string, "%lu", n);
+  string_builder_add_string(string_builder, integer_string, len);
+}
+
+void string_builder_add_double(StringBuilder *string_builder, double val,
+                               size_t len) {
+  // TODO: low priority, but find a better way than malloc'ing
+  char float_string[200] = "";
+  sprintf(float_string, "%0.2f", val);
+  string_builder_add_string(string_builder, float_string, len);
+}
+
+void string_builder_add_char(StringBuilder *string_builder, char c,
+                             size_t len) {
+  char char_as_string[2];
+  char_as_string[0] = c;
+  char_as_string[1] = '\0';
+  string_builder_add_string(string_builder, char_as_string, len);
+}
+
 void string_builder_truncate(StringBuilder *string_builder, size_t len) {
   if (string_builder == NULL || len >= string_builder->len) {
     return;

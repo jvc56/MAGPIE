@@ -7,6 +7,7 @@
 #include "letter_distribution.h"
 #include "log.h"
 #include "rack.h"
+#include "string_builder.h"
 
 void reset_rack(Rack *rack) {
   for (int i = 0; i < (rack->array_size); i++) {
@@ -85,8 +86,8 @@ void set_rack_to_string(Rack *rack, const char *rack_string,
   }
 }
 
-void rack_to_string(Rack *rack, char *rack_string,
-                    LetterDistribution *letter_distribution) {
+void write_rack(Rack *rack, LetterDistribution *letter_distribution,
+                char *rack_string) {
   char *rp = rack_string;
   for (int i = 0; i < rack->array_size; i++) {
     for (int j = 0; j < rack->array[i]; j++) {
@@ -95,6 +96,14 @@ void rack_to_string(Rack *rack, char *rack_string,
       rp += sprintf(rp, "%s", tile);
     }
   }
+}
+
+void string_builder_add_rack(Rack *rack,
+                             LetterDistribution *letter_distribution,
+                             StringBuilder *string_builder) {
+  char rack_string[MAX_LETTER_CHAR_LENGTH * BAG_SIZE] = "";
+  write_rack(rack, letter_distribution, rack_string);
+  string_builder_add_string(string_builder, rack_string, 0);
 }
 
 bool racks_are_equal(Rack *rack1, Rack *rack2) {

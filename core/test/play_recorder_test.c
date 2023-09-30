@@ -7,7 +7,6 @@
 #include "../src/gameplay.h"
 #include "../src/log.h"
 
-#include "game_print.h"
 #include "test_util.h"
 
 void play_top_versus_all_game(Game *game) {

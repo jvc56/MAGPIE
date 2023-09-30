@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "letter_distribution.h"
+#include "string_builder.h"
 #include "xoshiro.h"
 
 #define BAG_SIZE 100
@@ -22,5 +23,6 @@ void copy_bag_into(Bag *dst, Bag *src);
 void reseed_prng(Bag *bag, uint64_t seed);
 void reset_bag(Bag *bag, LetterDistribution *letter_distribution);
 void shuffle(Bag *bag);
-
+void string_builder_add_bag(Bag *bag, LetterDistribution *letter_distribution,
+                            size_t len, StringBuilder *string_builder);
 #endif

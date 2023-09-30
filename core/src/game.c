@@ -12,6 +12,8 @@
 #include "log.h"
 #include "movegen.h"
 #include "player.h"
+#include "string_builder.h"
+#include "util.h"
 
 char add_player_score(const char *cgp, int *cgp_index, Game *game,
                       int player_index) {
@@ -55,7 +57,7 @@ char add_player_rack(const char *cgp, int *cgp_index, Game *game,
 }
 
 void load_cgp(Game *game, const char *cgp) {
-  if (cgp[0] == '\0' || isspace((unsigned char)*cgp)) {
+  if (is_all_whitespace_or_empty(cgp)) {
     return;
   }
   // Set all tiles:
@@ -387,4 +389,92 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
     game_variant = GAME_VARIANT_WORDSMOG;
   }
   return game_variant;
+}
+
+// Human readable print functions
+
+void string_builder_add_player_row(LetterDistribution *letter_distribution,
+                                   Player *player, bool player_on_turn,
+                                   StringBuilder *game_string) {
+
+  char *player_on_turn_marker = "-> ";
+  char *player_off_turn_marker = "   ";
+  char *player_marker = player_on_turn_marker;
+  if (!player_on_turn) {
+    player_marker = player_off_turn_marker;
+  }
+
+  string_builder_add_string(game_string, player_marker, 0);
+  string_builder_add_string(game_string, player->name, 0);
+  string_builder_add_spaces(game_string, 25 - strlen(player->name), 0);
+  string_builder_add_rack(player->rack, letter_distribution, game_string);
+  string_builder_add_spaces(game_string, 10 - player->rack->number_of_letters,
+                            0);
+  string_builder_add_int(game_string, player->score, 0);
+}
+
+void string_builder_add_board_row(LetterDistribution *letter_distribution,
+                                  Board *board, int row,
+                                  StringBuilder *game_string) {
+  char row_number[5] = "";
+  sprintf(row_number, "%2d|", row + 1);
+  string_builder_add_string(game_string, row_number, 0);
+  for (int i = 0; i < BOARD_DIM; i++) {
+    uint8_t current_letter = get_letter(board, row, i);
+    if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+      string_builder_add_char(game_string,
+                              CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i], 0);
+    } else {
+      string_builder_add_user_visible_letter(letter_distribution,
+                                             current_letter, 0, game_string);
+    }
+    string_builder_add_string(game_string, " ", 0);
+  }
+  string_builder_add_string(game_string, "|", 0);
+}
+
+void string_builder_add_move_with_rank_and_equity(Game *game, int move_index,
+                                                  StringBuilder *game_string) {
+  Move *move = game->gen->move_list->moves[move_index];
+  string_builder_add_int(game_string, move_index + 1, 0);
+  string_builder_add_move(game->gen->board, move,
+                          game->gen->letter_distribution, game_string);
+  string_builder_add_double(game_string, move->equity, 0);
+}
+
+void string_builder_add_game(Game *game, StringBuilder *game_string) {
+  // TODO: update for super crossword game
+  string_builder_add_string(game_string, "   A B C D E F G H I J K L M N O   ",
+                            0);
+  string_builder_add_player_row(game->gen->letter_distribution,
+                                game->players[0],
+                                game->player_on_turn_index == 0, game_string);
+  string_builder_add_string(game_string,
+                            "\n   ------------------------------  ", 0);
+  string_builder_add_player_row(game->gen->letter_distribution,
+                                game->players[1],
+                                game->player_on_turn_index == 1, game_string);
+  string_builder_add_string(game_string, "\n", 0);
+
+  for (int i = 0; i < BOARD_DIM; i++) {
+    string_builder_add_board_row(game->gen->letter_distribution,
+                                 game->gen->board, i, game_string);
+    if (i == 0) {
+      string_builder_add_string(
+          game_string, " --Tracking-----------------------------------", 0);
+    } else if (i == 1) {
+      string_builder_add_string(game_string, " ", 0);
+      string_builder_add_bag(game->gen->bag, game->gen->letter_distribution, 0,
+                             game_string);
+      string_builder_add_string(game_string, "  ", 0);
+      string_builder_add_int(game_string, game->gen->bag->last_tile_index + 1,
+                             0);
+    } else if (i - 2 < game->gen->move_list->count) {
+      string_builder_add_move_with_rank_and_equity(game, i - 2, game_string);
+    }
+    string_builder_add_string(game_string, "\n", 0);
+  }
+
+  string_builder_add_string(game_string, "   ------------------------------\n",
+                            0);
 }

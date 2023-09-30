@@ -10,6 +10,7 @@
 #include "move.h"
 #include "rack.h"
 #include "stats.h"
+#include "string_builder.h"
 #include "thread_control.h"
 
 #define INFERENCE_EQUITY_EPSILON 0.000000001
@@ -82,5 +83,7 @@ get_probability_for_random_minimum_draw(Rack *bag_as_rack, Rack *rack,
                                         uint8_t this_letter, int minimum,
                                         int number_of_actual_tiles_played);
 uint64_t choose(uint64_t n, uint64_t k);
-
+void string_builder_add_inference(Inference *inference,
+                                  Rack *actual_tiles_played,
+                                  StringBuilder *inference_string);
 #endif

@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "constants.h"
+#include "string_builder.h"
 
 #define BLANK_MASK 0x80
 #define UNBLANK_MASK (0x80 - 1)
@@ -49,4 +50,12 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
                            uint8_t *mls);
 char *get_letter_distribution_filepath(const char *ld_name);
 char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name);
+
+void write_user_visible_letter(char *dest,
+                               LetterDistribution *letter_distribution,
+                               uint8_t ml);
+void string_builder_add_user_visible_letter(
+    LetterDistribution *letter_distribution, uint8_t ml, size_t len,
+    StringBuilder *string_builder);
+
 #endif

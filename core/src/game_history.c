@@ -94,7 +94,7 @@ void destroy_game_history(GameHistory *game_history) {
 }
 
 Game *play_to_turn(GameHistory *game_history, int turn_number) {
-  log_fatal("unimplemented");
+  log_fatal("unimplemented: %p, %d\n", game_history, turn_number);
   return NULL;
 }
 

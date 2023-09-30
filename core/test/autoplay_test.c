@@ -11,9 +11,6 @@
 #include "../src/infer.h"
 #include "../src/thread_control.h"
 
-#include "game_print.h"
-#include "inference_print.h"
-#include "move_print.h"
 #include "superconfig.h"
 #include "test_util.h"
 
@@ -163,8 +160,7 @@ void print_error_case(Game *game, Inference *inference_1,
                       int number_of_tiles_exchanged, int number_of_threads) {
   print_game(game);
   char rack_string[50] = "";
-  write_rack_to_end_of_buffer(rack_string, game->gen->letter_distribution,
-                              tiles_played);
+  write_rack(tiles_played, game->gen->letter_distribution, rack_string);
   printf("tiles played: %s\n", rack_string);
   printf("pindex: %d\n", player_on_turn_index);
   printf("score: %d\n", score);
@@ -189,8 +185,9 @@ void play_game_test(ThreadControl *thread_control, Game *game,
 
     Move *move_to_play = create_move();
     copy_move(game->gen->move_list->moves[0], move_to_play);
-    if (test_inference && (move_to_play->move_type == GAME_EVENT_EXCHANGE ||
-                           move_to_play->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE)) {
+    if (test_inference &&
+        (move_to_play->move_type == GAME_EVENT_EXCHANGE ||
+         move_to_play->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE)) {
       reset_rack(tiles_played);
       reset_rack(full_rack);
       for (int i = 0; i < move_to_play->tiles_length; i++) {
