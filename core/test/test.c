@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
     printf("must specify exactly one command\n");
     exit(EXIT_FAILURE);
   }
-  log_set_level(3);
+  log_set_level(LOG_WARN);
 
   if (!strcmp(argv[1], CMD_INFER)) {
     Config *config = create_config_from_args(argc, argv);
