@@ -10,21 +10,22 @@
 
 // String utility functions
 
-char *format_string(const char *format, ...) {
+char *format_string_with_va_list(const char *format, va_list *args) {
   int size;
-  va_list args;
-
-  va_start(args, format);
-  size = vsnprintf(NULL, 0, format, args) + 1;
-  va_end(args);
-
+  va_list args_copy_for_size;
+  va_copy(args_copy_for_size, *args);
+  size = vsnprintf(NULL, 0, format, args_copy_for_size) + 1;
   char *string_buffer = malloc_or_die(size);
-
-  va_start(args, format);
-  vsnprintf(string_buffer, size, format, args);
-  va_end(args);
-
+  vsnprintf(string_buffer, size, format, *args);
   return string_buffer;
+}
+
+char *format_string(const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  char *formatted_string = format_string_with_va_list(format, &args);
+  va_end(args);
+  return formatted_string;
 }
 
 // String Builder function
@@ -104,7 +105,7 @@ void string_builder_add_formatted_string(StringBuilder *string_builder,
                                          const char *format, ...) {
   va_list args;
   va_start(args, format);
-  char *formatted_string = format_string(format, args);
+  char *formatted_string = format_string_with_va_list(format, &args);
   va_end(args);
   string_builder_add_string(string_builder, formatted_string, 0);
   free(formatted_string);

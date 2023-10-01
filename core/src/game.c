@@ -404,8 +404,9 @@ void string_builder_add_player_row(LetterDistribution *letter_distribution,
     player_marker = player_off_turn_marker;
   }
 
-  string_builder_add_formatted_string(game_string, "%s%s", player_marker,
-                                      player->name);
+  string_builder_add_formatted_string(game_string, "%s%s%*s", player_marker,
+                                      player->name, 25 - strlen(player->name),
+                                      "");
   string_builder_add_rack(player->rack, letter_distribution, game_string);
   string_builder_add_formatted_string(game_string, "%*s%d",
                                       10 - player->rack->number_of_letters, "",

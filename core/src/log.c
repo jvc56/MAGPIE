@@ -149,6 +149,6 @@ void log_log(int level, const char *file, int line, const char *fmt, ...) {
 
   // Exit if log level is FATAL
   if (level == LOG_FATAL) {
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 }
