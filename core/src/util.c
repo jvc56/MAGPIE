@@ -34,3 +34,11 @@ void *malloc_or_die(size_t size) {
   }
   return uncasted_pointer;
 }
+
+void *realloc_or_die(void *realloc_target, size_t size) {
+  void *realloc_result = realloc(realloc_target, size);
+  if (!realloc_result) {
+    log_fatal("failed to realloc %p with size of %lu.\n", realloc_target, size);
+  }
+  return realloc_result;
+}

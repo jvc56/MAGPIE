@@ -12,7 +12,6 @@
 void reset_and_load_game(Game *game, const char *cgp) {
   reset_game(game);
   load_cgp(game, cgp);
-  print_game(game);
 }
 
 void test_load_cgp(SuperConfig *superconfig) {

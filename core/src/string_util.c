@@ -98,7 +98,7 @@ static void string_builder_ensure_space(StringBuilder *string_builder,
     }
   }
   string_builder->string =
-      realloc(string_builder->string, string_builder->alloced);
+      realloc_or_die(string_builder->string, string_builder->alloced);
 }
 
 void string_builder_add_string(StringBuilder *string_builder, const char *str,
