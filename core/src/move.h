@@ -46,8 +46,8 @@ void destroy_move(Move *move);
 MoveList *create_move_list(int capacity);
 void destroy_move_list(MoveList *ml);
 void sort_moves(MoveList *ml);
-void store_move_description(Move *move, char *placeholder,
-                            LetterDistribution *ld);
+void string_builder_add_move_description(Move *move, LetterDistribution *ld,
+                                         StringBuilder *move_string_builder);
 void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
                     int rightstrip, int score, int row_start, int col_start,
                     int tiles_played, int vertical, game_event_t move_type);

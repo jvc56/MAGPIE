@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h> // for sleep
@@ -17,6 +18,7 @@ void print_sim_stats(Simmer *simmer, Game *game) {
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
 
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
+  StringBuilder *move_description = create_string_builder();
   for (int i = 0; i < simmer->num_simmed_plays; i++) {
     SimmedPlay *play = simmer->simmed_plays[i];
     double wp_mean = play->win_pct_stat->mean * 100.0;
@@ -25,19 +27,20 @@ void print_sim_stats(Simmer *simmer, Game *game) {
     double eq_mean = play->equity_stat->mean;
     double eq_se = get_standard_error(play->equity_stat, STATS_Z99);
 
-    char wp[20];
-    char eq[20];
-    sprintf(wp, "%.3f±%.3f", wp_mean, wp_se);
-    sprintf(eq, "%.3f±%.3f", eq_mean, eq_se);
+    char *wp = get_formatted_string("%.3f±%.3f", wp_mean, wp_se);
+    char *eq = get_formatted_string("%.3f±%.3f", eq_mean, eq_se);
 
     const char *ignore = play->ignore ? "❌" : "";
-    char placeholder[80];
-    store_move_description(play->move, placeholder,
-                           game->gen->letter_distribution);
-    printf("%-20s%-9d%-16s%-16s%s\n", placeholder, play->move->score, wp, eq,
-           ignore);
+    string_builder_add_move_description(
+        play->move, game->gen->letter_distribution, move_description);
+    printf("%-20s%-9d%-16s%-16s%s\n", string_builder_peek(move_description),
+           play->move->score, wp, eq, ignore);
+    string_builder_clear(move_description);
+    free(wp);
+    free(eq);
   }
   printf("Iterations: %d\n", simmer->iteration_count);
+  destroy_string_builder(move_description);
 }
 
 void test_win_pct(SuperConfig *superconfig) {
@@ -77,15 +80,17 @@ void test_more_iterations(SuperConfig *superconfig,
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
-  char placeholder[80];
-  store_move_description(simmer->simmed_plays[0]->move, placeholder,
-                         game->gen->letter_distribution);
+  StringBuilder *move_string_builder = create_string_builder();
+  string_builder_add_move_description(simmer->simmed_plays[0]->move,
+                                      game->gen->letter_distribution,
+                                      move_string_builder);
 
-  assert(strcmp(placeholder, "8G QI") == 0);
+  assert(strcmp(string_builder_peek(move_string_builder), "8G QI") == 0);
 
   assert(unhalt(thread_control));
   destroy_game(game);
   destroy_simmer(simmer);
+  destroy_string_builder(move_string_builder);
 }
 
 void perf_test_sim(Config *config, ThreadControl *thread_control) {
@@ -106,13 +111,15 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   print_sim_stats(simmer, game);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
-  char placeholder[80];
-  store_move_description(simmer->simmed_plays[0]->move, placeholder,
-                         game->gen->letter_distribution);
+  StringBuilder *move_string_builder = create_string_builder();
+  string_builder_add_move_description(simmer->simmed_plays[0]->move,
+                                      game->gen->letter_distribution,
+                                      move_string_builder);
 
-  assert(strcmp(placeholder, "14F ZI.E") == 0);
+  assert(strcmp(string_builder_peek(move_string_builder), "14F ZI.E") == 0);
 
   assert(unhalt(thread_control));
+  destroy_string_builder(move_string_builder);
   destroy_game(game);
   destroy_simmer(simmer);
 }
@@ -131,13 +138,15 @@ void perf_test_multithread_sim(Config *config, ThreadControl *thread_control) {
   print_sim_stats(simmer, game);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
-  char placeholder[80];
-  store_move_description(simmer->simmed_plays[0]->move, placeholder,
-                         game->gen->letter_distribution);
+  StringBuilder *move_string_builder = create_string_builder();
+  string_builder_add_move_description(simmer->simmed_plays[0]->move,
+                                      game->gen->letter_distribution,
+                                      move_string_builder);
 
-  assert(strcmp(placeholder, "14F ZI.E") == 0);
+  assert(strcmp(string_builder_peek(move_string_builder), "14F ZI.E") == 0);
 
   assert(unhalt(thread_control));
+  destroy_string_builder(move_string_builder);
   destroy_game(game);
   destroy_simmer(simmer);
 }
@@ -156,11 +165,13 @@ void perf_test_multithread_blocking_sim(Config *config,
   print_sim_stats(simmer, game);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
-  char placeholder[80];
-  store_move_description(simmer->simmed_plays[0]->move, placeholder,
-                         game->gen->letter_distribution);
+  StringBuilder *move_string_builder = create_string_builder();
+  string_builder_add_move_description(simmer->simmed_plays[0]->move,
+                                      game->gen->letter_distribution,
+                                      move_string_builder);
 
-  assert(strcmp(placeholder, "14F ZI.E") == 0);
+  assert(strcmp(string_builder_peek(move_string_builder), "14F ZI.E") == 0);
+  destroy_string_builder(move_string_builder);
   destroy_game(game);
   destroy_simmer(simmer);
 }
@@ -180,16 +191,22 @@ void test_play_similarity(SuperConfig *superconfig,
   // 8F ATRESIC and 8F STEARIC should show up as similar, though.
   // These are play indexes 1 and 2.
 
+  StringBuilder *p1_string_builder = create_string_builder();
+  StringBuilder *p2_string_builder = create_string_builder();
+
   for (int i = 0; i < 4; i++) {
     for (int j = i + 1; j < 4; j++) {
-      char p1[80];
-      char p2[80];
+      string_builder_clear(p1_string_builder);
+      string_builder_add_move_description(simmer->simmed_plays[i]->move,
+                                          game->gen->letter_distribution,
+                                          p1_string_builder);
+      string_builder_clear(p2_string_builder);
+      string_builder_add_move_description(simmer->simmed_plays[j]->move,
+                                          game->gen->letter_distribution,
+                                          p2_string_builder);
 
-      store_move_description(simmer->simmed_plays[i]->move, p1,
-                             game->gen->letter_distribution);
-      store_move_description(simmer->simmed_plays[j]->move, p2,
-                             game->gen->letter_distribution);
-
+      const char *p1 = string_builder_peek(p1_string_builder);
+      const char *p2 = string_builder_peek(p2_string_builder);
       if (strcmp(p1, "8F ATRESIC") == 0 && strcmp(p2, "8F STEARIC") == 0) {
         assert(plays_are_similar(simmer, simmer->simmed_plays[i],
                                  simmer->simmed_plays[j]));
@@ -203,6 +220,8 @@ void test_play_similarity(SuperConfig *superconfig,
       }
     }
   }
+  destroy_string_builder(p1_string_builder);
+  destroy_string_builder(p2_string_builder);
 
   assert(!plays_are_similar(simmer, simmer->simmed_plays[3],
                             simmer->simmed_plays[4]));

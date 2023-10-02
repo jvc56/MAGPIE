@@ -144,13 +144,6 @@ human_readable_letter_to_machine_letter(LetterDistribution *letter_distribution,
   return INVALID_LETTER;
 }
 
-void machine_letter_to_human_readable_letter(
-    LetterDistribution *letter_distribution, uint8_t ml,
-    char letter[MAX_LETTER_CHAR_LENGTH]) {
-  strcpy(letter,
-         letter_distribution->machine_letter_to_human_readable_letter[ml]);
-}
-
 // Convert a string of arbitrary characters into an array of machine letters,
 // returning the number of machine letters. This function does not allocate
 // the ml array; it is the caller's responsibility to make this array big
@@ -257,23 +250,10 @@ char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name) {
   return strdup("english");
 }
 
-void write_user_visible_letter(char *dest,
-                               LetterDistribution *letter_distribution,
-                               uint8_t ml) {
-
-  char human_letter[MAX_LETTER_CHAR_LENGTH] = "";
-  machine_letter_to_human_readable_letter(letter_distribution, ml,
-                                          human_letter);
-  for (size_t i = 0; i < strlen(human_letter); i++) {
-    sprintf(dest + strlen(dest), "%c", human_letter[i]);
-  }
-}
-
 void string_builder_add_user_visible_letter(
     LetterDistribution *letter_distribution, uint8_t ml, size_t len,
     StringBuilder *string_builder) {
-
-  char human_letter[MAX_LETTER_CHAR_LENGTH] = "";
-  write_user_visible_letter(human_letter, letter_distribution, ml);
-  string_builder_add_string(string_builder, human_letter, len);
+  string_builder_add_string(
+      string_builder,
+      letter_distribution->machine_letter_to_human_readable_letter[ml], len);
 }

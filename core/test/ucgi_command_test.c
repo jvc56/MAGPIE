@@ -57,8 +57,8 @@ void test_ucgi_command() {
   int iters;
   int checkstop;
   int info;
-  char move_placeholder[80];
-  char test_stdin_input[256];
+  StringBuilder *move_string_builder = create_string_builder();
+  StringBuilder *test_stdin_input = create_string_builder();
 
   size_t len;
   size_t prev_len = 0;
@@ -78,61 +78,66 @@ void test_ucgi_command() {
   prev_len = len;
 
   // Test the position cgp command
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           ION_OPENING_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "position cgp %s",
+                                      ION_OPENING_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   assert(!strcmp("CSW21", ucgi_command_vars->last_lexicon_name));
   assert(!strcmp("english", ucgi_command_vars->last_ld_name));
   assert(ucgi_command_vars->loaded_game->gen->bag->last_tile_index + 1 == 83);
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
 
   // Test go parse failures
   // invalid stop cond
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s",
-           "go stopcondition 93");
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s",
+                                      "go stopcondition 93");
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(!is_halted(ucgi_command_vars->thread_control));
   assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
 
   // Test go parse failures
   // stop cond and infinite
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s",
-           "go stopcondition 95 i 0");
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
-  printf("result: %d\n", result);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s",
+                                      "go stopcondition 95 i 0");
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
 
   // Test go parse failures
   // sim + depth of 0
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s",
-           "go sim stopcondition 95 depth 0");
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s",
+                                      "go sim stopcondition 95 depth 0");
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
 
   // Test go parse failures
   // nonpositive threads
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s",
-           "go sim stopcondition 95 depth 1 threads 0");
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input, "%s", "go sim stopcondition 95 depth 1 threads 0");
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
 
   // Test go parse failures
-  // nonpositive threads
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s", "go sim infer");
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  // too many search types
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s", "go sim infer");
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
 
   // Test sim finishing probabilistically
   depth = 2;
@@ -143,16 +148,21 @@ void test_ucgi_command() {
   checkstop = 300;
   info = 70;
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           ZILLION_OPENING_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      ZILLION_OPENING_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go sim depth %d stopcondition %d threads %d plays %d i %d "
-           "checkstop %d info %d",
-           depth, stopcondition, threads, plays, iters, checkstop, info);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input,
+      "go sim depth %d stopcondition %d threads %d plays %d i %d "
+      "checkstop %d info %d",
+      depth, stopcondition, threads, plays, iters, checkstop, info);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // Check the go params
   assert(ucgi_command_vars->go_params->depth == depth);
@@ -176,13 +186,14 @@ void test_ucgi_command() {
   sort_plays_by_win_rate(ucgi_command_vars->simmer->simmed_plays,
                          ucgi_command_vars->simmer->num_simmed_plays);
 
-  store_move_description(
-      ucgi_command_vars->simmer->simmed_plays[0]->move, move_placeholder,
-      ucgi_command_vars->loaded_game->gen->letter_distribution);
+  string_builder_clear(move_string_builder);
+  string_builder_add_move_description(
+      ucgi_command_vars->simmer->simmed_plays[0]->move,
+      ucgi_command_vars->loaded_game->gen->letter_distribution,
+      move_string_builder);
 
   // If this isn't the best simming move, the universe implodes or something
-  assert(!strcmp(move_placeholder, "8D ZILLION"));
-
+  assert_strings_equal(string_builder_peek(move_string_builder), "8D ZILLION");
   // This test assumes that the 95pct condition was
   // met at the first check, which is 300 in this case.
   // If this isn't true then buy a lotto ticket or something.
@@ -198,21 +209,24 @@ void test_ucgi_command() {
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
-  memset(move_placeholder, 0, 80);
 
   // Test sim static only
   plays = 20;
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           ION_OPENING_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      ION_OPENING_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go sim depth %d stopcondition %d threads %d plays %d i %d "
-           "checkstop %d info %d static",
-           depth, stopcondition, threads, plays, iters, checkstop, info);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input,
+      "go sim depth %d stopcondition %d threads %d plays %d i %d "
+      "checkstop %d info %d static",
+      depth, stopcondition, threads, plays, iters, checkstop, info);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // Check the go params
   assert(ucgi_command_vars->go_params->static_search_only);
@@ -223,8 +237,6 @@ void test_ucgi_command() {
   // of plays specified plus a "bestmove" line.
   assert((plays + 1) == count_newlines(output_buffer + prev_len));
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
-  memset(move_placeholder, 0, 80);
 
   // Test max iterations
   depth = 2;
@@ -232,15 +244,19 @@ void test_ucgi_command() {
   plays = 15;
   iters = 200;
   info = 60;
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           DELDAR_VS_HARSHAN_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      DELDAR_VS_HARSHAN_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go sim depth %d threads %d plays %d i %d info %d", depth, threads,
-           plays, iters, info);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input, "go sim depth %d threads %d plays %d i %d info %d",
+      depth, threads, plays, iters, info);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // This shouldn't take more than 30 seconds.
   block_for_search(ucgi_command_vars, 30);
@@ -252,8 +268,6 @@ void test_ucgi_command() {
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
-  memset(move_placeholder, 0, 80);
 
   // Test user interrupt
   // With these params, sim shouldn't stop
@@ -264,22 +278,27 @@ void test_ucgi_command() {
   plays = 15;
   iters = 1000000;
   info = 1000000;
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           DELDAR_VS_HARSHAN_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      DELDAR_VS_HARSHAN_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go sim depth %d threads %d plays %d i %d info %d", depth, threads,
-           plays, iters, info);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input, "go sim depth %d threads %d plays %d i %d info %d",
+      depth, threads, plays, iters, info);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // Let the command run for a bit
   sleep(2);
   // Send the halt signal
-  memset(test_stdin_input, 0, 256);
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s", "stop");
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s", "stop");
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // It should not take more than 5 seconds to halt.
   block_for_search(ucgi_command_vars, 5);
@@ -293,8 +312,6 @@ void test_ucgi_command() {
   // it finishes.
   assert(plays + 2 == count_newlines(output_buffer + prev_len));
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
-  memset(move_placeholder, 0, 80);
 
   // Test infer
   Stat *letter_stat = create_stat();
@@ -306,17 +323,22 @@ void test_ucgi_command() {
   info = 4;
   plays = 20;
   threads = 4;
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           EMPTY_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      EMPTY_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(
-      test_stdin_input, sizeof(test_stdin_input),
-      "go infer tiles %s pidx %d score %d exch %d plays %d info %d threads %d",
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input,
+      "go infer tiles %s pidx %d score %d exch %d plays %d info %d "
+      "threads %d",
       tiles, player_index, score, number_of_tiles_exchanged, plays, info,
       threads);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
   // Check the go params
@@ -390,8 +412,6 @@ void test_ucgi_command() {
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
-  memset(move_placeholder, 0, 80);
 
   // test exchange
   player_index = 0;
@@ -400,16 +420,20 @@ void test_ucgi_command() {
   info = 500;
   plays = 20;
   threads = 10;
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           VS_MATT);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      VS_MATT);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go infer pidx %d score %d exch %d plays %d info %d threads %d",
-           player_index, score, number_of_tiles_exchanged, plays, info,
-           threads);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input,
+      "go infer pidx %d score %d exch %d plays %d info %d threads %d",
+      player_index, score, number_of_tiles_exchanged, plays, info, threads);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   block_for_search(ucgi_command_vars, 60);
   assert(ucgi_command_vars->inference->status == INFERENCE_STATUS_SUCCESS);
@@ -420,8 +444,6 @@ void test_ucgi_command() {
   assert(number_of_output_lines == count_newlines(output_buffer + prev_len));
 
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
-  memset(move_placeholder, 0, 80);
 
   // test interrupt
   player_index = 0;
@@ -430,23 +452,28 @@ void test_ucgi_command() {
   plays = 20;
   info = 5000000;
   threads = 5;
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           EMPTY_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      EMPTY_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go infer pidx %d score %d exch %d plays %d info %d threads %d",
-           player_index, score, number_of_tiles_exchanged, plays, info,
-           threads);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input,
+      "go infer pidx %d score %d exch %d plays %d info %d threads %d",
+      player_index, score, number_of_tiles_exchanged, plays, info, threads);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // Let the command run for a bit
   sleep(2);
   // Send the halt signal
-  memset(test_stdin_input, 0, 256);
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s", "stop");
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s", "stop");
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // It should not take more than 5 seconds to halt.
   block_for_search(ucgi_command_vars, 5);
@@ -454,8 +481,6 @@ void test_ucgi_command() {
   assert(ucgi_command_vars->thread_control->halt_status ==
          HALT_STATUS_USER_INTERRUPT);
   prev_len = len;
-  memset(test_stdin_input, 0, 256);
-  memset(move_placeholder, 0, 80);
 
   // test exchange
   player_index = 0;
@@ -464,16 +489,20 @@ void test_ucgi_command() {
   info = 500;
   plays = 20;
   threads = 10;
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           EMPTY_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      EMPTY_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go infer pidx %d score %d exch %d plays %d info %d threads %d",
-           player_index, score, number_of_tiles_exchanged, plays, info,
-           threads);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input,
+      "go infer pidx %d score %d exch %d plays %d info %d threads %d",
+      player_index, score, number_of_tiles_exchanged, plays, info, threads);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // The inference should fail
   block_for_search(ucgi_command_vars, 5);
@@ -487,15 +516,19 @@ void test_ucgi_command() {
   threads = 8;
   plays = 3;
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           ZILLION_OPENING_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      ZILLION_OPENING_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go sim depth %d threads %d plays %d i %d", depth, threads, plays,
-           100000);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input, "go sim depth %d threads %d plays %d i %d", depth,
+      threads, plays, 100000);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // Check the go params
   assert(ucgi_command_vars->go_params->depth == depth);
@@ -521,15 +554,19 @@ void test_ucgi_command() {
 
   // Test async API with a sim that finished fast.
   // 100 iterations should finish faster than in 5 seconds.
-  snprintf(test_stdin_input, sizeof(test_stdin_input), "%s%s", "position cgp ",
-           ZILLION_OPENING_CGP);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(test_stdin_input, "%s%s", "position cgp ",
+                                      ZILLION_OPENING_CGP);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
 
-  snprintf(test_stdin_input, sizeof(test_stdin_input),
-           "go sim depth %d threads %d plays %d i %d", depth, threads, plays,
-           100);
-  result = process_ucgi_command_async(test_stdin_input, ucgi_command_vars);
+  string_builder_clear(test_stdin_input);
+  string_builder_add_formatted_string(
+      test_stdin_input, "go sim depth %d threads %d plays %d i %d", depth,
+      threads, plays, 100);
+  result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
+                                      ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
   // Check the go params
   assert(ucgi_command_vars->go_params->depth == depth);
@@ -546,8 +583,8 @@ void test_ucgi_command() {
   ret = ucgi_search_status(ucgi_command_vars);
   assert(strcmp(nthline(3, ret), "bestmove 8d.ZILLION") == 0);
   free(ret);
-  // Sleep a couple more seconds and then try to stop the search. It shouldn't
-  // work.
+  // Sleep a couple more seconds and then try to stop the search. It
+  // shouldn't work.
   sleep(2);
   ret2 = ucgi_stop_search(ucgi_command_vars);
   assert(ret2 == NULL);
@@ -558,4 +595,6 @@ void test_ucgi_command() {
   free(output_buffer);
   destroy_ucgi_command_vars(ucgi_command_vars);
   destroy_stat(letter_stat);
+  destroy_string_builder(move_string_builder);
+  destroy_string_builder(test_stdin_input);
 }

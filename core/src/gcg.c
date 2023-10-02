@@ -411,13 +411,15 @@ convert_tiles_string_to_machine_letters(GCGParser *gcg_parser, int group_index,
   int start_index = gcg_parser->matching_groups[group_index].rm_so;
   int end_index = gcg_parser->matching_groups[group_index].rm_eo;
   int matching_group_length = end_index - start_index;
-  char *tiles_string = malloc_or_die(sizeof(char) * (matching_group_length + 1));
+  char *tiles_string =
+      malloc_or_die(sizeof(char) * (matching_group_length + 1));
   for (int i = start_index; i < end_index; i++) {
     tiles_string[i - start_index] = gcg_parser->gcg_line_buffer[i];
   }
   tiles_string[matching_group_length] = '\0';
 
-  uint8_t *machine_letters = malloc_or_die(sizeof(char) * (matching_group_length + 1));
+  uint8_t *machine_letters =
+      malloc_or_die(sizeof(char) * (matching_group_length + 1));
   *number_of_machine_letters = str_to_machine_letters(
       gcg_parser->game_history->letter_distribution, tiles_string,
       allow_played_through_marker, machine_letters);
@@ -741,8 +743,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       return GCG_PARSE_STATUS_NOTE_PRECEDENT_EVENT;
     }
     char *note = get_matching_group_as_string(gcg_parser, 1);
-    string_builder_add_string(gcg_parser->note_builder, note, strlen(note));
-    string_builder_add_string(gcg_parser->note_builder, " ", 1);
+    string_builder_add_formatted_string(gcg_parser->note_builder, "%s ", note);
     free(note);
     break;
   case GCG_LEXICON_TOKEN:
@@ -944,10 +945,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   case GCG_UNKNOWN_TOKEN:
     if (previous_token == GCG_NOTE_TOKEN) {
       // Assume this is the continuation of a note
-      string_builder_add_string(gcg_parser->note_builder,
-                                gcg_parser->gcg_line_buffer,
-                                strlen(gcg_parser->gcg_line_buffer));
-      string_builder_add_string(gcg_parser->note_builder, " ", 1);
+      string_builder_add_formatted_string(gcg_parser->note_builder, "%s ",
+                                          gcg_parser->gcg_line_buffer);
+
     } else if (!is_all_whitespace_or_empty(gcg_parser->gcg_line_buffer)) {
       return GCG_PARSE_STATUS_NO_MATCHING_TOKEN;
     }
@@ -1002,7 +1002,8 @@ gcg_parse_status_t parse_gcg(const char *gcg_filename,
               MAX_GCG_FILE_SIZE);
   }
 
-  char *gcg_string = (char *)malloc_or_die(file_size + 1); // +1 for null terminator
+  char *gcg_string =
+      (char *)malloc_or_die(file_size + 1); // +1 for null terminator
   if (gcg_string == NULL) {
     fclose(gcg_file_handle);
     log_fatal("Memory allocation error.\n");

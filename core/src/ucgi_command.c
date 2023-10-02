@@ -242,10 +242,15 @@ void *execute_ucgi_command_async(UCGICommandVars *ucgi_command_vars) {
   return NULL;
 }
 
-int ucgi_go_async(char *go_cmd, UCGICommandVars *ucgi_command_vars) {
+int ucgi_go_async(const char *go_cmd, UCGICommandVars *ucgi_command_vars) {
   int status = UCGI_COMMAND_STATUS_SUCCESS;
   if (set_mode_searching(ucgi_command_vars->thread_control)) {
-    int parse_status = parse_go_cmd(go_cmd, ucgi_command_vars->go_params);
+    // FIXME: should use string copy, or better yet
+    // refactor all of this stuff argparse stuff.
+    char *mutable_go_cmd = get_formatted_string(go_cmd);
+    int parse_status =
+        parse_go_cmd(mutable_go_cmd, ucgi_command_vars->go_params);
+    free(mutable_go_cmd);
     if (parse_status == GO_PARAMS_PARSE_SUCCESS) {
       execute_ucgi_command_async(ucgi_command_vars);
     } else {
@@ -289,7 +294,8 @@ void load_position(UCGICommandVars *ucgi_command_vars, const char *cgp,
   strcpy(ucgi_command_vars->last_ld_name, ldname);
 }
 
-int process_ucgi_command_async(char *cmd, UCGICommandVars *ucgi_command_vars) {
+int process_ucgi_command_async(const char *cmd,
+                               UCGICommandVars *ucgi_command_vars) {
   // basic commands
   if (strcmp(cmd, "ucgi") == 0) {
     fprintf(ucgi_command_vars->outfile, "id name MAGPIE 0.1\n");
@@ -301,7 +307,7 @@ int process_ucgi_command_async(char *cmd, UCGICommandVars *ucgi_command_vars) {
 
   // other commands
   if (prefix("position cgp ", cmd)) {
-    char *cgpstr = cmd + strlen("position cgp ");
+    const char *cgpstr = cmd + strlen("position cgp ");
     char lexicon[16] = "";
     char ldname[16] = "";
     lexicon_ld_from_cgp(cgpstr, lexicon, ldname);

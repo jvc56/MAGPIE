@@ -38,30 +38,41 @@ void test_alphabet(SuperConfig *superconfig) {
   // separation token
   // The separation letter and machine letter should be the only machine
   // letters that map to the same value, since
-  // blank
-  char letter[MAX_LETTER_CHAR_LENGTH];
-  machine_letter_to_human_readable_letter(config->letter_distribution,
-                                          BLANK_MACHINE_LETTER, letter);
+  StringBuilder *letter = create_string_builder();
 
-  assert(strcmp(letter, "?") == 0);
   // blank
-  machine_letter_to_human_readable_letter(
-      config->letter_distribution, get_blanked_machine_letter(1), letter);
-  assert(strcmp(letter, "a") == 0);
-  machine_letter_to_human_readable_letter(
-      config->letter_distribution, get_blanked_machine_letter(2), letter);
-  assert(strcmp(letter, "b") == 0);
+  string_builder_add_user_visible_letter(config->letter_distribution,
+                                         BLANK_MACHINE_LETTER, 0, letter);
+  assert_strings_equal(string_builder_peek(letter), "?");
+  string_builder_clear(letter);
+
+  // blank A
+  string_builder_add_user_visible_letter(
+      config->letter_distribution, get_blanked_machine_letter(1), 0, letter);
+  assert_strings_equal(string_builder_peek(letter), "a");
+  string_builder_clear(letter);
+
+  string_builder_add_user_visible_letter(
+      config->letter_distribution, get_blanked_machine_letter(2), 0, letter);
+  assert_strings_equal(string_builder_peek(letter), "b");
+  string_builder_clear(letter);
+
   // not blank
-  machine_letter_to_human_readable_letter(config->letter_distribution, 3,
-                                          letter);
-  assert(strcmp(letter, "C") == 0);
-  machine_letter_to_human_readable_letter(config->letter_distribution, 4,
-                                          letter);
-  assert(strcmp(letter, "D") == 0);
+  string_builder_add_user_visible_letter(config->letter_distribution, 3, 0,
+                                         letter);
+  assert_strings_equal(string_builder_peek(letter), "C");
+  string_builder_clear(letter);
+  string_builder_add_user_visible_letter(config->letter_distribution, 4, 0,
+                                         letter);
+  assert_strings_equal(string_builder_peek(letter), "D");
+  string_builder_clear(letter);
 
   Config *catalan_config = get_disc_config(superconfig);
-  machine_letter_to_human_readable_letter(catalan_config->letter_distribution,
-                                          get_blanked_machine_letter(13),
-                                          letter);
-  assert(strcmp(letter, "l·l") == 0);
+  string_builder_add_user_visible_letter(catalan_config->letter_distribution,
+                                         get_blanked_machine_letter(13), 0,
+                                         letter);
+  assert_strings_equal(string_builder_peek(letter), "l·l");
+  string_builder_clear(letter);
+
+  destroy_string_builder(letter);
 }

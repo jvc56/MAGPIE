@@ -66,8 +66,6 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
 
   char *retstr = malloc_or_die(sizeof(char) * 400);
   Rack *leave_rack = NULL;
-  int phonies_exist = 0;
-  char phonies[200];
 
   if (nleave > 0) {
     leave_rack = create_rack(game->gen->letter_distribution->size);
@@ -78,19 +76,19 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
         get_leave_value(game->players[0]->strategy_params->klv, leave_rack);
   }
 
+  bool phonies_exist = false;
+  StringBuilder *phonies_string_builder = create_string_builder();
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    char *pp = phonies;
-    char tile[MAX_LETTER_CHAR_LENGTH];
     for (int i = 0; i < fw->num_words; i++) {
       if (!fw->words[i].valid) {
-        phonies_exist = 1;
+        phonies_exist = true;
         for (int mli = 0; mli < fw->words[i].word_length; mli++) {
-          machine_letter_to_human_readable_letter(
-              game->gen->letter_distribution, fw->words[i].word[mli], tile);
-          pp += sprintf(pp, "%s", tile);
+          string_builder_add_user_visible_letter(game->gen->letter_distribution,
+                                                 fw->words[i].word[mli], 0,
+                                                 phonies_string_builder);
         }
         if (i < fw->num_words - 1) {
-          pp += sprintf(pp, ",");
+          string_builder_add_string(phonies_string_builder, ",", 0);
         }
       }
     }
@@ -102,24 +100,28 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   // eq 123.45 sc 100 currmove f3.FU etc
 
   char *tp = retstr;
-  char move_placeholder[30];
+  StringBuilder *move_string_builder = create_string_builder();
 
   Move *move = create_move();
   set_move(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, vertical,
            move_type);
 
-  store_move_ucgi(move, game->gen->board, move_placeholder,
-                  game->gen->letter_distribution);
+  string_builder_add_ucgi_move(move, game->gen->board,
+                               game->gen->letter_distribution,
+                               move_string_builder);
   destroy_move(move);
 
-  tp += sprintf(tp, "currmove %s", move_placeholder);
+  tp += sprintf(tp, "currmove %s", string_builder_peek(move_string_builder));
   tp += sprintf(tp, " result %s valid %s", "scored",
                 phonies_exist ? "false" : "true");
   if (phonies_exist) {
-    tp += sprintf(tp, " invalid_words %s", phonies);
+    tp += sprintf(tp, " invalid_words %s",
+                  string_builder_peek(phonies_string_builder));
   }
   tp += sprintf(tp, " sc %d eq %.3f", points, (double)points + leave_value);
 
+  destroy_string_builder(phonies_string_builder);
+  destroy_string_builder(move_string_builder);
   // keep config around for next call.
   // destroy_config(config);
   destroy_game(game);

@@ -225,39 +225,50 @@ void sort_moves(MoveList *ml) {
   }
 }
 
-void store_move_description(Move *move, char *placeholder,
-                            LetterDistribution *ld) {
-  char tiles[20];
-  char *tp = tiles;
-  for (int i = 0; i < move->tiles_length; i++) {
-    if (move->tiles[i] == 0) {
-      tp += sprintf(tp, ".");
-    } else {
-      char tile[MAX_LETTER_CHAR_LENGTH];
-      machine_letter_to_human_readable_letter(ld, move->tiles[i], tile);
-      tp += sprintf(tp, "%s", tile);
-    }
-  }
-  char coords[20];
-  tp = coords;
+// Human readable print function
 
-  if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    if (move->vertical) {
-      tp += sprintf(tp, "%c", move->col_start + 'A');
-      tp += sprintf(tp, "%d", move->row_start + 1);
+void string_builder_add_move_description(Move *move, LetterDistribution *ld,
+                                         StringBuilder *move_string_builder) {
+  if (move->move_type != GAME_EVENT_PASS) {
+    if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      if (move->vertical) {
+        string_builder_add_formatted_string(move_string_builder, "%c%d ",
+                                            move->col_start + 'A',
+                                            move->row_start + 1);
+      } else {
+        string_builder_add_formatted_string(move_string_builder, "%d%c ",
+                                            move->row_start + 1,
+                                            move->col_start + 'A');
+      }
     } else {
-      tp += sprintf(tp, "%d", move->row_start + 1);
-      tp += sprintf(tp, "%c", move->col_start + 'A');
+      string_builder_add_string(move_string_builder, "(Exch ", 0);
     }
-    sprintf(placeholder, "%s %s", coords, tiles);
-  } else if (move->move_type == GAME_EVENT_EXCHANGE) {
-    sprintf(placeholder, "(Exch %s)", tiles);
-  } else if (move->move_type == GAME_EVENT_PASS) {
-    sprintf(placeholder, "(Pass)");
+
+    int number_of_tiles_to_print = move->tiles_length;
+
+    // FIXME: make sure tiles_length == tiles_played for exchanges
+    // this is not true currently.
+    if (move->move_type == GAME_EVENT_EXCHANGE) {
+      number_of_tiles_to_print = move->tiles_played;
+    }
+
+    for (int i = 0; i < number_of_tiles_to_print; i++) {
+      uint8_t letter = move->tiles[i];
+      if (letter == PLAYED_THROUGH_MARKER &&
+          move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        string_builder_add_char(move_string_builder, ASCII_PLAYED_THROUGH, 0);
+      } else {
+        string_builder_add_user_visible_letter(ld, letter, 0,
+                                               move_string_builder);
+      }
+    }
+    if (move->move_type == GAME_EVENT_EXCHANGE) {
+      string_builder_add_string(move_string_builder, ")", 0);
+    }
+  } else {
+    string_builder_add_string(move_string_builder, "(Pass)", 0);
   }
 }
-
-// Human readable print function
 
 void string_builder_add_move(Board *board, Move *m,
                              LetterDistribution *letter_distribution,

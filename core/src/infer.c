@@ -696,21 +696,23 @@ void string_builder_add_leave_rack(LeaveRack *leave_rack, int index,
                                    uint64_t total_draws,
                                    LetterDistribution *letter_distribution,
                                    StringBuilder *inference_string) {
-  char leave_rack_string[(RACK_SIZE * MAX_LETTER_CHAR_LENGTH) * 2 + 40] = "";
-  char leave_string[(RACK_SIZE * MAX_LETTER_CHAR_LENGTH)] = "";
-  write_rack(leave_rack->leave, letter_distribution, leave_string);
   if (leave_rack->exchanged->empty) {
-    sprintf(leave_rack_string, "%-3d %-7s %-6.2f %-6d %0.2f\n", index + 1,
-            leave_string, ((double)leave_rack->draws / total_draws) * 100,
-            leave_rack->draws, leave_rack->equity);
+    string_builder_add_rack(leave_rack->leave, letter_distribution,
+                            inference_string);
+    string_builder_add_formatted_string(
+        inference_string, "%-3d %-6.2f %-6d %0.2f\n", index + 1,
+        ((double)leave_rack->draws / total_draws) * 100, leave_rack->draws,
+        leave_rack->equity);
   } else {
-    char exchanged_string[(RACK_SIZE * MAX_LETTER_CHAR_LENGTH)] = "";
-    write_rack(leave_rack->exchanged, letter_distribution, exchanged_string);
-    sprintf(leave_rack_string, "%-3d %-7s %-7s %-6.2f %-6d\n", index + 1,
-            leave_string, exchanged_string,
-            ((double)leave_rack->draws / total_draws) * 100, leave_rack->draws);
+    string_builder_add_rack(leave_rack->leave, letter_distribution,
+                            inference_string);
+    string_builder_add_spaces(inference_string, 1, 0);
+    string_builder_add_rack(leave_rack->exchanged, letter_distribution,
+                            inference_string);
+    string_builder_add_formatted_string(
+        inference_string, "%-3d %-6.2f %-6d\n", index + 1,
+        ((double)leave_rack->draws / total_draws) * 100, leave_rack->draws);
   }
-  string_builder_add_string(inference_string, leave_rack_string, 0);
 }
 
 void string_builder_add_letter_minimum(InferenceRecord *record, Rack *rack,
@@ -726,11 +728,9 @@ void string_builder_add_letter_minimum(InferenceRecord *record, Rack *rack,
       ((double)draw_subtotal) / (double)get_weight(record->equity_values);
   double random_probability = get_probability_for_random_minimum_draw(
       bag_as_rack, rack, letter, minimum, number_of_tiles_played_or_exchanged);
-  char letter_minimum_string[50] = "";
-  sprintf(letter_minimum_string, " | %-7.2f %-7.2f%-9d%-9d",
-          inference_probability * 100, random_probability * 100, draw_subtotal,
-          leave_subtotal);
-  string_builder_add_string(inference_string, letter_minimum_string, 0);
+  string_builder_add_formatted_string(
+      inference_string, " | %-7.2f %-7.2f%-9d%-9d", inference_probability * 100,
+      random_probability * 100, draw_subtotal, leave_subtotal);
 }
 
 void string_builder_add_letter_line(Game *game, InferenceRecord *record,
@@ -740,14 +740,11 @@ void string_builder_add_letter_line(Game *game, InferenceRecord *record,
                                     int number_of_tiles_played_or_exchanged,
                                     StringBuilder *inference_string) {
   get_stat_for_letter(record, letter_stat, letter);
-  char readable_letter[MAX_LETTER_CHAR_LENGTH];
-  machine_letter_to_human_readable_letter(game->gen->letter_distribution,
-                                          letter, readable_letter);
-
-  char letter_avg_and_stdev_string[30] = "";
-  sprintf(letter_avg_and_stdev_string, "%s: %4.2f %4.2f", readable_letter,
-          get_mean(letter_stat), get_stdev(letter_stat));
-  string_builder_add_string(inference_string, letter_avg_and_stdev_string, 0);
+  string_builder_add_user_visible_letter(game->gen->letter_distribution, letter,
+                                         0, inference_string);
+  string_builder_add_formatted_string(inference_string, ": %4.2f %4.2f",
+                                      get_mean(letter_stat),
+                                      get_stdev(letter_stat));
 
   for (int i = 1; i <= max_duplicate_letter_draw; i++) {
     string_builder_add_letter_minimum(record, rack, bag_as_rack, letter, i,
@@ -764,28 +761,13 @@ void string_builder_add_inference_record(
   uint64_t total_draws = get_weight(record->equity_values);
   uint64_t total_leaves = get_cardinality(record->equity_values);
 
-  string_builder_add_string(inference_string,
-                            "Total possible leave draws:   ", 0);
-  string_builder_add_uint(inference_string, total_draws, 0);
-  string_builder_add_string(inference_string, "\n", 0);
-
-  string_builder_add_string(inference_string,
-                            "Total possible unique leaves: ", 0);
-  string_builder_add_uint(inference_string, total_leaves, 0);
-  string_builder_add_string(inference_string, "\n", 0);
-
-  string_builder_add_string(inference_string,
-                            "Average leave value:          ", 0);
-  string_builder_add_double(inference_string, get_mean(record->equity_values),
-                            0);
-  string_builder_add_string(inference_string, "\n", 0);
-
-  string_builder_add_string(inference_string,
-                            "Stdev leave value:            ", 0);
-  string_builder_add_double(inference_string, get_stdev(record->equity_values),
-                            0);
-  string_builder_add_string(inference_string, "\n\n", 0);
-
+  string_builder_add_formatted_string(
+      inference_string,
+      "Total possible leave draws:   %lu\nTotal possible unique leaves: "
+      "%lu\nAverage leave value:          %0.2fStdev leave value:            "
+      "%0.2f",
+      total_draws, total_leaves, get_mean(record->equity_values),
+      get_stdev(record->equity_values));
   int max_duplicate_letter_draw = 0;
   for (int letter = 0; letter < (int)game->gen->letter_distribution->size;
        letter++) {
@@ -805,9 +787,8 @@ void string_builder_add_inference_record(
 
   string_builder_add_string(inference_string, "               ", 0);
   for (int i = 0; i < max_duplicate_letter_draw; i++) {
-    string_builder_add_string(inference_string, "Has at least ", 0);
-    string_builder_add_int(inference_string, i + 1, 0);
-    string_builder_add_string(inference_string, " of                   ", 0);
+    string_builder_add_formatted_string(inference_string, "Has at least %d of",
+                                        i + 1);
   }
   string_builder_add_string(inference_string, "\n\n   Avg  Std ", 0);
 
@@ -845,15 +826,14 @@ void string_builder_add_inference(Inference *inference,
     number_of_tiles_played_or_exchanged =
         actual_tiles_played->number_of_letters;
   } else {
-    string_builder_add_string(inference_string, "Exchanged tiles:       ", 0);
-    string_builder_add_int(inference_string,
-                           inference->number_of_tiles_exchanged, 0);
+    string_builder_add_formatted_string(inference_string,
+                                        "Exchanged tiles:       %d",
+                                        inference->number_of_tiles_exchanged);
     number_of_tiles_played_or_exchanged = inference->number_of_tiles_exchanged;
   }
 
-  string_builder_add_string(inference_string, "\nScore:                 ", 0);
-  string_builder_add_int(inference_string, inference->actual_score, 0);
-  string_builder_add_string(inference_string, "\n", 0);
+  string_builder_add_string(inference_string, "\nScore:                 %d\n",
+                            inference->actual_score);
 
   if (inference->player_to_infer_rack->number_of_letters > 0) {
     string_builder_add_string(inference_string, "Partial Rack:          ", 0);
@@ -863,9 +843,8 @@ void string_builder_add_inference(Inference *inference,
     string_builder_add_string(inference_string, "\n", 0);
   }
 
-  string_builder_add_string(inference_string, "Equity margin:         ", 0);
-  string_builder_add_double(inference_string, inference->equity_margin, 0);
-  string_builder_add_string(inference_string, "\n", 0);
+  string_builder_add_string(inference_string, "Equity margin:         %0.2f\n",
+                            inference->equity_margin);
 
   // Create a transient stat to use the stat functions
   Stat *letter_stat = create_stat();

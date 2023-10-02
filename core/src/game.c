@@ -212,7 +212,7 @@ void load_cgp(Game *game, const char *cgp) {
 }
 
 // return lexicon and letter distribution from the cgp string.
-void lexicon_ld_from_cgp(char *cgp, char *lexicon, char *ldname) {
+void lexicon_ld_from_cgp(const char *cgp, char *lexicon, char *ldname) {
   // copy string since we are going to modify it with strtok :(
   char cgpcopy[512];
   strcpy(cgpcopy, cgp);
@@ -464,9 +464,10 @@ void string_builder_add_game(Game *game, StringBuilder *game_string) {
       string_builder_add_string(game_string, " ", 0);
       string_builder_add_bag(game->gen->bag, game->gen->letter_distribution, 0,
                              game_string);
-      string_builder_add_string(game_string, "  ", 0);
-      string_builder_add_int(game_string, game->gen->bag->last_tile_index + 1,
-                             0);
+
+      string_builder_add_formatted_string(game_string, "  %d",
+                                          game->gen->bag->last_tile_index + 1);
+
     } else if (i - 2 < game->gen->move_list->count) {
       string_builder_add_move_with_rank_and_equity(game, i - 2, game_string);
     }

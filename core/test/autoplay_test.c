@@ -159,9 +159,6 @@ void print_error_case(Game *game, Inference *inference_1,
                       int player_on_turn_index, int score,
                       int number_of_tiles_exchanged, int number_of_threads) {
   print_game(game);
-  char rack_string[50] = "";
-  write_rack(tiles_played, game->gen->letter_distribution, rack_string);
-  printf("tiles played: %s\n", rack_string);
   printf("pindex: %d\n", player_on_turn_index);
   printf("score: %d\n", score);
   printf("exch: %d\n", number_of_tiles_exchanged);

@@ -7,6 +7,8 @@
 #include "../src/gcg.h"
 #include "../src/util.h"
 
+#include "test_util.h"
+
 #define GCG_DIRECTORY_FILEPATH "testdata/"
 
 char *get_gcg_filepath(const char *filename) {
@@ -163,7 +165,7 @@ void assert_game_event(GameHistory *game_history, int event_index,
 
   assert(racks_match);
   assert((game_event->note == NULL && strlen(note) == 0) ||
-         !strcmp(game_event->note, note));
+         strings_equal(game_event->note, note));
 
   // Move assertions
   Move *move = game_event->move;

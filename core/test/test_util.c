@@ -136,7 +136,7 @@ bool strings_equal(const char *str1, const char *str2) {
 
 void assert_strings_equal(const char *str1, const char *str2) {
   if (!strings_equal(str1, str2)) {
-    fprintf(stderr, "strings are not equal: %s != %s", str1, str2);
+    fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, str2);
     assert(0);
   }
 }

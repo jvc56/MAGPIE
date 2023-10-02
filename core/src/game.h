@@ -58,7 +58,7 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter);
 void set_backup_mode(Game *game, int backup_mode);
 void backup_game(Game *game);
 void unplay_last_move(Game *game);
-void lexicon_ld_from_cgp(char *cgp, char *lexicon, char *ldname);
+void lexicon_ld_from_cgp(const char *cgp, char *lexicon, char *ldname);
 int tiles_unseen(Game *game);
 game_variant_t get_game_variant_type_from_name(const char *variant_name);
 void set_player_on_turn(Game *game, int player_on_turn_index);

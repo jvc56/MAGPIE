@@ -296,10 +296,6 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
       copy_rack_into(rack_placeholder, game->players[onturn]->rack);
       play_move(game, best_play);
       atomic_fetch_add(&simmer->node_count, 1);
-      char placeholder[80];
-      store_move_description(best_play, placeholder,
-                             game->gen->letter_distribution);
-
       if (ply == plies - 2 || ply == plies - 1) {
         double this_leftover =
             get_leave_value_for_move(game->players[0]->strategy_params->klv,
@@ -550,7 +546,8 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
     if (simmer->play_similarity_cache != NULL) {
       free(simmer->play_similarity_cache);
     }
-    simmer->play_similarity_cache = malloc_or_die(sizeof(int) * num_plays * num_plays);
+    simmer->play_similarity_cache =
+        malloc_or_die(sizeof(int) * num_plays * num_plays);
     for (int i = 0; i < num_plays; i++) {
       for (int j = 0; j < num_plays; j++) {
         if (i == j) {

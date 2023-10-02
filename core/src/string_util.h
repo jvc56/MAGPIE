@@ -8,7 +8,11 @@
 struct StringBuilder;
 typedef struct StringBuilder StringBuilder;
 
-char *format_string(const char *format, ...);
+int prefix(const char *pre, const char *str);
+
+int is_all_whitespace_or_empty(const char *str);
+
+char *get_formatted_string(const char *format, ...);
 
 StringBuilder *create_string_builder();
 void destroy_string_builder(StringBuilder *string_builder);

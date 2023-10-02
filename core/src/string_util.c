@@ -8,6 +8,22 @@
 #include "string_util.h"
 #include "util.h"
 
+// Misc string functions
+
+int prefix(const char *pre, const char *str) {
+  return strncmp(pre, str, strlen(pre)) == 0;
+}
+
+int is_all_whitespace_or_empty(const char *str) {
+  while (*str != '\0') {
+    if (!isspace((unsigned char)*str)) {
+      return 0;
+    }
+    str++;
+  }
+  return 1;
+}
+
 // String utility functions
 
 char *format_string_with_va_list(const char *format, va_list *args) {
@@ -20,7 +36,7 @@ char *format_string_with_va_list(const char *format, va_list *args) {
   return string_buffer;
 }
 
-char *format_string(const char *format, ...) {
+char *get_formatted_string(const char *format, ...) {
   va_list args;
   va_start(args, format);
   char *formatted_string = format_string_with_va_list(format, &args);

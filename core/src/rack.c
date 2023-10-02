@@ -87,24 +87,15 @@ void set_rack_to_string(Rack *rack, const char *rack_string,
   }
 }
 
-void write_rack(Rack *rack, LetterDistribution *letter_distribution,
-                char *rack_string) {
-  char *rp = rack_string;
-  for (int i = 0; i < rack->array_size; i++) {
-    for (int j = 0; j < rack->array[i]; j++) {
-      char tile[MAX_LETTER_CHAR_LENGTH];
-      machine_letter_to_human_readable_letter(letter_distribution, i, tile);
-      rp += sprintf(rp, "%s", tile);
-    }
-  }
-}
-
 void string_builder_add_rack(Rack *rack,
                              LetterDistribution *letter_distribution,
                              StringBuilder *string_builder) {
-  char rack_string[MAX_LETTER_CHAR_LENGTH * BAG_SIZE] = "";
-  write_rack(rack, letter_distribution, rack_string);
-  string_builder_add_string(string_builder, rack_string, 0);
+  for (int i = 0; i < rack->array_size; i++) {
+    for (int j = 0; j < rack->array[i]; j++) {
+      string_builder_add_user_visible_letter(letter_distribution, i, 0,
+                                             string_builder);
+    }
+  }
 }
 
 bool racks_are_equal(Rack *rack1, Rack *rack2) {
