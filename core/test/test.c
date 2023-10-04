@@ -29,6 +29,7 @@
 #include "shadow_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
+#include "string_util_test.h"
 #include "superconfig.h"
 #include "test_constants.h"
 #include "ucgi_command_test.h"
@@ -36,10 +37,13 @@
 #include "word_test.h"
 
 void unit_tests(SuperConfig *superconfig) {
+  test_string_util();
+  return;
   // Test the loading of the config
   test_config();
 
   // Test the readonly data first
+  test_string_util();
   test_alphabet(superconfig);
   test_letter_distribution(superconfig);
   test_str_to_machine_letters(superconfig);

@@ -5,14 +5,24 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct StringBuilder;
-typedef struct StringBuilder StringBuilder;
-
 int prefix(const char *pre, const char *str);
 
 int is_all_whitespace_or_empty(const char *str);
 
 char *get_formatted_string(const char *format, ...);
+
+struct StringSplitter;
+typedef struct StringSplitter StringSplitter;
+
+int string_splitter_get_number_of_items(StringSplitter *string_splitter);
+char *string_splitter_get_item(StringSplitter *string_splitter, int item_index);
+StringSplitter *split_string_ignore_empty(const char *input_string,
+                                          const char delimiter);
+StringSplitter *split_string(const char *input_string, const char delimiter);
+void destroy_string_splitter(StringSplitter *string_splitter);
+
+struct StringBuilder;
+typedef struct StringBuilder StringBuilder;
 
 StringBuilder *create_string_builder();
 void destroy_string_builder(StringBuilder *string_builder);

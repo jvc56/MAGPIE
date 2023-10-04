@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "log.h"
 #include "string_util.h"
 #include "util.h"
 
@@ -44,6 +45,30 @@ char *get_formatted_string(const char *format, ...) {
   return formatted_string;
 }
 
+char *get_substring(const char *input_string, int start_index, int end_index) {
+  if (input_string == NULL) {
+    log_fatal("cannot get substring of null string\n");
+  }
+
+  int input_length = strlen(input_string);
+
+  if (start_index < 0 || end_index < start_index ||
+      start_index > input_length || end_index > input_length) {
+    log_fatal("cannot get substring for invalid bounds: strlen is %d, bounds "
+              "are %d to %d\n",
+              input_length, start_index, end_index);
+  }
+
+  int substring_length = (end_index - start_index);
+
+  char *result = malloc_or_die(sizeof(char) * (substring_length + 1));
+
+  strncpy(result, input_string + start_index, substring_length);
+  result[substring_length] = '\0';
+
+  return result;
+}
+
 // String Builder function
 
 static const size_t string_builder_min_size = 32;
@@ -55,9 +80,7 @@ struct StringBuilder {
 };
 
 StringBuilder *create_string_builder() {
-  StringBuilder *string_builder;
-
-  string_builder = calloc(1, sizeof(*string_builder));
+  StringBuilder *string_builder = malloc_or_die(sizeof(StringBuilder));
   string_builder->string = malloc_or_die(string_builder_min_size);
   *string_builder->string = '\0';
   string_builder->alloced = string_builder_min_size;
@@ -192,4 +215,101 @@ char *string_builder_dump(const StringBuilder *string_builder, size_t *len) {
   out = malloc_or_die(string_builder->len + 1);
   memcpy(out, string_builder->string, string_builder->len + 1);
   return out;
+}
+
+// String splitter
+
+struct StringSplitter {
+  int number_of_items;
+  char **items;
+};
+
+StringSplitter *create_string_splitter() {
+  StringSplitter *string_splitter = malloc_or_die(sizeof(StringSplitter));
+  string_splitter->number_of_items = 0;
+  string_splitter->items = NULL;
+  return string_splitter;
+}
+
+void destroy_string_splitter(StringSplitter *string_splitter) {
+  for (int i = 0; i < string_splitter->number_of_items; i++) {
+    free(string_splitter->items[i]);
+  }
+  free(string_splitter->items);
+  free(string_splitter);
+}
+
+int string_splitter_get_number_of_items(StringSplitter *string_splitter) {
+  return string_splitter->number_of_items;
+}
+
+char *string_splitter_get_item(StringSplitter *string_splitter,
+                               int item_index) {
+  if (item_index >= string_splitter->number_of_items || item_index < 0) {
+    log_fatal("string item out of range: %d\n", item_index);
+  }
+  return string_splitter->items[item_index];
+}
+
+int split_string_scan(StringSplitter *string_splitter, const char *input_string,
+                      const char delimiter, bool ignore_empty, bool set_items) {
+  int current_number_of_items = 0;
+  char previous_char = delimiter;
+  int item_start_index = 0;
+  int item_end_index = 0;
+  size_t string_length = strlen(input_string);
+  for (size_t i = 0; i < string_length; i++) {
+    char current_char = input_string[i];
+    if (set_items) {
+      item_end_index++;
+    }
+    if (current_char == delimiter) {
+      if (!ignore_empty || previous_char != delimiter) {
+        if (set_items) {
+          string_splitter->items[current_number_of_items] =
+              get_substring(input_string, item_start_index, item_end_index - 1);
+        }
+        current_number_of_items++;
+      }
+      item_start_index = item_end_index;
+    }
+    previous_char = current_char;
+  }
+
+  if (!ignore_empty || previous_char != delimiter) {
+    if (set_items) {
+      string_splitter->items[current_number_of_items] =
+          get_substring(input_string, item_start_index, item_end_index);
+    }
+    current_number_of_items++;
+  }
+
+  return current_number_of_items;
+}
+
+StringSplitter *split_string_internal(const char *input_string,
+                                      const char delimiter, bool ignore_empty) {
+
+  int number_of_items =
+      split_string_scan(NULL, input_string, delimiter, ignore_empty, false);
+
+  StringSplitter *string_splitter = create_string_splitter();
+  string_splitter->number_of_items = number_of_items;
+  if (string_splitter->number_of_items > 0) {
+    string_splitter->items =
+        malloc_or_die(sizeof(char *) * string_splitter->number_of_items);
+    split_string_scan(string_splitter, input_string, delimiter, ignore_empty,
+                      true);
+  }
+
+  return string_splitter;
+}
+
+StringSplitter *split_string_ignore_empty(const char *input_string,
+                                          const char delimiter) {
+  return split_string_internal(input_string, delimiter, true);
+}
+
+StringSplitter *split_string(const char *input_string, const char delimiter) {
+  return split_string_internal(input_string, delimiter, false);
 }
