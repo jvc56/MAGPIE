@@ -256,7 +256,7 @@ void string_builder_add_move_description(Move *move, LetterDistribution *ld,
       uint8_t letter = move->tiles[i];
       if (letter == PLAYED_THROUGH_MARKER &&
           move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-        string_builder_add_char(move_string_builder, ASCII_PLAYED_THROUGH, 0);
+        string_builder_add_char(move_string_builder, ASCII_PLAYED_THROUGH);
       } else {
         string_builder_add_user_visible_letter(ld, letter, 0,
                                                move_string_builder);
@@ -289,14 +289,14 @@ void string_builder_add_move(Board *board, Move *m,
   }
 
   if (m->vertical) {
-    string_builder_add_char(string_builder, m->col_start + 'A', 0);
-    string_builder_add_int(string_builder, m->row_start + 1, 0);
+    string_builder_add_char(string_builder, m->col_start + 'A');
+    string_builder_add_int(string_builder, m->row_start + 1);
   } else {
-    string_builder_add_int(string_builder, m->row_start + 1, 0);
-    string_builder_add_char(string_builder, m->col_start + 'A', 0);
+    string_builder_add_int(string_builder, m->row_start + 1);
+    string_builder_add_char(string_builder, m->col_start + 'A');
   }
 
-  string_builder_add_spaces(string_builder, 1, 0);
+  string_builder_add_spaces(string_builder, 1);
   int current_row = m->row_start;
   int current_col = m->col_start;
   for (int i = 0; i < m->tiles_length; i++) {
@@ -335,8 +335,8 @@ void string_builder_add_move(Board *board, Move *m,
       current_col++;
     }
   }
-  string_builder_add_spaces(string_builder, 1, 0);
+  string_builder_add_spaces(string_builder, 1);
   if (board) {
-    string_builder_add_int(string_builder, m->score, 0);
+    string_builder_add_int(string_builder, m->score);
   }
 }

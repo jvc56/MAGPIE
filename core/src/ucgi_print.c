@@ -47,7 +47,7 @@ void string_builder_add_ucgi_leave_rack(LeaveRack *leave_rack, int index,
   } else {
     string_builder_add_rack(leave_rack->leave, letter_distribution,
                             ucgi_string_builder);
-    string_builder_add_spaces(ucgi_string_builder, 1, 0);
+    string_builder_add_spaces(ucgi_string_builder, 1);
     string_builder_add_rack(leave_rack->exchanged, letter_distribution,
                             ucgi_string_builder);
     string_builder_add_formatted_string(
@@ -284,13 +284,14 @@ void print_ucgi_sim_stats(Simmer *simmer, Game *game, int print_best_play) {
 
 void print_ucgi_autoplay_results(AutoplayResults *autoplay_results,
                                  ThreadControl *thread_control) {
-  char results_string[300];
-  sprintf(results_string, "autoplay %d %d %d %d %d %f %f %f %f\n",
-          autoplay_results->total_games, autoplay_results->p1_wins,
-          autoplay_results->p1_losses, autoplay_results->p1_ties,
-          autoplay_results->p1_firsts, get_mean(autoplay_results->p1_score),
-          get_stdev(autoplay_results->p1_score),
-          get_mean(autoplay_results->p2_score),
-          get_stdev(autoplay_results->p2_score));
+  char *results_string = get_formatted_string(
+      "autoplay %d %d %d %d %d %f %f %f %f\n", autoplay_results->total_games,
+      autoplay_results->p1_wins, autoplay_results->p1_losses,
+      autoplay_results->p1_ties, autoplay_results->p1_firsts,
+      get_mean(autoplay_results->p1_score),
+      get_stdev(autoplay_results->p1_score),
+      get_mean(autoplay_results->p2_score),
+      get_stdev(autoplay_results->p2_score));
   print_to_file(thread_control, results_string);
+  free(results_string);
 }

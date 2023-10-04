@@ -64,7 +64,6 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
     populate_word_validities(fw, game->players[0]->strategy_params->kwg);
   }
 
-  char *retstr = malloc_or_die(sizeof(char) * 400);
   Rack *leave_rack = NULL;
 
   if (nleave > 0) {
@@ -99,7 +98,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   // result <scored|error> valid <true|false> invalid_words FU,BARZ
   // eq 123.45 sc 100 currmove f3.FU etc
 
-  char *tp = retstr;
+  StringBuilder *return_string_builder = create_string_builder();
   StringBuilder *move_string_builder = create_string_builder();
 
   Move *move = create_move();
@@ -111,14 +110,18 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
                                move_string_builder);
   destroy_move(move);
 
-  tp += sprintf(tp, "currmove %s", string_builder_peek(move_string_builder));
-  tp += sprintf(tp, " result %s valid %s", "scored",
-                phonies_exist ? "false" : "true");
+  string_builder_add_formatted_string(return_string_builder, "currmove %s",
+                                      string_builder_peek(move_string_builder));
+  string_builder_add_formatted_string(return_string_builder,
+                                      " result %s valid %s", "scored",
+                                      phonies_exist ? "false" : "true");
   if (phonies_exist) {
-    tp += sprintf(tp, " invalid_words %s",
-                  string_builder_peek(phonies_string_builder));
+    string_builder_add_formatted_string(
+        return_string_builder, " invalid_words %s",
+        string_builder_peek(phonies_string_builder));
   }
-  tp += sprintf(tp, " sc %d eq %.3f", points, (double)points + leave_value);
+  string_builder_add_formatted_string(return_string_builder, " sc %d eq %.3f",
+                                      points, (double)points + leave_value);
 
   destroy_string_builder(phonies_string_builder);
   destroy_string_builder(move_string_builder);
@@ -128,12 +131,14 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   if (leave_rack != NULL) {
     destroy_rack(leave_rack);
   }
+  char *return_string = string_builder_dump(return_string_builder, 0);
+  destroy_string_builder(return_string_builder);
   clock_t end = clock();
   log_debug("score_play took %0.6f seconds",
             (double)(end - begin) / CLOCKS_PER_SEC);
   // Caller can use UTF8ToString on the returned pointer but it MUST FREE
   // this string after it's done with it!
-  return retstr;
+  return return_string;
 }
 
 // a synchronous function to return a static eval of a position.

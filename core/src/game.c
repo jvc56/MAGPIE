@@ -421,7 +421,7 @@ void string_builder_add_board_row(LetterDistribution *letter_distribution,
     uint8_t current_letter = get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       string_builder_add_char(game_string,
-                              CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i], 0);
+                              CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i]);
     } else {
       string_builder_add_user_visible_letter(letter_distribution,
                                              current_letter, 0, game_string);
@@ -434,10 +434,10 @@ void string_builder_add_board_row(LetterDistribution *letter_distribution,
 void string_builder_add_move_with_rank_and_equity(Game *game, int move_index,
                                                   StringBuilder *game_string) {
   Move *move = game->gen->move_list->moves[move_index];
-  string_builder_add_int(game_string, move_index + 1, 0);
+  string_builder_add_int(game_string, move_index + 1);
   string_builder_add_move(game->gen->board, move,
                           game->gen->letter_distribution, game_string);
-  string_builder_add_double(game_string, move->equity, 0);
+  string_builder_add_double(game_string, move->equity);
 }
 
 void string_builder_add_game(Game *game, StringBuilder *game_string) {

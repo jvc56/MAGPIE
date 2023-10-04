@@ -706,7 +706,7 @@ void string_builder_add_leave_rack(LeaveRack *leave_rack, int index,
   } else {
     string_builder_add_rack(leave_rack->leave, letter_distribution,
                             inference_string);
-    string_builder_add_spaces(inference_string, 1, 0);
+    string_builder_add_spaces(inference_string, 1);
     string_builder_add_rack(leave_rack->exchanged, letter_distribution,
                             inference_string);
     string_builder_add_formatted_string(

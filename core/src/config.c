@@ -10,6 +10,7 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "log.h"
+#include "string_util.h"
 #include "util.h"
 
 #define MAX_ARG_LENGTH 300
@@ -47,7 +48,8 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
   config->equity_margin = equity_margin;
   config->number_of_threads = number_of_threads;
 
-  StrategyParams *player_1_strategy_params = malloc_or_die(sizeof(StrategyParams));
+  StrategyParams *player_1_strategy_params =
+      malloc_or_die(sizeof(StrategyParams));
   if (strcmp(kwg_filename_1, "") != 0) {
     player_1_strategy_params->kwg = create_kwg(kwg_filename_1);
     strcpy(player_1_strategy_params->kwg_filename, kwg_filename_1);
@@ -66,7 +68,8 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
 
   config->player_1_strategy_params = player_1_strategy_params;
 
-  StrategyParams *player_2_strategy_params = malloc_or_die(sizeof(StrategyParams));
+  StrategyParams *player_2_strategy_params =
+      malloc_or_die(sizeof(StrategyParams));
   if (!strcmp(kwg_filename_2, "") || !strcmp(kwg_filename_2, kwg_filename_1)) {
     player_2_strategy_params->kwg = player_1_strategy_params->kwg;
     strcpy(player_2_strategy_params->kwg_filename, kwg_filename_1);
@@ -372,12 +375,10 @@ void destroy_config(Config *config) {
 void load_config_from_lexargs(Config **config, const char *cgp,
                               char *lexicon_name, char *ldname) {
 
-  char dist[50];
-  sprintf(dist, "data/letterdistributions/%s.csv", ldname);
+  char *dist = get_formatted_string("data/letterdistributions/%s.csv", ldname);
   char leaves[50] = "data/lexica/english.klv2";
   char winpct[50] = "data/strategy/default_english/winpct.csv";
-  char lexicon_file[50];
-  sprintf(lexicon_file, "data/lexica/%s.kwg", lexicon_name);
+  char *lexicon_file = get_formatted_string("data/lexica/%s.kwg", lexicon_name);
   if (strcmp(lexicon_name, "CSW21") == 0) {
     strcpy(leaves, "data/lexica/CSW21.klv2");
   } else if (prefix("NSF", lexicon_name)) {
@@ -427,6 +428,8 @@ void load_config_from_lexargs(Config **config, const char *cgp,
     free(c->cgp);
     c->cgp = strdup(cgp);
   }
+  free(dist);
+  free(lexicon_file);
 }
 
 StrategyParams *copy_strategy_params(StrategyParams *orig) {
