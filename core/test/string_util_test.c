@@ -203,4 +203,70 @@ void test_string_util() {
   assert_strings_equal(
       string_splitter_get_item(mix_5_ignore_empty_string_splitter, 0), "abc");
   destroy_string_splitter(mix_5_ignore_empty_string_splitter);
+
+  StringSplitter *mix_6_string_splitter =
+      split_string("def,,a,,h,,ijk,xyz", ',');
+  assert(string_splitter_get_number_of_items(mix_6_string_splitter) == 8);
+  assert_strings_equal(string_splitter_get_item(mix_6_string_splitter, 0),
+                       "def");
+  assert_strings_equal(string_splitter_get_item(mix_6_string_splitter, 1), "");
+  assert_strings_equal(string_splitter_get_item(mix_6_string_splitter, 2), "a");
+  assert_strings_equal(string_splitter_get_item(mix_6_string_splitter, 3), "");
+  assert_strings_equal(string_splitter_get_item(mix_6_string_splitter, 4), "h");
+  assert_strings_equal(string_splitter_get_item(mix_6_string_splitter, 5), "");
+  assert_strings_equal(string_splitter_get_item(mix_6_string_splitter, 6),
+                       "ijk");
+  assert_strings_equal(string_splitter_get_item(mix_6_string_splitter, 7),
+                       "xyz");
+  destroy_string_splitter(mix_6_string_splitter);
+
+  StringSplitter *mix_6_ignore_empty_string_splitter =
+      split_string_ignore_empty("def,,a,,h,,ijk,xyz", ',');
+  assert(string_splitter_get_number_of_items(
+             mix_6_ignore_empty_string_splitter) == 5);
+  assert_strings_equal(
+      string_splitter_get_item(mix_6_ignore_empty_string_splitter, 0), "def");
+  assert_strings_equal(
+      string_splitter_get_item(mix_6_ignore_empty_string_splitter, 1), "a");
+  assert_strings_equal(
+      string_splitter_get_item(mix_6_ignore_empty_string_splitter, 2), "h");
+  assert_strings_equal(
+      string_splitter_get_item(mix_6_ignore_empty_string_splitter, 3), "ijk");
+  assert_strings_equal(
+      string_splitter_get_item(mix_6_ignore_empty_string_splitter, 4), "xyz");
+  destroy_string_splitter(mix_6_ignore_empty_string_splitter);
+
+  StringSplitter *mix_7_string_splitter =
+      split_string(",def,,a,,h,,ijk,xyz,", ',');
+  assert(string_splitter_get_number_of_items(mix_7_string_splitter) == 10);
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 0), "");
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 1),
+                       "def");
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 2), "");
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 3), "a");
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 4), "");
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 5), "h");
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 6), "");
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 7),
+                       "ijk");
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 8),
+                       "xyz");
+  assert_strings_equal(string_splitter_get_item(mix_7_string_splitter, 9), "");
+  destroy_string_splitter(mix_7_string_splitter);
+
+  StringSplitter *mix_7_ignore_empty_string_splitter =
+      split_string_ignore_empty(",def,,a,,h,,ijk,xyz,", ',');
+  assert(string_splitter_get_number_of_items(
+             mix_7_ignore_empty_string_splitter) == 5);
+  assert_strings_equal(
+      string_splitter_get_item(mix_7_ignore_empty_string_splitter, 0), "def");
+  assert_strings_equal(
+      string_splitter_get_item(mix_7_ignore_empty_string_splitter, 1), "a");
+  assert_strings_equal(
+      string_splitter_get_item(mix_7_ignore_empty_string_splitter, 2), "h");
+  assert_strings_equal(
+      string_splitter_get_item(mix_7_ignore_empty_string_splitter, 3), "ijk");
+  assert_strings_equal(
+      string_splitter_get_item(mix_7_ignore_empty_string_splitter, 4), "xyz");
+  destroy_string_splitter(mix_7_ignore_empty_string_splitter);
 }
