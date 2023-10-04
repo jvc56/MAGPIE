@@ -16,9 +16,10 @@ typedef struct StringSplitter StringSplitter;
 
 int string_splitter_get_number_of_items(StringSplitter *string_splitter);
 char *string_splitter_get_item(StringSplitter *string_splitter, int item_index);
-StringSplitter *split_string_ignore_empty(const char *input_string,
-                                          const char delimiter);
-StringSplitter *split_string(const char *input_string, const char delimiter);
+StringSplitter *split_string_by_whitespace(const char *input_string,
+                                           bool ignore_empty);
+StringSplitter *split_string(const char *input_string, const char delimiter,
+                             bool ignore_empty);
 void destroy_string_splitter(StringSplitter *string_splitter);
 
 struct StringBuilder;

@@ -224,6 +224,17 @@ struct StringSplitter {
   char **items;
 };
 
+typedef enum {
+  STRING_DELIMITER_RANGED,
+  STRING_DELIMITER_WHITESPACE,
+} string_delimiter_class_t;
+
+typedef struct StringDelimiter {
+  char min_delimiter;
+  char max_delimiter;
+  string_delimiter_class_t string_delimiter_class;
+} StringDelimiter;
+
 StringSplitter *create_string_splitter() {
   StringSplitter *string_splitter = malloc_or_die(sizeof(StringSplitter));
   string_splitter->number_of_items = 0;
@@ -239,6 +250,32 @@ void destroy_string_splitter(StringSplitter *string_splitter) {
   free(string_splitter);
 }
 
+StringDelimiter *create_string_delimiter() {
+  StringDelimiter *string_delimiter = malloc_or_die(sizeof(StringSplitter));
+  return string_delimiter;
+}
+
+void destroy_string_delimiter(StringDelimiter *string_delimiter) {
+  free(string_delimiter);
+}
+
+bool char_matches_string_delimiter(StringDelimiter *string_delimiter,
+                                   const char c) {
+  switch (string_delimiter->string_delimiter_class) {
+  case STRING_DELIMITER_RANGED:
+    return c >= string_delimiter->min_delimiter &&
+           c <= string_delimiter->min_delimiter;
+    break;
+  case STRING_DELIMITER_WHITESPACE:
+    return isspace(c);
+    break;
+  default:
+    log_fatal("string delimiter class unhandled: %d\n",
+              string_delimiter->string_delimiter_class);
+  }
+  return false;
+}
+
 int string_splitter_get_number_of_items(StringSplitter *string_splitter) {
   return string_splitter->number_of_items;
 }
@@ -252,9 +289,10 @@ char *string_splitter_get_item(StringSplitter *string_splitter,
 }
 
 int split_string_scan(StringSplitter *string_splitter, const char *input_string,
-                      const char delimiter, bool ignore_empty, bool set_items) {
+                      StringDelimiter *string_delimiter, bool ignore_empty,
+                      bool set_items) {
   int current_number_of_items = 0;
-  char previous_char = delimiter;
+  char previous_char;
   int item_start_index = 0;
   int item_end_index = 0;
   size_t string_length = strlen(input_string);
@@ -263,8 +301,9 @@ int split_string_scan(StringSplitter *string_splitter, const char *input_string,
     if (set_items) {
       item_end_index++;
     }
-    if (current_char == delimiter) {
-      if (!ignore_empty || previous_char != delimiter) {
+    if (char_matches_string_delimiter(string_delimiter, current_char)) {
+      if (!ignore_empty || (i != 0 && !char_matches_string_delimiter(
+                                          string_delimiter, previous_char))) {
         if (set_items) {
           string_splitter->items[current_number_of_items] =
               get_substring(input_string, item_start_index, item_end_index - 1);
@@ -276,7 +315,9 @@ int split_string_scan(StringSplitter *string_splitter, const char *input_string,
     previous_char = current_char;
   }
 
-  if (!ignore_empty || previous_char != delimiter) {
+  if (!ignore_empty ||
+      (string_length != 0 &&
+       !char_matches_string_delimiter(string_delimiter, previous_char))) {
     if (set_items) {
       string_splitter->items[current_number_of_items] =
           get_substring(input_string, item_start_index, item_end_index);
@@ -288,28 +329,50 @@ int split_string_scan(StringSplitter *string_splitter, const char *input_string,
 }
 
 StringSplitter *split_string_internal(const char *input_string,
-                                      const char delimiter, bool ignore_empty) {
+                                      StringDelimiter *string_delimiter,
+                                      bool ignore_empty) {
 
-  int number_of_items =
-      split_string_scan(NULL, input_string, delimiter, ignore_empty, false);
+  int number_of_items = split_string_scan(NULL, input_string, string_delimiter,
+                                          ignore_empty, false);
 
   StringSplitter *string_splitter = create_string_splitter();
   string_splitter->number_of_items = number_of_items;
   if (string_splitter->number_of_items > 0) {
     string_splitter->items =
         malloc_or_die(sizeof(char *) * string_splitter->number_of_items);
-    split_string_scan(string_splitter, input_string, delimiter, ignore_empty,
-                      true);
+    split_string_scan(string_splitter, input_string, string_delimiter,
+                      ignore_empty, true);
   }
 
   return string_splitter;
 }
 
-StringSplitter *split_string_ignore_empty(const char *input_string,
-                                          const char delimiter) {
-  return split_string_internal(input_string, delimiter, true);
+StringSplitter *split_string_by_range(const char *input_string,
+                                      const char min_delimiter,
+                                      const char max_delimiter,
+                                      bool ignore_empty) {
+  StringDelimiter *string_delimiter = create_string_delimiter();
+  string_delimiter->min_delimiter = min_delimiter;
+  string_delimiter->max_delimiter = max_delimiter;
+  string_delimiter->string_delimiter_class = STRING_DELIMITER_RANGED;
+  StringSplitter *string_splitter =
+      split_string_internal(input_string, string_delimiter, ignore_empty);
+  destroy_string_delimiter(string_delimiter);
+  return string_splitter;
 }
 
-StringSplitter *split_string(const char *input_string, const char delimiter) {
-  return split_string_internal(input_string, delimiter, false);
+StringSplitter *split_string_by_whitespace(const char *input_string,
+                                           bool ignore_empty) {
+  StringDelimiter *string_delimiter = create_string_delimiter();
+  string_delimiter->string_delimiter_class = STRING_DELIMITER_WHITESPACE;
+  StringSplitter *string_splitter =
+      split_string_internal(input_string, string_delimiter, ignore_empty);
+  destroy_string_delimiter(string_delimiter);
+  return string_splitter;
+}
+
+StringSplitter *split_string(const char *input_string, const char delimiter,
+                             bool ignore_empty) {
+  return split_string_by_range(input_string, delimiter, delimiter,
+                               ignore_empty);
 }

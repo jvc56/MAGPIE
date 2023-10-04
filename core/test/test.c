@@ -37,8 +37,6 @@
 #include "word_test.h"
 
 void unit_tests(SuperConfig *superconfig) {
-  test_string_util();
-  return;
   // Test the loading of the config
   test_config();
 
