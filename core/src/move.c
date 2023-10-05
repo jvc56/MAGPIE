@@ -44,16 +44,6 @@ int within_epsilon_for_equity(double a, double board) {
   return fabs(a - board) < 1e-6;
 }
 
-void print_move(Move *m) {
-  printf("%2.6f %4d %2d %2d %2d %2d %d %d", m->equity, m->score, m->row_start,
-         m->col_start, m->tiles_played, m->tiles_length, m->vertical,
-         m->move_type);
-  for (int i = 0; i < m->tiles_length; i++) {
-    printf("%d ", m->tiles[i]);
-  }
-  printf("\n");
-}
-
 // Enforce arbitrary order to keep
 // move order deterministic
 int compare_moves(Move *move_1, Move *move_2) {

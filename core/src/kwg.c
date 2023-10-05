@@ -9,13 +9,13 @@
 #include "fileproxy.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "log.h"
 #include "util.h"
 
 void load_kwg(KWG *kwg, const char *kwg_filename) {
   FILE *stream = stream_from_filename(kwg_filename);
   if (!stream) {
-    perror(kwg_filename);
-    exit(EXIT_FAILURE);
+    log_fatal("failred to open stream from filename: %s\n", kwg_filename);
   }
 
   fseek(stream, 0, SEEK_END);        // seek to end of file
@@ -29,8 +29,7 @@ void load_kwg(KWG *kwg, const char *kwg_filename) {
   kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
   result = fread(kwg->nodes, sizeof(uint32_t), number_of_nodes, stream);
   if (result != number_of_nodes) {
-    printf("kwg nodes fread failure: %zd != %zd", result, number_of_nodes);
-    exit(EXIT_FAILURE);
+    log_fatal("kwg nodes fread failure: %zd != %zd", result, number_of_nodes);
   }
   for (uint32_t i = 0; i < number_of_nodes; i++) {
     kwg->nodes[i] = le32toh(kwg->nodes[i]);

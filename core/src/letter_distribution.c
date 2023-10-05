@@ -22,8 +22,7 @@ extern inline uint8_t is_blanked(uint8_t ml);
 int get_letter_distribution_size(const char *filename) {
   FILE *file = stream_from_filename(filename);
   if (!file) {
-    printf("Error opening file to count lines: %s\n", filename);
-    return -1;
+    log_fatal("Error opening file to count lines: %s\n", filename);
   }
 
   char line[100];

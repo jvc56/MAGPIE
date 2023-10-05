@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "fileproxy.h"
+#include "log.h"
 #include "util.h"
 #include "winpct.h"
 
@@ -13,8 +14,7 @@ extern inline float win_pct(WinPct *wp, int spread_plus_leftover,
 void parse_winpct_csv(WinPct *wp, const char *filename) {
   FILE *file = stream_from_filename(filename);
   if (!file) {
-    printf("Error opening file: %s\n", filename);
-    return;
+    log_fatal("Error opening file: %s\n", filename);
   }
   int max_rows = MAX_SPREAD * 2 + 1;
   // Allocate memory for the 2D array

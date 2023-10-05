@@ -47,20 +47,6 @@ void count_words(KLV *klv, size_t kwg_size) {
   }
 }
 
-void print_float_bits(float value) {
-  unsigned int *float_bits = (unsigned int *)&value;
-
-  // Obtain the bit representation
-  unsigned int bits = *float_bits;
-
-  // Print the bits
-  for (int i = sizeof(float) * 8 - 1; i >= 0; i--) {
-    unsigned int bit = (bits >> i) & 1;
-    printf("%u", bit);
-  }
-  printf("\n");
-}
-
 float reverse_float(const float in_float) {
   float ret_val;
   char *float_to_convert = (char *)&in_float;
@@ -95,8 +81,7 @@ float convert_little_endian_to_host(float little_endian_float) {
 void load_klv(KLV *klv, const char *klv_filename) {
   FILE *stream = stream_from_filename(klv_filename);
   if (!stream) {
-    perror(klv_filename);
-    exit(EXIT_FAILURE);
+    log_fatal("failred to open stream from filename: %s\n", klv_filename);
   }
 
   uint32_t kwg_size;
@@ -104,8 +89,7 @@ void load_klv(KLV *klv, const char *klv_filename) {
 
   result = fread(&kwg_size, sizeof(kwg_size), 1, stream);
   if (result != 1) {
-    printf("kwg size fread failure: %zd != %d\n", result, 1);
-    exit(EXIT_FAILURE);
+    log_fatal("kwg size fread failure: %zd != %d\n", result, 1);
   }
   kwg_size = le32toh(kwg_size);
 
@@ -113,8 +97,7 @@ void load_klv(KLV *klv, const char *klv_filename) {
   klv->kwg->nodes = (uint32_t *)malloc_or_die(kwg_size * sizeof(uint32_t));
   result = fread(klv->kwg->nodes, sizeof(uint32_t), kwg_size, stream);
   if (result != kwg_size) {
-    printf("kwg nodes fread failure: %zd != %d\n", result, kwg_size);
-    exit(EXIT_FAILURE);
+    log_fatal("kwg nodes fread failure: %zd != %d\n", result, kwg_size);
   }
   for (uint32_t i = 0; i < kwg_size; i++) {
     klv->kwg->nodes[i] = le32toh(klv->kwg->nodes[i]);
@@ -123,16 +106,14 @@ void load_klv(KLV *klv, const char *klv_filename) {
   uint32_t number_of_leaves;
   result = fread(&number_of_leaves, sizeof(number_of_leaves), 1, stream);
   if (result != 1) {
-    printf("number of leaves fread failure: %zd != %d\n", result, 1);
-    exit(EXIT_FAILURE);
+    log_fatal("number of leaves fread failure: %zd != %d\n", result, 1);
   }
   number_of_leaves = le32toh(number_of_leaves);
 
   klv->leave_values = (float *)malloc_or_die(number_of_leaves * sizeof(float));
   result = fread(klv->leave_values, sizeof(float), number_of_leaves, stream);
   if (result != number_of_leaves) {
-    printf("edges fread failure: %zd != %d\n", result, number_of_leaves);
-    exit(EXIT_FAILURE);
+    log_fatal("edges fread failure: %zd != %d\n", result, number_of_leaves);
   }
 
   fclose(stream);
