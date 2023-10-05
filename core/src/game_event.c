@@ -21,13 +21,13 @@ GameEvent *create_game_event() {
 }
 
 void destroy_game_event(GameEvent *game_event) {
-  if (game_event->move != NULL) {
+  if (game_event->move) {
     destroy_move(game_event->move);
   }
-  if (game_event->rack != NULL) {
+  if (game_event->rack) {
     destroy_rack(game_event->rack);
   }
-  if (game_event->note != NULL) {
+  if (game_event->note) {
     free(game_event->note);
   }
   free(game_event);

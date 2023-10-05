@@ -13,7 +13,7 @@
 
 void load_kwg(KWG *kwg, const char *kwg_filename) {
   FILE *stream = stream_from_filename(kwg_filename);
-  if (stream == NULL) {
+  if (!stream) {
     perror(kwg_filename);
     exit(EXIT_FAILURE);
   }

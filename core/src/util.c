@@ -45,4 +45,16 @@ void *realloc_or_die(void *realloc_target, size_t size) {
 
 int char_to_int(char c) { return c - '0'; }
 
-int string_to_int(const char *str) { return strtol(str, NULL, 10); }
+int string_to_int(const char *str) {
+  if (!str) {
+    log_fatal("called string_to_int on NULL string\n");
+  }
+  return strtol(str, NULL, 10);
+}
+
+double string_to_double(const char *str) {
+  if (!str) {
+    log_fatal("called string_to_double on NULL string\n");
+  }
+  return strtof(str, NULL);
+}

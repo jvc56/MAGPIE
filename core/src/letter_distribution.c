@@ -21,7 +21,7 @@ extern inline uint8_t is_blanked(uint8_t ml);
 
 int get_letter_distribution_size(const char *filename) {
   FILE *file = stream_from_filename(filename);
-  if (file == NULL) {
+  if (!file) {
     printf("Error opening file to count lines: %s\n", filename);
     return -1;
   }
@@ -45,7 +45,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
       get_letter_distribution_size(letter_distribution_filename);
 
   FILE *file = stream_from_filename(letter_distribution_filename);
-  if (file == NULL) {
+  if (!file) {
     log_fatal("Error opening letter distribution file: %s\n",
               letter_distribution_filename);
   }
@@ -70,42 +70,32 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     if (is_all_whitespace_or_empty(line)) {
       continue;
     }
-    char *token;
+    StringSplitter *single_letter_info = split_string(line, ',', true);
     // letter, lower case, dist, score, is_vowel
-    token = strtok(line, ",");
-    char letter[5];
-    char lower_case_letter[5];
-    strcpy(letter, token);
+    char *letter = string_splitter_get_item(single_letter_info, 0);
+    char *lower_case_letter = string_splitter_get_item(single_letter_info, 1);
+    int dist = string_to_int(string_splitter_get_item(single_letter_info, 2));
+    int score = string_to_int(string_splitter_get_item(single_letter_info, 3));
+    int is_vowel =
+        string_to_int(string_splitter_get_item(single_letter_info, 4));
 
-    token = strtok(NULL, ",");
-    strcpy(lower_case_letter, token);
-
-    int nl = strlen(letter);
-    if (nl > max_tile_length) {
-      max_tile_length = nl;
+    int tile_length = string_length(letter);
+    if (tile_length > max_tile_length) {
+      max_tile_length = tile_length;
     }
-
-    token = strtok(NULL, ",");
-    int dist = atoi(token);
-
-    token = strtok(NULL, ",");
-    int score = atoi(token);
-
-    token = strtok(NULL, ",");
-    int is_vowel = atoi(token);
 
     letter_distribution->distribution[machine_letter] = dist;
     letter_distribution->scores[machine_letter] = score;
     letter_distribution->is_vowel[machine_letter] = is_vowel;
 
-    strcpy(letter_distribution
-               ->machine_letter_to_human_readable_letter[machine_letter],
-           letter);
+    string_copy(letter_distribution
+                    ->machine_letter_to_human_readable_letter[machine_letter],
+                letter);
 
     if (machine_letter > 0) {
       uint8_t blanked_machine_letter =
           get_blanked_machine_letter(machine_letter);
-      strcpy(
+      string_copy(
           letter_distribution
               ->machine_letter_to_human_readable_letter[blanked_machine_letter],
           lower_case_letter);
@@ -121,7 +111,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
           letter_distribution->score_order[i - 1];
     }
     letter_distribution->score_order[i] = machine_letter;
-
+    destroy_string_splitter(single_letter_info);
     machine_letter++;
   }
   letter_distribution->max_tile_length = max_tile_length;
@@ -134,10 +124,10 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
 uint8_t
 human_readable_letter_to_machine_letter(LetterDistribution *letter_distribution,
                                         char *letter) {
-
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
-    if (strcmp(letter_distribution->machine_letter_to_human_readable_letter[i],
-               letter) == 0) {
+    if (strings_equal(
+            letter_distribution->machine_letter_to_human_readable_letter[i],
+            letter)) {
       return i;
     }
   }
@@ -154,7 +144,7 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
                            uint8_t *mls) {
 
   int num_mls = 0;
-  int num_bytes = strlen(str);
+  int num_bytes = string_length(str);
   int i = 0;
   int prev_i = -1;
   while (i < num_bytes) {
@@ -164,7 +154,7 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
       }
       // possible letter goes from index i to j. Search for it.
       char possible_letter[MAX_LETTER_CHAR_LENGTH];
-      memcpy(possible_letter, str + i, j - i);
+      memory_copy(possible_letter, str + i, j - i);
       possible_letter[j - i] = '\0';
       uint8_t ml = human_readable_letter_to_machine_letter(letter_distribution,
                                                            possible_letter);
@@ -209,39 +199,11 @@ void destroy_letter_distribution(LetterDistribution *letter_distribution) {
 
 char *get_letter_distribution_filepath(const char *ld_name) {
   // Check for invalid inputs
-  if (ld_name == NULL) {
+  if (!ld_name) {
     return NULL;
   }
-
-  const char *directory_path = LETTER_DISTRIBUTION_FILEPATH;
-
-  // Calculate the lengths of the input strings
-  size_t directory_path_len = strlen(directory_path);
-  size_t ld_name_len = strlen(ld_name);
-
-  // Allocate memory for the result string
-  char *result =
-      (char *)malloc_or_die((directory_path_len + ld_name_len +
-                             strlen(LETTER_DISTRIBUTION_FILE_EXTENSION) + 1) *
-                            sizeof(char));
-
-  // Copy the directory_path into the result
-  strcpy(result, directory_path);
-
-  // Check if directory_path ends with a directory separator (e.g., '/' or '\')
-  if (directory_path_len > 0 && directory_path[directory_path_len - 1] != '/' &&
-      directory_path[directory_path_len - 1] != '\\') {
-    // Add a directory separator if it's missing
-    strcat(result, "/");
-  }
-
-  // Concatenate the ld_name
-  strcat(result, ld_name);
-
-  // Add the ".csv" extension
-  strcat(result, LETTER_DISTRIBUTION_FILE_EXTENSION);
-
-  return result;
+  return get_formatted_string("%s%s%s", LETTER_DISTRIBUTION_FILEPATH, ld_name,
+                              LETTER_DISTRIBUTION_FILE_EXTENSION);
 }
 
 // FIXME: return letter distrubitions other than english

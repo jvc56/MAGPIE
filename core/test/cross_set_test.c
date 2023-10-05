@@ -15,14 +15,14 @@
 // this test func only works for single-char alphabets
 uint64_t cross_set_from_string(const char *letters,
                                LetterDistribution *letter_distribution) {
-  if (strcmp(letters, "TRIVIAL") == 0) {
+  if (strings_equal(letters, "TRIVIAL")) {
     return TRIVIAL_CROSS_SET;
   }
   uint64_t c = 0;
   char letter[2];
   letter[1] = '\0';
 
-  for (size_t i = 0; i < strlen(letters); i++) {
+  for (size_t i = 0; i < string_length(letters); i++) {
     letter[0] = letters[i];
     set_cross_set_letter(&c, human_readable_letter_to_machine_letter(
                                  letter_distribution, letter));
@@ -37,7 +37,7 @@ void set_row(Game *game, int row, const char *row_content) {
   }
   char letter[2];
   letter[1] = '\0';
-  for (size_t i = 0; i < strlen(row_content); i++) {
+  for (size_t i = 0; i < string_length(row_content); i++) {
     if (row_content[i] != ' ') {
       letter[0] = row_content[i];
       set_letter(game->gen->board, row, i,
@@ -57,7 +57,7 @@ void set_col(Game *game, int col, const char *col_content) {
   char letter[2];
   letter[1] = '\0';
 
-  for (size_t i = 0; i < strlen(col_content); i++) {
+  for (size_t i = 0; i < string_length(col_content); i++) {
     if (col_content[i] != ' ') {
       letter[0] = col_content[i];
       set_letter(game->gen->board, i, col,

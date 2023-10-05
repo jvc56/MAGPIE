@@ -19,7 +19,7 @@ int are_stats_equal(Stat *stat_1, Stat *stat_2) {
     return 1; // Pointers are the same, this should never be true
   }
 
-  if (stat_1 == NULL || stat_2 == NULL) {
+  if (!stat_1 || !stat_2) {
     return 2; // One of the stats is NULL
   }
 
@@ -38,7 +38,7 @@ int are_inference_records_equal(InferenceRecord *record_1,
     return 4; // Pointers are the same, the records are equal
   }
 
-  if (record_1 == NULL || record_2 == NULL) {
+  if (!record_1 || !record_2) {
     return 5; // One of the records is NULL
   }
 
@@ -63,7 +63,7 @@ int are_leave_racks_equal(LeaveRack *rack_1, LeaveRack *rack_2) {
     return 8; // Pointers are the same, this should never happen
   }
 
-  if (rack_1 == NULL || rack_2 == NULL) {
+  if (!rack_1 || !rack_2) {
     return 9; // One of the racks is NULL
   }
 
@@ -79,7 +79,7 @@ int are_leave_rack_lists_equal(LeaveRackList *list_1, LeaveRackList *list_2,
     return 11; // Pointers are the same, the lists are equal
   }
 
-  if (list_1 == NULL || list_2 == NULL) {
+  if (!list_1 || !list_2) {
     return 12; // One of the lists is NULL
   }
 
@@ -100,7 +100,7 @@ int are_inferences_equal(Inference *inference_1, Inference *inference_2) {
     return 14; // Pointers are the same, the inferences are equal
   }
 
-  if (inference_1 == NULL || inference_2 == NULL) {
+  if (!inference_1 || !inference_2) {
     return 15; // One of the inferences is NULL
   }
 

@@ -5,6 +5,7 @@
 
 #include "../src/config.h"
 #include "../src/game.h"
+#include "../src/string_util.h"
 #include "../src/words.h"
 
 #include "superconfig.h"
@@ -24,16 +25,16 @@ void test_words_played(SuperConfig *superconfig) {
   // Should generate 4 words: PIP, ONE, HEN, and the main word PENT
   assert(fw->words[0].word_length == 3);
   assert(fw->words[0].valid == 1);
-  assert(memcmp(fw->words[0].word, (uint8_t[]){16, 9, 16}, 3) == 0);
+  assert(memory_compare(fw->words[0].word, (uint8_t[]){16, 9, 16}, 3) == 0);
   assert(fw->words[1].word_length == 3);
   assert(fw->words[1].valid == 1);
-  assert(memcmp(fw->words[1].word, (uint8_t[]){15, 14, 5}, 3) == 0);
+  assert(memory_compare(fw->words[1].word, (uint8_t[]){15, 14, 5}, 3) == 0);
   assert(fw->words[2].word_length == 3);
   assert(fw->words[2].valid == 1);
-  assert(memcmp(fw->words[2].word, (uint8_t[]){8, 5, 14}, 3) == 0);
+  assert(memory_compare(fw->words[2].word, (uint8_t[]){8, 5, 14}, 3) == 0);
   assert(fw->words[3].word_length == 4);
   assert(fw->words[3].valid == 1);
-  assert(memcmp(fw->words[3].word, (uint8_t[]){16, 5, 14, 20}, 4) == 0);
+  assert(memory_compare(fw->words[3].word, (uint8_t[]){16, 5, 14, 20}, 4) == 0);
   free(fw);
 
   // Play some random phoney making a lot of words 6G DI(PET)AZ
@@ -46,21 +47,22 @@ void test_words_played(SuperConfig *superconfig) {
   // OD, WIFAY*, ANE, ZGENUINE*, and the main word DIPETAZ*
   assert(fw->words[0].word_length == 2);
   assert(fw->words[0].valid == 1);
-  assert(memcmp(fw->words[0].word, (uint8_t[]){15, 4}, 2) == 0);
+  assert(memory_compare(fw->words[0].word, (uint8_t[]){15, 4}, 2) == 0);
   assert(fw->words[1].word_length == 5);
   assert(fw->words[1].valid == 0);
-  assert(memcmp(fw->words[1].word, (uint8_t[]){23, 9, 6, 1, 25}, 5) == 0);
+  assert(memory_compare(fw->words[1].word, (uint8_t[]){23, 9, 6, 1, 25}, 5) ==
+         0);
   assert(fw->words[2].word_length == 3);
   assert(fw->words[2].valid == 1);
-  assert(memcmp(fw->words[2].word, (uint8_t[]){1, 14, 5}, 3) == 0);
+  assert(memory_compare(fw->words[2].word, (uint8_t[]){1, 14, 5}, 3) == 0);
   assert(fw->words[3].word_length == 8);
   assert(fw->words[3].valid == 0);
-  assert(memcmp(fw->words[3].word, (uint8_t[]){26, 7, 5, 14, 21, 9, 14, 5},
-                8) == 0);
+  assert(memory_compare(fw->words[3].word,
+                        (uint8_t[]){26, 7, 5, 14, 21, 9, 14, 5}, 8) == 0);
   assert(fw->words[4].word_length == 7);
   assert(fw->words[4].valid == 0);
-  assert(memcmp(fw->words[4].word, (uint8_t[]){4, 9, 16, 5, 20, 1, 26}, 7) ==
-         0);
+  assert(memory_compare(fw->words[4].word, (uint8_t[]){4, 9, 16, 5, 20, 1, 26},
+                        7) == 0);
 
   free(fw);
 
@@ -73,10 +75,11 @@ void test_words_played(SuperConfig *superconfig) {
   // generates SPAYS and BOYS
   assert(fw->words[0].word_length == 5);
   assert(fw->words[0].valid == 1);
-  assert(memcmp(fw->words[0].word, (uint8_t[]){19, 16, 1, 25, 19}, 5) == 0);
+  assert(memory_compare(fw->words[0].word, (uint8_t[]){19, 16, 1, 25, 19}, 5) ==
+         0);
   assert(fw->words[1].word_length == 4);
   assert(fw->words[1].valid == 1);
-  assert(memcmp(fw->words[1].word, (uint8_t[]){2, 15, 25, 19}, 4) == 0);
+  assert(memory_compare(fw->words[1].word, (uint8_t[]){2, 15, 25, 19}, 4) == 0);
 
   free(fw);
 
@@ -88,10 +91,11 @@ void test_words_played(SuperConfig *superconfig) {
   // generates BOYS and SPAYS
   assert(fw->words[0].word_length == 4);
   assert(fw->words[0].valid == 1);
-  assert(memcmp(fw->words[0].word, (uint8_t[]){2, 15, 25, 19}, 4) == 0);
+  assert(memory_compare(fw->words[0].word, (uint8_t[]){2, 15, 25, 19}, 4) == 0);
   assert(fw->words[1].word_length == 5);
   assert(fw->words[1].valid == 1);
-  assert(memcmp(fw->words[1].word, (uint8_t[]){19, 16, 1, 25, 19}, 5) == 0);
+  assert(memory_compare(fw->words[1].word, (uint8_t[]){19, 16, 1, 25, 19}, 5) ==
+         0);
 
   free(fw);
   destroy_game(game);

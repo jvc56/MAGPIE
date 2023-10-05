@@ -27,7 +27,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
     log_fatal("cgp parse failed: %d\n", cgp_parse_status);
   }
   // FIXME: maybe handle this elsewhere.
-  if (cgp_operations->letter_distribution_name == NULL) {
+  if (!cgp_operations->letter_distribution_name) {
     cgp_operations->letter_distribution_name =
         get_letter_distribution_name_from_lexicon_name(
             cgp_operations->lexicon_name);
@@ -140,7 +140,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   // keep config around for next call.
   // destroy_config(config);
   destroy_game(game);
-  if (leave_rack != NULL) {
+  if (leave_rack) {
     destroy_rack(leave_rack);
   }
   char *return_string = string_builder_dump(return_string_builder, 0);
@@ -164,7 +164,7 @@ char *static_evaluation(char *cgpstr, int num_plays) {
     log_fatal("cgp parse failed: %d\n", cgp_parse_status);
   }
   // FIXME: maybe handle this elsewhere.
-  if (cgp_operations->letter_distribution_name == NULL) {
+  if (!cgp_operations->letter_distribution_name) {
     cgp_operations->letter_distribution_name =
         get_letter_distribution_name_from_lexicon_name(
             cgp_operations->lexicon_name);
@@ -200,7 +200,7 @@ char *static_evaluation(char *cgpstr, int num_plays) {
 }
 
 int process_ucgi_command_wasm(char *cmd) {
-  if (ucgi_command_vars == NULL) {
+  if (!ucgi_command_vars) {
     ucgi_command_vars = create_ucgi_command_vars(NULL);
   }
   return process_ucgi_command_async(cmd, ucgi_command_vars);

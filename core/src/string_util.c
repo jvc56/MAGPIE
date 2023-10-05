@@ -12,7 +12,7 @@
 // Misc string functions
 
 int prefix(const char *pre, const char *str) {
-  return strncmp(pre, str, strlen(pre)) == 0;
+  return strncmp(pre, str, string_length(pre)) == 0;
 }
 
 int is_all_whitespace_or_empty(const char *str) {
@@ -39,6 +39,31 @@ bool strings_equal(const char *str1, const char *str2) {
   return strcmp(str1, str2) == 0;
 }
 
+bool is_string_empty(const char *str1) { return strings_equal(str1, ""); }
+
+char *string_copy(char *dest, const char *src) {
+  // FIXME: this is unsafe, need to check bounds
+  return strcpy(dest, src);
+}
+
+void *memory_copy(void *dest, const void *src, size_t n) {
+  // FIXME: probably need to check if dest is big enough
+  return memcpy(dest, src, n);
+}
+
+int memory_compare(const void *s1, const void *s2, size_t n) {
+  return memcmp(s1, s2, n);
+}
+
+void remove_first_newline(char *str) { str[strcspn(str, "\n")] = 0; }
+
+size_t string_length(const char *str) {
+  if (!str) {
+    log_fatal("called string_length on NULL string\n");
+  }
+  return strlen(str);
+}
+
 // String utility functions
 
 char *format_string_with_va_list(const char *format, va_list *args) {
@@ -60,17 +85,18 @@ char *get_formatted_string(const char *format, ...) {
 }
 
 char *get_substring(const char *input_string, int start_index, int end_index) {
-  if (input_string == NULL) {
+  if (!input_string) {
     log_fatal("cannot get substring of null string\n");
   }
 
-  int input_length = strlen(input_string);
+  int input_length = string_length(input_string);
 
   if (start_index < 0 || end_index < start_index ||
       start_index > input_length || end_index > input_length) {
-    log_fatal("cannot get substring for invalid bounds: strlen is %d, bounds "
-              "are %d to %d\n",
-              input_length, start_index, end_index);
+    log_fatal(
+        "cannot get substring for invalid bounds: string_length is %d, bounds "
+        "are %d to %d\n",
+        input_length, start_index, end_index);
   }
 
   int substring_length = (end_index - start_index);
@@ -104,7 +130,7 @@ StringBuilder *create_string_builder() {
 }
 
 void destroy_string_builder(StringBuilder *string_builder) {
-  if (string_builder == NULL) {
+  if (!string_builder) {
     return;
   }
   free(string_builder->string);
@@ -113,7 +139,7 @@ void destroy_string_builder(StringBuilder *string_builder) {
 
 static void string_builder_ensure_space(StringBuilder *string_builder,
                                         size_t add_len) {
-  if (string_builder == NULL || add_len == 0) {
+  if (!string_builder || add_len == 0) {
     return;
   }
 
@@ -140,12 +166,12 @@ static void string_builder_ensure_space(StringBuilder *string_builder,
 
 void string_builder_add_string(StringBuilder *string_builder, const char *str,
                                size_t len) {
-  if (string_builder == NULL || str == NULL || *str == '\0') {
+  if (!string_builder || !str || *str == '\0') {
     return;
   }
 
   if (len == 0) {
-    len = strlen(str);
+    len = string_length(str);
   }
 
   string_builder_ensure_space(string_builder, len);
@@ -187,7 +213,7 @@ void string_builder_add_char(StringBuilder *string_builder, char c) {
 }
 
 void string_builder_truncate(StringBuilder *string_builder, size_t len) {
-  if (string_builder == NULL || len >= string_builder->len) {
+  if (!string_builder || len >= string_builder->len) {
     return;
   }
 
@@ -196,21 +222,21 @@ void string_builder_truncate(StringBuilder *string_builder, size_t len) {
 }
 
 void string_builder_clear(StringBuilder *string_builder) {
-  if (string_builder == NULL) {
+  if (!string_builder) {
     return;
   }
   string_builder_truncate(string_builder, 0);
 }
 
 size_t string_builder_length(const StringBuilder *string_builder) {
-  if (string_builder == NULL) {
+  if (!string_builder) {
     return 0;
   }
   return string_builder->len;
 }
 
 const char *string_builder_peek(const StringBuilder *string_builder) {
-  if (string_builder == NULL) {
+  if (!string_builder) {
     return NULL;
   }
   return string_builder->string;
@@ -219,15 +245,15 @@ const char *string_builder_peek(const StringBuilder *string_builder) {
 char *string_builder_dump(const StringBuilder *string_builder, size_t *len) {
   char *out;
 
-  if (string_builder == NULL) {
+  if (!string_builder) {
     return NULL;
   }
 
-  if (len != NULL) {
+  if (len) {
     *len = string_builder->len;
   }
   out = malloc_or_die(string_builder->len + 1);
-  memcpy(out, string_builder->string, string_builder->len + 1);
+  memory_copy(out, string_builder->string, string_builder->len + 1);
   return out;
 }
 
@@ -309,8 +335,8 @@ int split_string_scan(StringSplitter *string_splitter, const char *input_string,
   char previous_char;
   int item_start_index = 0;
   int item_end_index = 0;
-  size_t string_length = strlen(input_string);
-  for (size_t i = 0; i < string_length; i++) {
+  size_t str_length = string_length(input_string);
+  for (size_t i = 0; i < str_length; i++) {
     char current_char = input_string[i];
     if (set_items) {
       item_end_index++;
@@ -330,7 +356,7 @@ int split_string_scan(StringSplitter *string_splitter, const char *input_string,
   }
 
   if (!ignore_empty ||
-      (string_length != 0 &&
+      (str_length != 0 &&
        !char_matches_string_delimiter(string_delimiter, previous_char))) {
     if (set_items) {
       string_splitter->items[current_number_of_items] =

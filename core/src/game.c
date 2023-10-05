@@ -42,7 +42,8 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
 cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
                                           int row_start,
                                           int *current_column_index) {
-  uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * strlen(letters));
+  uint8_t *machine_letters =
+      malloc_or_die(sizeof(uint8_t) * string_length(letters));
   int number_of_machine_letters = str_to_machine_letters(
       game->gen->letter_distribution, letters, false, machine_letters);
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
@@ -67,7 +68,7 @@ cgp_parse_status_t parse_cgp_board_row(Game *game, const char *cgp_board_row,
                                        int row_index) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   StringBuilder *tile_string_builder = create_string_builder();
-  int row_length = strlen(cgp_board_row);
+  int row_length = string_length(cgp_board_row);
 
   int current_row_number_of_spaces = 0;
   int current_column_index = 0;
@@ -280,10 +281,10 @@ CGPOperations *get_default_cgp_operations() {
 }
 
 void destroy_cgp_operations(CGPOperations *cgp_operations) {
-  if (cgp_operations->lexicon_name != NULL) {
+  if (cgp_operations->lexicon_name) {
     free(cgp_operations->lexicon_name);
   }
-  if (cgp_operations->letter_distribution_name != NULL) {
+  if (cgp_operations->letter_distribution_name) {
     free(cgp_operations->letter_distribution_name);
   }
   free(cgp_operations);
@@ -302,7 +303,7 @@ cgp_parse_status_t load_cgp_operations(CGPOperations *cgp_operations,
     // string, so if any of them have a semicolon at the end,
     // remove it.
     // FIXME: move this 'remove last char' function to string util
-    size_t string_value_length = strlen(string_value);
+    size_t string_value_length = string_length(string_value);
     if (string_value[string_value_length - 1] == ';') {
       string_value[string_value_length - 1] = '\0';
     }
@@ -325,13 +326,13 @@ cgp_parse_status_t load_cgp_operations(CGPOperations *cgp_operations,
         cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_GAME_VARIANT;
       }
     } else if (strings_equal(CGP_OPCODE_LETTER_DISTRIBUTION_NAME, opcode)) {
-      if (cgp_operations->letter_distribution_name != NULL) {
+      if (cgp_operations->letter_distribution_name) {
         free(cgp_operations->letter_distribution_name);
       }
       cgp_operations->letter_distribution_name =
           get_formatted_string("%s", string_value);
     } else if (strings_equal(CGP_OPCODE_LEXICON_NAME, opcode)) {
-      if (cgp_operations->lexicon_name != NULL) {
+      if (cgp_operations->lexicon_name) {
         free(cgp_operations->lexicon_name);
       }
       cgp_operations->lexicon_name = get_formatted_string("%s", string_value);
@@ -495,8 +496,8 @@ void string_builder_add_player_row(LetterDistribution *letter_distribution,
   }
 
   string_builder_add_formatted_string(game_string, "%s%s%*s", player_marker,
-                                      player->name, 25 - strlen(player->name),
-                                      "");
+                                      player->name,
+                                      25 - string_length(player->name), "");
   string_builder_add_rack(player->rack, letter_distribution, game_string);
   string_builder_add_formatted_string(game_string, "%*s%d",
                                       10 - player->rack->number_of_letters, "",

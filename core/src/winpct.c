@@ -12,7 +12,7 @@ extern inline float win_pct(WinPct *wp, int spread_plus_leftover,
 // note: this function was largely written by ChatGPT.
 void parse_winpct_csv(WinPct *wp, const char *filename) {
   FILE *file = stream_from_filename(filename);
-  if (file == NULL) {
+  if (!file) {
     printf("Error opening file: %s\n", filename);
     return;
   }
@@ -32,19 +32,15 @@ void parse_winpct_csv(WinPct *wp, const char *filename) {
 
   // Read data lines
   int row = 0;
-  while (fgets(line, sizeof(line), file) != NULL && row < max_rows) {
-    char *token = strtok(line, ",");
-    int col = 0;
-
-    while (token != NULL) {
-      if (col != 0) {
-        // ignore first column.
-        array[row][col - 1] = atof(token);
-      }
-      col++;
-      token = strtok(NULL, ",");
+  while (fgets(line, sizeof(line), file) && row < max_rows) {
+    StringSplitter *win_pct_data = split_string(line, ',', true);
+    int number_of_items = string_splitter_get_number_of_items(win_pct_data);
+    // Start at 1 to ignore the first column.
+    for (int i = 1; i < number_of_items; i++) {
+      array[row][i - 1] =
+          string_to_double(string_splitter_get_item(win_pct_data, i));
     }
-
+    destroy_string_splitter(win_pct_data);
     row++;
   }
 
@@ -64,7 +60,7 @@ WinPct *create_winpct(const char *winpct_filename) {
 
 // Function to free the memory allocated for the 2D array
 void destroy_winpct(WinPct *wp) {
-  if (wp == NULL) {
+  if (!wp) {
     return;
   }
   for (int i = 0; i < MAX_SPREAD * 2 + 1; i++) {

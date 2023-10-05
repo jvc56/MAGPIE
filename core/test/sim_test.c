@@ -85,7 +85,7 @@ void test_more_iterations(SuperConfig *superconfig,
                                       game->gen->letter_distribution,
                                       move_string_builder);
 
-  assert(strcmp(string_builder_peek(move_string_builder), "8G QI") == 0);
+  assert(strings_equal(string_builder_peek(move_string_builder), "8G QI"));
 
   assert(unhalt(thread_control));
   destroy_game(game);
@@ -116,7 +116,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
                                       game->gen->letter_distribution,
                                       move_string_builder);
 
-  assert(strcmp(string_builder_peek(move_string_builder), "14F ZI.E") == 0);
+  assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
   assert(unhalt(thread_control));
   destroy_string_builder(move_string_builder);
@@ -143,7 +143,7 @@ void perf_test_multithread_sim(Config *config, ThreadControl *thread_control) {
                                       game->gen->letter_distribution,
                                       move_string_builder);
 
-  assert(strcmp(string_builder_peek(move_string_builder), "14F ZI.E") == 0);
+  assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
   assert(unhalt(thread_control));
   destroy_string_builder(move_string_builder);
@@ -170,7 +170,7 @@ void perf_test_multithread_blocking_sim(Config *config,
                                       game->gen->letter_distribution,
                                       move_string_builder);
 
-  assert(strcmp(string_builder_peek(move_string_builder), "14F ZI.E") == 0);
+  assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
   destroy_string_builder(move_string_builder);
   destroy_game(game);
   destroy_simmer(simmer);
@@ -207,11 +207,11 @@ void test_play_similarity(SuperConfig *superconfig,
 
       const char *p1 = string_builder_peek(p1_string_builder);
       const char *p2 = string_builder_peek(p2_string_builder);
-      if (strcmp(p1, "8F ATRESIC") == 0 && strcmp(p2, "8F STEARIC") == 0) {
+      if (strings_equal(p1, "8F ATRESIC") && strings_equal(p2, "8F STEARIC")) {
         assert(plays_are_similar(simmer, simmer->simmed_plays[i],
                                  simmer->simmed_plays[j]));
-      } else if (strcmp(p2, "8F ATRESIC") == 0 &&
-                 strcmp(p1, "8F STEARIC") == 0) {
+      } else if (strings_equal(p2, "8F ATRESIC") &&
+                 strings_equal(p1, "8F STEARIC")) {
         assert(plays_are_similar(simmer, simmer->simmed_plays[i],
                                  simmer->simmed_plays[j]));
       } else {

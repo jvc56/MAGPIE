@@ -94,7 +94,7 @@ void insert_leave_rack(LeaveRackList *lrl, Rack *leave, Rack *exchanged,
   }
   lrl->spare_leave_rack->draws = number_of_draws_for_leave;
   lrl->spare_leave_rack->equity = equity;
-  if (exchanged != NULL && !exchanged->empty) {
+  if (exchanged && !exchanged->empty) {
     reset_rack(lrl->spare_leave_rack->exchanged);
     for (int i = 0; i < exchanged->array_size; i++) {
       for (int j = 0; j < exchanged->array[i]; j++) {

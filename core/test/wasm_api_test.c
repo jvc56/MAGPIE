@@ -21,23 +21,22 @@ void test_wasm_api() {
   // equity of ERS is 15.947
   // -> total equity is 72.947
   printf("%s\n", retstr);
-  assert(strcmp(retstr,
-                "currmove 6g.DIPETAZ result scored valid false invalid_words "
-                "WIFAY,ZGENUINE,DIPETAZ sc 57 eq 72.947") == 0);
+  assert(strings_equal(
+      retstr, "currmove 6g.DIPETAZ result scored valid false invalid_words "
+              "WIFAY,ZGENUINE,DIPETAZ sc 57 eq 72.947"));
   free(retstr);
 
   // Score an exchange keeping AEINR (equity is 12.610)
   retstr = score_play(VS_ED, GAME_EVENT_EXCHANGE, 0, 0, 0, (uint8_t[]){17, 23},
                       (uint8_t[]){1, 5, 9, 14, 18}, 2, 5);
-  assert(strcmp(retstr,
-                "currmove ex.QW result scored valid true sc 0 eq 12.610") == 0);
+  assert(strings_equal(
+      retstr, "currmove ex.QW result scored valid true sc 0 eq 12.610"));
   free(retstr);
 
   // Score another play
   retstr = score_play(cgp1, GAME_EVENT_TILE_PLACEMENT_MOVE, 1, 1, 0,
                       (uint8_t[]){20, 8, 21, 13, 16}, (uint8_t[]){1, 18}, 5, 2);
-  assert(strcmp(retstr,
-                "currmove 2b.THUMP result scored valid true sc 50 eq 54.356") ==
-         0);
+  assert(strings_equal(
+      retstr, "currmove 2b.THUMP result scored valid true sc 50 eq 54.356"));
   free(retstr);
 }

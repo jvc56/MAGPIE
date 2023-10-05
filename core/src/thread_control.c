@@ -17,7 +17,7 @@ ThreadControl *create_thread_control(FILE *outfile) {
   pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
   thread_control->check_stopping_condition_interval = 0;
   thread_control->check_stop_status = CHECK_STOP_INACTIVE;
-  if (outfile == NULL) {
+  if (!outfile) {
     thread_control->outfile = stdout;
   } else {
     thread_control->outfile = outfile;

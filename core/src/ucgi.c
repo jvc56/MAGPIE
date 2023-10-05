@@ -22,18 +22,18 @@ void ucgi_scan_loop() {
 
   while (1) {
     char cmd[CMD_MAX];
-    if (fgets(cmd, CMD_MAX, stdin) == NULL) {
+    if (!fgets(cmd, CMD_MAX, stdin)) {
       break;
     }
     // replace newline with 0 for ease in comparison
-    cmd[strcspn(cmd, "\n")] = 0;
+    remove_first_newline(cmd);
 
     int should_end = process_ucgi_command_async(cmd, ucgi_command_vars);
     if (should_end) {
       break;
     }
   }
-  if (ucgi_command_vars != NULL) {
+  if (ucgi_command_vars) {
     destroy_ucgi_command_vars(ucgi_command_vars);
   }
 }

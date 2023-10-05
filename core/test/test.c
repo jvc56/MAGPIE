@@ -74,11 +74,11 @@ int main(int argc, char *argv[]) {
   }
   log_set_level(LOG_WARN);
 
-  if (!strcmp(argv[1], CMD_INFER)) {
+  if (strings_equal(argv[1], CMD_INFER)) {
     Config *config = create_config_from_args(argc, argv);
     infer_from_config(config);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_AUTOPLAY)) {
+  } else if (strings_equal(argv[1], CMD_AUTOPLAY)) {
     Config *config = create_config_from_args(argc, argv);
     ThreadControl *thread_control = create_thread_control_from_config(config);
     AutoplayResults *autoplay_results = create_autoplay_results();
@@ -86,21 +86,21 @@ int main(int argc, char *argv[]) {
     destroy_config(config);
     destroy_autoplay_results(autoplay_results);
     destroy_thread_control(thread_control);
-  } else if (!strcmp(argv[1], CMD_PROF)) {
+  } else if (strings_equal(argv[1], CMD_PROF)) {
     Config *config = create_config_from_args(argc, argv);
     prof_tests(config);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_TOPVALL)) {
+  } else if (strings_equal(argv[1], CMD_TOPVALL)) {
     Config *config = create_config_from_args(argc, argv);
     test_play_recorder(config);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_SIM)) {
+  } else if (strings_equal(argv[1], CMD_SIM)) {
     Config *config = create_config_from_args(argc, argv);
     ThreadControl *thread_control = create_thread_control_from_config(config);
     perf_test_multithread_sim(config, thread_control);
     destroy_thread_control(thread_control);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_SIM_STOPPING)) {
+  } else if (strings_equal(argv[1], CMD_SIM_STOPPING)) {
     Config *config = create_config_from_args(argc, argv);
     ThreadControl *thread_control = create_thread_control_from_config(config);
     thread_control->print_info_interval = 500;
@@ -108,7 +108,7 @@ int main(int argc, char *argv[]) {
     perf_test_multithread_blocking_sim(config, thread_control);
     destroy_thread_control(thread_control);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
+  } else if (strings_equal(argv[1], CMD_UNIT_TESTS)) {
     Config *csw_config = create_config(
         "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
         "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "",

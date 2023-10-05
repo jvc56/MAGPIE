@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdio.h>
 
 #include "../src/config.h"
 #include "../src/letter_distribution.h"

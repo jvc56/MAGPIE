@@ -94,7 +94,7 @@ float convert_little_endian_to_host(float little_endian_float) {
 
 void load_klv(KLV *klv, const char *klv_filename) {
   FILE *stream = stream_from_filename(klv_filename);
-  if (stream == NULL) {
+  if (!stream) {
     perror(klv_filename);
     exit(EXIT_FAILURE);
   }
@@ -213,7 +213,7 @@ double get_leave_value(KLV *klv, Rack *leave) {
   if (leave->empty) {
     return 0.0;
   }
-  if (klv == NULL) {
+  if (!klv) {
     return 0.0;
   }
   int index = get_word_index_of(klv, kwg_arc_index(klv->kwg, 0), leave);

@@ -25,7 +25,7 @@ GameHistoryPlayer *create_game_history_player(const char *name,
 void destroy_game_history_player(GameHistoryPlayer *player) {
   free(player->name);
   free(player->nickname);
-  if (player->last_known_rack != NULL) {
+  if (player->last_known_rack) {
     destroy_rack(player->last_known_rack);
   }
   free(player);
@@ -59,31 +59,31 @@ GameHistory *create_game_history() {
 }
 
 void destroy_game_history(GameHistory *game_history) {
-  if (game_history->title != NULL) {
+  if (game_history->title) {
     free(game_history->title);
   }
-  if (game_history->description != NULL) {
+  if (game_history->description) {
     free(game_history->description);
   }
-  if (game_history->id_auth != NULL) {
+  if (game_history->id_auth) {
     free(game_history->id_auth);
   }
-  if (game_history->uid != NULL) {
+  if (game_history->uid) {
     free(game_history->uid);
   }
-  if (game_history->lexicon_name != NULL) {
+  if (game_history->lexicon_name) {
     free(game_history->lexicon_name);
   }
-  if (game_history->letter_distribution_name != NULL) {
+  if (game_history->letter_distribution_name) {
     free(game_history->letter_distribution_name);
   }
 
-  if (game_history->letter_distribution != NULL) {
+  if (game_history->letter_distribution) {
     destroy_letter_distribution(game_history->letter_distribution);
   }
 
   for (int i = 0; i < 2; i++) {
-    if (game_history->players[i] != NULL) {
+    if (game_history->players[i]) {
       destroy_game_history_player(game_history->players[i]);
     }
   }

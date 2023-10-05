@@ -198,7 +198,7 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   }
   reset_rack(prack);
   int ndrawn = 0;
-  if (known_rack != NULL && known_rack->number_of_letters > 0) {
+  if (known_rack && known_rack->number_of_letters > 0) {
     for (int i = 0; i < known_rack->array_size; i++) {
       for (int j = 0; j < known_rack->array[i]; j++) {
         draw_letter_to_rack(game->gen->bag, prack, i);

@@ -86,16 +86,16 @@ void destroy_simmed_plays(Simmer *simmer) {
 }
 
 void destroy_simmer(Simmer *simmer) {
-  if (simmer->simmed_plays != NULL) {
+  if (simmer->simmed_plays) {
     destroy_simmed_plays(simmer);
   }
   destroy_rack(simmer->similar_plays_rack);
 
-  if (simmer->known_opp_rack != NULL) {
+  if (simmer->known_opp_rack) {
     destroy_rack(simmer->known_opp_rack);
   }
 
-  if (simmer->play_similarity_cache != NULL) {
+  if (simmer->play_similarity_cache) {
     free(simmer->play_similarity_cache);
   }
 
@@ -514,7 +514,7 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   // then set the new values for the simmer. The destructor
   // relies on the previous values of the simmer to properly
   // free everything.
-  if (simmer->simmed_plays != NULL) {
+  if (simmer->simmed_plays) {
     destroy_simmed_plays(simmer);
   }
 
@@ -534,8 +534,8 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   create_simmed_plays(simmer, game, number_of_moves_generated);
 
   if (simmer->num_simmed_plays > 1 && number_of_moves_generated > 1) {
-    if (known_opp_rack != NULL) {
-      if (simmer->known_opp_rack != NULL) {
+    if (known_opp_rack) {
+      if (simmer->known_opp_rack) {
         destroy_rack(simmer->known_opp_rack);
       }
       simmer->known_opp_rack = copy_rack(known_opp_rack);
@@ -543,7 +543,7 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
       simmer->known_opp_rack = NULL;
     }
 
-    if (simmer->play_similarity_cache != NULL) {
+    if (simmer->play_similarity_cache) {
       free(simmer->play_similarity_cache);
     }
     simmer->play_similarity_cache =

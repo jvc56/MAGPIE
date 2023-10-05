@@ -31,16 +31,16 @@ UCGICommandVars *create_ucgi_command_vars(FILE *outfile) {
 
 void destroy_ucgi_command_vars(UCGICommandVars *ucgi_command_vars) {
   // Caller needs to handle the outfile
-  if (ucgi_command_vars->loaded_game != NULL) {
+  if (ucgi_command_vars->loaded_game) {
     destroy_game(ucgi_command_vars->loaded_game);
   }
-  if (ucgi_command_vars->config != NULL) {
+  if (ucgi_command_vars->config) {
     destroy_config(ucgi_command_vars->config);
   }
-  if (ucgi_command_vars->simmer != NULL) {
+  if (ucgi_command_vars->simmer) {
     destroy_simmer(ucgi_command_vars->simmer);
   }
-  if (ucgi_command_vars->inference != NULL) {
+  if (ucgi_command_vars->inference) {
     destroy_inference(ucgi_command_vars->inference);
   }
   destroy_go_params(ucgi_command_vars->go_params);
@@ -70,7 +70,7 @@ int parse_go_cmd(char *params, GoParams *go_params) {
   int reading_equity_margin = 0;
   int reading_print_info_interval = 0;
   int reading_check_stopping_condition_interval = 0;
-  while (token != NULL) {
+  while (token) {
     if (reading_num_plays) {
       go_params->num_plays = atoi(token);
     } else if (reading_max_iterations) {
@@ -80,7 +80,7 @@ int parse_go_cmd(char *params, GoParams *go_params) {
     } else if (reading_print_info_interval) {
       go_params->print_info_interval = atoi(token);
     } else if (reading_tiles) {
-      size_t tiles_size = strlen(token);
+      size_t tiles_size = string_length(token);
       if (tiles_size > (RACK_SIZE)) {
         log_warn("Too many played tiles for inference.");
         return GO_PARAMS_PARSE_FAILURE;
@@ -106,28 +106,28 @@ int parse_go_cmd(char *params, GoParams *go_params) {
     } else if (reading_threads) {
       go_params->threads = atoi(token);
     } else if (reading_stop_condition) {
-      if (strcmp(token, "95") == 0) {
+      if (strings_equal(token, "95")) {
         go_params->stop_condition = SIM_STOPPING_CONDITION_95PCT;
-      } else if (strcmp(token, "98") == 0) {
+      } else if (strings_equal(token, "98")) {
         go_params->stop_condition = SIM_STOPPING_CONDITION_98PCT;
-      } else if (strcmp(token, "99") == 0) {
+      } else if (strings_equal(token, "99")) {
         go_params->stop_condition = SIM_STOPPING_CONDITION_99PCT;
       } else {
         log_warn("Did not understand stopping condition %s", token);
         return GO_PARAMS_PARSE_FAILURE;
       }
     }
-    if (strcmp(token, "static") == 0) {
+    if (strings_equal(token, "static")) {
       go_params->static_search_only = 1;
     }
 
-    if (strcmp(token, "sim") == 0) {
+    if (strings_equal(token, "sim")) {
       if (go_params->search_type != SEARCH_TYPE_NONE) {
         log_warn("Too many search types specified.");
         return GO_PARAMS_PARSE_FAILURE;
       }
       go_params->search_type = SEARCH_TYPE_SIM_MONTECARLO;
-    } else if (strcmp(token, "infer") == 0) {
+    } else if (strings_equal(token, "infer")) {
       if (go_params->search_type != SEARCH_TYPE_NONE) {
         log_warn("Too many search types specified.");
         return GO_PARAMS_PARSE_FAILURE;
@@ -135,18 +135,19 @@ int parse_go_cmd(char *params, GoParams *go_params) {
       go_params->search_type = SEARCH_TYPE_INFERENCE_SOLVE;
     }
 
-    reading_num_plays = strcmp(token, "plays") == 0;
-    reading_print_info_interval = strcmp(token, "info") == 0;
-    reading_check_stopping_condition_interval = strcmp(token, "checkstop") == 0;
-    reading_max_iterations = strcmp(token, "i") == 0;
-    reading_depth = strcmp(token, "depth") == 0;
-    reading_stop_condition = strcmp(token, "stopcondition") == 0;
-    reading_threads = strcmp(token, "threads") == 0;
-    reading_tiles = strcmp(token, "tiles") == 0;
-    reading_player_index = strcmp(token, "pidx") == 0;
-    reading_score = strcmp(token, "score") == 0;
-    reading_number_of_tiles_exchanged = strcmp(token, "exch") == 0;
-    reading_equity_margin = strcmp(token, "eqmargin") == 0;
+    reading_num_plays = strings_equal(token, "plays");
+    reading_print_info_interval = strings_equal(token, "info");
+    reading_check_stopping_condition_interval =
+        strings_equal(token, "checkstop");
+    reading_max_iterations = strings_equal(token, "i");
+    reading_depth = strings_equal(token, "depth");
+    reading_stop_condition = strings_equal(token, "stopcondition");
+    reading_threads = strings_equal(token, "threads");
+    reading_tiles = strings_equal(token, "tiles");
+    reading_player_index = strings_equal(token, "pidx");
+    reading_score = strings_equal(token, "score");
+    reading_number_of_tiles_exchanged = strings_equal(token, "exch");
+    reading_equity_margin = strings_equal(token, "eqmargin");
     token = strtok(NULL, " ");
   }
   log_debug("Returning go_params; i %d stop %d depth %d threads %d ss %d",
@@ -171,7 +172,7 @@ int parse_go_cmd(char *params, GoParams *go_params) {
 }
 
 void ucgi_simulate(UCGICommandVars *ucgi_command_vars) {
-  if (ucgi_command_vars->simmer == NULL) {
+  if (!ucgi_command_vars->simmer) {
     ucgi_command_vars->simmer = create_simmer(ucgi_command_vars->config);
   }
   simulate(ucgi_command_vars->thread_control, ucgi_command_vars->simmer,
@@ -185,7 +186,7 @@ void ucgi_simulate(UCGICommandVars *ucgi_command_vars) {
 }
 
 void ucgi_infer(UCGICommandVars *ucgi_command_vars) {
-  if (ucgi_command_vars->inference == NULL) {
+  if (!ucgi_command_vars->inference) {
     ucgi_command_vars->inference = create_inference(
         ucgi_command_vars->go_params->num_plays,
         ucgi_command_vars->loaded_game->gen->letter_distribution->size);
@@ -273,11 +274,11 @@ cgp_parse_status_t load_position(UCGICommandVars *ucgi_command_vars,
                            ldname);
   ucgi_command_vars->config->move_list_capacity = move_list_capacity;
 
-  if (ucgi_command_vars->loaded_game == NULL ||
-      strcmp(ucgi_command_vars->last_lexicon_name, lexicon_name) ||
-      strcmp(ucgi_command_vars->last_ld_name, ldname)) {
+  if (!ucgi_command_vars->loaded_game ||
+      !strings_equal(ucgi_command_vars->last_lexicon_name, lexicon_name) ||
+      !strings_equal(ucgi_command_vars->last_ld_name, ldname)) {
     log_debug("creating game");
-    if (ucgi_command_vars->loaded_game != NULL) {
+    if (ucgi_command_vars->loaded_game) {
       destroy_game(ucgi_command_vars->loaded_game);
     }
     ucgi_command_vars->loaded_game = create_game(ucgi_command_vars->config);
@@ -292,8 +293,8 @@ cgp_parse_status_t load_position(UCGICommandVars *ucgi_command_vars,
       load_cgp(ucgi_command_vars->loaded_game, ucgi_command_vars->config->cgp);
   log_debug("loaded game");
 
-  strcpy(ucgi_command_vars->last_lexicon_name, lexicon_name);
-  strcpy(ucgi_command_vars->last_ld_name, ldname);
+  string_copy(ucgi_command_vars->last_lexicon_name, lexicon_name);
+  string_copy(ucgi_command_vars->last_ld_name, ldname);
   return cgp_parse_status;
 }
 
@@ -305,10 +306,10 @@ cgp_parse_status_t ucgi_load_position(UCGICommandVars *ucgi_command_vars,
   if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
     return UCGI_COMMAND_STATUS_CGP_PARSE_FAILED;
   }
-  if (cgp_operations->lexicon_name == NULL) {
+  if (!cgp_operations->lexicon_name) {
     return UCGI_COMMAND_STATUS_LEXICON_LD_FAILURE;
   }
-  if (cgp_operations->letter_distribution_name == NULL) {
+  if (!cgp_operations->letter_distribution_name) {
     cgp_operations->letter_distribution_name =
         get_letter_distribution_name_from_lexicon_name(
             cgp_operations->lexicon_name);
@@ -325,17 +326,17 @@ cgp_parse_status_t ucgi_load_position(UCGICommandVars *ucgi_command_vars,
 int process_ucgi_command_async(const char *cmd,
                                UCGICommandVars *ucgi_command_vars) {
   // basic commands
-  if (strcmp(cmd, "ucgi") == 0) {
+  if (strings_equal(cmd, "ucgi")) {
     fprintf(ucgi_command_vars->outfile, "id name MAGPIE 0.1\n");
     fprintf(ucgi_command_vars->outfile, "ucgiok\n");
     fflush(ucgi_command_vars->outfile);
-  } else if (strcmp(cmd, "quit") == 0) {
+  } else if (strings_equal(cmd, "quit")) {
     return UCGI_COMMAND_STATUS_QUIT;
   }
 
   // other commands
   if (prefix("position cgp ", cmd)) {
-    const char *cgpstr = cmd + strlen("position cgp ");
+    const char *cgpstr = cmd + string_length("position cgp ");
     CGPOperations *cgp_operations = get_default_cgp_operations();
     ucgi_command_status_t command_status =
         ucgi_load_position(ucgi_command_vars, cgp_operations, cgpstr);
@@ -345,14 +346,14 @@ int process_ucgi_command_async(const char *cmd,
     }
   } else if (prefix("go", cmd)) {
     ucgi_command_status_t command_status =
-        ucgi_go_async(cmd + strlen("go"), ucgi_command_vars);
+        ucgi_go_async(cmd + string_length("go"), ucgi_command_vars);
     if (command_status == UCGI_COMMAND_STATUS_COMMAND_PARSE_FAILED) {
       log_warn("Failed to parse go command.");
     } else if (command_status == UCGI_COMMAND_STATUS_NOT_STOPPED) {
       log_info("There is already a search ongoing.");
     }
     return command_status;
-  } else if (strcmp(cmd, "stop") == 0) {
+  } else if (strings_equal(cmd, "stop")) {
     if (get_mode(ucgi_command_vars->thread_control)) {
       if (!halt(ucgi_command_vars->thread_control,
                 HALT_STATUS_USER_INTERRUPT)) {
@@ -371,15 +372,15 @@ int process_ucgi_command_async(const char *cmd,
 // Note: this function does not currently work with the `sim static` search.
 // It will deadlock.
 char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
-  if (ucgi_command_vars == NULL) {
+  if (!ucgi_command_vars) {
     log_warn("The UCGI Command variables struct has not been initialized.");
     return NULL;
   }
-  if (ucgi_command_vars->thread_control == NULL) {
+  if (!ucgi_command_vars->thread_control) {
     log_warn("Thread controller has not been initialized.");
     return NULL;
   }
-  if (ucgi_command_vars->go_params == NULL) {
+  if (!ucgi_command_vars->go_params) {
     log_warn("Search params have not been initialized.");
     return NULL;
   }
@@ -388,7 +389,7 @@ char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
   // results.
   switch (ucgi_command_vars->go_params->search_type) {
   case SEARCH_TYPE_SIM_MONTECARLO:
-    if (ucgi_command_vars->simmer == NULL) {
+    if (!ucgi_command_vars->simmer) {
       log_warn("Simmer has not been initialized.");
       return NULL;
     }
@@ -403,15 +404,15 @@ char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
 }
 
 char *ucgi_stop_search(UCGICommandVars *ucgi_command_vars) {
-  if (ucgi_command_vars == NULL) {
+  if (!ucgi_command_vars) {
     log_warn("The UCGI Command variables struct has not been initialized.");
     return NULL;
   }
-  if (ucgi_command_vars->thread_control == NULL) {
+  if (!ucgi_command_vars->thread_control) {
     log_warn("Thread controller has not been initialized.");
     return NULL;
   }
-  if (ucgi_command_vars->go_params == NULL) {
+  if (!ucgi_command_vars->go_params) {
     log_warn("Search params have not been initialized.");
     return NULL;
   }
@@ -423,7 +424,7 @@ char *ucgi_stop_search(UCGICommandVars *ucgi_command_vars) {
   }
   switch (ucgi_command_vars->go_params->search_type) {
   case SEARCH_TYPE_SIM_MONTECARLO:
-    if (ucgi_command_vars->simmer == NULL) {
+    if (!ucgi_command_vars->simmer) {
       log_warn("Simmer has not been initialized.");
       return NULL;
     }

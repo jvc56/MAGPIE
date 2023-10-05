@@ -31,25 +31,25 @@ void block_for_search(UCGICommandVars *ucgi_command_vars, int max_seconds) {
   }
 }
 
-char *nthline(int n, char *text) {
+void assert_nthline_equals(char *text, int n, const char *expected_line) {
   // returns the nth line of the text (0-indexed)
-  char *token = strtok(text, "\n");
-  int ct = 0;
-  while (token != NULL) {
-    if (ct == n) {
-      return token;
-    }
-    ct++;
-    token = strtok(NULL, "\n");
+  StringSplitter *split_text = split_string(text, '\n', false);
+  bool n_less_than_number_of_items =
+      n < string_splitter_get_number_of_items(split_text);
+  bool line_matches = false;
+  if (n_less_than_number_of_items) {
+    line_matches =
+        strings_equal(expected_line, string_splitter_get_item(split_text, n));
   }
-  return NULL;
+  destroy_string_splitter(split_text);
+  assert(n_less_than_number_of_items);
+  assert(line_matches);
 }
 
 void test_ucgi_command() {
   int depth;
   int stopcondition;
   int threads;
-  char tiles[(RACK_SIZE)];
   int player_index;
   int score;
   int number_of_tiles_exchanged;
@@ -69,7 +69,8 @@ void test_ucgi_command() {
   // Test the ucgi command
   int result = process_ucgi_command_async("ucgi", ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
-  assert(!strcmp("id name MAGPIE 0.1\nucgiok\n", output_buffer + prev_len));
+  assert(
+      strings_equal("id name MAGPIE 0.1\nucgiok\n", output_buffer + prev_len));
   prev_len = len;
 
   // Test the quit command
@@ -84,8 +85,8 @@ void test_ucgi_command() {
   result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
                                       ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
-  assert(!strcmp("CSW21", ucgi_command_vars->last_lexicon_name));
-  assert(!strcmp("english", ucgi_command_vars->last_ld_name));
+  assert(strings_equal("CSW21", ucgi_command_vars->last_lexicon_name));
+  assert(strings_equal("english", ucgi_command_vars->last_ld_name));
   assert(ucgi_command_vars->loaded_game->gen->bag->last_tile_index + 1 == 83);
   prev_len = len;
 
@@ -316,7 +317,6 @@ void test_ucgi_command() {
   // Test infer
   Stat *letter_stat = create_stat();
 
-  strncpy(tiles, "MUZAKY", RACK_SIZE);
   player_index = 0;
   score = 58;
   number_of_tiles_exchanged = 0;
@@ -333,10 +333,9 @@ void test_ucgi_command() {
   string_builder_clear(test_stdin_input);
   string_builder_add_formatted_string(
       test_stdin_input,
-      "go infer tiles %s pidx %d score %d exch %d plays %d info %d "
+      "go infer tiles MUZAKY pidx %d score %d exch %d plays %d info %d "
       "threads %d",
-      tiles, player_index, score, number_of_tiles_exchanged, plays, info,
-      threads);
+      player_index, score, number_of_tiles_exchanged, plays, info, threads);
   result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
                                       ucgi_command_vars);
   assert(result == UCGI_COMMAND_STATUS_SUCCESS);
@@ -346,7 +345,7 @@ void test_ucgi_command() {
   assert(ucgi_command_vars->go_params->score == score);
   assert(ucgi_command_vars->go_params->number_of_tiles_exchanged ==
          number_of_tiles_exchanged);
-  assert(!strcmp(ucgi_command_vars->go_params->tiles, tiles));
+  assert(strings_equal(ucgi_command_vars->go_params->tiles, "MUZAKY"));
 
   // It shouldn't take too long to run an inference for a 2 tile leave.
   block_for_search(ucgi_command_vars, 5);
@@ -541,12 +540,12 @@ void test_ucgi_command() {
   sleep(5);
 
   char *ret = ucgi_search_status(ucgi_command_vars);
-  assert_strings_equal(nthline(3, ret), "bestsofar 8d.ZILLION");
+  assert_nthline_equals(ret, 3, "bestsofar 8d.ZILLION");
   free(ret);
   // Sleep a couple more seconds and then stop the search.
   sleep(2);
   char *ret2 = ucgi_stop_search(ucgi_command_vars);
-  assert_strings_equal(nthline(3, ret2), "bestmove 8d.ZILLION");
+  assert_nthline_equals(ret2, 3, "bestmove 8d.ZILLION");
   free(ret2);
 
   assert(ucgi_command_vars->thread_control->halt_status ==
@@ -581,13 +580,13 @@ void test_ucgi_command() {
   int mode = get_mode(ucgi_command_vars->thread_control);
   assert(mode != MODE_SEARCHING);
   ret = ucgi_search_status(ucgi_command_vars);
-  assert(strcmp(nthline(3, ret), "bestmove 8d.ZILLION") == 0);
+  assert_nthline_equals(ret, 3, "bestmove 8d.ZILLION");
   free(ret);
   // Sleep a couple more seconds and then try to stop the search. It
   // shouldn't work.
   sleep(2);
   ret2 = ucgi_stop_search(ucgi_command_vars);
-  assert(ret2 == NULL);
+  assert(!ret2);
   assert(ucgi_command_vars->thread_control->halt_status ==
          HALT_STATUS_MAX_ITERATIONS);
 

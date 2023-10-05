@@ -100,11 +100,11 @@ void string_builder_add_rack(Rack *rack,
 }
 
 bool racks_are_equal(Rack *rack1, Rack *rack2) {
-  if (rack1 == NULL && rack2 == NULL) {
+  if (!rack1 && !rack2) {
     return true;
   }
-  if (rack1 == NULL || rack2 == NULL ||
-      rack1->array_size != rack2->array_size || rack1->empty != rack2->empty) {
+  if (!rack1 || !rack2 || rack1->array_size != rack2->array_size ||
+      rack1->empty != rack2->empty) {
     return false;
   }
   for (int i = 0; i < rack1->array_size; i++) {
