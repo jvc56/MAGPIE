@@ -11,7 +11,6 @@
 // vertical and horizontal sets and
 // player 1 and player 2 sets, when using different lexica
 #define NUMBER_OF_CROSSES BOARD_DIM *BOARD_DIM * 2 * 2
-#define BINGO_BONUS 50
 #define BOARD_HORIZONTAL_DIRECTION 0
 #define BOARD_VERTICAL_DIRECTION 1
 
@@ -86,10 +85,6 @@ void set_cross_set(Board *board, int row, int col, uint64_t letter, int dir,
 void set_cross_set_letter(uint64_t *cross_set, uint8_t letter);
 void set_letter(Board *board, int row, int col, uint8_t letter);
 void set_letter_by_index(Board *board, int index, uint8_t letter);
-int score_move(Board *board, uint8_t word[], int word_start_index,
-               int word_end_index, int row, int col, int tiles_played,
-               int cross_dir, int cross_set_index,
-               LetterDistribution *letter_distribution);
 void transpose(Board *board);
 void reset_transpose(Board *board);
 void set_transpose(Board *board, int transpose);

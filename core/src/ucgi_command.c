@@ -257,7 +257,7 @@ int ucgi_go_async(const char *go_cmd, UCGICommandVars *ucgi_command_vars) {
       // No async command was started, so set the search
       // status to stopped.
       set_mode_stopped(ucgi_command_vars->thread_control);
-      status = UCGI_COMMAND_STATUS_PARSE_FAILED;
+      status = UCGI_COMMAND_STATUS_COMMAND_PARSE_FAILED;
     }
   } else {
     status = UCGI_COMMAND_STATUS_NOT_STOPPED;
@@ -265,8 +265,9 @@ int ucgi_go_async(const char *go_cmd, UCGICommandVars *ucgi_command_vars) {
   return status;
 }
 
-void load_position(UCGICommandVars *ucgi_command_vars, const char *cgp,
-                   char *lexicon_name, char *ldname, int move_list_capacity) {
+cgp_parse_status_t load_position(UCGICommandVars *ucgi_command_vars,
+                                 const char *cgp, char *lexicon_name,
+                                 char *ldname, int move_list_capacity) {
 
   load_config_from_lexargs(&ucgi_command_vars->config, cgp, lexicon_name,
                            ldname);
@@ -287,12 +288,38 @@ void load_position(UCGICommandVars *ucgi_command_vars, const char *cgp,
   }
 
   log_debug("loading cgp: %s", ucgi_command_vars->config->cgp);
-  // FIXME: use the return status of load_cgp
-  load_cgp(ucgi_command_vars->loaded_game, ucgi_command_vars->config->cgp);
+  cgp_parse_status_t cgp_parse_status =
+      load_cgp(ucgi_command_vars->loaded_game, ucgi_command_vars->config->cgp);
   log_debug("loaded game");
 
   strcpy(ucgi_command_vars->last_lexicon_name, lexicon_name);
   strcpy(ucgi_command_vars->last_ld_name, ldname);
+  return cgp_parse_status;
+}
+
+cgp_parse_status_t ucgi_load_position(UCGICommandVars *ucgi_command_vars,
+                                      CGPOperations *cgp_operations,
+                                      const char *cgpstr) {
+  cgp_parse_status_t cgp_parse_status =
+      load_cgp_operations(cgp_operations, cgpstr);
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    return UCGI_COMMAND_STATUS_CGP_PARSE_FAILED;
+  }
+  if (cgp_operations->lexicon_name == NULL) {
+    return UCGI_COMMAND_STATUS_LEXICON_LD_FAILURE;
+  }
+  if (cgp_operations->letter_distribution_name == NULL) {
+    cgp_operations->letter_distribution_name =
+        get_letter_distribution_name_from_lexicon_name(
+            cgp_operations->lexicon_name);
+  }
+  cgp_parse_status =
+      load_position(ucgi_command_vars, cgpstr, cgp_operations->lexicon_name,
+                    cgp_operations->letter_distribution_name, 100);
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    return UCGI_COMMAND_STATUS_CGP_PARSE_FAILED;
+  }
+  return UCGI_COMMAND_STATUS_SUCCESS;
 }
 
 int process_ucgi_command_async(const char *cmd,
@@ -309,16 +336,17 @@ int process_ucgi_command_async(const char *cmd,
   // other commands
   if (prefix("position cgp ", cmd)) {
     const char *cgpstr = cmd + strlen("position cgp ");
-    char lexicon[16] = "";
-    char ldname[16] = "";
-    lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
-    if (strcmp(lexicon, "") == 0) {
-      return UCGI_COMMAND_STATUS_LEXICON_LD_FAILURE;
+    CGPOperations *cgp_operations = get_default_cgp_operations();
+    ucgi_command_status_t command_status =
+        ucgi_load_position(ucgi_command_vars, cgp_operations, cgpstr);
+    destroy_cgp_operations(cgp_operations);
+    if (command_status != UCGI_COMMAND_STATUS_SUCCESS) {
+      return command_status;
     }
-    load_position(ucgi_command_vars, cgpstr, lexicon, ldname, 100);
   } else if (prefix("go", cmd)) {
-    int command_status = ucgi_go_async(cmd + strlen("go"), ucgi_command_vars);
-    if (command_status == UCGI_COMMAND_STATUS_PARSE_FAILED) {
+    ucgi_command_status_t command_status =
+        ucgi_go_async(cmd + strlen("go"), ucgi_command_vars);
+    if (command_status == UCGI_COMMAND_STATUS_COMMAND_PARSE_FAILED) {
       log_warn("Failed to parse go command.");
     } else if (command_status == UCGI_COMMAND_STATUS_NOT_STOPPED) {
       log_info("There is already a search ongoing.");

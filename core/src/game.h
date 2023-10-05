@@ -24,6 +24,9 @@ typedef enum {
   CGP_PARSE_STATUS_MALFORMED_SCORES,
   CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS,
   CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS,
+  CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BINGO_BONUS,
+  CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BOARD_NAME,
+  CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_GAME_VARIANT,
 } cgp_parse_status_t;
 
 typedef enum {
@@ -37,6 +40,14 @@ typedef enum {
   GAME_END_REASON_STANDARD,
   GAME_END_REASON_CONSECUTIVE_ZEROS,
 } game_end_reason_t;
+
+typedef struct CGPOperations {
+  int bingo_bonus;
+  board_layout_t board_layout;
+  game_variant_t game_variant;
+  char *letter_distribution_name;
+  char *lexicon_name;
+} CGPOperations;
 
 typedef struct MinimalGameBackup {
   Board *board;
@@ -71,10 +82,12 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter);
 void set_backup_mode(Game *game, int backup_mode);
 void backup_game(Game *game);
 void unplay_last_move(Game *game);
-void lexicon_ld_from_cgp(const char *cgp, char *lexicon, char *ldname);
 int tiles_unseen(Game *game);
 game_variant_t get_game_variant_type_from_name(const char *variant_name);
 void set_player_on_turn(Game *game, int player_on_turn_index);
 void string_builder_add_game(Game *game, StringBuilder *game_string);
-
+CGPOperations *get_default_cgp_operations();
+void destroy_cgp_operations(CGPOperations *cgp_operations);
+cgp_parse_status_t load_cgp_operations(CGPOperations *cgp_operations,
+                                       const char *cgp);
 #endif

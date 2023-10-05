@@ -31,7 +31,6 @@ void sort_and_print_move_list(Board *board,
                               MoveList *ml);
 int within_epsilon(double a, double b);
 int count_newlines(const char *str);
-bool strings_equal(const char *str1, const char *str2);
 void assert_strings_equal(const char *str1, const char *str2);
 void assert_move(Game *game, SortedMoveList *sml, int move_index,
                  char *expected_move_string);

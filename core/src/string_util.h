@@ -10,6 +10,7 @@ int prefix(const char *pre, const char *str);
 int is_all_whitespace_or_empty(const char *str);
 int is_all_digits_or_empty(const char *str);
 char *get_formatted_string(const char *format, ...);
+bool strings_equal(const char *str1, const char *str2);
 
 struct StringSplitter;
 typedef struct StringSplitter StringSplitter;

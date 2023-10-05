@@ -20,10 +20,21 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
                  uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
   clock_t begin = clock();
 
-  char lexicon[20] = "";
-  char ldname[20] = "";
-  lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
-  load_config_from_lexargs(&config, cgpstr, lexicon, ldname);
+  CGPOperations *cgp_operations = get_default_cgp_operations();
+  cgp_parse_status_t cgp_parse_status =
+      load_cgp_operations(cgp_operations, cgpstr);
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    log_fatal("cgp parse failed: %d\n", cgp_parse_status);
+  }
+  // FIXME: maybe handle this elsewhere.
+  if (cgp_operations->letter_distribution_name == NULL) {
+    cgp_operations->letter_distribution_name =
+        get_letter_distribution_name_from_lexicon_name(
+            cgp_operations->lexicon_name);
+  }
+  load_config_from_lexargs(&config, cgpstr, cgp_operations->lexicon_name,
+                           cgp_operations->letter_distribution_name);
+  destroy_cgp_operations(cgp_operations);
 
   Game *game = create_game(config);
   // FIXME: use the return status of load_cgp
@@ -146,10 +157,21 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
 char *static_evaluation(char *cgpstr, int num_plays) {
   clock_t begin = clock();
 
-  char lexicon[20] = "";
-  char ldname[20] = "";
-  lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
-  load_config_from_lexargs(&config, cgpstr, lexicon, ldname);
+  CGPOperations *cgp_operations = get_default_cgp_operations();
+  cgp_parse_status_t cgp_parse_status =
+      load_cgp_operations(cgp_operations, cgpstr);
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    log_fatal("cgp parse failed: %d\n", cgp_parse_status);
+  }
+  // FIXME: maybe handle this elsewhere.
+  if (cgp_operations->letter_distribution_name == NULL) {
+    cgp_operations->letter_distribution_name =
+        get_letter_distribution_name_from_lexicon_name(
+            cgp_operations->lexicon_name);
+  }
+  load_config_from_lexargs(&config, cgpstr, cgp_operations->lexicon_name,
+                           cgp_operations->letter_distribution_name);
+  destroy_cgp_operations(cgp_operations);
 
   Game *game = create_game(config);
   // FIXME: use the return status of load_cgp

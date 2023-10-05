@@ -984,6 +984,7 @@ gcg_parse_status_t parse_gcg_string(const char *input_gcg_string,
 
 gcg_parse_status_t parse_gcg(const char *gcg_filename,
                              GameHistory *game_history) {
+  // FIXME: move this file to string function to string util
   FILE *gcg_file_handle = fopen(gcg_filename, "r");
   if (gcg_file_handle == NULL) {
     log_fatal("Error opening file: %s\n", gcg_filename);

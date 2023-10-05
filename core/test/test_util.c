@@ -131,10 +131,6 @@ int count_newlines(const char *str) {
   return count;
 }
 
-bool strings_equal(const char *str1, const char *str2) {
-  return strcmp(str1, str2) == 0;
-}
-
 void assert_strings_equal(const char *str1, const char *str2) {
   if (!strings_equal(str1, str2)) {
     fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, str2);

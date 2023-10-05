@@ -287,53 +287,6 @@ void set_bonus_squares(Board *board) {
   }
 }
 
-// this fn assumes the word is always horizontal. If this isn't the case,
-// the board needs to be transposed ahead of time.
-int score_move(Board *board, uint8_t word[], int word_start_index,
-               int word_end_index, int row, int col, int tiles_played,
-               int cross_dir, int cross_set_index,
-               LetterDistribution *letter_distribution) {
-  int ls;
-  int main_word_score = 0;
-  int cross_scores = 0;
-  int bingo_bonus = 0;
-  if (tiles_played == RACK_SIZE) {
-    bingo_bonus = BINGO_BONUS;
-  }
-  int word_multiplier = 1;
-  for (int idx = 0; idx < word_end_index - word_start_index + 1; idx++) {
-    uint8_t ml = word[idx + word_start_index];
-    uint8_t bonus_square = get_bonus_square(board, row, col + idx);
-    int letter_multiplier = 1;
-    int this_word_multiplier = 1;
-    int fresh_tile = 0;
-    if (ml == PLAYED_THROUGH_MARKER) {
-      ml = get_letter(board, row, col + idx);
-    } else {
-      fresh_tile = 1;
-      this_word_multiplier = bonus_square >> 4;
-      letter_multiplier = bonus_square & 0x0F;
-      word_multiplier *= this_word_multiplier;
-    }
-    int cs = get_cross_score(board, row, col + idx, cross_dir, cross_set_index);
-    if (is_blanked(ml)) {
-      ls = 0;
-    } else {
-      ls = letter_distribution->scores[ml];
-    }
-
-    main_word_score += ls * letter_multiplier;
-    int actual_cross_word =
-        (row > 0 && !is_empty(board, row - 1, col + idx)) ||
-        ((row < BOARD_DIM - 1) && !is_empty(board, row + 1, col + idx));
-    if (fresh_tile && actual_cross_word) {
-      cross_scores += ls * letter_multiplier * this_word_multiplier +
-                      cs * this_word_multiplier;
-    }
-  }
-  return main_word_score * word_multiplier + cross_scores + bingo_bonus;
-}
-
 void transpose(Board *board) { board->transposed = 1 - board->transposed; }
 
 void set_transpose(Board *board, int transpose) {

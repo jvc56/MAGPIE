@@ -35,6 +35,10 @@ int is_all_digits_or_empty(const char *str) {
   return 1;
 }
 
+bool strings_equal(const char *str1, const char *str2) {
+  return strcmp(str1, str2) == 0;
+}
+
 // String utility functions
 
 char *format_string_with_va_list(const char *format, va_list *args) {

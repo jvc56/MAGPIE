@@ -97,7 +97,7 @@ void test_ucgi_command() {
   result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
                                       ucgi_command_vars);
   assert(!is_halted(ucgi_command_vars->thread_control));
-  assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
+  assert(result == UCGI_COMMAND_STATUS_COMMAND_PARSE_FAILED);
   prev_len = len;
 
   // Test go parse failures
@@ -107,7 +107,7 @@ void test_ucgi_command() {
                                       "go stopcondition 95 i 0");
   result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
                                       ucgi_command_vars);
-  assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
+  assert(result == UCGI_COMMAND_STATUS_COMMAND_PARSE_FAILED);
   prev_len = len;
 
   // Test go parse failures
@@ -117,7 +117,7 @@ void test_ucgi_command() {
                                       "go sim stopcondition 95 depth 0");
   result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
                                       ucgi_command_vars);
-  assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
+  assert(result == UCGI_COMMAND_STATUS_COMMAND_PARSE_FAILED);
   prev_len = len;
 
   // Test go parse failures
@@ -127,7 +127,7 @@ void test_ucgi_command() {
       test_stdin_input, "%s", "go sim stopcondition 95 depth 1 threads 0");
   result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
                                       ucgi_command_vars);
-  assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
+  assert(result == UCGI_COMMAND_STATUS_COMMAND_PARSE_FAILED);
   prev_len = len;
 
   // Test go parse failures
@@ -136,7 +136,7 @@ void test_ucgi_command() {
   string_builder_add_formatted_string(test_stdin_input, "%s", "go sim infer");
   result = process_ucgi_command_async(string_builder_peek(test_stdin_input),
                                       ucgi_command_vars);
-  assert(result == UCGI_COMMAND_STATUS_PARSE_FAILED);
+  assert(result == UCGI_COMMAND_STATUS_COMMAND_PARSE_FAILED);
   prev_len = len;
 
   // Test sim finishing probabilistically

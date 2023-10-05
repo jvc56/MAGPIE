@@ -186,24 +186,52 @@ void test_game_main(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_lexicon_ld_from_cgp() {
-  char lexicon[20] = "";
-  char ldname[20] = "";
-  char g1[] = "15/15/15/15/15/15/1FlAREUP7/7AGAVE3/15/15/15/15/15/15/15 "
-              "AEINNO?/AHIOSTU 0/86 0 lex CSW21;";
-  lexicon_ld_from_cgp(g1, lexicon, ldname);
-  assert(strcmp(lexicon, "CSW21") == 0);
-  assert(strcmp(ldname, "english") == 0);
+void test_load_cgp_operations() {
+  CGPOperations *cgp_operations = get_default_cgp_operations();
+  cgp_parse_status_t cgp_parse_status;
 
-  char g2[] = "15/15/15/15/15/15/1FlAREUP7/7AGAVE3/15/15/15/15/15/15/15 "
-              "AEINNO?/AHIOSTU 0/86 0 ld messedupenglish; lex NWL20;";
-  lexicon_ld_from_cgp(g2, lexicon, ldname);
-  assert(strcmp(lexicon, "NWL20") == 0);
-  assert(strcmp(ldname, "messedupenglish") == 0);
+  const char *cgp_success =
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 bb 33 bdn "
+      "SuperCrosswordGame var wordsmog ld english lex "
+      "CSW21;";
+  cgp_parse_status = load_cgp_operations(cgp_operations, cgp_success);
+  assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
+  assert(cgp_operations->bingo_bonus == 33);
+  assert(cgp_operations->board_layout == BOARD_LAYOUT_SUPER_CROSSWORD_GAME);
+  assert(cgp_operations->game_variant == GAME_VARIANT_WORDSMOG);
+  assert_strings_equal(cgp_operations->lexicon_name, "CSW21");
+  assert_strings_equal(cgp_operations->letter_distribution_name, "english");
+
+  const char *cgp_malformed_bingo_bonus =
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 bb 3r3 bdn "
+      "SuperCrosswordGame var wordsmog ld english lex "
+      "CSW21;";
+  cgp_parse_status =
+      load_cgp_operations(cgp_operations, cgp_malformed_bingo_bonus);
+  assert(cgp_parse_status == CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BINGO_BONUS);
+
+  const char *cgp_malformed_board_name =
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 bb 33 bdn "
+      "MiniCrosswordGame var wordsmog ld english lex "
+      "CSW21;";
+  cgp_parse_status =
+      load_cgp_operations(cgp_operations, cgp_malformed_board_name);
+  assert(cgp_parse_status == CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BOARD_NAME);
+
+  const char *cgp_malformed_game_variant =
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 bb 33 bdn "
+      "SuperCrosswordGame var ifonly ld english lex "
+      "CSW21;";
+  cgp_parse_status =
+      load_cgp_operations(cgp_operations, cgp_malformed_game_variant);
+  assert(cgp_parse_status ==
+         CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_GAME_VARIANT);
+
+  destroy_cgp_operations(cgp_operations);
 }
 
 void test_game(SuperConfig *superconfig) {
   test_game_main(superconfig);
   test_load_cgp(superconfig);
-  test_lexicon_ld_from_cgp();
+  test_load_cgp_operations();
 }
