@@ -287,6 +287,7 @@ void load_position(UCGICommandVars *ucgi_command_vars, const char *cgp,
   }
 
   log_debug("loading cgp: %s", ucgi_command_vars->config->cgp);
+  // FIXME: use the return status of load_cgp
   load_cgp(ucgi_command_vars->loaded_game, ucgi_command_vars->config->cgp);
   log_debug("loaded game");
 

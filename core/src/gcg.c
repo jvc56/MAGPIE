@@ -286,7 +286,7 @@ char *get_matching_group_as_string(GCGParser *gcg_parser, int group_index) {
 int get_matching_group_as_int(GCGParser *gcg_parser, int group_index) {
   char *matching_group_string =
       get_matching_group_as_string(gcg_parser, group_index);
-  int matching_group_int = strtol(matching_group_string, NULL, 10);
+  int matching_group_int = string_to_int(matching_group_string);
   free(matching_group_string);
   return matching_group_int;
 }
@@ -389,18 +389,16 @@ int get_player_index(GCGParser *gcg_parser, int group_index) {
 void copy_score_to_game_event(GCGParser *gcg_parser, GameEvent *game_event,
                               int group_index) {
   game_event->move->score =
-      strtol(gcg_parser->gcg_line_buffer +
-                 gcg_parser->matching_groups[group_index].rm_so,
-             NULL, 10);
+      string_to_int(gcg_parser->gcg_line_buffer +
+                    gcg_parser->matching_groups[group_index].rm_so);
 }
 
 void copy_cumulative_score_to_game_event(GCGParser *gcg_parser,
                                          GameEvent *game_event,
                                          int group_index) {
   game_event->cumulative_score =
-      strtol(gcg_parser->gcg_line_buffer +
-                 gcg_parser->matching_groups[group_index].rm_so,
-             NULL, 10);
+      string_to_int(gcg_parser->gcg_line_buffer +
+                    gcg_parser->matching_groups[group_index].rm_so);
 }
 
 uint8_t *

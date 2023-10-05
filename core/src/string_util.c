@@ -25,6 +25,16 @@ int is_all_whitespace_or_empty(const char *str) {
   return 1;
 }
 
+int is_all_digits_or_empty(const char *str) {
+  while (*str != '\0') {
+    if (!isdigit((unsigned char)*str)) {
+      return 0;
+    }
+    str++;
+  }
+  return 1;
+}
+
 // String utility functions
 
 char *format_string_with_va_list(const char *format, va_list *args) {

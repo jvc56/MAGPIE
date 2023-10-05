@@ -26,6 +26,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   load_config_from_lexargs(&config, cgpstr, lexicon, ldname);
 
   Game *game = create_game(config);
+  // FIXME: use the return status of load_cgp
   load_cgp(game, cgpstr);
 
   int tiles_played = 0;
@@ -151,6 +152,7 @@ char *static_evaluation(char *cgpstr, int num_plays) {
   load_config_from_lexargs(&config, cgpstr, lexicon, ldname);
 
   Game *game = create_game(config);
+  // FIXME: use the return status of load_cgp
   load_cgp(game, cgpstr);
 
   int sorting_type = game->players[0]->strategy_params->move_sorting;

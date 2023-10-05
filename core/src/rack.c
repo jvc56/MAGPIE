@@ -72,8 +72,8 @@ int score_on_rack(LetterDistribution *letter_distribution, Rack *rack) {
   return sum;
 }
 
-void set_rack_to_string(Rack *rack, const char *rack_string,
-                        LetterDistribution *letter_distribution) {
+int set_rack_to_string(Rack *rack, const char *rack_string,
+                       LetterDistribution *letter_distribution) {
   reset_rack(rack);
 
   uint8_t mls[BAG_SIZE];
@@ -85,6 +85,7 @@ void set_rack_to_string(Rack *rack, const char *rack_string,
   for (int i = 0; i < num_mls; i++) {
     add_letter_to_rack(rack, mls[i]);
   }
+  return num_mls;
 }
 
 void string_builder_add_rack(Rack *rack,

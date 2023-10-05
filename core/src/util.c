@@ -42,3 +42,7 @@ void *realloc_or_die(void *realloc_target, size_t size) {
   }
   return realloc_result;
 }
+
+int char_to_int(char c) { return c - '0'; }
+
+int string_to_int(const char *str) { return strtol(str, NULL, 10); }

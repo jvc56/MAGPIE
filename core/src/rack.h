@@ -23,8 +23,8 @@ void copy_rack_into(Rack *dst, Rack *src);
 void destroy_rack(Rack *rack);
 void reset_rack(Rack *rack);
 int score_on_rack(LetterDistribution *letter_distribution, Rack *rack);
-void set_rack_to_string(Rack *rack, const char *rack_string,
-                        LetterDistribution *letter_distribution);
+int set_rack_to_string(Rack *rack, const char *rack_string,
+                       LetterDistribution *letter_distribution);
 void take_letter_from_rack(Rack *rack, uint8_t letter);
 bool racks_are_equal(Rack *rack1, Rack *rack2);
 void string_builder_add_rack(Rack *rack,

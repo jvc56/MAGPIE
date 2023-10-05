@@ -69,6 +69,7 @@ void print_move_list(Board *board, LetterDistribution *letter_distribution,
   for (int i = 0; i < move_list_length; i++) {
     string_builder_add_move(board, sml->moves[0], letter_distribution,
                             move_list_string);
+    string_builder_add_string(move_list_string, "\n", 0);
   }
   printf("%s\n", string_builder_peek(move_list_string));
   destroy_string_builder(move_list_string);
