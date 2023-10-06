@@ -81,7 +81,7 @@ float convert_little_endian_to_host(float little_endian_float) {
 void load_klv(KLV *klv, const char *klv_filename) {
   FILE *stream = stream_from_filename(klv_filename);
   if (!stream) {
-    log_fatal("failred to open stream from filename: %s\n", klv_filename);
+    log_fatal("failed to open stream from filename: %s\n", klv_filename);
   }
 
   uint32_t kwg_size;
