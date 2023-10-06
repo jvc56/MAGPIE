@@ -26,6 +26,8 @@ void ucgi_scan_loop() {
       break;
     }
     // replace newline with 0 for ease in comparison
+    // FIXME, this should probably just be a more generic
+    // trim whitespace function.
     remove_first_newline(cmd);
 
     int should_end = process_ucgi_command_async(cmd, ucgi_command_vars);

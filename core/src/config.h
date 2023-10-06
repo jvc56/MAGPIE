@@ -58,14 +58,15 @@ typedef struct AutoplayConfig {
 } AutoplayConfig;
 
 typedef enum {
-  GO_COMMAND_UNKNOWN,
-  GO_COMMAND_SIM,
-  GO_COMMAND_INFER,
-  GO_COMMAND_AUTOPLAY,
-} go_command_t;
+  COMMAND_TYPE_UNKNOWN,
+  COMMAND_TYPE_LOAD_CGP,
+  COMMAND_TYPE_SIM,
+  COMMAND_TYPE_INFER,
+  COMMAND_TYPE_AUTOPLAY,
+} command_t;
 
 typedef struct Config {
-  go_command_t go_command;
+  command_t command;
   GameConfig *game_config;
   InferenceConfig *inference_config;
   SimConfig *sim_config;

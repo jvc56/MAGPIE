@@ -18,7 +18,6 @@
 
 #define OPENING_HOTSPOT_PENALTY -0.7
 #define PREENDGAME_ADJUSTMENT_VALUES_LENGTH 13
-#define BINGO_BONUS 50
 
 typedef struct Generator {
   int current_row_index;

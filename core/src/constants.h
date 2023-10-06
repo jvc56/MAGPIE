@@ -7,7 +7,7 @@
 #define TRIVIAL_CROSS_SET (uint64_t)((uint64_t)1 << MAX_ALPHABET_SIZE) - 1
 #define ASCII_PLAYED_THROUGH '.'
 #define MAX_DATA_FILENAME_LENGTH 64
-
+#define BINGO_BONUS 50
 // Shared enums
 
 typedef enum {
