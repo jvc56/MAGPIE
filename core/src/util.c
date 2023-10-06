@@ -6,12 +6,13 @@
 
 #include "constants.h"
 #include "klv.h"
+#include "log.h"
 #include "move.h"
 #include "rack.h"
 
 double get_leave_value_for_move(KLV *klv, Move *move, Rack *rack) {
   int valid_tiles = move->tiles_length;
-  if (move->move_type == MOVE_TYPE_EXCHANGE) {
+  if (move->move_type == GAME_EVENT_EXCHANGE) {
     valid_tiles = move->tiles_played;
   }
   for (int i = 0; i < valid_tiles; i++) {
@@ -26,64 +27,34 @@ double get_leave_value_for_move(KLV *klv, Move *move, Rack *rack) {
   return get_leave_value(klv, rack);
 }
 
-int prefix(const char *pre, const char *str) {
-  return strncmp(pre, str, strlen(pre)) == 0;
+void *malloc_or_die(size_t size) {
+  void *uncasted_pointer = malloc(size);
+  if (!uncasted_pointer) {
+    log_fatal("failed to malloc size of %lu.\n", size);
+  }
+  return uncasted_pointer;
 }
 
-void write_user_visible_letter_to_end_of_buffer(
-    char *dest, LetterDistribution *letter_distribution, uint8_t ml) {
-
-  char human_letter[MAX_LETTER_CHAR_LENGTH];
-  machine_letter_to_human_readable_letter(letter_distribution, ml,
-                                          human_letter);
-  for (size_t i = 0; i < strlen(human_letter); i++) {
-    sprintf(dest + strlen(dest), "%c", human_letter[i]);
+void *realloc_or_die(void *realloc_target, size_t size) {
+  void *realloc_result = realloc(realloc_target, size);
+  if (!realloc_result) {
+    log_fatal("failed to realloc %p with size of %lu.\n", realloc_target, size);
   }
+  return realloc_result;
 }
 
-void write_rack_to_end_of_buffer(char *dest,
-                                 LetterDistribution *letter_distribution,
-                                 Rack *rack) {
-  for (int i = 0; i < (rack->array_size); i++) {
-    for (int k = 0; k < rack->array[i]; k++) {
-      write_user_visible_letter_to_end_of_buffer(dest, letter_distribution, i);
-    }
+int char_to_int(char c) { return c - '0'; }
+
+int string_to_int(const char *str) {
+  if (!str) {
+    log_fatal("called string_to_int on NULL string\n");
   }
+  return strtol(str, NULL, 10);
 }
 
-int contains_all_whitespace(const char *str) {
-  while (*str) {
-    if (!isspace((unsigned char)*str)) {
-      return 0; // Found a non-whitespace character
-    }
-    str++;
+double string_to_double(const char *str) {
+  if (!str) {
+    log_fatal("called string_to_double on NULL string\n");
   }
-  return 1; // All characters are whitespace
-}
-
-char *concatenate_strings(const char *str1, const char *str2) {
-  // Check for invalid inputs
-  if (str1 == NULL || str2 == NULL) {
-    return NULL;
-  }
-
-  // Calculate the lengths of the input strings
-  size_t len1 = strlen(str1);
-  size_t len2 = strlen(str2);
-
-  // Allocate memory for the concatenated string plus one additional byte for
-  // the null terminator
-  char *result = (char *)malloc((len1 + len2 + 1) * sizeof(char));
-
-  if (result == NULL) {
-    return NULL; // Memory allocation failed
-  }
-
-  // Copy the first string into the result
-  strcpy(result, str1);
-
-  // Concatenate the second string to the result
-  strcat(result, str2);
-
-  return result;
+  return strtof(str, NULL);
 }

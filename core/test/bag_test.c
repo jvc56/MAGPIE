@@ -1,30 +1,24 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../src/config.h"
 #include "../src/gameplay.h"
 #include "../src/letter_distribution.h"
+#include "../src/string_util.h"
 
-#include "bag_print.h"
 #include "superconfig.h"
 #include "test_util.h"
 
-void write_bag_to_string(char *bag_string, Bag *bag,
-                         LetterDistribution *letter_distribution) {
-  reset_string(bag_string);
-  write_bag_to_end_of_buffer(bag_string, bag, letter_distribution);
-}
-
 void test_add_letter(Config *config, Bag *bag, char *r,
                      char *expected_bag_string) {
-  char bag_string[100];
-  reset_string(bag_string);
-
   add_letter(bag, human_readable_letter_to_machine_letter(
                       config->letter_distribution, r));
-  write_bag_to_string(bag_string, bag, config->letter_distribution);
-  assert(!strcmp(bag_string, expected_bag_string));
+  StringBuilder *bag_string = create_string_builder();
+  string_builder_add_bag(bag, config->letter_distribution, 0, bag_string);
+  assert_strings_equal(string_builder_peek(bag_string), expected_bag_string);
+  destroy_string_builder(bag_string);
 }
 
 void test_bag(SuperConfig *superconfig) {

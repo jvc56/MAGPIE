@@ -11,16 +11,19 @@
 #include "thread_control.h"
 #include "winpct.h"
 
-#define THREAD_CONTROL_IDLE 0
-#define THREAD_CONTROL_RUNNING 1
-#define THREAD_CONTROL_SHOULD_STOP 2
-#define THREAD_CONTROL_EXITING 3
+typedef enum {
+  THREAD_CONTROL_IDLE,
+  THREAD_CONTROL_RUNNING,
+  THREAD_CONTROL_SHOULD_STOP,
+  THREAD_CONTROL_EXITING,
+} thread_control_status_t;
 
-#define PLAYS_NOT_SIMILAR 0
-#define PLAYS_SIMILAR 1
-#define UNINITIALIZED_SIMILARITY 2
-#define PLAYS_IDENTICAL 3
-
+typedef enum {
+  PLAYS_NOT_SIMILAR,
+  PLAYS_SIMILAR,
+  UNINITIALIZED_SIMILARITY,
+  PLAYS_IDENTICAL,
+} similar_plays_t;
 typedef struct SimmedPlay {
   Move *move;
   Stat **score_stat;

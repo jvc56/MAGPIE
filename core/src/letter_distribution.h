@@ -5,6 +5,13 @@
 #include <stdint.h>
 
 #include "constants.h"
+#include "string_util.h"
+
+#define BLANK_MASK 0x80
+#define UNBLANK_MASK (0x80 - 1)
+#define MAX_ALPHABET_SIZE 50
+#define MACHINE_LETTER_MAX_VALUE 255
+#define MAX_LETTER_CHAR_LENGTH 6
 
 typedef struct LetterDistribution {
   uint32_t size;
@@ -24,9 +31,6 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
 uint8_t
 human_readable_letter_to_machine_letter(LetterDistribution *letter_distribution,
                                         char *letter);
-void machine_letter_to_human_readable_letter(
-    LetterDistribution *letter_distribution, uint8_t ml,
-    char letter[MAX_LETTER_CHAR_LENGTH]);
 
 inline uint8_t get_blanked_machine_letter(uint8_t ml) {
   return ml | BLANK_MASK;
@@ -43,4 +47,9 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
                            uint8_t *mls);
 char *get_letter_distribution_filepath(const char *ld_name);
 char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name);
+
+void string_builder_add_user_visible_letter(
+    LetterDistribution *letter_distribution, uint8_t ml, size_t len,
+    StringBuilder *string_builder);
+
 #endif

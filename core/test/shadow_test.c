@@ -5,7 +5,6 @@
 #include "../src/config.h"
 #include "../src/game.h"
 
-#include "game_print.h"
 #include "superconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -35,7 +34,7 @@ void test_shadow_score(SuperConfig *superconfig) {
   // This test checks scores only, so set the player strategy param
   // to move sorting of type score.
   int original_move_sorting = player->strategy_params->move_sorting;
-  player->strategy_params->move_sorting = SORT_BY_SCORE;
+  player->strategy_params->move_sorting = MOVE_SORT_SCORE;
 
   load_and_generate(game, player, EMPTY_CGP, "OU", 0);
   assert(game->gen->anchor_list->count == 1);
@@ -488,7 +487,7 @@ void test_shadow_equity(SuperConfig *superconfig) {
   // This test checks scores only, so set the player strategy param
   // to move sorting of type score.
   int original_move_sorting = player->strategy_params->move_sorting;
-  player->strategy_params->move_sorting = SORT_BY_EQUITY;
+  player->strategy_params->move_sorting = MOVE_SORT_EQUITY;
 
   // Check best leave values for a give rack.
   Rack *leave_rack = create_rack(game->gen->letter_distribution->size);
@@ -548,8 +547,8 @@ void test_shadow_top_move(SuperConfig *superconfig) {
 
   int original_move_sorting = player->strategy_params->move_sorting;
   int original_recorder_type = player->strategy_params->play_recorder_type;
-  player->strategy_params->move_sorting = SORT_BY_EQUITY;
-  player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
+  player->strategy_params->move_sorting = MOVE_SORT_EQUITY;
+  player->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
 
   // Top play should be L1 Q(I)
   load_and_generate(game, player, UEY_CGP, "ACEQOOV", 1);

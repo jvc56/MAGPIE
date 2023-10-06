@@ -5,14 +5,16 @@
 #include <string.h>
 
 #include "game.h"
+#include "game_event.h"
 #include "game_history.h"
 #include "log.h"
 #include "move.h"
 #include "rack.h"
+#include "util.h"
 
 GameHistoryPlayer *create_game_history_player(const char *name,
                                               const char *nickname) {
-  GameHistoryPlayer *player = malloc(sizeof(GameHistoryPlayer));
+  GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
   player->name = strdup(name);
   player->nickname = strdup(nickname);
   player->score = 0;
@@ -23,41 +25,23 @@ GameHistoryPlayer *create_game_history_player(const char *name,
 void destroy_game_history_player(GameHistoryPlayer *player) {
   free(player->name);
   free(player->nickname);
-  if (player->last_known_rack != NULL) {
+  if (player->last_known_rack) {
     destroy_rack(player->last_known_rack);
   }
   free(player);
 }
 
-GameEvent *create_game_event(GameHistory *game_history) {
+GameEvent *create_game_event_and_add_to_history(GameHistory *game_history) {
   if (game_history->number_of_events == MAX_GAME_EVENTS) {
     log_fatal("game events overflow");
   }
-  GameEvent *game_event = malloc(sizeof(GameEvent));
-  game_event->player_index = -1;
-  game_event->cumulative_score = 0;
-  game_event->move = NULL;
-  game_event->rack = NULL;
-  game_event->note = NULL;
+  GameEvent *game_event = create_game_event();
   game_history->events[game_history->number_of_events++] = game_event;
   return game_event;
 }
 
-void destroy_game_event(GameEvent *game_event) {
-  if (game_event->move != NULL) {
-    destroy_move(game_event->move);
-  }
-  if (game_event->rack != NULL) {
-    destroy_rack(game_event->rack);
-  }
-  if (game_event->note != NULL) {
-    free(game_event->note);
-  }
-  free(game_event);
-}
-
 GameHistory *create_game_history() {
-  GameHistory *game_history = malloc(sizeof(GameHistory));
+  GameHistory *game_history = malloc_or_die(sizeof(GameHistory));
   game_history->title = NULL;
   game_history->description = NULL;
   game_history->id_auth = NULL;
@@ -70,36 +54,36 @@ GameHistory *create_game_history() {
   game_history->players[1] = NULL;
   game_history->letter_distribution = NULL;
   game_history->number_of_events = 0;
-  game_history->events = malloc(sizeof(GameEvent) * (MAX_GAME_EVENTS));
+  game_history->events = malloc_or_die(sizeof(GameEvent) * (MAX_GAME_EVENTS));
   return game_history;
 }
 
 void destroy_game_history(GameHistory *game_history) {
-  if (game_history->title != NULL) {
+  if (game_history->title) {
     free(game_history->title);
   }
-  if (game_history->description != NULL) {
+  if (game_history->description) {
     free(game_history->description);
   }
-  if (game_history->id_auth != NULL) {
+  if (game_history->id_auth) {
     free(game_history->id_auth);
   }
-  if (game_history->uid != NULL) {
+  if (game_history->uid) {
     free(game_history->uid);
   }
-  if (game_history->lexicon_name != NULL) {
+  if (game_history->lexicon_name) {
     free(game_history->lexicon_name);
   }
-  if (game_history->letter_distribution_name != NULL) {
+  if (game_history->letter_distribution_name) {
     free(game_history->letter_distribution_name);
   }
 
-  if (game_history->letter_distribution != NULL) {
+  if (game_history->letter_distribution) {
     destroy_letter_distribution(game_history->letter_distribution);
   }
 
   for (int i = 0; i < 2; i++) {
-    if (game_history->players[i] != NULL) {
+    if (game_history->players[i]) {
       destroy_game_history_player(game_history->players[i]);
     }
   }
@@ -111,7 +95,7 @@ void destroy_game_history(GameHistory *game_history) {
 }
 
 Game *play_to_turn(GameHistory *game_history, int turn_number) {
-  log_fatal("unimplemented");
+  log_fatal("unimplemented: %p, %d\n", game_history, turn_number);
   return NULL;
 }
 

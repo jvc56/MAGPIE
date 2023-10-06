@@ -11,6 +11,7 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "util.h"
 #include "xoshiro.h"
 
 /* This is xoshiro256++ 1.0, one of our all-purpose, rock-solid generators.
@@ -125,26 +126,24 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
    It is a very fast generator passing BigCrush, and it can be useful if
    for some reason you absolutely want 64 bits of state. */
 
-static uint64_t xxsplit; /* The state can be seeded with any value. */
-
-uint64_t splitmix_next() {
-  uint64_t z = (xxsplit += 0x9e3779b97f4a7c15);
+uint64_t splitmix_next(XoshiroPRNG *prng) {
+  uint64_t z = (prng->xxsplit += 0x9e3779b97f4a7c15);
   z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
   z = (z ^ (z >> 27)) * 0x94d049bb133111eb;
   return z ^ (z >> 31);
 }
 
 void seed_prng(XoshiroPRNG *prng, uint64_t seed) {
-  xxsplit = seed;
+  prng->xxsplit = seed;
   for (int i = 0; i < 4; i++) {
-    prng->s[i] = splitmix_next();
+    prng->s[i] = splitmix_next(prng);
   }
 }
 
 // initializer
 // create and seed PRNG.
 XoshiroPRNG *create_prng(uint64_t seed) {
-  XoshiroPRNG *prng = malloc(sizeof(XoshiroPRNG));
+  XoshiroPRNG *prng = malloc_or_die(sizeof(XoshiroPRNG));
   seed_prng(prng, seed);
   return prng;
 }

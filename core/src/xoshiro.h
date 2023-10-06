@@ -6,6 +6,7 @@
 #define XOSHIRO_MAX UINT64_C(18446744073709551615)
 
 typedef struct XoshiroPRNG {
+  uint64_t xxsplit; /* The state can be seeded with any value. */
   uint64_t s[4];
 } XoshiroPRNG;
 

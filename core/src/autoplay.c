@@ -12,9 +12,7 @@
 #include "random.h"
 #include "thread_control.h"
 #include "ucgi_print.h"
-
-#include "../test/game_print.h"
-#include "../test/move_print.h"
+#include "util.h"
 
 typedef struct AutoplayWorker {
   Config *config;
@@ -25,7 +23,7 @@ typedef struct AutoplayWorker {
 } AutoplayWorker;
 
 AutoplayResults *create_autoplay_results() {
-  AutoplayResults *autoplay_results = malloc(sizeof(AutoplayResults));
+  AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
   autoplay_results->total_games = 0;
   autoplay_results->p1_wins = 0;
   autoplay_results->p1_losses = 0;
@@ -46,7 +44,7 @@ AutoplayWorker *create_autoplay_worker(Config *config,
                                        ThreadControl *thread_control,
                                        int max_games_for_worker,
                                        int worker_index) {
-  AutoplayWorker *autoplay_worker = malloc(sizeof(AutoplayWorker));
+  AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->config = config;
   autoplay_worker->thread_control = thread_control;
   autoplay_worker->max_games_for_worker = max_games_for_worker;
@@ -151,19 +149,17 @@ void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
 
   int saved_player_1_recorder_type =
       config->player_1_strategy_params->play_recorder_type;
-  config->player_1_strategy_params->play_recorder_type =
-      PLAY_RECORDER_TYPE_TOP_EQUITY;
+  config->player_1_strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
   int saved_player_2_recorder_type =
       config->player_2_strategy_params->play_recorder_type;
-  config->player_2_strategy_params->play_recorder_type =
-      PLAY_RECORDER_TYPE_TOP_EQUITY;
+  config->player_2_strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
   int save_move_list_capacity = config->move_list_capacity;
   config->move_list_capacity = 1;
 
   AutoplayWorker **autoplay_workers =
-      malloc((sizeof(AutoplayWorker *)) * (config->number_of_threads));
+      malloc_or_die((sizeof(AutoplayWorker *)) * (config->number_of_threads));
   pthread_t *worker_ids =
-      malloc((sizeof(pthread_t)) * (config->number_of_threads));
+      malloc_or_die((sizeof(pthread_t)) * (config->number_of_threads));
   for (int thread_index = 0; thread_index < config->number_of_threads;
        thread_index++) {
 
@@ -178,9 +174,9 @@ void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
   }
 
   Stat **p1_score_stats =
-      malloc((sizeof(Stat *)) * (config->number_of_threads));
+      malloc_or_die((sizeof(Stat *)) * (config->number_of_threads));
   Stat **p2_score_stats =
-      malloc((sizeof(Stat *)) * (config->number_of_threads));
+      malloc_or_die((sizeof(Stat *)) * (config->number_of_threads));
 
   for (int thread_index = 0; thread_index < config->number_of_threads;
        thread_index++) {

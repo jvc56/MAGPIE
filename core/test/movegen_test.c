@@ -13,8 +13,6 @@
 #include "../src/util.h"
 
 #include "cross_set_test.h"
-#include "game_print.h"
-#include "move_print.h"
 #include "rack_test.h"
 #include "superconfig.h"
 #include "test_constants.h"
@@ -23,7 +21,7 @@
 int count_scoring_plays(MoveList *ml) {
   int sum = 0;
   for (int i = 0; i < ml->count; i++) {
-    if (ml->moves[i]->move_type == MOVE_TYPE_PLAY) {
+    if (ml->moves[i]->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       sum++;
     }
   }
@@ -33,7 +31,7 @@ int count_scoring_plays(MoveList *ml) {
 int count_nonscoring_plays(MoveList *ml) {
   int sum = 0;
   for (int i = 0; i < ml->count; i++) {
-    if (ml->moves[i]->move_type != MOVE_TYPE_PLAY) {
+    if (ml->moves[i]->move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
       sum++;
     }
   }
@@ -91,8 +89,6 @@ void macondo_tests(SuperConfig *superconfig) {
   Game *game = create_game(config);
   Player *player = game->players[0];
   KWG *kwg = player->strategy_params->kwg;
-  char test_string[100];
-  reset_string(test_string);
 
   // TestGenBase
   clear_all_crosses(game->gen->board);
@@ -139,11 +135,7 @@ void macondo_tests(SuperConfig *superconfig) {
                         game->gen->current_anchor_col, 1);
   // it should generate HITHERMOST only
   assert(game->gen->move_list->count == 1);
-  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
-                                           game->gen->move_list->moves[0],
-                                           game->gen->letter_distribution);
-  assert(!strcmp(test_string, "5B HI(THERMOS)T 36"));
-  reset_string(test_string);
+  assert_move(game, NULL, 0, "5B HI(THERMOS)T 36");
 
   reset_game(game);
   reset_rack(player->rack);
@@ -162,16 +154,8 @@ void macondo_tests(SuperConfig *superconfig) {
   SortedMoveList *test_row_gen_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
 
-  write_user_visible_move_to_end_of_buffer(
-      test_string, game->gen->board, test_row_gen_sorted_move_list->moves[0],
-      game->gen->letter_distribution);
-  assert(!strcmp(test_string, "5B AIR(GLOWS) 12"));
-  reset_string(test_string);
-  write_user_visible_move_to_end_of_buffer(
-      test_string, game->gen->board, test_row_gen_sorted_move_list->moves[1],
-      game->gen->letter_distribution);
-  assert(!strcmp(test_string, "5C RE(GLOWS) 11"));
-  reset_string(test_string);
+  assert_move(game, test_row_gen_sorted_move_list, 0, "5B AIR(GLOWS) 12");
+  assert_move(game, test_row_gen_sorted_move_list, 1, "5C RE(GLOWS) 11");
 
   destroy_sorted_move_list(test_row_gen_sorted_move_list);
   reset_game(game);
@@ -186,12 +170,7 @@ void macondo_tests(SuperConfig *superconfig) {
                         game->gen->current_anchor_col,
                         game->gen->current_anchor_col, 1);
   assert(game->gen->move_list->count == 1);
-
-  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
-                                           game->gen->move_list->moves[0],
-                                           game->gen->letter_distribution);
-  assert(!strcmp(test_string, "15C A(VENGED) 12"));
-  reset_string(test_string);
+  assert_move(game, NULL, 0, "15C A(VENGED) 12");
 
   reset_game(game);
   reset_rack(player->rack);
@@ -205,12 +184,7 @@ void macondo_tests(SuperConfig *superconfig) {
                         game->gen->current_anchor_col,
                         game->gen->current_anchor_col, 1);
   assert(game->gen->move_list->count == 1);
-
-  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
-                                           game->gen->move_list->moves[0],
-                                           game->gen->letter_distribution);
-  assert(!strcmp(test_string, "1L (F)A 5"));
-  reset_string(test_string);
+  assert_move(game, NULL, 0, "1L (F)A 5");
 
   reset_game(game);
   reset_rack(player->rack);
@@ -305,19 +279,10 @@ void macondo_tests(SuperConfig *superconfig) {
   SortedMoveList *test_gen_all_moves_with_blanks_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
 
-  write_user_visible_move_to_end_of_buffer(
-      test_string, game->gen->board,
-      test_gen_all_moves_with_blanks_sorted_move_list->moves[0],
-      game->gen->letter_distribution);
-  assert(!strcmp(test_string, "14B hEaDW(OR)DS 106"));
-  reset_string(test_string);
-
-  write_user_visible_move_to_end_of_buffer(
-      test_string, game->gen->board,
-      test_gen_all_moves_with_blanks_sorted_move_list->moves[1],
-      game->gen->letter_distribution);
-  assert(!strcmp(test_string, "14B hEaDW(OR)D 38"));
-  reset_string(test_string);
+  assert_move(game, test_gen_all_moves_with_blanks_sorted_move_list, 0,
+              "14B hEaDW(OR)DS 106");
+  assert_move(game, test_gen_all_moves_with_blanks_sorted_move_list, 1,
+              "14B hEaDW(OR)D 38");
 
   destroy_sorted_move_list(test_gen_all_moves_with_blanks_sorted_move_list);
 
@@ -334,12 +299,8 @@ void macondo_tests(SuperConfig *superconfig) {
   SortedMoveList *test_giant_twenty_seven_timer_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
 
-  write_user_visible_move_to_end_of_buffer(
-      test_string, game->gen->board,
-      test_giant_twenty_seven_timer_sorted_move_list->moves[0],
-      game->gen->letter_distribution);
-  assert(!strcmp(test_string, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780"));
-  reset_string(test_string);
+  assert_move(game, test_giant_twenty_seven_timer_sorted_move_list, 0,
+              "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
 
   destroy_sorted_move_list(test_giant_twenty_seven_timer_sorted_move_list);
   reset_game(game);
@@ -358,7 +319,7 @@ void macondo_tests(SuperConfig *superconfig) {
   assert(move->score == 80);
   assert(move->tiles_played == 7);
   assert(move->tiles_length == 7);
-  assert(move->move_type == MOVE_TYPE_PLAY);
+  assert(move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE);
   assert(move->row_start == 7);
 
   destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
@@ -371,7 +332,7 @@ void macondo_tests(SuperConfig *superconfig) {
   generate_moves(game->gen, player, NULL, 0);
   assert(count_scoring_plays(game->gen->move_list) == 0);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
-  assert(game->gen->move_list->moves[0]->move_type == MOVE_TYPE_PASS);
+  assert(game->gen->move_list->moves[0]->move_type == GAME_EVENT_PASS);
 
   reset_game(game);
   reset_rack(player->rack);
@@ -421,7 +382,7 @@ void exchange_tests(SuperConfig *superconfig) {
   SortedMoveList *test_not_an_exchange_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
   assert(test_not_an_exchange_sorted_move_list->moves[0]->move_type ==
-         MOVE_TYPE_PLAY);
+         GAME_EVENT_TILE_PLACEMENT_MOVE);
   destroy_sorted_move_list(test_not_an_exchange_sorted_move_list);
   reset_game(game);
 
@@ -434,7 +395,7 @@ void exchange_tests(SuperConfig *superconfig) {
       create_sorted_move_list(game->gen->move_list);
 
   assert(test_exchange_sorted_move_list->moves[0]->move_type ==
-         MOVE_TYPE_EXCHANGE);
+         GAME_EVENT_EXCHANGE);
   destroy_sorted_move_list(test_exchange_sorted_move_list);
 
   destroy_game(game);
@@ -457,7 +418,7 @@ void equity_test(SuperConfig *superconfig) {
 
   Game *game = create_game(config);
   Player *player = game->players[0];
-  player->strategy_params->move_sorting = SORT_BY_EQUITY;
+  player->strategy_params->move_sorting = MOVE_SORT_EQUITY;
   KLV *klv = player->strategy_params->klv;
   // A middlegame is chosen to avoid
   // the opening and endgame equity adjustments
@@ -483,7 +444,7 @@ void equity_test(SuperConfig *superconfig) {
     previous_equity = move->equity;
   }
   assert(equity_test_sorted_move_list->moves[number_of_moves - 1]->move_type ==
-         MOVE_TYPE_PASS);
+         GAME_EVENT_PASS);
 
   destroy_sorted_move_list(equity_test_sorted_move_list);
   destroy_rack(move_rack);
@@ -496,19 +457,13 @@ void top_equity_play_recorder_test(SuperConfig *superconfig) {
   Game *game = create_game(config);
   Player *player = game->players[0];
   int saved_recorder_type = player->strategy_params->play_recorder_type;
-  player->strategy_params->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
-  char test_string[100];
-  reset_string(test_string);
+  player->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
 
   load_cgp(game, VS_JEREMY);
   set_rack_to_string(player->rack, "DDESW??", game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, 0);
 
-  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
-                                           game->gen->move_list->moves[0],
-                                           game->gen->letter_distribution);
-  assert(!strcmp(test_string, "14B hEaDW(OR)DS 106"));
-  reset_string(test_string);
+  assert_move(game, NULL, 0, "14B hEaDW(OR)DS 106");
 
   reset_game(game);
   reset_rack(player->rack);
@@ -517,11 +472,8 @@ void top_equity_play_recorder_test(SuperConfig *superconfig) {
   set_rack_to_string(player->rack, "ABEOPXZ", game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, 0);
 
-  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
-                                           game->gen->move_list->moves[0],
-                                           game->gen->letter_distribution);
-  assert(!strcmp(test_string, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780"));
-  reset_string(test_string);
+  assert_move(game, NULL, 0, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
+
   // reset play recorder type as this is a shared config.
   player->strategy_params->play_recorder_type = saved_recorder_type;
 
@@ -536,23 +488,14 @@ void distinct_lexica_test(SuperConfig *superconfig) {
       game->players[0]->strategy_params->play_recorder_type;
   int player_2_saved_recorder_type =
       game->players[1]->strategy_params->play_recorder_type;
-  game->players[0]->strategy_params->play_recorder_type =
-      PLAY_RECORDER_TYPE_TOP_EQUITY;
-  game->players[1]->strategy_params->play_recorder_type =
-      PLAY_RECORDER_TYPE_TOP_EQUITY;
-
-  char test_string[100];
-  reset_string(test_string);
+  game->players[0]->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
+  game->players[1]->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
 
   // Play SPORK, better than best NWL move of PORKS
   set_rack_to_string(game->players[0]->rack, "KOPRRSS",
                      game->gen->letter_distribution);
   generate_moves_for_game(game);
-  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
-                                           game->gen->move_list->moves[0],
-                                           game->gen->letter_distribution);
-  assert(!strcmp(test_string, "8H SPORK 32"));
-  reset_string(test_string);
+  assert_move(game, NULL, 0, "8H SPORK 32");
 
   play_move(game, game->gen->move_list->moves[0]);
   reset_move_list(game->gen->move_list);
@@ -562,11 +505,7 @@ void distinct_lexica_test(SuperConfig *superconfig) {
                      game->gen->letter_distribution);
   generate_moves_for_game(game);
 
-  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
-                                           game->gen->move_list->moves[0],
-                                           game->gen->letter_distribution);
-  assert(!strcmp(test_string, "H8 (S)CHIZIER 146"));
-  reset_string(test_string);
+  assert_move(game, NULL, 0, "H8 (S)CHIZIER 146");
 
   play_move(game, game->gen->move_list->moves[0]);
   reset_move_list(game->gen->move_list);
@@ -576,11 +515,7 @@ void distinct_lexica_test(SuperConfig *superconfig) {
                      game->gen->letter_distribution);
   generate_moves_for_game(game);
 
-  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
-                                           game->gen->move_list->moves[0],
-                                           game->gen->letter_distribution);
-  assert(!strcmp(test_string, "11G W(I)GGLY 28"));
-  reset_string(test_string);
+  assert_move(game, NULL, 0, "11G W(I)GGLY 28");
 
   play_move(game, game->gen->move_list->moves[0]);
   reset_move_list(game->gen->move_list);
@@ -590,11 +525,7 @@ void distinct_lexica_test(SuperConfig *superconfig) {
                      game->gen->letter_distribution);
   generate_moves_for_game(game);
 
-  write_user_visible_move_to_end_of_buffer(test_string, game->gen->board,
-                                           game->gen->move_list->moves[0],
-                                           game->gen->letter_distribution);
-  assert(!strcmp(test_string, "13C QUEAS(I)ER 88"));
-  reset_string(test_string);
+  assert_move(game, NULL, 0, "13C QUEAS(I)ER 88");
 
   play_move(game, game->gen->move_list->moves[0]);
   reset_move_list(game->gen->move_list);

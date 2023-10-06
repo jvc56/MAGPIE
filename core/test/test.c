@@ -18,7 +18,6 @@
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
-#include "gen_all_test.h"
 #include "infer_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
@@ -30,6 +29,7 @@
 #include "shadow_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
+#include "string_util_test.h"
 #include "superconfig.h"
 #include "test_constants.h"
 #include "ucgi_command_test.h"
@@ -41,6 +41,7 @@ void unit_tests(SuperConfig *superconfig) {
   test_config();
 
   // Test the readonly data first
+  test_string_util();
   test_alphabet(superconfig);
   test_letter_distribution(superconfig);
   test_str_to_machine_letters(superconfig);
@@ -71,17 +72,13 @@ int main(int argc, char *argv[]) {
     printf("must specify exactly one command\n");
     exit(EXIT_FAILURE);
   }
-  log_set_level(3);
+  log_set_level(LOG_WARN);
 
-  if (!strcmp(argv[1], CMD_GEN)) {
-    Config *config = create_config_from_args(argc, argv);
-    test_gen_all(config);
-    destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_INFER)) {
+  if (strings_equal(argv[1], CMD_INFER)) {
     Config *config = create_config_from_args(argc, argv);
     infer_from_config(config);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_AUTOPLAY)) {
+  } else if (strings_equal(argv[1], CMD_AUTOPLAY)) {
     Config *config = create_config_from_args(argc, argv);
     ThreadControl *thread_control = create_thread_control_from_config(config);
     AutoplayResults *autoplay_results = create_autoplay_results();
@@ -89,21 +86,21 @@ int main(int argc, char *argv[]) {
     destroy_config(config);
     destroy_autoplay_results(autoplay_results);
     destroy_thread_control(thread_control);
-  } else if (!strcmp(argv[1], CMD_PROF)) {
+  } else if (strings_equal(argv[1], CMD_PROF)) {
     Config *config = create_config_from_args(argc, argv);
     prof_tests(config);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_TOPVALL)) {
+  } else if (strings_equal(argv[1], CMD_TOPVALL)) {
     Config *config = create_config_from_args(argc, argv);
     test_play_recorder(config);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_SIM)) {
+  } else if (strings_equal(argv[1], CMD_SIM)) {
     Config *config = create_config_from_args(argc, argv);
     ThreadControl *thread_control = create_thread_control_from_config(config);
     perf_test_multithread_sim(config, thread_control);
     destroy_thread_control(thread_control);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_SIM_STOPPING)) {
+  } else if (strings_equal(argv[1], CMD_SIM_STOPPING)) {
     Config *config = create_config_from_args(argc, argv);
     ThreadControl *thread_control = create_thread_control_from_config(config);
     thread_control->print_info_interval = 500;
@@ -111,37 +108,41 @@ int main(int argc, char *argv[]) {
     perf_test_multithread_blocking_sim(config, thread_control);
     destroy_thread_control(thread_control);
     destroy_config(config);
-  } else if (!strcmp(argv[1], CMD_UNIT_TESTS)) {
+  } else if (strings_equal(argv[1], CMD_UNIT_TESTS)) {
     Config *csw_config = create_config(
         "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
-        "./data/lexica/CSW21.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "",
-        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+        "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "",
+        -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
+        "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     Config *nwl_config = create_config(
         "./data/letterdistributions/english.csv", "", "./data/lexica/NWL20.kwg",
-        "./data/lexica/CSW21.klv2", SORT_BY_SCORE, PLAY_RECORDER_TYPE_ALL, "",
-        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+        "./data/lexica/CSW21.klv2", MOVE_SORT_SCORE, MOVE_RECORDER_ALL, "", "",
+        -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
+        "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     Config *osps_config = create_config(
         // no OSPS kwg yet, use later when we have tests.
         "./data/letterdistributions/polish.csv", "", "./data/lexica/OSPS44.kwg",
-        "", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL, "", "", -1, -1, 0, 10000, 0,
-        0, NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
-        MOVE_LIST_CAPACITY);
+        "", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "", -1, -1, 0, 10000, 0, 0,
+        NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     Config *disc_config = create_config(
         "./data/letterdistributions/catalan.csv", "", "./data/lexica/DISC2.kwg",
-        "./data/lexica/catalan.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL,
-        "", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+        "./data/lexica/catalan.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "",
+        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
+        "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     Config *distinct_lexica_config = create_config(
         "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
-        "./data/lexica/CSW21.klv2", SORT_BY_EQUITY, PLAY_RECORDER_TYPE_ALL,
+        "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL,
         "./data/lexica/NWL20.kwg", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0,
-        1, "./data/strategy/default_english/winpct.csv", MOVE_LIST_CAPACITY);
+        1, "./data/strategy/default_english/winpct.csv",
+        DEFAULT_MOVE_LIST_CAPACITY);
 
     SuperConfig *superconfig =
         create_superconfig(csw_config, nwl_config, osps_config, disc_config,

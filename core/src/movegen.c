@@ -13,6 +13,9 @@
 #include "movegen.h"
 #include "player.h"
 #include "rack.h"
+#include "util.h"
+
+#define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
            Rack *opp_rack, uint32_t new_node_index, int accepts, int leftstrip,
@@ -58,7 +61,7 @@ double get_spare_move_equity(Generator *gen, Player *player, Rack *opp_rack) {
   double other_adjustments = 0;
 
   if (gen->apply_placement_adjustment && gen->board->tiles_played == 0 &&
-      gen->move_list->spare_move->move_type == MOVE_TYPE_PLAY) {
+      gen->move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
   }
 
@@ -79,6 +82,53 @@ double get_spare_move_equity(Generator *gen, Player *player, Rack *opp_rack) {
          other_adjustments;
 }
 
+// this function assumes the word is always horizontal. If this isn't the case,
+// the board needs to be transposed ahead of time.
+int score_move(Board *board, uint8_t word[], int word_start_index,
+               int word_end_index, int row, int col, int tiles_played,
+               int cross_dir, int cross_set_index,
+               LetterDistribution *letter_distribution) {
+  int ls;
+  int main_word_score = 0;
+  int cross_scores = 0;
+  int bingo_bonus = 0;
+  if (tiles_played == RACK_SIZE) {
+    bingo_bonus = BINGO_BONUS;
+  }
+  int word_multiplier = 1;
+  for (int idx = 0; idx < word_end_index - word_start_index + 1; idx++) {
+    uint8_t ml = word[idx + word_start_index];
+    uint8_t bonus_square = get_bonus_square(board, row, col + idx);
+    int letter_multiplier = 1;
+    int this_word_multiplier = 1;
+    int fresh_tile = 0;
+    if (ml == PLAYED_THROUGH_MARKER) {
+      ml = get_letter(board, row, col + idx);
+    } else {
+      fresh_tile = 1;
+      this_word_multiplier = bonus_square >> 4;
+      letter_multiplier = bonus_square & 0x0F;
+      word_multiplier *= this_word_multiplier;
+    }
+    int cs = get_cross_score(board, row, col + idx, cross_dir, cross_set_index);
+    if (is_blanked(ml)) {
+      ls = 0;
+    } else {
+      ls = letter_distribution->scores[ml];
+    }
+
+    main_word_score += ls * letter_multiplier;
+    int actual_cross_word =
+        (row > 0 && !is_empty(board, row - 1, col + idx)) ||
+        ((row < BOARD_DIM - 1) && !is_empty(board, row + 1, col + idx));
+    if (fresh_tile && actual_cross_word) {
+      cross_scores += ls * letter_multiplier * this_word_multiplier +
+                      cs * this_word_multiplier;
+    }
+  }
+  return main_word_score * word_multiplier + cross_scores + bingo_bonus;
+}
+
 void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
                  int rightstrip, int move_type) {
   int start_row = gen->current_row_index;
@@ -96,13 +146,13 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
   int score = 0;
   uint8_t *strip = NULL;
 
-  if (move_type == MOVE_TYPE_PLAY) {
+  if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     score = score_move(gen->board, gen->strip, leftstrip, rightstrip, start_row,
                        start_col, tiles_played, !gen->vertical,
                        get_cross_set_index(gen, player->index),
                        gen->letter_distribution);
     strip = gen->strip;
-  } else if (move_type == MOVE_TYPE_EXCHANGE) {
+  } else if (move_type == GAME_EVENT_EXCHANGE) {
     // ignore the empty exchange case
     if (rightstrip == 0) {
       return;
@@ -115,9 +165,9 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
   set_spare_move(gen->move_list, strip, leftstrip, rightstrip, score, row, col,
                  tiles_played, gen->vertical, move_type);
 
-  if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL) {
+  if (player->strategy_params->play_recorder_type == MOVE_RECORDER_ALL) {
     double equity;
-    if (player->strategy_params->move_sorting == SORT_BY_EQUITY) {
+    if (player->strategy_params->move_sorting == MOVE_SORT_EQUITY) {
       equity = get_spare_move_equity(gen, player, opp_rack);
     } else {
       equity = score;
@@ -149,7 +199,7 @@ void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
         gen->best_leaves[player->rack->number_of_letters] = current_value;
       }
       if (add_exchange) {
-        record_play(gen, player, NULL, 0, stripidx, MOVE_TYPE_EXCHANGE);
+        record_play(gen, player, NULL, 0, stripidx, GAME_EVENT_EXCHANGE);
       }
     }
   } else {
@@ -268,7 +318,8 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
 
     if (accepts && no_letter_directly_left && gen->tiles_played > 0 &&
         (unique_play || gen->tiles_played > 1)) {
-      record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
+      record_play(gen, player, opp_rack, leftstrip, rightstrip,
+                  GAME_EVENT_TILE_PLACEMENT_MOVE);
     }
 
     if (new_node_index == 0) {
@@ -307,7 +358,8 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
 
     if (accepts && no_letter_directly_right && gen->tiles_played > 0 &&
         (unique_play || gen->tiles_played > 1)) {
-      record_play(gen, player, opp_rack, leftstrip, rightstrip, MOVE_TYPE_PLAY);
+      record_play(gen, player, opp_rack, leftstrip, rightstrip,
+                  GAME_EVENT_TILE_PLACEMENT_MOVE);
     }
 
     if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
@@ -377,7 +429,7 @@ void shadow_record(Generator *gen, int left_col, int right_col,
               (main_played_through_score * word_multiplier) +
               perpendicular_additional_score + bingo_bonus;
   double equity = (double)score;
-  if (gen->move_sorting_type == SORT_BY_EQUITY) {
+  if (gen->move_sorting_type == MOVE_SORT_EQUITY) {
     equity +=
         gen->best_leaves[gen->number_of_letters_on_rack - gen->tiles_played];
   }
@@ -663,8 +715,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   gen->tiles_played = 0;
 
   for (int i = 0; i < gen->anchor_list->count; i++) {
-    if (player->strategy_params->play_recorder_type ==
-            PLAY_RECORDER_TYPE_TOP_EQUITY &&
+    if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST &&
         gen->anchor_list->anchors[i]->highest_possible_equity <
             gen->move_list->moves[0]->equity) {
       break;
@@ -684,12 +735,12 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   reset_transpose(gen->board);
 
   // Add the pass move
-  if (player->strategy_params->play_recorder_type == PLAY_RECORDER_TYPE_ALL ||
+  if (player->strategy_params->play_recorder_type == MOVE_RECORDER_ALL ||
       gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
     set_spare_move_as_pass(gen->move_list);
     insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
   } else if (player->strategy_params->play_recorder_type ==
-             PLAY_RECORDER_TYPE_TOP_EQUITY) {
+             MOVE_RECORDER_BEST) {
     // The move list count is still 0 at this point, so set it to 1.
     // This is done here to avoid repeatedly checking/updating the move count.
     gen->move_list->count = 1;
@@ -716,7 +767,7 @@ void load_zero_preendgame_adjustment_values(Generator *gen) {
 }
 
 Generator *create_generator(Config *config) {
-  Generator *generator = malloc(sizeof(Generator));
+  Generator *generator = malloc_or_die(sizeof(Generator));
   generator->bag = create_bag(config->letter_distribution);
   generator->board = create_board();
   generator->move_list = create_move_list(config->move_list_capacity);
@@ -731,8 +782,8 @@ Generator *create_generator(Config *config) {
   // On by default
   generator->apply_placement_adjustment = 1;
 
-  generator->exchange_strip =
-      (uint8_t *)malloc(config->letter_distribution->size * sizeof(uint8_t));
+  generator->exchange_strip = (uint8_t *)malloc_or_die(
+      config->letter_distribution->size * sizeof(uint8_t));
   // Just load the zero values for now
   load_zero_preendgame_adjustment_values(generator);
 
@@ -740,7 +791,7 @@ Generator *create_generator(Config *config) {
 }
 
 Generator *copy_generator(Generator *gen, int move_list_size) {
-  Generator *new_generator = malloc(sizeof(Generator));
+  Generator *new_generator = malloc_or_die(sizeof(Generator));
   new_generator->bag = copy_bag(gen->bag);
   new_generator->board = copy_board(gen->board);
   // Move list, anchor list, and leave map can be new
@@ -756,8 +807,8 @@ Generator *copy_generator(Generator *gen, int move_list_size) {
 
   new_generator->apply_placement_adjustment = gen->apply_placement_adjustment;
 
-  new_generator->exchange_strip =
-      (uint8_t *)malloc(gen->letter_distribution->size * sizeof(uint8_t));
+  new_generator->exchange_strip = (uint8_t *)malloc_or_die(
+      gen->letter_distribution->size * sizeof(uint8_t));
   // Just load the zero values for now
   load_zero_preendgame_adjustment_values(new_generator);
 

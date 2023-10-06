@@ -9,185 +9,248 @@
 #include "config.h"
 #include "cross_set.h"
 #include "game.h"
+#include "log.h"
 #include "movegen.h"
 #include "player.h"
+#include "string_util.h"
+#include "util.h"
 
-char add_player_score(const char *cgp, int *cgp_index, Game *game,
-                      int player_index) {
-  char cgp_char = cgp[*cgp_index];
-  char score[10] = "";
-  while (cgp_char != '/' && cgp_char != ' ') {
-    sprintf(score + strlen(score), "%c", cgp_char);
-    (*cgp_index)++;
-    cgp_char = cgp[*cgp_index];
-  }
-  game->players[player_index]->score = atoi(score);
-  return cgp_char;
-}
+#define CGP_OPCODE_BINGO_BONUS "bb"
+#define CGP_OPCODE_BOARD_NAME "bdn"
+#define CGP_OPCODE_GAME_VARIANT "var"
+#define CGP_OPCODE_LETTER_DISTRIBUTION_NAME "ld"
+#define CGP_OPCODE_LEXICON_NAME "lex"
+
+#define GAME_VARIANT_CLASSIC_NAME "classic"
+#define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
 
 void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter) {
   draw_letter(bag, letter);
   add_letter_to_rack(rack, letter);
 }
 
-char add_player_rack(const char *cgp, int *cgp_index, Game *game,
-                     int player_index) {
-  char rack_placeholder[30];
-  char cgp_char = cgp[*cgp_index];
-  int rpidx = 0;
-  while (cgp_char != '/' && cgp_char != ' ') {
-    rack_placeholder[rpidx] = cgp_char;
-    rpidx++;
-    (*cgp_index)++;
-    cgp_char = cgp[*cgp_index];
+game_variant_t get_game_variant_type_from_name(const char *variant_name) {
+  game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
+  if (strings_equal(variant_name, GAME_VARIANT_CLASSIC_NAME)) {
+    game_variant = GAME_VARIANT_CLASSIC;
+  } else if (strings_equal(variant_name, GAME_VARIANT_WORDSMOG_NAME)) {
+    game_variant = GAME_VARIANT_WORDSMOG;
   }
-  rack_placeholder[rpidx] = '\0';
-  uint8_t mls[RACK_SIZE];
-  int num_mls = str_to_machine_letters(game->gen->letter_distribution,
-                                       rack_placeholder, false, mls);
-  assert(num_mls <= RACK_SIZE);
-  for (int i = 0; i < num_mls; i++) {
-    draw_letter_to_rack(game->gen->bag, game->players[player_index]->rack,
-                        mls[i]);
-  }
-  return cgp_char;
+  return game_variant;
 }
 
-void load_cgp(Game *game, const char *cgp) {
+cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
+                                          int row_start,
+                                          int *current_column_index) {
+  uint8_t *machine_letters =
+      malloc_or_die(sizeof(uint8_t) * string_length(letters));
+  int number_of_machine_letters = str_to_machine_letters(
+      game->gen->letter_distribution, letters, false, machine_letters);
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+  int col_start = *current_column_index;
 
-  // Set all tiles:
-  int cgp_index = 0;
-  char cgp_char = cgp[cgp_index];
-  int current_board_index = 0;
-  int is_digit = 0;
-  int previous_was_digit = 0;
-  char current_digits[5] = "";
-
-  int began_multi = 0;
-  int multi_idx = 0;
-  char multitile[MAX_LETTER_CHAR_LENGTH];
-  char row_aggreg[45]; // idk, some big size.
-  int row_aggreg_idx = 0;
-  uint8_t mls[25];
-  while (cgp_char != ' ') {
-    is_digit = isdigit(cgp_char);
-
-    if (is_digit) {
-      sprintf(current_digits + strlen(current_digits), "%c", cgp_char);
-    } else if (previous_was_digit) {
-      current_board_index += atoi(current_digits);
-      current_digits[0] = '\0';
+  if (number_of_machine_letters < 0) {
+    cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_BOARD_LETTERS;
+  } else {
+    for (int i = 0; i < number_of_machine_letters; i++) {
+      set_letter(game->gen->board, row_start, col_start + i,
+                 machine_letters[i]);
+      draw_letter(game->gen->bag, machine_letters[i]);
+      game->gen->board->tiles_played++;
     }
-    if (!is_digit && cgp_char != '/') {
-      // it's a letter or a portion of a letter.
-      if (cgp_char == '[') {
-        // this is a multi-letter tile by the cgp spec.
-        // If we've been building up a string of characters already,
-        // let's convert these first.
-        if (row_aggreg_idx > 0) {
-          row_aggreg[row_aggreg_idx] = '\0';
+    *current_column_index = *current_column_index + number_of_machine_letters;
+  }
+  free(machine_letters);
+  return cgp_parse_status;
+}
 
-          int num_mls = str_to_machine_letters(game->gen->letter_distribution,
-                                               row_aggreg, false, mls);
-          row_aggreg_idx = 0;
-          for (int i = 0; i < num_mls; i++) {
-            set_letter_by_index(game->gen->board, current_board_index, mls[i]);
-            draw_letter(
-                game->gen->bag,
-                get_letter_by_index(game->gen->board, current_board_index));
-            current_board_index++;
-            game->gen->board->tiles_played++;
-          }
-        }
+cgp_parse_status_t parse_cgp_board_row(Game *game, const char *cgp_board_row,
+                                       int row_index) {
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+  StringBuilder *tile_string_builder = create_string_builder();
+  int row_length = string_length(cgp_board_row);
 
-        began_multi = 1;
-        multi_idx = 0;
-      } else if (cgp_char == ']') {
-        began_multi = 0;
-        multitile[multi_idx] = '\0';
-        int ml = human_readable_letter_to_machine_letter(
-            game->gen->letter_distribution, multitile);
-        set_letter_by_index(game->gen->board, current_board_index, ml);
-        draw_letter(game->gen->bag,
-                    get_letter_by_index(game->gen->board, current_board_index));
-        current_board_index++;
-        game->gen->board->tiles_played++;
-
-      } else {
-        if (began_multi) {
-          multitile[multi_idx] = cgp_char;
-          multi_idx++;
-        } else {
-          row_aggreg[row_aggreg_idx] = cgp_char;
-          row_aggreg_idx++;
+  int current_row_number_of_spaces = 0;
+  int current_column_index = 0;
+  for (int i = 0; i < row_length; i++) {
+    char current_char = cgp_board_row[i];
+    if (isdigit(current_char)) {
+      current_row_number_of_spaces =
+          (current_row_number_of_spaces * 10) + char_to_int(current_char);
+      if (string_builder_length(tile_string_builder) > 0) {
+        cgp_parse_status = place_letters_on_board(
+            game, string_builder_peek(tile_string_builder), row_index,
+            &current_column_index);
+        string_builder_clear(tile_string_builder);
+        if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+          break;
         }
       }
+    } else {
+      if (i == 0 || current_row_number_of_spaces > 0) {
+        current_column_index += current_row_number_of_spaces;
+        current_row_number_of_spaces = 0;
+      }
+      string_builder_add_char(tile_string_builder, current_char);
     }
+  }
 
-    if (row_aggreg_idx > 0) {
-      row_aggreg[row_aggreg_idx] = '\0';
+  if (string_builder_length(tile_string_builder) > 0) {
+    cgp_parse_status =
+        place_letters_on_board(game, string_builder_peek(tile_string_builder),
+                               row_index, &current_column_index);
+  } else {
+    current_column_index += current_row_number_of_spaces;
+  }
+  destroy_string_builder(tile_string_builder);
 
-      int num_mls = str_to_machine_letters(game->gen->letter_distribution,
-                                           row_aggreg, false, mls);
-      row_aggreg_idx = 0;
-      for (int i = 0; i < num_mls; i++) {
-        set_letter_by_index(game->gen->board, current_board_index, mls[i]);
-        draw_letter(game->gen->bag,
-                    get_letter_by_index(game->gen->board, current_board_index));
-        current_board_index++;
-        game->gen->board->tiles_played++;
+  if (current_column_index != BOARD_DIM &&
+      cgp_parse_status == CGP_PARSE_STATUS_SUCCESS) {
+    cgp_parse_status = CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_COLUMNS;
+  }
+
+  return cgp_parse_status;
+}
+
+cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+  StringSplitter *board_rows = split_string(cgp_board, '/', true);
+
+  if (string_splitter_get_number_of_items(board_rows) != BOARD_DIM) {
+    cgp_parse_status = CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_ROWS;
+  } else {
+    for (int i = 0; i < BOARD_DIM; i++) {
+      cgp_parse_status =
+          parse_cgp_board_row(game, string_splitter_get_item(board_rows, i), i);
+      if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+        break;
       }
     }
+  }
+  destroy_string_splitter(board_rows);
+  return cgp_parse_status;
+}
 
-    cgp_index++;
-    cgp_char = cgp[cgp_index];
-    previous_was_digit = is_digit;
+int draw_rack_from_bag(Bag *bag, Rack *rack, const char *rack_string,
+                       LetterDistribution *letter_distribution) {
+  int number_of_letters_set =
+      set_rack_to_string(rack, rack_string, letter_distribution);
+  for (int i = 0; i < rack->array_size; i++) {
+    for (int j = 0; j < rack->array[i]; j++) {
+      draw_letter(bag, i);
+    }
+  }
+  return number_of_letters_set;
+}
+
+cgp_parse_status_t
+parse_cgp_racks_with_string_splitter(Game *game, StringSplitter *player_racks) {
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+  int number_of_letters_added =
+      draw_rack_from_bag(game->gen->bag, game->players[0]->rack,
+                         string_splitter_get_item(player_racks, 0),
+                         game->gen->letter_distribution);
+  if (number_of_letters_added < 0) {
+    return CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
+  }
+  number_of_letters_added =
+      draw_rack_from_bag(game->gen->bag, game->players[1]->rack,
+                         string_splitter_get_item(player_racks, 1),
+                         game->gen->letter_distribution);
+  if (number_of_letters_added < 0) {
+    cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
+  }
+  return cgp_parse_status;
+}
+
+cgp_parse_status_t parse_cgp_racks(Game *game, const char *cgp_racks) {
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+  StringSplitter *player_racks = split_string(cgp_racks, '/', false);
+
+  if (string_splitter_get_number_of_items(player_racks) != 2) {
+    cgp_parse_status = CGP_PARSE_STATUS_INVALID_NUMBER_OF_PLAYER_RACKS;
+  } else {
+    cgp_parse_status = parse_cgp_racks_with_string_splitter(game, player_racks);
+  }
+  destroy_string_splitter(player_racks);
+  return cgp_parse_status;
+}
+
+cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+  StringSplitter *player_scores = split_string(cgp_scores, '/', false);
+  if (string_splitter_get_number_of_items(player_scores) != 2) {
+    cgp_parse_status = CGP_PARSE_STATUS_INVALID_NUMBER_OF_PLAYER_SCORES;
+  } else if (!is_all_digits_or_empty(
+                 string_splitter_get_item(player_scores, 0)) ||
+             !is_all_digits_or_empty(
+                 string_splitter_get_item(player_scores, 1))) {
+    cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_SCORES;
+  } else {
+    game->players[0]->score =
+        string_to_int(string_splitter_get_item(player_scores, 0));
+    game->players[1]->score =
+        string_to_int(string_splitter_get_item(player_scores, 1));
+  }
+  destroy_string_splitter(player_scores);
+  return cgp_parse_status;
+}
+
+cgp_parse_status_t
+parse_cgp_consecutive_zeros(Game *game, const char *cgp_consecutive_zeros) {
+
+  if (!is_all_digits_or_empty(cgp_consecutive_zeros)) {
+    return CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS;
+  }
+  game->consecutive_scoreless_turns = string_to_int(cgp_consecutive_zeros);
+  return CGP_PARSE_STATUS_SUCCESS;
+}
+
+cgp_parse_status_t parse_cgp_with_cgp_fields(Game *game,
+                                             StringSplitter *cgp_fields) {
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+
+  cgp_parse_status =
+      parse_cgp_board(game, string_splitter_get_item(cgp_fields, 0));
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    return cgp_parse_status;
   }
 
-  // Skip the whitespace
-  while (cgp_char == ' ') {
-    cgp_index++;
-    cgp_char = cgp[cgp_index];
+  cgp_parse_status =
+      parse_cgp_racks(game, string_splitter_get_item(cgp_fields, 1));
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    return cgp_parse_status;
   }
 
-  // Set the racks
-  int player_index = 0;
-  if (cgp_char == '/') {
-    // player0 has an empty rack
-    player_index = 1;
-    // Advance the pointer
-    cgp_index++;
+  cgp_parse_status =
+      parse_cgp_scores(game, string_splitter_get_item(cgp_fields, 2));
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    return cgp_parse_status;
   }
 
-  cgp_char = add_player_rack(cgp, &cgp_index, game, player_index);
+  return parse_cgp_consecutive_zeros(game,
+                                     string_splitter_get_item(cgp_fields, 3));
+}
 
-  if (cgp_char == '/') {
-    player_index = 1;
-    // Advance the pointer
-    cgp_index++;
-    cgp_char = add_player_rack(cgp, &cgp_index, game, 1);
+cgp_parse_status_t parse_cgp(Game *game, const char *cgp) {
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+  StringSplitter *cgp_fields = split_string_by_whitespace(cgp, true);
+
+  if (string_splitter_get_number_of_items(cgp_fields) < 4) {
+    cgp_parse_status = CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS;
+  } else {
+    cgp_parse_status = parse_cgp_with_cgp_fields(game, cgp_fields);
+  }
+  destroy_string_splitter(cgp_fields);
+  return cgp_parse_status;
+}
+
+cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
+  cgp_parse_status_t cgp_parse_status = parse_cgp(game, cgp);
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    return cgp_parse_status;
   }
 
-  // Skip the whitespace
-  while (cgp_char == ' ') {
-    cgp_index++;
-    cgp_char = cgp[cgp_index];
-  }
-
-  add_player_score(cgp, &cgp_index, game, 0);
-  cgp_index++;
-  add_player_score(cgp, &cgp_index, game, 1);
-  cgp_index++;
-
-  cgp_char = cgp[cgp_index];
-  // Skip the whitespace
-  while (cgp_char == ' ') {
-    cgp_index++;
-    cgp_char = cgp[cgp_index];
-  }
-
-  // Set number of consecutive zeros
-  game->consecutive_scoreless_turns = cgp_char - '0';
   game->player_on_turn_index = 0;
 
   generate_all_cross_sets(game->gen->board,
@@ -204,36 +267,79 @@ void load_cgp(Game *game, const char *cgp) {
   } else {
     game->game_end_reason = GAME_END_REASON_NONE;
   }
+  return cgp_parse_status;
 }
 
-// return lexicon and letter distribution from the cgp string.
-void lexicon_ld_from_cgp(char *cgp, char *lexicon, char *ldname) {
-  // copy string since we are going to modify it with strtok :(
-  char cgpcopy[512];
-  strcpy(cgpcopy, cgp);
-  char *token;
-  token = strtok(cgpcopy, " ");
-  // cgp consists of FEN racks scores zeroturns opcode val; opcode val; ...
-  int getting_lex = 0;
-  int getting_ld = 0;
-  while (token != NULL) {
-    if (getting_lex) {
-      strcpy(lexicon, token);
-      lexicon[strlen(lexicon) - 1] = '\0'; // overwrite the semicolon
-    } else if (getting_ld) {
-      strcpy(ldname, token);
-      ldname[strlen(ldname) - 1] = '\0'; // overwrite the semicolon
-    }
+CGPOperations *get_default_cgp_operations() {
+  CGPOperations *cgp_operations = malloc_or_die(sizeof(CGPOperations));
+  cgp_operations->bingo_bonus = BINGO_BONUS;
+  cgp_operations->board_layout = BOARD_LAYOUT_CROSSWORD_GAME;
+  cgp_operations->game_variant = GAME_VARIANT_CLASSIC;
+  cgp_operations->letter_distribution_name = NULL;
+  cgp_operations->lexicon_name = NULL;
+  return cgp_operations;
+}
 
-    getting_lex = strcmp(token, "lex") == 0;
-    getting_ld = strcmp(token, "ld") == 0;
-    token = strtok(NULL, " ");
+void destroy_cgp_operations(CGPOperations *cgp_operations) {
+  if (cgp_operations->lexicon_name) {
+    free(cgp_operations->lexicon_name);
   }
-  // if not specified, the default ld will be english, at least according to our
-  // program.
-  if (strcmp(ldname, "") == 0) {
-    strcpy(ldname, "english");
+  if (cgp_operations->letter_distribution_name) {
+    free(cgp_operations->letter_distribution_name);
   }
+  free(cgp_operations);
+}
+
+cgp_parse_status_t load_cgp_operations(CGPOperations *cgp_operations,
+                                       const char *cgp) {
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+  StringSplitter *split_cgp_string = split_string_by_whitespace(cgp, true);
+  int number_of_items = string_splitter_get_number_of_items(split_cgp_string);
+  for (int i = 0; i < number_of_items - 1; i++) {
+    const char *opcode = string_splitter_get_item(split_cgp_string, i);
+    char *string_value = string_splitter_get_item(split_cgp_string, i + 1);
+
+    // For now all values can be derived from a single contiguous
+    // string, so if any of them have a semicolon at the end,
+    // remove it.
+    // FIXME: move this 'remove last char' function to string util
+    size_t string_value_length = string_length(string_value);
+    if (string_value[string_value_length - 1] == ';') {
+      string_value[string_value_length - 1] = '\0';
+    }
+    if (strings_equal(CGP_OPCODE_BINGO_BONUS, opcode)) {
+      if (!is_all_digits_or_empty(string_value)) {
+        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BINGO_BONUS;
+        break;
+      }
+      cgp_operations->bingo_bonus = string_to_int(string_value);
+    } else if (strings_equal(CGP_OPCODE_BOARD_NAME, opcode)) {
+      cgp_operations->board_layout =
+          board_layout_string_to_board_layout(string_value);
+      if (cgp_operations->board_layout == BOARD_LAYOUT_UNKNOWN) {
+        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BOARD_NAME;
+      }
+    } else if (strings_equal(CGP_OPCODE_GAME_VARIANT, opcode)) {
+      cgp_operations->game_variant =
+          get_game_variant_type_from_name(string_value);
+      if (cgp_operations->game_variant == GAME_VARIANT_UNKNOWN) {
+        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_GAME_VARIANT;
+      }
+    } else if (strings_equal(CGP_OPCODE_LETTER_DISTRIBUTION_NAME, opcode)) {
+      if (cgp_operations->letter_distribution_name) {
+        free(cgp_operations->letter_distribution_name);
+      }
+      cgp_operations->letter_distribution_name =
+          get_formatted_string("%s", string_value);
+    } else if (strings_equal(CGP_OPCODE_LEXICON_NAME, opcode)) {
+      if (cgp_operations->lexicon_name) {
+        free(cgp_operations->lexicon_name);
+      }
+      cgp_operations->lexicon_name = get_formatted_string("%s", string_value);
+    }
+  }
+  destroy_string_splitter(split_cgp_string);
+  return cgp_parse_status;
 }
 
 int tiles_unseen(Game *game) {
@@ -261,7 +367,7 @@ void set_player_on_turn(Game *game, int player_on_turn_index) {
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
-    game->game_backups[i] = malloc(sizeof(MinimalGameBackup));
+    game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
     game->game_backups[i]->bag = create_bag(game->gen->letter_distribution);
     game->game_backups[i]->board = create_board();
     game->game_backups[i]->p0rack =
@@ -281,7 +387,7 @@ void set_backup_mode(Game *game, int backup_mode) {
 }
 
 Game *create_game(Config *config) {
-  Game *game = malloc(sizeof(Game));
+  Game *game = malloc_or_die(sizeof(Game));
   game->gen = create_generator(config);
   game->players[0] =
       create_player(0, "player_1", config->letter_distribution->size);
@@ -301,7 +407,7 @@ Game *create_game(Config *config) {
 }
 
 Game *copy_game(Game *game, int move_list_size) {
-  Game *new_game = malloc(sizeof(Game));
+  Game *new_game = malloc_or_die(sizeof(Game));
   new_game->gen = copy_generator(game->gen, move_list_size);
   for (int j = 0; j < 2; j++) {
     new_game->players[j] = copy_player(game->players[j]);
@@ -340,8 +446,7 @@ void backup_game(Game *game) {
 void unplay_last_move(Game *game) {
   // restore from backup (pop the last element).
   if (game->backup_cursor == 0) {
-    printf("error: no backup\n");
-    abort();
+    log_fatal("error: no backup\n");
   }
   MinimalGameBackup *state = game->game_backups[game->backup_cursor - 1];
   game->backup_cursor--;
@@ -377,12 +482,89 @@ void destroy_game(Game *game) {
   free(game);
 }
 
-game_variant_t get_game_variant_type_from_name(const char *variant_name) {
-  game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
-  if (!strcmp(variant_name, "classic")) {
-    game_variant = GAME_VARIANT_CLASSIC;
-  } else if (!strcmp(variant_name, "wordsmog")) {
-    game_variant = GAME_VARIANT_WORDSMOG;
+// Human readable print functions
+
+void string_builder_add_player_row(LetterDistribution *letter_distribution,
+                                   Player *player, bool player_on_turn,
+                                   StringBuilder *game_string) {
+
+  char *player_on_turn_marker = "-> ";
+  char *player_off_turn_marker = "   ";
+  char *player_marker = player_on_turn_marker;
+  if (!player_on_turn) {
+    player_marker = player_off_turn_marker;
   }
-  return game_variant;
+
+  string_builder_add_formatted_string(game_string, "%s%s%*s", player_marker,
+                                      player->name,
+                                      25 - string_length(player->name), "");
+  string_builder_add_rack(player->rack, letter_distribution, game_string);
+  string_builder_add_formatted_string(game_string, "%*s%d",
+                                      10 - player->rack->number_of_letters, "",
+                                      player->score);
+}
+
+void string_builder_add_board_row(LetterDistribution *letter_distribution,
+                                  Board *board, int row,
+                                  StringBuilder *game_string) {
+  string_builder_add_formatted_string(game_string, "%2d|", row + 1);
+  for (int i = 0; i < BOARD_DIM; i++) {
+    uint8_t current_letter = get_letter(board, row, i);
+    if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+      string_builder_add_char(game_string,
+                              CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i]);
+    } else {
+      string_builder_add_user_visible_letter(letter_distribution,
+                                             current_letter, 0, game_string);
+    }
+    string_builder_add_string(game_string, " ", 0);
+  }
+  string_builder_add_string(game_string, "|", 0);
+}
+
+void string_builder_add_move_with_rank_and_equity(Game *game, int move_index,
+                                                  StringBuilder *game_string) {
+  Move *move = game->gen->move_list->moves[move_index];
+  string_builder_add_int(game_string, move_index + 1);
+  string_builder_add_move(game->gen->board, move,
+                          game->gen->letter_distribution, game_string);
+  string_builder_add_double(game_string, move->equity);
+}
+
+void string_builder_add_game(Game *game, StringBuilder *game_string) {
+  // TODO: update for super crossword game
+  string_builder_add_string(game_string, "   A B C D E F G H I J K L M N O   ",
+                            0);
+  string_builder_add_player_row(game->gen->letter_distribution,
+                                game->players[0],
+                                game->player_on_turn_index == 0, game_string);
+  string_builder_add_string(game_string,
+                            "\n   ------------------------------  ", 0);
+  string_builder_add_player_row(game->gen->letter_distribution,
+                                game->players[1],
+                                game->player_on_turn_index == 1, game_string);
+  string_builder_add_string(game_string, "\n", 0);
+
+  for (int i = 0; i < BOARD_DIM; i++) {
+    string_builder_add_board_row(game->gen->letter_distribution,
+                                 game->gen->board, i, game_string);
+    if (i == 0) {
+      string_builder_add_string(
+          game_string, " --Tracking-----------------------------------", 0);
+    } else if (i == 1) {
+      string_builder_add_string(game_string, " ", 0);
+      string_builder_add_bag(game->gen->bag, game->gen->letter_distribution, 0,
+                             game_string);
+
+      string_builder_add_formatted_string(game_string, "  %d",
+                                          game->gen->bag->last_tile_index + 1);
+
+    } else if (i - 2 < game->gen->move_list->count) {
+      string_builder_add_move_with_rank_and_equity(game, i - 2, game_string);
+    }
+    string_builder_add_string(game_string, "\n", 0);
+  }
+
+  string_builder_add_string(game_string, "   ------------------------------\n",
+                            0);
 }

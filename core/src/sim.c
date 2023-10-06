@@ -22,7 +22,7 @@
 #define SIMILAR_PLAYS_ITER_CUTOFF 1000
 
 Simmer *create_simmer(Config *config) {
-  Simmer *simmer = malloc(sizeof(Simmer));
+  Simmer *simmer = malloc_or_die(sizeof(Simmer));
   simmer->threads = config->number_of_threads;
   simmer->win_pcts = config->win_pcts;
   simmer->max_iterations = 0;
@@ -39,15 +39,15 @@ Simmer *create_simmer(Config *config) {
 void create_simmed_plays(Simmer *simmer, Game *game,
                          int number_of_moves_generated) {
   simmer->simmed_plays =
-      malloc((sizeof(SimmedPlay)) * simmer->num_simmed_plays);
+      malloc_or_die((sizeof(SimmedPlay)) * simmer->num_simmed_plays);
   for (int i = 0; i < simmer->num_simmed_plays && i < number_of_moves_generated;
        i++) {
-    SimmedPlay *sp = malloc(sizeof(SimmedPlay));
+    SimmedPlay *sp = malloc_or_die(sizeof(SimmedPlay));
     sp->move = create_move();
     copy_move(game->gen->move_list->moves[i], sp->move);
 
-    sp->score_stat = malloc(sizeof(Stat *) * simmer->max_plies);
-    sp->bingo_stat = malloc(sizeof(Stat *) * simmer->max_plies);
+    sp->score_stat = malloc_or_die(sizeof(Stat *) * simmer->max_plies);
+    sp->bingo_stat = malloc_or_die(sizeof(Stat *) * simmer->max_plies);
     sp->equity_stat = create_stat();
     sp->leftover_stat = create_stat();
     sp->win_pct_stat = create_stat();
@@ -86,16 +86,16 @@ void destroy_simmed_plays(Simmer *simmer) {
 }
 
 void destroy_simmer(Simmer *simmer) {
-  if (simmer->simmed_plays != NULL) {
+  if (simmer->simmed_plays) {
     destroy_simmed_plays(simmer);
   }
   destroy_rack(simmer->similar_plays_rack);
 
-  if (simmer->known_opp_rack != NULL) {
+  if (simmer->known_opp_rack) {
     destroy_rack(simmer->known_opp_rack);
   }
 
-  if (simmer->play_similarity_cache != NULL) {
+  if (simmer->play_similarity_cache) {
     free(simmer->play_similarity_cache);
   }
 
@@ -104,7 +104,7 @@ void destroy_simmer(Simmer *simmer) {
 
 SimmerWorker *create_simmer_worker(Simmer *simmer, Game *game,
                                    int worker_index) {
-  SimmerWorker *simmer_worker = malloc(sizeof(SimmerWorker));
+  SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
 
   simmer_worker->simmer = simmer;
   simmer_worker->thread_index = worker_index;
@@ -115,7 +115,7 @@ SimmerWorker *create_simmer_worker(Simmer *simmer, Game *game,
   for (int j = 0; j < 2; j++) {
     // Simmer only needs to record top equity plays:
     new_game->players[j]->strategy_params->play_recorder_type =
-        PLAY_RECORDER_TYPE_TOP_EQUITY;
+        MOVE_RECORDER_BEST;
   }
 
   simmer_worker->rack_placeholder =
@@ -296,10 +296,6 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
       copy_rack_into(rack_placeholder, game->players[onturn]->rack);
       play_move(game, best_play);
       atomic_fetch_add(&simmer->node_count, 1);
-      char placeholder[80];
-      store_move_description(best_play, placeholder,
-                             game->gen->letter_distribution);
-
       if (ply == plies - 2 || ply == plies - 1) {
         double this_leftover =
             get_leave_value_for_move(game->players[0]->strategy_params->klv,
@@ -499,7 +495,7 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
               int static_search_only) {
 
   int sorting_type = game->players[0]->strategy_params->move_sorting;
-  game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
+  game->players[0]->strategy_params->move_sorting = MOVE_SORT_EQUITY;
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
                  game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
@@ -512,13 +508,13 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
     return;
   }
 
-  game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
+  game->players[0]->strategy_params->move_sorting = MOVE_SORT_EQUITY;
 
   // It is important that we first destroy the simmed plays
   // then set the new values for the simmer. The destructor
   // relies on the previous values of the simmer to properly
   // free everything.
-  if (simmer->simmed_plays != NULL) {
+  if (simmer->simmed_plays) {
     destroy_simmed_plays(simmer);
   }
 
@@ -538,8 +534,8 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   create_simmed_plays(simmer, game, number_of_moves_generated);
 
   if (simmer->num_simmed_plays > 1 && number_of_moves_generated > 1) {
-    if (known_opp_rack != NULL) {
-      if (simmer->known_opp_rack != NULL) {
+    if (known_opp_rack) {
+      if (simmer->known_opp_rack) {
         destroy_rack(simmer->known_opp_rack);
       }
       simmer->known_opp_rack = copy_rack(known_opp_rack);
@@ -547,10 +543,11 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
       simmer->known_opp_rack = NULL;
     }
 
-    if (simmer->play_similarity_cache != NULL) {
+    if (simmer->play_similarity_cache) {
       free(simmer->play_similarity_cache);
     }
-    simmer->play_similarity_cache = malloc(sizeof(int) * num_plays * num_plays);
+    simmer->play_similarity_cache =
+        malloc_or_die(sizeof(int) * num_plays * num_plays);
     for (int i = 0; i < num_plays; i++) {
       for (int j = 0; j < num_plays; j++) {
         if (i == j) {
@@ -563,8 +560,8 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
     }
 
     SimmerWorker **simmer_workers =
-        malloc((sizeof(SimmerWorker *)) * (threads));
-    pthread_t *worker_ids = malloc((sizeof(pthread_t)) * (threads));
+        malloc_or_die((sizeof(SimmerWorker *)) * (threads));
+    pthread_t *worker_ids = malloc_or_die((sizeof(pthread_t)) * (threads));
 
     clock_gettime(CLOCK_MONOTONIC, &thread_control->start_time);
     for (int thread_index = 0; thread_index < threads; thread_index++) {

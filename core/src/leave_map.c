@@ -3,13 +3,15 @@
 
 #include "leave_map.h"
 #include "rack.h"
+#include "util.h"
 
 LeaveMap *create_leave_map(int rack_array_size) {
   int number_of_values = 1 << RACK_SIZE;
-  LeaveMap *leave_map = malloc(sizeof(LeaveMap));
-  leave_map->leave_values = (double *)malloc(number_of_values * sizeof(double));
+  LeaveMap *leave_map = malloc_or_die(sizeof(LeaveMap));
+  leave_map->leave_values =
+      (double *)malloc_or_die(number_of_values * sizeof(double));
   leave_map->letter_base_index_map =
-      (int *)malloc(rack_array_size * sizeof(int));
+      (int *)malloc_or_die(rack_array_size * sizeof(int));
   return leave_map;
 }
 

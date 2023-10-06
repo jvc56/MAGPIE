@@ -16,6 +16,10 @@
 #include "player.h"
 #include "rack.h"
 
+#define OPENING_HOTSPOT_PENALTY -0.7
+#define PREENDGAME_ADJUSTMENT_VALUES_LENGTH 13
+#define BINGO_BONUS 50
+
 typedef struct Generator {
   int current_row_index;
   int current_anchor_col;
@@ -61,5 +65,8 @@ void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
 void reset_generator(Generator *gen);
 void load_row_letter_cache(Generator *gen, int row);
 int get_cross_set_index(Generator *gen, int player_index);
-
+int score_move(Board *board, uint8_t word[], int word_start_index,
+               int word_end_index, int row, int col, int tiles_played,
+               int cross_dir, int cross_set_index,
+               LetterDistribution *letter_distribution);
 #endif

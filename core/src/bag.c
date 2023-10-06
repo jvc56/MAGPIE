@@ -1,7 +1,11 @@
 #include <stdlib.h>
 
 #include "bag.h"
+#include "string_util.h"
+#include "util.h"
 #include "xoshiro.h"
+
+#define BLANK_SORT_VALUE 255
 
 void shuffle(Bag *bag) {
   if (bag->last_tile_index > 0) {
@@ -29,7 +33,7 @@ void reset_bag(Bag *bag, LetterDistribution *letter_distribution) {
 }
 
 Bag *create_bag(LetterDistribution *letter_distribution) {
-  Bag *bag = malloc(sizeof(Bag));
+  Bag *bag = malloc_or_die(sizeof(Bag));
   // call reseed_prng if needed.
   bag->prng = create_prng(42);
   reset_bag(bag, letter_distribution);
@@ -37,7 +41,7 @@ Bag *create_bag(LetterDistribution *letter_distribution) {
 }
 
 Bag *copy_bag(Bag *bag) {
-  Bag *new_bag = malloc(sizeof(Bag));
+  Bag *new_bag = malloc_or_die(sizeof(Bag));
   new_bag->prng = create_prng(42);
   copy_bag_into(new_bag, bag);
   return new_bag;
@@ -85,3 +89,37 @@ void add_letter(Bag *bag, uint8_t letter) {
 }
 
 void reseed_prng(Bag *bag, uint64_t seed) { seed_prng(bag->prng, seed); }
+
+void string_builder_add_bag(Bag *bag, LetterDistribution *letter_distribution,
+                            size_t len, StringBuilder *bag_string_builder) {
+  uint8_t sorted_bag[BAG_SIZE];
+  for (int i = 0; i <= bag->last_tile_index; i++) {
+    sorted_bag[i] = bag->tiles[i];
+    // Make blanks some arbitrarily large number
+    // so that they are printed last.
+    if (sorted_bag[i] == BLANK_MACHINE_LETTER) {
+      sorted_bag[i] = BLANK_SORT_VALUE;
+    }
+  }
+  int x;
+  int i = 1;
+  int k;
+  while (i < bag->last_tile_index + 1) {
+    x = sorted_bag[i];
+    k = i - 1;
+    while (k >= 0 && x < sorted_bag[k]) {
+      sorted_bag[k + 1] = sorted_bag[k];
+      k--;
+    }
+    sorted_bag[k + 1] = x;
+    i++;
+  }
+
+  for (int i = 0; i <= bag->last_tile_index; i++) {
+    if (sorted_bag[i] == BLANK_SORT_VALUE) {
+      sorted_bag[i] = 0;
+    }
+    string_builder_add_user_visible_letter(letter_distribution, sorted_bag[i],
+                                           len, bag_string_builder);
+  }
+}

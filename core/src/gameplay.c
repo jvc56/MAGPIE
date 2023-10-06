@@ -3,6 +3,7 @@
 #include "board.h"
 #include "cross_set.h"
 #include "game.h"
+#include "game_event.h"
 #include "gameplay.h"
 #include "move.h"
 #include "movegen.h"
@@ -149,7 +150,7 @@ void play_move(Game *game, Move *move) {
   if (game->backup_mode == BACKUP_MODE_SIMULATION) {
     backup_game(game);
   }
-  if (move->move_type == MOVE_TYPE_PLAY) {
+  if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     play_move_on_board(game, move);
     update_cross_set_for_move(game, move);
     game->consecutive_scoreless_turns = 0;
@@ -160,9 +161,9 @@ void play_move(Game *game, Move *move) {
     if (game->players[game->player_on_turn_index]->rack->empty) {
       standard_end_of_game_calculations(game);
     }
-  } else if (move->move_type == MOVE_TYPE_PASS) {
+  } else if (move->move_type == GAME_EVENT_PASS) {
     game->consecutive_scoreless_turns++;
-  } else if (move->move_type == MOVE_TYPE_EXCHANGE) {
+  } else if (move->move_type == GAME_EVENT_EXCHANGE) {
     execute_exchange_move(game, move);
     game->consecutive_scoreless_turns++;
   }
@@ -197,7 +198,7 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   }
   reset_rack(prack);
   int ndrawn = 0;
-  if (known_rack != NULL && known_rack->number_of_letters > 0) {
+  if (known_rack && known_rack->number_of_letters > 0) {
     for (int i = 0; i < known_rack->array_size; i++) {
       for (int j = 0; j < known_rack->array[i]; j++) {
         draw_letter_to_rack(game->gen->bag, prack, i);
@@ -212,7 +213,7 @@ Move *get_top_equity_move(Game *game) {
   StrategyParams *sp =
       game->players[game->player_on_turn_index]->strategy_params;
   int recorder_type = sp->play_recorder_type;
-  sp->play_recorder_type = PLAY_RECORDER_TYPE_TOP_EQUITY;
+  sp->play_recorder_type = MOVE_RECORDER_BEST;
   reset_move_list(game->gen->move_list);
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,

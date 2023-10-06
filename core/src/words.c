@@ -4,6 +4,7 @@
 
 #include "board.h"
 #include "log.h"
+#include "util.h"
 #include "words.h"
 
 FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
@@ -16,7 +17,7 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
     row = ph;
   }
 
-  FormedWords *ws = malloc(sizeof(FormedWords));
+  FormedWords *ws = malloc_or_die(sizeof(FormedWords));
   int formed_words_idx = 0;
   uint8_t main_word[BOARD_DIM];
   int main_word_idx = 0;
@@ -74,7 +75,7 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
   }
 
   ws->words[formed_words_idx].word_length = main_word_idx;
-  memcpy(ws->words[formed_words_idx].word, main_word, main_word_idx);
+  memory_copy(ws->words[formed_words_idx].word, main_word, main_word_idx);
   formed_words_idx++;
   ws->num_words = formed_words_idx;
 

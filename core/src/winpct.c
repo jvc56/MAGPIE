@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "fileproxy.h"
+#include "log.h"
+#include "util.h"
 #include "winpct.h"
 
 extern inline float win_pct(WinPct *wp, int spread_plus_leftover,
@@ -11,15 +13,14 @@ extern inline float win_pct(WinPct *wp, int spread_plus_leftover,
 // note: this function was largely written by ChatGPT.
 void parse_winpct_csv(WinPct *wp, const char *filename) {
   FILE *file = stream_from_filename(filename);
-  if (file == NULL) {
-    printf("Error opening file: %s\n", filename);
-    return;
+  if (!file) {
+    log_fatal("Error opening file: %s\n", filename);
   }
   int max_rows = MAX_SPREAD * 2 + 1;
   // Allocate memory for the 2D array
-  float **array = (float **)malloc(max_rows * sizeof(float *));
+  float **array = (float **)malloc_or_die(max_rows * sizeof(float *));
   for (int i = 0; i < max_rows; i++) {
-    array[i] = (float *)malloc(MAX_COLS * sizeof(float));
+    array[i] = (float *)malloc_or_die(MAX_COLS * sizeof(float));
   }
 
   // Read and process the CSV file
@@ -31,19 +32,15 @@ void parse_winpct_csv(WinPct *wp, const char *filename) {
 
   // Read data lines
   int row = 0;
-  while (fgets(line, sizeof(line), file) != NULL && row < max_rows) {
-    char *token = strtok(line, ",");
-    int col = 0;
-
-    while (token != NULL) {
-      if (col != 0) {
-        // ignore first column.
-        array[row][col - 1] = atof(token);
-      }
-      col++;
-      token = strtok(NULL, ",");
+  while (fgets(line, sizeof(line), file) && row < max_rows) {
+    StringSplitter *win_pct_data = split_string(line, ',', true);
+    int number_of_items = string_splitter_get_number_of_items(win_pct_data);
+    // Start at 1 to ignore the first column.
+    for (int i = 1; i < number_of_items; i++) {
+      array[row][i - 1] =
+          string_to_double(string_splitter_get_item(win_pct_data, i));
     }
-
+    destroy_string_splitter(win_pct_data);
     row++;
   }
 
@@ -56,14 +53,14 @@ void parse_winpct_csv(WinPct *wp, const char *filename) {
 }
 
 WinPct *create_winpct(const char *winpct_filename) {
-  WinPct *wp = malloc(sizeof(WinPct));
+  WinPct *wp = malloc_or_die(sizeof(WinPct));
   parse_winpct_csv(wp, winpct_filename);
   return wp;
 }
 
 // Function to free the memory allocated for the 2D array
 void destroy_winpct(WinPct *wp) {
-  if (wp == NULL) {
+  if (!wp) {
     return;
   }
   for (int i = 0; i < MAX_SPREAD * 2 + 1; i++) {

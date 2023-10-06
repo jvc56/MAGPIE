@@ -4,6 +4,7 @@
 
 #include "constants.h"
 #include "stats.h"
+#include "util.h"
 
 void reset_stat(Stat *stat) {
   stat->cardinality = 0;
@@ -13,7 +14,7 @@ void reset_stat(Stat *stat) {
 }
 
 Stat *create_stat() {
-  Stat *stat = malloc(sizeof(Stat));
+  Stat *stat = malloc_or_die(sizeof(Stat));
   reset_stat(stat);
   return stat;
 }
@@ -59,12 +60,25 @@ void push_stat(Stat *stat_1, Stat *stat_2) {
                         get_cardinality(stat_2));
 }
 
+// Use a estimator function to easily change from
+// biased to unbiased estimations.
+uint64_t get_estimator(uint64_t n) {
+  // For now, use a biased estimator for all
+  // stats. This might not be ideal since
+  // a biased estimator is probably better for
+  // inferences which calculate stats for all
+  // leaves in the probability space whereas
+  // the simulations are a sample.
+  // See Bessel's correction for more info.
+  return n;
+}
+
 double get_variance(Stat *stat) {
   if (stat->weight <= 1) {
     return 0.0;
   }
-  // BIAS_FIXME: maybe use weight - 1 instead
-  return stat->sum_of_mean_differences_squared / (((double)stat->weight));
+  return stat->sum_of_mean_differences_squared /
+         (((double)get_estimator(stat->weight)));
 }
 
 double get_stdev(Stat *stat) { return sqrt(get_variance(stat)); }
@@ -93,8 +107,7 @@ void combine_stats(Stat **stats, int number_of_stats, Stat *combined_stat) {
   for (int i = 0; i < number_of_stats; i++) {
     double stdev = get_stdev(stats[i]);
     uint64_t weight = get_weight(stats[i]);
-    // BIAS_FIXME: maybe use weight - 1 instead
-    combined_error_sum_of_squares += (stdev * stdev) * (weight);
+    combined_error_sum_of_squares += (stdev * stdev) * get_estimator(weight);
   }
 
   double combined_sum_of_squares = 0;

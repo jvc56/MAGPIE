@@ -3,9 +3,10 @@
 
 #include "constants.h"
 #include "leave_rack.h"
+#include "util.h"
 
 LeaveRack *create_leave_rack(int distribution_size) {
-  LeaveRack *leave_rack = malloc(sizeof(LeaveRack));
+  LeaveRack *leave_rack = malloc_or_die(sizeof(LeaveRack));
   leave_rack->draws = 0;
   leave_rack->equity = 0;
   leave_rack->leave = create_rack(distribution_size);
@@ -20,13 +21,13 @@ void destroy_leave_rack(LeaveRack *leave_rack) {
 }
 
 LeaveRackList *create_leave_rack_list(int capacity, int distribution_size) {
-  LeaveRackList *lrl = malloc(sizeof(LeaveRackList));
+  LeaveRackList *lrl = malloc_or_die(sizeof(LeaveRackList));
   lrl->count = 0;
   lrl->capacity = capacity;
   lrl->spare_leave_rack = create_leave_rack(distribution_size);
   // Use capacity + 1 to temporarily hold a new insertion
   // before popping it.
-  lrl->leave_racks = malloc((sizeof(LeaveRack *)) * (lrl->capacity + 1));
+  lrl->leave_racks = malloc_or_die((sizeof(LeaveRack *)) * (lrl->capacity + 1));
   for (int i = 0; i < lrl->capacity + 1; i++) {
     lrl->leave_racks[i] = create_leave_rack(distribution_size);
   }
@@ -93,7 +94,7 @@ void insert_leave_rack(LeaveRackList *lrl, Rack *leave, Rack *exchanged,
   }
   lrl->spare_leave_rack->draws = number_of_draws_for_leave;
   lrl->spare_leave_rack->equity = equity;
-  if (exchanged != NULL && !exchanged->empty) {
+  if (exchanged && !exchanged->empty) {
     reset_rack(lrl->spare_leave_rack->exchanged);
     for (int i = 0; i < exchanged->array_size; i++) {
       for (int j = 0; j < exchanged->array[i]; j++) {

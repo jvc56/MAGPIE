@@ -11,9 +11,6 @@
 #include "../src/infer.h"
 #include "../src/thread_control.h"
 
-#include "game_print.h"
-#include "inference_print.h"
-#include "move_print.h"
 #include "superconfig.h"
 #include "test_util.h"
 
@@ -22,7 +19,7 @@ int are_stats_equal(Stat *stat_1, Stat *stat_2) {
     return 1; // Pointers are the same, this should never be true
   }
 
-  if (stat_1 == NULL || stat_2 == NULL) {
+  if (!stat_1 || !stat_2) {
     return 2; // One of the stats is NULL
   }
 
@@ -41,7 +38,7 @@ int are_inference_records_equal(InferenceRecord *record_1,
     return 4; // Pointers are the same, the records are equal
   }
 
-  if (record_1 == NULL || record_2 == NULL) {
+  if (!record_1 || !record_2) {
     return 5; // One of the records is NULL
   }
 
@@ -66,7 +63,7 @@ int are_leave_racks_equal(LeaveRack *rack_1, LeaveRack *rack_2) {
     return 8; // Pointers are the same, this should never happen
   }
 
-  if (rack_1 == NULL || rack_2 == NULL) {
+  if (!rack_1 || !rack_2) {
     return 9; // One of the racks is NULL
   }
 
@@ -82,7 +79,7 @@ int are_leave_rack_lists_equal(LeaveRackList *list_1, LeaveRackList *list_2,
     return 11; // Pointers are the same, the lists are equal
   }
 
-  if (list_1 == NULL || list_2 == NULL) {
+  if (!list_1 || !list_2) {
     return 12; // One of the lists is NULL
   }
 
@@ -103,7 +100,7 @@ int are_inferences_equal(Inference *inference_1, Inference *inference_2) {
     return 14; // Pointers are the same, the inferences are equal
   }
 
-  if (inference_1 == NULL || inference_2 == NULL) {
+  if (!inference_1 || !inference_2) {
     return 15; // One of the inferences is NULL
   }
 
@@ -162,10 +159,6 @@ void print_error_case(Game *game, Inference *inference_1,
                       int player_on_turn_index, int score,
                       int number_of_tiles_exchanged, int number_of_threads) {
   print_game(game);
-  char rack_string[50] = "";
-  write_rack_to_end_of_buffer(rack_string, game->gen->letter_distribution,
-                              tiles_played);
-  printf("tiles played: %s\n", rack_string);
   printf("pindex: %d\n", player_on_turn_index);
   printf("score: %d\n", score);
   printf("exch: %d\n", number_of_tiles_exchanged);
@@ -189,8 +182,9 @@ void play_game_test(ThreadControl *thread_control, Game *game,
 
     Move *move_to_play = create_move();
     copy_move(game->gen->move_list->moves[0], move_to_play);
-    if (test_inference && (move_to_play->move_type == MOVE_TYPE_EXCHANGE ||
-                           move_to_play->move_type == MOVE_TYPE_PLAY)) {
+    if (test_inference &&
+        (move_to_play->move_type == GAME_EVENT_EXCHANGE ||
+         move_to_play->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE)) {
       reset_rack(tiles_played);
       reset_rack(full_rack);
       for (int i = 0; i < move_to_play->tiles_length; i++) {
@@ -218,7 +212,7 @@ void play_game_test(ThreadControl *thread_control, Game *game,
       }
 
       int number_of_tiles_exchanged = 0;
-      if (move_to_play->move_type == MOVE_TYPE_EXCHANGE) {
+      if (move_to_play->move_type == GAME_EVENT_EXCHANGE) {
         number_of_tiles_exchanged = move_to_play->tiles_played;
         reset_rack(tiles_played);
       }

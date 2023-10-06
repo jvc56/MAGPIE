@@ -4,6 +4,10 @@
 #include <string.h>
 #include <time.h>
 
+#include "../src/log.h"
+#include "../src/string_util.h"
+#include "../src/util.h"
+
 #include "superconfig.h"
 #include "test_util.h"
 
@@ -14,27 +18,21 @@ void test_leaves(SuperConfig *superconfig, const char *leaves_csv_filename) {
   Rack *rack = create_rack(config->letter_distribution->size);
 
   FILE *file = fopen(leaves_csv_filename, "r");
-  if (file == NULL) {
-    printf("Error opening file: %s\n", leaves_csv_filename);
-    abort();
+  if (!file) {
+    log_fatal("Error opening file: %s\n", leaves_csv_filename);
   }
 
   char line[100];
   while (fgets(line, sizeof(line), file)) {
-    char *token;
-    // Leave token
-    token = strtok(line, ",");
-    char *leave = strdup(token);
-
-    // Value token
-    token = strtok(NULL, ",");
-    double actual_value = strtof(token, NULL);
-
-    set_rack_to_string(rack, leave, letter_distribution);
+    StringSplitter *leave_and_value = split_string(line, ',', true);
+    set_rack_to_string(rack, string_splitter_get_item(leave_and_value, 0),
+                       letter_distribution);
     double klv_leave_value = get_leave_value(klv, rack);
-    assert(within_epsilon(klv_leave_value, actual_value));
+    assert(within_epsilon(
+        klv_leave_value,
+        string_to_double(string_splitter_get_item(leave_and_value, 1))));
 
-    free(leave);
+    destroy_string_splitter(leave_and_value);
   }
 
   destroy_rack(rack);

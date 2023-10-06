@@ -4,9 +4,10 @@
 
 #include "config.h"
 #include "thread_control.h"
+#include "util.h"
 
 ThreadControl *create_thread_control(FILE *outfile) {
-  ThreadControl *thread_control = malloc(sizeof(ThreadControl));
+  ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
   pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
   thread_control->halt_status = HALT_STATUS_NONE;
   pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
@@ -16,7 +17,7 @@ ThreadControl *create_thread_control(FILE *outfile) {
   pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
   thread_control->check_stopping_condition_interval = 0;
   thread_control->check_stop_status = CHECK_STOP_INACTIVE;
-  if (outfile == NULL) {
+  if (!outfile) {
     thread_control->outfile = stdout;
   } else {
     thread_control->outfile = outfile;

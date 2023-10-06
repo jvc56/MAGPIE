@@ -10,6 +10,7 @@
 #include "ucgi_command.h"
 #include "ucgi_formats.h"
 #include "ucgi_print.h"
+#include "util.h"
 #include "words.h"
 
 static UCGICommandVars *ucgi_command_vars = NULL;
@@ -19,12 +20,24 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
                  uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
   clock_t begin = clock();
 
-  char lexicon[20] = "";
-  char ldname[20] = "";
-  lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
-  load_config_from_lexargs(&config, cgpstr, lexicon, ldname);
+  CGPOperations *cgp_operations = get_default_cgp_operations();
+  cgp_parse_status_t cgp_parse_status =
+      load_cgp_operations(cgp_operations, cgpstr);
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    log_fatal("cgp parse failed: %d\n", cgp_parse_status);
+  }
+  // FIXME: maybe handle this elsewhere.
+  if (!cgp_operations->letter_distribution_name) {
+    cgp_operations->letter_distribution_name =
+        get_letter_distribution_name_from_lexicon_name(
+            cgp_operations->lexicon_name);
+  }
+  load_config_from_lexargs(&config, cgpstr, cgp_operations->lexicon_name,
+                           cgp_operations->letter_distribution_name);
+  destroy_cgp_operations(cgp_operations);
 
   Game *game = create_game(config);
+  // FIXME: use the return status of load_cgp
   load_cgp(game, cgpstr);
 
   int tiles_played = 0;
@@ -43,7 +56,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   int points = 0;
   double leave_value = 0.0;
   FormedWords *fw = NULL;
-  if (move_type == MOVE_TYPE_PLAY) {
+  if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Assume that that kwg is shared
     points =
         score_move(game->gen->board, tiles, 0, ntiles - 1, row, col,
@@ -63,10 +76,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
     populate_word_validities(fw, game->players[0]->strategy_params->kwg);
   }
 
-  char *retstr = malloc(sizeof(char) * 400);
   Rack *leave_rack = NULL;
-  int phonies_exist = 0;
-  char phonies[200];
 
   if (nleave > 0) {
     leave_rack = create_rack(game->gen->letter_distribution->size);
@@ -77,19 +87,19 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
         get_leave_value(game->players[0]->strategy_params->klv, leave_rack);
   }
 
-  if (move_type == MOVE_TYPE_PLAY) {
-    char *pp = phonies;
-    char tile[MAX_LETTER_CHAR_LENGTH];
+  bool phonies_exist = false;
+  StringBuilder *phonies_string_builder = create_string_builder();
+  if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     for (int i = 0; i < fw->num_words; i++) {
       if (!fw->words[i].valid) {
-        phonies_exist = 1;
+        phonies_exist = true;
         for (int mli = 0; mli < fw->words[i].word_length; mli++) {
-          machine_letter_to_human_readable_letter(
-              game->gen->letter_distribution, fw->words[i].word[mli], tile);
-          pp += sprintf(pp, "%s", tile);
+          string_builder_add_user_visible_letter(game->gen->letter_distribution,
+                                                 fw->words[i].word[mli], 0,
+                                                 phonies_string_builder);
         }
         if (i < fw->num_words - 1) {
-          pp += sprintf(pp, ",");
+          string_builder_add_string(phonies_string_builder, ",", 0);
         }
       }
     }
@@ -100,53 +110,75 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   // result <scored|error> valid <true|false> invalid_words FU,BARZ
   // eq 123.45 sc 100 currmove f3.FU etc
 
-  char *tp = retstr;
-  char move_placeholder[30];
+  StringBuilder *return_string_builder = create_string_builder();
+  StringBuilder *move_string_builder = create_string_builder();
 
   Move *move = create_move();
   set_move(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, vertical,
            move_type);
 
-  store_move_ucgi(move, game->gen->board, move_placeholder,
-                  game->gen->letter_distribution);
+  string_builder_add_ucgi_move(move, game->gen->board,
+                               game->gen->letter_distribution,
+                               move_string_builder);
   destroy_move(move);
 
-  tp += sprintf(tp, "currmove %s", move_placeholder);
-  tp += sprintf(tp, " result %s valid %s", "scored",
-                phonies_exist ? "false" : "true");
+  string_builder_add_formatted_string(return_string_builder, "currmove %s",
+                                      string_builder_peek(move_string_builder));
+  string_builder_add_formatted_string(return_string_builder,
+                                      " result %s valid %s", "scored",
+                                      phonies_exist ? "false" : "true");
   if (phonies_exist) {
-    tp += sprintf(tp, " invalid_words %s", phonies);
+    string_builder_add_formatted_string(
+        return_string_builder, " invalid_words %s",
+        string_builder_peek(phonies_string_builder));
   }
-  tp += sprintf(tp, " sc %d eq %.3f", points, (double)points + leave_value);
+  string_builder_add_formatted_string(return_string_builder, " sc %d eq %.3f",
+                                      points, (double)points + leave_value);
 
+  destroy_string_builder(phonies_string_builder);
+  destroy_string_builder(move_string_builder);
   // keep config around for next call.
   // destroy_config(config);
   destroy_game(game);
-  if (leave_rack != NULL) {
+  if (leave_rack) {
     destroy_rack(leave_rack);
   }
+  char *return_string = string_builder_dump(return_string_builder, 0);
+  destroy_string_builder(return_string_builder);
   clock_t end = clock();
   log_debug("score_play took %0.6f seconds",
             (double)(end - begin) / CLOCKS_PER_SEC);
   // Caller can use UTF8ToString on the returned pointer but it MUST FREE
   // this string after it's done with it!
-  return retstr;
+  return return_string;
 }
 
 // a synchronous function to return a static eval of a position.
 char *static_evaluation(char *cgpstr, int num_plays) {
   clock_t begin = clock();
 
-  char lexicon[20] = "";
-  char ldname[20] = "";
-  lexicon_ld_from_cgp(cgpstr, lexicon, ldname);
-  load_config_from_lexargs(&config, cgpstr, lexicon, ldname);
+  CGPOperations *cgp_operations = get_default_cgp_operations();
+  cgp_parse_status_t cgp_parse_status =
+      load_cgp_operations(cgp_operations, cgpstr);
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    log_fatal("cgp parse failed: %d\n", cgp_parse_status);
+  }
+  // FIXME: maybe handle this elsewhere.
+  if (!cgp_operations->letter_distribution_name) {
+    cgp_operations->letter_distribution_name =
+        get_letter_distribution_name_from_lexicon_name(
+            cgp_operations->lexicon_name);
+  }
+  load_config_from_lexargs(&config, cgpstr, cgp_operations->lexicon_name,
+                           cgp_operations->letter_distribution_name);
+  destroy_cgp_operations(cgp_operations);
 
   Game *game = create_game(config);
+  // FIXME: use the return status of load_cgp
   load_cgp(game, cgpstr);
 
   int sorting_type = game->players[0]->strategy_params->move_sorting;
-  game->players[0]->strategy_params->move_sorting = SORT_BY_EQUITY;
+  game->players[0]->strategy_params->move_sorting = MOVE_SORT_EQUITY;
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
                  game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
@@ -168,7 +200,7 @@ char *static_evaluation(char *cgpstr, int num_plays) {
 }
 
 int process_ucgi_command_wasm(char *cmd) {
-  if (ucgi_command_vars == NULL) {
+  if (!ucgi_command_vars) {
     ucgi_command_vars = create_ucgi_command_vars(NULL);
   }
   return process_ucgi_command_async(cmd, ucgi_command_vars);
