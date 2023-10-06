@@ -30,8 +30,11 @@ board_layout_string_to_board_layout(const char *board_layout_string) {
 // depends on tranposition of the board
 
 int get_tindex(Board *board, int row, int col) {
-  return (row * (BOARD_DIM * (1 - board->transposed) + board->transposed)) +
-         (col * (BOARD_DIM * board->transposed + (1 - board->transposed)));
+  if (!board->transposed) {
+    return (row * BOARD_DIM) + col;
+  } else {
+    return (col * BOARD_DIM) + row;
+  }
 }
 
 int get_tindex_dir(Board *board, int row, int col, int dir) {

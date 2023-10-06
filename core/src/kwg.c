@@ -15,7 +15,7 @@
 void load_kwg(KWG *kwg, const char *kwg_filename) {
   FILE *stream = stream_from_filename(kwg_filename);
   if (!stream) {
-    log_fatal("failred to open stream from filename: %s\n", kwg_filename);
+    log_fatal("failed to open stream from filename: %s\n", kwg_filename);
   }
 
   fseek(stream, 0, SEEK_END);        // seek to end of file
