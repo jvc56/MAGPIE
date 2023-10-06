@@ -19,8 +19,8 @@ FSAN_ARG := -fsanitize=address,leak,undefined,pointer-compare,pointer-subtract
 
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra $(FSAN_ARG)
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
-cflags.prof := -g -O3 -Wall -Wno-trigraphs -Wextra -pg
-cflags.release := -O3 -Wall -Wno-trigraphs
+cflags.prof := -g -O3 -march=native -Wall -Wno-trigraphs -Wextra -pg
+cflags.release := -O3 -march=native -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
 lflags.prof := -pg -g
