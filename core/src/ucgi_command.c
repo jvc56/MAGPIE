@@ -335,7 +335,7 @@ int process_ucgi_command_async(const char *cmd,
   }
 
   // other commands
-  if (prefix("position cgp ", cmd)) {
+  if (has_prefix("position cgp ", cmd)) {
     const char *cgpstr = cmd + string_length("position cgp ");
     CGPOperations *cgp_operations = get_default_cgp_operations();
     ucgi_command_status_t command_status =
@@ -344,7 +344,7 @@ int process_ucgi_command_async(const char *cmd,
     if (command_status != UCGI_COMMAND_STATUS_SUCCESS) {
       return command_status;
     }
-  } else if (prefix("go", cmd)) {
+  } else if (has_prefix("go", cmd)) {
     ucgi_command_status_t command_status =
         ucgi_go_async(cmd + string_length("go"), ucgi_command_vars);
     if (command_status == UCGI_COMMAND_STATUS_COMMAND_PARSE_FAILED) {

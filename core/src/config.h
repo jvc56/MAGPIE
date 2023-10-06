@@ -5,42 +5,72 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "rack.h"
+#include "thread_control.h"
 #include "winpct.h"
 
 #define DEFAULT_MOVE_LIST_CAPACITY 1000000
 
+typedef enum {
+  CONFIG_LOAD_STATUS_SUCCESS,
+  CONFIG_LOAD_STATUS_FAILURE,
+  CONFIG_LOAD_STATUS_MULTIPLE_COMMANDS,
+  CONFIG_LOAD_STATUS_NO_COMMAND_SPECIFIED,
+  CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND,
+  CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG,
+} config_load_status_t;
+
 typedef struct StrategyParams {
   KWG *kwg;
-  char kwg_filename[MAX_DATA_FILENAME_LENGTH];
+  char *kwg_filename;
   KLV *klv;
-  char klv_filename[MAX_DATA_FILENAME_LENGTH];
+  char *klv_filename;
   int move_sorting;
   int play_recorder_type;
 } StrategyParams;
 
-typedef struct Config {
+typedef struct GameConfig {
   LetterDistribution *letter_distribution;
-  char ld_filename[MAX_DATA_FILENAME_LENGTH];
+  char *ld_filename;
   char *cgp;
-  int kwg_is_shared;
-  int klv_is_shared;
-  int use_game_pairs;
-  int number_of_games_or_pairs;
-  int print_info;
-  int checkstop;
-  StrategyParams *player_1_strategy_params;
-  StrategyParams *player_2_strategy_params;
-  // Inference params
+  bool kwg_is_shared;
+  bool klv_is_shared;
+  StrategyParams *player_strategy_params[2];
+} GameConfig;
+
+typedef struct InferenceConfig {
   Rack *actual_tiles_played;
   int player_to_infer_index;
   int actual_score;
   int number_of_tiles_exchanged;
   double equity_margin;
   int number_of_threads;
-  // Sim params
+} InferenceConfig;
+
+typedef struct SimConfig {
   WinPct *win_pcts;
-  char win_pct_filename[MAX_DATA_FILENAME_LENGTH];
+  char *win_pct_filename;
   int move_list_capacity;
+} SimConfig;
+
+typedef struct AutoplayConfig {
+  int use_game_pairs;
+  int number_of_games_or_pairs;
+} AutoplayConfig;
+
+typedef enum {
+  GO_COMMAND_UNKNOWN,
+  GO_COMMAND_SIM,
+  GO_COMMAND_INFER,
+  GO_COMMAND_AUTOPLAY,
+} go_command_t;
+
+typedef struct Config {
+  go_command_t go_command;
+  GameConfig *game_config;
+  InferenceConfig *inference_config;
+  SimConfig *sim_config;
+  AutoplayConfig *autoplay_config;
+  ThreadControl *thread_control;
 } Config;
 
 void load_config_from_lexargs(Config **config, const char *cgp,

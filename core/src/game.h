@@ -41,14 +41,6 @@ typedef enum {
   GAME_END_REASON_CONSECUTIVE_ZEROS,
 } game_end_reason_t;
 
-typedef struct CGPOperations {
-  int bingo_bonus;
-  board_layout_t board_layout;
-  game_variant_t game_variant;
-  char *letter_distribution_name;
-  char *lexicon_name;
-} CGPOperations;
-
 typedef struct MinimalGameBackup {
   Board *board;
   Bag *bag;

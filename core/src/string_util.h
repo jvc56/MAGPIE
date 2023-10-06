@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-int prefix(const char *pre, const char *str);
+int has_prefix(const char *pre, const char *str);
 int is_all_whitespace_or_empty(const char *str);
 int is_all_digits_or_empty(const char *str);
 char *get_formatted_string(const char *format, ...);

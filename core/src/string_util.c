@@ -11,7 +11,7 @@
 
 // Misc string functions
 
-int prefix(const char *pre, const char *str) {
+int has_prefix(const char *pre, const char *str) {
   return strncmp(pre, str, string_length(pre)) == 0;
 }
 

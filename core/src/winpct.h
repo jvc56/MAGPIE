@@ -15,7 +15,9 @@ typedef struct WinPct {
 WinPct *create_winpct(const char *winpct_filename);
 void destroy_winpct(WinPct *wp);
 
-inline float win_pct(WinPct *wp, int spread_plus_leftover, unsigned int tiles_unseen) {
+// FIXME: should this be inlined?
+inline float win_pct(WinPct *wp, int spread_plus_leftover,
+                     unsigned int tiles_unseen) {
   if (spread_plus_leftover > wp->max_spread) {
     spread_plus_leftover = wp->max_spread;
   }

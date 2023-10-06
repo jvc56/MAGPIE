@@ -41,13 +41,6 @@ void set_check_stopping_condition_interval(
       check_stopping_condition_interval;
 }
 
-ThreadControl *create_thread_control_from_config(Config *config) {
-  ThreadControl *thread_control = create_thread_control(NULL);
-  set_print_info_interval(thread_control, config->print_info);
-  set_check_stopping_condition_interval(thread_control, config->checkstop);
-  return thread_control;
-}
-
 int get_halt_status(ThreadControl *thread_control) {
   int halt_status;
   pthread_mutex_lock(&thread_control->halt_status_mutex);

@@ -15,6 +15,209 @@
 
 #define MAX_ARG_LENGTH 300
 
+#define LOAD_CGP_COMMAND_PREFIX "position cgp "
+#define GO_COMMAND_PREFIX "go "
+
+#define GO_COMMAND_SIM_NAME "sim"
+#define GO_COMMAND_INFER_NAME "infer"
+#define GO_COMMAND_AUTOPLAY_NAME "autoplay"
+
+#define CGP_OPCODE_BINGO_BONUS "bb"
+#define CGP_OPCODE_BOARD_NAME "bdn"
+#define CGP_OPCODE_GAME_VARIANT "var"
+#define CGP_OPCODE_LETTER_DISTRIBUTION_NAME "ld"
+#define CGP_OPCODE_LEXICON_NAME "lex"
+
+// Sim go arg name
+
+#define GO_ARG_WIN_PERCENTAGE_FILENAME "winpct"
+#define GO_ARG_MOVE_LIST_CAPACITY "cap"
+
+typedef struct CGPOperations {
+  int bingo_bonus;
+  board_layout_t board_layout;
+  game_variant_t game_variant;
+  char *letter_distribution_name;
+  char *lexicon_name;
+} CGPOperations;
+
+CGPOperations *get_default_cgp_operations() {
+  CGPOperations *cgp_operations = malloc_or_die(sizeof(CGPOperations));
+  cgp_operations->bingo_bonus = BINGO_BONUS;
+  cgp_operations->board_layout = BOARD_LAYOUT_CROSSWORD_GAME;
+  cgp_operations->game_variant = GAME_VARIANT_CLASSIC;
+  cgp_operations->letter_distribution_name = NULL;
+  cgp_operations->lexicon_name = NULL;
+  return cgp_operations;
+}
+
+void destroy_cgp_operations(CGPOperations *cgp_operations) {
+  if (cgp_operations->lexicon_name) {
+    free(cgp_operations->lexicon_name);
+  }
+  if (cgp_operations->letter_distribution_name) {
+    free(cgp_operations->letter_distribution_name);
+  }
+  free(cgp_operations);
+}
+
+cgp_parse_status_t load_cgp_operations(CGPOperations *cgp_operations,
+                                       const char *cgp) {
+  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
+  StringSplitter *split_cgp_string = split_string_by_whitespace(cgp, true);
+  int number_of_items = string_splitter_get_number_of_items(split_cgp_string);
+  for (int i = 0; i < number_of_items - 1; i++) {
+    const char *opcode = string_splitter_get_item(split_cgp_string, i);
+    char *string_value = string_splitter_get_item(split_cgp_string, i + 1);
+
+    // For now all values can be derived from a single contiguous
+    // string, so if any of them have a semicolon at the end,
+    // remove it.
+    // FIXME: move this 'remove last char' function to string util
+    size_t string_value_length = string_length(string_value);
+    if (string_value[string_value_length - 1] == ';') {
+      string_value[string_value_length - 1] = '\0';
+    }
+    if (strings_equal(CGP_OPCODE_BINGO_BONUS, opcode)) {
+      if (!is_all_digits_or_empty(string_value)) {
+        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BINGO_BONUS;
+        break;
+      }
+      cgp_operations->bingo_bonus = string_to_int(string_value);
+    } else if (strings_equal(CGP_OPCODE_BOARD_NAME, opcode)) {
+      cgp_operations->board_layout =
+          board_layout_string_to_board_layout(string_value);
+      if (cgp_operations->board_layout == BOARD_LAYOUT_UNKNOWN) {
+        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BOARD_NAME;
+      }
+    } else if (strings_equal(CGP_OPCODE_GAME_VARIANT, opcode)) {
+      cgp_operations->game_variant =
+          get_game_variant_type_from_name(string_value);
+      if (cgp_operations->game_variant == GAME_VARIANT_UNKNOWN) {
+        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_GAME_VARIANT;
+      }
+    } else if (strings_equal(CGP_OPCODE_LETTER_DISTRIBUTION_NAME, opcode)) {
+      if (cgp_operations->letter_distribution_name) {
+        free(cgp_operations->letter_distribution_name);
+      }
+      cgp_operations->letter_distribution_name =
+          get_formatted_string("%s", string_value);
+    } else if (strings_equal(CGP_OPCODE_LEXICON_NAME, opcode)) {
+      if (cgp_operations->lexicon_name) {
+        free(cgp_operations->lexicon_name);
+      }
+      cgp_operations->lexicon_name = get_formatted_string("%s", string_value);
+    }
+  }
+  destroy_string_splitter(split_cgp_string);
+  return cgp_parse_status;
+}
+
+ThreadControl *create_thread_control_from_config(Config *config) {
+  ThreadControl *thread_control = create_thread_control(NULL);
+  set_print_info_interval(thread_control, config->print_info);
+  set_check_stopping_condition_interval(thread_control, config->checkstop);
+  return thread_control;
+}
+
+void load_game_config_with_cgp_operations(GameConfig *game_config,
+                                          CGPOperations *cgp_operations) {}
+
+go_command_t go_command_from_string(const char *str) {
+  go_command_t go_command = GO_COMMAND_UNKNOWN;
+  if (strings_equal(GO_COMMAND_SIM_NAME, str)) {
+    go_command = GO_COMMAND_SIM;
+  } else if (strings_equal(GO_COMMAND_INFER_NAME, str)) {
+    go_command = GO_COMMAND_INFER;
+  } else if (strings_equal(GO_COMMAND_AUTOPLAY_NAME, str)) {
+    go_command = GO_COMMAND_AUTOPLAY;
+  }
+  return go_command;
+}
+
+void load_winpct_for_sim_config(SimConfig *sim_config,
+                                const char *win_pct_filename) {
+  if (sim_config->win_pct_filename &&
+      strings_equal(sim_config->win_pct_filename, win_pct_filename)) {
+    return;
+  }
+  WinPct *new_win_pcts = create_winpct(win_pct_filename);
+  destroy_winpct(sim_config->win_pcts);
+  sim_config->win_pcts = new_win_pcts;
+
+  free(sim_config->win_pct_filename);
+  sim_config->win_pct_filename = get_formatted_string("%s", win_pct_filename);
+}
+
+config_load_status_t load_config_for_sim(Config *config,
+                                         StringSplitter *go_args) {
+  int number_of_args = string_splitter_get_number_of_items(go_args);
+  for (int i = 0; i < number_of_args - 1; i++) {
+    const char *arg_name = string_splitter_get_item(go_args, i);
+    const char *arg_value = string_splitter_get_item(go_args, i + 1);
+    if (strings_equal(GO_ARG_WIN_PERCENTAGE_FILENAME, arg_name)) {
+      load_winpct_for_sim_config(config->sim_config, arg_value);
+    } else if (strings_equal(GO_ARG_MOVE_LIST_CAPACITY, arg_name)) {
+      config->sim_config->move_list_capacity = string_to_int(arg_value);
+    } else {
+      return CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG;
+    }
+  }
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+config_load_status_t load_config_with_go_command(Config *config,
+                                                 StringSplitter *go_args) {
+  config->go_command = GO_COMMAND_UNKNOWN;
+  int number_of_args = string_splitter_get_number_of_items(go_args);
+  for (int i = 0; i < number_of_args; i++) {
+    go_command_t possible_go_command =
+        go_command_from_string(string_splitter_get_item(go_args, i));
+    if (possible_go_command != GO_COMMAND_UNKNOWN) {
+      if (config->go_command != GO_COMMAND_UNKNOWN) {
+        return CONFIG_LOAD_STATUS_MULTIPLE_COMMANDS;
+      }
+      config->go_command = possible_go_command;
+    }
+  }
+  if (config->go_command == GO_COMMAND_UNKNOWN) {
+    return CONFIG_LOAD_STATUS_NO_COMMAND_SPECIFIED;
+  }
+
+  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_FAILURE;
+  switch (config->go_command) {
+  case GO_COMMAND_SIM:
+    config_load_status = load_config_for_sim(config, go_args);
+    break;
+  case GO_COMMAND_INFER:
+    config_load_status = load_config_for_infer(config, go_args);
+    break;
+  case GO_COMMAND_AUTOPLAY:
+    config_load_status = load_config_for_autoplay(config, go_args);
+    break;
+  default:
+    log_fatal("unhandled go command: %d\n", config->go_command);
+  }
+  return config_load_status;
+}
+
+config_load_status_t load_config(Config *config, const char *cmd) {
+  config_load_status_t config_load_status =
+      CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND;
+  if (has_prefix(LOAD_CGP_COMMAND_PREFIX, cmd)) {
+    CGPOperations *cgp_operations = get_default_cgp_operations();
+    load_cgp_operations(cgp_operations,
+                        cmd + string_length(LOAD_CGP_COMMAND_PREFIX));
+    load_game_config_with_cgp_operations(config->game_config, cgp_operations);
+    destroy_cgp_operations(cgp_operations);
+  } else if (has_prefix(GO_COMMAND_PREFIX, cmd)) {
+    StringSplitter *go_args = split_string_by_whitespace(
+        cmd + string_length(GO_COMMAND_PREFIX), true);
+    config_load_status = load_config_with_go_command(config, go_args);
+    destroy_string_splitter(go_args);
+  }
+}
+
 Config *create_config(const char *letter_distribution_filename, const char *cgp,
                       const char *kwg_filename_1, const char *klv_filename_1,
                       int move_sorting_1, int play_recorder_type_1,
@@ -383,13 +586,13 @@ void load_config_from_lexargs(Config **config, const char *cgp,
   char *lexicon_file = get_formatted_string("data/lexica/%s.kwg", lexicon_name);
   if (strings_equal(lexicon_name, "CSW21")) {
     string_copy(leaves, "data/lexica/CSW21.klv2");
-  } else if (prefix("NSF", lexicon_name)) {
+  } else if (has_prefix("NSF", lexicon_name)) {
     string_copy(leaves, "data/lexica/norwegian.klv2");
-  } else if (prefix("RD", lexicon_name)) {
+  } else if (has_prefix("RD", lexicon_name)) {
     string_copy(leaves, "data/lexica/german.klv2");
-  } else if (prefix("DISC", lexicon_name)) {
+  } else if (has_prefix("DISC", lexicon_name)) {
     string_copy(leaves, "data/lexica/catalan.klv2");
-  } else if (prefix("FRA", lexicon_name)) {
+  } else if (has_prefix("FRA", lexicon_name)) {
     string_copy(leaves, "data/lexica/french.klv2");
   }
 
