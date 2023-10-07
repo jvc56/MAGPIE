@@ -57,6 +57,10 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
           break;
         }
       }
+      if (rend > BOARD_DIM - 1) {
+        rend = BOARD_DIM - 1;
+      }
+
       int widx = 0;
       ws->words[formed_words_idx].word_length = rend - rbegin + 1;
       ws->words[formed_words_idx].valid = 0; // we don't know validity yet.
