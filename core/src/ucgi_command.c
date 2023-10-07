@@ -298,9 +298,9 @@ cgp_parse_status_t load_position(UCGICommandVars *ucgi_command_vars,
   return cgp_parse_status;
 }
 
-cgp_parse_status_t ucgi_load_position(UCGICommandVars *ucgi_command_vars,
-                                      CGPOperations *cgp_operations,
-                                      const char *cgpstr) {
+ucgi_command_status_t ucgi_load_position(UCGICommandVars *ucgi_command_vars,
+                                         CGPOperations *cgp_operations,
+                                         const char *cgpstr) {
   cgp_parse_status_t cgp_parse_status =
       load_cgp_operations(cgp_operations, cgpstr);
   if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
