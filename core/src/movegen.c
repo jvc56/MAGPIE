@@ -832,7 +832,7 @@ Generator *create_generator(Config *config) {
   generator->exchange_strip = (uint8_t *)malloc_or_die(
       config->letter_distribution->size * sizeof(uint8_t));
   // Just load the zero values for now
-  load_quackle_preendgame_adjustment_values(generator);
+  load_zero_preendgame_adjustment_values(generator);
 
   return generator;
 }
@@ -857,7 +857,7 @@ Generator *copy_generator(Generator *gen, int move_list_size) {
   new_generator->exchange_strip = (uint8_t *)malloc_or_die(
       gen->letter_distribution->size * sizeof(uint8_t));
   // Just load the zero values for now
-  load_quackle_preendgame_adjustment_values(new_generator);
+  load_zero_preendgame_adjustment_values(new_generator);
 
   return new_generator;
 }
