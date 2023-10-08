@@ -255,7 +255,7 @@ int is_empty_cache(Generator *gen, int col) {
 }
 
 int better_play_has_been_found(Generator *gen, double highest_possible_equity) {
-  return highest_possible_equity + COMPARE_MOVES_EPSILON <
+  return highest_possible_equity + COMPARE_MOVES_EPSILON <=
          gen->move_list->moves[0]->equity;
 }
 
@@ -773,10 +773,13 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
                   kwg_get_root_node_index(player->strategy_params->kwg),
                   gen->current_anchor_col, gen->current_anchor_col,
                   !gen->vertical);
-    // If a better play has been found than should have been possible for this
-    // anchor, highest_possible_equity was invalid.
-    assert(!better_play_has_been_found(
-        gen, gen->anchor_list->anchors[i]->highest_possible_equity));
+
+    if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST) {
+      // If a better play has been found than should have been possible for this
+      // anchor, highest_possible_equity was invalid.
+      assert(!better_play_has_been_found(
+          gen, gen->anchor_list->anchors[i]->highest_possible_equity));
+    }
   }
 
   reset_transpose(gen->board);
