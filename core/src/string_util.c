@@ -328,6 +328,24 @@ char *string_splitter_get_item(StringSplitter *string_splitter,
   return string_splitter->items[item_index];
 }
 
+char *string_splitter_join(StringSplitter *string_splitter, int start_index,
+                           int end_index) {
+  int number_of_items = string_splitter_get_number_of_items(string_splitter);
+  if (start_index < 0 || end_index < 0 || start_index > number_of_items ||
+      end_index > number_of_items) {
+    log_fatal("invalid bounds for join: %d, %d, %d\n", start_index, end_index,
+              number_of_items);
+  }
+  StringBuilder *joined_string_builder = create_string_builder();
+  for (int i = start_index; i < end_index; i++) {
+    string_builder_add_string(joined_string_builder,
+                              string_splitter_get_item(string_splitter, i), 0);
+  }
+  char *joined_string = string_builder_dump(joined_string_builder, 0);
+  destroy_string_builder(joined_string_builder);
+  return joined_string;
+}
+
 int split_string_scan(StringSplitter *string_splitter, const char *input_string,
                       StringDelimiter *string_delimiter, bool ignore_empty,
                       bool set_items) {

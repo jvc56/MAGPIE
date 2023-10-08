@@ -2,6 +2,8 @@
 #ifndef CGP_H
 #define CGP_H
 
+#include "constants.h"
+
 typedef enum {
   CGP_PARSE_STATUS_SUCCESS,
   CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS,

@@ -25,6 +25,7 @@ typedef enum {
 } halt_status_t;
 
 typedef struct ThreadControl {
+  int number_of_threads;
   pthread_mutex_t halt_status_mutex;
   int halt_status;
   pthread_mutex_t current_mode_mutex;

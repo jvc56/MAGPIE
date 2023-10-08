@@ -43,7 +43,6 @@ typedef struct InferenceConfig {
   int actual_score;
   int number_of_tiles_exchanged;
   double equity_margin;
-  int number_of_threads;
 } InferenceConfig;
 
 typedef struct SimConfig {

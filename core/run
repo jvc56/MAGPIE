@@ -73,7 +73,7 @@ fi
 # echo 0 > /proc/sys/kernel/kptr_restrict
 
 make magpie_test BUILD=release
-perf record ./bin/magpie_test prof -g1 "./data/lexica/CSW21.kwg" \
+perf record ./bin/magpie_test autoplay -g1 "./data/lexica/CSW21.kwg" \
                       -d "./data/letterdistributions/english.csv" \
                       -l1 "./data/lexica/CSW21.klv2" \
                       -r1 "top" \

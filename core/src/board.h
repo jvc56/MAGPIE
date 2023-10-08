@@ -32,11 +32,6 @@
   " -   \"   \"   - "                                                          \
   "=  '   =   '  ="
 
-typedef enum {
-  BOARD_LAYOUT_UNKNOWN,
-  BOARD_LAYOUT_CROSSWORD_GAME,
-  BOARD_LAYOUT_SUPER_CROSSWORD_GAME,
-} board_layout_t;
 typedef struct TraverseBackwardsReturnValues {
   uint32_t node_index;
   int path_is_valid;

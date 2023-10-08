@@ -1,28 +1,15 @@
+#include <stdbool.h>
+#include <stdlib.h>
+
+#include "cgp.h"
 #include "constants.h"
+#include "string_util.h"
 
-typedef enum {
-  CGP_PARSE_STATUS_SUCCESS,
-  CGP_PARSE_STATUS_MISSING_REQUIRED_FIELDS,
-  CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_ROWS,
-  CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_COLUMNS,
-  CGP_PARSE_STATUS_INVALID_NUMBER_OF_PLAYER_RACKS,
-  CGP_PARSE_STATUS_INVALID_NUMBER_OF_PLAYER_SCORES,
-  CGP_PARSE_STATUS_MALFORMED_BOARD_LETTERS,
-  CGP_PARSE_STATUS_MALFORMED_SCORES,
-  CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS,
-  CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS,
-  CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BINGO_BONUS,
-  CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BOARD_NAME,
-  CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_GAME_VARIANT,
-} cgp_parse_status_t;
-
-typedef struct CGPOperations {
-  int bingo_bonus;
-  board_layout_t board_layout;
-  game_variant_t game_variant;
-  char *letter_distribution_name;
-  char *lexicon_name;
-} CGPOperations;
+#define CGP_OPCODE_BINGO_BONUS "bb"
+#define CGP_OPCODE_BOARD_NAME "bdn"
+#define CGP_OPCODE_GAME_VARIANT "var"
+#define CGP_OPCODE_LETTER_DISTRIBUTION_NAME "ld"
+#define CGP_OPCODE_LEXICON_NAME "lex"
 
 CGPOperations *get_default_cgp_operations() {
   CGPOperations *cgp_operations = malloc_or_die(sizeof(CGPOperations));

@@ -8,7 +8,20 @@
 #define ASCII_PLAYED_THROUGH '.'
 #define MAX_DATA_FILENAME_LENGTH 64
 #define BINGO_BONUS 50
+
 // Shared enums
+
+typedef enum {
+  GAME_VARIANT_UNKNOWN,
+  GAME_VARIANT_CLASSIC,
+  GAME_VARIANT_WORDSMOG,
+} game_variant_t;
+
+typedef enum {
+  BOARD_LAYOUT_UNKNOWN,
+  BOARD_LAYOUT_CROSSWORD_GAME,
+  BOARD_LAYOUT_SUPER_CROSSWORD_GAME,
+} board_layout_t;
 
 typedef enum {
   MOVE_SORT_EQUITY,

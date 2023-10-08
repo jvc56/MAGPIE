@@ -8,6 +8,7 @@
 
 ThreadControl *create_thread_control(FILE *outfile) {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
+  thread_control->number_of_threads = 1;
   pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
   thread_control->halt_status = HALT_STATUS_NONE;
   pthread_mutex_init(&thread_control->current_mode_mutex, NULL);

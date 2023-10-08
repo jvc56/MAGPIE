@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cgp.h"
 #include "config.h"
 #include "constants.h"
 #include "klv.h"
@@ -18,28 +19,23 @@
 #define COMMAND_TYPE_LOAD_CGP_FIRST_PREFIX "position"
 #define COMMAND_TYPE_LOAD_CGP_SECOND_PREFIX "cgp"
 
-#define COMMAND_TYPE_GO_PREFIX "go "
+#define COMMAND_TYPE_GO_PREFIX "go"
 #define COMMAND_TYPE_SIM_NAME "sim"
 #define COMMAND_TYPE_INFER_NAME "infer"
 #define COMMAND_TYPE_AUTOPLAY_NAME "autoplay"
 
-#define CGP_OPCODE_BINGO_BONUS "bb"
-#define CGP_OPCODE_BOARD_NAME "bdn"
-#define CGP_OPCODE_GAME_VARIANT "var"
-#define CGP_OPCODE_LETTER_DISTRIBUTION_NAME "ld"
-#define CGP_OPCODE_LEXICON_NAME "lex"
+// Sim args
 
-// Sim go arg name
+#define SIM_ARG_WIN_PERCENTAGE_FILENAME "winpct"
+#define SIM_ARG_MOVE_LIST_CAPACITY "cap"
 
-#define GO_ARG_WIN_PERCENTAGE_FILENAME "winpct"
-#define GO_ARG_MOVE_LIST_CAPACITY "cap"
+// Infer args
 
-ThreadControl *create_thread_control_from_config(Config *config) {
-  ThreadControl *thread_control = create_thread_control(NULL);
-  set_print_info_interval(thread_control, config->print_info);
-  set_check_stopping_condition_interval(thread_control, config->checkstop);
-  return thread_control;
-}
+#define INFER_ARG_TILES_PLAYED "tilesplayed"
+#define INFER_ARG_PLAYER_TO_INFER_INDEX "playerindex"
+#define INFER_ARG_SCORE "score"
+#define INFER_ARG_NUMBER_OF_TILES_EXCHANGED "exch"
+#define INFER_ARG_EQUITY_MARGIN "exch"
 
 void load_game_config_with_cgp_operations(GameConfig *game_config,
                                           CGPOperations *cgp_operations) {}
@@ -58,15 +54,46 @@ void load_winpct_for_sim_config(SimConfig *sim_config,
   sim_config->win_pct_filename = get_formatted_string("%s", win_pct_filename);
 }
 
-config_load_status_t load_config_for_sim(Config *config,
-                                         StringSplitter *cmd_args) {
+config_load_status_t load_config_for_infer(Config *config,
+                                           StringSplitter *cmd_args) {
+  if (!config->inference_config) {
+    config->inference_config = create_inference_config();
+  }
   int number_of_args = string_splitter_get_number_of_items(cmd_args);
   for (int i = 0; i < number_of_args - 1; i++) {
     const char *arg_name = string_splitter_get_item(cmd_args, i);
     const char *arg_value = string_splitter_get_item(cmd_args, i + 1);
-    if (strings_equal(GO_ARG_WIN_PERCENTAGE_FILENAME, arg_name)) {
+    if (strings_equal(INFER_ARG_TILES_PLAYED, arg_name)) {
+      set_rack_to_string(config->inference_config, arg_value, NULL);
+    } else if (strings_equal(INFER_ARG_PLAYER_TO_INFER_INDEX, arg_name)) {
+      config->inference_config->player_to_infer_index =
+          string_to_int(arg_value);
+    } else if (strings_equal(INFER_ARG_SCORE, arg_name)) {
+      config->inference_config->actual_score = string_to_int(arg_value);
+    } else if (strings_equal(INFER_ARG_NUMBER_OF_TILES_EXCHANGED, arg_name)) {
+      config->inference_config->number_of_tiles_exchanged =
+          string_to_int(arg_value);
+    } else if (strings_equal(INFER_ARG_EQUITY_MARGIN, arg_name)) {
+      config->inference_config->equity_margin = string_to_double(arg_value);
+    } else {
+      return CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG;
+    }
+  }
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+config_load_status_t load_config_for_sim(Config *config,
+                                         StringSplitter *cmd_args) {
+  if (!config->sim_config) {
+    config->sim_config = create_sim_config();
+  }
+  int number_of_args = string_splitter_get_number_of_items(cmd_args);
+  for (int i = 0; i < number_of_args - 1; i++) {
+    const char *arg_name = string_splitter_get_item(cmd_args, i);
+    const char *arg_value = string_splitter_get_item(cmd_args, i + 1);
+    if (strings_equal(SIM_ARG_WIN_PERCENTAGE_FILENAME, arg_name)) {
       load_winpct_for_sim_config(config->sim_config, arg_value);
-    } else if (strings_equal(GO_ARG_MOVE_LIST_CAPACITY, arg_name)) {
+    } else if (strings_equal(SIM_ARG_MOVE_LIST_CAPACITY, arg_name)) {
       config->sim_config->move_list_capacity = string_to_int(arg_value);
     } else {
       return CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG;
@@ -110,15 +137,22 @@ command_t get_command_type(StringSplitter *cmd_args) {
 }
 
 config_load_status_t load_config(Config *config, const char *cmd) {
-  config_load_status_t config_load_status =
-      CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND;
+  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
 
-  StringSplitter *cmd_args = split_string_by_whitespace(
-      cmd + string_length(COMMAND_TYPE_PREFIX), true);
+  StringSplitter *cmd_args = split_string_by_whitespace(cmd, true);
 
   command_t command_type = get_command_type(cmd_args);
 
   switch (command_type) {
+  case COMMAND_TYPE_LOAD_CGP:
+    int cmd_args_length = string_splitter_get_number_of_items(cmd_args);
+    // Cut off the 'position' and 'cgp' strings
+    char *cgp_string = string_splitter_join(cmd_args, 2, cmd_args_length);
+    CGPOperations *cgp_operations = get_default_cgp_operations();
+    load_cgp_operations(cgp_operations, cgp_string);
+    load_game_config_with_cgp_operations(config->game_config, cgp_operations);
+    destroy_cgp_operations(cgp_operations);
+    break;
   case COMMAND_TYPE_SIM:
     config_load_status = load_config_for_sim(config, cmd_args);
     break;
@@ -129,24 +163,10 @@ config_load_status_t load_config(Config *config, const char *cmd) {
     config_load_status = load_config_for_autoplay(config, cmd_args);
     break;
   default:
+    config_load_status = CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND;
     break;
   }
-  return config_load_status;
-
-  if (has_prefix(LOAD_CGP_COMMAND_PREFIX, cmd)) {
-    CGPOperations *cgp_operations = get_default_cgp_operations();
-    load_cgp_operations(cgp_operations,
-                        cmd + string_length(LOAD_CGP_COMMAND_PREFIX));
-    load_game_config_with_cgp_operations(config->game_config, cgp_operations);
-    destroy_cgp_operations(cgp_operations);
-  } else if (has_prefix(COMMAND_TYPE_PREFIX, cmd)) {
-    StringSplitter *cmd_args = split_string_by_whitespace(
-        cmd + string_length(COMMAND_TYPE_PREFIX), true);
-    config_load_status = load_config_with_command(config, cmd_args);
-    destroy_string_splitter(cmd_args);
-  }
   destroy_string_splitter(cmd_args);
-
   return config_load_status;
 }
 
