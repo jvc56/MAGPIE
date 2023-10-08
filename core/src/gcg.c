@@ -89,7 +89,7 @@ const char *id_regex =
 const char *rack1_regex = "#rack1 ([^[:space:]]+)";
 const char *rack2_regex = "#rack2 ([^[:space:]]+)";
 const char *move_regex = ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
-                         "]]+(\\w+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
+                         "]]+([[:alnum:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
                          "\\+([[:digit:]]+)[[:space:]]+([[:digit:]]+)";
 const char *note_regex = "#note (.+)";
 const char *lexicon_name_regex = "#lexicon (.+)";
