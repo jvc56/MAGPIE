@@ -1,5 +1,3 @@
-#include "movegen.h"
-
 #include <assert.h>
 #include <ctype.h>
 #include <stdint.h>
@@ -13,6 +11,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "leave_map.h"
+#include "movegen.h"
 #include "player.h"
 #include "rack.h"
 #include "util.h"
