@@ -254,9 +254,11 @@ int is_empty_cache(Generator *gen, int col) {
   return get_letter_cache(gen, col) == ALPHABET_EMPTY_SQUARE_MARKER;
 }
 
-int better_play_has_been_found(Generator *gen, double highest_possible_equity) {
-  return highest_possible_equity + COMPARE_MOVES_EPSILON <=
-         gen->move_list->moves[0]->equity;
+int better_play_has_been_found(Generator *gen, double highest_possible_value) {
+  const double best_value_found = (gen->move_sorting_type == MOVE_SORT_EQUITY)
+                                      ? gen->move_list->moves[0]->equity
+                                      : gen->move_list->moves[0]->score;
+  return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
 }
 
 void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
