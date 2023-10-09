@@ -221,8 +221,6 @@ void *execute_ucgi_command(void *uncasted_ucgi_command_vars) {
   case SEARCH_TYPE_INFERENCE_SOLVE:
     ucgi_infer(ucgi_command_vars);
     break;
-  default:
-    log_warn("Search type not set; exiting immediately.");
   }
   log_debug("setting current mode to stopped");
   set_mode_stopped(ucgi_command_vars->thread_control);
@@ -396,10 +394,6 @@ char *ucgi_search_status(UCGICommandVars *ucgi_command_vars) {
     return ucgi_sim_stats(ucgi_command_vars->simmer,
                           ucgi_command_vars->loaded_game, mode == MODE_STOPPED);
     break;
-
-  default:
-    log_warn("Search type not yet handled.");
-    return NULL;
   }
 }
 
@@ -433,9 +427,5 @@ char *ucgi_stop_search(UCGICommandVars *ucgi_command_vars) {
     return ucgi_sim_stats(ucgi_command_vars->simmer,
                           ucgi_command_vars->loaded_game, 1);
     break;
-
-  default:
-    log_warn("Search type not yet handled.");
-    return NULL;
   }
 }

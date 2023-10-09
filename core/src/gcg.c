@@ -953,8 +953,6 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   case GCG_TILE_SET_TOKEN:
     // For now, don't do anything
     break;
-  default:
-    log_fatal("Unhandled token");
   }
   return gcg_parse_status;
 }

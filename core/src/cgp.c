@@ -32,9 +32,8 @@ void destroy_cgp_operations(CGPOperations *cgp_operations) {
 }
 
 cgp_parse_status_t load_cgp_operations(CGPOperations *cgp_operations,
-                                       const char *cgp) {
+                                       StringSplitter *split_cgp_string) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
-  StringSplitter *split_cgp_string = split_string_by_whitespace(cgp, true);
   int number_of_items = string_splitter_get_number_of_items(split_cgp_string);
   for (int i = 0; i < number_of_items - 1; i++) {
     const char *opcode = string_splitter_get_item(split_cgp_string, i);
@@ -44,10 +43,6 @@ cgp_parse_status_t load_cgp_operations(CGPOperations *cgp_operations,
     // string, so if any of them have a semicolon at the end,
     // remove it.
     // FIXME: move this 'remove last char' function to string util
-    size_t string_value_length = string_length(string_value);
-    if (string_value[string_value_length - 1] == ';') {
-      string_value[string_value_length - 1] = '\0';
-    }
     if (strings_equal(CGP_OPCODE_BINGO_BONUS, opcode)) {
       if (!is_all_digits_or_empty(string_value)) {
         cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BINGO_BONUS;

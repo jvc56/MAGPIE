@@ -16,6 +16,7 @@ int memory_compare(const void *s1, const void *s2, size_t n);
 bool is_string_empty(const char *str1);
 void remove_first_newline(char *str);
 size_t string_length(const char *str);
+void trim_semicolon(char *str);
 
 struct StringSplitter;
 typedef struct StringSplitter StringSplitter;

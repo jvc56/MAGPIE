@@ -64,6 +64,16 @@ size_t string_length(const char *str) {
   return strlen(str);
 }
 
+void trim_semicolon(char *str) {
+  size_t str_length = string_length(str);
+  if (str_length == 0) {
+    return;
+  }
+  if (str[str_length - 1] == ';') {
+    str[str_length - 1] = '\0';
+  }
+}
+
 // String utility functions
 
 char *format_string_with_va_list(const char *format, va_list *args) {
@@ -309,9 +319,6 @@ bool char_matches_string_delimiter(StringDelimiter *string_delimiter,
   case STRING_DELIMITER_WHITESPACE:
     return isspace(c);
     break;
-  default:
-    log_fatal("string delimiter class unhandled: %d\n",
-              string_delimiter->string_delimiter_class);
   }
   return false;
 }
