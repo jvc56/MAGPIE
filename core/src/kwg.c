@@ -12,11 +12,23 @@
 #include "log.h"
 #include "util.h"
 
-void load_kwg(KWG *kwg, const char *kwg_filename) {
+char *get_kwg_filepath(const char *kwg_name) {
+  // Check for invalid inputs
+  if (!kwg_name) {
+    return NULL;
+  }
+  return get_formatted_string("%s%s%s", KWG_FILEPATH, kwg_name,
+                              KWG_FILE_EXTENSION);
+}
+
+void load_kwg(KWG *kwg, const char *kwg_name) {
+  char *kwg_filename = get_kwg_filepath(kwg_name);
+
   FILE *stream = stream_from_filename(kwg_filename);
   if (!stream) {
     log_fatal("failed to open stream from filename: %s\n", kwg_filename);
   }
+  free(kwg_filename);
 
   fseek(stream, 0, SEEK_END);        // seek to end of file
   long int kwg_size = ftell(stream); // get current file pointer

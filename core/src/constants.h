@@ -8,6 +8,10 @@
 #define ASCII_PLAYED_THROUGH '.'
 #define MAX_DATA_FILENAME_LENGTH 64
 #define BINGO_BONUS 50
+#define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"
+#define LETTER_DISTRIBUTION_FILEPATH "data/letterdistributions/"
+#define KWG_FILEPATH "data/lexica/"
+#define KWG_EXTENSION ".kwg"
 
 // Shared enums
 
@@ -29,9 +33,9 @@ typedef enum {
 } move_sort_t;
 
 typedef enum {
-  MOVE_RECORDER_ALL,
-  MOVE_RECORDER_BEST,
-} move_recorder_t;
+  MOVE_RECORD_ALL,
+  MOVE_RECORD_BEST,
+} move_record_t;
 
 typedef enum {
   SIM_STOPPING_CONDITION_NONE,

@@ -5,11 +5,13 @@
 
 #include "config_test.h"
 
+#define TEST_MOVE_LIST_CAPACITY 1000000
+
 void test_config_empty_string_klv2() {
   Config *config = create_config(
       "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
       "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "",
-      -1, -1, 0, 3, 0, 0, NULL, 0, 0, 0, 0, 1, "", DEFAULT_MOVE_LIST_CAPACITY);
+      -1, -1, 0, 3, 0, 0, NULL, 0, 0, 0, 0, 1, "", TEST_MOVE_LIST_CAPACITY);
 
   assert(config->klv_is_shared);
   assert(config->kwg_is_shared);
@@ -27,7 +29,7 @@ void test_config_identical_klv2() {
       "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
       "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL,
       "./data/lexica/CSW21.kwg", "./data/lexica/CSW21.klv2", -1, -1, 0, 10000,
-      0, 0, NULL, 0, 0, 0, 0, 1, "", DEFAULT_MOVE_LIST_CAPACITY);
+      0, 0, NULL, 0, 0, 0, 0, 1, "", TEST_MOVE_LIST_CAPACITY);
 
   assert(config->klv_is_shared);
   assert(config->kwg_is_shared);
@@ -44,7 +46,7 @@ void test_config_different_klv2() {
       "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
       "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL,
       "./data/lexica/NWL20.kwg", "./data/lexica/english.klv2", -1, -1, 1, 10000,
-      0, 0, NULL, 0, 0, 0, 0, 1, "", DEFAULT_MOVE_LIST_CAPACITY);
+      0, 0, NULL, 0, 0, 0, 0, 1, "", TEST_MOVE_LIST_CAPACITY);
 
   assert(!config->klv_is_shared);
   assert(!config->kwg_is_shared);

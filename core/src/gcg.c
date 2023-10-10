@@ -13,15 +13,7 @@
 #include "string_util.h"
 #include "util.h"
 
-#define MAX_GCG_FILE_SIZE 100000
-#define MAX_GCG_LINE_LENGTH 512
 #define MAX_GROUPS 7
-
-// FIXME: handle these defaults in the config
-#define DEFAULT_LEXICON "CSW21"
-#define DEFAULT_LETTER_DISTRIBUTION "english"
-#define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
-#define DEFAULT_VARIANT GAME_VARIANT_CLASSIC
 
 typedef enum {
   GCG_ENCODING_ISO_8859_1,
@@ -581,11 +573,8 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       if (game_history->game_variant == GAME_VARIANT_UNKNOWN) {
         game_history->game_variant = GAME_VARIANT_CLASSIC;
       }
-      char *letter_distribution_filepath = get_letter_distribution_filepath(
-          game_history->letter_distribution_name);
       game_history->letter_distribution =
-          create_letter_distribution(letter_distribution_filepath);
-      free(letter_distribution_filepath);
+          create_letter_distribution(game_history->letter_distribution_name);
     }
   }
 

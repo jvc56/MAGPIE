@@ -11,8 +11,6 @@
 #include "string_util.h"
 #include "util.h"
 
-#define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"
-#define LETTER_DISTRIBUTION_FILEPATH "data/letterdistributions/"
 #define INVALID_LETTER (0x80 - 1)
 
 extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
@@ -36,10 +34,22 @@ int get_letter_distribution_size(const char *filename) {
   return letter_distribution_size;
 }
 
+char *get_letter_distribution_filepath(const char *ld_name) {
+  // Check for invalid inputs
+  if (!ld_name) {
+    return NULL;
+  }
+  return get_formatted_string("%s%s%s", LETTER_DISTRIBUTION_FILEPATH, ld_name,
+                              LETTER_DISTRIBUTION_FILE_EXTENSION);
+}
+
 void load_letter_distribution(LetterDistribution *letter_distribution,
-                              const char *letter_distribution_filename) {
+                              const char *ld_name) {
   // This function call opens and closes the file, so
   // call it before the fopen to prevent a nested file read
+  char *letter_distribution_filename =
+      get_letter_distribution_filepath(ld_name);
+
   letter_distribution->size =
       get_letter_distribution_size(letter_distribution_filename);
 
@@ -48,6 +58,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     log_fatal("Error opening letter distribution file: %s\n",
               letter_distribution_filename);
   }
+  free(letter_distribution_filename);
 
   letter_distribution->distribution =
       (uint32_t *)malloc_or_die(letter_distribution->size * sizeof(uint32_t));
@@ -181,10 +192,10 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
   return num_mls;
 }
 
-LetterDistribution *create_letter_distribution(const char *filename) {
+LetterDistribution *create_letter_distribution(const char *ld_name) {
   LetterDistribution *letter_distribution =
       malloc_or_die(sizeof(LetterDistribution));
-  load_letter_distribution(letter_distribution, filename);
+  load_letter_distribution(letter_distribution, ld_name);
   return letter_distribution;
 }
 
@@ -194,15 +205,6 @@ void destroy_letter_distribution(LetterDistribution *letter_distribution) {
   free(letter_distribution->is_vowel);
   free(letter_distribution->score_order);
   free(letter_distribution);
-}
-
-char *get_letter_distribution_filepath(const char *ld_name) {
-  // Check for invalid inputs
-  if (!ld_name) {
-    return NULL;
-  }
-  return get_formatted_string("%s%s%s", LETTER_DISTRIBUTION_FILEPATH, ld_name,
-                              LETTER_DISTRIBUTION_FILE_EXTENSION);
 }
 
 // FIXME: return letter distrubitions other than english
