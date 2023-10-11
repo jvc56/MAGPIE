@@ -612,10 +612,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
   free(worker_ids);
 }
 
-void infer(ThreadControl *thread_control, Inference *inference, Game *game,
-           Rack *actual_tiles_played, int player_to_infer_index,
-           int actual_score, int number_of_tiles_exchanged,
-           double equity_margin, int number_of_threads) {
+void infer(Config *config, Game *game, Inference *inference) {
   inference->status = INFERENCE_STATUS_RUNNING;
 
   initialize_inference_for_evaluation(inference, game, actual_tiles_played,

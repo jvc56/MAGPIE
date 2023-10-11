@@ -43,13 +43,50 @@ void *realloc_or_die(void *realloc_target, size_t size) {
   return realloc_result;
 }
 
+bool is_decimal_number(const char *str) {
+  if (!str || *str == '\0') {
+    return false; // Empty string is not a valid decimal number
+  }
+
+  int i = 0;
+  bool has_decimal_point = false;
+
+  if (str[i] == '\0') {
+    return false; // No digits in the string
+  }
+
+  while (str[i] != '\0') {
+    if (isdigit(str[i])) {
+      i++;
+    } else if (str[i] == '.' && !has_decimal_point) {
+      has_decimal_point = true;
+      i++;
+    } else {
+      return false; // Invalid character in the string
+    }
+  }
+
+  return true;
+}
+
 int char_to_int(char c) { return c - '0'; }
 
 int string_to_int(const char *str) {
-  if (!str) {
-    log_fatal("called string_to_int on NULL string\n");
+  char *endptr;
+  uint64_t result = strtol(str, &endptr, 10);
+  if (*endptr != '\0') {
+    log_fatal("string to int conversion failed for %s\n", str);
   }
-  return strtol(str, NULL, 10);
+  return result;
+}
+
+uint64_t string_to_uint64(const char *str) {
+  char *endptr;
+  uint64_t result = strtoull(str, &endptr, 10);
+  if (*endptr != '\0') {
+    log_fatal("string to uint64_t conversion failed for %s\n", str);
+  }
+  return result;
 }
 
 double string_to_double(const char *str) {

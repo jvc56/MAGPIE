@@ -26,17 +26,17 @@ typedef enum {
 
 typedef struct ThreadControl {
   int number_of_threads;
-  pthread_mutex_t halt_status_mutex;
-  int halt_status;
-  pthread_mutex_t current_mode_mutex;
-  int current_mode;
-  pthread_mutex_t print_output_mutex;
   int print_info_interval;
-  pthread_mutex_t check_stopping_condition_mutex;
   int check_stopping_condition_interval;
+  int current_mode;
   int check_stop_status;
-  FILE *outfile;
+  int halt_status;
+  pthread_mutex_t print_output_mutex;
+  pthread_mutex_t check_stopping_condition_mutex;
+  pthread_mutex_t current_mode_mutex;
+  pthread_mutex_t halt_status_mutex;
   pthread_mutex_t searching_mode_mutex;
+  FILE *outfile;
   struct timespec start_time;
 } ThreadControl;
 

@@ -315,10 +315,8 @@ Game *create_game(Config *config) {
       create_player(0, "player_1", config->letter_distribution->size);
   game->players[1] =
       create_player(1, "player_2", config->letter_distribution->size);
-  game->players[0]->strategy_params =
-      copy_strategy_params(config->player_1_strategy_params);
-  game->players[1]->strategy_params =
-      copy_strategy_params(config->player_2_strategy_params);
+  game->players[0]->strategy_params = config->player_strategy_params[0];
+  game->players[1]->strategy_params = config->player_strategy_params[1];
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;

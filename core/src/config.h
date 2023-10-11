@@ -22,6 +22,20 @@ typedef enum {
   CONFIG_LOAD_STATUS_MALFORMED_BINGO_BONUS,
   CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE,
   CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE,
+  CONFIG_LOAD_STATUS_MALFORMED_RACK,
+  CONFIG_LOAD_STATUS_MALFORMED_NUM_PLAYS,
+  CONFIG_LOAD_STATUS_MALFORMED_PLIES,
+  CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS,
+  CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION,
+  CONFIG_LOAD_STATUS_MALFORMED_PLAYER_TO_INFER_INDEX,
+  CONFIG_LOAD_STATUS_MALFORMED_SCORE,
+  CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN,
+  CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED,
+  CONFIG_LOAD_STATUS_MALFORMED_RANDOM_SEED,
+  CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS,
+  CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL,
+  CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL,
+  CONFIG_LOAD_STATUS_INVALID_CGP_ARG,
 } config_load_status_t;
 
 typedef enum {
@@ -65,10 +79,15 @@ typedef struct Config {
   // Sim
   WinPct *win_pcts;
   char *win_pct_name;
-  int move_list_capacity;
+  int num_plays;
+  int plies;
+  int max_iterations;
+  sim_stopping_condition_t stopping_condition;
+  bool static_search_only;
+
   // Autoplay
   bool use_game_pairs;
-  int number_of_games_or_pairs;
+  uint64_t random_seed;
   // Thread Control
   ThreadControl *thread_control;
 } Config;
@@ -77,6 +96,6 @@ Config *create_config();
 void destroy_config(Config *config);
 StrategyParams *copy_strategy_params(StrategyParams *orig);
 void destroy_strategy_params(StrategyParams *sp);
-config_load_status_t load_config(Config *config, const char *cmd) {
+config_load_status_t load_config(Config *config, const char *cmd);
 
 #endif

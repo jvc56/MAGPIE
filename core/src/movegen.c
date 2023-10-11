@@ -635,9 +635,6 @@ void shadow_play_for_anchor(Generator *gen, int col, Player *player) {
   // Set the current anchor column
   gen->current_anchor_col = col;
 
-  // Set the recorder type
-  gen->move_sorting_type = player->strategy_params->move_sorting;
-
   // Reset tiles played
   gen->tiles_played = 0;
 
@@ -684,7 +681,8 @@ void set_descending_tile_scores(Generator *gen, Player *player) {
 }
 
 void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
-                    int add_exchange) {
+                    int add_exchange, move_sort_t move_sort_type) {
+  gen->move_sorting_type = move_sort_type;
   // Reset the best leaves
   for (int i = 0; i < (RACK_SIZE); i++) {
     gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);

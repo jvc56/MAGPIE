@@ -494,14 +494,12 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
               int max_iterations, int stopping_condition,
               int static_search_only) {
 
-  int sorting_type = game->players[0]->strategy_params->move_sorting;
-  game->players[0]->strategy_params->move_sorting = MOVE_SORT_EQUITY;
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 MOVE_SORT_EQUITY);
   int number_of_moves_generated = game->gen->move_list->count;
   sort_moves(game->gen->move_list);
-  game->players[0]->strategy_params->move_sorting = sorting_type;
 
   if (static_search_only) {
     print_ucgi_static_moves(game, num_plays, thread_control);

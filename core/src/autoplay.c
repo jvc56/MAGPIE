@@ -143,8 +143,7 @@ int get_number_of_games_for_worker(Config *config, int thread_index) {
   return number_of_games_for_worker;
 }
 
-void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
-              Config *config, uint64_t seed) {
+void autoplay(Config *config, AutoplayResults *autoplay_results) {
   seed_random(seed);
 
   int saved_player_1_recorder_type =
