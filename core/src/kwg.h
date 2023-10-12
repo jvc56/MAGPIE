@@ -7,7 +7,7 @@ typedef struct KWG {
   uint32_t *nodes;
 } KWG;
 
-KWG *create_kwg(const char *kwg_filename);
+KWG *create_kwg(const char *kwg_name);
 void destroy_kwg(KWG *kwg);
 
 inline int kwg_is_end(KWG *kwg, int node_index) {

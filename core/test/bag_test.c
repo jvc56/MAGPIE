@@ -8,7 +8,7 @@
 #include "../src/letter_distribution.h"
 #include "../src/string_util.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_util.h"
 
 void test_add_letter(Config *config, Bag *bag, char *r,
@@ -21,8 +21,8 @@ void test_add_letter(Config *config, Bag *bag, char *r,
   destroy_string_builder(bag_string);
 }
 
-void test_bag(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_bag(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Bag *bag = create_bag(config->letter_distribution);
   Rack *rack = create_rack(config->letter_distribution->size);
 

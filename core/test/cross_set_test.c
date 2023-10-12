@@ -8,7 +8,7 @@
 #include "../src/game.h"
 #include "../src/letter_distribution.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -105,8 +105,8 @@ void test_gen_cross_set_col(Game *game, int row, int col, int dir,
                      expected_cross_score, run_gcs);
 }
 
-void test_cross_set(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_cross_set(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   KWG *kwg = game->players[0]->strategy_params->kwg;
 

@@ -8,11 +8,11 @@
 #include "../src/string_util.h"
 #include "../src/words.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_constants.h"
 
-void test_words_played(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_words_played(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   load_cgp(game, VS_ED);
 
@@ -101,4 +101,4 @@ void test_words_played(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_words(SuperConfig *superconfig) { test_words_played(superconfig); }
+void test_words(TestConfig *testconfig) { test_words_played(testconfig); }

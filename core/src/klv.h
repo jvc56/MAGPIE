@@ -12,7 +12,7 @@ typedef struct KLV {
   float *leave_values;
 } KLV;
 
-KLV *create_klv(const char *klv_filename);
+KLV *create_klv(const char *klv_name);
 void destroy_klv(KLV *klv);
 double get_leave_value(KLV *klv, Rack *rack);
 

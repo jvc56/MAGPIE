@@ -80,6 +80,42 @@ void trim_semicolon(char *str) {
   }
 }
 
+void trim_whitespace(char *str) {
+  if (str == NULL) {
+    return;
+  }
+
+  int length = 0;
+  int leading_space = 0;
+  int trailing_space = 0;
+
+  // Calculate the length of the string and count leading/trailing whitespace
+  while (str[length] != '\0') {
+    if (isspace(str[length])) {
+      if (length == 0) {
+        leading_space++;
+      } else {
+        trailing_space++;
+      }
+    }
+    length++;
+  }
+
+  // If the entire string is whitespace, set it to an empty string
+  if (leading_space == length) {
+    str[0] = '\0';
+    return;
+  }
+
+  // Shift non-whitespace characters to the beginning of the string
+  for (int i = 0; i < length - trailing_space; i++) {
+    str[i] = str[i + leading_space];
+  }
+
+  // Null-terminate the new string
+  str[length - leading_space - trailing_space] = '\0';
+}
+
 // String utility functions
 
 char *format_string_with_va_list(const char *format, va_list *args) {

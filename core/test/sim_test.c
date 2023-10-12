@@ -9,7 +9,7 @@
 #include "../src/sim.h"
 #include "../src/winpct.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_util.h"
 
 void print_sim_stats(Simmer *simmer, Game *game) {
@@ -43,14 +43,14 @@ void print_sim_stats(Simmer *simmer, Game *game) {
   destroy_string_builder(move_description);
 }
 
-void test_win_pct(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_win_pct(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   assert(within_epsilon(win_pct(config->win_pcts, 118, 90), 0.844430));
 }
 
-void test_sim_single_iteration(SuperConfig *superconfig,
+void test_sim_single_iteration(TestConfig *testconfig,
                                ThreadControl *thread_control) {
-  Config *config = get_nwl_config(superconfig);
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AAADERW",
                       game->gen->letter_distribution);
@@ -67,9 +67,9 @@ void test_sim_single_iteration(SuperConfig *superconfig,
   destroy_simmer(simmer);
 }
 
-void test_more_iterations(SuperConfig *superconfig,
+void test_more_iterations(TestConfig *testconfig,
                           ThreadControl *thread_control) {
-  Config *config = get_nwl_config(superconfig);
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AEIQRST",
                       game->gen->letter_distribution);
@@ -176,9 +176,9 @@ void perf_test_multithread_blocking_sim(Config *config,
   destroy_simmer(simmer);
 }
 
-void test_play_similarity(SuperConfig *superconfig,
+void test_play_similarity(TestConfig *testconfig,
                           ThreadControl *thread_control) {
-  Config *config = superconfig->nwl_config;
+  Config *config = testconfig->nwl_config;
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
                       game->gen->letter_distribution);
@@ -230,23 +230,23 @@ void test_play_similarity(SuperConfig *superconfig,
   destroy_simmer(simmer);
 }
 
-void test_sim(SuperConfig *superconfig) {
+void test_sim(TestConfig *testconfig) {
   ThreadControl *thread_control = create_thread_control(NULL);
-  test_win_pct(superconfig);
-  test_sim_single_iteration(superconfig, thread_control);
-  test_more_iterations(superconfig, thread_control);
-  test_play_similarity(superconfig, thread_control);
+  test_win_pct(testconfig);
+  test_sim_single_iteration(testconfig, thread_control);
+  test_more_iterations(testconfig, thread_control);
+  test_play_similarity(testconfig, thread_control);
   // And run a perf test.
-  int threads = superconfig->nwl_config->number_of_threads;
-  char *backup_cgp = superconfig->nwl_config->cgp;
-  superconfig->nwl_config->number_of_threads = 4;
-  superconfig->nwl_config->cgp =
+  int threads = testconfig->nwl_config->number_of_threads;
+  char *backup_cgp = testconfig->nwl_config->cgp;
+  testconfig->nwl_config->number_of_threads = 4;
+  testconfig->nwl_config->cgp =
       "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"
       "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ "
       "336/298 0 lex NWL20;";
-  perf_test_multithread_sim(superconfig->nwl_config, thread_control);
-  // restore superconfig
-  superconfig->nwl_config->cgp = backup_cgp;
-  superconfig->nwl_config->number_of_threads = threads;
+  perf_test_multithread_sim(testconfig->nwl_config, thread_control);
+  // restore testconfig
+  testconfig->nwl_config->cgp = backup_cgp;
+  testconfig->nwl_config->number_of_threads = threads;
   destroy_thread_control(thread_control);
 }

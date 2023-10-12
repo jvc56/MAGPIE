@@ -20,4 +20,7 @@ typedef struct CommandVars {
   FILE *outfile;
 } CommandVars;
 
+void execute_command(CommandVars *command_vars);
+char *command_search_status(CommandVars *command_vars, bool should_halt);
+
 #endif

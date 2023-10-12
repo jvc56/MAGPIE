@@ -24,10 +24,11 @@ typedef struct LetterDistribution {
                                               [MAX_LETTER_CHAR_LENGTH];
 } LetterDistribution;
 
-LetterDistribution *create_letter_distribution(const char *filename);
+LetterDistribution *
+create_letter_distribution(const char *letter_distribution_name);
 void destroy_letter_distribution(LetterDistribution *letter_distribution);
 void load_letter_distribution(LetterDistribution *letter_distribution,
-                              const char *filename);
+                              const char *letter_distribution_name);
 uint8_t
 human_readable_letter_to_machine_letter(LetterDistribution *letter_distribution,
                                         char *letter);

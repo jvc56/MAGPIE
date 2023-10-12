@@ -36,6 +36,7 @@ typedef enum {
   CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL,
   CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL,
   CONFIG_LOAD_STATUS_INVALID_CGP_ARG,
+  CONFIG_LOAD_STATUS_LEXICON_MISSING,
 } config_load_status_t;
 
 typedef enum {
@@ -84,15 +85,16 @@ typedef struct Config {
   int max_iterations;
   sim_stopping_condition_t stopping_condition;
   bool static_search_only;
-
   // Autoplay
   bool use_game_pairs;
   uint64_t random_seed;
   // Thread Control
-  ThreadControl *thread_control;
+  int number_of_threads;
+  int print_info_interval;
+  int check_stopping_condition_interval;
 } Config;
 
-Config *create_config();
+Config *create_default_config();
 void destroy_config(Config *config);
 StrategyParams *copy_strategy_params(StrategyParams *orig);
 void destroy_strategy_params(StrategyParams *sp);

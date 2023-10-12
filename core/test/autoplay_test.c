@@ -11,7 +11,7 @@
 #include "../src/infer.h"
 #include "../src/thread_control.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_util.h"
 
 int are_stats_equal(Stat *stat_1, Stat *stat_2) {
@@ -321,8 +321,8 @@ void autoplay_inference_test(Config *config) {
   destroy_thread_control(thread_control);
 }
 
-void autoplay_game_pairs_test(SuperConfig *superconfig) {
-  Config *csw_config = get_csw_config(superconfig);
+void autoplay_game_pairs_test(TestConfig *testconfig) {
+  Config *csw_config = get_csw_config(testconfig);
   int game_pairs = 1000;
   int number_of_threads = 11;
   int original_number_of_game_pairs = csw_config->number_of_games_or_pairs;
@@ -355,6 +355,6 @@ void autoplay_game_pairs_test(SuperConfig *superconfig) {
   destroy_autoplay_results(autoplay_results);
 }
 
-void test_autoplay(SuperConfig *superconfig) {
-  autoplay_game_pairs_test(superconfig);
+void test_autoplay(TestConfig *testconfig) {
+  autoplay_game_pairs_test(testconfig);
 }

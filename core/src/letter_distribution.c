@@ -37,7 +37,7 @@ int get_letter_distribution_size(const char *filename) {
 char *get_letter_distribution_filepath(const char *ld_name) {
   // Check for invalid inputs
   if (!ld_name) {
-    return NULL;
+    log_fatal("letter distribution name is null");
   }
   return get_formatted_string("%s%s%s", LETTER_DISTRIBUTION_FILEPATH, ld_name,
                               LETTER_DISTRIBUTION_FILE_EXTENSION);

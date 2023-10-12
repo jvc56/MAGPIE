@@ -17,6 +17,7 @@ bool is_string_empty(const char *str1);
 void remove_first_newline(char *str);
 size_t string_length(const char *str);
 void trim_semicolon(char *str);
+void trim_whitespace(char *str);
 
 struct StringSplitter;
 typedef struct StringSplitter StringSplitter;

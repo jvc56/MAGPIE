@@ -8,12 +8,12 @@
 #include "../src/klv.h"
 #include "../src/util.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
 
-void test_macondo_opening_equity_adjustments(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = game->players[0]->rack;
   KLV *klv = game->players[0]->strategy_params->klv;
@@ -89,8 +89,8 @@ void test_macondo_opening_equity_adjustments(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_macondo_endgame_equity_adjustments(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_macondo_endgame_equity_adjustments(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   load_cgp(game,
@@ -149,7 +149,7 @@ void test_macondo_endgame_equity_adjustments(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_equity_adjustments(SuperConfig *superconfig) {
-  test_macondo_opening_equity_adjustments(superconfig);
-  test_macondo_endgame_equity_adjustments(superconfig);
+void test_equity_adjustments(TestConfig *testconfig) {
+  test_macondo_opening_equity_adjustments(testconfig);
+  test_macondo_endgame_equity_adjustments(testconfig);
 }

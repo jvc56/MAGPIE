@@ -15,7 +15,7 @@
 char *get_kwg_filepath(const char *kwg_name) {
   // Check for invalid inputs
   if (!kwg_name) {
-    return NULL;
+    log_fatal("kwg name is null");
   }
   return get_formatted_string("%s%s%s", KWG_FILEPATH, kwg_name,
                               KWG_FILE_EXTENSION);
@@ -49,9 +49,9 @@ void load_kwg(KWG *kwg, const char *kwg_name) {
   fclose(stream);
 }
 
-KWG *create_kwg(const char *kwg_filename) {
+KWG *create_kwg(const char *kwg_name) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
-  load_kwg(kwg, kwg_filename);
+  load_kwg(kwg, kwg_name);
   return kwg;
 }
 

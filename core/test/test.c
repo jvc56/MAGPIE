@@ -3,10 +3,9 @@
 #include <string.h>
 #include <time.h>
 
-#include "../src/autoplay.h"
 #include "../src/config.h"
 #include "../src/log.h"
-#include "../src/thread_control.h"
+#include "../src/string_util.h"
 
 #include "alphabet_test.h"
 #include "autoplay_test.h"
@@ -30,128 +29,89 @@
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
-#include "superconfig.h"
 #include "test_constants.h"
+#include "testconfig.h"
 #include "ucgi_command_test.h"
 #include "wasm_api_test.h"
 #include "word_test.h"
 
-void unit_tests(SuperConfig *superconfig) {
+void unit_tests(TestConfig *testconfig) {
   // Test the loading of the config
   test_config();
 
   // Test the readonly data first
   test_string_util();
-  test_alphabet(superconfig);
-  test_letter_distribution(superconfig);
-  test_str_to_machine_letters(superconfig);
-  test_leaves(superconfig, "./data/lexica/CSW21.csv");
-  test_leave_map(superconfig);
+  test_alphabet(testconfig);
+  test_letter_distribution(testconfig);
+  test_str_to_machine_letters(testconfig);
+  test_leaves(testconfig, "./data/lexica/CSW21.csv");
+  test_leave_map(testconfig);
 
   // Now test the rest
-  test_bag(superconfig);
-  test_rack(superconfig);
-  test_board(superconfig);
-  test_cross_set(superconfig);
-  test_game(superconfig);
-  test_shadow(superconfig);
-  test_movegen(superconfig);
-  test_equity_adjustments(superconfig);
-  test_gameplay(superconfig);
+  test_bag(testconfig);
+  test_rack(testconfig);
+  test_board(testconfig);
+  test_cross_set(testconfig);
+  test_game(testconfig);
+  test_shadow(testconfig);
+  test_movegen(testconfig);
+  test_equity_adjustments(testconfig);
+  test_gameplay(testconfig);
   test_stats();
-  test_infer(superconfig);
-  test_sim(superconfig);
+  test_infer(testconfig);
+  test_sim(testconfig);
   test_ucgi_command();
   test_gcg();
-  test_autoplay(superconfig);
+  test_autoplay(testconfig);
   test_wasm_api();
 }
 
+void run_tests(TestConfig *testconfig, const char *subtest) {
+  log_fatal("unrecognized test: %s\n", subtest);
+}
+
 int main(int argc, char *argv[]) {
-  if (argc < 2) {
-    printf("must specify exactly one command\n");
-    exit(EXIT_FAILURE);
+  Config *csw_config = create_config(
+      "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
+      "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "",
+      -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
+      "./data/strategy/default_english/winpct.csv", TEST_MOVE_LIST_CAPACITY);
+
+  Config *nwl_config = create_config(
+      "./data/letterdistributions/english.csv", "", "./data/lexica/NWL20.kwg",
+      "./data/lexica/CSW21.klv2", MOVE_SORT_SCORE, MOVE_RECORDER_ALL, "", "",
+      -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
+      "./data/strategy/default_english/winpct.csv", TEST_MOVE_LIST_CAPACITY);
+
+  Config *osps_config = create_config(
+      // no OSPS kwg yet, use later when we have tests.
+      "./data/letterdistributions/polish.csv", "", "./data/lexica/OSPS44.kwg",
+      "", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "", -1, -1, 0, 10000, 0, 0,
+      NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
+      TEST_MOVE_LIST_CAPACITY);
+
+  Config *disc_config = create_config(
+      "./data/letterdistributions/catalan.csv", "", "./data/lexica/DISC2.kwg",
+      "./data/lexica/catalan.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "",
+      -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
+      "./data/strategy/default_english/winpct.csv", TEST_MOVE_LIST_CAPACITY);
+
+  Config *distinct_lexica_config = create_config(
+      "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
+      "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL,
+      "./data/lexica/NWL20.kwg", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0,
+      1, "./data/strategy/default_english/winpct.csv", TEST_MOVE_LIST_CAPACITY);
+
+  TestConfig *testconfig = create_testconfig(
+      // CSW
+      "set options lex CSW21",
+
+      nwl_config, osps_config, disc_config, distinct_lexica_config);
+
+  const char *subtest = NULL;
+  if (argc > 1) {
+    subtest = argv[1];
   }
   log_set_level(LOG_WARN);
-
-  if (strings_equal(argv[1], CMD_INFER)) {
-    Config *config = create_config_from_args(argc, argv);
-    infer_from_config(config);
-    destroy_config(config);
-  } else if (strings_equal(argv[1], CMD_AUTOPLAY)) {
-    Config *config = create_config_from_args(argc, argv);
-    ThreadControl *thread_control = create_thread_control_from_config(config);
-    AutoplayResults *autoplay_results = create_autoplay_results();
-    autoplay(thread_control, autoplay_results, config, time(NULL));
-    destroy_config(config);
-    destroy_autoplay_results(autoplay_results);
-    destroy_thread_control(thread_control);
-  } else if (strings_equal(argv[1], CMD_PROF)) {
-    Config *config = create_config_from_args(argc, argv);
-    prof_tests(config);
-    destroy_config(config);
-  } else if (strings_equal(argv[1], CMD_TOPVALL)) {
-    Config *config = create_config_from_args(argc, argv);
-    test_play_recorder(config);
-    destroy_config(config);
-  } else if (strings_equal(argv[1], CMD_SIM)) {
-    Config *config = create_config_from_args(argc, argv);
-    ThreadControl *thread_control = create_thread_control_from_config(config);
-    perf_test_multithread_sim(config, thread_control);
-    destroy_thread_control(thread_control);
-    destroy_config(config);
-  } else if (strings_equal(argv[1], CMD_SIM_STOPPING)) {
-    Config *config = create_config_from_args(argc, argv);
-    ThreadControl *thread_control = create_thread_control_from_config(config);
-    thread_control->print_info_interval = 500;
-    thread_control->check_stopping_condition_interval = 500;
-    perf_test_multithread_blocking_sim(config, thread_control);
-    destroy_thread_control(thread_control);
-    destroy_config(config);
-  } else if (strings_equal(argv[1], CMD_UNIT_TESTS)) {
-    Config *csw_config = create_config(
-        "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
-        "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "",
-        -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv",
-        TEST_MOVE_LIST_CAPACITY);
-
-    Config *nwl_config = create_config(
-        "./data/letterdistributions/english.csv", "", "./data/lexica/NWL20.kwg",
-        "./data/lexica/CSW21.klv2", MOVE_SORT_SCORE, MOVE_RECORDER_ALL, "", "",
-        -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv",
-        TEST_MOVE_LIST_CAPACITY);
-
-    Config *osps_config = create_config(
-        // no OSPS kwg yet, use later when we have tests.
-        "./data/letterdistributions/polish.csv", "", "./data/lexica/OSPS44.kwg",
-        "", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "", -1, -1, 0, 10000, 0, 0,
-        NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
-        TEST_MOVE_LIST_CAPACITY);
-
-    Config *disc_config = create_config(
-        "./data/letterdistributions/catalan.csv", "", "./data/lexica/DISC2.kwg",
-        "./data/lexica/catalan.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "",
-        "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-        "./data/strategy/default_english/winpct.csv",
-        TEST_MOVE_LIST_CAPACITY);
-
-    Config *distinct_lexica_config = create_config(
-        "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
-        "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL,
-        "./data/lexica/NWL20.kwg", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0,
-        1, "./data/strategy/default_english/winpct.csv",
-        TEST_MOVE_LIST_CAPACITY);
-
-    SuperConfig *superconfig =
-        create_superconfig(csw_config, nwl_config, osps_config, disc_config,
-                           distinct_lexica_config);
-    unit_tests(superconfig);
-    // This also frees the nested configs
-    destroy_superconfig(superconfig);
-  } else {
-    printf("unrecognized command: %s\n", argv[1]);
-    exit(EXIT_FAILURE);
-  }
+  run_tests(test_config, subtest)
 }

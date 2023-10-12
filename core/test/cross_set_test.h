@@ -3,9 +3,9 @@
 
 #include "../src/game.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 
 void set_row(Game *game, int row, const char *row_content);
-void test_cross_set(SuperConfig *superconfig);
+void test_cross_set(TestConfig *testconfig);
 
 #endif

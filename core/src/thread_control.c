@@ -42,20 +42,20 @@ void set_check_stopping_condition_interval(
       check_stopping_condition_interval;
 }
 
-int get_halt_status(ThreadControl *thread_control) {
-  int halt_status;
+halt_status_t get_halt_status(ThreadControl *thread_control) {
+  halt_status_t halt_status;
   pthread_mutex_lock(&thread_control->halt_status_mutex);
   halt_status = thread_control->halt_status;
   pthread_mutex_unlock(&thread_control->halt_status_mutex);
   return halt_status;
 }
 
-int is_halted(ThreadControl *thread_control) {
+bool is_halted(ThreadControl *thread_control) {
   return get_halt_status(thread_control) != HALT_STATUS_NONE;
 }
 
-int halt(ThreadControl *thread_control, int halt_status) {
-  int success = 0;
+bool halt(ThreadControl *thread_control, int halt_status) {
+  bool success = false;
   pthread_mutex_lock(&thread_control->halt_status_mutex);
   // Assume the first reason to halt is the only
   // reason we care about, so subsequent calls to halt
@@ -63,73 +63,73 @@ int halt(ThreadControl *thread_control, int halt_status) {
   if (thread_control->halt_status == HALT_STATUS_NONE &&
       halt_status != HALT_STATUS_NONE) {
     thread_control->halt_status = halt_status;
-    success = 1;
+    success = true;
   }
   pthread_mutex_unlock(&thread_control->halt_status_mutex);
   return success;
 }
 
-int unhalt(ThreadControl *thread_control) {
-  int success = 0;
+bool unhalt(ThreadControl *thread_control) {
+  bool success = false;
   pthread_mutex_lock(&thread_control->halt_status_mutex);
   if (thread_control->halt_status != HALT_STATUS_NONE) {
     thread_control->halt_status = HALT_STATUS_NONE;
-    success = 1;
+    success = true;
   }
   pthread_mutex_unlock(&thread_control->halt_status_mutex);
   return success;
 }
 
-int set_mode_searching(ThreadControl *thread_control) {
-  int success = 0;
+bool set_mode_searching(ThreadControl *thread_control) {
+  bool success = false;
   pthread_mutex_lock(&thread_control->current_mode_mutex);
   if (thread_control->current_mode == MODE_STOPPED) {
     thread_control->current_mode = MODE_SEARCHING;
-    success = 1;
+    // Searching mode mutex should remain locked while we are searching.
+    pthread_mutex_lock(&thread_control->searching_mode_mutex);
+    success = true;
   }
-  // Searching mode mutex should remain locked while we are searching.
-  pthread_mutex_lock(&thread_control->searching_mode_mutex);
   pthread_mutex_unlock(&thread_control->current_mode_mutex);
   return success;
 }
 
-int set_mode_stopped(ThreadControl *thread_control) {
-  int success = 0;
+bool set_mode_stopped(ThreadControl *thread_control) {
+  bool success = false;
   pthread_mutex_lock(&thread_control->current_mode_mutex);
   if (thread_control->current_mode == MODE_SEARCHING) {
     thread_control->current_mode = MODE_STOPPED;
-    success = 1;
+    pthread_mutex_unlock(&thread_control->searching_mode_mutex);
+    success = true;
   }
-  pthread_mutex_unlock(&thread_control->searching_mode_mutex);
   pthread_mutex_unlock(&thread_control->current_mode_mutex);
   return success;
 }
 
-int get_mode(ThreadControl *thread_control) {
-  int mode = 0;
+mode_search_status_t get_mode(ThreadControl *thread_control) {
+  mode_search_status_t mode = 0;
   pthread_mutex_lock(&thread_control->current_mode_mutex);
   mode = thread_control->current_mode;
   pthread_mutex_unlock(&thread_control->current_mode_mutex);
   return mode;
 }
 
-int set_check_stop_active(ThreadControl *thread_control) {
-  int success = 0;
+bool set_check_stop_active(ThreadControl *thread_control) {
+  bool success = false;
   pthread_mutex_lock(&thread_control->check_stopping_condition_mutex);
   if (thread_control->check_stop_status == CHECK_STOP_INACTIVE) {
     thread_control->check_stop_status = CHECK_STOP_ACTIVE;
-    success = 1;
+    success = true;
   }
   pthread_mutex_unlock(&thread_control->check_stopping_condition_mutex);
   return success;
 }
 
-int set_check_stop_inactive(ThreadControl *thread_control) {
-  int success = 0;
+bool set_check_stop_inactive(ThreadControl *thread_control) {
+  bool success = false;
   pthread_mutex_lock(&thread_control->check_stopping_condition_mutex);
   if (thread_control->check_stop_status == CHECK_STOP_ACTIVE) {
     thread_control->check_stop_status = CHECK_STOP_INACTIVE;
-    success = 1;
+    success = true;
   }
   pthread_mutex_unlock(&thread_control->check_stopping_condition_mutex);
   return success;

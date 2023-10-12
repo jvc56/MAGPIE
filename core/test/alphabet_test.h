@@ -1,8 +1,8 @@
 #ifndef ALPHABET_TEST_H
 #define ALPHABET_TEST_H
 
-#include "superconfig.h"
+#include "testconfig.h"
 
-void test_alphabet(SuperConfig *superconfig);
+void test_alphabet(TestConfig *testconfig);
 
 #endif

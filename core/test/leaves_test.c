@@ -8,11 +8,11 @@
 #include "../src/string_util.h"
 #include "../src/util.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_util.h"
 
-void test_leaves(SuperConfig *superconfig, const char *leaves_csv_filename) {
-  Config *config = get_csw_config(superconfig);
+void test_leaves(TestConfig *testconfig, const char *leaves_csv_filename) {
+  Config *config = get_csw_config(testconfig);
   KLV *klv = config->player_1_strategy_params->klv;
   LetterDistribution *letter_distribution = config->letter_distribution;
   Rack *rack = create_rack(config->letter_distribution->size);

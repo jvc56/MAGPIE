@@ -4,11 +4,11 @@
 
 #include "../src/config.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_util.h"
 
-void test_alphabet(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_alphabet(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   // Test blank
   assert(get_blanked_machine_letter(1) == (1 | BLANK_MASK));
   assert(get_blanked_machine_letter(5) == (5 | BLANK_MASK));
@@ -67,7 +67,7 @@ void test_alphabet(SuperConfig *superconfig) {
   assert_strings_equal(string_builder_peek(letter), "D");
   string_builder_clear(letter);
 
-  Config *catalan_config = get_disc_config(superconfig);
+  Config *catalan_config = get_disc_config(testconfig);
   string_builder_add_user_visible_letter(catalan_config->letter_distribution,
                                          get_blanked_machine_letter(13), 0,
                                          letter);

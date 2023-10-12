@@ -22,6 +22,44 @@
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
 #define DEFAULT_MOVE_RECORD_TYPE MOVE_RECORDER_BEST
 
+#define ARG_POSITION "position"
+#define ARG_CGP "cgp"
+#define ARG_GO "go"
+#define ARG_SIM "sim"
+#define ARG_INFER "infer"
+#define ARG_AUTOPLAY "autoplay"
+#define ARG_SET "set"
+#define ARG_OPTIONS "options"
+#define ARG_BINGO_BONUS "bb"
+#define ARG_BOARD_LAYOUT "bdn"
+#define ARG_GAME_VARIANT "var"
+#define ARG_LETTER_DISTRIBUTION "ld"
+#define ARG_LEXICON "lex"
+#define ARG_P1_LEXICON "l1"
+#define ARG_P1_LEAVES "k1"
+#define ARG_P1_MOVE_SORT_TYPE "s1"
+#define ARG_P1_MOVE_RECORD_TYPE "r1"
+#define ARG_P2_LEXICON "l2"
+#define ARG_P2_LEAVES "k2"
+#define ARG_P2_MOVE_SORT_TYPE "s2"
+#define ARG_P2_MOVE_RECORD_TYPE "r2"
+#define ARG_KNOWN_OPP_RACK "rack"
+#define ARG_WIN_PCT "winpct"
+#define ARG_PLIES "plies"
+#define ARG_NUMBER_OF_PLAYS "numplays"
+#define ARG_MAX_ITERATIONS "i"
+#define ARG_STOPPING_CONDITION "stop"
+#define ARG_STATIC_SEARCH_ONLY "static"
+#define ARG_PLAYER_TO_INFER_INDEX "pindex"
+#define ARG_SCORE "score"
+#define ARG_EQUITY_MARGIN "eq"
+#define ARG_NUMBER_OF_TILES_EXCHANGED "exch"
+#define ARG_USE_GAME_PAIRS "gp"
+#define ARG_RANDOM_SEED "rs"
+#define ARG_NUMBER_OF_THREADS "numthreads"
+#define ARG_PRINT_INFO_INTERVAL "print"
+#define ARG_CHECK_STOP_INTERVAL "check"
+
 typedef enum {
   // Commands
   ARG_TOKEN_POSITION,
@@ -30,13 +68,15 @@ typedef enum {
   ARG_TOKEN_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_AUTOPLAY,
+  ARG_TOKEN_SET,
+  ARG_TOKEN_OPTIONS,
   // Game
   // shared between players
-  ARG_TOKEN_CGP_BINGO_BONUS,
-  ARG_TOKEN_CGP_BOARD_LAYOUT,
-  ARG_TOKEN_CGP_GAME_VARIANT,
-  ARG_TOKEN_CGP_LETTER_DISTRIBUTION,
-  ARG_TOKEN_CGP_LEXICON,
+  ARG_TOKEN_BINGO_BONUS,
+  ARG_TOKEN_BOARD_LAYOUT,
+  ARG_TOKEN_GAME_VARIANT,
+  ARG_TOKEN_LETTER_DISTRIBUTION,
+  ARG_TOKEN_LEXICON,
   // possibly unique for each player
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_LEAVES,
@@ -48,7 +88,7 @@ typedef enum {
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   // Sim
   ARG_TOKEN_KNOWN_OPP_RACK,
-  ARG_TOKEN_WIN_PCT_FILENAME,
+  ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
@@ -90,6 +130,8 @@ const struct {
     {COMMAND_TYPE_INFER, {ARG_TOKEN_GO, ARG_TOKEN_INFER, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_AUTOPLAY,
      {ARG_TOKEN_GO, ARG_TOKEN_AUTOPLAY, NUMBER_OF_ARG_TOKENS}},
+    {COMMAND_TYPE_SET_OPTIONS,
+     {ARG_TOKEN_SET, ARG_TOKEN_OPTIONS, NUMBER_OF_ARG_TOKENS}},
     // The unknown command type denotes the end of the sequences
     {COMMAND_TYPE_UNKNOWN, {}},
 }};
@@ -147,52 +189,79 @@ ParsedArgs *create_parsed_args(StringSplitter *cmd) {
 
   int index = 0;
   // Command args
-  set_single_arg(parsed_args, index++, ARG_TOKEN_POSITION, "position", 0);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_CGP, "cgp", 4);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_GO, "go", 0);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_SIM, "sim", 0);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_INFER, "infer", 0);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_AUTOPLAY, "autoplay", 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_POSITION, ARG_POSITION, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_CGP, ARG_CGP, 4);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_GO, ARG_GO, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_SIM, ARG_SIM, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_INFER, ARG_INFER, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_AUTOPLAY, ARG_AUTOPLAY, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_SET, ARG_SET, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_OPTIONS, ARG_OPTIONS, 0);
 
   // CGP args
-  set_single_arg(parsed_args, index++, ARG_TOKEN_CGP_BINGO_BONUS, "bb", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_CGP_BOARD_LAYOUT, "bdn", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_CGP_GAME_VARIANT, "var", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_CGP_LETTER_DISTRIBUTION, "ld",
+  set_single_arg(parsed_args, index++, ARG_TOKEN_BINGO_BONUS, ARG_BINGO_BONUS,
                  1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_CGP_LEXICON, "lex", 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_BOARD_LAYOUT, ARG_BOARD_LAYOUT,
+                 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_VARIANT, ARG_GAME_VARIANT,
+                 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_LETTER_DISTRIBUTION,
+                 ARG_LETTER_DISTRIBUTION, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_LEXICON, ARG_LEXICON, 1);
 
   // Game args
   // Player 1
-  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_LEXICON, "l1", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_LEAVES, "k1", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_LEXICON, ARG_P1_LEXICON, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_LEAVES, ARG_P1_LEAVES, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_MOVE_SORT_TYPE,
+                 ARG_P1_MOVE_SORT_TYPE, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_MOVE_RECORD_TYPE,
+                 ARG_P1_MOVE_RECORD_TYPE, 1);
 
   // Player 2
-  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_LEXICON, "l2", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_LEAVES, "k2", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_LEXICON, ARG_P2_LEXICON, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_LEAVES, ARG_P2_LEAVES, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_MOVE_SORT_TYPE,
+                 ARG_P2_MOVE_SORT_TYPE, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_MOVE_RECORD_TYPE,
+                 ARG_P2_MOVE_RECORD_TYPE, 1);
 
   // Sim args
-  set_single_arg(parsed_args, index++, ARG_TOKEN_KNOWN_OPP_RACK, "rack", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_WIN_PCT_FILENAME, "winpct", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_NUMBER_OF_PLAYS, "numplays",
-                 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_PLIES, "plies", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_MAX_ITERATIONS, "i", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_STOPPING_CONDITION, "cond", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_STATIC_SEARCH_ONLY, "static",
-                 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_KNOWN_OPP_RACK,
+                 ARG_KNOWN_OPP_RACK, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_WIN_PCT, ARG_WIN_PCT, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_NUMBER_OF_PLAYS,
+                 ARG_NUMBER_OF_PLAYS, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_PLIES, ARG_PLIES, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_MAX_ITERATIONS,
+                 ARG_MAX_ITERATIONS, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_STOPPING_CONDITION,
+                 ARG_STOPPING_CONDITION, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_STATIC_SEARCH_ONLY,
+                 ARG_STATIC_SEARCH_ONLY, 0);
 
   // Inference args
-  set_single_arg(parsed_args, index++, ARG_TOKEN_KNOWN_OPP_RACK, "tilesplayed",
-                 1);
+  // rack is KNOWN_OPP_RACK shared with sim
   set_single_arg(parsed_args, index++, ARG_TOKEN_PLAYER_TO_INFER_INDEX,
-                 "pindex", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_SCORE, "score", 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_EQUITY_MARGIN, "eq", 1);
+                 ARG_PLAYER_TO_INFER_INDEX, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_SCORE, ARG_SCORE, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_EQUITY_MARGIN,
+                 ARG_EQUITY_MARGIN, 1);
+
+  // Autoplay
+  set_single_arg(parsed_args, index++, ARG_TOKEN_USE_GAME_PAIRS,
+                 ARG_USE_GAME_PAIRS, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_RANDOM_SEED, ARG_RANDOM_SEED,
+                 1);
+
+  // number of iterations shared with sim
+  // Thread Control
+  set_single_arg(parsed_args, index++, ARG_TOKEN_NUMBER_OF_THREADS,
+                 ARG_NUMBER_OF_THREADS, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_PRINT_INFO_INTERVAL,
+                 ARG_PRINT_INFO_INTERVAL, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_CHECK_STOP_INTERVAL,
+                 ARG_CHECK_STOP_INTERVAL, 1);
 
   return parsed_args;
 }
@@ -306,74 +375,97 @@ load_letter_distribution_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-player_strategy_data_status_t load_player_strategy_data(
-    const char *player_new_data_name, void **player_data,
-    char **player_data_name, void **opponent_data, char **opponent_data_name,
-    (void)(*create_data)(const char *), (void)(*destroy_data)(void *)) {
-
-  if (string_equals(*player_data_name, player_new_data_name)) {
-    return;
-  }
-  if (string_equals(*opponent_data_name, player_new_data_name)) {
-    *player_data = *opponent_data;
-    if (*player_data_name) {
-      free(*player_data_name);
+void get_index_of_kwg_to_load(Config *config, const char *lexicon_name,
+                              int player_index) {
+  int kwg_to_use = -1;
+  if (!lexicon_name) {
+    // Use existing
+    kwg_to_use = player_index;
+  } else {
+    // Use existing if names match
+    for (int i = 0; i < 2; i++) {
+      if (strings_equal(config->player_strategy_params[i]->kwg_name,
+                        lexicon_name)) {
+        kwg_to_use = i;
+      }
     }
-    *player_data_name = get_formatted_string("%s", *opponent_data_name);
-    return;
-  }
-
-  bool data_is_shared =
-      *player_data && *opponent_data && *player_data == *opponent_data;
-
-  // If the data isn't shared, it is safe to destroy
-  if (!data_is_shared) {
-    (*destroy_data)(*player_data);
-  }
-  if (*player_data_name) {
-    free(*player_data_name);
-  }
-  *player_data = (*create_data)(*player_new_data_name);
-  *player_data_name = get_formatted_string("%s", *player_new_data_name);
-}
-
-config_load_status_t load_lexicon_for_config(Config *config,
-                                             const char *lexicon_name,
-                                             int player_index) {
-  int opponent_index = 1 - player_index;
-  load_player_strategy_data(
-      lexicon_name, &config->player_strategy_params[player_index]->kwg,
-      &config->player_strategy_params[player_index]->kwg_name,
-      &config->player_strategy_params[opponent_index]->kwg,
-      &config->player_strategy_params[opponent_index]->kwg_name);
-  if (strings_equal(config->player_strategy_params[player_index]->kwg_name,
-                    config->player_strategy_params[opponent_index]->kwg_name)) {
-    config->kwg_is_shared = true;
   }
 }
 
-config_load_status_t load_leaves_for_config(Config *config,
-                                            const char *leaves_name,
-                                            int player_index) {
-  int opponent_index = 1 - player_index;
-  load_player_strategy_data(
-      leaves_name, &config->player_strategy_params[player_index]->klv,
-      &config->player_strategy_params[player_index]->klv_name,
-      &config->player_strategy_params[opponent_index]->klv,
-      &config->player_strategy_params[opponent_index]->klv_name);
-  if (strings_equal(config->player_strategy_params[player_index]->klv_name,
-                    config->player_strategy_params[opponent_index]->klv_name)) {
-    config->klv_is_shared = true;
+// FIXME: make this generic
+config_load_status_t load_lexicons_for_config(Config *config,
+                                              const char *p1_lexicon_name,
+                                              const char *p2_lexicon_name) {
+  int p1_kwg_to_use_index =
+      get_index_of_kwg_to_load(config, p1_lexicon_name, 0);
+  int p2_kwg_to_use_index =
+      get_index_of_kwg_to_load(config, p2_lexicon_name, 1);
+
+  KWG *p1_kwg;
+  const char *p1_kwg_name;
+
+  if (p1_kwg_to_use_index < 0) {
+    p1_kwg = create_kwg(p1_lexicon_name);
+    p1_kwg_name = p1_lexicon_name;
+  } else {
+    p1_kwg = config->player_strategy_params[p1_kwg_to_use_index]->kwg;
+    p1_kwg_name = config->player_strategy_params[p1_kwg_to_use_index]->kwg_name;
   }
+
+  KWG *p2_kwg;
+  char *p2_kwg_name;
+
+  if (p2_kwg_to_use_index < 0) {
+    if (strings_equal(p1_lexicon_name, p2_lexicon_name)) {
+      p2_kwg = p1_kwg;
+      p2_kwg_name = p1_lexicon_name;
+    } else {
+      p2_kwg = create_kwg(p2_lexicon_name);
+      p2_kwg_name = p2_lexicon_name;
+    }
+  } else {
+    p2_kwg = config->player_strategy_params[p2_kwg_to_use_index]->kwg;
+    p2_kwg_name = config->player_strategy_params[p2_kwg_to_use_index]->kwg_name;
+  }
+
+  for (int i = 0; i < 2; i++) {
+    KWG *existing_kwg = config->player_strategy_params[i]->kwg;
+    if (existing_kwg != p1_kwg && existing_kwg != p2_kwg) {
+      destroy_kwg(existing_kwg);
+    }
+  }
+
+  if (!p1_kwg || !p2_kwg) {
+    return CONFIG_LOAD_STATUS_MISSING_LEXICON;
+  }
+
+  config->player_strategy_params[0]->kwg = p1_kwg;
+  config->player_strategy_params[1]->kwg = p2_kwg;
+
+  if (!strings_equal(config->player_strategy_params[0]->kwg_name,
+                     p1_lexicon_name)) {
+    free(config->player_strategy_params[0]->kwg_name);
+    config->player_strategy_params[0]->kwg_name =
+        get_formatted_string("%s", p1_lexicon_name);
+  }
+  if (!strings_equal(config->player_strategy_params[1]->kwg_name,
+                     p2_lexicon_name)) {
+    free(config->player_strategy_params[1]->kwg_name);
+    config->player_strategy_params[1]->kwg_name =
+        get_formatted_string("%s", p2_lexicon_name);
+  }
+  config->kwg_is_shared =
+      strings_equal(config->player_strategy_params[0]->kwg_name,
+                    config->player_strategy_params[1]->kwg_name);
 }
 
 config_load_status_t load_move_sort_type_for_config(
     Config *config, const char *move_sort_type_string, int player_index) {
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
-  if (strings_equal(move_sort_type_string, "equity")) {
+  if (strings_equal(move_sort_type_string, MOVE_SORT_EQUITY_NAME)) {
     config->player_strategy_params[player_index]->move_sort_type =
         MOVE_SORT_EQUITY;
-  } else if (strings_equal(move_sort_type_string, "score")) {
+  } else if (strings_equal(move_sort_type_string, MOVE_SORT_SCORE_NAME)) {
     config->player_strategy_params[player_index]->move_sort_type =
         MOVE_SORT_SCORE;
   } else {
@@ -385,11 +477,10 @@ config_load_status_t load_move_sort_type_for_config(
 config_load_status_t load_move_record_type_for_config(
     Config *config, const char *move_record_type_string, int player_index) {
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
-  if (strings_equal(move_record_type_string, "best") ||
-      strings_equal(move_record_type_string, "top")) {
+  if (strings_equal(move_record_type_string, MOVE_RECORD_BEST_NAME)) {
     config->player_strategy_params[player_index]->move_record_type =
         MOVE_RECORD_BEST;
-  } else if (strings_equal(move_record_type_string, "all")) {
+  } else if (strings_equal(move_record_type_string, MOVE_RECORD_ALL_NAME)) {
     config->player_strategy_params[player_index]->move_record_type =
         MOVE_RECORD_ALL;
   } else {
@@ -539,11 +630,7 @@ load_number_of_threads_for_config(Config *config,
   if (!is_all_digits_or_empty(number_of_tiles_threads)) {
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
   }
-  if (!config->thread_control) {
-    config->thread_control = create_thread_control();
-  }
-  config->thread_control->number_of_threads =
-      string_to_int(number_of_tiles_threads);
+  config->number_of_threads = string_to_int(number_of_tiles_threads);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -553,11 +640,7 @@ load_print_info_interval_for_config(Config *config,
   if (!is_all_digits_or_empty(print_info_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL;
   }
-  if (!config->thread_control) {
-    config->thread_control = create_thread_control();
-  }
-  config->thread_control->print_info_interval =
-      string_to_int(print_info_interval);
+  config->print_info_interval = string_to_int(print_info_interval);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -567,10 +650,7 @@ load_check_stop_interval_for_config(Config *config,
   if (!is_all_digits_or_empty(check_stop_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL;
   }
-  if (!config->thread_control) {
-    config->thread_control = create_thread_control();
-  }
-  config->thread_control->check_stopping_condition_interval =
+  config->check_stopping_condition_interval =
       string_to_int(check_stop_interval);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
@@ -623,6 +703,12 @@ config_load_status_t load_cgp_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
+char *get_default_letter_distribution_name(const char *lexicon_name) {
+  return "";
+}
+
+char *get_default_klv_name(const char *lexicon_name) {}
+
 config_load_status_t load_config_with_parsed_args(Config *config,
                                                   ParsedArgs *parsed_args) {
 
@@ -632,6 +718,14 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     return CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND;
   }
 
+  // Set the names using the args
+  // and load the data once the args
+  // are parsed.
+  const char *p1_lexicon_name = NULL;
+  const char *p1_leaves_name = NULL;
+  const char *p2_lexicon_name = NULL;
+  const char *p2_leaves_name = NULL;
+  const char *win_pct_name = NULL;
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   for (int i = args_start_index; i < NUMBER_OF_ARG_TOKENS; i++) {
     if (!parsed_args->has_value[i]) {
@@ -649,27 +743,28 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     case ARG_TOKEN_AUTOPLAY:
       config_load_status = CONFIG_LOAD_STATUS_MISPLACED_COMMAND;
       break;
-    case ARG_TOKEN_CGP_BINGO_BONUS:
+    case ARG_TOKEN_BINGO_BONUS:
       config_load_status = load_bingo_bonus_for_config(config, arg_values[0]);
       break;
-    case ARG_TOKEN_CGP_BOARD_LAYOUT:
+    case ARG_TOKEN_BOARD_LAYOUT:
       config_load_status = load_board_layout_for_config(config, arg_values[0]);
       break;
-    case ARG_TOKEN_CGP_GAME_VARIANT:
+    case ARG_TOKEN_GAME_VARIANT:
       config_load_status = load_game_variant_for_config(config, arg_values[0]);
       break;
-    case ARG_TOKEN_CGP_LETTER_DISTRIBUTION:
+    case ARG_TOKEN_LETTER_DISTRIBUTION:
       config_load_status =
           load_letter_distribution_for_config(config, arg_values[0]);
       break;
-    case ARG_TOKEN_CGP_LEXICON:
-      config_load_status = load_lexicon_for_config(config, arg_values[0], 0);
+    case ARG_TOKEN_LEXICON:
+      p1_lexicon_name = arg_values[0];
+      p2_lexicon_name = arg_values[0];
       break;
     case ARG_TOKEN_P1_LEXICON:
-      config_load_status = load_lexicon_for_config(config, arg_values[0], 0);
+      p1_lexicon_name = arg_values[0];
       break;
     case ARG_TOKEN_P1_LEAVES:
-      config_load_status = load_lexicon_for_config(config, arg_values[0], 0);
+      p1_leaves_name = arg_values[0];
       break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
       config_load_status =
@@ -680,10 +775,10 @@ config_load_status_t load_config_with_parsed_args(Config *config,
           load_move_record_type_for_config(config, arg_values[0], 0);
       break;
     case ARG_TOKEN_P2_LEXICON:
-      config_load_status = load_lexicon_for_config(config, arg_values[0], 1);
+      p2_lexicon_name = arg_values[0];
       break;
     case ARG_TOKEN_P2_LEAVES:
-      config_load_status = load_lexicon_for_config(config, arg_values[0], 1);
+      p2_leaves_name = arg_values[0];
       break;
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       config_load_status =
@@ -696,8 +791,8 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     case ARG_TOKEN_KNOWN_OPP_RACK:
       config_load_status = load_rack_for_config(config, arg_values[0]);
       break;
-    case ARG_TOKEN_WIN_PCT_FILENAME:
-      config_load_status = load_winpct_for_config(config, arg_values[0]);
+    case ARG_TOKEN_WIN_PCT:
+      win_pct_name = arg_values[0];
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       config_load_status = load_num_plays_for_config(config, arg_values[0]);
@@ -753,14 +848,29 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       break;
     }
     if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-      break;
+      return config_load_status;
     }
   }
-  if (config_load_status == CONFIG_LOAD_STATUS_SUCCESS &&
-      config->command_type == COMMAND_TYPE_LOAD_CGP) {
+
+  if (config->command_type == COMMAND_TYPE_LOAD_CGP) {
     config_load_status = load_cgp_for_config(config, parsed_args);
+    if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+      return config_load_status;
+    }
   }
-  return config_load_status;
+
+  config_load_status =
+      load_lexicons_for_config(config, p1_lexicon_name, p2_lexicon_name);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
+  load_leaves_for_config(config, p1_leaves_name, p2_leaves_name);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
+  return load_winpct_for_config(config, win_pct_name);
 }
 
 config_load_status_t load_config(Config *config, const char *cmd) {
@@ -810,7 +920,7 @@ void destroy_strategy_params(StrategyParams *strategy_params, bool destroy_kwg,
   free(strategy_params);
 }
 
-Config *create_config() {
+Config *create_default_config() {
   Config *config = malloc_or_die(sizeof(Config));
   config->command_type = COMMAND_TYPE_UNKNOWN;
   config->letter_distribution = NULL;
@@ -835,8 +945,11 @@ Config *create_config() {
   config->max_iterations = 0;
   config->stopping_condition = SIM_STOPPING_CONDITION_NONE;
   config->static_search_only = false;
-  config->number_of_games_or_pairs = 0;
-  config->thread_control = NULL;
+  config->use_game_pairs = true;
+  config->random_seed = 0;
+  config->number_of_threads = 1;
+  config->print_info_interval = 0;
+  config->check_stopping_condition_interval = 0;
   return config;
 }
 
@@ -861,9 +974,6 @@ void destroy_config(Config *config) {
   }
   if (config->win_pct_name) {
     free(config->win_pct_name);
-  }
-  if (config->thread_control) {
-    destroy_thread_control(config->thread_control);
   }
   free(config);
 }

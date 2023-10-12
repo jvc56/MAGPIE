@@ -1,8 +1,8 @@
 #ifndef EQUITY_ADJUSTMENT_TEST_H
 #define EQUITY_ADJUSTMENT_TEST_H
 
-#include "superconfig.h"
+#include "testconfig.h"
 
-void test_equity_adjustments(SuperConfig *superconfig);
+void test_equity_adjustments(TestConfig *testconfig);
 
 #endif

@@ -8,10 +8,15 @@
 #define ASCII_PLAYED_THROUGH '.'
 #define MAX_DATA_FILENAME_LENGTH 64
 #define BINGO_BONUS 50
-#define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"
-#define LETTER_DISTRIBUTION_FILEPATH "data/letterdistributions/"
 #define KWG_FILEPATH "data/lexica/"
-#define KWG_EXTENSION ".kwg"
+#define KWG_FILE_EXTENSION ".kwg"
+#define LETTER_DISTRIBUTION_FILEPATH "data/letterdistributions/"
+#define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"
+#define KLV_FILEPATH "data/lexica/"
+#define KLV_FILE_EXTENSION ".klv2"
+#define WIN_PCT_FILEPATH "data/strategy/"
+#define WIN_PCT_DEFAULT_ENGLISH_DIR "default_english/"
+#define WIN_PCT_FILE_EXTENSION ".csv"
 
 // Shared enums
 

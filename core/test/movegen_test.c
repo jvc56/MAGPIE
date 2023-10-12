@@ -14,7 +14,7 @@
 
 #include "cross_set_test.h"
 #include "rack_test.h"
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -84,8 +84,8 @@ void test_simple_case(Game *game, Player *player, const char *rack_string,
   reset_rack(player->rack);
 }
 
-void macondo_tests(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void macondo_tests(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
   KWG *kwg = player->strategy_params->kwg;
@@ -366,8 +366,8 @@ void macondo_tests(SuperConfig *superconfig) {
   destroy_game(game_two);
 }
 
-void exchange_tests(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void exchange_tests(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
@@ -401,8 +401,8 @@ void exchange_tests(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void many_moves_tests(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void many_moves_tests(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   load_cgp(game, MANY_MOVES);
@@ -413,8 +413,8 @@ void many_moves_tests(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void equity_test(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void equity_test(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
 
   Game *game = create_game(config);
   Player *player = game->players[0];
@@ -451,8 +451,8 @@ void equity_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void top_equity_play_recorder_test(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void top_equity_play_recorder_test(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
 
   Game *game = create_game(config);
   Player *player = game->players[0];
@@ -480,8 +480,8 @@ void top_equity_play_recorder_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void distinct_lexica_test(SuperConfig *superconfig) {
-  Config *config = get_distinct_lexica_config(superconfig);
+void distinct_lexica_test(TestConfig *testconfig) {
+  Config *config = get_distinct_lexica_config(testconfig);
 
   Game *game = create_game(config);
   int player_1_saved_recorder_type =
@@ -539,10 +539,10 @@ void distinct_lexica_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_movegen(SuperConfig *superconfig) {
-  macondo_tests(superconfig);
-  exchange_tests(superconfig);
-  equity_test(superconfig);
-  top_equity_play_recorder_test(superconfig);
-  distinct_lexica_test(superconfig);
+void test_movegen(TestConfig *testconfig) {
+  macondo_tests(testconfig);
+  exchange_tests(testconfig);
+  equity_test(testconfig);
+  top_equity_play_recorder_test(testconfig);
+  distinct_lexica_test(testconfig);
 }

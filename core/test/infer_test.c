@@ -10,7 +10,7 @@
 #include "../src/move.h"
 #include "../src/thread_control.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -27,8 +27,8 @@ int infer_for_test(Inference *inference, Game *game, Rack *actual_tiles_played,
   return inference->status;
 }
 
-void test_trivial_random_probability(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_trivial_random_probability(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
@@ -96,8 +96,8 @@ void test_trivial_random_probability(SuperConfig *superconfig) {
   destroy_inference(inference);
 }
 
-void test_infer_rack_overflow(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_rack_overflow(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);
 
@@ -119,8 +119,8 @@ void test_infer_rack_overflow(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_infer_no_tiles_played(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_no_tiles_played(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   Rack *rack = create_rack(game->players[0]->rack->array_size);
@@ -134,8 +134,8 @@ void test_infer_no_tiles_played(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_infer_both_play_and_exchange(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_both_play_and_exchange(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);
 
@@ -150,8 +150,8 @@ void test_infer_both_play_and_exchange(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_infer_exchange_score_not_zero(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_exchange_score_not_zero(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);
 
@@ -165,8 +165,8 @@ void test_infer_exchange_score_not_zero(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_infer_exchange_not_allowed(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_exchange_not_allowed(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);
 
@@ -187,8 +187,8 @@ void test_infer_exchange_not_allowed(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_infer_tiles_played_not_in_bag(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   Rack *rack = create_rack(game->players[0]->rack->array_size);
@@ -203,9 +203,9 @@ void test_infer_tiles_played_not_in_bag(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_infer_nonerror_cases(SuperConfig *superconfig,
+void test_infer_nonerror_cases(TestConfig *testconfig,
                                int number_of_threads) {
-  Config *config = get_csw_config(superconfig);
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);
   KLV *klv = game->players[0]->strategy_params->klv;
@@ -773,17 +773,17 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   destroy_game(game);
 }
 
-void test_infer(SuperConfig *superconfig) {
-  test_trivial_random_probability(superconfig);
-  test_infer_rack_overflow(superconfig);
-  test_infer_no_tiles_played(superconfig);
-  test_infer_both_play_and_exchange(superconfig);
-  test_infer_exchange_score_not_zero(superconfig);
-  test_infer_exchange_not_allowed(superconfig);
-  test_infer_tiles_played_not_in_bag(superconfig);
-  test_infer_nonerror_cases(superconfig, 1);
-  test_infer_nonerror_cases(superconfig, 2);
-  test_infer_nonerror_cases(superconfig, 7);
+void test_infer(TestConfig *testconfig) {
+  test_trivial_random_probability(testconfig);
+  test_infer_rack_overflow(testconfig);
+  test_infer_no_tiles_played(testconfig);
+  test_infer_both_play_and_exchange(testconfig);
+  test_infer_exchange_score_not_zero(testconfig);
+  test_infer_exchange_not_allowed(testconfig);
+  test_infer_tiles_played_not_in_bag(testconfig);
+  test_infer_nonerror_cases(testconfig, 1);
+  test_infer_nonerror_cases(testconfig, 2);
+  test_infer_nonerror_cases(testconfig, 7);
 }
 
 void infer_from_config(Config *config) {

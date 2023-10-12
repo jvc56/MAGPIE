@@ -12,7 +12,7 @@ typedef struct WinPct {
   unsigned int max_tiles_unseen;
 } WinPct;
 
-WinPct *create_winpct(const char *winpct_filename);
+WinPct *create_winpct(const char *winpct_name);
 void destroy_winpct(WinPct *wp);
 
 // FIXME: should this be inlined?

@@ -5,7 +5,7 @@
 #include "../src/config.h"
 #include "../src/game.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -26,8 +26,8 @@ void load_and_generate(Game *game, Player *player, const char *cgp,
   }
 }
 
-void test_shadow_score(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_shadow_score(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
 
@@ -479,8 +479,8 @@ void test_shadow_score(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_shadow_equity(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_shadow_equity(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
 
@@ -540,8 +540,8 @@ void test_shadow_equity(SuperConfig *superconfig) {
   destroy_rack(leave_rack);
 }
 
-void test_shadow_top_move(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_shadow_top_move(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
 
@@ -560,8 +560,8 @@ void test_shadow_top_move(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_shadow(SuperConfig *superconfig) {
-  test_shadow_score(superconfig);
-  test_shadow_equity(superconfig);
-  test_shadow_top_move(superconfig);
+void test_shadow(TestConfig *testconfig) {
+  test_shadow_score(testconfig);
+  test_shadow_equity(testconfig);
+  test_shadow_top_move(testconfig);
 }
