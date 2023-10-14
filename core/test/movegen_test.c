@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -376,13 +377,17 @@ void print_leave_lookup_test(SuperConfig *superconfig) {
       "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
       "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
-  generate_leaves_for_game(game, true);
 
   double *leaves = game->gen->leave_map->leave_values;
+  // Initialize data to notice which elements are not set.
+  for (int i = 0; i < 127; i++) {
+    leaves[i] = DBL_MAX;
+  }
+  generate_leaves_for_game(game, true);
   const char rack[8] = "MOOORTT";
   for (int i = 0; i < (1 << RACK_SIZE); ++i) {
     const double value = leaves[i];
-    if (within_epsilon(value, -0.000002)) {
+    if (value == DBL_MAX) {
       continue;
     }
     char leave_string[8];
