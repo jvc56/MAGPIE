@@ -380,7 +380,7 @@ void print_leave_lookup_test(SuperConfig *superconfig) {
 
   double *leaves = game->gen->leave_map->leave_values;
   // Initialize data to notice which elements are not set.
-  for (int i = 0; i < 127; i++) {
+  for (int i = 0; i < (1 << RACK_SIZE); i++) {
     leaves[i] = DBL_MAX;
   }
   generate_leaves_for_game(game, true);
