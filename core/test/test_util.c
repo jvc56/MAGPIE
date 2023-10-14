@@ -30,6 +30,22 @@ void generate_moves_for_game(Game *game) {
                  game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
 }
 
+void generate_leaves_for_game(Game* game, int add_exchange) {
+  Generator *gen = game->gen;
+  Player *player = game->players[game->player_on_turn_index];
+    init_leave_map(gen->leave_map, player->rack);
+  if (player->rack->number_of_letters < RACK_SIZE) {
+    set_current_value(
+        gen->leave_map,
+        get_leave_value(player->strategy_params->klv, player->rack));
+  } else {
+    set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
+  }
+
+  // Set the best leaves and maybe add exchanges.
+  generate_exchange_moves(gen, player, 0, 0, add_exchange);
+}
+
 SortedMoveList *create_sorted_move_list(MoveList *ml) {
   int number_of_moves = ml->count;
   SortedMoveList *sorted_move_list = malloc_or_die((sizeof(SortedMoveList)));

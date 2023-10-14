@@ -366,6 +366,104 @@ void macondo_tests(SuperConfig *superconfig) {
   destroy_game(game_two);
 }
 
+void print_leave_lookup_test(SuperConfig *superconfig) {
+  Config *config = get_csw_config(superconfig);
+  Game *game = create_game(config);
+
+  char cgp[300] =
+      "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+  load_cgp(game, cgp);
+  generate_leaves_for_game(game, true);
+
+  double *leaves = game->gen->leave_map->leave_values;
+  const char rack[8] = "MOOORTT";
+  for (int i = 0; i < (1 << RACK_SIZE); ++i) {
+    const double value = leaves[i];
+    if (within_epsilon(value, -0.000002)) {
+      continue;
+    }
+    char leave_string[8];
+    int k = 0;
+    for (int j = 0; j < RACK_SIZE; ++j) {
+      if (i & (1 << j)) {
+        leave_string[k++] = rack[j];
+      }
+      leave_string[k] = '\0';
+    }
+    printf("assert(within_epsilon(leaves[%3d], %+14.6f));", i, value);
+    printf(" // %s\n", leave_string);
+  }
+
+  destroy_game(game);
+}
+
+void leave_lookup_test(SuperConfig *superconfig) {
+  Config *config = get_csw_config(superconfig);
+  Game *game = create_game(config);
+
+  char cgp[300] =
+      "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+  load_cgp(game, cgp);
+  generate_leaves_for_game(game, true);
+
+  double *leaves = game->gen->leave_map->leave_values;
+
+  assert(within_epsilon(leaves[0], +0.000000));         //
+  assert(within_epsilon(leaves[1], -0.079110));         // M
+  assert(within_epsilon(leaves[2], -1.092266));         // O
+  assert(within_epsilon(leaves[3], +0.427566));         // MO
+  assert(within_epsilon(leaves[6], -8.156165));         // OO
+  assert(within_epsilon(leaves[7], -4.466051));         // MOO
+  assert(within_epsilon(leaves[14], -18.868383));       // OOO
+  assert(within_epsilon(leaves[15], -14.565833));       // MOOO
+  assert(within_epsilon(leaves[16], +1.924450));        // R
+  assert(within_epsilon(leaves[17], +0.965204));        // MR
+  assert(within_epsilon(leaves[18], +1.631953));        // OR
+  assert(within_epsilon(leaves[19], +2.601703));        // MOR
+  assert(within_epsilon(leaves[22], -5.642596));        // OOR
+  assert(within_epsilon(leaves[23], -1.488737));        // MOOR
+  assert(within_epsilon(leaves[30], -17.137913));       // OOOR
+  assert(within_epsilon(leaves[31], -12.899072));       // MOOOR
+  assert(within_epsilon(leaves[48], -5.277321));        // RT
+  assert(within_epsilon(leaves[49], -7.450112));        // MRT
+  assert(within_epsilon(leaves[50], -4.813058));        // ORT
+  assert(within_epsilon(leaves[51], -4.582363));        // MORT
+  assert(within_epsilon(leaves[54], -11.206508));       // OORT
+  assert(within_epsilon(leaves[55], -7.305244));        // MOORT
+  assert(within_epsilon(leaves[62], -21.169294));       // OOORT
+  assert(within_epsilon(leaves[63], -16.637489));       // MOOORT
+  assert(within_epsilon(leaves[64], +0.878783));        // T
+  assert(within_epsilon(leaves[65], -0.536439));        // MT
+  assert(within_epsilon(leaves[66], +0.461634));        // OT
+  assert(within_epsilon(leaves[67], +0.634061));        // MOT
+  assert(within_epsilon(leaves[70], -6.678402));        // OOT
+  assert(within_epsilon(leaves[71], -3.665847));        // MOOT
+  assert(within_epsilon(leaves[78], -18.284534));       // OOOT
+  assert(within_epsilon(leaves[79], -14.382346));       // MOOOT
+  assert(within_epsilon(leaves[80], +2.934475));        // RT
+  assert(within_epsilon(leaves[81], +0.090591));        // MRT
+  assert(within_epsilon(leaves[82], +3.786163));        // ORT
+  assert(within_epsilon(leaves[83], +2.442589));        // MORT
+  assert(within_epsilon(leaves[86], -3.260469));        // OORT
+  assert(within_epsilon(leaves[87], -0.355031));        // MOORT
+  assert(within_epsilon(leaves[94], -15.671781));       // OOORT
+  assert(within_epsilon(leaves[95], -12.082211));       // MOOORT
+  assert(within_epsilon(leaves[112], -5.691820));       // RTT
+  assert(within_epsilon(leaves[113], -10.848881));      // MRTT
+  assert(within_epsilon(leaves[114], -3.967470));       // ORTT
+  assert(within_epsilon(leaves[115], -7.316442));       // MORTT
+  assert(within_epsilon(leaves[118], -9.621570));       // OORTT
+  assert(within_epsilon(leaves[119], -8.197909));       // MOORTT
+  assert(within_epsilon(leaves[126], -18.412781));      // OOORTT
+  assert(within_epsilon(leaves[127], -100000.000000));  // MOOORTT
+
+  destroy_game(game);
+}
+
 void exchange_tests(SuperConfig *superconfig) {
   Config *config = get_csw_config(superconfig);
   Game *game = create_game(config);
@@ -542,6 +640,7 @@ void distinct_lexica_test(SuperConfig *superconfig) {
 void test_movegen(SuperConfig *superconfig) {
   macondo_tests(superconfig);
   exchange_tests(superconfig);
+  leave_lookup_test(superconfig);
   equity_test(superconfig);
   top_equity_play_recorder_test(superconfig);
   distinct_lexica_test(superconfig);
