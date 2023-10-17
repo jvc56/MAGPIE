@@ -61,6 +61,8 @@ Generator *copy_generator(Generator *gen, int move_list_size);
 void destroy_generator(Generator *gen);
 void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
                     int add_exchange);
+void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
+                             int stripidx, int add_exchange);
 void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
                    uint32_t node_index, int leftstrip, int rightstrip,
                    int unique_play);
