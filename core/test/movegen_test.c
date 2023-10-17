@@ -414,7 +414,8 @@ void leave_lookup_test(SuperConfig *superconfig) {
       "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
 
-  for (int add_exchanges = false; add_exchanges <= true; add_exchanges++) {
+  for (int i = 0; i < 2; i++) {
+    int add_exchanges = i == 0;
     generate_leaves_for_game(game, add_exchanges);
     double *leaves = game->gen->leave_map->leave_values;
     assert(within_epsilon(leaves[0], +0.000000));         //
