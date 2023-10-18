@@ -50,11 +50,11 @@ void destroy_kwg(KWG *kwg) {
 
 extern inline int kwg_is_end(KWG *kwg, int node_index);
 extern inline int kwg_accepts(KWG *kwg, int node_index);
-extern inline int kwg_arc_index(KWG *kwg, int node_index);
+extern inline int32_t kwg_arc_index(KWG *kwg, int node_index);
 extern inline int kwg_tile(KWG *kwg, int node_index);
-extern inline int kwg_get_root_node_index(KWG *kwg);
+extern inline int32_t kwg_get_root_node_index(KWG *kwg);
 
-int kwg_get_next_node_index(KWG *kwg, int node_index, int letter) {
+int kwg_get_next_node_index(KWG *kwg, int32_t node_index, int letter) {
   int i = node_index;
   while (1) {
     if (kwg_tile(kwg, i) == letter) {
@@ -67,9 +67,9 @@ int kwg_get_next_node_index(KWG *kwg, int node_index, int letter) {
   }
 }
 
-int kwg_in_letter_set(KWG *kwg, int letter, int node_index) {
+int kwg_in_letter_set(KWG *kwg, int letter, int32_t node_index) {
   letter = get_unblanked_machine_letter(letter);
-  int i = node_index;
+  int32_t i = node_index;
   while (1) {
     if (kwg_tile(kwg, i) == letter) {
       return kwg_accepts(kwg, i);
@@ -81,9 +81,9 @@ int kwg_in_letter_set(KWG *kwg, int letter, int node_index) {
   }
 }
 
-int kwg_get_letter_set(KWG *kwg, int node_index) {
+int kwg_get_letter_set(KWG *kwg, int32_t node_index) {
   int ls = 0;
-  int i = node_index;
+  int32_t i = node_index;
   while (1) {
     int t = kwg_tile(kwg, i);
     if (kwg_accepts(kwg, i)) {

@@ -143,7 +143,7 @@ void destroy_klv(KLV *klv) {
   free(klv);
 }
 
-int get_word_index_of(KLV *klv, uint32_t node_index, Rack *leave) {
+int get_word_index_of(KLV *klv, int32_t node_index, Rack *leave) {
   int idx = 0;
   int lidx = 0;
   int lidx_letter_count = leave->array[lidx];
@@ -156,13 +156,16 @@ int get_word_index_of(KLV *klv, uint32_t node_index, Rack *leave) {
   }
 
   while (node_index != 0) {
-    while (kwg_tile(klv->kwg, node_index) != (uint8_t)lidx) {
-      if (kwg_is_end(klv->kwg, node_index)) {
-        return -1;
-      }
-      idx += klv->word_counts[node_index] - klv->word_counts[node_index + 1];
-      node_index++;
+    //printf("gwio node_index: %d\n", node_index);
+    int next_word_index;
+    node_index =
+        increment_node_to_ml(klv, node_index, idx, &next_word_index, lidx);
+    //printf(" node_index: %d\n", node_index);
+    //printf(" next_word_index: %d\n", next_word_index);
+    if (node_index == -1) {
+      return node_index;
     }
+    idx = next_word_index;
 
     lidx_letter_count--;
     number_of_letters--;
@@ -177,15 +180,11 @@ int get_word_index_of(KLV *klv, uint32_t node_index, Rack *leave) {
     }
 
     if (number_of_letters == 0) {
-      if (kwg_accepts(klv->kwg, node_index)) {
-        return idx;
-      }
-      return -1;
+      return idx;
     }
-    if (kwg_accepts(klv->kwg, node_index)) {
-      idx += 1;
-    }
-    node_index = kwg_arc_index(klv->kwg, node_index);
+
+    node_index = follow_arc(klv, node_index, idx, &next_word_index);
+    idx = next_word_index;
   }
   return -1;
 }
@@ -198,8 +197,40 @@ double get_leave_value(KLV *klv, Rack *leave) {
     return 0.0;
   }
   int index = get_word_index_of(klv, kwg_arc_index(klv->kwg, 0), leave);
+  //printf("index: %d\n", index);
   if (index != -1) {
     return (double)klv->leave_values[index];
   }
   return 0.0;
+}
+
+int32_t increment_node_to_ml(KLV *klv, int32_t node_index, int32_t word_index,
+                             int *next_word_index, uint8_t ml) {
+  //printf("get_next_node_index.. node_index: %d word_index: %d\n", node_index,
+  //        word_index);
+  *next_word_index = word_index;
+  //printf("ml: %d\n", ml);
+  while (kwg_tile(klv->kwg, node_index) != ml) {
+    //printf("kwg_tile(klv->kwg, node_index): %d\n",
+    //        kwg_tile(klv->kwg, node_index));
+    if (kwg_is_end(klv->kwg, node_index)) {
+      break;
+    }
+    //printf("gnni klv->word_counts[node_index]: %d\n",
+    //        klv->word_counts[node_index]);
+    //printf("gnni klv->word_counts[node_index + 1]: %d\n",
+    //        klv->word_counts[node_index + 1]);
+    *next_word_index +=
+        klv->word_counts[node_index] - klv->word_counts[node_index + 1];
+    node_index++;
+  }
+  return node_index;
+  //*next_word_index++;
+  //return kwg_arc_index(klv->kwg, node_index);
+}
+
+int32_t follow_arc(KLV *klv, int32_t node_index, int32_t word_index,
+                   int32_t *next_word_index) {
+  *next_word_index = word_index + 1;
+  return kwg_arc_index(klv->kwg, node_index);
 }

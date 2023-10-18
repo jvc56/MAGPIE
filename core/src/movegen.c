@@ -104,6 +104,18 @@ double get_spare_move_equity(Generator *gen, Player *player, Rack *opp_rack) {
          other_adjustments;
 }
 
+double get_spare_exchange_equity(Generator *gen) {
+  double leave_adjustment = get_current_value(gen->leave_map);
+  double other_adjustments = 0;
+
+  if (gen->apply_placement_adjustment && gen->board->tiles_played == 0 &&
+      gen->move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
+  }
+
+  return leave_adjustment + other_adjustments;
+}
+
 // this function assumes the word is always horizontal. If this isn't the case,
 // the board needs to be transposed ahead of time.
 int score_move(Board *board, uint8_t word[], int word_start_index,
@@ -174,14 +186,7 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
                        get_cross_set_index(gen, player->index),
                        gen->letter_distribution);
     strip = gen->strip;
-  } else if (move_type == GAME_EVENT_EXCHANGE) {
-    // ignore the empty exchange case
-    if (rightstrip == 0) {
-      return;
-    }
-    tiles_played = rightstrip;
-    strip = gen->exchange_strip;
-  }
+  } 
 
   // Set the move to more easily handle equity calculations
   set_spare_move(gen->move_list, strip, leftstrip, rightstrip, score, row, col,
@@ -201,40 +206,123 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
   }
 }
 
-void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
-                             int stripidx, int add_exchange) {
+void record_exchange(Generator *gen, Player *player, Rack *exchanged) {
+  if ((player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST) &&
+      (player->strategy_params->move_sorting == MOVE_SORT_EQUITY)) {
+    double leave_value = get_current_value(gen->leave_map);
+    if (leave_value <= gen->move_list->moves[0]->equity) {
+      return;
+    }
+  }
+
+  int start_row = gen->current_row_index;
+  int tiles_exchanged = 0;
+  int start_col = 0;
+  int row = start_row;
+  int col = start_col;
+
+  int score = 0;
+  uint8_t *strip = NULL;
+
+  strip = gen->exchange_strip;
+  for (uint8_t ml = 0; ml < gen->letter_distribution->size; ml++) {
+    int num_this = exchanged->array[ml];
+    for (int i = 0; i < num_this; i++) {
+      strip[tiles_exchanged] = ml;
+      tiles_exchanged++;
+    }
+  }
+  set_spare_move(gen->move_list, strip, 0, tiles_exchanged, score, row, col,
+                 tiles_exchanged, gen->vertical, GAME_EVENT_EXCHANGE);
+  if (player->strategy_params->play_recorder_type == MOVE_RECORDER_ALL) {
+    double equity;
+    if (player->strategy_params->move_sorting == MOVE_SORT_EQUITY) {
+      equity = get_spare_exchange_equity(gen);
+    } else {
+      equity = score;
+    }
+    insert_spare_move(gen->move_list, equity);
+  } else {
+    insert_spare_move_top_equity(gen->move_list,
+                                 get_spare_exchange_equity(gen));
+  }
+}
+
+void generate_exchange_moves(Generator *gen, Player *player, Rack *leave,
+                             int32_t node_index, int32_t word_index, uint8_t ml,
+                             int add_exchange) {
   while (ml < (gen->letter_distribution->size) &&
          player->rack->array[ml] == 0) {
     ml++;
   }
+  // printf("ml: %d\n", ml);
+  // printf("current_index: %d, player->rack->number_of_letters: %d\n",
+  //       gen->leave_map->current_index, player->rack->number_of_letters);
   if (ml == (gen->letter_distribution->size)) {
-    // The recording of an exchange should never require
-    // the opponent's rack.
-
-    // Ignore the empty exchange case for full racks
-    // to avoid out of bounds errors for the best_leaves array
-    if (player->rack->number_of_letters < RACK_SIZE) {
-      double current_value =
-          get_leave_value(player->strategy_params->klv, player->rack);
-      set_current_value(gen->leave_map, current_value);
-      if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
-        gen->best_leaves[player->rack->number_of_letters] = current_value;
+    /*
+        StringBuilder *s1 = create_string_builder();
+        string_builder_add_rack(player->rack, gen->letter_distribution, s1);
+        StringBuilder *s2 = create_string_builder();
+        string_builder_add_rack(leave, gen->letter_distribution, s2);
+        printf("exchanged: %s leave: %s\n", string_builder_peek(s1),
+               string_builder_peek(s2));
+        destroy_string_builder(s1);
+        destroy_string_builder(s2);
+    */
+    if (player->rack->number_of_letters > 0) {
+      // printf("  gen->leave_map->current_index: %d\n",
+      //        gen->leave_map->current_index);
+      double value = 0.0;
+      if (word_index > 0) {
+        value = player->strategy_params->klv->leave_values[word_index - 1];
+      }
+      // printf("  incremental value: %f\n", value);
+      //   value = get_leave_value(player->strategy_params->klv, player->rack);
+      //   printf("value from root: %f\n", value);
+      set_current_value(gen->leave_map, value);
+      if (value > gen->best_leaves[leave->number_of_letters]) {
+        gen->best_leaves[leave->number_of_letters] = value;
       }
       if (add_exchange) {
-        record_play(gen, player, NULL, 0, stripidx, GAME_EVENT_EXCHANGE);
+        record_exchange(gen, player, player->rack);
       }
     }
   } else {
-    generate_exchange_moves(gen, player, ml + 1, stripidx, add_exchange);
+    generate_exchange_moves(gen, player, leave, node_index, word_index, ml + 1,
+                            add_exchange);
     int num_this = player->rack->array[ml];
     for (int i = 0; i < num_this; i++) {
-      gen->exchange_strip[stripidx] = ml;
-      stripidx += 1;
-      take_letter_and_update_current_index(gen->leave_map, player->rack, ml);
-      generate_exchange_moves(gen, player, ml + 1, stripidx, add_exchange);
+      add_letter_to_rack(leave, ml);
+      // add_letter_and_update_current_index(gen->leave_map, player->rack, ml);
+      take_letter_and_update_complement_index(gen->leave_map, player->rack,
+                                              leave, ml);
+      int32_t next_word_index;
+      int32_t next_node_index =
+          increment_node_to_ml(player->strategy_params->klv, node_index,
+                               word_index, &next_word_index, ml);
+      // printf("next_word_index: %d next_node_index: %d\n", next_word_index,
+      //        next_node_index);
+      node_index = next_node_index;
+      word_index = next_word_index;
+      {
+        int32_t next_word_index;
+        int32_t next_node_index =
+            follow_arc(player->strategy_params->klv, node_index, word_index,
+                       &next_word_index);
+        // printf("next_word_index: %d next_node_index: %d\n", next_word_index,
+        //        next_node_index);
+        node_index = next_node_index;
+        word_index = next_word_index;
+      }
+      generate_exchange_moves(gen, player, leave, node_index, word_index,
+                              ml + 1, add_exchange);
     }
+
     for (int i = 0; i < num_this; i++) {
-      add_letter_and_update_current_index(gen->leave_map, player->rack, ml);
+      take_letter_from_rack(leave, ml);
+      // take_letter_and_update_current_index(gen->leave_map, player->rack, ml);
+      add_letter_and_update_complement_index(gen->leave_map, player->rack,
+                                             leave, ml);
     }
   }
 }
@@ -735,17 +823,22 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   }
 
   init_leave_map(gen->leave_map, player->rack);
-  if (player->rack->number_of_letters < RACK_SIZE) {
+  if (player->rack->number_of_letters > RACK_SIZE) {
     set_current_value(
         gen->leave_map,
         get_leave_value(player->strategy_params->klv, player->rack));
   } else {
     set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
+  gen->leave_map->current_index = 0;
 
   // Set the best leaves and maybe add exchanges.
-  generate_exchange_moves(gen, player, 0, 0, add_exchange);
+  int32_t node_index = kwg_arc_index(player->strategy_params->klv->kwg, 0);
+  Rack *leave = create_rack(gen->letter_distribution->size);
+  generate_exchange_moves(gen, player, leave, node_index, 0, 0, add_exchange);
+  destroy_rack(leave);
 
+  gen->leave_map->current_index = (1 << player->rack->number_of_letters) - 1;
   reset_anchor_list(gen->anchor_list);
   set_descending_tile_scores(gen, player);
 

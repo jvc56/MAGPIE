@@ -41,9 +41,13 @@ void generate_leaves_for_game(Game* game, int add_exchange) {
   } else {
     set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
+  gen->leave_map->current_index = 0;
 
   // Set the best leaves and maybe add exchanges.
-  generate_exchange_moves(gen, player, 0, 0, add_exchange);
+  int32_t node_index = kwg_arc_index(player->strategy_params->klv->kwg, 0);
+  Rack *leave = create_rack(gen->letter_distribution->size);
+  generate_exchange_moves(gen, player, leave, node_index, 0, 0, add_exchange);
+  destroy_rack(leave);
 }
 
 SortedMoveList *create_sorted_move_list(MoveList *ml) {

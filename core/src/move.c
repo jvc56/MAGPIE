@@ -167,7 +167,6 @@ void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
 
 void insert_spare_move(MoveList *ml, double equity) {
   ml->spare_move->equity = equity;
-
   Move *swap = ml->moves[ml->count];
   ml->moves[ml->count] = ml->spare_move;
   ml->spare_move = swap;

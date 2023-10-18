@@ -8,6 +8,7 @@
 #include "letter_distribution.h"
 
 #define RACK_SIZE 7
+#define NUMBER_OF_RACK_LEAVES 127
 
 typedef struct Rack {
   int array_size;

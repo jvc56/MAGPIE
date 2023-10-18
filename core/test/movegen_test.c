@@ -414,8 +414,20 @@ void leave_lookup_test(SuperConfig *superconfig) {
       "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
 
-  for (int add_exchanges = false; add_exchanges <= true; add_exchanges++) {
+  for (int i = 0; i < 1; i++) {
+    int add_exchanges = i == 0;
+    //printf("add_exchanges: %d\n", add_exchanges);
     generate_leaves_for_game(game, add_exchanges);
+    /*
+    if (add_exchanges) {
+      Move *best_move = game->gen->move_list->moves[0];
+      StringBuilder *string_builder = create_string_builder();
+      string_builder_add_move(game->gen->board, best_move,
+                              game->gen->letter_distribution, string_builder);
+      printf("moves[0]: %s\n", string_builder_peek(string_builder));
+      destroy_string_builder(string_builder);
+    }
+    */
     double *leaves = game->gen->leave_map->leave_values;
     assert(within_epsilon(leaves[0], +0.000000));         //
     assert(within_epsilon(leaves[1], -0.079110));         // M
@@ -643,6 +655,8 @@ void distinct_lexica_test(SuperConfig *superconfig) {
 }
 
 void test_movegen(SuperConfig *superconfig) {
+  //print_leave_lookup_test(superconfig); return;
+  //leave_lookup_test(superconfig); return;
   macondo_tests(superconfig);
   exchange_tests(superconfig);
   leave_lookup_test(superconfig);
