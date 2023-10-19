@@ -3,6 +3,7 @@
 
 #include "autoplay.h"
 #include "config.h"
+#include "error_status.h"
 #include "game.h"
 #include "infer.h"
 #include "sim.h"

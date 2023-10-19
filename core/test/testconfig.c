@@ -47,7 +47,7 @@ TestConfig *create_testconfig(const char *csw_config_string,
   testconfig->osps_config = create_and_load_config(osps_config_string);
   testconfig->disc_config = create_and_load_config(disc_config_string);
   testconfig->distinct_lexica_config =
-      create_and_load_config(distinct_lexica_config);
+      create_and_load_config(distinct_lexica_config_string);
   return testconfig;
 }
 

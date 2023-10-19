@@ -91,7 +91,7 @@ void test_simple_case(Game *game, Player *player, const char *rack_string,
 
 void macondo_tests(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
   Player *player = game->players[0];
   KWG *kwg = player->kwg;
 
@@ -345,7 +345,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestRowEquivalent
   load_cgp(game, TEST_DUPE);
 
-  Game *game_two = create_game(config);
+  Game *game_two = create_game(config, TEST_MOVE_LIST_CAPACITY);
 
   set_row(game_two, 7, " INCITES");
   set_row(game_two, 8, "IS");
@@ -372,7 +372,7 @@ void macondo_tests(TestConfig *testconfig) {
 
 void exchange_tests(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
@@ -407,7 +407,7 @@ void exchange_tests(TestConfig *testconfig) {
 
 void many_moves_tests(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
 
   load_cgp(game, MANY_MOVES);
   generate_moves_for_game(game);
@@ -420,9 +420,9 @@ void many_moves_tests(TestConfig *testconfig) {
 void equity_test(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
 
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
   Player *player = game->players[0];
-  player->move_sorting = MOVE_SORT_EQUITY;
+  player->move_sort_type = MOVE_SORT_EQUITY;
   KLV *klv = player->klv;
   // A middlegame is chosen to avoid
   // the opening and endgame equity adjustments
@@ -458,10 +458,9 @@ void equity_test(TestConfig *testconfig) {
 void top_equity_play_recorder_test(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
 
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
   Player *player = game->players[0];
-  int saved_recorder_type = player->play_recorder_type;
-  player->play_recorder_type = MOVE_RECORDER_BEST;
+  player->move_record_type = MOVE_RECORD_BEST;
 
   load_cgp(game, VS_JEREMY);
   set_rack_to_string(player->rack, "DDESW??", game->gen->letter_distribution);
@@ -478,20 +477,15 @@ void top_equity_play_recorder_test(TestConfig *testconfig) {
 
   assert_move(game, NULL, 0, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
 
-  // reset play recorder type as this is a shared config.
-  player->play_recorder_type = saved_recorder_type;
-
   destroy_game(game);
 }
 
 void distinct_lexica_test(TestConfig *testconfig) {
   Config *config = get_distinct_lexica_config(testconfig);
 
-  Game *game = create_game(config);
-  int player_1_saved_recorder_type = game->players[0]->play_recorder_type;
-  int player_2_saved_recorder_type = game->players[1]->play_recorder_type;
-  game->players[0]->play_recorder_type = MOVE_RECORDER_BEST;
-  game->players[1]->play_recorder_type = MOVE_RECORDER_BEST;
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  game->players[0]->move_record_type = MOVE_RECORD_BEST;
+  game->players[1]->move_record_type = MOVE_RECORD_BEST;
 
   // Play SPORK, better than best NWL move of PORKS
   set_rack_to_string(game->players[0]->rack, "KOPRRSS",
@@ -531,10 +525,6 @@ void distinct_lexica_test(TestConfig *testconfig) {
 
   play_move(game, game->gen->move_list->moves[0]);
   reset_move_list(game->gen->move_list);
-
-  game->players[0]->play_recorder_type = player_1_saved_recorder_type;
-
-  game->players[1]->play_recorder_type = player_2_saved_recorder_type;
 
   destroy_game(game);
 }

@@ -38,7 +38,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
                  uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
   clock_t begin = clock();
 
-  Game *game = get_game_from_cgp(cgp);
+  Game *game = get_game_from_cgp(cgpstr);
 
   int tiles_played = 0;
   for (int i = 0; i < ntiles; i++) {
@@ -155,7 +155,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
 char *static_evaluation(char *cgpstr, int num_plays) {
   clock_t begin = clock();
 
-  Game *game = get_game_from_cgp(cgp);
+  Game *game = get_game_from_cgp(cgpstr);
 
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
@@ -176,11 +176,15 @@ char *static_evaluation(char *cgpstr, int num_plays) {
   return val;
 }
 
+// FIXME: what exactly allocates the char* here?
+// I'm not sure about this part of WASM, it might
+// need to be freed
 int process_ucgi_command_wasm(char *cmd) {
   if (!ucgi_command_vars) {
-    ucgi_command_vars = create_ucgi_command_vars(NULL);
+    ucgi_command_vars = create_command_vars(NULL);
   }
-  return process_ucgi_command_async(cmd, ucgi_command_vars);
+  ucgi_command_vars->command = cmd;
+  return process_ucgi_command_async(ucgi_command_vars);
 }
 
 char *ucgi_search_status_wasm() {

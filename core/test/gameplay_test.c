@@ -88,8 +88,8 @@ void assert_games_are_equal(Game *g1, Game *g2, int check_scores) {
 
 void test_gameplay_by_turn(Config *config, char *cgps[], char *racks[],
                            int array_length) {
-  Game *actual_game = create_game(config);
-  Game *expected_game = create_game(config);
+  Game *actual_game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
+  Game *expected_game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
 
   int player0_last_score_on_rack = -1;
   int player1_last_score_on_rack = -1;
@@ -380,7 +380,7 @@ void test_standard_game(TestConfig *testconfig) {
 
 void test_playmove(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
 
   // Test play
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
@@ -477,7 +477,7 @@ void test_playmove(TestConfig *testconfig) {
 
 void test_set_random_rack(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
   assert(game->gen->bag->last_tile_index == 99);
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
@@ -519,7 +519,7 @@ void test_set_random_rack(TestConfig *testconfig) {
 
 void test_backups(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
                       game->gen->letter_distribution);

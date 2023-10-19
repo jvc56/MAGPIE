@@ -621,37 +621,34 @@ inference_status_t verify_inference(Inference *inference) {
     }
   }
 
-  if (actual_tiles_played->number_of_letters == 0 &&
-      config->number_of_tiles_exchanged == 0) {
+  if (inference->player_to_infer_rack->number_of_letters == 0 &&
+      inference->number_of_tiles_exchanged == 0) {
     return INFERENCE_STATUS_NO_TILES_PLAYED;
   }
 
-  if (actual_tiles_played->number_of_letters != 0 &&
-      config->number_of_tiles_exchanged != 0) {
+  if (inference->player_to_infer_rack->number_of_letters != 0 &&
+      inference->number_of_tiles_exchanged != 0) {
     return INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE;
   }
 
-  if (config->number_of_tiles_exchanged != 0 &&
+  if (inference->number_of_tiles_exchanged != 0 &&
       inference->bag_as_rack->number_of_letters < (RACK_SIZE) * 2) {
     return INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
   }
 
-  if (config->number_of_tiles_exchanged != 0 && inference->actual_score != 0) {
+  if (inference->number_of_tiles_exchanged != 0 &&
+      inference->actual_score != 0) {
     return INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO;
   }
 
-  if (game->players[config->player_to_infer_index]->rack->number_of_letters >
-      (RACK_SIZE)) {
+  if (inference->player_to_infer_rack->number_of_letters > (RACK_SIZE)) {
     return INFERENCE_STATUS_RACK_OVERFLOW;
   }
 
-  if (config->number_of_threads < 1) {
-    return INFERENCE_STATUS_INVALID_NUMBER_OF_THREADS;
-  }
   return INFERENCE_STATUS_SUCCESS;
 }
 
-inference_status_t infer(Config *config, ThreadControl *thread_control,
+inference_status_t infer(const Config *config, ThreadControl *thread_control,
                          Game *game, Inference *inference) {
   initialize_inference_for_evaluation(
       inference, game, config->rack, config->player_to_infer_index,
@@ -671,8 +668,8 @@ inference_status_t infer(Config *config, ThreadControl *thread_control,
 
   // Return the player to infer rack to it's original
   // state since the inference does not own that struct
-  for (int i = 0; i < actual_tiles_played->array_size; i++) {
-    for (int j = 0; j < actual_tiles_played->array[i]; j++) {
+  for (int i = 0; i < config->rack->array_size; i++) {
+    for (int j = 0; j < config->rack->array[i]; j++) {
       take_letter_from_rack(inference->player_to_infer_rack, i);
     }
   }

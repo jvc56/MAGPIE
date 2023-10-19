@@ -61,7 +61,7 @@ typedef struct Game {
 } Game;
 
 void reset_game(Game *game);
-Game *create_game(Config *config, int move_list_capacity);
+Game *create_game(const Config *config, int move_list_capacity);
 Game *copy_game(Game *game, int move_list_capacity);
 void destroy_game(Game *game);
 cgp_parse_status_t load_cgp(Game *game, const char *cgp);

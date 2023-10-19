@@ -7,6 +7,7 @@
 #include "board.h"
 #include "config.h"
 #include "constants.h"
+#include "game.h"
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
@@ -122,11 +123,9 @@ const struct {
   command_t command_type;
   // The sequence of tokens associated with this command type
   arg_token_t arg_token_sequence[3];
-} VALID_COMMAND_SEQUENCES[5] = {{
+} VALID_COMMAND_SEQUENCES[6] = {
     // The valid sequences
     {COMMAND_TYPE_LOAD_CGP,
-     // The NUMBER_OF_ARG_TOKENS token denotes the end of the arg token
-     // sequence
      {ARG_TOKEN_POSITION, ARG_TOKEN_CGP, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_SIM, {ARG_TOKEN_GO, ARG_TOKEN_SIM, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_INFER, {ARG_TOKEN_GO, ARG_TOKEN_INFER, NUMBER_OF_ARG_TOKENS}},
@@ -135,7 +134,7 @@ const struct {
     {COMMAND_TYPE_SET_OPTIONS, {ARG_TOKEN_SET_OPTIONS, NUMBER_OF_ARG_TOKENS}},
     // The unknown command type denotes the end of the sequences
     {COMMAND_TYPE_UNKNOWN, {}},
-}};
+};
 
 typedef struct SingleArg {
   arg_token_t token;
@@ -155,7 +154,7 @@ SingleArg *create_single_arg() {
   return single_arg;
 }
 
-void destory_single_arg(SingleArg *single_arg) {
+void destroy_single_arg(SingleArg *single_arg) {
   if (single_arg->name) {
     free(single_arg->name);
   }
@@ -185,7 +184,7 @@ void set_single_arg(ParsedArgs *parsed_args, int index, arg_token_t arg_token,
   parsed_args->args[index] = single_arg;
 }
 
-ParsedArgs *create_parsed_args(StringSplitter *cmd) {
+ParsedArgs *create_parsed_args() {
   ParsedArgs *parsed_args = malloc_or_die(sizeof(ParsedArgs));
 
   int index = 0;
@@ -277,7 +276,6 @@ void destroy_parsed_args(ParsedArgs *parsed_args) {
 config_load_status_t init_parsed_args(ParsedArgs *parsed_args,
                                       StringSplitter *cmd) {
   int number_of_input_args = string_splitter_get_number_of_items(cmd);
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   for (int i = 0; i < number_of_input_args;) {
     char *input_arg = string_splitter_get_item(cmd, i);
     bool is_recognized_arg = false;
@@ -376,10 +374,10 @@ config_load_status_t load_letter_distribution_for_config(
   }
   config->letter_distribution = new_letter_distribution;
 
-  if (config->letter_distribution_name) {
-    free(config->letter_distribution_name);
+  if (config->ld_name) {
+    free(config->ld_name);
   }
-  config->letter_distribution_name = letter_distribution_name;
+  config->ld_name = letter_distribution_name;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -418,20 +416,25 @@ config_load_status_t load_rack_for_config(Config *config, const char *rack) {
     return CONFIG_LOAD_STATUS_MISSING_LETTER_DISTRIBUTION;
   }
   if (!config->rack) {
-    config->rack = create_rack();
+    config->rack = create_rack(config->letter_distribution->size);
   }
-  int number_of_letters_set =
-      set_rack_to_string(config->rack, rack, config->letter_distribution);
-  if (number_of_letters_set < 0) {
-    return CONFIG_LOAD_STATUS_MALFORMED_RACK;
+  if (!strings_equal(EMPTY_RACK_STRING, rack)) {
+    int number_of_letters_set =
+        set_rack_to_string(config->rack, rack, config->letter_distribution);
+    if (number_of_letters_set < 0) {
+      return CONFIG_LOAD_STATUS_MALFORMED_RACK;
+    }
+  } else {
+    reset_rack(config->rack);
   }
+
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
 config_load_status_t load_winpct_for_config(Config *config,
                                             const char *input_win_pct_name) {
 
-  char *win_pct_name = NULL;
+  const char *win_pct_name = NULL;
   if (is_string_empty_or_null(input_win_pct_name)) {
     win_pct_name = DEFAULT_WIN_PCT;
   } else {
@@ -484,7 +487,9 @@ load_max_iterations_for_config(Config *config, const char *max_iterations) {
 config_load_status_t
 load_stopping_condition_for_config(Config *config,
                                    const char *stopping_condition) {
-  if (strings_equal(stopping_condition, "95")) {
+  if (strings_equal(stopping_condition, "none")) {
+    config->stopping_condition = SIM_STOPPING_CONDITION_NONE;
+  } else if (strings_equal(stopping_condition, "95")) {
     config->stopping_condition = SIM_STOPPING_CONDITION_95PCT;
   } else if (strings_equal(stopping_condition, "98")) {
     config->stopping_condition = SIM_STOPPING_CONDITION_98PCT;
@@ -520,7 +525,7 @@ config_load_status_t load_score_for_config(Config *config, const char *score) {
   if (!is_all_digits_or_empty(score)) {
     return CONFIG_LOAD_STATUS_MALFORMED_SCORE;
   }
-  config->score = string_to_int(score);
+  config->actual_score = string_to_int(score);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -564,6 +569,9 @@ load_number_of_threads_for_config(Config *config,
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
   }
   config->number_of_threads = string_to_int(number_of_tiles_threads);
+  if (config->number_of_threads < 1) {
+    return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
+  }
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -598,7 +606,6 @@ int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
     for (int j = 0; VALID_COMMAND_SEQUENCES[i].arg_token_sequence[j] !=
                     NUMBER_OF_ARG_TOKENS;
          j++) {
-      arg_token_t arg_token = VALID_COMMAND_SEQUENCES[i].arg_token_sequence[j];
       if (!parsed_args->args[j]->has_value ||
           parsed_args->args[j]->token !=
               VALID_COMMAND_SEQUENCES[i].arg_token_sequence[j]) {
@@ -618,10 +625,9 @@ int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
 // The CGP is a special arg since it acts
 // as both a subcommand and an arg token
 config_load_status_t load_cgp_for_config(Config *config,
-                                         ParsedArgs *parsed_args,
-                                         int args_start_index) {
+                                         ParsedArgs *parsed_args) {
   SingleArg *cgp_arg = NULL;
-  for (int i = 0; i < args_start_index; i++) {
+  for (int i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
     if (parsed_args->args[i]->token == ARG_TOKEN_CGP) {
       cgp_arg = parsed_args->args[i];
       break;
@@ -652,22 +658,32 @@ bool lexicons_are_compatible(const char *p1_lexicon_name,
   return compatible;
 }
 
-config_load_status_t load_lexicons_for_config(Config *config,
-                                              const char *p1_lexicon_name,
-                                              const char *p2_lexicon_name) {
+config_load_status_t
+load_lexicons_for_config(Config *config, const char *input_p1_lexicon_name,
+                         const char *input_p2_lexicon_name) {
+  const char *p1_lexicon_name = input_p1_lexicon_name;
+  if (is_string_empty_or_null(p1_lexicon_name)) {
+    p1_lexicon_name = players_data_get_data_name(config->players_data,
+                                                 PLAYERS_DATA_TYPE_KWG, 0);
+  }
   if (is_string_empty_or_null(p1_lexicon_name)) {
     return CONFIG_LOAD_STATUS_LEXICON_MISSING;
   }
+
+  const char *p2_lexicon_name = input_p2_lexicon_name;
   if (is_string_empty_or_null(p2_lexicon_name)) {
-    set_players_data(config->players_data, players_data_TYPE_KWG,
-                     p1_lexicon_name, p1_lexicon_name);
-  } else {
-    if (!lexicons_are_compatible(p1_lexicon_name, p2_lexicon_name)) {
-      return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
-    }
-    set_players_data(config->players_data, players_data_TYPE_KWG,
-                     p1_lexicon_name, p2_lexicon_name);
+    p2_lexicon_name = players_data_get_data_name(config->players_data,
+                                                 PLAYERS_DATA_TYPE_KWG, 1);
   }
+  if (is_string_empty_or_null(p2_lexicon_name)) {
+    p1_lexicon_name = p1_lexicon_name;
+  }
+
+  if (!lexicons_are_compatible(p1_lexicon_name, p2_lexicon_name)) {
+    return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
+  }
+  set_players_data(config->players_data, PLAYERS_DATA_TYPE_KWG, p1_lexicon_name,
+                   p2_lexicon_name);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -688,7 +704,7 @@ config_load_status_t load_leaves_for_config(Config *config,
   leaves_names[1] = p2_leaves_name;
   char *final_leaves_names[2];
   for (int player_index = 0; player_index < 2; player_index++) {
-    if (is_string_empty_or_null(leaves_name[player_index])) {
+    if (is_string_empty_or_null(leaves_names[player_index])) {
       // use the default
       if (is_string_empty_or_null(lexicon_names[player_index])) {
         log_fatal("leave file not specified for player 1\n");
@@ -697,11 +713,11 @@ config_load_status_t load_leaves_for_config(Config *config,
           get_default_klv_name(lexicon_names[player_index]);
     } else {
       final_leaves_names[player_index] =
-          get_formatted_string("%s", leaves_name[player_index]);
+          get_formatted_string("%s", leaves_names[player_index]);
     }
   }
 
-  set_players_data(config->players_data, players_data_TYPE_KLV,
+  set_players_data(config->players_data, PLAYERS_DATA_TYPE_KLV,
                    final_leaves_names[0], final_leaves_names[1]);
   for (int player_index = 0; player_index < 2; player_index++) {
     free(final_leaves_names[player_index]);
@@ -722,20 +738,19 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   // Set the names using the args
   // and load the data once the args
   // are parsed.
-  const char *p1_lexicon_name = NULL;
-  const char *p1_leaves_name = NULL;
-  const char *p2_lexicon_name = NULL;
-  const char *p2_leaves_name = NULL;
-  const char *letter_distribution_name = NULL;
-  const char *win_pct_name = NULL;
+  const char *new_p1_lexicon_name = NULL;
+  const char *new_p1_leaves_name = NULL;
+  const char *new_p2_lexicon_name = NULL;
+  const char *new_p2_leaves_name = NULL;
+  const char *new_letter_distribution_name = NULL;
+  const char *new_win_pct_name = NULL;
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   for (int i = args_start_index; i < NUMBER_OF_ARG_TOKENS; i++) {
-    if (!parsed_args->has_value[i]) {
+    if (!parsed_args->args[i]->has_value) {
       continue;
     }
-    arg_token_t arg_token = parsed_args->tokens[i];
-    int arg_position = parsed_args->arg_positions[i];
-    char **arg_values = parsed_args->values[i];
+    arg_token_t arg_token = parsed_args->args[i]->token;
+    char **arg_values = parsed_args->args[i]->values;
     switch (arg_token) {
     case ARG_TOKEN_POSITION:
     case ARG_TOKEN_GO:
@@ -743,6 +758,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_AUTOPLAY:
+    case ARG_TOKEN_SET_OPTIONS:
       config_load_status = CONFIG_LOAD_STATUS_MISPLACED_COMMAND;
       break;
     case ARG_TOKEN_BINGO_BONUS:
@@ -755,17 +771,17 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       config_load_status = load_game_variant_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_LETTER_DISTRIBUTION:
-      letter_distribution_name = arg_values[0];
+      new_letter_distribution_name = arg_values[0];
       break;
     case ARG_TOKEN_LEXICON:
-      p1_lexicon_name = arg_values[0];
-      p2_lexicon_name = arg_values[0];
+      new_p1_lexicon_name = arg_values[0];
+      new_p2_lexicon_name = arg_values[0];
       break;
     case ARG_TOKEN_P1_LEXICON:
-      p1_lexicon_name = arg_values[0];
+      new_p1_lexicon_name = arg_values[0];
       break;
     case ARG_TOKEN_P1_LEAVES:
-      p1_leaves_name = arg_values[0];
+      new_p1_leaves_name = arg_values[0];
       break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
       config_load_status =
@@ -776,10 +792,10 @@ config_load_status_t load_config_with_parsed_args(Config *config,
           load_move_record_type_for_config(config, arg_values[0], 0);
       break;
     case ARG_TOKEN_P2_LEXICON:
-      p2_lexicon_name = arg_values[0];
+      new_p2_lexicon_name = arg_values[0];
       break;
     case ARG_TOKEN_P2_LEAVES:
-      p2_leaves_name = arg_values[0];
+      new_p2_leaves_name = arg_values[0];
       break;
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       config_load_status =
@@ -793,7 +809,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       config_load_status = load_rack_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_WIN_PCT:
-      win_pct_name = arg_values[0];
+      new_win_pct_name = arg_values[0];
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       config_load_status = load_num_plays_for_config(config, arg_values[0]);
@@ -842,7 +858,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       break;
     case ARG_TOKEN_CHECK_STOP_INTERVAL:
       config_load_status =
-          load_check_stop_interval_threads_for_config(config, arg_values[0]);
+          load_check_stop_interval_for_config(config, arg_values[0]);
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("invalid token found in args\n");
@@ -860,8 +876,8 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     }
   }
 
-  config_load_status =
-      load_lexicons_for_config(config, p1_lexicon_name, p2_lexicon_name);
+  config_load_status = load_lexicons_for_config(config, new_p1_lexicon_name,
+                                                new_p2_lexicon_name);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
@@ -870,30 +886,29 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   // player 1 lexicon to get a default letter distribution
   config_load_status = load_letter_distribution_for_config(
       config,
-      players_data_get_data_name(config->players_data, players_data_TYPE_KWG,
+      players_data_get_data_name(config->players_data, PLAYERS_DATA_TYPE_KWG,
                                  0),
-      letter_distribution_name);
+      new_letter_distribution_name);
 
   // Pass in the lexicons that were loaded in the step above
   // so we can load the default leave values if none are provided.
   config_load_status = load_leaves_for_config(
       config,
-      players_data_get_data_name(config->players_data, players_data_TYPE_KWG,
+      players_data_get_data_name(config->players_data, PLAYERS_DATA_TYPE_KWG,
                                  0),
-      players_data_get_data_name(config->players_data, players_data_TYPE_KWG,
+      players_data_get_data_name(config->players_data, PLAYERS_DATA_TYPE_KWG,
                                  1),
-      p1_leaves_name, p2_leaves_name);
+      new_p1_leaves_name, new_p2_leaves_name);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
 
-  return load_winpct_for_config(config, win_pct_name);
+  return load_winpct_for_config(config, new_win_pct_name);
 }
 
 config_load_status_t load_config(Config *config, const char *cmd) {
+  ParsedArgs *parsed_args = create_parsed_args();
   StringSplitter *cmd_split_string = split_string_by_whitespace(cmd, true);
-  ParsedArgs *parsed_args = create_parsed_args(cmd_split_string);
-
   config_load_status_t config_load_status =
       init_parsed_args(parsed_args, cmd_split_string);
 

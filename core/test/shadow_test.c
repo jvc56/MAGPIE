@@ -29,12 +29,12 @@ void load_and_generate(Game *game, Player *player, const char *cgp,
 
 void test_shadow_score(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
   Player *player = game->players[0];
 
   // This test checks scores only, so set the player move sorting
   // to sort by score.
-  player->move_sorting = MOVE_SORT_SCORE;
+  player->move_sort_type = MOVE_SORT_SCORE;
 
   load_and_generate(game, player, EMPTY_CGP, "OU", 0);
   assert(game->gen->anchor_list->count == 1);
@@ -479,12 +479,12 @@ void test_shadow_score(TestConfig *testconfig) {
 
 void test_shadow_equity(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
   Player *player = game->players[0];
 
   // This test checks scores only, so set move sorting
   // to sort by score.
-  player->move_sorting = MOVE_SORT_EQUITY;
+  player->move_sort_type = MOVE_SORT_EQUITY;
 
   // Check best leave values for a give rack.
   Rack *leave_rack = create_rack(game->gen->letter_distribution->size);
@@ -530,11 +530,11 @@ void test_shadow_equity(TestConfig *testconfig) {
 
 void test_shadow_top_move(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
   Player *player = game->players[0];
 
-  player->move_sorting = MOVE_SORT_EQUITY;
-  player->play_recorder_type = MOVE_RECORD_BEST;
+  player->move_sort_type = MOVE_SORT_EQUITY;
+  player->move_record_type = MOVE_RECORD_BEST;
 
   // Top play should be L1 Q(I)
   load_and_generate(game, player, UEY_CGP, "ACEQOOV", 1);

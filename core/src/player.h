@@ -15,8 +15,8 @@ typedef struct Player {
   KLV *klv;
 } Player;
 
-Player *create_player(int index, const char *name, int array_size);
-Player *copy_player(Player *player);
+Player *create_player(const Config *config, int player_index, const char *name);
+Player *copy_player(const Player *player);
 void destroy_player(Player *player);
 void reset_player(Player *player);
 

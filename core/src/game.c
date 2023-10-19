@@ -307,10 +307,10 @@ void set_backup_mode(Game *game, int backup_mode) {
   }
 }
 
-Game *create_game(Config *config, int move_list_capacity) {
+Game *create_game(const Config *config, int move_list_capacity) {
   Game *game = malloc_or_die(sizeof(Game));
   game->gen = create_generator(config, move_list_capacity);
-  for (int player_index = 0; player_index < count; player_index++) {
+  for (int player_index = 0; player_index < 2; player_index++) {
     char *player_name = get_formatted_string("player_%d", player_index);
     game->players[player_index] =
         create_player(config, player_index, player_name);

@@ -15,7 +15,7 @@
 #include "util.h"
 
 typedef struct AutoplayWorker {
-  Config *config;
+  const Config *config;
   ThreadControl *thread_control;
   AutoplayResults *autoplay_results;
   int max_games_for_worker;
@@ -40,7 +40,7 @@ void destroy_autoplay_results(AutoplayResults *autoplay_results) {
   free(autoplay_results);
 }
 
-AutoplayWorker *create_autoplay_worker(Config *config,
+AutoplayWorker *create_autoplay_worker(const Config *config,
                                        ThreadControl *thread_control,
                                        int max_games_for_worker,
                                        int worker_index) {
@@ -135,17 +135,16 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   return NULL;
 }
 
-int get_number_of_games_for_worker(Config *config, int thread_index) {
+int get_number_of_games_for_worker(const Config *config, int thread_index) {
   int number_of_games_for_worker =
-      (config->number_of_games_or_pairs / config->number_of_threads);
-  if (config->number_of_games_or_pairs % config->number_of_threads >
-      thread_index) {
+      (config->max_iterations / config->number_of_threads);
+  if (config->max_iterations % config->number_of_threads > thread_index) {
     number_of_games_for_worker++;
   }
   return number_of_games_for_worker;
 }
 
-autoplay_status_t autoplay(Config *config, ThreadControl *thread_control,
+autoplay_status_t autoplay(const Config *config, ThreadControl *thread_control,
                            AutoplayResults *autoplay_results) {
   // FIXME: see fixme above
   seed_random(config->random_seed);

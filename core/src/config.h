@@ -9,6 +9,8 @@
 #include "thread_control.h"
 #include "winpct.h"
 
+#define EMPTY_RACK_STRING "-"
+
 typedef enum {
   CONFIG_LOAD_STATUS_SUCCESS,
   CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG,
@@ -51,6 +53,8 @@ typedef enum {
 } command_t;
 
 typedef struct Config {
+  command_t command_type;
+  // Game
   LetterDistribution *letter_distribution;
   char *ld_name;
   char *cgp;

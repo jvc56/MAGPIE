@@ -1,3 +1,4 @@
+#include <stdlib.h>
 
 #include "error_status.h"
 #include "string_util.h"

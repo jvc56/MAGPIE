@@ -13,6 +13,7 @@
 #include "string_util.h"
 #include "util.h"
 
+#define MAX_GCG_LINE_LENGTH 512
 #define MAX_GROUPS 7
 
 typedef enum {
@@ -42,15 +43,10 @@ typedef enum {
   GCG_LAST_RACK_PENALTY_TOKEN,
   GCG_GAME_TYPE_TOKEN,
   GCG_TILE_SET_TOKEN,
-  GCG_GAME_BOARD_TOKEN,
   GCG_BOARD_LAYOUT_TOKEN,
   GCG_TILE_DISTRIBUTION_NAME_TOKEN,
-  GCG_CONTINUATION_TOKEN,
-  GCG_INCOMPLETE_TOKEN,
-  GCG_TILE_DECLARATION_TOKEN,
+  NUMBER_OF_GCG_TOKENS,
 } gcg_token_t;
-
-#define MAX_NUMBER_OF_TOKENS GCG_TILE_DECLARATION_TOKEN + 1
 
 typedef struct TokenRegexPair {
   gcg_token_t token;
@@ -147,7 +143,7 @@ GCGParser *create_gcg_parser(const char *input_gcg_string,
   gcg_parser->note_builder = create_string_builder();
   // Allocate enough space for all of the tokens
   gcg_parser->token_regex_pairs =
-      malloc_or_die(sizeof(TokenRegexPair) * (MAX_NUMBER_OF_TOKENS));
+      malloc_or_die(sizeof(TokenRegexPair) * (NUMBER_OF_GCG_TOKENS));
   gcg_parser->number_of_token_regex_pairs = 0;
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       create_token_regex_pair(GCG_PLAYER_TOKEN, player_regex);
@@ -190,19 +186,10 @@ GCGParser *create_gcg_parser(const char *input_gcg_string,
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       create_token_regex_pair(GCG_TILE_SET_TOKEN, tile_set_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_GAME_BOARD_TOKEN, game_board_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_CONTINUATION_TOKEN, continuation_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       create_token_regex_pair(GCG_BOARD_LAYOUT_TOKEN, board_layout_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       create_token_regex_pair(GCG_TILE_DISTRIBUTION_NAME_TOKEN,
                               tile_distribution_name_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_INCOMPLETE_TOKEN, incomplete_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_TILE_DECLARATION_TOKEN,
-                              tile_declaration_regex);
   return gcg_parser;
 }
 
@@ -560,7 +547,8 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (!game_history->letter_distribution) {
 
       if (!game_history->lexicon_name) {
-        game_history->lexicon_name = strdup(DEFAULT_LEXICON);
+        // FIXME: add test for this
+        return GCG_PARSE_STATUS_LEXICON_NOT_FOUND;
       }
       if (!game_history->letter_distribution_name) {
         game_history->letter_distribution_name =
@@ -941,6 +929,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   case GCG_TILE_SET_TOKEN:
     // For now, don't do anything
     break;
+  case NUMBER_OF_GCG_TOKENS:
+    log_fatal("invalid gcg token");
+    break;
   }
   return gcg_parse_status;
 }
@@ -970,40 +961,7 @@ gcg_parse_status_t parse_gcg_string(const char *input_gcg_string,
 
 gcg_parse_status_t parse_gcg(const char *gcg_filename,
                              GameHistory *game_history) {
-  // FIXME: move this file to string function to string util
-  FILE *gcg_file_handle = fopen(gcg_filename, "r");
-  if (!gcg_file_handle) {
-    log_fatal("Error opening file: %s\n", gcg_filename);
-  }
-
-  // Get the file size by seeking to the end and then back to the beginning
-  fseek(gcg_file_handle, 0, SEEK_END);
-  long file_size = ftell(gcg_file_handle);
-  fseek(gcg_file_handle, 0, SEEK_SET);
-
-  if (file_size > MAX_GCG_FILE_SIZE) {
-    fclose(gcg_file_handle);
-    log_fatal("File size exceeds maximum allowed size of %d bytes.\n",
-              MAX_GCG_FILE_SIZE);
-  }
-
-  char *gcg_string =
-      (char *)malloc_or_die(file_size + 1); // +1 for null terminator
-  if (!gcg_string) {
-    fclose(gcg_file_handle);
-    log_fatal("Memory allocation error.\n");
-  }
-
-  size_t bytes_read = fread(gcg_string, 1, file_size, gcg_file_handle);
-  if (bytes_read != (size_t)file_size) {
-    fclose(gcg_file_handle);
-    free(gcg_string);
-    log_fatal("Error reading file: %s\n", gcg_filename);
-  }
-
-  gcg_string[file_size] = '\0';
-  fclose(gcg_file_handle);
-
+  char *gcg_string = get_string_from_file(gcg_filename);
   gcg_parse_status_t gcg_parse_status =
       parse_gcg_string(gcg_string, game_history);
   free(gcg_string);

@@ -2,6 +2,7 @@
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -19,6 +20,7 @@ void remove_first_newline(char *str);
 size_t string_length(const char *str);
 void trim_semicolon(char *str);
 void trim_whitespace(char *str);
+char *get_string_from_file(const char *filename);
 
 struct StringSplitter;
 typedef struct StringSplitter StringSplitter;

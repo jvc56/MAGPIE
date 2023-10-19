@@ -11,6 +11,7 @@
 #include "autoplay_test.h"
 #include "bag_test.h"
 #include "board_test.h"
+#include "command_test.h"
 #include "config_test.h"
 #include "cross_set_test.h"
 #include "equity_adjustment_test.h"
@@ -22,8 +23,6 @@
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
 #include "movegen_test.h"
-#include "play_recorder_test.h"
-#include "prof_tests.h"
 #include "rack_test.h"
 #include "shadow_test.h"
 #include "sim_test.h"
@@ -31,7 +30,6 @@
 #include "string_util_test.h"
 #include "test_constants.h"
 #include "testconfig.h"
-#include "ucgi_command_test.h"
 #include "wasm_api_test.h"
 #include "word_test.h"
 
@@ -44,7 +42,7 @@ void run_all(TestConfig *testconfig) {
   test_alphabet(testconfig);
   test_letter_distribution(testconfig);
   test_str_to_machine_letters(testconfig);
-  test_leaves(testconfig, "./data/lexica/CSW21.csv");
+  test_leaves(testconfig);
   test_leave_map(testconfig);
 
   // Now test the rest
@@ -60,14 +58,15 @@ void run_all(TestConfig *testconfig) {
   test_stats();
   test_infer(testconfig);
   test_sim(testconfig);
-  test_ucgi_command();
   test_gcg();
   test_autoplay(testconfig);
   test_wasm_api();
 }
 
 void run_test(TestConfig *testconfig, const char *subtest) {
-  if (strings_equal(subtest, "stringutil")) {
+  if (strings_equal(subtest, "config")) {
+    test_config();
+  } else if (strings_equal(subtest, "stringutil")) {
     test_string_util();
   } else if (strings_equal(subtest, "alphabet")) {
     test_alphabet(testconfig);
@@ -104,7 +103,7 @@ void run_test(TestConfig *testconfig, const char *subtest) {
   } else if (strings_equal(subtest, "sim")) {
     test_sim(testconfig);
   } else if (strings_equal(subtest, "ucgi")) {
-    test_ucgi_command(testconfig);
+    test_command(testconfig);
   } else if (strings_equal(subtest, "gcg")) {
     test_gcg(testconfig);
   } else if (strings_equal(subtest, "autoplay")) {

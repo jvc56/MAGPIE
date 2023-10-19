@@ -1,6 +1,7 @@
-#include "command.h"
+#include <stdlib.h>
+
 #include "autoplay.h"
-#include "cgp.h"
+#include "command.h"
 #include "config.h"
 #include "error_status.h"
 #include "game.h"
@@ -9,6 +10,7 @@
 #include "sim.h"
 #include "thread_control.h"
 #include "ucgi_print.h"
+#include "util.h"
 
 CommandVars *create_command_vars(FILE *outfile) {
   CommandVars *command_vars = malloc_or_die(sizeof(CommandVars));
@@ -55,7 +57,7 @@ void destroy_command_vars(CommandVars *command_vars) {
 
 char *command_search_status(CommandVars *command_vars, bool should_halt) {
   if (!command_vars) {
-    log_warn("The Command variables struct has not been initialized.");
+    log_warn("The command variables struct has not been initialized.");
     return NULL;
   }
   if (!command_vars->thread_control) {
@@ -90,8 +92,7 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
     // FIXME: need an option for ucgi vs. human readable
     // since the command module is an abstraction layer
     // above UCGI.
-    status_string =
-        ucgi_sim_stats(command_vars->simmer, command_vars->loaded_game, 1);
+    status_string = ucgi_sim_stats(command_vars->simmer, command_vars->game, 1);
     break;
   case COMMAND_TYPE_AUTOPLAY:
     log_warn("autoplay status unimplemented");
@@ -99,8 +100,8 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
   case COMMAND_TYPE_LOAD_CGP:
     log_warn("no status available for load cgp");
     break;
-  case COMMAND_TYPE_SIM:
-    log_warn("sim status unimplemented");
+  case COMMAND_TYPE_SET_OPTIONS:
+    log_warn("no status available for set options");
     break;
   case COMMAND_TYPE_INFER:
     log_warn("infer status unimplemented");
@@ -111,7 +112,7 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
 
 void execute_load_cgp(CommandVars *command_vars, const Config *config) {
   if (!command_vars->game) {
-    command_vars->game = create_game(config);
+    command_vars->game = create_game(config, config->num_plays);
   }
   cgp_parse_status_t cgp_parse_status =
       load_cgp(command_vars->game, config->cgp);
@@ -123,7 +124,7 @@ void execute_load_cgp(CommandVars *command_vars, const Config *config) {
 
 void execute_sim(CommandVars *command_vars, const Config *config) {
   if (!command_vars->game) {
-    command_vars->game = create_game(config);
+    command_vars->game = create_game(config, config->num_plays);
   }
   if (!command_vars->simmer) {
     command_vars->simmer = create_simmer(config);
@@ -138,14 +139,13 @@ void execute_sim(CommandVars *command_vars, const Config *config) {
 
 void execute_autoplay(CommandVars *command_vars, const Config *config) {
   if (!command_vars->game) {
-    command_vars->game = create_game(config);
+    command_vars->game = create_game(config, config->num_plays);
   }
   if (!command_vars->autoplay_results) {
     command_vars->autoplay_results = create_autoplay_results();
   }
-  autoplay_status_t status =
-      autoplay(config, command_vars->thread_control, command_vars->game,
-               command_vars->autoplay_results);
+  autoplay_status_t status = autoplay(config, command_vars->thread_control,
+                                      command_vars->autoplay_results);
   if (status != AUTOPLAY_STATUS_SUCCESS) {
     set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                      (int)status);
@@ -154,10 +154,11 @@ void execute_autoplay(CommandVars *command_vars, const Config *config) {
 
 void execute_infer(CommandVars *command_vars, const Config *config) {
   if (!command_vars->game) {
-    command_vars->game = create_game(config);
+    command_vars->game = create_game(config, config->num_plays);
   }
   if (!command_vars->inference) {
-    command_vars->inference = create_inference();
+    command_vars->inference =
+        create_inference(config->num_plays, config->letter_distribution->size);
   }
   inference_status_t status =
       infer(config, command_vars->thread_control, command_vars->game,

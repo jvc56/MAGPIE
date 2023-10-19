@@ -7,7 +7,6 @@
 #include <time.h>
 
 #include "gameplay.h"
-#include "go_params.h"
 #include "log.h"
 #include "rack.h"
 #include "sim.h"
@@ -21,7 +20,7 @@
 #define PER_PLY_STOPPING_SCALING 1250
 #define SIMILAR_PLAYS_ITER_CUTOFF 1000
 
-Simmer *create_simmer(Config *config) {
+Simmer *create_simmer(const Config *config) {
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
   simmer->threads = config->number_of_threads;
   simmer->win_pcts = config->win_pcts;
@@ -487,7 +486,7 @@ void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
         compare_simmed_plays);
 }
 
-sim_status_t simulate(Config *config, ThreadControl *thread_control,
+sim_status_t simulate(const Config *config, ThreadControl *thread_control,
                       Simmer *simmer, Game *game) {
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
@@ -538,31 +537,35 @@ sim_status_t simulate(Config *config, ThreadControl *thread_control,
       free(simmer->play_similarity_cache);
     }
     simmer->play_similarity_cache =
-        malloc_or_die(sizeof(int) * num_plays * num_plays);
-    for (int i = 0; i < num_plays; i++) {
-      for (int j = 0; j < num_plays; j++) {
+        malloc_or_die(sizeof(int) * config->num_plays * config->num_plays);
+    for (int i = 0; i < config->num_plays; i++) {
+      for (int j = 0; j < config->num_plays; j++) {
         if (i == j) {
-          simmer->play_similarity_cache[i * num_plays + j] = PLAYS_IDENTICAL;
+          simmer->play_similarity_cache[i * config->num_plays + j] =
+              PLAYS_IDENTICAL;
         } else {
-          simmer->play_similarity_cache[i * num_plays + j] =
+          simmer->play_similarity_cache[i * config->num_plays + j] =
               UNINITIALIZED_SIMILARITY;
         }
       }
     }
 
     SimmerWorker **simmer_workers =
-        malloc_or_die((sizeof(SimmerWorker *)) * (threads));
-    pthread_t *worker_ids = malloc_or_die((sizeof(pthread_t)) * (threads));
+        malloc_or_die((sizeof(SimmerWorker *)) * (config->number_of_threads));
+    pthread_t *worker_ids =
+        malloc_or_die((sizeof(pthread_t)) * (config->number_of_threads));
 
     clock_gettime(CLOCK_MONOTONIC, &thread_control->start_time);
-    for (int thread_index = 0; thread_index < threads; thread_index++) {
+    for (int thread_index = 0; thread_index < config->number_of_threads;
+         thread_index++) {
       simmer_workers[thread_index] =
           create_simmer_worker(simmer, game, thread_index);
       pthread_create(&worker_ids[thread_index], NULL, simmer_worker,
                      simmer_workers[thread_index]);
     }
 
-    for (int thread_index = 0; thread_index < threads; thread_index++) {
+    for (int thread_index = 0; thread_index < config->number_of_threads;
+         thread_index++) {
       pthread_join(worker_ids[thread_index], NULL);
       destroy_simmer_worker(simmer_workers[thread_index]);
     }

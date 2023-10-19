@@ -9,11 +9,12 @@
 #include "../src/words.h"
 
 #include "test_constants.h"
+#include "test_util.h"
 #include "testconfig.h"
 
 void test_words_played(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config);
+  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
   load_cgp(game, VS_ED);
 
   // Play PeNT vertically at N11 (col 14, row 11)

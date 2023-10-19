@@ -4,7 +4,6 @@
 #include <pthread.h>
 
 #include "game.h"
-#include "go_params.h"
 #include "klv.h"
 #include "leave_rack.h"
 #include "move.h"
@@ -25,7 +24,6 @@ typedef enum {
   INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE,
   INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO,
   INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED,
-  INFERENCE_STATUS_INVALID_NUMBER_OF_THREADS,
 } inference_status_t;
 
 typedef struct InferenceRecord {
@@ -64,7 +62,7 @@ typedef struct Inference {
   ThreadControl *thread_control;
 } Inference;
 
-inference_status_t infer(Config *config, ThreadControl *thread_control,
+inference_status_t infer(const Config *config, ThreadControl *thread_control,
                          Game *game, Inference *inference);
 Inference *create_inference(int capacity, int distribution_size);
 void destroy_inference(Inference *inference);

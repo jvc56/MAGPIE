@@ -1,14 +1,16 @@
+#include <stdlib.h>
 
-#include "players_data.h"
 #include "constants.h"
 #include "klv.h"
 #include "kwg.h"
+#include "log.h"
+#include "players_data.h"
 #include "util.h"
 
 struct PlayersData {
   bool data_is_shared[NUMBER_OF_DATA];
   char *data_names[(NUMBER_OF_DATA * 2)];
-  char *data[(NUMBER_OF_DATA * 2)];
+  void *data[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
 };
@@ -54,13 +56,30 @@ void players_data_set_is_shared(PlayersData *players_data,
   players_data->data_is_shared[players_data_type] = is_shared;
 }
 
+void players_data_destroy_data_name(PlayersData *players_data,
+                                    players_data_t players_data_type,
+                                    int player_index) {
+  // String must be allocated by the caller
+  int data_name_index =
+      players_data_get_player_data_index(players_data_type, player_index);
+  if (players_data->data_names[data_name_index]) {
+    free(players_data->data_names[data_name_index]);
+    players_data->data_names[data_name_index] = NULL;
+  }
+}
+
 void players_data_set_data_name(PlayersData *players_data,
                                 players_data_t players_data_type,
                                 int player_index, const char *data_name) {
   // String must be allocated by the caller
   int data_name_index =
       players_data_get_player_data_index(players_data_type, player_index);
-  players_data->data_names[data_name_index] = data_name;
+  if (strings_equal(players_data->data_names[data_name_index], data_name)) {
+    return;
+  }
+  players_data_destroy_data_name(players_data, players_data_type, player_index);
+  players_data->data_names[data_name_index] =
+      get_formatted_string("%s", data_name);
 }
 
 void *players_data_get_data(PlayersData *players_data,
@@ -91,18 +110,6 @@ void players_data_set_data(PlayersData *players_data,
   players_data->data[data_index] = data;
 }
 
-void players_data_destroy_data_name(PlayersData *players_data,
-                                    players_data_t players_data_type,
-                                    int player_index, const char *data_name) {
-  // String must be allocated by the caller
-  int data_name_index =
-      players_data_get_player_data_index(players_data_type, player_index);
-  if (players_data->data_names[data_name_index]) {
-    free(players_data->data_names[data_name_index]);
-    players_data->data_names[data_name_index] = NULL;
-  }
-}
-
 void *players_data_create_data(players_data_t players_data_type,
                                const char *data_name) {
   void *data = NULL;
@@ -112,6 +119,9 @@ void *players_data_create_data(players_data_t players_data_type,
     break;
   case PLAYERS_DATA_TYPE_KLV:
     data = create_klv(data_name);
+    break;
+  case NUMBER_OF_DATA:
+    log_fatal("cannot create invalid players data type");
     break;
   }
   return data;
@@ -130,6 +140,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_KLV:
       destroy_klv(players_data->data[data_index]);
+      break;
+    case NUMBER_OF_DATA:
+      log_fatal("cannot destroy invalid players data type");
       break;
     }
     players_data->data[data_index] = NULL;
@@ -151,9 +164,9 @@ int get_index_of_existing_data(PlayersData *players_data,
   return index;
 }
 
-const char *players_data_get_data_name(PlayersData *players_data,
-                                       players_data_t players_data_type,
-                                       int player_index) {
+char *players_data_get_data_name(PlayersData *players_data,
+                                 players_data_t players_data_type,
+                                 int player_index) {
   int data_name_index =
       players_data_get_player_data_index(players_data_type, player_index);
   return players_data->data_names[data_name_index];
@@ -180,8 +193,8 @@ PlayersData *create_players_data() {
 
 void destroy_players_data(PlayersData *players_data) {
   for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {
-    bool is_shared = players_data_get_is_shared(
-        players_data, (players_data_t)data_index, false);
+    bool is_shared =
+        players_data_get_is_shared(players_data, (players_data_t)data_index);
     for (int player_index = 0; player_index < 2; player_index++) {
       if (!is_shared || player_index == 0) {
         players_data_destroy_data(players_data, (players_data_t)data_index,
@@ -198,44 +211,44 @@ void set_players_data(PlayersData *players_data,
                       players_data_t players_data_type,
                       const char *p1_data_name, const char *p2_data_name) {
 
-  const char *data_names[2];
-  data_names[0] = p1_data_name;
-  data_names[1] = p2_data_name;
+  const char *input_data_names[2];
+  input_data_names[0] = p1_data_name;
+  input_data_names[1] = p2_data_name;
 
-  bool data_is_shared = strings_equal(data_names[0], data_names[1]);
-  void *players_data[2];
-  void *players_data_names[2];
+  bool data_is_shared = strings_equal(input_data_names[0], input_data_names[1]);
+  void *data_pointers[2];
+  void *data_names[2];
 
   for (int player_index = 0; player_index < 2; player_index++) {
-    players_data[player_index] = NULL;
-    players_data_names[player_index] = NULL;
+    data_pointers[player_index] = NULL;
+    data_names[player_index] = NULL;
   }
 
-  int players_data_indexes[2];
+  int data_indexes[2];
 
   for (int player_index = 0; player_index < 2; player_index++) {
-    players_data_indexes[player_index] = get_index_of_existing_data(
+    data_indexes[player_index] = get_index_of_existing_data(
         players_data, players_data_type, data_names[player_index]);
   }
 
   for (int player_index = 0; player_index < 2; player_index++) {
-    if (players_data_indexes[player_index] < 0) {
+    if (data_indexes[player_index] < 0) {
       if (player_index == 1 && data_is_shared) {
-        players_data[player_index] = players_data_get_data(
+        data_pointers[player_index] = players_data_get_data(
             players_data, players_data_type, player_index);
-        players_data_names[player_index] = players_data_get_data_name(
+        data_names[player_index] = players_data_get_data_name(
             players_data, players_data_type, player_index);
       } else {
-        players_data[player_index] = players_data_create_data(
+        data_pointers[player_index] = players_data_create_data(
             players_data_type, data_names[player_index]);
-        players_data_names[player_index] =
+        data_names[player_index] =
             get_formatted_string("%s", data_names[player_index]);
       }
     } else {
-      players_data[player_index] = players_data_get_data(
-          players_data, players_data_type, players_data_indexes[player_index]);
-      players_data_names[player_index] = players_data_get_data_name(
-          players_data, players_data_type, players_data_indexes[player_index]);
+      data_pointers[player_index] = players_data_get_data(
+          players_data, players_data_type, data_indexes[player_index]);
+      data_names[player_index] = players_data_get_data_name(
+          players_data, players_data_type, data_indexes[player_index]);
     }
   }
 
@@ -243,14 +256,15 @@ void set_players_data(PlayersData *players_data,
   // and set new data
   for (int player_index = 0; player_index < 2; player_index++) {
     void *existing_data =
-        players_data_get_data(players_data, players_data_type, i);
-    if (existing_data != players_data[0] && existing_data != players_data[1]) {
+        players_data_get_data(players_data, players_data_type, player_index);
+    if (existing_data != data_pointers[0] &&
+        existing_data != data_pointers[1]) {
       players_data_destroy_data(players_data, players_data_type, player_index);
     }
     players_data_set_data(players_data, players_data_type, player_index,
-                          players_data[player_index]);
+                          data_pointers[player_index]);
     players_data_set_data_name(players_data, players_data_type, player_index,
-                               players_data_names[player_index]);
+                               data_names[player_index]);
   }
   players_data_set_is_shared(players_data, players_data_type, data_is_shared);
 }

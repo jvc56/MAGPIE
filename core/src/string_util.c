@@ -123,7 +123,36 @@ void trim_whitespace(char *str) {
   str[length - leading_space - trailing_space] = '\0';
 }
 
-// String utility functions
+char *get_string_from_file(const char *filename) {
+  FILE *file_handle = fopen(filename, "r");
+  if (!file_handle) {
+    log_fatal("Error opening file: %s\n", filename);
+  }
+
+  // Get the file size by seeking to the end and then back to the beginning
+  fseek(file_handle, 0, SEEK_END);
+  long file_size = ftell(file_handle);
+  fseek(file_handle, 0, SEEK_SET);
+
+  char *result_string =
+      (char *)malloc_or_die(file_size + 1); // +1 for null terminator
+  if (!result_string) {
+    fclose(file_handle);
+    log_fatal("Memory allocation error while reading file: %s\n", filename);
+  }
+
+  size_t bytes_read = fread(result_string, 1, file_size, file_handle);
+  if (bytes_read != (size_t)file_size) {
+    fclose(file_handle);
+    free(result_string);
+    log_fatal("Error reading file: %s\n", filename);
+  }
+
+  result_string[file_size] = '\0';
+  fclose(file_handle);
+
+  return result_string;
+}
 
 char *format_string_with_va_list(const char *format, va_list *args) {
   int size;

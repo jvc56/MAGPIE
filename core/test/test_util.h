@@ -38,5 +38,6 @@ void assert_move(Game *game, SortedMoveList *sml, int move_index,
                  char *expected_move_string);
 void print_game(Game *game);
 void print_inference(Inference *inference, Rack *rack);
+void load_config_or_die(Config *config, const char *cmd);
 
 #endif

@@ -88,7 +88,7 @@ char *get_klv_filepath(const char *klv_name) {
 }
 
 void load_klv(KLV *klv, const char *klv_name) {
-  const char *klv_filename = get_klv_filepath(klv_name);
+  char *klv_filename = get_klv_filepath(klv_name);
   FILE *stream = stream_from_filename(klv_filename);
   if (!stream) {
     log_fatal("failed to open stream from filename: %s\n", klv_filename);

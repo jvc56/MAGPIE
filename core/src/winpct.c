@@ -21,7 +21,7 @@ char *get_win_pct_filepath(const char *win_pct_name) {
 
 // note: this function was largely written by ChatGPT.
 void parse_winpct_csv(WinPct *wp, const char *win_pct_name) {
-  const char *win_pct_filename = get_win_pct_filepath(win_pct_name);
+  char *win_pct_filename = get_win_pct_filepath(win_pct_name);
   FILE *file = stream_from_filename(win_pct_filename);
   if (!file) {
     log_fatal("Error opening file: %s\n", win_pct_filename);

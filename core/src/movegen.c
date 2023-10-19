@@ -165,9 +165,9 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
   set_spare_move(gen->move_list, strip, leftstrip, rightstrip, score, row, col,
                  tiles_played, gen->vertical, move_type);
 
-  if (player->move_record_type == MOVE_RECORDER_ALL) {
+  if (gen->move_record_type == MOVE_RECORD_ALL) {
     double equity;
-    if (player->move_sort_type == MOVE_SORT_EQUITY) {
+    if (gen->move_sort_type == MOVE_SORT_EQUITY) {
       equity = get_spare_move_equity(gen, player, opp_rack);
     } else {
       equity = score;
@@ -427,7 +427,7 @@ void shadow_record(Generator *gen, int left_col, int right_col,
               (main_played_through_score * word_multiplier) +
               perpendicular_additional_score + bingo_bonus;
   double equity = (double)score;
-  if (gen->move_sort_type_type == MOVE_SORT_EQUITY) {
+  if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity +=
         gen->best_leaves[gen->number_of_letters_on_rack - gen->tiles_played];
   }
@@ -682,7 +682,8 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
                     int add_exchange, move_record_t move_record_type,
                     move_sort_t move_sort_type,
                     bool apply_placement_adjustment) {
-  gen->move_sort_type_type = move_sort_type;
+  gen->move_sort_type = move_sort_type;
+  gen->move_record_type = move_record_type;
   gen->apply_placement_adjustment = apply_placement_adjustment;
 
   // Reset the best leaves
@@ -763,7 +764,7 @@ void load_zero_preendgame_adjustment_values(Generator *gen) {
   }
 }
 
-Generator *create_generator(Config *config, int move_list_capacity) {
+Generator *create_generator(const Config *config, int move_list_capacity) {
   Generator *generator = malloc_or_die(sizeof(Generator));
   generator->bag = create_bag(config->letter_distribution);
   generator->board = create_board();

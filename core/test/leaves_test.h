@@ -3,6 +3,6 @@
 
 #include "testconfig.h"
 
-void test_leaves(TestConfig *testconfig, const char *leaves_csv_filename);
+void test_leaves(TestConfig *testconfig);
 
 #endif
