@@ -35,7 +35,7 @@
 #include "wasm_api_test.h"
 #include "word_test.h"
 
-void unit_tests(TestConfig *testconfig) {
+void run_all(TestConfig *testconfig) {
   // Test the loading of the config
   test_config();
 
@@ -66,52 +66,76 @@ void unit_tests(TestConfig *testconfig) {
   test_wasm_api();
 }
 
-void run_tests(TestConfig *testconfig, const char *subtest) {
-  log_fatal("unrecognized test: %s\n", subtest);
+void run_test(TestConfig *testconfig, const char *subtest) {
+  if (strings_equal(subtest, "stringutil")) {
+    test_string_util();
+  } else if (strings_equal(subtest, "alphabet")) {
+    test_alphabet(testconfig);
+  } else if (strings_equal(subtest, "letterdistribution")) {
+    test_letter_distribution(testconfig);
+  } else if (strings_equal(subtest, "strtomachineletters")) {
+    test_str_to_machine_letters(testconfig);
+  } else if (strings_equal(subtest, "leaves")) {
+    test_leaves(testconfig);
+  } else if (strings_equal(subtest, "leavemap")) {
+    test_leave_map(testconfig);
+  } else if (strings_equal(subtest, "bag")) {
+    test_bag(testconfig);
+  } else if (strings_equal(subtest, "rack")) {
+    test_rack(testconfig);
+  } else if (strings_equal(subtest, "board")) {
+    test_board(testconfig);
+  } else if (strings_equal(subtest, "crossset")) {
+    test_cross_set(testconfig);
+  } else if (strings_equal(subtest, "game")) {
+    test_game(testconfig);
+  } else if (strings_equal(subtest, "shadow")) {
+    test_shadow(testconfig);
+  } else if (strings_equal(subtest, "movegen")) {
+    test_movegen(testconfig);
+  } else if (strings_equal(subtest, "equityadjustments")) {
+    test_equity_adjustments(testconfig);
+  } else if (strings_equal(subtest, "gameplay")) {
+    test_gameplay(testconfig);
+  } else if (strings_equal(subtest, "stats")) {
+    test_stats(testconfig);
+  } else if (strings_equal(subtest, "infer")) {
+    test_infer(testconfig);
+  } else if (strings_equal(subtest, "sim")) {
+    test_sim(testconfig);
+  } else if (strings_equal(subtest, "ucgi")) {
+    test_ucgi_command(testconfig);
+  } else if (strings_equal(subtest, "gcg")) {
+    test_gcg(testconfig);
+  } else if (strings_equal(subtest, "autoplay")) {
+    test_autoplay(testconfig);
+  } else if (strings_equal(subtest, "wasm")) {
+    test_wasm_api(testconfig);
+  } else {
+    log_warn("skipping unrecognized test: %s\n", subtest);
+  }
 }
 
 int main(int argc, char *argv[]) {
-  Config *csw_config = create_config(
-      "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
-      "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "",
-      -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-      "./data/strategy/default_english/winpct.csv", TEST_MOVE_LIST_CAPACITY);
-
-  Config *nwl_config = create_config(
-      "./data/letterdistributions/english.csv", "", "./data/lexica/NWL20.kwg",
-      "./data/lexica/CSW21.klv2", MOVE_SORT_SCORE, MOVE_RECORDER_ALL, "", "",
-      -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-      "./data/strategy/default_english/winpct.csv", TEST_MOVE_LIST_CAPACITY);
-
-  Config *osps_config = create_config(
-      // no OSPS kwg yet, use later when we have tests.
-      "./data/letterdistributions/polish.csv", "", "./data/lexica/OSPS44.kwg",
-      "", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "", -1, -1, 0, 10000, 0, 0,
-      NULL, 0, 0, 0, 0, 1, "./data/strategy/default_english/winpct.csv",
-      TEST_MOVE_LIST_CAPACITY);
-
-  Config *disc_config = create_config(
-      "./data/letterdistributions/catalan.csv", "", "./data/lexica/DISC2.kwg",
-      "./data/lexica/catalan.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "",
-      -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0, 1,
-      "./data/strategy/default_english/winpct.csv", TEST_MOVE_LIST_CAPACITY);
-
-  Config *distinct_lexica_config = create_config(
-      "./data/letterdistributions/english.csv", "", "./data/lexica/CSW21.kwg",
-      "./data/lexica/CSW21.klv2", MOVE_SORT_EQUITY, MOVE_RECORDER_ALL,
-      "./data/lexica/NWL20.kwg", "", -1, -1, 0, 10000, 0, 0, NULL, 0, 0, 0, 0,
-      1, "./data/strategy/default_english/winpct.csv", TEST_MOVE_LIST_CAPACITY);
-
   TestConfig *testconfig = create_testconfig(
       // CSW
-      "set options lex CSW21",
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all",
+      // NWL
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all",
+      // OSPS
+      "setoptions lex OSPS44 s1 equity s2 equity r1 all r2 all",
+      // DISC
+      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all",
+      // Distinct lexica
+      "setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity r1 all r2 all");
 
-      nwl_config, osps_config, disc_config, distinct_lexica_config);
-
-  const char *subtest = NULL;
-  if (argc > 1) {
-    subtest = argv[1];
-  }
   log_set_level(LOG_WARN);
-  run_tests(test_config, subtest)
+  if (argc == 1) {
+    run_all(testconfig);
+  } else {
+    for (int i = 1; i < argc; i++) {
+      run_test(testconfig, argv[i]);
+    }
+  }
+  destroy_testconfig(testconfig);
 }

@@ -13,12 +13,18 @@ void reset_player(Player *player) {
   player->score = 0;
 }
 
-Player *create_player(int index, const char *name, int array_size) {
+Player *create_player(Config *config, int player_index, const char *name) {
   Player *player = malloc_or_die(sizeof(Player));
-  player->index = index;
+  player->index = player_index;
   player->name = strdup(name);
-  player->rack = create_rack(array_size);
+  player->rack = create_rack(config->letter_distribution->size);
   player->score = 0;
+  player->move_sort_type =
+      players_data_get_move_sort_type(config->players_data, player_index);
+  player->move_record_type =
+      players_data_set_move_record_type(config->players_data, player_index);
+  player->kwg = players_data_get_kwg(config->players_data, player_index);
+  player->klv = players_data_get_klv(config->players_data, player_index);
   return player;
 }
 
@@ -27,13 +33,15 @@ Player *copy_player(Player *player) {
   new_player->name = strdup(player->name);
   new_player->rack = copy_rack(player->rack);
   new_player->score = player->score;
-  new_player->strategy_params = copy_strategy_params(player->strategy_params);
+  new_player->move_sort_type = player->move_sort_type;
+  new_player->move_record_type = player->move_record_type;
+  new_player->kwg = player->kwg;
+  new_player->klv = player->klv;
   return new_player;
 }
 
 void destroy_player(Player *player) {
   destroy_rack(player->rack);
-  destroy_strategy_params(player->strategy_params);
   free(player->name);
   free(player);
 }

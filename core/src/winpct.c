@@ -15,8 +15,7 @@ char *get_win_pct_filepath(const char *win_pct_name) {
   if (!win_pct_name) {
     log_fatal("win percentage name is null");
   }
-  return get_formatted_string("%s%s%s%s", WIN_PCT_FILEPATH,
-                              WIN_PCT_DEFAULT_ENGLISH_DIR, win_pct_name,
+  return get_formatted_string("%s%s%s", WIN_PCT_FILEPATH, win_pct_name,
                               WIN_PCT_FILE_EXTENSION);
 }
 

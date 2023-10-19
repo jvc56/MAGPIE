@@ -14,9 +14,9 @@
 
 #include "cross_set_test.h"
 #include "rack_test.h"
-#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 int count_scoring_plays(MoveList *ml) {
   int sum = 0;
@@ -62,9 +62,14 @@ void execute_recursive_gen(Generator *gen, int col, Player *player,
                            int leftstrip, int rightstrip, int unique_play) {
   init_leave_map(gen->leave_map, player->rack);
   load_row_letter_cache(gen, gen->current_row_index);
-  recursive_gen(gen, col, player, NULL,
-                kwg_get_root_node_index(player->strategy_params->kwg),
+  recursive_gen(gen, col, player, NULL, kwg_get_root_node_index(player->kwg),
                 leftstrip, rightstrip, unique_play);
+}
+
+void generate_moves_for_movegen(Generator *gen, Player *player, Rack *opp_rack,
+                                int add_exchange) {
+  generate_moves(gen, player, opp_rack, add_exchange, player->move_record_type,
+                 player->move_sort_type, true);
 }
 
 void test_simple_case(Game *game, Player *player, const char *rack_string,
@@ -88,7 +93,7 @@ void macondo_tests(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
-  KWG *kwg = player->strategy_params->kwg;
+  KWG *kwg = player->kwg;
 
   // TestGenBase
   clear_all_crosses(game->gen->board);
@@ -211,7 +216,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestGenAllMovesSingleTile
   load_cgp(game, VS_MATT);
   set_rack_to_string(player->rack, "A", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
   assert(game->gen->move_list->count == 25);
 
   reset_game(game);
@@ -220,7 +225,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestGenAllMovesFullRack
   load_cgp(game, VS_MATT);
   set_rack_to_string(player->rack, "AABDELT", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 667);
   assert(count_nonscoring_plays(game->gen->move_list) == 96);
 
@@ -242,7 +247,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestGenAllMovesFullRackAgain
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "AFGIIIS", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 219);
   assert(count_nonscoring_plays(game->gen->move_list) == 64);
 
@@ -252,7 +257,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestGenAllMovesSingleBlank
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "?", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 169);
   assert(count_nonscoring_plays(game->gen->move_list) == 2);
 
@@ -262,7 +267,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestGenAllMovesTwoBlanksOnly
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "??", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 1961);
   assert(count_nonscoring_plays(game->gen->move_list) == 3);
 
@@ -272,7 +277,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestGenAllMovesWithBlanks
   load_cgp(game, VS_JEREMY);
   set_rack_to_string(player->rack, "DDESW??", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
   assert(count_scoring_plays(game->gen->move_list) == 8285);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
 
@@ -292,7 +297,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestGiantTwentySevenTimer
   load_cgp(game, VS_OXY);
   set_rack_to_string(player->rack, "ABEOPXZ", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
   assert(count_scoring_plays(game->gen->move_list) == 513);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
 
@@ -308,7 +313,7 @@ void macondo_tests(TestConfig *testconfig) {
 
   // TestGenerateEmptyBoard
   set_rack_to_string(player->rack, "DEGORV?", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 3307);
   assert(count_nonscoring_plays(game->gen->move_list) == 128);
 
@@ -329,7 +334,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestGenerateNoPlays
   load_cgp(game, VS_JEREMY);
   set_rack_to_string(player->rack, "V", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
   assert(count_scoring_plays(game->gen->move_list) == 0);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
   assert(game->gen->move_list->moves[0]->move_type == GAME_EVENT_PASS);
@@ -339,8 +344,6 @@ void macondo_tests(TestConfig *testconfig) {
 
   // TestRowEquivalent
   load_cgp(game, TEST_DUPE);
-  generate_all_cross_sets(game->gen->board, kwg, kwg,
-                          game->gen->letter_distribution, 0);
 
   Game *game_two = create_game(config);
 
@@ -349,7 +352,8 @@ void macondo_tests(TestConfig *testconfig) {
   set_row(game_two, 9, "T");
   update_all_anchors(game_two->gen->board);
   generate_all_cross_sets(game_two->gen->board, kwg, kwg,
-                          game_two->gen->letter_distribution, 0);
+                          game_two->gen->letter_distribution,
+                          game->data_is_shared[PLAYERS_DATA_TYPE_KWG]);
 
   boards_equal(game->gen->board, game_two->gen->board);
 
@@ -359,7 +363,7 @@ void macondo_tests(TestConfig *testconfig) {
 
   // TestGenExchange
   set_rack_to_string(player->rack, "ABCDEF?", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_nonscoring_plays(game->gen->move_list) == 128);
 
   destroy_game(game);
@@ -418,13 +422,13 @@ void equity_test(TestConfig *testconfig) {
 
   Game *game = create_game(config);
   Player *player = game->players[0];
-  player->strategy_params->move_sorting = MOVE_SORT_EQUITY;
-  KLV *klv = player->strategy_params->klv;
+  player->move_sorting = MOVE_SORT_EQUITY;
+  KLV *klv = player->klv;
   // A middlegame is chosen to avoid
   // the opening and endgame equity adjustments
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "AFGIIIS", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 219);
   assert(count_nonscoring_plays(game->gen->move_list) == 64);
 
@@ -456,12 +460,12 @@ void top_equity_play_recorder_test(TestConfig *testconfig) {
 
   Game *game = create_game(config);
   Player *player = game->players[0];
-  int saved_recorder_type = player->strategy_params->play_recorder_type;
-  player->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
+  int saved_recorder_type = player->play_recorder_type;
+  player->play_recorder_type = MOVE_RECORDER_BEST;
 
   load_cgp(game, VS_JEREMY);
   set_rack_to_string(player->rack, "DDESW??", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
 
   assert_move(game, NULL, 0, "14B hEaDW(OR)DS 106");
 
@@ -470,12 +474,12 @@ void top_equity_play_recorder_test(TestConfig *testconfig) {
 
   load_cgp(game, VS_OXY);
   set_rack_to_string(player->rack, "ABEOPXZ", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
 
   assert_move(game, NULL, 0, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
 
   // reset play recorder type as this is a shared config.
-  player->strategy_params->play_recorder_type = saved_recorder_type;
+  player->play_recorder_type = saved_recorder_type;
 
   destroy_game(game);
 }
@@ -484,12 +488,10 @@ void distinct_lexica_test(TestConfig *testconfig) {
   Config *config = get_distinct_lexica_config(testconfig);
 
   Game *game = create_game(config);
-  int player_1_saved_recorder_type =
-      game->players[0]->strategy_params->play_recorder_type;
-  int player_2_saved_recorder_type =
-      game->players[1]->strategy_params->play_recorder_type;
-  game->players[0]->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
-  game->players[1]->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
+  int player_1_saved_recorder_type = game->players[0]->play_recorder_type;
+  int player_2_saved_recorder_type = game->players[1]->play_recorder_type;
+  game->players[0]->play_recorder_type = MOVE_RECORDER_BEST;
+  game->players[1]->play_recorder_type = MOVE_RECORDER_BEST;
 
   // Play SPORK, better than best NWL move of PORKS
   set_rack_to_string(game->players[0]->rack, "KOPRRSS",
@@ -530,11 +532,9 @@ void distinct_lexica_test(TestConfig *testconfig) {
   play_move(game, game->gen->move_list->moves[0]);
   reset_move_list(game->gen->move_list);
 
-  game->players[0]->strategy_params->play_recorder_type =
-      player_1_saved_recorder_type;
+  game->players[0]->play_recorder_type = player_1_saved_recorder_type;
 
-  game->players[1]->strategy_params->play_recorder_type =
-      player_2_saved_recorder_type;
+  game->players[1]->play_recorder_type = player_2_saved_recorder_type;
 
   destroy_game(game);
 }

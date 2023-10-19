@@ -564,8 +564,7 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       }
       if (!game_history->letter_distribution_name) {
         game_history->letter_distribution_name =
-            get_letter_distribution_name_from_lexicon_name(
-                game_history->lexicon_name);
+            get_default_letter_distribution_name(game_history->lexicon_name);
       }
       if (game_history->board_layout == BOARD_LAYOUT_UNKNOWN) {
         game_history->board_layout = BOARD_LAYOUT_CROSSWORD_GAME;
@@ -995,8 +994,8 @@ gcg_parse_status_t parse_gcg(const char *gcg_filename,
     log_fatal("Memory allocation error.\n");
   }
 
-  size_t bytesRead = fread(gcg_string, 1, file_size, gcg_file_handle);
-  if (bytesRead != (size_t)file_size) {
+  size_t bytes_read = fread(gcg_string, 1, file_size, gcg_file_handle);
+  if (bytes_read != (size_t)file_size) {
     fclose(gcg_file_handle);
     free(gcg_string);
     log_fatal("Error reading file: %s\n", gcg_filename);

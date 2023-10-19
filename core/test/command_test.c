@@ -15,7 +15,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void block_for_search(UCGICommandVars *ucgi_command_vars, int max_seconds) {
+void block_for_search(CommandVars *ucgi_command_vars, int max_seconds) {
   // Poll for the end of the command
   int seconds_elapsed = 0;
   while (1) {
@@ -64,19 +64,6 @@ void test_ucgi_command() {
   size_t prev_len = 0;
   char *output_buffer;
   FILE *file_handler = open_memstream(&output_buffer, &len);
-
-  UCGICommandVars *ucgi_command_vars = create_ucgi_command_vars(file_handler);
-  // Test the ucgi command
-  int result = process_ucgi_command_async("ucgi", ucgi_command_vars);
-  assert(result == UCGI_COMMAND_STATUS_SUCCESS);
-  assert(
-      strings_equal("id name MAGPIE 0.1\nucgiok\n", output_buffer + prev_len));
-  prev_len = len;
-
-  // Test the quit command
-  result = process_ucgi_command_async("quit", ucgi_command_vars);
-  assert(result == UCGI_COMMAND_STATUS_QUIT);
-  prev_len = len;
 
   // Test the position cgp command
   string_builder_clear(test_stdin_input);

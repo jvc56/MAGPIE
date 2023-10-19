@@ -5,6 +5,10 @@
 #include "game.h"
 #include "stats.h"
 
+// Use this status type for consistency across
+// commands. We might add more in the future.
+typedef enum { AUTOPLAY_STATUS_SUCCESS } autoplay_status_t;
+
 typedef struct AutoplayResults {
   int total_games;
   int p1_wins;
@@ -15,7 +19,8 @@ typedef struct AutoplayResults {
   Stat *p2_score;
 } AutoplayResults;
 
-void autoplay(Config *config, Game *game, AutoplayResults *autoplay_results);
+autoplay_status_t autoplay(Config *config, Game *game,
+                           AutoplayResults *autoplay_results);
 AutoplayResults *create_autoplay_results();
 void destroy_autoplay_results(AutoplayResults *autoplay_results);
 

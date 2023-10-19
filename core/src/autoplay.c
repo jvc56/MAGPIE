@@ -96,9 +96,11 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
                        game->players[1 - starting_player_index]->rack,
                        RACK_SIZE);
   while (!game->game_end_reason) {
-    generate_moves(game->gen, game->players[game->player_on_turn_index],
-                   game->players[1 - game->player_on_turn_index]->rack,
-                   game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+    generate_moves(
+        game->gen, game->players[game->player_on_turn_index],
+        game->players[1 - game->player_on_turn_index]->rack,
+        game->gen->bag->last_tile_index + 1 >= RACK_SIZE, MOVE_RECORD_BEST,
+        game->players[game->player_on_turn_index]->move_sort_type, true);
     play_move(game, game->gen->move_list->moves[0]);
     reset_move_list(game->gen->move_list);
   }
@@ -108,8 +110,7 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
 
-  Game *game_1 = create_game(autoplay_worker->config);
-  Game *game_2 = create_game(autoplay_worker->config);
+  Game *game = create_game(autoplay_worker->config, 1);
   uint64_t seed;
 
   int starting_player_for_thread = autoplay_worker->worker_index % 2;
@@ -118,18 +119,19 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
     if (is_halted(autoplay_worker->thread_control)) {
       break;
     }
+    // FIXME: get the seed in a way that is doesn't use sad
+    // rand and is unique across threads.
     seed = rand_uint64();
     int starting_player_index = (i + starting_player_for_thread) % 2;
-    play_game(game_1, seed, autoplay_worker->autoplay_results,
+    play_game(game, seed, autoplay_worker->autoplay_results,
               starting_player_index);
     if (autoplay_worker->config->use_game_pairs) {
-      play_game(game_2, seed, autoplay_worker->autoplay_results,
+      play_game(game, seed, autoplay_worker->autoplay_results,
                 1 - starting_player_index);
     }
   }
 
-  destroy_game(game_1);
-  destroy_game(game_2);
+  destroy_game(game);
   return NULL;
 }
 
@@ -143,17 +145,10 @@ int get_number_of_games_for_worker(Config *config, int thread_index) {
   return number_of_games_for_worker;
 }
 
-void autoplay(Config *config, AutoplayResults *autoplay_results) {
-  seed_random(seed);
-
-  int saved_player_1_recorder_type =
-      config->player_1_strategy_params->play_recorder_type;
-  config->player_1_strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
-  int saved_player_2_recorder_type =
-      config->player_2_strategy_params->play_recorder_type;
-  config->player_2_strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
-  int save_move_list_capacity = config->move_list_capacity;
-  config->move_list_capacity = 1;
+autoplay_status_t autoplay(Config *config, ThreadControl *thread_control,
+                           AutoplayResults *autoplay_results) {
+  // FIXME: see fixme above
+  seed_random(config->random_seed);
 
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (config->number_of_threads));
@@ -205,11 +200,6 @@ void autoplay(Config *config, AutoplayResults *autoplay_results) {
   free(autoplay_workers);
   free(worker_ids);
 
-  config->player_1_strategy_params->play_recorder_type =
-      saved_player_1_recorder_type;
-  config->player_2_strategy_params->play_recorder_type =
-      saved_player_2_recorder_type;
-  config->move_list_capacity = save_move_list_capacity;
-
   print_ucgi_autoplay_results(autoplay_results, thread_control);
+  return AUTOPLAY_STATUS_SUCCESS;
 }

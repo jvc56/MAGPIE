@@ -10,6 +10,7 @@
 #include "leave_rack.h"
 #include "log.h"
 #include "move.h"
+#include "players_data.h"
 #include "rack.h"
 #include "stats.h"
 #include "string_util.h"
@@ -222,7 +223,8 @@ Move *get_top_move(Inference *inference) {
   reset_move_list(game->gen->move_list);
   generate_moves(game->gen, player,
                  game->players[1 - inference->player_to_infer_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 MOVE_SORT_EQUITY, MOVE_RECORD_BEST, false);
   return game->gen->move_list->moves[0];
 }
 
@@ -323,7 +325,7 @@ void initialize_inference_for_evaluation(Inference *inference, Game *game,
   inference->current_rack_index = 0;
 
   inference->player_to_infer_index = player_to_infer_index;
-  inference->klv = game->players[player_to_infer_index]->strategy_params->klv;
+  inference->klv = game->players[player_to_infer_index]->klv;
   inference->player_to_infer_rack = game->players[player_to_infer_index]->rack;
 
   reset_rack(inference->bag_as_rack);
@@ -612,70 +614,60 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
   free(worker_ids);
 }
 
-void infer(Config *config, Game *game, Inference *inference) {
-  inference->status = INFERENCE_STATUS_RUNNING;
-
-  initialize_inference_for_evaluation(inference, game, actual_tiles_played,
-                                      player_to_infer_index, actual_score,
-                                      number_of_tiles_exchanged, equity_margin);
-
+inference_status_t verify_inference(Inference *inference) {
   for (int i = 0; i < inference->distribution_size; i++) {
     if (inference->bag_as_rack->array[i] < 0) {
-      inference->status = INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG;
-      return;
+      return INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG;
     }
   }
 
   if (actual_tiles_played->number_of_letters == 0 &&
-      number_of_tiles_exchanged == 0) {
-    inference->status = INFERENCE_STATUS_NO_TILES_PLAYED;
-    return;
+      config->number_of_tiles_exchanged == 0) {
+    return INFERENCE_STATUS_NO_TILES_PLAYED;
   }
 
   if (actual_tiles_played->number_of_letters != 0 &&
-      number_of_tiles_exchanged != 0) {
-    inference->status = INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE;
-    return;
+      config->number_of_tiles_exchanged != 0) {
+    return INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE;
   }
 
-  if (number_of_tiles_exchanged != 0 &&
+  if (config->number_of_tiles_exchanged != 0 &&
       inference->bag_as_rack->number_of_letters < (RACK_SIZE) * 2) {
-    inference->status = INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
-    return;
+    return INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
   }
 
-  if (number_of_tiles_exchanged != 0 && actual_score != 0) {
-    inference->status = INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO;
-    return;
+  if (config->number_of_tiles_exchanged != 0 && inference->actual_score != 0) {
+    return INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO;
   }
 
-  if (game->players[player_to_infer_index]->rack->number_of_letters >
+  if (game->players[config->player_to_infer_index]->rack->number_of_letters >
       (RACK_SIZE)) {
-    inference->status = INFERENCE_STATUS_RACK_OVERFLOW;
-    return;
+    return INFERENCE_STATUS_RACK_OVERFLOW;
   }
 
-  if (number_of_threads < 1) {
-    inference->status = INFERENCE_STATUS_INVALID_NUMBER_OF_THREADS;
-    return;
+  if (config->number_of_threads < 1) {
+    return INFERENCE_STATUS_INVALID_NUMBER_OF_THREADS;
+  }
+  return INFERENCE_STATUS_SUCCESS;
+}
+
+inference_status_t infer(Config *config, ThreadControl *thread_control,
+                         Game *game, Inference *inference) {
+  initialize_inference_for_evaluation(
+      inference, game, config->rack, config->player_to_infer_index,
+      config->actual_score, config->number_of_tiles_exchanged,
+      config->equity_margin);
+
+  inference_status_t status = verify_inference(inference);
+  if (status != INFERENCE_STATUS_SUCCESS) {
+    return status;
   }
 
   int tiles_to_infer =
       (RACK_SIZE)-inference->player_to_infer_rack->number_of_letters;
   inference->initial_tiles_to_infer = tiles_to_infer;
 
-  // Prepare the game for inference calculations
-  Player *player = game->players[inference->player_to_infer_index];
-  int original_recorder_type = player->strategy_params->play_recorder_type;
-  int original_apply_placement_adjustment =
-      game->gen->apply_placement_adjustment;
-  game->gen->apply_placement_adjustment = 0;
-  player->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
-
-  infer_manager(thread_control, inference, number_of_threads);
-
-  player->strategy_params->play_recorder_type = original_recorder_type;
-  game->gen->apply_placement_adjustment = original_apply_placement_adjustment;
+  infer_manager(thread_control, inference, config->number_of_threads);
 
   // Return the player to infer rack to it's original
   // state since the inference does not own that struct
@@ -684,7 +676,7 @@ void infer(Config *config, Game *game, Inference *inference) {
       take_letter_from_rack(inference->player_to_infer_rack, i);
     }
   }
-  inference->status = INFERENCE_STATUS_SUCCESS;
+  return INFERENCE_STATUS_SUCCESS;
 }
 
 // Human readable print functions

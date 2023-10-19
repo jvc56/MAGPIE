@@ -10,21 +10,22 @@
 #include "../src/move.h"
 #include "../src/thread_control.h"
 
-#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "testconfig.h"
 
-int infer_for_test(Inference *inference, Game *game, Rack *actual_tiles_played,
-                   int player_to_infer_index, int actual_score,
-                   int number_of_tiles_exchanged, double equity_margin,
-                   int number_of_threads) {
+inference_status_t infer_for_test(Inference *inference, Game *game,
+                                  Rack *actual_tiles_played,
+                                  int player_to_infer_index, int actual_score,
+                                  int number_of_tiles_exchanged,
+                                  double equity_margin, int number_of_threads) {
   ThreadControl *thread_control = create_thread_control(NULL);
-
-  infer(thread_control, inference, game, actual_tiles_played,
-        player_to_infer_index, actual_score, number_of_tiles_exchanged,
-        equity_margin, number_of_threads);
+  inference_status_t status =
+      infer(thread_control, inference, game, actual_tiles_played,
+            player_to_infer_index, actual_score, number_of_tiles_exchanged,
+            equity_margin, number_of_threads);
   destroy_thread_control(thread_control);
-  return inference->status;
+  return status;
 }
 
 void test_trivial_random_probability(TestConfig *testconfig) {
@@ -104,7 +105,8 @@ void test_infer_rack_overflow(TestConfig *testconfig) {
   set_rack_to_string(rack, "ABCDEFGH", game->gen->letter_distribution);
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
+  inference_status_t status =
+      infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
   assert(status == INFERENCE_STATUS_RACK_OVERFLOW);
   reset_game(game);
 
@@ -126,7 +128,8 @@ void test_infer_no_tiles_played(TestConfig *testconfig) {
   Rack *rack = create_rack(game->players[0]->rack->array_size);
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
+  inference_status_t status =
+      infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
   assert(status == INFERENCE_STATUS_NO_TILES_PLAYED);
 
   destroy_rack(rack);
@@ -142,7 +145,8 @@ void test_infer_both_play_and_exchange(TestConfig *testconfig) {
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
   set_rack_to_string(rack, "DEFGH", game->gen->letter_distribution);
-  int status = infer_for_test(inference, game, rack, 0, 0, 1, 0, 1);
+  inference_status_t status =
+      infer_for_test(inference, game, rack, 0, 0, 1, 0, 1);
   assert(status == INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE);
 
   destroy_rack(rack);
@@ -157,7 +161,8 @@ void test_infer_exchange_score_not_zero(TestConfig *testconfig) {
 
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 3, 1, 0, 1);
+  inference_status_t status =
+      infer_for_test(inference, game, rack, 0, 3, 1, 0, 1);
   assert(status == INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
 
   destroy_rack(rack);
@@ -174,7 +179,8 @@ void test_infer_exchange_not_allowed(TestConfig *testconfig) {
   load_cgp(game, VS_JEREMY);
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 3, 1, 0, 1);
+  inference_status_t status =
+      infer_for_test(inference, game, rack, 0, 3, 1, 0, 1);
   assert(status == INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED);
 
   add_letter(game->gen->bag, BLANK_MACHINE_LETTER);
@@ -195,7 +201,8 @@ void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
   set_rack_to_string(rack, "ABCYEYY", game->gen->letter_distribution);
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
+  inference_status_t status =
+      infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
   assert(status == INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG);
 
   destroy_rack(rack);
@@ -203,16 +210,15 @@ void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
   destroy_game(game);
 }
 
-void test_infer_nonerror_cases(TestConfig *testconfig,
-                               int number_of_threads) {
+void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);
-  KLV *klv = game->players[0]->strategy_params->klv;
+  KLV *klv = game->players[0]->klv;
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
   Stat *letter_stat = create_stat();
-  int status;
+  inference_status_t status;
 
   set_rack_to_string(rack, "MUZAKS", game->gen->letter_distribution);
   status =
@@ -622,7 +628,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig,
   // Partially known leaves that are on the player's rack
   // before the inference are not removed from the bag, so
   // we have to remove it here.
-  // game->players[0]->strategy_params->play_recorder_type =
+  // game->players[0]->play_recorder_type =
   // MOVE_RECORDER_BEST;
   set_rack_to_string(game->players[0]->rack, "?",
                      game->gen->letter_distribution);
@@ -791,7 +797,7 @@ void infer_from_config(Config *config) {
   load_cgp(game, config->cgp);
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
-  int status =
+  inference_status_t status =
       infer_for_test(inference, game, config->actual_tiles_played,
                      config->player_to_infer_index, config->actual_score,
                      config->number_of_tiles_exchanged, config->equity_margin,

@@ -12,6 +12,7 @@
 
 CommandVars *create_command_vars(FILE *outfile) {
   CommandVars *command_vars = malloc_or_die(sizeof(CommandVars));
+  command_vars->command = NULL;
   command_vars->config = NULL;
   command_vars->game = NULL;
   command_vars->simmer = NULL;
@@ -25,6 +26,9 @@ CommandVars *create_command_vars(FILE *outfile) {
 
 void destroy_command_vars(CommandVars *command_vars) {
   // Caller needs to handle the outfile
+  if (command_vars->command) {
+    free(command_vars->command);
+  }
   if (command_vars->config) {
     destroy_config(command_vars->config);
   }
@@ -124,8 +128,12 @@ void execute_sim(CommandVars *command_vars, const Config *config) {
   if (!command_vars->simmer) {
     command_vars->simmer = create_simmer(config);
   }
-  simulate(config, command_vars->thread_control, command_vars->simmer,
-           command_vars->game);
+  sim_status_t status = simulate(config, command_vars->thread_control,
+                                 command_vars->simmer, command_vars->game);
+  if (status != SIM_STATUS_SUCCESS) {
+    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_SIM,
+                     (int)status);
+  }
 }
 
 void execute_autoplay(CommandVars *command_vars, const Config *config) {
@@ -135,8 +143,13 @@ void execute_autoplay(CommandVars *command_vars, const Config *config) {
   if (!command_vars->autoplay_results) {
     command_vars->autoplay_results = create_autoplay_results();
   }
-  autoplay(config, command_vars->thread_control, command_vars->game,
-           command_vars->autoplay_results);
+  autoplay_status_t status =
+      autoplay(config, command_vars->thread_control, command_vars->game,
+               command_vars->autoplay_results);
+  if (status != AUTOPLAY_STATUS_SUCCESS) {
+    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
+                     (int)status);
+  }
 }
 
 void execute_infer(CommandVars *command_vars, const Config *config) {
@@ -146,8 +159,13 @@ void execute_infer(CommandVars *command_vars, const Config *config) {
   if (!command_vars->inference) {
     command_vars->inference = create_inference();
   }
-  infer(config, command_vars->thread_control, command_vars->game,
-        command_vars->inference);
+  inference_status_t status =
+      infer(config, command_vars->thread_control, command_vars->game,
+            command_vars->inference);
+  if (status != INFERENCE_STATUS_SUCCESS) {
+    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_INFER,
+                     (int)status);
+  }
 }
 
 void load_thread_control(CommandVars *command_vars, const Config *config) {

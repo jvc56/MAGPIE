@@ -207,10 +207,26 @@ void destroy_letter_distribution(LetterDistribution *letter_distribution) {
   free(letter_distribution);
 }
 
-// FIXME: return letter distrubitions other than english
-char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name) {
-  log_warn("returning 'english' for %s", lexicon_name);
-  return strdup("english");
+char *get_default_letter_distribution_name(const char *lexicon_name) {
+  char *ld_name = NULL;
+  if (has_prefix("CSW", lexicon_name) || has_prefix("NWL", lexicon_name) ||
+      has_prefix("TWL", lexicon_name) || has_prefix("America", lexicon_name)) {
+    ld_name = get_formatted_string("%s", ENGLISH_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("RD", lexicon_name)) {
+    ld_name = get_formatted_string("%s", GERMAN_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("NSF", lexicon_name)) {
+    ld_name = get_formatted_string("%s", NORWEGIAN_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("DISC", lexicon_name)) {
+    ld_name = get_formatted_string("%s", CATALAN_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("FRA", lexicon_name)) {
+    ld_name = get_formatted_string("%s", FRENCH_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("OSPS", lexicon_name)) {
+    ld_name = get_formatted_string("%s", POLISH_LETTER_DISTRIBUTION_NAME);
+  } else {
+    log_fatal("default letter distribution not found for lexicon %s\n",
+              lexicon_name);
+  }
+  return ld_name;
 }
 
 void string_builder_add_user_visible_letter(

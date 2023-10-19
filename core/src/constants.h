@@ -15,8 +15,8 @@
 #define KLV_FILEPATH "data/lexica/"
 #define KLV_FILE_EXTENSION ".klv2"
 #define WIN_PCT_FILEPATH "data/strategy/"
-#define WIN_PCT_DEFAULT_ENGLISH_DIR "default_english/"
 #define WIN_PCT_FILE_EXTENSION ".csv"
+#define DEFAULT_WIN_PCT "winpct"
 
 // Shared enums
 

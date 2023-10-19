@@ -8,12 +8,12 @@
 #include "../src/string_util.h"
 #include "../src/util.h"
 
-#include "testconfig.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void test_leaves(TestConfig *testconfig, const char *leaves_csv_filename) {
   Config *config = get_csw_config(testconfig);
-  KLV *klv = config->player_1_strategy_params->klv;
+  KLV *klv = players_data_get_klv(config->players_data, 0);
   LetterDistribution *letter_distribution = config->letter_distribution;
   Rack *rack = create_rack(config->letter_distribution->size);
 

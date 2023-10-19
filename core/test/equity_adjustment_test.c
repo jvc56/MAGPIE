@@ -8,15 +8,15 @@
 #include "../src/klv.h"
 #include "../src/util.h"
 
-#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = game->players[0]->rack;
-  KLV *klv = game->players[0]->strategy_params->klv;
+  KLV *klv = game->players[0]->klv;
   set_rack_to_string(rack, "EORSTVX", game->gen->letter_distribution);
   generate_moves_for_game(game);
 

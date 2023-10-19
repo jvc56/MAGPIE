@@ -5,16 +5,17 @@
 #include "../src/config.h"
 #include "../src/game.h"
 
-#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void load_and_generate(Game *game, Player *player, const char *cgp,
                        const char *rack, int add_exchange) {
   reset_game(game);
   load_cgp(game, cgp);
   set_rack_to_string(player->rack, rack, game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, add_exchange);
+  generate_moves(game->gen, player, NULL, add_exchange,
+                 player->move_record_type, player->move_sort_type, true);
   double previous_equity;
   for (int i = 0; i < game->gen->anchor_list->count; i++) {
     if (i == 0) {
@@ -31,10 +32,9 @@ void test_shadow_score(TestConfig *testconfig) {
   Game *game = create_game(config);
   Player *player = game->players[0];
 
-  // This test checks scores only, so set the player strategy param
-  // to move sorting of type score.
-  int original_move_sorting = player->strategy_params->move_sorting;
-  player->strategy_params->move_sorting = MOVE_SORT_SCORE;
+  // This test checks scores only, so set the player move sorting
+  // to sort by score.
+  player->move_sorting = MOVE_SORT_SCORE;
 
   load_and_generate(game, player, EMPTY_CGP, "OU", 0);
   assert(game->gen->anchor_list->count == 1);
@@ -474,8 +474,6 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 2036));
 
-  player->strategy_params->move_sorting = original_move_sorting;
-
   destroy_game(game);
 }
 
@@ -484,57 +482,47 @@ void test_shadow_equity(TestConfig *testconfig) {
   Game *game = create_game(config);
   Player *player = game->players[0];
 
-  // This test checks scores only, so set the player strategy param
-  // to move sorting of type score.
-  int original_move_sorting = player->strategy_params->move_sorting;
-  player->strategy_params->move_sorting = MOVE_SORT_EQUITY;
+  // This test checks scores only, so set move sorting
+  // to sort by score.
+  player->move_sorting = MOVE_SORT_EQUITY;
 
   // Check best leave values for a give rack.
   Rack *leave_rack = create_rack(game->gen->letter_distribution->size);
   load_and_generate(game, player, EMPTY_CGP, "ERSVQUW", 0);
 
   set_rack_to_string(leave_rack, "", game->gen->letter_distribution);
-  assert(within_epsilon(
-      game->gen->best_leaves[0],
-      get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
+  assert(within_epsilon(game->gen->best_leaves[0],
+                        get_leave_value_for_rack(player->klv, leave_rack)));
 
   set_rack_to_string(leave_rack, "S", game->gen->letter_distribution);
-  assert(within_epsilon(
-      game->gen->best_leaves[1],
-      get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
+  assert(within_epsilon(game->gen->best_leaves[1],
+                        get_leave_value_for_rack(player->klv, leave_rack)));
 
   set_rack_to_string(leave_rack, "ES", game->gen->letter_distribution);
-  assert(within_epsilon(
-      game->gen->best_leaves[2],
-      get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
+  assert(within_epsilon(game->gen->best_leaves[2],
+                        get_leave_value_for_rack(player->klv, leave_rack)));
 
   set_rack_to_string(leave_rack, "ERS", game->gen->letter_distribution);
-  assert(within_epsilon(
-      game->gen->best_leaves[3],
-      get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
+  assert(within_epsilon(game->gen->best_leaves[3],
+                        get_leave_value_for_rack(player->klv, leave_rack)));
 
   set_rack_to_string(leave_rack, "EQSU", game->gen->letter_distribution);
-  assert(within_epsilon(
-      game->gen->best_leaves[4],
-      get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
+  assert(within_epsilon(game->gen->best_leaves[4],
+                        get_leave_value_for_rack(player->klv, leave_rack)));
 
   set_rack_to_string(leave_rack, "EQRSU", game->gen->letter_distribution);
-  assert(within_epsilon(
-      game->gen->best_leaves[5],
-      get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
+  assert(within_epsilon(game->gen->best_leaves[5],
+                        get_leave_value_for_rack(player->klv, leave_rack)));
 
   set_rack_to_string(leave_rack, "EQRSUV", game->gen->letter_distribution);
-  assert(within_epsilon(
-      game->gen->best_leaves[6],
-      get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
+  assert(within_epsilon(game->gen->best_leaves[6],
+                        get_leave_value_for_rack(player->klv, leave_rack)));
 
   load_and_generate(game, player, EMPTY_CGP, "ESQW", 1);
   set_rack_to_string(leave_rack, "ES", game->gen->letter_distribution);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity,
-      28 + get_leave_value_for_rack(player->strategy_params->klv, leave_rack)));
-
-  player->strategy_params->move_sorting = original_move_sorting;
+      28 + get_leave_value_for_rack(player->klv, leave_rack)));
 
   destroy_game(game);
   destroy_rack(leave_rack);
@@ -545,17 +533,12 @@ void test_shadow_top_move(TestConfig *testconfig) {
   Game *game = create_game(config);
   Player *player = game->players[0];
 
-  int original_move_sorting = player->strategy_params->move_sorting;
-  int original_recorder_type = player->strategy_params->play_recorder_type;
-  player->strategy_params->move_sorting = MOVE_SORT_EQUITY;
-  player->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
+  player->move_sorting = MOVE_SORT_EQUITY;
+  player->play_recorder_type = MOVE_RECORD_BEST;
 
   // Top play should be L1 Q(I)
   load_and_generate(game, player, UEY_CGP, "ACEQOOV", 1);
   assert(within_epsilon(game->gen->move_list->moves[0]->score, 21));
-
-  player->strategy_params->move_sorting = original_move_sorting;
-  player->strategy_params->play_recorder_type = original_recorder_type;
 
   destroy_game(game);
 }

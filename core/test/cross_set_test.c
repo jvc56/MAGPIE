@@ -8,9 +8,9 @@
 #include "../src/game.h"
 #include "../src/letter_distribution.h"
 
-#include "testconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 // this test func only works for single-char alphabets
 uint64_t cross_set_from_string(const char *letters,
@@ -74,7 +74,7 @@ void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
   int cross_set_index = get_cross_set_index(game->gen, player_index);
   if (run_gcs) {
     gen_cross_set(game->gen->board, row, col, dir, cross_set_index,
-                  game->players[player_index]->strategy_params->kwg,
+                  game->players[player_index]->kwg,
                   game->gen->letter_distribution);
   }
   uint64_t expected_cross_set =
@@ -108,7 +108,7 @@ void test_gen_cross_set_col(Game *game, int row, int col, int dir,
 void test_cross_set(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  KWG *kwg = game->players[0]->strategy_params->kwg;
+  KWG *kwg = game->players[0]->kwg;
 
   // TestGencross_setLoadedGame
   load_cgp(game, VS_MATT);

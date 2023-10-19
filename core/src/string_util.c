@@ -11,11 +11,11 @@
 
 // Misc string functions
 
-int has_prefix(const char *pre, const char *str) {
+bool has_prefix(const char *pre, const char *str) {
   return strncmp(pre, str, string_length(pre)) == 0;
 }
 
-int is_all_whitespace_or_empty(const char *str) {
+bool is_all_whitespace_or_empty(const char *str) {
   while (*str != '\0') {
     if (!isspace((unsigned char)*str)) {
       return 0;
@@ -25,7 +25,7 @@ int is_all_whitespace_or_empty(const char *str) {
   return 1;
 }
 
-int is_all_digits_or_empty(const char *str) {
+bool is_all_digits_or_empty(const char *str) {
   while (*str != '\0') {
     if (!isdigit((unsigned char)*str)) {
       return 0;
@@ -45,7 +45,14 @@ bool strings_equal(const char *str1, const char *str2) {
   return strcmp(str1, str2) == 0;
 }
 
-bool is_string_empty(const char *str1) { return strings_equal(str1, ""); }
+bool is_string_empty(const char *str) { return strings_equal(str, ""); }
+
+bool is_string_empty_or_null(const char *str) {
+  if (!str) {
+    return true;
+  }
+  return strings_equal(str, "");
+}
 
 char *string_copy(char *dest, const char *src) {
   // FIXME: this is unsafe, need to check bounds

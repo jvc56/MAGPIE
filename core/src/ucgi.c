@@ -17,8 +17,8 @@ void ucgi_scan_loop() {
     }
 
     trim_whitespace(cmd);
-
-    int should_end = process_ucgi_command_async(command_vars, cmd);
+    command_vars->command = cmd;
+    int should_end = process_ucgi_command_async(command_vars);
     if (should_end) {
       break;
     }

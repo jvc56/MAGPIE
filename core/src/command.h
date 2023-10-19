@@ -9,7 +9,7 @@
 #include "string_util.h"
 
 typedef struct CommandVars {
-  StringBuilder *command;
+  char *command;
   Config *config;
   Game *game;
   Simmer *simmer;
@@ -22,5 +22,7 @@ typedef struct CommandVars {
 
 void execute_command(CommandVars *command_vars);
 char *command_search_status(CommandVars *command_vars, bool should_halt);
+CommandVars *create_command_vars(FILE *outfile);
+void destroy_command_vars(CommandVars *command_vars);
 
 #endif

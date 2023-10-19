@@ -4,6 +4,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "players_data.h"
 #include "rack.h"
 #include "thread_control.h"
 #include "winpct.h"
@@ -37,6 +38,7 @@ typedef enum {
   CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL,
   CONFIG_LOAD_STATUS_INVALID_CGP_ARG,
   CONFIG_LOAD_STATUS_LEXICON_MISSING,
+  CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS,
 } config_load_status_t;
 
 typedef enum {
@@ -48,27 +50,14 @@ typedef enum {
   COMMAND_TYPE_SET_OPTIONS,
 } command_t;
 
-typedef struct StrategyParams {
-  KWG *kwg;
-  char *kwg_name;
-  KLV *klv;
-  char *klv_name;
-  move_sort_t move_sort_type;
-  move_record_t move_record_type;
-} StrategyParams;
-
 typedef struct Config {
-  command_t command_type;
-  // Game
   LetterDistribution *letter_distribution;
   char *ld_name;
   char *cgp;
   int bingo_bonus;
   board_layout_t board_layout;
   game_variant_t game_variant;
-  bool kwg_is_shared;
-  bool klv_is_shared;
-  StrategyParams *player_strategy_params[2];
+  PlayersData *players_data;
   // Inference
   // This can act as the known opp tiles
   // or the tiles play in an inference
@@ -94,10 +83,8 @@ typedef struct Config {
   int check_stopping_condition_interval;
 } Config;
 
+config_load_status_t load_config(Config *config, const char *cmd);
 Config *create_default_config();
 void destroy_config(Config *config);
-StrategyParams *copy_strategy_params(StrategyParams *orig);
-void destroy_strategy_params(StrategyParams *sp);
-config_load_status_t load_config(Config *config, const char *cmd);
 
 #endif

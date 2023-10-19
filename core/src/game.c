@@ -247,10 +247,9 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
 
   game->player_on_turn_index = 0;
 
-  generate_all_cross_sets(game->gen->board,
-                          game->players[0]->strategy_params->kwg,
-                          game->players[1]->strategy_params->kwg,
-                          game->gen->letter_distribution, 0);
+  generate_all_cross_sets(game->gen->board, game->players[0]->kwg,
+                          game->players[1]->kwg, game->gen->letter_distribution,
+                          game->data_is_shared[PLAYERS_DATA_TYPE_KWG]);
   update_all_anchors(game->gen->board);
 
   if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
@@ -308,15 +307,20 @@ void set_backup_mode(Game *game, int backup_mode) {
   }
 }
 
-Game *create_game(Config *config) {
+Game *create_game(Config *config, int move_list_capacity) {
   Game *game = malloc_or_die(sizeof(Game));
-  game->gen = create_generator(config);
-  game->players[0] =
-      create_player(0, "player_1", config->letter_distribution->size);
-  game->players[1] =
-      create_player(1, "player_2", config->letter_distribution->size);
-  game->players[0]->strategy_params = config->player_strategy_params[0];
-  game->players[1]->strategy_params = config->player_strategy_params[1];
+  game->gen = create_generator(config, move_list_capacity);
+  for (int player_index = 0; player_index < count; player_index++) {
+    char *player_name = get_formatted_string("player_%d", player_index);
+    game->players[player_index] =
+        create_player(config, player_index, player_name);
+    free(player_name);
+  }
+  for (int i = 0; i < NUMBER_OF_DATA; i++) {
+    game->data_is_shared[i] =
+        players_data_get_is_shared(config->players_data, (players_data_t)i);
+  }
+
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
@@ -326,11 +330,14 @@ Game *create_game(Config *config) {
   return game;
 }
 
-Game *copy_game(Game *game, int move_list_size) {
+Game *copy_game(Game *game, int move_list_capacity) {
   Game *new_game = malloc_or_die(sizeof(Game));
-  new_game->gen = copy_generator(game->gen, move_list_size);
+  new_game->gen = copy_generator(game->gen, move_list_capacity);
   for (int j = 0; j < 2; j++) {
     new_game->players[j] = copy_player(game->players[j]);
+  }
+  for (int i = 0; i < NUMBER_OF_DATA; i++) {
+    new_game->data_is_shared[i] = game->data_is_shared[i];
   }
   new_game->player_on_turn_index = game->player_on_turn_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;

@@ -9,7 +9,10 @@ typedef struct Player {
   char *name;
   Rack *rack;
   int score;
-  StrategyParams *strategy_params;
+  move_sort_t move_sort_type;
+  move_record_t move_record_type;
+  KWG *kwg;
+  KLV *klv;
 } Player;
 
 Player *create_player(int index, const char *name, int array_size);

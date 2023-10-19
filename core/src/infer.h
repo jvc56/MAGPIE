@@ -19,7 +19,6 @@
 
 typedef enum {
   INFERENCE_STATUS_SUCCESS,
-  INFERENCE_STATUS_RUNNING,
   INFERENCE_STATUS_NO_TILES_PLAYED,
   INFERENCE_STATUS_RACK_OVERFLOW,
   INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG,
@@ -58,7 +57,6 @@ typedef struct Inference {
   int initial_tiles_to_infer;
   double equity_margin;
   uint64_t current_rack_index;
-  int status;
   uint64_t total_racks_evaluated;
   // Multithreading fields
   uint64_t *shared_rack_index;
@@ -66,10 +64,8 @@ typedef struct Inference {
   ThreadControl *thread_control;
 } Inference;
 
-void infer(ThreadControl *thread_control, Inference *inference, Game *game,
-           Rack *actual_tiles_played, int player_to_infer_index,
-           int actual_score, int number_of_tiles_exchanged,
-           double equity_margin, int number_of_threads);
+inference_status_t infer(Config *config, ThreadControl *thread_control,
+                         Game *game, Inference *inference);
 Inference *create_inference(int capacity, int distribution_size);
 void destroy_inference(Inference *inference);
 uint64_t get_subtotal(InferenceRecord *record, uint8_t letter,

@@ -119,9 +119,10 @@ void gen_cross_set(Board *board, int row, int col, int dir, int cross_set_index,
   }
 }
 
+// FIXME: this might belong in game.c
 void generate_all_cross_sets(Board *board, KWG *kwg_1, KWG *kwg_2,
                              LetterDistribution *letter_distribution,
-                             int kwgs_are_distinct) {
+                             bool kwgs_are_distinct) {
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
       gen_cross_set(board, i, j, 0, 0, kwg_1, letter_distribution);

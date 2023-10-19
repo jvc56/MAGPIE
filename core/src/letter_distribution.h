@@ -13,6 +13,13 @@
 #define MACHINE_LETTER_MAX_VALUE 255
 #define MAX_LETTER_CHAR_LENGTH 6
 
+#define ENGLISH_LETTER_DISTRIBUTION_NAME "english"
+#define GERMAN_LETTER_DISTRIBUTION_NAME "german"
+#define NORWEGIAN_LETTER_DISTRIBUTION_NAME "norwegian"
+#define CATALAN_LETTER_DISTRIBUTION_NAME "catalan"
+#define POLISH_LETTER_DISTRIBUTION_NAME "polish"
+#define FRENCH_LETTER_DISTRIBUTION_NAME "french"
+
 typedef struct LetterDistribution {
   uint32_t size;
   uint32_t *distribution;
@@ -46,7 +53,7 @@ inline uint8_t is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
 int str_to_machine_letters(LetterDistribution *letter_distribution,
                            const char *str, bool allow_played_through_marker,
                            uint8_t *mls);
-char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name);
+char *get_default_letter_distribution_name(const char *lexicon_name);
 
 void string_builder_add_user_visible_letter(
     LetterDistribution *letter_distribution, uint8_t ml, size_t len,

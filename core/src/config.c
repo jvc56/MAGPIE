@@ -5,13 +5,13 @@
 #include <string.h>
 
 #include "board.h"
-#include "cgp.h"
 #include "config.h"
 #include "constants.h"
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "log.h"
+#include "players_data.h"
 #include "string_util.h"
 #include "util.h"
 
@@ -19,8 +19,6 @@
 #define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
 #define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC
 #define DEFAULT_MOVE_LIST_CAPACITY 20
-#define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
-#define DEFAULT_MOVE_RECORD_TYPE MOVE_RECORD_BEST
 
 #define ARG_POSITION "position"
 #define ARG_CGP "cgp"
@@ -28,8 +26,7 @@
 #define ARG_SIM "sim"
 #define ARG_INFER "infer"
 #define ARG_AUTOPLAY "autoplay"
-#define ARG_SET "set"
-#define ARG_OPTIONS "options"
+#define ARG_SET_OPTIONS "setoptions"
 #define ARG_BINGO_BONUS "bb"
 #define ARG_BOARD_LAYOUT "bdn"
 #define ARG_GAME_VARIANT "var"
@@ -60,6 +57,12 @@
 #define ARG_PRINT_INFO_INTERVAL "print"
 #define ARG_CHECK_STOP_INTERVAL "check"
 
+#define ARG_VAL_MOVE_SORT_EQUITY "equity"
+#define ARG_VAL_MOVE_SORT_SCORE "score"
+
+#define ARG_VAL_MOVE_RECORD_BEST "best"
+#define ARG_VAL_MOVE_RECORD_ALL "all"
+
 typedef enum {
   // Commands
   ARG_TOKEN_POSITION,
@@ -68,8 +71,7 @@ typedef enum {
   ARG_TOKEN_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_AUTOPLAY,
-  ARG_TOKEN_SET,
-  ARG_TOKEN_OPTIONS,
+  ARG_TOKEN_SET_OPTIONS,
   // Game
   // shared between players
   ARG_TOKEN_BINGO_BONUS,
@@ -130,8 +132,7 @@ const struct {
     {COMMAND_TYPE_INFER, {ARG_TOKEN_GO, ARG_TOKEN_INFER, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_AUTOPLAY,
      {ARG_TOKEN_GO, ARG_TOKEN_AUTOPLAY, NUMBER_OF_ARG_TOKENS}},
-    {COMMAND_TYPE_SET_OPTIONS,
-     {ARG_TOKEN_SET, ARG_TOKEN_OPTIONS, NUMBER_OF_ARG_TOKENS}},
+    {COMMAND_TYPE_SET_OPTIONS, {ARG_TOKEN_SET_OPTIONS, NUMBER_OF_ARG_TOKENS}},
     // The unknown command type denotes the end of the sequences
     {COMMAND_TYPE_UNKNOWN, {}},
 }};
@@ -195,8 +196,8 @@ ParsedArgs *create_parsed_args(StringSplitter *cmd) {
   set_single_arg(parsed_args, index++, ARG_TOKEN_SIM, ARG_SIM, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_INFER, ARG_INFER, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_AUTOPLAY, ARG_AUTOPLAY, 0);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_SET, ARG_SET, 0);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_OPTIONS, ARG_OPTIONS, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_SET_OPTIONS, ARG_SET_OPTIONS,
+                 0);
 
   // CGP args
   set_single_arg(parsed_args, index++, ARG_TOKEN_BINGO_BONUS, ARG_BINGO_BONUS,
@@ -354,9 +355,17 @@ config_load_status_t load_game_variant_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_letter_distribution_for_config(Config *config,
-                                    const char *letter_distribution_name) {
+config_load_status_t load_letter_distribution_for_config(
+    Config *config, const char *lexicon_name,
+    const char *input_letter_distribution_name) {
+  char *letter_distribution_name = NULL;
+  if (is_string_empty_or_null(letter_distribution_name)) {
+    letter_distribution_name =
+        get_default_letter_distribution_name(lexicon_name);
+  } else {
+    letter_distribution_name =
+        get_formatted_string("%s", input_letter_distribution_name);
+  }
   if (strings_equal(config->ld_name, letter_distribution_name)) {
     return CONFIG_LOAD_STATUS_SUCCESS;
   }
@@ -370,104 +379,19 @@ load_letter_distribution_for_config(Config *config,
   if (config->letter_distribution_name) {
     free(config->letter_distribution_name);
   }
-  config->letter_distribution_name =
-      get_formatted_string("%s", letter_distribution_name);
+  config->letter_distribution_name = letter_distribution_name;
   return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-void get_index_of_kwg_to_load(Config *config, const char *lexicon_name,
-                              int player_index) {
-  int kwg_to_use = -1;
-  if (!lexicon_name) {
-    // Use existing
-    kwg_to_use = player_index;
-  } else {
-    // Use existing if names match
-    for (int i = 0; i < 2; i++) {
-      if (strings_equal(config->player_strategy_params[i]->kwg_name,
-                        lexicon_name)) {
-        kwg_to_use = i;
-      }
-    }
-  }
-}
-
-// FIXME: make this generic
-config_load_status_t load_lexicons_for_config(Config *config,
-                                              const char *p1_lexicon_name,
-                                              const char *p2_lexicon_name) {
-  int p1_kwg_to_use_index =
-      get_index_of_kwg_to_load(config, p1_lexicon_name, 0);
-  int p2_kwg_to_use_index =
-      get_index_of_kwg_to_load(config, p2_lexicon_name, 1);
-
-  KWG *p1_kwg;
-  const char *p1_kwg_name;
-
-  if (p1_kwg_to_use_index < 0) {
-    p1_kwg = create_kwg(p1_lexicon_name);
-    p1_kwg_name = p1_lexicon_name;
-  } else {
-    p1_kwg = config->player_strategy_params[p1_kwg_to_use_index]->kwg;
-    p1_kwg_name = config->player_strategy_params[p1_kwg_to_use_index]->kwg_name;
-  }
-
-  KWG *p2_kwg;
-  char *p2_kwg_name;
-
-  if (p2_kwg_to_use_index < 0) {
-    if (strings_equal(p1_lexicon_name, p2_lexicon_name)) {
-      p2_kwg = p1_kwg;
-      p2_kwg_name = p1_lexicon_name;
-    } else {
-      p2_kwg = create_kwg(p2_lexicon_name);
-      p2_kwg_name = p2_lexicon_name;
-    }
-  } else {
-    p2_kwg = config->player_strategy_params[p2_kwg_to_use_index]->kwg;
-    p2_kwg_name = config->player_strategy_params[p2_kwg_to_use_index]->kwg_name;
-  }
-
-  for (int i = 0; i < 2; i++) {
-    KWG *existing_kwg = config->player_strategy_params[i]->kwg;
-    if (existing_kwg != p1_kwg && existing_kwg != p2_kwg) {
-      destroy_kwg(existing_kwg);
-    }
-  }
-
-  if (!p1_kwg || !p2_kwg) {
-    return CONFIG_LOAD_STATUS_MISSING_LEXICON;
-  }
-
-  config->player_strategy_params[0]->kwg = p1_kwg;
-  config->player_strategy_params[1]->kwg = p2_kwg;
-
-  if (!strings_equal(config->player_strategy_params[0]->kwg_name,
-                     p1_lexicon_name)) {
-    free(config->player_strategy_params[0]->kwg_name);
-    config->player_strategy_params[0]->kwg_name =
-        get_formatted_string("%s", p1_lexicon_name);
-  }
-  if (!strings_equal(config->player_strategy_params[1]->kwg_name,
-                     p2_lexicon_name)) {
-    free(config->player_strategy_params[1]->kwg_name);
-    config->player_strategy_params[1]->kwg_name =
-        get_formatted_string("%s", p2_lexicon_name);
-  }
-  config->kwg_is_shared =
-      strings_equal(config->player_strategy_params[0]->kwg_name,
-                    config->player_strategy_params[1]->kwg_name);
 }
 
 config_load_status_t load_move_sort_type_for_config(
     Config *config, const char *move_sort_type_string, int player_index) {
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
-  if (strings_equal(move_sort_type_string, MOVE_SORT_EQUITY_NAME)) {
-    config->player_strategy_params[player_index]->move_sort_type =
-        MOVE_SORT_EQUITY;
-  } else if (strings_equal(move_sort_type_string, MOVE_SORT_SCORE_NAME)) {
-    config->player_strategy_params[player_index]->move_sort_type =
-        MOVE_SORT_SCORE;
+  if (strings_equal(move_sort_type_string, ARG_VAL_MOVE_SORT_EQUITY)) {
+    players_data_set_move_sort_type(config->players_data, player_index,
+                                    MOVE_SORT_EQUITY);
+  } else if (strings_equal(move_sort_type_string, ARG_VAL_MOVE_SORT_SCORE)) {
+    players_data_set_move_sort_type(config->players_data, player_index,
+                                    MOVE_SORT_SCORE);
   } else {
     config_load_status = CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE;
   }
@@ -477,12 +401,12 @@ config_load_status_t load_move_sort_type_for_config(
 config_load_status_t load_move_record_type_for_config(
     Config *config, const char *move_record_type_string, int player_index) {
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
-  if (strings_equal(move_record_type_string, MOVE_RECORD_BEST_NAME)) {
-    config->player_strategy_params[player_index]->move_record_type =
-        MOVE_RECORD_BEST;
-  } else if (strings_equal(move_record_type_string, MOVE_RECORD_ALL_NAME)) {
-    config->player_strategy_params[player_index]->move_record_type =
-        MOVE_RECORD_ALL;
+  if (strings_equal(move_record_type_string, ARG_VAL_MOVE_RECORD_BEST)) {
+    players_data_set_move_record_type(config->players_data, player_index,
+                                      MOVE_RECORD_BEST);
+  } else if (strings_equal(move_record_type_string, ARG_VAL_MOVE_RECORD_ALL)) {
+    players_data_set_move_record_type(config->players_data, player_index,
+                                      MOVE_RECORD_ALL);
   } else {
     config_load_status = CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE;
   }
@@ -505,10 +429,19 @@ config_load_status_t load_rack_for_config(Config *config, const char *rack) {
 }
 
 config_load_status_t load_winpct_for_config(Config *config,
-                                            const char *win_pct_name) {
+                                            const char *input_win_pct_name) {
+
+  char *win_pct_name = NULL;
+  if (is_string_empty_or_null(input_win_pct_name)) {
+    win_pct_name = DEFAULT_WIN_PCT;
+  } else {
+    win_pct_name = input_win_pct_name;
+  }
+
   if (strings_equal(config->win_pct_name, win_pct_name)) {
     return CONFIG_LOAD_STATUS_SUCCESS;
   }
+
   WinPct *new_win_pcts = create_winpct(win_pct_name);
   if (config->win_pcts) {
     destroy_winpct(config->win_pcts);
@@ -703,11 +636,79 @@ config_load_status_t load_cgp_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-char *get_default_letter_distribution_name(const char *lexicon_name) {
-  return "";
+bool lexicons_are_compatible(const char *p1_lexicon_name,
+                             const char *p2_lexicon_name) {
+  char *p1_ld = get_default_letter_distribution_name(p1_lexicon_name);
+  char *p2_ld = get_default_letter_distribution_name(p2_lexicon_name);
+  bool compatible = strings_equal(p1_ld, p2_ld) ||
+                    // English and French use the same letters so they are
+                    // allowed to play against each other.
+                    (strings_equal(p1_ld, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
+                     strings_equal(p2_ld, FRENCH_LETTER_DISTRIBUTION_NAME)) ||
+                    (strings_equal(p2_ld, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
+                     strings_equal(p1_ld, FRENCH_LETTER_DISTRIBUTION_NAME));
+  free(p1_ld);
+  free(p2_ld);
+  return compatible;
 }
 
-char *get_default_klv_name(const char *lexicon_name) {}
+config_load_status_t load_lexicons_for_config(Config *config,
+                                              const char *p1_lexicon_name,
+                                              const char *p2_lexicon_name) {
+  if (is_string_empty_or_null(p1_lexicon_name)) {
+    return CONFIG_LOAD_STATUS_LEXICON_MISSING;
+  }
+  if (is_string_empty_or_null(p2_lexicon_name)) {
+    set_players_data(config->players_data, players_data_TYPE_KWG,
+                     p1_lexicon_name, p1_lexicon_name);
+  } else {
+    if (!lexicons_are_compatible(p1_lexicon_name, p2_lexicon_name)) {
+      return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
+    }
+    set_players_data(config->players_data, players_data_TYPE_KWG,
+                     p1_lexicon_name, p2_lexicon_name);
+  }
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+char *get_default_klv_name(const char *lexicon_name) {
+  return get_formatted_string("%s", lexicon_name);
+}
+
+config_load_status_t load_leaves_for_config(Config *config,
+                                            const char *p1_lexicon_name,
+                                            const char *p2_lexicon_name,
+                                            const char *p1_leaves_name,
+                                            const char *p2_leaves_name) {
+  const char *lexicon_names[2];
+  lexicon_names[0] = p1_lexicon_name;
+  lexicon_names[1] = p2_lexicon_name;
+  const char *leaves_names[2];
+  leaves_names[0] = p1_leaves_name;
+  leaves_names[1] = p2_leaves_name;
+  char *final_leaves_names[2];
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (is_string_empty_or_null(leaves_name[player_index])) {
+      // use the default
+      if (is_string_empty_or_null(lexicon_names[player_index])) {
+        log_fatal("leave file not specified for player 1\n");
+      }
+      final_leaves_names[player_index] =
+          get_default_klv_name(lexicon_names[player_index]);
+    } else {
+      final_leaves_names[player_index] =
+          get_formatted_string("%s", leaves_name[player_index]);
+    }
+  }
+
+  set_players_data(config->players_data, players_data_TYPE_KLV,
+                   final_leaves_names[0], final_leaves_names[1]);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    free(final_leaves_names[player_index]);
+  }
+
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
 
 config_load_status_t load_config_with_parsed_args(Config *config,
                                                   ParsedArgs *parsed_args) {
@@ -725,6 +726,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   const char *p1_leaves_name = NULL;
   const char *p2_lexicon_name = NULL;
   const char *p2_leaves_name = NULL;
+  const char *letter_distribution_name = NULL;
   const char *win_pct_name = NULL;
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   for (int i = args_start_index; i < NUMBER_OF_ARG_TOKENS; i++) {
@@ -753,8 +755,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       config_load_status = load_game_variant_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_LETTER_DISTRIBUTION:
-      config_load_status =
-          load_letter_distribution_for_config(config, arg_values[0]);
+      letter_distribution_name = arg_values[0];
       break;
     case ARG_TOKEN_LEXICON:
       p1_lexicon_name = arg_values[0];
@@ -865,7 +866,23 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     return config_load_status;
   }
 
-  load_leaves_for_config(config, p1_leaves_name, p2_leaves_name);
+  // If no letter distribution was specified, use the
+  // player 1 lexicon to get a default letter distribution
+  config_load_status = load_letter_distribution_for_config(
+      config,
+      players_data_get_data_name(config->players_data, players_data_TYPE_KWG,
+                                 0),
+      letter_distribution_name);
+
+  // Pass in the lexicons that were loaded in the step above
+  // so we can load the default leave values if none are provided.
+  config_load_status = load_leaves_for_config(
+      config,
+      players_data_get_data_name(config->players_data, players_data_TYPE_KWG,
+                                 0),
+      players_data_get_data_name(config->players_data, players_data_TYPE_KWG,
+                                 1),
+      p1_leaves_name, p2_leaves_name);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
@@ -890,36 +907,6 @@ config_load_status_t load_config(Config *config, const char *cmd) {
   return config_load_status;
 }
 
-// Strategy params
-
-StrategyParams *create_strategy_params() {
-  StrategyParams *strategy_params = malloc_or_die(sizeof(StrategyParams));
-  strategy_params->klv = NULL;
-  strategy_params->klv_name = NULL;
-  strategy_params->kwg = NULL;
-  strategy_params->kwg_name;
-  strategy_params->move_sort_type = DEFAULT_MOVE_SORT_TYPE;
-  strategy_params->move_record_type = DEFAULT_MOVE_RECORD_TYPE;
-  return strategy_params;
-}
-
-void destroy_strategy_params(StrategyParams *strategy_params, bool destroy_kwg,
-                             bool destroy_klv) {
-  if (destroy_klv) {
-    destroy_klv(strategy_params->klv);
-  }
-  if (destroy_kwg) {
-    destroy_kwg(strategy_params->kwg);
-  }
-  if (strategy_params->klv_name) {
-    free(strategy_params->klv_name);
-  }
-  if (strategy_params->kwg_name) {
-    free(strategy_params->kwg_name);
-  }
-  free(strategy_params);
-}
-
 Config *create_default_config() {
   Config *config = malloc_or_die(sizeof(Config));
   config->command_type = COMMAND_TYPE_UNKNOWN;
@@ -929,10 +916,7 @@ Config *create_default_config() {
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->board_layout = DEFAULT_BOARD_LAYOUT;
   config->game_variant = DEFAULT_GAME_VARIANT;
-  config->kwg_is_shared = false;
-  config->klv_is_shared = false;
-  config->player_strategy_params[0] = create_strategy_params();
-  config->player_strategy_params[1] = create_strategy_params();
+  config->players_data = create_players_data();
   config->rack = NULL;
   config->player_to_infer_index = 0;
   config->actual_score = 0;
@@ -963,9 +947,7 @@ void destroy_config(Config *config) {
   if (config->cgp) {
     free(config->cgp);
   }
-  destroy_strategy_params(config->player_strategy_params[0], true, true);
-  destroy_strategy_params(config->player_strategy_params[1],
-                          !config->kwg_is_shared, !config->klv_is_shared);
+  destroy_players_data(config->players_data);
   if (config->rack) {
     destroy_rack(config->rack);
   }

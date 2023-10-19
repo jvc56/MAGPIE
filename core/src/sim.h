@@ -4,6 +4,7 @@
 #include <stdatomic.h>
 #include <time.h>
 
+#include "config.h"
 #include "game.h"
 #include "move.h"
 #include "rack.h"
@@ -11,12 +12,7 @@
 #include "thread_control.h"
 #include "winpct.h"
 
-typedef enum {
-  THREAD_CONTROL_IDLE,
-  THREAD_CONTROL_RUNNING,
-  THREAD_CONTROL_SHOULD_STOP,
-  THREAD_CONTROL_EXITING,
-} thread_control_status_t;
+typedef enum { SIM_STATUS_SUCCESS } sim_status_t;
 
 typedef enum {
   PLAYS_NOT_SIMILAR,
@@ -71,10 +67,8 @@ typedef struct SimmerWorker {
 Simmer *create_simmer(Config *config);
 void destroy_simmer(Simmer *simmer);
 int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);
-void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
-              Rack *known_opp_rack, int plies, int threads, int num_plays,
-              int max_iterations, int stopping_condition,
-              int static_search_only);
+sim_status_t simulate(Config *config, ThreadControl *thread_control,
+                      Simmer *simmer, Game *game);
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays);
 
 #endif
