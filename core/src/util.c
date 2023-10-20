@@ -73,11 +73,12 @@ int char_to_int(char c) { return c - '0'; }
 
 int string_to_int(const char *str) {
   char *endptr;
-  uint64_t result = strtol(str, &endptr, 10);
+  long int result = strtol(str, &endptr, 10);
   if (*endptr != '\0') {
-    log_fatal("string to int conversion failed for %s\n", str);
+    abort();
+    log_fatal("string to int conversion failed for >%s<\n", str);
   }
-  return result;
+  return (int)result;
 }
 
 uint64_t string_to_uint64(const char *str) {

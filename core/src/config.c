@@ -158,7 +158,7 @@ void destroy_single_arg(SingleArg *single_arg) {
   if (single_arg->name) {
     free(single_arg->name);
   }
-  if (single_arg->number_of_values > 0) {
+  if (single_arg->has_value) {
     for (int i = 0; i < single_arg->number_of_values; i++) {
       if (single_arg->values[i]) {
         free(single_arg->values[i]);
@@ -230,9 +230,9 @@ ParsedArgs *create_parsed_args() {
   set_single_arg(parsed_args, index++, ARG_TOKEN_KNOWN_OPP_RACK,
                  ARG_KNOWN_OPP_RACK, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_WIN_PCT, ARG_WIN_PCT, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_PLIES, ARG_PLIES, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_NUMBER_OF_PLAYS,
                  ARG_NUMBER_OF_PLAYS, 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_PLIES, ARG_PLIES, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_MAX_ITERATIONS,
                  ARG_MAX_ITERATIONS, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_STOPPING_CONDITION,
@@ -247,7 +247,8 @@ ParsedArgs *create_parsed_args() {
   set_single_arg(parsed_args, index++, ARG_TOKEN_SCORE, ARG_SCORE, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_EQUITY_MARGIN,
                  ARG_EQUITY_MARGIN, 1);
-
+  set_single_arg(parsed_args, index++, ARG_TOKEN_NUMBER_OF_TILES_EXCHANGED,
+                 ARG_NUMBER_OF_TILES_EXCHANGED, 1);
   // Autoplay
   set_single_arg(parsed_args, index++, ARG_TOKEN_USE_GAME_PAIRS,
                  ARG_USE_GAME_PAIRS, 1);
@@ -263,6 +264,8 @@ ParsedArgs *create_parsed_args() {
   set_single_arg(parsed_args, index++, ARG_TOKEN_CHECK_STOP_INTERVAL,
                  ARG_CHECK_STOP_INTERVAL, 1);
 
+  assert(index == NUMBER_OF_ARG_TOKENS);
+
   return parsed_args;
 }
 
@@ -277,7 +280,7 @@ config_load_status_t init_parsed_args(ParsedArgs *parsed_args,
                                       StringSplitter *cmd) {
   int number_of_input_args = string_splitter_get_number_of_items(cmd);
   for (int i = 0; i < number_of_input_args;) {
-    char *input_arg = string_splitter_get_item(cmd, i);
+    const char *input_arg = string_splitter_get_item(cmd, i);
     bool is_recognized_arg = false;
     for (int j = 0; j < NUMBER_OF_ARG_TOKENS; j++) {
       SingleArg *single_arg = parsed_args->args[j];
@@ -287,7 +290,7 @@ config_load_status_t init_parsed_args(ParsedArgs *parsed_args,
         } else if (i + single_arg->number_of_values < number_of_input_args) {
           for (int k = 0; k < single_arg->number_of_values; k++) {
             single_arg->values[k] = get_formatted_string(
-                "%s", string_splitter_get_item(cmd, i + k));
+                "%s", string_splitter_get_item(cmd, i + k + 1));
           }
           single_arg->has_value = true;
           single_arg->position = i;
@@ -675,6 +678,7 @@ load_lexicons_for_config(Config *config, const char *input_p1_lexicon_name,
     p2_lexicon_name = players_data_get_data_name(config->players_data,
                                                  PLAYERS_DATA_TYPE_KWG, 1);
   }
+
   if (is_string_empty_or_null(p2_lexicon_name)) {
     p1_lexicon_name = p1_lexicon_name;
   }

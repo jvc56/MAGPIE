@@ -26,6 +26,8 @@ void players_data_set_move_record_type(PlayersData *players_data,
                                        move_record_t move_record_type);
 move_record_t players_data_get_move_record_type(PlayersData *players_data,
                                                 int player_index);
+void *players_data_get_data(PlayersData *players_data,
+                            players_data_t players_data_type, int player_index);
 char *players_data_get_data_name(PlayersData *players_data,
                                  players_data_t players_data_type,
                                  int player_index);

@@ -20,7 +20,7 @@ make magpie BUILD=release
 ./bin/magpie
 elif [ "$1" == "u" ]; then
 make magpie_test
-./bin/magpie_test "$2"
+./bin/magpie_test $2
 elif [ "$1" == "t" ]; then
 if [ -z "$2" ]; then
     echo "must provide number of games to play"

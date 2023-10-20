@@ -80,10 +80,12 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     if (is_all_whitespace_or_empty(line)) {
       continue;
     }
+    trim_whitespace(line);
     StringSplitter *single_letter_info = split_string(line, ',', true);
     // letter, lower case, dist, score, is_vowel
-    char *letter = string_splitter_get_item(single_letter_info, 0);
-    char *lower_case_letter = string_splitter_get_item(single_letter_info, 1);
+    const char *letter = string_splitter_get_item(single_letter_info, 0);
+    const char *lower_case_letter =
+        string_splitter_get_item(single_letter_info, 1);
     int dist = string_to_int(string_splitter_get_item(single_letter_info, 2));
     int score = string_to_int(string_splitter_get_item(single_letter_info, 3));
     int is_vowel =

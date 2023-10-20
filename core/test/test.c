@@ -23,6 +23,7 @@
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
 #include "movegen_test.h"
+#include "players_data_test.h"
 #include "rack_test.h"
 #include "shadow_test.h"
 #include "sim_test.h"
@@ -35,6 +36,7 @@
 
 void run_all(TestConfig *testconfig) {
   // Test the loading of the config
+  test_players_data();
   test_config();
 
   // Test the readonly data first
@@ -116,6 +118,8 @@ void run_test(TestConfig *testconfig, const char *subtest) {
 }
 
 int main(int argc, char *argv[]) {
+  log_set_level(LOG_WARN);
+
   TestConfig *testconfig = create_testconfig(
       // CSW
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all",
@@ -128,7 +132,6 @@ int main(int argc, char *argv[]) {
       // Distinct lexica
       "setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity r1 all r2 all");
 
-  log_set_level(LOG_WARN);
   if (argc == 1) {
     run_all(testconfig);
   } else {

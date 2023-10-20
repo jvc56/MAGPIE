@@ -405,8 +405,8 @@ int string_splitter_get_number_of_items(StringSplitter *string_splitter) {
   return string_splitter->number_of_items;
 }
 
-char *string_splitter_get_item(StringSplitter *string_splitter,
-                               int item_index) {
+const char *string_splitter_get_item(StringSplitter *string_splitter,
+                                     int item_index) {
   if (item_index >= string_splitter->number_of_items || item_index < 0) {
     log_fatal("string item out of range: %d\n", item_index);
   }
