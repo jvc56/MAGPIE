@@ -67,7 +67,7 @@ void destroy_ort(ORT *ort) {
 
 uint64_t make_rack_key(Rack *rack, LetterDistribution *ld) {
   uint64_t key = 0;
-  for (int i = 1; i < ld->size; i++) {
+  for (uint32_t i = 1; i < ld->size; i++) {
     const int num_this = rack->array[i];
     for (int j = 0; j < num_this; j++) {
       key = (key << BITS_PER_TILE) | i;

@@ -23,4 +23,13 @@ void test_ort(SuperConfig *superconfig) {
   for (int i = 6; i <= BOARD_DIM; i++) {
     assert(word_sizes[i] == rack->number_of_letters);
   }
+
+  set_rack_to_string(rack, "QUACK", ld);
+  add_letter_to_rack(rack, human_readable_letter_to_machine_letter(ld, "Q"));
+  // rack is QQUACK, an impossible rack that will be missing from the table.
+  get_word_sizes(ort, rack, ld, word_sizes);
+  // Knowing nothing about this rack, we assume all tiles can be played.
+  for (int i = 0; i <= BOARD_DIM; i++) {
+    assert(word_sizes[i] == rack->number_of_letters);
+  }
 }
