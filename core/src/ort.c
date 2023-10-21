@@ -73,7 +73,8 @@ uint64_t make_rack_key(Rack *rack, LetterDistribution *ld) {
       key = (key << BITS_PER_TILE) | i;
     }
   }
-  // MAGPIE has blank = 0, not e.g. blank = 27 in English
+  // MAGPIE has blank = 0, not e.g. blank = 27 in English.
+  // ORT has blank after Z.
   for (int j = 0; j < rack->array[0]; j++) {
     key = (key << BITS_PER_TILE) | ld->size;
   }
