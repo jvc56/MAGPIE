@@ -646,8 +646,8 @@ void shadow_start(Generator *gen, int cross_set_index, Rack *opp_rack) {
     // Traverse the full length of the tiles on the board until hitting an empty
     // square
     while (1) {
+      tiles_played_through++;
       if (!is_blanked(current_letter)) {
-        tiles_played_through++;
         main_played_through_score +=
             gen->letter_distribution->scores[current_letter];
       }
