@@ -54,6 +54,7 @@ void load_ort(ORT *ort, const char *ort_filename) {
 }
 
 ORT *create_ort(const char *ort_filename) {
+  printf("Loading ort from %s\n", ort_filename);  // TODO: remove
   ORT *ort = malloc(sizeof(ORT));
   load_ort(ort, ort_filename);
   return ort;

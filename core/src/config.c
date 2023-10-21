@@ -468,7 +468,15 @@ void load_config_from_lexargs(Config **config, const char *cgp,
       c->player_2_strategy_params->klv = c->player_1_strategy_params->klv;
       string_copy(c->player_2_strategy_params->klv_filename, leaves);
     }
-
+    if (!strings_equal(c->player_1_strategy_params->ort_filename, ort)) {
+      log_debug("reloading ort #1");
+      destroy_ort(c->player_1_strategy_params->ort);
+      c->player_1_strategy_params->ort = create_ort(ort);
+      // assume the ort applies to both players if we're using this function
+      assert(c->ort_is_shared);
+      c->player_2_strategy_params->ort = c->player_1_strategy_params->ort;
+      string_copy(c->player_2_strategy_params->ort_filename, ort);
+    }
     free(c->cgp);
     c->cgp = strdup(cgp);
   }
@@ -481,6 +489,7 @@ StrategyParams *copy_strategy_params(StrategyParams *orig) {
   // No need to copy the klv itself.
   sp->klv = orig->klv;
   sp->kwg = orig->kwg;
+  sp->ort = orig->ort;
   string_copy(sp->klv_filename, orig->klv_filename);
   sp->move_sorting = orig->move_sorting;
   sp->play_recorder_type = orig->play_recorder_type;
