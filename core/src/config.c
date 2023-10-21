@@ -1,15 +1,17 @@
+#include "config.h"
+
 #include <assert.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "config.h"
 #include "constants.h"
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "log.h"
+#include "ort.h"
 #include "string_util.h"
 #include "util.h"
 
@@ -17,8 +19,9 @@
 
 Config *create_config(const char *letter_distribution_filename, const char *cgp,
                       const char *kwg_filename_1, const char *klv_filename_1,
-                      int move_sorting_1, int play_recorder_type_1,
-                      const char *kwg_filename_2, const char *klv_filename_2,
+                      const char *ort_filename_1, int move_sorting_1,
+                      int play_recorder_type_1, const char *kwg_filename_2,
+                      const char *klv_filename_2, const char *ort_filename_2,
                       int move_sorting_2, int play_recorder_type_2,
                       int game_pair_flag, int number_of_games_or_pairs,
                       int print_info, int checkstop,
@@ -27,7 +30,6 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
                       int number_of_tiles_exchanged, double equity_margin,
                       int number_of_threads, const char *winpct_filename,
                       int move_list_capacity) {
-
   Config *config = malloc_or_die(sizeof(Config));
   config->letter_distribution =
       create_letter_distribution(letter_distribution_filename);
@@ -63,6 +65,13 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
   } else {
     player_1_strategy_params->klv = NULL;
   }
+
+  if (!strings_equal(ort_filename_1, "")) {
+    player_1_strategy_params->ort = create_ort(ort_filename_1);
+    string_copy(player_1_strategy_params->ort_filename, ort_filename_1);
+  } else {
+    player_1_strategy_params->ort = NULL;
+  }
   player_1_strategy_params->move_sorting = move_sorting_1;
   player_1_strategy_params->play_recorder_type = play_recorder_type_1;
 
@@ -90,6 +99,23 @@ Config *create_config(const char *letter_distribution_filename, const char *cgp,
     string_copy(player_2_strategy_params->klv_filename, klv_filename_2);
     player_2_strategy_params->klv = create_klv(klv_filename_2);
     config->klv_is_shared = 0;
+  }
+
+  // Only default to sharing ORT if both players are using the same lexicon.
+  // If either player's lexicon is one that no ORT is available for, leave
+  // that ORT null and do not use the rack table (conservatively assume that
+  // every set of tiles can form words using up to 7 letters).
+  if ((strings_equal(ort_filename_2, "") && config->kwg_is_shared) ||
+      strings_equal(ort_filename_2, ort_filename_1)) {
+    player_2_strategy_params->ort = player_1_strategy_params->ort;
+    string_copy(player_2_strategy_params->ort_filename, ort_filename_1);
+    config->ort_is_shared = 1;
+  } else if (strings_equal(ort_filename_2, "")) {
+    player_2_strategy_params->ort = NULL;
+  }else {
+    string_copy(player_2_strategy_params->ort_filename, ort_filename_2);
+    player_2_strategy_params->ort = create_ort(ort_filename_2);
+    config->ort_is_shared = 0;
   }
 
   if (move_sorting_2 < 0) {
@@ -132,11 +158,13 @@ Config *create_config_from_args(int argc, char *argv[]) {
 
   char kwg_filename_1[(MAX_ARG_LENGTH)] = "";
   char klv_filename_1[(MAX_ARG_LENGTH)] = "";
+  char ort_filename_1[(MAX_ARG_LENGTH)] = "";
   int play_recorder_type_1 = MOVE_RECORDER_ALL;
   int move_sorting_1 = MOVE_SORT_EQUITY;
 
   char kwg_filename_2[(MAX_ARG_LENGTH)] = "";
   char klv_filename_2[(MAX_ARG_LENGTH)] = "";
+  char ort_filename_2[(MAX_ARG_LENGTH)] = "";
   int play_recorder_type_2 = -1;
   int move_sorting_2 = -1;
 
@@ -161,8 +189,9 @@ Config *create_config_from_args(int argc, char *argv[]) {
     static struct option long_options[] = {
         {"c", required_argument, 0, 1001},  {"d", required_argument, 0, 1002},
         {"g1", required_argument, 0, 1003}, {"l1", required_argument, 0, 1004},
-        {"r1", required_argument, 0, 1005}, {"s1", required_argument, 0, 1006},
-        {"g2", required_argument, 0, 1007}, {"l2", required_argument, 0, 1008},
+        {"o1", required_argument, 0, 1022}, {"r1", required_argument, 0, 1005},
+        {"s1", required_argument, 0, 1006}, {"g2", required_argument, 0, 1007},
+        {"l2", required_argument, 0, 1008}, {"o2", required_argument, 0, 1023},
         {"r2", required_argument, 0, 1009}, {"s2", required_argument, 0, 1010},
         {"n", required_argument, 0, 1011},  {"t", required_argument, 0, 1012},
         {"i", required_argument, 0, 1013},  {"a", required_argument, 0, 1014},
@@ -197,6 +226,11 @@ Config *create_config_from_args(int argc, char *argv[]) {
     case 1004:
       check_arg_length(optarg);
       string_copy(klv_filename_1, optarg);
+      break;
+
+    case 1022:
+      check_arg_length(optarg);
+      string_copy(ort_filename_1, optarg);
       break;
 
     case 1005:
@@ -235,6 +269,11 @@ Config *create_config_from_args(int argc, char *argv[]) {
     case 1008:
       check_arg_length(optarg);
       string_copy(klv_filename_2, optarg);
+      break;
+
+    case 1023:
+      check_arg_length(optarg);
+      string_copy(ort_filename_2, optarg);
       break;
 
     case 1009:
@@ -339,12 +378,12 @@ Config *create_config_from_args(int argc, char *argv[]) {
 
   return create_config(
       letter_distribution_filename, cgp, kwg_filename_1, klv_filename_1,
-      move_sorting_1, play_recorder_type_1, kwg_filename_2, klv_filename_2,
-      move_sorting_2, play_recorder_type_2, use_game_pairs,
-      number_of_games_or_pairs, print_info, checkstop, actual_tiles_played,
-      player_to_infer_index, actual_score, number_of_tiles_exchanged,
-      equity_margin, number_of_threads, winpct_filename,
-      DEFAULT_MOVE_LIST_CAPACITY);
+      ort_filename_1, move_sorting_1, play_recorder_type_1, kwg_filename_2,
+      klv_filename_2, ort_filename_2, move_sorting_2, play_recorder_type_2,
+      use_game_pairs, number_of_games_or_pairs, print_info, checkstop,
+      actual_tiles_played, player_to_infer_index, actual_score,
+      number_of_tiles_exchanged, equity_margin, number_of_threads,
+      winpct_filename, DEFAULT_MOVE_LIST_CAPACITY);
 }
 
 void destroy_config(Config *config) {
@@ -379,10 +418,12 @@ void load_config_from_lexargs(Config **config, const char *cgp,
 
   char *dist = get_formatted_string("data/letterdistributions/%s.csv", ldname);
   char leaves[50] = "data/lexica/english.klv2";
+  char ort[50] = "";
   char winpct[50] = "data/strategy/default_english/winpct.csv";
   char *lexicon_file = get_formatted_string("data/lexica/%s.kwg", lexicon_name);
   if (strings_equal(lexicon_name, "CSW21")) {
     string_copy(leaves, "data/lexica/CSW21.klv2");
+    string_copy(ort, "data/lexica/CSW21.ort");
   } else if (prefix("NSF", lexicon_name)) {
     string_copy(leaves, "data/lexica/norwegian.klv2");
   } else if (prefix("RD", lexicon_name)) {
@@ -394,10 +435,10 @@ void load_config_from_lexargs(Config **config, const char *cgp,
   }
 
   if (!*config) {
-    *config = create_config(dist, cgp, lexicon_file, leaves, MOVE_SORT_EQUITY,
-                            MOVE_RECORDER_ALL, "", "", MOVE_SORT_EQUITY,
-                            MOVE_RECORDER_ALL, 0, 0, 9, 0, "", 0, 0, 0, 0, 0,
-                            winpct, 100);
+    *config = create_config(dist, cgp, lexicon_file, leaves, ort,
+                            MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, "", "", "",
+                            MOVE_SORT_EQUITY, MOVE_RECORDER_ALL, 0, 0, 9, 0, "",
+                            0, 0, 0, 0, 0, winpct, 100);
   } else {
     Config *c = (*config);
     // check each filename
