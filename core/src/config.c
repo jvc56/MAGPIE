@@ -54,8 +54,8 @@
 #define ARG_NUMBER_OF_TILES_EXCHANGED "exch"
 #define ARG_USE_GAME_PAIRS "gp"
 #define ARG_RANDOM_SEED "rs"
-#define ARG_NUMBER_OF_THREADS "numthreads"
-#define ARG_PRINT_INFO_INTERVAL "print"
+#define ARG_NUMBER_OF_THREADS "threads"
+#define ARG_PRINT_INFO_INTERVAL "info"
 #define ARG_CHECK_STOP_INTERVAL "check"
 
 #define ARG_VAL_MOVE_SORT_EQUITY "equity"
@@ -360,7 +360,7 @@ config_load_status_t load_letter_distribution_for_config(
     Config *config, const char *lexicon_name,
     const char *input_letter_distribution_name) {
   char *letter_distribution_name = NULL;
-  if (is_string_empty_or_null(letter_distribution_name)) {
+  if (is_string_empty_or_null(input_letter_distribution_name)) {
     letter_distribution_name =
         get_default_letter_distribution_name(lexicon_name);
   } else {
@@ -368,6 +368,7 @@ config_load_status_t load_letter_distribution_for_config(
         get_formatted_string("%s", input_letter_distribution_name);
   }
   if (strings_equal(config->ld_name, letter_distribution_name)) {
+    free(letter_distribution_name);
     return CONFIG_LOAD_STATUS_SUCCESS;
   }
   LetterDistribution *new_letter_distribution =
@@ -532,12 +533,17 @@ config_load_status_t load_score_for_config(Config *config, const char *score) {
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_equity_margin_for_config(Config *config,
-                                                   const char *equity_margin) {
-  if (!is_decimal_number(equity_margin)) {
-    return CONFIG_LOAD_STATUS_MALFORMED_PLAYER_TO_INFER_INDEX;
+config_load_status_t
+load_equity_margin_for_config(Config *config,
+                              const char *equity_margin_string) {
+  if (!is_decimal_number(equity_margin_string)) {
+    return CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN;
   }
-  config->equity_margin = string_to_double(equity_margin);
+  double equity_margin = string_to_double(equity_margin_string);
+  if (equity_margin < 0) {
+    return CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN;
+  }
+  config->equity_margin = equity_margin;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -627,18 +633,9 @@ int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
 
 // The CGP is a special arg since it acts
 // as both a subcommand and an arg token
-config_load_status_t load_cgp_for_config(Config *config,
-                                         ParsedArgs *parsed_args) {
-  SingleArg *cgp_arg = NULL;
-  for (int i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
-    if (parsed_args->args[i]->token == ARG_TOKEN_CGP) {
-      cgp_arg = parsed_args->args[i];
-      break;
-    }
-  }
-  if (!cgp_arg || !cgp_arg->has_value) {
-    return CONFIG_LOAD_STATUS_INVALID_CGP_ARG;
-  }
+config_load_status_t set_cgp_string_for_config(Config *config,
+                                               SingleArg *cgp_arg) {
+  // At this point it is guaranteed that cgp_arg has 4 values.
   config->cgp = get_formatted_string("%s %s %s %s", cgp_arg->values[0],
                                      cgp_arg->values[1], cgp_arg->values[2],
                                      cgp_arg->values[3]);
@@ -754,17 +751,20 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     if (!parsed_args->args[i]->has_value) {
       continue;
     }
-    arg_token_t arg_token = parsed_args->args[i]->token;
-    char **arg_values = parsed_args->args[i]->values;
+    SingleArg *single_arg = parsed_args->args[i];
+    arg_token_t arg_token = single_arg->token;
+    char **arg_values = single_arg->values;
     switch (arg_token) {
     case ARG_TOKEN_POSITION:
     case ARG_TOKEN_GO:
-    case ARG_TOKEN_CGP:
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_SET_OPTIONS:
       config_load_status = CONFIG_LOAD_STATUS_MISPLACED_COMMAND;
+      break;
+    case ARG_TOKEN_CGP:
+      config_load_status = set_cgp_string_for_config(config, single_arg);
       break;
     case ARG_TOKEN_BINGO_BONUS:
       config_load_status = load_bingo_bonus_for_config(config, arg_values[0]);
@@ -869,13 +869,6 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       log_fatal("invalid token found in args\n");
       break;
     }
-    if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-      return config_load_status;
-    }
-  }
-
-  if (config->command_type == COMMAND_TYPE_LOAD_CGP) {
-    config_load_status = load_cgp_for_config(config, parsed_args);
     if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
       return config_load_status;
     }
