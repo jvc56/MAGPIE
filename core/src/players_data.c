@@ -195,11 +195,11 @@ void destroy_players_data(PlayersData *players_data) {
     bool is_shared =
         players_data_get_is_shared(players_data, (players_data_t)data_index);
     for (int player_index = 0; player_index < 2; player_index++) {
+      players_data_destroy_data_name(players_data, (players_data_t)data_index,
+                                     player_index);
       if (!is_shared || player_index == 0) {
         players_data_destroy_data(players_data, (players_data_t)data_index,
                                   player_index);
-        players_data_destroy_data_name(players_data, (players_data_t)data_index,
-                                       player_index);
       }
     }
   }

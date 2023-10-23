@@ -224,7 +224,7 @@ Move *get_top_move(Inference *inference) {
   generate_moves(game->gen, player,
                  game->players[1 - inference->player_to_infer_index]->rack,
                  game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
-                 MOVE_SORT_EQUITY, MOVE_RECORD_BEST, false);
+                 MOVE_RECORD_BEST, MOVE_SORT_EQUITY, false);
   return game->gen->move_list->moves[0];
 }
 

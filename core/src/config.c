@@ -163,9 +163,9 @@ void destroy_single_arg(SingleArg *single_arg) {
       if (single_arg->values[i]) {
         free(single_arg->values[i]);
       }
-      free(single_arg->values);
     }
   }
+  free(single_arg->values);
   free(single_arg);
 }
 
@@ -416,7 +416,7 @@ config_load_status_t load_move_record_type_for_config(
 
 config_load_status_t load_rack_for_config(Config *config, const char *rack) {
   if (!config->letter_distribution) {
-    return CONFIG_LOAD_STATUS_MISSING_LETTER_DISTRIBUTION;
+    log_fatal("letter distribution is missing for rack parsing\n");
   }
   if (!config->rack) {
     config->rack = create_rack(config->letter_distribution->size);
@@ -748,6 +748,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   const char *new_p2_leaves_name = NULL;
   const char *new_letter_distribution_name = NULL;
   const char *new_win_pct_name = NULL;
+  const char *rack = NULL;
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   for (int i = args_start_index; i < NUMBER_OF_ARG_TOKENS; i++) {
     if (!parsed_args->args[i]->has_value) {
@@ -810,7 +811,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
           load_move_record_type_for_config(config, arg_values[0], 1);
       break;
     case ARG_TOKEN_KNOWN_OPP_RACK:
-      config_load_status = load_rack_for_config(config, arg_values[0]);
+      rack = arg_values[0];
       break;
     case ARG_TOKEN_WIN_PCT:
       new_win_pct_name = arg_values[0];
@@ -893,6 +894,19 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       players_data_get_data_name(config->players_data, PLAYERS_DATA_TYPE_KWG,
                                  0),
       new_letter_distribution_name);
+
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
+  // Now that the letter distribution has been loaded
+  // we can read the rack.
+  if (rack) {
+    config_load_status = load_rack_for_config(config, rack);
+    if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+      return config_load_status;
+    }
+  }
 
   // Pass in the lexicons that were loaded in the step above
   // so we can load the default leave values if none are provided.
