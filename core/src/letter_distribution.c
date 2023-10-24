@@ -82,6 +82,10 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     }
     trim_whitespace(line);
     StringSplitter *single_letter_info = split_string(line, ',', true);
+    if (string_splitter_get_number_of_items(single_letter_info) != 5) {
+      log_fatal("invalid letter distribution line in %s:\n>%s<\n", ld_name,
+                line);
+    }
     // letter, lower case, dist, score, is_vowel
     const char *letter = string_splitter_get_item(single_letter_info, 0);
     const char *lower_case_letter =

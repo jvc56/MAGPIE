@@ -20,6 +20,7 @@
 #define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
 #define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC
 #define DEFAULT_MOVE_LIST_CAPACITY 20
+#define DEFAULT_SIMMING_STOPPING_CONDITION SIM_STOPPING_CONDITION_NONE
 
 #define ARG_POSITION "position"
 #define ARG_CGP "cgp"
@@ -125,8 +126,7 @@ const struct {
   arg_token_t arg_token_sequence[3];
 } VALID_COMMAND_SEQUENCES[6] = {
     // The valid sequences
-    {COMMAND_TYPE_LOAD_CGP,
-     {ARG_TOKEN_POSITION, ARG_TOKEN_CGP, NUMBER_OF_ARG_TOKENS}},
+    {COMMAND_TYPE_LOAD_CGP, {ARG_TOKEN_POSITION, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_SIM, {ARG_TOKEN_GO, ARG_TOKEN_SIM, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_INFER, {ARG_TOKEN_GO, ARG_TOKEN_INFER, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_AUTOPLAY,
@@ -631,10 +631,11 @@ int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
   return number_of_tokens_parsed;
 }
 
-// The CGP is a special arg since it acts
-// as both a subcommand and an arg token
 config_load_status_t set_cgp_string_for_config(Config *config,
                                                SingleArg *cgp_arg) {
+  if (config->cgp) {
+    free(config->cgp);
+  }
   // At this point it is guaranteed that cgp_arg has 4 values.
   config->cgp = get_formatted_string("%s %s %s %s", cgp_arg->values[0],
                                      cgp_arg->values[1], cgp_arg->values[2],
@@ -920,6 +921,9 @@ config_load_status_t load_config_with_parsed_args(Config *config,
 config_load_status_t load_config(Config *config, const char *cmd) {
   ParsedArgs *parsed_args = create_parsed_args();
   StringSplitter *cmd_split_string = split_string_by_whitespace(cmd, true);
+  // CGP values can have semicolons at the end, so
+  // we trim these off to make loading easier.
+  string_splitter_trim_char(cmd_split_string, ';');
   config_load_status_t config_load_status =
       init_parsed_args(parsed_args, cmd_split_string);
 
@@ -953,7 +957,7 @@ Config *create_default_config() {
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
   config->plies = 2;
   config->max_iterations = 0;
-  config->stopping_condition = SIM_STOPPING_CONDITION_NONE;
+  config->stopping_condition = DEFAULT_SIMMING_STOPPING_CONDITION;
   config->static_search_only = false;
   config->use_game_pairs = true;
   config->random_seed = 0;
@@ -973,7 +977,6 @@ void destroy_config(Config *config) {
   if (config->cgp) {
     free(config->cgp);
   }
-  destroy_players_data(config->players_data);
   if (config->rack) {
     destroy_rack(config->rack);
   }
@@ -983,5 +986,6 @@ void destroy_config(Config *config) {
   if (config->win_pct_name) {
     free(config->win_pct_name);
   }
+  destroy_players_data(config->players_data);
   free(config);
 }

@@ -28,12 +28,18 @@ jobs:
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/NWL20.kwg &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.kwg &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/DISC2.kwg &&
+          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/FRA20.kwg &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.klv2 &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/english.klv2 &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/catalan.klv2 &&
+          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/french.klv2 &&
           wget https://github.com/domino14/macondo/raw/master/data/strategy/default_english/winpct.csv &&
           wget https://woogles-prod-assets.s3.amazonaws.com/CSW21.csv.gz &&
           wget https://woogles-prod-assets.s3.amazonaws.com/OSPS44.kwg &&
+          ln -sf english.klv2 NWL20.klv2 &&
+          ln -sf english.klv2 OSPS44.klv2 &&
+          ln -sf catalan.klv2 DISC2.klv2 &&
+          ln -sf french.klv2 FRA20.klv2 &&
           mv *.kwg core/data/lexica &&
           mv *.klv2 core/data/lexica &&
           mv *.csv core/data/strategy/default_english &&

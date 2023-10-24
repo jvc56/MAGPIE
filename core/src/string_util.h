@@ -18,8 +18,8 @@ bool is_string_empty(const char *str1);
 bool is_string_empty_or_null(const char *str);
 void remove_first_newline(char *str);
 size_t string_length(const char *str);
-void trim_semicolon(char *str);
 void trim_whitespace(char *str);
+void trim_char(char *str, const char c);
 char *get_string_from_file(const char *filename);
 
 struct StringSplitter;
@@ -28,6 +28,7 @@ typedef struct StringSplitter StringSplitter;
 int string_splitter_get_number_of_items(StringSplitter *string_splitter);
 const char *string_splitter_get_item(StringSplitter *string_splitter,
                                      int item_index);
+void string_splitter_trim_char(StringSplitter *string_splitter, const char c);
 char *string_splitter_join(StringSplitter *string_splitter, int start_index,
                            int end_index);
 StringSplitter *split_string_by_whitespace(const char *input_string,

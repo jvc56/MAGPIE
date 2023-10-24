@@ -87,7 +87,7 @@ void trim_semicolon(char *str) {
   }
 }
 
-void trim_whitespace(char *str) {
+void trim_internal(char *str, const char c, bool whitespace) {
   if (str == NULL) {
     return;
   }
@@ -98,7 +98,8 @@ void trim_whitespace(char *str) {
 
   // Calculate the length of the string and count leading/trailing whitespace
   while (str[length] != '\0') {
-    if (isspace(str[length])) {
+    if ((whitespace && isspace(str[length])) ||
+        (!whitespace && str[length] == c)) {
       if (length == 0) {
         leading_space++;
       } else {
@@ -122,6 +123,10 @@ void trim_whitespace(char *str) {
   // Null-terminate the new string
   str[length - leading_space - trailing_space] = '\0';
 }
+
+void trim_whitespace(char *str) { trim_internal(str, 0, true); }
+
+void trim_char(char *str, const char c) { trim_internal(str, c, false); }
 
 char *get_string_from_file(const char *filename) {
   FILE *file_handle = fopen(filename, "r");
@@ -408,9 +413,17 @@ int string_splitter_get_number_of_items(StringSplitter *string_splitter) {
 const char *string_splitter_get_item(StringSplitter *string_splitter,
                                      int item_index) {
   if (item_index >= string_splitter->number_of_items || item_index < 0) {
-    log_fatal("string item out of range: %d\n", item_index);
+    log_fatal("string item out of range (%d): %d\n",
+              string_splitter->number_of_items, item_index);
   }
   return string_splitter->items[item_index];
+}
+
+void string_splitter_trim_char(StringSplitter *string_splitter, const char c) {
+  int number_of_items = string_splitter_get_number_of_items(string_splitter);
+  for (int i = 0; i < number_of_items; i++) {
+    trim_char(string_splitter->items[i], c);
+  }
 }
 
 char *string_splitter_join(StringSplitter *string_splitter, int start_index,
