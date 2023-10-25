@@ -39,7 +39,7 @@ void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
 
 void test_board(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   load_cgp(game, VS_ED);
 
   assert(!get_anchor(game->gen->board, 3, 3, 0) &&

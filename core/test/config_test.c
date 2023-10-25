@@ -170,6 +170,7 @@ void test_config_success() {
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
   assert(config->command_type == COMMAND_TYPE_SET_OPTIONS);
+  assert(!config->command_set_cgp);
   assert(config->game_variant == GAME_VARIANT_WORDSMOG);
   assert(players_data_get_move_sort_type(config->players_data, 0) ==
          MOVE_SORT_SCORE);
@@ -249,6 +250,7 @@ void test_config_success() {
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
   assert(config->command_type == COMMAND_TYPE_SET_OPTIONS);
+  assert(!config->command_set_cgp);
   assert(config->game_variant == GAME_VARIANT_WORDSMOG);
   assert(players_data_get_move_sort_type(config->players_data, 0) ==
          MOVE_SORT_EQUITY);
@@ -309,6 +311,7 @@ void test_config_success() {
                                       DOUG_V_EMELY_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert(config->command_type == COMMAND_TYPE_LOAD_CGP);
+  assert(config->command_set_cgp);
   assert_strings_equal(config->cgp, "15/15/15/15/15/15/15/3WINDY7/15/15/15/15/"
                                     "15/15/15 ADEEGIL/AEILOUY 0/32 0");
 
@@ -319,6 +322,7 @@ void test_config_success() {
                                       NOAH_VS_MISHU_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert(config->command_type == COMMAND_TYPE_SIM);
+  assert(config->command_set_cgp);
   assert_strings_equal(
       config->cgp, "15/15/15/15/15/15/12BOA/6VOX1ATONY/7FIVER3/11E3/8MOANED1/"
                    "7QI2C3/8MU1H3/15/15 AAIRSSU/AELORTT 76/120 0");
@@ -328,6 +332,7 @@ void test_config_success() {
                                       NOAH_VS_PETER_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert(config->command_type == COMMAND_TYPE_INFER);
+  assert(config->command_set_cgp);
   assert_strings_equal(
       config->cgp,
       "15/9O5/7GIP5/7H1E3T1/7E5E1/5CUTTY3EF/7T6O/7OR4UP/7SEMINAL1/4AX2S4V1/"
@@ -339,6 +344,7 @@ void test_config_success() {
                                       SOME_ISC_GAME_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert(config->command_type == COMMAND_TYPE_AUTOPLAY);
+  assert(config->command_set_cgp);
   assert_strings_equal(
       config->cgp, "15/1V13/1O13/1D12P/1U12O/1NA2C7FE/2N2R7AM/OUTFLYING2AHIS/"
                    "2I1O2AILERON1/2R1O10/2I1I2D2WAG2/2O1EXPUNgES3/2t4C7/"

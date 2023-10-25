@@ -14,7 +14,7 @@
 
 void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Rack *rack = game->players[0]->rack;
   KLV *klv = game->players[0]->klv;
   set_rack_to_string(rack, "EORSTVX", game->gen->letter_distribution);
@@ -91,7 +91,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
 
 void test_macondo_endgame_equity_adjustments(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   load_cgp(game,
            "4RUMMAGED2C/7A6A/2H1G2T6V/2O1O2I6E/2WAB2PREBENDS/2ER3O3n3/2SI6COW2/"

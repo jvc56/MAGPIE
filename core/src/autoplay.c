@@ -110,7 +110,7 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
 
-  Game *game = create_game(autoplay_worker->config, 1);
+  Game *game = create_game(autoplay_worker->config);
   uint64_t seed;
 
   int starting_player_for_thread = autoplay_worker->worker_index % 2;

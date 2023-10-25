@@ -24,7 +24,7 @@ void reset_and_load_game_failure(Game *game, const char *cgp,
 
 void test_load_cgp(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   // Test that loading various CGPs doesn't result in
   // any errors
   reset_and_load_game_success(game, EMPTY_CGP);
@@ -146,7 +146,7 @@ void test_load_cgp(TestConfig *testconfig) {
 
 void test_game_main(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Rack *rack = create_rack(config->letter_distribution->size);
   cgp_parse_status_t cgp_parse_status;
 

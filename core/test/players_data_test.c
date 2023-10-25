@@ -63,6 +63,39 @@ void test_for_data_type(players_data_t players_data_type,
   destroy_players_data(players_data);
 }
 
+void test_unshared_data() {
+  PlayersData *players_data = create_players_data();
+
+  const char *p1_name = "Alice";
+  move_sort_t p1_move_sort_type = MOVE_SORT_SCORE;
+  move_record_t p1_move_record_type = MOVE_RECORD_ALL;
+  players_data_set_name(players_data, 0, p1_name);
+  players_data_set_move_sort_type(players_data, 0, p1_move_sort_type);
+  players_data_set_move_record_type(players_data, 0, p1_move_record_type);
+
+  assert_strings_equal(players_data_get_name(players_data, 0), p1_name);
+  assert(players_data_get_move_sort_type(players_data, 0) == p1_move_sort_type);
+  assert(players_data_get_move_record_type(players_data, 0) ==
+         p1_move_record_type);
+
+  const char *p2_name = "Bob";
+  move_sort_t p2_move_sort_type = MOVE_SORT_SCORE;
+  move_record_t p2_move_record_type = MOVE_RECORD_ALL;
+  players_data_set_name(players_data, 1, p2_name);
+  players_data_set_move_sort_type(players_data, 1, p2_move_sort_type);
+  players_data_set_move_record_type(players_data, 1, p2_move_record_type);
+
+  assert_strings_equal(players_data_get_name(players_data, 1), p2_name);
+  assert(players_data_get_move_sort_type(players_data, 1) == p2_move_sort_type);
+  assert(players_data_get_move_record_type(players_data, 1) ==
+         p2_move_record_type);
+
+  p2_name = "Charlie";
+  players_data_set_name(players_data, 1, p2_name);
+  assert_strings_equal(players_data_get_name(players_data, 1), p2_name);
+
+  destroy_players_data(players_data);
+}
 void test_players_data() {
   const char *data_names[] = {
       "CSW21", "CSW21", "NWL20",  "NWL20", "CSW21",  "NWL20", "CSW21",
@@ -73,4 +106,5 @@ void test_players_data() {
   assert(number_of_data_names % 2 == 0);
   test_for_data_type(PLAYERS_DATA_TYPE_KWG, data_names, number_of_data_names);
   test_for_data_type(PLAYERS_DATA_TYPE_KLV, data_names, number_of_data_names);
+  test_unshared_data();
 }

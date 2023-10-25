@@ -6,28 +6,6 @@
 #define QUIT_COMMAND_STRING "quit"
 #define STOP_COMMAND_STRING "stop"
 
-char *ucgi_search_status(CommandVars *command_vars) {
-  return command_search_status(command_vars, false);
-}
-
-char *ucgi_stop_search(CommandVars *command_vars) {
-  return command_search_status(command_vars, true);
-}
-
-void *execute_command_worker(void *uncasted_command_vars) {
-  CommandVars *command_vars = (CommandVars *)uncasted_command_vars;
-  execute_command(command_vars);
-  return NULL;
-}
-
-void *execute_command_async(CommandVars *command_vars) {
-  pthread_t cmd_execution_thread;
-  pthread_create(&cmd_execution_thread, NULL, execute_command_worker,
-                 command_vars);
-  pthread_detach(cmd_execution_thread);
-  return NULL;
-}
-
 bool process_ucgi_command_async(CommandVars *command_vars) {
   // Assume cmd is already trimmed of whitespace
   bool should_end = false;

@@ -17,7 +17,7 @@ Player *create_player(const Config *config, int player_index,
                       const char *name) {
   Player *player = malloc_or_die(sizeof(Player));
   player->index = player_index;
-  player->name = strdup(name);
+  player->name = name;
   player->rack = create_rack(config->letter_distribution->size);
   player->score = 0;
   player->move_sort_type =
@@ -31,7 +31,7 @@ Player *create_player(const Config *config, int player_index,
 
 Player *copy_player(const Player *player) {
   Player *new_player = malloc_or_die(sizeof(Player));
-  new_player->name = strdup(player->name);
+  new_player->name = player->name;
   new_player->rack = copy_rack(player->rack);
   new_player->score = player->score;
   new_player->move_sort_type = player->move_sort_type;
@@ -43,6 +43,5 @@ Player *copy_player(const Player *player) {
 
 void destroy_player(Player *player) {
   destroy_rack(player->rack);
-  free(player->name);
   free(player);
 }

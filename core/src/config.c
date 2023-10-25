@@ -19,7 +19,7 @@
 #define DEFAULT_BINGO_BONUS 50
 #define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
 #define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC
-#define DEFAULT_MOVE_LIST_CAPACITY 20
+#define DEFAULT_MOVE_LIST_CAPACITY 1
 #define DEFAULT_SIMMING_STOPPING_CONDITION SIM_STOPPING_CONDITION_NONE
 
 #define ARG_POSITION "position"
@@ -34,10 +34,12 @@
 #define ARG_GAME_VARIANT "var"
 #define ARG_LETTER_DISTRIBUTION "ld"
 #define ARG_LEXICON "lex"
+#define ARG_P1_NAME "p1"
 #define ARG_P1_LEXICON "l1"
 #define ARG_P1_LEAVES "k1"
 #define ARG_P1_MOVE_SORT_TYPE "s1"
 #define ARG_P1_MOVE_RECORD_TYPE "r1"
+#define ARG_P2_NAME "p2"
 #define ARG_P2_LEXICON "l2"
 #define ARG_P2_LEAVES "k2"
 #define ARG_P2_MOVE_SORT_TYPE "s2"
@@ -82,10 +84,12 @@ typedef enum {
   ARG_TOKEN_LETTER_DISTRIBUTION,
   ARG_TOKEN_LEXICON,
   // possibly unique for each player
+  ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
+  ARG_TOKEN_P2_NAME,
   ARG_TOKEN_P2_LEXICON,
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
@@ -211,6 +215,7 @@ ParsedArgs *create_parsed_args() {
 
   // Game args
   // Player 1
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_NAME, ARG_P1_NAME, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_P1_LEXICON, ARG_P1_LEXICON, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_P1_LEAVES, ARG_P1_LEAVES, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_P1_MOVE_SORT_TYPE,
@@ -219,6 +224,7 @@ ParsedArgs *create_parsed_args() {
                  ARG_P1_MOVE_RECORD_TYPE, 1);
 
   // Player 2
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_NAME, ARG_P2_NAME, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_P2_LEXICON, ARG_P2_LEXICON, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_P2_LEAVES, ARG_P2_LEAVES, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_P2_MOVE_SORT_TYPE,
@@ -640,6 +646,14 @@ config_load_status_t set_cgp_string_for_config(Config *config,
   config->cgp = get_formatted_string("%s %s %s %s", cgp_arg->values[0],
                                      cgp_arg->values[1], cgp_arg->values[2],
                                      cgp_arg->values[3]);
+  config->command_set_cgp = true;
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+config_load_status_t load_player_name_for_config(Config *config,
+                                                 int player_index,
+                                                 const char *player_name) {
+  players_data_set_name(config->players_data, player_index, player_name);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -783,6 +797,10 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       new_p1_lexicon_name = arg_values[0];
       new_p2_lexicon_name = arg_values[0];
       break;
+    case ARG_TOKEN_P1_NAME:
+      config_load_status =
+          load_player_name_for_config(config, 0, arg_values[0]);
+      break;
     case ARG_TOKEN_P1_LEXICON:
       new_p1_lexicon_name = arg_values[0];
       break;
@@ -796,6 +814,10 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
       config_load_status =
           load_move_record_type_for_config(config, arg_values[0], 0);
+      break;
+    case ARG_TOKEN_P2_NAME:
+      config_load_status =
+          load_player_name_for_config(config, 1, arg_values[0]);
       break;
     case ARG_TOKEN_P2_LEXICON:
       new_p2_lexicon_name = arg_values[0];
@@ -927,6 +949,7 @@ config_load_status_t load_config(Config *config, const char *cmd) {
   config_load_status_t config_load_status =
       init_parsed_args(parsed_args, cmd_split_string);
 
+  config->command_set_cgp = false;
   if (config_load_status == CONFIG_LOAD_STATUS_SUCCESS) {
     config_load_status = load_config_with_parsed_args(config, parsed_args);
   }
@@ -940,6 +963,7 @@ config_load_status_t load_config(Config *config, const char *cmd) {
 Config *create_default_config() {
   Config *config = malloc_or_die(sizeof(Config));
   config->command_type = COMMAND_TYPE_UNKNOWN;
+  config->command_set_cgp = false;
   config->letter_distribution = NULL;
   config->ld_name = NULL;
   config->cgp = NULL;

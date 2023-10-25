@@ -24,7 +24,7 @@ inference_status_t infer_for_test(const Config *config, Game *game,
 
 void test_trivial_random_probability(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
 
@@ -93,7 +93,7 @@ void test_trivial_random_probability(TestConfig *testconfig) {
 
 void test_infer_rack_overflow(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
@@ -117,7 +117,7 @@ void test_infer_rack_overflow(TestConfig *testconfig) {
 
 void test_infer_no_tiles_played(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
@@ -132,7 +132,7 @@ void test_infer_no_tiles_played(TestConfig *testconfig) {
 
 void test_infer_both_play_and_exchange(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
@@ -147,7 +147,7 @@ void test_infer_both_play_and_exchange(TestConfig *testconfig) {
 
 void test_infer_exchange_score_not_zero(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
@@ -162,7 +162,7 @@ void test_infer_exchange_score_not_zero(TestConfig *testconfig) {
 
 void test_infer_exchange_not_allowed(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   // There are 13 tiles in the bag
   load_cgp(game, VS_JEREMY);
@@ -184,7 +184,7 @@ void test_infer_exchange_not_allowed(TestConfig *testconfig) {
 
 void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
@@ -199,7 +199,7 @@ void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
 
 void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);
   KLV *klv = game->players[0]->klv;
   Inference *inference =

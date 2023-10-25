@@ -8,8 +8,8 @@
 #include "../src/gameplay.h"
 #include "../src/player.h"
 
-#include "testconfig.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void return_rack_to_bag(Rack *rack, Bag *bag) {
   for (int i = 0; i < (rack->array_size); i++) {
@@ -88,8 +88,10 @@ void assert_games_are_equal(Game *g1, Game *g2, int check_scores) {
 
 void test_gameplay_by_turn(Config *config, char *cgps[], char *racks[],
                            int array_length) {
-  Game *actual_game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
-  Game *expected_game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
+  Game *actual_game = create_game(config);
+  ;
+  Game *expected_game = create_game(config);
+  ;
 
   int player0_last_score_on_rack = -1;
   int player1_last_score_on_rack = -1;
@@ -380,7 +382,8 @@ void test_standard_game(TestConfig *testconfig) {
 
 void test_playmove(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
+  Game *game = create_game(config);
+  ;
 
   // Test play
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
@@ -477,7 +480,8 @@ void test_playmove(TestConfig *testconfig) {
 
 void test_set_random_rack(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
+  Game *game = create_game(config);
+  ;
   assert(game->gen->bag->last_tile_index == 99);
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
@@ -519,7 +523,8 @@ void test_set_random_rack(TestConfig *testconfig) {
 
 void test_backups(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
+  Game *game = create_game(config);
+  ;
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
                       game->gen->letter_distribution);

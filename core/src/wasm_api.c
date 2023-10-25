@@ -3,18 +3,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "command.h"
 #include "config.h"
 #include "error_status.h"
 #include "game.h"
 #include "log.h"
 #include "move.h"
-#include "ucgi_command.h"
 #include "ucgi_formats.h"
 #include "ucgi_print.h"
 #include "util.h"
 #include "words.h"
 
-static CommandVars *ucgi_command_vars = NULL;
+static CommandVars *wasm_command_vars = NULL;
 static CommandVars *iso_command_vars = NULL;
 
 Game *get_game_from_cgp(const char *cgp) {
@@ -179,16 +179,18 @@ char *static_evaluation(char *cgpstr, int num_plays) {
 // FIXME: what exactly allocates the char* here?
 // I'm not sure about this part of WASM, it might
 // need to be freed
-int process_ucgi_command_wasm(char *cmd) {
-  if (!ucgi_command_vars) {
-    ucgi_command_vars = create_command_vars(NULL);
+int process_command_wasm(char *cmd) {
+  if (!wasm_command_vars) {
+    wasm_command_vars = create_command_vars(NULL);
   }
-  ucgi_command_vars->command = cmd;
-  return process_ucgi_command_async(ucgi_command_vars);
+  wasm_command_vars->command = cmd;
+  return execute_command_async(wasm_command_vars);
 }
 
-char *ucgi_search_status_wasm() {
-  return ucgi_search_status(ucgi_command_vars);
+char *get_search_status_wasm() {
+  return command_search_status(command_vars, false);
 }
 
-char *ucgi_stop_search_wasm() { return ucgi_stop_search(ucgi_command_vars); }
+char *get_stop_search_wasm() {
+  return command_search_status(command_vars, true);
+}

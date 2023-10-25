@@ -122,15 +122,17 @@ int main(int argc, char *argv[]) {
 
   TestConfig *testconfig = create_testconfig(
       // CSW
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all",
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1000000",
       // NWL
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all",
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1000000",
       // OSPS
-      "setoptions lex OSPS44 s1 equity s2 equity r1 all r2 all",
+      "setoptions lex OSPS44 s1 equity s2 equity r1 all r2 all numplays "
+      "1000000",
       // DISC
-      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all",
+      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1000000",
       // Distinct lexica
-      "setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity r1 all r2 all");
+      "setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity r1 all r2 all numplays "
+      "1000000");
 
   if (argc == 1) {
     run_all(testconfig);

@@ -11,8 +11,6 @@
 #include "../src/movegen.h"
 #include "../src/rack.h"
 
-#define TEST_MOVE_LIST_CAPACITY 1000000
-
 typedef struct SortedMoveList {
   int count;
   Move **moves;

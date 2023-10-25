@@ -91,7 +91,7 @@ void test_simple_case(Game *game, Player *player, const char *rack_string,
 
 void macondo_tests(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Player *player = game->players[0];
   KWG *kwg = player->kwg;
 
@@ -345,7 +345,7 @@ void macondo_tests(TestConfig *testconfig) {
   // TestRowEquivalent
   load_cgp(game, TEST_DUPE);
 
-  Game *game_two = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game_two = create_game(config);
 
   set_row(game_two, 7, " INCITES");
   set_row(game_two, 8, "IS");
@@ -372,7 +372,7 @@ void macondo_tests(TestConfig *testconfig) {
 
 void exchange_tests(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
@@ -407,7 +407,7 @@ void exchange_tests(TestConfig *testconfig) {
 
 void many_moves_tests(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   load_cgp(game, MANY_MOVES);
   generate_moves_for_game(game);
@@ -420,7 +420,7 @@ void many_moves_tests(TestConfig *testconfig) {
 void equity_test(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
 
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Player *player = game->players[0];
   player->move_sort_type = MOVE_SORT_EQUITY;
   KLV *klv = player->klv;
@@ -458,7 +458,7 @@ void equity_test(TestConfig *testconfig) {
 void top_equity_play_recorder_test(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
 
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Player *player = game->players[0];
   player->move_record_type = MOVE_RECORD_BEST;
 
@@ -483,7 +483,7 @@ void top_equity_play_recorder_test(TestConfig *testconfig) {
 void distinct_lexica_test(TestConfig *testconfig) {
   Config *config = get_distinct_lexica_config(testconfig);
 
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   game->players[0]->move_record_type = MOVE_RECORD_BEST;
   game->players[1]->move_record_type = MOVE_RECORD_BEST;
 

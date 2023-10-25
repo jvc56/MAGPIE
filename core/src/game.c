@@ -307,14 +307,23 @@ void set_backup_mode(Game *game, int backup_mode) {
   }
 }
 
-Game *create_game(const Config *config, int move_list_capacity) {
+void update_game(const Config *config, Game *game) {
+  // Player names are owned by config, so
+  // we only need to update the movelist capacity.
+  // In the future, we will need to update the board dimensions.
+  if (config->num_plays != game->gen->move_list->capacity) {
+    destroy_move_list(game->gen->move_list);
+    game->gen->move_list = create_move_list(config->num_plays);
+  }
+}
+
+Game *create_game(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
-  game->gen = create_generator(config, move_list_capacity);
+  game->gen = create_generator(config, config->num_plays);
   for (int player_index = 0; player_index < 2; player_index++) {
-    char *player_name = get_formatted_string("player_%d", player_index);
-    game->players[player_index] =
-        create_player(config, player_index, player_name);
-    free(player_name);
+    game->players[player_index] = create_player(
+        config, player_index,
+        players_data_get_name(config->players_data, player_index));
   }
   for (int i = 0; i < NUMBER_OF_DATA; i++) {
     game->data_is_shared[i] =

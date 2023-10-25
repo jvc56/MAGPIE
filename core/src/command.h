@@ -21,7 +21,8 @@ typedef struct CommandVars {
   FILE *outfile;
 } CommandVars;
 
-void execute_command(CommandVars *command_vars);
+void execute_command_sync(CommandVars *command_vars);
+void execute_command_async(CommandVars *command_vars);
 char *command_search_status(CommandVars *command_vars, bool should_halt);
 CommandVars *create_command_vars(FILE *outfile);
 void destroy_command_vars(CommandVars *command_vars);

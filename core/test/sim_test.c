@@ -51,7 +51,7 @@ void test_win_pct(TestConfig *testconfig) {
 void test_sim_single_iteration(TestConfig *testconfig,
                                ThreadControl *thread_control) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AAADERW",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
@@ -72,7 +72,7 @@ void test_sim_single_iteration(TestConfig *testconfig,
 void test_more_iterations(TestConfig *testconfig,
                           ThreadControl *thread_control) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AEIQRST",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
@@ -98,7 +98,7 @@ void test_more_iterations(TestConfig *testconfig,
 }
 
 void perf_test_sim(Config *config, ThreadControl *thread_control) {
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
 
   load_cgp(game, config->cgp);
   Simmer *simmer = create_simmer(config);
@@ -134,7 +134,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
 }
 
 void perf_test_multithread_sim(Config *config, ThreadControl *thread_control) {
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   int num_threads = config->number_of_threads;
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config->cgp);
@@ -164,7 +164,7 @@ void perf_test_multithread_sim(Config *config, ThreadControl *thread_control) {
 
 void perf_test_multithread_blocking_sim(Config *config,
                                         ThreadControl *thread_control) {
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   int num_threads = config->number_of_threads;
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config->cgp);
@@ -192,7 +192,7 @@ void perf_test_multithread_blocking_sim(Config *config,
 void test_play_similarity(TestConfig *testconfig,
                           ThreadControl *thread_control) {
   Config *config = testconfig->nwl_config;
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);

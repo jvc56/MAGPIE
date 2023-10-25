@@ -51,6 +51,7 @@ typedef enum {
 
 typedef struct Config {
   command_t command_type;
+  bool command_set_cgp;
   // Game
   LetterDistribution *letter_distribution;
   char *ld_name;

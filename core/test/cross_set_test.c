@@ -107,7 +107,7 @@ void test_gen_cross_set_col(Game *game, int row, int col, int dir,
 
 void test_cross_set(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);;
+  Game *game = create_game(config);
   KWG *kwg = game->players[0]->kwg;
 
   // TestGencross_setLoadedGame

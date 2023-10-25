@@ -29,7 +29,7 @@ void load_and_generate(Game *game, Player *player, const char *cgp,
 
 void test_shadow_score(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Player *player = game->players[0];
 
   // This test checks scores only, so set the player move sorting
@@ -479,7 +479,7 @@ void test_shadow_score(TestConfig *testconfig) {
 
 void test_shadow_equity(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Player *player = game->players[0];
 
   // This test checks scores only, so set move sorting
@@ -530,7 +530,7 @@ void test_shadow_equity(TestConfig *testconfig) {
 
 void test_shadow_top_move(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   Player *player = game->players[0];
 
   player->move_sort_type = MOVE_SORT_EQUITY;

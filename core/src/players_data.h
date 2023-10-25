@@ -16,6 +16,9 @@ typedef enum {
 struct PlayersData;
 typedef struct PlayersData PlayersData;
 
+void players_data_set_name(PlayersData *players_data, int player_index,
+                           const char *player_name);
+const char *players_data_get_name(PlayersData *players_data, int player_index);
 void players_data_set_move_sort_type(PlayersData *players_data,
                                      int player_index,
                                      move_sort_t move_sort_type);

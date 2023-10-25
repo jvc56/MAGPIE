@@ -14,7 +14,7 @@
 
 void test_words_played(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
-  Game *game = create_game(config, TEST_MOVE_LIST_CAPACITY);
+  Game *game = create_game(config);
   load_cgp(game, VS_ED);
 
   // Play PeNT vertically at N11 (col 14, row 11)
