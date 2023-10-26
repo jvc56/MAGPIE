@@ -4,7 +4,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>>
+#include <string.h>
 #include <time.h>
 
 #include "gameplay.h"
@@ -546,6 +546,7 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   if (also_search != NULL && strlen(also_search) > 0) {
     // Need to add more simmed plays for each generated move.
     // add to simmer->num_simmed_plays
+    log_debug("also searching %s", also_search);
     char *token = strtok(also_search, ",");
     while (token != NULL) {
       Move *m = create_move();
@@ -553,8 +554,9 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
       // see if m is already one of the simmed plays.
       bool found_move = false;
       for (int i = 0; i < simmer->num_simmed_plays; i++) {
-        int cmp = compare_moves(m, game->gen->move_list->moves[i], true);
-        if (cmp == 0) {
+        int cmp = compare_moves(m, game->gen->move_list->moves[i], true, false);
+        // sorry, fix this later:
+        if (cmp == -2) {
           // m is already this move.
           found_move = true;
           break;
@@ -563,7 +565,8 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
       if (!found_move) {
         simmer->num_simmed_plays++;
         // let the simmer take ownership of this move.
-        simmer->simmed_plays // need to realloc..
+        // XXX: NOT FINISHED YET.
+        // simmer->simmed_plays // need to realloc..
       } else {
         // a little wasteful, but gotta clean up.
         destroy_move(m);

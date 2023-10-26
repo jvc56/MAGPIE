@@ -46,7 +46,8 @@ int within_epsilon_for_equity(double a, double board) {
 
 // Enforce arbitrary order to keep
 // move order deterministic
-int compare_moves(Move *move_1, Move *move_2, bool ignore_equity) {
+int compare_moves(Move *move_1, Move *move_2, bool ignore_equity,
+                  bool fail_if_same) {
   if (!ignore_equity &&
       !within_epsilon_for_equity(move_1->equity, move_2->equity)) {
     return move_1->equity > move_2->equity;
@@ -77,20 +78,18 @@ int compare_moves(Move *move_1, Move *move_2, bool ignore_equity) {
       return move_1->tiles[i] < move_2->tiles[i];
     }
   }
-  // They're the same; return 0
-  return 0;
+  if (move_1->move_type == GAME_EVENT_PASS) {
+    return 0;
+  }
+  if (fail_if_same) {
+    log_fatal("duplicate move in move list detected");
+  }
+  // They're the same; return -2 for now.
+  return -2;
 }
 
 int compare_moves_fail_if_same(Move *move_1, Move *move_2) {
-  int cmp = compare_moves(move_1, move_2, false);
-  if (cmp == 0) {
-    if (move_1->move_type == GAME_EVENT_PASS) {
-      return 0;
-    }
-    log_fatal("duplicate move in move list detected\n");
-    return 0;
-  }
-  return cmp;
+  return compare_moves(move_1, move_2, false, true);
 }
 
 void up_heapify(MoveList *ml, int index) {

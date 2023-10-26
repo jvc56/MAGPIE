@@ -41,7 +41,8 @@ typedef struct MoveList {
 } MoveList;
 
 Move *create_move();
-int compare_moves(Move *move_1, Move *move_2, bool ignore_equity);
+int compare_moves(Move *move_1, Move *move_2, bool ignore_equity,
+                  bool fail_if_same);
 void copy_move(Move *src_move, Move *dest_move);
 void destroy_move(Move *move);
 MoveList *create_move_list(int capacity);
