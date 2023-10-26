@@ -6,5 +6,5 @@
 void string_builder_add_ucgi_move(Move *move, Board *board,
                                   LetterDistribution *ld,
                                   StringBuilder *move_string_builder);
-
+void to_move(LetterDistribution *ld, char *desc, Move *move, Board *board);
 #endif

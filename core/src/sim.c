@@ -4,6 +4,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>>
 #include <time.h>
 
 #include "gameplay.h"
@@ -36,12 +37,10 @@ Simmer *create_simmer(Config *config) {
   return simmer;
 }
 
-void create_simmed_plays(Simmer *simmer, Game *game,
-                         int number_of_moves_generated) {
+void create_simmed_plays(Simmer *simmer, Game *game) {
   simmer->simmed_plays =
       malloc_or_die((sizeof(SimmedPlay)) * simmer->num_simmed_plays);
-  for (int i = 0; i < simmer->num_simmed_plays && i < number_of_moves_generated;
-       i++) {
+  for (int i = 0; i < simmer->num_simmed_plays; i++) {
     SimmedPlay *sp = malloc_or_die(sizeof(SimmedPlay));
     sp->move = create_move();
     copy_move(game->gen->move_list->moves[i], sp->move);
@@ -489,10 +488,19 @@ void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
         compare_simmed_plays);
 }
 
+void parse_also_search(char *also_search) {
+  char *token = strtok(also_search, ",");
+  while (token != NULL) {
+
+    token = strtok(NULL, ",");
+  }
+}
+
 void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
-              Rack *known_opp_rack, int plies, int threads, int num_plays,
-              int max_iterations, int stopping_condition,
-              int static_search_only) {
+              Rack *known_opp_rack, int plies, int threads,
+              int num_plays_to_generate, int max_iterations,
+              int stopping_condition, int static_search_only,
+              char *also_search) {
 
   int sorting_type = game->players[0]->strategy_params->move_sorting;
   game->players[0]->strategy_params->move_sorting = MOVE_SORT_EQUITY;
@@ -504,7 +512,7 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   game->players[0]->strategy_params->move_sorting = sorting_type;
 
   if (static_search_only) {
-    print_ucgi_static_moves(game, num_plays, thread_control);
+    print_ucgi_static_moves(game, num_plays_to_generate, thread_control);
     return;
   }
 
@@ -525,13 +533,47 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
   simmer->max_iterations = max_iterations;
   simmer->stopping_condition = stopping_condition;
 
-  simmer->num_simmed_plays = num_plays;
+  simmer->num_simmed_plays = num_plays_to_generate;
+  if (num_plays_to_generate > number_of_moves_generated) {
+    simmer->num_simmed_plays = number_of_moves_generated;
+  }
   simmer->iteration_count = 0;
   simmer->initial_player = game->player_on_turn_index;
   simmer->initial_spread = game->players[game->player_on_turn_index]->score -
                            game->players[1 - game->player_on_turn_index]->score;
   atomic_init(&simmer->node_count, 0);
-  create_simmed_plays(simmer, game, number_of_moves_generated);
+
+  if (also_search != NULL && strlen(also_search) > 0) {
+    // Need to add more simmed plays for each generated move.
+    // add to simmer->num_simmed_plays
+    char *token = strtok(also_search, ",");
+    while (token != NULL) {
+      Move *m = create_move();
+      to_move(game->gen->letter_distribution, token, m, game->gen->board);
+      // see if m is already one of the simmed plays.
+      bool found_move = false;
+      for (int i = 0; i < simmer->num_simmed_plays; i++) {
+        int cmp = compare_moves(m, game->gen->move_list->moves[i], true);
+        if (cmp == 0) {
+          // m is already this move.
+          found_move = true;
+          break;
+        }
+      }
+      if (!found_move) {
+        simmer->num_simmed_plays++;
+        // let the simmer take ownership of this move.
+        simmer->simmed_plays // need to realloc..
+      } else {
+        // a little wasteful, but gotta clean up.
+        destroy_move(m);
+      }
+
+      token = strtok(NULL, ",");
+    }
+  }
+
+  create_simmed_plays(simmer, game);
 
   if (simmer->num_simmed_plays > 1 && number_of_moves_generated > 1) {
     if (known_opp_rack) {
@@ -546,14 +588,15 @@ void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
     if (simmer->play_similarity_cache) {
       free(simmer->play_similarity_cache);
     }
-    simmer->play_similarity_cache =
-        malloc_or_die(sizeof(int) * num_plays * num_plays);
-    for (int i = 0; i < num_plays; i++) {
-      for (int j = 0; j < num_plays; j++) {
+    simmer->play_similarity_cache = malloc_or_die(
+        sizeof(int) * num_plays_to_generate * num_plays_to_generate);
+    for (int i = 0; i < num_plays_to_generate; i++) {
+      for (int j = 0; j < num_plays_to_generate; j++) {
         if (i == j) {
-          simmer->play_similarity_cache[i * num_plays + j] = PLAYS_IDENTICAL;
+          simmer->play_similarity_cache[i * num_plays_to_generate + j] =
+              PLAYS_IDENTICAL;
         } else {
-          simmer->play_similarity_cache[i * num_plays + j] =
+          simmer->play_similarity_cache[i * num_plays_to_generate + j] =
               UNINITIALIZED_SIMILARITY;
         }
       }

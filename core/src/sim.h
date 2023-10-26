@@ -75,7 +75,7 @@ int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);
 void simulate(ThreadControl *thread_control, Simmer *simmer, Game *game,
               Rack *known_opp_rack, int plies, int threads, int num_plays,
               int max_iterations, int stopping_condition,
-              int static_search_only);
+              int static_search_only, char *also_search);
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays);
 
 #endif
