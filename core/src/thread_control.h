@@ -42,7 +42,7 @@ typedef struct ThreadControl {
 
 ThreadControl *create_thread_control(FILE *outfile);
 void destroy_thread_control(ThreadControl *thread_control);
-bool halt(ThreadControl *thread_control, int halt_status);
+bool halt(ThreadControl *thread_control, halt_status_t halt_status);
 bool unhalt(ThreadControl *thread_control);
 bool is_halted(ThreadControl *thread_control);
 halt_status_t get_halt_status(ThreadControl *thread_control);

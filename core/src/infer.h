@@ -41,7 +41,7 @@ typedef struct Inference {
   // Recursive vars
   // Malloc'd by the game:
   Game *game;
-  KLV *klv;
+  const KLV *klv;
   Rack *player_to_infer_rack;
   // Malloc'd by inference:
   Rack *bag_as_rack;
@@ -64,7 +64,7 @@ typedef struct Inference {
 
 inference_status_t infer(const Config *config, ThreadControl *thread_control,
                          Game *game, Inference *inference);
-Inference *create_inference(int capacity, int distribution_size);
+Inference *create_inference();
 void destroy_inference(Inference *inference);
 uint64_t get_subtotal(InferenceRecord *record, uint8_t letter,
                       int number_of_letters, int subtotal_index_offset);

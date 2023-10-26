@@ -24,7 +24,7 @@ Game *get_game_from_cgp(const char *cgp) {
     iso_command_vars = create_command_vars(NULL);
   }
   iso_command_vars->command = get_formatted_string("position cgp %s", cgp);
-  execute_command(iso_command_vars);
+  execute_command_sync(iso_command_vars);
   if (iso_command_vars->error_status->type != ERROR_STATUS_TYPE_NONE) {
     log_fatal("wasm command failed with error type %d code %d\n",
               iso_command_vars->error_status->type,
@@ -184,13 +184,14 @@ int process_command_wasm(char *cmd) {
     wasm_command_vars = create_command_vars(NULL);
   }
   wasm_command_vars->command = cmd;
-  return execute_command_async(wasm_command_vars);
+  execute_command_async(wasm_command_vars);
+  return 0;
 }
 
 char *get_search_status_wasm() {
-  return command_search_status(command_vars, false);
+  return command_search_status(wasm_command_vars, false);
 }
 
 char *get_stop_search_wasm() {
-  return command_search_status(command_vars, true);
+  return command_search_status(wasm_command_vars, true);
 }

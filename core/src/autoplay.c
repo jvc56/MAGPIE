@@ -182,6 +182,10 @@ autoplay_status_t autoplay(const Config *config, ThreadControl *thread_control,
         autoplay_workers[thread_index]->autoplay_results->p2_score;
   }
 
+  // If autoplay was interrupted by the user,
+  // this will not change the status.
+  halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
+
   combine_stats(p1_score_stats, config->number_of_threads,
                 autoplay_results->p1_score);
   free(p1_score_stats);

@@ -20,7 +20,7 @@ typedef struct FormedWords {
 } FormedWords;
 
 // populate the validity of the formed words passed in.
-void populate_word_validities(FormedWords *ws, KWG *kwg);
+void populate_word_validities(FormedWords *ws, const KWG *kwg);
 FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
                           int word_end_index, int row, int col, int vertical);
 #endif

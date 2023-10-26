@@ -30,17 +30,15 @@ Simmer *create_simmer(const Config *config) {
   simmer->known_opp_rack = NULL;
   simmer->play_similarity_cache = NULL;
   simmer->num_simmed_plays = 0;
+  simmer->similar_plays_rack = NULL;
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
-  simmer->similar_plays_rack = create_rack(config->letter_distribution->size);
   return simmer;
 }
 
-void create_simmed_plays(Simmer *simmer, Game *game,
-                         int number_of_moves_generated) {
+void create_simmed_plays(Simmer *simmer, Game *game) {
   simmer->simmed_plays =
       malloc_or_die((sizeof(SimmedPlay)) * simmer->num_simmed_plays);
-  for (int i = 0; i < simmer->num_simmed_plays && i < number_of_moves_generated;
-       i++) {
+  for (int i = 0; i < simmer->num_simmed_plays; i++) {
     SimmedPlay *sp = malloc_or_die(sizeof(SimmedPlay));
     sp->move = create_move();
     copy_move(game->gen->move_list->moves[i], sp->move);
@@ -88,7 +86,9 @@ void destroy_simmer(Simmer *simmer) {
   if (simmer->simmed_plays) {
     destroy_simmed_plays(simmer);
   }
-  destroy_rack(simmer->similar_plays_rack);
+  if (simmer->similar_plays_rack) {
+    destroy_rack(simmer->similar_plays_rack);
+  }
 
   if (simmer->known_opp_rack) {
     destroy_rack(simmer->known_opp_rack);
@@ -516,14 +516,22 @@ sim_status_t simulate(const Config *config, ThreadControl *thread_control,
   simmer->stopping_condition = config->stopping_condition;
 
   simmer->num_simmed_plays = config->num_plays;
+  if (number_of_moves_generated < simmer->num_simmed_plays) {
+    simmer->num_simmed_plays = number_of_moves_generated;
+  }
   simmer->iteration_count = 0;
   simmer->initial_player = game->player_on_turn_index;
   simmer->initial_spread = game->players[game->player_on_turn_index]->score -
                            game->players[1 - game->player_on_turn_index]->score;
   atomic_init(&simmer->node_count, 0);
-  create_simmed_plays(simmer, game, number_of_moves_generated);
+  create_simmed_plays(simmer, game);
 
-  if (simmer->num_simmed_plays > 1 && number_of_moves_generated > 1) {
+  // The letter distribution may have changed,
+  // so we might need to recreate the rack.
+  update_or_create_rack(&simmer->similar_plays_rack,
+                        config->letter_distribution->size);
+
+  if (simmer->num_simmed_plays) {
     if (config->rack) {
       if (simmer->known_opp_rack) {
         destroy_rack(simmer->known_opp_rack);

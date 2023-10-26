@@ -154,7 +154,7 @@ void destroy_klv(KLV *klv) {
   free(klv);
 }
 
-int get_word_index_of(KLV *klv, uint32_t node_index, Rack *leave) {
+int get_word_index_of(const KLV *klv, uint32_t node_index, Rack *leave) {
   int idx = 0;
   int lidx = 0;
   int lidx_letter_count = leave->array[lidx];
@@ -201,7 +201,7 @@ int get_word_index_of(KLV *klv, uint32_t node_index, Rack *leave) {
   return -1;
 }
 
-double get_leave_value(KLV *klv, Rack *leave) {
+double get_leave_value(const KLV *klv, Rack *leave) {
   if (leave->empty) {
     return 0.0;
   }

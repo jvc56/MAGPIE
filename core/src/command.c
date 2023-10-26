@@ -20,6 +20,7 @@ CommandVars *create_command_vars(FILE *outfile) {
   command_vars->simmer = NULL;
   command_vars->inference = NULL;
   command_vars->autoplay_results = NULL;
+  command_vars->error_status = create_error_status(ERROR_STATUS_TYPE_NONE, 0);
   command_vars->thread_control = create_thread_control(outfile);
   command_vars->outfile = outfile;
   return command_vars;
@@ -45,12 +46,8 @@ void destroy_command_vars(CommandVars *command_vars) {
   if (command_vars->autoplay_results) {
     destroy_autoplay_results(command_vars->autoplay_results);
   }
-  if (command_vars->thread_control) {
-    destroy_thread_control(command_vars->thread_control);
-  }
-  if (command_vars->error_status) {
-    destroy_error_status(command_vars->error_status);
-  }
+  destroy_error_status(command_vars->error_status);
+  destroy_thread_control(command_vars->thread_control);
   free(command_vars);
 }
 
@@ -113,7 +110,7 @@ void update_or_create_game(const Config *config, CommandVars *command_vars) {
   if (!command_vars->game) {
     command_vars->game = create_game(config);
   } else {
-    update_game(command_vars->game);
+    update_game(config, command_vars->game);
   }
 }
 
@@ -143,8 +140,7 @@ void execute_autoplay(CommandVars *command_vars, const Config *config) {
 
 void execute_infer(CommandVars *command_vars, const Config *config) {
   if (!command_vars->inference) {
-    command_vars->inference =
-        create_inference(config->num_plays, config->letter_distribution->size);
+    command_vars->inference = create_inference();
   }
   inference_status_t status =
       infer(config, command_vars->thread_control, command_vars->game,
@@ -163,13 +159,12 @@ void load_thread_control(CommandVars *command_vars, const Config *config) {
       config->check_stopping_condition_interval;
 }
 
-void execute_command_in_search_mode(CommandVars *command_vars) {
+void execute_command(CommandVars *command_vars) {
   if (!command_vars->config) {
     command_vars->config = create_default_config();
   }
-  if (!command_vars->error_status) {
-    command_vars->error_status = create_error_status(ERROR_STATUS_TYPE_NONE, 0);
-  }
+
+  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_NONE, 0);
   config_load_status_t config_load_status =
       load_config(command_vars->config, command_vars->command);
 
@@ -195,7 +190,6 @@ void execute_command_in_search_mode(CommandVars *command_vars) {
   }
 
   load_thread_control(command_vars, config);
-  unhalt(command_vars->thread_control);
   switch (config->command_type) {
   case COMMAND_TYPE_UNKNOWN:
     set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
@@ -222,38 +216,37 @@ void execute_command_in_search_mode(CommandVars *command_vars) {
   }
 }
 
-void execute_command_sync(CommandVars *command_vars) {
-  // Do not modify any variables here,
-  // this could
-  // be multithreaded if commands are executed
-  // quickly enough.
-  if (!command_vars->thread_control) {
-    log_fatal("missing thread control for command execution\n");
-  }
-  // Up until this point, there could be multiple
-  // threads running 'execute_command'. The set_mode_searching
-  // function will lock on the current mode mutex
-  // and set the search value to searching
-  // to ensure that at most 1 thread is running concurrently
-  // after this point.
+void execute_command_and_set_mode_stopped(CommandVars *command_vars) {
+  execute_command(command_vars);
+  set_mode_stopped(command_vars->thread_control);
+}
+
+void *execute_command_thread_worker(void *uncasted_command_vars) {
+  CommandVars *command_vars = (CommandVars *)uncasted_command_vars;
+  execute_command_and_set_mode_stopped(command_vars);
+  return NULL;
+}
+
+void execute_command_sync_or_async(CommandVars *command_vars, bool sync) {
   if (!set_mode_searching(command_vars->thread_control)) {
     log_warn("still searching");
     return;
   }
-  execute_command_in_search_mode(command_vars);
-  set_mode_stopped(command_vars->thread_control);
+  unhalt(command_vars->thread_control);
+  if (sync) {
+    execute_command_and_set_mode_stopped(command_vars);
+  } else {
+    pthread_t cmd_execution_thread;
+    pthread_create(&cmd_execution_thread, NULL, execute_command_thread_worker,
+                   command_vars);
+    pthread_detach(cmd_execution_thread);
+  }
 }
 
-void *execute_command_sync_worker(void *uncasted_command_vars) {
-  CommandVars *command_vars = (CommandVars *)uncasted_command_vars;
-  execute_command_sync(command_vars);
-  return NULL;
+void execute_command_sync(CommandVars *command_vars) {
+  execute_command_sync_or_async(command_vars, true);
 }
 
-void *execute_command_async(CommandVars *command_vars) {
-  pthread_t cmd_execution_thread;
-  pthread_create(&cmd_execution_thread, NULL, execute_command_sync_worker,
-                 command_vars);
-  pthread_detach(cmd_execution_thread);
-  return NULL;
+void execute_command_async(CommandVars *command_vars) {
+  execute_command_sync_or_async(command_vars, false);
 }

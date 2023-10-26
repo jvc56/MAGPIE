@@ -93,7 +93,7 @@ void macondo_tests(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
-  KWG *kwg = player->kwg;
+  const KWG *kwg = player->kwg;
 
   // TestGenBase
   clear_all_crosses(game->gen->board);
@@ -400,6 +400,11 @@ void exchange_tests(TestConfig *testconfig) {
 
   assert(test_exchange_sorted_move_list->moves[0]->move_type ==
          GAME_EVENT_EXCHANGE);
+  // FIXME: just reminders to fix later
+  assert(test_exchange_sorted_move_list->moves[0]->score == 0);
+  assert(test_exchange_sorted_move_list->moves[0]->tiles_length == -1);
+  assert(test_exchange_sorted_move_list->moves[0]->tiles_played == -1);
+  assert(0);
   destroy_sorted_move_list(test_exchange_sorted_move_list);
 
   destroy_game(game);
@@ -423,7 +428,7 @@ void equity_test(TestConfig *testconfig) {
   Game *game = create_game(config);
   Player *player = game->players[0];
   player->move_sort_type = MOVE_SORT_EQUITY;
-  KLV *klv = player->klv;
+  const KLV *klv = player->klv;
   // A middlegame is chosen to avoid
   // the opening and endgame equity adjustments
   load_cgp(game, VS_ED);

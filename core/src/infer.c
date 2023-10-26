@@ -32,47 +32,50 @@ void destroy_inference_record(InferenceRecord *record) {
   free(record);
 }
 
-Inference *create_inference(int capacity, int distribution_size) {
+Inference *create_inference() {
   Inference *inference = malloc_or_die(sizeof(Inference));
-  inference->distribution_size = distribution_size;
-  inference->draw_and_leave_subtotals_size =
-      distribution_size * (RACK_SIZE) * 2;
   inference->total_racks_evaluated = 0;
-  inference->bag_as_rack = create_rack(distribution_size);
-  inference->leave = create_rack(distribution_size);
-  inference->exchanged = create_rack(distribution_size);
-  inference->leave_record =
-      create_inference_record(inference->draw_and_leave_subtotals_size);
-  inference->exchanged_record =
-      create_inference_record(inference->draw_and_leave_subtotals_size);
-  inference->rack_record =
-      create_inference_record(inference->draw_and_leave_subtotals_size);
-  inference->leave_rack_list =
-      create_leave_rack_list(capacity, distribution_size);
+  // These will be set when infer is called
+  inference->distribution_size = 0;
+  inference->draw_and_leave_subtotals_size = 0;
+  inference->leave_record = NULL;
+  inference->exchanged_record = NULL;
+  inference->rack_record = NULL;
+  inference->bag_as_rack = NULL;
+  inference->leave = NULL;
+  inference->exchanged = NULL;
+  inference->leave_rack_list = NULL;
   return inference;
 }
 
 void destroy_inference(Inference *inference) {
-  destroy_rack(inference->bag_as_rack);
-  destroy_rack(inference->leave);
-  destroy_rack(inference->exchanged);
-  destroy_leave_rack_list(inference->leave_rack_list);
-  destroy_inference_record(inference->leave_record);
-  destroy_inference_record(inference->exchanged_record);
-  destroy_inference_record(inference->rack_record);
+  if (inference->bag_as_rack) {
+    destroy_rack(inference->bag_as_rack);
+  }
+  if (inference->leave) {
+    destroy_rack(inference->leave);
+  }
+  if (inference->exchanged) {
+    destroy_rack(inference->exchanged);
+  }
+  if (inference->leave_rack_list) {
+    destroy_leave_rack_list(inference->leave_rack_list);
+  }
+  if (inference->leave_record) {
+    destroy_inference_record(inference->leave_record);
+  }
+  if (inference->exchanged_record) {
+    destroy_inference_record(inference->exchanged_record);
+  }
+  if (inference->rack_record) {
+    destroy_inference_record(inference->rack_record);
+  }
   free(inference);
 }
 
 void destroy_inference_copy(Inference *inference) {
-  destroy_rack(inference->bag_as_rack);
-  destroy_rack(inference->leave);
-  destroy_rack(inference->exchanged);
-  destroy_leave_rack_list(inference->leave_rack_list);
-  destroy_inference_record(inference->leave_record);
-  destroy_inference_record(inference->exchanged_record);
-  destroy_inference_record(inference->rack_record);
   destroy_game(inference->game);
-  free(inference);
+  destroy_inference(inference);
 }
 
 // Functions for the inference record
@@ -304,12 +307,79 @@ void initialize_inference_record_for_evaluation(
   }
 }
 
-void initialize_inference_for_evaluation(Inference *inference, Game *game,
-                                         Rack *actual_tiles_played,
-                                         int player_to_infer_index,
-                                         int actual_score,
-                                         int number_of_tiles_exchanged,
-                                         double equity_margin) {
+void initialize_inference_for_evaluation(
+    Inference *inference, Game *game, Rack *actual_tiles_played,
+    int move_capacity, int player_to_infer_index, int actual_score,
+    int number_of_tiles_exchanged, double equity_margin) {
+
+  bool rack_size_changed =
+      actual_tiles_played->array_size != inference->distribution_size;
+  inference->distribution_size = actual_tiles_played->array_size;
+  inference->draw_and_leave_subtotals_size =
+      inference->distribution_size * (RACK_SIZE) * 2;
+
+  if (rack_size_changed) {
+    // Rack size has changed, we need to recreate
+    // anything that has a rack
+    if (inference->leave_record) {
+      destroy_inference_record(inference->leave_record);
+      inference->leave_record = NULL;
+    }
+    if (inference->exchanged_record) {
+      destroy_inference_record(inference->exchanged_record);
+      inference->exchanged_record = NULL;
+    }
+    if (inference->rack_record) {
+      destroy_inference_record(inference->rack_record);
+      inference->rack_record = NULL;
+    }
+    if (inference->bag_as_rack) {
+      destroy_rack(inference->bag_as_rack);
+      inference->bag_as_rack = NULL;
+    }
+    if (inference->leave) {
+      destroy_rack(inference->leave);
+      inference->leave = NULL;
+    }
+    if (inference->exchanged) {
+      destroy_rack(inference->exchanged);
+      inference->exchanged = NULL;
+    }
+    if (inference->leave_rack_list) {
+      destroy_leave_rack_list(inference->leave_rack_list);
+      inference->leave_rack_list = NULL;
+    }
+  }
+
+  // Possibly recreate records
+  if (!inference->leave_record) {
+    inference->leave_record =
+        create_inference_record(inference->draw_and_leave_subtotals_size);
+  }
+  if (!inference->exchanged_record) {
+    inference->exchanged_record =
+        create_inference_record(inference->draw_and_leave_subtotals_size);
+  }
+  if (!inference->rack_record) {
+    inference->rack_record =
+        create_inference_record(inference->draw_and_leave_subtotals_size);
+  }
+
+  if (!inference->bag_as_rack) {
+    inference->bag_as_rack = create_rack(inference->distribution_size);
+  }
+  if (!inference->leave) {
+    inference->leave = create_rack(inference->distribution_size);
+  }
+  if (!inference->exchanged) {
+    inference->exchanged = create_rack(inference->distribution_size);
+  }
+
+  if (!inference->leave_rack_list) {
+    inference->leave_rack_list =
+        create_leave_rack_list(move_capacity, inference->distribution_size);
+  }
+
   initialize_inference_record_for_evaluation(
       inference->leave_record, inference->draw_and_leave_subtotals_size);
   initialize_inference_record_for_evaluation(
@@ -608,7 +678,12 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
     destroy_inference_copy(inferences_for_workers[thread_index]);
   }
 
-  print_ucgi_inference(inference, thread_control);
+  if (get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS) {
+    // Only print if infer was able to finish normally.
+    // If halt status isn't max iterations, it was interrupted
+    // by the user and the results will not be valid.
+    print_ucgi_inference(inference, thread_control);
+  }
 
   free(inferences_for_workers);
   free(worker_ids);
@@ -650,10 +725,13 @@ inference_status_t verify_inference(Inference *inference) {
 
 inference_status_t infer(const Config *config, ThreadControl *thread_control,
                          Game *game, Inference *inference) {
+  if (!config->rack) {
+    return INFERENCE_STATUS_NO_TILES_PLAYED;
+  }
   initialize_inference_for_evaluation(
-      inference, game, config->rack, config->player_to_infer_index,
-      config->actual_score, config->number_of_tiles_exchanged,
-      config->equity_margin);
+      inference, game, config->rack, config->num_plays,
+      config->player_to_infer_index, config->actual_score,
+      config->number_of_tiles_exchanged, config->equity_margin);
 
   inference_status_t status = verify_inference(inference);
   if (status != INFERENCE_STATUS_SUCCESS) {

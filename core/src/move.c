@@ -14,10 +14,14 @@ Move *create_move() { return malloc_or_die(sizeof(Move)); }
 MoveList *create_move_list(int capacity) {
   MoveList *ml = malloc_or_die(sizeof(MoveList));
   ml->count = 0;
-  ml->capacity = capacity;
+  // We set increment capacity here
+  // because we need to temporarily hold
+  // capacity + 1 moves to before popping
+  // the least desirable move.
+  ml->capacity = capacity + 1;
   ml->spare_move = create_move();
-  ml->moves = malloc_or_die(sizeof(Move *) * capacity);
-  for (int i = 0; i < capacity; i++) {
+  ml->moves = malloc_or_die(sizeof(Move *) * ml->capacity);
+  for (int i = 0; i < ml->capacity; i++) {
     ml->moves[i] = create_move();
   }
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;

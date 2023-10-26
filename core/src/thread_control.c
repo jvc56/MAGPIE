@@ -54,7 +54,7 @@ bool is_halted(ThreadControl *thread_control) {
   return get_halt_status(thread_control) != HALT_STATUS_NONE;
 }
 
-bool halt(ThreadControl *thread_control, int halt_status) {
+bool halt(ThreadControl *thread_control, halt_status_t halt_status) {
   bool success = false;
   pthread_mutex_lock(&thread_control->halt_status_mutex);
   // Assume the first reason to halt is the only

@@ -115,7 +115,7 @@ uint8_t get_bonus_square(Board *board, int row, int col) {
 }
 
 void set_cross_set_letter(uint64_t *cross_set, uint8_t letter) {
-  *cross_set = *cross_set | (1 << letter);
+  *cross_set = *cross_set | ((uint64_t)1 << letter);
 }
 
 void set_cross_set(Board *board, int row, int col, uint64_t letter, int dir,

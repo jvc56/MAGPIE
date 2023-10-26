@@ -178,7 +178,7 @@ char *ucgi_static_moves(Game *game, int nmoves) {
         game->gen->letter_distribution, moves_string_builder);
 
     string_builder_add_formatted_string(moves_string_builder,
-                                        "sc %d eq %.3f it 0\n",
+                                        " sc %d eq %.3f it 0\n",
                                         game->gen->move_list->moves[i]->score,
                                         game->gen->move_list->moves[i]->equity);
   }

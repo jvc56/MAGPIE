@@ -115,7 +115,7 @@ void test_infer_rack_overflow(TestConfig *testconfig) {
   destroy_game(game);
 }
 
-void test_infer_no_tiles_played(TestConfig *testconfig) {
+void test_infer_no_tiles_played_rack_empty(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
@@ -123,6 +123,21 @@ void test_infer_no_tiles_played(TestConfig *testconfig) {
       create_inference(20, game->gen->letter_distribution->size);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " pindex 0 score 0 exch 0 eq 0 threads 1");
+  inference_status_t status = infer_for_test(config, game, inference);
+  assert(status == INFERENCE_STATUS_NO_TILES_PLAYED);
+
+  destroy_inference(inference);
+  destroy_game(game);
+}
+
+void test_infer_no_tiles_played_rack_null(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
+  Game *game = create_game(config);
+
+  Inference *inference =
+      create_inference(20, game->gen->letter_distribution->size);
+  load_config_or_die(config,
+                     "setoptions pindex 0 score 0 exch 0 eq 0 threads 1");
   inference_status_t status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_NO_TILES_PLAYED);
 
@@ -201,7 +216,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);
-  KLV *klv = game->players[0]->klv;
+  const KLV *klv = game->players[0]->klv;
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
   Stat *letter_stat = create_stat();
@@ -777,7 +792,8 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
 void test_infer(TestConfig *testconfig) {
   test_trivial_random_probability(testconfig);
   test_infer_rack_overflow(testconfig);
-  test_infer_no_tiles_played(testconfig);
+  test_infer_no_tiles_played_rack_empty(testconfig);
+  test_infer_no_tiles_played_rack_null(testconfig);
   test_infer_both_play_and_exchange(testconfig);
   test_infer_exchange_score_not_zero(testconfig);
   test_infer_exchange_not_allowed(testconfig);

@@ -5,7 +5,6 @@
 #include <unistd.h>
 
 #include "../src/game.h"
-#include "../src/go_params.h"
 #include "../src/infer.h"
 #include "../src/log.h"
 #include "../src/sim.h"
@@ -31,103 +30,184 @@ void block_for_search(CommandVars *command_vars, int max_seconds) {
   }
 }
 
-void assert_command_status_and_output(const char *command, bool halt,
+void assert_command_status_and_output(const char *command, bool should_halt,
                                       int seconds_to_wait,
                                       halt_status_t expected_halt_status,
                                       error_status_t expected_error_status_type,
                                       int expected_error_code,
-                                      const char *expected_output) {
+                                      int expected_output_line_count) {
   size_t len;
-  size_t prev_len = 0;
-  char *output_buffer;
+  char *output_buffer = "";
   FILE *file_handler = open_memstream(&output_buffer, &len);
 
   CommandVars *command_vars = create_command_vars(file_handler);
-  command_vars->command = command;
+  if (command_vars->command) {
+    free(command_vars);
+  }
+  command_vars->command = get_formatted_string("%s", command);
   execute_command_async(command_vars);
-  if (halt) {
+  if (should_halt) {
     // If halting, let the search start
     sleep(2);
     halt(command_vars->thread_control, HALT_STATUS_USER_INTERRUPT);
   }
   block_for_search(command_vars, seconds_to_wait);
-  assert(command_vars->thread_control->halt_status == expected_halt_status);
-  assert(get_mode(command_vars->thread_control) == MODE_STOPPED);
+  if (command_vars->error_status->type != expected_error_status_type) {
+    printf("expected error status != actual error status (%d != %d)\n",
+           expected_error_status_type, command_vars->error_status->type);
+  }
+  if (command_vars->error_status->code != expected_error_code) {
+    printf("expected error code != actual error code (%d != %d)\n",
+           expected_error_code, command_vars->error_status->code);
+  }
   assert(command_vars->error_status->type == expected_error_status_type);
   assert(command_vars->error_status->code == expected_error_code);
-  assert_strings_equal(expected_output, output_buffer);
+  if (command_vars->thread_control->halt_status != expected_halt_status) {
+    printf("expected halt status != actual halt status (%d != %d)\n",
+           expected_halt_status, command_vars->thread_control->halt_status);
+  }
+  assert(command_vars->thread_control->halt_status == expected_halt_status);
+  assert(get_mode(command_vars->thread_control) == MODE_STOPPED);
+  int newlines_in_output = count_newlines(output_buffer);
+  if (newlines_in_output != expected_output_line_count) {
+    printf("output:\n>%s<\n", output_buffer);
+    printf("counts do not match %d != %d\n", newlines_in_output,
+           expected_output_line_count);
+    assert(0);
+  }
+  fclose(file_handler);
+  free(output_buffer);
+  destroy_command_vars(command_vars);
 }
 
 void test_command_execution() {
   assert_command_status_and_output(
       "go sim lex CSW21 i 1000 plies", false, 5, HALT_STATUS_NONE,
       ERROR_STATUS_TYPE_CONFIG_LOAD,
-      (int)CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES, "");
+      (int)CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES, 0);
 
   assert_command_status_and_output(
       "position cgp 15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 "
-      "ABC5DF/YXZ 0/0 0",
+      "ABC5DF/YXZ 0/0 0 lex CSW21",
       false, 5, HALT_STATUS_NONE, ERROR_STATUS_TYPE_CGP_LOAD,
-      (int)CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS, "");
+      (int)CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS, 0);
 
   // Test load cgp
   assert_command_status_and_output("position cgp " ION_OPENING_CGP, false, 5,
                                    HALT_STATUS_NONE, ERROR_STATUS_TYPE_NONE, 0,
-                                   "");
-  assert(ucgi_command_vars->game->gen->bag->last_tile_index + 1 == 83);
+                                   0);
 
   // Sim finishing probabilistically
   assert_command_status_and_output(
-      "go sim depth 2 stop 95 threads 8 numplays 3 i 100000 check 300 "
-      "info 70 lex CSW21 cgp " ZILLION_OPENING_CGP,
-      false, 60, HALT_STATUS_PROBABILISTIC, ERROR_STATUS_TYPE_NONE, 0, "");
+      "go sim plies 2 stop 95 threads 8 numplays 3 i 100000 check 300 "
+      "info 100000 cgp " ZILLION_OPENING_CGP,
+      false, 60, HALT_STATUS_PROBABILISTIC, ERROR_STATUS_TYPE_NONE, 0, 5);
 
   // Sim statically
   assert_command_status_and_output(
-      "go sim depth 2 stop 95 threads 8 numplays 20 i 100000 check 300 "
-      "info 70 static lex CSW21 cgp " ZILLION_OPENING_CGP,
-      false, 60, HALT_STATUS_NONE, ERROR_STATUS_TYPE_NONE, 0, "");
+      "go sim plies 2 stop 95 threads 8 numplays 20 i 100000 check 300 "
+      "info 70 static cgp " ZILLION_OPENING_CGP,
+      false, 60, HALT_STATUS_NONE, ERROR_STATUS_TYPE_NONE, 0, 21);
 
   // Sim finishes with max iterations
-  assert_command_status_and_output(
-      "go sim depth 2 threads 10 numplays 15 i "
-      "200 info 60 lex CSW21 cgp " DELDAR_VS_HARSHAN_CGP,
-      false, 60, HALT_STATUS_MAX_ITERATIONS, ERROR_STATUS_TYPE_NONE, 0, "");
+  assert_command_status_and_output("go sim plies 2 threads 10 numplays 15 i "
+                                   "200 info 60 cgp " DELDAR_VS_HARSHAN_CGP,
+                                   false, 60, HALT_STATUS_MAX_ITERATIONS,
+                                   ERROR_STATUS_TYPE_NONE, 0, (17 * 4));
 
   // Sim interrupted by user
   assert_command_status_and_output(
-      "go sim depth 2 threads 10 numplays 15 i "
+      "go sim plies 2 threads 10 numplays 15 i "
       "1000000 info 1000000 cgp " DELDAR_VS_HARSHAN_CGP,
-      true, 5, HALT_STATUS_USER_INTERRUPT, ERROR_STATUS_TYPE_NONE, 0, "");
+      true, 5, HALT_STATUS_USER_INTERRUPT, ERROR_STATUS_TYPE_NONE, 0, 17);
 
   // Infer finishes normally
   assert_command_status_and_output(
-      "go infer tiles MUZAKY pindex 0 score 58 exch 0 numplays 20 threads 4 "
+      "go infer rack MUZAKY pindex 0 score 58 exch 0 numplays 20 threads 4 "
       "cgp " EMPTY_CGP,
-      false, 60, HALT_STATUS_MAX_ITERATIONS, ERROR_STATUS_TYPE_NONE, 0, "");
+      false, 60, HALT_STATUS_MAX_ITERATIONS, ERROR_STATUS_TYPE_NONE, 0,
+      5 + 27 + 20);
 
   // Infer interrupted
   assert_command_status_and_output(
-      "go infer pindex 0 score 0 exch 3 numplays 20 threads 3 "
+      "go infer rack " EMPTY_RACK_STRING
+      " pindex 0 score 0 exch 3 numplays 20 threads 3 "
       "cgp " EMPTY_CGP,
-      true, 5, HALT_STATUS_USER_INTERRUPT, ERROR_STATUS_TYPE_NONE, 0, "");
+      true, 5, HALT_STATUS_USER_INTERRUPT, ERROR_STATUS_TYPE_NONE, 0, 1);
 
   // Autoplay finishes normally
   assert_command_status_and_output("go autoplay lex CSW21 s1 equity s2 equity "
-                                   "r1 best r2 best i 10 numplays 1",
+                                   "r1 best r2 best i 10 numplays 1 threads 3",
                                    false, 30, HALT_STATUS_MAX_ITERATIONS,
-                                   ERROR_STATUS_TYPE_NONE, 0, "");
+                                   ERROR_STATUS_TYPE_NONE, 0, 1);
 
   // Autoplay interrupted
-  assert_command_status_and_output(
-      "go autoplay lex CSW21 s1 equity s2 equity r1 best r2 best i 10000000",
-      true, 5, HALT_STATUS_USER_INTERRUPT, ERROR_STATUS_TYPE_NONE, 0, "");
+  assert_command_status_and_output("go autoplay lex CSW21 s1 equity s2 equity "
+                                   "r1 best r2 best i 10000000 threads 5",
+                                   true, 5, HALT_STATUS_USER_INTERRUPT,
+                                   ERROR_STATUS_TYPE_NONE, 0, 1);
 
-  // FIXME: run more commands that change rack size
-  //   run all 3 command in catalan
-  //   run all 3 in csw
-  //   run all 3 in polish?
-  //   repeat
+  for (int i = 0; i < 3; i++) {
+    // Catalan
+    assert_command_status_and_output("position cgp " CATALAN_CGP, false, 5,
+                                     HALT_STATUS_NONE, ERROR_STATUS_TYPE_NONE,
+                                     0, 0);
+    assert_command_status_and_output("go sim plies 2 threads 10 numplays 15 i "
+                                     "200 info 60 cgp " CATALAN_CGP,
+                                     false, 60, HALT_STATUS_MAX_ITERATIONS,
+                                     ERROR_STATUS_TYPE_NONE, 0, (17 * 4));
+
+    assert_command_status_and_output(
+        "go infer rack AIMSX pindex 0 score 52 exch "
+        "0 numplays 20 threads 4 cgp " EMPTY_CATALAN_CGP,
+        false, 60, HALT_STATUS_MAX_ITERATIONS, ERROR_STATUS_TYPE_NONE, 0,
+        5 + 27 + 20);
+
+    assert_command_status_and_output(
+        "go autoplay s1 equity s2 equity "
+        "r1 best r2 best i 10 numplays 1 cgp " CATALAN_CGP,
+        false, 30, HALT_STATUS_MAX_ITERATIONS, ERROR_STATUS_TYPE_NONE, 0, 1);
+    // CSW
+    assert_command_status_and_output("position cgp " ION_OPENING_CGP, false, 5,
+                                     HALT_STATUS_NONE, ERROR_STATUS_TYPE_NONE,
+                                     0, 0);
+
+    assert_command_status_and_output("go sim plies 2 threads 10 numplays 15 i "
+                                     "200 info 60 cgp " DELDAR_VS_HARSHAN_CGP,
+                                     false, 60, HALT_STATUS_MAX_ITERATIONS,
+                                     ERROR_STATUS_TYPE_NONE, 0, (17 * 4));
+
+    assert_command_status_and_output(
+        "go infer rack DGINR pindex 0 score 18 exch 0 numplays 20 threads 4 "
+        "cgp " EMPTY_CGP,
+        false, 60, HALT_STATUS_MAX_ITERATIONS, ERROR_STATUS_TYPE_NONE, 0,
+        5 + 27 + 20);
+
+    assert_command_status_and_output(
+        "go autoplay lex CSW21 s1 equity s2 equity "
+        "r1 best r2 best i 10 numplays 1",
+        false, 30, HALT_STATUS_MAX_ITERATIONS, ERROR_STATUS_TYPE_NONE, 0, 1);
+    // Polish
+    assert_command_status_and_output("position cgp " POLISH_CGP, false, 5,
+                                     HALT_STATUS_NONE, ERROR_STATUS_TYPE_NONE,
+                                     0, 0);
+
+    assert_command_status_and_output("go sim plies 2 threads 10 numplays 15 i "
+                                     "200 info 60 cgp " POLISH_CGP,
+                                     false, 60, HALT_STATUS_MAX_ITERATIONS,
+                                     ERROR_STATUS_TYPE_NONE, 0, 68);
+
+    assert_command_status_and_output(
+        "go infer rack HUJA pindex 0 score 20 exch 0 "
+        "numplays 20 threads 4 cgp " EMPTY_POLISH_CGP,
+        false, 60, HALT_STATUS_MAX_ITERATIONS, ERROR_STATUS_TYPE_NONE, 0,
+        5 + 33 + 20);
+
+    assert_command_status_and_output(
+        "go autoplay s1 equity s2 equity "
+        "r1 best r2 best i 10 numplays 1 lex OSPS44",
+        false, 30, HALT_STATUS_MAX_ITERATIONS, ERROR_STATUS_TYPE_NONE, 0, 1);
+  }
 }
 
 void test_command() { test_command_execution(); }

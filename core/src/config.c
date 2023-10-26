@@ -983,7 +983,7 @@ Config *create_default_config() {
   config->max_iterations = 0;
   config->stopping_condition = DEFAULT_SIMMING_STOPPING_CONDITION;
   config->static_search_only = false;
-  config->use_game_pairs = true;
+  config->use_game_pairs = false;
   config->random_seed = 0;
   config->number_of_threads = 1;
   config->print_info_interval = 0;

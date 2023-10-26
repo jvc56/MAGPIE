@@ -104,7 +104,7 @@ void run_test(TestConfig *testconfig, const char *subtest) {
     test_infer(testconfig);
   } else if (strings_equal(subtest, "sim")) {
     test_sim(testconfig);
-  } else if (strings_equal(subtest, "ucgi")) {
+  } else if (strings_equal(subtest, "command")) {
     test_command(testconfig);
   } else if (strings_equal(subtest, "gcg")) {
     test_gcg(testconfig);

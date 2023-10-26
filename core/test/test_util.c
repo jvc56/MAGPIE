@@ -21,7 +21,7 @@
 
 int within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
-double get_leave_value_for_rack(KLV *klv, Rack *rack) {
+double get_leave_value_for_rack(const KLV *klv, Rack *rack) {
   return get_leave_value(klv, rack);
 }
 
@@ -147,7 +147,13 @@ int count_newlines(const char *str) {
 
 void assert_strings_equal(const char *str1, const char *str2) {
   if (!strings_equal(str1, str2)) {
-    fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, str2);
+    if (str1 && !str2) {
+      fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, "(NULL)");
+    } else if (!str1 && str2) {
+      fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", "(NULL)", str2);
+    } else {
+      fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, str2);
+    }
     assert(0);
   }
 }

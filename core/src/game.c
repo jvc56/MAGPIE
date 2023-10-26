@@ -313,6 +313,7 @@ void update_game(const Config *config, Game *game) {
   // In the future, we will need to update the board dimensions.
   if (config->num_plays != game->gen->move_list->capacity) {
     destroy_move_list(game->gen->move_list);
+    printf("move list capacity changed to %d\n", config->num_plays);
     game->gen->move_list = create_move_list(config->num_plays);
   }
 }

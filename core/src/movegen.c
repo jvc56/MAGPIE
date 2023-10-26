@@ -640,7 +640,7 @@ void shadow_play_for_anchor(Generator *gen, int col, Player *player) {
   gen->rack_cross_set = 0;
   for (uint32_t i = 0; i < gen->letter_distribution->size; i++) {
     if (player->rack->array[i] > 0) {
-      gen->rack_cross_set = gen->rack_cross_set | (1 << i);
+      gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
     }
   }
 

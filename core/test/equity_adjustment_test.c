@@ -16,7 +16,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = game->players[0]->rack;
-  KLV *klv = game->players[0]->klv;
+  const KLV *klv = game->players[0]->klv;
   set_rack_to_string(rack, "EORSTVX", game->gen->letter_distribution);
   generate_moves_for_game(game);
 

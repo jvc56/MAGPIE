@@ -8,11 +8,12 @@
 #include "kwg.h"
 
 int allowed(uint64_t cross_set, uint8_t letter) {
-  return (cross_set & (1 << letter)) != 0;
+  return (cross_set & ((uint64_t)1 << letter)) != 0;
 }
 
 void traverse_backwards(Board *board, int row, int col, uint32_t node_index,
-                        int check_letter_set, int left_most_col, KWG *kwg) {
+                        int check_letter_set, int left_most_col,
+                        const KWG *kwg) {
   while (pos_exists(row, col)) {
     uint8_t ml = get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -45,7 +46,7 @@ void traverse_backwards(Board *board, int row, int col, uint32_t node_index,
 }
 
 void gen_cross_set(Board *board, int row, int col, int dir, int cross_set_index,
-                   KWG *kwg, LetterDistribution *letter_distribution) {
+                   const KWG *kwg, LetterDistribution *letter_distribution) {
   if (!pos_exists(row, col)) {
     return;
   }
@@ -120,7 +121,7 @@ void gen_cross_set(Board *board, int row, int col, int dir, int cross_set_index,
 }
 
 // FIXME: this might belong in game.c
-void generate_all_cross_sets(Board *board, KWG *kwg_1, KWG *kwg_2,
+void generate_all_cross_sets(Board *board, const KWG *kwg_1, const KWG *kwg_2,
                              LetterDistribution *letter_distribution,
                              bool kwgs_are_distinct) {
   for (int i = 0; i < BOARD_DIM; i++) {
