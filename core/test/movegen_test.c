@@ -60,6 +60,9 @@ void boards_equal(Board *b1, Board *b2) {
 
 void execute_recursive_gen(Generator *gen, int col, Player *player,
                            int leftstrip, int rightstrip, int unique_play) {
+  gen->move_sort_type = player->move_sort_type;
+  gen->move_record_type = player->move_record_type;
+  gen->apply_placement_adjustment = true;
   init_leave_map(gen->leave_map, player->rack);
   load_row_letter_cache(gen, gen->current_row_index);
   recursive_gen(gen, col, player, NULL, kwg_get_root_node_index(player->kwg),
@@ -386,11 +389,9 @@ void exchange_tests(TestConfig *testconfig) {
 
   assert(test_exchange_sorted_move_list->moves[0]->move_type ==
          GAME_EVENT_EXCHANGE);
-  // FIXME: just reminders to fix later
   assert(test_exchange_sorted_move_list->moves[0]->score == 0);
-  assert(test_exchange_sorted_move_list->moves[0]->tiles_length == -1);
-  assert(test_exchange_sorted_move_list->moves[0]->tiles_played == -1);
-  assert(0);
+  assert(test_exchange_sorted_move_list->moves[0]->tiles_length ==
+         test_exchange_sorted_move_list->moves[0]->tiles_played + 1);
   destroy_sorted_move_list(test_exchange_sorted_move_list);
 
   destroy_game(game);

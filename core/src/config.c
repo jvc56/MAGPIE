@@ -263,9 +263,9 @@ ParsedArgs *create_parsed_args() {
                  ARG_NUMBER_OF_TILES_EXCHANGED, 1);
   // Autoplay
   set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_PAIRS_ON,
-                 ARG_GAME_PAIRS_ON, 1);
+                 ARG_GAME_PAIRS_ON, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_PAIRS_OFF,
-                 ARG_GAME_PAIRS_OFF, 1);
+                 ARG_GAME_PAIRS_OFF, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_RANDOM_SEED, ARG_RANDOM_SEED,
                  1);
 

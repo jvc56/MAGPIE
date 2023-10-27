@@ -28,6 +28,9 @@ void test_trivial_random_probability(TestConfig *testconfig) {
   Inference *inference =
       create_inference(20, game->gen->letter_distribution->size);
 
+  inference->bag_as_rack = create_rack(game->gen->letter_distribution->size);
+  inference->leave = create_rack(game->gen->letter_distribution->size);
+
   // A minimum of zero should always be 100% probability
   assert(within_epsilon(get_probability_for_random_minimum_draw(
                             inference->bag_as_rack, inference->leave,
@@ -725,7 +728,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
 
   reset_rack(rack);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-                             " pindex 0 score 6 exch 0 eq 0");
+                             " pindex 0 score 0 exch 6 eq 0");
   status = infer_for_test(config, game, inference);
 
   assert(status == INFERENCE_STATUS_SUCCESS);
