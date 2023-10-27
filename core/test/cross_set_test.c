@@ -158,7 +158,6 @@ void test_cross_set(TestConfig *testconfig) {
   test_gen_cross_set_row(game, 4, 1, 1, 0, "S OBCONIc", "", 11, 1);
 
   // TestGenAllcross_sets
-  reset_game(game);
   load_cgp(game, VS_ED);
   test_gen_cross_set(game, 8, 8, BOARD_HORIZONTAL_DIRECTION, 0, "OS", 8, 0);
   test_gen_cross_set(game, 8, 8, BOARD_VERTICAL_DIRECTION, 0, "S", 9, 0);
@@ -177,7 +176,6 @@ void test_cross_set(TestConfig *testconfig) {
   test_gen_cross_set(game, 12, 12, BOARD_VERTICAL_DIRECTION, 0, "", 0, 0);
 
   // TestUpdateSinglecross_set
-  reset_game(game);
   load_cgp(game, VS_MATT);
   set_letter(game->gen->board, 8, 10, 19);
   set_letter(game->gen->board, 9, 10, 0);

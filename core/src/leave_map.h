@@ -7,6 +7,7 @@
 #include "rack.h"
 
 typedef struct LeaveMap {
+  uint32_t rack_array_size;
   double *leave_values;
   int *letter_base_index_map;
   int current_index;
@@ -14,6 +15,7 @@ typedef struct LeaveMap {
 
 LeaveMap *create_leave_map(int rack_array_size);
 void destroy_leave_map(LeaveMap *LeaveMap);
+void update_leave_map(LeaveMap *leave_map, int new_rack_array_size);
 void init_leave_map(LeaveMap *leave_map, Rack *rack);
 void take_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
                                           uint8_t letter);

@@ -162,7 +162,7 @@ void test_config_success() {
       "setoptions ld %s bb %d var %s l1 %s l2 %s s1 %s r1 "
       "%s s2 %s r2 %s rack %s pindex %d score %d exch %d eq %0.2f numplays %d "
       "plies %d i "
-      "%d stop %d rs %d threads %d info %d check %d",
+      "%d stop %d rs %d threads %d info %d check %d static gp",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, rack, pindex,
       score, number_exch, equity_margin, num_plays, plies, max_iterations,
       stopping_cond, random_seed, number_of_threads, print_info, check_stop);
@@ -193,6 +193,8 @@ void test_config_success() {
   assert(config->number_of_threads == number_of_threads);
   assert(config->print_info_interval == print_info);
   assert(config->check_stopping_condition_interval == check_stop);
+  assert(config->static_search_only);
+  assert(config->use_game_pairs);
 
   assert(strings_equal(config->ld_name, ld_name));
   assert(strings_equal(players_data_get_data_name(config->players_data,
@@ -243,7 +245,7 @@ void test_config_success() {
       "setoptions ld %s bb %d l1 %s l2 %s  s1 "
       "%s r1 %s s2 %s r2 %s rack %s exch %d plies %d i %d "
       "threads %d "
-      "info %d",
+      "info %d nostatic nogp",
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, rack, number_exch, plies,
       max_iterations, number_of_threads, print_info);
 
@@ -273,6 +275,8 @@ void test_config_success() {
   assert(config->number_of_threads == number_of_threads);
   assert(config->print_info_interval == print_info);
   assert(config->check_stopping_condition_interval == check_stop);
+  assert(!config->static_search_only);
+  assert(!config->use_game_pairs);
 
   assert(strings_equal(config->ld_name, ld_name));
   assert(strings_equal(players_data_get_data_name(config->players_data,

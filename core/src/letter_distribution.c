@@ -76,6 +76,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   int machine_letter = 0;
   char line[100];
   int max_tile_length = 0;
+  letter_distribution->total_tiles = 0;
   while (fgets(line, sizeof(line), file)) {
     if (is_all_whitespace_or_empty(line)) {
       continue;
@@ -91,6 +92,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     const char *lower_case_letter =
         string_splitter_get_item(single_letter_info, 1);
     int dist = string_to_int(string_splitter_get_item(single_letter_info, 2));
+    letter_distribution->total_tiles += dist;
     int score = string_to_int(string_splitter_get_item(single_letter_info, 3));
     int is_vowel =
         string_to_int(string_splitter_get_item(single_letter_info, 4));

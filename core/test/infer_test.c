@@ -696,7 +696,6 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
       (bhir_weighted_value + bhnr_weighted_value + hirn_weighted_value) / 660;
   assert(within_epsilon(get_mean(inference->leave_record->equity_values),
                         mean_rin_leave_value));
-  reset_game(game);
 
   // Test exchanges
   load_cgp(game, VS_JEREMY);

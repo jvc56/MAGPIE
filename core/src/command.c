@@ -28,9 +28,6 @@ CommandVars *create_command_vars(FILE *outfile) {
 
 void destroy_command_vars(CommandVars *command_vars) {
   // Caller needs to handle the outfile
-  if (command_vars->command) {
-    free(command_vars->command);
-  }
   if (command_vars->config) {
     destroy_config(command_vars->config);
   }

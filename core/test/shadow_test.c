@@ -11,7 +11,6 @@
 
 void load_and_generate(Game *game, Player *player, const char *cgp,
                        const char *rack, int add_exchange) {
-  reset_game(game);
   load_cgp(game, cgp);
   set_rack_to_string(player->rack, rack, game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, add_exchange,

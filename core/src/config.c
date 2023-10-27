@@ -50,12 +50,14 @@
 #define ARG_NUMBER_OF_PLAYS "numplays"
 #define ARG_MAX_ITERATIONS "i"
 #define ARG_STOPPING_CONDITION "stop"
-#define ARG_STATIC_SEARCH_ONLY "static"
+#define ARG_STATIC_SEARCH_ON "static"
+#define ARG_STATIC_SEARCH_OFF "nostatic"
 #define ARG_PLAYER_TO_INFER_INDEX "pindex"
 #define ARG_SCORE "score"
 #define ARG_EQUITY_MARGIN "eq"
 #define ARG_NUMBER_OF_TILES_EXCHANGED "exch"
-#define ARG_USE_GAME_PAIRS "gp"
+#define ARG_GAME_PAIRS_ON "gp"
+#define ARG_GAME_PAIRS_OFF "nogp"
 #define ARG_RANDOM_SEED "rs"
 #define ARG_NUMBER_OF_THREADS "threads"
 #define ARG_PRINT_INFO_INTERVAL "info"
@@ -101,7 +103,8 @@ typedef enum {
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
   ARG_TOKEN_STOPPING_CONDITION,
-  ARG_TOKEN_STATIC_SEARCH_ONLY,
+  ARG_TOKEN_STATIC_SEARCH_ON,
+  ARG_TOKEN_STATIC_SEARCH_OFF,
   // Infer
   // Rack is shared with sim
   ARG_TOKEN_PLAYER_TO_INFER_INDEX,
@@ -109,7 +112,8 @@ typedef enum {
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_NUMBER_OF_TILES_EXCHANGED,
   // Autoplay
-  ARG_TOKEN_USE_GAME_PAIRS,
+  ARG_TOKEN_GAME_PAIRS_ON,
+  ARG_TOKEN_GAME_PAIRS_OFF,
   ARG_TOKEN_RANDOM_SEED,
   // number of iterations shared with sim
   // Thread Control
@@ -243,8 +247,10 @@ ParsedArgs *create_parsed_args() {
                  ARG_MAX_ITERATIONS, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_STOPPING_CONDITION,
                  ARG_STOPPING_CONDITION, 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_STATIC_SEARCH_ONLY,
-                 ARG_STATIC_SEARCH_ONLY, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_STATIC_SEARCH_ON,
+                 ARG_STATIC_SEARCH_ON, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_STATIC_SEARCH_OFF,
+                 ARG_STATIC_SEARCH_OFF, 0);
 
   // Inference args
   // rack is KNOWN_OPP_RACK shared with sim
@@ -256,8 +262,10 @@ ParsedArgs *create_parsed_args() {
   set_single_arg(parsed_args, index++, ARG_TOKEN_NUMBER_OF_TILES_EXCHANGED,
                  ARG_NUMBER_OF_TILES_EXCHANGED, 1);
   // Autoplay
-  set_single_arg(parsed_args, index++, ARG_TOKEN_USE_GAME_PAIRS,
-                 ARG_USE_GAME_PAIRS, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_PAIRS_ON,
+                 ARG_GAME_PAIRS_ON, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_PAIRS_OFF,
+                 ARG_GAME_PAIRS_OFF, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_RANDOM_SEED, ARG_RANDOM_SEED,
                  1);
 
@@ -422,12 +430,6 @@ config_load_status_t load_move_record_type_for_config(
 }
 
 config_load_status_t load_rack_for_config(Config *config, const char *rack) {
-  if (!config->letter_distribution) {
-    log_fatal("letter distribution is missing for rack parsing\n");
-  }
-  if (!config->rack) {
-    config->rack = create_rack(config->letter_distribution->size);
-  }
   if (!strings_equal(EMPTY_RACK_STRING, rack)) {
     int number_of_letters_set =
         set_rack_to_string(config->rack, rack, config->letter_distribution);
@@ -853,8 +855,11 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       config_load_status =
           load_stopping_condition_for_config(config, arg_values[0]);
       break;
-    case ARG_TOKEN_STATIC_SEARCH_ONLY:
+    case ARG_TOKEN_STATIC_SEARCH_ON:
       config_load_status = load_static_search_only_for_config(config, true);
+      break;
+    case ARG_TOKEN_STATIC_SEARCH_OFF:
+      config_load_status = load_static_search_only_for_config(config, false);
       break;
     case ARG_TOKEN_PLAYER_TO_INFER_INDEX:
       config_load_status =
@@ -870,8 +875,11 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       config_load_status =
           load_number_of_tiles_exchanged_for_config(config, arg_values[0]);
       break;
-    case ARG_TOKEN_USE_GAME_PAIRS:
+    case ARG_TOKEN_GAME_PAIRS_ON:
       config_load_status = load_use_game_pairs_for_config(config, true);
+      break;
+    case ARG_TOKEN_GAME_PAIRS_OFF:
+      config_load_status = load_use_game_pairs_for_config(config, false);
       break;
     case ARG_TOKEN_RANDOM_SEED:
       config_load_status = load_random_seed_for_config(config, arg_values[0]);
@@ -914,6 +922,10 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
+
+  // The letter distribution may have changed,
+  // so we might need to update the rack.
+  update_or_create_rack(&config->rack, config->letter_distribution->size);
 
   // Now that the letter distribution has been loaded
   // we can read the rack.

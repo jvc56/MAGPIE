@@ -26,6 +26,7 @@ typedef struct LetterDistribution {
   uint32_t *scores;
   uint32_t *score_order;
   uint32_t *is_vowel;
+  int total_tiles;
   int max_tile_length;
   char machine_letter_to_human_readable_letter[MACHINE_LETTER_MAX_VALUE]
                                               [MAX_LETTER_CHAR_LENGTH];

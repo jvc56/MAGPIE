@@ -37,11 +37,11 @@ void string_builder_add_ucgi_leave_rack(LeaveRack *leave_rack, int index,
                                         LetterDistribution *letter_distribution,
                                         int is_exchange,
                                         StringBuilder *ucgi_string_builder) {
-  if (is_exchange) {
+  if (!is_exchange) {
     string_builder_add_rack(leave_rack->leave, letter_distribution,
                             ucgi_string_builder);
     string_builder_add_formatted_string(
-        ucgi_string_builder, "%-3d %-6.2f %-6d %0.2f\n", index + 1,
+        ucgi_string_builder, " %-3d %-6.2f %-6d %0.2f\n", index + 1,
         ((double)leave_rack->draws / total_draws) * 100, leave_rack->draws,
         leave_rack->equity);
   } else {

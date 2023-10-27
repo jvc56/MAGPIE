@@ -531,7 +531,7 @@ sim_status_t simulate(const Config *config, ThreadControl *thread_control,
   update_or_create_rack(&simmer->similar_plays_rack,
                         config->letter_distribution->size);
 
-  if (simmer->num_simmed_plays) {
+  if (simmer->num_simmed_plays > 0) {
     if (config->rack) {
       if (simmer->known_opp_rack) {
         destroy_rack(simmer->known_opp_rack);

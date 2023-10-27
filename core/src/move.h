@@ -45,6 +45,7 @@ void copy_move(Move *src_move, Move *dest_move);
 void destroy_move(Move *move);
 MoveList *create_move_list(int capacity);
 void destroy_move_list(MoveList *ml);
+void update_move_list(MoveList *ml, int new_capacity);
 void sort_moves(MoveList *ml);
 void string_builder_add_move_description(Move *move, LetterDistribution *ld,
                                          StringBuilder *move_string_builder);

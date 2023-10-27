@@ -53,6 +53,7 @@ void set_check_stopping_condition_interval(
 bool set_mode_searching(ThreadControl *thread_control);
 bool set_mode_stopped(ThreadControl *thread_control);
 mode_search_status_t get_mode(ThreadControl *thread_control);
+void set_outfile(ThreadControl *thread_control, FILE *new_outfile);
 bool set_check_stop_active(ThreadControl *thread_control);
 bool set_check_stop_inactive(ThreadControl *thread_control);
 void print_to_file(ThreadControl *thread_control, const char *content);

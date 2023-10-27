@@ -240,6 +240,7 @@ cgp_parse_status_t parse_cgp(Game *game, const char *cgp) {
 }
 
 cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
+  reset_game(game);
   cgp_parse_status_t cgp_parse_status = parse_cgp(game, cgp);
   if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
     return cgp_parse_status;
@@ -311,20 +312,17 @@ void update_game(const Config *config, Game *game) {
   // Player names are owned by config, so
   // we only need to update the movelist capacity.
   // In the future, we will need to update the board dimensions.
-  if (config->num_plays != game->gen->move_list->capacity) {
-    destroy_move_list(game->gen->move_list);
-    printf("move list capacity changed to %d\n", config->num_plays);
-    game->gen->move_list = create_move_list(config->num_plays);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    update_player(config, game->players[player_index]);
   }
+  update_generator(config, game->gen);
 }
 
 Game *create_game(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
   game->gen = create_generator(config, config->num_plays);
   for (int player_index = 0; player_index < 2; player_index++) {
-    game->players[player_index] = create_player(
-        config, player_index,
-        players_data_get_name(config->players_data, player_index));
+    game->players[player_index] = create_player(config, player_index);
   }
   for (int i = 0; i < NUMBER_OF_DATA; i++) {
     game->data_is_shared[i] =

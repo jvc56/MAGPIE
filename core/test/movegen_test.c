@@ -142,7 +142,6 @@ void macondo_tests(TestConfig *testconfig) {
   assert(game->gen->move_list->count == 1);
   assert_move(game, NULL, 0, "5B HI(THERMOS)T 36");
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestRowGen
@@ -163,7 +162,6 @@ void macondo_tests(TestConfig *testconfig) {
   assert_move(game, test_row_gen_sorted_move_list, 1, "5C RE(GLOWS) 11");
 
   destroy_sorted_move_list(test_row_gen_sorted_move_list);
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestOtherRowGen
@@ -177,7 +175,6 @@ void macondo_tests(TestConfig *testconfig) {
   assert(game->gen->move_list->count == 1);
   assert_move(game, NULL, 0, "15C A(VENGED) 12");
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestOneMoreRowGen
@@ -191,7 +188,6 @@ void macondo_tests(TestConfig *testconfig) {
   assert(game->gen->move_list->count == 1);
   assert_move(game, NULL, 0, "1L (F)A 5");
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenMoveJustOnce
@@ -210,7 +206,6 @@ void macondo_tests(TestConfig *testconfig) {
   }
   assert(game->gen->move_list->count == 34);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesSingleTile
@@ -219,7 +214,6 @@ void macondo_tests(TestConfig *testconfig) {
   generate_moves_for_movegen(game->gen, player, NULL, 0);
   assert(game->gen->move_list->count == 25);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesFullRack
@@ -241,7 +235,6 @@ void macondo_tests(TestConfig *testconfig) {
 
   destroy_sorted_move_list(test_gen_all_moves_full_rack_sorted_move_list);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesFullRackAgain
@@ -251,7 +244,6 @@ void macondo_tests(TestConfig *testconfig) {
   assert(count_scoring_plays(game->gen->move_list) == 219);
   assert(count_nonscoring_plays(game->gen->move_list) == 64);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesSingleBlank
@@ -261,7 +253,6 @@ void macondo_tests(TestConfig *testconfig) {
   assert(count_scoring_plays(game->gen->move_list) == 169);
   assert(count_nonscoring_plays(game->gen->move_list) == 2);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesTwoBlanksOnly
@@ -271,7 +262,6 @@ void macondo_tests(TestConfig *testconfig) {
   assert(count_scoring_plays(game->gen->move_list) == 1961);
   assert(count_nonscoring_plays(game->gen->move_list) == 3);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesWithBlanks
@@ -291,7 +281,6 @@ void macondo_tests(TestConfig *testconfig) {
 
   destroy_sorted_move_list(test_gen_all_moves_with_blanks_sorted_move_list);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGiantTwentySevenTimer
@@ -328,7 +317,6 @@ void macondo_tests(TestConfig *testconfig) {
   assert(move->row_start == 7);
 
   destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenerateNoPlays
@@ -339,7 +327,6 @@ void macondo_tests(TestConfig *testconfig) {
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
   assert(game->gen->move_list->moves[0]->move_type == GAME_EVENT_PASS);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestRowEquivalent
@@ -388,7 +375,6 @@ void exchange_tests(TestConfig *testconfig) {
   assert(test_not_an_exchange_sorted_move_list->moves[0]->move_type ==
          GAME_EVENT_TILE_PLACEMENT_MOVE);
   destroy_sorted_move_list(test_not_an_exchange_sorted_move_list);
-  reset_game(game);
 
   load_cgp(game, cgp);
   // The second top equity play only uses
@@ -473,7 +459,6 @@ void top_equity_play_recorder_test(TestConfig *testconfig) {
 
   assert_move(game, NULL, 0, "14B hEaDW(OR)DS 106");
 
-  reset_game(game);
   reset_rack(player->rack);
 
   load_cgp(game, VS_OXY);

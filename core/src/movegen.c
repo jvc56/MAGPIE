@@ -764,6 +764,13 @@ void load_zero_preendgame_adjustment_values(Generator *gen) {
   }
 }
 
+void update_generator(const Config *config, Generator *gen) {
+  gen->letter_distribution = config->letter_distribution;
+  update_move_list(gen->move_list, config->num_plays);
+  update_bag(gen->bag, gen->letter_distribution);
+  update_leave_map(gen->leave_map, gen->letter_distribution->size);
+}
+
 Generator *create_generator(const Config *config, int move_list_capacity) {
   Generator *generator = malloc_or_die(sizeof(Generator));
   generator->bag = create_bag(config->letter_distribution);

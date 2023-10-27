@@ -10,14 +10,12 @@
 #include "test_util.h"
 
 void reset_and_load_game_success(Game *game, const char *cgp) {
-  reset_game(game);
   cgp_parse_status_t cgp_parse_status = load_cgp(game, cgp);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
 }
 
 void reset_and_load_game_failure(Game *game, const char *cgp,
                                  cgp_parse_status_t expected_cgp_parse_status) {
-  reset_game(game);
   cgp_parse_status_t cgp_parse_status = load_cgp(game, cgp);
   assert(cgp_parse_status == expected_cgp_parse_status);
 }
@@ -164,7 +162,6 @@ void test_game_main(TestConfig *testconfig) {
   assert(equal_rack(rack, game->players[0]->rack));
   set_rack_to_string(rack, "HIJKLM?", config->letter_distribution);
   assert(equal_rack(rack, game->players[1]->rack));
-  reset_game(game);
 
   // Test CGP with excessive whitespace
   cgp_parse_status = load_cgp(game, EXCESSIVE_WHITESPACE_CGP);
@@ -174,7 +171,6 @@ void test_game_main(TestConfig *testconfig) {
   set_rack_to_string(rack, "HIJKLM?", config->letter_distribution);
   assert(equal_rack(rack, game->players[1]->rack));
   assert(game->consecutive_scoreless_turns == 4);
-  reset_game(game);
 
   // Test CGP with one consecutive zero
   cgp_parse_status = load_cgp(game, ONE_CONSECUTIVE_ZERO_CGP);

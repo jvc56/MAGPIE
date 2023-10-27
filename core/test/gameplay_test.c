@@ -135,7 +135,6 @@ void test_gameplay_by_turn(Config *config, char *cgps[], char *racks[],
       player1_final_score = actual_game->players[1]->score;
     }
 
-    reset_game(expected_game);
     load_cgp(expected_game, cgps[i]);
     // If the game is still ongoing,
     // return the racks to the bag so that
@@ -436,7 +435,6 @@ void test_playmove(TestConfig *testconfig) {
              game->gen->letter_distribution, "W")] == 0);
   assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(
              game->gen->letter_distribution, "U")] < 2);
-  reset_game(game);
 
   // Test pass
   load_cgp(game,

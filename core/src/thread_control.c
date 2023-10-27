@@ -31,6 +31,10 @@ void destroy_thread_control(ThreadControl *thread_control) {
   free(thread_control);
 }
 
+void set_outfile(ThreadControl *thread_control, FILE *new_outfile) {
+  thread_control->outfile = new_outfile;
+}
+
 void set_print_info_interval(ThreadControl *thread_control,
                              int print_info_interval) {
   thread_control->print_info_interval = print_info_interval;

@@ -66,6 +66,9 @@ void take_letter_from_rack(Rack *rack, uint8_t letter) {
 }
 
 void add_letter_to_rack(Rack *rack, uint8_t letter) {
+  if (letter >= rack->array_size) {
+    printf("l: %d, s: %d\n", letter, rack->array_size);
+  }
   rack->array[letter]++;
   rack->number_of_letters++;
   if (rack->empty == 1) {
@@ -85,11 +88,11 @@ int set_rack_to_string(Rack *rack, const char *rack_string,
                        LetterDistribution *letter_distribution) {
   reset_rack(rack);
 
-  uint8_t mls[BAG_SIZE];
+  uint8_t mls[MAX_BAG_SIZE];
   int num_mls =
       str_to_machine_letters(letter_distribution, rack_string, false, mls);
-  if (num_mls > BAG_SIZE) {
-    log_fatal("rack contains more letters than the bag: %d\n", num_mls);
+  if (num_mls > MAX_BAG_SIZE) {
+    log_fatal("rack overflow: %d\n", num_mls);
   }
   for (int i = 0; i < num_mls; i++) {
     add_letter_to_rack(rack, mls[i]);

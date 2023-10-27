@@ -6,10 +6,9 @@
 
 typedef struct Player {
   int index;
-  // The player name is owned by the
-  // config in the same manner as the
-  // KWG and KLV files, which is why
-  // it is const here.
+  // All const fields are owned
+  // by PlayerData and are
+  // treated as read-only
   const char *name;
   Rack *rack;
   int score;
@@ -19,7 +18,8 @@ typedef struct Player {
   const KLV *klv;
 } Player;
 
-Player *create_player(const Config *config, int player_index, const char *name);
+Player *create_player(const Config *config, int player_index);
+void update_player(const Config *config, Player *player);
 Player *copy_player(const Player *player);
 void destroy_player(Player *player);
 void reset_player(Player *player);
