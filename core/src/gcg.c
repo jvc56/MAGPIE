@@ -76,9 +76,10 @@ const char *id_regex =
     "#id[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)";
 const char *rack1_regex = "#rack1 ([^[:space:]]+)";
 const char *rack2_regex = "#rack2 ([^[:space:]]+)";
-const char *move_regex = ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
-                         "]]+(\\w+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
-                         "[+]([[:digit:]]+)[[:space:]]+([[:digit:]]+)";
+const char *move_regex =
+    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
+    "]]+([[:alnum:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
+    "[+]([[:digit:]]+)[[:space:]]+([[:digit:]]+)";
 const char *note_regex = "#note (.+)";
 const char *lexicon_name_regex = "#lexicon (.+)";
 const char *character_encoding_regex = "#character-encoding ([[:graph:]]+)";
@@ -205,21 +206,6 @@ void destroy_gcg_parser(GCGParser *gcg_parser) {
   free(gcg_parser);
 }
 
-void convert_iso_8859_1_to_utf8(const char *input, char *output) {
-  const unsigned char *in = (unsigned char *)input;
-  unsigned char *out = (unsigned char *)output;
-
-  while (*in) {
-    if (*in < 128) {
-      *out++ = *in++;
-    } else {
-      *out++ = 0xC2 + (*in > 0xBF);
-      *out++ = (*in++ & 0x3F) + 0x80;
-    }
-  }
-  *out = '\0';
-}
-
 gcg_parse_status_t load_next_gcg_line(GCGParser *gcg_parser) {
   int buffer_index = 0;
   gcg_parse_status_t gcg_parse_status = GCG_PARSE_STATUS_SUCCESS;
@@ -320,11 +306,8 @@ gcg_parse_status_t handle_encoding(GCGParser *gcg_parser) {
   }
 
   if (gcg_encoding == GCG_ENCODING_ISO_8859_1) {
-    gcg_parser->utf8_gcg_string = malloc_or_die(
-        sizeof(char) * 2 * string_length(gcg_parser->input_gcg_string));
-    convert_iso_8859_1_to_utf8(gcg_parser->input_gcg_string +
-                                   gcg_start_write_offset,
-                               gcg_parser->utf8_gcg_string);
+    gcg_parser->utf8_gcg_string = iso_8859_1_to_utf8(
+        gcg_parser->input_gcg_string + gcg_start_write_offset);
   } else {
     gcg_parser->utf8_gcg_string =
         strdup(gcg_parser->input_gcg_string + gcg_start_write_offset);
@@ -367,17 +350,19 @@ int get_player_index(GCGParser *gcg_parser, int group_index) {
 
 void copy_score_to_game_event(GCGParser *gcg_parser, GameEvent *game_event,
                               int group_index) {
-  game_event->move->score =
-      string_to_int(gcg_parser->gcg_line_buffer +
-                    gcg_parser->matching_groups[group_index].rm_so);
+  char *move_score_string =
+      get_matching_group_as_string(gcg_parser, group_index);
+  game_event->move->score = string_to_int(move_score_string);
+  free(move_score_string);
 }
 
 void copy_cumulative_score_to_game_event(GCGParser *gcg_parser,
                                          GameEvent *game_event,
                                          int group_index) {
-  game_event->cumulative_score =
-      string_to_int(gcg_parser->gcg_line_buffer +
-                    gcg_parser->matching_groups[group_index].rm_so);
+  char *cumulative_score_string =
+      get_matching_group_as_string(gcg_parser, group_index);
+  game_event->cumulative_score = string_to_int(cumulative_score_string);
+  free(cumulative_score_string);
 }
 
 uint8_t *
@@ -388,12 +373,7 @@ convert_tiles_string_to_machine_letters(GCGParser *gcg_parser, int group_index,
   int start_index = gcg_parser->matching_groups[group_index].rm_so;
   int end_index = gcg_parser->matching_groups[group_index].rm_eo;
   int matching_group_length = end_index - start_index;
-  char *tiles_string =
-      malloc_or_die(sizeof(char) * (matching_group_length + 1));
-  for (int i = start_index; i < end_index; i++) {
-    tiles_string[i - start_index] = gcg_parser->gcg_line_buffer[i];
-  }
-  tiles_string[matching_group_length] = '\0';
+  char *tiles_string = get_matching_group_as_string(gcg_parser, group_index);
 
   uint8_t *machine_letters =
       malloc_or_die(sizeof(char) * (matching_group_length + 1));

@@ -13,7 +13,7 @@ struct PlayersData {
   void *data[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
-  char *player_names[2];
+  const char *player_names[2];
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
@@ -26,11 +26,7 @@ int players_data_get_player_data_index(players_data_t players_data_type,
 
 void players_data_set_name(PlayersData *players_data, int player_index,
                            const char *player_name) {
-  if (players_data->player_names[player_index]) {
-    free(players_data->player_names[player_index]);
-  }
-  players_data->player_names[player_index] =
-      get_formatted_string("%s", player_name);
+  players_data->player_names[player_index] = player_name;
 }
 
 const char *players_data_get_name(PlayersData *players_data, int player_index) {

@@ -159,6 +159,38 @@ char *get_string_from_file(const char *filename) {
   return result_string;
 }
 
+char *iso_8859_1_to_utf8(const char *iso_8859_1_string) {
+  if (iso_8859_1_string == NULL) {
+    return NULL;
+  }
+
+  size_t iso_len = string_length(iso_8859_1_string);
+  char *utf8_string = (char *)malloc_or_die(
+      (iso_len * 4 + 1) *
+      sizeof(char)); // UTF-8 can be up to 4 times longer than ISO-8859-1
+
+  char *iso_8859_1_string_pointer = (char *)iso_8859_1_string;
+  char *utf8_string_pointer = utf8_string;
+
+  while (*iso_8859_1_string_pointer != '\0') {
+    if (*iso_8859_1_string_pointer < 0) {
+      // Handle non-ASCII characters
+      *utf8_string_pointer++ =
+          (char)(0xC0 | (*(unsigned char *)iso_8859_1_string_pointer >> 6));
+      *utf8_string_pointer++ =
+          (char)(0x80 | (*iso_8859_1_string_pointer & 0x3F));
+    } else {
+      // Handle ASCII characters
+      *utf8_string_pointer++ = *iso_8859_1_string_pointer;
+    }
+    iso_8859_1_string_pointer++;
+  }
+
+  *utf8_string_pointer = '\0'; // Null-terminate the UTF-8 string
+
+  return utf8_string;
+}
+
 char *format_string_with_va_list(const char *format, va_list *args) {
   int size;
   va_list args_copy_for_size;

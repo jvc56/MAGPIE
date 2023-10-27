@@ -21,6 +21,7 @@ size_t string_length(const char *str);
 void trim_whitespace(char *str);
 void trim_char(char *str, const char c);
 char *get_string_from_file(const char *filename);
+char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
 
 struct StringSplitter;
 typedef struct StringSplitter StringSplitter;

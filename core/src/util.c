@@ -75,6 +75,7 @@ int string_to_int(const char *str) {
   char *endptr;
   long int result = strtol(str, &endptr, 10);
   if (*endptr != '\0') {
+    abort();
     log_fatal("string to int conversion failed for >%s<\n", str);
   }
   return (int)result;
