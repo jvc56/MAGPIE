@@ -23,7 +23,7 @@ jobs:
       - name: Download data files
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: >
-          mkdir -p core/data/strategy/default_english &&
+          mkdir -p core/data/strategy/ &&
           mkdir -p core/data/lexica &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/NWL20.kwg &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.kwg &&
@@ -42,7 +42,7 @@ jobs:
           ln -sf french.klv2 FRA20.klv2 &&
           mv *.kwg core/data/lexica &&
           mv *.klv2 core/data/lexica &&
-          mv *.csv core/data/strategy/default_english &&
+          mv *.csv core/data/strategy/ &&
           gunzip CSW21.csv.gz &&
           mv *.csv core/data/lexica
 
