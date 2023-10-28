@@ -637,8 +637,8 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
 
   Stat **leave_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
 
-  Stat **exchanged_stats;
-  Stat **rack_stats;
+  Stat **exchanged_stats = NULL;
+  Stat **rack_stats = NULL;
 
   if (inference->number_of_tiles_exchanged > 0) {
     exchanged_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));

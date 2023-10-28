@@ -66,9 +66,6 @@ void take_letter_from_rack(Rack *rack, uint8_t letter) {
 }
 
 void add_letter_to_rack(Rack *rack, uint8_t letter) {
-  if (letter >= rack->array_size) {
-    printf("l: %d, s: %d\n", letter, rack->array_size);
-  }
   rack->array[letter]++;
   rack->number_of_letters++;
   if (rack->empty == 1) {

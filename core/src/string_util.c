@@ -87,41 +87,31 @@ void trim_semicolon(char *str) {
   }
 }
 
-void trim_internal(char *str, const char c, bool whitespace) {
-  if (str == NULL) {
+bool matches_trim_condition(const char input_c, const char trim_c,
+                            bool trim_whitespace) {
+  return (isspace(input_c) && trim_whitespace) ||
+         (input_c == trim_c && !trim_whitespace);
+}
+
+void trim_internal(char *str, const char c, bool trim_whitespace) {
+  if (!str) {
     return;
   }
 
-  int length = 0;
-  int leading_space = 0;
-  int trailing_space = 0;
+  char *ptr = str;
+  int len = strlen(ptr);
 
-  // Calculate the length of the string and count leading/trailing whitespace
-  while (str[length] != '\0') {
-    if ((whitespace && isspace(str[length])) ||
-        (!whitespace && str[length] == c)) {
-      if (length == 0) {
-        leading_space++;
-      } else {
-        trailing_space++;
-      }
-    }
-    length++;
+  while (len - 1 > 0 &&
+         matches_trim_condition(ptr[len - 1], c, trim_whitespace)) {
+    ptr[--len] = 0;
   }
 
-  // If the entire string is whitespace, set it to an empty string
-  if (leading_space == length) {
-    str[0] = '\0';
-    return;
+  while (*ptr && matches_trim_condition(*ptr, c, trim_whitespace)) {
+    ++ptr;
+    --len;
   }
 
-  // Shift non-whitespace characters to the beginning of the string
-  for (int i = 0; i < length - trailing_space; i++) {
-    str[i] = str[i + leading_space];
-  }
-
-  // Null-terminate the new string
-  str[length - leading_space - trailing_space] = '\0';
+  memmove(str, ptr, len + 1);
 }
 
 void trim_whitespace(char *str) { trim_internal(str, 0, true); }
@@ -563,4 +553,9 @@ StringSplitter *split_string(const char *input_string, const char delimiter,
                              bool ignore_empty) {
   return split_string_by_range(input_string, delimiter, delimiter,
                                ignore_empty);
+}
+
+StringSplitter *split_file_by_newline(const char *filename) {
+  char *file_content = get_string_from_file(filename);
+  return split_string(file_content, '\n', true);
 }

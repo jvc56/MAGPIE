@@ -26,5 +26,6 @@ void execute_command_async(CommandVars *command_vars);
 char *command_search_status(CommandVars *command_vars, bool should_halt);
 CommandVars *create_command_vars(FILE *outfile);
 void destroy_command_vars(CommandVars *command_vars);
+void process_command(int argc, char *argv[]);
 
 #endif

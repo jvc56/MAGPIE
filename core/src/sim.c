@@ -254,7 +254,6 @@ int handle_potential_stopping_condition(Simmer *simmer) {
   log_debug("total ignored: %d\n", total_ignored);
   if (total_ignored >= simmer->num_simmed_plays - 1) {
     // if there is only 1 unignored play, exit.
-    // printf("Only one unignored play, we should stop simming.\n");
     return 1;
   }
   return 0;
@@ -488,6 +487,7 @@ void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
 
 sim_status_t simulate(const Config *config, ThreadControl *thread_control,
                       Simmer *simmer, Game *game) {
+  reset_move_list(game->gen->move_list);
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
                  game->gen->bag->last_tile_index + 1 >= RACK_SIZE,

@@ -4,12 +4,12 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "../src/command.h"
 #include "../src/game.h"
 #include "../src/infer.h"
 #include "../src/log.h"
 #include "../src/sim.h"
 #include "../src/thread_control.h"
-#include "../src/ucgi_command.h"
 
 #include "test_constants.h"
 #include "test_util.h"

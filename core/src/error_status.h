@@ -18,5 +18,6 @@ typedef struct ErrorStatus {
 void set_error_status(ErrorStatus *error_status, error_status_t type, int code);
 ErrorStatus *create_error_status(error_status_t type, int code);
 void destroy_error_status(ErrorStatus *error_status);
+char *error_status_to_string(ErrorStatus *error_status);
 
 #endif

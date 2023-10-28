@@ -196,7 +196,7 @@ PlayersData *create_players_data() {
                                     DEFAULT_MOVE_SORT_TYPE);
     players_data_set_move_record_type(players_data, player_index,
                                       DEFAULT_MOVE_RECORD_TYPE);
-    players_data->player_names[player_index] = NULL;
+    players_data_set_name(players_data, player_index, NULL);
   }
   return players_data;
 }

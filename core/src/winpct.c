@@ -39,7 +39,10 @@ void parse_winpct_csv(WinPct *wp, const char *win_pct_name) {
   char line[MAX_COLS * 10];
 
   // Read the header line
-  fgets(line, sizeof(line), file);
+  char *result = fgets(line, sizeof(line), file);
+  if (!result) {
+    log_fatal("could not read file with fgets: %s\n", file);
+  }
 
   // Read data lines
   int row = 0;

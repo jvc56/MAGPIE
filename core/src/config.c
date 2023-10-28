@@ -310,6 +310,8 @@ config_load_status_t init_parsed_args(ParsedArgs *parsed_args,
           single_arg->position = i;
           i += single_arg->number_of_values + 1;
         } else {
+          log_warn("argument %s has an insufficient number of values\n",
+                   single_arg->name);
           return CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES;
         }
         is_recognized_arg = true;

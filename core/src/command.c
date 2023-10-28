@@ -12,6 +12,16 @@
 #include "ucgi_print.h"
 #include "util.h"
 
+#define UCGI_COMMAND_STRING "ucgi"
+#define QUIT_COMMAND_STRING "quit"
+#define STOP_COMMAND_STRING "stop"
+#define FILE_COMMAND_STRING "file"
+
+typedef enum {
+  COMMAND_MODE_CONSOLE,
+  COMMAND_MODE_UCGI,
+} command_mode_t;
+
 CommandVars *create_command_vars(FILE *outfile) {
   CommandVars *command_vars = malloc_or_die(sizeof(CommandVars));
   command_vars->command = NULL;
@@ -117,10 +127,8 @@ void execute_sim(CommandVars *command_vars, const Config *config) {
   }
   sim_status_t status = simulate(config, command_vars->thread_control,
                                  command_vars->simmer, command_vars->game);
-  if (status != SIM_STATUS_SUCCESS) {
-    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_SIM,
-                     (int)status);
-  }
+  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_SIM,
+                   (int)status);
 }
 
 void execute_autoplay(CommandVars *command_vars, const Config *config) {
@@ -129,10 +137,8 @@ void execute_autoplay(CommandVars *command_vars, const Config *config) {
   }
   autoplay_status_t status = autoplay(config, command_vars->thread_control,
                                       command_vars->autoplay_results);
-  if (status != AUTOPLAY_STATUS_SUCCESS) {
-    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
-                     (int)status);
-  }
+  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
+                   (int)status);
 }
 
 void execute_infer(CommandVars *command_vars, const Config *config) {
@@ -142,10 +148,8 @@ void execute_infer(CommandVars *command_vars, const Config *config) {
   inference_status_t status =
       infer(config, command_vars->thread_control, command_vars->game,
             command_vars->inference);
-  if (status != INFERENCE_STATUS_SUCCESS) {
-    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_INFER,
-                     (int)status);
-  }
+  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_INFER,
+                   (int)status);
 }
 
 void load_thread_control(CommandVars *command_vars, const Config *config) {
@@ -161,13 +165,11 @@ void execute_command(CommandVars *command_vars) {
     command_vars->config = create_default_config();
   }
 
-  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_NONE, 0);
   config_load_status_t config_load_status =
       load_config(command_vars->config, command_vars->command);
-
+  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
+                   (int)config_load_status);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
-                     (int)config_load_status);
     return;
   }
 
@@ -179,9 +181,9 @@ void execute_command(CommandVars *command_vars) {
     update_or_create_game(config, command_vars);
     cgp_parse_status_t cgp_parse_status =
         load_cgp(command_vars->game, config->cgp);
+    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_CGP_LOAD,
+                     (int)cgp_parse_status);
     if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
-      set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_CGP_LOAD,
-                       (int)cgp_parse_status);
       return;
     }
   }
@@ -215,6 +217,12 @@ void execute_command(CommandVars *command_vars) {
 
 void execute_command_and_set_mode_stopped(CommandVars *command_vars) {
   execute_command(command_vars);
+  if (command_vars->error_status->type != ERROR_STATUS_TYPE_NONE) {
+    char *error_status_string =
+        error_status_to_string(command_vars->error_status);
+    print_to_file(command_vars->thread_control, error_status_string);
+    free(error_status_string);
+  }
   set_mode_stopped(command_vars->thread_control);
 }
 
@@ -246,4 +254,99 @@ void execute_command_sync(CommandVars *command_vars) {
 
 void execute_command_async(CommandVars *command_vars) {
   execute_command_sync_or_async(command_vars, false);
+}
+
+void execute_single_command_sync(const char *command) {
+  CommandVars *command_vars = create_command_vars(stdout);
+  command_vars->command = command;
+  execute_command_sync(command_vars);
+  destroy_command_vars(command_vars);
+}
+
+void process_ucgi_command(CommandVars *command_vars) {
+  // Assume cmd is already trimmed of whitespace
+  if (strings_equal(command_vars->command, UCGI_COMMAND_STRING)) {
+    // More of a formality to align with UCI
+    print_to_file(command_vars->thread_control, "id name MAGPIE 0.1\nucgiok\n");
+  } else if (strings_equal(command_vars->command, STOP_COMMAND_STRING)) {
+    if (get_mode(command_vars->thread_control) == MODE_SEARCHING) {
+      if (!halt(command_vars->thread_control, HALT_STATUS_USER_INTERRUPT)) {
+        log_warn("Search already received stop signal but has not stopped.");
+      }
+    } else {
+      log_info("There is no search to stop.");
+    }
+  } else {
+    execute_command_async(command_vars);
+  }
+}
+
+void command_scan_loop(command_mode_t command_mode_type) {
+  CommandVars *command_vars = create_command_vars(stdout);
+  char *input = NULL;
+  size_t input_size = 0;
+  ssize_t input_length;
+  while (1) {
+    if (command_mode_type == COMMAND_MODE_CONSOLE) {
+      print_to_file(command_vars->thread_control, "magpie>");
+    }
+    input_length = getline(&input, &input_size, stdin);
+
+    if (input_length == -1) {
+      log_fatal("error reading input\n");
+    }
+
+    trim_whitespace(input);
+
+    if (strings_equal(input, QUIT_COMMAND_STRING)) {
+      break;
+    }
+
+    if (is_string_empty_or_null(input)) {
+      continue;
+    }
+
+    command_vars->command = input;
+    if (command_mode_type == COMMAND_MODE_UCGI) {
+      process_ucgi_command(command_vars);
+    } else if (command_mode_type == COMMAND_MODE_CONSOLE) {
+      execute_command_sync(command_vars);
+    }
+  }
+  destroy_command_vars(command_vars);
+  free(input);
+}
+
+void execute_command_file_sync(const char *filename) {
+  StringSplitter *commands = split_file_by_newline(filename);
+  int number_of_commands = string_splitter_get_number_of_items(commands);
+
+  CommandVars *command_vars = create_command_vars(stdout);
+
+  for (int i = 0; i < number_of_commands; i++) {
+    command_vars->command = string_splitter_get_item(commands, i);
+    execute_command_sync(command_vars);
+  }
+
+  destroy_command_vars(command_vars);
+  destroy_string_splitter(commands);
+}
+
+void process_command(int argc, char *argv[]) {
+  if (argc == 1) {
+    // Use console mode by default
+    command_scan_loop(COMMAND_MODE_CONSOLE);
+  } else if (argc == 2 && strings_equal(argv[1], UCGI_COMMAND_STRING)) {
+    command_scan_loop(COMMAND_MODE_UCGI);
+  } else if (argc == 3 && strings_equal(argv[1], FILE_COMMAND_STRING)) {
+    execute_command_file_sync(argv[2]);
+  } else {
+    StringBuilder *command_string_builder = create_string_builder();
+    for (int i = 1; i < argc; i++) {
+      string_builder_add_formatted_string(command_string_builder, "%s ",
+                                          argv[i]);
+    }
+    execute_single_command_sync(string_builder_peek(command_string_builder));
+    destroy_string_builder(command_string_builder);
+  }
 }
