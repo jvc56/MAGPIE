@@ -693,9 +693,9 @@ void shadow_play_for_anchor(Generator *gen, int col, Player *player,
   }
 
   shadow_start(gen, get_cross_set_index(gen, player->index), opp_rack);
-  insert_anchor(gen->anchor_list, gen->current_row_index, col,
-                gen->last_anchor_col, gen->board->transposed, gen->vertical,
-                gen->highest_shadow_equity);
+  add_anchor(gen->anchor_list, gen->current_row_index, col,
+             gen->last_anchor_col, gen->board->transposed, gen->vertical,
+             gen->highest_shadow_equity);
 }
 
 void shadow_by_orientation(Generator *gen, Player *player, int dir,
@@ -758,6 +758,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
+  sort_anchor_list(gen->anchor_list);
   for (int i = 0; i < gen->anchor_list->count; i++) {
     if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST &&
         better_play_has_been_found(

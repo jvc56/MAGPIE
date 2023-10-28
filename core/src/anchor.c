@@ -3,6 +3,7 @@
 #include "anchor.h"
 #include "board.h"
 #include "constants.h"
+#include "stdlib.h"
 #include "util.h"
 
 AnchorList *create_anchor_list() {
@@ -25,21 +26,10 @@ void destroy_anchor_list(AnchorList *al) {
   free(al);
 }
 
-void insert_anchor(AnchorList *al, int row, int col, int last_anchor_col,
+void add_anchor(AnchorList *al, int row, int col, int last_anchor_col,
                    int transpose_state, int vertical,
                    double highest_possible_equity) {
   int i = al->count;
-  for (; i > 0 &&
-         al->anchors[i - 1]->highest_possible_equity < highest_possible_equity;
-       i--) {
-    al->anchors[i]->row = al->anchors[i - 1]->row;
-    al->anchors[i]->col = al->anchors[i - 1]->col;
-    al->anchors[i]->last_anchor_col = al->anchors[i - 1]->last_anchor_col;
-    al->anchors[i]->transpose_state = al->anchors[i - 1]->transpose_state;
-    al->anchors[i]->vertical = al->anchors[i - 1]->vertical;
-    al->anchors[i]->highest_possible_equity =
-        al->anchors[i - 1]->highest_possible_equity;
-  }
   al->anchors[i]->row = row;
   al->anchors[i]->col = col;
   al->anchors[i]->last_anchor_col = last_anchor_col;
@@ -47,6 +37,22 @@ void insert_anchor(AnchorList *al, int row, int col, int last_anchor_col,
   al->anchors[i]->vertical = vertical;
   al->anchors[i]->highest_possible_equity = highest_possible_equity;
   al->count++;
+}
+
+int compare_anchors(const void *a, const void *b) {
+  const Anchor *anchor_a = *(const Anchor **)a;
+  const Anchor *anchor_b = *(const Anchor **)b;
+  if (anchor_a->highest_possible_equity > anchor_b->highest_possible_equity) {
+    return -1;
+  } else if (anchor_a->highest_possible_equity < anchor_b->highest_possible_equity) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+void sort_anchor_list(AnchorList *al) {
+  qsort(al->anchors, al->count, sizeof(Anchor *), compare_anchors);
 }
 
 void reset_anchor_list(AnchorList *al) { al->count = 0; }
