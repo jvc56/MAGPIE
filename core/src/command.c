@@ -177,8 +177,9 @@ void execute_command(CommandVars *command_vars) {
   // read-only. We create a new const pointer to enforce this.
   const Config *config = command_vars->config;
 
+  update_or_create_game(config, command_vars);
+
   if (config->command_set_cgp) {
-    update_or_create_game(config, command_vars);
     cgp_parse_status_t cgp_parse_status =
         load_cgp(command_vars->game, config->cgp);
     set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_CGP_LOAD,
@@ -217,6 +218,7 @@ void execute_command(CommandVars *command_vars) {
 
 void execute_command_and_set_mode_stopped(CommandVars *command_vars) {
   execute_command(command_vars);
+  // FIXME: seems inelegant, find a better way to show errors
   if (command_vars->error_status->type != ERROR_STATUS_TYPE_NONE) {
     char *error_status_string =
         error_status_to_string(command_vars->error_status);
