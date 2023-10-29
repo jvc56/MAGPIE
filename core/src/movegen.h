@@ -21,6 +21,7 @@
 #define BINGO_BONUS 50
 #define NON_OUTPLAY_LEAVE_SCORE_MULTIPLIER_PENALTY 2.0
 #define NON_OUTPLAY_CONSTANT_PENALTY 10.0
+#define BINGO_LIST_CAPACITY 10000
 
 typedef struct Generator {
   int current_row_index;
@@ -44,10 +45,19 @@ typedef struct Generator {
   LeaveMap *leave_map;
   LetterDistribution *letter_distribution;
 
+  // Bingo lookup
+  uint8_t rack_bingos[BINGO_LIST_CAPACITY][RACK_SIZE];
+  int number_of_bingos;
+
   // Shadow plays
   int current_left_col;
   int current_right_col;
+  int num_tiles_played_through;
+  int max_num_playthrough;
+  int min_tiles_to_play;
+  int max_tiles_to_play;
   double highest_shadow_equity;
+  double highest_equity_by_length[(RACK_SIZE + 1)];
   uint64_t rack_cross_set;
   int move_sorting_type;
   int number_of_letters_on_rack;
