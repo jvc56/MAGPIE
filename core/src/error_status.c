@@ -7,11 +7,7 @@
 void set_error_status(ErrorStatus *error_status, error_status_t type,
                       int code) {
   error_status->code = code;
-  if (code == 0) {
-    error_status->type = ERROR_STATUS_TYPE_NONE;
-  } else {
-    error_status->type = type;
-  }
+  error_status->type = type;
 }
 
 ErrorStatus *create_error_status(error_status_t type, int code) {

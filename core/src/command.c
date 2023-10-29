@@ -121,14 +121,50 @@ void update_or_create_game(const Config *config, CommandVars *command_vars) {
   }
 }
 
+bool is_successful_error_code(error_status_t error_status_type,
+                              int error_code) {
+  bool is_success = false;
+  switch (error_status_type) {
+  case ERROR_STATUS_TYPE_NONE:
+    is_success = true;
+    break;
+  case ERROR_STATUS_TYPE_SIM:
+    is_success = error_code == (int)SIM_STATUS_SUCCESS;
+    break;
+  case ERROR_STATUS_TYPE_INFER:
+    is_success = error_code == (int)INFERENCE_STATUS_SUCCESS;
+    break;
+  case ERROR_STATUS_TYPE_AUTOPLAY:
+    is_success = error_code == (int)AUTOPLAY_STATUS_SUCCESS;
+    break;
+  case ERROR_STATUS_TYPE_CONFIG_LOAD:
+    is_success = error_code == (int)CONFIG_LOAD_STATUS_SUCCESS;
+    break;
+  case ERROR_STATUS_TYPE_CGP_LOAD:
+    is_success = error_code == (int)CGP_PARSE_STATUS_SUCCESS;
+    break;
+  }
+  return is_success;
+}
+
+void set_or_clear_error_status(ErrorStatus *error_status,
+                               error_status_t error_status_type,
+                               int error_code) {
+  if (is_successful_error_code(error_status_type, error_code)) {
+    set_error_status(error_status, ERROR_STATUS_TYPE_NONE, 0);
+  } else {
+    set_error_status(error_status, error_status_type, error_code);
+  }
+}
+
 void execute_sim(CommandVars *command_vars, const Config *config) {
   if (!command_vars->simmer) {
     command_vars->simmer = create_simmer(config);
   }
   sim_status_t status = simulate(config, command_vars->thread_control,
                                  command_vars->simmer, command_vars->game);
-  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_SIM,
-                   (int)status);
+  set_or_clear_error_status(command_vars->error_status, ERROR_STATUS_TYPE_SIM,
+                            (int)status);
 }
 
 void execute_autoplay(CommandVars *command_vars, const Config *config) {
@@ -137,8 +173,8 @@ void execute_autoplay(CommandVars *command_vars, const Config *config) {
   }
   autoplay_status_t status = autoplay(config, command_vars->thread_control,
                                       command_vars->autoplay_results);
-  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
-                   (int)status);
+  set_or_clear_error_status(command_vars->error_status,
+                            ERROR_STATUS_TYPE_AUTOPLAY, (int)status);
 }
 
 void execute_infer(CommandVars *command_vars, const Config *config) {
@@ -148,8 +184,8 @@ void execute_infer(CommandVars *command_vars, const Config *config) {
   inference_status_t status =
       infer(config, command_vars->thread_control, command_vars->game,
             command_vars->inference);
-  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_INFER,
-                   (int)status);
+  set_or_clear_error_status(command_vars->error_status, ERROR_STATUS_TYPE_INFER,
+                            (int)status);
 }
 
 void load_thread_control(CommandVars *command_vars, const Config *config) {
@@ -167,8 +203,9 @@ void execute_command(CommandVars *command_vars) {
 
   config_load_status_t config_load_status =
       load_config(command_vars->config, command_vars->command);
-  set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
-                   (int)config_load_status);
+  set_or_clear_error_status(command_vars->error_status,
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            (int)config_load_status);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return;
   }
@@ -182,8 +219,9 @@ void execute_command(CommandVars *command_vars) {
   if (config->command_set_cgp) {
     cgp_parse_status_t cgp_parse_status =
         load_cgp(command_vars->game, config->cgp);
-    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_CGP_LOAD,
-                     (int)cgp_parse_status);
+    set_or_clear_error_status(command_vars->error_status,
+                              ERROR_STATUS_TYPE_CGP_LOAD,
+                              (int)cgp_parse_status);
     if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
       return;
     }
@@ -192,8 +230,9 @@ void execute_command(CommandVars *command_vars) {
   load_thread_control(command_vars, config);
   switch (config->command_type) {
   case COMMAND_TYPE_UNKNOWN:
-    set_error_status(command_vars->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
-                     (int)CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND);
+    set_or_clear_error_status(command_vars->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              (int)CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND);
     break;
   case COMMAND_TYPE_SET_OPTIONS:
     // this operation is just for loading the config
@@ -335,6 +374,11 @@ void execute_command_file_sync(const char *filename) {
 }
 
 void process_command(int argc, char *argv[]) {
+  // Create command vars here
+  // process:
+  // error out - set error out in log
+  // infile set infile to read from
+  // outfile set outfile in thread control
   if (argc == 1) {
     // Use console mode by default
     command_scan_loop(COMMAND_MODE_CONSOLE);
