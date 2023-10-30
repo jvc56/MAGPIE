@@ -1024,7 +1024,7 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
               ((row < BOARD_DIM - 1) && !is_empty(board, row + 1, col));
           int letter_multiplier = bonus_square & 0x0F;
           if (actual_cross_word) {
-            tile_crossing_score =
+            tile_crossing_score +=
                 tile_score * this_word_multiplier * letter_multiplier;
           }
           printf(
