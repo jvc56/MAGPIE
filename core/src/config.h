@@ -38,6 +38,7 @@ typedef enum {
   CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL,
   CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL,
   CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS,
+  CONFIG_LOAD_STATUS_FOUND_COLDSTART_ONLY_OPTION,
 } config_load_status_t;
 
 typedef enum {
@@ -48,6 +49,13 @@ typedef enum {
   COMMAND_TYPE_AUTOPLAY,
   COMMAND_TYPE_SET_OPTIONS,
 } command_t;
+
+typedef enum {
+  CONFIG_MODE_SINGLE_COMMAND,
+  CONFIG_MODE_CONSOLE,
+  CONFIG_MODE_UCGI,
+  CONFIG_MODE_COMMAND_FILE,
+} config_mode_t;
 
 typedef struct Config {
   command_t command_type;
@@ -81,9 +89,13 @@ typedef struct Config {
   uint64_t random_seed;
   // Thread Control
   ThreadControl *thread_control;
+  // Config mode and command file execution
+  config_mode_t mode;
+  char *command_file;
 } Config;
 
-config_load_status_t load_config(Config *config, const char *cmd);
+config_load_status_t load_config(Config *config, const char *cmd,
+                                 bool coldstart);
 Config *create_default_config();
 void destroy_config(Config *config);
 

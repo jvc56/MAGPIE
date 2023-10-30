@@ -65,6 +65,9 @@
 #define ARG_INFILE "infile"
 #define ARG_OUTFILE "outfile"
 #define ARG_ERRORFILE "errorfile"
+#define ARG_CONSOLE_MODE "console"
+#define ARG_UCGI_MODE "ucgi"
+#define ARG_COMMAND_FILE "file"
 
 #define ARG_VAL_MOVE_SORT_EQUITY "equity"
 #define ARG_VAL_MOVE_SORT_SCORE "score"
@@ -126,6 +129,10 @@ typedef enum {
   ARG_TOKEN_INFILE,
   ARG_TOKEN_OUTFILE,
   ARG_TOKEN_ERRORFILE,
+
+  ARG_TOKEN_CONSOLE_MODE,
+  ARG_TOKEN_UCGI_MODE,
+  ARG_TOKEN_COMMAND_FILE,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -140,6 +147,7 @@ const struct {
   arg_token_t arg_token_sequence[3];
 } VALID_COMMAND_SEQUENCES[6] = {
     // The valid sequences
+    // The NUMBER_OF_ARG_TOKENS denotes the end of the given sequence
     {COMMAND_TYPE_LOAD_CGP, {ARG_TOKEN_POSITION, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_SIM, {ARG_TOKEN_GO, ARG_TOKEN_SIM, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_INFER, {ARG_TOKEN_GO, ARG_TOKEN_INFER, NUMBER_OF_ARG_TOKENS}},
@@ -287,6 +295,12 @@ ParsedArgs *create_parsed_args() {
   set_single_arg(parsed_args, index++, ARG_TOKEN_OUTFILE, ARG_OUTFILE, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_ERRORFILE, ARG_ERRORFILE, 1);
 
+  set_single_arg(parsed_args, index++, ARG_TOKEN_CONSOLE_MODE, ARG_CONSOLE_MODE,
+                 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_UCGI_MODE, ARG_UCGI_MODE, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_COMMAND_FILE, ARG_COMMAND_FILE,
+                 1);
+
   assert(index == NUMBER_OF_ARG_TOKENS);
 
   return parsed_args;
@@ -385,13 +399,17 @@ config_load_status_t load_letter_distribution_for_config(
     Config *config, const char *lexicon_name,
     const char *input_letter_distribution_name) {
   char *letter_distribution_name = NULL;
-  if (is_string_empty_or_null(input_letter_distribution_name)) {
+
+  if (!is_string_empty_or_null(input_letter_distribution_name)) {
+    letter_distribution_name =
+        get_formatted_string("%s", input_letter_distribution_name);
+  } else if (!is_string_empty_or_null(lexicon_name)) {
     letter_distribution_name =
         get_default_letter_distribution_name(lexicon_name);
   } else {
-    letter_distribution_name =
-        get_formatted_string("%s", input_letter_distribution_name);
+    return CONFIG_LOAD_STATUS_LEXICON_MISSING;
   }
+
   if (strings_equal(config->ld_name, letter_distribution_name)) {
     free(letter_distribution_name);
     return CONFIG_LOAD_STATUS_SUCCESS;
@@ -644,6 +662,20 @@ config_load_status_t load_errorfile_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
+config_load_status_t load_mode_for_config(Config *config,
+                                          config_mode_t config_mode_type,
+                                          const char *command_filename,
+                                          bool coldstart) {
+  if (!coldstart) {
+    return CONFIG_LOAD_STATUS_FOUND_COLDSTART_ONLY_OPTION;
+  }
+  config->mode = config_mode_type;
+  if (config->mode == CONFIG_MODE_COMMAND_FILE) {
+    config->command_file = get_formatted_string("%s", command_filename);
+  }
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
 int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
   config->command_type = COMMAND_TYPE_UNKNOWN;
   int number_of_tokens_parsed = 0;
@@ -776,7 +808,8 @@ config_load_status_t load_leaves_for_config(Config *config,
 }
 
 config_load_status_t load_config_with_parsed_args(Config *config,
-                                                  ParsedArgs *parsed_args) {
+                                                  ParsedArgs *parsed_args,
+                                                  bool coldstart) {
 
   int args_start_index = set_command_type_for_config(config, parsed_args);
 
@@ -936,6 +969,18 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     case ARG_TOKEN_ERRORFILE:
       config_load_status = load_errorfile_for_config(config, arg_values[0]);
       break;
+    case ARG_TOKEN_CONSOLE_MODE:
+      config_load_status =
+          load_mode_for_config(config, CONFIG_MODE_CONSOLE, NULL, coldstart);
+      break;
+    case ARG_TOKEN_UCGI_MODE:
+      config_load_status =
+          load_mode_for_config(config, CONFIG_MODE_UCGI, NULL, coldstart);
+      break;
+    case ARG_TOKEN_ERRORFILE:
+      config_load_status = load_mode_for_config(
+          config, CONFIG_MODE_COMMAND_FILE, arg_values[0], coldstart);
+      break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("invalid token found in args\n");
       break;
@@ -945,9 +990,15 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     }
   }
 
+  // FIXME: use better logic for this coldstart lexicon missing nonsense
+
   config_load_status = load_lexicons_for_config(config, new_p1_lexicon_name,
                                                 new_p2_lexicon_name);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+  // Coldstart might not have a lexicon
+  // and we want to allow that
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS &&
+      !(coldstart &&
+        config_load_status == CONFIG_LOAD_STATUS_LEXICON_MISSING)) {
     return config_load_status;
   }
 
@@ -959,13 +1010,23 @@ config_load_status_t load_config_with_parsed_args(Config *config,
                                  0),
       new_letter_distribution_name);
 
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS &&
+      !(coldstart &&
+        config_load_status == CONFIG_LOAD_STATUS_LEXICON_MISSING)) {
     return config_load_status;
+  }
+
+  // If the rack is specified, then we really need a lexicon
+  // even on coldstart
+  if (rack && config_load_status == CONFIG_LOAD_STATUS_LEXICON_MISSING) {
+    return CONFIG_LOAD_STATUS_LEXICON_MISSING;
   }
 
   // The letter distribution may have changed,
   // so we might need to update the rack.
-  update_or_create_rack(&config->rack, config->letter_distribution->size);
+  if (config_load_status != CONFIG_LOAD_STATUS_LEXICON_MISSING) {
+    update_or_create_rack(&config->rack, config->letter_distribution->size);
+  }
 
   // Now that the letter distribution has been loaded
   // we can read the rack.
@@ -992,7 +1053,8 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   return load_winpct_for_config(config, new_win_pct_name);
 }
 
-config_load_status_t load_config(Config *config, const char *cmd) {
+config_load_status_t load_config(Config *config, const char *cmd,
+                                 bool coldstart) {
   ParsedArgs *parsed_args = create_parsed_args();
   StringSplitter *cmd_split_string = split_string_by_whitespace(cmd, true);
   // CGP values can have semicolons at the end, so
@@ -1003,7 +1065,8 @@ config_load_status_t load_config(Config *config, const char *cmd) {
 
   config->command_set_cgp = false;
   if (config_load_status == CONFIG_LOAD_STATUS_SUCCESS) {
-    config_load_status = load_config_with_parsed_args(config, parsed_args);
+    config_load_status =
+        load_config_with_parsed_args(config, parsed_args, coldstart);
   }
 
   destroy_parsed_args(parsed_args);
@@ -1038,6 +1101,8 @@ Config *create_default_config() {
   config->use_game_pairs = false;
   config->random_seed = 0;
   config->thread_control = create_thread_control();
+  config->mode = CONFIG_MODE_CONSOLE;
+  config->command_file = NULL;
   return config;
 }
 
