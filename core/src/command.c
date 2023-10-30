@@ -22,7 +22,7 @@ typedef enum {
   COMMAND_MODE_UCGI,
 } command_mode_t;
 
-CommandVars *create_command_vars(FILE *outfile) {
+CommandVars *create_command_vars() {
   CommandVars *command_vars = malloc_or_die(sizeof(CommandVars));
   command_vars->command = NULL;
   command_vars->config = NULL;
@@ -31,8 +31,6 @@ CommandVars *create_command_vars(FILE *outfile) {
   command_vars->inference = NULL;
   command_vars->autoplay_results = NULL;
   command_vars->error_status = create_error_status(ERROR_STATUS_TYPE_NONE, 0);
-  command_vars->thread_control = create_thread_control(outfile);
-  command_vars->outfile = outfile;
   return command_vars;
 }
 
@@ -54,7 +52,6 @@ void destroy_command_vars(CommandVars *command_vars) {
     destroy_autoplay_results(command_vars->autoplay_results);
   }
   destroy_error_status(command_vars->error_status);
-  destroy_thread_control(command_vars->thread_control);
   free(command_vars);
 }
 
@@ -63,23 +60,20 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
     log_warn("The command variables struct has not been initialized.");
     return NULL;
   }
-  if (!command_vars->thread_control) {
-    // log fatally since there should always be
-    // a thread control
-    log_fatal("Thread controller has not been initialized.");
-  }
 
-  int mode = get_mode(command_vars->thread_control);
+  ThreadControl *thread_control = command_vars->config->thread_control;
+
+  int mode = get_mode(thread_control);
   if (mode != MODE_SEARCHING) {
     log_warn("Not currently searching.");
     return NULL;
   }
 
   if (should_halt) {
-    if (!halt(command_vars->thread_control, HALT_STATUS_USER_INTERRUPT)) {
+    if (!halt(thread_control, HALT_STATUS_USER_INTERRUPT)) {
       log_warn("Command already halted.");
     }
-    wait_for_mode_stopped(command_vars->thread_control);
+    wait_for_mode_stopped(thread_control);
   }
 
   char *status_string = NULL;
@@ -161,8 +155,8 @@ void execute_sim(CommandVars *command_vars, const Config *config) {
   if (!command_vars->simmer) {
     command_vars->simmer = create_simmer(config);
   }
-  sim_status_t status = simulate(config, command_vars->thread_control,
-                                 command_vars->simmer, command_vars->game);
+  sim_status_t status =
+      simulate(config, command_vars->simmer, command_vars->game);
   set_or_clear_error_status(command_vars->error_status, ERROR_STATUS_TYPE_SIM,
                             (int)status);
 }
@@ -171,8 +165,7 @@ void execute_autoplay(CommandVars *command_vars, const Config *config) {
   if (!command_vars->autoplay_results) {
     command_vars->autoplay_results = create_autoplay_results();
   }
-  autoplay_status_t status = autoplay(config, command_vars->thread_control,
-                                      command_vars->autoplay_results);
+  autoplay_status_t status = autoplay(config, command_vars->autoplay_results);
   set_or_clear_error_status(command_vars->error_status,
                             ERROR_STATUS_TYPE_AUTOPLAY, (int)status);
 }
@@ -182,18 +175,9 @@ void execute_infer(CommandVars *command_vars, const Config *config) {
     command_vars->inference = create_inference();
   }
   inference_status_t status =
-      infer(config, command_vars->thread_control, command_vars->game,
-            command_vars->inference);
+      infer(config, command_vars->game, command_vars->inference);
   set_or_clear_error_status(command_vars->error_status, ERROR_STATUS_TYPE_INFER,
                             (int)status);
-}
-
-void load_thread_control(CommandVars *command_vars, const Config *config) {
-  command_vars->thread_control->number_of_threads = config->number_of_threads;
-  command_vars->thread_control->print_info_interval =
-      config->print_info_interval;
-  command_vars->thread_control->check_stopping_condition_interval =
-      config->check_stopping_condition_interval;
 }
 
 void execute_command(CommandVars *command_vars) {
@@ -227,7 +211,6 @@ void execute_command(CommandVars *command_vars) {
     }
   }
 
-  load_thread_control(command_vars, config);
   switch (config->command_type) {
   case COMMAND_TYPE_UNKNOWN:
     set_or_clear_error_status(command_vars->error_status,
@@ -261,10 +244,10 @@ void execute_command_and_set_mode_stopped(CommandVars *command_vars) {
   if (command_vars->error_status->type != ERROR_STATUS_TYPE_NONE) {
     char *error_status_string =
         error_status_to_string(command_vars->error_status);
-    print_to_file(command_vars->thread_control, error_status_string);
+    print_to_outfile(command_vars->config->thread_control, error_status_string);
     free(error_status_string);
   }
-  set_mode_stopped(command_vars->thread_control);
+  set_mode_stopped(command_vars->config->thread_control);
 }
 
 void *execute_command_thread_worker(void *uncasted_command_vars) {
@@ -274,11 +257,11 @@ void *execute_command_thread_worker(void *uncasted_command_vars) {
 }
 
 void execute_command_sync_or_async(CommandVars *command_vars, bool sync) {
-  if (!set_mode_searching(command_vars->thread_control)) {
+  if (!set_mode_searching(command_vars->config->thread_control)) {
     log_warn("still searching");
     return;
   }
-  unhalt(command_vars->thread_control);
+  unhalt(command_vars->config->thread_control);
   if (sync) {
     execute_command_and_set_mode_stopped(command_vars);
   } else {
@@ -306,12 +289,13 @@ void execute_single_command_sync(const char *command) {
 
 void process_ucgi_command(CommandVars *command_vars) {
   // Assume cmd is already trimmed of whitespace
+  ThreadControl *thread_control = command_vars->config->thread_control;
   if (strings_equal(command_vars->command, UCGI_COMMAND_STRING)) {
     // More of a formality to align with UCI
-    print_to_file(command_vars->thread_control, "id name MAGPIE 0.1\nucgiok\n");
+    print_to_outfile(thread_control, "id name MAGPIE 0.1\nucgiok\n");
   } else if (strings_equal(command_vars->command, STOP_COMMAND_STRING)) {
-    if (get_mode(command_vars->thread_control) == MODE_SEARCHING) {
-      if (!halt(command_vars->thread_control, HALT_STATUS_USER_INTERRUPT)) {
+    if (get_mode(thread_control) == MODE_SEARCHING) {
+      if (!halt(thread_control, HALT_STATUS_USER_INTERRUPT)) {
         log_warn("Search already received stop signal but has not stopped.");
       }
     } else {
@@ -323,14 +307,15 @@ void process_ucgi_command(CommandVars *command_vars) {
 }
 
 void command_scan_loop(command_mode_t command_mode_type) {
-  CommandVars *command_vars = create_command_vars(stdout);
+  CommandVars *command_vars = create_command_vars();
   char *input = NULL;
   size_t input_size = 0;
   ssize_t input_length;
   while (1) {
     if (command_mode_type == COMMAND_MODE_CONSOLE) {
-      print_to_file(command_vars->thread_control, "magpie>");
+      print_to_outfile(command_vars->config->thread_control, "magpie>");
     }
+    // FIXME: use filehandler infile instead of stdin
     input_length = getline(&input, &input_size, stdin);
 
     if (input_length == -1) {
@@ -374,11 +359,6 @@ void execute_command_file_sync(const char *filename) {
 }
 
 void process_command(int argc, char *argv[]) {
-  // Create command vars here
-  // process:
-  // error out - set error out in log
-  // infile set infile to read from
-  // outfile set outfile in thread control
   if (argc == 1) {
     // Use console mode by default
     command_scan_loop(COMMAND_MODE_CONSOLE);

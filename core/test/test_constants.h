@@ -1,14 +1,7 @@
 #ifndef TEST_CONSTANTS_H
 #define TEST_CONSTANTS_H
 
-#define CMD_GEN "gen"
-#define CMD_UNIT_TESTS "unit"
-#define CMD_PROF "prof"
-#define CMD_AUTOPLAY "autoplay"
-#define CMD_INFER "infer"
-#define CMD_TOPVALL "topvall"
-#define CMD_SIM "sim"
-#define CMD_SIM_STOPPING "simstopping"
+#define TESTDATA_FILEPATH "testdata/"
 
 #define EMPTY_CGP                                                              \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;"

@@ -16,15 +16,13 @@ typedef struct CommandVars {
   Simmer *simmer;
   Inference *inference;
   AutoplayResults *autoplay_results;
-  ThreadControl *thread_control;
   ErrorStatus *error_status;
-  FILE *outfile;
 } CommandVars;
 
 void execute_command_sync(CommandVars *command_vars);
 void execute_command_async(CommandVars *command_vars);
 char *command_search_status(CommandVars *command_vars, bool should_halt);
-CommandVars *create_command_vars(FILE *outfile);
+CommandVars *create_command_vars();
 void destroy_command_vars(CommandVars *command_vars);
 void process_command(int argc, char *argv[]);
 

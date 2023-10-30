@@ -19,7 +19,7 @@ typedef struct AutoplayResults {
   Stat *p2_score;
 } AutoplayResults;
 
-autoplay_status_t autoplay(const Config *config, ThreadControl *thread_control,
+autoplay_status_t autoplay(const Config *config,
                            AutoplayResults *autoplay_results);
 AutoplayResults *create_autoplay_results();
 void destroy_autoplay_results(AutoplayResults *autoplay_results);

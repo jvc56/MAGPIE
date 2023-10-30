@@ -2,11 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "config.h"
 #include "thread_control.h"
 #include "util.h"
 
-ThreadControl *create_thread_control(FILE *outfile) {
+ThreadControl *create_thread_control() {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
   thread_control->number_of_threads = 1;
   pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
@@ -18,21 +17,34 @@ ThreadControl *create_thread_control(FILE *outfile) {
   pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
   thread_control->check_stopping_condition_interval = 0;
   thread_control->check_stop_status = CHECK_STOP_INACTIVE;
-  if (!outfile) {
-    thread_control->outfile = stdout;
-  } else {
-    thread_control->outfile = outfile;
-  }
   pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
+  thread_control->outfile = create_file_handler_from_filename(
+      STDOUT_FILENAME, FILE_HANDLER_MODE_WRITE);
+  thread_control->infile =
+      create_file_handler_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
+  thread_control->errorfile = create_file_handler_from_filename(
+      STDERR_FILENAME, FILE_HANDLER_MODE_WRITE);
   return thread_control;
 }
 
 void destroy_thread_control(ThreadControl *thread_control) {
+  destroy_file_handler(thread_control->outfile);
+  destroy_file_handler(thread_control->infile);
+  destroy_file_handler(thread_control->errorfile);
   free(thread_control);
 }
 
-void set_outfile(ThreadControl *thread_control, FILE *new_outfile) {
-  thread_control->outfile = new_outfile;
+void set_outfile(ThreadControl *thread_control, const char *filename) {
+  set_file_handler(thread_control->outfile, filename, FILE_HANDLER_MODE_WRITE);
+}
+
+void set_infile(ThreadControl *thread_control, const char *filename) {
+  set_file_handler(thread_control->infile, filename, FILE_HANDLER_MODE_READ);
+}
+
+void set_errorfile(ThreadControl *thread_control, const char *filename) {
+  set_file_handler(thread_control->errorfile, filename,
+                   FILE_HANDLER_MODE_WRITE);
 }
 
 void set_print_info_interval(ThreadControl *thread_control,
@@ -139,12 +151,11 @@ bool set_check_stop_inactive(ThreadControl *thread_control) {
   return success;
 }
 
-void print_to_file(ThreadControl *thread_control, const char *content) {
+void print_to_outfile(ThreadControl *thread_control, const char *content) {
   // Lock to print unconditionally even if we might not need
   // to for simplicity. The performance cost is negligible.
   pthread_mutex_lock(&thread_control->print_output_mutex);
-  fprintf(thread_control->outfile, "%s", content);
-  fflush(thread_control->outfile);
+  write_to_file(thread_control->outfile, content);
   pthread_mutex_unlock(&thread_control->print_output_mutex);
 }
 

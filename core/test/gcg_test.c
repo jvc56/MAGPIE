@@ -7,12 +7,11 @@
 #include "../src/gcg.h"
 #include "../src/util.h"
 
+#include "test_constants.h"
 #include "test_util.h"
 
-#define GCG_DIRECTORY_FILEPATH "testdata/"
-
 char *get_gcg_filepath(const char *filename) {
-  return get_formatted_string("%s%s", GCG_DIRECTORY_FILEPATH, filename);
+  return get_formatted_string("%s%s", TESTDATA_FILEPATH, filename);
 }
 
 gcg_parse_status_t test_parse_gcg(const char *gcg_filename,

@@ -22,7 +22,7 @@
 
 Simmer *create_simmer(const Config *config) {
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
-  simmer->threads = config->number_of_threads;
+  simmer->threads = config->thread_control->number_of_threads;
   simmer->win_pcts = config->win_pcts;
   simmer->max_iterations = 0;
   simmer->stopping_condition = SIM_STOPPING_CONDITION_NONE;
@@ -485,8 +485,7 @@ void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
         compare_simmed_plays);
 }
 
-sim_status_t simulate(const Config *config, ThreadControl *thread_control,
-                      Simmer *simmer, Game *game) {
+sim_status_t simulate(const Config *config, Simmer *simmer, Game *game) {
   reset_move_list(game->gen->move_list);
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
@@ -496,7 +495,7 @@ sim_status_t simulate(const Config *config, ThreadControl *thread_control,
   sort_moves(game->gen->move_list);
 
   if (config->static_search_only) {
-    print_ucgi_static_moves(game, config->num_plays, thread_control);
+    print_ucgi_static_moves(game, config->num_plays, config->thread_control);
     return SIM_STATUS_SUCCESS;
   }
 
@@ -509,9 +508,9 @@ sim_status_t simulate(const Config *config, ThreadControl *thread_control,
   }
 
   // Prepare the shared simmer attributes
-  simmer->thread_control = thread_control;
+  simmer->thread_control = config->thread_control;
   simmer->max_plies = config->plies;
-  simmer->threads = config->number_of_threads;
+  simmer->threads = config->thread_control->number_of_threads;
   simmer->max_iterations = config->max_iterations;
   simmer->stopping_condition = config->stopping_condition;
 
@@ -558,13 +557,14 @@ sim_status_t simulate(const Config *config, ThreadControl *thread_control,
       }
     }
 
-    SimmerWorker **simmer_workers =
-        malloc_or_die((sizeof(SimmerWorker *)) * (config->number_of_threads));
-    pthread_t *worker_ids =
-        malloc_or_die((sizeof(pthread_t)) * (config->number_of_threads));
+    SimmerWorker **simmer_workers = malloc_or_die(
+        (sizeof(SimmerWorker *)) * (config->thread_control->number_of_threads));
+    pthread_t *worker_ids = malloc_or_die(
+        (sizeof(pthread_t)) * (config->thread_control->number_of_threads));
 
-    clock_gettime(CLOCK_MONOTONIC, &thread_control->start_time);
-    for (int thread_index = 0; thread_index < config->number_of_threads;
+    clock_gettime(CLOCK_MONOTONIC, &config->thread_control->start_time);
+    for (int thread_index = 0;
+         thread_index < config->thread_control->number_of_threads;
          thread_index++) {
       simmer_workers[thread_index] =
           create_simmer_worker(simmer, game, thread_index);
@@ -572,7 +572,8 @@ sim_status_t simulate(const Config *config, ThreadControl *thread_control,
                      simmer_workers[thread_index]);
     }
 
-    for (int thread_index = 0; thread_index < config->number_of_threads;
+    for (int thread_index = 0;
+         thread_index < config->thread_control->number_of_threads;
          thread_index++) {
       pthread_join(worker_ids[thread_index], NULL);
       destroy_simmer_worker(simmer_workers[thread_index]);

@@ -80,9 +80,7 @@ typedef struct Config {
   bool use_game_pairs;
   uint64_t random_seed;
   // Thread Control
-  int number_of_threads;
-  int print_info_interval;
-  int check_stopping_condition_interval;
+  ThreadControl *thread_control;
 } Config;
 
 config_load_status_t load_config(Config *config, const char *cmd);

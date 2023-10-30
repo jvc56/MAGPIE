@@ -62,8 +62,8 @@ typedef struct Inference {
   ThreadControl *thread_control;
 } Inference;
 
-inference_status_t infer(const Config *config, ThreadControl *thread_control,
-                         Game *game, Inference *inference);
+inference_status_t infer(const Config *config, Game *game,
+                         Inference *inference);
 Inference *create_inference();
 void destroy_inference(Inference *inference);
 uint64_t get_subtotal(InferenceRecord *record, uint8_t letter,

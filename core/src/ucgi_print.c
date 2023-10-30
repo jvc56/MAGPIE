@@ -19,7 +19,7 @@ void print_ucgi_inference_current_rack(uint64_t current_rack_index,
                                        ThreadControl *thread_control) {
   char *current_rack_info_string = get_formatted_string(
       "info infercurrrack %llu\n", (long long unsigned int)current_rack_index);
-  print_to_file(thread_control, current_rack_info_string);
+  print_to_outfile(thread_control, current_rack_info_string);
   free(current_rack_info_string);
 }
 
@@ -28,7 +28,7 @@ void print_ucgi_inference_total_racks_evaluated(uint64_t total_racks_evaluated,
   char *total_racks_info_string =
       get_formatted_string("info infertotalracks %llu\n",
                            (long long unsigned int)total_racks_evaluated);
-  print_to_file(thread_control, total_racks_info_string);
+  print_to_outfile(thread_control, total_racks_info_string);
   free(total_racks_info_string);
 }
 
@@ -163,7 +163,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
         get_weight(common_leaves_record->equity_values),
         game->gen->letter_distribution, is_exchange, ucgi_string_builder);
   }
-  print_to_file(thread_control, string_builder_peek(ucgi_string_builder));
+  print_to_outfile(thread_control, string_builder_peek(ucgi_string_builder));
   destroy_string_builder(ucgi_string_builder);
 }
 
@@ -195,7 +195,7 @@ char *ucgi_static_moves(Game *game, int nmoves) {
 void print_ucgi_static_moves(Game *game, int nmoves,
                              ThreadControl *thread_control) {
   char *starting_moves_string_pointer = ucgi_static_moves(game, nmoves);
-  print_to_file(thread_control, starting_moves_string_pointer);
+  print_to_outfile(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
 }
 
@@ -276,7 +276,7 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
 void print_ucgi_sim_stats(Simmer *simmer, Game *game, int print_best_play) {
   char *starting_stats_string_pointer =
       ucgi_sim_stats(simmer, game, print_best_play);
-  print_to_file(simmer->thread_control, starting_stats_string_pointer);
+  print_to_outfile(simmer->thread_control, starting_stats_string_pointer);
   free(starting_stats_string_pointer);
 }
 
@@ -292,6 +292,6 @@ void print_ucgi_autoplay_results(AutoplayResults *autoplay_results,
       get_stdev(autoplay_results->p1_score),
       get_mean(autoplay_results->p2_score),
       get_stdev(autoplay_results->p2_score));
-  print_to_file(thread_control, results_string);
+  print_to_outfile(thread_control, results_string);
   free(results_string);
 }

@@ -62,6 +62,9 @@
 #define ARG_NUMBER_OF_THREADS "threads"
 #define ARG_PRINT_INFO_INTERVAL "info"
 #define ARG_CHECK_STOP_INTERVAL "check"
+#define ARG_INFILE "infile"
+#define ARG_OUTFILE "outfile"
+#define ARG_ERRORFILE "errorfile"
 
 #define ARG_VAL_MOVE_SORT_EQUITY "equity"
 #define ARG_VAL_MOVE_SORT_SCORE "score"
@@ -120,6 +123,9 @@ typedef enum {
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
   ARG_TOKEN_CHECK_STOP_INTERVAL,
+  ARG_TOKEN_INFILE,
+  ARG_TOKEN_OUTFILE,
+  ARG_TOKEN_ERRORFILE,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -277,6 +283,9 @@ ParsedArgs *create_parsed_args() {
                  ARG_PRINT_INFO_INTERVAL, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_CHECK_STOP_INTERVAL,
                  ARG_CHECK_STOP_INTERVAL, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_INFILE, ARG_INFILE, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_OUTFILE, ARG_OUTFILE, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_ERRORFILE, ARG_ERRORFILE, 1);
 
   assert(index == NUMBER_OF_ARG_TOKENS);
 
@@ -587,8 +596,9 @@ load_number_of_threads_for_config(Config *config,
   if (!is_all_digits_or_empty(number_of_tiles_threads)) {
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
   }
-  config->number_of_threads = string_to_int(number_of_tiles_threads);
-  if (config->number_of_threads < 1) {
+  config->thread_control->number_of_threads =
+      string_to_int(number_of_tiles_threads);
+  if (config->thread_control->number_of_threads < 1) {
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
@@ -600,7 +610,8 @@ load_print_info_interval_for_config(Config *config,
   if (!is_all_digits_or_empty(print_info_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL;
   }
-  config->print_info_interval = string_to_int(print_info_interval);
+  config->thread_control->print_info_interval =
+      string_to_int(print_info_interval);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -610,8 +621,26 @@ load_check_stop_interval_for_config(Config *config,
   if (!is_all_digits_or_empty(check_stop_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL;
   }
-  config->check_stopping_condition_interval =
+  config->thread_control->check_stopping_condition_interval =
       string_to_int(check_stop_interval);
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+config_load_status_t load_outfile_for_config(Config *config,
+                                             const char *outfile_name) {
+  set_outfile(config->thread_control, outfile_name);
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+config_load_status_t load_infile_for_config(Config *config,
+                                            const char *infile_name) {
+  set_infile(config->thread_control, infile_name);
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+config_load_status_t load_errorfile_for_config(Config *config,
+                                               const char *errorfile_name) {
+  set_errorfile(config->thread_control, errorfile_name);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -898,6 +927,15 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       config_load_status =
           load_check_stop_interval_for_config(config, arg_values[0]);
       break;
+    case ARG_TOKEN_INFILE:
+      config_load_status = load_infile_for_config(config, arg_values[0]);
+      break;
+    case ARG_TOKEN_OUTFILE:
+      config_load_status = load_outfile_for_config(config, arg_values[0]);
+      break;
+    case ARG_TOKEN_ERRORFILE:
+      config_load_status = load_errorfile_for_config(config, arg_values[0]);
+      break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("invalid token found in args\n");
       break;
@@ -999,9 +1037,7 @@ Config *create_default_config() {
   config->static_search_only = false;
   config->use_game_pairs = false;
   config->random_seed = 0;
-  config->number_of_threads = 1;
-  config->print_info_interval = 0;
-  config->check_stopping_condition_interval = 0;
+  config->thread_control = create_thread_control();
   return config;
 }
 
@@ -1025,5 +1061,6 @@ void destroy_config(Config *config) {
     free(config->win_pct_name);
   }
   destroy_players_data(config->players_data);
+  destroy_thread_control(config->thread_control);
   free(config);
 }

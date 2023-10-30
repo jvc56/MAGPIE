@@ -18,7 +18,7 @@ void block_for_search(CommandVars *command_vars, int max_seconds) {
   // Poll for the end of the command
   int seconds_elapsed = 0;
   while (1) {
-    if (get_mode(command_vars->thread_control) == MODE_STOPPED) {
+    if (get_mode(command_vars->config->thread_control) == MODE_STOPPED) {
       break;
     } else {
       sleep(1);
@@ -37,20 +37,23 @@ void assert_command_status_and_output(CommandVars *command_vars,
                                       error_status_t expected_error_status_type,
                                       int expected_error_code,
                                       int expected_output_line_count) {
-  size_t len;
-  char *output_buffer = "";
-  FILE *file_handler = open_memstream(&output_buffer, &len);
+  char *test_output_filename =
+      get_formatted_string("%s%s", TESTDATA_FILEPATH, "test_command_output");
 
-  set_outfile(command_vars->thread_control, file_handler);
+  set_outfile(command_vars->config->thread_control, test_output_filename);
+  set_errorfile(command_vars->config->thread_control, test_output_filename);
 
   command_vars->command = command;
   execute_command_async(command_vars);
   if (should_halt) {
     // If halting, let the search start
     sleep(2);
-    halt(command_vars->thread_control, HALT_STATUS_USER_INTERRUPT);
+    halt(command_vars->config->thread_control, HALT_STATUS_USER_INTERRUPT);
   }
   block_for_search(command_vars, seconds_to_wait);
+
+  char *test_output = get_string_from_file(test_output_filename);
+
   if (command_vars->error_status->type != expected_error_status_type) {
     printf("expected error status != actual error status (%d != %d)\n",
            expected_error_status_type, command_vars->error_status->type);
@@ -61,21 +64,24 @@ void assert_command_status_and_output(CommandVars *command_vars,
   }
   assert(command_vars->error_status->type == expected_error_status_type);
   assert(command_vars->error_status->code == expected_error_code);
-  if (command_vars->thread_control->halt_status != expected_halt_status) {
+  if (command_vars->config->thread_control->halt_status !=
+      expected_halt_status) {
     printf("expected halt status != actual halt status (%d != %d)\n",
-           expected_halt_status, command_vars->thread_control->halt_status);
+           expected_halt_status,
+           command_vars->config->thread_control->halt_status);
   }
-  assert(command_vars->thread_control->halt_status == expected_halt_status);
-  assert(get_mode(command_vars->thread_control) == MODE_STOPPED);
-  int newlines_in_output = count_newlines(output_buffer);
+  assert(command_vars->config->thread_control->halt_status ==
+         expected_halt_status);
+  assert(get_mode(command_vars->config->thread_control) == MODE_STOPPED);
+  int newlines_in_output = count_newlines(test_output);
   if (newlines_in_output != expected_output_line_count) {
-    printf("output:\n>%s<\n", output_buffer);
+    printf("output:\n>%s<\n", test_output);
     printf("counts do not match %d != %d\n", newlines_in_output,
            expected_output_line_count);
     assert(0);
   }
-  fclose(file_handler);
-  free(output_buffer);
+  free(test_output);
+  free(test_output_filename);
 }
 
 void test_command_execution() {

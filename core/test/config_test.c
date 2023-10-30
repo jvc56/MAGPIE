@@ -190,9 +190,10 @@ void test_config_success() {
   assert(config->max_iterations == max_iterations);
   assert(config->stopping_condition == SIM_STOPPING_CONDITION_98PCT);
   assert(config->random_seed == (uint64_t)random_seed);
-  assert(config->number_of_threads == number_of_threads);
-  assert(config->print_info_interval == print_info);
-  assert(config->check_stopping_condition_interval == check_stop);
+  assert(config->thread_control->number_of_threads == number_of_threads);
+  assert(config->thread_control->print_info_interval == print_info);
+  assert(config->thread_control->check_stopping_condition_interval ==
+         check_stop);
   assert(config->static_search_only);
   assert(config->use_game_pairs);
 
@@ -272,9 +273,10 @@ void test_config_success() {
   assert(config->max_iterations == max_iterations);
   assert(config->stopping_condition == SIM_STOPPING_CONDITION_98PCT);
   assert(config->random_seed == (uint64_t)random_seed);
-  assert(config->number_of_threads == number_of_threads);
-  assert(config->print_info_interval == print_info);
-  assert(config->check_stopping_condition_interval == check_stop);
+  assert(config->thread_control->number_of_threads == number_of_threads);
+  assert(config->thread_control->print_info_interval == print_info);
+  assert(config->thread_control->check_stopping_condition_interval ==
+         check_stop);
   assert(!config->static_search_only);
   assert(!config->use_game_pairs);
 

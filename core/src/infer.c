@@ -482,10 +482,13 @@ Inference *copy_inference(Inference *inference, ThreadControl *thread_control) {
 void add_inference_record(InferenceRecord *inference_record_1,
                           InferenceRecord *inference_record_2,
                           int draw_and_leave_subtotals_size) {
+  int total = 0;
   for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
     inference_record_1->draw_and_leave_subtotals[i] +=
         inference_record_2->draw_and_leave_subtotals[i];
+    total += inference_record_2->draw_and_leave_subtotals[i];
   }
+  printf("had total of %d\n", total);
 }
 
 void add_inference(Inference *inference_1, Inference *inference_2) {
@@ -597,8 +600,7 @@ void set_shared_variables_for_inference(
   inference->shared_rack_index_lock = shared_rack_index_lock;
 }
 
-void infer_manager(ThreadControl *thread_control, Inference *inference,
-                   int number_of_threads) {
+void infer_manager(ThreadControl *thread_control, Inference *inference) {
 
   uint64_t total_racks_evaluated = 0;
   get_total_racks_evaluated(inference, inference->initial_tiles_to_infer,
@@ -608,6 +610,8 @@ void infer_manager(ThreadControl *thread_control, Inference *inference,
   print_ucgi_inference_total_racks_evaluated(total_racks_evaluated,
                                              thread_control);
 
+  int number_of_threads = thread_control->number_of_threads;
+  printf("number of threads: %d\n", number_of_threads);
   if (number_of_threads == 1) {
     inference->thread_control = thread_control;
     infer_worker_single_threaded(inference);
@@ -723,8 +727,8 @@ inference_status_t verify_inference(Inference *inference) {
   return INFERENCE_STATUS_SUCCESS;
 }
 
-inference_status_t infer(const Config *config, ThreadControl *thread_control,
-                         Game *game, Inference *inference) {
+inference_status_t infer(const Config *config, Game *game,
+                         Inference *inference) {
   if (!config->rack) {
     return INFERENCE_STATUS_NO_TILES_PLAYED;
   }
@@ -742,7 +746,7 @@ inference_status_t infer(const Config *config, ThreadControl *thread_control,
       (RACK_SIZE)-inference->player_to_infer_rack->number_of_letters;
   inference->initial_tiles_to_infer = tiles_to_infer;
 
-  infer_manager(thread_control, inference, config->number_of_threads);
+  infer_manager(config->thread_control, inference);
 
   // Return the player to infer rack to it's original
   // state since the inference does not own that struct
