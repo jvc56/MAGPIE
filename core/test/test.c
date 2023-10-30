@@ -60,6 +60,7 @@ void run_all(TestConfig *testconfig) {
   test_stats();
   test_infer(testconfig);
   test_sim(testconfig);
+  test_command(testconfig);
   test_gcg();
   test_autoplay(testconfig);
   test_wasm_api();
@@ -68,6 +69,8 @@ void run_all(TestConfig *testconfig) {
 void run_test(TestConfig *testconfig, const char *subtest) {
   if (strings_equal(subtest, "config")) {
     test_config();
+  } else if (strings_equal(subtest, "players")) {
+    test_players_data();
   } else if (strings_equal(subtest, "stringutil")) {
     test_string_util();
   } else if (strings_equal(subtest, "alphabet")) {

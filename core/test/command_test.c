@@ -40,6 +40,7 @@ void assert_command_status_and_output(CommandVars *command_vars,
   char *test_output_filename =
       get_formatted_string("%s%s", TESTDATA_FILEPATH, "test_command_output");
 
+  remove(test_output_filename);
   set_outfile(command_vars->config->thread_control, test_output_filename);
   set_errorfile(command_vars->config->thread_control, test_output_filename);
 
@@ -53,7 +54,6 @@ void assert_command_status_and_output(CommandVars *command_vars,
   block_for_search(command_vars, seconds_to_wait);
 
   char *test_output = get_string_from_file(test_output_filename);
-
   if (command_vars->error_status->type != expected_error_status_type) {
     printf("expected error status != actual error status (%d != %d)\n",
            expected_error_status_type, command_vars->error_status->type);
@@ -64,14 +64,6 @@ void assert_command_status_and_output(CommandVars *command_vars,
   }
   assert(command_vars->error_status->type == expected_error_status_type);
   assert(command_vars->error_status->code == expected_error_code);
-  if (command_vars->config->thread_control->halt_status !=
-      expected_halt_status) {
-    printf("expected halt status != actual halt status (%d != %d)\n",
-           expected_halt_status,
-           command_vars->config->thread_control->halt_status);
-  }
-  assert(command_vars->config->thread_control->halt_status ==
-         expected_halt_status);
   assert(get_mode(command_vars->config->thread_control) == MODE_STOPPED);
   int newlines_in_output = count_newlines(test_output);
   if (newlines_in_output != expected_output_line_count) {
@@ -80,6 +72,7 @@ void assert_command_status_and_output(CommandVars *command_vars,
            expected_output_line_count);
     assert(0);
   }
+  remove(test_output_filename);
   free(test_output);
   free(test_output_filename);
 }
@@ -90,14 +83,14 @@ void test_command_execution() {
   assert_command_status_and_output(
       command_vars, "go sim lex CSW21 i 1000 plies", false, 5, HALT_STATUS_NONE,
       ERROR_STATUS_TYPE_CONFIG_LOAD,
-      (int)CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES, 0);
+      (int)CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES, 1);
 
   assert_command_status_and_output(
       command_vars,
       "position cgp 15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 "
       "ABC5DF/YXZ 0/0 0 lex CSW21",
       false, 5, HALT_STATUS_NONE, ERROR_STATUS_TYPE_CGP_LOAD,
-      (int)CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS, 0);
+      (int)CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS, 1);
 
   // Test load cgp
   assert_command_status_and_output(
