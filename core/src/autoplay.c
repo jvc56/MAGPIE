@@ -1,10 +1,11 @@
+#include "autoplay.h"
+
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
-#include "autoplay.h"
 #include "config.h"
 #include "game.h"
 #include "gameplay.h"
@@ -60,6 +61,8 @@ void destroy_autoplay_worker(AutoplayWorker *autoplay_worker) {
 
 void record_results(Game *game, int starting_player_index,
                     AutoplayResults *autoplay_results) {
+  //printf("result %i %i %i\n", autoplay_results->total_games,
+  //       game->players[0]->score, game->players[1]->score);
   autoplay_results->total_games++;
   if (game->players[0]->score > game->players[1]->score) {
     autoplay_results->p1_wins++;
@@ -96,10 +99,10 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
                        game->players[1 - starting_player_index]->rack,
                        RACK_SIZE);
   while (!game->game_end_reason) {
-        StringBuilder *sb = create_string_builder();
-    string_builder_add_game(game, sb);
-    printf("%s\n", string_builder_peek(sb));
-    destroy_string_builder(sb);
+    //StringBuilder *sb = create_string_builder();
+    //string_builder_add_game(game, sb);
+    //printf("%s\n", string_builder_peek(sb));
+    //destroy_string_builder(sb);
     generate_moves(game->gen, game->players[game->player_on_turn_index],
                    game->players[1 - game->player_on_turn_index]->rack,
                    game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
@@ -166,7 +169,6 @@ void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
       malloc_or_die((sizeof(pthread_t)) * (config->number_of_threads));
   for (int thread_index = 0; thread_index < config->number_of_threads;
        thread_index++) {
-
     int number_of_games_for_worker =
         get_number_of_games_for_worker(config, thread_index);
 

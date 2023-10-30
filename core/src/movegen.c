@@ -79,12 +79,20 @@ double endgame_adjustment(Generator *gen, Rack *rack, Rack *opp_rack) {
   return 2 * ((double)score_on_rack(gen->letter_distribution, opp_rack));
 }
 
-double get_spare_bingo_equity(Generator *gen, Player *player, Rack *opp_rack) {
-  double other_adjustments = 0;
+double bingo_endgame_adjustment(Generator *gen, Rack *opp_rack) {
+  // An endgame bingo is always an outplay, and this function is used instead
+  // of endgame_adjustment because bingo_gen does not manipulate the player rack
+  // in the same way as recursive_gen. This should behave the same as the
+  // rack->empty case in endgame_adjustment.
+  return 2 * ((double)score_on_rack(gen->letter_distribution, opp_rack));
+}
 
-  if (gen->apply_placement_adjustment && gen->board->tiles_played == 0 &&
-      gen->move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
+double get_spare_bingo_equity(Generator *gen, Rack *opp_rack) {
+  double adjustments = 0;
+
+  if (gen->apply_placement_adjustment && gen->board->tiles_played == 0) {
+    adjustments = placement_adjustment(gen, gen->move_list->spare_move);
+    //printf("adjustments (placement): %f\n", adjustments);
   }
 
   if (gen->bag->last_tile_index >= 0) {
@@ -92,14 +100,15 @@ double get_spare_bingo_equity(Generator *gen, Player *player, Rack *opp_rack) {
                              gen->move_list->spare_move->tiles_played +
                              RACK_SIZE;
     if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
-      other_adjustments +=
-          gen->preendgame_adjustment_values[bag_plus_rack_size];
+      adjustments += gen->preendgame_adjustment_values[bag_plus_rack_size];
+      //printf("adjustments (preendgame): %f\n", adjustments);
     }
   } else {
-    other_adjustments += endgame_adjustment(gen, player->rack, opp_rack);
+    adjustments += bingo_endgame_adjustment(gen, opp_rack);
+    //printf("adjustments (endgame): %f\n", adjustments);
   }
 
-  return ((double)gen->move_list->spare_move->score) + other_adjustments;
+  return ((double)gen->move_list->spare_move->score) + adjustments;
 }
 
 double get_spare_move_equity(Generator *gen, Player *player, Rack *opp_rack) {
@@ -189,17 +198,24 @@ void record_bingo(Generator *gen, Player *player, Rack *opp_rack, int row,
   set_spare_move(gen->move_list, bingo, 0, tiles_played - 1, score, row, col,
                  tiles_played, gen->vertical, GAME_EVENT_TILE_PLACEMENT_MOVE);
 
+/*
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_move(gen->board, gen->move_list->spare_move,
+                          gen->letter_distribution, sb);
+  printf("recording bingo %s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+*/
   if (player->strategy_params->play_recorder_type == MOVE_RECORDER_ALL) {
     double equity;
     if (player->strategy_params->move_sorting == MOVE_SORT_EQUITY) {
-      equity = get_spare_bingo_equity(gen, player, opp_rack);
+      equity = get_spare_bingo_equity(gen, opp_rack);
     } else {
       equity = score;
     }
     insert_spare_move(gen->move_list, equity);
   } else {
     insert_spare_move_top_equity(gen->move_list,
-                                 get_spare_bingo_equity(gen, player, opp_rack));
+                                 get_spare_bingo_equity(gen, opp_rack));
   }
 }
 
@@ -891,7 +907,7 @@ void split_anchors_for_bingos(AnchorList *anchor_list) {
 
 void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
   const int row = gen->current_row_index;
-  const int dir = gen->vertical;
+  //const int dir = gen->vertical;
   const Board *board = gen->board;
   int leftmost_start_col = gen->current_anchor_col - (RACK_SIZE - 1);
   if (leftmost_start_col < 0) {
@@ -934,9 +950,9 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
   // for each subsequent position.
   int hook_totals[BOARD_DIM];
 
-  printf(
-      "bingo_gen: row=%d dir=%d leftmost_start_col=%d rightmost_start_col=%d\n",
-      row, dir, leftmost_start_col, rightmost_start_col);
+  //printf(
+  //    "bingo_gen: row=%d dir=%d leftmost_start_col=%d rightmost_start_col=%d\n",
+  //    row, dir, leftmost_start_col, rightmost_start_col);
 
   const int csi = get_cross_set_index(gen, player->index);
   int csd;
@@ -945,7 +961,7 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
   } else {
     csd = BOARD_VERTICAL_DIRECTION;
   }
-    hook_totals[leftmost_start_col] = 0;
+  hook_totals[leftmost_start_col] = 0;
   for (int col = leftmost_start_col; col <= leftmost_end_col; col++) {
     const uint8_t bonus_square = get_bonus_square(board, row, col);
     const int this_word_multiplier = bonus_square >> 4;
@@ -974,6 +990,7 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
   }
   uint64_t letter_bits[RACK_SIZE];
   for (int bingo_idx = 0; bingo_idx < gen->number_of_bingos; bingo_idx++) {
+    /*
     StringBuilder *sb = create_string_builder();
     for (int j = 0; j < RACK_SIZE; j++) {
       uint8_t print_tile = gen->rack_bingos[bingo_idx][j];
@@ -981,6 +998,7 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
                                              print_tile, 0, sb);
     }
     printf("trying to place bingo %s\n", string_builder_peek(sb));
+    */
     for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
       const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
       if (is_blanked(tile)) {
@@ -992,14 +1010,14 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
 
     for (int start_col = leftmost_start_col; start_col <= rightmost_start_col;
          start_col++) {
-      printf("  start_col=%d hook_total=%d\n", start_col,
-             hook_totals[start_col]);
+      //printf("  start_col=%d hook_total=%d\n", start_col,
+      //       hook_totals[start_col]);
       int end_col = start_col + (RACK_SIZE - 1);
       int fits_with_crosses = true;
       for (int col = start_col; col <= end_col; col++) {
         const int tile_idx = col - start_col;
         if ((cross_sets[col] & letter_bits[tile_idx]) == 0) {
-          printf("  tile %d doesn't fit in cross set %d\n", tile_idx, col);
+          //printf("  tile %d doesn't fit in cross set %d\n", tile_idx, col);
           fits_with_crosses = false;
           break;
         }
@@ -1011,7 +1029,7 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
       int main_word_score = 0;
       int tile_crossing_score = 0;
       for (int col = start_col; col <= end_col; col++) {
-        printf("    col=%d\n", col);
+        //printf("    col=%d\n", col);
         const int tile_idx = col - start_col;
         const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
         const uint8_t bonus_square = get_bonus_square(board, row, col);
@@ -1027,18 +1045,18 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
             tile_crossing_score +=
                 tile_score * this_word_multiplier * letter_multiplier;
           }
-          printf(
-              "    tilescore=%d letter_multiplier=%d this_word_multiplier=%d\n",
-              gen->letter_distribution->scores[tile], letter_multiplier,
-              this_word_multiplier);
+          //printf(
+          //    "    tilescore=%d letter_multiplier=%d this_word_multiplier=%d\n",
+          //    gen->letter_distribution->scores[tile], letter_multiplier,
+          //    this_word_multiplier);
           main_word_score += tile_score * letter_multiplier;
-          printf("    main_word_score=%d\n", main_word_score);
+          //printf("    main_word_score=%d\n", main_word_score);
         }
       }
       const int play_score = main_word_score * word_multiplier +
                              tile_crossing_score + hook_totals[start_col] +
                              BINGO_BONUS;
-      printf("  play_score=%d\n", play_score);
+      //printf("  play_score=%d\n", play_score);
       record_bingo(gen, player, opp_rack, row, start_col,
                    gen->rack_bingos[bingo_idx], play_score);
     }
@@ -1073,18 +1091,23 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     transpose(gen->board);
   }
 
-  StringBuilder *sb = create_string_builder();
-  string_builder_add_rack(player->rack, gen->letter_distribution, sb);
+  int do_bingo_gen = true;
+
+  //StringBuilder *sb = create_string_builder();
+  //string_builder_add_rack(player->rack, gen->letter_distribution, sb);
 
   // uint64_t start_time;
   // uint64_t end_time;
   // start_time = __rdtsc();
   gen->number_of_bingos = 0;
-  look_up_bingos(gen, player);
+  if (do_bingo_gen) {
+    look_up_bingos(gen, player);
+  }
   // end_time = __rdtsc();
   //  printf("rack: %s, number_of_bingos: %d, look_up_bingos time: %lluns\n",
   //         string_builder_peek(sb), gen->number_of_bingos, end_time -
   //         start_time);
+  /*
   for (int i = 0; i < gen->number_of_bingos; i++) {
     StringBuilder *sb = create_string_builder();
     for (int j = 0; j < RACK_SIZE; j++) {
@@ -1095,11 +1118,11 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     // printf("bingo: %s\n", string_builder_peek(sb));
     destroy_string_builder(sb);
   }
-
+*/
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
-  if (player->index == 1) {  // DO NOT SUBMIT
+  if (do_bingo_gen) { //player->index >= 0) {  // DO NOT SUBMIT
     if (gen->number_of_bingos > 0) {
       split_anchors_for_bingos(gen->anchor_list);
     }
@@ -1137,7 +1160,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     }
   }
 
-  destroy_string_builder(sb);
+  //destroy_string_builder(sb);
   reset_transpose(gen->board);
 
   // Add the pass move
