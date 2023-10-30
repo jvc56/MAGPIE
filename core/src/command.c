@@ -302,13 +302,13 @@ void process_ucgi_command(CommandVars *command_vars) {
   }
 }
 
-void command_scan_loop(command_mode_t command_mode_type) {
-  CommandVars *command_vars = create_command_vars();
+void command_scan_loop(CommandVars *command_vars) {
   char *input = NULL;
   size_t input_size = 0;
   ssize_t input_length;
+  exec_mode_t exec_mode = command_vars->config->exec_mode;
   while (1) {
-    if (command_mode_type == COMMAND_MODE_CONSOLE) {
+    if (exec_mode == COMMAND_MODE_CONSOLE) {
       print_to_outfile(command_vars->config->thread_control, "magpie>");
     }
     // FIXME: use filehandler infile instead of stdin
@@ -329,46 +329,55 @@ void command_scan_loop(command_mode_t command_mode_type) {
     }
 
     command_vars->command = input;
-    if (command_mode_type == COMMAND_MODE_UCGI) {
+    if (exec_mode == COMMAND_MODE_UCGI) {
       process_ucgi_command(command_vars);
-    } else if (command_mode_type == COMMAND_MODE_CONSOLE) {
+    } else {
       execute_command_sync(command_vars);
     }
   }
-  destroy_command_vars(command_vars);
   free(input);
 }
 
-void execute_command_file_sync(const char *filename) {
-  StringSplitter *commands = split_file_by_newline(filename);
+void execute_command_file_sync(CommandVars *command_vars) {
+  StringSplitter *commands =
+      split_file_by_newline(command_vars->config->command_file);
   int number_of_commands = string_splitter_get_number_of_items(commands);
-
-  CommandVars *command_vars = create_command_vars();
 
   for (int i = 0; i < number_of_commands; i++) {
     command_vars->command = string_splitter_get_item(commands, i);
     execute_command_sync(command_vars);
   }
-
-  destroy_command_vars(command_vars);
   destroy_string_splitter(commands);
 }
 
-void process_command(int argc, char *argv[]) {
-  if (argc == 1) {
-    // Use console mode by default
-    command_scan_loop(COMMAND_MODE_CONSOLE);
-  } else if (argc == 2 && strings_equal(argv[1], UCGI_COMMAND_STRING)) {
-    command_scan_loop(COMMAND_MODE_UCGI);
-  } else if (argc == 3 && strings_equal(argv[1], FILE_COMMAND_STRING)) {
-    execute_command_file_sync(argv[2]);
-  } else {
-    StringBuilder *command_string_builder = create_string_builder();
-    for (int i = 1; i < argc; i++) {
-      string_builder_add_formatted_string(command_string_builder, "%s ",
-                                          argv[i]);
-    }
-    execute_single_command_sync(string_builder_peek(command_string_builder));
-    destroy_string_builder(command_string_builder);
+char *create_command_from_args(int argc, char *argv[]) {
+  StringBuilder *command_string_builder = create_string_builder();
+  for (int i = 1; i < argc; i++) {
+    string_builder_add_formatted_string(command_string_builder, "%s ", argv[i]);
   }
+  char *command_string = string_builder_dump(command_string_builder);
+  destroy_string_builder(command_string_builder);
+  return command_string;
+}
+
+void process_command(int argc, char *argv[]) {
+  char *command_string = create_command_from_args(argc, argv);
+  CommandVars *command_vars = create_command_vars();
+  command_vars->command = command_string;
+  execute_command_sync(command_vars);
+  switch (command_vars->config->mode) {
+  case EXEC_MODE_CONSOLE:
+  case EXEC_MODE_UCGI:
+    command_scan_loop(command_vars);
+    break;
+  case EXEC_MODE_COMMAND_FILE:
+    execute_command_file_sync(command_vars);
+  case EXEC_MODE_SINGLE_COMMAND:
+    // Do nothing, the single command has already been executed above
+    break;
+  default:
+    break;
+  }
+  free(command_string);
+  destroy_command_vars(command_vars);
 }

@@ -39,6 +39,7 @@ typedef enum {
   CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL,
   CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS,
   CONFIG_LOAD_STATUS_FOUND_COLDSTART_ONLY_OPTION,
+  CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES,
 } config_load_status_t;
 
 typedef enum {
@@ -51,11 +52,11 @@ typedef enum {
 } command_t;
 
 typedef enum {
-  CONFIG_MODE_SINGLE_COMMAND,
-  CONFIG_MODE_CONSOLE,
-  CONFIG_MODE_UCGI,
-  CONFIG_MODE_COMMAND_FILE,
-} config_mode_t;
+  EXEC_MODE_SINGLE_COMMAND,
+  EXEC_MODE_CONSOLE,
+  EXEC_MODE_UCGI,
+  EXEC_MODE_COMMAND_FILE,
+} exec_mode_t;
 
 typedef struct Config {
   command_t command_type;
@@ -90,7 +91,7 @@ typedef struct Config {
   // Thread Control
   ThreadControl *thread_control;
   // Config mode and command file execution
-  config_mode_t mode;
+  exec_mode_t exec_mode;
   char *command_file;
 } Config;
 
