@@ -16,9 +16,7 @@
 
 inference_status_t infer_for_test(const Config *config, Game *game,
                                   Inference *inference) {
-  ThreadControl *thread_control = create_thread_control(NULL);
   inference_status_t status = infer(config, game, inference);
-  destroy_thread_control(thread_control);
   return status;
 }
 
@@ -783,15 +781,15 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
 }
 
 void test_infer(TestConfig *testconfig) {
-  // test_trivial_random_probability(testconfig);
-  // test_infer_rack_overflow(testconfig);
-  // test_infer_no_tiles_played_rack_empty(testconfig);
-  // test_infer_no_tiles_played_rack_null(testconfig);
-  // test_infer_both_play_and_exchange(testconfig);
-  // test_infer_exchange_score_not_zero(testconfig);
-  // test_infer_exchange_not_allowed(testconfig);
-  // test_infer_tiles_played_not_in_bag(testconfig);
-  // test_infer_nonerror_cases(testconfig, 1);
+  test_trivial_random_probability(testconfig);
+  test_infer_rack_overflow(testconfig);
+  test_infer_no_tiles_played_rack_empty(testconfig);
+  test_infer_no_tiles_played_rack_null(testconfig);
+  test_infer_both_play_and_exchange(testconfig);
+  test_infer_exchange_score_not_zero(testconfig);
+  test_infer_exchange_not_allowed(testconfig);
+  test_infer_tiles_played_not_in_bag(testconfig);
+  test_infer_nonerror_cases(testconfig, 1);
   test_infer_nonerror_cases(testconfig, 2);
   test_infer_nonerror_cases(testconfig, 7);
 }

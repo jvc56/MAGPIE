@@ -486,6 +486,8 @@ void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
 }
 
 sim_status_t simulate(const Config *config, Simmer *simmer, Game *game) {
+  unhalt(config->thread_control);
+
   reset_move_list(game->gen->move_list);
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,

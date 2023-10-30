@@ -21,7 +21,7 @@ Game *get_game_from_cgp(const char *cgp) {
   // Use a separate command vars to get
   // a game for score_play and static_evaluation
   if (!iso_command_vars) {
-    iso_command_vars = create_command_vars(NULL);
+    iso_command_vars = create_command_vars();
   }
   char *cgp_command = get_formatted_string("position cgp %s", cgp);
   iso_command_vars->command = cgp_command;
@@ -183,7 +183,7 @@ char *static_evaluation(char *cgpstr, int num_plays) {
 // need to be freed
 int process_command_wasm(char *cmd) {
   if (!wasm_command_vars) {
-    wasm_command_vars = create_command_vars(NULL);
+    wasm_command_vars = create_command_vars();
   }
   wasm_command_vars->command = cmd;
   execute_command_async(wasm_command_vars);

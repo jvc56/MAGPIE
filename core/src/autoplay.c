@@ -143,6 +143,8 @@ int get_number_of_games_for_worker(int max_iterations, int number_of_threads,
 
 autoplay_status_t autoplay(const Config *config,
                            AutoplayResults *autoplay_results) {
+  unhalt(config->thread_control);
+
   // FIXME: see fixme above
   seed_random(config->random_seed);
 

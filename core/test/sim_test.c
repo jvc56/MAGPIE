@@ -54,7 +54,6 @@ void test_sim_single_iteration(TestConfig *testconfig) {
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AAADERW",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
-  assert(config->thread_control->halt_status == HALT_STATUS_NONE);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1 stop none");
   sim_status_t status = simulate(config, simmer, game);
@@ -63,7 +62,6 @@ void test_sim_single_iteration(TestConfig *testconfig) {
 
   assert(game->gen->board->tiles_played == 0);
 
-  assert(unhalt(config->thread_control));
   destroy_game(game);
   destroy_simmer(simmer);
 }
@@ -74,7 +72,6 @@ void test_more_iterations(TestConfig *testconfig) {
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AEIQRST",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
-  assert(config->thread_control->halt_status == HALT_STATUS_NONE);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 400 stop none");
   sim_status_t status = simulate(config, simmer, game);
@@ -89,7 +86,6 @@ void test_more_iterations(TestConfig *testconfig) {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "8G QI"));
 
-  assert(unhalt(config->thread_control));
   destroy_game(game);
   destroy_simmer(simmer);
   destroy_string_builder(move_string_builder);
@@ -102,7 +98,6 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   Simmer *simmer = create_simmer(config);
 
   int iters = 10000;
-  assert(thread_control->halt_status == HALT_STATUS_NONE);
   char *setoptions_string = get_formatted_string(
       "setoptions rack %s plies 2 threads 1 numplays 15 i %d stop none",
       EMPTY_RACK_STRING, iters);
@@ -125,7 +120,6 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
-  assert(unhalt(thread_control));
   destroy_string_builder(move_string_builder);
   destroy_game(game);
   destroy_simmer(simmer);
@@ -137,9 +131,8 @@ void perf_test_multithread_sim(Config *config) {
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config->cgp);
   Simmer *simmer = create_simmer(config);
-  assert(config->thread_control->halt_status == HALT_STATUS_NONE);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-                             " plies 2 threads 1 numplays 15 i 100 stop none");
+                             " plies 2 threads 1 numplays 15 i 1000 stop none");
   sim_status_t status = simulate(config, simmer, game);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
@@ -154,7 +147,6 @@ void perf_test_multithread_sim(Config *config) {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
-  assert(unhalt(config->thread_control));
   destroy_string_builder(move_string_builder);
   destroy_game(game);
   destroy_simmer(simmer);
@@ -192,7 +184,6 @@ void test_play_similarity(TestConfig *testconfig) {
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
-  assert(config->thread_control->halt_status == HALT_STATUS_NONE);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 0 stop none");
   sim_status_t status = simulate(config, simmer, game);
@@ -236,7 +227,6 @@ void test_play_similarity(TestConfig *testconfig) {
 
   assert(!plays_are_similar(simmer, simmer->simmed_plays[3],
                             simmer->simmed_plays[4]));
-  assert(unhalt(config->thread_control));
   destroy_game(game);
   destroy_simmer(simmer);
 }

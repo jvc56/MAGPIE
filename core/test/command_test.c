@@ -85,7 +85,7 @@ void assert_command_status_and_output(CommandVars *command_vars,
 }
 
 void test_command_execution() {
-  CommandVars *command_vars = create_command_vars(NULL);
+  CommandVars *command_vars = create_command_vars();
 
   assert_command_status_and_output(
       command_vars, "go sim lex CSW21 i 1000 plies", false, 5, HALT_STATUS_NONE,

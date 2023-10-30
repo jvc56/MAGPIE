@@ -482,13 +482,10 @@ Inference *copy_inference(Inference *inference, ThreadControl *thread_control) {
 void add_inference_record(InferenceRecord *inference_record_1,
                           InferenceRecord *inference_record_2,
                           int draw_and_leave_subtotals_size) {
-  int total = 0;
   for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
     inference_record_1->draw_and_leave_subtotals[i] +=
         inference_record_2->draw_and_leave_subtotals[i];
-    total += inference_record_2->draw_and_leave_subtotals[i];
   }
-  printf("had total of %d\n", total);
 }
 
 void add_inference(Inference *inference_1, Inference *inference_2) {
@@ -601,7 +598,6 @@ void set_shared_variables_for_inference(
 }
 
 void infer_manager(ThreadControl *thread_control, Inference *inference) {
-
   uint64_t total_racks_evaluated = 0;
   get_total_racks_evaluated(inference, inference->initial_tiles_to_infer,
                             BLANK_MACHINE_LETTER, &total_racks_evaluated);
@@ -611,7 +607,6 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
                                              thread_control);
 
   int number_of_threads = thread_control->number_of_threads;
-  printf("number of threads: %d\n", number_of_threads);
   if (number_of_threads == 1) {
     inference->thread_control = thread_control;
     infer_worker_single_threaded(inference);
@@ -729,6 +724,8 @@ inference_status_t verify_inference(Inference *inference) {
 
 inference_status_t infer(const Config *config, Game *game,
                          Inference *inference) {
+  unhalt(config->thread_control);
+
   if (!config->rack) {
     return INFERENCE_STATUS_NO_TILES_PLAYED;
   }

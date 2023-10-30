@@ -25,20 +25,16 @@ typedef enum {
 CommandVars *create_command_vars() {
   CommandVars *command_vars = malloc_or_die(sizeof(CommandVars));
   command_vars->command = NULL;
-  command_vars->config = NULL;
   command_vars->game = NULL;
   command_vars->simmer = NULL;
   command_vars->inference = NULL;
   command_vars->autoplay_results = NULL;
+  command_vars->config = create_default_config();
   command_vars->error_status = create_error_status(ERROR_STATUS_TYPE_NONE, 0);
   return command_vars;
 }
 
 void destroy_command_vars(CommandVars *command_vars) {
-  // Caller needs to handle the outfile
-  if (command_vars->config) {
-    destroy_config(command_vars->config);
-  }
   if (command_vars->game) {
     destroy_game(command_vars->game);
   }
@@ -51,6 +47,7 @@ void destroy_command_vars(CommandVars *command_vars) {
   if (command_vars->autoplay_results) {
     destroy_autoplay_results(command_vars->autoplay_results);
   }
+  destroy_config(command_vars->config);
   destroy_error_status(command_vars->error_status);
   free(command_vars);
 }
@@ -261,7 +258,6 @@ void execute_command_sync_or_async(CommandVars *command_vars, bool sync) {
     log_warn("still searching");
     return;
   }
-  unhalt(command_vars->config->thread_control);
   if (sync) {
     execute_command_and_set_mode_stopped(command_vars);
   } else {
@@ -281,7 +277,7 @@ void execute_command_async(CommandVars *command_vars) {
 }
 
 void execute_single_command_sync(const char *command) {
-  CommandVars *command_vars = create_command_vars(stdout);
+  CommandVars *command_vars = create_command_vars();
   command_vars->command = command;
   execute_command_sync(command_vars);
   destroy_command_vars(command_vars);
@@ -347,7 +343,7 @@ void execute_command_file_sync(const char *filename) {
   StringSplitter *commands = split_file_by_newline(filename);
   int number_of_commands = string_splitter_get_number_of_items(commands);
 
-  CommandVars *command_vars = create_command_vars(stdout);
+  CommandVars *command_vars = create_command_vars();
 
   for (int i = 0; i < number_of_commands; i++) {
     command_vars->command = string_splitter_get_item(commands, i);
