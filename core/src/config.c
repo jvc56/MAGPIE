@@ -164,6 +164,7 @@ typedef struct SingleArg {
   bool has_value;
   int number_of_values;
   char **values;
+  int position;
 } SingleArg;
 
 typedef struct ParsedArgs {
@@ -201,6 +202,7 @@ void set_single_arg(ParsedArgs *parsed_args, int index, arg_token_t arg_token,
     single_arg->values = malloc_or_die(sizeof(char *) * number_of_values);
   }
   single_arg->has_value = false;
+  single_arg->position = NUMBER_OF_ARG_TOKENS + 1;
   parsed_args->args[index] = single_arg;
 }
 
@@ -328,6 +330,7 @@ config_load_status_t init_parsed_args(ParsedArgs *parsed_args,
                 "%s", string_splitter_get_item(cmd, i + k + 1));
           }
           single_arg->has_value = true;
+          single_arg->position = i;
           i += single_arg->number_of_values + 1;
         } else {
           log_warn("argument %s has an insufficient number of values\n",
@@ -341,6 +344,25 @@ config_load_status_t init_parsed_args(ParsedArgs *parsed_args,
     if (!is_recognized_arg) {
       return CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG;
     }
+  }
+
+  // Do a simple insertion sort
+  // to order the args in the user
+  // input order to more easily
+  // validate the command and subcommand
+
+  SingleArg *temp_single_arg;
+  int j;
+
+  for (int i = 1; i < NUMBER_OF_ARG_TOKENS; i++) {
+    temp_single_arg = parsed_args->args[i];
+    j = i - 1;
+    while (j >= 0 &&
+           parsed_args->args[j]->position > temp_single_arg->position) {
+      parsed_args->args[j + 1] = parsed_args->args[j];
+      j = j - 1;
+    }
+    parsed_args->args[j + 1] = temp_single_arg;
   }
 
   return CONFIG_LOAD_STATUS_SUCCESS;
@@ -618,11 +640,11 @@ config_load_status_t load_errorfile_for_config(Config *config,
 config_load_status_t load_mode_for_config(Config *config,
                                           exec_mode_t config_mode_type,
                                           const char *command_filename) {
-  if (config->mode != EXEC_MODE_SINGLE_COMMAND) {
+  if (config->exec_mode != EXEC_MODE_SINGLE_COMMAND) {
     return CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
   }
-  config->mode = config_mode_type;
-  if (config->mode == EXEC_MODE_COMMAND_FILE) {
+  config->exec_mode = config_mode_type;
+  if (config->exec_mode == EXEC_MODE_COMMAND_FILE) {
     config->command_file = get_formatted_string("%s", command_filename);
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
@@ -716,37 +738,25 @@ config_load_status_t load_players_data_for_config(
     }
   }
 
-  const char *new_data_names[2];
-  new_data_names[0] = p1_new_data_name;
-  new_data_names[1] = p2_new_data_name;
-  const char *default_data_names[2];
-  default_data_names[0] = p1_default_data_name;
-  default_data_names[1] = p2_default_data_name;
-  char *final_data_names[2];
-  final_data_names[0] = NULL;
-  final_data_names[1] = NULL;
+  const char *p1_final_data_name = p1_new_data_name;
+  if (!p1_final_data_name) {
+    p1_final_data_name = p1_default_data_name;
+  }
 
-  for (int player_index = 0; player_index < 2; player_index++) {
-    if (!is_string_empty_or_null(new_data_names[player_index])) {
-      final_data_names[player_index] =
-          get_formatted_string("%s", new_data_names[player_index]);
-    } else {
-      final_data_names[player_index] = default_data_names[player_index];
-    }
+  const char *p2_final_data_name = p2_new_data_name;
+  if (!p2_final_data_name) {
+    p2_final_data_name = p2_default_data_name;
   }
 
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
 
   // Since KWG and KLV share names, they can both be arguments
   // to the compatibility function.
-  if (!lexicons_are_compatible(final_leaves_names[0], final_leaves_names[1])) {
+  if (!lexicons_are_compatible(p1_final_data_name, p2_final_data_name)) {
     config_load_status = CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
   } else {
     set_players_data(config->players_data, players_data_type,
-                     final_leaves_names[0], final_leaves_names[1]);
-  }
-  for (int player_index = 0; player_index < 2; player_index++) {
-    free(final_leaves_names[player_index]);
+                     p1_final_data_name, p2_final_data_name);
   }
   return config_load_status;
 }
@@ -760,7 +770,6 @@ config_load_status_t load_lexicons_for_config(Config *config,
       config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
   const char *p2_default_lexicon_name = players_data_get_data_name(
       config->players_data, PLAYERS_DATA_TYPE_KWG, 1);
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   return load_players_data_for_config(
       config, PLAYERS_DATA_TYPE_KWG, p1_new_lexicon_name,
       p1_default_lexicon_name, p2_new_lexicon_name, p2_default_lexicon_name,
@@ -792,14 +801,14 @@ config_load_status_t load_leaves_for_config(Config *config,
     }
   }
 
-  const char *p1_default_leaves_name =
-      get_default_klv_name(p1_existing_lexicon_name);
-  const char *p2_default_leaves_name =
-      get_default_klv_name(p2_existing_lexicon_name);
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
-  return load_players_data_for_config(
+  char *p1_default_leaves_name = get_default_klv_name(p1_existing_lexicon_name);
+  char *p2_default_leaves_name = get_default_klv_name(p2_existing_lexicon_name);
+  config_load_status_t config_load_status = load_players_data_for_config(
       config, PLAYERS_DATA_TYPE_KLV, p1_new_leaves_name, p1_default_leaves_name,
       p2_new_leaves_name, p2_default_leaves_name, false);
+  free(p1_default_leaves_name);
+  free(p2_default_leaves_name);
+  return config_load_status;
 }
 
 config_load_status_t
@@ -880,12 +889,12 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     if (!parsed_args->args[i]->has_value) {
       continue;
     }
+    SingleArg *single_arg = parsed_args->args[i];
     arg_token_t arg_token = single_arg->token;
     if (!coldstart && is_coldstart_arg(arg_token)) {
       config_load_status = CONFIG_LOAD_STATUS_FOUND_COLDSTART_ONLY_OPTION;
       break;
     }
-    SingleArg *single_arg = parsed_args->args[i];
     char **arg_values = single_arg->values;
     switch (arg_token) {
     case ARG_TOKEN_POSITION:
@@ -1138,7 +1147,7 @@ Config *create_default_config() {
   config->use_game_pairs = false;
   config->random_seed = 0;
   config->thread_control = create_thread_control();
-  config->mode = EXEC_MODE_SINGLE_COMMAND;
+  config->exec_mode = EXEC_MODE_SINGLE_COMMAND;
   config->command_file = NULL;
   return config;
 }

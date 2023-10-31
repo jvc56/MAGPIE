@@ -25,7 +25,7 @@ Game *get_game_from_cgp(const char *cgp) {
   }
   char *cgp_command = get_formatted_string("position cgp %s", cgp);
   iso_command_vars->command = cgp_command;
-  execute_command_sync(iso_command_vars);
+  execute_command_sync(iso_command_vars, false);
   free(cgp_command);
   if (iso_command_vars->error_status->type != ERROR_STATUS_TYPE_NONE) {
     log_fatal("wasm command failed with error type %d code %d\n",
@@ -143,7 +143,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   if (leave_rack) {
     destroy_rack(leave_rack);
   }
-  char *return_string = string_builder_dump(return_string_builder, 0);
+  char *return_string = string_builder_dump(return_string_builder, NULL);
   destroy_string_builder(return_string_builder);
   clock_t end = clock();
   log_debug("score_play took %0.6f seconds",
@@ -186,7 +186,7 @@ int process_command_wasm(char *cmd) {
     wasm_command_vars = create_command_vars();
   }
   wasm_command_vars->command = cmd;
-  execute_command_async(wasm_command_vars);
+  execute_command_async(wasm_command_vars, false);
   return 0;
 }
 

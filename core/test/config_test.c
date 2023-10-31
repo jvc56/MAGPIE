@@ -11,7 +11,7 @@
 
 void test_config_error(Config *config, const char *cmd,
                        config_load_status_t expected_status) {
-  config_load_status_t actual_status = load_config(config, cmd);
+  config_load_status_t actual_status = load_config(config, cmd, false);
   if (actual_status != expected_status) {
     printf("config status mismatched: %d != %d\n>%s<\n", expected_status,
            actual_status, cmd);
@@ -20,7 +20,7 @@ void test_config_error(Config *config, const char *cmd,
 }
 
 void load_config_or_fail(Config *config, const char *cmd) {
-  config_load_status_t actual_status = load_config(config, cmd);
+  config_load_status_t actual_status = load_config(config, cmd, false);
   if (actual_status != CONFIG_LOAD_STATUS_SUCCESS) {
     printf("config load failed with error code %d\n>%s<\n", actual_status, cmd);
     assert(0);

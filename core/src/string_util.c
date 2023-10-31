@@ -461,7 +461,7 @@ char *string_splitter_join(StringSplitter *string_splitter, int start_index,
     string_builder_add_string(joined_string_builder,
                               string_splitter_get_item(string_splitter, i), 0);
   }
-  char *joined_string = string_builder_dump(joined_string_builder, 0);
+  char *joined_string = string_builder_dump(joined_string_builder, NULL);
   destroy_string_builder(joined_string_builder);
   return joined_string;
 }

@@ -187,7 +187,8 @@ char *ucgi_static_moves(Game *game, int nmoves) {
                                game->gen->letter_distribution,
                                moves_string_builder);
   string_builder_add_string(moves_string_builder, "\n", 0);
-  char *ucgi_static_moves_string = string_builder_dump(moves_string_builder, 0);
+  char *ucgi_static_moves_string =
+      string_builder_dump(moves_string_builder, NULL);
   destroy_string_builder(moves_string_builder);
   return ucgi_static_moves_string;
 }
@@ -268,7 +269,7 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
                                sim_stats_string_builder);
   string_builder_add_formatted_string(sim_stats_string_builder,
                                       "\ninfo nps %f\n", nps);
-  char *sim_stats_string = string_builder_dump(sim_stats_string_builder, 0);
+  char *sim_stats_string = string_builder_dump(sim_stats_string_builder, NULL);
   destroy_string_builder(sim_stats_string_builder);
   return sim_stats_string;
 }

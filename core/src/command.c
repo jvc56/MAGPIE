@@ -17,11 +17,6 @@
 #define STOP_COMMAND_STRING "stop"
 #define FILE_COMMAND_STRING "file"
 
-typedef enum {
-  COMMAND_MODE_CONSOLE,
-  COMMAND_MODE_UCGI,
-} command_mode_t;
-
 CommandVars *create_command_vars() {
   CommandVars *command_vars = malloc_or_die(sizeof(CommandVars));
   command_vars->command = NULL;
@@ -177,13 +172,13 @@ void execute_infer(CommandVars *command_vars, const Config *config) {
                             (int)status);
 }
 
-void execute_command(CommandVars *command_vars) {
+void execute_command(CommandVars *command_vars, bool coldstart) {
   if (!command_vars->config) {
     command_vars->config = create_default_config();
   }
 
   config_load_status_t config_load_status =
-      load_config(command_vars->config, command_vars->command);
+      load_config(command_vars->config, command_vars->command, coldstart);
   set_or_clear_error_status(command_vars->error_status,
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             (int)config_load_status);
@@ -235,8 +230,9 @@ void execute_command(CommandVars *command_vars) {
   }
 }
 
-void execute_command_and_set_mode_stopped(CommandVars *command_vars) {
-  execute_command(command_vars);
+void execute_command_and_set_mode_stopped(CommandVars *command_vars,
+                                          bool coldstart) {
+  execute_command(command_vars, coldstart);
   // FIXME: seems inelegant, find a better way to show errors
   if (command_vars->error_status->type != ERROR_STATUS_TYPE_NONE) {
     char *error_status_string =
@@ -249,17 +245,18 @@ void execute_command_and_set_mode_stopped(CommandVars *command_vars) {
 
 void *execute_command_thread_worker(void *uncasted_command_vars) {
   CommandVars *command_vars = (CommandVars *)uncasted_command_vars;
-  execute_command_and_set_mode_stopped(command_vars);
+  execute_command_and_set_mode_stopped(command_vars, false);
   return NULL;
 }
 
-void execute_command_sync_or_async(CommandVars *command_vars, bool sync) {
+void execute_command_sync_or_async(CommandVars *command_vars, bool coldstart,
+                                   bool sync) {
   if (!set_mode_searching(command_vars->config->thread_control)) {
     log_warn("still searching");
     return;
   }
   if (sync) {
-    execute_command_and_set_mode_stopped(command_vars);
+    execute_command_and_set_mode_stopped(command_vars, coldstart);
   } else {
     pthread_t cmd_execution_thread;
     pthread_create(&cmd_execution_thread, NULL, execute_command_thread_worker,
@@ -268,19 +265,12 @@ void execute_command_sync_or_async(CommandVars *command_vars, bool sync) {
   }
 }
 
-void execute_command_sync(CommandVars *command_vars) {
-  execute_command_sync_or_async(command_vars, true);
+void execute_command_sync(CommandVars *command_vars, bool coldstart) {
+  execute_command_sync_or_async(command_vars, coldstart, true);
 }
 
-void execute_command_async(CommandVars *command_vars) {
-  execute_command_sync_or_async(command_vars, false);
-}
-
-void execute_single_command_sync(const char *command) {
-  CommandVars *command_vars = create_command_vars();
-  command_vars->command = command;
-  execute_command_sync(command_vars);
-  destroy_command_vars(command_vars);
+void execute_command_async(CommandVars *command_vars, bool coldstart) {
+  execute_command_sync_or_async(command_vars, coldstart, false);
 }
 
 void process_ucgi_command(CommandVars *command_vars) {
@@ -298,7 +288,7 @@ void process_ucgi_command(CommandVars *command_vars) {
       log_info("There is no search to stop.");
     }
   } else {
-    execute_command_async(command_vars);
+    execute_command_async(command_vars, false);
   }
 }
 
@@ -308,7 +298,7 @@ void command_scan_loop(CommandVars *command_vars) {
   ssize_t input_length;
   exec_mode_t exec_mode = command_vars->config->exec_mode;
   while (1) {
-    if (exec_mode == COMMAND_MODE_CONSOLE) {
+    if (exec_mode == EXEC_MODE_CONSOLE) {
       print_to_outfile(command_vars->config->thread_control, "magpie>");
     }
     // FIXME: use filehandler infile instead of stdin
@@ -329,10 +319,10 @@ void command_scan_loop(CommandVars *command_vars) {
     }
 
     command_vars->command = input;
-    if (exec_mode == COMMAND_MODE_UCGI) {
+    if (exec_mode == EXEC_MODE_UCGI) {
       process_ucgi_command(command_vars);
     } else {
-      execute_command_sync(command_vars);
+      execute_command_sync(command_vars, false);
     }
   }
   free(input);
@@ -345,7 +335,7 @@ void execute_command_file_sync(CommandVars *command_vars) {
 
   for (int i = 0; i < number_of_commands; i++) {
     command_vars->command = string_splitter_get_item(commands, i);
-    execute_command_sync(command_vars);
+    execute_command_sync(command_vars, false);
   }
   destroy_string_splitter(commands);
 }
@@ -355,7 +345,7 @@ char *create_command_from_args(int argc, char *argv[]) {
   for (int i = 1; i < argc; i++) {
     string_builder_add_formatted_string(command_string_builder, "%s ", argv[i]);
   }
-  char *command_string = string_builder_dump(command_string_builder);
+  char *command_string = string_builder_dump(command_string_builder, NULL);
   destroy_string_builder(command_string_builder);
   return command_string;
 }
@@ -364,8 +354,8 @@ void process_command(int argc, char *argv[]) {
   char *command_string = create_command_from_args(argc, argv);
   CommandVars *command_vars = create_command_vars();
   command_vars->command = command_string;
-  execute_command_sync(command_vars);
-  switch (command_vars->config->mode) {
+  execute_command_sync(command_vars, true);
+  switch (command_vars->config->exec_mode) {
   case EXEC_MODE_CONSOLE:
   case EXEC_MODE_UCGI:
     command_scan_loop(command_vars);
