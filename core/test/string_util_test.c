@@ -128,4 +128,45 @@ void test_string_util() {
   test_whitespace_string_splitter(
       " def  a  h  ijk xyz ", true, 5,
       (const char *[]){"def", "a", "h", "ijk", "xyz"});
+
+  // Test trim
+  char str1[] = "";
+  trim_whitespace(str1);
+  assert_strings_equal(str1, "");
+
+  char str2[] = "   Hello, World   ";
+  trim_whitespace(str2);
+  assert_strings_equal(str2, "Hello, World");
+
+  char str3[] = "   ";
+  trim_whitespace(str3);
+  assert_strings_equal(str3, "");
+
+  char str4[] = "NoWhitespace";
+  trim_whitespace(str4);
+  assert_strings_equal(str4, "NoWhitespace");
+
+  char str5[] = "   In    between   \n whitespace   ";
+  trim_whitespace(str5);
+  assert_strings_equal(str5, "In    between   \n whitespace");
+
+  char str6[] = "##Hello, World##";
+  trim_char(str6, '#');
+  assert_strings_equal(str6, "Hello, World");
+
+  char str7[] = "###";
+  trim_char(str7, '#');
+  assert_strings_equal(str7, "");
+
+  char str8[] = "NoCharsToTrim";
+  trim_char(str8, '#');
+  assert_strings_equal(str8, "NoCharsToTrim");
+
+  char str9[] = "";
+  trim_char(str9, '#');
+  assert_strings_equal(str9, "");
+
+  char str10[] = ";;;In;;between;;semicolons;;;";
+  trim_char(str10, ';');
+  assert_strings_equal(str10, "In;;between;;semicolons");
 }
