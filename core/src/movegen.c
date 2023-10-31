@@ -1115,14 +1115,14 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     StringBuilder *sb = create_string_builder();
     string_builder_add_rack(player->rack, gen->letter_distribution, sb);
   */
-  uint64_t start_time;
-  uint64_t end_time;
+  //uint64_t start_time;
+  //uint64_t end_time;
 
   gen->number_of_bingos = 0;
   if (do_bingo_gen) {
-    start_time = __rdtsc();
+    //start_time = __rdtsc();
     look_up_bingos(gen, player);
-    end_time = __rdtsc();
+    //end_time = __rdtsc();
     /*
         printf("rack: %s, number_of_bingos: %d, look_up_bingos time: %lluns\n",
                string_builder_peek(sb), gen->number_of_bingos,
@@ -1151,8 +1151,8 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   }
   sort_anchor_list(gen->anchor_list);
 
-  uint64_t total_anchor_search_time = 0;
-  int anchors_searched = 0;
+  //uint64_t total_anchor_search_time = 0;
+  //int anchors_searched = 0;
   for (int i = 0; i < gen->anchor_list->count; i++) {
     if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST &&
         better_play_has_been_found(
@@ -1185,19 +1185,19 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     load_row_letter_cache(gen, gen->current_row_index);
     if (do_bingo_gen && (gen->min_tiles_to_play == RACK_SIZE) &&
         (gen->anchor_list->anchors[i]->max_num_playthrough == 0)) {
-      start_time = __rdtsc();
+      //start_time = __rdtsc();
       bingo_gen(gen, player, opp_rack);
-      end_time = __rdtsc();
+      //end_time = __rdtsc();
     } else {
-      start_time = __rdtsc();
+      //start_time = __rdtsc();
       recursive_gen(gen, gen->current_anchor_col, player, opp_rack,
                     kwg_get_root_node_index(player->strategy_params->kwg),
                     gen->current_anchor_col, gen->current_anchor_col,
                     !gen->vertical);
-      end_time = __rdtsc();
+      //end_time = __rdtsc();
     }
-    const uint64_t elapsed_time = end_time - start_time;
-    total_anchor_search_time += elapsed_time;
+    //const uint64_t elapsed_time = end_time - start_time;
+    //total_anchor_search_time += elapsed_time;
     /*
         printf(
             "player: %i, rack: %s, i: %i row: %i, col: %i, vert: %i, time: "
@@ -1213,7 +1213,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
             gen->max_num_playthrough, gen->min_tiles_to_play,
             gen->max_tiles_to_play);
     */
-    anchors_searched++;
+    //anchors_searched++;
     if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST) {
       // If a better play has been found than should have been possible for this
       // anchor, highest_possible_equity was invalid.
