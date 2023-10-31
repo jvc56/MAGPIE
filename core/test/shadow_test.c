@@ -96,10 +96,24 @@ void test_shadow_score(SuperConfig *superconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 50));
 
+  // Due to bingo lookups and anchor splitting, we know no bingo exists,
+  // and the highest possible score for the anchor would be a 6 letter play
+  // for fifty like ZANIER, same as the previous test.
+  // - The anchor is altered to have max 6 tiles
+  // - No 7 tile anchor is added
   load_and_generate(game, player, EMPTY_CGP, "AIERZNL", 0);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
+      game->gen->anchor_list->anchors[0]->highest_possible_equity, 50));
+
+  // This time since there is a bingo with the rack, the anchor is split and
+  // we have bingo and nonbingo versions.
+  load_and_generate(game, player, EMPTY_CGP, "AEINSTZ", 0);
+  assert(game->gen->anchor_list->count == 2);
+  assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 102));
+  assert(within_epsilon(
+      game->gen->anchor_list->anchors[1]->highest_possible_equity, 50));
 
   load_and_generate(game, player, EMPTY_CGP, "?", 0);
   assert(game->gen->anchor_list->count == 1);

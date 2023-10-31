@@ -99,10 +99,12 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
                        game->players[1 - starting_player_index]->rack,
                        RACK_SIZE);
   while (!game->game_end_reason) {
-    //StringBuilder *sb = create_string_builder();
-    //string_builder_add_game(game, sb);
-    //printf("%s\n", string_builder_peek(sb));
-    //destroy_string_builder(sb);
+/*    
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_game(game, sb);
+    printf("%s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+*/    
     generate_moves(game->gen, game->players[game->player_on_turn_index],
                    game->players[1 - game->player_on_turn_index]->rack,
                    game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
