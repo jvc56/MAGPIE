@@ -190,6 +190,7 @@ void assert_bingo_found(Generator *gen, const char *expected_bingo) {
     if (strings_equal(string_builder_peek(bingo), expected_bingo)) {
       return;
     }
+    destroy_string_builder(bingo);
   }
   fprintf(stderr, "expected bingo not found: %s\n", expected_bingo);
   assert(0);
