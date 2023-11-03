@@ -188,6 +188,7 @@ void assert_bingo_found(Generator *gen, const char *expected_bingo) {
                                              uv_tile, 0, bingo);
     }
     if (strings_equal(string_builder_peek(bingo), expected_bingo)) {
+          destroy_string_builder(bingo);
       return;
     }
     destroy_string_builder(bingo);
