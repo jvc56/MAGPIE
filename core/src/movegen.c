@@ -853,20 +853,23 @@ destroy_string_builder(sb);
     const int new_node_index = kwg_arc_index(player->strategy_params->kwg, i);
     if ((player->rack->array[ml] != 0 || player->rack->array[0] != 0)) {
       int accepts = kwg_accepts(player->strategy_params->kwg, i);
+      // Manipulating the array in the rack directly is a little bit dirty, and
+      // doesn't update rack->number_of_letters or rack->empty, but those aren't
+      // used here, and the original rack will be restored at the end.
       if (player->rack->array[ml] > 0) {
-        take_letter_from_rack(player->rack, ml);
+        player->rack->array[ml]--;
         gen->strip[gen->tiles_played] = ml;
         gen->tiles_played++;
         add_bingos(gen, player, new_node_index, accepts);
         gen->tiles_played--;
-        add_letter_to_rack(player->rack, ml);
+        player->rack->array[ml]++;
       } else if (player->rack->array[BLANK_MACHINE_LETTER] > 0) {
-        take_letter_from_rack(player->rack, BLANK_MACHINE_LETTER);
+        player->rack->array[BLANK_MACHINE_LETTER]--;
         gen->strip[gen->tiles_played] = ml;
         gen->tiles_played++;
         add_bingos(gen, player, new_node_index, accepts);
         gen->tiles_played--;
-        add_letter_to_rack(player->rack, BLANK_MACHINE_LETTER);
+        player->rack->array[BLANK_MACHINE_LETTER]++;
       }
     }
     if (kwg_is_end(player->strategy_params->kwg, i)) {
