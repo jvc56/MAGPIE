@@ -3,7 +3,6 @@
 
 #define STDOUT_FILENAME "stdout"
 #define STDIN_FILENAME "stdin"
-#define STDERR_FILENAME "stderr"
 
 typedef enum {
   FILE_HANDLER_MODE_READ,
@@ -13,6 +12,7 @@ typedef enum {
 struct FileHandler;
 typedef struct FileHandler FileHandler;
 
+const char *get_file_handler_filename(FileHandler *fh);
 void set_file_handler(FileHandler *fh, const char *filename,
                       file_handler_mode_t file_handler_mode_type);
 FileHandler *

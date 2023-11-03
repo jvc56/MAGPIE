@@ -172,13 +172,9 @@ void execute_infer(CommandVars *command_vars, const Config *config) {
                             (int)status);
 }
 
-void execute_command(CommandVars *command_vars, bool coldstart) {
-  if (!command_vars->config) {
-    command_vars->config = create_default_config();
-  }
-
+void execute_command(CommandVars *command_vars) {
   config_load_status_t config_load_status =
-      load_config(command_vars->config, command_vars->command, coldstart);
+      load_config(command_vars->config, command_vars->command);
   set_or_clear_error_status(command_vars->error_status,
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             (int)config_load_status);
@@ -190,16 +186,22 @@ void execute_command(CommandVars *command_vars, bool coldstart) {
   // read-only. We create a new const pointer to enforce this.
   const Config *config = command_vars->config;
 
-  update_or_create_game(config, command_vars);
+  // If the lexicons aren't loaded, this is
+  // guaranteed to be a set options
+  // command and the rest of the function
+  // will be a no-op.
+  if (config->lexicons_loaded) {
+    update_or_create_game(config, command_vars);
 
-  if (config->command_set_cgp) {
-    cgp_parse_status_t cgp_parse_status =
-        load_cgp(command_vars->game, config->cgp);
-    set_or_clear_error_status(command_vars->error_status,
-                              ERROR_STATUS_TYPE_CGP_LOAD,
-                              (int)cgp_parse_status);
-    if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
-      return;
+    if (config->command_set_cgp) {
+      cgp_parse_status_t cgp_parse_status =
+          load_cgp(command_vars->game, config->cgp);
+      set_or_clear_error_status(command_vars->error_status,
+                                ERROR_STATUS_TYPE_CGP_LOAD,
+                                (int)cgp_parse_status);
+      if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+        return;
+      }
     }
   }
 
@@ -230,33 +232,25 @@ void execute_command(CommandVars *command_vars, bool coldstart) {
   }
 }
 
-void execute_command_and_set_mode_stopped(CommandVars *command_vars,
-                                          bool coldstart) {
-  execute_command(command_vars, coldstart);
-  // FIXME: seems inelegant, find a better way to show errors
-  if (command_vars->error_status->type != ERROR_STATUS_TYPE_NONE) {
-    char *error_status_string =
-        error_status_to_string(command_vars->error_status);
-    print_to_outfile(command_vars->config->thread_control, error_status_string);
-    free(error_status_string);
-  }
+void execute_command_and_set_mode_stopped(CommandVars *command_vars) {
+  execute_command(command_vars);
+  log_warn_if_failed(command_vars->error_status);
   set_mode_stopped(command_vars->config->thread_control);
 }
 
 void *execute_command_thread_worker(void *uncasted_command_vars) {
   CommandVars *command_vars = (CommandVars *)uncasted_command_vars;
-  execute_command_and_set_mode_stopped(command_vars, false);
+  execute_command_and_set_mode_stopped(command_vars);
   return NULL;
 }
 
-void execute_command_sync_or_async(CommandVars *command_vars, bool coldstart,
-                                   bool sync) {
+void execute_command_sync_or_async(CommandVars *command_vars, bool sync) {
   if (!set_mode_searching(command_vars->config->thread_control)) {
     log_warn("still searching");
     return;
   }
   if (sync) {
-    execute_command_and_set_mode_stopped(command_vars, coldstart);
+    execute_command_and_set_mode_stopped(command_vars);
   } else {
     pthread_t cmd_execution_thread;
     pthread_create(&cmd_execution_thread, NULL, execute_command_thread_worker,
@@ -265,12 +259,12 @@ void execute_command_sync_or_async(CommandVars *command_vars, bool coldstart,
   }
 }
 
-void execute_command_sync(CommandVars *command_vars, bool coldstart) {
-  execute_command_sync_or_async(command_vars, coldstart, true);
+void execute_command_sync(CommandVars *command_vars) {
+  execute_command_sync_or_async(command_vars, true);
 }
 
-void execute_command_async(CommandVars *command_vars, bool coldstart) {
-  execute_command_sync_or_async(command_vars, coldstart, false);
+void execute_command_async(CommandVars *command_vars) {
+  execute_command_sync_or_async(command_vars, false);
 }
 
 void process_ucgi_command(CommandVars *command_vars) {
@@ -288,25 +282,45 @@ void process_ucgi_command(CommandVars *command_vars) {
       log_info("There is no search to stop.");
     }
   } else {
-    execute_command_async(command_vars, false);
+    execute_command_async(command_vars);
   }
 }
 
-void command_scan_loop(CommandVars *command_vars) {
-  char *input = NULL;
-  size_t input_size = 0;
-  ssize_t input_length;
-  exec_mode_t exec_mode = command_vars->config->exec_mode;
+void execute_command_file_sync(CommandVars *command_vars) {
+  StringSplitter *commands =
+      split_file_by_newline(command_vars->config->command_file);
+  int number_of_commands = string_splitter_get_number_of_items(commands);
+
+  for (int i = 0; i < number_of_commands; i++) {
+    command_vars->command = string_splitter_get_item(commands, i);
+    execute_command_sync(command_vars);
+  }
+  restore_previous_exec_mode(command_vars->config);
+  destroy_string_splitter(commands);
+}
+
+void command_scan_loop(CommandVars *command_vars,
+                       const char *initial_command_string) {
+  command_vars->command = initial_command_string;
+  execute_command_sync(command_vars);
   while (1) {
+    if (command_vars->config->exec_mode == EXEC_MODE_COMMAND_FILE) {
+      // This will revert to the previous exec mode
+      // when it finishes running.
+      execute_command_file_sync(command_vars);
+    }
+    exec_mode_t exec_mode = command_vars->config->exec_mode;
+
+    if (exec_mode == EXEC_MODE_SINGLE_COMMAND) {
+      break;
+    }
+
     if (exec_mode == EXEC_MODE_CONSOLE) {
       print_to_outfile(command_vars->config->thread_control, "magpie>");
     }
-    // FIXME: use filehandler infile instead of stdin
-    input_length = getline(&input, &input_size, stdin);
 
-    if (input_length == -1) {
-      log_fatal("error reading input\n");
-    }
+    char *input =
+        getline_from_file(command_vars->config->thread_control->infile);
 
     trim_whitespace(input);
 
@@ -319,25 +333,14 @@ void command_scan_loop(CommandVars *command_vars) {
     }
 
     command_vars->command = input;
-    if (exec_mode == EXEC_MODE_UCGI) {
+
+    if (exec_mode == EXEC_MODE_CONSOLE) {
+      execute_command_sync(command_vars);
+    } else if (exec_mode == EXEC_MODE_UCGI) {
       process_ucgi_command(command_vars);
-    } else {
-      execute_command_sync(command_vars, false);
     }
+    free(input);
   }
-  free(input);
-}
-
-void execute_command_file_sync(CommandVars *command_vars) {
-  StringSplitter *commands =
-      split_file_by_newline(command_vars->config->command_file);
-  int number_of_commands = string_splitter_get_number_of_items(commands);
-
-  for (int i = 0; i < number_of_commands; i++) {
-    command_vars->command = string_splitter_get_item(commands, i);
-    execute_command_sync(command_vars, false);
-  }
-  destroy_string_splitter(commands);
 }
 
 char *create_command_from_args(int argc, char *argv[]) {
@@ -351,23 +354,9 @@ char *create_command_from_args(int argc, char *argv[]) {
 }
 
 void process_command(int argc, char *argv[]) {
-  char *command_string = create_command_from_args(argc, argv);
   CommandVars *command_vars = create_command_vars();
-  command_vars->command = command_string;
-  execute_command_sync(command_vars, true);
-  switch (command_vars->config->exec_mode) {
-  case EXEC_MODE_CONSOLE:
-  case EXEC_MODE_UCGI:
-    command_scan_loop(command_vars);
-    break;
-  case EXEC_MODE_COMMAND_FILE:
-    execute_command_file_sync(command_vars);
-  case EXEC_MODE_SINGLE_COMMAND:
-    // Do nothing, the single command has already been executed above
-    break;
-  default:
-    break;
-  }
-  free(command_string);
+  char *initial_command_string = create_command_from_args(argc, argv);
+  command_scan_loop(command_vars, initial_command_string);
+  free(initial_command_string);
   destroy_command_vars(command_vars);
 }

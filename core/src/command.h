@@ -19,8 +19,8 @@ typedef struct CommandVars {
   ErrorStatus *error_status;
 } CommandVars;
 
-void execute_command_sync(CommandVars *command_vars, bool coldstart);
-void execute_command_async(CommandVars *command_vars, bool coldstart);
+void execute_command_sync(CommandVars *command_vars);
+void execute_command_async(CommandVars *command_vars);
 char *command_search_status(CommandVars *command_vars, bool should_halt);
 CommandVars *create_command_vars();
 void destroy_command_vars(CommandVars *command_vars);

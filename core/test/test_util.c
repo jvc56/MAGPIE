@@ -26,7 +26,7 @@ double get_leave_value_for_rack(const KLV *klv, Rack *rack) {
 }
 
 void load_config_or_die(Config *config, const char *cmd) {
-  config_load_status_t status = load_config(config, cmd, false);
+  config_load_status_t status = load_config(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
     log_fatal("load config failed with status %d\n", status);
   }

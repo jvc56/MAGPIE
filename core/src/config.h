@@ -38,7 +38,7 @@ typedef enum {
   CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL,
   CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL,
   CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS,
-  CONFIG_LOAD_STATUS_FOUND_COLDSTART_ONLY_OPTION,
+  CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION,
   CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES,
 } config_load_status_t;
 
@@ -61,6 +61,7 @@ typedef enum {
 typedef struct Config {
   command_t command_type;
   bool command_set_cgp;
+  bool lexicons_loaded;
   // Game
   LetterDistribution *letter_distribution;
   char *ld_name;
@@ -92,11 +93,12 @@ typedef struct Config {
   ThreadControl *thread_control;
   // Config mode and command file execution
   exec_mode_t exec_mode;
+  exec_mode_t previous_exec_mode;
   char *command_file;
 } Config;
 
-config_load_status_t load_config(Config *config, const char *cmd,
-                                 bool coldstart);
+void restore_previous_exec_mode(Config *config);
+config_load_status_t load_config(Config *config, const char *cmd);
 Config *create_default_config();
 void destroy_config(Config *config);
 

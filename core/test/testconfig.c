@@ -28,7 +28,7 @@ Config *get_distinct_lexica_config(TestConfig *testconfig) {
 
 Config *create_and_load_config(const char *cmd) {
   Config *config = create_default_config();
-  config_load_status_t config_load_status = load_config(config, cmd, false);
+  config_load_status_t config_load_status = load_config(config, cmd);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     log_fatal("failed to create config with\ncommand: %s\nerror:   %d\n", cmd,
               config_load_status);

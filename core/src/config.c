@@ -64,7 +64,6 @@
 #define ARG_CHECK_STOP_INTERVAL "check"
 #define ARG_INFILE "infile"
 #define ARG_OUTFILE "outfile"
-#define ARG_ERRORFILE "errorfile"
 #define ARG_CONSOLE_MODE "console"
 #define ARG_UCGI_MODE "ucgi"
 #define ARG_COMMAND_FILE "file"
@@ -128,7 +127,6 @@ typedef enum {
   ARG_TOKEN_CHECK_STOP_INTERVAL,
   ARG_TOKEN_INFILE,
   ARG_TOKEN_OUTFILE,
-  ARG_TOKEN_ERRORFILE,
 
   ARG_TOKEN_CONSOLE_MODE,
   ARG_TOKEN_UCGI_MODE,
@@ -293,7 +291,6 @@ ParsedArgs *create_parsed_args() {
                  ARG_CHECK_STOP_INTERVAL, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_INFILE, ARG_INFILE, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_OUTFILE, ARG_OUTFILE, 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_ERRORFILE, ARG_ERRORFILE, 1);
 
   set_single_arg(parsed_args, index++, ARG_TOKEN_CONSOLE_MODE, ARG_CONSOLE_MODE,
                  0);
@@ -333,8 +330,6 @@ config_load_status_t init_parsed_args(ParsedArgs *parsed_args,
           single_arg->position = i;
           i += single_arg->number_of_values + 1;
         } else {
-          log_warn("argument %s has an insufficient number of values\n",
-                   single_arg->name);
           return CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES;
         }
         is_recognized_arg = true;
@@ -423,28 +418,6 @@ config_load_status_t load_move_record_type_for_config(
     config_load_status = CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE;
   }
   return config_load_status;
-}
-
-config_load_status_t load_rack_for_config(Config *config, const char *rack) {
-  if (!rack) {
-    return CONFIG_LOAD_STATUS_SUCCESS;
-  }
-  if (!strings_equal(EMPTY_RACK_STRING, rack)) {
-    // If rack is specified on cold start without a
-    // lexicon, the letter distribution could be missing.
-    if (!config->letter_distribution) {
-      return CONFIG_LOAD_STATUS_LEXICON_MISSING;
-    }
-    int number_of_letters_set =
-        set_rack_to_string(config->rack, rack, config->letter_distribution);
-    if (number_of_letters_set < 0) {
-      return CONFIG_LOAD_STATUS_MALFORMED_RACK;
-    }
-  } else {
-    reset_rack(config->rack);
-  }
-
-  return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
 config_load_status_t load_winpct_for_config(Config *config,
@@ -619,30 +592,16 @@ load_check_stop_interval_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_outfile_for_config(Config *config,
-                                             const char *outfile_name) {
-  set_outfile(config->thread_control, outfile_name);
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t load_infile_for_config(Config *config,
-                                            const char *infile_name) {
-  set_infile(config->thread_control, infile_name);
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t load_errorfile_for_config(Config *config,
-                                               const char *errorfile_name) {
-  set_errorfile(config->thread_control, errorfile_name);
+config_load_status_t load_io_for_config(Config *config, const char *infile_name,
+                                        const char *outfile_name) {
+  set_io(config->thread_control, infile_name, outfile_name);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
 config_load_status_t load_mode_for_config(Config *config,
                                           exec_mode_t config_mode_type,
                                           const char *command_filename) {
-  if (config->exec_mode != EXEC_MODE_SINGLE_COMMAND) {
-    return CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
-  }
+  config->previous_exec_mode = config->exec_mode;
   config->exec_mode = config_mode_type;
   if (config->exec_mode == EXEC_MODE_COMMAND_FILE) {
     config->command_file = get_formatted_string("%s", command_filename);
@@ -696,51 +655,44 @@ config_load_status_t load_player_name_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
+bool letter_distributions_are_compatible(const char *ld_name_1,
+                                         const char *ld_name_2) {
+  return strings_equal(ld_name_1, ld_name_2) ||
+         // English and French use the same letters so they are
+         // allowed to play against each other.
+         (strings_equal(ld_name_1, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
+          strings_equal(ld_name_2, FRENCH_LETTER_DISTRIBUTION_NAME)) ||
+         (strings_equal(ld_name_2, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
+          strings_equal(ld_name_1, FRENCH_LETTER_DISTRIBUTION_NAME));
+}
+
 bool lexicons_are_compatible(const char *p1_lexicon_name,
                              const char *p2_lexicon_name) {
   char *p1_ld = get_default_letter_distribution_name(p1_lexicon_name);
   char *p2_ld = get_default_letter_distribution_name(p2_lexicon_name);
-  bool compatible = strings_equal(p1_ld, p2_ld) ||
-                    // English and French use the same letters so they are
-                    // allowed to play against each other.
-                    (strings_equal(p1_ld, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
-                     strings_equal(p2_ld, FRENCH_LETTER_DISTRIBUTION_NAME)) ||
-                    (strings_equal(p2_ld, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
-                     strings_equal(p1_ld, FRENCH_LETTER_DISTRIBUTION_NAME));
+  bool compatible = letter_distributions_are_compatible(p1_ld, p2_ld);
   free(p1_ld);
   free(p2_ld);
   return compatible;
 }
 
-// Returns true on success and
-// return false if data was considered missing
+bool letter_distribution_is_compatible_with_lexicon(const char *lexicon_name,
+                                                    const char *ld_name) {
+  char *ld_from_lexicon_name =
+      get_default_letter_distribution_name(lexicon_name);
+  bool compatible =
+      letter_distributions_are_compatible(ld_from_lexicon_name, ld_name);
+  free(ld_from_lexicon_name);
+  return compatible;
+}
+
 config_load_status_t load_players_data_for_config(
     Config *config, players_data_t players_data_type,
     const char *p1_new_data_name, const char *p1_default_data_name,
-    const char *p2_new_data_name, const char *p2_default_data_name,
-    bool allow_null_data) {
-
-  bool p1_has_data = p1_new_data_name || p1_default_data_name;
-  bool p2_has_data = p2_new_data_name || p2_default_data_name;
-
-  // Do not allow just a single data to be specified. Enforce all
-  // or nothing to simplify logic.
-  if ((p1_has_data && !p2_has_data) || (!p1_has_data && p2_has_data)) {
-    return CONFIG_LOAD_STATUS_LEXICON_MISSING;
-  }
-
-  // If no data is specified, return now
-  if (!p1_has_data && !p2_has_data) {
-    if (allow_null_data) {
-      return CONFIG_LOAD_STATUS_SUCCESS;
-    } else {
-      return CONFIG_LOAD_STATUS_LEXICON_MISSING;
-    }
-  }
-
-  const char *p1_final_data_name = p1_new_data_name;
-  if (!p1_final_data_name) {
-    p1_final_data_name = p1_default_data_name;
+    const char *p2_new_data_name, const char *p2_default_data_name) {
+  const char *current_lexicon_name = p1_new_data_name;
+  if (!current_lexicon_name) {
+    current_lexicon_name = p1_default_data_name;
   }
 
   const char *p2_final_data_name = p2_new_data_name;
@@ -752,121 +704,184 @@ config_load_status_t load_players_data_for_config(
 
   // Since KWG and KLV share names, they can both be arguments
   // to the compatibility function.
-  if (!lexicons_are_compatible(p1_final_data_name, p2_final_data_name)) {
+  if (!lexicons_are_compatible(current_lexicon_name, p2_final_data_name)) {
     config_load_status = CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
   } else {
     set_players_data(config->players_data, players_data_type,
-                     p1_final_data_name, p2_final_data_name);
+                     current_lexicon_name, p2_final_data_name);
   }
   return config_load_status;
-}
-
-config_load_status_t load_lexicons_for_config(Config *config,
-                                              const char *p1_new_lexicon_name,
-                                              const char *p2_new_lexicon_name,
-                                              bool allow_null_lexicons) {
-  // The defaults are the existing names
-  const char *p1_default_lexicon_name = players_data_get_data_name(
-      config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
-  const char *p2_default_lexicon_name = players_data_get_data_name(
-      config->players_data, PLAYERS_DATA_TYPE_KWG, 1);
-  return load_players_data_for_config(
-      config, PLAYERS_DATA_TYPE_KWG, p1_new_lexicon_name,
-      p1_default_lexicon_name, p2_new_lexicon_name, p2_default_lexicon_name,
-      allow_null_lexicons);
 }
 
 char *get_default_klv_name(const char *lexicon_name) {
   return get_formatted_string("%s", lexicon_name);
 }
 
-config_load_status_t load_leaves_for_config(Config *config,
-                                            const char *p1_new_leaves_name,
-                                            const char *p2_new_leaves_name) {
-  // These might be null
-  // if we are doing a coldstart
-  const char *p1_existing_lexicon_name = players_data_get_data_name(
-      config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
-  const char *p2_existing_lexicon_name = players_data_get_data_name(
-      config->players_data, PLAYERS_DATA_TYPE_KWG, 1);
-
-  // Lexicons are guarantted to either both be null or both be nonnull
-  if (!p1_existing_lexicon_name && !p2_existing_lexicon_name) {
-    // If both lexicon names are null, we can safely assume
-    // we are in a cold start.
-    if (p1_new_leaves_name || p2_new_leaves_name) {
-      return CONFIG_LOAD_STATUS_LEXICON_MISSING;
-    } else {
-      return CONFIG_LOAD_STATUS_SUCCESS;
-    }
-  }
-
-  char *p1_default_leaves_name = get_default_klv_name(p1_existing_lexicon_name);
-  char *p2_default_leaves_name = get_default_klv_name(p2_existing_lexicon_name);
-  config_load_status_t config_load_status = load_players_data_for_config(
-      config, PLAYERS_DATA_TYPE_KLV, p1_new_leaves_name, p1_default_leaves_name,
-      p2_new_leaves_name, p2_default_leaves_name, false);
-  free(p1_default_leaves_name);
-  free(p2_default_leaves_name);
-  return config_load_status;
+bool is_lexicon_required(Config *config, const char *new_p1_leaves_name,
+                         const char *new_p2_leaves_name,
+                         const char *new_letter_distribution_name,
+                         const char *new_rack) {
+  return config->command_type != COMMAND_TYPE_SET_OPTIONS || config->cgp ||
+         config->command_set_cgp || new_p1_leaves_name || new_p2_leaves_name ||
+         new_letter_distribution_name || new_rack;
 }
 
-config_load_status_t
-load_letter_distribution_for_config(Config *config,
-                                    const char *new_letter_distribution_name) {
+config_load_status_t load_lexicon_dependent_data_for_config(
+    Config *config, const char *new_p1_lexicon_name,
+    const char *new_p2_lexicon_name, const char *new_p1_leaves_name,
+    const char *new_p2_leaves_name, const char *new_letter_distribution_name,
+    const char *new_rack) {
 
-  // Use player 1 lexicon to get a default distribution
-  const char *p1_lexicon_name = players_data_get_data_name(
+  // Load lexicons first
+  const char *existing_p1_lexicon_name = players_data_get_data_name(
       config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
+  const char *existing_p2_lexicon_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KWG, 1);
 
-  // If p1_lexicon_name is null, we can safely assume
-  // we are in a cold start that does not require
-  // lexicons
-  if (is_string_empty_or_null(p1_lexicon_name)) {
-    if (is_string_empty_or_null(new_letter_distribution_name)) {
-      return CONFIG_LOAD_STATUS_SUCCESS;
-    } else {
+  const char *updated_p1_lexicon_name = new_p1_lexicon_name;
+  if (!updated_p1_lexicon_name) {
+    updated_p1_lexicon_name = existing_p1_lexicon_name;
+  }
+
+  const char *updated_p2_lexicon_name = new_p2_lexicon_name;
+  if (!updated_p2_lexicon_name) {
+    updated_p2_lexicon_name = existing_p2_lexicon_name;
+  }
+
+  // Both or neither players must have lexical data
+  if ((updated_p1_lexicon_name && !updated_p2_lexicon_name) ||
+      (!updated_p1_lexicon_name && updated_p2_lexicon_name)) {
+    return CONFIG_LOAD_STATUS_LEXICON_MISSING;
+  }
+
+  // Both lexicons are not specified, so we don't
+  // load any of the lexicon dependent data
+  if (!updated_p1_lexicon_name && !updated_p2_lexicon_name) {
+    // We can use the new_* variables here since if lexicons
+    // are null, it is guaranteed that there are no leaves, ld, or
+    // rack since they are all set after this if check.
+    if (is_lexicon_required(config, new_p1_leaves_name, new_p2_leaves_name,
+                            new_letter_distribution_name, new_rack)) {
       return CONFIG_LOAD_STATUS_LEXICON_MISSING;
+    } else {
+      return CONFIG_LOAD_STATUS_SUCCESS;
     }
   }
 
-  char *letter_distribution_name = NULL;
+  if (!lexicons_are_compatible(updated_p1_lexicon_name,
+                               updated_p2_lexicon_name)) {
+    return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
+  }
 
-  if (!is_string_empty_or_null(new_letter_distribution_name)) {
-    letter_distribution_name =
-        get_formatted_string("%s", new_letter_distribution_name);
+  set_players_data(config->players_data, PLAYERS_DATA_TYPE_KWG,
+                   updated_p1_lexicon_name, updated_p2_lexicon_name);
+
+  config->lexicons_loaded = true;
+
+  // Load the leaves
+
+  char *updated_p1_leaves_name;
+  if (new_p1_leaves_name) {
+    updated_p1_leaves_name = get_formatted_string("%s", new_p1_leaves_name);
   } else {
-    letter_distribution_name =
-        get_default_letter_distribution_name(p1_lexicon_name);
+    updated_p1_leaves_name = get_default_klv_name(updated_p1_lexicon_name);
   }
 
-  if (strings_equal(config->ld_name, letter_distribution_name)) {
-    free(letter_distribution_name);
-    return CONFIG_LOAD_STATUS_SUCCESS;
+  char *updated_p2_leaves_name;
+  if (new_p2_leaves_name) {
+    updated_p2_leaves_name = get_formatted_string("%s", new_p2_leaves_name);
+  } else {
+    updated_p2_leaves_name = get_default_klv_name(updated_p2_lexicon_name);
   }
-  LetterDistribution *new_letter_distribution =
-      create_letter_distribution(letter_distribution_name);
-  if (config->letter_distribution) {
-    destroy_letter_distribution(config->letter_distribution);
-  }
-  config->letter_distribution = new_letter_distribution;
 
-  if (config->ld_name) {
-    free(config->ld_name);
+  if (!lexicons_are_compatible(updated_p1_leaves_name,
+                               updated_p2_leaves_name) ||
+      !lexicons_are_compatible(updated_p1_lexicon_name,
+                               updated_p1_leaves_name) ||
+      !lexicons_are_compatible(updated_p2_lexicon_name,
+                               updated_p2_leaves_name)) {
+    free(updated_p1_leaves_name);
+    free(updated_p2_leaves_name);
+    return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
   }
-  config->ld_name = letter_distribution_name;
+
+  set_players_data(config->players_data, PLAYERS_DATA_TYPE_KLV,
+                   updated_p1_leaves_name, updated_p2_leaves_name);
+
+  free(updated_p1_leaves_name);
+  free(updated_p2_leaves_name);
+
+  // Load letter distribution
+
+  char *updated_letter_distribution_name;
+  if (!is_string_empty_or_null(new_letter_distribution_name)) {
+    // if the user specified letter distribution
+    // isn't compatible, return an error
+    if (!letter_distribution_is_compatible_with_lexicon(
+            updated_p1_lexicon_name, new_letter_distribution_name)) {
+      return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
+    }
+    updated_letter_distribution_name =
+        get_formatted_string("%s", new_letter_distribution_name);
+  } else if (is_string_empty_or_null(config->ld_name)) {
+    // No letter distribution was specified and the current
+    // letter distribution is null, so load the default letter
+    // distribution based on player one's lexicon
+    updated_letter_distribution_name =
+        get_default_letter_distribution_name(updated_p1_lexicon_name);
+  } else {
+    // If the existing letter distribution isn't compatible,
+    // just assume we want to use the default.
+    if (!letter_distribution_is_compatible_with_lexicon(updated_p1_lexicon_name,
+                                                        config->ld_name)) {
+      updated_letter_distribution_name =
+          get_default_letter_distribution_name(updated_p1_lexicon_name);
+    } else {
+      updated_letter_distribution_name =
+          get_formatted_string("%s", config->ld_name);
+    }
+  }
+
+  // Here we can assume that the lexicons are already
+  // compatible with each other, so we only need to
+  // check the letter distribution with 1 lexicon
+
+  // If the letter distribution name has changed, update it
+  if (!strings_equal(config->ld_name, updated_letter_distribution_name)) {
+    LetterDistribution *updated_letter_distribution =
+        create_letter_distribution(updated_letter_distribution_name);
+    if (config->letter_distribution) {
+      destroy_letter_distribution(config->letter_distribution);
+    }
+    config->letter_distribution = updated_letter_distribution;
+
+    if (config->ld_name) {
+      free(config->ld_name);
+    }
+    config->ld_name = updated_letter_distribution_name;
+  } else {
+    free(updated_letter_distribution_name);
+  }
+
+  update_or_create_rack(&config->rack, config->letter_distribution->size);
+
+  if (new_rack) {
+    if (!strings_equal(EMPTY_RACK_STRING, new_rack)) {
+      int number_of_letters_set = set_rack_to_string(
+          config->rack, new_rack, config->letter_distribution);
+      if (number_of_letters_set < 0) {
+        return CONFIG_LOAD_STATUS_MALFORMED_RACK;
+      }
+    } else {
+      reset_rack(config->rack);
+    }
+  }
+
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-bool is_coldstart_arg(arg_token_t arg_token) {
-  return arg_token == ARG_TOKEN_UCGI_MODE ||
-         arg_token == ARG_TOKEN_CONSOLE_MODE ||
-         arg_token == ARG_TOKEN_COMMAND_FILE;
-}
-
 config_load_status_t load_config_with_parsed_args(Config *config,
-                                                  ParsedArgs *parsed_args,
-                                                  bool coldstart) {
+                                                  ParsedArgs *parsed_args) {
 
   int args_start_index = set_command_type_for_config(config, parsed_args);
 
@@ -883,7 +898,10 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   const char *new_p2_leaves_name = NULL;
   const char *new_letter_distribution_name = NULL;
   const char *new_win_pct_name = NULL;
-  const char *rack = NULL;
+  const char *new_rack = NULL;
+  const char *outfile = NULL;
+  const char *infile = NULL;
+  exec_mode_t command_exec_mode = EXEC_MODE_SINGLE_COMMAND;
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   for (int i = args_start_index; i < NUMBER_OF_ARG_TOKENS; i++) {
     if (!parsed_args->args[i]->has_value) {
@@ -891,10 +909,6 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     }
     SingleArg *single_arg = parsed_args->args[i];
     arg_token_t arg_token = single_arg->token;
-    if (!coldstart && is_coldstart_arg(arg_token)) {
-      config_load_status = CONFIG_LOAD_STATUS_FOUND_COLDSTART_ONLY_OPTION;
-      break;
-    }
     char **arg_values = single_arg->values;
     switch (arg_token) {
     case ARG_TOKEN_POSITION:
@@ -961,7 +975,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
           load_move_record_type_for_config(config, arg_values[0], 1);
       break;
     case ARG_TOKEN_KNOWN_OPP_RACK:
-      rack = arg_values[0];
+      new_rack = arg_values[0];
       break;
     case ARG_TOKEN_WIN_PCT:
       new_win_pct_name = arg_values[0];
@@ -1022,24 +1036,33 @@ config_load_status_t load_config_with_parsed_args(Config *config,
           load_check_stop_interval_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_INFILE:
-      config_load_status = load_infile_for_config(config, arg_values[0]);
+      infile = arg_values[0];
       break;
     case ARG_TOKEN_OUTFILE:
-      config_load_status = load_outfile_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_ERRORFILE:
-      config_load_status = load_errorfile_for_config(config, arg_values[0]);
+      outfile = arg_values[0];
       break;
     case ARG_TOKEN_CONSOLE_MODE:
-      config_load_status =
-          load_mode_for_config(config, EXEC_MODE_CONSOLE, NULL);
+      if (command_exec_mode != EXEC_MODE_SINGLE_COMMAND) {
+        config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
+      } else {
+        config_load_status =
+            load_mode_for_config(config, EXEC_MODE_CONSOLE, NULL);
+      }
       break;
     case ARG_TOKEN_UCGI_MODE:
-      config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI, NULL);
+      if (command_exec_mode != EXEC_MODE_SINGLE_COMMAND) {
+        config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
+      } else {
+        config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI, NULL);
+      }
       break;
     case ARG_TOKEN_COMMAND_FILE:
-      config_load_status =
-          load_mode_for_config(config, EXEC_MODE_COMMAND_FILE, arg_values[0]);
+      if (command_exec_mode != EXEC_MODE_SINGLE_COMMAND) {
+        config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
+      } else {
+        config_load_status =
+            load_mode_for_config(config, EXEC_MODE_COMMAND_FILE, arg_values[0]);
+      }
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("invalid token found in args\n");
@@ -1050,40 +1073,14 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     }
   }
 
-  // Lexicons must be loaded before other data
-  // since they are used to get default data
-  // for leaves, letter distribution, etc.
-  // if those values are not specified
-  config_load_status = load_lexicons_for_config(config, new_p1_lexicon_name,
-                                                new_p2_lexicon_name, coldstart);
+  config_load_status = load_lexicon_dependent_data_for_config(
+      config, new_p1_lexicon_name, new_p2_lexicon_name, new_p1_leaves_name,
+      new_p2_leaves_name, new_letter_distribution_name, new_rack);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
 
-  config_load_status =
-      load_leaves_for_config(config, new_p1_leaves_name, new_p2_leaves_name);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
-  }
-
-  config_load_status =
-      load_letter_distribution_for_config(config, new_letter_distribution_name);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
-  }
-
-  // The letter distribution may have changed,
-  // so we might need to update the rack.
-  // If this is a coldstart, we might not have a
-  // letter distribution in which case we do not update
-  // the rack.
-  if (config->letter_distribution) {
-    update_or_create_rack(&config->rack, config->letter_distribution->size);
-  }
-
-  // Now that the letter distribution has been loaded
-  // we can read the rack.
-  config_load_status = load_rack_for_config(config, rack);
+  config_load_status = load_io_for_config(config, infile, outfile);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
@@ -1091,8 +1088,11 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   return load_winpct_for_config(config, new_win_pct_name);
 }
 
-config_load_status_t load_config(Config *config, const char *cmd,
-                                 bool coldstart) {
+void restore_previous_exec_mode(Config *config) {
+  config->exec_mode = config->previous_exec_mode;
+}
+
+config_load_status_t load_config(Config *config, const char *cmd) {
 
   // If the command is empty, consider this a set options
   // command where zero options are set and return without error.
@@ -1111,8 +1111,7 @@ config_load_status_t load_config(Config *config, const char *cmd,
 
   config->command_set_cgp = false;
   if (config_load_status == CONFIG_LOAD_STATUS_SUCCESS) {
-    config_load_status =
-        load_config_with_parsed_args(config, parsed_args, coldstart);
+    config_load_status = load_config_with_parsed_args(config, parsed_args);
   }
 
   destroy_parsed_args(parsed_args);
@@ -1125,6 +1124,7 @@ Config *create_default_config() {
   Config *config = malloc_or_die(sizeof(Config));
   config->command_type = COMMAND_TYPE_UNKNOWN;
   config->command_set_cgp = false;
+  config->lexicons_loaded = false;
   config->letter_distribution = NULL;
   config->ld_name = NULL;
   config->cgp = NULL;
@@ -1148,6 +1148,7 @@ Config *create_default_config() {
   config->random_seed = 0;
   config->thread_control = create_thread_control();
   config->exec_mode = EXEC_MODE_SINGLE_COMMAND;
+  config->previous_exec_mode = EXEC_MODE_SINGLE_COMMAND;
   config->command_file = NULL;
   return config;
 }

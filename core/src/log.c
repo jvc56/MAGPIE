@@ -134,7 +134,6 @@ void log_log(int level, const char *file, int line, const char *fmt, ...) {
   if (!L.quiet && level >= L.level) {
     if (L.errorout) {
       init_event(&ev, L.errorout);
-
     } else {
       init_event(&ev, stderr);
     }

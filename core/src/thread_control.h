@@ -32,7 +32,6 @@ typedef struct ThreadControl {
   check_stop_status_t check_stop_status;
   mode_search_status_t current_mode;
   halt_status_t halt_status;
-  pthread_mutex_t print_output_mutex;
   pthread_mutex_t check_stopping_condition_mutex;
   pthread_mutex_t current_mode_mutex;
   pthread_mutex_t halt_status_mutex;
@@ -56,9 +55,8 @@ void set_check_stopping_condition_interval(
 bool set_mode_searching(ThreadControl *thread_control);
 bool set_mode_stopped(ThreadControl *thread_control);
 mode_search_status_t get_mode(ThreadControl *thread_control);
-void set_outfile(ThreadControl *thread_control, const char *filename);
-void set_infile(ThreadControl *thread_control, const char *filename);
-void set_errorfile(ThreadControl *thread_control, const char *filename);
+void set_io(ThreadControl *thread_control, const char *in_filename,
+            const char *out_filename);
 bool set_check_stop_active(ThreadControl *thread_control);
 bool set_check_stop_inactive(ThreadControl *thread_control);
 void print_to_outfile(ThreadControl *thread_control, const char *content);

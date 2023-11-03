@@ -17,8 +17,7 @@ struct FileHandler {
 
 void file_handler_clear_file_and_filename(FileHandler *fh) {
   if (fh->file && !strings_equal(fh->filename, STDOUT_FILENAME) &&
-      !strings_equal(fh->filename, STDIN_FILENAME) &&
-      !strings_equal(fh->filename, STDERR_FILENAME)) {
+      !strings_equal(fh->filename, STDIN_FILENAME)) {
     fclose(fh->file);
     fh->file = NULL;
   }
@@ -28,9 +27,13 @@ void file_handler_clear_file_and_filename(FileHandler *fh) {
   }
 }
 
-void set_file_handler(FileHandler *fh, const char *filename,
-                      file_handler_mode_t file_handler_mode_type) {
-  pthread_mutex_lock(&fh->mutex);
+const char *get_file_handler_filename(FileHandler *fh) { return fh->filename; }
+
+void set_file_handler_while_locked(FileHandler *fh, const char *filename,
+                                   file_handler_mode_t file_handler_mode_type) {
+  if (strings_equal(filename, fh->filename)) {
+    return;
+  }
   file_handler_clear_file_and_filename(fh);
   fh->filename = get_formatted_string("%s", filename);
   fh->type = file_handler_mode_type;
@@ -46,22 +49,29 @@ void set_file_handler(FileHandler *fh, const char *filename,
       log_fatal("file handler for stderr must be in read mode\n");
     }
     fh->file = stdin;
-  } else if (strings_equal(filename, STDERR_FILENAME)) {
-    if (fh->type != FILE_HANDLER_MODE_WRITE) {
-      log_fatal("file handler for stderr must be in write mode\n");
-    }
-    fh->file = stderr;
-    log_set_error_out(fh->file);
   } else {
     switch (fh->type) {
     case FILE_HANDLER_MODE_READ:
       fh->file = fopen(filename, "r");
+      if (!fh->file) {
+        log_fatal("failed to open fail handle %s for reading", filename);
+      }
       break;
     case FILE_HANDLER_MODE_WRITE:
       fh->file = fopen(filename, "a");
+      if (!fh->file) {
+        log_fatal("failed to open fail handle %s for appending", fh->filename);
+      }
       break;
     }
   }
+}
+
+// No-op if the filename matches the existing filename
+void set_file_handler(FileHandler *fh, const char *filename,
+                      file_handler_mode_t file_handler_mode_type) {
+  pthread_mutex_lock(&fh->mutex);
+  set_file_handler_while_locked(fh, filename, file_handler_mode_type);
   pthread_mutex_unlock(&fh->mutex);
 }
 
@@ -95,8 +105,17 @@ void write_to_file(FileHandler *fh, const char *content) {
   if (!content) {
     return;
   }
-  fprintf(fh->file, "%s", content);
-  fflush(fh->file);
+
+  int fprintf_result = fprintf(fh->file, "%s", content);
+  if (fprintf_result < 0) {
+    log_fatal("fprintf failed with error code %d\n", fprintf_result);
+  }
+
+  int fflush_result = fflush(fh->file);
+  if (fflush_result != 0) {
+    log_fatal("fflush failed with error code %d\n", fflush_result);
+  }
+
   pthread_mutex_unlock(&fh->mutex);
 }
 

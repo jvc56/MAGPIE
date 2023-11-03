@@ -2,48 +2,56 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "log.h"
 #include "thread_control.h"
 #include "util.h"
 
 ThreadControl *create_thread_control() {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
-  thread_control->number_of_threads = 1;
-  pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
   thread_control->halt_status = HALT_STATUS_NONE;
-  pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
   thread_control->current_mode = MODE_STOPPED;
-  pthread_mutex_init(&thread_control->print_output_mutex, NULL);
-  thread_control->print_info_interval = 0;
-  pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
-  thread_control->check_stopping_condition_interval = 0;
   thread_control->check_stop_status = CHECK_STOP_INACTIVE;
+  thread_control->number_of_threads = 1;
+  thread_control->check_stopping_condition_interval = 0;
+  thread_control->print_info_interval = 0;
+  pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
+  pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
+  pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
   pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
   thread_control->outfile = create_file_handler_from_filename(
       STDOUT_FILENAME, FILE_HANDLER_MODE_WRITE);
   thread_control->infile =
       create_file_handler_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
-  thread_control->errorfile = create_file_handler_from_filename(
-      STDERR_FILENAME, FILE_HANDLER_MODE_WRITE);
   return thread_control;
 }
 
 void destroy_thread_control(ThreadControl *thread_control) {
   destroy_file_handler(thread_control->outfile);
   destroy_file_handler(thread_control->infile);
-  destroy_file_handler(thread_control->errorfile);
   free(thread_control);
 }
 
-void set_outfile(ThreadControl *thread_control, const char *filename) {
-  set_file_handler(thread_control->outfile, filename, FILE_HANDLER_MODE_WRITE);
-}
+void set_io(ThreadControl *thread_control, const char *in_filename,
+            const char *out_filename) {
+  const char *nonnull_in_filename = in_filename;
+  if (!nonnull_in_filename) {
+    nonnull_in_filename = get_file_handler_filename(thread_control->infile);
+  }
 
-void set_infile(ThreadControl *thread_control, const char *filename) {
-  set_file_handler(thread_control->infile, filename, FILE_HANDLER_MODE_READ);
-}
+  const char *nonnull_out_filename = out_filename;
+  if (!nonnull_out_filename) {
+    nonnull_out_filename = get_file_handler_filename(thread_control->outfile);
+  }
 
-void set_errorfile(ThreadControl *thread_control, const char *filename) {
-  set_file_handler(thread_control->errorfile, filename,
+  if (strings_equal(nonnull_in_filename, nonnull_out_filename)) {
+    log_warn("in file and out file cannot be the same\n");
+    return;
+  }
+
+  set_file_handler(thread_control->infile, nonnull_in_filename,
+                   FILE_HANDLER_MODE_READ);
+
+  set_file_handler(thread_control->outfile, nonnull_out_filename,
                    FILE_HANDLER_MODE_WRITE);
 }
 
@@ -152,11 +160,7 @@ bool set_check_stop_inactive(ThreadControl *thread_control) {
 }
 
 void print_to_outfile(ThreadControl *thread_control, const char *content) {
-  // Lock to print unconditionally even if we might not need
-  // to for simplicity. The performance cost is negligible.
-  pthread_mutex_lock(&thread_control->print_output_mutex);
   write_to_file(thread_control->outfile, content);
-  pthread_mutex_unlock(&thread_control->print_output_mutex);
 }
 
 void wait_for_mode_stopped(ThreadControl *thread_control) {
