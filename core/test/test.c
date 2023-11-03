@@ -39,7 +39,6 @@
 void unit_tests(SuperConfig *superconfig) {
   // Test the loading of the config
   test_config();
-
   // Test the readonly data first
   test_string_util();
   test_alphabet(superconfig);

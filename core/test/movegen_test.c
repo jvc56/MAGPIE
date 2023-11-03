@@ -1,3 +1,5 @@
+#include "../src/movegen.h"
+
 #include <assert.h>
 #include <float.h>
 #include <math.h>
@@ -9,10 +11,8 @@
 #include "../src/game.h"
 #include "../src/gameplay.h"
 #include "../src/move.h"
-#include "../src/movegen.h"
 #include "../src/player.h"
 #include "../src/util.h"
-
 #include "cross_set_test.h"
 #include "rack_test.h"
 #include "superconfig.h"
@@ -130,10 +130,10 @@ void macondo_tests(SuperConfig *superconfig) {
       game->gen->letter_distribution, "I");
   clear_cross_set(game->gen->board, game->gen->current_row_index, 2,
                   BOARD_VERTICAL_DIRECTION, 0);
-  set_cross_set_letter(get_cross_set_pointer(game->gen->board,
-                                             game->gen->current_row_index, 2,
-                                             BOARD_VERTICAL_DIRECTION, 0),
-                       ml);
+  set_cross_set_letter(
+      get_cross_set_pointer(game->gen->board, game->gen->current_row_index, 2,
+                            BOARD_VERTICAL_DIRECTION, 0),
+      ml);
   execute_recursive_gen(game->gen, game->gen->current_anchor_col, player,
                         game->gen->current_anchor_col,
                         game->gen->current_anchor_col, 1);
@@ -477,9 +477,10 @@ void exchange_tests(SuperConfig *superconfig) {
   Config *config = get_csw_config(superconfig);
   Game *game = create_game(config);
 
-  char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
-                  "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
-                  "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+  char cgp[300] =
+      "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
   // The top equity plays uses 7 tiles,
   // so exchanges should not be possible.
@@ -555,6 +556,155 @@ void equity_test(SuperConfig *superconfig) {
 
   destroy_sorted_move_list(equity_test_sorted_move_list);
   destroy_rack(move_rack);
+  destroy_game(game);
+}
+
+void bingo_tests(SuperConfig *superconfig) {
+  Config *config = get_csw_config(superconfig);
+  Game *game = create_game(config);
+  Generator *gen = game->gen;
+  char word_square[300] =
+      "15/15/15/15/15/15/15/3JEWELER5/3ELAPINE5/3WAXINGS5/15/"
+      "3LINEMAN5/3ENGRAFT5/3RESENTS5/15 EEEIMPR/BDIORTU 339/169 0 lex CSW21";
+  assert(load_cgp(game, word_square) == CGP_PARSE_STATUS_SUCCESS);
+  Player *player = game->players[game->player_on_turn_index];
+
+  // Seven-tile overlap, tests cross-checking and scoring
+  look_up_bingos_for_game(game);
+  assert(gen->number_of_bingos == 2);
+  assert_bingo_found(gen, "EPIMERE");
+  assert_bingo_found(gen, "PREEMIE");
+  gen->current_row_index = 10;
+  gen->current_anchor_col = 3;
+  gen->vertical = false;
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  player->strategy_params->play_recorder_type = MOVE_RECORDER_ALL;
+  bingo_gen(gen, player, NULL);
+  assert(gen->move_list->count == 1);
+  assert_move(game, NULL, 0, "11D EPIMERE 163");
+
+  // Tests double-blank with blanks designated as same letter
+  set_rack_to_string(player->rack, "??EIMPR", gen->letter_distribution);
+  look_up_bingos_for_game(game);
+  assert(gen->number_of_bingos == 108);
+  reset_move_list(gen->move_list);
+  bingo_gen(gen, player, NULL);
+  assert(gen->move_list->count == 3);
+  SortedMoveList *sorted_move_list = create_sorted_move_list(gen->move_list);
+  assert_move(game, sorted_move_list, 0, "11D EPIMeRe 157");
+  assert_move(game, sorted_move_list, 1, "11D ePIMERe 157");
+  assert_move(game, sorted_move_list, 2, "11D ePIMeRE 157");
+  destroy_sorted_move_list(sorted_move_list);
+
+  // Tests double-blank with blanks designated as two different letters
+  set_rack_to_string(player->rack, "??EEIMR", gen->letter_distribution);
+  look_up_bingos_for_game(game);
+  assert(gen->number_of_bingos == 103);
+  reset_move_list(gen->move_list);
+  bingo_gen(gen, player, NULL);
+  assert(gen->move_list->count == 3);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+  assert_move(game, sorted_move_list, 0, "11D EpIMERe 148");
+  assert_move(game, sorted_move_list, 1, "11D EpIMeRE 148");
+  assert_move(game, sorted_move_list, 2, "11D epIMERE 148");
+  destroy_sorted_move_list(sorted_move_list);
+
+  // Tests single-blank, non-overlapping tiles, last_anchor_col is set.
+  set_rack_to_string(player->rack, "?EEIMRT", gen->letter_distribution);
+  look_up_bingos_for_game(game);
+  reset_move_list(gen->move_list);
+  gen->current_anchor_col = 7;
+  gen->last_anchor_col = 6;
+  bingo_gen(gen, player, NULL);
+  assert(gen->move_list->count == 3);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+  assert_move(game, sorted_move_list, 0, "11H EREMITe 93");
+  assert_move(game, sorted_move_list, 1, "11H EReMITE 92");
+  assert_move(game, sorted_move_list, 2, "11H eREMITE 92");
+  destroy_sorted_move_list(sorted_move_list);
+
+  // Tests single blank set as any of three different letters 
+  reset_move_list(gen->move_list);
+  gen->current_anchor_col = 8;
+  gen->last_anchor_col = 7;
+  bingo_gen(gen, player, NULL);
+  assert(gen->move_list->count == 3);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+  assert_move(game, sorted_move_list, 0, "11I REEMITs 84");
+  assert_move(game, sorted_move_list, 1, "11I RETIMEd 84");
+  assert_move(game, sorted_move_list, 2, "11I RETIMEs 84");
+  destroy_sorted_move_list(sorted_move_list);
+
+  // Tests anchor with no bingos
+  reset_move_list(gen->move_list);
+  gen->current_anchor_col = 9;
+  gen->last_anchor_col = 8;
+  bingo_gen(gen, player, NULL);
+  assert(gen->move_list->count == 0);
+
+  reset_game(game);
+  char outplay[300] =
+      "7U6R/7R4MOO/7V4MUT/3J1PEACOAt2O/3ANA1S2T3L/3REX4R2QI/4W3L1E2I1/"
+      "4BOWIE1mOGGY/8KOB2O1/5VIDUAL2N1/2AUF4TE2GI/3NEP3I4C/"
+      "4HARDIEST2H/9S3ZE/7INTENDED AEFLRST/AEINY 452/368 0 lex CSW21";
+  assert(load_cgp(game, outplay) == CGP_PARSE_STATUS_SUCCESS);
+  player = game->players[game->player_on_turn_index];
+  look_up_bingos_for_game(game);
+  reset_move_list(gen->move_list);
+
+  // Tests vertical play, find a bingo starting before current_anchor_col, and
+  // endgame equity adjustment.
+  assert(gen->number_of_bingos == 1);
+  transpose(game->gen->board);
+  gen->current_anchor_col = 10;
+  gen->current_row_index = 1;
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  gen->vertical = true;
+  Rack *opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+  bingo_gen(gen, player, opp_rack);
+  assert(gen->move_list->count == 1);
+  assert_move(game, NULL, 0, "B9 FALTERS 81");
+  assert(gen->move_list->moves[0]->equity == 81 + 2 * 8);
+
+  // Test blanks and opening play with placement adjustment
+  reset_game(game);
+  assert(load_cgp(game, EMPTY_CGP) == CGP_PARSE_STATUS_SUCCESS);
+  set_rack_to_string(player->rack, "??ACEFO", gen->letter_distribution);
+  look_up_bingos_for_game(game);
+  assert(gen->number_of_bingos == 9);
+  gen->current_anchor_col = 7;
+  gen->current_row_index = 7;
+  // This would be INITIAL_LAST_ANCHOR_COL for a real empty-board anchor.
+  // Setting it to 6 gives us just the 8H moves.
+  gen->last_anchor_col = 6;
+  gen->vertical = false;
+  bingo_gen(gen, player, NULL);
+  // FACEOFF x 3
+  // AFFORCE x 2
+  // ARCHFOE
+  // DOGFACE
+  // FACONNE
+  // FORECAR
+  // GEOFACT
+  // OUTFACE
+  // PROFACE
+  assert(gen->move_list->count == 12);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+  // When scores are equal, consonant is preferred to vowel in 8I square.
+  assert_move(game, sorted_move_list, 0, "8H ArChFOE 78");
+  assert_move(game, sorted_move_list, 1, "8H FOrECAr 76");
+  assert_move(game, sorted_move_list, 2, "8H prOFACE 72");
+  assert_move(game, sorted_move_list, 3, "8H FACEOff 72");
+  assert_move(game, sorted_move_list, 4, "8H OutFACE 72");
+  assert_move(game, sorted_move_list, 5, "8H dOgFACE 72");
+  assert_move(game, sorted_move_list, 6, "8H fACEOFf 72");
+  assert_move(game, sorted_move_list, 7, "8H fACEOfF 72");
+  assert_move(game, sorted_move_list, 8, "8H gEOFACt 72");
+  assert_move(game, sorted_move_list, 9, "8H AFfOrCE 70");
+  assert_move(game, sorted_move_list, 10, "8H AfFOrCE 70");
+  assert_move(game, sorted_move_list, 11, "8H FACOnnE 70");
+
+  destroy_sorted_move_list(sorted_move_list);
   destroy_game(game);
 }
 
@@ -649,6 +799,7 @@ void distinct_lexica_test(SuperConfig *superconfig) {
 void test_movegen(SuperConfig *superconfig) {
   macondo_tests(superconfig);
   exchange_tests(superconfig);
+  bingo_tests(superconfig);
   leave_lookup_test(superconfig);
   equity_test(superconfig);
   top_equity_play_recorder_test(superconfig);

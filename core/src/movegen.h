@@ -16,6 +16,7 @@
 #include "player.h"
 #include "rack.h"
 
+#define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 #define OPENING_HOTSPOT_PENALTY -0.7
 #define PREENDGAME_ADJUSTMENT_VALUES_LENGTH 13
 #define BINGO_BONUS 50
@@ -73,6 +74,8 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
                     int add_exchange);
 void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
                              int stripidx, int add_exchange);
+void look_up_bingos(Generator *gen, Player *player);       
+void bingo_gen(Generator *gen, Player *player, Rack *opp_rack);                      
 void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
                    uint32_t node_index, int leftstrip, int rightstrip,
                    int unique_play);

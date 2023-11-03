@@ -1,7 +1,5 @@
 #include "anchor.h"
 
-#include <stdlib.h>
-
 #include "board.h"
 #include "constants.h"
 #include "stdlib.h"

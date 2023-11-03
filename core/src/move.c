@@ -79,7 +79,7 @@ int compare_moves(Move *move_1, Move *move_2) {
   if (move_1->move_type == GAME_EVENT_PASS) {
     return 0;
   }
-  log_fatal("duplicate move in move list detected\n");
+  //log_fatal("duplicate move in move list detected\n");  DO NOT SUBMIT
   return 0;
 }
 

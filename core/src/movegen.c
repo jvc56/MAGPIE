@@ -17,8 +17,6 @@
 #include "rack.h"
 #include "util.h"
 
-#define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
-
 void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
            Rack *opp_rack, uint32_t new_node_index, int accepts, int leftstrip,
            int rightstrip, int unique_play);
@@ -831,13 +829,14 @@ void set_descending_tile_scores(Generator *gen, Player *player) {
 
 void add_bingos(Generator *gen, Player *player, uint32_t node_index,
                 bool flipped, int accepts) {
-  // StringBuilder *sb = create_string_builder();
-  // string_builder_add_rack(player->rack, gen->letter_distribution, sb);
-  // printf(
-  //     "add_bingos %s tiles_played: %i node_index: %i flipped: %i accepts:
-  //     %i\n", string_builder_peek(sb), gen->tiles_played, node_index, flipped,
-  //     accepts);
-  // destroy_string_builder(sb);
+  /*
+StringBuilder *sb = create_string_builder();
+string_builder_add_rack(player->rack, gen->letter_distribution, sb);
+printf(
+"add_bingos %s tiles_played: %i node_index: %i flipped: %i accepts: %i\n",
+string_builder_peek(sb), gen->tiles_played, node_index, flipped, accepts);
+destroy_string_builder(sb);
+*/
   if (gen->tiles_played == RACK_SIZE) {
     if (accepts) {
       memcpy(gen->rack_bingos[gen->number_of_bingos], gen->strip,
@@ -869,10 +868,9 @@ void add_bingos(Generator *gen, Player *player, uint32_t node_index,
         add_bingos(gen, player, new_node_index, flipped, accepts);
         gen->tiles_played--;
         add_letter_to_rack(player->rack, ml);
-      }
-      if (player->rack->array[BLANK_MACHINE_LETTER] > 0) {
+      } else if (player->rack->array[BLANK_MACHINE_LETTER] > 0) {
         take_letter_from_rack(player->rack, BLANK_MACHINE_LETTER);
-        gen->strip[gen->tiles_played] = get_blanked_machine_letter(ml);
+        gen->strip[gen->tiles_played] = ml;
         gen->tiles_played++;
         add_bingos(gen, player, new_node_index, flipped, accepts);
         gen->tiles_played--;
@@ -922,6 +920,7 @@ void split_anchors_for_bingos(AnchorList *anchor_list, int make_bingo_anchors) {
 }
 
 void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
+  //printf("bingo_gen\n");
   const int row = gen->current_row_index;
   // const int dir = gen->vertical;
   const Board *board = gen->board;
@@ -957,6 +956,12 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
     rightmost_start_col--;
     rightmost_end_col--;
   }
+  /*
+  printf("bingo_gen: row=%d leftmost_start_col=%d leftmost_end_col=%d "
+         "rightmost_start_col=%d rightmost_end_col=%d\n",
+         row, leftmost_start_col, leftmost_end_col, rightmost_start_col,
+         rightmost_end_col);
+         */
   if (leftmost_start_col > rightmost_start_col) {
     return;
   }
@@ -1007,27 +1012,23 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
   }
   uint64_t letter_bits[RACK_SIZE];
   for (int bingo_idx = 0; bingo_idx < gen->number_of_bingos; bingo_idx++) {
-    /*
-    StringBuilder *sb = create_string_builder();
-    for (int j = 0; j < RACK_SIZE; j++) {
-      uint8_t print_tile = gen->rack_bingos[bingo_idx][j];
-      string_builder_add_user_visible_letter(gen->letter_distribution,
-                                             print_tile, 0, sb);
-    }
-    printf("trying to place bingo %s\n", string_builder_peek(sb));
-    */
+    //StringBuilder *sb = create_string_builder();
+    //for (int j = 0; j < RACK_SIZE; j++) {
+    //  uint8_t print_tile = gen->rack_bingos[bingo_idx][j];
+    //  string_builder_add_user_visible_letter(gen->letter_distribution,
+    //                                         print_tile, 0, sb);
+    //}
+    //printf("trying to place bingo %s\n", string_builder_peek(sb));
+    //destroy_string_builder(sb);
     for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
       const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
-      if (is_blanked(tile)) {
-        letter_bits[tile_idx] = 1 << get_unblanked_machine_letter(tile);
-      } else {
-        letter_bits[tile_idx] = 1 << tile;
-      }
+      assert(!is_blanked(tile));
+      letter_bits[tile_idx] = 1 << tile;
     }
 
     for (int start_col = leftmost_start_col; start_col <= rightmost_start_col;
          start_col++) {
-      // printf("  start_col=%d hook_total=%d\n", start_col,
+      //printf("  start_col=%d hook_total=%d\n", start_col,
       //        hook_totals[start_col]);
       int end_col = start_col + (RACK_SIZE - 1);
       int fits_with_crosses = true;
@@ -1044,7 +1045,9 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
       }
       int word_multiplier = 1;
       int main_word_score = 0;
-      int tile_crossing_score = 0;
+      int total_tile_crossing_score = 0;
+      int tile_crossing_scores[RACK_SIZE];
+      int tile_main_word_scores[RACK_SIZE];
       for (int col = start_col; col <= end_col; col++) {
         // printf("    col=%d\n", col);
         const int tile_idx = col - start_col;
@@ -1052,31 +1055,174 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
         const uint8_t bonus_square = get_bonus_square(board, row, col);
         int this_word_multiplier = bonus_square >> 4;
         word_multiplier *= this_word_multiplier;
-        if (!is_blanked(tile)) {
-          const int tile_score = gen->letter_distribution->scores[tile];
-          int actual_cross_word =
-              (row > 0 && !is_empty(board, row - 1, col)) ||
-              ((row < BOARD_DIM - 1) && !is_empty(board, row + 1, col));
-          int letter_multiplier = bonus_square & 0x0F;
-          if (actual_cross_word) {
-            tile_crossing_score +=
-                tile_score * this_word_multiplier * letter_multiplier;
-          }
-          // printf(
-          //     "    tilescore=%d letter_multiplier=%d
-          //     this_word_multiplier=%d\n",
-          //     gen->letter_distribution->scores[tile], letter_multiplier,
-          //     this_word_multiplier);
-          main_word_score += tile_score * letter_multiplier;
-          // printf("    main_word_score=%d\n", main_word_score);
+        const int tile_score = gen->letter_distribution->scores[tile];
+        int actual_cross_word =
+            (row > 0 && !is_empty(board, row - 1, col)) ||
+            ((row < BOARD_DIM - 1) && !is_empty(board, row + 1, col));
+        int letter_multiplier = bonus_square & 0x0F;
+        int tile_crossing_score = 0;
+        if (actual_cross_word) {
+          tile_crossing_score =
+              tile_score * this_word_multiplier * letter_multiplier;
+          total_tile_crossing_score += tile_crossing_score;
         }
+        const int tile_main_word_score = tile_score * letter_multiplier;
+        tile_crossing_scores[tile_idx] = tile_crossing_score;
+        // printf(
+        //     "    tilescore=%d letter_multiplier=%d
+        //     this_word_multiplier=%d\n",
+        //     gen->letter_distribution->scores[tile], letter_multiplier,
+        //     this_word_multiplier);
+        tile_main_word_scores[tile_idx] = tile_main_word_score;
+        main_word_score += tile_main_word_score;
+        // printf("    main_word_score=%d\n", main_word_score);
       }
       const int play_score = main_word_score * word_multiplier +
-                             tile_crossing_score + hook_totals[start_col] +
-                             BINGO_BONUS;
-      // printf("  play_score=%d\n", play_score);
-      record_bingo(gen, player, opp_rack, row, start_col,
-                   gen->rack_bingos[bingo_idx], play_score);
+                             total_tile_crossing_score +
+                             hook_totals[start_col] + BINGO_BONUS;
+      /*                             
+      printf("  play_score=%d\n", play_score);
+      for (int i = 0; i < RACK_SIZE; i++) {
+        printf("tile_crossing_scores[%d]: %d, tile_main_word_scores[%d]: %d\n",
+               i, tile_crossing_scores[i], i, tile_main_word_scores[i]);
+      }
+      */
+      if (player->rack->array[BLANK_MACHINE_LETTER] == 0) {
+        record_bingo(gen, player, opp_rack, row, start_col,
+                     gen->rack_bingos[bingo_idx], play_score);
+      } else {
+        int bingo_letter_counts[MAX_ALPHABET_SIZE];
+        memset(bingo_letter_counts, 0, sizeof(bingo_letter_counts));
+        for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+          const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
+          bingo_letter_counts[tile]++;
+        }
+        if (player->rack->array[BLANK_MACHINE_LETTER] == 1) {
+          uint8_t letter_needing_blank = 0;
+          for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+            const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
+            if (bingo_letter_counts[tile] > player->rack->array[tile]) {
+              letter_needing_blank = tile;
+              break;
+            }
+          }
+          assert(letter_needing_blank != 0);
+          //printf("one blank: %d\n", letter_needing_blank);
+          for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+            const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
+            if (tile == letter_needing_blank) {
+              gen->rack_bingos[bingo_idx][tile_idx] =
+                  get_blanked_machine_letter(tile);
+              const int blanked_score =
+                  play_score - tile_crossing_scores[tile_idx] -
+                  tile_main_word_scores[tile_idx] * word_multiplier;
+              record_bingo(gen, player, opp_rack, row, start_col,
+                           gen->rack_bingos[bingo_idx], blanked_score);
+              gen->rack_bingos[bingo_idx][tile_idx] = letter_needing_blank;
+            }
+          }
+        } else {
+          assert(player->rack->array[BLANK_MACHINE_LETTER] == 2);
+          uint8_t letter_needing_blank = 0;
+          uint8_t second_letter_needing_blank = 0;
+          for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+            const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
+            const int deficit =
+                bingo_letter_counts[tile] - player->rack->array[tile];
+            assert(deficit <= 2);
+            if (deficit == 2) {
+              letter_needing_blank = tile;
+              break;
+            } else if (deficit == 1) {
+              if (letter_needing_blank == 0) {
+                letter_needing_blank = tile;
+              } else if (letter_needing_blank != tile) {
+                second_letter_needing_blank = tile;
+                break;
+              }
+            }
+          }
+          if (second_letter_needing_blank == 0) {
+            int blank_indices[RACK_SIZE];
+            memset(blank_indices, 0, sizeof(blank_indices));
+            int num_duplicates = 0;
+            for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+              const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
+              if (tile == letter_needing_blank) {
+                blank_indices[num_duplicates] = tile_idx;
+                num_duplicates++;
+              }
+            }
+            assert(num_duplicates >= 2);
+            for (int dup_idx1 = 0; dup_idx1 < num_duplicates; dup_idx1++) {
+              const int tile_idx1 = blank_indices[dup_idx1];
+              gen->rack_bingos[bingo_idx][tile_idx1] =
+                  get_blanked_machine_letter(letter_needing_blank);
+              const int blanked1 =
+                  play_score - tile_crossing_scores[tile_idx1] -
+                  tile_main_word_scores[tile_idx1] * word_multiplier;
+              for (int dup_idx2 = dup_idx1 + 1; dup_idx2 < num_duplicates;
+                   dup_idx2++) {
+                const int tile_idx2 = blank_indices[dup_idx2];
+                gen->rack_bingos[bingo_idx][tile_idx2] =
+                    get_blanked_machine_letter(letter_needing_blank);
+                const int blanked2 =
+                    blanked1 - tile_crossing_scores[tile_idx2] -
+                    tile_main_word_scores[tile_idx2] * word_multiplier;
+                record_bingo(gen, player, opp_rack, row, start_col,
+                             gen->rack_bingos[bingo_idx], blanked2);
+                gen->rack_bingos[bingo_idx][tile_idx2] = letter_needing_blank;
+              }
+              gen->rack_bingos[bingo_idx][tile_idx1] = letter_needing_blank;
+            }
+          } else {
+            int blank1_indices[RACK_SIZE];
+            int blank1_dups = 0;
+            int blank2_indices[RACK_SIZE];
+            int blank2_dups = 0;
+            for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+              const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
+              if (tile == letter_needing_blank) {
+                blank1_indices[blank1_dups] = tile_idx;
+                blank1_dups++;
+              } else if (tile == second_letter_needing_blank) {
+                blank2_indices[blank2_dups] = tile_idx;
+                blank2_dups++;
+              }
+            }
+            /*
+            printf("blank1_dups: %d\n", blank1_dups);
+            for (int i = 0; i < blank1_dups; i++) {
+              printf("  %d\n", blank1_indices[i]);
+            }
+            printf("blank2_dups: %d\n", blank2_dups);
+            for (int i = 0; i < blank2_dups; i++) {
+              printf("  %d\n", blank2_indices[i]);
+            }
+            */
+            for (int blank1_dup_idx = 0; blank1_dup_idx < blank1_dups; blank1_dup_idx++) {
+              const int tile_idx1 = blank1_indices[blank1_dup_idx];
+              gen->rack_bingos[bingo_idx][tile_idx1] =
+                  get_blanked_machine_letter(letter_needing_blank);
+              const int blanked1 =
+                  play_score - tile_crossing_scores[tile_idx1] -
+                  tile_main_word_scores[tile_idx1] * word_multiplier;
+              for (int blank2_dup_idx = 0; blank2_dup_idx < blank2_dups; blank2_dup_idx++) {
+                const int tile_idx2 = blank2_indices[blank2_dup_idx];
+                gen->rack_bingos[bingo_idx][tile_idx2] =
+                    get_blanked_machine_letter(second_letter_needing_blank);
+                const int blanked2 =
+                    blanked1 - tile_crossing_scores[tile_idx2] -
+                    tile_main_word_scores[tile_idx2] * word_multiplier;
+                record_bingo(gen, player, opp_rack, row, start_col,
+                             gen->rack_bingos[bingo_idx], blanked2);
+                gen->rack_bingos[bingo_idx][tile_idx2] = second_letter_needing_blank;
+              }
+              gen->rack_bingos[bingo_idx][tile_idx1] = letter_needing_blank;
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -1109,20 +1255,21 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     transpose(gen->board);
   }
 
+  //int do_bingo_gen = player->index == 1;  // DO NOT SUBMIT
   int do_bingo_gen = true;  // player->index == 1;
 
   /*
     StringBuilder *sb = create_string_builder();
     string_builder_add_rack(player->rack, gen->letter_distribution, sb);
   */
-  //uint64_t start_time;
-  //uint64_t end_time;
+  // uint64_t start_time;
+  // uint64_t end_time;
 
   gen->number_of_bingos = 0;
   if (do_bingo_gen) {
-    //start_time = __rdtsc();
+    // start_time = __rdtsc();
     look_up_bingos(gen, player);
-    //end_time = __rdtsc();
+    // end_time = __rdtsc();
     /*
         printf("rack: %s, number_of_bingos: %d, look_up_bingos time: %lluns\n",
                string_builder_peek(sb), gen->number_of_bingos,
@@ -1151,8 +1298,8 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   }
   sort_anchor_list(gen->anchor_list);
 
-  //uint64_t total_anchor_search_time = 0;
-  //int anchors_searched = 0;
+  // uint64_t total_anchor_search_time = 0;
+  // int anchors_searched = 0;
   for (int i = 0; i < gen->anchor_list->count; i++) {
     if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST &&
         better_play_has_been_found(
@@ -1185,19 +1332,19 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     load_row_letter_cache(gen, gen->current_row_index);
     if (do_bingo_gen && (gen->min_tiles_to_play == RACK_SIZE) &&
         (gen->anchor_list->anchors[i]->max_num_playthrough == 0)) {
-      //start_time = __rdtsc();
+      // start_time = __rdtsc();
       bingo_gen(gen, player, opp_rack);
-      //end_time = __rdtsc();
+      // end_time = __rdtsc();
     } else {
-      //start_time = __rdtsc();
+      // start_time = __rdtsc();
       recursive_gen(gen, gen->current_anchor_col, player, opp_rack,
                     kwg_get_root_node_index(player->strategy_params->kwg),
                     gen->current_anchor_col, gen->current_anchor_col,
                     !gen->vertical);
-      //end_time = __rdtsc();
+      // end_time = __rdtsc();
     }
-    //const uint64_t elapsed_time = end_time - start_time;
-    //total_anchor_search_time += elapsed_time;
+    // const uint64_t elapsed_time = end_time - start_time;
+    // total_anchor_search_time += elapsed_time;
     /*
         printf(
             "player: %i, rack: %s, i: %i row: %i, col: %i, vert: %i, time: "
@@ -1213,7 +1360,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
             gen->max_num_playthrough, gen->min_tiles_to_play,
             gen->max_tiles_to_play);
     */
-    //anchors_searched++;
+    // anchors_searched++;
     if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST) {
       // If a better play has been found than should have been possible for this
       // anchor, highest_possible_equity was invalid.

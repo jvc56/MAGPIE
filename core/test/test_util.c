@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -14,9 +16,7 @@
 #include "../src/move.h"
 #include "../src/rack.h"
 #include "../src/util.h"
-
 #include "test_constants.h"
-#include "test_util.h"
 
 int within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
@@ -30,10 +30,10 @@ void generate_moves_for_game(Game *game) {
                  game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
 }
 
-void generate_leaves_for_game(Game* game, int add_exchange) {
+void generate_leaves_for_game(Game *game, int add_exchange) {
   Generator *gen = game->gen;
   Player *player = game->players[game->player_on_turn_index];
-    init_leave_map(gen->leave_map, player->rack);
+  init_leave_map(gen->leave_map, player->rack);
   if (player->rack->number_of_letters < RACK_SIZE) {
     set_current_value(
         gen->leave_map,
@@ -44,6 +44,13 @@ void generate_leaves_for_game(Game* game, int add_exchange) {
 
   // Set the best leaves and maybe add exchanges.
   generate_exchange_moves(gen, player, 0, 0, add_exchange);
+}
+
+void look_up_bingos_for_game(Game *game) {
+  Generator *gen = game->gen;
+  Player *player = game->players[game->player_on_turn_index];
+  gen->number_of_bingos = 0;
+  look_up_bingos(gen, player);
 }
 
 SortedMoveList *create_sorted_move_list(MoveList *ml) {
@@ -126,7 +133,6 @@ void play_top_n_equity_move(Game *game, int n) {
 
 void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
                          LetterDistribution *letter_distribution) {
-
   uint8_t mls[1000];
   int num_mls =
       str_to_machine_letters(letter_distribution, letters, false, mls);
@@ -171,4 +177,20 @@ void assert_move(Game *game, SortedMoveList *sml, int move_index,
     assert(0);
   }
   destroy_string_builder(move_string);
+}
+
+void assert_bingo_found(Generator *gen, const char *expected_bingo) {
+  for (int i = 0; i < gen->number_of_bingos; i++) {
+    StringBuilder *bingo = create_string_builder();
+    for (int j = 0; j < RACK_SIZE; j++) {
+      uint8_t uv_tile = gen->rack_bingos[i][j];
+      string_builder_add_user_visible_letter(gen->letter_distribution,
+                                             uv_tile, 0, bingo);
+    }
+    if (strings_equal(string_builder_peek(bingo), expected_bingo)) {
+      return;
+    }
+  }
+  fprintf(stderr, "expected bingo not found: %s\n", expected_bingo);
+  assert(0);
 }
