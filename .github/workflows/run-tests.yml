@@ -34,8 +34,11 @@ jobs:
           wget https://github.com/domino14/macondo/raw/master/data/strategy/default_english/winpct.csv &&
           wget https://woogles-prod-assets.s3.amazonaws.com/CSW21.csv.gz &&
           wget https://woogles-prod-assets.s3.amazonaws.com/OSPS44.kwg &&
+          wget https://github.com/olaugh-q2/q2/raw/main/data/csw21.ort.gz &&
           mv *.kwg core/data/lexica &&
           mv *.klv2 core/data/lexica &&
+          gunzip csw21.ort.gz &&
+          mv csw21.ort core/data/lexica/CSW21.ort &&
           mv *.csv core/data/strategy/default_english &&
           gunzip CSW21.csv.gz &&
           mv *.csv core/data/lexica

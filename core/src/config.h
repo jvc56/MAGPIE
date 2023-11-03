@@ -4,6 +4,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "ort.h"
 #include "rack.h"
 #include "winpct.h"
 
@@ -14,6 +15,8 @@ typedef struct StrategyParams {
   char kwg_filename[MAX_DATA_FILENAME_LENGTH];
   KLV *klv;
   char klv_filename[MAX_DATA_FILENAME_LENGTH];
+  ORT *ort;
+  char ort_filename[MAX_DATA_FILENAME_LENGTH];
   int move_sorting;
   int play_recorder_type;
 } StrategyParams;
@@ -24,6 +27,7 @@ typedef struct Config {
   char *cgp;
   int kwg_is_shared;
   int klv_is_shared;
+  int ort_is_shared;
   int use_game_pairs;
   int number_of_games_or_pairs;
   int print_info;
@@ -47,9 +51,10 @@ void load_config_from_lexargs(Config **config, const char *cgp,
                               char *lexicon_name, char *ldname);
 Config *create_config(
     const char *letter_distribution_filename, const char *cgp,
-    const char *kwg_filename_1, const char *klv_filename_1, int move_sorting_1,
-    int play_recorder_type_1, const char *kwg_filename_2,
-    const char *klv_filename_2, int move_sorting_2, int play_recorder_type_2,
+    const char *kwg_filename_1, const char *klv_filename_1,
+    const char *ort_filename_1, int move_sorting_1, int play_recorder_type_1,
+    const char *kwg_filename_2, const char *klv_filename_2,
+    const char *ort_filename_2, int move_sorting_2, int play_recorder_type_2,
     int game_pair_flag, int number_of_games_or_pairs, int print_info,
     int checkstop, const char *actual_tiles_played, int player_to_infer_index,
     int actual_score, int number_of_tiles_exchanged, double equity_margin,

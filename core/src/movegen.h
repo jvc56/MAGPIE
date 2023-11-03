@@ -32,6 +32,7 @@ typedef struct Generator {
   int apply_placement_adjustment;
   int kwgs_are_distinct;
 
+  uint8_t word_sizes[(BOARD_DIM + 1)];
   uint8_t row_letter_cache[(BOARD_DIM)];
   uint8_t strip[(BOARD_DIM)];
   uint8_t *exchange_strip;
