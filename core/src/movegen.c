@@ -849,10 +849,9 @@ destroy_string_builder(sb);
     return;
   }
   for (int i = node_index;; i++) {
-    int ml = kwg_tile(player->strategy_params->kwg, i);
-    int new_node_index = kwg_arc_index(player->strategy_params->kwg, i);
-    if ((ml > 0) &&
-        (player->rack->array[ml] != 0 || player->rack->array[0] != 0)) {
+    const int ml = kwg_tile(player->strategy_params->kwg, i);
+    const int new_node_index = kwg_arc_index(player->strategy_params->kwg, i);
+    if ((player->rack->array[ml] != 0 || player->rack->array[0] != 0)) {
       int accepts = kwg_accepts(player->strategy_params->kwg, i);
       if (player->rack->array[ml] > 0) {
         take_letter_from_rack(player->rack, ml);
