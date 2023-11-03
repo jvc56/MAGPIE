@@ -828,13 +828,13 @@ void set_descending_tile_scores(Generator *gen, Player *player) {
 }
 
 void add_bingos(Generator *gen, Player *player, uint32_t node_index,
-                bool flipped, int accepts) {
+                int accepts) {
   /*
 StringBuilder *sb = create_string_builder();
 string_builder_add_rack(player->rack, gen->letter_distribution, sb);
 printf(
-"add_bingos %s tiles_played: %i node_index: %i flipped: %i accepts: %i\n",
-string_builder_peek(sb), gen->tiles_played, node_index, flipped, accepts);
+"add_bingos %s tiles_played: %i node_index: accepts: %i\n",
+string_builder_peek(sb), gen->tiles_played, node_index, accepts);
 destroy_string_builder(sb);
 */
   if (gen->tiles_played == RACK_SIZE) {
@@ -851,13 +851,6 @@ destroy_string_builder(sb);
   for (int i = node_index;; i++) {
     int ml = kwg_tile(player->strategy_params->kwg, i);
     int new_node_index = kwg_arc_index(player->strategy_params->kwg, i);
-    if ((ml == 0) && (gen->tiles_played == 1)) {
-      add_bingos(gen, player, new_node_index, true, false);
-      return;
-    }
-    if ((gen->tiles_played >= 1) && !flipped) {
-      return;
-    }
     if ((ml > 0) &&
         (player->rack->array[ml] != 0 || player->rack->array[0] != 0)) {
       int accepts = kwg_accepts(player->strategy_params->kwg, i);
@@ -865,14 +858,14 @@ destroy_string_builder(sb);
         take_letter_from_rack(player->rack, ml);
         gen->strip[gen->tiles_played] = ml;
         gen->tiles_played++;
-        add_bingos(gen, player, new_node_index, flipped, accepts);
+        add_bingos(gen, player, new_node_index, accepts);
         gen->tiles_played--;
         add_letter_to_rack(player->rack, ml);
       } else if (player->rack->array[BLANK_MACHINE_LETTER] > 0) {
         take_letter_from_rack(player->rack, BLANK_MACHINE_LETTER);
         gen->strip[gen->tiles_played] = ml;
         gen->tiles_played++;
-        add_bingos(gen, player, new_node_index, flipped, accepts);
+        add_bingos(gen, player, new_node_index, accepts);
         gen->tiles_played--;
         add_letter_to_rack(player->rack, BLANK_MACHINE_LETTER);
       }
@@ -885,8 +878,8 @@ destroy_string_builder(sb);
 
 void look_up_bingos(Generator *gen, Player *player) {
   gen->tiles_played = 0;
-  add_bingos(gen, player, kwg_get_root_node_index(player->strategy_params->kwg),
-             false, false);
+  add_bingos(gen, player,
+             kwg_get_dawg_root_node_index(player->strategy_params->kwg), false);
 }
 
 void split_anchors_for_bingos(AnchorList *anchor_list, int make_bingo_anchors) {
@@ -920,7 +913,7 @@ void split_anchors_for_bingos(AnchorList *anchor_list, int make_bingo_anchors) {
 }
 
 void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
-  //printf("bingo_gen\n");
+  // printf("bingo_gen\n");
   const int row = gen->current_row_index;
   // const int dir = gen->vertical;
   const Board *board = gen->board;
@@ -1012,14 +1005,14 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
   }
   uint64_t letter_bits[RACK_SIZE];
   for (int bingo_idx = 0; bingo_idx < gen->number_of_bingos; bingo_idx++) {
-    //StringBuilder *sb = create_string_builder();
-    //for (int j = 0; j < RACK_SIZE; j++) {
-    //  uint8_t print_tile = gen->rack_bingos[bingo_idx][j];
-    //  string_builder_add_user_visible_letter(gen->letter_distribution,
-    //                                         print_tile, 0, sb);
-    //}
-    //printf("trying to place bingo %s\n", string_builder_peek(sb));
-    //destroy_string_builder(sb);
+    // StringBuilder *sb = create_string_builder();
+    // for (int j = 0; j < RACK_SIZE; j++) {
+    //   uint8_t print_tile = gen->rack_bingos[bingo_idx][j];
+    //   string_builder_add_user_visible_letter(gen->letter_distribution,
+    //                                          print_tile, 0, sb);
+    // }
+    // printf("trying to place bingo %s\n", string_builder_peek(sb));
+    // destroy_string_builder(sb);
     for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
       const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
       assert(!is_blanked(tile));
@@ -1028,8 +1021,8 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
 
     for (int start_col = leftmost_start_col; start_col <= rightmost_start_col;
          start_col++) {
-      //printf("  start_col=%d hook_total=%d\n", start_col,
-      //        hook_totals[start_col]);
+      // printf("  start_col=%d hook_total=%d\n", start_col,
+      //         hook_totals[start_col]);
       int end_col = start_col + (RACK_SIZE - 1);
       int fits_with_crosses = true;
       for (int col = start_col; col <= end_col; col++) {
@@ -1080,7 +1073,7 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
       const int play_score = main_word_score * word_multiplier +
                              total_tile_crossing_score +
                              hook_totals[start_col] + BINGO_BONUS;
-      /*                             
+      /*
       printf("  play_score=%d\n", play_score);
       for (int i = 0; i < RACK_SIZE; i++) {
         printf("tile_crossing_scores[%d]: %d, tile_main_word_scores[%d]: %d\n",
@@ -1107,7 +1100,7 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
             }
           }
           assert(letter_needing_blank != 0);
-          //printf("one blank: %d\n", letter_needing_blank);
+          // printf("one blank: %d\n", letter_needing_blank);
           for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
             const uint8_t tile = gen->rack_bingos[bingo_idx][tile_idx];
             if (tile == letter_needing_blank) {
@@ -1200,14 +1193,16 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
               printf("  %d\n", blank2_indices[i]);
             }
             */
-            for (int blank1_dup_idx = 0; blank1_dup_idx < blank1_dups; blank1_dup_idx++) {
+            for (int blank1_dup_idx = 0; blank1_dup_idx < blank1_dups;
+                 blank1_dup_idx++) {
               const int tile_idx1 = blank1_indices[blank1_dup_idx];
               gen->rack_bingos[bingo_idx][tile_idx1] =
                   get_blanked_machine_letter(letter_needing_blank);
               const int blanked1 =
                   play_score - tile_crossing_scores[tile_idx1] -
                   tile_main_word_scores[tile_idx1] * word_multiplier;
-              for (int blank2_dup_idx = 0; blank2_dup_idx < blank2_dups; blank2_dup_idx++) {
+              for (int blank2_dup_idx = 0; blank2_dup_idx < blank2_dups;
+                   blank2_dup_idx++) {
                 const int tile_idx2 = blank2_indices[blank2_dup_idx];
                 gen->rack_bingos[bingo_idx][tile_idx2] =
                     get_blanked_machine_letter(second_letter_needing_blank);
@@ -1216,7 +1211,8 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
                     tile_main_word_scores[tile_idx2] * word_multiplier;
                 record_bingo(gen, player, opp_rack, row, start_col,
                              gen->rack_bingos[bingo_idx], blanked2);
-                gen->rack_bingos[bingo_idx][tile_idx2] = second_letter_needing_blank;
+                gen->rack_bingos[bingo_idx][tile_idx2] =
+                    second_letter_needing_blank;
               }
               gen->rack_bingos[bingo_idx][tile_idx1] = letter_needing_blank;
             }
@@ -1255,7 +1251,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     transpose(gen->board);
   }
 
-  //int do_bingo_gen = player->index == 1;  // DO NOT SUBMIT
+  // int do_bingo_gen = player->index == 1;  // DO NOT SUBMIT
   int do_bingo_gen = true;  // player->index == 1;
 
   /*

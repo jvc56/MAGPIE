@@ -26,6 +26,7 @@ inline int kwg_tile(KWG *kwg, int node_index) {
   return kwg->nodes[node_index] >> 24;
 }
 
+inline int kwg_get_dawg_root_node_index(KWG *kwg) { return kwg_arc_index(kwg, 0); }
 inline int kwg_get_root_node_index(KWG *kwg) { return kwg_arc_index(kwg, 1); }
 int kwg_get_next_node_index(KWG *kwg, int node_index, int letter);
 int kwg_in_letter_set(KWG *kwg, int letter, int node_index);
