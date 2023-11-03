@@ -554,6 +554,29 @@ void test_shadow_equity(SuperConfig *superconfig) {
   destroy_rack(leave_rack);
 }
 
+void test_split_anchors_for_bingos(SuperConfig *superconfig) {
+  Config *config = get_csw_config(superconfig);
+  Game *game = create_game(config);
+  Generator *gen = game->gen;
+  AnchorList *al = gen->anchor_list;
+  for (int i = 2; i <= RACK_SIZE; i++) {
+    gen->highest_equity_by_length[i] = 10.0 * i;
+  }
+
+  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 2, 7, 70,
+             gen->highest_equity_by_length);
+  split_anchors_for_bingos(al, true);
+  assert(al->count == 2);
+
+  reset_anchor_list(al);
+  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 2, 7, 70,
+             gen->highest_equity_by_length);
+  split_anchors_for_bingos(al, false);
+  assert(al->count == 1);
+
+  destroy_game(game);
+}
+
 void test_shadow_top_move(SuperConfig *superconfig) {
   Config *config = get_csw_config(superconfig);
   Game *game = create_game(config);
@@ -577,5 +600,6 @@ void test_shadow_top_move(SuperConfig *superconfig) {
 void test_shadow(SuperConfig *superconfig) {
   test_shadow_score(superconfig);
   test_shadow_equity(superconfig);
+  test_split_anchors_for_bingos(superconfig);
   test_shadow_top_move(superconfig);
 }
