@@ -79,7 +79,9 @@ void test_simple_case(Game *game, Player *player, const char *rack_string,
   game->gen->current_row_index = row;
   memset(game->gen->highest_equity_by_length, 100000.0,
          sizeof(double) * (RACK_SIZE + 1));
-  game->gen->max_tiles_to_play = 7;
+  game->gen->min_num_playthrough = 0;
+  game->gen->max_num_playthrough = BOARD_DIM - 1;    
+  game->gen->max_tiles_to_play = RACK_SIZE;
   execute_recursive_gen(game->gen, game->gen->current_anchor_col, player,
                         game->gen->current_anchor_col,
                         game->gen->current_anchor_col, 1);

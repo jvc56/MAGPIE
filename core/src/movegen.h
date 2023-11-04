@@ -54,6 +54,7 @@ typedef struct Generator {
   int current_left_col;
   int current_right_col;
   int num_tiles_played_through;
+  int min_num_playthrough;
   int max_num_playthrough;
   int min_tiles_to_play;
   int max_tiles_to_play;

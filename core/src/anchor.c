@@ -2,6 +2,7 @@
 
 #include "board.h"
 #include "constants.h"
+#include "stdio.h"
 #include "stdlib.h"
 #include "string.h"
 #include "util.h"
@@ -27,16 +28,23 @@ void destroy_anchor_list(AnchorList *al) {
 }
 
 void add_anchor(AnchorList *al, int row, int col, int last_anchor_col,
-                int transpose_state, int vertical, int max_num_playthrough,
-                int min_tiles_to_play, int max_tiles_to_play,
-                double highest_possible_equity,
+                int transpose_state, int vertical, int min_num_playthrough,
+                int max_num_playthrough, int min_tiles_to_play,
+                int max_tiles_to_play, double highest_possible_equity,
                 double *highest_equity_by_length) {
+/*                  
+  printf("add_anchor %d %d %d %d %d %d %d %d %d %f\n", row, col,
+         last_anchor_col, transpose_state, vertical, min_num_playthrough,
+         max_num_playthrough, min_tiles_to_play, max_tiles_to_play,
+         highest_possible_equity);                  
+*/         
   int i = al->count;
   al->anchors[i]->row = row;
   al->anchors[i]->col = col;
   al->anchors[i]->last_anchor_col = last_anchor_col;
   al->anchors[i]->transpose_state = transpose_state;
   al->anchors[i]->vertical = vertical;
+  al->anchors[i]->min_num_playthrough = min_num_playthrough;
   al->anchors[i]->max_num_playthrough = max_num_playthrough;
   al->anchors[i]->min_tiles_to_play = min_tiles_to_play;
   al->anchors[i]->max_tiles_to_play = max_tiles_to_play;

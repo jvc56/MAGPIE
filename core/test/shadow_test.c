@@ -563,7 +563,7 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
     gen->highest_equity_by_length[i] = 10 * i;
   }
 
-  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 2, 7, 70,
+  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 0, 2, 7, 70,
              gen->highest_equity_by_length);
   split_anchors_for_bingos(al, true);
 
@@ -597,7 +597,7 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[1]->max_tiles_to_play == 7);
 
   reset_anchor_list(al);
-  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 2, 7, 70,
+  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 0, 2, 7, 70,
              gen->highest_equity_by_length);
   split_anchors_for_bingos(al, false);
 
@@ -617,7 +617,7 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[0]->max_tiles_to_play == 6);
 
   reset_anchor_list(al);
-  add_anchor(al, 7, 7, 5, true, true, 1, 1, 7, 70,
+  add_anchor(al, 7, 7, 5, true, true, 1, 1, 1, 7, 70,
              gen->highest_equity_by_length);
   split_anchors_for_bingos(al, true);
 
@@ -650,8 +650,14 @@ void test_shadow_top_move(SuperConfig *superconfig) {
   player->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
 
   // Top play should be L1 Q(I)
-  load_and_generate(game, player, UEY_CGP, "ACEQOOV", 1);
-  assert(within_epsilon(game->gen->move_list->moves[0]->score, 21));
+  load_and_generate(game, player, UEY_CGP, "ACEQOOV", true);
+  /*
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_game(game, sb);
+  printf("%s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+  */
+  assert(game->gen->move_list->moves[0]->score == 21);
 
   player->strategy_params->move_sorting = original_move_sorting;
   player->strategy_params->play_recorder_type = original_recorder_type;
