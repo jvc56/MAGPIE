@@ -559,20 +559,82 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   Game *game = create_game(config);
   Generator *gen = game->gen;
   AnchorList *al = gen->anchor_list;
-  for (int i = 2; i <= RACK_SIZE; i++) {
-    gen->highest_equity_by_length[i] = 10.0 * i;
+  for (int i = 2; i <= 7; i++) {
+    gen->highest_equity_by_length[i] = 10 * i;
   }
 
   add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 2, 7, 70,
              gen->highest_equity_by_length);
   split_anchors_for_bingos(al, true);
+
+  // splits into nonbingo and bingo anchors
   assert(al->count == 2);
+
+  // nonbingo
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 60));
+  assert(al->anchors[0]->row == 7);
+  assert(al->anchors[0]->col == 7);
+  assert(al->anchors[0]->last_anchor_col == INITIAL_LAST_ANCHOR_COL);
+  assert(al->anchors[0]->transpose_state == false);
+  assert(al->anchors[0]->vertical == false);
+  for (int i = 2; i <= 6; i++) {
+    assert(al->anchors[0]->highest_equity_by_length[i] == 10 * i);
+  }
+  assert(al->anchors[0]->max_num_playthrough == 0);
+  assert(al->anchors[0]->min_tiles_to_play == 2);
+  assert(al->anchors[0]->max_tiles_to_play == 6);
+
+  // bingo
+  assert(within_epsilon(al->anchors[1]->highest_possible_equity, 70));
+  assert(al->anchors[0]->row == 7);
+  assert(al->anchors[0]->col == 7);
+  assert(al->anchors[0]->last_anchor_col == INITIAL_LAST_ANCHOR_COL);
+  assert(al->anchors[0]->transpose_state == false);
+  assert(al->anchors[0]->vertical == false);
+  assert(al->anchors[1]->highest_equity_by_length[7] == 70);
+  assert(al->anchors[1]->max_num_playthrough == 0);
+  assert(al->anchors[1]->min_tiles_to_play == 7);
+  assert(al->anchors[1]->max_tiles_to_play == 7);
 
   reset_anchor_list(al);
   add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 2, 7, 70,
              gen->highest_equity_by_length);
   split_anchors_for_bingos(al, false);
+
+  // trims the anchor to look for nonbingos but does not create bingo anchor
   assert(al->count == 1);
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 60));
+  assert(al->anchors[0]->row == 7);
+  assert(al->anchors[0]->col == 7);
+  assert(al->anchors[0]->last_anchor_col == INITIAL_LAST_ANCHOR_COL);
+  assert(al->anchors[0]->transpose_state == false);
+  assert(al->anchors[0]->vertical == false);
+  for (int i = 2; i <= 6; i++) {
+    assert(al->anchors[0]->highest_equity_by_length[i] == 10 * i);
+  }
+  assert(al->anchors[0]->max_num_playthrough == 0);
+  assert(al->anchors[0]->min_tiles_to_play == 2);
+  assert(al->anchors[0]->max_tiles_to_play == 6);
+
+  reset_anchor_list(al);
+  add_anchor(al, 7, 7, 5, true, true, 1, 1, 7, 70,
+             gen->highest_equity_by_length);
+  split_anchors_for_bingos(al, true);
+
+  // has no effect on this anchor because it has playthrough
+  assert(al->count == 1);
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 70));
+  assert(al->anchors[0]->row == 7);
+  assert(al->anchors[0]->col == 7);
+  assert(al->anchors[0]->last_anchor_col == 5);
+  assert(al->anchors[0]->transpose_state == true);
+  assert(al->anchors[0]->vertical == true);
+  for (int i = 2; i <= 7; i++) {
+    assert(al->anchors[0]->highest_equity_by_length[i] == 10 * i);
+  }
+  assert(al->anchors[0]->max_num_playthrough == 1);
+  assert(al->anchors[0]->min_tiles_to_play == 1);
+  assert(al->anchors[0]->max_tiles_to_play == 7);
 
   destroy_game(game);
 }
