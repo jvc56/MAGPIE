@@ -152,8 +152,9 @@ const struct {
     {COMMAND_TYPE_AUTOPLAY,
      {ARG_TOKEN_GO, ARG_TOKEN_AUTOPLAY, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_SET_OPTIONS, {ARG_TOKEN_SET_OPTIONS, NUMBER_OF_ARG_TOKENS}},
-    // The unknown command type denotes the end of the sequences
-    {COMMAND_TYPE_UNKNOWN, {}},
+    // A sequence with just NUMBER_OF_ARG_TOKENS denotes the end of the
+    // sequences
+    {0, {NUMBER_OF_ARG_TOKENS}},
 };
 
 typedef struct SingleArg {
@@ -604,16 +605,22 @@ config_load_status_t load_mode_for_config(Config *config,
   config->previous_exec_mode = config->exec_mode;
   config->exec_mode = config_mode_type;
   if (config->exec_mode == EXEC_MODE_COMMAND_FILE) {
+    if (config->command_file) {
+      free(config->command_file);
+    }
     config->command_file = get_formatted_string("%s", command_filename);
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
 int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
-  config->command_type = COMMAND_TYPE_UNKNOWN;
+  // If no valid sequences are found we use
+  // the set options command as a default
+  config->command_type = COMMAND_TYPE_SET_OPTIONS;
   int number_of_tokens_parsed = 0;
   for (int i = 0;
-       VALID_COMMAND_SEQUENCES[i].command_type != COMMAND_TYPE_UNKNOWN; i++) {
+       VALID_COMMAND_SEQUENCES[i].arg_token_sequence[0] != NUMBER_OF_ARG_TOKENS;
+       i++) {
     bool sequence_matches = true;
     number_of_tokens_parsed = 0;
     for (int j = 0; VALID_COMMAND_SEQUENCES[i].arg_token_sequence[j] !=
@@ -629,10 +636,10 @@ int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
     }
     if (sequence_matches) {
       config->command_type = VALID_COMMAND_SEQUENCES[i].command_type;
-      break;
+      return number_of_tokens_parsed;
     }
   }
-  return number_of_tokens_parsed;
+  return 0;
 }
 
 config_load_status_t set_cgp_string_for_config(Config *config,
@@ -885,10 +892,6 @@ config_load_status_t load_config_with_parsed_args(Config *config,
 
   int args_start_index = set_command_type_for_config(config, parsed_args);
 
-  if (config->command_type == COMMAND_TYPE_UNKNOWN) {
-    return CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND;
-  }
-
   // Set the names using the args
   // and load the data once the args
   // are parsed.
@@ -1122,7 +1125,7 @@ config_load_status_t load_config(Config *config, const char *cmd) {
 
 Config *create_default_config() {
   Config *config = malloc_or_die(sizeof(Config));
-  config->command_type = COMMAND_TYPE_UNKNOWN;
+  config->command_type = COMMAND_TYPE_SET_OPTIONS;
   config->command_set_cgp = false;
   config->lexicons_loaded = false;
   config->letter_distribution = NULL;
@@ -1171,6 +1174,9 @@ void destroy_config(Config *config) {
   }
   if (config->win_pct_name) {
     free(config->win_pct_name);
+  }
+  if (config->command_file) {
+    free(config->command_file);
   }
   destroy_players_data(config->players_data);
   destroy_thread_control(config->thread_control);

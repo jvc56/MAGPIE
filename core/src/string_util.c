@@ -118,6 +118,17 @@ void trim_whitespace(char *str) { trim_internal(str, 0, true); }
 
 void trim_char(char *str, const char c) { trim_internal(str, c, false); }
 
+bool has_substring(const char *str, const char *pattern) {
+  // If the pattern is empty or both strings are equal, return true
+  if (is_string_empty_or_null(pattern) || strings_equal(str, pattern)) {
+    return true;
+  }
+
+  // Check if pattern exists in str using strstr function
+  const char *ptr = strstr(str, pattern);
+  return (ptr != NULL);
+}
+
 char *get_string_from_file(const char *filename) {
   FILE *file_handle = fopen(filename, "r");
   if (!file_handle) {
@@ -147,6 +158,22 @@ char *get_string_from_file(const char *filename) {
   fclose(file_handle);
 
   return result_string;
+}
+
+void write_string_to_file(const char *filename, const char *string) {
+  FILE *file_handle = fopen(filename, "w");
+  if (!file_handle) {
+    log_fatal("Error opening file for writing: %s\n", filename);
+  }
+
+  // Write string to file
+  if (fputs(string, file_handle) == EOF) {
+    fclose(file_handle);
+    log_fatal("Error writing to file: %s\n", filename);
+  }
+
+  // Close the file handle
+  fclose(file_handle);
 }
 
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string) {
@@ -557,5 +584,8 @@ StringSplitter *split_string(const char *input_string, const char delimiter,
 
 StringSplitter *split_file_by_newline(const char *filename) {
   char *file_content = get_string_from_file(filename);
-  return split_string(file_content, '\n', true);
+  StringSplitter *file_content_split_by_newline =
+      split_string(file_content, '\n', true);
+  free(file_content);
+  return file_content_split_by_newline;
 }

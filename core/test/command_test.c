@@ -10,6 +10,7 @@
 #include "../src/log.h"
 #include "../src/sim.h"
 #include "../src/thread_control.h"
+#include "../src/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -39,6 +40,10 @@ char *get_test_outerror_filename() {
                               "test_command_outerror");
 }
 
+char *get_test_commands_filename() {
+  return get_formatted_string("%s%s", TESTDATA_FILEPATH, "test_commands_file");
+}
+
 void delete_test_output_file() {
   char *test_output_filename = get_test_output_filename();
   remove(test_output_filename);
@@ -49,6 +54,12 @@ void delete_test_outerror_file() {
   char *test_outerror_filename = get_test_outerror_filename();
   remove(test_outerror_filename);
   free(test_outerror_filename);
+}
+
+void delete_test_commands_file() {
+  char *test_commands_filename = get_test_commands_filename();
+  remove(test_commands_filename);
+  free(test_commands_filename);
 }
 
 void assert_command_status_and_output(CommandVars *command_vars,
@@ -95,6 +106,7 @@ void assert_command_status_and_output(CommandVars *command_vars,
   assert(get_mode(command_vars->config->thread_control) == MODE_STOPPED);
 
   char *test_output = get_string_from_file(test_output_filename);
+  printf("output for %s:\n%s\n", command, test_output);
   int newlines_in_output = count_newlines(test_output);
   if (newlines_in_output != expected_output_line_count) {
     printf("output counts do not match %d != %d\n", newlines_in_output,
@@ -156,7 +168,7 @@ void test_command_execution() {
       command_vars,
       "go sim plies 2 threads 10 numplays 15 i "
       "200 info 60 nostatic cgp " DELDAR_VS_HARSHAN_CGP,
-      false, 60, ERROR_STATUS_TYPE_NONE, 0, (17 * 4), 0);
+      false, 60, ERROR_STATUS_TYPE_NONE, 0, 68, 0);
 
   // Sim interrupted by user
   assert_command_status_and_output(
@@ -170,7 +182,7 @@ void test_command_execution() {
       command_vars,
       "go infer rack MUZAKY pindex 0 score 58 exch 0 numplays 20 threads 4 "
       "cgp " EMPTY_CGP,
-      false, 60, ERROR_STATUS_TYPE_NONE, 0, 5 + 27 + 20, 0);
+      false, 60, ERROR_STATUS_TYPE_NONE, 0, 52, 0);
 
   // Infer interrupted
   assert_command_status_and_output(
@@ -199,13 +211,13 @@ void test_command_execution() {
     assert_command_status_and_output(command_vars,
                                      "go sim plies 2 threads 10 numplays 15 i "
                                      "200 info 60 cgp " CATALAN_CGP,
-                                     false, 60, ERROR_STATUS_TYPE_NONE, 0,
-                                     (17 * 4), 0);
+                                     false, 60, ERROR_STATUS_TYPE_NONE, 0, 68,
+                                     0);
     assert_command_status_and_output(
         command_vars,
         "go infer rack AIMSX pindex 0 score 52 exch "
         "0 numplays 20 threads 4 info 1000000 cgp " EMPTY_CATALAN_CGP,
-        false, 60, ERROR_STATUS_TYPE_NONE, 0, 5 + 27 + 20, 0);
+        false, 60, ERROR_STATUS_TYPE_NONE, 0, 52, 0);
 
     assert_command_status_and_output(
         command_vars,
@@ -220,15 +232,15 @@ void test_command_execution() {
     assert_command_status_and_output(command_vars,
                                      "go sim plies 2 threads 10 numplays 15 i "
                                      "200 info 60 cgp " DELDAR_VS_HARSHAN_CGP,
-                                     false, 60, ERROR_STATUS_TYPE_NONE, 0,
-                                     (17 * 4), 0);
+                                     false, 60, ERROR_STATUS_TYPE_NONE, 0, 68,
+                                     0);
 
     assert_command_status_and_output(
         command_vars,
         "go infer rack DGINR pindex 0 score 18 exch 0 numplays 20 threads 4 "
         "info 1000000 "
         "cgp " EMPTY_CGP,
-        false, 60, ERROR_STATUS_TYPE_NONE, 0, 5 + 27 + 20, 0);
+        false, 60, ERROR_STATUS_TYPE_NONE, 0, 52, 0);
 
     assert_command_status_and_output(
         command_vars,
@@ -249,7 +261,7 @@ void test_command_execution() {
         command_vars,
         "go infer rack HUJA pindex 0 score 20 exch 0 "
         "numplays 20 info 1000000  threads 4 cgp " EMPTY_POLISH_CGP,
-        false, 60, ERROR_STATUS_TYPE_NONE, 0, 5 + 33 + 20, 0);
+        false, 60, ERROR_STATUS_TYPE_NONE, 0, 58, 0);
 
     assert_command_status_and_output(
         command_vars,
@@ -260,46 +272,166 @@ void test_command_execution() {
   destroy_command_vars(command_vars);
 }
 
-void test_exec_single_command() {}
+typedef struct MainArgs {
+  int argc;
+  char **argv;
+} MainArgs;
 
-void test_exec_console_command() {}
+MainArgs *get_main_args_from_string(const char *arg_string) {
+  StringSplitter *arg_string_splitter =
+      split_string_by_whitespace(arg_string, true);
+  MainArgs *main_args = malloc_or_die(sizeof(MainArgs));
+  main_args->argc = string_splitter_get_number_of_items(arg_string_splitter);
+  main_args->argv = malloc_or_die(sizeof(char *) * main_args->argc);
+  for (int i = 0; i < main_args->argc; i++) {
+    main_args->argv[i] = get_formatted_string(
+        "%s", string_splitter_get_item(arg_string_splitter, i));
+  }
+  destroy_string_splitter(arg_string_splitter);
+  return main_args;
+}
+
+void destroy_main_args(MainArgs *main_args) {
+  for (int i = 0; i < main_args->argc; i++) {
+    free(main_args->argv[i]);
+  }
+  free(main_args->argv);
+  free(main_args);
+}
+
+void test_process_command(const char *arg_string,
+                          int expected_output_line_count,
+                          const char *output_substr,
+                          int expected_outerror_line_count,
+                          const char *outerror_substr) {
+
+  char *test_output_filename = get_test_output_filename();
+  char *test_outerror_filename = get_test_outerror_filename();
+
+  char *arg_string_with_outfile = get_formatted_string(
+      "./bin/magpie %s outfile %s", arg_string, test_output_filename);
+
+  // Reset the contents of output
+  fclose(fopen(test_output_filename, "w"));
+
+  FILE *errorout_fh = fopen(test_outerror_filename, "w");
+
+  log_set_error_out(errorout_fh);
+
+  MainArgs *main_args = get_main_args_from_string(arg_string_with_outfile);
+
+  process_command(main_args->argc, main_args->argv);
+  destroy_main_args(main_args);
+
+  char *test_output = get_string_from_file(test_output_filename);
+  char *test_outerror = get_string_from_file(test_outerror_filename);
+
+  if (!has_substring(test_output, output_substr)) {
+    printf("pattern not found in output:\n%s\n***\n%s\n", test_output,
+           output_substr);
+    assert(0);
+  }
+
+  printf("test out:\n%s\n", test_output);
+
+  int newlines_in_output = count_newlines(test_output);
+  if (newlines_in_output != expected_output_line_count) {
+    printf("counts do not match %d != %d\n", newlines_in_output,
+           expected_output_line_count);
+    assert(0);
+  }
+
+  if (!has_substring(test_outerror, outerror_substr)) {
+    printf("pattern not found in error:\n%s\n***\n%s\n", test_outerror,
+           outerror_substr);
+    assert(0);
+  }
+
+  int newlines_in_outerror = count_newlines(test_outerror);
+  if (newlines_in_outerror != expected_outerror_line_count) {
+    printf("error counts do not match %d != %d\n", newlines_in_outerror,
+           expected_outerror_line_count);
+    assert(0);
+  }
+
+  free(test_output);
+  free(test_outerror);
+  free(test_output_filename);
+  free(test_outerror_filename);
+  free(arg_string_with_outfile);
+}
+
+void test_exec_single_command() {
+  char *plies_error_substr =
+      get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_PLIES);
+  test_process_command("go sim lex CSW21 i 1000 plies 2h3", 0, NULL, 1,
+                       plies_error_substr);
+  free(plies_error_substr);
+
+  char *rack_error_substr =
+      get_formatted_string("code %d", CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS);
+  test_process_command(
+      "position cgp 15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 "
+      "ABC5DF/YXZ 0/0 0 lex CSW21",
+      0, NULL, 1, rack_error_substr);
+  free(rack_error_substr);
+
+  test_process_command("go infer rack MUZAKY pindex 0 score 58 exch 0 numplays "
+                       "20 threads 4 lex CSW21",
+                       52, "infertile leave Z", 0, NULL);
+}
+
+void test_exec_file_commands() {
+  // Run a sim in CSW, then (68 output)
+  // run a sim that exits with a warning, then (1 warning)
+  // run an inference in Polish, then (58 output)
+  // run autoplay in CSW (1 output)
+  // total output = 127
+  // total error = 1
+
+  // Separate into distinct lines to prove
+  // the command file is being read.
+  const char *commands_file_content =
+      // "i 200\n"
+      // "info 60\n"
+      // "cgp " DELDAR_VS_HARSHAN_CGP "\ngo sim plies 2 threads 10 numplays
+      // 15\n" "go sim lex CSW21 i 10h00 "
+      "pindex 0 score 20 exch 0\n"
+      "numplays 20 info 1000000\n"
+      " threads 4 cgp " EMPTY_POLISH_CGP "\ngo infer rack HUJA\n"
+      // "r1 best r2 best i 10 numplays 1 threads 3\n"
+      // "go autoplay lex CSW21 s1 equity s2 equity "
+      ;
+  char *commands_filename = get_test_commands_filename();
+
+  write_string_to_file(commands_filename, commands_file_content);
+
+  char *commands_file_invocation =
+      get_formatted_string("file %s", commands_filename);
+
+  char *iter_error_substr = get_formatted_string(
+      "code %d", CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
+
+  test_process_command(commands_file_invocation, 127,
+                       "info infertotalracks 6145", 1, iter_error_substr);
+
+  free(iter_error_substr);
+  free(commands_filename);
+  free(commands_file_invocation);
+}
 
 void test_exec_ucgi_command() {}
 
-void test_exec_file_commands() {
-  //   position cgp 15/15/15/15/15/15/15/5ION7/15/15/15/15/15/15/15
-  //   ADEEGIL/AEILOUY 0/4 0 lex CSW21;
-  // go sim plies 2 stop 95 threads 8 numplays 3 i 50 check 300 info 500 cgp
-  // 15/15/15/15/15/15/15/5ION7/15/15/15/15/15/15/15 ADEEGIL/AEILOUY 0/4 0 lex
-  // CSW21; go sim plies 2 stop 95 threads 8 numplays 20 i 50 check 300 info 70
-  // static cgp 15/15/15/15/15/15/15/5ION7/15/15/15/15/15/15/15 ADEEGIL/AEILOUY
-  // 0/4 0 lex CSW21; go infer rack MUZAKY pindex 0 score 58 exch 0 numplays 20
-  // threads 4 cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex
-  // CSW21;
-}
+void test_exec_console_command() {}
 
 void test_command() {
-  // const char *filename = "a.txt";
-  // const char *content = "hello\n";
-  // FILE *file = fopen(filename, "w");
-
-  // printf("writing content to %s:\n>%s<\n", filename, content);
-
-  // int fprintf_result = fprintf(file, "%s", content);
-  // if (fprintf_result < 0) {
-  //   log_fatal("fprintf failed with error code %d\n", fprintf_result);
-  // }
-
-  // int fflush_result = fflush(file);
-  // if (fflush_result != 0) {
-  //   log_fatal("fflush failed with error code %d\n", fflush_result);
-  // }
-
-  // char *file_as_string = get_string_from_file(filename);
-  // printf("the resulting read string:\n>%s<\n", file_as_string);
-  // return;
+  // test_command_execution();
   test_exec_single_command();
-  test_command_execution();
+  test_exec_file_commands();
+  test_exec_console_command();
+  test_exec_ucgi_command();
+
   delete_test_output_file();
   delete_test_outerror_file();
+  delete_test_commands_file();
 }

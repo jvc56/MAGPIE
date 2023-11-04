@@ -1,4 +1,0 @@
-position cgp 15/15/15/15/15/15/15/5ION7/15/15/15/15/15/15/15 ADEEGIL/AEILOUY 0/4 0 lex CSW21;
-go sim plies 2 stop 95 threads 8 numplays 3 i 50 check 300 info 500 cgp 15/15/15/15/15/15/15/5ION7/15/15/15/15/15/15/15 ADEEGIL/AEILOUY 0/4 0 lex CSW21;
-go sim plies 2 stop 95 threads 8 numplays 20 i 50 check 300 info 70 static cgp 15/15/15/15/15/15/15/5ION7/15/15/15/15/15/15/15 ADEEGIL/AEILOUY 0/4 0 lex CSW21;
-go infer rack MUZAKY pindex 0 score 58 exch 0 numplays 20 threads 4 cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;

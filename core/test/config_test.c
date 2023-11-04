@@ -34,7 +34,6 @@ void test_config_error_cases() {
   test_config_error(config, "go sim lex CSW21 i 1000 plies 10 1",
                     CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
   test_config_error(config, "go sim sim", CONFIG_LOAD_STATUS_DUPLICATE_ARG);
-  test_config_error(config, "sim go", CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND);
   test_config_error(config, "go sim i 1000 infer",
                     CONFIG_LOAD_STATUS_MISPLACED_COMMAND);
   test_config_error(config, "go sim i 1000",
@@ -125,6 +124,8 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
   test_config_error(config, "go sim l1 NWL20 l2 OSPS44",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
+  test_config_error(config, "go sim l1 NWL20 l2 CSW21 ld german",
+                    CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION);
   destroy_config(config);
 }
 

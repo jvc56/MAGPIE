@@ -20,7 +20,9 @@ void remove_first_newline(char *str);
 size_t string_length(const char *str);
 void trim_whitespace(char *str);
 void trim_char(char *str, const char c);
+bool has_substring(const char *str, const char *pattern);
 char *get_string_from_file(const char *filename);
+void write_string_to_file(const char *filename, const char *string);
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
 
 struct StringSplitter;

@@ -70,9 +70,6 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
 
   char *status_string = NULL;
   switch (command_vars->config->command_type) {
-  case COMMAND_TYPE_UNKNOWN:
-    log_warn("Unknown command type");
-    break;
   case COMMAND_TYPE_SIM:
     if (!command_vars->simmer) {
       log_warn("Simmer has not been initialized.");
@@ -206,11 +203,6 @@ void execute_command(CommandVars *command_vars) {
   }
 
   switch (config->command_type) {
-  case COMMAND_TYPE_UNKNOWN:
-    set_or_clear_error_status(command_vars->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              (int)CONFIG_LOAD_STATUS_UNRECOGNIZED_COMMAND);
-    break;
   case COMMAND_TYPE_SET_OPTIONS:
     // this operation is just for loading the config
     // so the execution is a no-op
@@ -290,9 +282,11 @@ void execute_command_file_sync(CommandVars *command_vars) {
   StringSplitter *commands =
       split_file_by_newline(command_vars->config->command_file);
   int number_of_commands = string_splitter_get_number_of_items(commands);
-
+  printf("found %d commands\n", number_of_commands);
   for (int i = 0; i < number_of_commands; i++) {
+
     command_vars->command = string_splitter_get_item(commands, i);
+    printf("%d: %s\n", i, command_vars->command);
     execute_command_sync(command_vars);
   }
   restore_previous_exec_mode(command_vars->config);
