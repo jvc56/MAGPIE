@@ -926,9 +926,12 @@ void split_anchors_for_bingos(AnchorList *anchor_list, int make_bingo_anchors) {
   //   2. never has playthrough tiles (max_num_playthrough == 0)
   // Change the existing anchor to be only for non-bingo plays,
   // and add a new anchor for bingo plays.
+  //
+  // Update comment, there's more going on now.
+
   for (int i = 0; i < original_count; i++) {
     Anchor *anchor = anchor_list->anchors[i];
-    if ((anchor->max_num_playthrough == 0) &&
+    if ((anchor->min_num_playthrough == 0) &&
         (anchor->max_tiles_to_play == RACK_SIZE)) {
       anchor->max_tiles_to_play--;
       double best_nonbingo = 0;
@@ -942,9 +945,15 @@ void split_anchors_for_bingos(AnchorList *anchor_list, int make_bingo_anchors) {
         double best_bingo = anchor->highest_equity_by_length[RACK_SIZE];
         add_anchor(anchor_list, anchor->row, anchor->col,
                    anchor->last_anchor_col, anchor->transpose_state,
-                   anchor->vertical, anchor->min_num_playthrough,
-                   anchor->max_num_playthrough, RACK_SIZE, RACK_SIZE,
-                   best_bingo, anchor->highest_equity_by_length);
+                   anchor->vertical, 0, 0, RACK_SIZE, RACK_SIZE, best_bingo,
+                   anchor->highest_equity_by_length);
+        if (anchor->max_num_playthrough > 0) {
+          add_anchor(anchor_list, anchor->row, anchor->col,
+                     anchor->last_anchor_col, anchor->transpose_state,
+                     anchor->vertical, 1, anchor->max_num_playthrough,
+                     RACK_SIZE, RACK_SIZE, best_bingo,
+                     anchor->highest_equity_by_length);
+        }
       }
     }
   }
@@ -1289,8 +1298,8 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     transpose(gen->board);
   }
 
-  // int do_bingo_gen = player->index == 1;  // DO NOT SUBMIT
-  int do_bingo_gen = true;  // player->index == 1;
+  int do_bingo_gen = player->index == 1;  // DO NOT SUBMIT
+  do_bingo_gen = true;  // player->index == 1;
 
   /*
     StringBuilder *sb = create_string_builder();

@@ -621,7 +621,7 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
              gen->highest_equity_by_length);
   split_anchors_for_bingos(al, true);
 
-  // has no effect on this anchor because it has playthrough
+  // has no effect on this anchor because it always has playthrough
   assert(al->count == 1);
   assert(within_epsilon(al->anchors[0]->highest_possible_equity, 70));
   assert(al->anchors[0]->row == 7);
@@ -635,6 +635,48 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[0]->max_num_playthrough == 1);
   assert(al->anchors[0]->min_tiles_to_play == 1);
   assert(al->anchors[0]->max_tiles_to_play == 7);
+
+  reset_anchor_list(al);
+  add_anchor(al, 7, 7, 5, true, true, 0, 2, 1, 7, 70,
+             gen->highest_equity_by_length);
+  split_anchors_for_bingos(al, true);
+  assert(al->count == 3);
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 60));
+  for (int i = 2; i <= 6; i++) {
+    assert(al->anchors[0]->highest_equity_by_length[i] == 10 * i);
+  }
+  assert(al->anchors[0]->row == 7);
+  assert(al->anchors[0]->col == 7);
+  assert(al->anchors[0]->last_anchor_col == 5);
+  assert(al->anchors[0]->transpose_state == true);
+  assert(al->anchors[0]->vertical == true);
+  assert(al->anchors[0]->min_num_playthrough == 0);
+  assert(al->anchors[0]->max_num_playthrough == 2);
+  assert(al->anchors[0]->min_tiles_to_play == 1);
+  assert(al->anchors[0]->max_tiles_to_play == 6);
+  
+  assert(al->anchors[1]->highest_equity_by_length[7] == 70);
+  assert(al->anchors[1]->row == 7);
+  assert(al->anchors[1]->col == 7);
+  assert(al->anchors[1]->last_anchor_col == 5);
+  assert(al->anchors[1]->transpose_state == true);
+  assert(al->anchors[1]->vertical == true);
+  assert(al->anchors[1]->min_num_playthrough == 0);
+  assert(al->anchors[1]->max_num_playthrough == 0);
+  assert(al->anchors[1]->min_tiles_to_play == 7);
+  assert(al->anchors[1]->max_tiles_to_play == 7);
+
+
+  assert(al->anchors[2]->highest_equity_by_length[7] == 70);
+  assert(al->anchors[2]->row == 7);
+  assert(al->anchors[2]->col == 7);
+  assert(al->anchors[2]->last_anchor_col == 5);
+  assert(al->anchors[2]->transpose_state == true);
+  assert(al->anchors[2]->vertical == true);
+  assert(al->anchors[2]->min_num_playthrough == 1);
+  assert(al->anchors[2]->max_num_playthrough == 2);
+  assert(al->anchors[2]->min_tiles_to_play == 7);
+  assert(al->anchors[2]->max_tiles_to_play == 7);
 
   destroy_game(game);
 }
