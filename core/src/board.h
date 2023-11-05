@@ -64,16 +64,16 @@ Board *copy_board(Board *board);
 void copy_board_into(Board *dst, Board *src);
 void destroy_board(Board *board);
 int get_anchor(Board *board, int row, int col, int vertical);
-uint8_t get_bonus_square(Board *board, int row, int col);
-int get_cross_score(Board *board, int row, int col, int dir,
+uint8_t get_bonus_square(const Board *board, int row, int col);
+int get_cross_score(const Board *board, int row, int col, int dir,
                     int cross_set_index);
-uint64_t get_cross_set(Board *board, int row, int col, int dir,
+uint64_t get_cross_set(const Board *board, int row, int col, int dir,
                        int cross_set_index);
 uint64_t *get_cross_set_pointer(Board *board, int row, int col, int dir,
                                 int cross_set_index);
-uint8_t get_letter(Board *board, int row, int col);
+uint8_t get_letter(const Board *board, int row, int col);
 uint8_t get_letter_by_index(Board *board, int index);
-int is_empty(Board *board, int row, int col);
+int is_empty(const Board *board, int row, int col);
 int left_and_right_empty(Board *board, int row, int col);
 int pos_exists(int row, int col);
 void reset_board(Board *board);

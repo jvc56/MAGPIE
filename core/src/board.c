@@ -29,7 +29,7 @@ board_layout_string_to_board_layout(const char *board_layout_string) {
 // Current index
 // depends on tranposition of the board
 
-int get_tindex(Board *board, int row, int col) {
+int get_tindex(const Board *board, int row, int col) {
   if (!board->transposed) {
     return (row * BOARD_DIM) + col;
   } else {
@@ -37,11 +37,11 @@ int get_tindex(Board *board, int row, int col) {
   }
 }
 
-int get_tindex_dir(Board *board, int row, int col, int dir) {
+int get_tindex_dir(const Board *board, int row, int col, int dir) {
   return get_tindex(board, row, col) * 2 + dir;
 }
 
-int get_tindex_player_cross(Board *board, int row, int col, int dir,
+int get_tindex_player_cross(const Board *board, int row, int col, int dir,
                             int cross_set_index) {
   return get_tindex_dir(board, row, col, dir) +
          (BOARD_DIM * BOARD_DIM * 2) * cross_set_index;
@@ -49,7 +49,7 @@ int get_tindex_player_cross(Board *board, int row, int col, int dir,
 
 // Letters
 
-int is_empty(Board *board, int row, int col) {
+int is_empty(const Board *board, int row, int col) {
   return get_letter(board, row, col) == ALPHABET_EMPTY_SQUARE_MARKER;
 }
 
@@ -65,7 +65,7 @@ void set_letter(Board *board, int row, int col, uint8_t letter) {
   board->letters[get_tindex(board, row, col)] = letter;
 }
 
-uint8_t get_letter(Board *board, int row, int col) {
+uint8_t get_letter(const Board *board, int row, int col) {
   return board->letters[get_tindex(board, row, col)];
 }
 
@@ -92,7 +92,7 @@ uint64_t *get_cross_set_pointer(Board *board, int row, int col, int dir,
                                                     cross_set_index)];
 }
 
-uint64_t get_cross_set(Board *board, int row, int col, int dir,
+uint64_t get_cross_set(const Board *board, int row, int col, int dir,
                        int cross_set_index) {
   return board->cross_sets[get_tindex_player_cross(board, row, col, dir,
                                                    cross_set_index)];
@@ -104,13 +104,13 @@ void set_cross_score(Board *board, int row, int col, int score, int dir,
                                               cross_set_index)] = score;
 }
 
-int get_cross_score(Board *board, int row, int col, int dir,
+int get_cross_score(const Board *board, int row, int col, int dir,
                     int cross_set_index) {
   return board->cross_scores[get_tindex_player_cross(board, row, col, dir,
                                                      cross_set_index)];
 }
 
-uint8_t get_bonus_square(Board *board, int row, int col) {
+uint8_t get_bonus_square(const Board *board, int row, int col) {
   return board->bonus_squares[get_tindex(board, row, col)];
 }
 

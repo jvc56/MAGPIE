@@ -16,11 +16,13 @@
 #include "player.h"
 #include "rack.h"
 
+#define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 #define OPENING_HOTSPOT_PENALTY -0.7
 #define PREENDGAME_ADJUSTMENT_VALUES_LENGTH 13
 #define BINGO_BONUS 50
 #define NON_OUTPLAY_LEAVE_SCORE_MULTIPLIER_PENALTY 2.0
 #define NON_OUTPLAY_CONSTANT_PENALTY 10.0
+#define BINGO_LIST_CAPACITY 10000
 
 typedef struct Generator {
   int current_row_index;
@@ -44,10 +46,20 @@ typedef struct Generator {
   LeaveMap *leave_map;
   LetterDistribution *letter_distribution;
 
+  // Bingo lookup
+  uint8_t rack_bingos[BINGO_LIST_CAPACITY][RACK_SIZE];
+  int number_of_bingos;
+
   // Shadow plays
   int current_left_col;
   int current_right_col;
+  int num_tiles_played_through;
+  int min_num_playthrough;
+  int max_num_playthrough;
+  int min_tiles_to_play;
+  int max_tiles_to_play;
   double highest_shadow_equity;
+  double highest_equity_by_length[(RACK_SIZE + 1)];
   uint64_t rack_cross_set;
   int move_sorting_type;
   int number_of_letters_on_rack;
@@ -63,6 +75,9 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
                     int add_exchange);
 void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
                              int stripidx, int add_exchange);
+void look_up_bingos(Generator *gen, Player *player);     
+void split_anchors_for_bingos(AnchorList *anchor_list, int make_bingo_anchors);
+void bingo_gen(Generator *gen, Player *player, Rack *opp_rack);                      
 void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
                    uint32_t node_index, int leftstrip, int rightstrip,
                    int unique_play);

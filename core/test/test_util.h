@@ -20,6 +20,7 @@ void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
                          LetterDistribution *letter_distribution);
 void generate_moves_for_game(Game *game);
 void generate_leaves_for_game(Game *game, int add_exchanges);
+void look_up_bingos_for_game(Game *game);
 double get_leave_value_for_rack(KLV *klv, Rack *rack);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *create_sorted_move_list(MoveList *ml);
@@ -35,6 +36,7 @@ int count_newlines(const char *str);
 void assert_strings_equal(const char *str1, const char *str2);
 void assert_move(Game *game, SortedMoveList *sml, int move_index,
                  char *expected_move_string);
+void assert_bingo_found(Generator *game, const char* expected_bingo);                 
 void print_game(Game *game);
 void print_inference(Inference *inference, Rack *rack);
 
