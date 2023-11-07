@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +12,7 @@
 struct FileHandler {
   FILE *file;
   char *filename;
-  file_handler_mode_t type;
+  file_handler_mode_t mode;
   pthread_mutex_t mutex;
 };
 
@@ -30,27 +31,26 @@ void file_handler_clear_file_and_filename(FileHandler *fh) {
 const char *get_file_handler_filename(FileHandler *fh) { return fh->filename; }
 
 void set_file_handler_while_locked(FileHandler *fh, const char *filename,
-                                   file_handler_mode_t file_handler_mode_type) {
-  if (strings_equal(filename, fh->filename)) {
+                                   file_handler_mode_t mode) {
+  if (strings_equal(filename, fh->filename) && fh->mode == mode) {
     return;
   }
   file_handler_clear_file_and_filename(fh);
   fh->filename = get_formatted_string("%s", filename);
-  fh->type = file_handler_mode_type;
+  fh->mode = mode;
   // Handle reserved filenames specially
   if (strings_equal(filename, STDOUT_FILENAME)) {
-    if (fh->type != FILE_HANDLER_MODE_WRITE) {
-      log_fatal("file handler for stdout must be in write mode\n",
-                file_handler_mode_type);
+    if (fh->mode != FILE_HANDLER_MODE_WRITE) {
+      log_fatal("file handler for stdout must be in write mode\n", mode);
     }
     fh->file = stdout;
   } else if (strings_equal(filename, STDIN_FILENAME)) {
-    if (fh->type != FILE_HANDLER_MODE_READ) {
+    if (fh->mode != FILE_HANDLER_MODE_READ) {
       log_fatal("file handler for stderr must be in read mode\n");
     }
     fh->file = stdin;
   } else {
-    switch (fh->type) {
+    switch (fh->mode) {
     case FILE_HANDLER_MODE_READ:
       fh->file = fopen(filename, "r");
       if (!fh->file) {
@@ -69,20 +69,19 @@ void set_file_handler_while_locked(FileHandler *fh, const char *filename,
 
 // No-op if the filename matches the existing filename
 void set_file_handler(FileHandler *fh, const char *filename,
-                      file_handler_mode_t file_handler_mode_type) {
+                      file_handler_mode_t mode) {
   pthread_mutex_lock(&fh->mutex);
-  set_file_handler_while_locked(fh, filename, file_handler_mode_type);
+  set_file_handler_while_locked(fh, filename, mode);
   pthread_mutex_unlock(&fh->mutex);
 }
 
-FileHandler *
-create_file_handler_from_filename(const char *filename,
-                                  file_handler_mode_t file_handler_mode_type) {
+FileHandler *create_file_handler_from_filename(const char *filename,
+                                               file_handler_mode_t mode) {
   FileHandler *fh = (FileHandler *)malloc_or_die(sizeof(FileHandler));
   fh->file = NULL;
   fh->filename = NULL;
   pthread_mutex_init(&fh->mutex, NULL);
-  set_file_handler(fh, filename, file_handler_mode_type);
+  set_file_handler(fh, filename, mode);
   return fh;
 }
 
@@ -96,7 +95,7 @@ void write_to_file(FileHandler *fh, const char *content) {
   if (!fh) {
     log_fatal("cannot write to null file handler\n");
   }
-  if (fh->type != FILE_HANDLER_MODE_WRITE) {
+  if (fh->mode != FILE_HANDLER_MODE_WRITE) {
     log_fatal("cannot write to nonwrite file handler\n");
   }
   if (!fh->file) {
@@ -124,7 +123,7 @@ char *getline_from_file(FileHandler *fh) {
   if (!fh) {
     log_fatal("cannot getline from null file handler\n");
   }
-  if (fh->type != FILE_HANDLER_MODE_READ) {
+  if (fh->mode != FILE_HANDLER_MODE_READ) {
     log_fatal("cannot getline from nonread file handler\n");
   }
   if (!fh->file) {
@@ -137,11 +136,17 @@ char *getline_from_file(FileHandler *fh) {
 
   read = getline(&line, &len, fh->file);
   if (read == -1) {
-    free(line);
-    return NULL;
+    int error_number = errno;
+    if (error_number) {
+      log_fatal("getline for %s failed with code: %d\n", fh->filename,
+                error_number);
+    } else {
+      free(line);
+      line = NULL;
+    }
   }
 
-  if (read > 0 && line[read - 1] == '\n') {
+  if (read && read > 0 && line[read - 1] == '\n') {
     line[read - 1] = '\0';
   }
   pthread_mutex_unlock(&fh->mutex);

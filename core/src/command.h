@@ -10,7 +10,7 @@
 #include "string_util.h"
 
 typedef struct CommandVars {
-  const char *command;
+  char *command;
   Config *config;
   Game *game;
   Simmer *simmer;

@@ -1,8 +1,11 @@
 #include <assert.h>
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "../src/board.h"
 #include "../src/config.h"
@@ -176,3 +179,33 @@ void assert_move(Game *game, SortedMoveList *sml, int move_index,
   }
   destroy_string_builder(move_string);
 }
+
+char *get_test_filename(const char *filename) {
+  return get_formatted_string("%s%s", TESTDATA_FILEPATH, filename);
+}
+
+void delete_file(const char *filename) {
+  int result = remove(filename);
+  if (result != 0) {
+    int error_number = errno;
+    if (error_number != ENOENT) {
+      log_fatal("remove %s failed with code: %d\n", filename, error_number);
+    }
+  }
+}
+
+void reset_file(const char *filename) { fclose(fopen(filename, "w")); }
+
+void create_fifo(const char *fifo_name) {
+  int result;
+
+  result = mkfifo(fifo_name, 0666); // Read/write permissions for everyone
+  if (result < 0) {
+    int error_number = errno;
+    if (error_number != EEXIST) {
+      log_fatal("mkfifo %s for with %d\n", fifo_name, error_number);
+    }
+  }
+}
+
+void delete_fifo(const char *fifo_name) { unlink(fifo_name); }

@@ -30,6 +30,9 @@ CommandVars *create_command_vars() {
 }
 
 void destroy_command_vars(CommandVars *command_vars) {
+  if (command_vars->command) {
+    free(command_vars->command);
+  }
   if (command_vars->game) {
     destroy_game(command_vars->game);
   }
@@ -45,6 +48,13 @@ void destroy_command_vars(CommandVars *command_vars) {
   destroy_config(command_vars->config);
   destroy_error_status(command_vars->error_status);
   free(command_vars);
+}
+
+void set_command(CommandVars *command_vars, const char *command) {
+  if (command_vars->command) {
+    free(command_vars->command);
+  }
+  command_vars->command = get_formatted_string("%s", command);
 }
 
 char *command_search_status(CommandVars *command_vars, bool should_halt) {
@@ -282,11 +292,8 @@ void execute_command_file_sync(CommandVars *command_vars) {
   StringSplitter *commands =
       split_file_by_newline(command_vars->config->command_file);
   int number_of_commands = string_splitter_get_number_of_items(commands);
-  printf("found %d commands\n", number_of_commands);
   for (int i = 0; i < number_of_commands; i++) {
-
-    command_vars->command = string_splitter_get_item(commands, i);
-    printf("%d: %s\n", i, command_vars->command);
+    set_command(command_vars, string_splitter_get_item(commands, i));
     execute_command_sync(command_vars);
   }
   restore_previous_exec_mode(command_vars->config);
@@ -295,8 +302,9 @@ void execute_command_file_sync(CommandVars *command_vars) {
 
 void command_scan_loop(CommandVars *command_vars,
                        const char *initial_command_string) {
-  command_vars->command = initial_command_string;
+  set_command(command_vars, initial_command_string);
   execute_command_sync(command_vars);
+  char *input = NULL;
   while (1) {
     if (command_vars->config->exec_mode == EXEC_MODE_COMMAND_FILE) {
       // This will revert to the previous exec mode
@@ -313,9 +321,10 @@ void command_scan_loop(CommandVars *command_vars,
       print_to_outfile(command_vars->config->thread_control, "magpie>");
     }
 
-    char *input =
-        getline_from_file(command_vars->config->thread_control->infile);
-
+    if (input) {
+      free(input);
+    }
+    input = getline_from_file(command_vars->config->thread_control->infile);
     trim_whitespace(input);
 
     if (strings_equal(input, QUIT_COMMAND_STRING)) {
@@ -326,13 +335,15 @@ void command_scan_loop(CommandVars *command_vars,
       continue;
     }
 
-    command_vars->command = input;
+    set_command(command_vars, input);
 
     if (exec_mode == EXEC_MODE_CONSOLE) {
       execute_command_sync(command_vars);
     } else if (exec_mode == EXEC_MODE_UCGI) {
       process_ucgi_command(command_vars);
     }
+  }
+  if (input) {
     free(input);
   }
 }

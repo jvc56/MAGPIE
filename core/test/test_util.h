@@ -37,5 +37,10 @@ void assert_move(Game *game, SortedMoveList *sml, int move_index,
 void print_game(Game *game);
 void print_inference(Inference *inference, Rack *rack);
 void load_config_or_die(Config *config, const char *cmd);
+char *get_test_filename(const char *filename);
+void delete_file(const char *filename);
+void reset_file(const char *filename);
+void create_fifo(const char *fifo_name);
+void delete_fifo(const char *fifo_name);
 
 #endif

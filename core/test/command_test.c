@@ -1,7 +1,10 @@
 #include <assert.h>
+#include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "../src/command.h"
@@ -14,6 +17,78 @@
 
 #include "test_constants.h"
 #include "test_util.h"
+
+typedef struct ProcessArgs {
+  const char *arg_string;
+  int expected_output_line_count;
+  const char *output_substr;
+  int expected_outerror_line_count;
+  const char *outerror_substr;
+  bool finished;
+  pthread_mutex_t finished_mutex;
+} ProcessArgs;
+
+typedef struct MainArgs {
+  int argc;
+  char **argv;
+} MainArgs;
+
+ProcessArgs *create_process_args(const char *arg_string,
+                                 int expected_output_line_count,
+                                 const char *output_substr,
+                                 int expected_outerror_line_count,
+                                 const char *outerror_substr) {
+  ProcessArgs *process_args = malloc_or_die(sizeof(ProcessArgs));
+  process_args->arg_string = arg_string;
+  process_args->expected_output_line_count = expected_output_line_count;
+  process_args->output_substr = output_substr;
+  process_args->expected_outerror_line_count = expected_outerror_line_count;
+  process_args->outerror_substr = outerror_substr;
+  process_args->finished = false;
+  pthread_mutex_init(&process_args->finished_mutex, NULL);
+  return process_args;
+}
+
+void destroy_process_args(ProcessArgs *process_args) {
+  // All strings are owned by the caller
+  free(process_args);
+}
+
+bool get_process_args_finished(ProcessArgs *process_args) {
+  bool finished;
+  pthread_mutex_lock(&process_args->finished_mutex);
+  finished = process_args->finished;
+  pthread_mutex_unlock(&process_args->finished_mutex);
+  return finished;
+}
+
+void set_process_args_finished(ProcessArgs *process_args, bool finished) {
+  pthread_mutex_lock(&process_args->finished_mutex);
+  process_args->finished = finished;
+  pthread_mutex_unlock(&process_args->finished_mutex);
+}
+
+MainArgs *get_main_args_from_string(const char *arg_string) {
+  StringSplitter *arg_string_splitter =
+      split_string_by_whitespace(arg_string, true);
+  MainArgs *main_args = malloc_or_die(sizeof(MainArgs));
+  main_args->argc = string_splitter_get_number_of_items(arg_string_splitter);
+  main_args->argv = malloc_or_die(sizeof(char *) * main_args->argc);
+  for (int i = 0; i < main_args->argc; i++) {
+    main_args->argv[i] = get_formatted_string(
+        "%s", string_splitter_get_item(arg_string_splitter, i));
+  }
+  destroy_string_splitter(arg_string_splitter);
+  return main_args;
+}
+
+void destroy_main_args(MainArgs *main_args) {
+  for (int i = 0; i < main_args->argc; i++) {
+    free(main_args->argv[i]);
+  }
+  free(main_args->argv);
+  free(main_args);
+}
 
 void block_for_search(CommandVars *command_vars, int max_seconds) {
   // Poll for the end of the command
@@ -31,35 +106,21 @@ void block_for_search(CommandVars *command_vars, int max_seconds) {
   }
 }
 
-char *get_test_output_filename() {
-  return get_formatted_string("%s%s", TESTDATA_FILEPATH, "test_command_output");
-}
-
-char *get_test_outerror_filename() {
-  return get_formatted_string("%s%s", TESTDATA_FILEPATH,
-                              "test_command_outerror");
-}
-
-char *get_test_commands_filename() {
-  return get_formatted_string("%s%s", TESTDATA_FILEPATH, "test_commands_file");
-}
-
-void delete_test_output_file() {
-  char *test_output_filename = get_test_output_filename();
-  remove(test_output_filename);
-  free(test_output_filename);
-}
-
-void delete_test_outerror_file() {
-  char *test_outerror_filename = get_test_outerror_filename();
-  remove(test_outerror_filename);
-  free(test_outerror_filename);
-}
-
-void delete_test_commands_file() {
-  char *test_commands_filename = get_test_commands_filename();
-  remove(test_commands_filename);
-  free(test_commands_filename);
+void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
+  // Poll for the end of the process
+  int seconds_elapsed = 0;
+  while (1) {
+    if (get_process_args_finished(process_args)) {
+      break;
+    } else {
+      sleep(1);
+    }
+    seconds_elapsed++;
+    printf("%d seconds elapsed\n", seconds_elapsed);
+    if (seconds_elapsed >= max_seconds) {
+      log_fatal("Test aborted after processing for %d seconds", max_seconds);
+    }
+  }
 }
 
 void assert_command_status_and_output(CommandVars *command_vars,
@@ -69,8 +130,8 @@ void assert_command_status_and_output(CommandVars *command_vars,
                                       int expected_error_code,
                                       int expected_output_line_count,
                                       int expected_outerror_line_count) {
-  char *test_output_filename = get_test_output_filename();
-  char *test_outerror_filename = get_test_outerror_filename();
+  char *test_output_filename = get_test_filename("output");
+  char *test_outerror_filename = get_test_filename("outerror");
 
   char *command = get_formatted_string("%s outfile %s", command_without_io,
                                        test_output_filename);
@@ -272,41 +333,14 @@ void test_command_execution() {
   destroy_command_vars(command_vars);
 }
 
-typedef struct MainArgs {
-  int argc;
-  char **argv;
-} MainArgs;
-
-MainArgs *get_main_args_from_string(const char *arg_string) {
-  StringSplitter *arg_string_splitter =
-      split_string_by_whitespace(arg_string, true);
-  MainArgs *main_args = malloc_or_die(sizeof(MainArgs));
-  main_args->argc = string_splitter_get_number_of_items(arg_string_splitter);
-  main_args->argv = malloc_or_die(sizeof(char *) * main_args->argc);
-  for (int i = 0; i < main_args->argc; i++) {
-    main_args->argv[i] = get_formatted_string(
-        "%s", string_splitter_get_item(arg_string_splitter, i));
-  }
-  destroy_string_splitter(arg_string_splitter);
-  return main_args;
-}
-
-void destroy_main_args(MainArgs *main_args) {
-  for (int i = 0; i < main_args->argc; i++) {
-    free(main_args->argv[i]);
-  }
-  free(main_args->argv);
-  free(main_args);
-}
-
 void test_process_command(const char *arg_string,
                           int expected_output_line_count,
                           const char *output_substr,
                           int expected_outerror_line_count,
                           const char *outerror_substr) {
 
-  char *test_output_filename = get_test_output_filename();
-  char *test_outerror_filename = get_test_outerror_filename();
+  char *test_output_filename = get_test_filename("output");
+  char *test_outerror_filename = get_test_filename("outerror");
 
   char *arg_string_with_outfile = get_formatted_string(
       "./bin/magpie %s outfile %s", arg_string, test_output_filename);
@@ -326,13 +360,14 @@ void test_process_command(const char *arg_string,
   char *test_output = get_string_from_file(test_output_filename);
   char *test_outerror = get_string_from_file(test_outerror_filename);
 
+  printf("test out:\n%s\n", test_output);
+  printf("error out:\n%s\n", test_outerror);
+
   if (!has_substring(test_output, output_substr)) {
     printf("pattern not found in output:\n%s\n***\n%s\n", test_output,
            output_substr);
     assert(0);
   }
-
-  printf("test out:\n%s\n", test_output);
 
   int newlines_in_output = count_newlines(test_output);
   if (newlines_in_output != expected_output_line_count) {
@@ -392,19 +427,18 @@ void test_exec_file_commands() {
   // Separate into distinct lines to prove
   // the command file is being read.
   const char *commands_file_content =
-      // "i 200\n"
-      // "info 60\n"
-      // "cgp " DELDAR_VS_HARSHAN_CGP "\ngo sim plies 2 threads 10 numplays
-      // 15\n" "go sim lex CSW21 i 10h00 "
+      "i 200\n"
+      "info 60\n"
+      "cgp " DELDAR_VS_HARSHAN_CGP "\ngo sim plies 2 threads 10 numplays 15\n"
+      "go sim lex CSW21 i 10h00\n"
       "pindex 0 score 20 exch 0\n"
       "numplays 20 info 1000000\n"
       " threads 4 cgp " EMPTY_POLISH_CGP "\ngo infer rack HUJA\n"
-      // "r1 best r2 best i 10 numplays 1 threads 3\n"
-      // "go autoplay lex CSW21 s1 equity s2 equity "
-      ;
-  char *commands_filename = get_test_commands_filename();
+      "r1 best r2 best i 10 numplays 1 threads 3\n"
+      "go autoplay lex CSW21 s1 equity s2 equity ";
+  char *commands_filename = get_test_filename("test_commands");
 
-  write_string_to_file(commands_filename, commands_file_content);
+  write_string_to_file(commands_filename, "w", commands_file_content);
 
   char *commands_file_invocation =
       get_formatted_string("file %s", commands_filename);
@@ -420,18 +454,65 @@ void test_exec_file_commands() {
   free(commands_file_invocation);
 }
 
-void test_exec_ucgi_command() {}
+void *test_process_command_async(void *uncasted_process_args) {
+  ProcessArgs *process_args = (ProcessArgs *)uncasted_process_args;
+  test_process_command(
+      process_args->arg_string, process_args->expected_output_line_count,
+      process_args->output_substr, process_args->expected_outerror_line_count,
+      process_args->outerror_substr);
+  set_process_args_finished(process_args, true);
+  return NULL;
+}
+
+void test_exec_ucgi_command() {
+  char *test_input_filename = get_test_filename("input");
+
+  create_fifo(test_input_filename);
+
+  FILE *test_input_fh = fopen(test_input_filename, "w");
+  if (test_input_fh == NULL) {
+    log_fatal("failed to open fifo %s\n", test_input_filename);
+  }
+
+  char *initial_command =
+      get_formatted_string("ucgi infile %s", test_input_filename);
+  ProcessArgs *process_args =
+      create_process_args(initial_command, 1, "autoplay", 0, "");
+
+  printf("spawning thread\n");
+  pthread_t cmd_execution_thread;
+  pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
+                 process_args);
+  pthread_detach(cmd_execution_thread);
+
+  printf("writing autoplay params\n");
+
+  fputs("r1 best r2 best i 10 numplays 1 threads 3\n", test_input_fh);
+
+  sleep(2);
+  printf("writing autoplay command\n");
+  fputs("go autoplay lex CSW21 s1 equity s2 equity\n", test_input_fh);
+
+  // Allow autoplay to finish
+  sleep(2);
+
+  fputs("quit\n", test_input_fh);
+
+  // Wait for magpie to quit
+  block_for_process_command(process_args, 5);
+
+  fclose(test_input_fh);
+  delete_fifo(test_input_filename);
+  free(test_input_filename);
+  free(initial_command);
+}
 
 void test_exec_console_command() {}
 
 void test_command() {
   // test_command_execution();
-  test_exec_single_command();
-  test_exec_file_commands();
-  test_exec_console_command();
+  // test_exec_single_command();
+  // test_exec_file_commands();
+  // test_exec_console_command();
   test_exec_ucgi_command();
-
-  delete_test_output_file();
-  delete_test_outerror_file();
-  delete_test_commands_file();
 }

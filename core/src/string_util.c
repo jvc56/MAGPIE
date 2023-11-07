@@ -160,8 +160,9 @@ char *get_string_from_file(const char *filename) {
   return result_string;
 }
 
-void write_string_to_file(const char *filename, const char *string) {
-  FILE *file_handle = fopen(filename, "w");
+void write_string_to_file(const char *filename, const char *mode,
+                          const char *string) {
+  FILE *file_handle = fopen(filename, mode);
   if (!file_handle) {
     log_fatal("Error opening file for writing: %s\n", filename);
   }

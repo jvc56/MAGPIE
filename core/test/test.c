@@ -15,6 +15,7 @@
 #include "config_test.h"
 #include "cross_set_test.h"
 #include "equity_adjustment_test.h"
+#include "file_handler_test.h"
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
@@ -64,6 +65,7 @@ void run_all(TestConfig *testconfig) {
   test_gcg();
   test_autoplay(testconfig);
   test_wasm_api();
+  test_file_handler();
 }
 
 void run_test(TestConfig *testconfig, const char *subtest) {
@@ -115,6 +117,8 @@ void run_test(TestConfig *testconfig, const char *subtest) {
     test_autoplay(testconfig);
   } else if (strings_equal(subtest, "wasm")) {
     test_wasm_api(testconfig);
+  } else if (strings_equal(subtest, "fh")) {
+    test_file_handler();
   } else {
     log_warn("skipping unrecognized test: %s\n", subtest);
   }

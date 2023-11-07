@@ -38,7 +38,6 @@ typedef struct ThreadControl {
   pthread_mutex_t searching_mode_mutex;
   FileHandler *outfile;
   FileHandler *infile;
-  FileHandler *errorfile;
   struct timespec start_time;
 } ThreadControl;
 
