@@ -53,7 +53,6 @@ typedef enum {
   EXEC_MODE_SINGLE_COMMAND,
   EXEC_MODE_CONSOLE,
   EXEC_MODE_UCGI,
-  EXEC_MODE_COMMAND_FILE,
 } exec_mode_t;
 
 typedef struct Config {
@@ -91,11 +90,8 @@ typedef struct Config {
   ThreadControl *thread_control;
   // Config mode and command file execution
   exec_mode_t exec_mode;
-  exec_mode_t previous_exec_mode;
-  char *command_file;
 } Config;
 
-void restore_previous_exec_mode(Config *config);
 config_load_status_t load_config(Config *config, const char *cmd);
 Config *create_default_config();
 void destroy_config(Config *config);

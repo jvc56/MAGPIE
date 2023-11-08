@@ -143,8 +143,7 @@ void assert_command_status_and_output(CommandVars *command_vars,
 
   log_set_error_out(errorout_fh);
 
-  command_vars->command = command;
-  execute_command_async(command_vars);
+  execute_command_async(command_vars, command);
   if (should_halt) {
     // If halting, let the search start
     sleep(2);
@@ -441,7 +440,7 @@ void test_exec_file_commands() {
   write_string_to_file(commands_filename, "w", commands_file_content);
 
   char *commands_file_invocation =
-      get_formatted_string("file %s", commands_filename);
+      get_formatted_string("infile %s", commands_filename);
 
   char *iter_error_substr = get_formatted_string(
       "code %d", CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
@@ -469,40 +468,33 @@ void test_exec_ucgi_command() {
 
   create_fifo(test_input_filename);
 
-  FILE *test_input_fh = fopen(test_input_filename, "w");
-  if (test_input_fh == NULL) {
-    log_fatal("failed to open fifo %s\n", test_input_filename);
-  }
-
   char *initial_command =
       get_formatted_string("ucgi infile %s", test_input_filename);
   ProcessArgs *process_args =
       create_process_args(initial_command, 1, "autoplay", 0, "");
 
-  printf("spawning thread\n");
   pthread_t cmd_execution_thread;
   pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
                  process_args);
   pthread_detach(cmd_execution_thread);
 
-  printf("writing autoplay params\n");
+  FileHandler *input_writer = create_file_handler_from_filename(
+      test_input_filename, FILE_HANDLER_MODE_WRITE);
 
-  fputs("r1 best r2 best i 10 numplays 1 threads 3\n", test_input_fh);
-
-  sleep(2);
-  printf("writing autoplay command\n");
-  fputs("go autoplay lex CSW21 s1 equity s2 equity\n", test_input_fh);
-
-  // Allow autoplay to finish
-  sleep(2);
-
-  fputs("quit\n", test_input_fh);
+  sleep(1);
+  write_to_file(input_writer, "r1 best r2 best i 10 numplays 1 threads 1\n");
+  sleep(1);
+  write_to_file(input_writer, "go autoplay lex CSW21 s1 equity s2 equity\n");
+  sleep(1);
+  write_to_file(input_writer, "quit\n");
+  sleep(1);
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
-  fclose(test_input_fh);
+  destroy_file_handler(input_writer);
   delete_fifo(test_input_filename);
+  destroy_process_args(process_args);
   free(test_input_filename);
   free(initial_command);
 }
@@ -512,7 +504,7 @@ void test_exec_console_command() {}
 void test_command() {
   // test_command_execution();
   // test_exec_single_command();
-  // test_exec_file_commands();
+  test_exec_file_commands();
   // test_exec_console_command();
   test_exec_ucgi_command();
 }

@@ -90,8 +90,7 @@ void destroy_file_handler(FileHandler *fh) {
   free(fh);
 }
 
-void write_to_file(FileHandler *fh, const char *content) {
-  pthread_mutex_lock(&fh->mutex);
+void write_to_file_with_lock(FileHandler *fh, const char *content) {
   if (!fh) {
     log_fatal("cannot write to null file handler\n");
   }
@@ -114,12 +113,15 @@ void write_to_file(FileHandler *fh, const char *content) {
   if (fflush_result != 0) {
     log_fatal("fflush failed with error code %d\n", fflush_result);
   }
+}
 
+void write_to_file(FileHandler *fh, const char *content) {
+  pthread_mutex_lock(&fh->mutex);
+  write_to_file_with_lock(fh, content);
   pthread_mutex_unlock(&fh->mutex);
 }
 
-char *getline_from_file(FileHandler *fh) {
-  pthread_mutex_lock(&fh->mutex);
+char *getline_from_file_with_lock(FileHandler *fh) {
   if (!fh) {
     log_fatal("cannot getline from null file handler\n");
   }
@@ -149,7 +151,13 @@ char *getline_from_file(FileHandler *fh) {
   if (read && read > 0 && line[read - 1] == '\n') {
     line[read - 1] = '\0';
   }
-  pthread_mutex_unlock(&fh->mutex);
 
+  return line;
+}
+
+char *getline_from_file(FileHandler *fh) {
+  pthread_mutex_lock(&fh->mutex);
+  char *line = getline_from_file_with_lock(fh);
+  pthread_mutex_unlock(&fh->mutex);
   return line;
 }

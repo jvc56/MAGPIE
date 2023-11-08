@@ -180,14 +180,8 @@ void execute_infer(CommandVars *command_vars, const Config *config) {
 }
 
 void execute_command(CommandVars *command_vars) {
-  config_load_status_t config_load_status =
-      load_config(command_vars->config, command_vars->command);
-  set_or_clear_error_status(command_vars->error_status,
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            (int)config_load_status);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return;
-  }
+  // This function assumes that the config
+  // is already loaded
 
   // Once the config is loaded, we should regard it as
   // read-only. We create a new const pointer to enforce this.
@@ -246,11 +240,33 @@ void *execute_command_thread_worker(void *uncasted_command_vars) {
   return NULL;
 }
 
-void execute_command_sync_or_async(CommandVars *command_vars, bool sync) {
+void execute_command_sync_or_async(CommandVars *command_vars,
+                                   const char *command, bool sync) {
   if (!set_mode_searching(command_vars->config->thread_control)) {
     log_warn("still searching");
     return;
   }
+
+  set_command(command_vars, command);
+
+  // Loading the config should always be
+  // done synchronously to prevent deadlock
+  // since the config load
+  // needs to lock the infile FileHandler
+  // to potentially change it but the
+  // getline to read the next input
+  // also locks the in FileHandler
+  // Loading the config is relatively
+  // fast so humans shouldn't notice anything
+  config_load_status_t config_load_status =
+      load_config(command_vars->config, command_vars->command);
+  set_or_clear_error_status(command_vars->error_status,
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            (int)config_load_status);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return;
+  }
+
   if (sync) {
     execute_command_and_set_mode_stopped(command_vars);
   } else {
@@ -261,21 +277,21 @@ void execute_command_sync_or_async(CommandVars *command_vars, bool sync) {
   }
 }
 
-void execute_command_sync(CommandVars *command_vars) {
-  execute_command_sync_or_async(command_vars, true);
+void execute_command_sync(CommandVars *command_vars, const char *command) {
+  execute_command_sync_or_async(command_vars, command, true);
 }
 
-void execute_command_async(CommandVars *command_vars) {
-  execute_command_sync_or_async(command_vars, false);
+void execute_command_async(CommandVars *command_vars, const char *command) {
+  execute_command_sync_or_async(command_vars, command, false);
 }
 
-void process_ucgi_command(CommandVars *command_vars) {
+void process_ucgi_command(CommandVars *command_vars, const char *command) {
   // Assume cmd is already trimmed of whitespace
   ThreadControl *thread_control = command_vars->config->thread_control;
-  if (strings_equal(command_vars->command, UCGI_COMMAND_STRING)) {
+  if (strings_equal(command, UCGI_COMMAND_STRING)) {
     // More of a formality to align with UCI
     print_to_outfile(thread_control, "id name MAGPIE 0.1\nucgiok\n");
-  } else if (strings_equal(command_vars->command, STOP_COMMAND_STRING)) {
+  } else if (strings_equal(command, STOP_COMMAND_STRING)) {
     if (get_mode(thread_control) == MODE_SEARCHING) {
       if (!halt(thread_control, HALT_STATUS_USER_INTERRUPT)) {
         log_warn("Search already received stop signal but has not stopped.");
@@ -284,33 +300,16 @@ void process_ucgi_command(CommandVars *command_vars) {
       log_info("There is no search to stop.");
     }
   } else {
-    execute_command_async(command_vars);
+    execute_command_async(command_vars, command);
   }
-}
-
-void execute_command_file_sync(CommandVars *command_vars) {
-  StringSplitter *commands =
-      split_file_by_newline(command_vars->config->command_file);
-  int number_of_commands = string_splitter_get_number_of_items(commands);
-  for (int i = 0; i < number_of_commands; i++) {
-    set_command(command_vars, string_splitter_get_item(commands, i));
-    execute_command_sync(command_vars);
-  }
-  restore_previous_exec_mode(command_vars->config);
-  destroy_string_splitter(commands);
 }
 
 void command_scan_loop(CommandVars *command_vars,
                        const char *initial_command_string) {
-  set_command(command_vars, initial_command_string);
-  execute_command_sync(command_vars);
+  printf("initial command: %s\n", initial_command_string);
+  execute_command_sync(command_vars, initial_command_string);
   char *input = NULL;
   while (1) {
-    if (command_vars->config->exec_mode == EXEC_MODE_COMMAND_FILE) {
-      // This will revert to the previous exec mode
-      // when it finishes running.
-      execute_command_file_sync(command_vars);
-    }
     exec_mode_t exec_mode = command_vars->config->exec_mode;
 
     if (exec_mode == EXEC_MODE_SINGLE_COMMAND) {
@@ -324,7 +323,16 @@ void command_scan_loop(CommandVars *command_vars,
     if (input) {
       free(input);
     }
+
     input = getline_from_file(command_vars->config->thread_control->infile);
+    printf("got line: %s\n", input);
+    if (!input) {
+      // NULL input indicates an EOF
+      // For now just exit, but we will probably want to implement some smarter
+      // logic later on
+      break;
+    }
+
     trim_whitespace(input);
 
     if (strings_equal(input, QUIT_COMMAND_STRING)) {
@@ -335,12 +343,10 @@ void command_scan_loop(CommandVars *command_vars,
       continue;
     }
 
-    set_command(command_vars, input);
-
     if (exec_mode == EXEC_MODE_CONSOLE) {
-      execute_command_sync(command_vars);
+      execute_command_sync(command_vars, input);
     } else if (exec_mode == EXEC_MODE_UCGI) {
-      process_ucgi_command(command_vars);
+      process_ucgi_command(command_vars, input);
     }
   }
   if (input) {

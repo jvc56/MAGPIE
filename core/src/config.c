@@ -66,7 +66,6 @@
 #define ARG_OUTFILE "outfile"
 #define ARG_CONSOLE_MODE "console"
 #define ARG_UCGI_MODE "ucgi"
-#define ARG_COMMAND_FILE "file"
 
 #define ARG_VAL_MOVE_SORT_EQUITY "equity"
 #define ARG_VAL_MOVE_SORT_SCORE "score"
@@ -130,7 +129,6 @@ typedef enum {
 
   ARG_TOKEN_CONSOLE_MODE,
   ARG_TOKEN_UCGI_MODE,
-  ARG_TOKEN_COMMAND_FILE,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -296,8 +294,6 @@ ParsedArgs *create_parsed_args() {
   set_single_arg(parsed_args, index++, ARG_TOKEN_CONSOLE_MODE, ARG_CONSOLE_MODE,
                  0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_UCGI_MODE, ARG_UCGI_MODE, 0);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_COMMAND_FILE, ARG_COMMAND_FILE,
-                 1);
 
   assert(index == NUMBER_OF_ARG_TOKENS);
 
@@ -600,16 +596,8 @@ config_load_status_t load_io_for_config(Config *config, const char *infile_name,
 }
 
 config_load_status_t load_mode_for_config(Config *config,
-                                          exec_mode_t config_mode_type,
-                                          const char *command_filename) {
-  config->previous_exec_mode = config->exec_mode;
+                                          exec_mode_t config_mode_type) {
   config->exec_mode = config_mode_type;
-  if (config->exec_mode == EXEC_MODE_COMMAND_FILE) {
-    if (config->command_file) {
-      free(config->command_file);
-    }
-    config->command_file = get_formatted_string("%s", command_filename);
-  }
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -1048,23 +1036,14 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       if (command_exec_mode != EXEC_MODE_SINGLE_COMMAND) {
         config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
       } else {
-        config_load_status =
-            load_mode_for_config(config, EXEC_MODE_CONSOLE, NULL);
+        config_load_status = load_mode_for_config(config, EXEC_MODE_CONSOLE);
       }
       break;
     case ARG_TOKEN_UCGI_MODE:
       if (command_exec_mode != EXEC_MODE_SINGLE_COMMAND) {
         config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
       } else {
-        config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI, NULL);
-      }
-      break;
-    case ARG_TOKEN_COMMAND_FILE:
-      if (command_exec_mode != EXEC_MODE_SINGLE_COMMAND) {
-        config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
-      } else {
-        config_load_status =
-            load_mode_for_config(config, EXEC_MODE_COMMAND_FILE, arg_values[0]);
+        config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI);
       }
       break;
     case NUMBER_OF_ARG_TOKENS:
@@ -1089,10 +1068,6 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   }
 
   return load_winpct_for_config(config, new_win_pct_name);
-}
-
-void restore_previous_exec_mode(Config *config) {
-  config->exec_mode = config->previous_exec_mode;
 }
 
 config_load_status_t load_config(Config *config, const char *cmd) {
@@ -1151,8 +1126,6 @@ Config *create_default_config() {
   config->random_seed = 0;
   config->thread_control = create_thread_control();
   config->exec_mode = EXEC_MODE_SINGLE_COMMAND;
-  config->previous_exec_mode = EXEC_MODE_SINGLE_COMMAND;
-  config->command_file = NULL;
   return config;
 }
 
@@ -1174,9 +1147,6 @@ void destroy_config(Config *config) {
   }
   if (config->win_pct_name) {
     free(config->win_pct_name);
-  }
-  if (config->command_file) {
-    free(config->command_file);
   }
   destroy_players_data(config->players_data);
   destroy_thread_control(config->thread_control);
