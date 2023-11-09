@@ -23,7 +23,7 @@ void log_warn_if_failed(ErrorStatus *error_status) {
   if (error_status->type == ERROR_STATUS_TYPE_NONE) {
     return;
   }
-  const char *error_type_string;
+  const char *error_type_string = "";
   switch (error_status->type) {
   case ERROR_STATUS_TYPE_NONE:
     log_fatal("no error to warn");

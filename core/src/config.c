@@ -598,6 +598,7 @@ config_load_status_t load_io_for_config(Config *config, const char *infile_name,
 config_load_status_t load_mode_for_config(Config *config,
                                           exec_mode_t config_mode_type) {
   config->exec_mode = config_mode_type;
+  config->command_set_exec_mode = true;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -892,7 +893,6 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   const char *new_rack = NULL;
   const char *outfile = NULL;
   const char *infile = NULL;
-  bool command_exec_mode_set = false;
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   for (int i = args_start_index; i < NUMBER_OF_ARG_TOKENS; i++) {
     if (!parsed_args->args[i]->has_value) {
@@ -1027,20 +1027,21 @@ config_load_status_t load_config_with_parsed_args(Config *config,
           load_check_stop_interval_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_INFILE:
+      config->command_set_infile = true;
       infile = arg_values[0];
       break;
     case ARG_TOKEN_OUTFILE:
       outfile = arg_values[0];
       break;
     case ARG_TOKEN_CONSOLE_MODE:
-      if (command_exec_mode_set) {
+      if (config->command_set_exec_mode) {
         config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
       } else {
         config_load_status = load_mode_for_config(config, EXEC_MODE_CONSOLE);
       }
       break;
     case ARG_TOKEN_UCGI_MODE:
-      if (command_exec_mode_set) {
+      if (config->command_set_exec_mode) {
         config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
       } else {
         config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI);
@@ -1070,8 +1071,14 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   return load_winpct_for_config(config, new_win_pct_name);
 }
 
-config_load_status_t load_config(Config *config, const char *cmd) {
+void reset_transient_fields(Config *config) {
+  config->command_set_cgp = false;
+  config->command_set_infile = false;
+  config->command_set_exec_mode = false;
+}
 
+config_load_status_t load_config(Config *config, const char *cmd) {
+  reset_transient_fields(config);
   // If the command is empty, consider this a set options
   // command where zero options are set and return without error.
   if (is_all_whitespace_or_empty(cmd)) {
@@ -1087,7 +1094,6 @@ config_load_status_t load_config(Config *config, const char *cmd) {
   config_load_status_t config_load_status =
       init_parsed_args(parsed_args, cmd_split_string);
 
-  config->command_set_cgp = false;
   if (config_load_status == CONFIG_LOAD_STATUS_SUCCESS) {
     config_load_status = load_config_with_parsed_args(config, parsed_args);
   }
@@ -1101,15 +1107,15 @@ config_load_status_t load_config(Config *config, const char *cmd) {
 bool continue_on_coldstart(const Config *config) {
   return config->command_type == COMMAND_TYPE_SET_OPTIONS ||
          config->command_type == COMMAND_TYPE_LOAD_CGP ||
-         !strings_equal(
-             get_file_handler_filename(config->thread_control->infile),
-             STDIN_FILENAME);
+         config->command_set_infile || config->command_set_exec_mode;
 }
 
 Config *create_default_config() {
   Config *config = malloc_or_die(sizeof(Config));
-  config->command_type = COMMAND_TYPE_SET_OPTIONS;
   config->command_set_cgp = false;
+  config->command_set_infile = false;
+  config->command_set_exec_mode = false;
+  config->command_type = COMMAND_TYPE_SET_OPTIONS;
   config->lexicons_loaded = false;
   config->letter_distribution = NULL;
   config->ld_name = NULL;

@@ -55,8 +55,16 @@ typedef enum {
 } exec_mode_t;
 
 typedef struct Config {
-  command_t command_type;
+  // Transient fields
+  // these fields are reset
+  // every time the config is loaded
   bool command_set_cgp;
+  bool command_set_infile;
+  bool command_set_exec_mode;
+  // Persistent fields
+  // these fields maintain their
+  // value between config loads
+  command_t command_type;
   bool lexicons_loaded;
   // Game
   LetterDistribution *letter_distribution;

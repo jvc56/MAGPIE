@@ -368,6 +368,7 @@ char *create_command_from_args(int argc, char *argv[]) {
 }
 
 void process_command(int argc, char *argv[]) {
+  log_set_level(LOG_WARN);
   CommandVars *command_vars = create_command_vars();
   char *initial_command_string = create_command_from_args(argc, argv);
   command_scan_loop(command_vars, initial_command_string);
