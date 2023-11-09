@@ -264,6 +264,8 @@ void execute_command_sync_or_async(CommandVars *command_vars,
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             (int)config_load_status);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    log_warn_if_failed(command_vars->error_status);
+    set_mode_stopped(command_vars->config->thread_control);
     return;
   }
 
@@ -306,17 +308,18 @@ void process_ucgi_command(CommandVars *command_vars, const char *command) {
 
 void command_scan_loop(CommandVars *command_vars,
                        const char *initial_command_string) {
-  printf("initial command: %s\n", initial_command_string);
   execute_command_sync(command_vars, initial_command_string);
+  if (!continue_on_coldstart(command_vars->config)) {
+    return;
+  }
   char *input = NULL;
   while (1) {
     exec_mode_t exec_mode = command_vars->config->exec_mode;
 
-    if (exec_mode == EXEC_MODE_SINGLE_COMMAND) {
-      break;
-    }
+    FileHandler *infile = command_vars->config->thread_control->infile;
 
-    if (exec_mode == EXEC_MODE_CONSOLE) {
+    if (exec_mode == EXEC_MODE_CONSOLE &&
+        strings_equal(STDIN_FILENAME, get_file_handler_filename(infile))) {
       print_to_outfile(command_vars->config->thread_control, "magpie>");
     }
 
@@ -324,12 +327,9 @@ void command_scan_loop(CommandVars *command_vars,
       free(input);
     }
 
-    input = getline_from_file(command_vars->config->thread_control->infile);
-    printf("got line: %s\n", input);
+    input = getline_from_file(infile);
     if (!input) {
       // NULL input indicates an EOF
-      // For now just exit, but we will probably want to implement some smarter
-      // logic later on
       break;
     }
 
@@ -343,10 +343,13 @@ void command_scan_loop(CommandVars *command_vars,
       continue;
     }
 
-    if (exec_mode == EXEC_MODE_CONSOLE) {
+    switch (exec_mode) {
+    case EXEC_MODE_CONSOLE:
       execute_command_sync(command_vars, input);
-    } else if (exec_mode == EXEC_MODE_UCGI) {
+      break;
+    case EXEC_MODE_UCGI:
       process_ucgi_command(command_vars, input);
+      break;
     }
   }
   if (input) {

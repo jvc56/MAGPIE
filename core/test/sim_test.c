@@ -55,7 +55,7 @@ void test_sim_single_iteration(TestConfig *testconfig) {
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-                             " plies 2 threads 1 numplays 15 i 1 stop none");
+                             " plies 2 threads 1 numplays 15 i 1 cond none");
   sim_status_t status = simulate(config, simmer, game);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
@@ -73,7 +73,7 @@ void test_more_iterations(TestConfig *testconfig) {
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-                             " plies 2 threads 1 numplays 15 i 400 stop none");
+                             " plies 2 threads 1 numplays 15 i 400 cond none");
   sim_status_t status = simulate(config, simmer, game);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
@@ -99,7 +99,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
 
   int iters = 10000;
   char *setoptions_string = get_formatted_string(
-      "setoptions rack %s plies 2 threads 1 numplays 15 i %d stop none",
+      "setoptions rack %s plies 2 threads 1 numplays 15 i %d cond none",
       EMPTY_RACK_STRING, iters);
   load_config_or_die(config, setoptions_string);
   free(setoptions_string);
@@ -132,7 +132,7 @@ void perf_test_multithread_sim(Config *config) {
   load_cgp(game, config->cgp);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-                             " plies 2 threads 1 numplays 15 i 1000 stop none");
+                             " plies 2 threads 1 numplays 15 i 1000 cond none");
   sim_status_t status = simulate(config, simmer, game);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
@@ -161,7 +161,7 @@ void perf_test_multithread_blocking_sim(Config *config) {
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config,
                      "setoptions rack " EMPTY_RACK_STRING
-                     " plies 2 threads 1 numplays 15 i 1000000 stop 99");
+                     " plies 2 threads 1 numplays 15 i 1000000 cond 99");
   sim_status_t status = simulate(config, simmer, game);
   assert(status == SIM_STATUS_SUCCESS);
   print_sim_stats(simmer, game);
@@ -185,7 +185,7 @@ void test_play_similarity(TestConfig *testconfig) {
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-                             " plies 2 threads 1 numplays 15 i 0 stop none");
+                             " plies 2 threads 1 numplays 15 i 0 cond none");
   sim_status_t status = simulate(config, simmer, game);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);

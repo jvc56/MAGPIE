@@ -116,7 +116,6 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
       sleep(1);
     }
     seconds_elapsed++;
-    printf("%d seconds elapsed\n", seconds_elapsed);
     if (seconds_elapsed >= max_seconds) {
       log_fatal("Test aborted after processing for %d seconds", max_seconds);
     }
@@ -166,7 +165,6 @@ void assert_command_status_and_output(CommandVars *command_vars,
   assert(get_mode(command_vars->config->thread_control) == MODE_STOPPED);
 
   char *test_output = get_string_from_file(test_output_filename);
-  printf("output for %s:\n%s\n", command, test_output);
   int newlines_in_output = count_newlines(test_output);
   if (newlines_in_output != expected_output_line_count) {
     printf("output counts do not match %d != %d\n", newlines_in_output,
@@ -212,14 +210,14 @@ void test_command_execution() {
   // Sim finishing probabilistically
   assert_command_status_and_output(
       command_vars,
-      "go sim plies 2 stop 95 threads 8 numplays 3 i 100000 check 300 "
+      "go sim plies 2 cond 95 threads 8 numplays 3 i 100000 check 300 "
       "info 500 cgp " ZILLION_OPENING_CGP,
       false, 60, ERROR_STATUS_TYPE_NONE, 0, 5, 0);
 
   // Sim statically
   assert_command_status_and_output(
       command_vars,
-      "go sim plies 2 stop 95 threads 8 numplays 20 i 100000 check 300 "
+      "go sim plies 2 cond 95 threads 8 numplays 20 i 100000 check 300 "
       "info 70 static cgp " ZILLION_OPENING_CGP,
       false, 60, ERROR_STATUS_TYPE_NONE, 0, 21, 0);
 
@@ -359,9 +357,6 @@ void test_process_command(const char *arg_string,
   char *test_output = get_string_from_file(test_output_filename);
   char *test_outerror = get_string_from_file(test_outerror_filename);
 
-  printf("test out:\n%s\n", test_output);
-  printf("error out:\n%s\n", test_outerror);
-
   if (!has_substring(test_output, output_substr)) {
     printf("pattern not found in output:\n%s\n***\n%s\n", test_output,
            output_substr);
@@ -390,6 +385,8 @@ void test_process_command(const char *arg_string,
 
   free(test_output);
   free(test_outerror);
+  delete_file(test_output_filename);
+  delete_file(test_outerror_filename);
   free(test_output_filename);
   free(test_outerror_filename);
   free(arg_string_with_outfile);
@@ -401,14 +398,6 @@ void test_exec_single_command() {
   test_process_command("go sim lex CSW21 i 1000 plies 2h3", 0, NULL, 1,
                        plies_error_substr);
   free(plies_error_substr);
-
-  char *rack_error_substr =
-      get_formatted_string("code %d", CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS);
-  test_process_command(
-      "position cgp 15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 "
-      "ABC5DF/YXZ 0/0 0 lex CSW21",
-      0, NULL, 1, rack_error_substr);
-  free(rack_error_substr);
 
   test_process_command("go infer rack MUZAKY pindex 0 score 58 exch 0 numplays "
                        "20 threads 4 lex CSW21",
@@ -448,6 +437,7 @@ void test_exec_file_commands() {
   test_process_command(commands_file_invocation, 127,
                        "info infertotalracks 6145", 1, iter_error_substr);
 
+  delete_file(commands_filename);
   free(iter_error_substr);
   free(commands_filename);
   free(commands_file_invocation);
@@ -471,7 +461,7 @@ void test_exec_ucgi_command() {
   char *initial_command =
       get_formatted_string("ucgi infile %s", test_input_filename);
   ProcessArgs *process_args =
-      create_process_args(initial_command, 1, "autoplay", 0, "");
+      create_process_args(initial_command, 2, "autoplay", 0, "");
 
   pthread_t cmd_execution_thread;
   pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
@@ -486,6 +476,12 @@ void test_exec_ucgi_command() {
   sleep(1);
   write_to_file(input_writer, "go autoplay lex CSW21 s1 equity s2 equity\n");
   sleep(1);
+  write_to_file(input_writer,
+                "go autoplay lex CSW21 s1 equity s2 equity i 10000000\n");
+  sleep(1);
+  // Interrupt the autoplay which won't finish in 1 second
+  write_to_file(input_writer, "stop\n");
+  sleep(1);
   write_to_file(input_writer, "quit\n");
   sleep(1);
 
@@ -499,12 +495,53 @@ void test_exec_ucgi_command() {
   free(initial_command);
 }
 
-void test_exec_console_command() {}
+void test_exec_console_command() {
+  char *test_input_filename = get_test_filename("input");
+
+  create_fifo(test_input_filename);
+
+  // infile other than STDIN
+  char *initial_command = get_formatted_string(
+      "go infer rack DGINR pindex 0 score 18 exch 0 numplays 7 threads 4 "
+      "info 1000000 "
+      "cgp " EMPTY_CGP " infile %s",
+      test_input_filename);
+
+  char *config_load_error_substr =
+      get_formatted_string("code %d", CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
+
+  ProcessArgs *process_args = create_process_args(
+      initial_command, 40, "autoplay 100", 1, config_load_error_substr);
+
+  pthread_t cmd_execution_thread;
+  pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
+                 process_args);
+  pthread_detach(cmd_execution_thread);
+
+  FileHandler *input_writer = create_file_handler_from_filename(
+      test_input_filename, FILE_HANDLER_MODE_WRITE);
+
+  write_to_file(input_writer, "r1 best r2 best i 100 numplays 1 threads 4\n");
+  write_to_file(input_writer, "go autoplay lex CSW21 s1 equity s2 equity\n");
+  // Stop should have no effect and appear as an error
+  write_to_file(input_writer, "stop\n");
+  write_to_file(input_writer, "quit\n");
+
+  // Wait for magpie to quit
+  block_for_process_command(process_args, 5);
+
+  destroy_file_handler(input_writer);
+  delete_fifo(test_input_filename);
+  destroy_process_args(process_args);
+  free(config_load_error_substr);
+  free(test_input_filename);
+  free(initial_command);
+}
 
 void test_command() {
-  // test_command_execution();
-  // test_exec_single_command();
+  test_command_execution();
+  test_exec_single_command();
   test_exec_file_commands();
-  // test_exec_console_command();
   test_exec_ucgi_command();
+  test_exec_console_command();
 }

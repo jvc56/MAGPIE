@@ -74,11 +74,11 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
   test_config_error(config, "go sim i -6",
                     CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
-  test_config_error(config, "go sim stop 96",
+  test_config_error(config, "go sim cond 96",
                     CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
-  test_config_error(config, "go sim stop -95",
+  test_config_error(config, "go sim cond -95",
                     CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
-  test_config_error(config, "go sim stop NO",
+  test_config_error(config, "go sim cond NO",
                     CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
   test_config_error(config, "go sim pindex 3",
                     CONFIG_LOAD_STATUS_MALFORMED_PLAYER_TO_INFER_INDEX);
@@ -163,7 +163,7 @@ void test_config_success() {
       "setoptions ld %s bb %d var %s l1 %s l2 %s s1 %s r1 "
       "%s s2 %s r2 %s rack %s pindex %d score %d exch %d eq %0.2f numplays %d "
       "plies %d i "
-      "%d stop %d rs %d threads %d info %d check %d static gp",
+      "%d cond %d rs %d threads %d info %d check %d static gp",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, rack, pindex,
       score, number_exch, equity_margin, num_plays, plies, max_iterations,
       stopping_cond, random_seed, number_of_threads, print_info, check_stop);

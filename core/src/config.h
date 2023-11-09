@@ -50,7 +50,6 @@ typedef enum {
 } command_t;
 
 typedef enum {
-  EXEC_MODE_SINGLE_COMMAND,
   EXEC_MODE_CONSOLE,
   EXEC_MODE_UCGI,
 } exec_mode_t;
@@ -93,6 +92,7 @@ typedef struct Config {
 } Config;
 
 config_load_status_t load_config(Config *config, const char *cmd);
+bool continue_on_coldstart(const Config *config);
 Config *create_default_config();
 void destroy_config(Config *config);
 

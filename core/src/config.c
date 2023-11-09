@@ -49,7 +49,7 @@
 #define ARG_PLIES "plies"
 #define ARG_NUMBER_OF_PLAYS "numplays"
 #define ARG_MAX_ITERATIONS "i"
-#define ARG_STOPPING_CONDITION "stop"
+#define ARG_STOPPING_CONDITION "cond"
 #define ARG_STATIC_SEARCH_ON "static"
 #define ARG_STATIC_SEARCH_OFF "nostatic"
 #define ARG_PLAYER_TO_INFER_INDEX "pindex"
@@ -892,7 +892,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
   const char *new_rack = NULL;
   const char *outfile = NULL;
   const char *infile = NULL;
-  exec_mode_t command_exec_mode = EXEC_MODE_SINGLE_COMMAND;
+  bool command_exec_mode_set = false;
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
   for (int i = args_start_index; i < NUMBER_OF_ARG_TOKENS; i++) {
     if (!parsed_args->args[i]->has_value) {
@@ -1033,14 +1033,14 @@ config_load_status_t load_config_with_parsed_args(Config *config,
       outfile = arg_values[0];
       break;
     case ARG_TOKEN_CONSOLE_MODE:
-      if (command_exec_mode != EXEC_MODE_SINGLE_COMMAND) {
+      if (command_exec_mode_set) {
         config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
       } else {
         config_load_status = load_mode_for_config(config, EXEC_MODE_CONSOLE);
       }
       break;
     case ARG_TOKEN_UCGI_MODE:
-      if (command_exec_mode != EXEC_MODE_SINGLE_COMMAND) {
+      if (command_exec_mode_set) {
         config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
       } else {
         config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI);
@@ -1098,6 +1098,14 @@ config_load_status_t load_config(Config *config, const char *cmd) {
   return config_load_status;
 }
 
+bool continue_on_coldstart(const Config *config) {
+  return config->command_type == COMMAND_TYPE_SET_OPTIONS ||
+         config->command_type == COMMAND_TYPE_LOAD_CGP ||
+         !strings_equal(
+             get_file_handler_filename(config->thread_control->infile),
+             STDIN_FILENAME);
+}
+
 Config *create_default_config() {
   Config *config = malloc_or_die(sizeof(Config));
   config->command_type = COMMAND_TYPE_SET_OPTIONS;
@@ -1125,7 +1133,7 @@ Config *create_default_config() {
   config->use_game_pairs = false;
   config->random_seed = 0;
   config->thread_control = create_thread_control();
-  config->exec_mode = EXEC_MODE_SINGLE_COMMAND;
+  config->exec_mode = EXEC_MODE_CONSOLE;
   return config;
 }
 
