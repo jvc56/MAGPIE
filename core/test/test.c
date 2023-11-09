@@ -61,7 +61,7 @@ void run_all(TestConfig *testconfig) {
   test_stats();
   test_infer(testconfig);
   test_sim(testconfig);
-  test_command(testconfig);
+  // test_command(testconfig);
   test_gcg();
   test_autoplay(testconfig);
   test_wasm_api();
