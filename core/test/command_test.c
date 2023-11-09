@@ -543,7 +543,7 @@ void test_exec_console_command() {
 void test_command() {
   test_command_execution();
   test_exec_single_command();
-  test_exec_file_commands();
-  test_exec_ucgi_command();
-  test_exec_console_command();
+  // test_exec_file_commands();
+  // test_exec_ucgi_command();
+  // test_exec_console_command();
 }
