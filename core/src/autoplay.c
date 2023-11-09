@@ -21,15 +21,21 @@ typedef struct AutoplayWorker {
   int worker_index;
 } AutoplayWorker;
 
-AutoplayResults *create_autoplay_results() {
-  AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
+void reset_autoplay_results(AutoplayResults *autoplay_results) {
   autoplay_results->total_games = 0;
   autoplay_results->p1_wins = 0;
   autoplay_results->p1_losses = 0;
   autoplay_results->p1_ties = 0;
   autoplay_results->p1_firsts = 0;
+  reset_stat(autoplay_results->p1_score);
+  reset_stat(autoplay_results->p2_score);
+}
+
+AutoplayResults *create_autoplay_results() {
+  AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
   autoplay_results->p1_score = create_stat();
   autoplay_results->p2_score = create_stat();
+  reset_autoplay_results(autoplay_results);
   return autoplay_results;
 }
 
@@ -144,6 +150,7 @@ int get_number_of_games_for_worker(int max_iterations, int number_of_threads,
 autoplay_status_t autoplay(const Config *config,
                            AutoplayResults *autoplay_results) {
   unhalt(config->thread_control);
+  reset_autoplay_results(autoplay_results);
 
   // FIXME: see fixme above
   seed_random(config->random_seed);

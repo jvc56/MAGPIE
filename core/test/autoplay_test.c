@@ -28,6 +28,14 @@ void autoplay_game_pairs_test(TestConfig *testconfig) {
                         get_mean(autoplay_results->p2_score)));
   assert(within_epsilon(get_stdev(autoplay_results->p1_score),
                         get_stdev(autoplay_results->p2_score)));
+
+  load_config_or_die(csw_config, "setoptions i 7 nogp threads 2");
+
+  // Autoplay should reset the stats
+  status = autoplay(csw_config, autoplay_results);
+  assert(status == AUTOPLAY_STATUS_SUCCESS);
+  assert(autoplay_results->total_games == csw_config->max_iterations);
+
   destroy_autoplay_results(autoplay_results);
 }
 

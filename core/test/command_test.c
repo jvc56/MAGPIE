@@ -406,6 +406,7 @@ void test_exec_single_command() {
 
 void test_exec_file_commands() {
   // Run a sim in CSW, then (68 output)
+  // run the same sim with no parameters, then (68 output)
   // run a sim that exits with a warning, then (1 warning)
   // run an inference in Polish, then (58 output)
   // run autoplay in CSW (1 output)
@@ -418,6 +419,7 @@ void test_exec_file_commands() {
       "i 200\n"
       "info 60\n"
       "cgp " DELDAR_VS_HARSHAN_CGP "\ngo sim plies 2 threads 10 numplays 15\n"
+      "go sim\n"
       "go sim lex CSW21 i 10h00\n"
       "pindex 0 score 20 exch 0\n"
       "numplays 20 info 1000000\n"
@@ -434,7 +436,7 @@ void test_exec_file_commands() {
   char *iter_error_substr = get_formatted_string(
       "code %d", CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
 
-  test_process_command(commands_file_invocation, 127,
+  test_process_command(commands_file_invocation, 195,
                        "info infertotalracks 6145", 1, iter_error_substr);
 
   delete_file(commands_filename);

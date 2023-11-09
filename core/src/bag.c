@@ -37,8 +37,8 @@ void update_bag(Bag *bag, LetterDistribution *letter_distribution) {
     free(bag->tiles);
     bag->size = letter_distribution->total_tiles;
     bag->tiles = malloc_or_die(sizeof(uint8_t) * bag->size);
+    reset_bag(bag, letter_distribution);
   }
-  reset_bag(bag, letter_distribution);
 }
 
 Bag *create_bag(LetterDistribution *letter_distribution) {

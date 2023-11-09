@@ -299,7 +299,7 @@ void process_ucgi_command(CommandVars *command_vars, const char *command) {
         log_warn("Search already received stop signal but has not stopped.");
       }
     } else {
-      log_info("There is no search to stop.");
+      log_warn("There is no search to stop.");
     }
   } else {
     execute_command_async(command_vars, command);
