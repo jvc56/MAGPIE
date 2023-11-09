@@ -308,6 +308,7 @@ void process_ucgi_command(CommandVars *command_vars, const char *command) {
 
 void command_scan_loop(CommandVars *command_vars,
                        const char *initial_command_string) {
+  printf("initial command: %s\n", initial_command_string);
   execute_command_sync(command_vars, initial_command_string);
   if (!continue_on_coldstart(command_vars->config)) {
     return;
@@ -332,6 +333,7 @@ void command_scan_loop(CommandVars *command_vars,
       // NULL input indicates an EOF
       break;
     }
+    printf("got line: %s\n", input);
 
     trim_whitespace(input);
 
