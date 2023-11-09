@@ -69,7 +69,6 @@ void players_data_set_is_shared(PlayersData *players_data,
 void players_data_destroy_data_name(PlayersData *players_data,
                                     players_data_t players_data_type,
                                     int player_index) {
-  // String must be allocated by the caller
   int data_name_index =
       players_data_get_player_data_index(players_data_type, player_index);
   if (players_data->data_names[data_name_index]) {
@@ -81,7 +80,6 @@ void players_data_destroy_data_name(PlayersData *players_data,
 void players_data_set_data_name(PlayersData *players_data,
                                 players_data_t players_data_type,
                                 int player_index, const char *data_name) {
-  // String must be allocated by the caller
   int data_name_index =
       players_data_get_player_data_index(players_data_type, player_index);
   if (strings_equal(players_data->data_names[data_name_index], data_name)) {
@@ -140,7 +138,6 @@ void *players_data_create_data(players_data_t players_data_type,
 void players_data_destroy_data(PlayersData *players_data,
                                players_data_t players_data_type,
                                int player_index) {
-  // String must be allocated by the caller
   int data_index =
       players_data_get_player_data_index(players_data_type, player_index);
   if (players_data->data[data_index]) {
