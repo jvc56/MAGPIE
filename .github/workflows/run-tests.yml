@@ -47,7 +47,7 @@ jobs:
           mv *.csv core/data/lexica
 
       - name: Run unit tests
-        run: cd core && ./run u command
+        run: cd core && ./run u
 
       - name: Build release
         run: cd core && make clean && make magpie BUILD=release
