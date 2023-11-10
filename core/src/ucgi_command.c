@@ -70,6 +70,7 @@ int parse_go_cmd(char *params, GoParams *go_params) {
   int reading_equity_margin = 0;
   int reading_print_info_interval = 0;
   int reading_check_stopping_condition_interval = 0;
+  int reading_also_search = 0;
   while (token) {
     if (reading_num_plays) {
       go_params->num_plays = atoi(token);
@@ -116,6 +117,8 @@ int parse_go_cmd(char *params, GoParams *go_params) {
         log_warn("Did not understand stopping condition %s", token);
         return GO_PARAMS_PARSE_FAILURE;
       }
+    } else if (reading_also_search) {
+      strcpy(go_params->also_search, token);
     }
     if (strings_equal(token, "static")) {
       go_params->static_search_only = 1;
@@ -148,12 +151,14 @@ int parse_go_cmd(char *params, GoParams *go_params) {
     reading_score = strings_equal(token, "score");
     reading_number_of_tiles_exchanged = strings_equal(token, "exch");
     reading_equity_margin = strings_equal(token, "eqmargin");
+    reading_also_search = strings_equal(token, "alsosearch");
     token = strtok(NULL, " ");
   }
-  log_debug("Returning go_params; i %d stop %d depth %d threads %d ss %d",
+  log_debug("Returning go_params; i %d stop %d depth %d threads %d ss %d "
+            "alsosearch %s",
             go_params->max_iterations, go_params->stop_condition,
-            go_params->depth, go_params->threads,
-            go_params->static_search_only);
+            go_params->depth, go_params->threads, go_params->static_search_only,
+            go_params->also_search);
   if (go_params->stop_condition != SIM_STOPPING_CONDITION_NONE &&
       go_params->max_iterations <= 0) {
     log_warn("Cannot have a stopping condition and also search infinitely.");
@@ -182,7 +187,8 @@ void ucgi_simulate(UCGICommandVars *ucgi_command_vars) {
            ucgi_command_vars->go_params->num_plays,
            ucgi_command_vars->go_params->max_iterations,
            ucgi_command_vars->go_params->stop_condition,
-           ucgi_command_vars->go_params->static_search_only);
+           ucgi_command_vars->go_params->static_search_only,
+           ucgi_command_vars->go_params->also_search);
 }
 
 void ucgi_infer(UCGICommandVars *ucgi_command_vars) {

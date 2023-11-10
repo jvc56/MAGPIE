@@ -376,7 +376,7 @@ void destroy_config(Config *config) {
 // potentially edit an existing config, or create a brand new one
 void load_config_from_lexargs(Config **config, const char *cgp,
                               char *lexicon_name, char *ldname) {
-
+  log_debug("load_config_from_lexargs; lex %s ldname %s", lexicon_name, ldname);
   char *dist = get_formatted_string("data/letterdistributions/%s.csv", ldname);
   char leaves[50] = "data/lexica/english.klv2";
   char winpct[50] = "data/strategy/default_english/winpct.csv";
@@ -407,6 +407,7 @@ void load_config_from_lexargs(Config **config, const char *cgp,
                 dist);
       destroy_letter_distribution(c->letter_distribution);
       c->letter_distribution = create_letter_distribution(dist);
+      string_copy(c->ld_filename, dist);
     }
     if (!strings_equal(c->player_1_strategy_params->kwg_filename,
                        lexicon_file)) {
@@ -416,6 +417,7 @@ void load_config_from_lexargs(Config **config, const char *cgp,
       // assume the kwg applies to both players if we're using this function
       assert(c->kwg_is_shared);
       c->player_2_strategy_params->kwg = c->player_1_strategy_params->kwg;
+      string_copy(c->player_1_strategy_params->kwg_filename, lexicon_file);
       string_copy(c->player_2_strategy_params->kwg_filename, lexicon_file);
     }
     if (!strings_equal(c->player_1_strategy_params->klv_filename, leaves)) {
@@ -425,6 +427,7 @@ void load_config_from_lexargs(Config **config, const char *cgp,
       // assume the klv applies to both players if we're using this function
       assert(c->klv_is_shared);
       c->player_2_strategy_params->klv = c->player_1_strategy_params->klv;
+      string_copy(c->player_1_strategy_params->klv_filename, leaves);
       string_copy(c->player_2_strategy_params->klv_filename, leaves);
     }
 

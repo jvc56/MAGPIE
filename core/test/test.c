@@ -33,6 +33,7 @@
 #include "superconfig.h"
 #include "test_constants.h"
 #include "ucgi_command_test.h"
+#include "ucgi_formats_test.h"
 #include "wasm_api_test.h"
 #include "word_test.h"
 
@@ -65,6 +66,7 @@ void unit_tests(SuperConfig *superconfig) {
   test_gcg();
   test_autoplay(superconfig);
   test_wasm_api();
+  test_ucgi_formats();
 }
 
 int main(int argc, char *argv[]) {

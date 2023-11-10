@@ -19,6 +19,7 @@ void reset_go_params(GoParams *go_params) {
   go_params->equity_margin = 0;
   go_params->print_info_interval = 0;
   go_params->check_stopping_condition_interval = 0;
+  go_params->also_search[0] = '\0';
 }
 
 GoParams *create_go_params() {

@@ -3,6 +3,8 @@
 
 #include "rack.h"
 
+#define ALSOSEARCH_CHARS 255
+
 typedef enum {
   SEARCH_TYPE_NONE,
   SEARCH_TYPE_SIM_MONTECARLO,
@@ -26,6 +28,7 @@ typedef struct GoParams {
   double equity_margin;
   int print_info_interval;
   int check_stopping_condition_interval;
+  char also_search[ALSOSEARCH_CHARS];
 } GoParams;
 
 GoParams *create_go_params();

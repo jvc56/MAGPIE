@@ -57,7 +57,7 @@ void test_sim_single_iteration(SuperConfig *superconfig,
   Simmer *simmer = create_simmer(config);
   assert(thread_control->halt_status == HALT_STATUS_NONE);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1,
-           SIM_STOPPING_CONDITION_NONE, 0);
+           SIM_STOPPING_CONDITION_NONE, 0, NULL);
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
 
   assert(game->gen->board->tiles_played == 0);
@@ -76,7 +76,7 @@ void test_more_iterations(SuperConfig *superconfig,
   Simmer *simmer = create_simmer(config);
   assert(thread_control->halt_status == HALT_STATUS_NONE);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 400,
-           SIM_STOPPING_CONDITION_NONE, 0);
+           SIM_STOPPING_CONDITION_NONE, 0, NULL);
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
@@ -103,7 +103,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   assert(thread_control->halt_status == HALT_STATUS_NONE);
   clock_t begin = clock();
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, iters,
-           SIM_STOPPING_CONDITION_NONE, 0);
+           SIM_STOPPING_CONDITION_NONE, 0, NULL);
   clock_t end = clock();
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   printf("%d iters took %0.6f seconds\n", iters,
@@ -132,7 +132,7 @@ void perf_test_multithread_sim(Config *config, ThreadControl *thread_control) {
   Simmer *simmer = create_simmer(config);
   assert(thread_control->halt_status == HALT_STATUS_NONE);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1000,
-           SIM_STOPPING_CONDITION_NONE, 0);
+           SIM_STOPPING_CONDITION_NONE, 0, NULL);
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
 
   print_sim_stats(simmer, game);
@@ -160,7 +160,7 @@ void perf_test_multithread_blocking_sim(Config *config,
 
   Simmer *simmer = create_simmer(config);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1000000,
-           SIM_STOPPING_CONDITION_99PCT, 0);
+           SIM_STOPPING_CONDITION_99PCT, 0, NULL);
 
   print_sim_stats(simmer, game);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
@@ -185,7 +185,7 @@ void test_play_similarity(SuperConfig *superconfig,
   Simmer *simmer = create_simmer(config);
   assert(thread_control->halt_status == HALT_STATUS_NONE);
   simulate(thread_control, simmer, game, NULL, 2, 1, 15, 0,
-           SIM_STOPPING_CONDITION_NONE, 0);
+           SIM_STOPPING_CONDITION_NONE, 0, NULL);
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   // The first four plays all score 74. Only
   // 8F ATRESIC and 8F STEARIC should show up as similar, though.

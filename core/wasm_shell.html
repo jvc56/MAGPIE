@@ -137,28 +137,31 @@
           //text = text.replace(/>/g, "&gt;");
           //text = text.replace('\n', '<br>', 'g');
           // console.log(text);
-          text = text.split(" ");
+
+          var lines = text.split("\n");
           var toPrint = "";
-          for (var i = 0; i < text.length; i++) {
-            if (text[i] === "bestmove") {
-              toPrint = text.join(" ");
-              break;
-            } else if (text[i] === "nps") {
-              toPrint = text.join(" ");
-              break;
-            } else if (text[i] === "bestsofar") {
-              toPrint = text.join(" ");
-              break;
-            } else if (text[i] === "it") {
-              var iterct = parseInt(text[i + 1], 10);
-              if (iterct > lastIterCt) {
-                lastIterCt = iterct;
-                toPrint = text[i] + " " + lastIterCt;
+          for (var i = 0; i < lines.length; i++) {
+            var pairs = lines[i].split(" ");
+            for (var j = 0; j < pairs.length; j++) {
+              if (pairs[j] === "bestmove") {
+                toPrint += pairs.join(" ") + "\n";
+                break;
+              } else if (pairs[j] === "nps") {
+                toPrint += pairs.join(" ") + "\n";
+                break;
+              } else if (pairs[j] === "bestsofar") {
+                toPrint += pairs.join(" ") + "\n";
+                break;
+              } else if (pairs[j] === "it") {
+                var iterct = parseInt(pairs[j + 1], 10);
+                if (iterct > lastIterCt) {
+                  lastIterCt = iterct;
+                  toPrint += pairs[j] + " " + lastIterCt + "\n";
+                }
+                break;
               }
-              break;
             }
           }
-
           if (toPrint !== "" && element) {
             element.value += toPrint + "\n";
             element.scrollTop = element.scrollHeight; // focus on bottom
@@ -317,7 +320,7 @@
         lastIterCt = 0;
 
         const ucgiLoadCmd = "position cgp " + cgpstring;
-        const nthreads = navigator.hardwareConcurrency;
+        const nthreads = navigator.hardwareConcurrency - 1;
         if (nthreads < 1) {
           nthreads = 1;
         }
@@ -327,7 +330,7 @@
         console.log("Using nthreads: " + nthreads);
 
         // const goCmd = `go sim threads ${nthreads} plays 5 stopcondition 99 depth 5 i 10000 checkstop 100 info 100`;
-        const goCmd = `go sim static threads ${nthreads} depth 1 plays 15`;
+        const goCmd = `go sim threads ${nthreads} depth 1 plays 15 stopcondition 99 i 5000 checkstop 500 info 250`;
         const cmd1C = Module.stringToNewUTF8(ucgiLoadCmd);
         const cmd2C = Module.stringToNewUTF8(goCmd);
         processUCGICommand(cmd1C);
@@ -336,11 +339,10 @@
         Module._free(cmd2C);
 
         const interval = setInterval(() => {
-          console.log("gonna get search status");
           const status = ucgiSearchStatus();
           const str = Module.UTF8ToString(status);
           print(str);
-          console.log(str);
+          // console.log(str);
           if (str.includes("bestmove ")) {
             console.log("stop interval");
             clearInterval(interval);
