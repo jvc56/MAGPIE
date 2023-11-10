@@ -45,6 +45,16 @@ bool strings_equal(const char *str1, const char *str2) {
   return strcmp(str1, str2) == 0;
 }
 
+bool strings_iequal(const char *str1, const char *str2) {
+  if (!str1 && !str2) {
+    return true;
+  }
+  if (!str1 || !str2) {
+    return false;
+  }
+  return strcasecmp(str1, str2) == 0;
+}
+
 bool is_string_empty(const char *str) { return strings_equal(str, ""); }
 
 bool is_string_empty_or_null(const char *str) {

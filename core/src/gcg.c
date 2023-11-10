@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "constants.h"
 #include "game_history.h"
@@ -283,10 +282,10 @@ gcg_parse_status_t handle_encoding(GCGParser *gcg_parser) {
   int gcg_start_write_offset = 0;
   if (!regexec_result) {
     char *encoding_string = get_matching_group_as_string(gcg_parser, 1);
-    bool is_utf8 = !strcasecmp("utf-8", encoding_string) ||
-                   !strcasecmp("utf8", encoding_string);
-    bool is_iso_8859_1 = !strcasecmp("iso-8859-1", encoding_string) ||
-                         !strcasecmp("iso 8859-1", encoding_string);
+    bool is_utf8 = strings_iequal("utf-8", encoding_string) ||
+                   strings_iequal("utf8", encoding_string);
+    bool is_iso_8859_1 = strings_iequal("iso-8859-1", encoding_string) ||
+                         strings_iequal("iso 8859-1", encoding_string);
     free(encoding_string);
     if (is_utf8) {
       gcg_encoding = GCG_ENCODING_UTF8;
@@ -307,8 +306,8 @@ gcg_parse_status_t handle_encoding(GCGParser *gcg_parser) {
     gcg_parser->utf8_gcg_string = iso_8859_1_to_utf8(
         gcg_parser->input_gcg_string + gcg_start_write_offset);
   } else {
-    gcg_parser->utf8_gcg_string =
-        strdup(gcg_parser->input_gcg_string + gcg_start_write_offset);
+    gcg_parser->utf8_gcg_string = get_formatted_string(
+        "%s", gcg_parser->input_gcg_string + gcg_start_write_offset);
   }
   gcg_parser->current_gcg_char_index = 0;
   return gcg_parse_status;

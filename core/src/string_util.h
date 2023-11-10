@@ -11,6 +11,7 @@ bool is_all_whitespace_or_empty(const char *str);
 bool is_all_digits_or_empty(const char *str);
 char *get_formatted_string(const char *format, ...);
 bool strings_equal(const char *str1, const char *str2);
+bool strings_iequal(const char *str1, const char *str2);
 char *string_copy(char *dest, const char *src);
 void *memory_copy(void *dest, const void *src, size_t n);
 int memory_compare(const void *s1, const void *s2, size_t n);
