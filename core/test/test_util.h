@@ -20,6 +20,7 @@ void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
                          LetterDistribution *letter_distribution);
 void generate_moves_for_game(Game *game);
 double get_leave_value_for_rack(const KLV *klv, Rack *rack);
+void generate_leaves_for_game(Game *game, int add_exchanges);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *create_sorted_move_list(MoveList *ml);
 void destroy_sorted_move_list(SortedMoveList *sorted_move_list);

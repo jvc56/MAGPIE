@@ -19,9 +19,10 @@ typedef struct AnchorList {
 
 AnchorList *create_anchor_list();
 void destroy_anchor_list(AnchorList *al);
-void insert_anchor(AnchorList *al, int row, int col, int last_anchor_col,
-                   int transpose_state, int vertical,
-                   double highest_possible_equity);
+void add_anchor(AnchorList *al, int row, int col, int last_anchor_col,
+                int transpose_state, int vertical,
+                double highest_possible_equity);
+void sort_anchor_list(AnchorList *al);
 void reset_anchor_list(AnchorList *al);
 
 #endif

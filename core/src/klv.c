@@ -167,13 +167,14 @@ int get_word_index_of(const KLV *klv, uint32_t node_index, Rack *leave) {
   }
 
   while (node_index != 0) {
+    idx += klv->word_counts[node_index];
     while (kwg_tile(klv->kwg, node_index) != (uint8_t)lidx) {
       if (kwg_is_end(klv->kwg, node_index)) {
         return -1;
       }
-      idx += klv->word_counts[node_index] - klv->word_counts[node_index + 1];
       node_index++;
     }
+    idx -= klv->word_counts[node_index];
 
     lidx_letter_count--;
     number_of_letters--;

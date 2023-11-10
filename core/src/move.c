@@ -60,7 +60,7 @@ void reset_move_list(MoveList *ml) {
 }
 
 int within_epsilon_for_equity(double a, double board) {
-  return fabs(a - board) < 1e-6;
+  return fabs(a - board) < COMPARE_MOVES_EPSILON;
 }
 
 // Enforce arbitrary order to keep

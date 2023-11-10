@@ -15,7 +15,11 @@ OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 #dev is default, for another flavor : make BUILD=release
 BUILD := dev
 
-FSAN_ARG := -fsanitize=address,leak,undefined,pointer-compare,pointer-subtract
+FSAN_ARG := -fsanitize=address,undefined,pointer-compare,pointer-subtract
+# Test whether the leak flag is supported by the compiler
+ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o /dev/null >/dev/null 2>&1; echo $$?),0)
+    FSAN_ARG += -fsanitize=leak
+endif
 
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra $(FSAN_ARG)
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
