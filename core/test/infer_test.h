@@ -4,6 +4,5 @@
 #include "testconfig.h"
 
 void test_infer(TestConfig *testconfig);
-void infer_from_config(Config *config);
 
 #endif

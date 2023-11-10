@@ -362,8 +362,8 @@ void macondo_tests(TestConfig *testconfig) {
 }
 
 // print assertions to paste into leave_lookup_test
-void print_leave_lookup_test(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void print_leave_lookup_test(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
@@ -397,8 +397,8 @@ void print_leave_lookup_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void leave_lookup_test(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void leave_lookup_test(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
@@ -622,10 +622,10 @@ void distinct_lexica_test(TestConfig *testconfig) {
   destroy_game(game);
 }
 
-void test_movegen(SuperConfig *superconfig) {
-  macondo_tests(superconfig);
-  exchange_tests(superconfig);
-  equity_test(superconfig);
-  top_equity_play_recorder_test(superconfig);
-  distinct_lexica_test(superconfig);
+void test_movegen(TestConfig *testconfig) {
+  macondo_tests(testconfig);
+  exchange_tests(testconfig);
+  equity_test(testconfig);
+  top_equity_play_recorder_test(testconfig);
+  distinct_lexica_test(testconfig);
 }

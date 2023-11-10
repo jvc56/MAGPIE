@@ -253,7 +253,7 @@ int is_empty_cache(Generator *gen, int col) {
 }
 
 int better_play_has_been_found(Generator *gen, double highest_possible_value) {
-  const double best_value_found = (gen->move_sorting_type == MOVE_SORT_EQUITY)
+  const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? gen->move_list->moves[0]->equity
                                       : gen->move_list->moves[0]->score;
   return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
@@ -457,7 +457,7 @@ void shadow_record(Generator *gen, int left_col, int right_col,
               (main_played_through_score * word_multiplier) +
               perpendicular_additional_score + bingo_bonus;
   double equity = (double)score;
-  if (gen->move_sorting_type == MOVE_SORT_EQUITY) {
+  if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     if (gen->bag->last_tile_index >= 0) {
       // Bag is not empty: use leave values
       equity +=
@@ -760,7 +760,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
 
   sort_anchor_list(gen->anchor_list);
   for (int i = 0; i < gen->anchor_list->count; i++) {
-    if (player->strategy_params->play_recorder_type == MOVE_RECORD_BEST &&
+    if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(
             gen, gen->anchor_list->anchors[i]->highest_possible_equity)) {
       break;
@@ -772,11 +772,10 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     set_transpose(gen->board, gen->anchor_list->anchors[i]->transpose_state);
     load_row_letter_cache(gen, gen->current_row_index);
     recursive_gen(gen, gen->current_anchor_col, player, opp_rack,
-                  kwg_get_root_node_index(player->strategy_params->kwg),
-                  gen->current_anchor_col, gen->current_anchor_col,
-                  !gen->vertical);
+                  kwg_get_root_node_index(player->kwg), gen->current_anchor_col,
+                  gen->current_anchor_col, !gen->vertical);
 
-    if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST) {
+    if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for this
       // anchor, highest_possible_equity was invalid.
       assert(!better_play_has_been_found(

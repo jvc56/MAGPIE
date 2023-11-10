@@ -65,6 +65,8 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
                     int add_exchange, move_record_t move_record_type,
                     move_sort_t move_sort_type,
                     bool apply_placement_adjustment);
+void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
+                             int stripidx, int add_exchange);
 void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
                    uint32_t node_index, int leftstrip, int rightstrip,
                    int unique_play);

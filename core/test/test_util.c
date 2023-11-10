@@ -44,14 +44,13 @@ void generate_moves_for_game(Game *game) {
                  true);
 }
 
-void generate_leaves_for_game(Game* game, int add_exchange) {
+void generate_leaves_for_game(Game *game, int add_exchange) {
   Generator *gen = game->gen;
   Player *player = game->players[game->player_on_turn_index];
-    init_leave_map(gen->leave_map, player->rack);
+  init_leave_map(gen->leave_map, player->rack);
   if (player->rack->number_of_letters < RACK_SIZE) {
-    set_current_value(
-        gen->leave_map,
-        get_leave_value(player->strategy_params->klv, player->rack));
+    set_current_value(gen->leave_map,
+                      get_leave_value(player->klv, player->rack));
   } else {
     set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
