@@ -27,8 +27,6 @@ void destroy_game_event(GameEvent *game_event) {
   if (game_event->rack) {
     destroy_rack(game_event->rack);
   }
-  if (game_event->note) {
-    free(game_event->note);
-  }
+  free(game_event->note);
   free(game_event);
 }

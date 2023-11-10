@@ -174,14 +174,10 @@ SingleArg *create_single_arg() {
 }
 
 void destroy_single_arg(SingleArg *single_arg) {
-  if (single_arg->name) {
-    free(single_arg->name);
-  }
+  free(single_arg->name);
   if (single_arg->has_value) {
     for (int i = 0; i < single_arg->number_of_values; i++) {
-      if (single_arg->values[i]) {
-        free(single_arg->values[i]);
-      }
+      free(single_arg->values[i]);
     }
   }
   free(single_arg->values);
@@ -437,9 +433,7 @@ config_load_status_t load_winpct_for_config(Config *config,
   }
   config->win_pcts = new_win_pcts;
 
-  if (config->win_pct_name) {
-    free(config->win_pct_name);
-  }
+  free(config->win_pct_name);
   config->win_pct_name = get_formatted_string("%s", win_pct_name);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
@@ -633,9 +627,7 @@ int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
 
 config_load_status_t set_cgp_string_for_config(Config *config,
                                                SingleArg *cgp_arg) {
-  if (config->cgp) {
-    free(config->cgp);
-  }
+  free(config->cgp);
   // At this point it is guaranteed that cgp_arg has 4 values.
   config->cgp = get_formatted_string("%s %s %s %s", cgp_arg->values[0],
                                      cgp_arg->values[1], cgp_arg->values[2],
@@ -851,9 +843,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     }
     config->letter_distribution = updated_letter_distribution;
 
-    if (config->ld_name) {
-      free(config->ld_name);
-    }
+    free(config->ld_name);
     config->ld_name = updated_letter_distribution_name;
   } else {
     free(updated_letter_distribution_name);
@@ -1147,21 +1137,15 @@ void destroy_config(Config *config) {
   if (config->letter_distribution) {
     destroy_letter_distribution(config->letter_distribution);
   }
-  if (config->ld_name) {
-    free(config->ld_name);
-  }
-  if (config->cgp) {
-    free(config->cgp);
-  }
   if (config->rack) {
     destroy_rack(config->rack);
   }
   if (config->win_pcts) {
     destroy_winpct(config->win_pcts);
   }
-  if (config->win_pct_name) {
-    free(config->win_pct_name);
-  }
+  free(config->ld_name);
+  free(config->cgp);
+  free(config->win_pct_name);
   destroy_players_data(config->players_data);
   destroy_thread_control(config->thread_control);
   free(config);

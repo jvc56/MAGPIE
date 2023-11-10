@@ -195,9 +195,7 @@ GCGParser *create_gcg_parser(const char *input_gcg_string,
 }
 
 void destroy_gcg_parser(GCGParser *gcg_parser) {
-  if (gcg_parser->utf8_gcg_string) {
-    free(gcg_parser->utf8_gcg_string);
-  }
+  free(gcg_parser->utf8_gcg_string);
   for (int i = 0; i < (gcg_parser->number_of_token_regex_pairs); i++) {
     destroy_token_regex_pair(gcg_parser->token_regex_pairs[i]);
   }
