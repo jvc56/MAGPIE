@@ -21,14 +21,14 @@ Stat *create_stat() {
 
 void destroy_stat(Stat *stat) { free(stat); }
 
-Stat *copy_stat(Stat *original_stat) {
-  Stat *copy_stat = create_stat();
-  copy_stat->cardinality = original_stat->cardinality;
-  copy_stat->weight = original_stat->weight;
-  copy_stat->sum_of_mean_differences_squared =
-      original_stat->sum_of_mean_differences_squared;
-  copy_stat->mean = original_stat->mean;
-  return copy_stat;
+Stat *copy_stat(Stat *stat) {
+  Stat *new_stat = create_stat();
+  new_stat->cardinality = stat->cardinality;
+  new_stat->weight = stat->weight;
+  new_stat->sum_of_mean_differences_squared =
+      stat->sum_of_mean_differences_squared;
+  new_stat->mean = stat->mean;
+  return new_stat;
 }
 
 void push_with_cardinality(Stat *stat, double value, uint64_t value_weight,

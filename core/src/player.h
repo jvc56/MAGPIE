@@ -6,14 +6,21 @@
 
 typedef struct Player {
   int index;
-  char *name;
+  // All const fields are owned
+  // by PlayerData and are
+  // treated as read-only
+  const char *name;
   Rack *rack;
   int score;
-  StrategyParams *strategy_params;
+  move_sort_t move_sort_type;
+  move_record_t move_record_type;
+  const KWG *kwg;
+  const KLV *klv;
 } Player;
 
-Player *create_player(int index, const char *name, int array_size);
-Player *copy_player(Player *player);
+Player *create_player(const Config *config, int player_index);
+void update_player(const Config *config, Player *player);
+Player *copy_player(const Player *player);
 void destroy_player(Player *player);
 void reset_player(Player *player);
 

@@ -4,10 +4,10 @@
 #include "../src/config.h"
 #include "../src/letter_distribution.h"
 
-#include "superconfig.h"
+#include "testconfig.h"
 
-void test_letter_distribution(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_letter_distribution(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
 
   uint32_t previous_score;
   for (uint32_t i = 0; i < config->letter_distribution->size; i++) {
@@ -20,8 +20,8 @@ void test_letter_distribution(SuperConfig *superconfig) {
   }
 }
 
-void test_str_to_machine_letters(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_str_to_machine_letters(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   uint8_t mls[4];
   int num_mls =
       str_to_machine_letters(config->letter_distribution, "??", false, mls);
@@ -39,7 +39,7 @@ void test_str_to_machine_letters(SuperConfig *superconfig) {
   assert(emls[2] == 26);
 
   // catalan:
-  config = get_disc_config(superconfig);
+  config = get_disc_config(testconfig);
   uint8_t cmls[20];
   num_mls = str_to_machine_letters(config->letter_distribution,
                                    "Al·lOQUIMIquES", false, cmls);

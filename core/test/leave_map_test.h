@@ -1,8 +1,8 @@
 #ifndef LEAVE_MAP_TEST_H
 #define LEAVE_MAP_TEST_H
 
-#include "superconfig.h"
+#include "testconfig.h"
 
-void test_leave_map(SuperConfig *superconfig);
+void test_leave_map(TestConfig *testconfig);
 
 #endif

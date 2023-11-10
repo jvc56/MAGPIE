@@ -78,11 +78,22 @@ float convert_little_endian_to_host(float little_endian_float) {
   }
 }
 
-void load_klv(KLV *klv, const char *klv_filename) {
+char *get_klv_filepath(const char *klv_name) {
+  // Check for invalid inputs
+  if (!klv_name) {
+    log_fatal("klv name is null");
+  }
+  return get_formatted_string("%s%s%s", KLV_FILEPATH, klv_name,
+                              KLV_FILE_EXTENSION);
+}
+
+void load_klv(KLV *klv, const char *klv_name) {
+  char *klv_filename = get_klv_filepath(klv_name);
   FILE *stream = stream_from_filename(klv_filename);
   if (!stream) {
     log_fatal("failed to open stream from filename: %s\n", klv_filename);
   }
+  free(klv_filename);
 
   uint32_t kwg_size;
   size_t result;
@@ -130,9 +141,9 @@ void load_klv(KLV *klv, const char *klv_filename) {
   count_words(klv, kwg_size);
 }
 
-KLV *create_klv(const char *klv_filename) {
+KLV *create_klv(const char *klv_name) {
   KLV *klv = malloc_or_die(sizeof(KLV));
-  load_klv(klv, klv_filename);
+  load_klv(klv, klv_name);
   return klv;
 }
 
@@ -143,7 +154,7 @@ void destroy_klv(KLV *klv) {
   free(klv);
 }
 
-int get_word_index_of(KLV *klv, uint32_t node_index, Rack *leave) {
+int get_word_index_of(const KLV *klv, uint32_t node_index, Rack *leave) {
   int idx = 0;
   int lidx = 0;
   int lidx_letter_count = leave->array[lidx];
@@ -191,7 +202,7 @@ int get_word_index_of(KLV *klv, uint32_t node_index, Rack *leave) {
   return -1;
 }
 
-double get_leave_value(KLV *klv, Rack *leave) {
+double get_leave_value(const KLV *klv, Rack *leave) {
   if (leave->empty) {
     return 0.0;
   }

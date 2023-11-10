@@ -5,13 +5,23 @@
 #include "rack.h"
 #include "util.h"
 
+void update_leave_map(LeaveMap *leave_map, int new_rack_array_size) {
+  if (leave_map->rack_array_size != (uint32_t)new_rack_array_size) {
+    free(leave_map->letter_base_index_map);
+    leave_map->rack_array_size = new_rack_array_size;
+    leave_map->letter_base_index_map =
+        (int *)malloc_or_die(leave_map->rack_array_size * sizeof(int));
+  }
+}
+
 LeaveMap *create_leave_map(int rack_array_size) {
   int number_of_values = 1 << RACK_SIZE;
   LeaveMap *leave_map = malloc_or_die(sizeof(LeaveMap));
+  leave_map->rack_array_size = rack_array_size;
   leave_map->leave_values =
       (double *)malloc_or_die(number_of_values * sizeof(double));
   leave_map->letter_base_index_map =
-      (int *)malloc_or_die(rack_array_size * sizeof(int));
+      (int *)malloc_or_die(leave_map->rack_array_size * sizeof(int));
   return leave_map;
 }
 

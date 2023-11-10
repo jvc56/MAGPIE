@@ -13,15 +13,8 @@
 #include "string_util.h"
 #include "util.h"
 
-#define MAX_GCG_FILE_SIZE 100000
 #define MAX_GCG_LINE_LENGTH 512
 #define MAX_GROUPS 7
-
-// FIXME: handle these defaults in the config
-#define DEFAULT_LEXICON "CSW21"
-#define DEFAULT_LETTER_DISTRIBUTION "english"
-#define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
-#define DEFAULT_VARIANT GAME_VARIANT_CLASSIC
 
 typedef enum {
   GCG_ENCODING_ISO_8859_1,
@@ -50,15 +43,10 @@ typedef enum {
   GCG_LAST_RACK_PENALTY_TOKEN,
   GCG_GAME_TYPE_TOKEN,
   GCG_TILE_SET_TOKEN,
-  GCG_GAME_BOARD_TOKEN,
   GCG_BOARD_LAYOUT_TOKEN,
   GCG_TILE_DISTRIBUTION_NAME_TOKEN,
-  GCG_CONTINUATION_TOKEN,
-  GCG_INCOMPLETE_TOKEN,
-  GCG_TILE_DECLARATION_TOKEN,
+  NUMBER_OF_GCG_TOKENS,
 } gcg_token_t;
-
-#define MAX_NUMBER_OF_TOKENS GCG_TILE_DECLARATION_TOKEN + 1
 
 typedef struct TokenRegexPair {
   gcg_token_t token;
@@ -88,9 +76,10 @@ const char *id_regex =
     "#id[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)";
 const char *rack1_regex = "#rack1 ([^[:space:]]+)";
 const char *rack2_regex = "#rack2 ([^[:space:]]+)";
-const char *move_regex = ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
-                         "]]+([[:alnum:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
-                         "\\+([[:digit:]]+)[[:space:]]+([[:digit:]]+)";
+const char *move_regex =
+    ">([^[:space:]]+):[[:space:]]+([^[:space:]]+)[[:space:"
+    "]]+([[:alnum:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
+    "[+]([[:digit:]]+)[[:space:]]+([[:digit:]]+)";
 const char *note_regex = "#note (.+)";
 const char *lexicon_name_regex = "#lexicon (.+)";
 const char *character_encoding_regex = "#character-encoding ([[:graph:]]+)";
@@ -155,7 +144,7 @@ GCGParser *create_gcg_parser(const char *input_gcg_string,
   gcg_parser->note_builder = create_string_builder();
   // Allocate enough space for all of the tokens
   gcg_parser->token_regex_pairs =
-      malloc_or_die(sizeof(TokenRegexPair) * (MAX_NUMBER_OF_TOKENS));
+      malloc_or_die(sizeof(TokenRegexPair) * (NUMBER_OF_GCG_TOKENS));
   gcg_parser->number_of_token_regex_pairs = 0;
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       create_token_regex_pair(GCG_PLAYER_TOKEN, player_regex);
@@ -198,19 +187,10 @@ GCGParser *create_gcg_parser(const char *input_gcg_string,
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       create_token_regex_pair(GCG_TILE_SET_TOKEN, tile_set_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_GAME_BOARD_TOKEN, game_board_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_CONTINUATION_TOKEN, continuation_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       create_token_regex_pair(GCG_BOARD_LAYOUT_TOKEN, board_layout_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       create_token_regex_pair(GCG_TILE_DISTRIBUTION_NAME_TOKEN,
                               tile_distribution_name_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_INCOMPLETE_TOKEN, incomplete_regex);
-  gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_TILE_DECLARATION_TOKEN,
-                              tile_declaration_regex);
   return gcg_parser;
 }
 
@@ -224,21 +204,6 @@ void destroy_gcg_parser(GCGParser *gcg_parser) {
   destroy_string_builder(gcg_parser->note_builder);
   free(gcg_parser->token_regex_pairs);
   free(gcg_parser);
-}
-
-void convert_iso_8859_1_to_utf8(const char *input, char *output) {
-  const unsigned char *in = (unsigned char *)input;
-  unsigned char *out = (unsigned char *)output;
-
-  while (*in) {
-    if (*in < 128) {
-      *out++ = *in++;
-    } else {
-      *out++ = 0xC2 + (*in > 0xBF);
-      *out++ = (*in++ & 0x3F) + 0x80;
-    }
-  }
-  *out = '\0';
 }
 
 gcg_parse_status_t load_next_gcg_line(GCGParser *gcg_parser) {
@@ -341,11 +306,8 @@ gcg_parse_status_t handle_encoding(GCGParser *gcg_parser) {
   }
 
   if (gcg_encoding == GCG_ENCODING_ISO_8859_1) {
-    gcg_parser->utf8_gcg_string = malloc_or_die(
-        sizeof(char) * 2 * string_length(gcg_parser->input_gcg_string));
-    convert_iso_8859_1_to_utf8(gcg_parser->input_gcg_string +
-                                   gcg_start_write_offset,
-                               gcg_parser->utf8_gcg_string);
+    gcg_parser->utf8_gcg_string = iso_8859_1_to_utf8(
+        gcg_parser->input_gcg_string + gcg_start_write_offset);
   } else {
     gcg_parser->utf8_gcg_string =
         strdup(gcg_parser->input_gcg_string + gcg_start_write_offset);
@@ -388,17 +350,19 @@ int get_player_index(GCGParser *gcg_parser, int group_index) {
 
 void copy_score_to_game_event(GCGParser *gcg_parser, GameEvent *game_event,
                               int group_index) {
-  game_event->move->score =
-      string_to_int(gcg_parser->gcg_line_buffer +
-                    gcg_parser->matching_groups[group_index].rm_so);
+  char *move_score_string =
+      get_matching_group_as_string(gcg_parser, group_index);
+  game_event->move->score = string_to_int(move_score_string);
+  free(move_score_string);
 }
 
 void copy_cumulative_score_to_game_event(GCGParser *gcg_parser,
                                          GameEvent *game_event,
                                          int group_index) {
-  game_event->cumulative_score =
-      string_to_int(gcg_parser->gcg_line_buffer +
-                    gcg_parser->matching_groups[group_index].rm_so);
+  char *cumulative_score_string =
+      get_matching_group_as_string(gcg_parser, group_index);
+  game_event->cumulative_score = string_to_int(cumulative_score_string);
+  free(cumulative_score_string);
 }
 
 uint8_t *
@@ -409,12 +373,7 @@ convert_tiles_string_to_machine_letters(GCGParser *gcg_parser, int group_index,
   int start_index = gcg_parser->matching_groups[group_index].rm_so;
   int end_index = gcg_parser->matching_groups[group_index].rm_eo;
   int matching_group_length = end_index - start_index;
-  char *tiles_string =
-      malloc_or_die(sizeof(char) * (matching_group_length + 1));
-  for (int i = start_index; i < end_index; i++) {
-    tiles_string[i - start_index] = gcg_parser->gcg_line_buffer[i];
-  }
-  tiles_string[matching_group_length] = '\0';
+  char *tiles_string = get_matching_group_as_string(gcg_parser, group_index);
 
   uint8_t *machine_letters =
       malloc_or_die(sizeof(char) * (matching_group_length + 1));
@@ -568,12 +527,12 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
     if (!game_history->letter_distribution) {
 
       if (!game_history->lexicon_name) {
-        game_history->lexicon_name = strdup(DEFAULT_LEXICON);
+        // FIXME: add test for this
+        return GCG_PARSE_STATUS_LEXICON_NOT_FOUND;
       }
       if (!game_history->letter_distribution_name) {
         game_history->letter_distribution_name =
-            get_letter_distribution_name_from_lexicon_name(
-                game_history->lexicon_name);
+            get_default_letter_distribution_name(game_history->lexicon_name);
       }
       if (game_history->board_layout == BOARD_LAYOUT_UNKNOWN) {
         game_history->board_layout = BOARD_LAYOUT_CROSSWORD_GAME;
@@ -581,11 +540,8 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
       if (game_history->game_variant == GAME_VARIANT_UNKNOWN) {
         game_history->game_variant = GAME_VARIANT_CLASSIC;
       }
-      char *letter_distribution_filepath = get_letter_distribution_filepath(
-          game_history->letter_distribution_name);
       game_history->letter_distribution =
-          create_letter_distribution(letter_distribution_filepath);
-      free(letter_distribution_filepath);
+          create_letter_distribution(game_history->letter_distribution_name);
     }
   }
 
@@ -953,8 +909,9 @@ gcg_parse_status_t parse_next_gcg_line(GCGParser *gcg_parser) {
   case GCG_TILE_SET_TOKEN:
     // For now, don't do anything
     break;
-  default:
-    log_fatal("Unhandled token");
+  case NUMBER_OF_GCG_TOKENS:
+    log_fatal("invalid gcg token");
+    break;
   }
   return gcg_parse_status;
 }
@@ -984,40 +941,7 @@ gcg_parse_status_t parse_gcg_string(const char *input_gcg_string,
 
 gcg_parse_status_t parse_gcg(const char *gcg_filename,
                              GameHistory *game_history) {
-  // FIXME: move this file to string function to string util
-  FILE *gcg_file_handle = fopen(gcg_filename, "r");
-  if (!gcg_file_handle) {
-    log_fatal("Error opening file: %s\n", gcg_filename);
-  }
-
-  // Get the file size by seeking to the end and then back to the beginning
-  fseek(gcg_file_handle, 0, SEEK_END);
-  long file_size = ftell(gcg_file_handle);
-  fseek(gcg_file_handle, 0, SEEK_SET);
-
-  if (file_size > MAX_GCG_FILE_SIZE) {
-    fclose(gcg_file_handle);
-    log_fatal("File size exceeds maximum allowed size of %d bytes.\n",
-              MAX_GCG_FILE_SIZE);
-  }
-
-  char *gcg_string =
-      (char *)malloc_or_die(file_size + 1); // +1 for null terminator
-  if (!gcg_string) {
-    fclose(gcg_file_handle);
-    log_fatal("Memory allocation error.\n");
-  }
-
-  size_t bytesRead = fread(gcg_string, 1, file_size, gcg_file_handle);
-  if (bytesRead != (size_t)file_size) {
-    fclose(gcg_file_handle);
-    free(gcg_string);
-    log_fatal("Error reading file: %s\n", gcg_filename);
-  }
-
-  gcg_string[file_size] = '\0';
-  fclose(gcg_file_handle);
-
+  char *gcg_string = get_string_from_file(gcg_filename);
   gcg_parse_status_t gcg_parse_status =
       parse_gcg_string(gcg_string, game_history);
   free(gcg_string);

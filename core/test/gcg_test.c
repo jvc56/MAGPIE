@@ -7,12 +7,11 @@
 #include "../src/gcg.h"
 #include "../src/util.h"
 
+#include "test_constants.h"
 #include "test_util.h"
 
-#define GCG_DIRECTORY_FILEPATH "testdata/"
-
 char *get_gcg_filepath(const char *filename) {
-  return get_formatted_string("%s%s", GCG_DIRECTORY_FILEPATH, filename);
+  return get_formatted_string("%s%s", TESTDATA_FILEPATH, filename);
 }
 
 gcg_parse_status_t test_parse_gcg(const char *gcg_filename,
@@ -85,8 +84,8 @@ void test_parse_special_char() {
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  assert(strings_equal(game_history->players[0]->name, "césar"));
-  assert(strings_equal(game_history->players[1]->name, "hércules"));
+  assert_strings_equal(game_history->players[0]->name, "césar");
+  assert_strings_equal(game_history->players[1]->name, "hércules");
   destroy_game_history(game_history);
 }
 

@@ -2,8 +2,12 @@
 #define AUTOPLAY_H
 
 #include "config.h"
+#include "game.h"
 #include "stats.h"
-#include "thread_control.h"
+
+// Use this status type for consistency across
+// commands. We might add more in the future.
+typedef enum { AUTOPLAY_STATUS_SUCCESS } autoplay_status_t;
 
 typedef struct AutoplayResults {
   int total_games;
@@ -15,8 +19,8 @@ typedef struct AutoplayResults {
   Stat *p2_score;
 } AutoplayResults;
 
-void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
-              Config *config, uint64_t seed);
+autoplay_status_t autoplay(const Config *config,
+                           AutoplayResults *autoplay_results);
 AutoplayResults *create_autoplay_results();
 void destroy_autoplay_results(AutoplayResults *autoplay_results);
 

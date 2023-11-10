@@ -8,9 +8,9 @@
 #include "../src/game.h"
 #include "../src/letter_distribution.h"
 
-#include "superconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 // this test func only works for single-char alphabets
 uint64_t cross_set_from_string(const char *letters,
@@ -74,7 +74,7 @@ void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
   int cross_set_index = get_cross_set_index(game->gen, player_index);
   if (run_gcs) {
     gen_cross_set(game->gen->board, row, col, dir, cross_set_index,
-                  game->players[player_index]->strategy_params->kwg,
+                  game->players[player_index]->kwg,
                   game->gen->letter_distribution);
   }
   uint64_t expected_cross_set =
@@ -105,10 +105,10 @@ void test_gen_cross_set_col(Game *game, int row, int col, int dir,
                      expected_cross_score, run_gcs);
 }
 
-void test_cross_set(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_cross_set(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  KWG *kwg = game->players[0]->strategy_params->kwg;
+  const KWG *kwg = game->players[0]->kwg;
 
   // TestGencross_setLoadedGame
   load_cgp(game, VS_MATT);
@@ -158,7 +158,6 @@ void test_cross_set(SuperConfig *superconfig) {
   test_gen_cross_set_row(game, 4, 1, 1, 0, "S OBCONIc", "", 11, 1);
 
   // TestGenAllcross_sets
-  reset_game(game);
   load_cgp(game, VS_ED);
   test_gen_cross_set(game, 8, 8, BOARD_HORIZONTAL_DIRECTION, 0, "OS", 8, 0);
   test_gen_cross_set(game, 8, 8, BOARD_VERTICAL_DIRECTION, 0, "S", 9, 0);
@@ -177,7 +176,6 @@ void test_cross_set(SuperConfig *superconfig) {
   test_gen_cross_set(game, 12, 12, BOARD_VERTICAL_DIRECTION, 0, "", 0, 0);
 
   // TestUpdateSinglecross_set
-  reset_game(game);
   load_cgp(game, VS_MATT);
   set_letter(game->gen->board, 8, 10, 19);
   set_letter(game->gen->board, 9, 10, 0);

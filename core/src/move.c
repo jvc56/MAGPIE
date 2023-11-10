@@ -11,27 +11,46 @@
 
 Move *create_move() { return malloc_or_die(sizeof(Move)); }
 
+void destroy_move(Move *move) { free(move); }
+
+void create_moves(MoveList *ml, int capacity) {
+  ml->capacity = capacity + 1;
+  ml->moves = malloc_or_die(sizeof(Move *) * ml->capacity);
+  for (int i = 0; i < ml->capacity; i++) {
+    ml->moves[i] = create_move();
+  }
+}
+
+void destroy_moves(MoveList *ml) {
+  for (int i = 0; i < ml->capacity; i++) {
+    destroy_move(ml->moves[i]);
+  }
+  free(ml->moves);
+}
+
+void update_move_list(MoveList *ml, int new_capacity) {
+  if (ml->capacity != new_capacity) {
+    destroy_moves(ml);
+    create_moves(ml, new_capacity);
+  }
+}
+
 MoveList *create_move_list(int capacity) {
   MoveList *ml = malloc_or_die(sizeof(MoveList));
   ml->count = 0;
-  ml->capacity = capacity;
+  // We set increment capacity here
+  // because we need to temporarily hold
+  // capacity + 1 moves to before popping
+  // the least desirable move.
   ml->spare_move = create_move();
-  ml->moves = malloc_or_die(sizeof(Move *) * capacity);
-  for (int i = 0; i < capacity; i++) {
-    ml->moves[i] = create_move();
-  }
+  create_moves(ml, capacity);
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
   return ml;
 }
 
-void destroy_move(Move *move) { free(move); }
-
 void destroy_move_list(MoveList *ml) {
-  for (int i = 0; i < ml->capacity; i++) {
-    destroy_move(ml->moves[i]);
-  }
+  destroy_moves(ml);
   destroy_move(ml->spare_move);
-  free(ml->moves);
   free(ml);
 }
 

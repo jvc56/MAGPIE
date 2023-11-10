@@ -9,8 +9,8 @@
 #include "../src/sim.h"
 #include "../src/winpct.h"
 
-#include "superconfig.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void print_sim_stats(Simmer *simmer, Game *game) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
@@ -43,41 +43,40 @@ void print_sim_stats(Simmer *simmer, Game *game) {
   destroy_string_builder(move_description);
 }
 
-void test_win_pct(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_win_pct(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   assert(within_epsilon(win_pct(config->win_pcts, 118, 90), 0.844430));
 }
 
-void test_sim_single_iteration(SuperConfig *superconfig,
-                               ThreadControl *thread_control) {
-  Config *config = get_nwl_config(superconfig);
+void test_sim_single_iteration(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AAADERW",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
-  assert(thread_control->halt_status == HALT_STATUS_NONE);
-  simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1,
-           SIM_STOPPING_CONDITION_NONE, 0);
-  assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
+  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
+                             " plies 2 threads 1 numplays 15 i 1 cond none");
+  sim_status_t status = simulate(config, simmer, game);
+  assert(status == SIM_STATUS_SUCCESS);
+  assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
 
   assert(game->gen->board->tiles_played == 0);
 
-  assert(unhalt(thread_control));
   destroy_game(game);
   destroy_simmer(simmer);
 }
 
-void test_more_iterations(SuperConfig *superconfig,
-                          ThreadControl *thread_control) {
-  Config *config = get_nwl_config(superconfig);
+void test_more_iterations(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AEIQRST",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
-  assert(thread_control->halt_status == HALT_STATUS_NONE);
-  simulate(thread_control, simmer, game, NULL, 2, 1, 15, 400,
-           SIM_STOPPING_CONDITION_NONE, 0);
-  assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
+  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
+                             " plies 2 threads 1 numplays 15 i 400 cond none");
+  sim_status_t status = simulate(config, simmer, game);
+  assert(status == SIM_STATUS_SUCCESS);
+  assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
   StringBuilder *move_string_builder = create_string_builder();
@@ -87,7 +86,6 @@ void test_more_iterations(SuperConfig *superconfig,
 
   assert(strings_equal(string_builder_peek(move_string_builder), "8G QI"));
 
-  assert(unhalt(thread_control));
   destroy_game(game);
   destroy_simmer(simmer);
   destroy_string_builder(move_string_builder);
@@ -100,11 +98,15 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   Simmer *simmer = create_simmer(config);
 
   int iters = 10000;
-  assert(thread_control->halt_status == HALT_STATUS_NONE);
+  char *setoptions_string = get_formatted_string(
+      "setoptions rack %s plies 2 threads 1 numplays 15 i %d cond none",
+      EMPTY_RACK_STRING, iters);
+  load_config_or_die(config, setoptions_string);
+  free(setoptions_string);
   clock_t begin = clock();
-  simulate(thread_control, simmer, game, NULL, 2, 1, 15, iters,
-           SIM_STOPPING_CONDITION_NONE, 0);
+  sim_status_t status = simulate(config, simmer, game);
   clock_t end = clock();
+  assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   printf("%d iters took %0.6f seconds\n", iters,
          (double)(end - begin) / CLOCKS_PER_SEC);
@@ -118,22 +120,22 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
-  assert(unhalt(thread_control));
   destroy_string_builder(move_string_builder);
   destroy_game(game);
   destroy_simmer(simmer);
 }
 
-void perf_test_multithread_sim(Config *config, ThreadControl *thread_control) {
+void perf_test_multithread_sim(Config *config) {
   Game *game = create_game(config);
-  int num_threads = config->number_of_threads;
+  int num_threads = config->thread_control->number_of_threads;
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config->cgp);
   Simmer *simmer = create_simmer(config);
-  assert(thread_control->halt_status == HALT_STATUS_NONE);
-  simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1000,
-           SIM_STOPPING_CONDITION_NONE, 0);
-  assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
+  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
+                             " plies 2 threads 1 numplays 15 i 1000 cond none");
+  sim_status_t status = simulate(config, simmer, game);
+  assert(status == SIM_STATUS_SUCCESS);
+  assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
 
   print_sim_stats(simmer, game);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
@@ -145,23 +147,23 @@ void perf_test_multithread_sim(Config *config, ThreadControl *thread_control) {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
-  assert(unhalt(thread_control));
   destroy_string_builder(move_string_builder);
   destroy_game(game);
   destroy_simmer(simmer);
 }
 
-void perf_test_multithread_blocking_sim(Config *config,
-                                        ThreadControl *thread_control) {
+void perf_test_multithread_blocking_sim(Config *config) {
   Game *game = create_game(config);
-  int num_threads = config->number_of_threads;
+  int num_threads = config->thread_control->number_of_threads;
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config->cgp);
 
   Simmer *simmer = create_simmer(config);
-  simulate(thread_control, simmer, game, NULL, 2, 1, 15, 1000000,
-           SIM_STOPPING_CONDITION_99PCT, 0);
-
+  load_config_or_die(config,
+                     "setoptions rack " EMPTY_RACK_STRING
+                     " plies 2 threads 1 numplays 15 i 1000000 cond 99");
+  sim_status_t status = simulate(config, simmer, game);
+  assert(status == SIM_STATUS_SUCCESS);
   print_sim_stats(simmer, game);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
@@ -176,17 +178,17 @@ void perf_test_multithread_blocking_sim(Config *config,
   destroy_simmer(simmer);
 }
 
-void test_play_similarity(SuperConfig *superconfig,
-                          ThreadControl *thread_control) {
-  Config *config = superconfig->nwl_config;
+void test_play_similarity(TestConfig *testconfig) {
+  Config *config = testconfig->nwl_config;
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
                       game->gen->letter_distribution);
   Simmer *simmer = create_simmer(config);
-  assert(thread_control->halt_status == HALT_STATUS_NONE);
-  simulate(thread_control, simmer, game, NULL, 2, 1, 15, 0,
-           SIM_STOPPING_CONDITION_NONE, 0);
-  assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
+  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
+                             " plies 2 threads 1 numplays 15 i 0 cond none");
+  sim_status_t status = simulate(config, simmer, game);
+  assert(status == SIM_STATUS_SUCCESS);
+  assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   // The first four plays all score 74. Only
   // 8F ATRESIC and 8F STEARIC should show up as similar, though.
   // These are play indexes 1 and 2.
@@ -225,28 +227,25 @@ void test_play_similarity(SuperConfig *superconfig,
 
   assert(!plays_are_similar(simmer, simmer->simmed_plays[3],
                             simmer->simmed_plays[4]));
-  assert(unhalt(thread_control));
   destroy_game(game);
   destroy_simmer(simmer);
 }
 
-void test_sim(SuperConfig *superconfig) {
-  ThreadControl *thread_control = create_thread_control(NULL);
-  test_win_pct(superconfig);
-  test_sim_single_iteration(superconfig, thread_control);
-  test_more_iterations(superconfig, thread_control);
-  test_play_similarity(superconfig, thread_control);
+void test_sim(TestConfig *testconfig) {
+  test_win_pct(testconfig);
+  test_sim_single_iteration(testconfig);
+  test_more_iterations(testconfig);
+  test_play_similarity(testconfig);
   // And run a perf test.
-  int threads = superconfig->nwl_config->number_of_threads;
-  char *backup_cgp = superconfig->nwl_config->cgp;
-  superconfig->nwl_config->number_of_threads = 4;
-  superconfig->nwl_config->cgp =
+  int threads = testconfig->nwl_config->thread_control->number_of_threads;
+  char *backup_cgp = testconfig->nwl_config->cgp;
+  testconfig->nwl_config->thread_control->number_of_threads = 4;
+  testconfig->nwl_config->cgp =
       "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"
       "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ "
       "336/298 0 lex NWL20;";
-  perf_test_multithread_sim(superconfig->nwl_config, thread_control);
-  // restore superconfig
-  superconfig->nwl_config->cgp = backup_cgp;
-  superconfig->nwl_config->number_of_threads = threads;
-  destroy_thread_control(thread_control);
+  perf_test_multithread_sim(testconfig->nwl_config);
+  // restore testconfig
+  testconfig->nwl_config->cgp = backup_cgp;
+  testconfig->nwl_config->thread_control->number_of_threads = threads;
 }

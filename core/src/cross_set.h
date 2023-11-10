@@ -10,9 +10,9 @@
 
 int allowed(uint64_t cross_set, uint8_t letter);
 void gen_cross_set(Board *board, int row, int col, int dir, int cross_set_index,
-                   KWG *kwg, LetterDistribution *letter_distribution);
-void generate_all_cross_sets(Board *board, KWG *kwg_1, KWG *kwg_2,
+                   const KWG *kwg, LetterDistribution *letter_distribution);
+void generate_all_cross_sets(Board *board, const KWG *kwg_1, const KWG *kwg_2,
                              LetterDistribution *letter_distribution,
-                             int kwgs_are_distinct);
+                             bool kwgs_are_distinct);
 
 #endif

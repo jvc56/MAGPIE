@@ -10,12 +10,23 @@
 extern inline float win_pct(WinPct *wp, int spread_plus_leftover,
                             unsigned int tiles_unseen);
 
-// note: this function was largely written by ChatGPT.
-void parse_winpct_csv(WinPct *wp, const char *filename) {
-  FILE *file = stream_from_filename(filename);
-  if (!file) {
-    log_fatal("Error opening file: %s\n", filename);
+char *get_win_pct_filepath(const char *win_pct_name) {
+  // Check for invalid inputs
+  if (!win_pct_name) {
+    log_fatal("win percentage name is null");
   }
+  return get_formatted_string("%s%s%s", WIN_PCT_FILEPATH, win_pct_name,
+                              WIN_PCT_FILE_EXTENSION);
+}
+
+// note: this function was largely written by ChatGPT.
+void parse_winpct_csv(WinPct *wp, const char *win_pct_name) {
+  char *win_pct_filename = get_win_pct_filepath(win_pct_name);
+  FILE *file = stream_from_filename(win_pct_filename);
+  if (!file) {
+    log_fatal("Error opening file: %s\n", win_pct_filename);
+  }
+  free(win_pct_filename);
   int max_rows = MAX_SPREAD * 2 + 1;
   // Allocate memory for the 2D array
   float **array = (float **)malloc_or_die(max_rows * sizeof(float *));
@@ -28,7 +39,10 @@ void parse_winpct_csv(WinPct *wp, const char *filename) {
   char line[MAX_COLS * 10];
 
   // Read the header line
-  fgets(line, sizeof(line), file);
+  char *result = fgets(line, sizeof(line), file);
+  if (!result) {
+    log_fatal("could not read file with fgets: %s\n", file);
+  }
 
   // Read data lines
   int row = 0;
@@ -52,9 +66,9 @@ void parse_winpct_csv(WinPct *wp, const char *filename) {
   wp->max_tiles_unseen = 93;
 }
 
-WinPct *create_winpct(const char *winpct_filename) {
+WinPct *create_winpct(const char *winpct_name) {
   WinPct *wp = malloc_or_die(sizeof(WinPct));
-  parse_winpct_csv(wp, winpct_filename);
+  parse_winpct_csv(wp, winpct_name);
   return wp;
 }
 

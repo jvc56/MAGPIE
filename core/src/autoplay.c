@@ -15,22 +15,27 @@
 #include "util.h"
 
 typedef struct AutoplayWorker {
-  Config *config;
-  ThreadControl *thread_control;
+  const Config *config;
   AutoplayResults *autoplay_results;
   int max_games_for_worker;
   int worker_index;
 } AutoplayWorker;
 
-AutoplayResults *create_autoplay_results() {
-  AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
+void reset_autoplay_results(AutoplayResults *autoplay_results) {
   autoplay_results->total_games = 0;
   autoplay_results->p1_wins = 0;
   autoplay_results->p1_losses = 0;
   autoplay_results->p1_ties = 0;
   autoplay_results->p1_firsts = 0;
+  reset_stat(autoplay_results->p1_score);
+  reset_stat(autoplay_results->p2_score);
+}
+
+AutoplayResults *create_autoplay_results() {
+  AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
   autoplay_results->p1_score = create_stat();
   autoplay_results->p2_score = create_stat();
+  reset_autoplay_results(autoplay_results);
   return autoplay_results;
 }
 
@@ -40,13 +45,11 @@ void destroy_autoplay_results(AutoplayResults *autoplay_results) {
   free(autoplay_results);
 }
 
-AutoplayWorker *create_autoplay_worker(Config *config,
-                                       ThreadControl *thread_control,
+AutoplayWorker *create_autoplay_worker(const Config *config,
                                        int max_games_for_worker,
                                        int worker_index) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->config = config;
-  autoplay_worker->thread_control = thread_control;
   autoplay_worker->max_games_for_worker = max_games_for_worker;
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->autoplay_results = create_autoplay_results();
@@ -96,9 +99,11 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
                        game->players[1 - starting_player_index]->rack,
                        RACK_SIZE);
   while (!game->game_end_reason) {
-    generate_moves(game->gen, game->players[game->player_on_turn_index],
-                   game->players[1 - game->player_on_turn_index]->rack,
-                   game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+    generate_moves(
+        game->gen, game->players[game->player_on_turn_index],
+        game->players[1 - game->player_on_turn_index]->rack,
+        game->gen->bag->last_tile_index + 1 >= RACK_SIZE, MOVE_RECORD_BEST,
+        game->players[game->player_on_turn_index]->move_sort_type, true);
     play_move(game, game->gen->move_list->moves[0]);
     reset_move_list(game->gen->move_list);
   }
@@ -107,79 +112,70 @@ void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
-
-  Game *game_1 = create_game(autoplay_worker->config);
-  Game *game_2 = create_game(autoplay_worker->config);
+  ThreadControl *thread_control = autoplay_worker->config->thread_control;
+  Game *game = create_game(autoplay_worker->config);
   uint64_t seed;
 
   int starting_player_for_thread = autoplay_worker->worker_index % 2;
 
   for (int i = 0; i < autoplay_worker->max_games_for_worker; i++) {
-    if (is_halted(autoplay_worker->thread_control)) {
+    if (is_halted(thread_control)) {
       break;
     }
+    // FIXME: get the seed in a way that is doesn't use sad
+    // rand and is unique across threads.
     seed = rand_uint64();
     int starting_player_index = (i + starting_player_for_thread) % 2;
-    play_game(game_1, seed, autoplay_worker->autoplay_results,
+    play_game(game, seed, autoplay_worker->autoplay_results,
               starting_player_index);
     if (autoplay_worker->config->use_game_pairs) {
-      play_game(game_2, seed, autoplay_worker->autoplay_results,
+      play_game(game, seed, autoplay_worker->autoplay_results,
                 1 - starting_player_index);
     }
   }
 
-  destroy_game(game_1);
-  destroy_game(game_2);
+  destroy_game(game);
   return NULL;
 }
 
-int get_number_of_games_for_worker(Config *config, int thread_index) {
-  int number_of_games_for_worker =
-      (config->number_of_games_or_pairs / config->number_of_threads);
-  if (config->number_of_games_or_pairs % config->number_of_threads >
-      thread_index) {
+int get_number_of_games_for_worker(int max_iterations, int number_of_threads,
+                                   int thread_index) {
+  int number_of_games_for_worker = (max_iterations / number_of_threads);
+  if (max_iterations % number_of_threads > thread_index) {
     number_of_games_for_worker++;
   }
   return number_of_games_for_worker;
 }
 
-void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
-              Config *config, uint64_t seed) {
-  seed_random(seed);
+autoplay_status_t autoplay(const Config *config,
+                           AutoplayResults *autoplay_results) {
+  unhalt(config->thread_control);
+  reset_autoplay_results(autoplay_results);
 
-  int saved_player_1_recorder_type =
-      config->player_1_strategy_params->play_recorder_type;
-  config->player_1_strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
-  int saved_player_2_recorder_type =
-      config->player_2_strategy_params->play_recorder_type;
-  config->player_2_strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
-  int save_move_list_capacity = config->move_list_capacity;
-  config->move_list_capacity = 1;
+  // FIXME: see fixme above
+  seed_random(config->random_seed);
 
+  int number_of_threads = config->thread_control->number_of_threads;
   AutoplayWorker **autoplay_workers =
-      malloc_or_die((sizeof(AutoplayWorker *)) * (config->number_of_threads));
+      malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
   pthread_t *worker_ids =
-      malloc_or_die((sizeof(pthread_t)) * (config->number_of_threads));
-  for (int thread_index = 0; thread_index < config->number_of_threads;
-       thread_index++) {
+      malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
+  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
 
-    int number_of_games_for_worker =
-        get_number_of_games_for_worker(config, thread_index);
+    int number_of_games_for_worker = get_number_of_games_for_worker(
+        config->max_iterations, number_of_threads, thread_index);
 
     autoplay_workers[thread_index] = create_autoplay_worker(
-        config, thread_control, number_of_games_for_worker, thread_index);
+        config, number_of_games_for_worker, thread_index);
 
     pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
                    autoplay_workers[thread_index]);
   }
 
-  Stat **p1_score_stats =
-      malloc_or_die((sizeof(Stat *)) * (config->number_of_threads));
-  Stat **p2_score_stats =
-      malloc_or_die((sizeof(Stat *)) * (config->number_of_threads));
+  Stat **p1_score_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
+  Stat **p2_score_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
 
-  for (int thread_index = 0; thread_index < config->number_of_threads;
-       thread_index++) {
+  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
     add_autoplay_results(autoplay_results,
                          autoplay_workers[thread_index]->autoplay_results);
@@ -189,16 +185,17 @@ void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
         autoplay_workers[thread_index]->autoplay_results->p2_score;
   }
 
-  combine_stats(p1_score_stats, config->number_of_threads,
-                autoplay_results->p1_score);
+  // If autoplay was interrupted by the user,
+  // this will not change the status.
+  halt(config->thread_control, HALT_STATUS_MAX_ITERATIONS);
+
+  combine_stats(p1_score_stats, number_of_threads, autoplay_results->p1_score);
   free(p1_score_stats);
 
-  combine_stats(p2_score_stats, config->number_of_threads,
-                autoplay_results->p2_score);
+  combine_stats(p2_score_stats, number_of_threads, autoplay_results->p2_score);
   free(p2_score_stats);
 
-  for (int thread_index = 0; thread_index < config->number_of_threads;
-       thread_index++) {
+  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     destroy_autoplay_worker(autoplay_workers[thread_index]);
   }
 
@@ -206,11 +203,6 @@ void autoplay(ThreadControl *thread_control, AutoplayResults *autoplay_results,
   free(autoplay_workers);
   free(worker_ids);
 
-  config->player_1_strategy_params->play_recorder_type =
-      saved_player_1_recorder_type;
-  config->player_2_strategy_params->play_recorder_type =
-      saved_player_2_recorder_type;
-  config->move_list_capacity = save_move_list_capacity;
-
-  print_ucgi_autoplay_results(autoplay_results, thread_control);
+  print_ucgi_autoplay_results(autoplay_results, config->thread_control);
+  return AUTOPLAY_STATUS_SUCCESS;
 }

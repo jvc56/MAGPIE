@@ -31,6 +31,8 @@ typedef struct Generator {
   int number_of_plays;
   int apply_placement_adjustment;
   int kwgs_are_distinct;
+  int move_sort_type;
+  int move_record_type;
 
   uint8_t row_letter_cache[(BOARD_DIM)];
   uint8_t strip[(BOARD_DIM)];
@@ -49,18 +51,20 @@ typedef struct Generator {
   int current_right_col;
   double highest_shadow_equity;
   uint64_t rack_cross_set;
-  int move_sorting_type;
   int number_of_letters_on_rack;
   int descending_tile_scores[(RACK_SIZE)];
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
 } Generator;
 
-Generator *create_generator(Config *config);
-Generator *copy_generator(Generator *gen, int move_list_size);
+Generator *create_generator(const Config *config, int move_list_capacity);
+Generator *copy_generator(Generator *gen, int move_list_capacity);
 void destroy_generator(Generator *gen);
+void update_generator(const Config *config, Generator *gen);
 void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
-                    int add_exchange);
+                    int add_exchange, move_record_t move_record_type,
+                    move_sort_t move_sort_type,
+                    bool apply_placement_adjustment);
 void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
                              int stripidx, int add_exchange);
 void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,

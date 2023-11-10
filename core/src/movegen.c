@@ -187,9 +187,9 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
   set_spare_move(gen->move_list, strip, leftstrip, rightstrip, score, row, col,
                  tiles_played, gen->vertical, move_type);
 
-  if (player->strategy_params->play_recorder_type == MOVE_RECORDER_ALL) {
+  if (gen->move_record_type == MOVE_RECORD_ALL) {
     double equity;
-    if (player->strategy_params->move_sorting == MOVE_SORT_EQUITY) {
+    if (gen->move_sort_type == MOVE_SORT_EQUITY) {
       equity = get_spare_move_equity(gen, player, opp_rack);
     } else {
       equity = score;
@@ -214,8 +214,7 @@ void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
     // Ignore the empty exchange case for full racks
     // to avoid out of bounds errors for the best_leaves array
     if (player->rack->number_of_letters < RACK_SIZE) {
-      double current_value =
-          get_leave_value(player->strategy_params->klv, player->rack);
+      double current_value = get_leave_value(player->klv, player->rack);
       set_current_value(gen->leave_map, current_value);
       if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
         gen->best_leaves[player->rack->number_of_letters] = current_value;
@@ -254,7 +253,7 @@ int is_empty_cache(Generator *gen, int col) {
 }
 
 int better_play_has_been_found(Generator *gen, double highest_possible_value) {
-  const double best_value_found = (gen->move_sorting_type == MOVE_SORT_EQUITY)
+  const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? gen->move_list->moves[0]->equity
                                       : gen->move_list->moves[0]->score;
   return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
@@ -278,12 +277,12 @@ void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
     int next_node_index = 0;
     int accepts = 0;
     for (int i = node_index;; i++) {
-      if (kwg_tile(player->strategy_params->kwg, i) == raw) {
-        next_node_index = kwg_arc_index(player->strategy_params->kwg, i);
-        accepts = kwg_accepts(player->strategy_params->kwg, i);
+      if (kwg_tile(player->kwg, i) == raw) {
+        next_node_index = kwg_arc_index(player->kwg, i);
+        accepts = kwg_accepts(player->kwg, i);
         break;
       }
-      if (kwg_is_end(player->strategy_params->kwg, i)) {
+      if (kwg_is_end(player->kwg, i)) {
         break;
       }
     }
@@ -291,12 +290,12 @@ void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
           leftstrip, rightstrip, unique_play);
   } else if (!player->rack->empty) {
     for (int i = node_index;; i++) {
-      int ml = kwg_tile(player->strategy_params->kwg, i);
+      int ml = kwg_tile(player->kwg, i);
       if (ml != 0 &&
           (player->rack->array[ml] != 0 || player->rack->array[0] != 0) &&
           allowed(cross_set, ml)) {
-        int next_node_index = kwg_arc_index(player->strategy_params->kwg, i);
-        int accepts = kwg_accepts(player->strategy_params->kwg, i);
+        int next_node_index = kwg_arc_index(player->kwg, i);
+        int accepts = kwg_accepts(player->kwg, i);
         if (player->rack->array[ml] > 0) {
           take_letter_and_update_current_index(gen->leave_map, player->rack,
                                                ml);
@@ -318,7 +317,7 @@ void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
                                               BLANK_MACHINE_LETTER);
         }
       }
-      if (kwg_is_end(player->strategy_params->kwg, i)) {
+      if (kwg_is_end(player->kwg, i)) {
         break;
       }
     }
@@ -360,9 +359,8 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
                     leftstrip, rightstrip, unique_play);
     }
 
-    uint32_t separation_node_index =
-        kwg_get_next_node_index(player->strategy_params->kwg, new_node_index,
-                                SEPARATION_MACHINE_LETTER);
+    uint32_t separation_node_index = kwg_get_next_node_index(
+        player->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
     if (separation_node_index != 0 && no_letter_directly_left &&
         gen->current_anchor_col < BOARD_DIM - 1) {
       recursive_gen(gen, gen->current_anchor_col + 1, player, opp_rack,
@@ -459,7 +457,7 @@ void shadow_record(Generator *gen, int left_col, int right_col,
               (main_played_through_score * word_multiplier) +
               perpendicular_additional_score + bingo_bonus;
   double equity = (double)score;
-  if (gen->move_sorting_type == MOVE_SORT_EQUITY) {
+  if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     if (gen->bag->last_tile_index >= 0) {
       // Bag is not empty: use leave values
       equity +=
@@ -678,9 +676,6 @@ void shadow_play_for_anchor(Generator *gen, int col, Player *player,
   // Set the current anchor column
   gen->current_anchor_col = col;
 
-  // Set the recorder type
-  gen->move_sorting_type = player->strategy_params->move_sorting;
-
   // Reset tiles played
   gen->tiles_played = 0;
 
@@ -688,7 +683,7 @@ void shadow_play_for_anchor(Generator *gen, int col, Player *player,
   gen->rack_cross_set = 0;
   for (uint32_t i = 0; i < gen->letter_distribution->size; i++) {
     if (player->rack->array[i] > 0) {
-      gen->rack_cross_set = gen->rack_cross_set | (1 << i);
+      gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
     }
   }
 
@@ -728,7 +723,13 @@ void set_descending_tile_scores(Generator *gen, Player *player) {
 }
 
 void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
-                    int add_exchange) {
+                    int add_exchange, move_record_t move_record_type,
+                    move_sort_t move_sort_type,
+                    bool apply_placement_adjustment) {
+  gen->move_sort_type = move_sort_type;
+  gen->move_record_type = move_record_type;
+  gen->apply_placement_adjustment = apply_placement_adjustment;
+
   // Reset the best leaves
   for (int i = 0; i < (RACK_SIZE); i++) {
     gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
@@ -736,9 +737,8 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
 
   init_leave_map(gen->leave_map, player->rack);
   if (player->rack->number_of_letters < RACK_SIZE) {
-    set_current_value(
-        gen->leave_map,
-        get_leave_value(player->strategy_params->klv, player->rack));
+    set_current_value(gen->leave_map,
+                      get_leave_value(player->klv, player->rack));
   } else {
     set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
@@ -760,7 +760,7 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
 
   sort_anchor_list(gen->anchor_list);
   for (int i = 0; i < gen->anchor_list->count; i++) {
-    if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST &&
+    if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(
             gen, gen->anchor_list->anchors[i]->highest_possible_equity)) {
       break;
@@ -772,11 +772,10 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     set_transpose(gen->board, gen->anchor_list->anchors[i]->transpose_state);
     load_row_letter_cache(gen, gen->current_row_index);
     recursive_gen(gen, gen->current_anchor_col, player, opp_rack,
-                  kwg_get_root_node_index(player->strategy_params->kwg),
-                  gen->current_anchor_col, gen->current_anchor_col,
-                  !gen->vertical);
+                  kwg_get_root_node_index(player->kwg), gen->current_anchor_col,
+                  gen->current_anchor_col, !gen->vertical);
 
-    if (player->strategy_params->play_recorder_type == MOVE_RECORDER_BEST) {
+    if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for this
       // anchor, highest_possible_equity was invalid.
       assert(!better_play_has_been_found(
@@ -787,12 +786,11 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
   reset_transpose(gen->board);
 
   // Add the pass move
-  if (player->strategy_params->play_recorder_type == MOVE_RECORDER_ALL ||
+  if (move_record_type == MOVE_RECORD_ALL ||
       gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
     set_spare_move_as_pass(gen->move_list);
     insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
-  } else if (player->strategy_params->play_recorder_type ==
-             MOVE_RECORDER_BEST) {
+  } else if (move_record_type == MOVE_RECORD_BEST) {
     // The move list count is still 0 at this point, so set it to 1.
     // This is done here to avoid repeatedly checking/updating the move count.
     gen->move_list->count = 1;
@@ -818,18 +816,26 @@ void load_zero_preendgame_adjustment_values(Generator *gen) {
   }
 }
 
-Generator *create_generator(Config *config) {
+void update_generator(const Config *config, Generator *gen) {
+  gen->letter_distribution = config->letter_distribution;
+  update_move_list(gen->move_list, config->num_plays);
+  update_bag(gen->bag, gen->letter_distribution);
+  update_leave_map(gen->leave_map, gen->letter_distribution->size);
+}
+
+Generator *create_generator(const Config *config, int move_list_capacity) {
   Generator *generator = malloc_or_die(sizeof(Generator));
   generator->bag = create_bag(config->letter_distribution);
   generator->board = create_board();
-  generator->move_list = create_move_list(config->move_list_capacity);
+  generator->move_list = create_move_list(move_list_capacity);
   generator->anchor_list = create_anchor_list();
   generator->leave_map = create_leave_map(config->letter_distribution->size);
   generator->letter_distribution = config->letter_distribution;
   generator->tiles_played = 0;
   generator->vertical = 0;
   generator->last_anchor_col = 0;
-  generator->kwgs_are_distinct = !config->kwg_is_shared;
+  generator->kwgs_are_distinct =
+      !players_data_get_is_shared(config->players_data, PLAYERS_DATA_TYPE_KWG);
 
   // On by default
   generator->apply_placement_adjustment = 1;
@@ -842,12 +848,12 @@ Generator *create_generator(Config *config) {
   return generator;
 }
 
-Generator *copy_generator(Generator *gen, int move_list_size) {
+Generator *copy_generator(Generator *gen, int move_list_capacity) {
   Generator *new_generator = malloc_or_die(sizeof(Generator));
   new_generator->bag = copy_bag(gen->bag);
   new_generator->board = copy_board(gen->board);
   // Move list, anchor list, and leave map can be new
-  new_generator->move_list = create_move_list(move_list_size);
+  new_generator->move_list = create_move_list(move_list_capacity);
   new_generator->anchor_list = create_anchor_list();
   new_generator->leave_map = create_leave_map(gen->letter_distribution->size);
   // KWG and letter distribution are read only and can share pointers

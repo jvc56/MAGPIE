@@ -26,6 +26,15 @@ Rack *create_rack(int array_size) {
   return rack;
 }
 
+void update_or_create_rack(Rack **rack, int array_size) {
+  if (!(*rack)) {
+    *rack = create_rack(array_size);
+  } else if ((*rack)->array_size != array_size) {
+    destroy_rack(*rack);
+    *rack = create_rack(array_size);
+  }
+}
+
 Rack *copy_rack(Rack *rack) {
   Rack *new_rack = malloc_or_die(sizeof(Rack));
   new_rack->array = (int *)malloc_or_die(rack->array_size * sizeof(int));
@@ -76,11 +85,11 @@ int set_rack_to_string(Rack *rack, const char *rack_string,
                        LetterDistribution *letter_distribution) {
   reset_rack(rack);
 
-  uint8_t mls[BAG_SIZE];
+  uint8_t mls[MAX_BAG_SIZE];
   int num_mls =
       str_to_machine_letters(letter_distribution, rack_string, false, mls);
-  if (num_mls > BAG_SIZE) {
-    log_fatal("rack contains more letters than the bag: %d\n", num_mls);
+  if (num_mls > MAX_BAG_SIZE) {
+    log_fatal("rack overflow: %d\n", num_mls);
   }
   for (int i = 0; i < num_mls; i++) {
     add_letter_to_rack(rack, mls[i]);

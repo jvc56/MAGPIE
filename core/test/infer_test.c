@@ -10,28 +10,23 @@
 #include "../src/move.h"
 #include "../src/thread_control.h"
 
-#include "superconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "testconfig.h"
 
-int infer_for_test(Inference *inference, Game *game, Rack *actual_tiles_played,
-                   int player_to_infer_index, int actual_score,
-                   int number_of_tiles_exchanged, double equity_margin,
-                   int number_of_threads) {
-  ThreadControl *thread_control = create_thread_control(NULL);
-
-  infer(thread_control, inference, game, actual_tiles_played,
-        player_to_infer_index, actual_score, number_of_tiles_exchanged,
-        equity_margin, number_of_threads);
-  destroy_thread_control(thread_control);
-  return inference->status;
+inference_status_t infer_for_test(const Config *config, Game *game,
+                                  Inference *inference) {
+  inference_status_t status = infer(config, game, inference);
+  return status;
 }
 
-void test_trivial_random_probability(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_trivial_random_probability(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
+  Inference *inference = create_inference();
+
+  inference->bag_as_rack = create_rack(game->gen->letter_distribution->size);
+  inference->leave = create_rack(game->gen->letter_distribution->size);
 
   // A minimum of zero should always be 100% probability
   assert(within_epsilon(get_probability_for_random_minimum_draw(
@@ -96,127 +91,137 @@ void test_trivial_random_probability(SuperConfig *superconfig) {
   destroy_inference(inference);
 }
 
-void test_infer_rack_overflow(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_rack_overflow(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Rack *rack = create_rack(game->players[0]->rack->array_size);
 
-  set_rack_to_string(rack, "ABCDEFGH", game->gen->letter_distribution);
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
+  Inference *inference = create_inference();
+  load_config_or_die(
+      config,
+      "setoptions rack ABCDEFGH pindex 0 score 0 exch 0 eq 0 threads 1");
+  inference_status_t status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_RACK_OVERFLOW);
   reset_game(game);
 
   set_rack_to_string(game->players[0]->rack, "ABC",
                      game->gen->letter_distribution);
-  set_rack_to_string(rack, "DEFGH", game->gen->letter_distribution);
-  status = infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
+  load_config_or_die(
+      config, "setoptions rack DEFGH pindex 0 score 0 exch 0 eq 0 threads 1");
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_RACK_OVERFLOW);
 
-  destroy_rack(rack);
   destroy_inference(inference);
   destroy_game(game);
 }
 
-void test_infer_no_tiles_played(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_no_tiles_played_rack_empty(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
-  Rack *rack = create_rack(game->players[0]->rack->array_size);
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
+  Inference *inference = create_inference();
+  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
+                             " pindex 0 score 0 exch 0 eq 0 threads 1");
+  inference_status_t status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_NO_TILES_PLAYED);
 
-  destroy_rack(rack);
   destroy_inference(inference);
   destroy_game(game);
 }
 
-void test_infer_both_play_and_exchange(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_no_tiles_played_rack_null(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Rack *rack = create_rack(game->players[0]->rack->array_size);
 
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
-  set_rack_to_string(rack, "DEFGH", game->gen->letter_distribution);
-  int status = infer_for_test(inference, game, rack, 0, 0, 1, 0, 1);
+  Inference *inference = create_inference();
+  load_config_or_die(config,
+                     "setoptions pindex 0 score 0 exch 0 eq 0 threads 1");
+  inference_status_t status = infer_for_test(config, game, inference);
+  assert(status == INFERENCE_STATUS_NO_TILES_PLAYED);
+
+  destroy_inference(inference);
+  destroy_game(game);
+}
+
+void test_infer_both_play_and_exchange(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
+  Game *game = create_game(config);
+
+  Inference *inference = create_inference();
+  load_config_or_die(
+      config, "setoptions rack DEFGH pindex 0 score 0 exch 1 eq 0 threads 1");
+  inference_status_t status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE);
 
-  destroy_rack(rack);
   destroy_inference(inference);
   destroy_game(game);
 }
 
-void test_infer_exchange_score_not_zero(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_exchange_score_not_zero(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Rack *rack = create_rack(game->players[0]->rack->array_size);
 
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 3, 1, 0, 1);
+  Inference *inference = create_inference();
+  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
+                             " pindex 0 score 3 exch 1 eq 0 threads 1");
+  inference_status_t status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
 
-  destroy_rack(rack);
   destroy_inference(inference);
   destroy_game(game);
 }
 
-void test_infer_exchange_not_allowed(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_exchange_not_allowed(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Rack *rack = create_rack(game->players[0]->rack->array_size);
 
   // There are 13 tiles in the bag
   load_cgp(game, VS_JEREMY);
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 3, 1, 0, 1);
+  Inference *inference = create_inference();
+  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
+                             " pindex 0 score 3 exch 1 eq 0 threads 1");
+  inference_status_t status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED);
 
   add_letter(game->gen->bag, BLANK_MACHINE_LETTER);
   // There should now be 14 tiles in the bag
-  status = infer_for_test(inference, game, rack, 0, 3, 1, 0, 1);
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
 
-  destroy_rack(rack);
   destroy_inference(inference);
   destroy_game(game);
 }
 
-void test_infer_tiles_played_not_in_bag(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
-  Rack *rack = create_rack(game->players[0]->rack->array_size);
-  set_rack_to_string(rack, "ABCYEYY", game->gen->letter_distribution);
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
-  int status = infer_for_test(inference, game, rack, 0, 0, 0, 0, 1);
+  Inference *inference = create_inference();
+  load_config_or_die(
+      config, "setoptions rack ABCYEYY pindex 0 score 0 exch 1 eq 0 threads 1");
+  inference_status_t status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG);
 
-  destroy_rack(rack);
   destroy_inference(inference);
   destroy_game(game);
 }
 
-void test_infer_nonerror_cases(SuperConfig *superconfig,
-                               int number_of_threads) {
-  Config *config = get_csw_config(superconfig);
+void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);
-  KLV *klv = game->players[0]->strategy_params->klv;
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
+  const KLV *klv = game->players[0]->klv;
+  Inference *inference = create_inference();
   Stat *letter_stat = create_stat();
-  int status;
+  inference_status_t status;
 
-  set_rack_to_string(rack, "MUZAKS", game->gen->letter_distribution);
-  status =
-      infer_for_test(inference, game, rack, 0, 52, 0, 0, number_of_threads);
+  char *setoptions_thread_string =
+      get_formatted_string("setoptions threads %d", number_of_threads);
+  load_config_or_die(config, setoptions_thread_string);
+  free(setoptions_thread_string);
+
+  load_config_or_die(config,
+                     "setoptions rack MUZAKS pindex 0 score 52 exch 0 eq 0");
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // With this rack, only keeping an S is possible, and
   // there are 3 S remaining.
@@ -252,9 +257,9 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   assert(game->players[0]->rack->number_of_letters == 0);
   assert(game->players[1]->rack->number_of_letters == 0);
 
-  set_rack_to_string(rack, "MUZAKY", game->gen->letter_distribution);
-  status =
-      infer_for_test(inference, game, rack, 0, 58, 0, 0, number_of_threads);
+  load_config_or_die(config,
+                     "setoptions rack MUZAKY pindex 0 score 58 exch 0 eq 0");
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Letters not possible:
   // A - YAKUZA
@@ -304,9 +309,9 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   assert(game->players[0]->rack->number_of_letters == 0);
   assert(game->players[1]->rack->number_of_letters == 0);
 
-  set_rack_to_string(rack, "MUZAK", game->gen->letter_distribution);
-  status =
-      infer_for_test(inference, game, rack, 0, 50, 0, 0, number_of_threads);
+  load_config_or_die(config,
+                     "setoptions rack MUZAK pindex 0 score 50 exch 0 eq 0");
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Can't have B or Y because of ZAMBUK and MUZAKY
   // Can't have K or Z because there are none in the bag
@@ -342,9 +347,8 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   // the remaining tiles exactly. Since the played
   // tiles contain an E, the inferred leave should not
   // contain an E.
-  set_rack_to_string(rack, "E", game->gen->letter_distribution);
-  status =
-      infer_for_test(inference, game, rack, 0, 22, 0, 0, number_of_threads);
+  load_config_or_die(config, "setoptions rack E pindex 0 score 22 exch 0 eq 0");
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_SUCCESS);
   assert(get_weight(inference->leave_record->equity_values) == 1);
   assert(get_cardinality(inference->leave_record->equity_values) == 1);
@@ -375,8 +379,9 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   }
   reset_game(game);
 
-  set_rack_to_string(rack, "RENT", game->gen->letter_distribution);
-  status = infer_for_test(inference, game, rack, 0, 8, 0, 0, number_of_threads);
+  load_config_or_die(config,
+                     "setoptions rack RENT pindex 0 score 8 exch 0 eq 0");
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // There are only 3 racks for which playing RENT for 8 on the opening is
   // top
@@ -448,7 +453,6 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   // Contrive an impossible situation to easily test
   // more combinatorics
   load_cgp(game, OOPSYCHOLOGY_CGP);
-  set_rack_to_string(rack, "IIII", game->gen->letter_distribution);
   // Empty the bag
   game->gen->bag->last_tile_index = -1;
   add_letter(game->gen->bag, human_readable_letter_to_machine_letter(
@@ -479,8 +483,9 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   // Z(OOPSYCHOLOGY) is over 100 points so keeping the Z will never be
   // inferred
   // for plays scoring 50.
-  status =
-      infer_for_test(inference, game, rack, 0, 50, 0, 0, number_of_threads);
+  load_config_or_die(config,
+                     "setoptions rack IIII pindex 0 score 50 exch 0 eq 0");
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // There are only 4 racks for which not playing Z(OOPSYCHOLOGY) is
   // correct:
@@ -584,9 +589,9 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   reset_game(game);
 
   // Check that the equity margin works
-  set_rack_to_string(rack, "MUZAKY", game->gen->letter_distribution);
-  status =
-      infer_for_test(inference, game, rack, 0, 58, 0, 5, number_of_threads);
+  load_config_or_die(config,
+                     "setoptions rack MUZAKY pindex 0 score 58 exch 0 eq 5");
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Letters not possible with equity margin of 5:
   // B - ZAMBUK
@@ -618,18 +623,18 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
 
   // Test partial leaves
   // play GRIND with partial leave of ?
-  set_rack_to_string(rack, "GRIND", game->gen->letter_distribution);
   // Partially known leaves that are on the player's rack
   // before the inference are not removed from the bag, so
   // we have to remove it here.
-  // game->players[0]->strategy_params->play_recorder_type =
+  // game->players[0]->play_recorder_type =
   // MOVE_RECORDER_BEST;
   set_rack_to_string(game->players[0]->rack, "?",
                      game->gen->letter_distribution);
   draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(
                                   game->gen->letter_distribution, "?"));
-  status =
-      infer_for_test(inference, game, rack, 0, 18, 0, 0, number_of_threads);
+  load_config_or_die(config,
+                     "setoptions rack GRIND pindex 0 score 18 exch 0 eq 0");
+  status = infer_for_test(config, game, inference);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // If GRIND is played keeping ?, the only
   // possible other tile is an X
@@ -654,12 +659,13 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   }
   reset_game(game);
 
-  set_rack_to_string(rack, "RIN", game->gen->letter_distribution);
   set_rack_to_string(game->players[0]->rack, "H",
                      game->gen->letter_distribution);
   draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(
                                   game->gen->letter_distribution, "H"));
-  status = infer_for_test(inference, game, rack, 0, 6, 0, 0, number_of_threads);
+  load_config_or_die(config,
+                     "setoptions rack RIN pindex 0 score 6 exch 0 eq 0");
+  status = infer_for_test(config, game, inference);
   // If the player opens with RIN for 6 keeping an H, there are only 3
   // possible racks where this would be correct:
   // 1) ?HIINRR keeping ?HIR = 2 * 2 * 8 * 5 = 160
@@ -682,7 +688,6 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
       (bhir_weighted_value + bhnr_weighted_value + hirn_weighted_value) / 660;
   assert(within_epsilon(get_mean(inference->leave_record->equity_values),
                         mean_rin_leave_value));
-  reset_game(game);
 
   // Test exchanges
   load_cgp(game, VS_JEREMY);
@@ -711,7 +716,9 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
                                  game->gen->letter_distribution, "V"));
 
   reset_rack(rack);
-  status = infer_for_test(inference, game, rack, 0, 0, 6, 0, number_of_threads);
+  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
+                             " pindex 0 score 0 exch 6 eq 0");
+  status = infer_for_test(config, game, inference);
 
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Keeping any one of D, H, R, or S is valid
@@ -773,34 +780,16 @@ void test_infer_nonerror_cases(SuperConfig *superconfig,
   destroy_game(game);
 }
 
-void test_infer(SuperConfig *superconfig) {
-  test_trivial_random_probability(superconfig);
-  test_infer_rack_overflow(superconfig);
-  test_infer_no_tiles_played(superconfig);
-  test_infer_both_play_and_exchange(superconfig);
-  test_infer_exchange_score_not_zero(superconfig);
-  test_infer_exchange_not_allowed(superconfig);
-  test_infer_tiles_played_not_in_bag(superconfig);
-  test_infer_nonerror_cases(superconfig, 1);
-  test_infer_nonerror_cases(superconfig, 2);
-  test_infer_nonerror_cases(superconfig, 7);
-}
-
-void infer_from_config(Config *config) {
-  Game *game = create_game(config);
-  load_cgp(game, config->cgp);
-  Inference *inference =
-      create_inference(20, game->gen->letter_distribution->size);
-  int status =
-      infer_for_test(inference, game, config->actual_tiles_played,
-                     config->player_to_infer_index, config->actual_score,
-                     config->number_of_tiles_exchanged, config->equity_margin,
-                     config->number_of_threads);
-  if (status != INFERENCE_STATUS_SUCCESS) {
-    printf("inference failed with error code: %d\n", status);
-  } else {
-    print_inference(inference, config->actual_tiles_played);
-  }
-  destroy_game(game);
-  destroy_inference(inference);
+void test_infer(TestConfig *testconfig) {
+  test_trivial_random_probability(testconfig);
+  test_infer_rack_overflow(testconfig);
+  test_infer_no_tiles_played_rack_empty(testconfig);
+  test_infer_no_tiles_played_rack_null(testconfig);
+  test_infer_both_play_and_exchange(testconfig);
+  test_infer_exchange_score_not_zero(testconfig);
+  test_infer_exchange_not_allowed(testconfig);
+  test_infer_tiles_played_not_in_bag(testconfig);
+  test_infer_nonerror_cases(testconfig, 1);
+  test_infer_nonerror_cases(testconfig, 2);
+  test_infer_nonerror_cases(testconfig, 7);
 }

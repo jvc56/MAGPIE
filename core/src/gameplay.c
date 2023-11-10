@@ -72,24 +72,18 @@ void calc_for_across(int row_start, int col_start, int csd, Game *game,
     int left_col =
         word_edge(game->gen->board, row, col_start, WORD_DIRECTION_LEFT);
     gen_cross_set(game->gen->board, row, right_col + 1, csd, 0,
-                  game->players[0]->strategy_params->kwg,
-                  game->gen->letter_distribution);
+                  game->players[0]->kwg, game->gen->letter_distribution);
     gen_cross_set(game->gen->board, row, left_col - 1, csd, 0,
-                  game->players[0]->strategy_params->kwg,
-                  game->gen->letter_distribution);
+                  game->players[0]->kwg, game->gen->letter_distribution);
     gen_cross_set(game->gen->board, row, col_start, csd, 0,
-                  game->players[0]->strategy_params->kwg,
-                  game->gen->letter_distribution);
+                  game->players[0]->kwg, game->gen->letter_distribution);
     if (game->gen->kwgs_are_distinct) {
       gen_cross_set(game->gen->board, row, right_col + 1, csd, 1,
-                    game->players[1]->strategy_params->kwg,
-                    game->gen->letter_distribution);
+                    game->players[1]->kwg, game->gen->letter_distribution);
       gen_cross_set(game->gen->board, row, left_col - 1, csd, 1,
-                    game->players[1]->strategy_params->kwg,
-                    game->gen->letter_distribution);
+                    game->players[1]->kwg, game->gen->letter_distribution);
       gen_cross_set(game->gen->board, row, col_start, csd, 1,
-                    game->players[1]->strategy_params->kwg,
-                    game->gen->letter_distribution);
+                    game->players[1]->kwg, game->gen->letter_distribution);
     }
   }
 }
@@ -98,12 +92,10 @@ void calc_for_self(int row_start, int col_start, int csd, Game *game,
                    Move *move) {
   for (int col = col_start - 1; col <= col_start + move->tiles_length; col++) {
     gen_cross_set(game->gen->board, row_start, col, csd, 0,
-                  game->players[0]->strategy_params->kwg,
-                  game->gen->letter_distribution);
+                  game->players[0]->kwg, game->gen->letter_distribution);
     if (game->gen->kwgs_are_distinct) {
       gen_cross_set(game->gen->board, row_start, col, csd, 1,
-                    game->players[1]->strategy_params->kwg,
-                    game->gen->letter_distribution);
+                    game->players[1]->kwg, game->gen->letter_distribution);
     }
   }
 }
@@ -210,15 +202,10 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
 }
 
 Move *get_top_equity_move(Game *game) {
-  StrategyParams *sp =
-      game->players[game->player_on_turn_index]->strategy_params;
-  int recorder_type = sp->play_recorder_type;
-  sp->play_recorder_type = MOVE_RECORDER_BEST;
   reset_move_list(game->gen->move_list);
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
-  // restore old recorder type
-  sp->play_recorder_type = recorder_type;
+                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 MOVE_RECORD_BEST, MOVE_SORT_EQUITY, true);
   return game->gen->move_list->moves[0];
 }

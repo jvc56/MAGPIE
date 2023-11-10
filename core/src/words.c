@@ -86,7 +86,7 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
   return ws;
 }
 
-int is_word_valid(FormedWord *w, KWG *kwg) {
+int is_word_valid(FormedWord *w, const KWG *kwg) {
   if (w->word_length < 2) {
     return 0;
   }
@@ -114,7 +114,7 @@ int is_word_valid(FormedWord *w, KWG *kwg) {
   } while (1);
 }
 
-void populate_word_validities(FormedWords *ws, KWG *kwg) {
+void populate_word_validities(FormedWords *ws, const KWG *kwg) {
   for (int i = 0; i < ws->num_words; i++) {
     ws->words[i].valid = is_word_valid(&ws->words[i], kwg);
   }

@@ -1,17 +1,14 @@
 #ifndef TEST_CONSTANTS_H
 #define TEST_CONSTANTS_H
 
-#define CMD_GEN "gen"
-#define CMD_UNIT_TESTS "unit"
-#define CMD_PROF "prof"
-#define CMD_AUTOPLAY "autoplay"
-#define CMD_INFER "infer"
-#define CMD_TOPVALL "topvall"
-#define CMD_SIM "sim"
-#define CMD_SIM_STOPPING "simstopping"
+#define TESTDATA_FILEPATH "testdata/"
 
 #define EMPTY_CGP                                                              \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;"
+#define EMPTY_CATALAN_CGP                                                      \
+  "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex DISC2;"
+#define EMPTY_POLISH_CGP                                                       \
+  "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex OSPS44;"
 #define EMPTY_PLAYER0_RACK_CGP                                                 \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 /ABC 0/0 0 lex CSW21;"
 #define EMPTY_PLAYER1_RACK_CGP                                                 \
@@ -146,5 +143,12 @@
 #define DELDAR_VS_HARSHAN_CGP                                                  \
   "15/15/10LAZED/6EPITAXES1/7R7/7o7/7T7/7E7/7G7/7E7/2SNIFTER6/15/15/15/15 "    \
   "IJLNOPS/ 149/154 0 lex CSW21;"
-
+#define CATALAN_CGP                                                            \
+  "15/15/15/11HUNS/4E5JO3/4n2CEL·LA4/2RECELAT6/3XAMIS2D4/4R1BONY1E1P1E/"      \
+  "1ZELAM4S1E1N/4R5A1V1C/BUSQUIN4FRENA/U3A2MODI1T1U/R6ERINOSIS/"               \
+  "LITIGAnT2O3E AAIPRRS/AADEGLT 388/446 0 lex DISC2;"
+#define POLISH_CGP                                                                 \
+  "15/15/11FiŚ1/11LI2/9CŁA3/9Z1N3/8HOI4/6STĘPIĆ3/5AUR1Y5/4SAMY2G4/2CLE4JA1K2/" \
+  "2LARWO1SAMBIE1/2I1WENTO1O1IW1/E6END3Y1/ZDZIAŁaJ1Y5 ACNNPRW/AHIKPZŻ "          \
+  "240/200 0 lex OSPS44;"
 #endif

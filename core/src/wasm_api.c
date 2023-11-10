@@ -3,42 +3,43 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "command.h"
 #include "config.h"
+#include "error_status.h"
 #include "game.h"
 #include "log.h"
 #include "move.h"
-#include "ucgi_command.h"
 #include "ucgi_formats.h"
 #include "ucgi_print.h"
 #include "util.h"
 #include "words.h"
 
-static UCGICommandVars *ucgi_command_vars = NULL;
-static Config *config = NULL;
+static CommandVars *wasm_command_vars = NULL;
+static CommandVars *iso_command_vars = NULL;
+
+Game *get_game_from_cgp(const char *cgp) {
+  // Use a separate command vars to get
+  // a game for score_play and static_evaluation
+  if (!iso_command_vars) {
+    iso_command_vars = create_command_vars();
+  }
+  char *cgp_command = get_formatted_string("position cgp %s", cgp);
+  execute_command_sync(iso_command_vars, cgp_command);
+  free(cgp_command);
+  if (iso_command_vars->error_status->type != ERROR_STATUS_TYPE_NONE) {
+    log_fatal("wasm command failed with error type %d code %d\n",
+              iso_command_vars->error_status->type,
+              iso_command_vars->error_status->code);
+  }
+  return iso_command_vars->game;
+}
+
 // tiles must contain 0 for play-through tiles!
 char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
                  uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
   clock_t begin = clock();
 
-  CGPOperations *cgp_operations = get_default_cgp_operations();
-  cgp_parse_status_t cgp_parse_status =
-      load_cgp_operations(cgp_operations, cgpstr);
-  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
-    log_fatal("cgp parse failed: %d\n", cgp_parse_status);
-  }
-  // FIXME: maybe handle this elsewhere.
-  if (!cgp_operations->letter_distribution_name) {
-    cgp_operations->letter_distribution_name =
-        get_letter_distribution_name_from_lexicon_name(
-            cgp_operations->lexicon_name);
-  }
-  load_config_from_lexargs(&config, cgpstr, cgp_operations->lexicon_name,
-                           cgp_operations->letter_distribution_name);
-  destroy_cgp_operations(cgp_operations);
-
-  Game *game = create_game(config);
-  // FIXME: use the return status of load_cgp
-  load_cgp(game, cgpstr);
+  Game *game = get_game_from_cgp(cgpstr);
 
   int tiles_played = 0;
   for (int i = 0; i < ntiles; i++) {
@@ -73,7 +74,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
     fw = words_played(game->gen->board, tiles, 0, ntiles - 1, row, col,
                       vertical);
     // Assume that that kwg is shared
-    populate_word_validities(fw, game->players[0]->strategy_params->kwg);
+    populate_word_validities(fw, game->players[0]->kwg);
   }
 
   Rack *leave_rack = NULL;
@@ -83,8 +84,7 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
     for (int i = 0; i < nleave; i++) {
       add_letter_to_rack(leave_rack, leave[i]);
     }
-    leave_value =
-        get_leave_value(game->players[0]->strategy_params->klv, leave_rack);
+    leave_value = get_leave_value(game->players[0]->klv, leave_rack);
   }
 
   bool phonies_exist = false;
@@ -139,11 +139,10 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
   destroy_string_builder(move_string_builder);
   // keep config around for next call.
   // destroy_config(config);
-  destroy_game(game);
   if (leave_rack) {
     destroy_rack(leave_rack);
   }
-  char *return_string = string_builder_dump(return_string_builder, 0);
+  char *return_string = string_builder_dump(return_string_builder, NULL);
   destroy_string_builder(return_string_builder);
   clock_t end = clock();
   log_debug("score_play took %0.6f seconds",
@@ -157,41 +156,20 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
 char *static_evaluation(char *cgpstr, int num_plays) {
   clock_t begin = clock();
 
-  CGPOperations *cgp_operations = get_default_cgp_operations();
-  cgp_parse_status_t cgp_parse_status =
-      load_cgp_operations(cgp_operations, cgpstr);
-  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
-    log_fatal("cgp parse failed: %d\n", cgp_parse_status);
-  }
-  // FIXME: maybe handle this elsewhere.
-  if (!cgp_operations->letter_distribution_name) {
-    cgp_operations->letter_distribution_name =
-        get_letter_distribution_name_from_lexicon_name(
-            cgp_operations->lexicon_name);
-  }
-  load_config_from_lexargs(&config, cgpstr, cgp_operations->lexicon_name,
-                           cgp_operations->letter_distribution_name);
-  destroy_cgp_operations(cgp_operations);
+  Game *game = get_game_from_cgp(cgpstr);
 
-  Game *game = create_game(config);
-  // FIXME: use the return status of load_cgp
-  load_cgp(game, cgpstr);
-
-  int sorting_type = game->players[0]->strategy_params->move_sorting;
-  game->players[0]->strategy_params->move_sorting = MOVE_SORT_EQUITY;
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 MOVE_RECORD_ALL, MOVE_SORT_EQUITY, true);
   int number_of_moves_generated = game->gen->move_list->count;
   if (number_of_moves_generated < num_plays) {
     num_plays = number_of_moves_generated;
   }
   sort_moves(game->gen->move_list);
-  game->players[0]->strategy_params->move_sorting = sorting_type;
+
   // This pointer needs to be freed by the caller:
   char *val = ucgi_static_moves(game, num_plays);
-
-  destroy_game(game);
 
   clock_t end = clock();
   log_debug("static_evaluation took %0.6f seconds",
@@ -199,15 +177,21 @@ char *static_evaluation(char *cgpstr, int num_plays) {
   return val;
 }
 
-int process_ucgi_command_wasm(char *cmd) {
-  if (!ucgi_command_vars) {
-    ucgi_command_vars = create_ucgi_command_vars(NULL);
+// FIXME: what exactly allocates the char* here?
+// I'm not sure about this part of WASM, it might
+// need to be freed
+int process_command_wasm(char *cmd) {
+  if (!wasm_command_vars) {
+    wasm_command_vars = create_command_vars();
   }
-  return process_ucgi_command_async(cmd, ucgi_command_vars);
+  execute_command_async(wasm_command_vars, cmd);
+  return 0;
 }
 
-char *ucgi_search_status_wasm() {
-  return ucgi_search_status(ucgi_command_vars);
+char *get_search_status_wasm() {
+  return command_search_status(wasm_command_vars, false);
 }
 
-char *ucgi_stop_search_wasm() { return ucgi_stop_search(ucgi_command_vars); }
+char *get_stop_search_wasm() {
+  return command_search_status(wasm_command_vars, true);
+}

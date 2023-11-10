@@ -1,6 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include "../src/command.h"
 
-#include "../src/ucgi.h"
-
-int main() { ucgi_scan_loop(); }
+int main(int argc, char *argv[]) { process_command(argc, argv); }

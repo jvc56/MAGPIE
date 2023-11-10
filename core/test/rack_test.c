@@ -8,7 +8,7 @@
 #include "../src/rack.h"
 
 #include "rack_test.h"
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_util.h"
 
 int equal_rack(Rack *expected_rack, Rack *actual_rack) {
@@ -36,8 +36,8 @@ int equal_rack(Rack *expected_rack, Rack *actual_rack) {
   return 1;
 }
 
-void test_rack_main(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_rack_main(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Rack *rack = create_rack(config->letter_distribution->size);
   Rack *expected_rack = create_rack(config->letter_distribution->size);
 
@@ -115,4 +115,4 @@ void test_rack_main(SuperConfig *superconfig) {
   destroy_rack(expected_rack);
 }
 
-void test_rack(SuperConfig *superconfig) { test_rack_main(superconfig); }
+void test_rack(TestConfig *testconfig) { test_rack_main(testconfig); }

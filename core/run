@@ -1,113 +1,50 @@
 make clean
 
-if [ "$1" == "v" ]; then
+# Run tests with debugger
+if [ "$1" == "g" ]; then
 make magpie_test
-valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./bin/magpie_test unit
-elif [ "$1" == "g" ]; then
-make magpie_test
-gdb --args ./bin/magpie_test unit
+gdb --args ./bin/magpie_test $2
+# Run magpie with debugger
+elif [ "$1" == "d" ]; then
+make magpie
+gdb --args ./bin/magpie
+# Run tests with coverage
 elif [ "$1" == "c" ]; then
 make magpie_test BUILD=cov
-./bin/magpie_test unit
+./bin/magpie_test $2
 mkdir -p cov
 rm -f cov/*
 ln -sf $PWD/obj/*/*.gc* cov
 lcov --capture --directory cov --output-file coverage.info
 genhtml coverage.info --output-directory covhtml
 xdg-open covhtml/index.html
+# Build release version of magpie
 elif [ "$1" == "r" ]; then
 make magpie BUILD=release
 ./bin/magpie
+# Run unit tests
+# Set $2 to run a specific test
+# see test.c for more details
 elif [ "$1" == "u" ]; then
 make magpie_test
-./bin/magpie_test unit
-elif [ "$1" == "t" ]; then
-if [ -z "$2" ]; then
-    echo "must provide number of games to play"
-    exit 1
-fi
-make magpie_test BUILD=release
-./bin/magpie_test prof -g1 "./data/lexica/CSW21.kwg" \
-                      -d "./data/letterdistributions/english.csv" \
-                      -l1 "./data/lexica/CSW21.klv2" \
-                      -r1 "top" \
-                      -s1 "equity" \
-                      -n "$2" \
-                      -i 0
-elif [ "$1" == "i" ]; then
-make magpie_test BUILD=release
-perf record ./bin/magpie_test infer -g1 "./data/lexica/CSW21.kwg" \
-                      -d "./data/letterdistributions/english.csv" \
-                      -l1 "./data/lexica/CSW21.klv2" \
-                      -r1 "top" \
-                      -s1 "equity" \
-                      -c "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;" \
-                      -t "QI" \
-                      -i 0 \
-                      -a 22 \
-                      -e 0 \
-                      -q 0
-perf report
-elif [ "$1" == "tva" ]; then
-if [ -z "$2" ]; then
-    echo "must provide number of games to play"
-    exit 1
-fi
-make magpie_test BUILD=release
-./bin/magpie_test topvall -g1 "./data/lexica/CSW21.kwg" \
-                      -d "./data/letterdistributions/english.csv" \
-                      -l1 "./data/lexica/CSW21.klv2" \
-                      -r1 "top" \
-                      -s1 "equity" \
-                      -n "$2"
-elif [ "$1" == "o" ]; then
-if [ -z "$2" ]; then
-    echo "must provide number of games to play"
-    exit 1
-fi
+./bin/magpie_test $2
+# Run an autoplay perf test
+
+# The perf tool might need
+# some extra setup. If you see
+# permission errors, try these:
 
 # Set paranoia to 0 with
 # sudo sysctl -w kernel.perf_event_paranoid=0
 
 # Then, as sudo
 # echo 0 > /proc/sys/kernel/kptr_restrict
-
-make magpie_test BUILD=release
-perf record ./bin/magpie_test prof -g1 "./data/lexica/CSW21.kwg" \
-                      -d "./data/letterdistributions/english.csv" \
-                      -l1 "./data/lexica/CSW21.klv2" \
-                      -r1 "top" \
-                      -s1 "equity" \
-                      -n "$2"
-perf report
-elif [ "$1" == "m" ]; then
-make magpie_test
-./bin/magpie_test gen -g1 "./data/lexica/CSW21.kwg" \
-                      -d "./data/letterdistributions/english.csv" \
-                      -l "./data/lexica/CSW21.klv2" \
-                      -r "all" \
-                      -s "equity" \
-                      -c "1PACIFYING5/1IS12/YE13/1REQUALIFIED3/H1L12/EDS12/NO3T9/1RAINWASHING3/UM3O9/T2E1O9/1WAKEnERS6/1OnETIME7/OOT2E1B7/N6U7/1JACULATING4 ABEOPXZ/ 0/0 0 lex NWL20;"
-elif [ "$1" == "sim" ]; then
-make magpie_test BUILD=release
-./bin/magpie_test sim -g1 "./data/lexica/NWL20.kwg" \
-                      -d "./data/letterdistributions/english.csv" \
-                      -w "./data/strategy/default_english/winpct.csv" \
-                      -l1 "./data/lexica/english.klv2" \
-                      -h "$2" \
-                      -c "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ 336/298 0 lex NWL20;"
-elif [ "$1" == "simstopping" ]; then
-make magpie_test BUILD=release
-./bin/magpie_test simstopping -g1 "./data/lexica/NWL20.kwg" \
-                      -d "./data/letterdistributions/english.csv" \
-                      -w "./data/strategy/default_english/winpct.csv" \
-                      -l1 "./data/lexica/english.klv2" \
-                      -h "$2" \
-                      -c "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ 336/298 0 lex NWL20;"
+elif [ "$1" == "t" ]; then
+if [ -z "$2" ]; then
+    echo "must provide number of games to play"
+    exit 1
 fi
-
-# Bugs:
-# Gives negative for random:
-# time ../core/bin/magpie_test infer -g1 ../core/data/lexica/CSW21.kwg -d ../core/data/letterdistributions/english.csv -l1 ../core/data/lexica/CSW21.klv2 -r1 top -s1 equity -c '15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 /CDEIPSW 0/0 0 lex CSW21;' -t A -i 0 -a 2 -e 0 -q 0 -h 10
-# Number of draws looks incorrect:
-# time ../core/bin/magpie_test infer -g1 ../core/data/lexica/CSW21.kwg -d ../core/data/letterdistributions/english.csv -l1 ../core/data/lexica/CSW21.klv2 -r1 top -s1 equity -c '15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AENT/CDEIPSW 0/0 0 lex CSW21;' -t A -i 0 -a 2 -e 0 -q 0 -h 1
+make magpie BUILD=release
+perf record ./bin/magpie go autoplay lex CSW21 s1 equity r1 best s2 equity r2 best i $2
+perf report
+fi

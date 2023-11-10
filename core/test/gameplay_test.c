@@ -8,8 +8,8 @@
 #include "../src/gameplay.h"
 #include "../src/player.h"
 
-#include "superconfig.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void return_rack_to_bag(Rack *rack, Bag *bag) {
   for (int i = 0; i < (rack->array_size); i++) {
@@ -89,7 +89,9 @@ void assert_games_are_equal(Game *g1, Game *g2, int check_scores) {
 void test_gameplay_by_turn(Config *config, char *cgps[], char *racks[],
                            int array_length) {
   Game *actual_game = create_game(config);
+  ;
   Game *expected_game = create_game(config);
+  ;
 
   int player0_last_score_on_rack = -1;
   int player1_last_score_on_rack = -1;
@@ -133,7 +135,6 @@ void test_gameplay_by_turn(Config *config, char *cgps[], char *racks[],
       player1_final_score = actual_game->players[1]->score;
     }
 
-    reset_game(expected_game);
     load_cgp(expected_game, cgps[i]);
     // If the game is still ongoing,
     // return the racks to the bag so that
@@ -164,8 +165,8 @@ void test_gameplay_by_turn(Config *config, char *cgps[], char *racks[],
   destroy_game(expected_game);
 }
 
-void test_six_exchanges_game(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_six_exchanges_game(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
 
   char *racks[18] = {"UUUVVWW", "AEFRWYZ", "INOOQSU", "LUUUVVW", "EEEEEOO",
                      "AEIKLMO", "GNOOOPR", "EGIJLRS", "EEEOTTT", "EIILRSX",
@@ -211,8 +212,8 @@ void test_six_exchanges_game(SuperConfig *superconfig) {
   test_gameplay_by_turn(config, cgps, racks, 18);
 }
 
-void test_six_passes_game(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_six_passes_game(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
 
   char *racks[31] = {"AEGILPR", "ACELNTV", "DDEIOTY", "?ADIIUU", "?BEIINS",
                      "EEEKMNO", "AAEHINT", "CDEGORZ", "EGNOQRS", "AFIQRRT",
@@ -306,8 +307,8 @@ void test_six_passes_game(SuperConfig *superconfig) {
   test_gameplay_by_turn(config, cgps, racks, 31);
 }
 
-void test_standard_game(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_standard_game(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
 
   char *racks[23] = {"EGIILNO", "DRRTYYZ", "CEIOTTU", "AADEEMT", "AACDEKS",
                      "BEEIOOP", "DHLNORR", "BGIIJRV", "?DFMNPU", "EEEOQRW",
@@ -378,9 +379,10 @@ void test_standard_game(SuperConfig *superconfig) {
   test_gameplay_by_turn(config, cgps, racks, 23);
 }
 
-void test_playmove(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_playmove(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
+  ;
 
   // Test play
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
@@ -433,7 +435,6 @@ void test_playmove(SuperConfig *superconfig) {
              game->gen->letter_distribution, "W")] == 0);
   assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(
              game->gen->letter_distribution, "U")] < 2);
-  reset_game(game);
 
   // Test pass
   load_cgp(game,
@@ -475,9 +476,10 @@ void test_playmove(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_set_random_rack(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_set_random_rack(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
+  ;
   assert(game->gen->bag->last_tile_index == 99);
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
@@ -490,9 +492,9 @@ void test_set_random_rack(SuperConfig *superconfig) {
 
   // draw some random rack, but with 5 fixed tiles
   Rack *known_rack =
-      create_rack(superconfig->csw_config->letter_distribution->size);
+      create_rack(testconfig->csw_config->letter_distribution->size);
   set_rack_to_string(known_rack, "CESAR",
-                     superconfig->csw_config->letter_distribution);
+                     testconfig->csw_config->letter_distribution);
   set_random_rack(game, 0, known_rack);
   assert(game->gen->bag->last_tile_index == 92);
   assert(game->players[0]->rack->number_of_letters == 7);
@@ -517,9 +519,10 @@ void test_set_random_rack(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_backups(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_backups(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
+  ;
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
                       game->gen->letter_distribution);
@@ -568,11 +571,11 @@ void test_backups(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_gameplay(SuperConfig *superconfig) {
-  test_playmove(superconfig);
-  test_six_exchanges_game(superconfig);
-  test_six_passes_game(superconfig);
-  test_standard_game(superconfig);
-  test_set_random_rack(superconfig);
-  test_backups(superconfig);
+void test_gameplay(TestConfig *testconfig) {
+  test_playmove(testconfig);
+  test_six_exchanges_game(testconfig);
+  test_six_passes_game(testconfig);
+  test_standard_game(testconfig);
+  test_set_random_rack(testconfig);
+  test_backups(testconfig);
 }

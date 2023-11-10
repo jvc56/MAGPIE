@@ -10,20 +10,18 @@
 #include "test_util.h"
 
 void reset_and_load_game_success(Game *game, const char *cgp) {
-  reset_game(game);
   cgp_parse_status_t cgp_parse_status = load_cgp(game, cgp);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
 }
 
 void reset_and_load_game_failure(Game *game, const char *cgp,
                                  cgp_parse_status_t expected_cgp_parse_status) {
-  reset_game(game);
   cgp_parse_status_t cgp_parse_status = load_cgp(game, cgp);
   assert(cgp_parse_status == expected_cgp_parse_status);
 }
 
-void test_load_cgp(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_load_cgp(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   // Test that loading various CGPs doesn't result in
   // any errors
@@ -144,8 +142,8 @@ void test_load_cgp(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_game_main(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_game_main(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(config->letter_distribution->size);
   cgp_parse_status_t cgp_parse_status;
@@ -164,7 +162,6 @@ void test_game_main(SuperConfig *superconfig) {
   assert(equal_rack(rack, game->players[0]->rack));
   set_rack_to_string(rack, "HIJKLM?", config->letter_distribution);
   assert(equal_rack(rack, game->players[1]->rack));
-  reset_game(game);
 
   // Test CGP with excessive whitespace
   cgp_parse_status = load_cgp(game, EXCESSIVE_WHITESPACE_CGP);
@@ -174,7 +171,6 @@ void test_game_main(SuperConfig *superconfig) {
   set_rack_to_string(rack, "HIJKLM?", config->letter_distribution);
   assert(equal_rack(rack, game->players[1]->rack));
   assert(game->consecutive_scoreless_turns == 4);
-  reset_game(game);
 
   // Test CGP with one consecutive zero
   cgp_parse_status = load_cgp(game, ONE_CONSECUTIVE_ZERO_CGP);
@@ -186,52 +182,7 @@ void test_game_main(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void test_load_cgp_operations() {
-  CGPOperations *cgp_operations = get_default_cgp_operations();
-  cgp_parse_status_t cgp_parse_status;
-
-  const char *cgp_success =
-      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 bb 33 bdn "
-      "SuperCrosswordGame var wordsmog ld english lex "
-      "CSW21;";
-  cgp_parse_status = load_cgp_operations(cgp_operations, cgp_success);
-  assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
-  assert(cgp_operations->bingo_bonus == 33);
-  assert(cgp_operations->board_layout == BOARD_LAYOUT_SUPER_CROSSWORD_GAME);
-  assert(cgp_operations->game_variant == GAME_VARIANT_WORDSMOG);
-  assert_strings_equal(cgp_operations->lexicon_name, "CSW21");
-  assert_strings_equal(cgp_operations->letter_distribution_name, "english");
-
-  const char *cgp_malformed_bingo_bonus =
-      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 bb 3r3 bdn "
-      "SuperCrosswordGame var wordsmog ld english lex "
-      "CSW21;";
-  cgp_parse_status =
-      load_cgp_operations(cgp_operations, cgp_malformed_bingo_bonus);
-  assert(cgp_parse_status == CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BINGO_BONUS);
-
-  const char *cgp_malformed_board_name =
-      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 bb 33 bdn "
-      "MiniCrosswordGame var wordsmog ld english lex "
-      "CSW21;";
-  cgp_parse_status =
-      load_cgp_operations(cgp_operations, cgp_malformed_board_name);
-  assert(cgp_parse_status == CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BOARD_NAME);
-
-  const char *cgp_malformed_game_variant =
-      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 bb 33 bdn "
-      "SuperCrosswordGame var ifonly ld english lex "
-      "CSW21;";
-  cgp_parse_status =
-      load_cgp_operations(cgp_operations, cgp_malformed_game_variant);
-  assert(cgp_parse_status ==
-         CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_GAME_VARIANT);
-
-  destroy_cgp_operations(cgp_operations);
-}
-
-void test_game(SuperConfig *superconfig) {
-  test_game_main(superconfig);
-  test_load_cgp(superconfig);
-  test_load_cgp_operations();
+void test_game(TestConfig *testconfig) {
+  test_game_main(testconfig);
+  test_load_cgp(testconfig);
 }

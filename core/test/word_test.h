@@ -1,8 +1,8 @@
 #ifndef WORD_TEST_H
 #define WORD_TEST_H
 
-#include "superconfig.h"
+#include "testconfig.h"
 
-void test_words(SuperConfig *superconfig);
+void test_words(TestConfig *testconfig);
 
 #endif

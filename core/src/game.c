@@ -15,12 +15,6 @@
 #include "string_util.h"
 #include "util.h"
 
-#define CGP_OPCODE_BINGO_BONUS "bb"
-#define CGP_OPCODE_BOARD_NAME "bdn"
-#define CGP_OPCODE_GAME_VARIANT "var"
-#define CGP_OPCODE_LETTER_DISTRIBUTION_NAME "ld"
-#define CGP_OPCODE_LEXICON_NAME "lex"
-
 #define GAME_VARIANT_CLASSIC_NAME "classic"
 #define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
 
@@ -246,6 +240,7 @@ cgp_parse_status_t parse_cgp(Game *game, const char *cgp) {
 }
 
 cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
+  reset_game(game);
   cgp_parse_status_t cgp_parse_status = parse_cgp(game, cgp);
   if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
     return cgp_parse_status;
@@ -253,10 +248,9 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
 
   game->player_on_turn_index = 0;
 
-  generate_all_cross_sets(game->gen->board,
-                          game->players[0]->strategy_params->kwg,
-                          game->players[1]->strategy_params->kwg,
-                          game->gen->letter_distribution, 0);
+  generate_all_cross_sets(game->gen->board, game->players[0]->kwg,
+                          game->players[1]->kwg, game->gen->letter_distribution,
+                          game->data_is_shared[PLAYERS_DATA_TYPE_KWG]);
   update_all_anchors(game->gen->board);
 
   if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
@@ -267,78 +261,6 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
   } else {
     game->game_end_reason = GAME_END_REASON_NONE;
   }
-  return cgp_parse_status;
-}
-
-CGPOperations *get_default_cgp_operations() {
-  CGPOperations *cgp_operations = malloc_or_die(sizeof(CGPOperations));
-  cgp_operations->bingo_bonus = BINGO_BONUS;
-  cgp_operations->board_layout = BOARD_LAYOUT_CROSSWORD_GAME;
-  cgp_operations->game_variant = GAME_VARIANT_CLASSIC;
-  cgp_operations->letter_distribution_name = NULL;
-  cgp_operations->lexicon_name = NULL;
-  return cgp_operations;
-}
-
-void destroy_cgp_operations(CGPOperations *cgp_operations) {
-  if (cgp_operations->lexicon_name) {
-    free(cgp_operations->lexicon_name);
-  }
-  if (cgp_operations->letter_distribution_name) {
-    free(cgp_operations->letter_distribution_name);
-  }
-  free(cgp_operations);
-}
-
-cgp_parse_status_t load_cgp_operations(CGPOperations *cgp_operations,
-                                       const char *cgp) {
-  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
-  StringSplitter *split_cgp_string = split_string_by_whitespace(cgp, true);
-  int number_of_items = string_splitter_get_number_of_items(split_cgp_string);
-  for (int i = 0; i < number_of_items - 1; i++) {
-    const char *opcode = string_splitter_get_item(split_cgp_string, i);
-    char *string_value = string_splitter_get_item(split_cgp_string, i + 1);
-
-    // For now all values can be derived from a single contiguous
-    // string, so if any of them have a semicolon at the end,
-    // remove it.
-    // FIXME: move this 'remove last char' function to string util
-    size_t string_value_length = string_length(string_value);
-    if (string_value[string_value_length - 1] == ';') {
-      string_value[string_value_length - 1] = '\0';
-    }
-    if (strings_equal(CGP_OPCODE_BINGO_BONUS, opcode)) {
-      if (!is_all_digits_or_empty(string_value)) {
-        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BINGO_BONUS;
-        break;
-      }
-      cgp_operations->bingo_bonus = string_to_int(string_value);
-    } else if (strings_equal(CGP_OPCODE_BOARD_NAME, opcode)) {
-      cgp_operations->board_layout =
-          board_layout_string_to_board_layout(string_value);
-      if (cgp_operations->board_layout == BOARD_LAYOUT_UNKNOWN) {
-        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_BOARD_NAME;
-      }
-    } else if (strings_equal(CGP_OPCODE_GAME_VARIANT, opcode)) {
-      cgp_operations->game_variant =
-          get_game_variant_type_from_name(string_value);
-      if (cgp_operations->game_variant == GAME_VARIANT_UNKNOWN) {
-        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_CGP_OPCODE_GAME_VARIANT;
-      }
-    } else if (strings_equal(CGP_OPCODE_LETTER_DISTRIBUTION_NAME, opcode)) {
-      if (cgp_operations->letter_distribution_name) {
-        free(cgp_operations->letter_distribution_name);
-      }
-      cgp_operations->letter_distribution_name =
-          get_formatted_string("%s", string_value);
-    } else if (strings_equal(CGP_OPCODE_LEXICON_NAME, opcode)) {
-      if (cgp_operations->lexicon_name) {
-        free(cgp_operations->lexicon_name);
-      }
-      cgp_operations->lexicon_name = get_formatted_string("%s", string_value);
-    }
-  }
-  destroy_string_splitter(split_cgp_string);
   return cgp_parse_status;
 }
 
@@ -386,17 +308,27 @@ void set_backup_mode(Game *game, int backup_mode) {
   }
 }
 
-Game *create_game(Config *config) {
+void update_game(const Config *config, Game *game) {
+  // Player names are owned by config, so
+  // we only need to update the movelist capacity.
+  // In the future, we will need to update the board dimensions.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    update_player(config, game->players[player_index]);
+  }
+  update_generator(config, game->gen);
+}
+
+Game *create_game(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
-  game->gen = create_generator(config);
-  game->players[0] =
-      create_player(0, "player_1", config->letter_distribution->size);
-  game->players[1] =
-      create_player(1, "player_2", config->letter_distribution->size);
-  game->players[0]->strategy_params =
-      copy_strategy_params(config->player_1_strategy_params);
-  game->players[1]->strategy_params =
-      copy_strategy_params(config->player_2_strategy_params);
+  game->gen = create_generator(config, config->num_plays);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    game->players[player_index] = create_player(config, player_index);
+  }
+  for (int i = 0; i < NUMBER_OF_DATA; i++) {
+    game->data_is_shared[i] =
+        players_data_get_is_shared(config->players_data, (players_data_t)i);
+  }
+
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
@@ -406,11 +338,14 @@ Game *create_game(Config *config) {
   return game;
 }
 
-Game *copy_game(Game *game, int move_list_size) {
+Game *copy_game(Game *game, int move_list_capacity) {
   Game *new_game = malloc_or_die(sizeof(Game));
-  new_game->gen = copy_generator(game->gen, move_list_size);
+  new_game->gen = copy_generator(game->gen, move_list_capacity);
   for (int j = 0; j < 2; j++) {
     new_game->players[j] = copy_player(game->players[j]);
+  }
+  for (int i = 0; i < NUMBER_OF_DATA; i++) {
+    new_game->data_is_shared[i] = game->data_is_shared[i];
   }
   new_game->player_on_turn_index = game->player_on_turn_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;

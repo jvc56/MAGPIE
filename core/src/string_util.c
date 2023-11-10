@@ -11,11 +11,11 @@
 
 // Misc string functions
 
-int prefix(const char *pre, const char *str) {
+bool has_prefix(const char *pre, const char *str) {
   return strncmp(pre, str, string_length(pre)) == 0;
 }
 
-int is_all_whitespace_or_empty(const char *str) {
+bool is_all_whitespace_or_empty(const char *str) {
   while (*str != '\0') {
     if (!isspace((unsigned char)*str)) {
       return 0;
@@ -25,7 +25,7 @@ int is_all_whitespace_or_empty(const char *str) {
   return 1;
 }
 
-int is_all_digits_or_empty(const char *str) {
+bool is_all_digits_or_empty(const char *str) {
   while (*str != '\0') {
     if (!isdigit((unsigned char)*str)) {
       return 0;
@@ -36,10 +36,23 @@ int is_all_digits_or_empty(const char *str) {
 }
 
 bool strings_equal(const char *str1, const char *str2) {
+  if (!str1 && !str2) {
+    return true;
+  }
+  if (!str1 || !str2) {
+    return false;
+  }
   return strcmp(str1, str2) == 0;
 }
 
-bool is_string_empty(const char *str1) { return strings_equal(str1, ""); }
+bool is_string_empty(const char *str) { return strings_equal(str, ""); }
+
+bool is_string_empty_or_null(const char *str) {
+  if (!str) {
+    return true;
+  }
+  return strings_equal(str, "");
+}
 
 char *string_copy(char *dest, const char *src) {
   // FIXME: this is unsafe, need to check bounds
@@ -64,7 +77,137 @@ size_t string_length(const char *str) {
   return strlen(str);
 }
 
-// String utility functions
+void trim_semicolon(char *str) {
+  size_t str_length = string_length(str);
+  if (str_length == 0) {
+    return;
+  }
+  if (str[str_length - 1] == ';') {
+    str[str_length - 1] = '\0';
+  }
+}
+
+bool matches_trim_condition(const char input_c, const char trim_c,
+                            bool trim_whitespace) {
+  return (isspace(input_c) && trim_whitespace) ||
+         (input_c == trim_c && !trim_whitespace);
+}
+
+void trim_internal(char *str, const char c, bool trim_whitespace) {
+  if (!str) {
+    return;
+  }
+
+  char *ptr = str;
+  int len = strlen(ptr);
+
+  while (len - 1 > 0 &&
+         matches_trim_condition(ptr[len - 1], c, trim_whitespace)) {
+    ptr[--len] = 0;
+  }
+
+  while (*ptr && matches_trim_condition(*ptr, c, trim_whitespace)) {
+    ++ptr;
+    --len;
+  }
+
+  memmove(str, ptr, len + 1);
+}
+
+void trim_whitespace(char *str) { trim_internal(str, 0, true); }
+
+void trim_char(char *str, const char c) { trim_internal(str, c, false); }
+
+bool has_substring(const char *str, const char *pattern) {
+  // If the pattern is empty or both strings are equal, return true
+  if (is_string_empty_or_null(pattern) || strings_equal(str, pattern)) {
+    return true;
+  }
+
+  // Check if pattern exists in str using strstr function
+  const char *ptr = strstr(str, pattern);
+  return (ptr != NULL);
+}
+
+char *get_string_from_file(const char *filename) {
+  FILE *file_handle = fopen(filename, "r");
+  if (!file_handle) {
+    log_fatal("Error opening file: %s\n", filename);
+  }
+
+  // Get the file size by seeking to the end and then back to the beginning
+  fseek(file_handle, 0, SEEK_END);
+  long file_size = ftell(file_handle);
+  fseek(file_handle, 0, SEEK_SET);
+
+  char *result_string =
+      (char *)malloc_or_die(file_size + 1); // +1 for null terminator
+  if (!result_string) {
+    fclose(file_handle);
+    log_fatal("Memory allocation error while reading file: %s\n", filename);
+  }
+
+  size_t bytes_read = fread(result_string, 1, file_size, file_handle);
+  if (bytes_read != (size_t)file_size) {
+    fclose(file_handle);
+    free(result_string);
+    log_fatal("Error reading file: %s\n", filename);
+  }
+
+  result_string[file_size] = '\0';
+  fclose(file_handle);
+
+  return result_string;
+}
+
+void write_string_to_file(const char *filename, const char *mode,
+                          const char *string) {
+  FILE *file_handle = fopen(filename, mode);
+  if (!file_handle) {
+    log_fatal("Error opening file for writing: %s\n", filename);
+  }
+
+  // Write string to file
+  if (fputs(string, file_handle) == EOF) {
+    fclose(file_handle);
+    log_fatal("Error writing to file: %s\n", filename);
+  }
+
+  // Close the file handle
+  fclose(file_handle);
+}
+
+char *iso_8859_1_to_utf8(const char *iso_8859_1_string) {
+  if (iso_8859_1_string == NULL) {
+    return NULL;
+  }
+
+  size_t iso_len = string_length(iso_8859_1_string);
+  char *utf8_string = (char *)malloc_or_die(
+      (iso_len * 4 + 1) *
+      sizeof(char)); // UTF-8 can be up to 4 times longer than ISO-8859-1
+
+  char *iso_8859_1_string_pointer = (char *)iso_8859_1_string;
+  char *utf8_string_pointer = utf8_string;
+
+  while (*iso_8859_1_string_pointer != '\0') {
+    if (*iso_8859_1_string_pointer < 0) {
+      // Handle non-ASCII characters
+      *utf8_string_pointer++ =
+          (char)(0xC0 | (*(unsigned char *)iso_8859_1_string_pointer >> 6));
+      *utf8_string_pointer++ =
+          (char)(0x80 | (*iso_8859_1_string_pointer & 0x3F));
+    } else {
+      // Handle ASCII characters
+      *utf8_string_pointer++ = *iso_8859_1_string_pointer;
+    }
+    iso_8859_1_string_pointer++;
+  }
+
+  *utf8_string_pointer = '\0'; // Null-terminate the UTF-8 string
+
+  return utf8_string;
+}
 
 char *format_string_with_va_list(const char *format, va_list *args) {
   int size;
@@ -309,9 +452,6 @@ bool char_matches_string_delimiter(StringDelimiter *string_delimiter,
   case STRING_DELIMITER_WHITESPACE:
     return isspace(c);
     break;
-  default:
-    log_fatal("string delimiter class unhandled: %d\n",
-              string_delimiter->string_delimiter_class);
   }
   return false;
 }
@@ -320,12 +460,38 @@ int string_splitter_get_number_of_items(StringSplitter *string_splitter) {
   return string_splitter->number_of_items;
 }
 
-char *string_splitter_get_item(StringSplitter *string_splitter,
-                               int item_index) {
+const char *string_splitter_get_item(StringSplitter *string_splitter,
+                                     int item_index) {
   if (item_index >= string_splitter->number_of_items || item_index < 0) {
-    log_fatal("string item out of range: %d\n", item_index);
+    log_fatal("string item out of range (%d): %d\n",
+              string_splitter->number_of_items, item_index);
   }
   return string_splitter->items[item_index];
+}
+
+void string_splitter_trim_char(StringSplitter *string_splitter, const char c) {
+  int number_of_items = string_splitter_get_number_of_items(string_splitter);
+  for (int i = 0; i < number_of_items; i++) {
+    trim_char(string_splitter->items[i], c);
+  }
+}
+
+char *string_splitter_join(StringSplitter *string_splitter, int start_index,
+                           int end_index) {
+  int number_of_items = string_splitter_get_number_of_items(string_splitter);
+  if (start_index < 0 || end_index < 0 || start_index > number_of_items ||
+      end_index > number_of_items) {
+    log_fatal("invalid bounds for join: %d, %d, %d\n", start_index, end_index,
+              number_of_items);
+  }
+  StringBuilder *joined_string_builder = create_string_builder();
+  for (int i = start_index; i < end_index; i++) {
+    string_builder_add_string(joined_string_builder,
+                              string_splitter_get_item(string_splitter, i), 0);
+  }
+  char *joined_string = string_builder_dump(joined_string_builder, NULL);
+  destroy_string_builder(joined_string_builder);
+  return joined_string;
 }
 
 int split_string_scan(StringSplitter *string_splitter, const char *input_string,
@@ -415,4 +581,12 @@ StringSplitter *split_string(const char *input_string, const char delimiter,
                              bool ignore_empty) {
   return split_string_by_range(input_string, delimiter, delimiter,
                                ignore_empty);
+}
+
+StringSplitter *split_file_by_newline(const char *filename) {
+  char *file_content = get_string_from_file(filename);
+  StringSplitter *file_content_split_by_newline =
+      split_string(file_content, '\n', true);
+  free(file_content);
+  return file_content_split_by_newline;
 }

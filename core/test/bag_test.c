@@ -8,8 +8,8 @@
 #include "../src/letter_distribution.h"
 #include "../src/string_util.h"
 
-#include "superconfig.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void test_add_letter(Config *config, Bag *bag, char *r,
                      char *expected_bag_string) {
@@ -21,13 +21,13 @@ void test_add_letter(Config *config, Bag *bag, char *r,
   destroy_string_builder(bag_string);
 }
 
-void test_bag(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_bag(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Bag *bag = create_bag(config->letter_distribution);
   Rack *rack = create_rack(config->letter_distribution->size);
 
   // Check initial bag configuration
-  assert(bag->last_tile_index == BAG_SIZE - 1);
+  assert(bag->last_tile_index == bag->size - 1);
 
   for (uint32_t i = 0; i < (config->letter_distribution->size); i++) {
     uint32_t number_of_letters = 0;

@@ -15,9 +15,9 @@
 
 #include "cross_set_test.h"
 #include "rack_test.h"
-#include "superconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 int count_scoring_plays(MoveList *ml) {
   int sum = 0;
@@ -61,11 +61,19 @@ void boards_equal(Board *b1, Board *b2) {
 
 void execute_recursive_gen(Generator *gen, int col, Player *player,
                            int leftstrip, int rightstrip, int unique_play) {
+  gen->move_sort_type = player->move_sort_type;
+  gen->move_record_type = player->move_record_type;
+  gen->apply_placement_adjustment = true;
   init_leave_map(gen->leave_map, player->rack);
   load_row_letter_cache(gen, gen->current_row_index);
-  recursive_gen(gen, col, player, NULL,
-                kwg_get_root_node_index(player->strategy_params->kwg),
+  recursive_gen(gen, col, player, NULL, kwg_get_root_node_index(player->kwg),
                 leftstrip, rightstrip, unique_play);
+}
+
+void generate_moves_for_movegen(Generator *gen, Player *player, Rack *opp_rack,
+                                int add_exchange) {
+  generate_moves(gen, player, opp_rack, add_exchange, player->move_record_type,
+                 player->move_sort_type, true);
 }
 
 void test_simple_case(Game *game, Player *player, const char *rack_string,
@@ -85,11 +93,11 @@ void test_simple_case(Game *game, Player *player, const char *rack_string,
   reset_rack(player->rack);
 }
 
-void macondo_tests(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void macondo_tests(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
-  KWG *kwg = player->strategy_params->kwg;
+  const KWG *kwg = player->kwg;
 
   // TestGenBase
   clear_all_crosses(game->gen->board);
@@ -138,7 +146,6 @@ void macondo_tests(SuperConfig *superconfig) {
   assert(game->gen->move_list->count == 1);
   assert_move(game, NULL, 0, "5B HI(THERMOS)T 36");
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestRowGen
@@ -159,7 +166,6 @@ void macondo_tests(SuperConfig *superconfig) {
   assert_move(game, test_row_gen_sorted_move_list, 1, "5C RE(GLOWS) 11");
 
   destroy_sorted_move_list(test_row_gen_sorted_move_list);
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestOtherRowGen
@@ -173,7 +179,6 @@ void macondo_tests(SuperConfig *superconfig) {
   assert(game->gen->move_list->count == 1);
   assert_move(game, NULL, 0, "15C A(VENGED) 12");
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestOneMoreRowGen
@@ -187,7 +192,6 @@ void macondo_tests(SuperConfig *superconfig) {
   assert(game->gen->move_list->count == 1);
   assert_move(game, NULL, 0, "1L (F)A 5");
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenMoveJustOnce
@@ -206,22 +210,20 @@ void macondo_tests(SuperConfig *superconfig) {
   }
   assert(game->gen->move_list->count == 34);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesSingleTile
   load_cgp(game, VS_MATT);
   set_rack_to_string(player->rack, "A", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
   assert(game->gen->move_list->count == 25);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesFullRack
   load_cgp(game, VS_MATT);
   set_rack_to_string(player->rack, "AABDELT", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 667);
   assert(count_nonscoring_plays(game->gen->move_list) == 96);
 
@@ -237,43 +239,39 @@ void macondo_tests(SuperConfig *superconfig) {
 
   destroy_sorted_move_list(test_gen_all_moves_full_rack_sorted_move_list);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesFullRackAgain
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "AFGIIIS", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 219);
   assert(count_nonscoring_plays(game->gen->move_list) == 64);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesSingleBlank
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "?", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 169);
   assert(count_nonscoring_plays(game->gen->move_list) == 2);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesTwoBlanksOnly
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "??", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 1961);
   assert(count_nonscoring_plays(game->gen->move_list) == 3);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenAllMovesWithBlanks
   load_cgp(game, VS_JEREMY);
   set_rack_to_string(player->rack, "DDESW??", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
   assert(count_scoring_plays(game->gen->move_list) == 8285);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
 
@@ -287,13 +285,12 @@ void macondo_tests(SuperConfig *superconfig) {
 
   destroy_sorted_move_list(test_gen_all_moves_with_blanks_sorted_move_list);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGiantTwentySevenTimer
   load_cgp(game, VS_OXY);
   set_rack_to_string(player->rack, "ABEOPXZ", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
   assert(count_scoring_plays(game->gen->move_list) == 513);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
 
@@ -309,7 +306,7 @@ void macondo_tests(SuperConfig *superconfig) {
 
   // TestGenerateEmptyBoard
   set_rack_to_string(player->rack, "DEGORV?", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 3307);
   assert(count_nonscoring_plays(game->gen->move_list) == 128);
 
@@ -324,24 +321,20 @@ void macondo_tests(SuperConfig *superconfig) {
   assert(move->row_start == 7);
 
   destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestGenerateNoPlays
   load_cgp(game, VS_JEREMY);
   set_rack_to_string(player->rack, "V", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
   assert(count_scoring_plays(game->gen->move_list) == 0);
   assert(count_nonscoring_plays(game->gen->move_list) == 1);
   assert(game->gen->move_list->moves[0]->move_type == GAME_EVENT_PASS);
 
-  reset_game(game);
   reset_rack(player->rack);
 
   // TestRowEquivalent
   load_cgp(game, TEST_DUPE);
-  generate_all_cross_sets(game->gen->board, kwg, kwg,
-                          game->gen->letter_distribution, 0);
 
   Game *game_two = create_game(config);
 
@@ -350,7 +343,8 @@ void macondo_tests(SuperConfig *superconfig) {
   set_row(game_two, 9, "T");
   update_all_anchors(game_two->gen->board);
   generate_all_cross_sets(game_two->gen->board, kwg, kwg,
-                          game_two->gen->letter_distribution, 0);
+                          game_two->gen->letter_distribution,
+                          game->data_is_shared[PLAYERS_DATA_TYPE_KWG]);
 
   boards_equal(game->gen->board, game_two->gen->board);
 
@@ -360,7 +354,7 @@ void macondo_tests(SuperConfig *superconfig) {
 
   // TestGenExchange
   set_rack_to_string(player->rack, "ABCDEF?", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_nonscoring_plays(game->gen->move_list) == 128);
 
   destroy_game(game);
@@ -368,14 +362,13 @@ void macondo_tests(SuperConfig *superconfig) {
 }
 
 // print assertions to paste into leave_lookup_test
-void print_leave_lookup_test(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void print_leave_lookup_test(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
-  char cgp[300] =
-      "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
-      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
-      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+  char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+                  "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+                  "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
 
   double *leaves = game->gen->leave_map->leave_values;
@@ -404,74 +397,73 @@ void print_leave_lookup_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void leave_lookup_test(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void leave_lookup_test(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
-  char cgp[300] =
-      "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
-      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
-      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+  char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+                  "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+                  "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
 
   for (int i = 0; i < 2; i++) {
     int add_exchanges = i == 0;
     generate_leaves_for_game(game, add_exchanges);
     double *leaves = game->gen->leave_map->leave_values;
-    assert(within_epsilon(leaves[0], +0.000000));         //
-    assert(within_epsilon(leaves[1], -0.079110));         // M
-    assert(within_epsilon(leaves[2], -1.092266));         // O
-    assert(within_epsilon(leaves[3], +0.427566));         // MO
-    assert(within_epsilon(leaves[6], -8.156165));         // OO
-    assert(within_epsilon(leaves[7], -4.466051));         // MOO
-    assert(within_epsilon(leaves[14], -18.868383));       // OOO
-    assert(within_epsilon(leaves[15], -14.565833));       // MOOO
-    assert(within_epsilon(leaves[16], +1.924450));        // R
-    assert(within_epsilon(leaves[17], +0.965204));        // MR
-    assert(within_epsilon(leaves[18], +1.631953));        // OR
-    assert(within_epsilon(leaves[19], +2.601703));        // MOR
-    assert(within_epsilon(leaves[22], -5.642596));        // OOR
-    assert(within_epsilon(leaves[23], -1.488737));        // MOOR
-    assert(within_epsilon(leaves[30], -17.137913));       // OOOR
-    assert(within_epsilon(leaves[31], -12.899072));       // MOOOR
-    assert(within_epsilon(leaves[48], -5.277321));        // RT
-    assert(within_epsilon(leaves[49], -7.450112));        // MRT
-    assert(within_epsilon(leaves[50], -4.813058));        // ORT
-    assert(within_epsilon(leaves[51], -4.582363));        // MORT
-    assert(within_epsilon(leaves[54], -11.206508));       // OORT
-    assert(within_epsilon(leaves[55], -7.305244));        // MOORT
-    assert(within_epsilon(leaves[62], -21.169294));       // OOORT
-    assert(within_epsilon(leaves[63], -16.637489));       // MOOORT
-    assert(within_epsilon(leaves[64], +0.878783));        // T
-    assert(within_epsilon(leaves[65], -0.536439));        // MT
-    assert(within_epsilon(leaves[66], +0.461634));        // OT
-    assert(within_epsilon(leaves[67], +0.634061));        // MOT
-    assert(within_epsilon(leaves[70], -6.678402));        // OOT
-    assert(within_epsilon(leaves[71], -3.665847));        // MOOT
-    assert(within_epsilon(leaves[78], -18.284534));       // OOOT
-    assert(within_epsilon(leaves[79], -14.382346));       // MOOOT
-    assert(within_epsilon(leaves[80], +2.934475));        // RT
-    assert(within_epsilon(leaves[81], +0.090591));        // MRT
-    assert(within_epsilon(leaves[82], +3.786163));        // ORT
-    assert(within_epsilon(leaves[83], +2.442589));        // MORT
-    assert(within_epsilon(leaves[86], -3.260469));        // OORT
-    assert(within_epsilon(leaves[87], -0.355031));        // MOORT
-    assert(within_epsilon(leaves[94], -15.671781));       // OOORT
-    assert(within_epsilon(leaves[95], -12.082211));       // MOOORT
-    assert(within_epsilon(leaves[112], -5.691820));       // RTT
-    assert(within_epsilon(leaves[113], -10.848881));      // MRTT
-    assert(within_epsilon(leaves[114], -3.967470));       // ORTT
-    assert(within_epsilon(leaves[115], -7.316442));       // MORTT
-    assert(within_epsilon(leaves[118], -9.621570));       // OORTT
-    assert(within_epsilon(leaves[119], -8.197909));       // MOORTT
-    assert(within_epsilon(leaves[126], -18.412781));      // OOORTT
-    assert(within_epsilon(leaves[127], -100000.000000));  // MOOORTT
+    assert(within_epsilon(leaves[0], +0.000000));        //
+    assert(within_epsilon(leaves[1], -0.079110));        // M
+    assert(within_epsilon(leaves[2], -1.092266));        // O
+    assert(within_epsilon(leaves[3], +0.427566));        // MO
+    assert(within_epsilon(leaves[6], -8.156165));        // OO
+    assert(within_epsilon(leaves[7], -4.466051));        // MOO
+    assert(within_epsilon(leaves[14], -18.868383));      // OOO
+    assert(within_epsilon(leaves[15], -14.565833));      // MOOO
+    assert(within_epsilon(leaves[16], +1.924450));       // R
+    assert(within_epsilon(leaves[17], +0.965204));       // MR
+    assert(within_epsilon(leaves[18], +1.631953));       // OR
+    assert(within_epsilon(leaves[19], +2.601703));       // MOR
+    assert(within_epsilon(leaves[22], -5.642596));       // OOR
+    assert(within_epsilon(leaves[23], -1.488737));       // MOOR
+    assert(within_epsilon(leaves[30], -17.137913));      // OOOR
+    assert(within_epsilon(leaves[31], -12.899072));      // MOOOR
+    assert(within_epsilon(leaves[48], -5.277321));       // RT
+    assert(within_epsilon(leaves[49], -7.450112));       // MRT
+    assert(within_epsilon(leaves[50], -4.813058));       // ORT
+    assert(within_epsilon(leaves[51], -4.582363));       // MORT
+    assert(within_epsilon(leaves[54], -11.206508));      // OORT
+    assert(within_epsilon(leaves[55], -7.305244));       // MOORT
+    assert(within_epsilon(leaves[62], -21.169294));      // OOORT
+    assert(within_epsilon(leaves[63], -16.637489));      // MOOORT
+    assert(within_epsilon(leaves[64], +0.878783));       // T
+    assert(within_epsilon(leaves[65], -0.536439));       // MT
+    assert(within_epsilon(leaves[66], +0.461634));       // OT
+    assert(within_epsilon(leaves[67], +0.634061));       // MOT
+    assert(within_epsilon(leaves[70], -6.678402));       // OOT
+    assert(within_epsilon(leaves[71], -3.665847));       // MOOT
+    assert(within_epsilon(leaves[78], -18.284534));      // OOOT
+    assert(within_epsilon(leaves[79], -14.382346));      // MOOOT
+    assert(within_epsilon(leaves[80], +2.934475));       // RT
+    assert(within_epsilon(leaves[81], +0.090591));       // MRT
+    assert(within_epsilon(leaves[82], +3.786163));       // ORT
+    assert(within_epsilon(leaves[83], +2.442589));       // MORT
+    assert(within_epsilon(leaves[86], -3.260469));       // OORT
+    assert(within_epsilon(leaves[87], -0.355031));       // MOORT
+    assert(within_epsilon(leaves[94], -15.671781));      // OOORT
+    assert(within_epsilon(leaves[95], -12.082211));      // MOOORT
+    assert(within_epsilon(leaves[112], -5.691820));      // RTT
+    assert(within_epsilon(leaves[113], -10.848881));     // MRTT
+    assert(within_epsilon(leaves[114], -3.967470));      // ORTT
+    assert(within_epsilon(leaves[115], -7.316442));      // MORTT
+    assert(within_epsilon(leaves[118], -9.621570));      // OORTT
+    assert(within_epsilon(leaves[119], -8.197909));      // MOORTT
+    assert(within_epsilon(leaves[126], -18.412781));     // OOORTT
+    assert(within_epsilon(leaves[127], -100000.000000)); // MOOORTT
   }
   destroy_game(game);
 }
 
-void exchange_tests(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void exchange_tests(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
@@ -488,7 +480,6 @@ void exchange_tests(SuperConfig *superconfig) {
   assert(test_not_an_exchange_sorted_move_list->moves[0]->move_type ==
          GAME_EVENT_TILE_PLACEMENT_MOVE);
   destroy_sorted_move_list(test_not_an_exchange_sorted_move_list);
-  reset_game(game);
 
   load_cgp(game, cgp);
   // The second top equity play only uses
@@ -500,13 +491,16 @@ void exchange_tests(SuperConfig *superconfig) {
 
   assert(test_exchange_sorted_move_list->moves[0]->move_type ==
          GAME_EVENT_EXCHANGE);
+  assert(test_exchange_sorted_move_list->moves[0]->score == 0);
+  assert(test_exchange_sorted_move_list->moves[0]->tiles_length ==
+         test_exchange_sorted_move_list->moves[0]->tiles_played + 1);
   destroy_sorted_move_list(test_exchange_sorted_move_list);
 
   destroy_game(game);
 }
 
-void many_moves_tests(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void many_moves_tests(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   load_cgp(game, MANY_MOVES);
@@ -517,18 +511,18 @@ void many_moves_tests(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void equity_test(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void equity_test(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
 
   Game *game = create_game(config);
   Player *player = game->players[0];
-  player->strategy_params->move_sorting = MOVE_SORT_EQUITY;
-  KLV *klv = player->strategy_params->klv;
+  player->move_sort_type = MOVE_SORT_EQUITY;
+  const KLV *klv = player->klv;
   // A middlegame is chosen to avoid
   // the opening and endgame equity adjustments
   load_cgp(game, VS_ED);
   set_rack_to_string(player->rack, "AFGIIIS", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 1);
+  generate_moves_for_movegen(game->gen, player, NULL, 1);
   assert(count_scoring_plays(game->gen->move_list) == 219);
   assert(count_nonscoring_plays(game->gen->move_list) == 64);
 
@@ -555,45 +549,36 @@ void equity_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void top_equity_play_recorder_test(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void top_equity_play_recorder_test(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
 
   Game *game = create_game(config);
   Player *player = game->players[0];
-  int saved_recorder_type = player->strategy_params->play_recorder_type;
-  player->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
+  player->move_record_type = MOVE_RECORD_BEST;
 
   load_cgp(game, VS_JEREMY);
   set_rack_to_string(player->rack, "DDESW??", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
 
   assert_move(game, NULL, 0, "14B hEaDW(OR)DS 106");
 
-  reset_game(game);
   reset_rack(player->rack);
 
   load_cgp(game, VS_OXY);
   set_rack_to_string(player->rack, "ABEOPXZ", game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, 0);
+  generate_moves_for_movegen(game->gen, player, NULL, 0);
 
   assert_move(game, NULL, 0, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
-
-  // reset play recorder type as this is a shared config.
-  player->strategy_params->play_recorder_type = saved_recorder_type;
 
   destroy_game(game);
 }
 
-void distinct_lexica_test(SuperConfig *superconfig) {
-  Config *config = get_distinct_lexica_config(superconfig);
+void distinct_lexica_test(TestConfig *testconfig) {
+  Config *config = get_distinct_lexica_config(testconfig);
 
   Game *game = create_game(config);
-  int player_1_saved_recorder_type =
-      game->players[0]->strategy_params->play_recorder_type;
-  int player_2_saved_recorder_type =
-      game->players[1]->strategy_params->play_recorder_type;
-  game->players[0]->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
-  game->players[1]->strategy_params->play_recorder_type = MOVE_RECORDER_BEST;
+  game->players[0]->move_record_type = MOVE_RECORD_BEST;
+  game->players[1]->move_record_type = MOVE_RECORD_BEST;
 
   // Play SPORK, better than best NWL move of PORKS
   set_rack_to_string(game->players[0]->rack, "KOPRRSS",
@@ -634,20 +619,13 @@ void distinct_lexica_test(SuperConfig *superconfig) {
   play_move(game, game->gen->move_list->moves[0]);
   reset_move_list(game->gen->move_list);
 
-  game->players[0]->strategy_params->play_recorder_type =
-      player_1_saved_recorder_type;
-
-  game->players[1]->strategy_params->play_recorder_type =
-      player_2_saved_recorder_type;
-
   destroy_game(game);
 }
 
-void test_movegen(SuperConfig *superconfig) {
-  macondo_tests(superconfig);
-  exchange_tests(superconfig);
-  leave_lookup_test(superconfig);
-  equity_test(superconfig);
-  top_equity_play_recorder_test(superconfig);
-  distinct_lexica_test(superconfig);
+void test_movegen(TestConfig *testconfig) {
+  macondo_tests(testconfig);
+  exchange_tests(testconfig);
+  equity_test(testconfig);
+  top_equity_play_recorder_test(testconfig);
+  distinct_lexica_test(testconfig);
 }

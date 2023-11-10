@@ -6,7 +6,7 @@
 #include "../src/rack.h"
 
 #include "rack_test.h"
-#include "superconfig.h"
+#include "testconfig.h"
 #include "test_util.h"
 
 void take_set(LeaveMap *leave_map, Rack *rack,
@@ -41,8 +41,8 @@ void take_set_add(LeaveMap *leave_map, Rack *rack,
   assert(leave_map->current_index == expected_add_index);
 }
 
-void test_leave_map(SuperConfig *superconfig) {
-  Config *config = get_csw_config(superconfig);
+void test_leave_map(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
   LetterDistribution *letter_distribution = config->letter_distribution;
   Rack *rack = create_rack(config->letter_distribution->size);
   LeaveMap *leave_map = create_leave_map(rack->array_size);

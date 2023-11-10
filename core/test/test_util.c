@@ -1,8 +1,11 @@
 #include <assert.h>
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "../src/board.h"
 #include "../src/config.h"
@@ -11,6 +14,7 @@
 #include "../src/gameplay.h"
 #include "../src/infer.h"
 #include "../src/klv.h"
+#include "../src/log.h"
 #include "../src/move.h"
 #include "../src/rack.h"
 #include "../src/util.h"
@@ -20,24 +24,33 @@
 
 int within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
-double get_leave_value_for_rack(KLV *klv, Rack *rack) {
+double get_leave_value_for_rack(const KLV *klv, Rack *rack) {
   return get_leave_value(klv, rack);
+}
+
+void load_config_or_die(Config *config, const char *cmd) {
+  config_load_status_t status = load_config(config, cmd);
+  if (status != CONFIG_LOAD_STATUS_SUCCESS) {
+    log_fatal("load config failed with status %d\n", status);
+  }
 }
 
 void generate_moves_for_game(Game *game) {
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 game->players[game->player_on_turn_index]->move_record_type,
+                 game->players[game->player_on_turn_index]->move_sort_type,
+                 true);
 }
 
-void generate_leaves_for_game(Game* game, int add_exchange) {
+void generate_leaves_for_game(Game *game, int add_exchange) {
   Generator *gen = game->gen;
   Player *player = game->players[game->player_on_turn_index];
-    init_leave_map(gen->leave_map, player->rack);
+  init_leave_map(gen->leave_map, player->rack);
   if (player->rack->number_of_letters < RACK_SIZE) {
-    set_current_value(
-        gen->leave_map,
-        get_leave_value(player->strategy_params->klv, player->rack));
+    set_current_value(gen->leave_map,
+                      get_leave_value(player->klv, player->rack));
   } else {
     set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
@@ -116,7 +129,10 @@ void sort_and_print_move_list(Board *board,
 void play_top_n_equity_move(Game *game, int n) {
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE);
+                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 game->players[game->player_on_turn_index]->move_record_type,
+                 game->players[game->player_on_turn_index]->move_sort_type,
+                 true);
   SortedMoveList *sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
   play_move(game, sorted_move_list->moves[n]);
@@ -149,7 +165,13 @@ int count_newlines(const char *str) {
 
 void assert_strings_equal(const char *str1, const char *str2) {
   if (!strings_equal(str1, str2)) {
-    fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, str2);
+    if (str1 && !str2) {
+      fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, "(NULL)");
+    } else if (!str1 && str2) {
+      fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", "(NULL)", str2);
+    } else {
+      fprintf(stderr, "strings are not equal:\n>%s<\n>%s<\n", str1, str2);
+    }
     assert(0);
   }
 }
@@ -172,3 +194,33 @@ void assert_move(Game *game, SortedMoveList *sml, int move_index,
   }
   destroy_string_builder(move_string);
 }
+
+char *get_test_filename(const char *filename) {
+  return get_formatted_string("%s%s", TESTDATA_FILEPATH, filename);
+}
+
+void delete_file(const char *filename) {
+  int result = remove(filename);
+  if (result != 0) {
+    int error_number = errno;
+    if (error_number != ENOENT) {
+      log_fatal("remove %s failed with code: %d\n", filename, error_number);
+    }
+  }
+}
+
+void reset_file(const char *filename) { fclose(fopen(filename, "w")); }
+
+void create_fifo(const char *fifo_name) {
+  int result;
+
+  result = mkfifo(fifo_name, 0666); // Read/write permissions for everyone
+  if (result < 0) {
+    int error_number = errno;
+    if (error_number != EEXIST) {
+      log_fatal("mkfifo %s for with %d\n", fifo_name, error_number);
+    }
+  }
+}
+
+void delete_fifo(const char *fifo_name) { unlink(fifo_name); }

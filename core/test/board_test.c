@@ -7,9 +7,9 @@
 #include "../src/game.h"
 
 #include "board_test.h"
-#include "superconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
   // Test cross set
@@ -37,8 +37,8 @@ void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
   assert(!allowed(cs, 12));
 }
 
-void test_board(SuperConfig *superconfig) {
-  Config *config = get_nwl_config(superconfig);
+void test_board(TestConfig *testconfig) {
+  Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   load_cgp(game, VS_ED);
 

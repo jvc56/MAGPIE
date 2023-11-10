@@ -8,15 +8,16 @@
 #include "../src/string_util.h"
 #include "../src/util.h"
 
-#include "superconfig.h"
 #include "test_util.h"
+#include "testconfig.h"
 
-void test_leaves(SuperConfig *superconfig, const char *leaves_csv_filename) {
-  Config *config = get_csw_config(superconfig);
-  KLV *klv = config->player_1_strategy_params->klv;
+void test_leaves(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
+  KLV *klv = players_data_get_klv(config->players_data, 0);
   LetterDistribution *letter_distribution = config->letter_distribution;
   Rack *rack = create_rack(config->letter_distribution->size);
 
+  const char *leaves_csv_filename = "./data/lexica/CSW21.csv";
   FILE *file = fopen(leaves_csv_filename, "r");
   if (!file) {
     log_fatal("Error opening file: %s\n", leaves_csv_filename);

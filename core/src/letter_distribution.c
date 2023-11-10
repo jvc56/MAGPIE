@@ -11,8 +11,6 @@
 #include "string_util.h"
 #include "util.h"
 
-#define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"
-#define LETTER_DISTRIBUTION_FILEPATH "data/letterdistributions/"
 #define INVALID_LETTER (0x80 - 1)
 
 extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
@@ -36,10 +34,22 @@ int get_letter_distribution_size(const char *filename) {
   return letter_distribution_size;
 }
 
+char *get_letter_distribution_filepath(const char *ld_name) {
+  // Check for invalid inputs
+  if (!ld_name) {
+    log_fatal("letter distribution name is null");
+  }
+  return get_formatted_string("%s%s%s", LETTER_DISTRIBUTION_FILEPATH, ld_name,
+                              LETTER_DISTRIBUTION_FILE_EXTENSION);
+}
+
 void load_letter_distribution(LetterDistribution *letter_distribution,
-                              const char *letter_distribution_filename) {
+                              const char *ld_name) {
   // This function call opens and closes the file, so
   // call it before the fopen to prevent a nested file read
+  char *letter_distribution_filename =
+      get_letter_distribution_filepath(ld_name);
+
   letter_distribution->size =
       get_letter_distribution_size(letter_distribution_filename);
 
@@ -48,6 +58,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     log_fatal("Error opening letter distribution file: %s\n",
               letter_distribution_filename);
   }
+  free(letter_distribution_filename);
 
   letter_distribution->distribution =
       (uint32_t *)malloc_or_die(letter_distribution->size * sizeof(uint32_t));
@@ -65,15 +76,23 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   int machine_letter = 0;
   char line[100];
   int max_tile_length = 0;
+  letter_distribution->total_tiles = 0;
   while (fgets(line, sizeof(line), file)) {
     if (is_all_whitespace_or_empty(line)) {
       continue;
     }
+    trim_whitespace(line);
     StringSplitter *single_letter_info = split_string(line, ',', true);
+    if (string_splitter_get_number_of_items(single_letter_info) != 5) {
+      log_fatal("invalid letter distribution line in %s:\n>%s<\n", ld_name,
+                line);
+    }
     // letter, lower case, dist, score, is_vowel
-    char *letter = string_splitter_get_item(single_letter_info, 0);
-    char *lower_case_letter = string_splitter_get_item(single_letter_info, 1);
+    const char *letter = string_splitter_get_item(single_letter_info, 0);
+    const char *lower_case_letter =
+        string_splitter_get_item(single_letter_info, 1);
     int dist = string_to_int(string_splitter_get_item(single_letter_info, 2));
+    letter_distribution->total_tiles += dist;
     int score = string_to_int(string_splitter_get_item(single_letter_info, 3));
     int is_vowel =
         string_to_int(string_splitter_get_item(single_letter_info, 4));
@@ -181,10 +200,10 @@ int str_to_machine_letters(LetterDistribution *letter_distribution,
   return num_mls;
 }
 
-LetterDistribution *create_letter_distribution(const char *filename) {
+LetterDistribution *create_letter_distribution(const char *ld_name) {
   LetterDistribution *letter_distribution =
       malloc_or_die(sizeof(LetterDistribution));
-  load_letter_distribution(letter_distribution, filename);
+  load_letter_distribution(letter_distribution, ld_name);
   return letter_distribution;
 }
 
@@ -196,19 +215,26 @@ void destroy_letter_distribution(LetterDistribution *letter_distribution) {
   free(letter_distribution);
 }
 
-char *get_letter_distribution_filepath(const char *ld_name) {
-  // Check for invalid inputs
-  if (!ld_name) {
-    return NULL;
+char *get_default_letter_distribution_name(const char *lexicon_name) {
+  char *ld_name = NULL;
+  if (has_prefix("CSW", lexicon_name) || has_prefix("NWL", lexicon_name) ||
+      has_prefix("TWL", lexicon_name) || has_prefix("America", lexicon_name)) {
+    ld_name = get_formatted_string("%s", ENGLISH_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("RD", lexicon_name)) {
+    ld_name = get_formatted_string("%s", GERMAN_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("NSF", lexicon_name)) {
+    ld_name = get_formatted_string("%s", NORWEGIAN_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("DISC", lexicon_name)) {
+    ld_name = get_formatted_string("%s", CATALAN_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("FRA", lexicon_name)) {
+    ld_name = get_formatted_string("%s", FRENCH_LETTER_DISTRIBUTION_NAME);
+  } else if (has_prefix("OSPS", lexicon_name)) {
+    ld_name = get_formatted_string("%s", POLISH_LETTER_DISTRIBUTION_NAME);
+  } else {
+    log_fatal("default letter distribution not found for lexicon %s\n",
+              lexicon_name);
   }
-  return get_formatted_string("%s%s%s", LETTER_DISTRIBUTION_FILEPATH, ld_name,
-                              LETTER_DISTRIBUTION_FILE_EXTENSION);
-}
-
-// FIXME: return letter distrubitions other than english
-char *get_letter_distribution_name_from_lexicon_name(const char *lexicon_name) {
-  log_warn("returning 'english' for %s", lexicon_name);
-  return strdup("english");
+  return ld_name;
 }
 
 void string_builder_add_user_visible_letter(

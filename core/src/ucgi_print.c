@@ -19,7 +19,7 @@ void print_ucgi_inference_current_rack(uint64_t current_rack_index,
                                        ThreadControl *thread_control) {
   char *current_rack_info_string = get_formatted_string(
       "info infercurrrack %llu\n", (long long unsigned int)current_rack_index);
-  print_to_file(thread_control, current_rack_info_string);
+  print_to_outfile(thread_control, current_rack_info_string);
   free(current_rack_info_string);
 }
 
@@ -28,7 +28,7 @@ void print_ucgi_inference_total_racks_evaluated(uint64_t total_racks_evaluated,
   char *total_racks_info_string =
       get_formatted_string("info infertotalracks %llu\n",
                            (long long unsigned int)total_racks_evaluated);
-  print_to_file(thread_control, total_racks_info_string);
+  print_to_outfile(thread_control, total_racks_info_string);
   free(total_racks_info_string);
 }
 
@@ -37,11 +37,11 @@ void string_builder_add_ucgi_leave_rack(LeaveRack *leave_rack, int index,
                                         LetterDistribution *letter_distribution,
                                         int is_exchange,
                                         StringBuilder *ucgi_string_builder) {
-  if (is_exchange) {
+  if (!is_exchange) {
     string_builder_add_rack(leave_rack->leave, letter_distribution,
                             ucgi_string_builder);
     string_builder_add_formatted_string(
-        ucgi_string_builder, "%-3d %-6.2f %-6d %0.2f\n", index + 1,
+        ucgi_string_builder, " %-3d %-6.2f %-6d %0.2f\n", index + 1,
         ((double)leave_rack->draws / total_draws) * 100, leave_rack->draws,
         leave_rack->equity);
   } else {
@@ -163,7 +163,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
         get_weight(common_leaves_record->equity_values),
         game->gen->letter_distribution, is_exchange, ucgi_string_builder);
   }
-  print_to_file(thread_control, string_builder_peek(ucgi_string_builder));
+  print_to_outfile(thread_control, string_builder_peek(ucgi_string_builder));
   destroy_string_builder(ucgi_string_builder);
 }
 
@@ -178,7 +178,7 @@ char *ucgi_static_moves(Game *game, int nmoves) {
         game->gen->letter_distribution, moves_string_builder);
 
     string_builder_add_formatted_string(moves_string_builder,
-                                        "sc %d eq %.3f it 0\n",
+                                        " sc %d eq %.3f it 0\n",
                                         game->gen->move_list->moves[i]->score,
                                         game->gen->move_list->moves[i]->equity);
   }
@@ -187,7 +187,8 @@ char *ucgi_static_moves(Game *game, int nmoves) {
                                game->gen->letter_distribution,
                                moves_string_builder);
   string_builder_add_string(moves_string_builder, "\n", 0);
-  char *ucgi_static_moves_string = string_builder_dump(moves_string_builder, 0);
+  char *ucgi_static_moves_string =
+      string_builder_dump(moves_string_builder, NULL);
   destroy_string_builder(moves_string_builder);
   return ucgi_static_moves_string;
 }
@@ -195,7 +196,7 @@ char *ucgi_static_moves(Game *game, int nmoves) {
 void print_ucgi_static_moves(Game *game, int nmoves,
                              ThreadControl *thread_control) {
   char *starting_moves_string_pointer = ucgi_static_moves(game, nmoves);
-  print_to_file(thread_control, starting_moves_string_pointer);
+  print_to_outfile(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
 }
 
@@ -268,7 +269,7 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
                                sim_stats_string_builder);
   string_builder_add_formatted_string(sim_stats_string_builder,
                                       "\ninfo nps %f\n", nps);
-  char *sim_stats_string = string_builder_dump(sim_stats_string_builder, 0);
+  char *sim_stats_string = string_builder_dump(sim_stats_string_builder, NULL);
   destroy_string_builder(sim_stats_string_builder);
   return sim_stats_string;
 }
@@ -276,7 +277,7 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
 void print_ucgi_sim_stats(Simmer *simmer, Game *game, int print_best_play) {
   char *starting_stats_string_pointer =
       ucgi_sim_stats(simmer, game, print_best_play);
-  print_to_file(simmer->thread_control, starting_stats_string_pointer);
+  print_to_outfile(simmer->thread_control, starting_stats_string_pointer);
   free(starting_stats_string_pointer);
 }
 
@@ -292,6 +293,6 @@ void print_ucgi_autoplay_results(AutoplayResults *autoplay_results,
       get_stdev(autoplay_results->p1_score),
       get_mean(autoplay_results->p2_score),
       get_stdev(autoplay_results->p2_score));
-  print_to_file(thread_control, results_string);
+  print_to_outfile(thread_control, results_string);
   free(results_string);
 }

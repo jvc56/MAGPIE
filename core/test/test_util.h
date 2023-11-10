@@ -19,8 +19,8 @@ typedef struct SortedMoveList {
 void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
                          LetterDistribution *letter_distribution);
 void generate_moves_for_game(Game *game);
+double get_leave_value_for_rack(const KLV *klv, Rack *rack);
 void generate_leaves_for_game(Game *game, int add_exchanges);
-double get_leave_value_for_rack(KLV *klv, Rack *rack);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *create_sorted_move_list(MoveList *ml);
 void destroy_sorted_move_list(SortedMoveList *sorted_move_list);
@@ -37,5 +37,11 @@ void assert_move(Game *game, SortedMoveList *sml, int move_index,
                  char *expected_move_string);
 void print_game(Game *game);
 void print_inference(Inference *inference, Rack *rack);
+void load_config_or_die(Config *config, const char *cmd);
+char *get_test_filename(const char *filename);
+void delete_file(const char *filename);
+void reset_file(const char *filename);
+void create_fifo(const char *fifo_name);
+void delete_fifo(const char *fifo_name);
 
 #endif
