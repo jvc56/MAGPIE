@@ -4,10 +4,10 @@
 
 MAGPIE is a crossword game playing and analysis program that currently supports the following features:
 
-* Static move generation
-* Montecarlo simulation
-* Exhaustive inferences
-* Autoplay
+- Static move generation
+- Montecarlo simulation
+- Exhaustive inferences
+- Autoplay
 
 MAGPIE is basically a C rewrite of [Macondo](https://github.com/domino14/macondo) and uses several algorithms and data structures originally developed in [wolges](https://github.com/andy-k/wolges), including shadow playing and the KWG and KLV data structures.
 
@@ -21,7 +21,7 @@ git clone https://github.com/jvc56/MAGPIE.git
 
 ## Compilation
 
-To compile the MAGPIE executable, navigate to the `/MAGPIE/core/` and run:
+To compile the MAGPIE executable, navigate to the `/MAGPIE/core/` directory and run:
 
 ```
 make magpie BUILD=release
@@ -47,9 +47,9 @@ will run 100 autoplay games in the CSW21 lexicon, print the result, and exit imm
 
 MAGPIE will exit immediately after completing the command if the following conditions are met:
 
- * A 'go' subcommand is specified
- * No infile is specified
- * No execution mode is specified
+- A 'go' subcommand is specified
+- No infile is specified
+- No execution mode is specified
 
 Otherwise, MAGPIE will not exit immediately.
 
@@ -87,10 +87,10 @@ magpie>go autoplay lex CSW21 s1 equity s2 equity r1 best r2 best i 100 numplays 
 
 ### UCGI mode
 
-UCGI mode implements the [UCGI Protocol](https://docs.google.com/document/d/175zdbEiS37XLG600fDafDyeOcLwHQ804xN4UNdU8h1Q), the crossward game equivalent to the [UCI Protocol](https://www.wbec-ridderkerk.nl/html/UCIProtocol.html). It operates exactly the same as console mode with the following exceptions:
+UCGI mode implements the [UCGI Protocol](https://docs.google.com/document/d/175zdbEiS37XLG600fDafDyeOcLwHQ804xN4UNdU8h1Q), the crossword game equivalent to the [UCI Protocol](https://www.wbec-ridderkerk.nl/html/UCIProtocol.html). It operates exactly the same as console mode with the following exceptions:
 
-* All commands are asynchronous. This means they will immediately start running in the background while MAGPIE continues to listen for user input.
-* The `stop` command will halt any ongoing commands.
+- All commands are asynchronous. This means they will immediately start running in the background while MAGPIE continues to listen for user input.
+- The `stop` command will halt any ongoing commands.
 
 To enter UCGI mode, specify the `ucgi` argument:
 
