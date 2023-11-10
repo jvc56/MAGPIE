@@ -30,9 +30,6 @@ CommandVars *create_command_vars() {
 }
 
 void destroy_command_vars(CommandVars *command_vars) {
-  if (command_vars->command) {
-    free(command_vars->command);
-  }
   if (command_vars->game) {
     destroy_game(command_vars->game);
   }
@@ -47,13 +44,12 @@ void destroy_command_vars(CommandVars *command_vars) {
   }
   destroy_config(command_vars->config);
   destroy_error_status(command_vars->error_status);
+  free(command_vars->command);
   free(command_vars);
 }
 
 void set_command(CommandVars *command_vars, const char *command) {
-  if (command_vars->command) {
-    free(command_vars->command);
-  }
+  free(command_vars->command);
   command_vars->command = get_formatted_string("%s", command);
 }
 
@@ -323,9 +319,7 @@ void command_scan_loop(CommandVars *command_vars,
       print_to_outfile(command_vars->config->thread_control, "magpie>");
     }
 
-    if (input) {
-      free(input);
-    }
+    free(input);
 
     input = getline_from_file(infile);
     if (!input) {
@@ -352,9 +346,7 @@ void command_scan_loop(CommandVars *command_vars,
       break;
     }
   }
-  if (input) {
-    free(input);
-  }
+  free(input);
 }
 
 char *create_command_from_args(int argc, char *argv[]) {

@@ -94,10 +94,7 @@ void destroy_simmer(Simmer *simmer) {
     destroy_rack(simmer->known_opp_rack);
   }
 
-  if (simmer->play_similarity_cache) {
-    free(simmer->play_similarity_cache);
-  }
-
+  free(simmer->play_similarity_cache);
   free(simmer);
 }
 
@@ -542,9 +539,7 @@ sim_status_t simulate(const Config *config, Simmer *simmer, Game *game) {
       simmer->known_opp_rack = NULL;
     }
 
-    if (simmer->play_similarity_cache) {
-      free(simmer->play_similarity_cache);
-    }
+    free(simmer->play_similarity_cache);
     simmer->play_similarity_cache =
         malloc_or_die(sizeof(int) * config->num_plays * config->num_plays);
     for (int i = 0; i < config->num_plays; i++) {

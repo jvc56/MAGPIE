@@ -22,10 +22,8 @@ void file_handler_clear_file_and_filename(FileHandler *fh) {
     fclose(fh->file);
     fh->file = NULL;
   }
-  if (fh->filename) {
-    free(fh->filename);
-    fh->filename = NULL;
-  }
+  free(fh->filename);
+  fh->filename = NULL;
 }
 
 const char *get_file_handler_filename(FileHandler *fh) { return fh->filename; }
