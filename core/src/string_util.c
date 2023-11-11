@@ -45,6 +45,16 @@ bool strings_equal(const char *str1, const char *str2) {
   return strcmp(str1, str2) == 0;
 }
 
+bool strings_iequal(const char *str1, const char *str2) {
+  if (!str1 && !str2) {
+    return true;
+  }
+  if (!str1 || !str2) {
+    return false;
+  }
+  return strcasecmp(str1, str2) == 0;
+}
+
 bool is_string_empty(const char *str) { return strings_equal(str, ""); }
 
 bool is_string_empty_or_null(const char *str) {
@@ -477,7 +487,7 @@ void string_splitter_trim_char(StringSplitter *string_splitter, const char c) {
 }
 
 char *string_splitter_join(StringSplitter *string_splitter, int start_index,
-                           int end_index) {
+                           int end_index, const char *separator) {
   int number_of_items = string_splitter_get_number_of_items(string_splitter);
   if (start_index < 0 || end_index < 0 || start_index > number_of_items ||
       end_index > number_of_items) {
@@ -488,6 +498,9 @@ char *string_splitter_join(StringSplitter *string_splitter, int start_index,
   for (int i = start_index; i < end_index; i++) {
     string_builder_add_string(joined_string_builder,
                               string_splitter_get_item(string_splitter, i), 0);
+    if (i < end_index - 1) {
+      string_builder_add_string(joined_string_builder, separator, 0);
+    }
   }
   char *joined_string = string_builder_dump(joined_string_builder, NULL);
   destroy_string_builder(joined_string_builder);
@@ -575,6 +588,11 @@ StringSplitter *split_string_by_whitespace(const char *input_string,
       split_string_internal(input_string, string_delimiter, ignore_empty);
   destroy_string_delimiter(string_delimiter);
   return string_splitter;
+}
+
+StringSplitter *split_string_by_newline(const char *input_string,
+                                        bool ignore_empty) {
+  return split_string(input_string, '\n', ignore_empty);
 }
 
 StringSplitter *split_string(const char *input_string, const char delimiter,

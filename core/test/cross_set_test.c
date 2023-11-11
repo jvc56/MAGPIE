@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "../src/config.h"
 #include "../src/cross_set.h"

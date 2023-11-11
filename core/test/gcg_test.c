@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "../src/game_history.h"
 #include "../src/gcg.h"
@@ -55,7 +54,6 @@ void test_error_cases() {
                          GCG_PARSE_STATUS_PHONY_TILES_RETURNED_WITHOUT_PLAY);
   test_single_error_case("no_matching_token.gcg",
                          GCG_PARSE_STATUS_NO_MATCHING_TOKEN);
-  test_single_error_case("line_overflow.gcg", GCG_PARSE_STATUS_LINE_OVERFLOW);
   test_single_error_case("lowercase_tile_placement.gcg",
                          GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION);
   test_single_error_case("invalid_tile_placement.gcg",

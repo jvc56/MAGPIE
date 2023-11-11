@@ -2,7 +2,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "game.h"
 #include "game_event.h"
@@ -10,13 +9,14 @@
 #include "log.h"
 #include "move.h"
 #include "rack.h"
+#include "string_util.h"
 #include "util.h"
 
 GameHistoryPlayer *create_game_history_player(const char *name,
                                               const char *nickname) {
   GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
-  player->name = strdup(name);
-  player->nickname = strdup(nickname);
+  player->name = get_formatted_string("%s", name);
+  player->nickname = get_formatted_string("%s", nickname);
   player->score = 0;
   player->last_known_rack = NULL;
   return player;

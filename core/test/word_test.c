@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "../src/config.h"
 #include "../src/game.h"

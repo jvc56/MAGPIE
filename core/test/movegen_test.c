@@ -2,7 +2,6 @@
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "../src/bag.h"
 #include "../src/cross_set.h"

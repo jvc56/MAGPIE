@@ -11,6 +11,7 @@ bool is_all_whitespace_or_empty(const char *str);
 bool is_all_digits_or_empty(const char *str);
 char *get_formatted_string(const char *format, ...);
 bool strings_equal(const char *str1, const char *str2);
+bool strings_iequal(const char *str1, const char *str2);
 char *string_copy(char *dest, const char *src);
 void *memory_copy(void *dest, const void *src, size_t n);
 int memory_compare(const void *s1, const void *s2, size_t n);
@@ -34,12 +35,14 @@ const char *string_splitter_get_item(StringSplitter *string_splitter,
                                      int item_index);
 void string_splitter_trim_char(StringSplitter *string_splitter, const char c);
 char *string_splitter_join(StringSplitter *string_splitter, int start_index,
-                           int end_index);
+                           int end_index, const char *separator);
 StringSplitter *split_string_by_whitespace(const char *input_string,
                                            bool ignore_empty);
 StringSplitter *split_string(const char *input_string, const char delimiter,
                              bool ignore_empty);
 void destroy_string_splitter(StringSplitter *string_splitter);
+StringSplitter *split_string_by_newline(const char *input_string,
+                                        bool ignore_empty);
 StringSplitter *split_file_by_newline(const char *filename);
 
 struct StringBuilder;
