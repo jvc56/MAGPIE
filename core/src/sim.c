@@ -104,7 +104,6 @@ SimmerWorker *create_simmer_worker(Simmer *simmer, const Game *game,
 
   simmer_worker->simmer = simmer;
   simmer_worker->thread_index = worker_index;
-  uint64_t seed = time(NULL);
   Game *new_game = copy_game(game, 1);
   simmer_worker->game = new_game;
   set_backup_mode(new_game, BACKUP_MODE_SIMULATION);
@@ -115,12 +114,8 @@ SimmerWorker *create_simmer_worker(Simmer *simmer, const Game *game,
 
   simmer_worker->rack_placeholder =
       create_rack(game->gen->letter_distribution->size);
-  // Give each game bag the same seed, but then change these:
-  seed_prng(new_game->gen->bag->prng, seed);
-  // "jump" each bag's prng thread number of times.
-  for (int j = 0; j < worker_index; j++) {
-    xoshiro_jump(new_game->gen->bag->prng);
-  }
+
+  seed_prng_for_worker(new_game->gen->bag->prng, simmer->seed, worker_index);
 
   return simmer_worker;
 }
@@ -511,6 +506,7 @@ sim_status_t simulate(const Config *config, const Game *game, Simmer *simmer) {
   simmer->thread_control = config->thread_control;
   simmer->max_plies = config->plies;
   simmer->threads = config->thread_control->number_of_threads;
+  simmer->seed = config->seed;
   simmer->max_iterations = config->max_iterations;
   simmer->stopping_condition = config->stopping_condition;
 

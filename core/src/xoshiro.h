@@ -13,6 +13,7 @@ typedef struct XoshiroPRNG {
 XoshiroPRNG *create_prng(uint64_t seed);
 void copy_prng_into(XoshiroPRNG *dst, const XoshiroPRNG *src);
 void seed_prng(XoshiroPRNG *x, uint64_t seed);
+void seed_prng_for_worker(XoshiroPRNG *prng, uint64_t seed, int worker_index);
 void xoshiro_jump(XoshiroPRNG *x);
 uint64_t xoshiro_next(XoshiroPRNG *x);
 void destroy_prng(XoshiroPRNG *x);

@@ -538,11 +538,11 @@ config_load_status_t load_use_game_pairs_for_config(Config *config,
 }
 
 config_load_status_t load_random_seed_for_config(Config *config,
-                                                 const char *random_seed) {
-  if (!is_all_digits_or_empty(random_seed)) {
+                                                 const char *seed) {
+  if (!is_all_digits_or_empty(seed)) {
     return CONFIG_LOAD_STATUS_MALFORMED_RANDOM_SEED;
   }
-  config->random_seed = string_to_uint64(random_seed);
+  config->seed = string_to_uint64(seed);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -1064,6 +1064,7 @@ void reset_transient_fields(Config *config) {
   config->command_set_cgp = false;
   config->command_set_infile = false;
   config->command_set_exec_mode = false;
+  config->seed = time(NULL);
 }
 
 config_load_status_t load_config(Config *config, const char *cmd) {
@@ -1126,7 +1127,9 @@ Config *create_default_config() {
   config->stopping_condition = DEFAULT_SIMMING_STOPPING_CONDITION;
   config->static_search_only = false;
   config->use_game_pairs = false;
-  config->random_seed = 0;
+  // The seed is set to a random value by default for each
+  // load in reset_transient_fields.
+  config->seed = 0;
   config->thread_control = create_thread_control();
   config->exec_mode = EXEC_MODE_CONSOLE;
   return config;

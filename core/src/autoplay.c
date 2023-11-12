@@ -9,7 +9,6 @@
 #include "game.h"
 #include "gameplay.h"
 #include "infer.h"
-#include "random.h"
 #include "thread_control.h"
 #include "ucgi_print.h"
 #include "util.h"
@@ -19,6 +18,7 @@ typedef struct AutoplayWorker {
   AutoplayResults *autoplay_results;
   int max_games_for_worker;
   int worker_index;
+  uint64_t seed;
 } AutoplayWorker;
 
 void reset_autoplay_results(AutoplayResults *autoplay_results) {
@@ -47,11 +47,12 @@ void destroy_autoplay_results(AutoplayResults *autoplay_results) {
 
 AutoplayWorker *create_autoplay_worker(const Config *config,
                                        int max_games_for_worker,
-                                       int worker_index) {
+                                       int worker_index, uint64_t seed) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->config = config;
   autoplay_worker->max_games_for_worker = max_games_for_worker;
   autoplay_worker->worker_index = worker_index;
+  autoplay_worker->seed = seed;
   autoplay_worker->autoplay_results = create_autoplay_results();
   return autoplay_worker;
 }
@@ -88,9 +89,8 @@ void add_autoplay_results(AutoplayResults *autoplay_results_1,
   autoplay_results_1->total_games += autoplay_results_2->total_games;
 }
 
-void play_game(Game *game, time_t seed, AutoplayResults *autoplay_results,
+void play_game(Game *game, AutoplayResults *autoplay_results,
                int starting_player_index) {
-  reseed_prng(game->gen->bag, seed);
   reset_game(game);
   set_player_on_turn(game, starting_player_index);
   draw_at_most_to_rack(game->gen->bag,
@@ -114,26 +114,48 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
   ThreadControl *thread_control = autoplay_worker->config->thread_control;
   Game *game = create_game(autoplay_worker->config);
-  uint64_t seed;
 
-  int starting_player_for_thread = autoplay_worker->worker_index % 2;
+  // Declare local vars for autoplay_worker fields for convenience
+  bool use_game_pairs = autoplay_worker->config->use_game_pairs;
+  int worker_index = autoplay_worker->worker_index;
+  int starting_player_for_thread = worker_index % 2;
+
+  // Create a PRNG to save the state of the game
+  // to use for game pairs. The initial seed does
+  // not matter since it will be overwritten before
+  // the first game of the pair is played.
+  XoshiroPRNG *game_pair_prng;
+  if (use_game_pairs) {
+    game_pair_prng = create_prng(0);
+  }
+  seed_prng_for_worker(game->gen->bag->prng, autoplay_worker->seed,
+                       worker_index);
 
   for (int i = 0; i < autoplay_worker->max_games_for_worker; i++) {
     if (is_halted(thread_control)) {
       break;
     }
-    // FIXME: get the seed in a way that is doesn't use sad
-    // rand and is unique across threads.
-    seed = rand_uint64();
     int starting_player_index = (i + starting_player_for_thread) % 2;
-    play_game(game, seed, autoplay_worker->autoplay_results,
-              starting_player_index);
-    if (autoplay_worker->config->use_game_pairs) {
-      play_game(game, seed, autoplay_worker->autoplay_results,
+
+    // If we are using game pairs, we have to save the state of the
+    // PRNG before playing the first game so the state can be
+    // reloaded before playing the second game of the pair, ensuring
+    // both games are played with an identical PRNG.
+    if (use_game_pairs) {
+      copy_prng_into(game_pair_prng, game->gen->bag->prng);
+    }
+
+    play_game(game, autoplay_worker->autoplay_results, starting_player_index);
+    if (use_game_pairs) {
+      copy_prng_into(game->gen->bag->prng, game_pair_prng);
+      play_game(game, autoplay_worker->autoplay_results,
                 1 - starting_player_index);
     }
   }
 
+  if (use_game_pairs) {
+    destroy_prng(game_pair_prng);
+  }
   destroy_game(game);
   return NULL;
 }
@@ -152,9 +174,6 @@ autoplay_status_t autoplay(const Config *config,
   unhalt(config->thread_control);
   reset_autoplay_results(autoplay_results);
 
-  // FIXME: see fixme above
-  seed_random(config->random_seed);
-
   int number_of_threads = config->thread_control->number_of_threads;
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
@@ -166,7 +185,7 @@ autoplay_status_t autoplay(const Config *config,
         config->max_iterations, number_of_threads, thread_index);
 
     autoplay_workers[thread_index] = create_autoplay_worker(
-        config, number_of_games_for_worker, thread_index);
+        config, number_of_games_for_worker, thread_index, config->seed);
 
     pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
                    autoplay_workers[thread_index]);
