@@ -7,36 +7,11 @@
 #include "../src/rack.h"
 
 #include "rack_test.h"
-#include "testconfig.h"
 #include "test_util.h"
-
-int equal_rack(Rack *expected_rack, Rack *actual_rack) {
-  if (expected_rack->empty != actual_rack->empty) {
-    printf("not empty\n");
-    return 0;
-  }
-  if (expected_rack->number_of_letters != actual_rack->number_of_letters) {
-    printf("num letters: %d != %d\n", expected_rack->number_of_letters,
-           actual_rack->number_of_letters);
-    return 0;
-  }
-  if (expected_rack->array_size != actual_rack->array_size) {
-    printf("sizes: %d != %d\n", expected_rack->array_size,
-           actual_rack->array_size);
-    return 0;
-  }
-  for (int i = 0; i < (expected_rack->array_size); i++) {
-    if (expected_rack->array[i] != actual_rack->array[i]) {
-      printf("different: %d: %d != %d\n", i, expected_rack->array[i],
-             actual_rack->array[i]);
-      return 0;
-    }
-  }
-  return 1;
-}
+#include "testconfig.h"
 
 void test_rack_main(TestConfig *testconfig) {
-  Config *config = get_nwl_config(testconfig);
+  const Config *config = get_nwl_config(testconfig);
   Rack *rack = create_rack(config->letter_distribution->size);
   Rack *expected_rack = create_rack(config->letter_distribution->size);
 

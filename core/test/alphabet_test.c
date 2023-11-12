@@ -3,11 +3,11 @@
 
 #include "../src/config.h"
 
-#include "testconfig.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void test_alphabet(TestConfig *testconfig) {
-  Config *config = get_nwl_config(testconfig);
+  const Config *config = get_nwl_config(testconfig);
   // Test blank
   assert(get_blanked_machine_letter(1) == (1 | BLANK_MASK));
   assert(get_blanked_machine_letter(5) == (5 | BLANK_MASK));
@@ -66,7 +66,7 @@ void test_alphabet(TestConfig *testconfig) {
   assert_strings_equal(string_builder_peek(letter), "D");
   string_builder_clear(letter);
 
-  Config *catalan_config = get_disc_config(testconfig);
+  const Config *catalan_config = get_disc_config(testconfig);
   string_builder_add_user_visible_letter(catalan_config->letter_distribution,
                                          get_blanked_machine_letter(13), 0,
                                          letter);

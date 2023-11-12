@@ -19,7 +19,7 @@ ErrorStatus *create_error_status(error_status_t type, int code) {
 
 void destroy_error_status(ErrorStatus *error_status) { free(error_status); }
 
-void log_warn_if_failed(ErrorStatus *error_status) {
+void log_warn_if_failed(const ErrorStatus *error_status) {
   if (error_status->type == ERROR_STATUS_TYPE_NONE) {
     return;
   }

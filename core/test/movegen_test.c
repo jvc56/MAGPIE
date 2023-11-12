@@ -18,7 +18,7 @@
 #include "test_util.h"
 #include "testconfig.h"
 
-int count_scoring_plays(MoveList *ml) {
+int count_scoring_plays(const MoveList *ml) {
   int sum = 0;
   for (int i = 0; i < ml->count; i++) {
     if (ml->moves[i]->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
@@ -28,7 +28,7 @@ int count_scoring_plays(MoveList *ml) {
   return sum;
 }
 
-int count_nonscoring_plays(MoveList *ml) {
+int count_nonscoring_plays(const MoveList *ml) {
   int sum = 0;
   for (int i = 0; i < ml->count; i++) {
     if (ml->moves[i]->move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
@@ -38,7 +38,7 @@ int count_nonscoring_plays(MoveList *ml) {
   return sum;
 }
 
-void boards_equal(Board *b1, Board *b2) {
+void boards_equal(const Board *b1, const Board *b2) {
   assert(b1->tiles_played == b2->tiles_played);
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
@@ -93,7 +93,7 @@ void test_simple_case(Game *game, Player *player, const char *rack_string,
 }
 
 void macondo_tests(TestConfig *testconfig) {
-  Config *config = get_nwl_config(testconfig);
+  const Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
   const KWG *kwg = player->kwg;
@@ -312,7 +312,7 @@ void macondo_tests(TestConfig *testconfig) {
   SortedMoveList *test_generate_empty_board_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
 
-  Move *move = test_generate_empty_board_sorted_move_list->moves[0];
+  const Move *move = test_generate_empty_board_sorted_move_list->moves[0];
   assert(move->score == 80);
   assert(move->tiles_played == 7);
   assert(move->tiles_length == 7);
@@ -362,7 +362,7 @@ void macondo_tests(TestConfig *testconfig) {
 
 // print assertions to paste into leave_lookup_test
 void print_leave_lookup_test(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
@@ -397,7 +397,7 @@ void print_leave_lookup_test(TestConfig *testconfig) {
 }
 
 void leave_lookup_test(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
@@ -408,7 +408,7 @@ void leave_lookup_test(TestConfig *testconfig) {
   for (int i = 0; i < 2; i++) {
     int add_exchanges = i == 0;
     generate_leaves_for_game(game, add_exchanges);
-    double *leaves = game->gen->leave_map->leave_values;
+    const double *leaves = game->gen->leave_map->leave_values;
     assert(within_epsilon(leaves[0], +0.000000));        //
     assert(within_epsilon(leaves[1], -0.079110));        // M
     assert(within_epsilon(leaves[2], -1.092266));        // O
@@ -462,7 +462,7 @@ void leave_lookup_test(TestConfig *testconfig) {
 }
 
 void exchange_tests(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
@@ -499,7 +499,7 @@ void exchange_tests(TestConfig *testconfig) {
 }
 
 void many_moves_tests(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
   load_cgp(game, MANY_MOVES);
@@ -511,7 +511,7 @@ void many_moves_tests(TestConfig *testconfig) {
 }
 
 void equity_test(TestConfig *testconfig) {
-  Config *config = get_nwl_config(testconfig);
+  const Config *config = get_nwl_config(testconfig);
 
   Game *game = create_game(config);
   Player *player = game->players[0];
@@ -533,7 +533,7 @@ void equity_test(TestConfig *testconfig) {
   int number_of_moves = equity_test_sorted_move_list->count;
 
   for (int i = 0; i < number_of_moves - 1; i++) {
-    Move *move = equity_test_sorted_move_list->moves[i];
+    const Move *move = equity_test_sorted_move_list->moves[i];
     assert(move->equity <= previous_equity);
     set_rack_to_string(move_rack, "AFGIIIS", game->gen->letter_distribution);
     double leave_value = get_leave_value_for_move(klv, move, move_rack);
@@ -549,7 +549,7 @@ void equity_test(TestConfig *testconfig) {
 }
 
 void top_equity_play_recorder_test(TestConfig *testconfig) {
-  Config *config = get_nwl_config(testconfig);
+  const Config *config = get_nwl_config(testconfig);
 
   Game *game = create_game(config);
   Player *player = game->players[0];
@@ -573,7 +573,7 @@ void top_equity_play_recorder_test(TestConfig *testconfig) {
 }
 
 void distinct_lexica_test(TestConfig *testconfig) {
-  Config *config = get_distinct_lexica_config(testconfig);
+  const Config *config = get_distinct_lexica_config(testconfig);
 
   Game *game = create_game(config);
   game->players[0]->move_record_type = MOVE_RECORD_BEST;

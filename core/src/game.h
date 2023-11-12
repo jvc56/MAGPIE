@@ -63,16 +63,16 @@ typedef struct Game {
 void reset_game(Game *game);
 void update_game(const Config *config, Game *game);
 Game *create_game(const Config *config);
-Game *copy_game(Game *game, int move_list_capacity);
+Game *copy_game(const Game *game, int move_list_capacity);
 void destroy_game(Game *game);
 cgp_parse_status_t load_cgp(Game *game, const char *cgp);
 void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter);
 void set_backup_mode(Game *game, int backup_mode);
 void backup_game(Game *game);
 void unplay_last_move(Game *game);
-int tiles_unseen(Game *game);
+int tiles_unseen(const Game *game);
 game_variant_t get_game_variant_type_from_name(const char *variant_name);
 void set_player_on_turn(Game *game, int player_on_turn_index);
-void string_builder_add_game(Game *game, StringBuilder *game_string);
+void string_builder_add_game(const Game *game, StringBuilder *game_string);
 
 #endif

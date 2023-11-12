@@ -192,8 +192,8 @@ void destroy_gcg_parser(GCGParser *gcg_parser) {
   free(gcg_parser);
 }
 
-char *get_matching_group_as_string(GCGParser *gcg_parser, const char *gcg_line,
-                                   int group_index) {
+char *get_matching_group_as_string(const GCGParser *gcg_parser,
+                                   const char *gcg_line, int group_index) {
   int start_index = gcg_parser->matching_groups[group_index].rm_so;
   int end_index = gcg_parser->matching_groups[group_index].rm_eo;
   int matching_group_string_length = end_index - start_index;
@@ -206,7 +206,7 @@ char *get_matching_group_as_string(GCGParser *gcg_parser, const char *gcg_line,
   return matching_group_string;
 }
 
-int get_matching_group_as_int(GCGParser *gcg_parser, const char *gcg_line,
+int get_matching_group_as_int(const GCGParser *gcg_parser, const char *gcg_line,
                               int group_index) {
   char *matching_group_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
@@ -307,7 +307,7 @@ gcg_token_t find_matching_gcg_token(GCGParser *gcg_parser,
   return GCG_UNKNOWN_TOKEN;
 }
 
-int get_player_index(GCGParser *gcg_parser, const char *gcg_line,
+int get_player_index(const GCGParser *gcg_parser, const char *gcg_line,
                      int group_index) {
   char *player_nickname =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
@@ -324,15 +324,16 @@ int get_player_index(GCGParser *gcg_parser, const char *gcg_line,
   return player_index;
 }
 
-void copy_score_to_game_event(GCGParser *gcg_parser, GameEvent *game_event,
-                              const char *gcg_line, int group_index) {
+void copy_score_to_game_event(const GCGParser *gcg_parser,
+                              GameEvent *game_event, const char *gcg_line,
+                              int group_index) {
   char *move_score_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
   game_event->move->score = string_to_int(move_score_string);
   free(move_score_string);
 }
 
-void copy_cumulative_score_to_game_event(GCGParser *gcg_parser,
+void copy_cumulative_score_to_game_event(const GCGParser *gcg_parser,
                                          GameEvent *game_event,
                                          const char *gcg_line,
                                          int group_index) {
@@ -343,7 +344,7 @@ void copy_cumulative_score_to_game_event(GCGParser *gcg_parser,
 }
 
 uint8_t *convert_tiles_string_to_machine_letters(
-    GCGParser *gcg_parser, const char *gcg_line, int group_index,
+    const GCGParser *gcg_parser, const char *gcg_line, int group_index,
     bool allow_played_through_marker, int *number_of_machine_letters) {
 
   int start_index = gcg_parser->matching_groups[group_index].rm_so;
@@ -365,7 +366,7 @@ uint8_t *convert_tiles_string_to_machine_letters(
   return machine_letters;
 }
 
-bool copy_played_tiles_to_game_event(GCGParser *gcg_parser,
+bool copy_played_tiles_to_game_event(const GCGParser *gcg_parser,
                                      GameEvent *game_event,
                                      const char *gcg_line, int group_index) {
   int number_of_machine_letters;
@@ -393,7 +394,7 @@ bool copy_played_tiles_to_game_event(GCGParser *gcg_parser,
   return success;
 }
 
-bool copy_exchanged_tiles_to_game_event(GCGParser *gcg_parser,
+bool copy_exchanged_tiles_to_game_event(const GCGParser *gcg_parser,
                                         GameEvent *game_event,
                                         const char *gcg_line, int group_index) {
   int number_of_machine_letters;
@@ -415,7 +416,7 @@ bool copy_exchanged_tiles_to_game_event(GCGParser *gcg_parser,
   return success;
 }
 
-Rack *get_rack_from_matching(GCGParser *gcg_parser, const char *gcg_line,
+Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
                              int group_index) {
   char *player_rack_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
@@ -430,7 +431,7 @@ Rack *get_rack_from_matching(GCGParser *gcg_parser, const char *gcg_line,
   return rack;
 }
 
-gcg_parse_status_t copy_position_to_game_event(GCGParser *gcg_parser,
+gcg_parse_status_t copy_position_to_game_event(const GCGParser *gcg_parser,
                                                GameEvent *game_event,
                                                const char *gcg_line,
                                                int group_index) {

@@ -66,18 +66,19 @@ inference_status_t infer(const Config *config, Game *game,
                          Inference *inference);
 Inference *create_inference();
 void destroy_inference(Inference *inference);
-uint64_t get_subtotal(InferenceRecord *record, uint8_t letter,
+uint64_t get_subtotal(const InferenceRecord *record, uint8_t letter,
                       int number_of_letters, int subtotal_index_offset);
-uint64_t get_subtotal_sum_with_minimum(InferenceRecord *record, uint8_t letter,
+uint64_t get_subtotal_sum_with_minimum(const InferenceRecord *record,
+                                       uint8_t letter,
                                        int minimum_number_of_letters,
                                        int subtotal_index_offset);
-void get_stat_for_letter(InferenceRecord *record, Stat *stat, uint8_t letter);
-double
-get_probability_for_random_minimum_draw(Rack *bag_as_rack, Rack *rack,
-                                        uint8_t this_letter, int minimum,
-                                        int number_of_actual_tiles_played);
+void get_stat_for_letter(const InferenceRecord *record, Stat *stat,
+                         uint8_t letter);
+double get_probability_for_random_minimum_draw(
+    const Rack *bag_as_rack, const Rack *rack, uint8_t this_letter, int minimum,
+    int number_of_actual_tiles_played);
 uint64_t choose(uint64_t n, uint64_t k);
-void string_builder_add_inference(Inference *inference,
-                                  Rack *actual_tiles_played,
+void string_builder_add_inference(const Inference *inference,
+                                  const Rack *actual_tiles_played,
                                   StringBuilder *inference_string);
 #endif

@@ -5,7 +5,7 @@
 
 #include "test_util.h"
 
-void assert_players_data(PlayersData *players_data,
+void assert_players_data(const PlayersData *players_data,
                          players_data_t players_data_type,
                          const char *p1_data_name, const char *p2_data_name) {
   bool data_is_shared = strings_equal(p1_data_name, p2_data_name);

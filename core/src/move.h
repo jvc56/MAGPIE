@@ -42,13 +42,14 @@ typedef struct MoveList {
 } MoveList;
 
 Move *create_move();
-void copy_move(Move *src_move, Move *dest_move);
+void copy_move(const Move *src_move, Move *dest_move);
 void destroy_move(Move *move);
 MoveList *create_move_list(int capacity);
 void destroy_move_list(MoveList *ml);
 void update_move_list(MoveList *ml, int new_capacity);
 void sort_moves(MoveList *ml);
-void string_builder_add_move_description(Move *move, LetterDistribution *ld,
+void string_builder_add_move_description(const Move *move,
+                                         const LetterDistribution *ld,
                                          StringBuilder *move_string_builder);
 void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
                     int rightstrip, int score, int row_start, int col_start,
@@ -62,7 +63,7 @@ void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
               int vertical, game_event_t move_type);
 void set_move_as_pass(Move *move);
 void set_spare_move_as_pass(MoveList *ml);
-void string_builder_add_move(Board *board, Move *m,
-                             LetterDistribution *letter_distribution,
+void string_builder_add_move(const Board *board, const Move *m,
+                             const LetterDistribution *letter_distribution,
                              StringBuilder *string_builder);
 #endif

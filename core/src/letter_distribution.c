@@ -138,9 +138,8 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
 // This is a linear search. This function should not be used for anything
 // that is speed-critical. If we ever need to use this in anything
 // speed-critical, we should use a hash.
-uint8_t
-human_readable_letter_to_machine_letter(LetterDistribution *letter_distribution,
-                                        char *letter) {
+uint8_t human_readable_letter_to_machine_letter(
+    const LetterDistribution *letter_distribution, char *letter) {
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
     if (strings_equal(
             letter_distribution->machine_letter_to_human_readable_letter[i],
@@ -156,7 +155,7 @@ human_readable_letter_to_machine_letter(LetterDistribution *letter_distribution,
 // the ml array; it is the caller's responsibility to make this array big
 // enough.
 // Note: This is a slow function that should not be used in any hot loops.
-int str_to_machine_letters(LetterDistribution *letter_distribution,
+int str_to_machine_letters(const LetterDistribution *letter_distribution,
                            const char *str, bool allow_played_through_marker,
                            uint8_t *mls) {
 
@@ -237,7 +236,7 @@ char *get_default_letter_distribution_name(const char *lexicon_name) {
 }
 
 void string_builder_add_user_visible_letter(
-    LetterDistribution *letter_distribution, uint8_t ml, size_t len,
+    const LetterDistribution *letter_distribution, uint8_t ml, size_t len,
     StringBuilder *string_builder) {
   string_builder_add_string(
       string_builder,

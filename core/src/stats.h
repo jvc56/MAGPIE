@@ -18,15 +18,15 @@ typedef struct Stat {
 Stat *create_stat();
 void destroy_stat(Stat *stat);
 void reset_stat(Stat *stat);
-Stat *copy_stat(Stat *stat);
+Stat *copy_stat(const Stat *stat);
 void push(Stat *stat, double value, uint64_t weight);
 void push_stat(Stat *stat_1, Stat *stat_2);
-uint64_t get_cardinality(Stat *stat);
-uint64_t get_weight(Stat *stat);
-double get_mean(Stat *stat);
-double get_variance(Stat *stat);
-double get_stdev(Stat *stat);
-double get_standard_error(Stat *stat, double m);
+uint64_t get_cardinality(const Stat *stat);
+uint64_t get_weight(const Stat *stat);
+double get_mean(const Stat *stat);
+double get_variance(const Stat *stat);
+double get_stdev(const Stat *stat);
+double get_standard_error(const Stat *stat, double m);
 int round_to_nearest_int(double a);
 void combine_stats(Stat **stats, int number_of_stats, Stat *combined_stat);
 

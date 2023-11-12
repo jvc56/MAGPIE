@@ -82,7 +82,7 @@ void destroy_game_history(GameHistory *game_history) {
   free(game_history);
 }
 
-Game *play_to_turn(GameHistory *game_history, int turn_number) {
+Game *play_to_turn(const GameHistory *game_history, int turn_number) {
   log_fatal("unimplemented: %p, %d\n", game_history, turn_number);
   return NULL;
 }

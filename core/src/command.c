@@ -151,7 +151,7 @@ void execute_sim(CommandVars *command_vars, const Config *config) {
     command_vars->simmer = create_simmer(config);
   }
   sim_status_t status =
-      simulate(config, command_vars->simmer, command_vars->game);
+      simulate(config, command_vars->game, command_vars->simmer);
   set_or_clear_error_status(command_vars->error_status, ERROR_STATUS_TYPE_SIM,
                             (int)status);
 }

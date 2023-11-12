@@ -30,12 +30,13 @@ char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
 struct StringSplitter;
 typedef struct StringSplitter StringSplitter;
 
-int string_splitter_get_number_of_items(StringSplitter *string_splitter);
-const char *string_splitter_get_item(StringSplitter *string_splitter,
+int string_splitter_get_number_of_items(const StringSplitter *string_splitter);
+const char *string_splitter_get_item(const StringSplitter *string_splitter,
                                      int item_index);
 void string_splitter_trim_char(StringSplitter *string_splitter, const char c);
-char *string_splitter_join(StringSplitter *string_splitter, int start_index,
-                           int end_index, const char *separator);
+char *string_splitter_join(const StringSplitter *string_splitter,
+                           int start_index, int end_index,
+                           const char *separator);
 StringSplitter *split_string_by_whitespace(const char *input_string,
                                            bool ignore_empty);
 StringSplitter *split_string(const char *input_string, const char delimiter,

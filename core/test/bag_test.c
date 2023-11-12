@@ -10,7 +10,7 @@
 #include "test_util.h"
 #include "testconfig.h"
 
-void test_add_letter(Config *config, Bag *bag, char *r,
+void test_add_letter(const Config *config, Bag *bag, char *r,
                      char *expected_bag_string) {
   add_letter(bag, human_readable_letter_to_machine_letter(
                       config->letter_distribution, r));
@@ -21,7 +21,7 @@ void test_add_letter(Config *config, Bag *bag, char *r,
 }
 
 void test_bag(TestConfig *testconfig) {
-  Config *config = get_nwl_config(testconfig);
+  const Config *config = get_nwl_config(testconfig);
   Bag *bag = create_bag(config->letter_distribution);
   Rack *rack = create_rack(config->letter_distribution->size);
 

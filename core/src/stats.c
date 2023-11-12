@@ -21,7 +21,7 @@ Stat *create_stat() {
 
 void destroy_stat(Stat *stat) { free(stat); }
 
-Stat *copy_stat(Stat *stat) {
+Stat *copy_stat(const Stat *stat) {
   Stat *new_stat = create_stat();
   new_stat->cardinality = stat->cardinality;
   new_stat->weight = stat->weight;
@@ -49,11 +49,11 @@ void push(Stat *stat, double value, uint64_t value_weight) {
   push_with_cardinality(stat, value, value_weight, 1);
 }
 
-uint64_t get_cardinality(Stat *stat) { return stat->cardinality; }
+uint64_t get_cardinality(const Stat *stat) { return stat->cardinality; }
 
-uint64_t get_weight(Stat *stat) { return stat->weight; }
+uint64_t get_weight(const Stat *stat) { return stat->weight; }
 
-double get_mean(Stat *stat) { return stat->mean; }
+double get_mean(const Stat *stat) { return stat->mean; }
 
 void push_stat(Stat *stat_1, Stat *stat_2) {
   push_with_cardinality(stat_1, get_mean(stat_2), get_weight(stat_2),
@@ -73,7 +73,7 @@ uint64_t get_estimator(uint64_t n) {
   return n;
 }
 
-double get_variance(Stat *stat) {
+double get_variance(const Stat *stat) {
   if (stat->weight <= 1) {
     return 0.0;
   }
@@ -81,7 +81,7 @@ double get_variance(Stat *stat) {
          (((double)get_estimator(stat->weight)));
 }
 
-double get_stdev(Stat *stat) { return sqrt(get_variance(stat)); }
+double get_stdev(const Stat *stat) { return sqrt(get_variance(stat)); }
 
 void combine_stats(Stat **stats, int number_of_stats, Stat *combined_stat) {
   uint64_t combined_cardinality = 0;
@@ -127,7 +127,7 @@ void combine_stats(Stat **stats, int number_of_stats, Stat *combined_stat) {
       combined_sum_of_mean_differences_squared;
 }
 
-double get_standard_error(Stat *stat, double m) {
+double get_standard_error(const Stat *stat, double m) {
   return m * sqrt(get_variance(stat) / (double)stat->cardinality);
 }
 

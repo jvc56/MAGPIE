@@ -12,7 +12,7 @@
 #include "rack.h"
 #include "util.h"
 
-int count_words_at(KLV *klv, int p, int kwg_size) {
+int count_words_at(const KLV *klv, int p, int kwg_size) {
   if (p >= kwg_size) {
     return 0;
   }
@@ -41,7 +41,7 @@ int count_words_at(KLV *klv, int p, int kwg_size) {
   return klv->word_counts[p];
 }
 
-void count_words(KLV *klv, size_t kwg_size) {
+void count_words(const KLV *klv, size_t kwg_size) {
   for (int p = kwg_size - 1; p >= 0; p--) {
     count_words_at(klv, p, (int)kwg_size);
   }
@@ -49,7 +49,7 @@ void count_words(KLV *klv, size_t kwg_size) {
 
 float reverse_float(const float in_float) {
   float ret_val;
-  char *float_to_convert = (char *)&in_float;
+  const char *float_to_convert = (char *)&in_float;
   char *return_float = (char *)&ret_val;
 
   // swap the bytes into a temporary buffer
@@ -154,7 +154,7 @@ void destroy_klv(KLV *klv) {
   free(klv);
 }
 
-int get_word_index_of(const KLV *klv, uint32_t node_index, Rack *leave) {
+int get_word_index_of(const KLV *klv, uint32_t node_index, const Rack *leave) {
   int idx = 0;
   int lidx = 0;
   int lidx_letter_count = leave->array[lidx];
@@ -202,7 +202,7 @@ int get_word_index_of(const KLV *klv, uint32_t node_index, Rack *leave) {
   return -1;
 }
 
-double get_leave_value(const KLV *klv, Rack *leave) {
+double get_leave_value(const KLV *klv, const Rack *leave) {
   if (leave->empty) {
     return 0.0;
   }

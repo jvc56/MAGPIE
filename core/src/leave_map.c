@@ -53,7 +53,7 @@ void set_current_value(LeaveMap *leave_map, double value) {
   leave_map->leave_values[leave_map->current_index] = value;
 }
 
-double get_current_value(LeaveMap *leave_map) {
+double get_current_value(const LeaveMap *leave_map) {
   return leave_map->leave_values[leave_map->current_index];
 }
 

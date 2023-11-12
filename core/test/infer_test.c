@@ -21,7 +21,7 @@ inference_status_t infer_for_test(const Config *config, Game *game,
 }
 
 void test_trivial_random_probability(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Inference *inference = create_inference();
 

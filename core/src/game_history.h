@@ -41,6 +41,6 @@ GameHistoryPlayer *create_game_history_player(const char *name,
                                               const char *nickname);
 void destroy_game_history_player(GameHistoryPlayer *player);
 void set_cumulative_scores(GameHistory *game_history);
-Game *play_to_turn(GameHistory *game_history, int turn_number);
+Game *play_to_turn(const GameHistory *game_history, int turn_number);
 
 #endif
