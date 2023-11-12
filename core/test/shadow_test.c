@@ -10,7 +10,7 @@
 #include "testconfig.h"
 
 void load_and_generate(Game *game, Player *player, const char *cgp,
-                       const char *rack, int add_exchange) {
+                       const char *rack, bool add_exchange) {
   load_cgp(game, cgp);
   set_rack_to_string(player->rack, rack, game->gen->letter_distribution);
   generate_moves(game->gen, player, NULL, add_exchange,
@@ -35,92 +35,92 @@ void test_shadow_score(TestConfig *testconfig) {
   // to sort by score.
   player->move_sort_type = MOVE_SORT_SCORE;
 
-  load_and_generate(game, player, EMPTY_CGP, "OU", 0);
+  load_and_generate(game, player, EMPTY_CGP, "OU", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 4));
 
-  load_and_generate(game, player, EMPTY_CGP, "ID", 0);
+  load_and_generate(game, player, EMPTY_CGP, "ID", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 6));
 
-  load_and_generate(game, player, EMPTY_CGP, "AX", 0);
+  load_and_generate(game, player, EMPTY_CGP, "AX", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 18));
 
-  load_and_generate(game, player, EMPTY_CGP, "BD", 0);
+  load_and_generate(game, player, EMPTY_CGP, "BD", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 10));
 
-  load_and_generate(game, player, EMPTY_CGP, "QK", 0);
+  load_and_generate(game, player, EMPTY_CGP, "QK", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 30));
 
-  load_and_generate(game, player, EMPTY_CGP, "AESR", 0);
+  load_and_generate(game, player, EMPTY_CGP, "AESR", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 8));
 
-  load_and_generate(game, player, EMPTY_CGP, "TNCL", 0);
+  load_and_generate(game, player, EMPTY_CGP, "TNCL", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 12));
 
-  load_and_generate(game, player, EMPTY_CGP, "AAAAA", 0);
+  load_and_generate(game, player, EMPTY_CGP, "AAAAA", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 12));
 
-  load_and_generate(game, player, EMPTY_CGP, "CAAAA", 0);
+  load_and_generate(game, player, EMPTY_CGP, "CAAAA", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 20));
 
-  load_and_generate(game, player, EMPTY_CGP, "CAKAA", 0);
+  load_and_generate(game, player, EMPTY_CGP, "CAKAA", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 32));
 
-  load_and_generate(game, player, EMPTY_CGP, "AIERZ", 0);
+  load_and_generate(game, player, EMPTY_CGP, "AIERZ", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 48));
 
-  load_and_generate(game, player, EMPTY_CGP, "AIERZN", 0);
+  load_and_generate(game, player, EMPTY_CGP, "AIERZN", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 50));
 
-  load_and_generate(game, player, EMPTY_CGP, "AIERZNL", 0);
+  load_and_generate(game, player, EMPTY_CGP, "AIERZNL", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 102));
 
-  load_and_generate(game, player, EMPTY_CGP, "?", 0);
+  load_and_generate(game, player, EMPTY_CGP, "?", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 0));
 
-  load_and_generate(game, player, EMPTY_CGP, "??", 0);
+  load_and_generate(game, player, EMPTY_CGP, "??", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 0));
 
-  load_and_generate(game, player, EMPTY_CGP, "??OU", 0);
+  load_and_generate(game, player, EMPTY_CGP, "??OU", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 4));
 
-  load_and_generate(game, player, EMPTY_CGP, "??OUA", 0);
+  load_and_generate(game, player, EMPTY_CGP, "??OUA", false);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 8));
 
-  load_and_generate(game, player, KA_OPENING_CGP, "EE", 0);
+  load_and_generate(game, player, KA_OPENING_CGP, "EE", false);
   // KAE and EE
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 10));
@@ -147,7 +147,7 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
-  load_and_generate(game, player, KA_OPENING_CGP, "E?", 0);
+  load_and_generate(game, player, KA_OPENING_CGP, "E?", false);
   // oK, oE, EA
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 10));
@@ -176,7 +176,7 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[8]->highest_possible_equity, 2));
 
-  load_and_generate(game, player, KA_OPENING_CGP, "J", 0);
+  load_and_generate(game, player, KA_OPENING_CGP, "J", false);
   // J(K) veritcally
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 21));
@@ -200,7 +200,7 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
-  load_and_generate(game, player, AA_OPENING_CGP, "JF", 0);
+  load_and_generate(game, player, AA_OPENING_CGP, "JF", false);
   // JF, JA, and FA
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 42));
@@ -228,53 +228,53 @@ void test_shadow_score(TestConfig *testconfig) {
       game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
   // Makeing JA, FA, and JFU, doubling the U on the double letter
-  load_and_generate(game, player, AA_OPENING_CGP, "JFU", 0);
+  load_and_generate(game, player, AA_OPENING_CGP, "JFU", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 44));
 
   // Making KAU (allowed by F in rack cross set) and JUF, doubling the F and J.
-  load_and_generate(game, player, KA_OPENING_CGP, "JFU", 0);
+  load_and_generate(game, player, KA_OPENING_CGP, "JFU", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 32));
 
-  load_and_generate(game, player, AA_OPENING_CGP, "JFUG", 0);
+  load_and_generate(game, player, AA_OPENING_CGP, "JFUG", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 47));
 
-  load_and_generate(game, player, AA_OPENING_CGP, "JFUGX", 0);
+  load_and_generate(game, player, AA_OPENING_CGP, "JFUGX", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 61));
 
   // Reaches the triple word
-  load_and_generate(game, player, AA_OPENING_CGP, "JFUGXL", 0);
+  load_and_generate(game, player, AA_OPENING_CGP, "JFUGXL", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 102));
 
-  load_and_generate(game, player, DOUG_V_EMELY_CGP, "Q", 0);
+  load_and_generate(game, player, DOUG_V_EMELY_CGP, "Q", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 22));
 
-  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BD", 0);
+  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BD", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 17));
 
-  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BOH", 0);
+  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BOH", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 60));
 
-  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BOHGX", 0);
+  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BOHGX", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 90));
 
-  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BOHGXZ", 0);
+  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BOHGXZ", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 120));
 
-  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BOHGXZQ", 0);
+  load_and_generate(game, player, DOUG_V_EMELY_CGP, "BOHGXZQ", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 230));
 
-  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "A", 0);
+  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "A", false);
 
   // WINDYA
   assert(within_epsilon(
@@ -301,7 +301,7 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[7]->highest_possible_equity, 5));
 
-  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "Z", 0);
+  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "Z", false);
   // Z(P) vertically
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 33));
@@ -315,7 +315,7 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[3]->highest_possible_equity, 29));
 
-  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "ZLW", 0);
+  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "ZLW", false);
   // ZEN, ZW, WAD
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 73));
@@ -326,57 +326,57 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[2]->highest_possible_equity, 40));
 
-  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "ZLW?", 0);
+  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "ZLW?", false);
   // The blank makes all cross sets valid
   // LZW(WINDY)s
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 99));
 
-  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "QZLW", 0);
+  load_and_generate(game, player, TRIPLE_LETTERS_CGP, "QZLW", false);
   // ZQ, ZEN, QAD (L and W are in the AD cross set, but scored using the Q)
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 85));
 
-  load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "K", 0);
+  load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "K", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 23));
 
-  load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KT", 0);
+  load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KT", false);
   // KPAVT
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 26));
 
-  load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KT?", 0);
+  load_and_generate(game, player, TRIPLE_DOUBLE_CGP, "KT?", false);
   // The blank makes PAVE, allowed all letters in the cross set
   // PAVK, KT?
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 39));
 
-  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "M", 0);
+  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "M", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 8));
 
-  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MN", 0);
+  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MN", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 16));
 
-  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MNA", 0);
+  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MNA", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 20));
 
-  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MNAU", 0);
+  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MNAU", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 22));
 
-  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MNAUT", 0);
+  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MNAUT", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 30));
 
-  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MNAUTE", 0);
+  load_and_generate(game, player, BOTTOM_LEFT_RE_CGP, "MNAUTE", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 39));
 
-  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "Z", 0);
+  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "Z", false);
   // (L)Z and (R)Z
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 31));
@@ -389,84 +389,88 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[3]->highest_possible_equity, 21));
 
-  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZL", 0);
+  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZL", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 64));
 
-  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLI", 0);
+  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLI", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 68));
 
-  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIE", 0);
+  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIE",
+                    false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 72));
 
-  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIER", 0);
+  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIER",
+                    false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 77));
 
-  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIERA", 0);
+  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIERA",
+                    false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 80));
 
-  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIERAI", 0);
+  load_and_generate(game, player, LATER_BETWEEN_DOUBLE_WORDS_CGP, "ZLIERAI",
+                    false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 212));
 
-  load_and_generate(game, player, VS_OXY, "A", 0);
+  load_and_generate(game, player, VS_OXY, "A", false);
   // APACIFYING
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 63));
 
-  load_and_generate(game, player, VS_OXY, "PB", 0);
+  load_and_generate(game, player, VS_OXY, "PB", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 156));
 
-  load_and_generate(game, player, VS_OXY, "PA", 0);
+  load_and_generate(game, player, VS_OXY, "PA", false);
   // Forms DORMPWOOAJ because the A fits in the cross set of T and N.
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 76));
 
-  load_and_generate(game, player, VS_OXY, "PBA", 0);
+  load_and_generate(game, player, VS_OXY, "PBA", false);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 174));
 
-  load_and_generate(game, player, VS_OXY, "Z", 0);
+  load_and_generate(game, player, VS_OXY, "Z", false);
   // ZPACIFYING
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 90));
 
-  load_and_generate(game, player, VS_OXY, "ZE", 0);
+  load_and_generate(game, player, VS_OXY, "ZE", false);
   // ZONE
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 160));
 
-  load_and_generate(game, player, VS_OXY, "AZE", 0);
+  load_and_generate(game, player, VS_OXY, "AZE", false);
   // UTAZONE
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 184));
 
-  load_and_generate(game, player, VS_OXY, "AZEB", 0);
+  load_and_generate(game, player, VS_OXY, "AZEB", false);
   // HENBUTAZONE
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 484));
 
-  load_and_generate(game, player, VS_OXY, "AZEBP", 0);
+  load_and_generate(game, player, VS_OXY, "AZEBP", false);
   // YPHENBUTAZONE
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 604));
 
-  load_and_generate(game, player, VS_OXY, "AZEBPX", 0);
+  load_and_generate(game, player, VS_OXY, "AZEBPX", false);
   // A2 A(Y)X(HEN)P(UT)EZ(ON)B
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 740));
 
-  load_and_generate(game, player, VS_OXY, "AZEBPXO", 0);
+  load_and_generate(game, player, VS_OXY, "AZEBPXO", false);
   // A1 OA(Y)X(HEN)P(UT)EZ(ON)B
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 1924));
 
-  load_and_generate(game, player, VS_OXY, "AZEBPQO", 0);
+  load_and_generate(game, player, VS_OXY, "AZEBPQO", false);
   // A1 OA(Y)Q(HEN)P(UT)EZ(ON)B
   // Only the letters AZEBPO are required to form acceptable
   // plays in all cross sets
@@ -487,7 +491,7 @@ void test_shadow_equity(TestConfig *testconfig) {
 
   // Check best leave values for a give rack.
   Rack *leave_rack = create_rack(game->gen->letter_distribution->size);
-  load_and_generate(game, player, EMPTY_CGP, "ERSVQUW", 0);
+  load_and_generate(game, player, EMPTY_CGP, "ERSVQUW", false);
 
   set_rack_to_string(leave_rack, "", game->gen->letter_distribution);
   assert(within_epsilon(game->gen->best_leaves[0],
@@ -517,7 +521,7 @@ void test_shadow_equity(TestConfig *testconfig) {
   assert(within_epsilon(game->gen->best_leaves[6],
                         get_leave_value_for_rack(player->klv, leave_rack)));
 
-  load_and_generate(game, player, EMPTY_CGP, "ESQW", 1);
+  load_and_generate(game, player, EMPTY_CGP, "ESQW", true);
   set_rack_to_string(leave_rack, "ES", game->gen->letter_distribution);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity,
@@ -536,7 +540,7 @@ void test_shadow_top_move(TestConfig *testconfig) {
   player->move_record_type = MOVE_RECORD_BEST;
 
   // Top play should be L1 Q(I)
-  load_and_generate(game, player, UEY_CGP, "ACEQOOV", 1);
+  load_and_generate(game, player, UEY_CGP, "ACEQOOV", true);
   assert(within_epsilon(game->gen->move_list->moves[0]->score, 21));
 
   destroy_game(game);

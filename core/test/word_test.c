@@ -83,7 +83,7 @@ void test_words_played(TestConfig *testconfig) {
 
   free(fw);
 
-  // same as above but vertical - I5 SPAY(S)
+  // same as above but dir - I5 SPAY(S)
   uint8_t SPAYS[] = {0, 0, 0, 0, 19};
   fw = words_played(game->gen->board, SPAYS, 0, 4, 4, 8, 1);
   populate_word_validities(fw, game->players[0]->kwg);

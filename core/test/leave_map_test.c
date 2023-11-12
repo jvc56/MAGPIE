@@ -25,7 +25,7 @@ void take_set(LeaveMap *leave_map, Rack *rack,
 void take_set_add(LeaveMap *leave_map, Rack *rack,
                   const LetterDistribution *letter_distribution, char *letter,
                   int expected_take_index, int expected_add_index, double value,
-                  int set) {
+                  bool set) {
   take_letter_and_update_current_index(
       leave_map, rack,
       human_readable_letter_to_machine_letter(letter_distribution, letter));
@@ -54,15 +54,15 @@ void test_leave_map(TestConfig *testconfig) {
   // 1111111
   assert(leave_map->current_index == 127);
 
-  take_set_add(leave_map, rack, letter_distribution, "A", 126, 127, 7.0, 1);
-  take_set_add(leave_map, rack, letter_distribution, "B", 125, 127, 8.0, 1);
-  take_set_add(leave_map, rack, letter_distribution, "E", 111, 127, 9.0, 1);
-  take_set_add(leave_map, rack, letter_distribution, "G", 63, 127, 10.0, 1);
+  take_set_add(leave_map, rack, letter_distribution, "A", 126, 127, 7.0, true);
+  take_set_add(leave_map, rack, letter_distribution, "B", 125, 127, 8.0, true);
+  take_set_add(leave_map, rack, letter_distribution, "E", 111, 127, 9.0, true);
+  take_set_add(leave_map, rack, letter_distribution, "G", 63, 127, 10.0, true);
 
-  take_set_add(leave_map, rack, letter_distribution, "A", 126, 127, 7.0, 0);
-  take_set_add(leave_map, rack, letter_distribution, "B", 125, 127, 8.0, 0);
-  take_set_add(leave_map, rack, letter_distribution, "E", 111, 127, 9.0, 0);
-  take_set_add(leave_map, rack, letter_distribution, "G", 63, 127, 10.0, 0);
+  take_set_add(leave_map, rack, letter_distribution, "A", 126, 127, 7.0, false);
+  take_set_add(leave_map, rack, letter_distribution, "B", 125, 127, 8.0, false);
+  take_set_add(leave_map, rack, letter_distribution, "E", 111, 127, 9.0, false);
+  take_set_add(leave_map, rack, letter_distribution, "G", 63, 127, 10.0, false);
 
   // Multiple letters
   set_rack_to_string(rack, "DDDIIUU", letter_distribution);

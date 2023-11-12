@@ -26,13 +26,13 @@ typedef struct Generator {
   int current_row_index;
   int current_anchor_col;
   int last_anchor_col;
-  int vertical;
+  int dir;
   int tiles_played;
   int number_of_plays;
-  int apply_placement_adjustment;
-  int kwgs_are_distinct;
   int move_sort_type;
   int move_record_type;
+  bool kwgs_are_distinct;
+  bool apply_placement_adjustment;
 
   uint8_t row_letter_cache[(BOARD_DIM)];
   uint8_t strip[(BOARD_DIM)];
@@ -62,14 +62,14 @@ Generator *copy_generator(const Generator *gen, int move_list_capacity);
 void destroy_generator(Generator *gen);
 void update_generator(const Config *config, Generator *gen);
 void generate_moves(Generator *gen, Player *player, const Rack *opp_rack,
-                    int add_exchange, move_record_t move_record_type,
+                    bool add_exchange, move_record_t move_record_type,
                     move_sort_t move_sort_type,
                     bool apply_placement_adjustment);
 void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
-                             int stripidx, int add_exchange);
+                             int stripidx, bool add_exchange);
 void recursive_gen(Generator *gen, int col, Player *player,
                    const Rack *opp_rack, uint32_t node_index, int leftstrip,
-                   int rightstrip, int unique_play);
+                   int rightstrip, bool unique_play);
 void reset_generator(Generator *gen);
 void load_row_letter_cache(Generator *gen, int row);
 int get_cross_set_index(const Generator *gen, int player_index);

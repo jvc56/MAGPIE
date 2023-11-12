@@ -32,7 +32,7 @@ int count_words_at(const KLV *klv, int p, int kwg_size) {
       b = count_words_at(klv, arc_index_p, kwg_size);
     }
     int c = 0;
-    int is_not_end = !kwg_is_end(klv->kwg, p);
+    bool is_not_end = !kwg_is_end(klv->kwg, p);
     if (is_not_end) {
       c = count_words_at(klv, p + 1, kwg_size);
     }

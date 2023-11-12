@@ -33,7 +33,7 @@ void print_ucgi_inference_total_racks_evaluated(uint64_t total_racks_evaluated,
 
 void string_builder_add_ucgi_leave_rack(
     const LeaveRack *leave_rack, int index, uint64_t total_draws,
-    const LetterDistribution *letter_distribution, int is_exchange,
+    const LetterDistribution *letter_distribution, bool is_exchange,
     StringBuilder *ucgi_string_builder) {
   if (!is_exchange) {
     string_builder_add_rack(leave_rack->leave, letter_distribution,
@@ -120,7 +120,7 @@ void string_builder_ucgi_add_inference_record(
 
 void print_ucgi_inference(const Inference *inference,
                           ThreadControl *thread_control) {
-  int is_exchange = inference->number_of_tiles_exchanged > 0;
+  bool is_exchange = inference->number_of_tiles_exchanged > 0;
   int number_of_tiles_played_or_exchanged =
       inference->number_of_tiles_exchanged;
   if (number_of_tiles_played_or_exchanged == 0) {
@@ -201,7 +201,7 @@ void print_ucgi_static_moves(const Game *game, int nmoves,
   free(starting_moves_string_pointer);
 }
 
-char *ucgi_sim_stats(Simmer *simmer, const Game *game, int best_known_play) {
+char *ucgi_sim_stats(Simmer *simmer, const Game *game, bool best_known_play) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
@@ -241,7 +241,7 @@ char *ucgi_sim_stats(Simmer *simmer, const Game *game, int best_known_play) {
     string_builder_add_ucgi_move(play->move, game->gen->board,
                                  game->gen->letter_distribution,
                                  sim_stats_string_builder);
-    int ignore = play->ignore;
+    bool ignore = play->ignore;
     string_builder_add_formatted_string(
         sim_stats_string_builder,
         " sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %llu "
@@ -276,7 +276,7 @@ char *ucgi_sim_stats(Simmer *simmer, const Game *game, int best_known_play) {
 }
 
 void print_ucgi_sim_stats(Simmer *simmer, const Game *game,
-                          int print_best_play) {
+                          bool print_best_play) {
   char *starting_stats_string_pointer =
       ucgi_sim_stats(simmer, game, print_best_play);
   print_to_outfile(simmer->thread_control, starting_stats_string_pointer);

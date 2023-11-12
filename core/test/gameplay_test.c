@@ -25,7 +25,7 @@ void return_racks_to_bag(Game *game) {
 }
 
 void assert_players_are_equal(const Player *p1, const Player *p2,
-                              int check_scores) {
+                              bool check_scores) {
   // For games ending in consecutive zeros, scores are checked elsewhere
   if (check_scores) {
     assert(p1->score == p2->score);
@@ -67,7 +67,7 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
   }
 }
 
-void assert_games_are_equal(const Game *g1, const Game *g2, int check_scores) {
+void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores) {
   assert(g1->consecutive_scoreless_turns == g2->consecutive_scoreless_turns);
   assert(g1->game_end_reason == g2->game_end_reason);
 

@@ -7,9 +7,9 @@
 #include "words.h"
 
 FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
-                          int word_end_index, int row, int col, int vertical) {
+                          int word_end_index, int row, int col, int dir) {
 
-  if (vertical) {
+  if (dir_is_vertical(dir)) {
     transpose(board);
     int ph = col;
     col = row;
@@ -22,18 +22,18 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
   int main_word_idx = 0;
   for (int idx = 0; idx < word_end_index - word_start_index + 1; idx++) {
     uint8_t ml = word[idx + word_start_index];
-    int fresh_tile = 0;
+    bool fresh_tile = false;
 
     if (ml == PLAYED_THROUGH_MARKER) {
       ml = get_letter(board, row, col + idx);
     } else {
-      fresh_tile = 1;
+      fresh_tile = true;
     }
     ml = get_unblanked_machine_letter(ml);
     main_word[main_word_idx] = ml;
     main_word_idx++;
 
-    int actual_cross_word =
+    bool actual_cross_word =
         (row > 0 && !is_empty(board, row - 1, col + idx)) ||
         ((row < BOARD_DIM - 1) && !is_empty(board, row + 1, col + idx));
 
@@ -58,7 +58,7 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
       }
       int widx = 0;
       ws->words[formed_words_idx].word_length = rend - rbegin + 1;
-      ws->words[formed_words_idx].valid = 0; // we don't know validity yet.
+      ws->words[formed_words_idx].valid = false; // we don't know validity yet.
       for (int r = rbegin; r <= rend; r++) {
         if (r != row) {
           uint8_t lt =
@@ -78,16 +78,16 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
   formed_words_idx++;
   ws->num_words = formed_words_idx;
 
-  if (vertical) {
+  if (dir) {
     transpose(board);
   }
 
   return ws;
 }
 
-int is_word_valid(const FormedWord *w, const KWG *kwg) {
+bool is_word_valid(const FormedWord *w, const KWG *kwg) {
   if (w->word_length < 2) {
-    return 0;
+    return false;
   }
 
   int lidx = 0;
@@ -95,7 +95,7 @@ int is_word_valid(const FormedWord *w, const KWG *kwg) {
   do {
     if (lidx > w->word_length - 1) {
       // if we've gone too far the word is not found
-      return 0;
+      return false;
     }
     uint8_t ml = w->word[lidx];
     if (kwg_tile(kwg, node_idx) == ml) {
@@ -106,7 +106,7 @@ int is_word_valid(const FormedWord *w, const KWG *kwg) {
       lidx++;
     } else {
       if (kwg_is_end(kwg, node_idx)) {
-        return 0;
+        return false;
       }
       node_idx++;
     }

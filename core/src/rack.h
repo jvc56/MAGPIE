@@ -12,7 +12,7 @@
 typedef struct Rack {
   int array_size;
   int *array;
-  int empty;
+  bool empty;
   int number_of_letters;
 } Rack;
 

@@ -14,7 +14,7 @@
 
 extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
 extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
-extern inline uint8_t is_blanked(uint8_t ml);
+extern inline bool is_blanked(uint8_t ml);
 
 int get_letter_distribution_size(const char *filename) {
   FILE *file = stream_from_filename(filename);
@@ -66,7 +66,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   letter_distribution->score_order =
       (uint32_t *)malloc_or_die(letter_distribution->size * sizeof(uint32_t));
   letter_distribution->is_vowel =
-      (uint32_t *)malloc_or_die(letter_distribution->size * sizeof(uint32_t));
+      (bool *)malloc_or_die(letter_distribution->size * sizeof(bool));
 
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
     letter_distribution->machine_letter_to_human_readable_letter[i][0] = '\0';
@@ -103,7 +103,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
 
     letter_distribution->distribution[machine_letter] = dist;
     letter_distribution->scores[machine_letter] = score;
-    letter_distribution->is_vowel[machine_letter] = is_vowel;
+    letter_distribution->is_vowel[machine_letter] = is_vowel == 1;
 
     string_copy(letter_distribution
                     ->machine_letter_to_human_readable_letter[machine_letter],

@@ -239,15 +239,15 @@ void evaluate_possible_leave(Inference *inference) {
     current_leave_value = get_leave_value(inference->klv, inference->leave);
   }
   const Move *top_move = get_top_move(inference);
-  int is_within_equity_margin = inference->actual_score + current_leave_value +
-                                    inference->equity_margin +
-                                    (INFERENCE_EQUITY_EPSILON) >=
-                                top_move->equity;
-  int number_exchanged_matches =
+  bool is_within_equity_margin = inference->actual_score + current_leave_value +
+                                     inference->equity_margin +
+                                     (INFERENCE_EQUITY_EPSILON) >=
+                                 top_move->equity;
+  bool number_exchanged_matches =
       top_move->move_type == GAME_EVENT_EXCHANGE &&
       top_move->tiles_played == inference->number_of_tiles_exchanged;
-  int recordable = is_within_equity_margin || number_exchanged_matches ||
-                   inference->bag_as_rack->empty;
+  bool recordable = is_within_equity_margin || number_exchanged_matches ||
+                    inference->bag_as_rack->empty;
   if (recordable) {
     uint64_t number_of_draws_for_leave =
         get_number_of_draws_for_rack(inference->bag_as_rack, inference->leave);
@@ -527,7 +527,7 @@ void get_total_racks_evaluated(Inference *inference, int tiles_to_infer,
   }
 }
 
-int should_print_info(const Inference *inference) {
+bool should_print_info(const Inference *inference) {
   return inference->thread_control->print_info_interval > 0 &&
          inference->current_rack_index > 0 &&
          inference->current_rack_index %
@@ -537,25 +537,25 @@ int should_print_info(const Inference *inference) {
 
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter,
-                                         int multithreaded) {
+                                         bool multithreaded) {
   if (is_halted(inference->thread_control)) {
     return;
   }
   if (tiles_to_infer == 0) {
-    int perform_evaluation = 0;
-    int print_info = 0;
+    bool perform_evaluation = false;
+    bool print_info = false;
 
     if (multithreaded) {
       pthread_mutex_lock(inference->shared_rack_index_lock);
       if (inference->current_rack_index == *inference->shared_rack_index) {
         print_info = should_print_info(inference);
-        perform_evaluation = 1;
+        perform_evaluation = true;
         *inference->shared_rack_index += 1;
       }
       pthread_mutex_unlock(inference->shared_rack_index_lock);
     } else {
       print_info = should_print_info(inference);
-      perform_evaluation = 1;
+      perform_evaluation = true;
     }
 
     if (perform_evaluation) {
@@ -882,7 +882,7 @@ void string_builder_add_inference(const Inference *inference,
                                   const Rack *actual_tiles_played,
                                   StringBuilder *inference_string) {
 
-  int is_exchange = inference->number_of_tiles_exchanged > 0;
+  bool is_exchange = inference->number_of_tiles_exchanged > 0;
   int number_of_tiles_played_or_exchanged;
   const Game *game = inference->game;
 

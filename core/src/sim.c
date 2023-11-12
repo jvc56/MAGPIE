@@ -52,7 +52,7 @@ void create_simmed_plays(Simmer *simmer, const Game *game) {
       sp->score_stat[j] = create_stat();
       sp->bingo_stat[j] = create_stat();
     }
-    sp->ignore = 0;
+    sp->ignore = false;
     sp->play_id = i;
     pthread_mutex_init(&sp->mutex, NULL);
     simmer->simmed_plays[i] = sp;
@@ -126,10 +126,10 @@ void destroy_simmer_worker(SimmerWorker *simmer_worker) {
   free(simmer_worker);
 }
 
-int is_multithreaded(const Simmer *simmer) { return simmer->threads > 1; }
+bool is_multithreaded(const Simmer *simmer) { return simmer->threads > 1; }
 
-void add_score_stat(SimmedPlay *sp, int score, int is_bingo, int ply,
-                    int lock) {
+void add_score_stat(SimmedPlay *sp, int score, bool is_bingo, int ply,
+                    bool lock) {
   if (lock) {
     pthread_mutex_lock(&sp->mutex);
   }
@@ -141,7 +141,7 @@ void add_score_stat(SimmedPlay *sp, int score, int is_bingo, int ply,
 }
 
 void add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
-                     float leftover, int lock) {
+                     float leftover, bool lock) {
   if (lock) {
     pthread_mutex_lock(&sp->mutex);
   }
@@ -155,7 +155,7 @@ void add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
 
 void add_winpct_stat(SimmedPlay *sp, const WinPct *wp, int spread,
                      float leftover, int game_end_reason, int tiles_unseen,
-                     int plies_are_odd, int lock) {
+                     bool plies_are_odd, bool lock) {
 
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
@@ -190,17 +190,17 @@ void add_winpct_stat(SimmedPlay *sp, const WinPct *wp, int spread,
   }
 }
 
-void ignore_play(SimmedPlay *sp, int lock) {
+void ignore_play(SimmedPlay *sp, bool lock) {
   if (lock) {
     pthread_mutex_lock(&sp->mutex);
   }
-  sp->ignore = 1;
+  sp->ignore = true;
   if (lock) {
     pthread_mutex_unlock(&sp->mutex);
   }
 }
 
-int handle_potential_stopping_condition(Simmer *simmer) {
+bool handle_potential_stopping_condition(Simmer *simmer) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
@@ -246,9 +246,9 @@ int handle_potential_stopping_condition(Simmer *simmer) {
   log_debug("total ignored: %d\n", total_ignored);
   if (total_ignored >= simmer->num_simmed_plays - 1) {
     // if there is only 1 unignored play, exit.
-    return 1;
+    return true;
   }
-  return 0;
+  return false;
 }
 
 void sim_single_iteration(SimmerWorker *simmer_worker) {
@@ -321,12 +321,12 @@ void *simmer_worker(void *uncasted_simmer_worker) {
   ThreadControl *thread_control = simmer->thread_control;
   while (!is_halted(thread_control)) {
     int current_iteration_count;
-    int reached_max_iteration = 0;
+    bool reached_max_iteration = false;
     if (is_multithreaded(simmer)) {
       pthread_mutex_lock(&simmer->iteration_count_mutex);
     }
     if (simmer->iteration_count == simmer->max_iterations) {
-      reached_max_iteration = 1;
+      reached_max_iteration = true;
     } else {
       simmer->iteration_count++;
       current_iteration_count = simmer->iteration_count;
@@ -363,17 +363,17 @@ void *simmer_worker(void *uncasted_simmer_worker) {
   return NULL;
 }
 
-int plays_are_similar(Simmer *simmer, const SimmedPlay *m1,
-                      const SimmedPlay *m2) {
+bool plays_are_similar(Simmer *simmer, const SimmedPlay *m1,
+                       const SimmedPlay *m2) {
   // look in the cache first
   int cache_value =
       simmer->play_similarity_cache[m1->play_id +
                                     simmer->num_simmed_plays * m2->play_id];
   assert(cache_value != PLAYS_IDENTICAL);
   if (cache_value == PLAYS_SIMILAR) {
-    return 1;
+    return true;
   } else if (cache_value == PLAYS_NOT_SIMILAR) {
-    return 0;
+    return false;
   }
   int cache_index1 = m1->play_id + simmer->num_simmed_plays * m2->play_id;
   int cache_index2 = m2->play_id + simmer->num_simmed_plays * m1->play_id;
@@ -381,25 +381,25 @@ int plays_are_similar(Simmer *simmer, const SimmedPlay *m1,
   if (m1->move->move_type != m2->move->move_type) {
     simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
     simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
-    return 0;
+    return false;
   }
 
   // Otherwise, we must compute play similarity and fill in the cache.
   // two plays are "similar" if they use the same tiles, and they start at
   // the same square.
-  if (!(m1->move->vertical == m2->move->vertical &&
+  if (!(m1->move->dir == m2->move->dir &&
         m1->move->col_start == m2->move->col_start &&
         m1->move->row_start == m2->move->row_start)) {
 
     simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
     simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
-    return 0;
+    return false;
   }
   if (!(m1->move->tiles_played == m2->move->tiles_played &&
         m1->move->tiles_length == m2->move->tiles_length)) {
     simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
     simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
-    return 0;
+    return false;
   }
 
   // Create a rack from m1, then subtract the rack from m2. The final
@@ -431,13 +431,13 @@ int plays_are_similar(Simmer *simmer, const SimmedPlay *m1,
     if (simmer->similar_plays_rack->array[i] != 0) {
       simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
       simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
-      return 0;
+      return false;
     }
   }
   simmer->play_similarity_cache[cache_index1] = PLAYS_SIMILAR;
   simmer->play_similarity_cache[cache_index2] = PLAYS_SIMILAR;
 
-  return 1;
+  return true;
 }
 
 int compare_simmed_plays(const void *a, const void *b) {

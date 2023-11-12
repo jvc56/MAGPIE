@@ -24,8 +24,8 @@ void play_move_on_board(Game *game, const Move *move) {
     if (letter == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    set_letter(game->gen->board, move->row_start + (move->vertical * idx),
-               move->col_start + ((1 - move->vertical) * idx), letter);
+    set_letter(game->gen->board, move->row_start + (move->dir * idx),
+               move->col_start + ((1 - move->dir) * idx), letter);
     if (is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
     }
@@ -37,26 +37,25 @@ void play_move_on_board(Game *game, const Move *move) {
   // updateAnchorsForMove
   int row = move->row_start;
   int col = move->col_start;
-  if (move->vertical) {
+  if (dir_is_vertical(move->dir)) {
     row = move->col_start;
     col = move->row_start;
   }
 
   for (int i = col; i < move->tiles_length + col; i++) {
-    update_anchors(game->gen->board, row, i, move->vertical);
+    update_anchors(game->gen->board, row, i, move->dir);
     if (row > 0) {
-      update_anchors(game->gen->board, row - 1, i, move->vertical);
+      update_anchors(game->gen->board, row - 1, i, move->dir);
     }
     if (row < BOARD_DIM - 1) {
-      update_anchors(game->gen->board, row + 1, i, move->vertical);
+      update_anchors(game->gen->board, row + 1, i, move->dir);
     }
   }
   if (col - 1 >= 0) {
-    update_anchors(game->gen->board, row, col - 1, move->vertical);
+    update_anchors(game->gen->board, row, col - 1, move->dir);
   }
   if (move->tiles_length + col < BOARD_DIM) {
-    update_anchors(game->gen->board, row, move->tiles_length + col,
-                   move->vertical);
+    update_anchors(game->gen->board, row, move->tiles_length + col, move->dir);
   }
 }
 
@@ -101,7 +100,7 @@ void calc_for_self(int row_start, int col_start, int csd, Game *game,
 }
 
 void update_cross_set_for_move(Game *game, const Move *move) {
-  if (move->vertical) {
+  if (dir_is_vertical(move->dir)) {
     calc_for_across(move->row_start, move->col_start,
                     BOARD_HORIZONTAL_DIRECTION, game, move);
     transpose(game->gen->board);

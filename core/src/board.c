@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,8 @@
 #define BONUS_DOUBLE_WORD_SCORE '-'
 #define BONUS_TRIPLE_LETTER_SCORE '"'
 #define BONUS_DOUBLE_LETTER_SCORE '\''
+
+bool dir_is_vertical(int dir) { return dir == BOARD_VERTICAL_DIRECTION; }
 
 board_layout_t
 board_layout_string_to_board_layout(const char *board_layout_string) {
@@ -48,7 +51,7 @@ int get_tindex_player_cross(const Board *board, int row, int col, int dir,
 
 // Letters
 
-int is_empty(const Board *board, int row, int col) {
+bool is_empty(const Board *board, int row, int col) {
   return get_letter(board, row, col) == ALPHABET_EMPTY_SQUARE_MARKER;
 }
 
@@ -70,12 +73,12 @@ uint8_t get_letter(const Board *board, int row, int col) {
 
 // Anchors
 
-int get_anchor(const Board *board, int row, int col, int vertical) {
-  return board->anchors[get_tindex_dir(board, row, col, vertical)];
+int get_anchor(const Board *board, int row, int col, int dir) {
+  return board->anchors[get_tindex_dir(board, row, col, dir)];
 }
 
-void set_anchor(Board *board, int row, int col, int vertical) {
-  board->anchors[get_tindex_dir(board, row, col, vertical)] = 1;
+void set_anchor(Board *board, int row, int col, int dir) {
+  board->anchors[get_tindex_dir(board, row, col, dir)] = 1;
 }
 
 void reset_anchors(Board *board, int row, int col) {
@@ -147,11 +150,11 @@ void reset_all_cross_scores(Board *board) {
   }
 }
 
-int pos_exists(int row, int col) {
+bool pos_exists(int row, int col) {
   return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM;
 }
 
-int left_and_right_empty(const Board *board, int row, int col) {
+bool left_and_right_empty(const Board *board, int row, int col) {
   return !((pos_exists(row, col - 1) && !is_empty(board, row, col - 1)) ||
            (pos_exists(row, col + 1) && !is_empty(board, row, col + 1)));
 }
@@ -182,19 +185,19 @@ int traverse_backwards_for_score(
   return score;
 }
 
-void update_anchors(Board *board, int row, int col, int vertical) {
-  if (vertical) {
+void update_anchors(Board *board, int row, int col, int dir) {
+  if (dir_is_vertical(dir)) {
     int temp = row;
     row = col;
     col = temp;
   }
 
   reset_anchors(board, row, col);
-  int tile_above = 0;
-  int tile_below = 0;
-  int tile_left = 0;
-  int tile_right = 0;
-  int tile_here = 0;
+  bool tile_above = false;
+  bool tile_below = false;
+  bool tile_left = false;
+  bool tile_right = false;
+  bool tile_here = false;
 
   if (row > 0) {
     tile_above = !is_empty(board, row - 1, col);
@@ -248,7 +251,7 @@ void reset_board(Board *board) {
   // The transposed field must be set to 0 here because
   // it is used to calculate the index for set_letter.
   board->tiles_played = 0;
-  board->transposed = 0;
+  board->transposed = false;
 
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
@@ -290,13 +293,13 @@ void set_bonus_squares(Board *board) {
   }
 }
 
-void transpose(Board *board) { board->transposed = 1 - board->transposed; }
+void transpose(Board *board) { board->transposed = !board->transposed; }
 
-void set_transpose(Board *board, int transpose) {
-  board->transposed = transpose;
+void set_transpose(Board *board, bool transposed) {
+  board->transposed = transposed;
 }
 
-void reset_transpose(Board *board) { board->transposed = 0; }
+void reset_transpose(Board *board) { board->transposed = false; }
 
 Board *create_board() {
   Board *board = malloc_or_die(sizeof(Board));

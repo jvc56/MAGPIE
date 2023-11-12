@@ -11,7 +11,7 @@ void string_builder_add_ucgi_move(const Move *move, const Board *board,
 
   if (move->move_type != GAME_EVENT_PASS) {
     if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      if (move->vertical) {
+      if (dir_is_vertical(move->dir)) {
         string_builder_add_formatted_string(move_string_builder, "%c%d.",
                                             move->col_start + 'a',
                                             move->row_start + 1);
@@ -34,7 +34,7 @@ void string_builder_add_ucgi_move(const Move *move, const Board *board,
 
     int ri = 0;
     int ci = 0;
-    if (move->vertical) {
+    if (dir_is_vertical(move->dir)) {
       ri = 1;
     } else {
       ci = 1;
