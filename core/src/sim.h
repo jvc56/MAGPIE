@@ -50,7 +50,7 @@ typedef struct Simmer {
 
   Rack *known_opp_rack;
   Rack *similar_plays_rack;
-  WinPct *win_pcts;
+  const WinPct *win_pcts;
 
   int *play_similarity_cache;
   atomic_int node_count;
@@ -66,8 +66,9 @@ typedef struct SimmerWorker {
 
 Simmer *create_simmer(const Config *config);
 void destroy_simmer(Simmer *simmer);
-int plays_are_similar(Simmer *simmer, SimmedPlay *m1, SimmedPlay *m2);
-sim_status_t simulate(const Config *config, Simmer *simmer, Game *game);
+int plays_are_similar(Simmer *simmer, const SimmedPlay *m1,
+                      const SimmedPlay *m2);
+sim_status_t simulate(const Config *config, const Game *game, Simmer *simmer);
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays);
 
 #endif

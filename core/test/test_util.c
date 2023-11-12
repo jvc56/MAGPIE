@@ -23,7 +23,7 @@
 
 int within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
-double get_leave_value_for_rack(const KLV *klv, Rack *rack) {
+double get_leave_value_for_rack(const KLV *klv, const Rack *rack) {
   return get_leave_value(klv, rack);
 }
 
@@ -75,12 +75,12 @@ void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
   free(sorted_move_list);
 }
 
-void print_anchor_list(Generator *gen) {
+void print_anchor_list(const Generator *gen) {
   for (int i = 0; i < gen->anchor_list->count; i++) {
     Anchor *anchor = gen->anchor_list->anchors[i];
     int row = anchor->row;
     int col = anchor->col;
-    char *dir = "Horizontal";
+    const char *dir = "Horizontal";
     if (anchor->vertical) {
       row = anchor->col;
       col = anchor->row;
@@ -91,8 +91,9 @@ void print_anchor_list(Generator *gen) {
   }
 }
 
-void print_move_list(Board *board, LetterDistribution *letter_distribution,
-                     SortedMoveList *sml, int move_list_length) {
+void print_move_list(const Board *board,
+                     const LetterDistribution *letter_distribution,
+                     const SortedMoveList *sml, int move_list_length) {
   StringBuilder *move_list_string = create_string_builder();
   for (int i = 0; i < move_list_length; i++) {
     string_builder_add_move(board, sml->moves[0], letter_distribution,
@@ -103,22 +104,22 @@ void print_move_list(Board *board, LetterDistribution *letter_distribution,
   destroy_string_builder(move_list_string);
 }
 
-void print_game(Game *game) {
+void print_game(const Game *game) {
   StringBuilder *game_string = create_string_builder();
   string_builder_add_game(game, game_string);
   printf("%s\n", string_builder_peek(game_string));
   destroy_string_builder(game_string);
 }
 
-void print_inference(Inference *inference, Rack *rack) {
+void print_inference(const Inference *inference, const Rack *rack) {
   StringBuilder *inference_string = create_string_builder();
   string_builder_add_inference(inference, rack, inference_string);
   printf("%s\n", string_builder_peek(inference_string));
   destroy_string_builder(inference_string);
 }
 
-void sort_and_print_move_list(Board *board,
-                              LetterDistribution *letter_distribution,
+void sort_and_print_move_list(const Board *board,
+                              const LetterDistribution *letter_distribution,
                               MoveList *ml) {
   SortedMoveList *sml = create_sorted_move_list(ml);
   print_move_list(board, letter_distribution, sml, sml->count);
@@ -140,7 +141,7 @@ void play_top_n_equity_move(Game *game, int n) {
 }
 
 void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
-                         LetterDistribution *letter_distribution) {
+                         const LetterDistribution *letter_distribution) {
 
   uint8_t mls[1000];
   int num_mls =
@@ -162,6 +163,31 @@ int count_newlines(const char *str) {
   return count;
 }
 
+int equal_rack(const Rack *expected_rack, const Rack *actual_rack) {
+  if (expected_rack->empty != actual_rack->empty) {
+    printf("not empty\n");
+    return 0;
+  }
+  if (expected_rack->number_of_letters != actual_rack->number_of_letters) {
+    printf("num letters: %d != %d\n", expected_rack->number_of_letters,
+           actual_rack->number_of_letters);
+    return 0;
+  }
+  if (expected_rack->array_size != actual_rack->array_size) {
+    printf("sizes: %d != %d\n", expected_rack->array_size,
+           actual_rack->array_size);
+    return 0;
+  }
+  for (int i = 0; i < (expected_rack->array_size); i++) {
+    if (expected_rack->array[i] != actual_rack->array[i]) {
+      printf("different: %d: %d != %d\n", i, expected_rack->array[i],
+             actual_rack->array[i]);
+      return 0;
+    }
+  }
+  return 1;
+}
+
 void assert_strings_equal(const char *str1, const char *str2) {
   if (!strings_equal(str1, str2)) {
     if (str1 && !str2) {
@@ -175,8 +201,8 @@ void assert_strings_equal(const char *str1, const char *str2) {
   }
 }
 
-void assert_move(Game *game, SortedMoveList *sml, int move_index,
-                 char *expected_move_string) {
+void assert_move(const Game *game, const SortedMoveList *sml, int move_index,
+                 const char *expected_move_string) {
   StringBuilder *move_string = create_string_builder();
   Move *move;
   if (sml) {

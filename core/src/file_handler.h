@@ -12,7 +12,7 @@ typedef enum {
 struct FileHandler;
 typedef struct FileHandler FileHandler;
 
-const char *get_file_handler_filename(FileHandler *fh);
+const char *get_file_handler_filename(const FileHandler *fh);
 void set_file_handler(FileHandler *fh, const char *filename,
                       file_handler_mode_t file_handler_mode_type);
 FileHandler *

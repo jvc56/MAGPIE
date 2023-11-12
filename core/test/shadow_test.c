@@ -27,7 +27,7 @@ void load_and_generate(Game *game, Player *player, const char *cgp,
 }
 
 void test_shadow_score(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
 
@@ -477,7 +477,7 @@ void test_shadow_score(TestConfig *testconfig) {
 }
 
 void test_shadow_equity(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
 
@@ -528,7 +528,7 @@ void test_shadow_equity(TestConfig *testconfig) {
 }
 
 void test_shadow_top_move(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Player *player = game->players[0];
 

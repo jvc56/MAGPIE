@@ -18,13 +18,14 @@ typedef struct Bag {
 void add_letter(Bag *bag, uint8_t letter);
 void draw_letter(Bag *bag, uint8_t letter);
 void destroy_bag(Bag *bag);
-Bag *create_bag(LetterDistribution *letter_distribution);
-Bag *copy_bag(Bag *bag);
-void update_bag(Bag *bag, LetterDistribution *letter_distribution);
-void copy_bag_into(Bag *dst, Bag *src);
+Bag *create_bag(const LetterDistribution *letter_distribution);
+Bag *copy_bag(const Bag *bag);
+void update_bag(Bag *bag, const LetterDistribution *letter_distribution);
+void copy_bag_into(Bag *dst, const Bag *src);
 void reseed_prng(Bag *bag, uint64_t seed);
-void reset_bag(Bag *bag, LetterDistribution *letter_distribution);
+void reset_bag(Bag *bag, const LetterDistribution *letter_distribution);
 void shuffle(Bag *bag);
-void string_builder_add_bag(Bag *bag, LetterDistribution *letter_distribution,
+void string_builder_add_bag(const Bag *bag,
+                            const LetterDistribution *letter_distribution,
                             size_t len, StringBuilder *string_builder);
 #endif

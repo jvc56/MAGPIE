@@ -6,11 +6,11 @@
 #include "../src/rack.h"
 
 #include "rack_test.h"
-#include "testconfig.h"
 #include "test_util.h"
+#include "testconfig.h"
 
 void take_set(LeaveMap *leave_map, Rack *rack,
-              LetterDistribution *letter_distribution, char *letter,
+              const LetterDistribution *letter_distribution, char *letter,
               int expected_take_index, double value) {
   take_letter_and_update_current_index(
       leave_map, rack,
@@ -23,7 +23,7 @@ void take_set(LeaveMap *leave_map, Rack *rack,
 }
 
 void take_set_add(LeaveMap *leave_map, Rack *rack,
-                  LetterDistribution *letter_distribution, char *letter,
+                  const LetterDistribution *letter_distribution, char *letter,
                   int expected_take_index, int expected_add_index, double value,
                   int set) {
   take_letter_and_update_current_index(
@@ -42,8 +42,8 @@ void take_set_add(LeaveMap *leave_map, Rack *rack,
 }
 
 void test_leave_map(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
-  LetterDistribution *letter_distribution = config->letter_distribution;
+  const Config *config = get_csw_config(testconfig);
+  const LetterDistribution *letter_distribution = config->letter_distribution;
   Rack *rack = create_rack(config->letter_distribution->size);
   LeaveMap *leave_map = create_leave_map(rack->array_size);
 

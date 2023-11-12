@@ -219,9 +219,9 @@ void test_config_success() {
   assert(strings_equal(rack, string_builder_peek(test_string_builder)));
 
   // Save KWG pointers as these shouldn't be reused
-  KWG *p1_csw_kwg =
+  const KWG *p1_csw_kwg =
       players_data_get_data(config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
-  KWG *p2_nwl_kwg =
+  const KWG *p2_nwl_kwg =
       players_data_get_data(config->players_data, PLAYERS_DATA_TYPE_KWG, 1);
 
   // Change some fields, confirm that
@@ -299,9 +299,9 @@ void test_config_success() {
 
   // The players data should have swapped the lexicons
   // and not created or destroyed any new KWGs
-  KWG *p1_nwl_kwg =
+  const KWG *p1_nwl_kwg =
       players_data_get_data(config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
-  KWG *p2_csw_kwg =
+  const KWG *p2_csw_kwg =
       players_data_get_data(config->players_data, PLAYERS_DATA_TYPE_KWG, 1);
   assert(p1_csw_kwg == p2_csw_kwg);
   assert(p1_nwl_kwg == p2_nwl_kwg);

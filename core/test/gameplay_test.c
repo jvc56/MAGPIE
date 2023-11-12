@@ -24,14 +24,15 @@ void return_racks_to_bag(Game *game) {
   return_rack_to_bag(game->players[1]->rack, game->gen->bag);
 }
 
-void assert_players_are_equal(Player *p1, Player *p2, int check_scores) {
+void assert_players_are_equal(const Player *p1, const Player *p2,
+                              int check_scores) {
   // For games ending in consecutive zeros, scores are checked elsewhere
   if (check_scores) {
     assert(p1->score == p2->score);
   }
 }
 
-void assert_boards_are_equal(Board *b1, Board *b2) {
+void assert_boards_are_equal(const Board *b1, const Board *b2) {
   assert(b1->transposed == b2->transposed);
   assert(b1->tiles_played == b2->tiles_played);
   for (int i = 0; i < (BOARD_DIM * BOARD_DIM * 2); i++) {
@@ -45,7 +46,7 @@ void assert_boards_are_equal(Board *b1, Board *b2) {
   }
 }
 
-void assert_bags_are_equal(Bag *b1, Bag *b2, int rack_array_size) {
+void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
   assert(b1->last_tile_index == b2->last_tile_index);
 
   uint8_t sb1[(rack_array_size)];
@@ -66,15 +67,17 @@ void assert_bags_are_equal(Bag *b1, Bag *b2, int rack_array_size) {
   }
 }
 
-void assert_games_are_equal(Game *g1, Game *g2, int check_scores) {
+void assert_games_are_equal(const Game *g1, const Game *g2, int check_scores) {
   assert(g1->consecutive_scoreless_turns == g2->consecutive_scoreless_turns);
   assert(g1->game_end_reason == g2->game_end_reason);
 
-  Player *g1_player_on_turn = g1->players[g1->player_on_turn_index];
-  Player *g1_player_not_on_turn = g1->players[1 - g1->player_on_turn_index];
+  const Player *g1_player_on_turn = g1->players[g1->player_on_turn_index];
+  const Player *g1_player_not_on_turn =
+      g1->players[1 - g1->player_on_turn_index];
 
-  Player *g2_player_on_turn = g2->players[g2->player_on_turn_index];
-  Player *g2_player_not_on_turn = g2->players[1 - g2->player_on_turn_index];
+  const Player *g2_player_on_turn = g2->players[g2->player_on_turn_index];
+  const Player *g2_player_not_on_turn =
+      g2->players[1 - g2->player_on_turn_index];
 
   assert_players_are_equal(g1_player_on_turn, g2_player_on_turn, check_scores);
   assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn,
@@ -85,12 +88,10 @@ void assert_games_are_equal(Game *g1, Game *g2, int check_scores) {
                         g1->gen->letter_distribution->size);
 }
 
-void test_gameplay_by_turn(Config *config, char *cgps[], char *racks[],
+void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
                            int array_length) {
   Game *actual_game = create_game(config);
-  ;
   Game *expected_game = create_game(config);
-  ;
 
   int player0_last_score_on_rack = -1;
   int player1_last_score_on_rack = -1;
@@ -165,7 +166,7 @@ void test_gameplay_by_turn(Config *config, char *cgps[], char *racks[],
 }
 
 void test_six_exchanges_game(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
 
   char *racks[18] = {"UUUVVWW", "AEFRWYZ", "INOOQSU", "LUUUVVW", "EEEEEOO",
                      "AEIKLMO", "GNOOOPR", "EGIJLRS", "EEEOTTT", "EIILRSX",
@@ -212,7 +213,7 @@ void test_six_exchanges_game(TestConfig *testconfig) {
 }
 
 void test_six_passes_game(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
 
   char *racks[31] = {"AEGILPR", "ACELNTV", "DDEIOTY", "?ADIIUU", "?BEIINS",
                      "EEEKMNO", "AAEHINT", "CDEGORZ", "EGNOQRS", "AFIQRRT",
@@ -307,7 +308,7 @@ void test_six_passes_game(TestConfig *testconfig) {
 }
 
 void test_standard_game(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
 
   char *racks[23] = {"EGIILNO", "DRRTYYZ", "CEIOTTU", "AADEEMT", "AACDEKS",
                      "BEEIOOP", "DHLNORR", "BGIIJRV", "?DFMNPU", "EEEOQRW",
@@ -379,9 +380,8 @@ void test_standard_game(TestConfig *testconfig) {
 }
 
 void test_playmove(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  ;
 
   // Test play
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
@@ -476,9 +476,9 @@ void test_playmove(TestConfig *testconfig) {
 }
 
 void test_set_random_rack(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  ;
+
   assert(game->gen->bag->last_tile_index == 99);
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
@@ -519,9 +519,9 @@ void test_set_random_rack(TestConfig *testconfig) {
 }
 
 void test_backups(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  ;
+
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
                       game->gen->letter_distribution);

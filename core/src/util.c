@@ -9,7 +9,7 @@
 #include "move.h"
 #include "rack.h"
 
-double get_leave_value_for_move(const KLV *klv, Move *move, Rack *rack) {
+double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   int valid_tiles = move->tiles_length;
   if (move->move_type == GAME_EVENT_EXCHANGE) {
     valid_tiles = move->tiles_played;

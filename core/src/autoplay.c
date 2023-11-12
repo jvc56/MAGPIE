@@ -61,7 +61,7 @@ void destroy_autoplay_worker(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
-void record_results(Game *game, int starting_player_index,
+void record_results(const Game *game, int starting_player_index,
                     AutoplayResults *autoplay_results) {
   autoplay_results->total_games++;
   if (game->players[0]->score > game->players[1]->score) {
@@ -79,7 +79,7 @@ void record_results(Game *game, int starting_player_index,
 }
 
 void add_autoplay_results(AutoplayResults *autoplay_results_1,
-                          AutoplayResults *autoplay_results_2) {
+                          const AutoplayResults *autoplay_results_2) {
   // Stats are combined elsewhere
   autoplay_results_1->p1_firsts += autoplay_results_2->p1_firsts;
   autoplay_results_1->p1_wins += autoplay_results_2->p1_wins;

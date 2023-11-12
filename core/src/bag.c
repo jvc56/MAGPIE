@@ -20,7 +20,7 @@ void shuffle(Bag *bag) {
   }
 }
 
-void reset_bag(Bag *bag, LetterDistribution *letter_distribution) {
+void reset_bag(Bag *bag, const LetterDistribution *letter_distribution) {
   int tile_index = 0;
   for (uint32_t i = 0; i < (letter_distribution->size); i++) {
     for (uint32_t k = 0; k < letter_distribution->distribution[i]; k++) {
@@ -32,7 +32,7 @@ void reset_bag(Bag *bag, LetterDistribution *letter_distribution) {
   shuffle(bag);
 }
 
-void update_bag(Bag *bag, LetterDistribution *letter_distribution) {
+void update_bag(Bag *bag, const LetterDistribution *letter_distribution) {
   if (bag->size != letter_distribution->total_tiles) {
     free(bag->tiles);
     bag->size = letter_distribution->total_tiles;
@@ -41,7 +41,7 @@ void update_bag(Bag *bag, LetterDistribution *letter_distribution) {
   }
 }
 
-Bag *create_bag(LetterDistribution *letter_distribution) {
+Bag *create_bag(const LetterDistribution *letter_distribution) {
   Bag *bag = malloc_or_die(sizeof(Bag));
   // call reseed_prng if needed.
   bag->prng = create_prng(42);
@@ -51,7 +51,7 @@ Bag *create_bag(LetterDistribution *letter_distribution) {
   return bag;
 }
 
-Bag *copy_bag(Bag *bag) {
+Bag *copy_bag(const Bag *bag) {
   Bag *new_bag = malloc_or_die(sizeof(Bag));
   new_bag->prng = create_prng(42);
   new_bag->size = bag->size;
@@ -60,7 +60,7 @@ Bag *copy_bag(Bag *bag) {
   return new_bag;
 }
 
-void copy_bag_into(Bag *dst, Bag *src) {
+void copy_bag_into(Bag *dst, const Bag *src) {
   for (int tile_index = 0; tile_index <= src->last_tile_index; tile_index++) {
     dst->tiles[tile_index] = src->tiles[tile_index];
   }
@@ -104,7 +104,8 @@ void add_letter(Bag *bag, uint8_t letter) {
 
 void reseed_prng(Bag *bag, uint64_t seed) { seed_prng(bag->prng, seed); }
 
-void string_builder_add_bag(Bag *bag, LetterDistribution *letter_distribution,
+void string_builder_add_bag(const Bag *bag,
+                            const LetterDistribution *letter_distribution,
                             size_t len, StringBuilder *bag_string_builder) {
   uint8_t *sorted_bag = malloc_or_die(sizeof(uint8_t) * bag->size);
   for (int i = 0; i <= bag->last_tile_index; i++) {

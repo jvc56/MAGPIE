@@ -34,7 +34,7 @@ void update_or_create_rack(Rack **rack, int array_size) {
   }
 }
 
-Rack *copy_rack(Rack *rack) {
+Rack *copy_rack(const Rack *rack) {
   Rack *new_rack = malloc_or_die(sizeof(Rack));
   new_rack->array = (int *)malloc_or_die(rack->array_size * sizeof(int));
   new_rack->array_size = rack->array_size;
@@ -43,7 +43,7 @@ Rack *copy_rack(Rack *rack) {
   return new_rack;
 }
 
-void copy_rack_into(Rack *dst, Rack *src) {
+void copy_rack_into(Rack *dst, const Rack *src) {
   for (int i = 0; i < src->array_size; i++) {
     dst->array[i] = src->array[i];
   }
@@ -72,7 +72,8 @@ void add_letter_to_rack(Rack *rack, uint8_t letter) {
   }
 }
 
-int score_on_rack(LetterDistribution *letter_distribution, Rack *rack) {
+int score_on_rack(const LetterDistribution *letter_distribution,
+                  const Rack *rack) {
   int sum = 0;
   for (int i = 0; i < (rack->array_size); i++) {
     sum += rack->array[i] * letter_distribution->scores[i];
@@ -81,7 +82,7 @@ int score_on_rack(LetterDistribution *letter_distribution, Rack *rack) {
 }
 
 int set_rack_to_string(Rack *rack, const char *rack_string,
-                       LetterDistribution *letter_distribution) {
+                       const LetterDistribution *letter_distribution) {
   reset_rack(rack);
 
   uint8_t mls[MAX_BAG_SIZE];
@@ -96,8 +97,8 @@ int set_rack_to_string(Rack *rack, const char *rack_string,
   return num_mls;
 }
 
-void string_builder_add_rack(Rack *rack,
-                             LetterDistribution *letter_distribution,
+void string_builder_add_rack(const Rack *rack,
+                             const LetterDistribution *letter_distribution,
                              StringBuilder *string_builder) {
   for (int i = 0; i < rack->array_size; i++) {
     for (int j = 0; j < rack->array[i]; j++) {
@@ -107,7 +108,7 @@ void string_builder_add_rack(Rack *rack,
   }
 }
 
-bool racks_are_equal(Rack *rack1, Rack *rack2) {
+bool racks_are_equal(const Rack *rack1, const Rack *rack2) {
   if (!rack1 && !rack2) {
     return true;
   }

@@ -301,15 +301,15 @@ static void string_builder_ensure_space(StringBuilder *string_builder,
   }
 
   while (string_builder->alloced < string_builder->len + add_len + 1) {
-    /* Doubling growth strategy. */
+    // doubling growth strategy
     string_builder->alloced <<= 1;
     if (string_builder->alloced == 0) {
-      /* Left shift of max bits will go to 0. An unsigned type set to
-       * -1 will return the maximum possible size. However, we should
-       *  have run out of memory well before we need to do this. Since
-       *  this is the theoretical maximum total system memory we don't
-       *  have a flag saying we can't grow any more because it should
-       *  be impossible to get to this point. */
+      // Left shift of max bits will go to 0. An unsigned type set to
+      // -1 will return the maximum possible size. However, we should
+      //  have run out of memory well before we need to do this. Since
+      //  this is the theoretical maximum total system memory we don't
+      //  have a flag saying we can't grow any more because it should
+      // be impossible to get to this point.
       string_builder->alloced--;
     }
   }
@@ -452,7 +452,7 @@ void destroy_string_delimiter(StringDelimiter *string_delimiter) {
   free(string_delimiter);
 }
 
-bool char_matches_string_delimiter(StringDelimiter *string_delimiter,
+bool char_matches_string_delimiter(const StringDelimiter *string_delimiter,
                                    const char c) {
   switch (string_delimiter->string_delimiter_class) {
   case STRING_DELIMITER_RANGED:
@@ -466,11 +466,11 @@ bool char_matches_string_delimiter(StringDelimiter *string_delimiter,
   return false;
 }
 
-int string_splitter_get_number_of_items(StringSplitter *string_splitter) {
+int string_splitter_get_number_of_items(const StringSplitter *string_splitter) {
   return string_splitter->number_of_items;
 }
 
-const char *string_splitter_get_item(StringSplitter *string_splitter,
+const char *string_splitter_get_item(const StringSplitter *string_splitter,
                                      int item_index) {
   if (item_index >= string_splitter->number_of_items || item_index < 0) {
     log_fatal("string item out of range (%d): %d\n",
@@ -486,8 +486,9 @@ void string_splitter_trim_char(StringSplitter *string_splitter, const char c) {
   }
 }
 
-char *string_splitter_join(StringSplitter *string_splitter, int start_index,
-                           int end_index, const char *separator) {
+char *string_splitter_join(const StringSplitter *string_splitter,
+                           int start_index, int end_index,
+                           const char *separator) {
   int number_of_items = string_splitter_get_number_of_items(string_splitter);
   if (start_index < 0 || end_index < 0 || start_index > number_of_items ||
       end_index > number_of_items) {
@@ -508,8 +509,8 @@ char *string_splitter_join(StringSplitter *string_splitter, int start_index,
 }
 
 int split_string_scan(StringSplitter *string_splitter, const char *input_string,
-                      StringDelimiter *string_delimiter, bool ignore_empty,
-                      bool set_items) {
+                      const StringDelimiter *string_delimiter,
+                      bool ignore_empty, bool set_items) {
   int current_number_of_items = 0;
   char previous_char;
   int item_start_index = 0;

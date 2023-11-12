@@ -37,9 +37,8 @@ create_letter_distribution(const char *letter_distribution_name);
 void destroy_letter_distribution(LetterDistribution *letter_distribution);
 void load_letter_distribution(LetterDistribution *letter_distribution,
                               const char *letter_distribution_name);
-uint8_t
-human_readable_letter_to_machine_letter(LetterDistribution *letter_distribution,
-                                        char *letter);
+uint8_t human_readable_letter_to_machine_letter(
+    const LetterDistribution *letter_distribution, char *letter);
 
 inline uint8_t get_blanked_machine_letter(uint8_t ml) {
   return ml | BLANK_MASK;
@@ -51,13 +50,13 @@ inline uint8_t get_unblanked_machine_letter(uint8_t ml) {
 
 inline uint8_t is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
 
-int str_to_machine_letters(LetterDistribution *letter_distribution,
+int str_to_machine_letters(const LetterDistribution *letter_distribution,
                            const char *str, bool allow_played_through_marker,
                            uint8_t *mls);
 char *get_default_letter_distribution_name(const char *lexicon_name);
 
 void string_builder_add_user_visible_letter(
-    LetterDistribution *letter_distribution, uint8_t ml, size_t len,
+    const LetterDistribution *letter_distribution, uint8_t ml, size_t len,
     StringBuilder *string_builder);
 
 #endif

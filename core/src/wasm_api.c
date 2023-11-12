@@ -34,11 +34,12 @@ Game *get_game_from_cgp(const char *cgp) {
 }
 
 // tiles must contain 0 for play-through tiles!
-char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
-                 uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
+char *score_play(const char *cgpstr, int move_type, int row, int col,
+                 int vertical, uint8_t *tiles, uint8_t *leave, int ntiles,
+                 int nleave) {
   clock_t begin = clock();
 
-  Game *game = get_game_from_cgp(cgpstr);
+  const Game *game = get_game_from_cgp(cgpstr);
 
   int tiles_played = 0;
   for (int i = 0; i < ntiles; i++) {
@@ -152,10 +153,10 @@ char *score_play(char *cgpstr, int move_type, int row, int col, int vertical,
 }
 
 // a synchronous function to return a static eval of a position.
-char *static_evaluation(char *cgpstr, int num_plays) {
+char *static_evaluation(const char *cgpstr, int num_plays) {
   clock_t begin = clock();
 
-  Game *game = get_game_from_cgp(cgpstr);
+  const Game *game = get_game_from_cgp(cgpstr);
 
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
@@ -179,7 +180,7 @@ char *static_evaluation(char *cgpstr, int num_plays) {
 // FIXME: what exactly allocates the char* here?
 // I'm not sure about this part of WASM, it might
 // need to be freed
-int process_command_wasm(char *cmd) {
+int process_command_wasm(const char *cmd) {
   if (!wasm_command_vars) {
     wasm_command_vars = create_command_vars();
   }

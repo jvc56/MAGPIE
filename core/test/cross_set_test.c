@@ -13,7 +13,7 @@
 
 // this test func only works for single-char alphabets
 uint64_t cross_set_from_string(const char *letters,
-                               LetterDistribution *letter_distribution) {
+                               const LetterDistribution *letter_distribution) {
   if (strings_equal(letters, "TRIVIAL")) {
     return TRIVIAL_CROSS_SET;
   }
@@ -105,7 +105,7 @@ void test_gen_cross_set_col(Game *game, int row, int col, int dir,
 }
 
 void test_cross_set(TestConfig *testconfig) {
-  Config *config = get_nwl_config(testconfig);
+  const Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   const KWG *kwg = game->players[0]->kwg;
 

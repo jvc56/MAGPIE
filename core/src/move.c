@@ -65,7 +65,7 @@ int within_epsilon_for_equity(double a, double board) {
 
 // Enforce arbitrary order to keep
 // move order deterministic
-int compare_moves(Move *move_1, Move *move_2) {
+int compare_moves(const Move *move_1, const Move *move_2) {
   if (!within_epsilon_for_equity(move_1->equity, move_2->equity)) {
     return move_1->equity > move_2->equity;
   }
@@ -157,7 +157,7 @@ void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
   }
 }
 
-void copy_move(Move *src_move, Move *dest_move) {
+void copy_move(const Move *src_move, Move *dest_move) {
   for (int i = 0; i < (BOARD_DIM); i++) {
     dest_move->tiles[i] = src_move->tiles[i];
   }
@@ -236,7 +236,8 @@ void sort_moves(MoveList *ml) {
 
 // Human readable print function
 
-void string_builder_add_move_description(Move *move, LetterDistribution *ld,
+void string_builder_add_move_description(const Move *move,
+                                         const LetterDistribution *ld,
                                          StringBuilder *move_string_builder) {
   if (move->move_type != GAME_EVENT_PASS) {
     if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
@@ -279,8 +280,8 @@ void string_builder_add_move_description(Move *move, LetterDistribution *ld,
   }
 }
 
-void string_builder_add_move(Board *board, Move *m,
-                             LetterDistribution *letter_distribution,
+void string_builder_add_move(const Board *board, const Move *m,
+                             const LetterDistribution *letter_distribution,
                              StringBuilder *string_builder) {
   if (m->move_type == GAME_EVENT_PASS) {
     string_builder_add_string(string_builder, "pass 0", 0);

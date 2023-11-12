@@ -3,8 +3,8 @@
 
 #include "string_util.h"
 
-void string_builder_add_ucgi_move(Move *move, Board *board,
-                                  LetterDistribution *ld,
+void string_builder_add_ucgi_move(const Move *move, const Board *board,
+                                  const LetterDistribution *ld,
                                   StringBuilder *move_string_builder);
 
 #endif

@@ -118,14 +118,14 @@ void test_parse_dos_mode() {
   destroy_game_history(game_history);
 }
 
-void assert_game_event(GameHistory *game_history, int event_index,
+void assert_game_event(const GameHistory *game_history, int event_index,
                        game_event_t event_type, int player_index,
                        int cumulative_score, const char *rack_string,
                        const char *note, game_event_t move_type, int vertical,
                        int move_row_start, int move_col_start, int move_score,
                        int tiles_played, int tiles_length,
                        const char *tiles_string,
-                       LetterDistribution *letter_distribution) {
+                       const LetterDistribution *letter_distribution) {
   GameEvent *game_event = game_history->events[event_index];
 
   // Game Event assertions
@@ -148,7 +148,7 @@ void assert_game_event(GameHistory *game_history, int event_index,
          strings_equal(game_event->note, note));
 
   // Move assertions
-  Move *move = game_event->move;
+  const Move *move = game_event->move;
   if (move) {
 
     assert(move->move_type == move_type);

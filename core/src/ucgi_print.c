@@ -31,11 +31,10 @@ void print_ucgi_inference_total_racks_evaluated(uint64_t total_racks_evaluated,
   free(total_racks_info_string);
 }
 
-void string_builder_add_ucgi_leave_rack(LeaveRack *leave_rack, int index,
-                                        uint64_t total_draws,
-                                        LetterDistribution *letter_distribution,
-                                        int is_exchange,
-                                        StringBuilder *ucgi_string_builder) {
+void string_builder_add_ucgi_leave_rack(
+    const LeaveRack *leave_rack, int index, uint64_t total_draws,
+    const LetterDistribution *letter_distribution, int is_exchange,
+    StringBuilder *ucgi_string_builder) {
   if (!is_exchange) {
     string_builder_add_rack(leave_rack->leave, letter_distribution,
                             ucgi_string_builder);
@@ -56,8 +55,8 @@ void string_builder_add_ucgi_leave_rack(LeaveRack *leave_rack, int index,
 }
 
 void string_builder_ucgi_add_letter_minimum(
-    InferenceRecord *record, Rack *rack, Rack *bag_as_rack, uint8_t letter,
-    int minimum, int number_of_tiles_played_or_exchanged,
+    const InferenceRecord *record, const Rack *rack, const Rack *bag_as_rack,
+    uint8_t letter, int minimum, int number_of_tiles_played_or_exchanged,
     StringBuilder *ucgi_string_builder) {
   int draw_subtotal = get_subtotal_sum_with_minimum(
       record, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
@@ -73,9 +72,10 @@ void string_builder_ucgi_add_letter_minimum(
 }
 
 void string_builder_ucgi_add_letter_line(
-    Game *game, InferenceRecord *record, Rack *rack, Rack *bag_as_rack,
-    Stat *letter_stat, uint8_t letter, int number_of_tiles_played_or_exchanged,
-    const char *inference_record_type, StringBuilder *ucgi_string_builder) {
+    const Game *game, const InferenceRecord *record, const Rack *rack,
+    const Rack *bag_as_rack, Stat *letter_stat, uint8_t letter,
+    int number_of_tiles_played_or_exchanged, const char *inference_record_type,
+    StringBuilder *ucgi_string_builder) {
   get_stat_for_letter(record, letter_stat, letter);
   string_builder_add_formatted_string(ucgi_string_builder, "infertile %s ",
                                       inference_record_type, 0);
@@ -94,9 +94,10 @@ void string_builder_ucgi_add_letter_line(
 }
 
 void string_builder_ucgi_add_inference_record(
-    InferenceRecord *record, Game *game, Rack *rack, Rack *bag_as_rack,
-    Stat *letter_stat, int number_of_tiles_played_or_exchanged,
-    const char *inference_record_type, StringBuilder *ucgi_string_builder) {
+    const InferenceRecord *record, const Game *game, const Rack *rack,
+    const Rack *bag_as_rack, Stat *letter_stat,
+    int number_of_tiles_played_or_exchanged, const char *inference_record_type,
+    StringBuilder *ucgi_string_builder) {
   uint64_t total_draws = get_weight(record->equity_values);
   uint64_t total_leaves = get_cardinality(record->equity_values);
 
@@ -117,7 +118,8 @@ void string_builder_ucgi_add_inference_record(
   }
 }
 
-void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
+void print_ucgi_inference(const Inference *inference,
+                          ThreadControl *thread_control) {
   int is_exchange = inference->number_of_tiles_exchanged > 0;
   int number_of_tiles_played_or_exchanged =
       inference->number_of_tiles_exchanged;
@@ -125,7 +127,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
     number_of_tiles_played_or_exchanged =
         (RACK_SIZE)-inference->initial_tiles_to_infer;
   }
-  Game *game = inference->game;
+  const Game *game = inference->game;
 
   // Create a transient stat to use the stat functions
   Stat *letter_stat = create_stat();
@@ -135,7 +137,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
       inference->leave_record, game, inference->leave, inference->bag_as_rack,
       letter_stat, number_of_tiles_played_or_exchanged, "leave",
       ucgi_string_builder);
-  InferenceRecord *common_leaves_record = inference->leave_record;
+  const InferenceRecord *common_leaves_record = inference->leave_record;
   if (is_exchange) {
     common_leaves_record = inference->rack_record;
     Rack *unknown_exchange_rack = create_rack(inference->leave->array_size);
@@ -155,7 +157,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
   sort_leave_racks(inference->leave_rack_list);
   for (int common_leave_index = 0; common_leave_index < number_of_common_leaves;
        common_leave_index++) {
-    LeaveRack *leave_rack =
+    const LeaveRack *leave_rack =
         inference->leave_rack_list->leave_racks[common_leave_index];
     string_builder_add_ucgi_leave_rack(
         leave_rack, common_leave_index,
@@ -168,7 +170,7 @@ void print_ucgi_inference(Inference *inference, ThreadControl *thread_control) {
 
 // Sim
 
-char *ucgi_static_moves(Game *game, int nmoves) {
+char *ucgi_static_moves(const Game *game, int nmoves) {
   StringBuilder *moves_string_builder = create_string_builder();
   for (int i = 0; i < nmoves; i++) {
     string_builder_add_string(moves_string_builder, "info currmove ", 0);
@@ -192,14 +194,14 @@ char *ucgi_static_moves(Game *game, int nmoves) {
   return ucgi_static_moves_string;
 }
 
-void print_ucgi_static_moves(Game *game, int nmoves,
+void print_ucgi_static_moves(const Game *game, int nmoves,
                              ThreadControl *thread_control) {
   char *starting_moves_string_pointer = ucgi_static_moves(game, nmoves);
   print_to_outfile(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
 }
 
-char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
+char *ucgi_sim_stats(Simmer *simmer, const Game *game, int best_known_play) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
@@ -227,7 +229,7 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
   // FIXME: get better numbers
   StringBuilder *sim_stats_string_builder = create_string_builder();
   for (int i = 0; i < simmer->num_simmed_plays; i++) {
-    SimmedPlay *play = simmer->simmed_plays[i];
+    const SimmedPlay *play = simmer->simmed_plays[i];
     double wp_mean = play->win_pct_stat->mean * 100.0;
     double wp_se = get_standard_error(play->win_pct_stat, STATS_Z99) * 100.0;
 
@@ -262,7 +264,7 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
   } else {
     string_builder_add_string(sim_stats_string_builder, "bestsofar ", 0);
   }
-  SimmedPlay *play = simmer->simmed_plays[0];
+  const SimmedPlay *play = simmer->simmed_plays[0];
   string_builder_add_ucgi_move(play->move, game->gen->board,
                                game->gen->letter_distribution,
                                sim_stats_string_builder);
@@ -273,7 +275,8 @@ char *ucgi_sim_stats(Simmer *simmer, Game *game, int best_known_play) {
   return sim_stats_string;
 }
 
-void print_ucgi_sim_stats(Simmer *simmer, Game *game, int print_best_play) {
+void print_ucgi_sim_stats(Simmer *simmer, const Game *game,
+                          int print_best_play) {
   char *starting_stats_string_pointer =
       ucgi_sim_stats(simmer, game, print_best_play);
   print_to_outfile(simmer->thread_control, starting_stats_string_pointer);
@@ -282,7 +285,7 @@ void print_ucgi_sim_stats(Simmer *simmer, Game *game, int print_best_play) {
 
 // Autoplay
 
-void print_ucgi_autoplay_results(AutoplayResults *autoplay_results,
+void print_ucgi_autoplay_results(const AutoplayResults *autoplay_results,
                                  ThreadControl *thread_control) {
   char *results_string = get_formatted_string(
       "autoplay %d %d %d %d %d %f %f %f %f\n", autoplay_results->total_games,

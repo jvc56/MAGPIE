@@ -5,7 +5,7 @@
 #include "move.h"
 #include "rack.h"
 
-double get_leave_value_for_move(const KLV *klv, Move *move, Rack *rack);
+double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 bool has_prefix(const char *pre, const char *str);
 void *malloc_or_die(size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);

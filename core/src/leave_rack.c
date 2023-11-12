@@ -84,8 +84,9 @@ void down_heapify_leave_rack(LeaveRackList *lrl, int parent_node) {
   }
 }
 
-void insert_leave_rack(LeaveRackList *lrl, Rack *leave, Rack *exchanged,
-                       int number_of_draws_for_leave, double equity) {
+void insert_leave_rack(LeaveRackList *lrl, const Rack *leave,
+                       const Rack *exchanged, int number_of_draws_for_leave,
+                       double equity) {
   reset_rack(lrl->spare_leave_rack->leave);
   for (int i = 0; i < leave->array_size; i++) {
     for (int j = 0; j < leave->array[i]; j++) {

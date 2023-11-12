@@ -25,7 +25,9 @@ void file_handler_clear_file_and_filename(FileHandler *fh) {
   fh->filename = NULL;
 }
 
-const char *get_file_handler_filename(FileHandler *fh) { return fh->filename; }
+const char *get_file_handler_filename(const FileHandler *fh) {
+  return fh->filename;
+}
 
 void set_file_handler_while_locked(FileHandler *fh, const char *filename,
                                    file_handler_mode_t mode) {
@@ -87,7 +89,7 @@ void destroy_file_handler(FileHandler *fh) {
   free(fh);
 }
 
-void write_to_file_with_lock(FileHandler *fh, const char *content) {
+void write_to_file_with_lock(const FileHandler *fh, const char *content) {
   if (!fh) {
     log_fatal("cannot write to null file handler\n");
   }

@@ -125,7 +125,7 @@ cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
 }
 
 int draw_rack_from_bag(Bag *bag, Rack *rack, const char *rack_string,
-                       LetterDistribution *letter_distribution) {
+                       const LetterDistribution *letter_distribution) {
   int number_of_letters_set =
       set_rack_to_string(rack, rack_string, letter_distribution);
   for (int i = 0; i < rack->array_size; i++) {
@@ -137,7 +137,8 @@ int draw_rack_from_bag(Bag *bag, Rack *rack, const char *rack_string,
 }
 
 cgp_parse_status_t
-parse_cgp_racks_with_string_splitter(Game *game, StringSplitter *player_racks) {
+parse_cgp_racks_with_string_splitter(Game *game,
+                                     const StringSplitter *player_racks) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   int number_of_letters_added =
       draw_rack_from_bag(game->gen->bag, game->players[0]->rack,
@@ -200,7 +201,7 @@ parse_cgp_consecutive_zeros(Game *game, const char *cgp_consecutive_zeros) {
 }
 
 cgp_parse_status_t parse_cgp_with_cgp_fields(Game *game,
-                                             StringSplitter *cgp_fields) {
+                                             const StringSplitter *cgp_fields) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
 
   cgp_parse_status =
@@ -263,7 +264,7 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
   return cgp_parse_status;
 }
 
-int tiles_unseen(Game *game) {
+int tiles_unseen(const Game *game) {
   int bag_idx = game->gen->bag->last_tile_index;
   int their_rack_tiles =
       game->players[1 - game->player_on_turn_index]->rack->number_of_letters;
@@ -337,7 +338,7 @@ Game *create_game(const Config *config) {
   return game;
 }
 
-Game *copy_game(Game *game, int move_list_capacity) {
+Game *copy_game(const Game *game, int move_list_capacity) {
   Game *new_game = malloc_or_die(sizeof(Game));
   new_game->gen = copy_generator(game->gen, move_list_capacity);
   for (int j = 0; j < 2; j++) {
@@ -418,13 +419,13 @@ void destroy_game(Game *game) {
 
 // Human readable print functions
 
-void string_builder_add_player_row(LetterDistribution *letter_distribution,
-                                   Player *player, bool player_on_turn,
-                                   StringBuilder *game_string) {
+void string_builder_add_player_row(
+    const LetterDistribution *letter_distribution, const Player *player,
+    bool player_on_turn, StringBuilder *game_string) {
 
-  char *player_on_turn_marker = "-> ";
-  char *player_off_turn_marker = "   ";
-  char *player_marker = player_on_turn_marker;
+  const char *player_on_turn_marker = "-> ";
+  const char *player_off_turn_marker = "   ";
+  const char *player_marker = player_on_turn_marker;
   if (!player_on_turn) {
     player_marker = player_off_turn_marker;
   }
@@ -438,8 +439,8 @@ void string_builder_add_player_row(LetterDistribution *letter_distribution,
                                       player->score);
 }
 
-void string_builder_add_board_row(LetterDistribution *letter_distribution,
-                                  Board *board, int row,
+void string_builder_add_board_row(const LetterDistribution *letter_distribution,
+                                  const Board *board, int row,
                                   StringBuilder *game_string) {
   string_builder_add_formatted_string(game_string, "%2d|", row + 1);
   for (int i = 0; i < BOARD_DIM; i++) {
@@ -456,16 +457,17 @@ void string_builder_add_board_row(LetterDistribution *letter_distribution,
   string_builder_add_string(game_string, "|", 0);
 }
 
-void string_builder_add_move_with_rank_and_equity(Game *game, int move_index,
+void string_builder_add_move_with_rank_and_equity(const Game *game,
+                                                  int move_index,
                                                   StringBuilder *game_string) {
-  Move *move = game->gen->move_list->moves[move_index];
+  const Move *move = game->gen->move_list->moves[move_index];
   string_builder_add_int(game_string, move_index + 1);
   string_builder_add_move(game->gen->board, move,
                           game->gen->letter_distribution, game_string);
   string_builder_add_double(game_string, move->equity);
 }
 
-void string_builder_add_game(Game *game, StringBuilder *game_string) {
+void string_builder_add_game(const Game *game, StringBuilder *game_string) {
   // TODO: update for super crossword game
   string_builder_add_string(game_string, "   A B C D E F G H I J K L M N O   ",
                             0);

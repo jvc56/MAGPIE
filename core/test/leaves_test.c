@@ -11,9 +11,9 @@
 #include "testconfig.h"
 
 void test_leaves(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
-  KLV *klv = players_data_get_klv(config->players_data, 0);
-  LetterDistribution *letter_distribution = config->letter_distribution;
+  const Config *config = get_csw_config(testconfig);
+  const KLV *klv = players_data_get_klv(config->players_data, 0);
+  const LetterDistribution *letter_distribution = config->letter_distribution;
   Rack *rack = create_rack(config->letter_distribution->size);
 
   const char *leaves_csv_filename = "./data/lexica/CSW21.csv";

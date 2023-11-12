@@ -6,7 +6,7 @@
 #include "util.h"
 #include "winpct.h"
 
-extern inline float win_pct(WinPct *wp, int spread_plus_leftover,
+extern inline float win_pct(const WinPct *wp, int spread_plus_leftover,
                             unsigned int tiles_unseen);
 
 char *get_win_pct_filepath(const char *win_pct_name) {

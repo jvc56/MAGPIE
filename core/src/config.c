@@ -303,7 +303,7 @@ void destroy_parsed_args(ParsedArgs *parsed_args) {
 }
 
 config_load_status_t init_parsed_args(ParsedArgs *parsed_args,
-                                      StringSplitter *cmd) {
+                                      const StringSplitter *cmd) {
   int number_of_input_args = string_splitter_get_number_of_items(cmd);
   for (int i = 0; i < number_of_input_args;) {
     const char *input_arg = string_splitter_get_item(cmd, i);
@@ -595,7 +595,7 @@ config_load_status_t load_mode_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
+int set_command_type_for_config(Config *config, const ParsedArgs *parsed_args) {
   // If no valid sequences are found we use
   // the set options command as a default
   config->command_type = COMMAND_TYPE_SET_OPTIONS;
@@ -625,7 +625,7 @@ int set_command_type_for_config(Config *config, ParsedArgs *parsed_args) {
 }
 
 config_load_status_t set_cgp_string_for_config(Config *config,
-                                               SingleArg *cgp_arg) {
+                                               const SingleArg *cgp_arg) {
   free(config->cgp);
   // At this point it is guaranteed that cgp_arg has 4 values.
   config->cgp = get_formatted_string("%s %s %s %s", cgp_arg->values[0],
@@ -704,7 +704,7 @@ char *get_default_klv_name(const char *lexicon_name) {
   return get_formatted_string("%s", lexicon_name);
 }
 
-bool is_lexicon_required(Config *config, const char *new_p1_leaves_name,
+bool is_lexicon_required(const Config *config, const char *new_p1_leaves_name,
                          const char *new_p2_leaves_name,
                          const char *new_letter_distribution_name,
                          const char *new_rack) {
@@ -865,8 +865,8 @@ config_load_status_t load_lexicon_dependent_data_for_config(
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_config_with_parsed_args(Config *config,
-                                                  ParsedArgs *parsed_args) {
+config_load_status_t
+load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
 
   int args_start_index = set_command_type_for_config(config, parsed_args);
 
@@ -887,7 +887,7 @@ config_load_status_t load_config_with_parsed_args(Config *config,
     if (!parsed_args->args[i]->has_value) {
       continue;
     }
-    SingleArg *single_arg = parsed_args->args[i];
+    const SingleArg *single_arg = parsed_args->args[i];
     arg_token_t arg_token = single_arg->token;
     char **arg_values = single_arg->values;
     switch (arg_token) {

@@ -55,21 +55,21 @@ void clear_all_crosses(Board *board);
 void clear_cross_set(Board *board, int row, int col, int dir,
                      int cross_set_index);
 Board *create_board();
-Board *copy_board(Board *board);
-void copy_board_into(Board *dst, Board *src);
+Board *copy_board(const Board *board);
+void copy_board_into(Board *dst, const Board *src);
 void destroy_board(Board *board);
-int get_anchor(Board *board, int row, int col, int vertical);
-uint8_t get_bonus_square(Board *board, int row, int col);
-int get_cross_score(Board *board, int row, int col, int dir,
+int get_anchor(const Board *board, int row, int col, int vertical);
+uint8_t get_bonus_square(const Board *board, int row, int col);
+int get_cross_score(const Board *board, int row, int col, int dir,
                     int cross_set_index);
-uint64_t get_cross_set(Board *board, int row, int col, int dir,
+uint64_t get_cross_set(const Board *board, int row, int col, int dir,
                        int cross_set_index);
 uint64_t *get_cross_set_pointer(Board *board, int row, int col, int dir,
                                 int cross_set_index);
-uint8_t get_letter(Board *board, int row, int col);
-uint8_t get_letter_by_index(Board *board, int index);
-int is_empty(Board *board, int row, int col);
-int left_and_right_empty(Board *board, int row, int col);
+uint8_t get_letter(const Board *board, int row, int col);
+uint8_t get_letter_by_index(const Board *board, int index);
+int is_empty(const Board *board, int row, int col);
+int left_and_right_empty(const Board *board, int row, int col);
 int pos_exists(int row, int col);
 void reset_board(Board *board);
 void set_all_crosses(Board *board);
@@ -83,10 +83,10 @@ void set_letter_by_index(Board *board, int index, uint8_t letter);
 void transpose(Board *board);
 void reset_transpose(Board *board);
 void set_transpose(Board *board, int transpose);
-int traverse_backwards_for_score(Board *board, int row, int col,
-                                 LetterDistribution *letter_distribution);
+int traverse_backwards_for_score(const Board *board, int row, int col,
+                                 const LetterDistribution *letter_distribution);
 void update_anchors(Board *board, int row, int col, int vertical);
 void update_all_anchors(Board *board);
-int word_edge(Board *board, int row, int col, int dir);
+int word_edge(const Board *board, int row, int col, int dir);
 
 #endif

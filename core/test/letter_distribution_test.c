@@ -7,7 +7,7 @@
 #include "testconfig.h"
 
 void test_letter_distribution(TestConfig *testconfig) {
-  Config *config = get_nwl_config(testconfig);
+  const Config *config = get_nwl_config(testconfig);
 
   uint32_t previous_score;
   for (uint32_t i = 0; i < config->letter_distribution->size; i++) {
@@ -21,7 +21,7 @@ void test_letter_distribution(TestConfig *testconfig) {
 }
 
 void test_str_to_machine_letters(TestConfig *testconfig) {
-  Config *config = get_nwl_config(testconfig);
+  const Config *config = get_nwl_config(testconfig);
   uint8_t mls[4];
   int num_mls =
       str_to_machine_letters(config->letter_distribution, "??", false, mls);

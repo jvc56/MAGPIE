@@ -85,7 +85,7 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
   return ws;
 }
 
-int is_word_valid(FormedWord *w, const KWG *kwg) {
+int is_word_valid(const FormedWord *w, const KWG *kwg) {
   if (w->word_length < 2) {
     return 0;
   }

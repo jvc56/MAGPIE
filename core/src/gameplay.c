@@ -17,7 +17,7 @@ void draw_at_most_to_rack(Bag *bag, Rack *rack, int n) {
   }
 }
 
-void play_move_on_board(Game *game, Move *move) {
+void play_move_on_board(Game *game, const Move *move) {
   // PlaceMoveTiles
   for (int idx = 0; idx < move->tiles_length; idx++) {
     uint8_t letter = move->tiles[idx];
@@ -61,7 +61,7 @@ void play_move_on_board(Game *game, Move *move) {
 }
 
 void calc_for_across(int row_start, int col_start, int csd, Game *game,
-                     Move *move) {
+                     const Move *move) {
   for (int row = row_start; row < move->tiles_length + row_start; row++) {
     if (move->tiles[row - row_start] == PLAYED_THROUGH_MARKER) {
       continue;
@@ -89,7 +89,7 @@ void calc_for_across(int row_start, int col_start, int csd, Game *game,
 }
 
 void calc_for_self(int row_start, int col_start, int csd, Game *game,
-                   Move *move) {
+                   const Move *move) {
   for (int col = col_start - 1; col <= col_start + move->tiles_length; col++) {
     gen_cross_set(game->gen->board, row_start, col, csd, 0,
                   game->players[0]->kwg, game->gen->letter_distribution);
@@ -100,7 +100,7 @@ void calc_for_self(int row_start, int col_start, int csd, Game *game,
   }
 }
 
-void update_cross_set_for_move(Game *game, Move *move) {
+void update_cross_set_for_move(Game *game, const Move *move) {
   if (move->vertical) {
     calc_for_across(move->row_start, move->col_start,
                     BOARD_HORIZONTAL_DIRECTION, game, move);
@@ -118,7 +118,7 @@ void update_cross_set_for_move(Game *game, Move *move) {
   }
 }
 
-void execute_exchange_move(Game *game, Move *move) {
+void execute_exchange_move(Game *game, const Move *move) {
   for (int i = 0; i < move->tiles_played; i++) {
     take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
                           move->tiles[i]);
@@ -138,7 +138,7 @@ void standard_end_of_game_calculations(Game *game) {
   game->game_end_reason = GAME_END_REASON_STANDARD;
 }
 
-void play_move(Game *game, Move *move) {
+void play_move(Game *game, const Move *move) {
   if (game->backup_mode == BACKUP_MODE_SIMULATION) {
     backup_game(game);
   }

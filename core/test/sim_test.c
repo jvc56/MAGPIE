@@ -11,7 +11,7 @@
 #include "test_util.h"
 #include "testconfig.h"
 
-void print_sim_stats(Simmer *simmer, Game *game) {
+void print_sim_stats(Simmer *simmer, const Game *game) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
@@ -19,7 +19,7 @@ void print_sim_stats(Simmer *simmer, Game *game) {
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
   StringBuilder *move_description = create_string_builder();
   for (int i = 0; i < simmer->num_simmed_plays; i++) {
-    SimmedPlay *play = simmer->simmed_plays[i];
+    const SimmedPlay *play = simmer->simmed_plays[i];
     double wp_mean = play->win_pct_stat->mean * 100.0;
     double wp_se = get_standard_error(play->win_pct_stat, STATS_Z99) * 100.0;
 
@@ -43,7 +43,7 @@ void print_sim_stats(Simmer *simmer, Game *game) {
 }
 
 void test_win_pct(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+  const Config *config = get_csw_config(testconfig);
   assert(within_epsilon(win_pct(config->win_pcts, 118, 90), 0.844430));
 }
 
@@ -55,7 +55,7 @@ void test_sim_single_iteration(TestConfig *testconfig) {
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1 cond none");
-  sim_status_t status = simulate(config, simmer, game);
+  sim_status_t status = simulate(config, game, simmer);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
 
@@ -73,7 +73,7 @@ void test_more_iterations(TestConfig *testconfig) {
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 400 cond none");
-  sim_status_t status = simulate(config, simmer, game);
+  sim_status_t status = simulate(config, game, simmer);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
@@ -103,7 +103,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   load_config_or_die(config, setoptions_string);
   free(setoptions_string);
   clock_t begin = clock();
-  sim_status_t status = simulate(config, simmer, game);
+  sim_status_t status = simulate(config, game, simmer);
   clock_t end = clock();
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
@@ -132,7 +132,7 @@ void perf_test_multithread_sim(Config *config) {
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1000 cond none");
-  sim_status_t status = simulate(config, simmer, game);
+  sim_status_t status = simulate(config, game, simmer);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
 
@@ -161,7 +161,7 @@ void perf_test_multithread_blocking_sim(Config *config) {
   load_config_or_die(config,
                      "setoptions rack " EMPTY_RACK_STRING
                      " plies 2 threads 1 numplays 15 i 1000000 cond 99");
-  sim_status_t status = simulate(config, simmer, game);
+  sim_status_t status = simulate(config, game, simmer);
   assert(status == SIM_STATUS_SUCCESS);
   print_sim_stats(simmer, game);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
@@ -185,7 +185,7 @@ void test_play_similarity(TestConfig *testconfig) {
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 0 cond none");
-  sim_status_t status = simulate(config, simmer, game);
+  sim_status_t status = simulate(config, game, simmer);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   // The first four plays all score 74. Only

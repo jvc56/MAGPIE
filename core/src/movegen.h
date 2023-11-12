@@ -44,7 +44,7 @@ typedef struct Generator {
   Bag *bag;
 
   LeaveMap *leave_map;
-  LetterDistribution *letter_distribution;
+  const LetterDistribution *letter_distribution;
 
   // Shadow plays
   int current_left_col;
@@ -58,23 +58,23 @@ typedef struct Generator {
 } Generator;
 
 Generator *create_generator(const Config *config, int move_list_capacity);
-Generator *copy_generator(Generator *gen, int move_list_capacity);
+Generator *copy_generator(const Generator *gen, int move_list_capacity);
 void destroy_generator(Generator *gen);
 void update_generator(const Config *config, Generator *gen);
-void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
+void generate_moves(Generator *gen, Player *player, const Rack *opp_rack,
                     int add_exchange, move_record_t move_record_type,
                     move_sort_t move_sort_type,
                     bool apply_placement_adjustment);
 void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
                              int stripidx, int add_exchange);
-void recursive_gen(Generator *gen, int col, Player *player, Rack *opp_rack,
-                   uint32_t node_index, int leftstrip, int rightstrip,
-                   int unique_play);
+void recursive_gen(Generator *gen, int col, Player *player,
+                   const Rack *opp_rack, uint32_t node_index, int leftstrip,
+                   int rightstrip, int unique_play);
 void reset_generator(Generator *gen);
 void load_row_letter_cache(Generator *gen, int row);
-int get_cross_set_index(Generator *gen, int player_index);
-int score_move(Board *board, uint8_t word[], int word_start_index,
+int get_cross_set_index(const Generator *gen, int player_index);
+int score_move(const Board *board, uint8_t word[], int word_start_index,
                int word_end_index, int row, int col, int tiles_played,
                int cross_dir, int cross_set_index,
-               LetterDistribution *letter_distribution);
+               const LetterDistribution *letter_distribution);
 #endif
