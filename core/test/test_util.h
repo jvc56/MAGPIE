@@ -20,7 +20,7 @@ void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
                          const LetterDistribution *letter_distribution);
 void generate_moves_for_game(Game *game);
 double get_leave_value_for_rack(const KLV *klv, const Rack *rack);
-void generate_leaves_for_game(Game *game, int add_exchanges);
+void generate_leaves_for_game(Game *game, bool add_exchanges);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *create_sorted_move_list(MoveList *ml);
 void destroy_sorted_move_list(SortedMoveList *sorted_move_list);
@@ -31,9 +31,9 @@ void print_move_list(const Board *board,
 void sort_and_print_move_list(const Board *board,
                               const LetterDistribution *letter_distribution,
                               MoveList *ml);
-int within_epsilon(double a, double b);
+bool within_epsilon(double a, double b);
 int count_newlines(const char *str);
-int equal_rack(const Rack *expected_rack, const Rack *actual_rack);
+bool equal_rack(const Rack *expected_rack, const Rack *actual_rack);
 void assert_strings_equal(const char *str1, const char *str2);
 void assert_move(const Game *game, const SortedMoveList *sml, int move_index,
                  const char *expected_move_string);

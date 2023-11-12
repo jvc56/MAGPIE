@@ -13,7 +13,7 @@ void reset_rack(Rack *rack) {
   for (int i = 0; i < (rack->array_size); i++) {
     rack->array[i] = 0;
   }
-  rack->empty = 1;
+  rack->empty = true;
   rack->number_of_letters = 0;
 }
 
@@ -60,7 +60,7 @@ void take_letter_from_rack(Rack *rack, uint8_t letter) {
   rack->array[letter]--;
   rack->number_of_letters--;
   if (rack->number_of_letters == 0) {
-    rack->empty = 1;
+    rack->empty = true;
   }
 }
 
@@ -68,7 +68,7 @@ void add_letter_to_rack(Rack *rack, uint8_t letter) {
   rack->array[letter]++;
   rack->number_of_letters++;
   if (rack->empty == 1) {
-    rack->empty = 0;
+    rack->empty = false;
   }
 }
 

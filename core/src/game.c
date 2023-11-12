@@ -304,7 +304,7 @@ void set_backup_mode(Game *game, int backup_mode) {
   if (backup_mode == BACKUP_MODE_SIMULATION && !game->backups_preallocated) {
     game->backup_cursor = 0;
     pre_allocate_backups(game);
-    game->backups_preallocated = 1;
+    game->backups_preallocated = true;
   }
 }
 
@@ -334,7 +334,7 @@ Game *create_game(const Config *config) {
   game->game_end_reason = GAME_END_REASON_NONE;
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
-  game->backups_preallocated = 0;
+  game->backups_preallocated = false;
   return game;
 }
 
@@ -354,7 +354,7 @@ Game *copy_game(const Game *game, int move_list_capacity) {
   // game copies to have backups.
   new_game->backup_cursor = 0;
   new_game->backup_mode = BACKUP_MODE_OFF;
-  new_game->backups_preallocated = 0;
+  new_game->backups_preallocated = false;
   return new_game;
 }
 

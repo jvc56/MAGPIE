@@ -25,7 +25,7 @@ typedef struct LetterDistribution {
   uint32_t *distribution;
   uint32_t *scores;
   uint32_t *score_order;
-  uint32_t *is_vowel;
+  bool *is_vowel;
   int total_tiles;
   int max_tile_length;
   char machine_letter_to_human_readable_letter[MACHINE_LETTER_MAX_VALUE]
@@ -48,7 +48,7 @@ inline uint8_t get_unblanked_machine_letter(uint8_t ml) {
   return ml & UNBLANK_MASK;
 }
 
-inline uint8_t is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
+inline bool is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
 
 int str_to_machine_letters(const LetterDistribution *letter_distribution,
                            const char *str, bool allow_played_through_marker,

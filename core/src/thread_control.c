@@ -130,7 +130,7 @@ bool set_mode_stopped(ThreadControl *thread_control) {
 }
 
 mode_search_status_t get_mode(ThreadControl *thread_control) {
-  mode_search_status_t mode = 0;
+  mode_search_status_t mode;
   pthread_mutex_lock(&thread_control->current_mode_mutex);
   mode = thread_control->current_mode;
   pthread_mutex_unlock(&thread_control->current_mode_mutex);

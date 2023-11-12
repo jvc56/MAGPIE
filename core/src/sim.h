@@ -27,7 +27,7 @@ typedef struct SimmedPlay {
   Stat *equity_stat;
   Stat *leftover_stat;
   Stat *win_pct_stat;
-  int ignore;
+  bool ignore;
   int play_id;
   pthread_mutex_t mutex;
 } SimmedPlay;
@@ -67,8 +67,8 @@ typedef struct SimmerWorker {
 
 Simmer *create_simmer(const Config *config);
 void destroy_simmer(Simmer *simmer);
-int plays_are_similar(Simmer *simmer, const SimmedPlay *m1,
-                      const SimmedPlay *m2);
+bool plays_are_similar(Simmer *simmer, const SimmedPlay *m1,
+                       const SimmedPlay *m2);
 sim_status_t simulate(const Config *config, const Game *game, Simmer *simmer);
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays);
 

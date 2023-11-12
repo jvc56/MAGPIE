@@ -59,7 +59,7 @@ void reset_move_list(MoveList *ml) {
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
 }
 
-int within_epsilon_for_equity(double a, double board) {
+bool within_epsilon_for_equity(double a, double board) {
   return fabs(a - board) < COMPARE_MOVES_EPSILON;
 }
 
@@ -81,8 +81,8 @@ int compare_moves(const Move *move_1, const Move *move_2) {
   if (move_1->col_start != move_2->col_start) {
     return move_1->col_start < move_2->col_start;
   }
-  if (move_1->vertical != move_2->vertical) {
-    return move_2->vertical;
+  if (move_1->dir != move_2->dir) {
+    return move_2->dir;
   }
   if (move_1->tiles_played != move_2->tiles_played) {
     return move_1->tiles_played < move_2->tiles_played;
@@ -142,12 +142,12 @@ void down_heapify(MoveList *ml, int parent_node) {
 
 void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
               int score, int row_start, int col_start, int tiles_played,
-              int vertical, game_event_t move_type) {
+              int dir, game_event_t move_type) {
   move->score = score;
   move->row_start = row_start;
   move->col_start = col_start;
   move->tiles_played = tiles_played;
-  move->vertical = vertical;
+  move->dir = dir;
   move->move_type = move_type;
   move->tiles_length = rightstrip - leftstrip + 1;
   if (move_type != GAME_EVENT_PASS) {
@@ -167,7 +167,7 @@ void copy_move(const Move *src_move, Move *dest_move) {
   dest_move->tiles_played = src_move->tiles_played;
   dest_move->tiles_length = src_move->tiles_length;
   dest_move->equity = src_move->equity;
-  dest_move->vertical = src_move->vertical;
+  dest_move->dir = src_move->dir;
   dest_move->move_type = src_move->move_type;
 }
 
@@ -179,9 +179,9 @@ void set_spare_move_as_pass(MoveList *ml) { set_move_as_pass(ml->spare_move); }
 
 void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
                     int rightstrip, int score, int row_start, int col_start,
-                    int tiles_played, int vertical, game_event_t move_type) {
+                    int tiles_played, int dir, game_event_t move_type) {
   set_move(ml->spare_move, strip, leftstrip, rightstrip, score, row_start,
-           col_start, tiles_played, vertical, move_type);
+           col_start, tiles_played, dir, move_type);
 }
 
 void insert_spare_move(MoveList *ml, double equity) {
@@ -241,7 +241,7 @@ void string_builder_add_move_description(const Move *move,
                                          StringBuilder *move_string_builder) {
   if (move->move_type != GAME_EVENT_PASS) {
     if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      if (move->vertical) {
+      if (dir_is_vertical(move->dir)) {
         string_builder_add_formatted_string(move_string_builder, "%c%d ",
                                             move->col_start + 'A',
                                             move->row_start + 1);
@@ -298,7 +298,7 @@ void string_builder_add_move(const Board *board, const Move *m,
     return;
   }
 
-  if (m->vertical) {
+  if (dir_is_vertical(m->dir)) {
     string_builder_add_char(string_builder, m->col_start + 'A');
     string_builder_add_int(string_builder, m->row_start + 1);
   } else {
@@ -339,7 +339,7 @@ void string_builder_add_move(const Board *board, const Move *m,
       string_builder_add_string(string_builder, "(", 0);
     }
 
-    if (m->vertical) {
+    if (dir_is_vertical(m->dir)) {
       current_row++;
     } else {
       current_col++;

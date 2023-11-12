@@ -121,7 +121,7 @@ void test_parse_dos_mode() {
 void assert_game_event(const GameHistory *game_history, int event_index,
                        game_event_t event_type, int player_index,
                        int cumulative_score, const char *rack_string,
-                       const char *note, game_event_t move_type, int vertical,
+                       const char *note, game_event_t move_type, int dir,
                        int move_row_start, int move_col_start, int move_score,
                        int tiles_played, int tiles_length,
                        const char *tiles_string,
@@ -177,7 +177,7 @@ void assert_game_event(const GameHistory *game_history, int event_index,
     }
 
     if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      assert(move->vertical == vertical);
+      assert(move->dir == dir);
       assert(move->row_start == move_row_start);
       assert(move->col_start == move_col_start);
     }

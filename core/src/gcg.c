@@ -442,14 +442,14 @@ gcg_parse_status_t copy_position_to_game_event(const GCGParser *gcg_parser,
     char position_char = gcg_line[i];
     if (position_char >= '0' && position_char <= '9') {
       if (i == start_index) {
-        game_event->move->vertical = 0;
+        game_event->move->dir = BOARD_HORIZONTAL_DIRECTION;
       }
       // Build the 1-indexed row_start
       game_event->move->row_start =
           game_event->move->row_start * 10 + (position_char - '0');
     } else if (position_char >= 'A' && position_char <= 'Z') {
       if (i == start_index) {
-        game_event->move->vertical = 1;
+        game_event->move->dir = BOARD_VERTICAL_DIRECTION;
       }
       game_event->move->col_start = position_char - 'A';
     } else {
@@ -634,10 +634,10 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     }
 
     // Check if the play goes off the board
-    if ((game_event->move->vertical &&
+    if ((dir_is_vertical(game_event->move->dir) &&
          game_event->move->row_start + game_event->move->tiles_length >
              BOARD_DIM) ||
-        (!game_event->move->vertical &&
+        (!dir_is_vertical(game_event->move->dir) &&
          game_event->move->col_start + game_event->move->tiles_length >
              BOARD_DIM)) {
       return GCG_PARSE_STATUS_PLAY_OUT_OF_BOUNDS;

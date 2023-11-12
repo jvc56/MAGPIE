@@ -21,7 +21,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-int within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
+bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
 double get_leave_value_for_rack(const KLV *klv, const Rack *rack) {
   return get_leave_value(klv, rack);
@@ -43,7 +43,7 @@ void generate_moves_for_game(Game *game) {
                  true);
 }
 
-void generate_leaves_for_game(Game *game, int add_exchange) {
+void generate_leaves_for_game(Game *game, bool add_exchange) {
   Generator *gen = game->gen;
   Player *player = game->players[game->player_on_turn_index];
   init_leave_map(gen->leave_map, player->rack);
@@ -81,7 +81,7 @@ void print_anchor_list(const Generator *gen) {
     int row = anchor->row;
     int col = anchor->col;
     const char *dir = "Horizontal";
-    if (anchor->vertical) {
+    if (dir_is_vertical(anchor->dir)) {
       row = anchor->col;
       col = anchor->row;
       dir = "Vertical";
@@ -163,29 +163,29 @@ int count_newlines(const char *str) {
   return count;
 }
 
-int equal_rack(const Rack *expected_rack, const Rack *actual_rack) {
+bool equal_rack(const Rack *expected_rack, const Rack *actual_rack) {
   if (expected_rack->empty != actual_rack->empty) {
     printf("not empty\n");
-    return 0;
+    return false;
   }
   if (expected_rack->number_of_letters != actual_rack->number_of_letters) {
     printf("num letters: %d != %d\n", expected_rack->number_of_letters,
            actual_rack->number_of_letters);
-    return 0;
+    return false;
   }
   if (expected_rack->array_size != actual_rack->array_size) {
     printf("sizes: %d != %d\n", expected_rack->array_size,
            actual_rack->array_size);
-    return 0;
+    return false;
   }
   for (int i = 0; i < (expected_rack->array_size); i++) {
     if (expected_rack->array[i] != actual_rack->array[i]) {
       printf("different: %d: %d != %d\n", i, expected_rack->array[i],
              actual_rack->array[i]);
-      return 0;
+      return false;
     }
   }
-  return 1;
+  return true;
 }
 
 void assert_strings_equal(const char *str1, const char *str2) {

@@ -27,14 +27,13 @@ void destroy_anchor_list(AnchorList *al) {
 }
 
 void add_anchor(AnchorList *al, int row, int col, int last_anchor_col,
-                   int transpose_state, int vertical,
-                   double highest_possible_equity) {
+                bool transposed, int dir, double highest_possible_equity) {
   int i = al->count;
   al->anchors[i]->row = row;
   al->anchors[i]->col = col;
   al->anchors[i]->last_anchor_col = last_anchor_col;
-  al->anchors[i]->transpose_state = transpose_state;
-  al->anchors[i]->vertical = vertical;
+  al->anchors[i]->transposed = transposed;
+  al->anchors[i]->dir = dir;
   al->anchors[i]->highest_possible_equity = highest_possible_equity;
   al->count++;
 }
@@ -44,7 +43,8 @@ int compare_anchors(const void *a, const void *b) {
   const Anchor *anchor_b = *(const Anchor **)b;
   if (anchor_a->highest_possible_equity > anchor_b->highest_possible_equity) {
     return -1;
-  } else if (anchor_a->highest_possible_equity < anchor_b->highest_possible_equity) {
+  } else if (anchor_a->highest_possible_equity <
+             anchor_b->highest_possible_equity) {
     return 1;
   } else {
     return 0;

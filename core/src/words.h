@@ -11,7 +11,7 @@
 typedef struct FormedWord {
   uint8_t word[BOARD_DIM];
   int word_length;
-  int valid;
+  bool valid;
 } FormedWord;
 
 typedef struct FormedWords {
@@ -22,5 +22,5 @@ typedef struct FormedWords {
 // populate the validity of the formed words passed in.
 void populate_word_validities(FormedWords *ws, const KWG *kwg);
 FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
-                          int word_end_index, int row, int col, int vertical);
+                          int word_end_index, int row, int col, int dir);
 #endif

@@ -40,7 +40,7 @@ void test_rack_main(TestConfig *testconfig) {
   expected_rack->array[16] = 2;
   expected_rack->array[19] = 1;
   expected_rack->array[23] = 1;
-  expected_rack->empty = 0;
+  expected_rack->empty = false;
   expected_rack->number_of_letters = 7;
 
   assert(equal_rack(expected_rack, rack));
@@ -69,7 +69,7 @@ void test_rack_main(TestConfig *testconfig) {
   for (int i = 0; i < (expected_rack->array_size); i++) {
     expected_rack->array[i] = 0;
   }
-  expected_rack->empty = 1;
+  expected_rack->empty = true;
   expected_rack->number_of_letters = 0;
 
   assert(equal_rack(expected_rack, rack));
@@ -80,7 +80,7 @@ void test_rack_main(TestConfig *testconfig) {
   add_letter_to_rack(rack, 13);
 
   expected_rack->array[13] = 2;
-  expected_rack->empty = 0;
+  expected_rack->empty = false;
   expected_rack->number_of_letters = 2;
 
   assert(equal_rack(expected_rack, rack));

@@ -59,7 +59,7 @@ void boards_equal(const Board *b1, const Board *b2) {
 }
 
 void execute_recursive_gen(Generator *gen, int col, Player *player,
-                           int leftstrip, int rightstrip, int unique_play) {
+                           int leftstrip, int rightstrip, bool unique_play) {
   gen->move_sort_type = player->move_sort_type;
   gen->move_record_type = player->move_record_type;
   gen->apply_placement_adjustment = true;
@@ -70,7 +70,7 @@ void execute_recursive_gen(Generator *gen, int col, Player *player,
 }
 
 void generate_moves_for_movegen(Generator *gen, Player *player, Rack *opp_rack,
-                                int add_exchange) {
+                                bool add_exchange) {
   generate_moves(gen, player, opp_rack, add_exchange, player->move_record_type,
                  player->move_sort_type, true);
 }
@@ -198,7 +198,7 @@ void macondo_tests(TestConfig *testconfig) {
   transpose(game->gen->board);
   set_rack_to_string(player->rack, "AELT", game->gen->letter_distribution);
   game->gen->current_row_index = 10;
-  game->gen->vertical = 1;
+  game->gen->dir = BOARD_VERTICAL_DIRECTION;
   game->gen->last_anchor_col = 100;
   for (int anchor_col = 8; anchor_col < 13; anchor_col++) {
     game->gen->current_anchor_col = anchor_col;
@@ -406,7 +406,7 @@ void leave_lookup_test(TestConfig *testconfig) {
   load_cgp(game, cgp);
 
   for (int i = 0; i < 2; i++) {
-    int add_exchanges = i == 0;
+    bool add_exchanges = i == 0;
     generate_leaves_for_game(game, add_exchanges);
     const double *leaves = game->gen->leave_map->leave_values;
     assert(within_epsilon(leaves[0], +0.000000));        //

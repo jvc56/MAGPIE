@@ -34,9 +34,8 @@ Game *get_game_from_cgp(const char *cgp) {
 }
 
 // tiles must contain 0 for play-through tiles!
-char *score_play(const char *cgpstr, int move_type, int row, int col,
-                 int vertical, uint8_t *tiles, uint8_t *leave, int ntiles,
-                 int nleave) {
+char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
+                 uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
   clock_t begin = clock();
 
   const Game *game = get_game_from_cgp(cgpstr);
@@ -47,8 +46,9 @@ char *score_play(const char *cgpstr, int move_type, int row, int col,
       tiles_played++;
     }
   }
+
   // score_move assumes the play is always horizontal.
-  if (vertical) {
+  if (dir_is_vertical(dir)) {
     transpose(game->gen->board);
     int ph = row;
     row = col;
@@ -59,11 +59,10 @@ char *score_play(const char *cgpstr, int move_type, int row, int col,
   FormedWords *fw = NULL;
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Assume that that kwg is shared
-    points =
-        score_move(game->gen->board, tiles, 0, ntiles - 1, row, col,
-                   tiles_played, !vertical, 0, game->gen->letter_distribution);
+    points = score_move(game->gen->board, tiles, 0, ntiles - 1, row, col,
+                        tiles_played, !dir, 0, game->gen->letter_distribution);
 
-    if (vertical) {
+    if (dir_is_vertical(dir)) {
       // transpose back.
       transpose(game->gen->board);
       int ph = row;
@@ -71,8 +70,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col,
       col = ph;
     }
 
-    fw = words_played(game->gen->board, tiles, 0, ntiles - 1, row, col,
-                      vertical);
+    fw = words_played(game->gen->board, tiles, 0, ntiles - 1, row, col, dir);
     // Assume that that kwg is shared
     populate_word_validities(fw, game->players[0]->kwg);
   }
@@ -114,7 +112,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col,
   StringBuilder *move_string_builder = create_string_builder();
 
   Move *move = create_move();
-  set_move(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, vertical,
+  set_move(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, dir,
            move_type);
 
   string_builder_add_ucgi_move(move, game->gen->board,

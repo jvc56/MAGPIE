@@ -57,7 +57,7 @@ typedef struct Game {
   MinimalGameBackup *game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
   int backup_mode;
-  int backups_preallocated;
+  bool backups_preallocated;
 } Game;
 
 void reset_game(Game *game);
