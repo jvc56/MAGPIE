@@ -4,7 +4,6 @@
 #include <stdint.h>
 
 #define XOSHIRO_MAX UINT64_C(18446744073709551615)
-#define DEFAULT_SEED 0
 
 typedef struct XoshiroPRNG {
   uint64_t xxsplit; /* The state can be seeded with any value. */
