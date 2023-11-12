@@ -152,7 +152,7 @@ void test_config_success() {
   int plies = 4;
   int max_iterations = 400;
   int stopping_cond = 98;
-  int random_seed = 101;
+  int seed = 101;
   int number_of_threads = 6;
   int print_info = 200;
   int check_stop = 700;
@@ -166,7 +166,7 @@ void test_config_success() {
       "%d cond %d rs %d threads %d info %d check %d static gp",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, rack, pindex,
       score, number_exch, equity_margin, num_plays, plies, max_iterations,
-      stopping_cond, random_seed, number_of_threads, print_info, check_stop);
+      stopping_cond, seed, number_of_threads, print_info, check_stop);
 
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
@@ -190,7 +190,7 @@ void test_config_success() {
   assert(config->plies == plies);
   assert(config->max_iterations == max_iterations);
   assert(config->stopping_condition == SIM_STOPPING_CONDITION_98PCT);
-  assert(config->random_seed == (uint64_t)random_seed);
+  assert(config->seed == (uint64_t)seed);
   assert(config->thread_control->number_of_threads == number_of_threads);
   assert(config->thread_control->print_info_interval == print_info);
   assert(config->thread_control->check_stopping_condition_interval ==
@@ -273,7 +273,6 @@ void test_config_success() {
   assert(config->plies == plies);
   assert(config->max_iterations == max_iterations);
   assert(config->stopping_condition == SIM_STOPPING_CONDITION_98PCT);
-  assert(config->random_seed == (uint64_t)random_seed);
   assert(config->thread_control->number_of_threads == number_of_threads);
   assert(config->thread_control->print_info_interval == print_info);
   assert(config->thread_control->check_stopping_condition_interval ==

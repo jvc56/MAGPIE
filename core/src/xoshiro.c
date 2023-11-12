@@ -106,6 +106,7 @@ void xoshiro_long_jump(XoshiroPRNG *prng) {
 }
 
 void copy_prng_into(XoshiroPRNG *dst, const XoshiroPRNG *src) {
+  dst->xxsplit = src->xxsplit;
   for (int i = 0; i < 4; i++) {
     dst->s[i] = src->s[i];
   }
@@ -137,6 +138,16 @@ void seed_prng(XoshiroPRNG *prng, uint64_t seed) {
   prng->xxsplit = seed;
   for (int i = 0; i < 4; i++) {
     prng->s[i] = splitmix_next(prng);
+  }
+}
+
+// This function ensures that all workers for a given
+// job are seeded with unique non-overlapping sequences
+// for their PRNGs.
+void seed_prng_for_worker(XoshiroPRNG *prng, uint64_t seed, int worker_index) {
+  seed_prng(prng, seed);
+  for (int j = 0; j < worker_index; j++) {
+    xoshiro_jump(prng);
   }
 }
 

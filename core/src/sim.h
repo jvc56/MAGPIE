@@ -44,6 +44,7 @@ typedef struct Simmer {
 
   int stopping_condition;
   int threads;
+  uint64_t seed;
 
   SimmedPlay **simmed_plays;
   pthread_mutex_t simmed_plays_mutex;

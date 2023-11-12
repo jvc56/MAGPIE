@@ -92,7 +92,7 @@ typedef struct Config {
   bool static_search_only;
   // Autoplay
   bool use_game_pairs;
-  uint64_t random_seed;
+  uint64_t seed;
   // Thread Control
   ThreadControl *thread_control;
   // Config mode and command file execution
