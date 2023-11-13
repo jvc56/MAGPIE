@@ -10,11 +10,7 @@
 #include "rack.h"
 
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
-  int valid_tiles = move->tiles_length;
-  if (move->move_type == GAME_EVENT_EXCHANGE) {
-    valid_tiles = move->tiles_played;
-  }
-  for (int i = 0; i < valid_tiles; i++) {
+  for (int i = 0; i < move->tiles_length; i++) {
     if (move->tiles[i] != PLAYED_THROUGH_MARKER) {
       if (is_blanked(move->tiles[i])) {
         take_letter_from_rack(rack, BLANK_MACHINE_LETTER);

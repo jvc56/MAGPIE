@@ -95,10 +95,7 @@ int compare_moves(const Move *move_1, const Move *move_2) {
       return move_1->tiles[i] < move_2->tiles[i];
     }
   }
-  if (move_1->move_type == GAME_EVENT_PASS) {
-    return 0;
-  }
-  log_fatal("duplicate move in move list detected\n");
+  log_fatal("duplicate move in move list detected: %d\n", move_1->move_type);
   return 0;
 }
 
@@ -149,7 +146,11 @@ void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
   move->tiles_played = tiles_played;
   move->dir = dir;
   move->move_type = move_type;
-  move->tiles_length = rightstrip - leftstrip + 1;
+  if (move_type == GAME_EVENT_EXCHANGE) {
+    move->tiles_length = move->tiles_played;
+  } else {
+    move->tiles_length = rightstrip - leftstrip + 1;
+  }
   if (move_type != GAME_EVENT_PASS) {
     for (int i = 0; i < move->tiles_length; i++) {
       move->tiles[i] = strip[leftstrip + i];
@@ -255,12 +256,6 @@ void string_builder_add_move_description(const Move *move,
     }
 
     int number_of_tiles_to_print = move->tiles_length;
-
-    // FIXME: make sure tiles_length == tiles_played for exchanges
-    // this is not true currently.
-    if (move->move_type == GAME_EVENT_EXCHANGE) {
-      number_of_tiles_to_print = move->tiles_played;
-    }
 
     for (int i = 0; i < number_of_tiles_to_print; i++) {
       uint8_t letter = move->tiles[i];

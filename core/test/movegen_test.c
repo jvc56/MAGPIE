@@ -492,7 +492,7 @@ void exchange_tests(TestConfig *testconfig) {
          GAME_EVENT_EXCHANGE);
   assert(test_exchange_sorted_move_list->moves[0]->score == 0);
   assert(test_exchange_sorted_move_list->moves[0]->tiles_length ==
-         test_exchange_sorted_move_list->moves[0]->tiles_played + 1);
+         test_exchange_sorted_move_list->moves[0]->tiles_played);
   destroy_sorted_move_list(test_exchange_sorted_move_list);
 
   destroy_game(game);

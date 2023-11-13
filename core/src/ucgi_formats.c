@@ -26,12 +26,6 @@ void string_builder_add_ucgi_move(const Move *move, const Board *board,
 
     int number_of_tiles_to_print = move->tiles_length;
 
-    // FIXME: make sure tiles_length == tiles_played for exchanges
-    // this is not true currently.
-    if (move->move_type == GAME_EVENT_EXCHANGE) {
-      number_of_tiles_to_print = move->tiles_played;
-    }
-
     int ri = 0;
     int ci = 0;
     if (dir_is_vertical(move->dir)) {
