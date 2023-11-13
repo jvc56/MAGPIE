@@ -817,7 +817,7 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(within_epsilon((*shadow_limit_table)[4][6].highest_equity, 33));
   assert(within_epsilon((*shadow_limit_table)[4][6].num_playthrough, 4));
 
-  // 9c STRIMI(YOND)
+  // 9c STRIMI(YOND)I
   assert(within_epsilon((*shadow_limit_table)[4][7].highest_equity, 85));
   assert(within_epsilon((*shadow_limit_table)[4][7].num_playthrough, 4));
 
@@ -854,79 +854,79 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(within_epsilon((*shadow_limit_table)[0][1].highest_equity, 11));
   assert(within_epsilon((*shadow_limit_table)[0][1].num_playthrough, 0));
 
-  // 8g MI(YOND)
+  // 9g MI(YOND)
   assert(within_epsilon((*shadow_limit_table)[0][2].highest_equity, 28));
   assert(within_epsilon((*shadow_limit_table)[0][2].num_playthrough, 4));
 
-  // 8g MI(YOND)I
+  // 9g MI(YOND)I
   assert(within_epsilon((*shadow_limit_table)[0][3].highest_equity, 30));
   assert(within_epsilon((*shadow_limit_table)[0][3].num_playthrough, 4));
 
-  // 8g MI(YOND)IS
+  // 9g MI(YOND)IS
   assert(within_epsilon((*shadow_limit_table)[0][4].highest_equity, 31));
   assert(within_epsilon((*shadow_limit_table)[0][4].num_playthrough, 4));
 
-  // 8g MI(YOND)IST
+  // 9g MI(YOND)IST
   assert(within_epsilon((*shadow_limit_table)[0][5].highest_equity, 32));
   assert(within_epsilon((*shadow_limit_table)[0][5].num_playthrough, 4));
 
-  // 8f IM
+  // 9f IM
   assert(within_epsilon((*shadow_limit_table)[1][2].highest_equity, 18));
   assert(within_epsilon((*shadow_limit_table)[1][2].num_playthrough, 0));
 
-  // 8f IMI(YOND)
+  // 9f IMI(YOND)
   assert(within_epsilon((*shadow_limit_table)[1][3].highest_equity, 29));
   assert(within_epsilon((*shadow_limit_table)[1][3].num_playthrough, 4));
 
-  // 8f IMI(YOND)I
+  // 9f IMI(YOND)I
   assert(within_epsilon((*shadow_limit_table)[1][4].highest_equity, 31));
   assert(within_epsilon((*shadow_limit_table)[1][4].num_playthrough, 4));
 
-  // 8f IMI(YOND)IS
+  // 9f IMI(YOND)IS
   assert(within_epsilon((*shadow_limit_table)[1][5].highest_equity, 32));
   assert(within_epsilon((*shadow_limit_table)[1][5].num_playthrough, 4));
 
-  // 8f IMI(YOND)IST
+  // 9f IMI(YOND)IST
   assert(within_epsilon((*shadow_limit_table)[1][6].highest_equity, 33));
   assert(within_epsilon((*shadow_limit_table)[1][6].num_playthrough, 4));
 
-  // 8e RIM
+  // 9e RIM
   assert(within_epsilon((*shadow_limit_table)[2][3].highest_equity, 19));
   assert(within_epsilon((*shadow_limit_table)[2][3].num_playthrough, 0));
 
-  // 8e RIMI(YOND)
+  // 9e RIMI(YOND)
   assert(within_epsilon((*shadow_limit_table)[2][4].highest_equity, 30));
   assert(within_epsilon((*shadow_limit_table)[2][4].num_playthrough, 4));
 
-  // 8e RIMI(YOND)I
+  // 9e RIMI(YOND)I
   assert(within_epsilon((*shadow_limit_table)[2][5].highest_equity, 32));
   assert(within_epsilon((*shadow_limit_table)[2][5].num_playthrough, 4));
 
-  // 8e RIMI(YOND)IS
+  // 9e RIMI(YOND)IS
   assert(within_epsilon((*shadow_limit_table)[2][6].highest_equity, 33));
   assert(within_epsilon((*shadow_limit_table)[2][6].num_playthrough, 4));
 
-  // 8d TRIM
+  // 9d TRIM
   assert(within_epsilon((*shadow_limit_table)[3][4].highest_equity, 20));
   assert(within_epsilon((*shadow_limit_table)[3][4].num_playthrough, 0));
 
-  // 8d TRIMI(YOND)
+  // 9d TRIMI(YOND)
   assert(within_epsilon((*shadow_limit_table)[3][5].highest_equity, 31));
   assert(within_epsilon((*shadow_limit_table)[3][5].num_playthrough, 4));
 
-  // 8d TRIMI(YOND)I
+  // 9d TRIMI(YOND)I
   assert(within_epsilon((*shadow_limit_table)[3][6].highest_equity, 33));
   assert(within_epsilon((*shadow_limit_table)[3][6].num_playthrough, 4));
 
-  // 8c STRIM
+  // 9c STRIM
   assert(within_epsilon((*shadow_limit_table)[4][5].highest_equity, 22));
   assert(within_epsilon((*shadow_limit_table)[4][5].num_playthrough, 0));
 
-  // 8c STRIMI(YOND)
+  // 9c STRIMI(YOND)
   assert(within_epsilon((*shadow_limit_table)[4][6].highest_equity, 33));
   assert(within_epsilon((*shadow_limit_table)[4][6].num_playthrough, 4));
 
-  // 8b ISTRIM
+  // 9b ISTRIM
   assert(within_epsilon((*shadow_limit_table)[5][6].highest_equity, 23));
   assert(within_epsilon((*shadow_limit_table)[5][6].num_playthrough, 0));
 
@@ -960,8 +960,23 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[2]->max_tiles_starting_left_by[4] == 7);
   assert(al->anchors[2]->max_tiles_starting_left_by[5] == 7);
   assert(al->anchors[2]->max_tiles_starting_left_by[6] == 0);
-  
+
   shadow_limit_table =  &(al->anchors[2]->shadow_limit_table);
+  // 9e RIMI(YOND)IST
+  assert(within_epsilon((*shadow_limit_table)[2][7].highest_equity, 84));
+  assert(within_epsilon((*shadow_limit_table)[2][7].num_playthrough, 4));
+
+  // 9d TRIMI(YOND)IS
+  assert(within_epsilon((*shadow_limit_table)[3][7].highest_equity, 84));
+  assert(within_epsilon((*shadow_limit_table)[3][7].num_playthrough, 4));
+
+  // 9c STRIMI(YOND)I
+  assert(within_epsilon((*shadow_limit_table)[4][7].highest_equity, 85));
+  assert(within_epsilon((*shadow_limit_table)[4][7].num_playthrough, 4));
+
+  // 9b ISTRIMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[5][7].highest_equity, 84));
+  assert(within_epsilon((*shadow_limit_table)[5][7].num_playthrough, 4));
 
   destroy_game(game);
 }
