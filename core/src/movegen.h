@@ -60,6 +60,8 @@ typedef struct Generator {
   int max_tiles_to_play;
   double highest_shadow_equity;
   double highest_equity_by_length[(RACK_SIZE + 1)];
+  int max_tiles_starting_left_by[(BOARD_DIM)];
+  ShadowLimit shadow_limit_table[(BOARD_DIM)][(RACK_SIZE + 1)];
   uint64_t rack_cross_set;
   int move_sorting_type;
   int number_of_letters_on_rack;
@@ -75,6 +77,9 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
                     int add_exchange);
 void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
                              int stripidx, int add_exchange);
+void set_descending_tile_scores(Generator *gen, Player *player);                             
+void shadow_play_for_anchor(Generator *gen, int col, Player *player,
+                            Rack *opp_rack);
 void look_up_bingos(Generator *gen, Player *player);     
 void split_anchors_for_bingos(AnchorList *anchor_list, int make_bingo_anchors);
 void bingo_gen(Generator *gen, Player *player, Rack *opp_rack);                      

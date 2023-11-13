@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <float.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -264,13 +265,13 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
   } else {
     insert_spare_move_top_equity(gen->move_list,
                                  get_spare_move_equity(gen, player, opp_rack));
-/*                                 
-    StringBuilder *sb = create_string_builder();
-    string_builder_add_move(gen->board, gen->move_list->moves[0],
-                            gen->letter_distribution, sb);
-    printf("recording play %s\n", string_builder_peek(sb));
-    destroy_string_builder(sb);
-*/    
+    /*
+        StringBuilder *sb = create_string_builder();
+        string_builder_add_move(gen->board, gen->move_list->moves[0],
+                                gen->letter_distribution, sb);
+        printf("recording play %s\n", string_builder_peek(sb));
+        destroy_string_builder(sb);
+    */
   }
 }
 
@@ -432,14 +433,14 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
         (num_tiles_played_through <= gen->max_num_playthrough) &&
         (gen->tiles_played >= gen->min_tiles_to_play) &&
         (gen->tiles_played <= gen->max_tiles_to_play)) {
-/*          
-      printf("leftstrip: %d, rightstrip: %d, length: %d, num_tiles_played: %d\n",
-             leftstrip, rightstrip, length, gen->tiles_played);
-      printf("record_play: %d %d %d %d %d %d\n", gen->tiles_played,
-             gen->min_tiles_to_play, gen->max_tiles_to_play,
-             num_tiles_played_through, gen->min_num_playthrough,
-             gen->max_num_playthrough);
-*/             
+      /*
+            printf("leftstrip: %d, rightstrip: %d, length: %d, num_tiles_played:
+         %d\n", leftstrip, rightstrip, length, gen->tiles_played);
+            printf("record_play: %d %d %d %d %d %d\n", gen->tiles_played,
+                   gen->min_tiles_to_play, gen->max_tiles_to_play,
+                   num_tiles_played_through, gen->min_num_playthrough,
+                   gen->max_num_playthrough);
+      */
       record_play(gen, player, opp_rack, leftstrip, rightstrip,
                   GAME_EVENT_TILE_PLACEMENT_MOVE);
     }
@@ -485,15 +486,15 @@ void go_on(Generator *gen, int current_col, uint8_t L, Player *player,
         (num_tiles_played_through >= gen->min_num_playthrough) &&
         (num_tiles_played_through <= gen->max_num_playthrough) &&
         (gen->tiles_played >= gen->min_tiles_to_play) &&
-        (gen->tiles_played <= gen->max_tiles_to_play)) {      
-/*          
-      printf("leftstrip: %d, rightstrip: %d, length: %d, num_tiles_played: %d\n",
-             leftstrip, rightstrip, length, gen->tiles_played);
-      printf("record_play: %d %d %d %d %d %d\n", gen->tiles_played,
-             gen->min_tiles_to_play, gen->max_tiles_to_play,
-             num_tiles_played_through, gen->min_num_playthrough,
-             gen->max_num_playthrough);
-*/            
+        (gen->tiles_played <= gen->max_tiles_to_play)) {
+      /*
+            printf("leftstrip: %d, rightstrip: %d, length: %d, num_tiles_played:
+         %d\n", leftstrip, rightstrip, length, gen->tiles_played);
+            printf("record_play: %d %d %d %d %d %d\n", gen->tiles_played,
+                   gen->min_tiles_to_play, gen->max_tiles_to_play,
+                   num_tiles_played_through, gen->min_num_playthrough,
+                   gen->max_num_playthrough);
+      */
       record_play(gen, player, opp_rack, leftstrip, rightstrip,
                   GAME_EVENT_TILE_PLACEMENT_MOVE);
     }
@@ -519,6 +520,9 @@ void shadow_record(Generator *gen, int left_col, int right_col,
                    int main_played_through_score, int num_tiles_played_through,
                    int perpendicular_additional_score, int word_multiplier,
                    Rack *opp_rack) {
+  printf("shadow_record(%d, %d, %d, %d, %d, %d...)\n", left_col, right_col,
+         main_played_through_score, num_tiles_played_through,
+         perpendicular_additional_score, word_multiplier);
   int sorted_effective_letter_multipliers[(RACK_SIZE)];
   int current_tiles_played = 0;
   for (int current_col = left_col; current_col <= right_col; current_col++) {
@@ -562,9 +566,11 @@ void shadow_record(Generator *gen, int left_col, int right_col,
     bingo_bonus = BINGO_BONUS;
   }
 
+  printf("tiles_played_score: %d\n", tiles_played_score);
   int score = tiles_played_score +
               (main_played_through_score * word_multiplier) +
               perpendicular_additional_score + bingo_bonus;
+  printf("score: %d\n", score);
   double equity = (double)score;
   if (gen->move_sorting_type == MOVE_SORT_EQUITY) {
     if (gen->bag->last_tile_index >= 0) {
@@ -584,11 +590,13 @@ void shadow_record(Generator *gen, int left_col, int right_col,
       equity += shadow_endgame_adjustment(gen, gen->tiles_played, opp_rack);
     }
   }
+
+  const int num_played = gen->tiles_played;
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
   }
-  if (equity > gen->highest_equity_by_length[gen->tiles_played]) {
-    gen->highest_equity_by_length[gen->tiles_played] = equity;
+  if (equity > gen->highest_equity_by_length[num_played]) {
+    gen->highest_equity_by_length[num_played] = equity;
   }
   if (num_tiles_played_through < gen->min_num_playthrough) {
     gen->min_num_playthrough = num_tiles_played_through;
@@ -596,11 +604,21 @@ void shadow_record(Generator *gen, int left_col, int right_col,
   if (num_tiles_played_through > gen->max_num_playthrough) {
     gen->max_num_playthrough = num_tiles_played_through;
   }
-  if (gen->tiles_played < gen->min_tiles_to_play) {
-    gen->min_tiles_to_play = gen->tiles_played;
+  if (num_played < gen->min_tiles_to_play) {
+    gen->min_tiles_to_play = num_played;
   }
-  if (gen->tiles_played > gen->max_tiles_to_play) {
-    gen->max_tiles_to_play = gen->tiles_played;
+  if (num_played > gen->max_tiles_to_play) {
+    gen->max_tiles_to_play = num_played;
+  }
+  const int left_of_anchor = gen->current_anchor_col - left_col;
+  if (num_played > gen->max_tiles_starting_left_by[left_of_anchor]) {
+    gen->max_tiles_starting_left_by[left_of_anchor] = num_played;
+  }
+  ShadowLimit *shadow_limit_table_entry =
+      &(gen->shadow_limit_table[left_of_anchor][num_played]);
+  if (equity > shadow_limit_table_entry->highest_equity) {
+    shadow_limit_table_entry->highest_equity = equity;
+    shadow_limit_table_entry->num_playthrough = num_tiles_played_through;
   }
 }
 
@@ -676,8 +694,8 @@ void shadow_play_left(Generator *gen, int main_played_through_score,
                       int num_tiles_played_through,
                       int perpendicular_additional_score, int word_multiplier,
                       int is_unique, int cross_set_index, Rack *opp_rack) {
+  printf("shadow_play_left\n");
   // Go left until hitting an empty square or the edge of the board.
-
   if (gen->current_left_col == 0 ||
       gen->current_left_col == gen->last_anchor_col + 1 ||
       gen->tiles_played >= gen->number_of_letters_on_rack) {
@@ -687,7 +705,9 @@ void shadow_play_left(Generator *gen, int main_played_through_score,
 
   int original_current_left_col = gen->current_left_col;
   gen->current_left_col--;
+  printf("gen->current_left_col: %d\n", gen->current_left_col);
   gen->tiles_played++;
+  printf("gen->tiles_played: %d\n", gen->tiles_played);
   uint64_t cross_set =
       get_cross_set(gen->board, gen->current_row_index, gen->current_left_col,
                     !gen->vertical, cross_set_index);
@@ -729,6 +749,7 @@ void shadow_play_left(Generator *gen, int main_played_through_score,
 }
 
 void shadow_start(Generator *gen, int cross_set_index, Rack *opp_rack) {
+  printf("shadow_start\n");
   int main_played_through_score = 0;
   int num_tiles_played_through = 0;
   int perpendicular_additional_score = 0;
@@ -736,6 +757,7 @@ void shadow_start(Generator *gen, int cross_set_index, Rack *opp_rack) {
   uint8_t current_letter = get_letter_cache(gen, gen->current_left_col);
 
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+    printf("empty square\n");
     // Only play a letter if a letter from the rack fits in the cross set
     if (shadow_allowed_in_cross_set(gen, gen->current_left_col,
                                     cross_set_index)) {
@@ -782,6 +804,7 @@ void shadow_start(Generator *gen, int cross_set_index, Rack *opp_rack) {
       }
     }
   }
+  printf("gen->current_left_col: %d\n", gen->current_left_col);
   shadow_play_left(gen, main_played_through_score, num_tiles_played_through,
                    perpendicular_additional_score, word_multiplier,
                    !gen->vertical, cross_set_index, opp_rack);
@@ -800,6 +823,12 @@ void shadow_play_for_anchor(Generator *gen, int col, Player *player,
   gen->highest_shadow_equity = 0;
   memset(gen->highest_equity_by_length, 0,
          sizeof(gen->highest_equity_by_length));
+  const struct ShadowLimit initial_shadow_limit = {0, -DBL_MAX};
+  for (int i = 0; i <= RACK_SIZE; i++) {
+    for (int j = 0; j <= RACK_SIZE; j++) {
+      gen->shadow_limit_table[i][j] = initial_shadow_limit;
+    }
+  }
 
   // Set the number of letters
   gen->number_of_letters_on_rack = player->rack->number_of_letters;
@@ -830,7 +859,8 @@ void shadow_play_for_anchor(Generator *gen, int col, Player *player,
              gen->last_anchor_col, gen->board->transposed, gen->vertical,
              gen->min_num_playthrough, gen->max_num_playthrough,
              gen->min_tiles_to_play, gen->max_tiles_to_play,
-             gen->highest_shadow_equity, gen->highest_equity_by_length);
+             gen->max_tiles_starting_left_by, gen->highest_shadow_equity,
+             gen->highest_equity_by_length, gen->shadow_limit_table);
 }
 
 void shadow_by_orientation(Generator *gen, Player *player, int dir,
@@ -920,6 +950,7 @@ void look_up_bingos(Generator *gen, Player *player) {
 }
 
 void split_anchors_for_bingos(AnchorList *anchor_list, int make_bingo_anchors) {
+  printf("test_split_anchor_for_bingos\n");
   const int original_count = anchor_list->count;
   // For each anchor: if it
   //   1. can bingo (has max_tiles_to_play == RACKSIZE)
@@ -940,19 +971,65 @@ void split_anchors_for_bingos(AnchorList *anchor_list, int make_bingo_anchors) {
           best_nonbingo = anchor->highest_equity_by_length[len];
         }
       }
+
       anchor->highest_possible_equity = best_nonbingo;
       if (make_bingo_anchors) {
-        double best_bingo = anchor->highest_equity_by_length[RACK_SIZE];
-        add_anchor(anchor_list, anchor->row, anchor->col,
-                   anchor->last_anchor_col, anchor->transpose_state,
-                   anchor->vertical, 0, 0, RACK_SIZE, RACK_SIZE, best_bingo,
-                   anchor->highest_equity_by_length);
+        double best_bingo = 0;
+        int max_tiles_starting_left_by[(BOARD_DIM)];
+        memset(max_tiles_starting_left_by, 0,
+               sizeof(max_tiles_starting_left_by));
+        for (int j = 0; j < (BOARD_DIM); j++) {
+          printf("anchor->max_tiles_starting_left_by[%i]: %d\n", j,
+                 anchor->max_tiles_starting_left_by[j]);
+          printf("anchor->shadow_limit_table[%i][7].num_playthrough: %i\n", j,
+                 anchor->shadow_limit_table[j][7].num_playthrough);
+          if ((anchor->max_tiles_starting_left_by[j] == RACK_SIZE) &&
+              (anchor->shadow_limit_table[j][7].num_playthrough == 0)) {
+            const double best_equity =
+                anchor->shadow_limit_table[j][7].highest_equity;
+            printf("best_equity: %f\n", best_equity);
+            if (best_equity > best_bingo) {
+              best_bingo = best_equity;
+            }
+            max_tiles_starting_left_by[j] = RACK_SIZE;
+          } else {
+            max_tiles_starting_left_by[j] = 0;
+          }
+        }
+        printf("best_bingo: %f\n", best_bingo);
+        add_anchor(
+            anchor_list, anchor->row, anchor->col, anchor->last_anchor_col,
+            anchor->transpose_state, anchor->vertical, 0, 0, RACK_SIZE,
+            RACK_SIZE, max_tiles_starting_left_by, best_bingo,
+            anchor->highest_equity_by_length, anchor->shadow_limit_table);
+        best_bingo = 0;
+        memset(max_tiles_starting_left_by, 0,
+               sizeof(max_tiles_starting_left_by));
+        for (int j = 0; j < (BOARD_DIM); j++) {
+          if ((anchor->max_tiles_starting_left_by[j] == RACK_SIZE) &&
+              (anchor->shadow_limit_table[j][7].num_playthrough > 0)) {
+            const double best_equity =
+                anchor->shadow_limit_table[j][7].highest_equity;
+            if (best_equity > best_bingo) {
+              best_bingo = best_equity;
+            }
+            max_tiles_starting_left_by[j] = RACK_SIZE;
+          } else {
+            max_tiles_starting_left_by[j] = 0;
+          }
+        }
         if (anchor->max_num_playthrough > 0) {
           add_anchor(anchor_list, anchor->row, anchor->col,
                      anchor->last_anchor_col, anchor->transpose_state,
                      anchor->vertical, 1, anchor->max_num_playthrough,
-                     RACK_SIZE, RACK_SIZE, best_bingo,
-                     anchor->highest_equity_by_length);
+                     RACK_SIZE, RACK_SIZE, max_tiles_starting_left_by,
+                     best_bingo, anchor->highest_equity_by_length,
+                     anchor->shadow_limit_table);
+        }
+      }
+      for (int left_by = 0; left_by < (BOARD_DIM); left_by++) {
+        if (anchor->max_tiles_starting_left_by[left_by] == RACK_SIZE) {
+          anchor->max_tiles_starting_left_by[left_by]--;
         }
       }
     }
@@ -1298,8 +1375,8 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
     transpose(gen->board);
   }
 
-  int do_bingo_gen = player->index == 1;  // DO NOT SUBMIT
-  do_bingo_gen = true;  // player->index == 1;
+  // int do_bingo_gen = player->index == 1;  // DO NOT SUBMIT
+  int do_bingo_gen = true;  // player->index == 1;
 
   /*
     StringBuilder *sb = create_string_builder();

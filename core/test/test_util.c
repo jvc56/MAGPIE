@@ -184,11 +184,11 @@ void assert_bingo_found(Generator *gen, const char *expected_bingo) {
     StringBuilder *bingo = create_string_builder();
     for (int j = 0; j < RACK_SIZE; j++) {
       uint8_t uv_tile = gen->rack_bingos[i][j];
-      string_builder_add_user_visible_letter(gen->letter_distribution,
-                                             uv_tile, 0, bingo);
+      string_builder_add_user_visible_letter(gen->letter_distribution, uv_tile,
+                                             0, bingo);
     }
     if (strings_equal(string_builder_peek(bingo), expected_bingo)) {
-          destroy_string_builder(bingo);
+      destroy_string_builder(bingo);
       return;
     }
     destroy_string_builder(bingo);

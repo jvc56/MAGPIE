@@ -1,10 +1,10 @@
 #include <assert.h>
+#include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "../src/config.h"
 #include "../src/game.h"
-
 #include "superconfig.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -100,7 +100,7 @@ void test_shadow_score(SuperConfig *superconfig) {
   // and the highest possible score for the anchor would be a 6 letter play
   // for fifty like ZANIER, same as the previous test.
   // - The anchor is altered to have max 6 tiles
-  // - No 7 tile anchor is added
+  // - No seven-tile anchor is added
   load_and_generate(game, player, EMPTY_CGP, "AIERZNL", 0);
   assert(game->gen->anchor_list->count == 1);
   assert(within_epsilon(
@@ -242,7 +242,7 @@ void test_shadow_score(SuperConfig *superconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
-  // Makeing JA, FA, and JFU, doubling the U on the double letter
+  // Making JA, FA, and JFU, doubling the U on the double letter
   load_and_generate(game, player, AA_OPENING_CGP, "JFU", 0);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 44));
@@ -559,12 +559,28 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   Game *game = create_game(config);
   Generator *gen = game->gen;
   AnchorList *al = gen->anchor_list;
+  for (int i = 0; i <= 6; i++) {
+    gen->max_tiles_starting_left_by[i] = 0;
+  }
+  const struct ShadowLimit initial_shadow_limit = {0, -DBL_MAX};
+  for (int i = 0; i <= RACK_SIZE; i++) {
+    for (int j = 0; j <= RACK_SIZE; j++) {
+      gen->shadow_limit_table[i][j] = initial_shadow_limit;
+    }
+  }
   for (int i = 2; i <= 7; i++) {
+    double equity = 10 * i;
     gen->highest_equity_by_length[i] = 10 * i;
+    gen->max_tiles_starting_left_by[i - 1] = i;
+    for (int j = 0; j < i; j++) {
+      gen->shadow_limit_table[j][i].highest_equity = equity;
+      gen->shadow_limit_table[j][i].num_playthrough = 0;
+    }
   }
 
-  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 0, 2, 7, 70,
-             gen->highest_equity_by_length);
+  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 0, 2, 7,
+             gen->max_tiles_starting_left_by, 70, gen->highest_equity_by_length,
+             gen->shadow_limit_table);
   split_anchors_for_bingos(al, true);
 
   // splits into nonbingo and bingo anchors
@@ -597,8 +613,9 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[1]->max_tiles_to_play == 7);
 
   reset_anchor_list(al);
-  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 0, 2, 7, 70,
-             gen->highest_equity_by_length);
+  add_anchor(al, 7, 7, INITIAL_LAST_ANCHOR_COL, false, false, 0, 0, 2, 7,
+             gen->max_tiles_starting_left_by, 70, gen->highest_equity_by_length,
+             gen->shadow_limit_table);
   split_anchors_for_bingos(al, false);
 
   // trims the anchor to look for nonbingos but does not create bingo anchor
@@ -617,8 +634,9 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[0]->max_tiles_to_play == 6);
 
   reset_anchor_list(al);
-  add_anchor(al, 7, 7, 5, true, true, 1, 1, 1, 7, 70,
-             gen->highest_equity_by_length);
+  add_anchor(al, 7, 7, 5, true, true, 1, 1, 1, 7,
+             gen->max_tiles_starting_left_by, 70, gen->highest_equity_by_length,
+             gen->shadow_limit_table);
   split_anchors_for_bingos(al, true);
 
   // has no effect on this anchor because it always has playthrough
@@ -637,8 +655,9 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[0]->max_tiles_to_play == 7);
 
   reset_anchor_list(al);
-  add_anchor(al, 7, 7, 5, true, true, 0, 2, 1, 7, 70,
-             gen->highest_equity_by_length);
+  add_anchor(al, 7, 7, 5, true, true, 0, 2, 1, 7,
+             gen->max_tiles_starting_left_by, 70, gen->highest_equity_by_length,
+             gen->shadow_limit_table);
   split_anchors_for_bingos(al, true);
   assert(al->count == 3);
   assert(within_epsilon(al->anchors[0]->highest_possible_equity, 60));
@@ -654,7 +673,7 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[0]->max_num_playthrough == 2);
   assert(al->anchors[0]->min_tiles_to_play == 1);
   assert(al->anchors[0]->max_tiles_to_play == 6);
-  
+
   assert(al->anchors[1]->highest_equity_by_length[7] == 70);
   assert(al->anchors[1]->row == 7);
   assert(al->anchors[1]->col == 7);
@@ -666,7 +685,6 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[1]->min_tiles_to_play == 7);
   assert(al->anchors[1]->max_tiles_to_play == 7);
 
-
   assert(al->anchors[2]->highest_equity_by_length[7] == 70);
   assert(al->anchors[2]->row == 7);
   assert(al->anchors[2]->col == 7);
@@ -677,6 +695,273 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[2]->max_num_playthrough == 2);
   assert(al->anchors[2]->min_tiles_to_play == 7);
   assert(al->anchors[2]->max_tiles_to_play == 7);
+
+  char kaki_yond[300] =
+      "15/15/15/15/15/15/15/6KAkI5/8YOND3/15/15/15/15/15/15 MIRITIS/EEEEEEE "
+      "14/22 0 lex CSW21";
+  assert(load_cgp(game, kaki_yond) == CGP_PARSE_STATUS_SUCCESS);
+  Player *player = game->players[game->player_on_turn_index];
+  Rack *opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_game(game, sb);
+  printf("%s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+
+  reset_anchor_list(al);
+  gen->current_row_index = 8;
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  set_descending_tile_scores(gen, player);
+  load_row_letter_cache(gen, gen->current_row_index);
+  shadow_play_for_anchor(gen, 6, player, opp_rack);
+  assert(al->count == 1);
+
+  // 9c RISIMI(YOND)T, etc
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 85));
+
+  assert(al->anchors[0]->max_tiles_starting_left_by[0] == 5);
+  assert(al->anchors[0]->max_tiles_starting_left_by[1] == 6);
+  assert(al->anchors[0]->max_tiles_starting_left_by[2] == 7);
+  assert(al->anchors[0]->max_tiles_starting_left_by[3] == 7);
+  assert(al->anchors[0]->max_tiles_starting_left_by[4] == 7);
+  assert(al->anchors[0]->max_tiles_starting_left_by[5] == 7);
+  assert(al->anchors[0]->max_tiles_starting_left_by[6] == 7);
+
+  // Leaves are zero so all equities below are just scores
+  ShadowLimit(*shadow_limit_table)[BOARD_DIM][RACK_SIZE + 1] =
+      &(al->anchors[0]->shadow_limit_table);
+
+  // ORIGINAL UNSPLIT ANCHOR
+  // -----------------------
+  // g8 KM
+  assert(within_epsilon((*shadow_limit_table)[0][1].highest_equity, 11));
+  assert(within_epsilon((*shadow_limit_table)[0][1].num_playthrough, 0));
+
+  // 9g MI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[0][2].highest_equity, 28));
+  assert(within_epsilon((*shadow_limit_table)[0][2].num_playthrough, 4));
+
+  // 9g MI(YOND)I
+  assert(within_epsilon((*shadow_limit_table)[0][3].highest_equity, 30));
+  assert(within_epsilon((*shadow_limit_table)[0][3].num_playthrough, 4));
+
+  // 9g MI(YOND)IS
+  assert(within_epsilon((*shadow_limit_table)[0][4].highest_equity, 31));
+  assert(within_epsilon((*shadow_limit_table)[0][4].num_playthrough, 4));
+
+  // 9g MI(YOND)IST
+  assert(within_epsilon((*shadow_limit_table)[0][5].highest_equity, 32));
+  assert(within_epsilon((*shadow_limit_table)[0][5].num_playthrough, 4));
+
+  // 9f IM
+  assert(within_epsilon((*shadow_limit_table)[1][2].highest_equity, 18));
+  assert(within_epsilon((*shadow_limit_table)[1][2].num_playthrough, 0));
+
+  // 9f IMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[1][3].highest_equity, 29));
+  assert(within_epsilon((*shadow_limit_table)[1][3].num_playthrough, 4));
+
+  // 9f IMI(YOND)I
+  assert(within_epsilon((*shadow_limit_table)[1][4].highest_equity, 31));
+  assert(within_epsilon((*shadow_limit_table)[1][4].num_playthrough, 4));
+
+  // 9f IMI(YOND)IS
+  assert(within_epsilon((*shadow_limit_table)[1][5].highest_equity, 32));
+  assert(within_epsilon((*shadow_limit_table)[1][5].num_playthrough, 4));
+
+  // 9f IMI(YOND)IST
+  assert(within_epsilon((*shadow_limit_table)[1][6].highest_equity, 33));
+  assert(within_epsilon((*shadow_limit_table)[1][6].num_playthrough, 4));
+
+  // 9e RIM
+  assert(within_epsilon((*shadow_limit_table)[2][3].highest_equity, 19));
+  assert(within_epsilon((*shadow_limit_table)[2][3].num_playthrough, 0));
+
+  // 9e RIMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[2][4].highest_equity, 30));
+  assert(within_epsilon((*shadow_limit_table)[2][4].num_playthrough, 4));
+
+  // 9e RIMI(YOND)I
+  assert(within_epsilon((*shadow_limit_table)[2][5].highest_equity, 32));
+  assert(within_epsilon((*shadow_limit_table)[2][5].num_playthrough, 4));
+
+  // 9e RIMI(YOND)IS
+  assert(within_epsilon((*shadow_limit_table)[2][6].highest_equity, 33));
+  assert(within_epsilon((*shadow_limit_table)[2][6].num_playthrough, 4));
+
+  // 9e RIMI(YOND)IST
+  assert(within_epsilon((*shadow_limit_table)[2][7].highest_equity, 84));
+  assert(within_epsilon((*shadow_limit_table)[2][7].num_playthrough, 4));
+
+  // 9d TRIM
+  assert(within_epsilon((*shadow_limit_table)[3][4].highest_equity, 20));
+  assert(within_epsilon((*shadow_limit_table)[3][4].num_playthrough, 0));
+
+  // 9d TRIMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[3][5].highest_equity, 31));
+  assert(within_epsilon((*shadow_limit_table)[3][5].num_playthrough, 4));
+
+  // 9d TRIMI(YOND)I
+  assert(within_epsilon((*shadow_limit_table)[3][6].highest_equity, 33));
+  assert(within_epsilon((*shadow_limit_table)[3][6].num_playthrough, 4));
+
+  // 9d TRIMI(YOND)IS
+  assert(within_epsilon((*shadow_limit_table)[3][7].highest_equity, 84));
+  assert(within_epsilon((*shadow_limit_table)[3][7].num_playthrough, 4));
+
+  // 9c STRIM
+  assert(within_epsilon((*shadow_limit_table)[4][5].highest_equity, 22));
+  assert(within_epsilon((*shadow_limit_table)[4][5].num_playthrough, 0));
+
+  // 9c STRIMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[4][6].highest_equity, 33));
+  assert(within_epsilon((*shadow_limit_table)[4][6].num_playthrough, 4));
+
+  // 9c STRIMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[4][7].highest_equity, 85));
+  assert(within_epsilon((*shadow_limit_table)[4][7].num_playthrough, 4));
+
+  // 9b ISTRIM
+  assert(within_epsilon((*shadow_limit_table)[5][6].highest_equity, 23));
+  assert(within_epsilon((*shadow_limit_table)[5][6].num_playthrough, 0));
+
+  // 9b ISTRIMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[5][7].highest_equity, 84));
+  assert(within_epsilon((*shadow_limit_table)[5][7].num_playthrough, 4));
+
+  // 9a IISTRIM
+  assert(within_epsilon((*shadow_limit_table)[6][7].highest_equity, 74));
+  assert(within_epsilon((*shadow_limit_table)[6][7].num_playthrough, 0));
+
+  split_anchors_for_bingos(al, true);
+
+  // nonbingo, bingo without playthrough, bingo with playthrough
+  assert(al->count == 3);
+
+  // NONBINGO ANCHOR
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 33));
+  assert(al->anchors[0]->min_tiles_to_play == 1);
+  assert(al->anchors[0]->max_tiles_to_play == 6);
+  assert(al->anchors[0]->max_tiles_starting_left_by[0] == 5);
+  assert(al->anchors[0]->max_tiles_starting_left_by[1] == 6);
+  assert(al->anchors[0]->max_tiles_starting_left_by[2] == 6);
+  assert(al->anchors[0]->max_tiles_starting_left_by[3] == 6);
+  assert(al->anchors[0]->max_tiles_starting_left_by[4] == 6);
+  assert(al->anchors[0]->max_tiles_starting_left_by[5] == 6);
+  assert(al->anchors[0]->max_tiles_starting_left_by[6] == 6);
+
+  // g8 KM
+  assert(within_epsilon((*shadow_limit_table)[0][1].highest_equity, 11));
+  assert(within_epsilon((*shadow_limit_table)[0][1].num_playthrough, 0));
+
+  // 8g MI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[0][2].highest_equity, 28));
+  assert(within_epsilon((*shadow_limit_table)[0][2].num_playthrough, 4));
+
+  // 8g MI(YOND)I
+  assert(within_epsilon((*shadow_limit_table)[0][3].highest_equity, 30));
+  assert(within_epsilon((*shadow_limit_table)[0][3].num_playthrough, 4));
+
+  // 8g MI(YOND)IS
+  assert(within_epsilon((*shadow_limit_table)[0][4].highest_equity, 31));
+  assert(within_epsilon((*shadow_limit_table)[0][4].num_playthrough, 4));
+
+  // 8g MI(YOND)IST
+  assert(within_epsilon((*shadow_limit_table)[0][5].highest_equity, 32));
+  assert(within_epsilon((*shadow_limit_table)[0][5].num_playthrough, 4));
+
+  // 8f IM
+  assert(within_epsilon((*shadow_limit_table)[1][2].highest_equity, 18));
+  assert(within_epsilon((*shadow_limit_table)[1][2].num_playthrough, 0));
+
+  // 8f IMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[1][3].highest_equity, 29));
+  assert(within_epsilon((*shadow_limit_table)[1][3].num_playthrough, 4));
+
+  // 8f IMI(YOND)I
+  assert(within_epsilon((*shadow_limit_table)[1][4].highest_equity, 31));
+  assert(within_epsilon((*shadow_limit_table)[1][4].num_playthrough, 4));
+
+  // 8f IMI(YOND)IS
+  assert(within_epsilon((*shadow_limit_table)[1][5].highest_equity, 32));
+  assert(within_epsilon((*shadow_limit_table)[1][5].num_playthrough, 4));
+
+  // 8f IMI(YOND)IST
+  assert(within_epsilon((*shadow_limit_table)[1][6].highest_equity, 33));
+  assert(within_epsilon((*shadow_limit_table)[1][6].num_playthrough, 4));
+
+  // 8e RIM
+  assert(within_epsilon((*shadow_limit_table)[2][3].highest_equity, 19));
+  assert(within_epsilon((*shadow_limit_table)[2][3].num_playthrough, 0));
+
+  // 8e RIMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[2][4].highest_equity, 30));
+  assert(within_epsilon((*shadow_limit_table)[2][4].num_playthrough, 4));
+
+  // 8e RIMI(YOND)I
+  assert(within_epsilon((*shadow_limit_table)[2][5].highest_equity, 32));
+  assert(within_epsilon((*shadow_limit_table)[2][5].num_playthrough, 4));
+
+  // 8e RIMI(YOND)IS
+  assert(within_epsilon((*shadow_limit_table)[2][6].highest_equity, 33));
+  assert(within_epsilon((*shadow_limit_table)[2][6].num_playthrough, 4));
+
+  // 8d TRIM
+  assert(within_epsilon((*shadow_limit_table)[3][4].highest_equity, 20));
+  assert(within_epsilon((*shadow_limit_table)[3][4].num_playthrough, 0));
+
+  // 8d TRIMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[3][5].highest_equity, 31));
+  assert(within_epsilon((*shadow_limit_table)[3][5].num_playthrough, 4));
+
+  // 8d TRIMI(YOND)I
+  assert(within_epsilon((*shadow_limit_table)[3][6].highest_equity, 33));
+  assert(within_epsilon((*shadow_limit_table)[3][6].num_playthrough, 4));
+
+  // 8c STRIM
+  assert(within_epsilon((*shadow_limit_table)[4][5].highest_equity, 22));
+  assert(within_epsilon((*shadow_limit_table)[4][5].num_playthrough, 0));
+
+  // 8c STRIMI(YOND)
+  assert(within_epsilon((*shadow_limit_table)[4][6].highest_equity, 33));
+  assert(within_epsilon((*shadow_limit_table)[4][6].num_playthrough, 4));
+
+  // 8b ISTRIM
+  assert(within_epsilon((*shadow_limit_table)[5][6].highest_equity, 23));
+  assert(within_epsilon((*shadow_limit_table)[5][6].num_playthrough, 0));
+
+  // BINGO WITHOUT PLAYTHROUGH
+  // -------------------------
+  assert(within_epsilon(al->anchors[1]->highest_possible_equity, 74));
+  assert(al->anchors[1]->min_tiles_to_play == 7);
+  assert(al->anchors[1]->max_tiles_to_play == 7);
+  assert(al->anchors[1]->max_tiles_starting_left_by[0] == 0);
+  assert(al->anchors[1]->max_tiles_starting_left_by[1] == 0);
+  assert(al->anchors[1]->max_tiles_starting_left_by[2] == 0);
+  assert(al->anchors[1]->max_tiles_starting_left_by[3] == 0);
+  assert(al->anchors[1]->max_tiles_starting_left_by[4] == 0);
+  assert(al->anchors[1]->max_tiles_starting_left_by[5] == 0);
+  assert(al->anchors[1]->max_tiles_starting_left_by[6] == 7);
+
+  shadow_limit_table =  &(al->anchors[1]->shadow_limit_table);
+  // 9a IISTRIM
+  assert(within_epsilon((*shadow_limit_table)[6][7].highest_equity, 74));
+  assert(within_epsilon((*shadow_limit_table)[6][7].num_playthrough, 0));
+
+  // BINGO WITH PLAYTHROUGH
+  // ----------------------
+  assert(within_epsilon(al->anchors[2]->highest_possible_equity, 85));
+  assert(al->anchors[2]->min_tiles_to_play == 7);
+  assert(al->anchors[2]->max_tiles_to_play == 7);
+  assert(al->anchors[2]->max_tiles_starting_left_by[0] == 0);
+  assert(al->anchors[2]->max_tiles_starting_left_by[1] == 0);
+  assert(al->anchors[2]->max_tiles_starting_left_by[2] == 7);
+  assert(al->anchors[2]->max_tiles_starting_left_by[3] == 7);
+  assert(al->anchors[2]->max_tiles_starting_left_by[4] == 7);
+  assert(al->anchors[2]->max_tiles_starting_left_by[5] == 7);
+  assert(al->anchors[2]->max_tiles_starting_left_by[6] == 0);
+  
+  shadow_limit_table =  &(al->anchors[2]->shadow_limit_table);
 
   destroy_game(game);
 }

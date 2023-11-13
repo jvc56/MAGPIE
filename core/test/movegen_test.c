@@ -80,7 +80,7 @@ void test_simple_case(Game *game, Player *player, const char *rack_string,
   memset(game->gen->highest_equity_by_length, 100000.0,
          sizeof(double) * (RACK_SIZE + 1));
   game->gen->min_num_playthrough = 0;
-  game->gen->max_num_playthrough = BOARD_DIM - 1;    
+  game->gen->max_num_playthrough = BOARD_DIM - 1;
   game->gen->max_tiles_to_play = RACK_SIZE;
   execute_recursive_gen(game->gen, game->gen->current_anchor_col, player,
                         game->gen->current_anchor_col,
@@ -561,7 +561,27 @@ void equity_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
-void bingo_tests(SuperConfig *superconfig) {
+void bingo_anchor_tests(SuperConfig *superconfig) {
+  Config *config = get_csw_config(superconfig);
+  Game *game = create_game(config);
+  Generator *gen = game->gen;
+  AnchorList *al = gen->anchor_list;
+
+  char kaki_yond[300] =
+      "15/15/15/15/15/15/15/6KAkI5/8YOND3/15/15/15/15/15/15 MIRITIS/EEEEEEE "
+      "14/22 0 lex CSW21";
+  assert(load_cgp(game, kaki_yond) == CGP_PARSE_STATUS_SUCCESS);
+  Player *player = game->players[game->player_on_turn_index];
+  Rack *opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+
+  look_up_bingos_for_game(game);
+  assert(gen->number_of_bingos == 1);
+  assert_bingo_found(gen, "MIRITIS");
+
+  destroy_game(game);
+}
+
+void bingo_gen_tests(SuperConfig *superconfig) {
   Config *config = get_csw_config(superconfig);
   Game *game = create_game(config);
   Generator *gen = game->gen;
@@ -625,7 +645,7 @@ void bingo_tests(SuperConfig *superconfig) {
   assert_move(game, sorted_move_list, 2, "11H eREMITE 92");
   destroy_sorted_move_list(sorted_move_list);
 
-  // Tests single blank set as any of three different letters 
+  // Tests single blank set as any of three different letters
   reset_move_list(gen->move_list);
   gen->current_anchor_col = 8;
   gen->last_anchor_col = 7;
@@ -799,9 +819,11 @@ void distinct_lexica_test(SuperConfig *superconfig) {
 }
 
 void test_movegen(SuperConfig *superconfig) {
+  bingo_anchor_tests(superconfig); return;
   macondo_tests(superconfig);
   exchange_tests(superconfig);
-  bingo_tests(superconfig);
+  bingo_anchor_tests(superconfig);
+  bingo_gen_tests(superconfig);
   leave_lookup_test(superconfig);
   equity_test(superconfig);
   top_equity_play_recorder_test(superconfig);
