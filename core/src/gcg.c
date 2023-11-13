@@ -408,7 +408,7 @@ bool copy_exchanged_tiles_to_game_event(const GCGParser *gcg_parser,
     for (int i = 0; i < game_event->move->tiles_played; i++) {
       game_event->move->tiles[i] = played_tiles[i];
     }
-    game_event->move->tiles_length = game_event->move->tiles_played + 1;
+    game_event->move->tiles_length = game_event->move->tiles_played;
   }
 
   free(played_tiles);

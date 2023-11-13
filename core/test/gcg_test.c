@@ -162,13 +162,9 @@ void assert_game_event(const GameHistory *game_history, int event_index,
       int number_of_machine_letters = str_to_machine_letters(
           game_history->letter_distribution, tiles_string,
           move_type == GAME_EVENT_TILE_PLACEMENT_MOVE, machine_letters);
-      int corrected_tiles_length = tiles_length;
-      if (move_type == GAME_EVENT_EXCHANGE) {
-        corrected_tiles_length--;
-      }
-      bool tiles_match = number_of_machine_letters == corrected_tiles_length;
+      bool tiles_match = number_of_machine_letters == tiles_length;
       if (tiles_match) {
-        for (int i = 0; i < corrected_tiles_length; i++) {
+        for (int i = 0; i < tiles_length; i++) {
           tiles_match = tiles_match && move->tiles[i] == machine_letters[i];
         }
       }
@@ -206,7 +202,7 @@ void test_success_standard() {
   assert(!game_history->players[1]->last_known_rack);
   assert(game_history->number_of_events == 29);
   assert_game_event(game_history, 0, GAME_EVENT_EXCHANGE, 0, 0, "DIIIILU", "",
-                    GAME_EVENT_EXCHANGE, 0, 0, 0, 0, 5, 6, "IIILU",
+                    GAME_EVENT_EXCHANGE, 0, 0, 0, 0, 5, 5, "IIILU",
                     game_history->letter_distribution);
   assert_game_event(game_history, 1, GAME_EVENT_TILE_PLACEMENT_MOVE, 1, 22,
                     "AAENRSZ", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 7, 6, 22,

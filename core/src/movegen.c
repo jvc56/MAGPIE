@@ -171,7 +171,6 @@ void record_play(Generator *gen, const Player *player, const Rack *opp_rack,
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     score = score_move(gen->board, gen->strip, leftstrip, rightstrip, start_row,
-                       // FIXME: create canonical way to flip direction
                        start_col, tiles_played, !dir_is_vertical(gen->dir),
                        get_cross_set_index(gen, player->index),
                        gen->letter_distribution);
