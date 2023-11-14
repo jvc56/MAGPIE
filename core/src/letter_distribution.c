@@ -177,7 +177,7 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
         // multichar exceeded max char length
         return -1;
       }
-      current_letter[current_letter_byte_index] = str[i];
+      current_letter[current_letter_byte_index] = current_char;
       current_letter_byte_index++;
       current_letter[current_letter_byte_index] = '\0';
     }
