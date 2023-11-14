@@ -76,9 +76,9 @@ void run_test(TestConfig *testconfig, const char *subtest) {
     test_string_util();
   } else if (strings_equal(subtest, "alphabet")) {
     test_alphabet(testconfig);
-  } else if (strings_equal(subtest, "letterdistribution")) {
+  } else if (strings_equal(subtest, "ld")) {
     test_letter_distribution(testconfig);
-  } else if (strings_equal(subtest, "strtomachineletters")) {
+  } else if (strings_equal(subtest, "sml")) {
     test_str_to_machine_letters(testconfig);
   } else if (strings_equal(subtest, "leaves")) {
     test_leaves(testconfig);

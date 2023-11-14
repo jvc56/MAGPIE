@@ -153,7 +153,7 @@ uint8_t human_readable_letter_to_machine_letter(
 // Convert a string of arbitrary characters into an array of machine letters,
 // returning the number of machine letters. This function does not allocate
 // the ml array; it is the caller's responsibility to make this array big
-// enough.
+// enough. This function will return -1 if it encounters an invalid letter.
 // Note: This is a slow function that should not be used in any hot loops.
 int str_to_machine_letters(const LetterDistribution *letter_distribution,
                            const char *str, bool allow_played_through_marker,
@@ -161,39 +161,43 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
 
   int num_mls = 0;
   int num_bytes = string_length(str);
-  int i = 0;
-  int prev_i = -1;
-  while (i < num_bytes) {
-    for (int j = i + letter_distribution->max_tile_length; j > i; j--) {
-      if (j > num_bytes) {
-        continue;
+  // Use +1 for the null terminator
+  char current_letter[MAX_LETTER_CHAR_LENGTH + 1];
+  int current_letter_byte_index = 0;
+  bool building_multichar_letter = false;
+
+  for (int i = 0; i < num_bytes; i++) {
+    char current_char = str[i];
+    if (current_char == '[') {
+      building_multichar_letter = true;
+    } else if (current_char == ']') {
+      building_multichar_letter = false;
+    } else {
+      if (current_letter_byte_index == MAX_LETTER_CHAR_LENGTH) {
+        // multichar exceeded max char length
+        return -1;
       }
-      // possible letter goes from index i to j. Search for it.
-      char possible_letter[MAX_LETTER_CHAR_LENGTH];
-      memory_copy(possible_letter, str + i, j - i);
-      possible_letter[j - i] = '\0';
+      current_letter[current_letter_byte_index] = str[i];
+      current_letter_byte_index++;
+      current_letter[current_letter_byte_index] = '\0';
+    }
+
+    if (!building_multichar_letter) {
       uint8_t ml = human_readable_letter_to_machine_letter(letter_distribution,
-                                                           possible_letter);
+                                                           current_letter);
       if (ml == INVALID_LETTER) {
-        if (j - i == 1 && allow_played_through_marker &&
-            possible_letter[0] == ASCII_PLAYED_THROUGH) {
+        if (current_letter_byte_index == 1 && allow_played_through_marker &&
+            current_char == ASCII_PLAYED_THROUGH) {
           ml = PLAYED_THROUGH_MARKER;
         } else {
-          continue;
+          // letter is invalid
+          return -1;
         }
       }
-      // Otherwise, we found the letter we're looking for
       mls[num_mls] = ml;
       num_mls++;
-      i = j;
+      current_letter_byte_index = 0;
     }
-    if (i == prev_i) {
-      // Search is not finding any valid machine letters
-      // and is not making progress. Return now with -1
-      // to signify an error to avoid an infinite loop.
-      return -1;
-    }
-    prev_i = i;
   }
   return num_mls;
 }
