@@ -157,11 +157,13 @@ void assert_game_event(const GameHistory *game_history, int event_index,
     if (move_type != GAME_EVENT_PASS) {
       assert(move->tiles_played == tiles_played);
       assert(move->tiles_length == tiles_length);
+      int machine_letters_size = tiles_length + 1;
       uint8_t *machine_letters =
-          malloc_or_die(sizeof(char) * (tiles_length + 1));
+          malloc_or_die(sizeof(char) * machine_letters_size);
       int number_of_machine_letters = str_to_machine_letters(
           game_history->letter_distribution, tiles_string,
-          move_type == GAME_EVENT_TILE_PLACEMENT_MOVE, machine_letters);
+          move_type == GAME_EVENT_TILE_PLACEMENT_MOVE, machine_letters,
+          machine_letters_size);
       bool tiles_match = number_of_machine_letters == tiles_length;
       if (tiles_match) {
         for (int i = 0; i < tiles_length; i++) {

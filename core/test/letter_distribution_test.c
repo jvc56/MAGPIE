@@ -8,41 +8,42 @@
 
 void test_letter_distribution(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
+  const LetterDistribution *ld = config->letter_distribution;
 
   uint32_t previous_score;
-  for (uint32_t i = 0; i < config->letter_distribution->size; i++) {
-    int score_order_index = config->letter_distribution->score_order[i];
+  for (uint32_t i = 0; i < ld->size; i++) {
+    int score_order_index = ld->score_order[i];
     if (i == 0) {
-      previous_score = config->letter_distribution->scores[score_order_index];
+      previous_score = ld->scores[score_order_index];
     }
-    assert(config->letter_distribution->scores[score_order_index] <=
-           previous_score);
+    assert(ld->scores[score_order_index] <= previous_score);
   }
 }
 
 void test_str_to_machine_letters(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+  const Config *nwl_config = get_nwl_config(testconfig);
+  const LetterDistribution *english_ld = nwl_config->letter_distribution;
+  const Config *disc_config = get_disc_config(testconfig);
+  const LetterDistribution *catalan_ld = disc_config->letter_distribution;
+
   uint8_t mls[4];
-  int num_mls =
-      str_to_machine_letters(config->letter_distribution, "??", false, mls);
+  int num_mls = str_to_machine_letters(english_ld, "??", false, mls, 4);
   assert(num_mls == 2);
   assert(mls[0] == 0);
   assert(mls[1] == 0);
 
   // english:
   uint8_t emls[20];
-  num_mls =
-      str_to_machine_letters(config->letter_distribution, "ABZ", false, emls);
+  num_mls = str_to_machine_letters(english_ld, "ABZ", false, emls, 20);
   assert(num_mls == 3);
   assert(emls[0] == 1);
   assert(emls[1] == 2);
   assert(emls[2] == 26);
 
   // catalan:
-  config = get_disc_config(testconfig);
   uint8_t cmls[20];
-  num_mls = str_to_machine_letters(config->letter_distribution,
-                                   "A[l·l]O[QU]IMI[qu]ES", false, cmls);
+  num_mls = str_to_machine_letters(catalan_ld, "A[l·l]O[QU]IMI[qu]ES", false,
+                                   cmls, 20);
   assert(num_mls == 10);
   assert(cmls[0] == 1);
   assert(cmls[1] == get_blanked_machine_letter(13));
@@ -57,8 +58,8 @@ void test_str_to_machine_letters(TestConfig *testconfig) {
 
   // Test consecutive multichar letters
   uint8_t cmls2[20];
-  num_mls = str_to_machine_letters(config->letter_distribution,
-                                   "[L·L]ES[QU][qu]A[QU][qu]", false, cmls2);
+  num_mls = str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu]",
+                                   false, cmls2, 20);
   assert(num_mls == 8);
   assert(cmls2[0] == 13);
   assert(cmls2[1] == 6);
@@ -72,24 +73,34 @@ void test_str_to_machine_letters(TestConfig *testconfig) {
   uint8_t imls[40];
 
   // Ensure allowing playthrough tiles works
-  assert(str_to_machine_letters(config->letter_distribution, ".BDEF", true,
-                                imls) == 5);
-  assert(str_to_machine_letters(config->letter_distribution, ".B.D.E.F..", true,
-                                imls) == 10);
+  assert(str_to_machine_letters(english_ld, ".BDEF", true, imls, 40) == 5);
+  assert(str_to_machine_letters(english_ld, ".B.D.E.F..", true, imls, 40) ==
+         10);
 
   // Ensure invalid racks return -1
-  assert(str_to_machine_letters(config->letter_distribution, "2", false,
-                                imls) == -1);
-  assert(str_to_machine_letters(config->letter_distribution, "ABC9EFG", false,
-                                imls) == -1);
-  assert(str_to_machine_letters(config->letter_distribution, "ABCD[AB]EGD",
-                                true, imls) == -1);
-  assert(str_to_machine_letters(config->letter_distribution, "ABCD[ABCEFGH]EGD",
-                                true, imls) == -1);
-  assert(str_to_machine_letters(config->letter_distribution, "AB.F", false,
-                                imls) == -1);
-  assert(str_to_machine_letters(config->letter_distribution, "BEHF.", false,
-                                imls) == -1);
-  assert(str_to_machine_letters(config->letter_distribution, ".BDEF", false,
-                                imls) == -1);
+
+  // Invalid multichar strings
+  assert(str_to_machine_letters(catalan_ld, "A[ES]A", true, imls, 40) == -1);
+  assert(str_to_machine_letters(catalan_ld, "ABCD[ABCEFGH]EGD", true, imls,
+                                40) == -1);
+  assert(str_to_machine_letters(catalan_ld, "[", true, imls, 40) == -1);
+  assert(str_to_machine_letters(catalan_ld, "]", true, imls, 40) == -1);
+  assert(str_to_machine_letters(catalan_ld, "[]", true, imls, 40) == -1);
+  assert(str_to_machine_letters(catalan_ld, "ABC[DE", true, imls, 40) == -1);
+  assert(str_to_machine_letters(catalan_ld, "ABCD]E", true, imls, 40) == -1);
+  assert(str_to_machine_letters(catalan_ld, "[L·L[QU]]ES", true, imls, 40) ==
+         -1);
+  assert(str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu][]A[QU][qu]", false,
+                                imls, 40) == -1);
+  assert(str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu", false,
+                                imls, 40) == -1);
+
+  // Invalid letters
+  assert(str_to_machine_letters(english_ld, "2", false, imls, 40) == -1);
+  assert(str_to_machine_letters(english_ld, "ABC9EFG", false, imls, 40) == -1);
+
+  // Play through not allowed
+  assert(str_to_machine_letters(english_ld, "AB.F", false, imls, 40) == -1);
+  assert(str_to_machine_letters(english_ld, "BEHF.", false, imls, 40) == -1);
+  assert(str_to_machine_letters(english_ld, ".BDEF", false, imls, 40) == -1);
 }

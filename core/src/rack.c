@@ -86,11 +86,8 @@ int set_rack_to_string(Rack *rack, const char *rack_string,
   reset_rack(rack);
 
   uint8_t mls[MAX_BAG_SIZE];
-  int num_mls =
-      str_to_machine_letters(letter_distribution, rack_string, false, mls);
-  if (num_mls > MAX_BAG_SIZE) {
-    log_fatal("rack overflow: %d\n", num_mls);
-  }
+  int num_mls = str_to_machine_letters(letter_distribution, rack_string, false,
+                                       mls, MAX_BAG_SIZE);
   for (int i = 0; i < num_mls; i++) {
     add_letter_to_rack(rack, mls[i]);
   }

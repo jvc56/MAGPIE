@@ -52,7 +52,7 @@ inline bool is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
 
 int str_to_machine_letters(const LetterDistribution *letter_distribution,
                            const char *str, bool allow_played_through_marker,
-                           uint8_t *mls);
+                           uint8_t *mls, int mls_size);
 char *get_default_letter_distribution_name(const char *lexicon_name);
 
 void string_builder_add_user_visible_letter(

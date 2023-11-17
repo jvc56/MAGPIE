@@ -353,11 +353,11 @@ uint8_t *convert_tiles_string_to_machine_letters(
   char *tiles_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
 
-  uint8_t *machine_letters =
-      malloc_or_die(sizeof(char) * (matching_group_length + 1));
+  int machine_letters_size = matching_group_length + 1;
+  uint8_t *machine_letters = malloc_or_die(sizeof(char) * machine_letters_size);
   *number_of_machine_letters = str_to_machine_letters(
       gcg_parser->game_history->letter_distribution, tiles_string,
-      allow_played_through_marker, machine_letters);
+      allow_played_through_marker, machine_letters, machine_letters_size);
   free(tiles_string);
   if (*number_of_machine_letters < 0) {
     free(machine_letters);
