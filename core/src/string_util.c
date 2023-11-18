@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "fileproxy.h"
 #include "log.h"
 #include "string_util.h"
 #include "util.h"
@@ -140,7 +141,7 @@ bool has_substring(const char *str, const char *pattern) {
 }
 
 char *get_string_from_file(const char *filename) {
-  FILE *file_handle = fopen(filename, "r");
+  FILE *file_handle = stream_from_filename(filename);
   if (!file_handle) {
     log_fatal("Error opening file: %s\n", filename);
   }

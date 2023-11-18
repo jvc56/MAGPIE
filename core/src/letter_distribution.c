@@ -16,23 +16,6 @@ extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
 extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
 extern inline bool is_blanked(uint8_t ml);
 
-int get_letter_distribution_size(const char *filename) {
-  FILE *file = stream_from_filename(filename);
-  if (!file) {
-    log_fatal("Error opening file to count lines: %s\n", filename);
-  }
-
-  char line[100];
-  int letter_distribution_size = 0;
-  while (fgets(line, sizeof(line), file)) {
-    if (!is_all_whitespace_or_empty(line)) {
-      letter_distribution_size++;
-    }
-  }
-  fclose(file);
-  return letter_distribution_size;
-}
-
 char *get_letter_distribution_filepath(const char *ld_name) {
   // Check for invalid inputs
   if (!ld_name) {
@@ -49,15 +32,15 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   char *letter_distribution_filename =
       get_letter_distribution_filepath(ld_name);
 
-  letter_distribution->size =
-      get_letter_distribution_size(letter_distribution_filename);
+  StringSplitter *letter_distribution_lines =
+      split_file_by_newline(letter_distribution_filename);
 
-  FILE *file = stream_from_filename(letter_distribution_filename);
-  if (!file) {
-    log_fatal("Error opening letter distribution file: %s\n",
-              letter_distribution_filename);
-  }
   free(letter_distribution_filename);
+
+  int number_of_lines =
+      string_splitter_get_number_of_items(letter_distribution_lines);
+
+  letter_distribution->size = number_of_lines;
 
   letter_distribution->distribution =
       (uint32_t *)malloc_or_die(letter_distribution->size * sizeof(uint32_t));
@@ -73,14 +56,10 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
   }
 
   int machine_letter = 0;
-  char line[100];
   int max_tile_length = 0;
   letter_distribution->total_tiles = 0;
-  while (fgets(line, sizeof(line), file)) {
-    if (is_all_whitespace_or_empty(line)) {
-      continue;
-    }
-    trim_whitespace(line);
+  for (int i = 0; i < number_of_lines; i++) {
+    const char *line = string_splitter_get_item(letter_distribution_lines, i);
     StringSplitter *single_letter_info = split_string(line, ',', true);
     if (string_splitter_get_number_of_items(single_letter_info) != 5) {
       log_fatal("invalid letter distribution line in %s:\n>%s<\n", ld_name,
@@ -131,8 +110,8 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     destroy_string_splitter(single_letter_info);
     machine_letter++;
   }
+  destroy_string_splitter(letter_distribution_lines);
   letter_distribution->max_tile_length = max_tile_length;
-  fclose(file);
 }
 
 // This is a linear search. This function should not be used for anything

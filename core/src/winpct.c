@@ -21,33 +21,50 @@ char *get_win_pct_filepath(const char *win_pct_name) {
 // note: this function was largely written by ChatGPT.
 void parse_winpct_csv(WinPct *wp, const char *win_pct_name) {
   char *win_pct_filename = get_win_pct_filepath(win_pct_name);
-  FILE *file = stream_from_filename(win_pct_filename);
-  if (!file) {
-    log_fatal("Error opening file: %s\n", win_pct_filename);
-  }
+  StringSplitter *win_pct_lines = split_file_by_newline(win_pct_filename);
   free(win_pct_filename);
-  int max_rows = MAX_SPREAD * 2 + 1;
+
+  // Use -1 to account for header line
+  wp->number_of_spreads =
+      string_splitter_get_number_of_items(win_pct_lines) - 1;
+
+  if (wp->number_of_spreads < 1) {
+    log_fatal("no data found in win percentage file: %s\n", win_pct_name);
+  }
+
   // Allocate memory for the 2D array
-  float **array = (float **)malloc_or_die(max_rows * sizeof(float *));
-  for (int i = 0; i < max_rows; i++) {
-    array[i] = (float *)malloc_or_die(MAX_COLS * sizeof(float));
-  }
-
-  // Read and process the CSV file
-  // Assuming each field is no longer than 10 characters
-  char line[MAX_COLS * 10];
-
-  // Read the header line
-  char *result = fgets(line, sizeof(line), file);
-  if (!result) {
-    log_fatal("could not read file with fgets: %s\n", file);
-  }
+  float **array =
+      (float **)malloc_or_die(wp->number_of_spreads * sizeof(float *));
 
   // Read data lines
   int row = 0;
-  while (fgets(line, sizeof(line), file) && row < max_rows) {
-    StringSplitter *win_pct_data = split_string(line, ',', true);
+  int number_of_columns = 0;
+  // Start at 1 to skip header line
+  for (int i = 0; i < wp->number_of_spreads; i++) {
+    // Use +1 to skip the header line
+    StringSplitter *win_pct_data =
+        split_string(string_splitter_get_item(win_pct_lines, i + 1), ',', true);
     int number_of_items = string_splitter_get_number_of_items(win_pct_data);
+
+    if (i == 0) {
+      number_of_columns = number_of_items;
+      for (int i = 0; i < wp->number_of_spreads; i++) {
+        array[i] = (float *)malloc_or_die(number_of_columns * sizeof(float));
+      }
+    } else if (number_of_items != number_of_columns) {
+      log_fatal("inconsistent number of columns in %s at line %d: %d != %d\n",
+                win_pct_name, i, number_of_columns, number_of_items);
+    }
+
+    // We assume the spread values are continuous and descending
+    if (i == 0) {
+      int spread = string_to_int(string_splitter_get_item(win_pct_data, 0));
+      wp->max_spread = spread;
+    } else if (i == wp->number_of_spreads - 1) {
+      int spread = string_to_int(string_splitter_get_item(win_pct_data, 0));
+      wp->min_spread = spread;
+    }
+
     // Start at 1 to ignore the first column.
     for (int i = 1; i < number_of_items; i++) {
       array[row][i - 1] =
@@ -56,13 +73,10 @@ void parse_winpct_csv(WinPct *wp, const char *win_pct_name) {
     destroy_string_splitter(win_pct_data);
     row++;
   }
+  destroy_string_splitter(win_pct_lines);
 
-  fclose(file);
   wp->win_pcts = array;
-
-  wp->max_spread = 300;
-  wp->min_spread = -300;
-  wp->max_tiles_unseen = 93;
+  wp->max_tiles_unseen = number_of_columns - 2;
 }
 
 WinPct *create_winpct(const char *winpct_name) {
@@ -76,7 +90,7 @@ void destroy_winpct(WinPct *wp) {
   if (!wp) {
     return;
   }
-  for (int i = 0; i < MAX_SPREAD * 2 + 1; i++) {
+  for (int i = 0; i < wp->number_of_spreads; i++) {
     free(wp->win_pcts[i]);
   }
   free(wp->win_pcts);
