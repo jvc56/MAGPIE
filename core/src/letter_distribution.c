@@ -160,7 +160,7 @@ uint8_t human_readable_letter_to_machine_letter(
 // Note: This is a slow function that should not be used in any hot loops.
 int str_to_machine_letters(const LetterDistribution *letter_distribution,
                            const char *str, bool allow_played_through_marker,
-                           uint8_t *mls, int mls_size) {
+                           uint8_t *mls, size_t mls_size) {
 
   int num_mls = 0;
   int num_bytes = string_length(str);
@@ -175,21 +175,18 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
   // - multichar characters are nonempty
   for (int i = 0; i < num_bytes; i++) {
     char current_char = str[i];
-    bool write_machine_letter;
     switch (current_char) {
     case MULTICHAR_START_DELIMITIER:
       if (building_multichar_letter) {
         return -1;
       }
       building_multichar_letter = true;
-      write_machine_letter = false;
       break;
     case MULTICHAR_END_DELIMITIER:
       if (!building_multichar_letter || current_letter_byte_index == 0) {
         return -1;
       }
       building_multichar_letter = false;
-      write_machine_letter = true;
       break;
     default:
       if (current_letter_byte_index == MAX_LETTER_CHAR_LENGTH) {
@@ -198,13 +195,12 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
       current_letter[current_letter_byte_index] = current_char;
       current_letter_byte_index++;
       current_letter[current_letter_byte_index] = '\0';
-      write_machine_letter = !building_multichar_letter;
       break;
     }
 
-    if (write_machine_letter) {
+    if (!building_multichar_letter) {
       // Not enough space allocated to mls
-      if (num_mls >= mls_size) {
+      if (num_mls >= (int)mls_size) {
         return -1;
       }
       uint8_t ml = human_readable_letter_to_machine_letter(letter_distribution,

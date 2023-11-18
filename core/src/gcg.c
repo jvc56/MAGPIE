@@ -192,11 +192,19 @@ void destroy_gcg_parser(GCGParser *gcg_parser) {
   free(gcg_parser);
 }
 
+int get_matching_group_string_length(const GCGParser *gcg_parser,
+                                     int group_index) {
+  int start_index = gcg_parser->matching_groups[group_index].rm_so;
+  int end_index = gcg_parser->matching_groups[group_index].rm_eo;
+  return end_index - start_index;
+}
+
 char *get_matching_group_as_string(const GCGParser *gcg_parser,
                                    const char *gcg_line, int group_index) {
   int start_index = gcg_parser->matching_groups[group_index].rm_so;
   int end_index = gcg_parser->matching_groups[group_index].rm_eo;
-  int matching_group_string_length = end_index - start_index;
+  int matching_group_string_length =
+      get_matching_group_string_length(gcg_parser, group_index);
   char *matching_group_string =
       (char *)malloc_or_die((matching_group_string_length + 1) * sizeof(char));
   for (int i = start_index; i < end_index; i++) {
@@ -354,7 +362,8 @@ uint8_t *convert_tiles_string_to_machine_letters(
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
 
   int machine_letters_size = matching_group_length + 1;
-  uint8_t *machine_letters = malloc_or_die(sizeof(char) * machine_letters_size);
+  uint8_t *machine_letters =
+      malloc_or_die(sizeof(uint8_t) * machine_letters_size);
   *number_of_machine_letters = str_to_machine_letters(
       gcg_parser->game_history->letter_distribution, tiles_string,
       allow_played_through_marker, machine_letters, machine_letters_size);
@@ -418,13 +427,16 @@ bool copy_exchanged_tiles_to_game_event(const GCGParser *gcg_parser,
 
 Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
                              int group_index) {
+  if (get_matching_group_string_length(gcg_parser, group_index) == 0) {
+    return NULL;
+  }
   char *player_rack_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
   Rack *rack = create_rack(gcg_parser->game_history->letter_distribution->size);
-  set_rack_to_string(rack, player_rack_string,
-                     gcg_parser->game_history->letter_distribution);
+  int number_of_letters_set = set_rack_to_string(
+      rack, player_rack_string, gcg_parser->game_history->letter_distribution);
   free(player_rack_string);
-  if (rack->empty) {
+  if (number_of_letters_set <= 0) {
     destroy_rack(rack);
     return NULL;
   }
@@ -764,7 +776,15 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     game_event = create_game_event_and_add_to_history(game_history);
     game_event->player_index = player_index;
     game_event->event_type = GAME_EVENT_TIME_PENALTY;
-    game_event->rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
+    // Rack is allowed to be empty for time penalty
+    if (get_matching_group_string_length(gcg_parser, 2) == 0) {
+      game_event->rack = NULL;
+    } else {
+      game_event->rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
+      if (!game_event->rack) {
+        return GCG_PARSE_STATUS_RACK_MALFORMED;
+      }
+    }
     copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4);
     break;
   case GCG_LAST_RACK_PENALTY_TOKEN:
