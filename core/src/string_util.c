@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "fileproxy.h"
 #include "log.h"
 #include "string_util.h"
 #include "util.h"
