@@ -141,7 +141,7 @@ bool has_substring(const char *str, const char *pattern) {
 }
 
 char *get_string_from_file(const char *filename) {
-  FILE *file_handle = stream_from_filename(filename);
+  FILE *file_handle = fopen(filename, "r");
   if (!file_handle) {
     log_fatal("Error opening file: %s\n", filename);
   }
