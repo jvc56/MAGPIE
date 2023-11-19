@@ -153,6 +153,31 @@ uint8_t human_readable_letter_to_machine_letter(
   return INVALID_LETTER;
 }
 
+// Returns:
+//  * the number of utf8 bytes for this code point for the first byte or
+//  * 0 for subsequent bytes in the code point or
+//  * -1 for invalid UTF8 bytes
+int get_number_of_utf8_bytes_for_code_point(uint8_t byte) {
+  int number_of_bytes = -1;
+  if ((byte & 0xC0) == 0x80) {
+    // Subsequent byte in a code point
+    return 0;
+  } else if ((byte & 0x80) == 0x00) {
+    // Single-byte UTF-8 character
+    return 1;
+  } else if ((byte & 0xE0) == 0xC0) {
+    // Two-byte UTF-8 character
+    return 2;
+  } else if ((byte & 0xF0) == 0xE0) {
+    // Three-byte UTF-8 character
+    return 3;
+  } else if ((byte & 0xF8) == 0xF0) {
+    // Four-byte UTF-8 character
+    return 4;
+  }
+  return number_of_bytes;
+}
+
 // Convert a string of arbitrary characters into an array of machine letters,
 // returning the number of machine letters. This function does not allocate
 // the ml array; it is the caller's responsibility to make this array big
@@ -168,6 +193,8 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
   char current_letter[MAX_LETTER_CHAR_LENGTH + 1];
   int current_letter_byte_index = 0;
   bool building_multichar_letter = false;
+  int current_unicode_bytes_remaining = 0;
+  int number_of_chars_in_builder = 0;
 
   // While writing to mls, this loop verifies the following:
   // - absence of nested multichar characters
@@ -177,28 +204,74 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
     char current_char = str[i];
     switch (current_char) {
     case MULTICHAR_START_DELIMITIER:
-      if (building_multichar_letter) {
+      if (building_multichar_letter || current_unicode_bytes_remaining > 0) {
         return -1;
       }
       building_multichar_letter = true;
       break;
     case MULTICHAR_END_DELIMITIER:
-      if (!building_multichar_letter || current_letter_byte_index == 0) {
+      // Return an error if
+      // - multichar is building
+      // - multichar has fewer than two bytes
+      // - unicode code point is being built
+      if (!building_multichar_letter || number_of_chars_in_builder < 2 ||
+          current_unicode_bytes_remaining > 0) {
         return -1;
       }
       building_multichar_letter = false;
       break;
     default:
       if (current_letter_byte_index == MAX_LETTER_CHAR_LENGTH) {
+        // Exceeded max char length
         return -1;
       }
+
+      int bytes_remaining =
+          get_number_of_utf8_bytes_for_code_point(current_char);
+
+      if (bytes_remaining < 0) {
+        // Return -1 for invalid UTF8 byte
+        return -1;
+      }
+
+      if (bytes_remaining > 0 && current_unicode_bytes_remaining > 0) {
+        // Invalid UTF8 start sequence
+        return -1;
+      }
+
+      if (!building_multichar_letter && bytes_remaining > 0) {
+        // If we are building a multichar character
+        // with [ and ] we do not need to account for
+        // multibyte unicode code points since the batch
+        // processing for multiple bytes is already handled.
+        // This is the start of a multibyte code point
+        current_unicode_bytes_remaining = bytes_remaining;
+      } else if (bytes_remaining != 0) {
+        // If we are building a multichar letter, we do not
+        // allow single width chars such as [Ż], so we
+        // count how many chars we encounter while building
+        // a multichar and return an error if we finish with fewer than 2.
+        // If this byte is not a continuation of an existing
+        // unicode code point, then it is a new character.
+        number_of_chars_in_builder++;
+      }
+
       current_letter[current_letter_byte_index] = current_char;
       current_letter_byte_index++;
       current_letter[current_letter_byte_index] = '\0';
+
+      if (current_unicode_bytes_remaining > 0) {
+        // Another byte of the multibyte code point
+        // has been processed
+        current_unicode_bytes_remaining--;
+      }
       break;
     }
 
-    if (!building_multichar_letter) {
+    // Only write if
+    //  - multichar is done building and
+    //  - unicode is done building
+    if (!building_multichar_letter && current_unicode_bytes_remaining == 0) {
       // Not enough space allocated to mls
       if (num_mls >= (int)mls_size) {
         return -1;
@@ -217,9 +290,10 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
       mls[num_mls] = ml;
       num_mls++;
       current_letter_byte_index = 0;
+      number_of_chars_in_builder = 0;
     }
   }
-  if (building_multichar_letter) {
+  if (building_multichar_letter || current_unicode_bytes_remaining != 0) {
     return -1;
   }
   return num_mls;

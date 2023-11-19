@@ -25,6 +25,8 @@ void test_str_to_machine_letters(TestConfig *testconfig) {
   const LetterDistribution *english_ld = nwl_config->letter_distribution;
   const Config *disc_config = get_disc_config(testconfig);
   const LetterDistribution *catalan_ld = disc_config->letter_distribution;
+  const Config *osps_config = get_osps_config(testconfig);
+  const LetterDistribution *polish_ld = osps_config->letter_distribution;
 
   uint8_t mls[4];
   int num_mls = str_to_machine_letters(english_ld, "??", false, mls, 4);
@@ -70,6 +72,28 @@ void test_str_to_machine_letters(TestConfig *testconfig) {
   assert(cmls2[6] == 19);
   assert(cmls2[7] == get_blanked_machine_letter(19));
 
+  // Polish
+  uint8_t pmls[20];
+  num_mls = str_to_machine_letters(polish_ld, "FGÓIŁHAŃ", false, pmls, 20);
+  assert(num_mls == 8);
+  assert(pmls[0] == 9);
+  assert(pmls[1] == 10);
+  assert(pmls[2] == 21);
+  assert(pmls[3] == 12);
+  assert(pmls[4] == 16);
+  assert(pmls[5] == 11);
+  assert(pmls[6] == 1);
+  assert(pmls[7] == 19);
+
+  num_mls = str_to_machine_letters(polish_ld, "ŻŚŻGÓI", false, pmls, 20);
+  assert(num_mls == 6);
+  assert(pmls[0] == 32);
+  assert(pmls[1] == 25);
+  assert(pmls[2] == 32);
+  assert(pmls[3] == 10);
+  assert(pmls[4] == 21);
+  assert(pmls[5] == 12);
+
   uint8_t imls[40];
 
   // Ensure allowing playthrough tiles works
@@ -80,6 +104,8 @@ void test_str_to_machine_letters(TestConfig *testconfig) {
   // Ensure invalid racks return -1
 
   // Invalid multichar strings
+  assert(str_to_machine_letters(polish_ld, "ŻŚ[Ż]GÓI", true, imls, 40) == -1);
+  assert(str_to_machine_letters(polish_ld, "Ż[ŚŻ]GÓI", true, imls, 40) == -1);
   assert(str_to_machine_letters(catalan_ld, "A[ES]A", true, imls, 40) == -1);
   assert(str_to_machine_letters(catalan_ld, "ABCD[ABCEFGH]EGD", true, imls,
                                 40) == -1);
@@ -88,16 +114,17 @@ void test_str_to_machine_letters(TestConfig *testconfig) {
   assert(str_to_machine_letters(catalan_ld, "[]", true, imls, 40) == -1);
   assert(str_to_machine_letters(catalan_ld, "ABC[DE", true, imls, 40) == -1);
   assert(str_to_machine_letters(catalan_ld, "ABCD]E", true, imls, 40) == -1);
+  assert(str_to_machine_letters(catalan_ld, "ABC[D]E", true, imls, 40) == -1);
   assert(str_to_machine_letters(catalan_ld, "[L·L[QU]]ES", true, imls, 40) ==
          -1);
-  assert(str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu][]A[QU][qu]", false,
+  assert(str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu][]A[QU][qu]", true,
                                 imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu", false,
+  assert(str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu", true,
                                 imls, 40) == -1);
 
   // Invalid letters
-  assert(str_to_machine_letters(english_ld, "2", false, imls, 40) == -1);
-  assert(str_to_machine_letters(english_ld, "ABC9EFG", false, imls, 40) == -1);
+  assert(str_to_machine_letters(english_ld, "2", true, imls, 40) == -1);
+  assert(str_to_machine_letters(english_ld, "ABC9EFG", true, imls, 40) == -1);
 
   // Play through not allowed
   assert(str_to_machine_letters(english_ld, "AB.F", false, imls, 40) == -1);
