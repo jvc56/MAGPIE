@@ -163,7 +163,7 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
                            uint8_t *mls, size_t mls_size) {
 
   int num_mls = 0;
-  int num_bytes = string_length(str);
+  size_t num_bytes = string_length(str);
   // Use +1 for the null terminator
   char current_letter[MAX_LETTER_CHAR_LENGTH + 1];
   int current_letter_byte_index = 0;
@@ -173,7 +173,7 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
   // - absence of nested multichar characters
   // - bijection between the set of start and end multichar delimiters
   // - multichar characters are nonempty
-  for (int i = 0; i < num_bytes; i++) {
+  for (size_t i = 0; i < num_bytes; i++) {
     char current_char = str[i];
     switch (current_char) {
     case MULTICHAR_START_DELIMITIER:
