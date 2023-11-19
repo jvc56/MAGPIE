@@ -18,7 +18,6 @@ char *get_win_pct_filepath(const char *win_pct_name) {
                               WIN_PCT_FILE_EXTENSION);
 }
 
-// note: this function was largely written by ChatGPT.
 void parse_winpct_csv(WinPct *wp, const char *win_pct_name) {
   char *win_pct_filename = get_win_pct_filepath(win_pct_name);
   StringSplitter *win_pct_lines = split_file_by_newline(win_pct_filename);
