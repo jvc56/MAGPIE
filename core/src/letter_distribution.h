@@ -11,7 +11,7 @@
 #define UNBLANK_MASK (0x80 - 1)
 #define MAX_ALPHABET_SIZE 50
 #define MACHINE_LETTER_MAX_VALUE 255
-#define MAX_LETTER_CHAR_LENGTH 6
+#define MAX_LETTER_BYTE_LENGTH 6
 
 #define ENGLISH_LETTER_DISTRIBUTION_NAME "english"
 #define GERMAN_LETTER_DISTRIBUTION_NAME "german"
@@ -29,7 +29,7 @@ typedef struct LetterDistribution {
   int total_tiles;
   int max_tile_length;
   char machine_letter_to_human_readable_letter[MACHINE_LETTER_MAX_VALUE]
-                                              [MAX_LETTER_CHAR_LENGTH];
+                                              [MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
 LetterDistribution *

@@ -190,11 +190,11 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
   int num_mls = 0;
   size_t num_bytes = string_length(str);
   // Use +1 for the null terminator
-  char current_letter[MAX_LETTER_CHAR_LENGTH + 1];
+  char current_letter[MAX_LETTER_BYTE_LENGTH + 1];
   int current_letter_byte_index = 0;
   bool building_multichar_letter = false;
-  int current_unicode_bytes_remaining = 0;
-  int number_of_chars_in_builder = 0;
+  int current_code_point_bytes_remaining = 0;
+  int number_of_letters_in_builder = 0;
 
   // While writing to mls, this loop verifies the following:
   // - absence of nested multichar characters
@@ -204,7 +204,7 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
     char current_char = str[i];
     switch (current_char) {
     case MULTICHAR_START_DELIMITIER:
-      if (building_multichar_letter || current_unicode_bytes_remaining > 0) {
+      if (building_multichar_letter || current_code_point_bytes_remaining > 0) {
         return -1;
       }
       building_multichar_letter = true;
@@ -212,66 +212,67 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
     case MULTICHAR_END_DELIMITIER:
       // Return an error if
       // - multichar is building
-      // - multichar has fewer than two bytes
-      // - unicode code point is being built
-      if (!building_multichar_letter || number_of_chars_in_builder < 2 ||
-          current_unicode_bytes_remaining > 0) {
+      // - multichar has fewer than two letters
+      // - code point is being built
+      if (!building_multichar_letter || number_of_letters_in_builder < 2 ||
+          current_code_point_bytes_remaining > 0) {
         return -1;
       }
       building_multichar_letter = false;
       break;
     default:
-      if (current_letter_byte_index == MAX_LETTER_CHAR_LENGTH) {
+      if (current_letter_byte_index == MAX_LETTER_BYTE_LENGTH) {
         // Exceeded max char length
         return -1;
       }
 
-      int bytes_remaining =
+      int number_of_bytes_for_code_point =
           get_number_of_utf8_bytes_for_code_point(current_char);
 
-      if (bytes_remaining < 0) {
+      if (number_of_bytes_for_code_point < 0) {
         // Return -1 for invalid UTF8 byte
         return -1;
       }
 
-      if (bytes_remaining > 0 && current_unicode_bytes_remaining > 0) {
+      if (number_of_bytes_for_code_point > 0 &&
+          current_code_point_bytes_remaining > 0) {
         // Invalid UTF8 start sequence
         return -1;
       }
 
-      if (!building_multichar_letter && bytes_remaining > 0) {
+      if (!building_multichar_letter && number_of_bytes_for_code_point > 0) {
         // If we are building a multichar character
-        // with [ and ] we do not need to account for
+        // with [ and ], we do not need to account for
         // multibyte unicode code points since the batch
         // processing for multiple bytes is already handled.
         // This is the start of a multibyte code point
-        current_unicode_bytes_remaining = bytes_remaining;
-      } else if (bytes_remaining != 0) {
+        current_code_point_bytes_remaining = number_of_bytes_for_code_point;
+      } else if (number_of_bytes_for_code_point != 0) {
         // If we are building a multichar letter, we do not
         // allow single width chars such as [Ż], so we
         // count how many chars we encounter while building
         // a multichar and return an error if we finish with fewer than 2.
         // If this byte is not a continuation of an existing
         // unicode code point, then it is a new character.
-        number_of_chars_in_builder++;
+        number_of_letters_in_builder++;
       }
 
       current_letter[current_letter_byte_index] = current_char;
       current_letter_byte_index++;
       current_letter[current_letter_byte_index] = '\0';
 
-      if (current_unicode_bytes_remaining > 0) {
+      if (current_code_point_bytes_remaining > 0) {
         // Another byte of the multibyte code point
         // has been processed
-        current_unicode_bytes_remaining--;
+        current_code_point_bytes_remaining--;
       }
       break;
     }
 
     // Only write if
     //  - multichar is done building and
-    //  - unicode is done building
-    if (!building_multichar_letter && current_unicode_bytes_remaining == 0) {
+    //  - unicode code point is done building
+    if (!building_multichar_letter && current_code_point_bytes_remaining == 0) {
       // Not enough space allocated to mls
       if (num_mls >= (int)mls_size) {
         return -1;
@@ -290,10 +291,10 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
       mls[num_mls] = ml;
       num_mls++;
       current_letter_byte_index = 0;
-      number_of_chars_in_builder = 0;
+      number_of_letters_in_builder = 0;
     }
   }
-  if (building_multichar_letter || current_unicode_bytes_remaining != 0) {
+  if (building_multichar_letter || current_code_point_bytes_remaining != 0) {
     return -1;
   }
   return num_mls;
