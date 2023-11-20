@@ -161,19 +161,19 @@ int get_number_of_utf8_bytes_for_code_point(uint8_t byte) {
   int number_of_bytes = -1;
   if ((byte & 0xC0) == 0x80) {
     // Subsequent byte in a code point
-    return 0;
+    number_of_bytes = 0;
   } else if ((byte & 0x80) == 0x00) {
     // Single-byte UTF-8 character
-    return 1;
+    number_of_bytes = 1;
   } else if ((byte & 0xE0) == 0xC0) {
     // Two-byte UTF-8 character
-    return 2;
+    number_of_bytes = 2;
   } else if ((byte & 0xF0) == 0xE0) {
     // Three-byte UTF-8 character
-    return 3;
+    number_of_bytes = 3;
   } else if ((byte & 0xF8) == 0xF0) {
     // Four-byte UTF-8 character
-    return 4;
+    number_of_bytes = 4;
   }
   return number_of_bytes;
 }
