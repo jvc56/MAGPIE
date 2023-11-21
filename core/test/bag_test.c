@@ -23,6 +23,7 @@ void test_add_letter(const Config *config, Bag *bag, char *r,
 void test_bag(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
   Bag *bag = create_bag(config->letter_distribution);
+  Bag *bag_copy = copy_bag(bag);
   Rack *rack = create_rack(config->letter_distribution->size);
 
   int number_of_remaining_tiles = get_tiles_remaining(bag);
@@ -64,5 +65,6 @@ void test_bag(TestConfig *testconfig) {
   test_add_letter(config, bag, "z", "ABFZ???");
 
   destroy_bag(bag);
+  destroy_bag(bag_copy);
   destroy_rack(rack);
 }
