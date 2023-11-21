@@ -7,6 +7,13 @@
 
 #define BLANK_SORT_VALUE 255
 
+struct Bag {
+  int size;
+  uint8_t *tiles;
+  int last_tile_index;
+  XoshiroPRNG *prng;
+};
+
 void shuffle(Bag *bag) {
   if (bag->last_tile_index > 0) {
     int i;
@@ -74,8 +81,19 @@ void destroy_bag(Bag *bag) {
   free(bag);
 }
 
+int get_tiles_remaining(const Bag *bag) { return bag->last_tile_index + 1; }
+
+bool bag_is_empty(const Bag *bag) { return get_tiles_remaining(bag) == 0; }
+
+// This assumes the bag is shuffled and nonempty
+uint8_t draw_random_letter(Bag *bag, int player_index) {
+  uint8_t letter = bag->tiles[bag->last_tile_index];
+  bag->last_tile_index--;
+  return letter;
+}
+
 // This assumes the letter is in the bag
-void draw_letter(Bag *bag, uint8_t letter) {
+void remove_letter(Bag *bag, uint8_t letter) {
   if (is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
@@ -103,6 +121,22 @@ void add_letter(Bag *bag, uint8_t letter) {
 }
 
 void reseed_prng(Bag *bag, uint64_t seed) { seed_prng(bag->prng, seed); }
+
+// This function ensures that all workers for a given
+// job are seeded with unique non-overlapping sequences
+// for the PRNGs in their bags.
+void seed_bag_for_worker(Bag *bag, uint64_t seed, int worker_index) {
+  seed_prng(bag->prng, seed);
+  for (int j = 0; j < worker_index; j++) {
+    xoshiro_jump(bag->prng);
+  }
+}
+
+void add_bag_to_rack(const Bag *bag, Rack *rack) {
+  for (int i = 0; i <= bag->last_tile_index; i++) {
+    add_letter_to_rack(rack, bag->tiles[i]);
+  }
+}
 
 void string_builder_add_bag(const Bag *bag,
                             const LetterDistribution *letter_distribution,

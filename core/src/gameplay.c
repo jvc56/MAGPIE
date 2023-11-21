@@ -9,10 +9,9 @@
 #include "movegen.h"
 #include "rack.h"
 
-void draw_at_most_to_rack(Bag *bag, Rack *rack, int n) {
-  while (n > 0 && bag->last_tile_index >= 0) {
-    add_letter_to_rack(rack, bag->tiles[bag->last_tile_index]);
-    bag->last_tile_index--;
+void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_index) {
+  while (n > 0 && !bag_is_empty(bag)) {
+    add_letter_to_rack(rack, draw_random_letter(bag, player_index));
     n--;
   }
 }
@@ -124,7 +123,7 @@ void execute_exchange_move(Game *game, const Move *move) {
   }
   draw_at_most_to_rack(game->gen->bag,
                        game->players[game->player_on_turn_index]->rack,
-                       move->tiles_played);
+                       move->tiles_played, game->player_on_turn_index);
   for (int i = 0; i < move->tiles_played; i++) {
     add_letter(game->gen->bag, move->tiles[i]);
   }
@@ -148,7 +147,7 @@ void play_move(Game *game, const Move *move) {
     game->players[game->player_on_turn_index]->score += move->score;
     draw_at_most_to_rack(game->gen->bag,
                          game->players[game->player_on_turn_index]->rack,
-                         move->tiles_played);
+                         move->tiles_played, game->player_on_turn_index);
     if (game->players[game->player_on_turn_index]->rack->empty) {
       standard_end_of_game_calculations(game);
     }
@@ -197,14 +196,14 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
       }
     }
   }
-  draw_at_most_to_rack(game->gen->bag, prack, ntiles - ndrawn);
+  draw_at_most_to_rack(game->gen->bag, prack, ntiles - ndrawn, pidx);
 }
 
 Move *get_top_equity_move(Game *game) {
   reset_move_list(game->gen->move_list);
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  MOVE_RECORD_BEST, MOVE_SORT_EQUITY, true);
   return game->gen->move_list->moves[0];
 }

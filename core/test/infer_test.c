@@ -453,8 +453,12 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   // Contrive an impossible situation to easily test
   // more combinatorics
   load_cgp(game, OOPSYCHOLOGY_CGP);
+
   // Empty the bag
-  game->gen->bag->last_tile_index = -1;
+  while (!bag_is_empty(game->gen->bag)) {
+    draw_random_letter(game->gen->bag, 0);
+  }
+
   add_letter(game->gen->bag, human_readable_letter_to_machine_letter(
                                  game->gen->letter_distribution, "I"));
   add_letter(game->gen->bag, human_readable_letter_to_machine_letter(
@@ -630,8 +634,8 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   // MOVE_RECORDER_BEST;
   set_rack_to_string(game->players[0]->rack, "?",
                      game->gen->letter_distribution);
-  draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(
-                                  game->gen->letter_distribution, "?"));
+  remove_letter(game->gen->bag, human_readable_letter_to_machine_letter(
+                                    game->gen->letter_distribution, "?"));
   load_config_or_die(config,
                      "setoptions rack GRIND pindex 0 score 18 exch 0 eq 0");
   status = infer_for_test(config, game, inference);
@@ -661,8 +665,8 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
 
   set_rack_to_string(game->players[0]->rack, "H",
                      game->gen->letter_distribution);
-  draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(
-                                  game->gen->letter_distribution, "H"));
+  remove_letter(game->gen->bag, human_readable_letter_to_machine_letter(
+                                    game->gen->letter_distribution, "H"));
   load_config_or_die(config,
                      "setoptions rack RIN pindex 0 score 6 exch 0 eq 0");
   status = infer_for_test(config, game, inference);
@@ -693,16 +697,16 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   load_cgp(game, VS_JEREMY);
   // Take out good letters and throw in bad ones to force certain
   // racks to have exchange as the best play
-  draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(
-                                  game->gen->letter_distribution, "?"));
-  draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(
-                                  game->gen->letter_distribution, "?"));
-  draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(
-                                  game->gen->letter_distribution, "E"));
-  draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(
-                                  game->gen->letter_distribution, "A"));
-  draw_letter(game->gen->bag, human_readable_letter_to_machine_letter(
-                                  game->gen->letter_distribution, "A"));
+  remove_letter(game->gen->bag, human_readable_letter_to_machine_letter(
+                                    game->gen->letter_distribution, "?"));
+  remove_letter(game->gen->bag, human_readable_letter_to_machine_letter(
+                                    game->gen->letter_distribution, "?"));
+  remove_letter(game->gen->bag, human_readable_letter_to_machine_letter(
+                                    game->gen->letter_distribution, "E"));
+  remove_letter(game->gen->bag, human_readable_letter_to_machine_letter(
+                                    game->gen->letter_distribution, "A"));
+  remove_letter(game->gen->bag, human_readable_letter_to_machine_letter(
+                                    game->gen->letter_distribution, "A"));
 
   add_letter(game->gen->bag, human_readable_letter_to_machine_letter(
                                  game->gen->letter_distribution, "Q"));

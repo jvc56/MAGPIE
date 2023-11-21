@@ -141,16 +141,6 @@ void seed_prng(XoshiroPRNG *prng, uint64_t seed) {
   }
 }
 
-// This function ensures that all workers for a given
-// job are seeded with unique non-overlapping sequences
-// for their PRNGs.
-void seed_prng_for_worker(XoshiroPRNG *prng, uint64_t seed, int worker_index) {
-  seed_prng(prng, seed);
-  for (int j = 0; j < worker_index; j++) {
-    xoshiro_jump(prng);
-  }
-}
-
 // initializer
 // create and seed PRNG.
 XoshiroPRNG *create_prng(uint64_t seed) {

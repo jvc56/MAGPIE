@@ -88,9 +88,9 @@ double get_spare_move_equity(const Generator *gen, const Player *player,
     other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
   }
 
-  if (gen->bag->last_tile_index >= 0) {
+  if (!bag_is_empty(gen->bag)) {
     leave_adjustment = get_current_value(gen->leave_map);
-    int bag_plus_rack_size = (gen->bag->last_tile_index + 1) -
+    int bag_plus_rack_size = get_tiles_remaining(gen->bag) -
                              gen->move_list->spare_move->tiles_played +
                              RACK_SIZE;
     if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
@@ -461,14 +461,14 @@ void shadow_record(Generator *gen, int left_col, int right_col,
               perpendicular_additional_score + bingo_bonus;
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-    if (gen->bag->last_tile_index >= 0) {
+    if (!bag_is_empty(gen->bag)) {
       // Bag is not empty: use leave values
       equity +=
           gen->best_leaves[gen->number_of_letters_on_rack - gen->tiles_played];
       // Apply preendgame heuristic if this play would empty the bag or leave
       // few enough tiles remaining.
       int bag_plus_rack_size =
-          (gen->bag->last_tile_index + 1) - gen->tiles_played + RACK_SIZE;
+          get_tiles_remaining(gen->bag) - gen->tiles_played + RACK_SIZE;
       if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
         equity += gen->preendgame_adjustment_values[bag_plus_rack_size];
       }

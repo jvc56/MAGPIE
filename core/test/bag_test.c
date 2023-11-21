@@ -25,33 +25,30 @@ void test_bag(TestConfig *testconfig) {
   Bag *bag = create_bag(config->letter_distribution);
   Rack *rack = create_rack(config->letter_distribution->size);
 
-  // Check initial bag configuration
-  assert(bag->last_tile_index == bag->size - 1);
-
-  for (uint32_t i = 0; i < (config->letter_distribution->size); i++) {
-    uint32_t number_of_letters = 0;
-    for (int k = 0; k <= bag->last_tile_index; k++) {
-      if (bag->tiles[k] == i) {
-        number_of_letters++;
-      }
-    }
-    assert(config->letter_distribution->distribution[i] == number_of_letters);
+  int number_of_remaining_tiles = get_tiles_remaining(bag);
+  for (int k = 0; k < number_of_remaining_tiles; k++) {
+    uint8_t letter = draw_random_letter(bag, 0);
+    add_letter_to_rack(rack, letter);
   }
 
-  int number_of_remaining_tiles = bag->last_tile_index + 1;
+  for (uint32_t i = 0; i < config->letter_distribution->size; i++) {
+    assert((int)config->letter_distribution->distribution[i] == rack->array[i]);
+  }
+
+  reset_bag(bag, config->letter_distribution);
+  reset_rack(rack);
 
   // Check drawing from the bag
-  while (bag->last_tile_index + 1 > RACK_SIZE) {
-    draw_at_most_to_rack(bag, rack, RACK_SIZE);
+  while (get_tiles_remaining(bag) > RACK_SIZE) {
+    draw_at_most_to_rack(bag, rack, RACK_SIZE, 0);
     number_of_remaining_tiles -= RACK_SIZE;
-    assert(bag->last_tile_index + 1 == number_of_remaining_tiles);
     assert(!rack->empty);
     assert(rack->number_of_letters == RACK_SIZE);
     reset_rack(rack);
   }
 
-  draw_at_most_to_rack(bag, rack, RACK_SIZE);
-  assert(bag->last_tile_index == -1);
+  draw_at_most_to_rack(bag, rack, RACK_SIZE, 0);
+  assert(bag_is_empty(bag));
   assert(!rack->empty);
   assert(rack->number_of_letters == number_of_remaining_tiles);
   reset_rack(rack);

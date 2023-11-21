@@ -37,7 +37,7 @@ void load_config_or_die(Config *config, const char *cmd) {
 void generate_moves_for_game(Game *game) {
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  game->players[game->player_on_turn_index]->move_record_type,
                  game->players[game->player_on_turn_index]->move_sort_type,
                  true);
@@ -129,7 +129,7 @@ void sort_and_print_move_list(const Board *board,
 void play_top_n_equity_move(Game *game, int n) {
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  game->players[game->player_on_turn_index]->move_record_type,
                  game->players[game->player_on_turn_index]->move_sort_type,
                  true);

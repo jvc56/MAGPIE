@@ -91,23 +91,26 @@ void add_autoplay_results(AutoplayResults *autoplay_results_1,
 
 void play_game(Game *game, AutoplayResults *autoplay_results,
                int starting_player_index) {
+  int player_going_first_index = starting_player_index;
+  int player_going_second_index = 1 - starting_player_index;
   reset_game(game);
-  set_player_on_turn(game, starting_player_index);
+  set_player_on_turn(game, player_going_first_index);
   draw_at_most_to_rack(game->gen->bag,
-                       game->players[starting_player_index]->rack, RACK_SIZE);
+                       game->players[player_going_first_index]->rack, RACK_SIZE,
+                       player_going_first_index);
   draw_at_most_to_rack(game->gen->bag,
-                       game->players[1 - starting_player_index]->rack,
-                       RACK_SIZE);
+                       game->players[player_going_second_index]->rack,
+                       RACK_SIZE, player_going_second_index);
   while (!game->game_end_reason) {
     generate_moves(
         game->gen, game->players[game->player_on_turn_index],
         game->players[1 - game->player_on_turn_index]->rack,
-        game->gen->bag->last_tile_index + 1 >= RACK_SIZE, MOVE_RECORD_BEST,
+        get_tiles_remaining(game->gen->bag) >= RACK_SIZE, MOVE_RECORD_BEST,
         game->players[game->player_on_turn_index]->move_sort_type, true);
     play_move(game, game->gen->move_list->moves[0]);
     reset_move_list(game->gen->move_list);
   }
-  record_results(game, starting_player_index, autoplay_results);
+  record_results(game, player_going_first_index, autoplay_results);
 }
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
@@ -120,16 +123,15 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   int worker_index = autoplay_worker->worker_index;
   int starting_player_for_thread = worker_index % 2;
 
-  // Create a PRNG to save the state of the game
-  // to use for game pairs. The initial seed does
-  // not matter since it will be overwritten before
-  // the first game of the pair is played.
-  XoshiroPRNG *game_pair_prng;
+  Bag *game_pair_bag;
   if (use_game_pairs) {
-    game_pair_prng = create_prng(0);
+    // Create a Bag to save the PRNG state of the game
+    // to use for game pairs. The initial seed does
+    // not matter since it will be overwritten before
+    // the first game of the pair is played.
+    game_pair_bag = create_bag(game->gen->letter_distribution);
   }
-  seed_prng_for_worker(game->gen->bag->prng, autoplay_worker->seed,
-                       worker_index);
+  seed_bag_for_worker(game->gen->bag, autoplay_worker->seed, worker_index);
 
   for (int i = 0; i < autoplay_worker->max_games_for_worker; i++) {
     if (is_halted(thread_control)) {
@@ -138,23 +140,23 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
     int starting_player_index = (i + starting_player_for_thread) % 2;
 
     // If we are using game pairs, we have to save the state of the
-    // PRNG before playing the first game so the state can be
+    // Bag PRNG before playing the first game so the state can be
     // reloaded before playing the second game of the pair, ensuring
-    // both games are played with an identical PRNG.
+    // both games are played with an identical Bag PRNG.
     if (use_game_pairs) {
-      copy_prng_into(game_pair_prng, game->gen->bag->prng);
+      copy_bag_into(game_pair_bag, game->gen->bag);
     }
 
     play_game(game, autoplay_worker->autoplay_results, starting_player_index);
     if (use_game_pairs) {
-      copy_prng_into(game->gen->bag->prng, game_pair_prng);
+      copy_bag_into(game->gen->bag, game_pair_bag);
       play_game(game, autoplay_worker->autoplay_results,
                 1 - starting_player_index);
     }
   }
 
   if (use_game_pairs) {
-    destroy_prng(game_pair_prng);
+    destroy_bag(game_pair_bag);
   }
   destroy_game(game);
   return NULL;

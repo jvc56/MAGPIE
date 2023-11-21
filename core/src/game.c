@@ -18,7 +18,7 @@
 #define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
 
 void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter) {
-  draw_letter(bag, letter);
+  remove_letter(bag, letter);
   add_letter_to_rack(rack, letter);
 }
 
@@ -48,7 +48,7 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
     for (int i = 0; i < number_of_machine_letters; i++) {
       set_letter(game->gen->board, row_start, col_start + i,
                  machine_letters[i]);
-      draw_letter(game->gen->bag, machine_letters[i]);
+      remove_letter(game->gen->bag, machine_letters[i]);
       game->gen->board->tiles_played++;
     }
     *current_column_index = *current_column_index + number_of_machine_letters;
@@ -130,7 +130,7 @@ int draw_rack_from_bag(Bag *bag, Rack *rack, const char *rack_string,
       set_rack_to_string(rack, rack_string, letter_distribution);
   for (int i = 0; i < rack->array_size; i++) {
     for (int j = 0; j < rack->array[i]; j++) {
-      draw_letter(bag, i);
+      remove_letter(bag, i);
     }
   }
   return number_of_letters_set;
@@ -255,7 +255,7 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
 
   if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
     game->game_end_reason = GAME_END_REASON_CONSECUTIVE_ZEROS;
-  } else if (game->gen->bag->last_tile_index == -1 &&
+  } else if (bag_is_empty(game->gen->bag) &&
              (game->players[0]->rack->empty || game->players[1]->rack->empty)) {
     game->game_end_reason = GAME_END_REASON_STANDARD;
   } else {
@@ -265,11 +265,10 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
 }
 
 int tiles_unseen(const Game *game) {
-  int bag_idx = game->gen->bag->last_tile_index;
   int their_rack_tiles =
       game->players[1 - game->player_on_turn_index]->rack->number_of_letters;
 
-  return (their_rack_tiles + bag_idx + 1);
+  return (their_rack_tiles + get_tiles_remaining(game->gen->bag));
 }
 
 void reset_game(Game *game) {
@@ -493,7 +492,7 @@ void string_builder_add_game(const Game *game, StringBuilder *game_string) {
                              game_string);
 
       string_builder_add_formatted_string(game_string, "  %d",
-                                          game->gen->bag->last_tile_index + 1);
+                                          get_tiles_remaining(game->gen->bag));
 
     } else if (i - 2 < game->gen->move_list->count) {
       string_builder_add_move_with_rank_and_equity(game, i - 2, game_string);

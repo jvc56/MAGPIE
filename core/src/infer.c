@@ -228,7 +228,7 @@ Move *get_top_move(Inference *inference) {
   reset_move_list(game->gen->move_list);
   generate_moves(game->gen, player,
                  game->players[1 - inference->player_to_infer_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  MOVE_RECORD_BEST, MOVE_SORT_EQUITY, false);
   return game->gen->move_list->moves[0];
 }
@@ -403,10 +403,7 @@ void initialize_inference_for_evaluation(
   reset_rack(inference->bag_as_rack);
   reset_rack(inference->leave);
 
-  // Create the bag as a rack
-  for (int i = 0; i <= game->gen->bag->last_tile_index; i++) {
-    add_letter_to_rack(inference->bag_as_rack, game->gen->bag->tiles[i]);
-  }
+  add_bag_to_rack(game->gen->bag, inference->bag_as_rack);
 
   // Add any existing tiles on the player's rack
   // to the player's leave for partial inferences

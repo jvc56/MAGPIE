@@ -6,7 +6,7 @@
 #include "game.h"
 #include "move.h"
 
-void draw_at_most_to_rack(Bag *bag, Rack *rack, int n);
+void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_index);
 void play_move(Game *game, const Move *move);
 void set_random_rack(Game *game, int pidx, Rack *existing_rack);
 Move *get_top_equity_move(Game *game);
