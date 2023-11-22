@@ -116,7 +116,7 @@ void update_cross_set_for_move(Game *game, const Move *move) {
   }
 }
 
-void execute_exchange_move(Game *game, const Move *move) {
+void execute_exchange_move(Game *game, const Move *move, int player_index) {
   for (int i = 0; i < move->tiles_played; i++) {
     take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
                           move->tiles[i]);
@@ -125,7 +125,7 @@ void execute_exchange_move(Game *game, const Move *move) {
                        game->players[game->player_on_turn_index]->rack,
                        move->tiles_played, game->player_on_turn_index);
   for (int i = 0; i < move->tiles_played; i++) {
-    add_letter(game->gen->bag, move->tiles[i]);
+    add_letter(game->gen->bag, move->tiles[i], player_index);
   }
 }
 
@@ -154,7 +154,7 @@ void play_move(Game *game, const Move *move) {
   } else if (move->move_type == GAME_EVENT_PASS) {
     game->consecutive_scoreless_turns++;
   } else if (move->move_type == GAME_EVENT_EXCHANGE) {
-    execute_exchange_move(game, move);
+    execute_exchange_move(game, move, game->player_on_turn_index);
     game->consecutive_scoreless_turns++;
   }
 
@@ -182,7 +182,7 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   for (int i = 0; i < prack->array_size; i++) {
     if (prack->array[i] > 0) {
       for (int j = 0; j < prack->array[i]; j++) {
-        add_letter(game->gen->bag, i);
+        add_letter(game->gen->bag, i, pidx);
       }
     }
   }
@@ -191,7 +191,7 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   if (known_rack && known_rack->number_of_letters > 0) {
     for (int i = 0; i < known_rack->array_size; i++) {
       for (int j = 0; j < known_rack->array[i]; j++) {
-        draw_letter_to_rack(game->gen->bag, prack, i);
+        draw_letter_to_rack(game->gen->bag, prack, i, pidx);
         ndrawn++;
       }
     }

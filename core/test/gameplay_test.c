@@ -10,18 +10,18 @@
 #include "test_util.h"
 #include "testconfig.h"
 
-void return_rack_to_bag(Rack *rack, Bag *bag) {
+void return_rack_to_bag(Rack *rack, Bag *bag, int player_index) {
   for (int i = 0; i < (rack->array_size); i++) {
     for (int j = 0; j < rack->array[i]; j++) {
-      add_letter(bag, i);
+      add_letter(bag, i, player_index);
     }
   }
   reset_rack(rack);
 }
 
 void return_racks_to_bag(Game *game) {
-  return_rack_to_bag(game->players[0]->rack, game->gen->bag);
-  return_rack_to_bag(game->players[1]->rack, game->gen->bag);
+  return_rack_to_bag(game->players[0]->rack, game->gen->bag, 0);
+  return_rack_to_bag(game->players[1]->rack, game->gen->bag, 1);
 }
 
 void assert_players_are_equal(const Player *p1, const Player *p2,
@@ -44,34 +44,6 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
     assert(b1->cross_scores[i] == b2->cross_scores[i]);
     assert(b1->anchors[i] == b2->anchors[i]);
   }
-}
-
-void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
-  Bag *b1_copy = copy_bag(b1);
-  Bag *b2_copy = copy_bag(b2);
-
-  int b1_number_of_tiles_remaining = get_tiles_remaining(b1_copy);
-  int b2_number_of_tiles_remaining = get_tiles_remaining(b2_copy);
-
-  assert(b1_number_of_tiles_remaining == b2_number_of_tiles_remaining);
-
-  Rack *rack = create_rack(rack_array_size);
-
-  for (int i = 0; i < b1_number_of_tiles_remaining; i++) {
-    add_letter_to_rack(rack, draw_random_letter(b1_copy, 0));
-  }
-
-  for (int i = 0; i < b2_number_of_tiles_remaining; i++) {
-    uint8_t letter = draw_random_letter(b2_copy, 0);
-    assert(rack->array[letter] > 0);
-    take_letter_from_rack(rack, letter);
-  }
-
-  assert(rack->empty);
-
-  destroy_bag(b1_copy);
-  destroy_bag(b2_copy);
-  destroy_rack(rack);
 }
 
 void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores) {
@@ -113,7 +85,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     draw_rack_to_string(
         actual_game->gen->bag,
         actual_game->players[actual_game->player_on_turn_index]->rack, racks[i],
-        actual_game->gen->letter_distribution);
+        actual_game->gen->letter_distribution,
+        actual_game->player_on_turn_index);
     // If it's the last turn, have the opponent draw the remaining tiles
     // so the end of actual_game subtractions are correct. If the bag has less
     // than RACK_SIZE tiles, have the opponent draw the remaining tiles
@@ -392,7 +365,7 @@ void test_playmove(TestConfig *testconfig) {
 
   // Test play
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
-                      game->gen->letter_distribution);
+                      game->gen->letter_distribution, 0);
   play_top_n_equity_move(game, 0);
 
   assert(game->consecutive_scoreless_turns == 0);
@@ -423,7 +396,7 @@ void test_playmove(TestConfig *testconfig) {
 
   // Test exchange
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "UUUVVWW",
-                      game->gen->letter_distribution);
+                      game->gen->letter_distribution, 0);
   play_top_n_equity_move(game, 0);
 
   assert(game->consecutive_scoreless_turns == 1);
@@ -489,7 +462,7 @@ void test_set_random_rack(TestConfig *testconfig) {
   assert(get_tiles_remaining(game->gen->bag) == 100);
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
-                      game->gen->letter_distribution);
+                      game->gen->letter_distribution, 0);
   assert(get_tiles_remaining(game->gen->bag) == 93);
 
   set_random_rack(game, 0, NULL);
@@ -531,10 +504,10 @@ void test_backups(TestConfig *testconfig) {
 
   // draw some random rack.
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
-                      game->gen->letter_distribution);
+                      game->gen->letter_distribution, 0);
 
   draw_rack_to_string(game->gen->bag, game->players[1]->rack, "AOQRTUZ",
-                      game->gen->letter_distribution);
+                      game->gen->letter_distribution, 1);
   assert(get_tiles_remaining(game->gen->bag) == 86);
 
   // backup

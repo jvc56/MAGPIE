@@ -51,7 +51,7 @@ void test_sim_single_iteration(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AAADERW",
-                      game->gen->letter_distribution);
+                      game->gen->letter_distribution, 0);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1 cond none");
@@ -69,7 +69,7 @@ void test_more_iterations(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AEIQRST",
-                      game->gen->letter_distribution);
+                      game->gen->letter_distribution, 0);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 400 cond none");
@@ -181,7 +181,7 @@ void test_play_similarity(TestConfig *testconfig) {
   Config *config = testconfig->nwl_config;
   Game *game = create_game(config);
   draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
-                      game->gen->letter_distribution);
+                      game->gen->letter_distribution, 0);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 0 cond none");

@@ -141,13 +141,14 @@ void play_top_n_equity_move(Game *game, int n) {
 }
 
 void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
-                         const LetterDistribution *letter_distribution) {
+                         const LetterDistribution *letter_distribution,
+                         int player_index) {
 
   uint8_t mls[1000];
   int num_mls =
       str_to_machine_letters(letter_distribution, letters, false, mls);
   for (int i = 0; i < num_mls; i++) {
-    draw_letter_to_rack(bag, rack, mls[i]);
+    draw_letter_to_rack(bag, rack, mls[i], player_index);
   }
 }
 
@@ -199,6 +200,35 @@ void assert_strings_equal(const char *str1, const char *str2) {
     }
     assert(0);
   }
+}
+
+void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
+  Bag *b1_copy = copy_bag(b1);
+  Bag *b2_copy = copy_bag(b2);
+
+  int b1_number_of_tiles_remaining = get_tiles_remaining(b1_copy);
+  int b2_number_of_tiles_remaining = get_tiles_remaining(b2_copy);
+
+  assert(b1_number_of_tiles_remaining == b2_number_of_tiles_remaining);
+
+  Rack *rack = create_rack(rack_array_size);
+
+  for (int i = 0; i < b1_number_of_tiles_remaining; i++) {
+    uint8_t letter = draw_random_letter(b1_copy, 0);
+    add_letter_to_rack(rack, letter);
+  }
+
+  for (int i = 0; i < b2_number_of_tiles_remaining; i++) {
+    uint8_t letter = draw_random_letter(b2_copy, 0);
+    assert(rack->array[letter] > 0);
+    take_letter_from_rack(rack, letter);
+  }
+
+  assert(rack->empty);
+
+  destroy_bag(b1_copy);
+  destroy_bag(b2_copy);
+  destroy_rack(rack);
 }
 
 void assert_move(const Game *game, const SortedMoveList *sml, int move_index,
