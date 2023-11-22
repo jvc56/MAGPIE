@@ -154,8 +154,8 @@ void add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
 }
 
 void add_winpct_stat(SimmedPlay *sp, const WinPct *wp, int spread,
-                     float leftover, int game_end_reason, int tiles_unseen,
-                     bool plies_are_odd, bool lock) {
+                     float leftover, game_end_reason_t game_end_reason,
+                     int tiles_unseen, bool plies_are_odd, bool lock) {
 
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {

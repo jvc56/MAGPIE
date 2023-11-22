@@ -116,16 +116,21 @@ void update_cross_set_for_move(Game *game, const Move *move) {
   }
 }
 
-void execute_exchange_move(Game *game, const Move *move, int player_index) {
+int get_player_draw_index(Game *game) {
+  return game->player_on_turn_index ^ game->starting_player_index;
+}
+
+void execute_exchange_move(Game *game, const Move *move) {
   for (int i = 0; i < move->tiles_played; i++) {
     take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
                           move->tiles[i]);
   }
+  int player_draw_index = get_player_draw_index(game);
   draw_at_most_to_rack(game->gen->bag,
                        game->players[game->player_on_turn_index]->rack,
-                       move->tiles_played, game->player_on_turn_index);
+                       move->tiles_played, player_draw_index);
   for (int i = 0; i < move->tiles_played; i++) {
-    add_letter(game->gen->bag, move->tiles[i], player_index);
+    add_letter(game->gen->bag, move->tiles[i], player_draw_index);
   }
 }
 
@@ -134,6 +139,13 @@ void standard_end_of_game_calculations(Game *game) {
       2 * score_on_rack(game->gen->letter_distribution,
                         game->players[1 - game->player_on_turn_index]->rack);
   game->game_end_reason = GAME_END_REASON_STANDARD;
+}
+
+void draw_starting_racks(Game *game) {
+  draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, RACK_SIZE,
+                       game->starting_player_index);
+  draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, RACK_SIZE,
+                       1 - game->starting_player_index);
 }
 
 void play_move(Game *game, const Move *move) {
@@ -147,14 +159,14 @@ void play_move(Game *game, const Move *move) {
     game->players[game->player_on_turn_index]->score += move->score;
     draw_at_most_to_rack(game->gen->bag,
                          game->players[game->player_on_turn_index]->rack,
-                         move->tiles_played, game->player_on_turn_index);
+                         move->tiles_played, get_player_draw_index(game));
     if (game->players[game->player_on_turn_index]->rack->empty) {
       standard_end_of_game_calculations(game);
     }
   } else if (move->move_type == GAME_EVENT_PASS) {
     game->consecutive_scoreless_turns++;
   } else if (move->move_type == GAME_EVENT_EXCHANGE) {
-    execute_exchange_move(game, move, game->player_on_turn_index);
+    execute_exchange_move(game, move);
     game->consecutive_scoreless_turns++;
   }
 

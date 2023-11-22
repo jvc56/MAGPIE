@@ -89,19 +89,12 @@ void add_autoplay_results(AutoplayResults *autoplay_results_1,
   autoplay_results_1->total_games += autoplay_results_2->total_games;
 }
 
-void play_game(Game *game, AutoplayResults *autoplay_results,
-               int starting_player_index) {
-  int player_going_first_index = starting_player_index;
-  int player_going_second_index = 1 - starting_player_index;
+void play_autoplay_game(Game *game, AutoplayResults *autoplay_results,
+                        int starting_player_index) {
   reset_game(game);
-  set_player_on_turn(game, player_going_first_index);
-  draw_at_most_to_rack(game->gen->bag,
-                       game->players[player_going_first_index]->rack, RACK_SIZE,
-                       player_going_first_index);
-  draw_at_most_to_rack(game->gen->bag,
-                       game->players[player_going_second_index]->rack,
-                       RACK_SIZE, player_going_second_index);
-  while (!game->game_end_reason) {
+  set_starting_player_index(game, starting_player_index);
+  draw_starting_racks(game);
+  while (game->game_end_reason == GAME_END_REASON_NONE) {
     generate_moves(
         game->gen, game->players[game->player_on_turn_index],
         game->players[1 - game->player_on_turn_index]->rack,
@@ -110,7 +103,7 @@ void play_game(Game *game, AutoplayResults *autoplay_results,
     play_move(game, game->gen->move_list->moves[0]);
     reset_move_list(game->gen->move_list);
   }
-  record_results(game, player_going_first_index, autoplay_results);
+  record_results(game, starting_player_index, autoplay_results);
 }
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
@@ -147,11 +140,12 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
       copy_bag_into(game_pair_bag, game->gen->bag);
     }
 
-    play_game(game, autoplay_worker->autoplay_results, starting_player_index);
+    play_autoplay_game(game, autoplay_worker->autoplay_results,
+                       starting_player_index);
     if (use_game_pairs) {
       copy_bag_into(game->gen->bag, game_pair_bag);
-      play_game(game, autoplay_worker->autoplay_results,
-                1 - starting_player_index);
+      play_autoplay_game(game, autoplay_worker->autoplay_results,
+                         1 - starting_player_index);
     }
   }
 

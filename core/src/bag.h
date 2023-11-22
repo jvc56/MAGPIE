@@ -15,9 +15,9 @@ typedef struct Bag Bag;
 
 int get_tiles_remaining(const Bag *bag);
 bool bag_is_empty(const Bag *bag);
-uint8_t draw_random_letter(Bag *bag, int player_index);
-void add_letter(Bag *bag, uint8_t letter, int player_index);
-void draw_letter(Bag *bag, uint8_t letter, int player_index);
+uint8_t draw_random_letter(Bag *bag, int player_draw_index);
+void add_letter(Bag *bag, uint8_t letter, int player_draw_index);
+void draw_letter(Bag *bag, uint8_t letter, int player_draw_index);
 void seed_bag_for_worker(Bag *bag, uint64_t seed, int worker_index);
 void add_bag_to_rack(const Bag *bag, Rack *rack);
 void destroy_bag(Bag *bag);

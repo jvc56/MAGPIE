@@ -281,13 +281,16 @@ void reset_game(Game *game) {
   reset_player(game->players[0]);
   reset_player(game->players[1]);
   game->player_on_turn_index = 0;
+  game->starting_player_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
   game->backup_cursor = 0;
 }
 
-void set_player_on_turn(Game *game, int player_on_turn_index) {
-  game->player_on_turn_index = player_on_turn_index;
+// This assumes the game has not started yet.
+void set_starting_player_index(Game *game, int starting_player_index) {
+  game->starting_player_index = starting_player_index;
+  game->player_on_turn_index = starting_player_index;
 }
 
 void pre_allocate_backups(Game *game) {
@@ -333,6 +336,7 @@ Game *create_game(const Config *config) {
         players_data_get_is_shared(config->players_data, (players_data_t)i);
   }
 
+  game->starting_player_index = 0;
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
@@ -352,6 +356,7 @@ Game *copy_game(const Game *game, int move_list_capacity) {
     new_game->data_is_shared[i] = game->data_is_shared[i];
   }
   new_game->player_on_turn_index = game->player_on_turn_index;
+  new_game->starting_player_index = game->starting_player_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
   // note: game backups must be explicitly handled by the caller if they want
@@ -372,6 +377,7 @@ void backup_game(Game *game) {
     copy_bag_into(state->bag, game->gen->bag);
     state->game_end_reason = game->game_end_reason;
     state->player_on_turn_index = game->player_on_turn_index;
+    state->starting_player_index = game->starting_player_index;
     state->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
     copy_rack_into(state->p0rack, game->players[0]->rack);
     state->p0score = game->players[0]->score;
@@ -393,6 +399,7 @@ void unplay_last_move(Game *game) {
   game->consecutive_scoreless_turns = state->consecutive_scoreless_turns;
   game->game_end_reason = state->game_end_reason;
   game->player_on_turn_index = state->player_on_turn_index;
+  game->starting_player_index = state->starting_player_index;
   game->players[0]->score = state->p0score;
   game->players[1]->score = state->p1score;
   copy_rack_into(game->players[0]->rack, state->p0rack);
@@ -434,13 +441,21 @@ void string_builder_add_player_row(
     player_marker = player_off_turn_marker;
   }
 
+  char *player_name;
+  if (player->name) {
+    player_name = get_formatted_string("%s", player->name);
+  } else {
+    player_name = get_formatted_string("player%d", player->index + 1);
+  }
+
   string_builder_add_formatted_string(game_string, "%s%s%*s", player_marker,
-                                      player->name,
-                                      25 - string_length(player->name), "");
+                                      player_name,
+                                      25 - string_length(player_name), "");
   string_builder_add_rack(player->rack, letter_distribution, game_string);
   string_builder_add_formatted_string(game_string, "%*s%d",
                                       10 - player->rack->number_of_letters, "",
                                       player->score);
+  free(player_name);
 }
 
 void string_builder_add_board_row(const LetterDistribution *letter_distribution,
@@ -465,10 +480,10 @@ void string_builder_add_move_with_rank_and_equity(const Game *game,
                                                   int move_index,
                                                   StringBuilder *game_string) {
   const Move *move = game->gen->move_list->moves[move_index];
-  string_builder_add_int(game_string, move_index + 1);
+  string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(game->gen->board, move,
                           game->gen->letter_distribution, game_string);
-  string_builder_add_double(game_string, move->equity);
+  string_builder_add_formatted_string(game_string, " %0.2f", move->equity);
 }
 
 void string_builder_add_game(const Game *game, StringBuilder *game_string) {

@@ -96,13 +96,15 @@ void destroy_bag(Bag *bag) {
 
 bool bag_is_empty(const Bag *bag) { return get_tiles_remaining(bag) == 0; }
 
-// This assumes the bag is shuffled and nonempty
-uint8_t draw_random_letter(Bag *bag, int player_index) {
+// This assumes the bag is shuffled and nonempty.
+// The player index is used to determine which side
+// of the bag the player draws from.
+uint8_t draw_random_letter(Bag *bag, int player_draw_index) {
   uint8_t letter;
-  // This assumes player_index can only be 0 or 1
+  // This assumes player_draw_index can only be 0 or 1
   // Player 0 draws from the end of the bag and
   // player 1 draws from the start of the bag
-  if (player_index == 0) {
+  if (player_draw_index == 0) {
     letter = bag->tiles[bag->end_tile_index];
     bag->end_tile_index--;
   } else {
@@ -112,7 +114,7 @@ uint8_t draw_random_letter(Bag *bag, int player_index) {
   return letter;
 }
 
-void draw_letter(Bag *bag, uint8_t letter, int player_index) {
+void draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   if (is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
@@ -126,7 +128,7 @@ void draw_letter(Bag *bag, uint8_t letter, int player_index) {
   if (letter_index < 0) {
     log_fatal("letter not found in bag: %d\n", letter);
   }
-  if (player_index == 0) {
+  if (player_draw_index == 0) {
     bag->tiles[letter_index] = bag->tiles[bag->end_tile_index];
     bag->end_tile_index--;
   } else {
@@ -135,23 +137,22 @@ void draw_letter(Bag *bag, uint8_t letter, int player_index) {
   }
 }
 
-void add_letter(Bag *bag, uint8_t letter, int player_index) {
+void add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   if (is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
-  // Use (1 - player_index) to shift 1 to the right when
+  // Use (1 - player_draw_index) to shift 1 to the right when
   // adding a tile for player 0, since the added tile
   // needs to be added to the end of the bag.
-  int insert_index = bag->start_tile_index - 1 + (1 - player_index);
+  int insert_index = bag->start_tile_index - 1 + (1 - player_draw_index);
   if (bag->end_tile_index > insert_index) {
     // XXX: should use division instead?
     insert_index += xoshiro_next(bag->prng) % (get_tiles_remaining(bag) + 1);
   }
-  // To reduce drawing variance introduced
-  // by exchanges, add swapped tiles
+  // Add swapped tiles
   // to the player's respective "side" of the bag.
   // Note: this assumes player index is only 0 or 1.
-  if (player_index == 0) {
+  if (player_draw_index == 0) {
     bag->tiles[bag->end_tile_index + 1] = bag->tiles[insert_index];
     bag->end_tile_index++;
   } else {
@@ -174,7 +175,7 @@ void seed_bag_for_worker(Bag *bag, uint64_t seed, int worker_index) {
 }
 
 void add_bag_to_rack(const Bag *bag, Rack *rack) {
-  for (int i = 0; i <= bag->end_tile_index; i++) {
+  for (int i = bag->start_tile_index; i <= bag->end_tile_index; i++) {
     add_letter_to_rack(rack, bag->tiles[i]);
   }
 }
@@ -195,7 +196,7 @@ void string_builder_add_bag(const Bag *bag,
   int x;
   int i = 1;
   int k;
-  while (i < bag->end_tile_index + 1) {
+  while (i < number_of_tiles_remaining) {
     x = sorted_bag[i];
     k = i - 1;
     while (k >= 0 && x < sorted_bag[k]) {
@@ -206,7 +207,7 @@ void string_builder_add_bag(const Bag *bag,
     i++;
   }
 
-  for (int i = 0; i <= number_of_tiles_remaining; i++) {
+  for (int i = 0; i < number_of_tiles_remaining; i++) {
     if (sorted_bag[i] == BLANK_SORT_VALUE) {
       sorted_bag[i] = 0;
     }

@@ -651,7 +651,6 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   draw_letter(bag, human_readable_letter_to_machine_letter(ld, "?"), 0);
   draw_letter(bag, human_readable_letter_to_machine_letter(ld, "E"), 0);
   draw_letter(bag, human_readable_letter_to_machine_letter(ld, "A"), 0);
-  draw_letter(bag, human_readable_letter_to_machine_letter(ld, "A"), 0);
 
   add_letter(bag, human_readable_letter_to_machine_letter(ld, "Q"), 0);
   add_letter(bag, human_readable_letter_to_machine_letter(ld, "W"), 0);

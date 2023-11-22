@@ -30,8 +30,10 @@ int get_drawn_tile_index(int drawn_tiles, int player_index) {
 
 void test_bag(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
-  Bag *bag = create_bag(config->letter_distribution);
-  Rack *rack = create_rack(config->letter_distribution->size);
+  const LetterDistribution *ld = config->letter_distribution;
+  Bag *bag = create_bag(ld);
+  Rack *rack = create_rack(ld->size);
+  Rack *rack2 = create_rack(ld->size);
 
   int number_of_remaining_tiles = get_tiles_remaining(bag);
   for (int k = 0; k < number_of_remaining_tiles; k++) {
@@ -39,23 +41,25 @@ void test_bag(TestConfig *testconfig) {
     add_letter_to_rack(rack, letter);
   }
 
-  for (uint32_t i = 0; i < config->letter_distribution->size; i++) {
-    assert((int)config->letter_distribution->distribution[i] == rack->array[i]);
+  for (uint32_t i = 0; i < ld->size; i++) {
+    assert((int)ld->distribution[i] == rack->array[i]);
   }
 
-  reset_bag(bag, config->letter_distribution);
+  reset_bag(bag, ld);
   reset_rack(rack);
 
   // Check drawing from the bag
+  int drawing_player = 0;
   while (get_tiles_remaining(bag) > RACK_SIZE) {
-    draw_at_most_to_rack(bag, rack, RACK_SIZE, 0);
+    draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
+    drawing_player = 1 - drawing_player;
     number_of_remaining_tiles -= RACK_SIZE;
     assert(!rack->empty);
     assert(rack->number_of_letters == RACK_SIZE);
     reset_rack(rack);
   }
 
-  draw_at_most_to_rack(bag, rack, RACK_SIZE, 0);
+  draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
   assert(bag_is_empty(bag));
   assert(!rack->empty);
   assert(rack->number_of_letters == number_of_remaining_tiles);
@@ -64,14 +68,18 @@ void test_bag(TestConfig *testconfig) {
   // Check adding letters to the bag
 
   test_add_letter(config, bag, "A", "A", 0);
-  test_add_letter(config, bag, "F", "AF", 0);
+  test_add_letter(config, bag, "F", "AF", 1);
   test_add_letter(config, bag, "Z", "AFZ", 0);
-  test_add_letter(config, bag, "B", "ABFZ", 0);
+  test_add_letter(config, bag, "B", "ABFZ", 1);
   test_add_letter(config, bag, "a", "ABFZ?", 0);
-  test_add_letter(config, bag, "b", "ABFZ??", 0);
+  test_add_letter(config, bag, "b", "ABFZ??", 1);
   test_add_letter(config, bag, "z", "ABFZ???", 0);
 
-  reset_bag(bag, config->letter_distribution);
+  add_bag_to_rack(bag, rack);
+  set_rack_to_string(rack2, "ABFZ???", ld);
+  assert(racks_are_equal(rack, rack2));
+
+  reset_bag(bag, ld);
   reset_rack(rack);
 
   Bag *bag_copy = copy_bag(bag);
@@ -130,7 +138,7 @@ void test_bag(TestConfig *testconfig) {
     add_letter(bag, draw_order[tiles_index], player_index);
   }
 
-  assert_bags_are_equal(bag, bag_copy, config->letter_distribution->size);
+  assert_bags_are_equal(bag, bag_copy, ld->size);
 
   copy_bag_into(bag, bag_copy);
   tiles_drawn[0] = 0;
@@ -187,9 +195,10 @@ void test_bag(TestConfig *testconfig) {
     add_letter(bag, draw_order[tiles_index], 1);
   }
 
-  assert_bags_are_equal(bag, bag_copy, config->letter_distribution->size);
+  assert_bags_are_equal(bag, bag_copy, ld->size);
 
   destroy_bag(bag);
   destroy_bag(bag_copy);
   destroy_rack(rack);
+  destroy_rack(rack2);
 }
