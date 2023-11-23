@@ -35,10 +35,11 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
 cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
                                           int row_start,
                                           int *current_column_index) {
-  uint8_t *machine_letters =
-      malloc_or_die(sizeof(uint8_t) * string_length(letters));
-  int number_of_machine_letters = str_to_machine_letters(
-      game->gen->letter_distribution, letters, false, machine_letters);
+  size_t letters_length = string_length(letters);
+  uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * letters_length);
+  int number_of_machine_letters =
+      str_to_machine_letters(game->gen->letter_distribution, letters, false,
+                             machine_letters, letters_length);
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   int col_start = *current_column_index;
 

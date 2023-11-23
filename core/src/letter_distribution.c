@@ -12,6 +12,9 @@
 
 #define INVALID_LETTER (0x80 - 1)
 
+#define MULTICHAR_START_DELIMITIER '['
+#define MULTICHAR_END_DELIMITIER ']'
+
 extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
 extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
 extern inline bool is_blanked(uint8_t ml);
@@ -150,50 +153,149 @@ uint8_t human_readable_letter_to_machine_letter(
   return INVALID_LETTER;
 }
 
+// Returns:
+//  * the number of utf8 bytes for this code point for the first byte or
+//  * 0 for subsequent bytes in the code point or
+//  * -1 for invalid UTF8 bytes
+int get_number_of_utf8_bytes_for_code_point(uint8_t byte) {
+  int number_of_bytes = -1;
+  if ((byte & 0xC0) == 0x80) {
+    // Subsequent byte in a code point
+    number_of_bytes = 0;
+  } else if ((byte & 0x80) == 0x00) {
+    // Single-byte UTF-8 character
+    number_of_bytes = 1;
+  } else if ((byte & 0xE0) == 0xC0) {
+    // Two-byte UTF-8 character
+    number_of_bytes = 2;
+  } else if ((byte & 0xF0) == 0xE0) {
+    // Three-byte UTF-8 character
+    number_of_bytes = 3;
+  } else if ((byte & 0xF8) == 0xF0) {
+    // Four-byte UTF-8 character
+    number_of_bytes = 4;
+  }
+  return number_of_bytes;
+}
+
 // Convert a string of arbitrary characters into an array of machine letters,
 // returning the number of machine letters. This function does not allocate
 // the ml array; it is the caller's responsibility to make this array big
-// enough.
+// enough. This function will return -1 if it encounters an invalid letter.
 // Note: This is a slow function that should not be used in any hot loops.
 int str_to_machine_letters(const LetterDistribution *letter_distribution,
                            const char *str, bool allow_played_through_marker,
-                           uint8_t *mls) {
+                           uint8_t *mls, size_t mls_size) {
 
   int num_mls = 0;
-  int num_bytes = string_length(str);
-  int i = 0;
-  int prev_i = -1;
-  while (i < num_bytes) {
-    for (int j = i + letter_distribution->max_tile_length; j > i; j--) {
-      if (j > num_bytes) {
-        continue;
+  size_t num_bytes = string_length(str);
+  // Use +1 for the null terminator
+  char current_letter[MAX_LETTER_BYTE_LENGTH + 1];
+  int current_letter_byte_index = 0;
+  bool building_multichar_letter = false;
+  int current_code_point_bytes_remaining = 0;
+  int number_of_letters_in_builder = 0;
+
+  // While writing to mls, this loop verifies the following:
+  // - absence of nested multichar characters
+  // - bijection between the set of start and end multichar delimiters
+  // - multichar characters are nonempty
+  for (size_t i = 0; i < num_bytes; i++) {
+    char current_char = str[i];
+    switch (current_char) {
+    case MULTICHAR_START_DELIMITIER:
+      if (building_multichar_letter || current_code_point_bytes_remaining > 0) {
+        return -1;
       }
-      // possible letter goes from index i to j. Search for it.
-      char possible_letter[MAX_LETTER_CHAR_LENGTH];
-      memory_copy(possible_letter, str + i, j - i);
-      possible_letter[j - i] = '\0';
+      building_multichar_letter = true;
+      break;
+    case MULTICHAR_END_DELIMITIER:
+      // Return an error if
+      // - multichar is building
+      // - multichar has fewer than two letters
+      // - code point is being built
+      if (!building_multichar_letter || number_of_letters_in_builder < 2 ||
+          current_code_point_bytes_remaining > 0) {
+        return -1;
+      }
+      building_multichar_letter = false;
+      break;
+    default:
+      if (current_letter_byte_index == MAX_LETTER_BYTE_LENGTH) {
+        // Exceeded max char length
+        return -1;
+      }
+
+      int number_of_bytes_for_code_point =
+          get_number_of_utf8_bytes_for_code_point(current_char);
+
+      if (number_of_bytes_for_code_point < 0) {
+        // Return -1 for invalid UTF8 byte
+        return -1;
+      }
+
+      if (number_of_bytes_for_code_point > 0 &&
+          current_code_point_bytes_remaining > 0) {
+        // Invalid UTF8 start sequence
+        return -1;
+      }
+
+      if (!building_multichar_letter && number_of_bytes_for_code_point > 0) {
+        // If we are building a multichar character
+        // with [ and ], we do not need to account for
+        // multibyte unicode code points since the batch
+        // processing for multiple bytes is already handled.
+        // This is the start of a multibyte code point
+        current_code_point_bytes_remaining = number_of_bytes_for_code_point;
+      } else if (number_of_bytes_for_code_point != 0) {
+        // If we are building a multichar letter, we do not
+        // allow single width chars such as [Ż], so we
+        // count how many chars we encounter while building
+        // a multichar and return an error if we finish with fewer than 2.
+        // If this byte is not a continuation of an existing
+        // unicode code point, then it is a new character.
+        number_of_letters_in_builder++;
+      }
+
+      current_letter[current_letter_byte_index] = current_char;
+      current_letter_byte_index++;
+      current_letter[current_letter_byte_index] = '\0';
+
+      if (current_code_point_bytes_remaining > 0) {
+        // Another byte of the multibyte code point
+        // has been processed
+        current_code_point_bytes_remaining--;
+      }
+      break;
+    }
+
+    // Only write if
+    //  - multichar is done building and
+    //  - unicode code point is done building
+    if (!building_multichar_letter && current_code_point_bytes_remaining == 0) {
+      // Not enough space allocated to mls
+      if (num_mls >= (int)mls_size) {
+        return -1;
+      }
       uint8_t ml = human_readable_letter_to_machine_letter(letter_distribution,
-                                                           possible_letter);
+                                                           current_letter);
       if (ml == INVALID_LETTER) {
-        if (j - i == 1 && allow_played_through_marker &&
-            possible_letter[0] == ASCII_PLAYED_THROUGH) {
+        if (current_letter_byte_index == 1 && allow_played_through_marker &&
+            current_char == ASCII_PLAYED_THROUGH) {
           ml = PLAYED_THROUGH_MARKER;
         } else {
-          continue;
+          // letter is invalid
+          return -1;
         }
       }
-      // Otherwise, we found the letter we're looking for
       mls[num_mls] = ml;
       num_mls++;
-      i = j;
+      current_letter_byte_index = 0;
+      number_of_letters_in_builder = 0;
     }
-    if (i == prev_i) {
-      // Search is not finding any valid machine letters
-      // and is not making progress. Return now with -1
-      // to signify an error to avoid an infinite loop.
-      return -1;
-    }
-    prev_i = i;
+  }
+  if (building_multichar_letter || current_code_point_bytes_remaining != 0) {
+    return -1;
   }
   return num_mls;
 }
