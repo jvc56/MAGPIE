@@ -9,9 +9,9 @@
 #include "movegen.h"
 #include "rack.h"
 
-void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_index) {
+void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
   while (n > 0 && !bag_is_empty(bag)) {
-    add_letter_to_rack(rack, draw_random_letter(bag, player_index));
+    add_letter_to_rack(rack, draw_random_letter(bag, player_draw_index));
     n--;
   }
 }
@@ -116,8 +116,12 @@ void update_cross_set_for_move(Game *game, const Move *move) {
   }
 }
 
-int get_player_draw_index(Game *game) {
-  return game->player_on_turn_index ^ game->starting_player_index;
+int get_player_draw_index(Game *game, int player_index) {
+  return player_index ^ game->starting_player_index;
+}
+
+int get_player_on_turn_draw_index(Game *game) {
+  return get_player_draw_index(game, game->player_on_turn_index);
 }
 
 void execute_exchange_move(Game *game, const Move *move) {
@@ -125,7 +129,7 @@ void execute_exchange_move(Game *game, const Move *move) {
     take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
                           move->tiles[i]);
   }
-  int player_draw_index = get_player_draw_index(game);
+  int player_draw_index = get_player_on_turn_draw_index(game);
   draw_at_most_to_rack(game->gen->bag,
                        game->players[game->player_on_turn_index]->rack,
                        move->tiles_played, player_draw_index);
@@ -143,9 +147,9 @@ void standard_end_of_game_calculations(Game *game) {
 
 void draw_starting_racks(Game *game) {
   draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, RACK_SIZE,
-                       game->starting_player_index);
+                       get_player_draw_index(game, 0));
   draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, RACK_SIZE,
-                       1 - game->starting_player_index);
+                       get_player_draw_index(game, 1));
 }
 
 void play_move(Game *game, const Move *move) {
@@ -157,9 +161,9 @@ void play_move(Game *game, const Move *move) {
     update_cross_set_for_move(game, move);
     game->consecutive_scoreless_turns = 0;
     game->players[game->player_on_turn_index]->score += move->score;
-    draw_at_most_to_rack(game->gen->bag,
-                         game->players[game->player_on_turn_index]->rack,
-                         move->tiles_played, get_player_draw_index(game));
+    draw_at_most_to_rack(
+        game->gen->bag, game->players[game->player_on_turn_index]->rack,
+        move->tiles_played, get_player_on_turn_draw_index(game));
     if (game->players[game->player_on_turn_index]->rack->empty) {
       standard_end_of_game_calculations(game);
     }
@@ -186,6 +190,7 @@ void play_move(Game *game, const Move *move) {
 void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   Rack *prack = game->players[pidx]->rack;
   int ntiles = prack->number_of_letters;
+  int player_draw_index = get_player_draw_index(game, pidx);
   // always try to fill rack if possible.
   if (ntiles < RACK_SIZE) {
     ntiles = RACK_SIZE;
@@ -194,7 +199,7 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   for (int i = 0; i < prack->array_size; i++) {
     if (prack->array[i] > 0) {
       for (int j = 0; j < prack->array[i]; j++) {
-        add_letter(game->gen->bag, i, pidx);
+        add_letter(game->gen->bag, i, player_draw_index);
       }
     }
   }
@@ -203,12 +208,13 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   if (known_rack && known_rack->number_of_letters > 0) {
     for (int i = 0; i < known_rack->array_size; i++) {
       for (int j = 0; j < known_rack->array[i]; j++) {
-        draw_letter_to_rack(game->gen->bag, prack, i, pidx);
+        draw_letter_to_rack(game->gen->bag, prack, i, player_draw_index);
         ndrawn++;
       }
     }
   }
-  draw_at_most_to_rack(game->gen->bag, prack, ntiles - ndrawn, pidx);
+  draw_at_most_to_rack(game->gen->bag, prack, ntiles - ndrawn,
+                       player_draw_index);
 }
 
 Move *get_top_equity_move(Game *game) {

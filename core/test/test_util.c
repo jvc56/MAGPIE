@@ -148,6 +148,8 @@ void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
   int num_mls =
       str_to_machine_letters(letter_distribution, letters, false, mls);
   for (int i = 0; i < num_mls; i++) {
+    // For tests we assume that player_index == player_draw_index
+    // since starting_player_index will always be 0.
     draw_letter_to_rack(bag, rack, mls[i], player_index);
   }
 }

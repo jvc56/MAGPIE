@@ -18,8 +18,8 @@
 #define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
 
 void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
-                         int player_index) {
-  draw_letter(bag, letter, player_index);
+                         int player_draw_index) {
+  draw_letter(bag, letter, player_draw_index);
   add_letter_to_rack(rack, letter);
 }
 

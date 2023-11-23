@@ -96,7 +96,9 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
       draw_at_most_to_rack(
           actual_game->gen->bag,
           actual_game->players[1 - actual_game->player_on_turn_index]->rack,
-          RACK_SIZE, 1 - actual_game->player_on_turn_index);
+          RACK_SIZE,
+          get_player_draw_index(actual_game,
+                                1 - actual_game->player_on_turn_index));
     }
 
     if (i == array_length - 1) {
@@ -420,8 +422,10 @@ void test_playmove(TestConfig *testconfig) {
            "15/15/12F2/11TROW/4V3EWE1A2/2iNAURATE1TIP1/4L1AAH2EM1B/"
            "3PAIGLE2X1TO/2JANN4FAQIR/4C2MOKES1ZO/4EBIoNISE2U/2ODDITY1R1S2G/"
            "1DUI1EALE3YEH/CODGER2LOTIONS/9RIN3 / 517/349 5 lex CSW21;");
-  draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, 1, 0);
-  draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, 1, 1);
+  draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, 1,
+                       get_player_draw_index(game, 0));
+  draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, 1,
+                       get_player_draw_index(game, 1));
 
   int player0_score = game->players[0]->score;
   int player1_score = game->players[1]->score;
