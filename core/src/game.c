@@ -17,6 +17,14 @@
 #define GAME_VARIANT_CLASSIC_NAME "classic"
 #define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
 
+int get_player_draw_index(Game *game, int player_index) {
+  return player_index ^ game->starting_player_index;
+}
+
+int get_player_on_turn_draw_index(Game *game) {
+  return get_player_draw_index(game, game->player_on_turn_index);
+}
+
 void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
                          int player_draw_index) {
   draw_letter(bag, letter, player_draw_index);
@@ -130,12 +138,12 @@ cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
 
 int draw_rack_from_bag(Bag *bag, Rack *rack, const char *rack_string,
                        const LetterDistribution *letter_distribution,
-                       int player_index) {
+                       int player_draw_index) {
   int number_of_letters_set =
       set_rack_to_string(rack, rack_string, letter_distribution);
   for (int i = 0; i < rack->array_size; i++) {
     for (int j = 0; j < rack->array[i]; j++) {
-      draw_letter(bag, i, player_index);
+      draw_letter(bag, i, player_draw_index);
     }
   }
   return number_of_letters_set;
@@ -145,17 +153,17 @@ cgp_parse_status_t
 parse_cgp_racks_with_string_splitter(Game *game,
                                      const StringSplitter *player_racks) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
-  int number_of_letters_added =
-      draw_rack_from_bag(game->gen->bag, game->players[0]->rack,
-                         string_splitter_get_item(player_racks, 0),
-                         game->gen->letter_distribution, 0);
+  int number_of_letters_added = draw_rack_from_bag(
+      game->gen->bag, game->players[0]->rack,
+      string_splitter_get_item(player_racks, 0), game->gen->letter_distribution,
+      get_player_draw_index(game, 0));
   if (number_of_letters_added < 0) {
     return CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
   }
-  number_of_letters_added =
-      draw_rack_from_bag(game->gen->bag, game->players[1]->rack,
-                         string_splitter_get_item(player_racks, 1),
-                         game->gen->letter_distribution, 1);
+  number_of_letters_added = draw_rack_from_bag(
+      game->gen->bag, game->players[1]->rack,
+      string_splitter_get_item(player_racks, 1), game->gen->letter_distribution,
+      get_player_draw_index(game, 1));
   if (number_of_letters_added < 0) {
     cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
   }

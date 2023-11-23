@@ -10,18 +10,20 @@
 #include "test_util.h"
 #include "testconfig.h"
 
-void return_rack_to_bag(Rack *rack, Bag *bag, int player_index) {
+void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
   for (int i = 0; i < (rack->array_size); i++) {
     for (int j = 0; j < rack->array[i]; j++) {
-      add_letter(bag, i, player_index);
+      add_letter(bag, i, player_draw_index);
     }
   }
   reset_rack(rack);
 }
 
 void return_racks_to_bag(Game *game) {
-  return_rack_to_bag(game->players[0]->rack, game->gen->bag, 0);
-  return_rack_to_bag(game->players[1]->rack, game->gen->bag, 1);
+  return_rack_to_bag(game->players[0]->rack, game->gen->bag,
+                     get_player_draw_index(game, 0));
+  return_rack_to_bag(game->players[1]->rack, game->gen->bag,
+                     get_player_draw_index(game, 1));
 }
 
 void assert_players_are_equal(const Player *p1, const Player *p2,

@@ -145,9 +145,10 @@ void add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   // adding a tile for player 0, since the added tile
   // needs to be added to the end of the bag.
   int insert_index = bag->start_tile_index - 1 + (1 - player_draw_index);
-  if (bag->end_tile_index > insert_index) {
+  int number_of_tiles_remaining = get_tiles_remaining(bag);
+  if (number_of_tiles_remaining > 0) {
     // XXX: should use division instead?
-    insert_index += xoshiro_next(bag->prng) % (get_tiles_remaining(bag) + 1);
+    insert_index += xoshiro_next(bag->prng) % (number_of_tiles_remaining + 1);
   }
   // Add swapped tiles
   // to the player's respective "side" of the bag.

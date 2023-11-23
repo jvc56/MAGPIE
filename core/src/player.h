@@ -2,7 +2,6 @@
 #define PLAYER_H
 
 #include "config.h"
-#include "constants.h"
 #include "rack.h"
 
 typedef struct Player {

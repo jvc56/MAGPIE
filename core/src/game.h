@@ -70,6 +70,8 @@ void destroy_game(Game *game);
 cgp_parse_status_t load_cgp(Game *game, const char *cgp);
 void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
                          int player_draw_index);
+int get_player_draw_index(Game *game, int player_index);
+int get_player_on_turn_draw_index(Game *game);
 void set_backup_mode(Game *game, int backup_mode);
 void backup_game(Game *game);
 void unplay_last_move(Game *game);

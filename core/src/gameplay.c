@@ -116,14 +116,6 @@ void update_cross_set_for_move(Game *game, const Move *move) {
   }
 }
 
-int get_player_draw_index(Game *game, int player_index) {
-  return player_index ^ game->starting_player_index;
-}
-
-int get_player_on_turn_draw_index(Game *game) {
-  return get_player_draw_index(game, game->player_on_turn_index);
-}
-
 void execute_exchange_move(Game *game, const Move *move) {
   for (int i = 0; i < move->tiles_played; i++) {
     take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
