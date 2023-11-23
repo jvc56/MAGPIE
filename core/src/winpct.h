@@ -9,6 +9,7 @@ typedef struct WinPct {
   float **win_pcts;
   int min_spread;
   int max_spread;
+  int number_of_spreads;
   unsigned int max_tiles_unseen;
 } WinPct;
 
