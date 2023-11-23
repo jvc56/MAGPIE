@@ -51,7 +51,7 @@ uint64_t xoshiro_next(XoshiroPRNG *prng) {
 uint64_t xoshiro_get_random_number(XoshiroPRNG *prng, uint64_t n) {
   uint64_t x = xoshiro_next(prng);
   // Eliminate modulus bias
-  while (x > XOSHIRO_MAX - (XOSHIRO_MAX % n)) {
+  while (x >= XOSHIRO_MAX - (XOSHIRO_MAX % n)) {
     x = xoshiro_next(prng);
   }
   return x % n;
