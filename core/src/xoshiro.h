@@ -14,7 +14,7 @@ XoshiroPRNG *create_prng(uint64_t seed);
 void copy_prng_into(XoshiroPRNG *dst, const XoshiroPRNG *src);
 void seed_prng(XoshiroPRNG *x, uint64_t seed);
 void xoshiro_jump(XoshiroPRNG *x);
-uint64_t xoshiro_next(XoshiroPRNG *x);
+uint64_t xoshiro_get_random_number(XoshiroPRNG *x, uint64_t n);
 void destroy_prng(XoshiroPRNG *x);
 
 #endif

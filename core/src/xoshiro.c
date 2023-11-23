@@ -46,6 +46,12 @@ uint64_t xoshiro_next(XoshiroPRNG *prng) {
   return result;
 }
 
+// Use the xoshiro_next function to get a random number
+// in the range [0, n)
+uint64_t xoshiro_get_random_number(XoshiroPRNG *prng, uint64_t n) {
+  return xoshiro_next(prng) % n;
+}
+
 /* This is the jump function for the generator. It is equivalent
    to 2^128 calls to next(); it can be used to generate 2^128
    non-overlapping subsequences for parallel computations. */
