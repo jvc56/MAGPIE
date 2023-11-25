@@ -16,20 +16,20 @@ void test_rack_main(TestConfig *testconfig) {
   Rack *expected_rack = create_rack(config->letter_distribution->size);
 
   // Test score on rack
-  set_rack_to_string(rack, "ABCDEFG", config->letter_distribution);
+  set_rack_to_string(config->letter_distribution, rack, "ABCDEFG");
   assert(score_on_rack(config->letter_distribution, rack) == 16);
-  set_rack_to_string(rack, "XYZ", config->letter_distribution);
+  set_rack_to_string(config->letter_distribution, rack, "XYZ");
   assert(score_on_rack(config->letter_distribution, rack) == 22);
-  set_rack_to_string(rack, "??", config->letter_distribution);
+  set_rack_to_string(config->letter_distribution, rack, "??");
   assert(score_on_rack(config->letter_distribution, rack) == 0);
-  set_rack_to_string(rack, "?QWERTY", config->letter_distribution);
+  set_rack_to_string(config->letter_distribution, rack, "?QWERTY");
   assert(score_on_rack(config->letter_distribution, rack) == 21);
-  set_rack_to_string(rack, "RETINAO", config->letter_distribution);
+  set_rack_to_string(config->letter_distribution, rack, "RETINAO");
   assert(score_on_rack(config->letter_distribution, rack) == 7);
-  set_rack_to_string(rack, "AABBEWW", config->letter_distribution);
+  set_rack_to_string(config->letter_distribution, rack, "AABBEWW");
   assert(score_on_rack(config->letter_distribution, rack) == 17);
 
-  set_rack_to_string(rack, "AENPPSW", config->letter_distribution);
+  set_rack_to_string(config->letter_distribution, rack, "AENPPSW");
 
   for (int i = 0; i < (expected_rack->array_size); i++) {
     expected_rack->array[i] = 0;

@@ -331,15 +331,12 @@ static void string_builder_ensure_space(StringBuilder *string_builder,
       realloc_or_die(string_builder->string, string_builder->alloced);
 }
 
-void string_builder_add_string(StringBuilder *string_builder, const char *str,
-                               size_t len) {
+void string_builder_add_string(StringBuilder *string_builder, const char *str) {
   if (!string_builder || !str || *str == '\0') {
     return;
   }
 
-  if (len == 0) {
-    len = string_length(str);
-  }
+  size_t len = string_length(str);
 
   string_builder_ensure_space(string_builder, len);
   memmove(string_builder->string + string_builder->len, str, len);
@@ -353,7 +350,7 @@ void string_builder_add_formatted_string(StringBuilder *string_builder,
   va_start(args, format);
   char *formatted_string = format_string_with_va_list(format, &args);
   va_end(args);
-  string_builder_add_string(string_builder, formatted_string, 0);
+  string_builder_add_string(string_builder, formatted_string);
   free(formatted_string);
 }
 
@@ -512,9 +509,9 @@ char *string_splitter_join(const StringSplitter *string_splitter,
   StringBuilder *joined_string_builder = create_string_builder();
   for (int i = start_index; i < end_index; i++) {
     string_builder_add_string(joined_string_builder,
-                              string_splitter_get_item(string_splitter, i), 0);
+                              string_splitter_get_item(string_splitter, i));
     if (i < end_index - 1) {
-      string_builder_add_string(joined_string_builder, separator, 0);
+      string_builder_add_string(joined_string_builder, separator);
     }
   }
   char *joined_string = string_builder_dump(joined_string_builder, NULL);
@@ -522,8 +519,8 @@ char *string_splitter_join(const StringSplitter *string_splitter,
   return joined_string;
 }
 
-int split_string_scan(StringSplitter *string_splitter, const char *input_string,
-                      const StringDelimiter *string_delimiter,
+int split_string_scan(const StringDelimiter *string_delimiter,
+                      StringSplitter *string_splitter, const char *input_string,
                       bool ignore_empty, bool set_items) {
   int current_number_of_items = 0;
   char previous_char;
@@ -566,7 +563,7 @@ StringSplitter *split_string_internal(const char *input_string,
                                       StringDelimiter *string_delimiter,
                                       bool ignore_empty) {
 
-  int number_of_items = split_string_scan(NULL, input_string, string_delimiter,
+  int number_of_items = split_string_scan(string_delimiter, NULL, input_string,
                                           ignore_empty, false);
 
   StringSplitter *string_splitter = create_string_splitter();
@@ -574,7 +571,7 @@ StringSplitter *split_string_internal(const char *input_string,
   if (string_splitter->number_of_items > 0) {
     string_splitter->items =
         malloc_or_die(sizeof(char *) * string_splitter->number_of_items);
-    split_string_scan(string_splitter, input_string, string_delimiter,
+    split_string_scan(string_delimiter, string_splitter, input_string,
                       ignore_empty, true);
   }
 

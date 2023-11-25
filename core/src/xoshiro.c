@@ -116,7 +116,7 @@ void xoshiro_long_jump(XoshiroPRNG *prng) {
   prng->s[3] = s3;
 }
 
-void copy_prng_into(XoshiroPRNG *dst, const XoshiroPRNG *src) {
+void prng_copy(XoshiroPRNG *dst, const XoshiroPRNG *src) {
   dst->xxsplit = src->xxsplit;
   for (int i = 0; i < 4; i++) {
     dst->s[i] = src->s[i];

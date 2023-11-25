@@ -302,8 +302,8 @@ void destroy_parsed_args(ParsedArgs *parsed_args) {
   free(parsed_args);
 }
 
-config_load_status_t init_parsed_args(ParsedArgs *parsed_args,
-                                      const StringSplitter *cmd) {
+config_load_status_t init_parsed_args(const StringSplitter *cmd,
+                                      ParsedArgs *parsed_args) {
   int number_of_input_args = string_splitter_get_number_of_items(cmd);
   for (int i = 0; i < number_of_input_args;) {
     const char *input_arg = string_splitter_get_item(cmd, i);
@@ -824,8 +824,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
       updated_letter_distribution_name =
           get_default_letter_distribution_name(updated_p1_lexicon_name);
     } else {
-      updated_letter_distribution_name =
-          string_duplicate(config->ld_name);
+      updated_letter_distribution_name = string_duplicate(config->ld_name);
     }
   }
 
@@ -853,7 +852,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
   if (new_rack) {
     if (!strings_equal(EMPTY_RACK_STRING, new_rack)) {
       int number_of_letters_set = set_rack_to_string(
-          config->rack, new_rack, config->letter_distribution);
+          config->letter_distribution, config->rack, new_rack);
       if (number_of_letters_set < 0) {
         return CONFIG_LOAD_STATUS_MALFORMED_RACK;
       }
@@ -1082,7 +1081,7 @@ config_load_status_t load_config(Config *config, const char *cmd) {
   // we trim these off to make loading easier.
   string_splitter_trim_char(cmd_split_string, ';');
   config_load_status_t config_load_status =
-      init_parsed_args(parsed_args, cmd_split_string);
+      init_parsed_args(cmd_split_string, parsed_args);
 
   if (config_load_status == CONFIG_LOAD_STATUS_SUCCESS) {
     config_load_status = load_config_with_parsed_args(config, parsed_args);

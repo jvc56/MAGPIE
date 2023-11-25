@@ -100,6 +100,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
           lower_case_letter);
     }
 
+    // FIXME: use qsort or some sort library
     int i = machine_letter;
     for (;
          i > 0 &&
@@ -317,9 +318,9 @@ char *get_default_letter_distribution_name(const char *lexicon_name) {
 }
 
 void string_builder_add_user_visible_letter(
-    const LetterDistribution *letter_distribution, uint8_t ml, size_t len,
-    StringBuilder *string_builder) {
+    const LetterDistribution *letter_distribution,
+    StringBuilder *string_builder, uint8_t ml) {
   string_builder_add_string(
       string_builder,
-      letter_distribution->machine_letter_to_human_readable_letter[ml], len);
+      letter_distribution->machine_letter_to_human_readable_letter[ml]);
 }

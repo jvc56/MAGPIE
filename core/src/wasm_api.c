@@ -59,8 +59,8 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   FormedWords *fw = NULL;
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Assume that that kwg is shared
-    points = score_move(game->gen->board, tiles, 0, ntiles - 1, row, col,
-                        tiles_played, !dir, 0, game->gen->letter_distribution);
+    points = score_move(game->gen->board, game->gen->letter_distribution, tiles,
+                        0, ntiles - 1, row, col, tiles_played, !dir, 0);
 
     if (dir_is_vertical(dir)) {
       // transpose back.
@@ -72,7 +72,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 
     fw = words_played(game->gen->board, tiles, 0, ntiles - 1, row, col, dir);
     // Assume that that kwg is shared
-    populate_word_validities(fw, game->players[0]->kwg);
+    populate_word_validities(game->players[0]->kwg, fw);
   }
 
   Rack *leave_rack = NULL;
@@ -93,11 +93,11 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
         phonies_exist = true;
         for (int mli = 0; mli < fw->words[i].word_length; mli++) {
           string_builder_add_user_visible_letter(game->gen->letter_distribution,
-                                                 fw->words[i].word[mli], 0,
-                                                 phonies_string_builder);
+                                                 phonies_string_builder,
+                                                 fw->words[i].word[mli]);
         }
         if (i < fw->num_words - 1) {
-          string_builder_add_string(phonies_string_builder, ",", 0);
+          string_builder_add_string(phonies_string_builder, ",");
         }
       }
     }
@@ -156,8 +156,8 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 
   const Game *game = get_game_from_cgp(cgpstr);
 
-  generate_moves(game->gen, game->players[game->player_on_turn_index],
-                 game->players[1 - game->player_on_turn_index]->rack,
+  generate_moves(game->players[1 - game->player_on_turn_index]->rack, game->gen,
+                 game->players[game->player_on_turn_index],
                  get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  MOVE_RECORD_ALL, MOVE_SORT_EQUITY, true);
   int number_of_moves_generated = game->gen->move_list->count;

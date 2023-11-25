@@ -113,7 +113,7 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg) {
   } while (1);
 }
 
-void populate_word_validities(FormedWords *ws, const KWG *kwg) {
+void populate_word_validities(const KWG *kwg, FormedWords *ws) {
   for (int i = 0; i < ws->num_words; i++) {
     ws->words[i].valid = is_word_valid(&ws->words[i], kwg);
   }

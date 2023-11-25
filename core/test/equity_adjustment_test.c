@@ -17,7 +17,8 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   Game *game = create_game(config);
   Rack *rack = game->players[0]->rack;
   const KLV *klv = game->players[0]->klv;
-  set_rack_to_string(rack, "EORSTVX", game->gen->letter_distribution);
+  const LetterDistribution *ld = game->gen->letter_distribution;
+  set_rack_to_string(ld, rack, "EORSTVX");
   generate_moves_for_game(game);
 
   // Should be 8G VORTEX
@@ -36,7 +37,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   destroy_sorted_move_list(vortex_sorted_move_list);
   reset_game(game);
 
-  set_rack_to_string(rack, "BDEIIIJ", game->gen->letter_distribution);
+  set_rack_to_string(ld, rack, "BDEIIIJ");
   generate_moves_for_game(game);
   // Should be 8D JIBED
 
@@ -55,7 +56,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   destroy_sorted_move_list(jibed_sorted_move_list);
   reset_game(game);
 
-  set_rack_to_string(rack, "ACEEEFT", game->gen->letter_distribution);
+  set_rack_to_string(ld, rack, "ACEEEFT");
   generate_moves_for_game(game);
   // Should be 8D FACETE
   SortedMoveList *facete_sorted_move_list =
@@ -71,7 +72,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   destroy_sorted_move_list(facete_sorted_move_list);
   reset_game(game);
 
-  set_rack_to_string(rack, "AAAALTY", game->gen->letter_distribution);
+  set_rack_to_string(ld, rack, "AAAALTY");
   generate_moves_for_game(game);
   // Should be 8G ATALAYA
   SortedMoveList *atalaya_sorted_move_list =

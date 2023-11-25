@@ -19,7 +19,7 @@ void test_add_letter(const Config *config, Bag *bag, char *r,
       human_readable_letter_to_machine_letter(config->letter_distribution, r),
       player_index);
   StringBuilder *bag_string = create_string_builder();
-  string_builder_add_bag(bag, config->letter_distribution, 0, bag_string);
+  string_builder_add_bag(bag, config->letter_distribution, bag_string);
   assert_strings_equal(string_builder_peek(bag_string), expected_bag_string);
   destroy_string_builder(bag_string);
 }
@@ -45,7 +45,7 @@ void test_bag(TestConfig *testconfig) {
     assert((int)ld->distribution[i] == rack->array[i]);
   }
 
-  reset_bag(bag, ld);
+  reset_bag(ld, bag);
   reset_rack(rack);
 
   // Check drawing from the bag
@@ -76,13 +76,13 @@ void test_bag(TestConfig *testconfig) {
   test_add_letter(config, bag, "z", "ABFZ???", 0);
 
   add_bag_to_rack(bag, rack);
-  set_rack_to_string(rack2, "ABFZ???", ld);
+  set_rack_to_string(ld, rack2, "ABFZ???");
   assert(racks_are_equal(rack, rack2));
 
-  reset_bag(bag, ld);
+  reset_bag(ld, bag);
   reset_rack(rack);
 
-  Bag *bag_copy = copy_bag(bag);
+  Bag *copy_of_bag = bag_duplicate(bag);
 
   // The first (TEST_BAG_SIZE) / 2 tiles
   // are drawn by player 0 and the next (TEST_BAG_SIZE) / 2
@@ -103,7 +103,7 @@ void test_bag(TestConfig *testconfig) {
   // Ensure that any interleaving of drawn tiles
   // by player 0 and 1 results in the same order
   // for both players.
-  copy_bag_into(bag, bag_copy);
+  bag_copy(bag, copy_of_bag);
   tiles_drawn[0] = 0;
   tiles_drawn[1] = 0;
 
@@ -116,7 +116,7 @@ void test_bag(TestConfig *testconfig) {
   }
   assert(bag_is_empty(bag));
 
-  copy_bag_into(bag, bag_copy);
+  bag_copy(bag, copy_of_bag);
   tiles_drawn[0] = 0;
   tiles_drawn[1] = 0;
 
@@ -138,9 +138,9 @@ void test_bag(TestConfig *testconfig) {
     add_letter(bag, draw_order[tiles_index], player_index);
   }
 
-  assert_bags_are_equal(bag, bag_copy, ld->size);
+  assert_bags_are_equal(bag, copy_of_bag, ld->size);
 
-  copy_bag_into(bag, bag_copy);
+  bag_copy(bag, copy_of_bag);
   tiles_drawn[0] = 0;
   tiles_drawn[1] = 0;
 
@@ -167,7 +167,7 @@ void test_bag(TestConfig *testconfig) {
   }
   assert(bag_is_empty(bag));
 
-  copy_bag_into(bag, bag_copy);
+  bag_copy(bag, copy_of_bag);
   tiles_drawn[0] = 0;
   tiles_drawn[1] = 0;
 
@@ -195,10 +195,10 @@ void test_bag(TestConfig *testconfig) {
     add_letter(bag, draw_order[tiles_index], 1);
   }
 
-  assert_bags_are_equal(bag, bag_copy, ld->size);
+  assert_bags_are_equal(bag, copy_of_bag, ld->size);
 
   destroy_bag(bag);
-  destroy_bag(bag_copy);
+  destroy_bag(copy_of_bag);
   destroy_rack(rack);
   destroy_rack(rack2);
 }

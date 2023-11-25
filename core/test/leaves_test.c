@@ -25,8 +25,8 @@ void test_leaves(TestConfig *testconfig) {
   char line[100];
   while (fgets(line, sizeof(line), file)) {
     StringSplitter *leave_and_value = split_string(line, ',', true);
-    set_rack_to_string(rack, string_splitter_get_item(leave_and_value, 0),
-                       letter_distribution);
+    set_rack_to_string(letter_distribution, rack,
+                       string_splitter_get_item(leave_and_value, 0));
     double klv_leave_value = get_leave_value(klv, rack);
     assert(within_epsilon(
         klv_leave_value,

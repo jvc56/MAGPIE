@@ -62,8 +62,8 @@ void destroy_autoplay_worker(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
-void record_results(const Game *game, int starting_player_index,
-                    AutoplayResults *autoplay_results) {
+void record_results(const Game *game, AutoplayResults *autoplay_results,
+                    int starting_player_index) {
   autoplay_results->total_games++;
   if (game->players[0]->score > game->players[1]->score) {
     autoplay_results->p1_wins++;
@@ -79,14 +79,14 @@ void record_results(const Game *game, int starting_player_index,
   push(autoplay_results->p2_score, (double)game->players[1]->score, 1);
 }
 
-void add_autoplay_results(AutoplayResults *autoplay_results_1,
-                          const AutoplayResults *autoplay_results_2) {
+void add_autoplay_results(const AutoplayResults *result_to_add,
+                          AutoplayResults *result_to_be_updated) {
   // Stats are combined elsewhere
-  autoplay_results_1->p1_firsts += autoplay_results_2->p1_firsts;
-  autoplay_results_1->p1_wins += autoplay_results_2->p1_wins;
-  autoplay_results_1->p1_losses += autoplay_results_2->p1_losses;
-  autoplay_results_1->p1_ties += autoplay_results_2->p1_ties;
-  autoplay_results_1->total_games += autoplay_results_2->total_games;
+  result_to_be_updated->p1_firsts += result_to_add->p1_firsts;
+  result_to_be_updated->p1_wins += result_to_add->p1_wins;
+  result_to_be_updated->p1_losses += result_to_add->p1_losses;
+  result_to_be_updated->p1_ties += result_to_add->p1_ties;
+  result_to_be_updated->total_games += result_to_add->total_games;
 }
 
 void play_autoplay_game(Game *game, AutoplayResults *autoplay_results,
@@ -96,14 +96,14 @@ void play_autoplay_game(Game *game, AutoplayResults *autoplay_results,
   draw_starting_racks(game);
   while (game->game_end_reason == GAME_END_REASON_NONE) {
     generate_moves(
-        game->gen, game->players[game->player_on_turn_index],
-        game->players[1 - game->player_on_turn_index]->rack,
+        game->players[1 - game->player_on_turn_index]->rack, game->gen,
+        game->players[game->player_on_turn_index],
         get_tiles_remaining(game->gen->bag) >= RACK_SIZE, MOVE_RECORD_BEST,
         game->players[game->player_on_turn_index]->move_sort_type, true);
-    play_move(game, game->gen->move_list->moves[0]);
+    play_move(game->gen->move_list->moves[0], game);
     reset_move_list(game->gen->move_list);
   }
-  record_results(game, starting_player_index, autoplay_results);
+  record_results(game, autoplay_results, starting_player_index);
 }
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
@@ -137,13 +137,13 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
     // reloaded before playing the second game of the pair, ensuring
     // both games are played with an identical Bag PRNG.
     if (use_game_pairs) {
-      copy_bag_into(game_pair_bag, game->gen->bag);
+      bag_copy(game_pair_bag, game->gen->bag);
     }
 
     play_autoplay_game(game, autoplay_worker->autoplay_results,
                        starting_player_index);
     if (use_game_pairs) {
-      copy_bag_into(game->gen->bag, game_pair_bag);
+      bag_copy(game->gen->bag, game_pair_bag);
       play_autoplay_game(game, autoplay_worker->autoplay_results,
                          1 - starting_player_index);
     }
@@ -192,8 +192,8 @@ autoplay_status_t autoplay(const Config *config,
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
-    add_autoplay_results(autoplay_results,
-                         autoplay_workers[thread_index]->autoplay_results);
+    add_autoplay_results(autoplay_workers[thread_index]->autoplay_results,
+                         autoplay_results);
     p1_score_stats[thread_index] =
         autoplay_workers[thread_index]->autoplay_results->p1_score;
     p2_score_stats[thread_index] =

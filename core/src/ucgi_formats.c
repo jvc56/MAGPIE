@@ -21,7 +21,7 @@ void string_builder_add_ucgi_move(const Move *move, const Board *board,
                                             move->col_start + 'a');
       }
     } else {
-      string_builder_add_string(move_string_builder, "ex.", 0);
+      string_builder_add_string(move_string_builder, "ex.");
     }
 
     int number_of_tiles_to_print = move->tiles_length;
@@ -42,10 +42,9 @@ void string_builder_add_ucgi_move(const Move *move, const Board *board,
         int c = move->col_start + (ci * i);
         letter = get_letter(board, r, c);
       }
-      string_builder_add_user_visible_letter(ld, letter, 0,
-                                             move_string_builder);
+      string_builder_add_user_visible_letter(ld, move_string_builder, letter);
     }
   } else {
-    string_builder_add_string(move_string_builder, "pass", 0);
+    string_builder_add_string(move_string_builder, "pass");
   }
 }

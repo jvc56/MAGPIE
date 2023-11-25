@@ -57,7 +57,7 @@ double get_current_value(const LeaveMap *leave_map) {
   return leave_map->leave_values[leave_map->current_index];
 }
 
-void init_leave_map(LeaveMap *leave_map, Rack *rack) {
+void init_leave_map(const Rack *rack, LeaveMap *leave_map) {
   int current_base_index = 0;
   for (int i = 0; i < rack->array_size; i++) {
     if (rack->array[i] > 0) {

@@ -308,7 +308,7 @@ void test_config_success() {
   // Test emptying the rack and move sort/record key words
   string_builder_clear(test_string_builder);
   string_builder_add_string(test_string_builder,
-                            "setoptions rack - s1 score r1 all", 0);
+                            "setoptions rack - s1 score r1 all");
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
   // Position CGP command
@@ -360,16 +360,16 @@ void test_config_success() {
   // with either distribution
   string_builder_clear(test_string_builder);
   string_builder_add_string(test_string_builder,
-                            "setoptions ld english l1 CSW21 l2 FRA20", 0);
+                            "setoptions ld english l1 CSW21 l2 FRA20");
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
   string_builder_clear(test_string_builder);
   string_builder_add_string(test_string_builder,
-                            "setoptions ld french l1 FRA20 l2 CSW21", 0);
+                            "setoptions ld french l1 FRA20 l2 CSW21");
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
   string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder, "setoptions lex NWL20", 0);
+  string_builder_add_string(test_string_builder, "setoptions lex NWL20");
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
   assert_strings_equal(players_data_get_data_name(config->players_data,
@@ -381,7 +381,7 @@ void test_config_success() {
 
   // Correctly set leave and letter distribution defaults
   string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder, "setoptions lex FRA20", 0);
+  string_builder_add_string(test_string_builder, "setoptions lex FRA20");
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert_strings_equal(players_data_get_data_name(config->players_data,
                                                   PLAYERS_DATA_TYPE_KWG, 0),

@@ -103,8 +103,8 @@ void test_infer_rack_overflow(TestConfig *testconfig) {
   assert(status == INFERENCE_STATUS_RACK_OVERFLOW);
   reset_game(game);
 
-  set_rack_to_string(game->players[0]->rack, "ABC",
-                     game->gen->letter_distribution);
+  set_rack_to_string(game->gen->letter_distribution, game->players[0]->rack,
+                     "ABC");
   load_config_or_die(
       config, "setoptions rack DEFGH pindex 0 score 0 exch 0 eq 0 threads 1");
   status = infer_for_test(config, game, inference);
@@ -229,7 +229,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   // there are 3 S remaining.
   assert(get_weight(inference->leave_record->equity_values) == 3);
   assert(get_cardinality(inference->leave_record->equity_values) == 1);
-  set_rack_to_string(rack, "S", ld);
+  set_rack_to_string(ld, rack, "S");
   assert(within_epsilon(get_mean(inference->leave_record->equity_values),
                         get_leave_value(klv, rack)));
   for (uint32_t i = 0; i < ld->size; i++) {
@@ -338,7 +338,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(status == INFERENCE_STATUS_SUCCESS);
   assert(get_weight(inference->leave_record->equity_values) == 1);
   assert(get_cardinality(inference->leave_record->equity_values) == 1);
-  set_rack_to_string(rack, "DDSW??", ld);
+  set_rack_to_string(ld, rack, "DDSW??");
   assert(within_epsilon(get_mean(inference->leave_record->equity_values),
                         get_leave_value(klv, rack)));
   for (uint32_t i = 0; i < ld->size; i++) {
@@ -420,8 +420,6 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(within_epsilon(get_mean(letter_stat), 1));
   assert(within_epsilon(get_stdev(letter_stat), 0));
 
-  // Exact stdev values are only valid for single threaded
-  // runs. See infer.h for an explanation.
   assert(within_epsilon(get_stdev(inference->leave_record->equity_values),
                         6.53225818584641171327));
 
@@ -586,9 +584,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   // Partially known leaves that are on the player's rack
   // before the inference are not removed from the bag, so
   // we have to remove it here.
-  // game->players[0]->play_recorder_type =
-  // MOVE_RECORDER_BEST;
-  set_rack_to_string(game->players[0]->rack, "?", ld);
+  set_rack_to_string(ld, game->players[0]->rack, "?");
   draw_letter(bag, human_readable_letter_to_machine_letter(ld, "?"), 0);
   load_config_or_die(config,
                      "setoptions rack GRIND pindex 0 score 18 exch 0 eq 0");
@@ -598,7 +594,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   // possible other tile is an X
   assert(get_weight(inference->leave_record->equity_values) == 2);
   assert(get_cardinality(inference->leave_record->equity_values) == 1);
-  set_rack_to_string(rack, "X?", ld);
+  set_rack_to_string(ld, rack, "X?");
   assert(within_epsilon(get_mean(inference->leave_record->equity_values),
                         get_leave_value(klv, rack)));
   for (uint32_t i = 0; i < ld->size; i++) {
@@ -615,7 +611,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   }
   reset_game(game);
 
-  set_rack_to_string(game->players[0]->rack, "H", ld);
+  set_rack_to_string(ld, game->players[0]->rack, "H");
   draw_letter(bag, human_readable_letter_to_machine_letter(ld, "H"), 0);
   load_config_or_die(config,
                      "setoptions rack RIN pindex 0 score 6 exch 0 eq 0");
@@ -629,13 +625,13 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(status == INFERENCE_STATUS_SUCCESS);
   assert(get_weight(inference->leave_record->equity_values) == 660);
   assert(get_cardinality(inference->leave_record->equity_values) == 3);
-  set_rack_to_string(rack, "?HIR", ld);
+  set_rack_to_string(ld, rack, "?HIR");
   double bhir_value = get_leave_value(klv, rack);
   double bhir_weighted_value = bhir_value * 160;
-  set_rack_to_string(rack, "?HNR", ld);
+  set_rack_to_string(ld, rack, "?HNR");
   double bhnr_value = get_leave_value(klv, rack);
   double bhnr_weighted_value = bhnr_value * 100;
-  set_rack_to_string(rack, "HINR", ld);
+  set_rack_to_string(ld, rack, "HINR");
   double hirn_value = get_leave_value(klv, rack);
   double hirn_weighted_value = hirn_value * 400;
   double mean_rin_leave_value =

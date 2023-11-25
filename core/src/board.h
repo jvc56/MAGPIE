@@ -57,8 +57,8 @@ void clear_all_crosses(Board *board);
 void clear_cross_set(Board *board, int row, int col, int dir,
                      int cross_set_index);
 Board *create_board();
-Board *copy_board(const Board *board);
-void copy_board_into(Board *dst, const Board *src);
+Board *board_duplicate(const Board *board);
+void board_copy(Board *dst, const Board *src);
 void destroy_board(Board *board);
 int get_anchor(const Board *board, int row, int col, int dir);
 uint8_t get_bonus_square(const Board *board, int row, int col);
@@ -85,8 +85,9 @@ void set_letter_by_index(Board *board, int index, uint8_t letter);
 void transpose(Board *board);
 void reset_transpose(Board *board);
 void set_transpose(Board *board, bool transposed);
-int traverse_backwards_for_score(const Board *board, int row, int col,
-                                 const LetterDistribution *letter_distribution);
+int traverse_backwards_for_score(const Board *board,
+                                 const LetterDistribution *letter_distribution,
+                                 int row, int col);
 void update_anchors(Board *board, int row, int col, int dir);
 void update_all_anchors(Board *board);
 int word_edge(const Board *board, int row, int col, int dir);

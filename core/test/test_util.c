@@ -35,8 +35,8 @@ void load_config_or_die(Config *config, const char *cmd) {
 }
 
 void generate_moves_for_game(Game *game) {
-  generate_moves(game->gen, game->players[game->player_on_turn_index],
-                 game->players[1 - game->player_on_turn_index]->rack,
+  generate_moves(game->players[1 - game->player_on_turn_index]->rack, game->gen,
+                 game->players[game->player_on_turn_index],
                  get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  game->players[game->player_on_turn_index]->move_record_type,
                  game->players[game->player_on_turn_index]->move_sort_type,
@@ -46,7 +46,7 @@ void generate_moves_for_game(Game *game) {
 void generate_leaves_for_game(Game *game, bool add_exchange) {
   Generator *gen = game->gen;
   Player *player = game->players[game->player_on_turn_index];
-  init_leave_map(gen->leave_map, player->rack);
+  init_leave_map(player->rack, gen->leave_map);
   if (player->rack->number_of_letters < RACK_SIZE) {
     set_current_value(gen->leave_map,
                       get_leave_value(player->klv, player->rack));
@@ -98,7 +98,7 @@ void print_move_list(const Board *board,
   for (int i = 0; i < move_list_length; i++) {
     string_builder_add_move(board, sml->moves[0], letter_distribution,
                             move_list_string);
-    string_builder_add_string(move_list_string, "\n", 0);
+    string_builder_add_string(move_list_string, "\n");
   }
   printf("%s\n", string_builder_peek(move_list_string));
   destroy_string_builder(move_list_string);
@@ -127,21 +127,21 @@ void sort_and_print_move_list(const Board *board,
 }
 
 void play_top_n_equity_move(Game *game, int n) {
-  generate_moves(game->gen, game->players[game->player_on_turn_index],
-                 game->players[1 - game->player_on_turn_index]->rack,
+  generate_moves(game->players[1 - game->player_on_turn_index]->rack, game->gen,
+                 game->players[game->player_on_turn_index],
                  get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  game->players[game->player_on_turn_index]->move_record_type,
                  game->players[game->player_on_turn_index]->move_sort_type,
                  true);
   SortedMoveList *sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
-  play_move(game, sorted_move_list->moves[n]);
+  play_move(sorted_move_list->moves[n], game);
   destroy_sorted_move_list(sorted_move_list);
   reset_move_list(game->gen->move_list);
 }
 
-void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
-                         const LetterDistribution *letter_distribution,
+void draw_rack_to_string(const LetterDistribution *letter_distribution,
+                         Bag *bag, Rack *rack, char *letters,
                          int player_index) {
 
   uint8_t mls[MAX_BAG_SIZE];
@@ -205,8 +205,8 @@ void assert_strings_equal(const char *str1, const char *str2) {
 }
 
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
-  Bag *b1_copy = copy_bag(b1);
-  Bag *b2_copy = copy_bag(b2);
+  Bag *b1_copy = bag_duplicate(b1);
+  Bag *b2_copy = bag_duplicate(b2);
 
   int b1_number_of_tiles_remaining = get_tiles_remaining(b1_copy);
   int b2_number_of_tiles_remaining = get_tiles_remaining(b2_copy);

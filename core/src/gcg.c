@@ -223,8 +223,8 @@ int get_matching_group_as_int(const GCGParser *gcg_parser, const char *gcg_line,
   return matching_group_int;
 }
 
-StringSplitter *decode_gcg_with_gcg_lines(GCGParser *gcg_parser,
-                                          StringSplitter *gcg_lines) {
+StringSplitter *decode_gcg_with_gcg_lines(const StringSplitter *gcg_lines,
+                                          GCGParser *gcg_parser) {
   // Find encoding token
   TokenRegexPair *encoding_token_regex_pair = NULL;
   for (int i = 0; i < gcg_parser->number_of_token_regex_pairs; i++) {
@@ -292,7 +292,7 @@ StringSplitter *decode_gcg_with_gcg_lines(GCGParser *gcg_parser,
 StringSplitter *decode_gcg(GCGParser *gcg_parser, const char *gcg_string) {
   StringSplitter *gcg_lines = split_string_by_newline(gcg_string, true);
   StringSplitter *utf8_gcg_lines =
-      decode_gcg_with_gcg_lines(gcg_parser, gcg_lines);
+      decode_gcg_with_gcg_lines(gcg_lines, gcg_parser);
   destroy_string_splitter(gcg_lines);
   return utf8_gcg_lines;
 }
@@ -434,7 +434,7 @@ Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
   Rack *rack = create_rack(gcg_parser->game_history->letter_distribution->size);
   int number_of_letters_set = set_rack_to_string(
-      rack, player_rack_string, gcg_parser->game_history->letter_distribution);
+      gcg_parser->game_history->letter_distribution, rack, player_rack_string);
   free(player_rack_string);
   if (number_of_letters_set <= 0) {
     destroy_rack(rack);

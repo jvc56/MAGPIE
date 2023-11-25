@@ -136,7 +136,7 @@ void assert_game_event(const GameHistory *game_history, int event_index,
   bool racks_match = false;
   if (string_length(rack_string) > 0) {
     expected_rack = create_rack(letter_distribution->size);
-    set_rack_to_string(expected_rack, rack_string, letter_distribution);
+    set_rack_to_string(letter_distribution, expected_rack, rack_string);
     racks_match = racks_are_equal(expected_rack, game_event->rack);
     destroy_rack(expected_rack);
   } else {

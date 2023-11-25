@@ -22,13 +22,13 @@ void seed_bag_for_worker(Bag *bag, uint64_t seed, int worker_index);
 void add_bag_to_rack(const Bag *bag, Rack *rack);
 void destroy_bag(Bag *bag);
 Bag *create_bag(const LetterDistribution *letter_distribution);
-Bag *copy_bag(const Bag *bag);
-void update_bag(Bag *bag, const LetterDistribution *letter_distribution);
-void copy_bag_into(Bag *dst, const Bag *src);
+Bag *bag_duplicate(const Bag *bag);
+void update_bag(const LetterDistribution *letter_distribution, Bag *bag);
+void bag_copy(Bag *dst, const Bag *src);
 void reseed_prng(Bag *bag, uint64_t seed);
-void reset_bag(Bag *bag, const LetterDistribution *letter_distribution);
+void reset_bag(const LetterDistribution *letter_distribution, Bag *bag);
 void shuffle(Bag *bag);
 void string_builder_add_bag(const Bag *bag,
                             const LetterDistribution *letter_distribution,
-                            size_t len, StringBuilder *string_builder);
+                            StringBuilder *string_builder);
 #endif

@@ -201,7 +201,7 @@ double get_probability_for_random_minimum_draw(
   return ((double)total_draws_for_this_letter_minimum) / total_draws;
 }
 
-void increment_subtotals_for_record(InferenceRecord *record, const Rack *rack,
+void increment_subtotals_for_record(const Rack *rack, InferenceRecord *record,
                                     uint64_t number_of_draws_for_leave) {
   for (int i = 0; i < rack->array_size; i++) {
     if (rack->array[i] > 0) {
@@ -214,20 +214,20 @@ void increment_subtotals_for_record(InferenceRecord *record, const Rack *rack,
   }
 }
 
-void record_valid_leave(InferenceRecord *record, const Rack *rack,
+void record_valid_leave(const Rack *rack, InferenceRecord *record,
                         double current_leave_value,
                         uint64_t number_of_draws_for_leave) {
   push(record->equity_values, (double)current_leave_value,
        number_of_draws_for_leave);
-  increment_subtotals_for_record(record, rack, number_of_draws_for_leave);
+  increment_subtotals_for_record(rack, record, number_of_draws_for_leave);
 }
 
 Move *get_top_move(Inference *inference) {
   Game *game = inference->game;
   Player *player = game->players[inference->player_to_infer_index];
   reset_move_list(game->gen->move_list);
-  generate_moves(game->gen, player,
-                 game->players[1 - inference->player_to_infer_index]->rack,
+  generate_moves(game->players[1 - inference->player_to_infer_index]->rack,
+                 game->gen, player,
                  get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  MOVE_RECORD_BEST, MOVE_SORT_EQUITY, false);
   return game->gen->move_list->moves[0];
@@ -252,7 +252,7 @@ void evaluate_possible_leave(Inference *inference) {
     uint64_t number_of_draws_for_leave =
         get_number_of_draws_for_rack(inference->bag_as_rack, inference->leave);
     if (inference->number_of_tiles_exchanged > 0) {
-      record_valid_leave(inference->rack_record, inference->leave,
+      record_valid_leave(inference->leave, inference->rack_record,
                          current_leave_value, number_of_draws_for_leave);
       // The full rack for the exchange was recorded above,
       // but now we have to record the leave and the exchanged tiles
@@ -263,14 +263,14 @@ void evaluate_possible_leave(Inference *inference) {
         add_letter_to_rack(inference->exchanged, tile_exchanged);
         take_letter_from_rack(inference->leave, tile_exchanged);
       }
-      record_valid_leave(inference->leave_record, inference->leave,
+      record_valid_leave(inference->leave, inference->leave_record,
                          get_leave_value(inference->klv, inference->leave),
                          number_of_draws_for_leave);
-      record_valid_leave(inference->exchanged_record, inference->exchanged,
+      record_valid_leave(inference->exchanged, inference->exchanged_record,
                          get_leave_value(inference->klv, inference->exchanged),
                          number_of_draws_for_leave);
-      insert_leave_rack(inference->leave_rack_list, inference->leave,
-                        inference->exchanged, number_of_draws_for_leave,
+      insert_leave_rack(inference->leave, inference->exchanged,
+                        inference->leave_rack_list, number_of_draws_for_leave,
                         current_leave_value);
       reset_rack(inference->exchanged);
       for (int exchanged_tile_index = 0;
@@ -280,9 +280,9 @@ void evaluate_possible_leave(Inference *inference) {
         add_letter_to_rack(inference->leave, tile_exchanged);
       }
     } else {
-      record_valid_leave(inference->leave_record, inference->leave,
+      record_valid_leave(inference->leave, inference->leave_record,
                          current_leave_value, number_of_draws_for_leave);
-      insert_leave_rack(inference->leave_rack_list, inference->leave, NULL,
+      insert_leave_rack(inference->leave, NULL, inference->leave_rack_list,
                         number_of_draws_for_leave, current_leave_value);
     }
   }
@@ -423,8 +423,9 @@ void initialize_inference_for_evaluation(
   }
 }
 
-InferenceRecord *copy_inference_record(const InferenceRecord *inference_record,
-                                       int draw_and_leave_subtotals_size) {
+InferenceRecord *
+inference_record_duplicate(const InferenceRecord *inference_record,
+                           int draw_and_leave_subtotals_size) {
   InferenceRecord *new_record = malloc_or_die(sizeof(InferenceRecord));
   new_record->draw_and_leave_subtotals = (uint64_t *)malloc_or_die(
       draw_and_leave_subtotals_size * sizeof(uint64_t));
@@ -432,31 +433,31 @@ InferenceRecord *copy_inference_record(const InferenceRecord *inference_record,
     new_record->draw_and_leave_subtotals[i] =
         inference_record->draw_and_leave_subtotals[i];
   }
-  new_record->equity_values = copy_stat(inference_record->equity_values);
+  new_record->equity_values = stat_duplicate(inference_record->equity_values);
   return new_record;
 }
 
-Inference *copy_inference(const Inference *inference,
-                          ThreadControl *thread_control) {
+Inference *inference_duplicate(const Inference *inference,
+                               ThreadControl *thread_control) {
   Inference *new_inference = malloc_or_die(sizeof(Inference));
   new_inference->distribution_size = inference->distribution_size;
   new_inference->draw_and_leave_subtotals_size =
       inference->distribution_size * (RACK_SIZE) * 2;
-  new_inference->bag_as_rack = copy_rack(inference->bag_as_rack);
-  new_inference->leave = copy_rack(inference->leave);
-  new_inference->exchanged = copy_rack(inference->exchanged);
-  new_inference->leave_record = copy_inference_record(
+  new_inference->bag_as_rack = rack_duplicate(inference->bag_as_rack);
+  new_inference->leave = rack_duplicate(inference->leave);
+  new_inference->exchanged = rack_duplicate(inference->exchanged);
+  new_inference->leave_record = inference_record_duplicate(
       inference->leave_record, inference->draw_and_leave_subtotals_size);
-  new_inference->exchanged_record = copy_inference_record(
+  new_inference->exchanged_record = inference_record_duplicate(
       inference->exchanged_record, inference->draw_and_leave_subtotals_size);
-  new_inference->rack_record = copy_inference_record(
+  new_inference->rack_record = inference_record_duplicate(
       inference->rack_record, inference->draw_and_leave_subtotals_size);
   new_inference->leave_rack_list = create_leave_rack_list(
       inference->leave_rack_list->capacity, inference->distribution_size);
 
   // Game must be deep copied since we use the move generator
-  new_inference->game =
-      copy_game(inference->game, inference->game->gen->move_list->capacity);
+  new_inference->game = game_duplicate(
+      inference->game, inference->game->gen->move_list->capacity);
   // KLV can just be a pointer since it is read only
   new_inference->klv = inference->klv;
   // Need the rack from the newly copied game
@@ -479,30 +480,35 @@ Inference *copy_inference(const Inference *inference,
   return new_inference;
 }
 
-void add_inference_record(InferenceRecord *inference_record_1,
-                          const InferenceRecord *inference_record_2,
+void add_inference_record(const InferenceRecord *inference_record_to_add,
+                          InferenceRecord *inference_record_to_update,
                           int draw_and_leave_subtotals_size) {
   for (int i = 0; i < draw_and_leave_subtotals_size; i++) {
-    inference_record_1->draw_and_leave_subtotals[i] +=
-        inference_record_2->draw_and_leave_subtotals[i];
+    inference_record_to_update->draw_and_leave_subtotals[i] +=
+        inference_record_to_add->draw_and_leave_subtotals[i];
   }
 }
 
-void add_inference(Inference *inference_1, const Inference *inference_2) {
-  add_inference_record(inference_1->leave_record, inference_2->leave_record,
-                       inference_1->draw_and_leave_subtotals_size);
-  if (inference_2->number_of_tiles_exchanged > 0) {
-    add_inference_record(inference_1->exchanged_record,
-                         inference_2->exchanged_record,
-                         inference_1->draw_and_leave_subtotals_size);
-    add_inference_record(inference_1->rack_record, inference_2->rack_record,
-                         inference_1->draw_and_leave_subtotals_size);
+void add_inference(const Inference *inference_to_add,
+                   Inference *inference_to_update) {
+  add_inference_record(inference_to_add->leave_record,
+                       inference_to_update->leave_record,
+                       inference_to_add->draw_and_leave_subtotals_size);
+  if (inference_to_update->number_of_tiles_exchanged > 0) {
+    add_inference_record(inference_to_add->exchanged_record,
+                         inference_to_update->exchanged_record,
+                         inference_to_add->draw_and_leave_subtotals_size);
+    add_inference_record(inference_to_add->rack_record,
+                         inference_to_update->rack_record,
+                         inference_to_add->draw_and_leave_subtotals_size);
   }
-  while (inference_2->leave_rack_list->count > 0) {
-    LeaveRack *leave_rack_2 = pop_leave_rack(inference_2->leave_rack_list);
-    insert_leave_rack(inference_1->leave_rack_list, leave_rack_2->leave,
-                      leave_rack_2->exchanged, leave_rack_2->draws,
-                      leave_rack_2->equity);
+  while (inference_to_update->leave_rack_list->count > 0) {
+    LeaveRack *leave_rack_to_update =
+        pop_leave_rack(inference_to_update->leave_rack_list);
+    insert_leave_rack(
+        leave_rack_to_update->leave, leave_rack_to_update->exchanged,
+        inference_to_add->leave_rack_list, leave_rack_to_update->draws,
+        leave_rack_to_update->equity);
   }
 }
 
@@ -626,7 +632,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
       malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     inferences_for_workers[thread_index] =
-        copy_inference(inference, thread_control);
+        inference_duplicate(inference, thread_control);
     set_shared_variables_for_inference(inferences_for_workers[thread_index],
                                        &shared_rack_index,
                                        &shared_rack_index_lock);
@@ -758,9 +764,8 @@ inference_status_t infer(const Config *config, Game *game,
 // Human readable print functions
 
 void string_builder_add_leave_rack(
-    const LeaveRack *leave_rack, int index, uint64_t total_draws,
-    const LetterDistribution *letter_distribution,
-    StringBuilder *inference_string) {
+    const LeaveRack *leave_rack, const LetterDistribution *letter_distribution,
+    StringBuilder *inference_string, int index, uint64_t total_draws) {
   if (leave_rack->exchanged->empty) {
     string_builder_add_rack(leave_rack->leave, letter_distribution,
                             inference_string);
@@ -780,12 +785,10 @@ void string_builder_add_leave_rack(
   }
 }
 
-void string_builder_add_letter_minimum(const InferenceRecord *record,
-                                       const Rack *rack,
-                                       const Rack *bag_as_rack, uint8_t letter,
-                                       int minimum,
-                                       int number_of_tiles_played_or_exchanged,
-                                       StringBuilder *inference_string) {
+void string_builder_add_letter_minimum(
+    const InferenceRecord *record, const Rack *rack, const Rack *bag_as_rack,
+    StringBuilder *inference_string, uint8_t letter, int minimum,
+    int number_of_tiles_played_or_exchanged) {
   int draw_subtotal = get_subtotal_sum_with_minimum(
       record, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
   int leave_subtotal = get_subtotal_sum_with_minimum(
@@ -802,29 +805,29 @@ void string_builder_add_letter_minimum(const InferenceRecord *record,
 void string_builder_add_letter_line(const Game *game,
                                     const InferenceRecord *record,
                                     const Rack *rack, const Rack *bag_as_rack,
+                                    StringBuilder *inference_string,
                                     Stat *letter_stat, uint8_t letter,
                                     int max_duplicate_letter_draw,
-                                    int number_of_tiles_played_or_exchanged,
-                                    StringBuilder *inference_string) {
+                                    int number_of_tiles_played_or_exchanged) {
   get_stat_for_letter(record, letter_stat, letter);
-  string_builder_add_user_visible_letter(game->gen->letter_distribution, letter,
-                                         0, inference_string);
+  string_builder_add_user_visible_letter(game->gen->letter_distribution,
+                                         inference_string, letter);
   string_builder_add_formatted_string(inference_string, ": %4.2f %4.2f",
                                       get_mean(letter_stat),
                                       get_stdev(letter_stat));
 
   for (int i = 1; i <= max_duplicate_letter_draw; i++) {
-    string_builder_add_letter_minimum(record, rack, bag_as_rack, letter, i,
-                                      number_of_tiles_played_or_exchanged,
-                                      inference_string);
+    string_builder_add_letter_minimum(record, rack, bag_as_rack,
+                                      inference_string, letter, i,
+                                      number_of_tiles_played_or_exchanged);
   }
-  string_builder_add_string(inference_string, "\n", 0);
+  string_builder_add_string(inference_string, "\n");
 }
 
 void string_builder_add_inference_record(
     const InferenceRecord *record, const Game *game, const Rack *rack,
-    const Rack *bag_as_rack, Stat *letter_stat,
-    int number_of_tiles_played_or_exchanged, StringBuilder *inference_string) {
+    const Rack *bag_as_rack, StringBuilder *inference_string, Stat *letter_stat,
+    int number_of_tiles_played_or_exchanged) {
   uint64_t total_draws = get_weight(record->equity_values);
   uint64_t total_leaves = get_cardinality(record->equity_values);
 
@@ -852,25 +855,24 @@ void string_builder_add_inference_record(
     }
   }
 
-  string_builder_add_string(inference_string, "               ", 0);
+  string_builder_add_string(inference_string, "               ");
   for (int i = 0; i < max_duplicate_letter_draw; i++) {
     string_builder_add_formatted_string(inference_string, "Has at least %d of",
                                         i + 1);
   }
-  string_builder_add_string(inference_string, "\n\n   Avg  Std ", 0);
+  string_builder_add_string(inference_string, "\n\n   Avg  Std ");
 
   for (int i = 0; i < max_duplicate_letter_draw; i++) {
     string_builder_add_string(inference_string,
-                              " | Pct     Rand   Tot      Unq      ", 0);
+                              " | Pct     Rand   Tot      Unq      ");
   }
-  string_builder_add_string(inference_string, "\n", 0);
+  string_builder_add_string(inference_string, "\n");
 
   if (total_draws > 0) {
     for (int i = 0; i < (int)game->gen->letter_distribution->size; i++) {
-      string_builder_add_letter_line(game, record, rack, bag_as_rack,
-                                     letter_stat, i, max_duplicate_letter_draw,
-                                     number_of_tiles_played_or_exchanged,
-                                     inference_string);
+      string_builder_add_letter_line(
+          game, record, rack, bag_as_rack, inference_string, letter_stat, i,
+          max_duplicate_letter_draw, number_of_tiles_played_or_exchanged);
     }
   }
 }
@@ -878,7 +880,6 @@ void string_builder_add_inference_record(
 void string_builder_add_inference(const Inference *inference,
                                   const Rack *actual_tiles_played,
                                   StringBuilder *inference_string) {
-
   bool is_exchange = inference->number_of_tiles_exchanged > 0;
   int number_of_tiles_played_or_exchanged;
   const Game *game = inference->game;
@@ -886,7 +887,7 @@ void string_builder_add_inference(const Inference *inference,
   string_builder_add_game(game, inference_string);
 
   if (!is_exchange) {
-    string_builder_add_string(inference_string, "Played tiles:          ", 0);
+    string_builder_add_string(inference_string, "Played tiles:          ");
     string_builder_add_rack(actual_tiles_played,
                             inference->game->gen->letter_distribution,
                             inference_string);
@@ -899,47 +900,49 @@ void string_builder_add_inference(const Inference *inference,
     number_of_tiles_played_or_exchanged = inference->number_of_tiles_exchanged;
   }
 
-  string_builder_add_string(inference_string, "\nScore:                 %d\n",
-                            inference->actual_score);
+  string_builder_add_formatted_string(inference_string,
+                                      "\nScore:                 %d\n",
+                                      inference->actual_score);
 
   if (inference->player_to_infer_rack->number_of_letters > 0) {
-    string_builder_add_string(inference_string, "Partial Rack:          ", 0);
+    string_builder_add_string(inference_string, "Partial Rack:          ");
     string_builder_add_rack(inference->player_to_infer_rack,
                             inference->game->gen->letter_distribution,
                             inference_string);
-    string_builder_add_string(inference_string, "\n", 0);
+    string_builder_add_string(inference_string, "\n");
   }
 
-  string_builder_add_string(inference_string, "Equity margin:         %0.2f\n",
-                            inference->equity_margin);
+  string_builder_add_formatted_string(inference_string,
+                                      "Equity margin:         %0.2f\n",
+                                      inference->equity_margin);
 
   // Create a transient stat to use the stat functions
   Stat *letter_stat = create_stat();
 
   string_builder_add_inference_record(
       inference->leave_record, game, inference->leave, inference->bag_as_rack,
-      letter_stat, number_of_tiles_played_or_exchanged, inference_string);
+      inference_string, letter_stat, number_of_tiles_played_or_exchanged);
   const InferenceRecord *common_leaves_record = inference->leave_record;
   if (is_exchange) {
     common_leaves_record = inference->rack_record;
-    string_builder_add_string(inference_string, "\n\nTiles Exchanged\n\n", 0);
+    string_builder_add_string(inference_string, "\n\nTiles Exchanged\n\n");
     Rack *unknown_exchange_rack = create_rack(inference->leave->array_size);
     string_builder_add_inference_record(
         inference->exchanged_record, game, unknown_exchange_rack,
-        inference->bag_as_rack, letter_stat,
-        inference->number_of_tiles_exchanged, inference_string);
+        inference->bag_as_rack, inference_string, letter_stat,
+        inference->number_of_tiles_exchanged);
     destroy_rack(unknown_exchange_rack);
-    string_builder_add_string(inference_string, "\n\nRack\n\n", 0);
+    string_builder_add_string(inference_string, "\n\nRack\n\n");
     string_builder_add_inference_record(
         inference->rack_record, game, inference->leave, inference->bag_as_rack,
-        letter_stat, 0, inference_string);
+        inference_string, letter_stat, 0);
     string_builder_add_string(
         inference_string,
-        "\nMost Common       \n\n#   Leave   Exch    Pct    Draws\n", 0);
+        "\nMost Common       \n\n#   Leave   Exch    Pct    Draws\n");
   } else {
     string_builder_add_string(
         inference_string,
-        "\nMost Common       \n\n#   Leave   Pct    Draws  Equity\n", 0);
+        "\nMost Common       \n\n#   Leave   Pct    Draws  Equity\n");
   }
   destroy_stat(letter_stat);
 
@@ -951,8 +954,7 @@ void string_builder_add_inference(const Inference *inference,
     LeaveRack *leave_rack =
         inference->leave_rack_list->leave_racks[common_leave_index];
     string_builder_add_leave_rack(
-        leave_rack, common_leave_index,
-        get_weight(common_leaves_record->equity_values),
-        game->gen->letter_distribution, inference_string);
+        leave_rack, game->gen->letter_distribution, inference_string,
+        common_leave_index, get_weight(common_leaves_record->equity_values));
   }
 }

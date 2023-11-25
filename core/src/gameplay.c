@@ -16,7 +16,7 @@ void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
   }
 }
 
-void play_move_on_board(Game *game, const Move *move) {
+void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
   for (int idx = 0; idx < move->tiles_length; idx++) {
     uint8_t letter = move->tiles[idx];
@@ -58,8 +58,8 @@ void play_move_on_board(Game *game, const Move *move) {
   }
 }
 
-void calc_for_across(int row_start, int col_start, int csd, Game *game,
-                     const Move *move) {
+void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
+                     int csd) {
   for (int row = row_start; row < move->tiles_length + row_start; row++) {
     if (move->tiles[row - row_start] == PLAYED_THROUGH_MARKER) {
       continue;
@@ -69,54 +69,54 @@ void calc_for_across(int row_start, int col_start, int csd, Game *game,
         word_edge(game->gen->board, row, col_start, WORD_DIRECTION_RIGHT);
     int left_col =
         word_edge(game->gen->board, row, col_start, WORD_DIRECTION_LEFT);
-    gen_cross_set(game->gen->board, row, right_col + 1, csd, 0,
-                  game->players[0]->kwg, game->gen->letter_distribution);
-    gen_cross_set(game->gen->board, row, left_col - 1, csd, 0,
-                  game->players[0]->kwg, game->gen->letter_distribution);
-    gen_cross_set(game->gen->board, row, col_start, csd, 0,
-                  game->players[0]->kwg, game->gen->letter_distribution);
+    gen_cross_set(game->players[0]->kwg, game->gen->letter_distribution,
+                  game->gen->board, row, right_col + 1, csd, 0);
+    gen_cross_set(game->players[0]->kwg, game->gen->letter_distribution,
+                  game->gen->board, row, left_col - 1, csd, 0);
+    gen_cross_set(game->players[0]->kwg, game->gen->letter_distribution,
+                  game->gen->board, row, col_start, csd, 0);
     if (game->gen->kwgs_are_distinct) {
-      gen_cross_set(game->gen->board, row, right_col + 1, csd, 1,
-                    game->players[1]->kwg, game->gen->letter_distribution);
-      gen_cross_set(game->gen->board, row, left_col - 1, csd, 1,
-                    game->players[1]->kwg, game->gen->letter_distribution);
-      gen_cross_set(game->gen->board, row, col_start, csd, 1,
-                    game->players[1]->kwg, game->gen->letter_distribution);
+      gen_cross_set(game->players[1]->kwg, game->gen->letter_distribution,
+                    game->gen->board, row, right_col + 1, csd, 1);
+      gen_cross_set(game->players[1]->kwg, game->gen->letter_distribution,
+                    game->gen->board, row, left_col - 1, csd, 1);
+      gen_cross_set(game->players[1]->kwg, game->gen->letter_distribution,
+                    game->gen->board, row, col_start, csd, 1);
     }
   }
 }
 
-void calc_for_self(int row_start, int col_start, int csd, Game *game,
-                   const Move *move) {
+void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
+                   int csd) {
   for (int col = col_start - 1; col <= col_start + move->tiles_length; col++) {
-    gen_cross_set(game->gen->board, row_start, col, csd, 0,
-                  game->players[0]->kwg, game->gen->letter_distribution);
+    gen_cross_set(game->players[0]->kwg, game->gen->letter_distribution,
+                  game->gen->board, row_start, col, csd, 0);
     if (game->gen->kwgs_are_distinct) {
-      gen_cross_set(game->gen->board, row_start, col, csd, 1,
-                    game->players[1]->kwg, game->gen->letter_distribution);
+      gen_cross_set(game->players[1]->kwg, game->gen->letter_distribution,
+                    game->gen->board, row_start, col, csd, 1);
     }
   }
 }
 
-void update_cross_set_for_move(Game *game, const Move *move) {
+void update_cross_set_for_move(const Move *move, Game *game) {
   if (dir_is_vertical(move->dir)) {
-    calc_for_across(move->row_start, move->col_start,
-                    BOARD_HORIZONTAL_DIRECTION, game, move);
+    calc_for_across(move, game, move->row_start, move->col_start,
+                    BOARD_HORIZONTAL_DIRECTION);
     transpose(game->gen->board);
-    calc_for_self(move->col_start, move->row_start, BOARD_VERTICAL_DIRECTION,
-                  game, move);
+    calc_for_self(move, game, move->col_start, move->row_start,
+                  BOARD_VERTICAL_DIRECTION);
     transpose(game->gen->board);
   } else {
-    calc_for_self(move->row_start, move->col_start, BOARD_HORIZONTAL_DIRECTION,
-                  game, move);
+    calc_for_self(move, game, move->row_start, move->col_start,
+                  BOARD_HORIZONTAL_DIRECTION);
     transpose(game->gen->board);
-    calc_for_across(move->col_start, move->row_start, BOARD_VERTICAL_DIRECTION,
-                    game, move);
+    calc_for_across(move, game, move->col_start, move->row_start,
+                    BOARD_VERTICAL_DIRECTION);
     transpose(game->gen->board);
   }
 }
 
-void execute_exchange_move(Game *game, const Move *move) {
+void execute_exchange_move(const Move *move, Game *game) {
   for (int i = 0; i < move->tiles_played; i++) {
     take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
                           move->tiles[i]);
@@ -144,13 +144,13 @@ void draw_starting_racks(Game *game) {
                        get_player_draw_index(game, 1));
 }
 
-void play_move(Game *game, const Move *move) {
+void play_move(const Move *move, Game *game) {
   if (game->backup_mode == BACKUP_MODE_SIMULATION) {
     backup_game(game);
   }
   if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    play_move_on_board(game, move);
-    update_cross_set_for_move(game, move);
+    play_move_on_board(move, game);
+    update_cross_set_for_move(move, game);
     game->consecutive_scoreless_turns = 0;
     game->players[game->player_on_turn_index]->score += move->score;
     draw_at_most_to_rack(
@@ -162,7 +162,7 @@ void play_move(Game *game, const Move *move) {
   } else if (move->move_type == GAME_EVENT_PASS) {
     game->consecutive_scoreless_turns++;
   } else if (move->move_type == GAME_EVENT_EXCHANGE) {
-    execute_exchange_move(game, move);
+    execute_exchange_move(move, game);
     game->consecutive_scoreless_turns++;
   }
 
@@ -211,8 +211,8 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
 
 Move *get_top_equity_move(Game *game) {
   reset_move_list(game->gen->move_list);
-  generate_moves(game->gen, game->players[game->player_on_turn_index],
-                 game->players[1 - game->player_on_turn_index]->rack,
+  generate_moves(game->players[1 - game->player_on_turn_index]->rack, game->gen,
+                 game->players[game->player_on_turn_index],
                  get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  MOVE_RECORD_BEST, MOVE_SORT_EQUITY, true);
   return game->gen->move_list->moves[0];

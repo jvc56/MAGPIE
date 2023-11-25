@@ -16,9 +16,8 @@ typedef struct SortedMoveList {
   Move **moves;
 } SortedMoveList;
 
-void draw_rack_to_string(Bag *bag, Rack *rack, char *letters,
-                         const LetterDistribution *letter_distribution,
-                         int player_index);
+void draw_rack_to_string(const LetterDistribution *letter_distribution,
+                         Bag *bag, Rack *rack, char *letters, int player_index);
 void generate_moves_for_game(Game *game);
 double get_leave_value_for_rack(const KLV *klv, const Rack *rack);
 void generate_leaves_for_game(Game *game, bool add_exchanges);

@@ -53,7 +53,7 @@ typedef struct StringBuilder StringBuilder;
 StringBuilder *create_string_builder();
 void destroy_string_builder(StringBuilder *string_builder);
 void string_builder_add_string(StringBuilder *string_builder,
-                               const char *string, size_t length);
+                               const char *string);
 void string_builder_add_formatted_string(StringBuilder *string_builder,
                                          const char *format, ...);
 void string_builder_add_spaces(StringBuilder *string_builder,

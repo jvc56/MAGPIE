@@ -85,9 +85,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     assert(actual_game->game_end_reason == GAME_END_REASON_NONE);
     return_racks_to_bag(actual_game);
     draw_rack_to_string(
-        actual_game->gen->bag,
+        actual_game->gen->letter_distribution, actual_game->gen->bag,
         actual_game->players[actual_game->player_on_turn_index]->rack, racks[i],
-        actual_game->gen->letter_distribution,
         actual_game->player_on_turn_index);
     // If it's the last turn, have the opponent draw the remaining tiles
     // so the end of actual_game subtractions are correct. If the bag has less
@@ -368,8 +367,8 @@ void test_playmove(TestConfig *testconfig) {
   Game *game = create_game(config);
 
   // Test play
-  draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
-                      game->gen->letter_distribution, 0);
+  draw_rack_to_string(game->gen->letter_distribution, game->gen->bag,
+                      game->players[0]->rack, "DEKNRTY", 0);
   play_top_n_equity_move(game, 0);
 
   assert(game->consecutive_scoreless_turns == 0);
@@ -399,8 +398,8 @@ void test_playmove(TestConfig *testconfig) {
   reset_game(game);
 
   // Test exchange
-  draw_rack_to_string(game->gen->bag, game->players[0]->rack, "UUUVVWW",
-                      game->gen->letter_distribution, 0);
+  draw_rack_to_string(game->gen->letter_distribution, game->gen->bag,
+                      game->players[0]->rack, "UUUVVWW", 0);
   play_top_n_equity_move(game, 0);
 
   assert(game->consecutive_scoreless_turns == 1);
@@ -467,8 +466,8 @@ void test_set_random_rack(TestConfig *testconfig) {
 
   assert(get_tiles_remaining(game->gen->bag) == 100);
   // draw some random rack.
-  draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
-                      game->gen->letter_distribution, 0);
+  draw_rack_to_string(game->gen->letter_distribution, game->gen->bag,
+                      game->players[0]->rack, "DEKNRTY", 0);
   assert(get_tiles_remaining(game->gen->bag) == 93);
 
   set_random_rack(game, 0, NULL);
@@ -478,8 +477,8 @@ void test_set_random_rack(TestConfig *testconfig) {
   // draw some random rack, but with 5 fixed tiles
   Rack *known_rack =
       create_rack(testconfig->csw_config->letter_distribution->size);
-  set_rack_to_string(known_rack, "CESAR",
-                     testconfig->csw_config->letter_distribution);
+  set_rack_to_string(testconfig->csw_config->letter_distribution, known_rack,
+                     "CESAR");
   set_random_rack(game, 0, known_rack);
   assert(get_tiles_remaining(game->gen->bag) == 93);
   assert(game->players[0]->rack->number_of_letters == 7);
@@ -509,11 +508,11 @@ void test_backups(TestConfig *testconfig) {
   Game *game = create_game(config);
 
   // draw some random rack.
-  draw_rack_to_string(game->gen->bag, game->players[0]->rack, "DEKNRTY",
-                      game->gen->letter_distribution, 0);
+  draw_rack_to_string(game->gen->letter_distribution, game->gen->bag,
+                      game->players[0]->rack, "DEKNRTY", 0);
 
-  draw_rack_to_string(game->gen->bag, game->players[1]->rack, "AOQRTUZ",
-                      game->gen->letter_distribution, 1);
+  draw_rack_to_string(game->gen->letter_distribution, game->gen->bag,
+                      game->players[1]->rack, "AOQRTUZ", 1);
   assert(get_tiles_remaining(game->gen->bag) == 86);
 
   // backup

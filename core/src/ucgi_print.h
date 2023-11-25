@@ -11,7 +11,7 @@
 
 void print_ucgi_static_moves(const Game *game, int nmoves,
                              ThreadControl *thread_control);
-void print_ucgi_sim_stats(const Simmer *simmer, const Game *game,
+void print_ucgi_sim_stats(const Game *game, Simmer *simmer,
                           bool print_best_play);
 void print_ucgi_inference_current_rack(uint64_t current_rack_index,
                                        ThreadControl *thread_control);
@@ -23,6 +23,6 @@ void print_ucgi_autoplay_results(const AutoplayResults *autoplay_results,
                                  ThreadControl *thread_control);
 
 char *ucgi_static_moves(const Game *game, int nmoves);
-char *ucgi_sim_stats(const Simmer *simmer, const Game *game,
+char *ucgi_sim_stats(const Game *game, const Simmer *simmer,
                      bool print_best_play);
 #endif

@@ -22,8 +22,9 @@ void assert_players_data(const PlayersData *players_data,
          data_is_shared);
 }
 
-void test_for_data_type(players_data_t players_data_type,
-                        const char **data_names, int number_of_data_names) {
+void test_for_data_type(const char **data_names,
+                        players_data_t players_data_type,
+                        int number_of_data_names) {
   PlayersData *players_data = create_players_data();
   // Verify initial NULL values
   for (int i = 0; i < NUMBER_OF_DATA; i++) {
@@ -96,6 +97,7 @@ void test_unshared_data() {
 
   destroy_players_data(players_data);
 }
+
 void test_players_data() {
   const char *data_names[] = {
       "CSW21", "CSW21", "NWL20",  "NWL20", "CSW21",  "NWL20", "CSW21",
@@ -104,7 +106,7 @@ void test_players_data() {
       "NWL20", "DISC2", "OSPS44", "CSW21", "DISC2",  "NWL20", "DISC2"};
   int number_of_data_names = sizeof(data_names) / sizeof(data_names[0]);
   assert(number_of_data_names % 2 == 0);
-  test_for_data_type(PLAYERS_DATA_TYPE_KWG, data_names, number_of_data_names);
-  test_for_data_type(PLAYERS_DATA_TYPE_KLV, data_names, number_of_data_names);
+  test_for_data_type(data_names, PLAYERS_DATA_TYPE_KWG, number_of_data_names);
+  test_for_data_type(data_names, PLAYERS_DATA_TYPE_KLV, number_of_data_names);
   test_unshared_data();
 }
