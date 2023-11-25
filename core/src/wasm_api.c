@@ -158,7 +158,7 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  MOVE_RECORD_ALL, MOVE_SORT_EQUITY, true);
   int number_of_moves_generated = game->gen->move_list->count;
   if (number_of_moves_generated < num_plays) {

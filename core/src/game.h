@@ -43,8 +43,9 @@ typedef struct MinimalGameBackup {
   int p0score;
   int p1score;
   int player_on_turn_index;
+  int starting_player_index;
   int consecutive_scoreless_turns;
-  int game_end_reason;
+  game_end_reason_t game_end_reason;
 } MinimalGameBackup;
 
 typedef struct Game {
@@ -52,8 +53,9 @@ typedef struct Game {
   Player *players[2];
   bool data_is_shared[NUMBER_OF_DATA];
   int player_on_turn_index;
+  int starting_player_index;
   int consecutive_scoreless_turns;
-  int game_end_reason;
+  game_end_reason_t game_end_reason;
   MinimalGameBackup *game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
   int backup_mode;
@@ -66,13 +68,16 @@ Game *create_game(const Config *config);
 Game *copy_game(const Game *game, int move_list_capacity);
 void destroy_game(Game *game);
 cgp_parse_status_t load_cgp(Game *game, const char *cgp);
-void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter);
+void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
+                         int player_draw_index);
+int get_player_draw_index(Game *game, int player_index);
+int get_player_on_turn_draw_index(Game *game);
 void set_backup_mode(Game *game, int backup_mode);
 void backup_game(Game *game);
 void unplay_last_move(Game *game);
 int tiles_unseen(const Game *game);
 game_variant_t get_game_variant_type_from_name(const char *variant_name);
-void set_player_on_turn(Game *game, int player_on_turn_index);
+void set_starting_player_index(Game *game, int starting_player_index);
 void string_builder_add_game(const Game *game, StringBuilder *game_string);
 
 #endif

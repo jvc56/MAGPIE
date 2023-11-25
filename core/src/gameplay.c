@@ -9,10 +9,9 @@
 #include "movegen.h"
 #include "rack.h"
 
-void draw_at_most_to_rack(Bag *bag, Rack *rack, int n) {
-  while (n > 0 && bag->last_tile_index >= 0) {
-    add_letter_to_rack(rack, bag->tiles[bag->last_tile_index]);
-    bag->last_tile_index--;
+void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
+  while (n > 0 && !bag_is_empty(bag)) {
+    add_letter_to_rack(rack, draw_random_letter(bag, player_draw_index));
     n--;
   }
 }
@@ -122,11 +121,12 @@ void execute_exchange_move(Game *game, const Move *move) {
     take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
                           move->tiles[i]);
   }
+  int player_draw_index = get_player_on_turn_draw_index(game);
   draw_at_most_to_rack(game->gen->bag,
                        game->players[game->player_on_turn_index]->rack,
-                       move->tiles_played);
+                       move->tiles_played, player_draw_index);
   for (int i = 0; i < move->tiles_played; i++) {
-    add_letter(game->gen->bag, move->tiles[i]);
+    add_letter(game->gen->bag, move->tiles[i], player_draw_index);
   }
 }
 
@@ -135,6 +135,13 @@ void standard_end_of_game_calculations(Game *game) {
       2 * score_on_rack(game->gen->letter_distribution,
                         game->players[1 - game->player_on_turn_index]->rack);
   game->game_end_reason = GAME_END_REASON_STANDARD;
+}
+
+void draw_starting_racks(Game *game) {
+  draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, RACK_SIZE,
+                       get_player_draw_index(game, 0));
+  draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, RACK_SIZE,
+                       get_player_draw_index(game, 1));
 }
 
 void play_move(Game *game, const Move *move) {
@@ -146,9 +153,9 @@ void play_move(Game *game, const Move *move) {
     update_cross_set_for_move(game, move);
     game->consecutive_scoreless_turns = 0;
     game->players[game->player_on_turn_index]->score += move->score;
-    draw_at_most_to_rack(game->gen->bag,
-                         game->players[game->player_on_turn_index]->rack,
-                         move->tiles_played);
+    draw_at_most_to_rack(
+        game->gen->bag, game->players[game->player_on_turn_index]->rack,
+        move->tiles_played, get_player_on_turn_draw_index(game));
     if (game->players[game->player_on_turn_index]->rack->empty) {
       standard_end_of_game_calculations(game);
     }
@@ -175,6 +182,7 @@ void play_move(Game *game, const Move *move) {
 void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   Rack *prack = game->players[pidx]->rack;
   int ntiles = prack->number_of_letters;
+  int player_draw_index = get_player_draw_index(game, pidx);
   // always try to fill rack if possible.
   if (ntiles < RACK_SIZE) {
     ntiles = RACK_SIZE;
@@ -183,7 +191,7 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   for (int i = 0; i < prack->array_size; i++) {
     if (prack->array[i] > 0) {
       for (int j = 0; j < prack->array[i]; j++) {
-        add_letter(game->gen->bag, i);
+        add_letter(game->gen->bag, i, player_draw_index);
       }
     }
   }
@@ -192,19 +200,20 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   if (known_rack && known_rack->number_of_letters > 0) {
     for (int i = 0; i < known_rack->array_size; i++) {
       for (int j = 0; j < known_rack->array[i]; j++) {
-        draw_letter_to_rack(game->gen->bag, prack, i);
+        draw_letter_to_rack(game->gen->bag, prack, i, player_draw_index);
         ndrawn++;
       }
     }
   }
-  draw_at_most_to_rack(game->gen->bag, prack, ntiles - ndrawn);
+  draw_at_most_to_rack(game->gen->bag, prack, ntiles - ndrawn,
+                       player_draw_index);
 }
 
 Move *get_top_equity_move(Game *game) {
   reset_move_list(game->gen->move_list);
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  MOVE_RECORD_BEST, MOVE_SORT_EQUITY, true);
   return game->gen->move_list->moves[0];
 }

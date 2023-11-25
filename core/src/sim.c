@@ -115,7 +115,7 @@ SimmerWorker *create_simmer_worker(Simmer *simmer, const Game *game,
   simmer_worker->rack_placeholder =
       create_rack(game->gen->letter_distribution->size);
 
-  seed_prng_for_worker(new_game->gen->bag->prng, simmer->seed, worker_index);
+  seed_bag_for_worker(new_game->gen->bag, simmer->seed, worker_index);
 
   return simmer_worker;
 }
@@ -154,8 +154,8 @@ void add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
 }
 
 void add_winpct_stat(SimmedPlay *sp, const WinPct *wp, int spread,
-                     float leftover, int game_end_reason, int tiles_unseen,
-                     bool plies_are_odd, bool lock) {
+                     float leftover, game_end_reason_t game_end_reason,
+                     int tiles_unseen, bool plies_are_odd, bool lock) {
 
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
@@ -307,7 +307,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
         simmer->simmed_plays[i], simmer->win_pcts, spread, leftover,
         game->game_end_reason,
         // number of tiles unseen to us: bag tiles + tiles on opp rack.
-        game->gen->bag->last_tile_index + 1 +
+        get_tiles_remaining(game->gen->bag) +
             game->players[1 - simmer->initial_player]->rack->number_of_letters,
         plies % 2, is_multithreaded(simmer));
     // reset to first state. we only need to restore one backup.
@@ -484,7 +484,7 @@ sim_status_t simulate(const Config *config, const Game *game, Simmer *simmer) {
   reset_move_list(game->gen->move_list);
   generate_moves(game->gen, game->players[game->player_on_turn_index],
                  game->players[1 - game->player_on_turn_index]->rack,
-                 game->gen->bag->last_tile_index + 1 >= RACK_SIZE,
+                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
                  MOVE_RECORD_ALL, MOVE_SORT_EQUITY, true);
   int number_of_moves_generated = game->gen->move_list->count;
   sort_moves(game->gen->move_list);

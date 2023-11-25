@@ -17,8 +17,17 @@
 #define GAME_VARIANT_CLASSIC_NAME "classic"
 #define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
 
-void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter) {
-  draw_letter(bag, letter);
+int get_player_draw_index(Game *game, int player_index) {
+  return player_index ^ game->starting_player_index;
+}
+
+int get_player_on_turn_draw_index(Game *game) {
+  return get_player_draw_index(game, game->player_on_turn_index);
+}
+
+void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
+                         int player_draw_index) {
+  draw_letter(bag, letter, player_draw_index);
   add_letter_to_rack(rack, letter);
 }
 
@@ -49,7 +58,10 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
     for (int i = 0; i < number_of_machine_letters; i++) {
       set_letter(game->gen->board, row_start, col_start + i,
                  machine_letters[i]);
-      draw_letter(game->gen->bag, machine_letters[i]);
+      // When placing letters on the board, we
+      // assume that player 0 placed all of the tiles
+      // for convenience.
+      draw_letter(game->gen->bag, machine_letters[i], 0);
       game->gen->board->tiles_played++;
     }
     *current_column_index = *current_column_index + number_of_machine_letters;
@@ -126,12 +138,13 @@ cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
 }
 
 int draw_rack_from_bag(Bag *bag, Rack *rack, const char *rack_string,
-                       const LetterDistribution *letter_distribution) {
+                       const LetterDistribution *letter_distribution,
+                       int player_draw_index) {
   int number_of_letters_set =
       set_rack_to_string(rack, rack_string, letter_distribution);
   for (int i = 0; i < rack->array_size; i++) {
     for (int j = 0; j < rack->array[i]; j++) {
-      draw_letter(bag, i);
+      draw_letter(bag, i, player_draw_index);
     }
   }
   return number_of_letters_set;
@@ -141,17 +154,17 @@ cgp_parse_status_t
 parse_cgp_racks_with_string_splitter(Game *game,
                                      const StringSplitter *player_racks) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
-  int number_of_letters_added =
-      draw_rack_from_bag(game->gen->bag, game->players[0]->rack,
-                         string_splitter_get_item(player_racks, 0),
-                         game->gen->letter_distribution);
+  int number_of_letters_added = draw_rack_from_bag(
+      game->gen->bag, game->players[0]->rack,
+      string_splitter_get_item(player_racks, 0), game->gen->letter_distribution,
+      get_player_draw_index(game, 0));
   if (number_of_letters_added < 0) {
     return CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
   }
-  number_of_letters_added =
-      draw_rack_from_bag(game->gen->bag, game->players[1]->rack,
-                         string_splitter_get_item(player_racks, 1),
-                         game->gen->letter_distribution);
+  number_of_letters_added = draw_rack_from_bag(
+      game->gen->bag, game->players[1]->rack,
+      string_splitter_get_item(player_racks, 1), game->gen->letter_distribution,
+      get_player_draw_index(game, 1));
   if (number_of_letters_added < 0) {
     cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
   }
@@ -256,7 +269,7 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
 
   if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
     game->game_end_reason = GAME_END_REASON_CONSECUTIVE_ZEROS;
-  } else if (game->gen->bag->last_tile_index == -1 &&
+  } else if (bag_is_empty(game->gen->bag) &&
              (game->players[0]->rack->empty || game->players[1]->rack->empty)) {
     game->game_end_reason = GAME_END_REASON_STANDARD;
   } else {
@@ -266,11 +279,10 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
 }
 
 int tiles_unseen(const Game *game) {
-  int bag_idx = game->gen->bag->last_tile_index;
   int their_rack_tiles =
       game->players[1 - game->player_on_turn_index]->rack->number_of_letters;
 
-  return (their_rack_tiles + bag_idx + 1);
+  return (their_rack_tiles + get_tiles_remaining(game->gen->bag));
 }
 
 void reset_game(Game *game) {
@@ -278,13 +290,16 @@ void reset_game(Game *game) {
   reset_player(game->players[0]);
   reset_player(game->players[1]);
   game->player_on_turn_index = 0;
+  game->starting_player_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
   game->backup_cursor = 0;
 }
 
-void set_player_on_turn(Game *game, int player_on_turn_index) {
-  game->player_on_turn_index = player_on_turn_index;
+// This assumes the game has not started yet.
+void set_starting_player_index(Game *game, int starting_player_index) {
+  game->starting_player_index = starting_player_index;
+  game->player_on_turn_index = starting_player_index;
 }
 
 void pre_allocate_backups(Game *game) {
@@ -330,6 +345,7 @@ Game *create_game(const Config *config) {
         players_data_get_is_shared(config->players_data, (players_data_t)i);
   }
 
+  game->starting_player_index = 0;
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
@@ -349,6 +365,7 @@ Game *copy_game(const Game *game, int move_list_capacity) {
     new_game->data_is_shared[i] = game->data_is_shared[i];
   }
   new_game->player_on_turn_index = game->player_on_turn_index;
+  new_game->starting_player_index = game->starting_player_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
   // note: game backups must be explicitly handled by the caller if they want
@@ -369,6 +386,7 @@ void backup_game(Game *game) {
     copy_bag_into(state->bag, game->gen->bag);
     state->game_end_reason = game->game_end_reason;
     state->player_on_turn_index = game->player_on_turn_index;
+    state->starting_player_index = game->starting_player_index;
     state->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
     copy_rack_into(state->p0rack, game->players[0]->rack);
     state->p0score = game->players[0]->score;
@@ -390,6 +408,7 @@ void unplay_last_move(Game *game) {
   game->consecutive_scoreless_turns = state->consecutive_scoreless_turns;
   game->game_end_reason = state->game_end_reason;
   game->player_on_turn_index = state->player_on_turn_index;
+  game->starting_player_index = state->starting_player_index;
   game->players[0]->score = state->p0score;
   game->players[1]->score = state->p1score;
   copy_rack_into(game->players[0]->rack, state->p0rack);
@@ -431,13 +450,21 @@ void string_builder_add_player_row(
     player_marker = player_off_turn_marker;
   }
 
+  char *player_name;
+  if (player->name) {
+    player_name = get_formatted_string("%s", player->name);
+  } else {
+    player_name = get_formatted_string("player%d", player->index + 1);
+  }
+
   string_builder_add_formatted_string(game_string, "%s%s%*s", player_marker,
-                                      player->name,
-                                      25 - string_length(player->name), "");
+                                      player_name,
+                                      25 - string_length(player_name), "");
   string_builder_add_rack(player->rack, letter_distribution, game_string);
   string_builder_add_formatted_string(game_string, "%*s%d",
                                       10 - player->rack->number_of_letters, "",
                                       player->score);
+  free(player_name);
 }
 
 void string_builder_add_board_row(const LetterDistribution *letter_distribution,
@@ -462,10 +489,10 @@ void string_builder_add_move_with_rank_and_equity(const Game *game,
                                                   int move_index,
                                                   StringBuilder *game_string) {
   const Move *move = game->gen->move_list->moves[move_index];
-  string_builder_add_int(game_string, move_index + 1);
+  string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(game->gen->board, move,
                           game->gen->letter_distribution, game_string);
-  string_builder_add_double(game_string, move->equity);
+  string_builder_add_formatted_string(game_string, " %0.2f", move->equity);
 }
 
 void string_builder_add_game(const Game *game, StringBuilder *game_string) {
@@ -494,7 +521,7 @@ void string_builder_add_game(const Game *game, StringBuilder *game_string) {
                              game_string);
 
       string_builder_add_formatted_string(game_string, "  %d",
-                                          game->gen->bag->last_tile_index + 1);
+                                          get_tiles_remaining(game->gen->bag));
 
     } else if (i - 2 < game->gen->move_list->count) {
       string_builder_add_move_with_rank_and_equity(game, i - 2, game_string);

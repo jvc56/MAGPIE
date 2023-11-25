@@ -12,7 +12,17 @@
 
 void autoplay_game_pairs_test(TestConfig *testconfig) {
   Config *csw_config = get_csw_config(testconfig);
-  load_config_or_die(csw_config, "setoptions i 1000 gp threads 11");
+
+  uint64_t seed = time(NULL);
+
+  char *options_string =
+      get_formatted_string("setoptions i 1000 gp threads 11 rs %ld", seed);
+
+  load_config_or_die(csw_config, options_string);
+
+  printf("running autoplay with: %s\n", options_string);
+
+  free(options_string);
 
   AutoplayResults *autoplay_results = create_autoplay_results();
 
