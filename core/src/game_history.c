@@ -15,8 +15,8 @@
 GameHistoryPlayer *create_game_history_player(const char *name,
                                               const char *nickname) {
   GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
-  player->name = get_formatted_string("%s", name);
-  player->nickname = get_formatted_string("%s", nickname);
+  player->name = string_duplicate(name);
+  player->nickname = string_duplicate(nickname);
   player->score = 0;
   player->last_known_rack = NULL;
   return player;

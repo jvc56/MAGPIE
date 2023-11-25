@@ -187,7 +187,7 @@ void set_single_arg(ParsedArgs *parsed_args, int index, arg_token_t arg_token,
                     const char *arg_name, int number_of_values) {
   SingleArg *single_arg = create_single_arg();
   single_arg->token = arg_token;
-  single_arg->name = get_formatted_string("%s", arg_name);
+  single_arg->name = string_duplicate(arg_name);
   single_arg->number_of_values = number_of_values;
   single_arg->values = NULL;
   if (number_of_values > 0) {
@@ -433,7 +433,7 @@ config_load_status_t load_winpct_for_config(Config *config,
   config->win_pcts = new_win_pcts;
 
   free(config->win_pct_name);
-  config->win_pct_name = get_formatted_string("%s", win_pct_name);
+  config->win_pct_name = string_duplicate(win_pct_name);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -701,7 +701,7 @@ config_load_status_t load_players_data_for_config(
 }
 
 char *get_default_klv_name(const char *lexicon_name) {
-  return get_formatted_string("%s", lexicon_name);
+  return string_duplicate(lexicon_name);
 }
 
 bool is_lexicon_required(const Config *config, const char *new_p1_leaves_name,
@@ -769,14 +769,14 @@ config_load_status_t load_lexicon_dependent_data_for_config(
 
   char *updated_p1_leaves_name;
   if (new_p1_leaves_name) {
-    updated_p1_leaves_name = get_formatted_string("%s", new_p1_leaves_name);
+    updated_p1_leaves_name = string_duplicate(new_p1_leaves_name);
   } else {
     updated_p1_leaves_name = get_default_klv_name(updated_p1_lexicon_name);
   }
 
   char *updated_p2_leaves_name;
   if (new_p2_leaves_name) {
-    updated_p2_leaves_name = get_formatted_string("%s", new_p2_leaves_name);
+    updated_p2_leaves_name = string_duplicate(new_p2_leaves_name);
   } else {
     updated_p2_leaves_name = get_default_klv_name(updated_p2_lexicon_name);
   }
@@ -809,7 +809,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
       return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
     }
     updated_letter_distribution_name =
-        get_formatted_string("%s", new_letter_distribution_name);
+        string_duplicate(new_letter_distribution_name);
   } else if (is_string_empty_or_null(config->ld_name)) {
     // No letter distribution was specified and the current
     // letter distribution is null, so load the default letter
@@ -825,7 +825,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
           get_default_letter_distribution_name(updated_p1_lexicon_name);
     } else {
       updated_letter_distribution_name =
-          get_formatted_string("%s", config->ld_name);
+          string_duplicate(config->ld_name);
     }
   }
 
