@@ -88,7 +88,7 @@ void players_data_set_data_name(PlayersData *players_data,
   }
   players_data_destroy_data_name(players_data, players_data_type, player_index);
   players_data->data_names[data_name_index] =
-      get_formatted_string("%s", data_name);
+      string_duplicate(data_name);
 }
 
 void *players_data_get_data(const PlayersData *players_data,
@@ -253,12 +253,12 @@ void set_players_data(PlayersData *players_data,
     if (existing_data_indexes[player_index] < 0) {
       if (player_index == 1 && new_data_is_shared) {
         data_pointers[1] = data_pointers[0];
-        data_names[1] = get_formatted_string("%s", data_names[0]);
+        data_names[1] = string_duplicate(data_names[0]);
       } else {
         data_pointers[player_index] = players_data_create_data(
             players_data_type, input_data_names[player_index]);
         data_names[player_index] =
-            get_formatted_string("%s", input_data_names[player_index]);
+            string_duplicate(input_data_names[player_index]);
       }
     } else {
       data_pointers[player_index] = players_data_get_data(

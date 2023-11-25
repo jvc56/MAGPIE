@@ -452,7 +452,7 @@ void string_builder_add_player_row(
 
   char *player_name;
   if (player->name) {
-    player_name = get_formatted_string("%s", player->name);
+    player_name = string_duplicate(player->name);
   } else {
     player_name = get_formatted_string("player%d", player->index + 1);
   }

@@ -64,6 +64,20 @@ bool is_string_empty_or_null(const char *str) {
   return strings_equal(str, "");
 }
 
+char *string_duplicate(const char *str) {
+  if (str == NULL) {
+    log_fatal("cannot duplicate null string");
+  }
+
+  char *duplicate = strdup(str);
+
+  if (duplicate == NULL) {
+    log_fatal("string duplicate failed");
+  }
+
+  return duplicate;
+}
+
 char *string_copy(char *dest, const char *src) {
   // FIXME: this is unsafe, need to check bounds
   return strcpy(dest, src);

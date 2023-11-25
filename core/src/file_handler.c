@@ -35,7 +35,7 @@ void set_file_handler_while_locked(FileHandler *fh, const char *filename,
     return;
   }
   file_handler_clear_file_and_filename(fh);
-  fh->filename = get_formatted_string("%s", filename);
+  fh->filename = string_duplicate(filename);
   fh->mode = mode;
   // Handle reserved filenames specially
   if (strings_equal(filename, STDOUT_FILENAME)) {

@@ -50,7 +50,7 @@ void destroy_command_vars(CommandVars *command_vars) {
 
 void set_command(CommandVars *command_vars, const char *command) {
   free(command_vars->command);
-  command_vars->command = get_formatted_string("%s", command);
+  command_vars->command = string_duplicate(command);
 }
 
 char *command_search_status(CommandVars *command_vars, bool should_halt) {
