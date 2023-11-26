@@ -37,7 +37,7 @@ void shuffle(Bag *bag) {
   }
 }
 
-void reset_bag(Bag *bag, const LetterDistribution *letter_distribution) {
+void reset_bag(const LetterDistribution *letter_distribution, Bag *bag) {
   int tile_index = 0;
   for (uint32_t i = 0; i < (letter_distribution->size); i++) {
     for (uint32_t k = 0; k < letter_distribution->distribution[i]; k++) {
@@ -50,12 +50,12 @@ void reset_bag(Bag *bag, const LetterDistribution *letter_distribution) {
   shuffle(bag);
 }
 
-void update_bag(Bag *bag, const LetterDistribution *letter_distribution) {
+void update_bag(const LetterDistribution *letter_distribution, Bag *bag) {
   if (bag->size != letter_distribution->total_tiles) {
     free(bag->tiles);
     bag->size = letter_distribution->total_tiles;
     bag->tiles = malloc_or_die(sizeof(uint8_t) * bag->size);
-    reset_bag(bag, letter_distribution);
+    reset_bag(letter_distribution, bag);
   }
 }
 
@@ -65,25 +65,25 @@ Bag *create_bag(const LetterDistribution *letter_distribution) {
   bag->prng = create_prng(42);
   bag->size = letter_distribution->total_tiles;
   bag->tiles = malloc_or_die(sizeof(uint8_t) * bag->size);
-  reset_bag(bag, letter_distribution);
+  reset_bag(letter_distribution, bag);
   return bag;
 }
 
-void copy_bag_into(Bag *dst, const Bag *src) {
+void bag_copy(Bag *dst, const Bag *src) {
   for (int tile_index = 0; tile_index < src->end_tile_index; tile_index++) {
     dst->tiles[tile_index] = src->tiles[tile_index];
   }
   dst->start_tile_index = src->start_tile_index;
   dst->end_tile_index = src->end_tile_index;
-  copy_prng_into(dst->prng, src->prng);
+  prng_copy(dst->prng, src->prng);
 }
 
-Bag *copy_bag(const Bag *bag) {
+Bag *bag_duplicate(const Bag *bag) {
   Bag *new_bag = malloc_or_die(sizeof(Bag));
   new_bag->prng = create_prng(42);
   new_bag->size = bag->size;
   new_bag->tiles = malloc_or_die(sizeof(uint8_t) * new_bag->size);
-  copy_bag_into(new_bag, bag);
+  bag_copy(new_bag, bag);
   return new_bag;
 }
 
@@ -182,7 +182,7 @@ void add_bag_to_rack(const Bag *bag, Rack *rack) {
 
 void string_builder_add_bag(const Bag *bag,
                             const LetterDistribution *letter_distribution,
-                            size_t len, StringBuilder *bag_string_builder) {
+                            StringBuilder *bag_string_builder) {
   int number_of_tiles_remaining = get_tiles_remaining(bag);
   uint8_t *sorted_bag = malloc_or_die(sizeof(uint8_t) * bag->size);
   for (int i = 0; i < number_of_tiles_remaining; i++) {
@@ -211,8 +211,8 @@ void string_builder_add_bag(const Bag *bag,
     if (sorted_bag[i] == BLANK_SORT_VALUE) {
       sorted_bag[i] = 0;
     }
-    string_builder_add_user_visible_letter(letter_distribution, sorted_bag[i],
-                                           len, bag_string_builder);
+    string_builder_add_user_visible_letter(letter_distribution,
+                                           bag_string_builder, sorted_bag[i]);
   }
   free(sorted_bag);
 }

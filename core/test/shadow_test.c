@@ -12,8 +12,8 @@
 void load_and_generate(Game *game, Player *player, const char *cgp,
                        const char *rack, bool add_exchange) {
   load_cgp(game, cgp);
-  set_rack_to_string(player->rack, rack, game->gen->letter_distribution);
-  generate_moves(game->gen, player, NULL, add_exchange,
+  set_rack_to_string(game->gen->letter_distribution, player->rack, rack);
+  generate_moves(NULL, game->gen, player, add_exchange,
                  player->move_record_type, player->move_sort_type, true);
   double previous_equity;
   for (int i = 0; i < game->gen->anchor_list->count; i++) {
@@ -493,36 +493,36 @@ void test_shadow_equity(TestConfig *testconfig) {
   Rack *leave_rack = create_rack(game->gen->letter_distribution->size);
   load_and_generate(game, player, EMPTY_CGP, "ERSVQUW", false);
 
-  set_rack_to_string(leave_rack, "", game->gen->letter_distribution);
+  set_rack_to_string(game->gen->letter_distribution, leave_rack, "");
   assert(within_epsilon(game->gen->best_leaves[0],
                         get_leave_value_for_rack(player->klv, leave_rack)));
 
-  set_rack_to_string(leave_rack, "S", game->gen->letter_distribution);
+  set_rack_to_string(game->gen->letter_distribution, leave_rack, "S");
   assert(within_epsilon(game->gen->best_leaves[1],
                         get_leave_value_for_rack(player->klv, leave_rack)));
 
-  set_rack_to_string(leave_rack, "ES", game->gen->letter_distribution);
+  set_rack_to_string(game->gen->letter_distribution, leave_rack, "ES");
   assert(within_epsilon(game->gen->best_leaves[2],
                         get_leave_value_for_rack(player->klv, leave_rack)));
 
-  set_rack_to_string(leave_rack, "ERS", game->gen->letter_distribution);
+  set_rack_to_string(game->gen->letter_distribution, leave_rack, "ERS");
   assert(within_epsilon(game->gen->best_leaves[3],
                         get_leave_value_for_rack(player->klv, leave_rack)));
 
-  set_rack_to_string(leave_rack, "EQSU", game->gen->letter_distribution);
+  set_rack_to_string(game->gen->letter_distribution, leave_rack, "EQSU");
   assert(within_epsilon(game->gen->best_leaves[4],
                         get_leave_value_for_rack(player->klv, leave_rack)));
 
-  set_rack_to_string(leave_rack, "EQRSU", game->gen->letter_distribution);
+  set_rack_to_string(game->gen->letter_distribution, leave_rack, "EQRSU");
   assert(within_epsilon(game->gen->best_leaves[5],
                         get_leave_value_for_rack(player->klv, leave_rack)));
 
-  set_rack_to_string(leave_rack, "EQRSUV", game->gen->letter_distribution);
+  set_rack_to_string(game->gen->letter_distribution, leave_rack, "EQRSUV");
   assert(within_epsilon(game->gen->best_leaves[6],
                         get_leave_value_for_rack(player->klv, leave_rack)));
 
   load_and_generate(game, player, EMPTY_CGP, "ESQW", true);
-  set_rack_to_string(leave_rack, "ES", game->gen->letter_distribution);
+  set_rack_to_string(game->gen->letter_distribution, leave_rack, "ES");
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity,
       28 + get_leave_value_for_rack(player->klv, leave_rack)));

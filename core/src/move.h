@@ -42,7 +42,7 @@ typedef struct MoveList {
 } MoveList;
 
 Move *create_move();
-void copy_move(const Move *src_move, Move *dest_move);
+void move_copy(Move *dest_move, const Move *src_move);
 void destroy_move(Move *move);
 MoveList *create_move_list(int capacity);
 void destroy_move_list(MoveList *ml);

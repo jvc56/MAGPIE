@@ -32,10 +32,10 @@ Player *create_player(const Config *config, int player_index) {
   return player;
 }
 
-Player *copy_player(const Player *player) {
+Player *player_duplicate(const Player *player) {
   Player *new_player = malloc_or_die(sizeof(Player));
   new_player->name = player->name;
-  new_player->rack = copy_rack(player->rack);
+  new_player->rack = rack_duplicate(player->rack);
   new_player->score = player->score;
   new_player->move_sort_type = player->move_sort_type;
   new_player->move_record_type = player->move_record_type;

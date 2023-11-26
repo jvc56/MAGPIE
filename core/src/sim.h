@@ -67,8 +67,8 @@ typedef struct SimmerWorker {
 
 Simmer *create_simmer(const Config *config);
 void destroy_simmer(Simmer *simmer);
-bool plays_are_similar(Simmer *simmer, const SimmedPlay *m1,
-                       const SimmedPlay *m2);
+bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
+                       Simmer *simmer);
 sim_status_t simulate(const Config *config, const Game *game, Simmer *simmer);
 void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays);
 

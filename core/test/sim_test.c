@@ -11,7 +11,7 @@
 #include "test_util.h"
 #include "testconfig.h"
 
-void print_sim_stats(Simmer *simmer, const Game *game) {
+void print_sim_stats(const Game *game, Simmer *simmer) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
@@ -50,8 +50,8 @@ void test_win_pct(TestConfig *testconfig) {
 void test_sim_single_iteration(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AAADERW",
-                      game->gen->letter_distribution, 0);
+  draw_rack_to_string(game->gen->letter_distribution, game->gen->bag,
+                      game->players[0]->rack, "AAADERW", 0);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1 cond none");
@@ -68,8 +68,8 @@ void test_sim_single_iteration(TestConfig *testconfig) {
 void test_more_iterations(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  draw_rack_to_string(game->gen->bag, game->players[0]->rack, "AEIQRST",
-                      game->gen->letter_distribution, 0);
+  draw_rack_to_string(game->gen->letter_distribution, game->gen->bag,
+                      game->players[0]->rack, "AEIQRST", 0);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 400 cond none");
@@ -109,7 +109,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   assert(thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
   printf("%d iters took %0.6f seconds\n", iters,
          (double)(end - begin) / CLOCKS_PER_SEC);
-  print_sim_stats(simmer, game);
+  print_sim_stats(game, simmer);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
   StringBuilder *move_string_builder = create_string_builder();
@@ -136,7 +136,7 @@ void perf_test_multithread_sim(Config *config) {
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
 
-  print_sim_stats(simmer, game);
+  print_sim_stats(game, simmer);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
   StringBuilder *move_string_builder = create_string_builder();
@@ -163,7 +163,7 @@ void perf_test_multithread_blocking_sim(Config *config) {
                      " plies 2 threads 1 numplays 15 i 1000000 cond 99");
   sim_status_t status = simulate(config, game, simmer);
   assert(status == SIM_STATUS_SUCCESS);
-  print_sim_stats(simmer, game);
+  print_sim_stats(game, simmer);
   sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
 
   StringBuilder *move_string_builder = create_string_builder();
@@ -180,8 +180,8 @@ void perf_test_multithread_blocking_sim(Config *config) {
 void test_play_similarity(TestConfig *testconfig) {
   Config *config = testconfig->nwl_config;
   Game *game = create_game(config);
-  draw_rack_to_string(game->gen->bag, game->players[0]->rack, "ACEIRST",
-                      game->gen->letter_distribution, 0);
+  draw_rack_to_string(game->gen->letter_distribution, game->gen->bag,
+                      game->players[0]->rack, "ACEIRST", 0);
   Simmer *simmer = create_simmer(config);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 0 cond none");
@@ -209,23 +209,23 @@ void test_play_similarity(TestConfig *testconfig) {
       const char *p1 = string_builder_peek(p1_string_builder);
       const char *p2 = string_builder_peek(p2_string_builder);
       if (strings_equal(p1, "8F ATRESIC") && strings_equal(p2, "8F STEARIC")) {
-        assert(plays_are_similar(simmer, simmer->simmed_plays[i],
-                                 simmer->simmed_plays[j]));
+        assert(plays_are_similar(simmer->simmed_plays[i],
+                                 simmer->simmed_plays[j], simmer));
       } else if (strings_equal(p2, "8F ATRESIC") &&
                  strings_equal(p1, "8F STEARIC")) {
-        assert(plays_are_similar(simmer, simmer->simmed_plays[i],
-                                 simmer->simmed_plays[j]));
+        assert(plays_are_similar(simmer->simmed_plays[i],
+                                 simmer->simmed_plays[j], simmer));
       } else {
-        assert(!plays_are_similar(simmer, simmer->simmed_plays[i],
-                                  simmer->simmed_plays[j]));
+        assert(!plays_are_similar(simmer->simmed_plays[i],
+                                  simmer->simmed_plays[j], simmer));
       }
     }
   }
   destroy_string_builder(p1_string_builder);
   destroy_string_builder(p2_string_builder);
 
-  assert(!plays_are_similar(simmer, simmer->simmed_plays[3],
-                            simmer->simmed_plays[4]));
+  assert(!plays_are_similar(simmer->simmed_plays[3], simmer->simmed_plays[4],
+                            simmer));
   destroy_game(game);
   destroy_simmer(simmer);
 }

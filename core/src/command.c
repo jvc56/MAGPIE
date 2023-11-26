@@ -84,7 +84,7 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
     // FIXME: need an option for ucgi vs. human readable
     // since the command module is an abstraction layer
     // above UCGI.
-    status_string = ucgi_sim_stats(command_vars->simmer, command_vars->game, 1);
+    status_string = ucgi_sim_stats(command_vars->game, command_vars->simmer, 1);
     break;
   case COMMAND_TYPE_AUTOPLAY:
     log_warn("autoplay status unimplemented");
@@ -146,7 +146,7 @@ void set_or_clear_error_status(ErrorStatus *error_status,
   }
 }
 
-void execute_sim(CommandVars *command_vars, const Config *config) {
+void execute_sim(const Config *config, CommandVars *command_vars) {
   if (!command_vars->simmer) {
     command_vars->simmer = create_simmer(config);
   }
@@ -156,7 +156,7 @@ void execute_sim(CommandVars *command_vars, const Config *config) {
                             (int)status);
 }
 
-void execute_autoplay(CommandVars *command_vars, const Config *config) {
+void execute_autoplay(const Config *config, CommandVars *command_vars) {
   if (!command_vars->autoplay_results) {
     command_vars->autoplay_results = create_autoplay_results();
   }
@@ -165,7 +165,7 @@ void execute_autoplay(CommandVars *command_vars, const Config *config) {
                             ERROR_STATUS_TYPE_AUTOPLAY, (int)status);
 }
 
-void execute_infer(CommandVars *command_vars, const Config *config) {
+void execute_infer(const Config *config, CommandVars *command_vars) {
   if (!command_vars->inference) {
     command_vars->inference = create_inference();
   }
@@ -213,13 +213,13 @@ void execute_command(CommandVars *command_vars) {
     // above. No further processing is necessary.
     break;
   case COMMAND_TYPE_SIM:
-    execute_sim(command_vars, config);
+    execute_sim(config, command_vars);
     break;
   case COMMAND_TYPE_AUTOPLAY:
-    execute_autoplay(command_vars, config);
+    execute_autoplay(config, command_vars);
     break;
   case COMMAND_TYPE_INFER:
-    execute_infer(command_vars, config);
+    execute_infer(config, command_vars);
     break;
   }
 }

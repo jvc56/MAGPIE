@@ -56,7 +56,7 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
 char *get_default_letter_distribution_name(const char *lexicon_name);
 
 void string_builder_add_user_visible_letter(
-    const LetterDistribution *letter_distribution, uint8_t ml, size_t len,
-    StringBuilder *string_builder);
+    const LetterDistribution *letter_distribution,
+    StringBuilder *string_builder, uint8_t ml);
 
 #endif

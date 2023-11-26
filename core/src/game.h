@@ -65,7 +65,7 @@ typedef struct Game {
 void reset_game(Game *game);
 void update_game(const Config *config, Game *game);
 Game *create_game(const Config *config);
-Game *copy_game(const Game *game, int move_list_capacity);
+Game *game_duplicate(const Game *game, int move_list_capacity);
 void destroy_game(Game *game);
 cgp_parse_status_t load_cgp(Game *game, const char *cgp);
 void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,

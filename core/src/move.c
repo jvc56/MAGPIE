@@ -158,7 +158,7 @@ void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
   }
 }
 
-void copy_move(const Move *src_move, Move *dest_move) {
+void move_copy(Move *dest_move, const Move *src_move) {
   for (int i = 0; i < (BOARD_DIM); i++) {
     dest_move->tiles[i] = src_move->tiles[i];
   }
@@ -252,7 +252,7 @@ void string_builder_add_move_description(const Move *move,
                                             move->col_start + 'A');
       }
     } else {
-      string_builder_add_string(move_string_builder, "(Exch ", 0);
+      string_builder_add_string(move_string_builder, "(Exch ");
     }
 
     int number_of_tiles_to_print = move->tiles_length;
@@ -263,15 +263,14 @@ void string_builder_add_move_description(const Move *move,
           move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
         string_builder_add_char(move_string_builder, ASCII_PLAYED_THROUGH);
       } else {
-        string_builder_add_user_visible_letter(ld, letter, 0,
-                                               move_string_builder);
+        string_builder_add_user_visible_letter(ld, move_string_builder, letter);
       }
     }
     if (move->move_type == GAME_EVENT_EXCHANGE) {
-      string_builder_add_string(move_string_builder, ")", 0);
+      string_builder_add_string(move_string_builder, ")");
     }
   } else {
-    string_builder_add_string(move_string_builder, "(Pass)", 0);
+    string_builder_add_string(move_string_builder, "(Pass)");
   }
 }
 
@@ -279,17 +278,17 @@ void string_builder_add_move(const Board *board, const Move *m,
                              const LetterDistribution *letter_distribution,
                              StringBuilder *string_builder) {
   if (m->move_type == GAME_EVENT_PASS) {
-    string_builder_add_string(string_builder, "pass 0", 0);
+    string_builder_add_string(string_builder, "pass 0");
     return;
   }
 
   if (m->move_type == GAME_EVENT_EXCHANGE) {
-    string_builder_add_string(string_builder, "(exch ", 0);
+    string_builder_add_string(string_builder, "(exch ");
     for (int i = 0; i < m->tiles_played; i++) {
-      string_builder_add_user_visible_letter(letter_distribution, m->tiles[i],
-                                             0, string_builder);
+      string_builder_add_user_visible_letter(letter_distribution,
+                                             string_builder, m->tiles[i]);
     }
-    string_builder_add_string(string_builder, ")", 0);
+    string_builder_add_string(string_builder, ")");
     return;
   }
 
@@ -312,26 +311,26 @@ void string_builder_add_move(const Board *board, const Move *m,
         print_tile = get_letter(board, current_row, current_col);
       }
       if (i == 0 && board) {
-        string_builder_add_string(string_builder, "(", 0);
+        string_builder_add_string(string_builder, "(");
       }
     }
 
     if (tile == PLAYED_THROUGH_MARKER && !board) {
-      string_builder_add_string(string_builder, ".", 0);
+      string_builder_add_string(string_builder, ".");
     } else {
-      string_builder_add_user_visible_letter(letter_distribution, print_tile, 0,
-                                             string_builder);
+      string_builder_add_user_visible_letter(letter_distribution,
+                                             string_builder, print_tile);
     }
 
     if (board && (tile == PLAYED_THROUGH_MARKER) &&
         (i == m->tiles_length - 1 ||
          m->tiles[i + 1] != PLAYED_THROUGH_MARKER)) {
-      string_builder_add_string(string_builder, ")", 0);
+      string_builder_add_string(string_builder, ")");
     }
 
     if (board && tile != PLAYED_THROUGH_MARKER && (i + 1 < m->tiles_length) &&
         m->tiles[i + 1] == PLAYED_THROUGH_MARKER) {
-      string_builder_add_string(string_builder, "(", 0);
+      string_builder_add_string(string_builder, "(");
     }
 
     if (dir_is_vertical(m->dir)) {

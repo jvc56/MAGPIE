@@ -135,7 +135,7 @@ void *read_fifo_thread(void *uncasted_test_fifo_args) {
     if (!line) {
       break;
     }
-    string_builder_add_string(result_builder, line, 0);
+    string_builder_add_string(result_builder, line);
     free(line);
   }
   assert_strings_equal("abc", string_builder_peek(result_builder));

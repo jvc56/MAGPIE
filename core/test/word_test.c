@@ -20,7 +20,7 @@ void test_words_played(TestConfig *testconfig) {
   uint8_t PeNT[] = {16, 5 | 0x80, 14, 20};
   // use 0-based indexing.
   FormedWords *fw = words_played(game->gen->board, PeNT, 0, 3, 10, 13, 1);
-  populate_word_validities(fw, game->players[0]->kwg);
+  populate_word_validities(game->players[0]->kwg, fw);
   assert(fw->num_words == 4);
   // Should generate 4 words: PIP, ONE, HEN, and the main word PENT
   assert(fw->words[0].word_length == 3);
@@ -40,7 +40,7 @@ void test_words_played(TestConfig *testconfig) {
   // Play some random phoney making a lot of words 6G DI(PET)AZ
   uint8_t DIPETAZ[] = {4, 9, 0, 0, 0, 1, 26};
   fw = words_played(game->gen->board, DIPETAZ, 0, 6, 5, 6, 0);
-  populate_word_validities(fw, game->players[0]->kwg);
+  populate_word_validities(game->players[0]->kwg, fw);
 
   assert(fw->num_words == 5);
   // should generate 5 "words":
@@ -69,7 +69,7 @@ void test_words_played(TestConfig *testconfig) {
   // play a single tile that makes two words. 9F (BOY)S
   uint8_t BOYS[] = {0, 0, 0, 19};
   fw = words_played(game->gen->board, BOYS, 0, 3, 8, 5, 0);
-  populate_word_validities(fw, game->players[0]->kwg);
+  populate_word_validities(game->players[0]->kwg, fw);
 
   assert(fw->num_words == 2);
   // generates SPAYS and BOYS
@@ -86,7 +86,7 @@ void test_words_played(TestConfig *testconfig) {
   // same as above but dir - I5 SPAY(S)
   uint8_t SPAYS[] = {0, 0, 0, 0, 19};
   fw = words_played(game->gen->board, SPAYS, 0, 4, 4, 8, 1);
-  populate_word_validities(fw, game->players[0]->kwg);
+  populate_word_validities(game->players[0]->kwg, fw);
 
   // generates BOYS and SPAYS
   assert(fw->words[0].word_length == 4);

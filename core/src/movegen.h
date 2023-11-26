@@ -58,23 +58,23 @@ typedef struct Generator {
 } Generator;
 
 Generator *create_generator(const Config *config, int move_list_capacity);
-Generator *copy_generator(const Generator *gen, int move_list_capacity);
+Generator *generate_duplicate(const Generator *gen, int move_list_capacity);
 void destroy_generator(Generator *gen);
 void update_generator(const Config *config, Generator *gen);
-void generate_moves(Generator *gen, Player *player, const Rack *opp_rack,
+void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
                     bool add_exchange, move_record_t move_record_type,
                     move_sort_t move_sort_type,
                     bool apply_placement_adjustment);
 void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
                              int stripidx, bool add_exchange);
-void recursive_gen(Generator *gen, int col, Player *player,
-                   const Rack *opp_rack, uint32_t node_index, int leftstrip,
+void recursive_gen(const Rack *opp_rack, Generator *gen, int col,
+                   Player *player, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play);
 void reset_generator(Generator *gen);
 void load_row_letter_cache(Generator *gen, int row);
 int get_cross_set_index(const Generator *gen, int player_index);
-int score_move(const Board *board, uint8_t word[], int word_start_index,
-               int word_end_index, int row, int col, int tiles_played,
-               int cross_dir, int cross_set_index,
-               const LetterDistribution *letter_distribution);
+int score_move(const Board *board,
+               const LetterDistribution *letter_distribution, uint8_t word[],
+               int word_start_index, int word_end_index, int row, int col,
+               int tiles_played, int cross_dir, int cross_set_index);
 #endif

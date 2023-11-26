@@ -166,9 +166,9 @@ int word_edge(const Board *board, int row, int col, int dir) {
   return col - dir;
 }
 
-int traverse_backwards_for_score(
-    const Board *board, int row, int col,
-    const LetterDistribution *letter_distribution) {
+int traverse_backwards_for_score(const Board *board,
+                                 const LetterDistribution *letter_distribution,
+                                 int row, int col) {
   int score = 0;
   while (pos_exists(row, col)) {
     uint8_t ml = get_letter(board, row, col);
@@ -310,16 +310,16 @@ Board *create_board() {
   return board;
 }
 
-Board *copy_board(const Board *board) {
+Board *board_duplicate(const Board *board) {
   Board *new_board = malloc_or_die(sizeof(Board));
   new_board->traverse_backwards_return_values =
       malloc_or_die(sizeof(TraverseBackwardsReturnValues));
-  copy_board_into(new_board, board);
+  board_copy(new_board, board);
   return new_board;
 }
 
 // copy src into dst; assume dst is already allocated.
-void copy_board_into(Board *dst, const Board *src) {
+void board_copy(Board *dst, const Board *src) {
   for (int board_index = 0; board_index < (BOARD_DIM * BOARD_DIM);
        board_index++) {
     dst->letters[board_index] = src->letters[board_index];

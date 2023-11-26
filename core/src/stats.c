@@ -21,7 +21,7 @@ Stat *create_stat() {
 
 void destroy_stat(Stat *stat) { free(stat); }
 
-Stat *copy_stat(const Stat *stat) {
+Stat *stat_duplicate(const Stat *stat) {
   Stat *new_stat = create_stat();
   new_stat->cardinality = stat->cardinality;
   new_stat->weight = stat->weight;
@@ -54,11 +54,6 @@ uint64_t get_cardinality(const Stat *stat) { return stat->cardinality; }
 uint64_t get_weight(const Stat *stat) { return stat->weight; }
 
 double get_mean(const Stat *stat) { return stat->mean; }
-
-void push_stat(Stat *stat_1, Stat *stat_2) {
-  push_with_cardinality(stat_1, get_mean(stat_2), get_weight(stat_2),
-                        get_cardinality(stat_2));
-}
 
 // Use a estimator function to easily change from
 // biased to unbiased estimations.

@@ -62,7 +62,7 @@ float reverse_float(const float in_float) {
 }
 
 // Egregious hack to convert endianness of a float
-float convert_little_endian_to_host(float little_endian_float) {
+float convert_little_endian_to_host(const float little_endian_float) {
   // Check if host machine is little-endian
   union {
     uint32_t i;
@@ -154,7 +154,7 @@ void destroy_klv(KLV *klv) {
   free(klv);
 }
 
-int get_word_index_of(const KLV *klv, uint32_t node_index, const Rack *leave) {
+int get_word_index_of(const KLV *klv, const Rack *leave, uint32_t node_index) {
   int idx = 0;
   int lidx = 0;
   int lidx_letter_count = leave->array[lidx];
@@ -209,7 +209,7 @@ double get_leave_value(const KLV *klv, const Rack *leave) {
   if (!klv) {
     return 0.0;
   }
-  int index = get_word_index_of(klv, kwg_arc_index(klv->kwg, 0), leave);
+  int index = get_word_index_of(klv, leave, kwg_arc_index(klv->kwg, 0));
   if (index != -1) {
     return (double)klv->leave_values[index];
   }

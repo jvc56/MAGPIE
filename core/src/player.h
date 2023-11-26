@@ -20,7 +20,7 @@ typedef struct Player {
 
 Player *create_player(const Config *config, int player_index);
 void update_player(const Config *config, Player *player);
-Player *copy_player(const Player *player);
+Player *player_duplicate(const Player *player);
 void destroy_player(Player *player);
 void reset_player(Player *player);
 

@@ -40,36 +40,36 @@ void test_alphabet(TestConfig *testconfig) {
   StringBuilder *letter = create_string_builder();
 
   // blank
-  string_builder_add_user_visible_letter(config->letter_distribution,
-                                         BLANK_MACHINE_LETTER, 0, letter);
+  string_builder_add_user_visible_letter(config->letter_distribution, letter,
+                                         BLANK_MACHINE_LETTER);
   assert_strings_equal(string_builder_peek(letter), "?");
   string_builder_clear(letter);
 
   // blank A
-  string_builder_add_user_visible_letter(
-      config->letter_distribution, get_blanked_machine_letter(1), 0, letter);
+  string_builder_add_user_visible_letter(config->letter_distribution, letter,
+                                         get_blanked_machine_letter(1));
   assert_strings_equal(string_builder_peek(letter), "a");
   string_builder_clear(letter);
 
-  string_builder_add_user_visible_letter(
-      config->letter_distribution, get_blanked_machine_letter(2), 0, letter);
+  string_builder_add_user_visible_letter(config->letter_distribution, letter,
+                                         get_blanked_machine_letter(2));
   assert_strings_equal(string_builder_peek(letter), "b");
   string_builder_clear(letter);
 
   // not blank
-  string_builder_add_user_visible_letter(config->letter_distribution, 3, 0,
-                                         letter);
+  string_builder_add_user_visible_letter(config->letter_distribution, letter,
+                                         3);
   assert_strings_equal(string_builder_peek(letter), "C");
   string_builder_clear(letter);
-  string_builder_add_user_visible_letter(config->letter_distribution, 4, 0,
-                                         letter);
+  string_builder_add_user_visible_letter(config->letter_distribution, letter,
+                                         4);
   assert_strings_equal(string_builder_peek(letter), "D");
   string_builder_clear(letter);
 
   const Config *catalan_config = get_disc_config(testconfig);
   string_builder_add_user_visible_letter(catalan_config->letter_distribution,
-                                         get_blanked_machine_letter(13), 0,
-                                         letter);
+                                         letter,
+                                         get_blanked_machine_letter(13));
   assert_strings_equal(string_builder_peek(letter), "l·l");
   string_builder_clear(letter);
 

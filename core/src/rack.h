@@ -19,14 +19,14 @@ typedef struct Rack {
 void add_letter_to_rack(Rack *rack, uint8_t letter);
 Rack *create_rack(int array_size);
 void update_or_create_rack(Rack **rack, int array_size);
-Rack *copy_rack(const Rack *rack);
-void copy_rack_into(Rack *dst, const Rack *src);
+Rack *rack_duplicate(const Rack *rack);
+void rack_copy(Rack *dst, const Rack *src);
 void destroy_rack(Rack *rack);
 void reset_rack(Rack *rack);
 int score_on_rack(const LetterDistribution *letter_distribution,
                   const Rack *rack);
-int set_rack_to_string(Rack *rack, const char *rack_string,
-                       const LetterDistribution *letter_distribution);
+int set_rack_to_string(const LetterDistribution *letter_distribution,
+                       Rack *rack, const char *rack_string);
 void take_letter_from_rack(Rack *rack, uint8_t letter);
 bool racks_are_equal(const Rack *rack1, const Rack *rack2);
 void string_builder_add_rack(const Rack *rack,
