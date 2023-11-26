@@ -206,6 +206,7 @@ void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
 }
 
 void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
+  printf("TESTING WITH %d THREADS\n");
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Rack *rack = create_rack(game->players[0]->rack->array_size);

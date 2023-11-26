@@ -203,8 +203,10 @@ double get_probability_for_random_minimum_draw(
 
 void increment_subtotals_for_record(const Rack *rack, InferenceRecord *record,
                                     uint64_t number_of_draws_for_leave) {
+  printf("recording subtotals\n");
   for (int i = 0; i < rack->array_size; i++) {
     if (rack->array[i] > 0) {
+      printf("adding %d: %d\n", i, rack->array[i]);
       add_to_letter_subtotal(record, i, rack->array[i],
                              INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW,
                              number_of_draws_for_leave);
@@ -217,6 +219,7 @@ void increment_subtotals_for_record(const Rack *rack, InferenceRecord *record,
 void record_valid_leave(const Rack *rack, InferenceRecord *record,
                         double current_leave_value,
                         uint64_t number_of_draws_for_leave) {
+  printf("recording valid leave\n");
   push(record->equity_values, (double)current_leave_value,
        number_of_draws_for_leave);
   increment_subtotals_for_record(rack, record, number_of_draws_for_leave);
@@ -280,6 +283,7 @@ void evaluate_possible_leave(Inference *inference) {
         add_letter_to_rack(inference->leave, tile_exchanged);
       }
     } else {
+      printf("recording non exchange\n");
       record_valid_leave(inference->leave, inference->leave_record,
                          current_leave_value, number_of_draws_for_leave);
       insert_leave_rack(inference->leave, NULL, inference->leave_rack_list,
@@ -654,7 +658,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
     Inference *inference_worker = inferences_for_workers[thread_index];
-    add_inference(inference, inference_worker);
+    add_inference(inference_worker, inference);
     leave_stats[thread_index] = inference_worker->leave_record->equity_values;
     if (inference->number_of_tiles_exchanged > 0) {
       exchanged_stats[thread_index] =
