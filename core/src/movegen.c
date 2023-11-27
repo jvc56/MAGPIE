@@ -763,17 +763,19 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
   gen->tiles_played = 0;
 
   sort_anchor_list(gen->anchor_list);
-  for (int i = 0; i < gen->anchor_list->count; i++) {
+  const AnchorList *anchor_list = gen->anchor_list;
+  for (int i = 0; i < get_number_of_anchors(anchor_list); i++) {
+    double anchor_highest_possible_equity =
+        get_anchor_highest_possible_equity(anchor_list, i);
     if (gen->move_record_type == MOVE_RECORD_BEST &&
-        better_play_has_been_found(
-            gen, gen->anchor_list->anchors[i]->highest_possible_equity)) {
+        better_play_has_been_found(gen, anchor_highest_possible_equity)) {
       break;
     }
-    gen->current_anchor_col = gen->anchor_list->anchors[i]->col;
-    gen->current_row_index = gen->anchor_list->anchors[i]->row;
-    gen->last_anchor_col = gen->anchor_list->anchors[i]->last_anchor_col;
-    gen->dir = gen->anchor_list->anchors[i]->dir;
-    set_transpose(gen->board, gen->anchor_list->anchors[i]->transposed);
+    gen->current_anchor_col = get_anchor_col(anchor_list, i);
+    gen->current_row_index = get_anchor_row(anchor_list, i);
+    gen->last_anchor_col = get_anchor_last_anchor_col(anchor_list, i);
+    gen->dir = get_anchor_dir(anchor_list, i);
+    set_transpose(gen->board, get_anchor_transposed(anchor_list, i));
     load_row_letter_cache(gen, gen->current_row_index);
     recursive_gen(opp_rack, gen, gen->current_anchor_col, player,
                   kwg_get_root_node_index(player->kwg), gen->current_anchor_col,
@@ -782,8 +784,7 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for this
       // anchor, highest_possible_equity was invalid.
-      assert(!better_play_has_been_found(
-          gen, gen->anchor_list->anchors[i]->highest_possible_equity));
+      assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
     }
   }
 

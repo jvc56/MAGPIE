@@ -6,6 +6,20 @@
 #include "stdlib.h"
 #include "util.h"
 
+typedef struct Anchor {
+  int row;
+  int col;
+  int last_anchor_col;
+  bool transposed;
+  int dir;
+  double highest_possible_equity;
+} Anchor;
+
+struct AnchorList {
+  int count;
+  Anchor **anchors;
+};
+
 AnchorList *create_anchor_list() {
   AnchorList *al = malloc_or_die(sizeof(AnchorList));
   al->count = 0;
@@ -24,6 +38,32 @@ void destroy_anchor_list(AnchorList *al) {
   }
   free(al->anchors);
   free(al);
+}
+
+int get_number_of_anchors(const AnchorList *al) { return al->count; }
+
+int get_anchor_row(const AnchorList *al, int index) {
+  return al->anchors[index]->row;
+}
+
+int get_anchor_col(const AnchorList *al, int index) {
+  return al->anchors[index]->col;
+}
+
+int get_anchor_last_anchor_col(const AnchorList *al, int index) {
+  return al->anchors[index]->last_anchor_col;
+}
+
+bool get_anchor_transposed(const AnchorList *al, int index) {
+  return al->anchors[index]->transposed;
+}
+
+int get_anchor_dir(const AnchorList *al, int index) {
+  return al->anchors[index]->dir;
+}
+
+double get_anchor_highest_possible_equity(const AnchorList *al, int index) {
+  return al->anchors[index]->highest_possible_equity;
 }
 
 void add_anchor(AnchorList *al, int row, int col, int last_anchor_col,

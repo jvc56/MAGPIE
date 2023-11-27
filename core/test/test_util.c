@@ -75,22 +75,6 @@ void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
   free(sorted_move_list);
 }
 
-void print_anchor_list(const Generator *gen) {
-  for (int i = 0; i < gen->anchor_list->count; i++) {
-    Anchor *anchor = gen->anchor_list->anchors[i];
-    int row = anchor->row;
-    int col = anchor->col;
-    const char *dir = "Horizontal";
-    if (dir_is_vertical(anchor->dir)) {
-      row = anchor->col;
-      col = anchor->row;
-      dir = "Vertical";
-    }
-    printf("Anchor %d: Row %d, Col %d, %s, %0.4f, %d\n", i, row, col, dir,
-           anchor->highest_possible_equity, anchor->last_anchor_col);
-  }
-}
-
 void print_move_list(const Board *board,
                      const LetterDistribution *letter_distribution,
                      const SortedMoveList *sml, int move_list_length) {

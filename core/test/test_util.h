@@ -24,7 +24,6 @@ void generate_leaves_for_game(Game *game, bool add_exchanges);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *create_sorted_move_list(MoveList *ml);
 void destroy_sorted_move_list(SortedMoveList *sorted_move_list);
-void print_anchor_list(const Generator *gen);
 void print_move_list(const Board *board,
                      const LetterDistribution *letter_distribution,
                      const SortedMoveList *sml, int move_list_length);
