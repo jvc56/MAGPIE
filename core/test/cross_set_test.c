@@ -42,7 +42,7 @@ void set_row(Game *game, int row, const char *row_content) {
       set_letter(game->gen->board, row, i,
                  human_readable_letter_to_machine_letter(
                      game->gen->letter_distribution, letter));
-      game->gen->board->tiles_played++;
+      incrememt_tiles_played(game->gen->board, 1);
     }
   }
 }
@@ -62,7 +62,7 @@ void set_col(Game *game, int col, const char *col_content) {
       set_letter(game->gen->board, i, col,
                  human_readable_letter_to_machine_letter(
                      game->gen->letter_distribution, letter));
-      game->gen->board->tiles_played++;
+      incrememt_tiles_played(game->gen->board, 1);
     }
   }
 }

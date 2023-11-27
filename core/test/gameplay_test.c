@@ -34,20 +34,6 @@ void assert_players_are_equal(const Player *p1, const Player *p2,
   }
 }
 
-void assert_boards_are_equal(const Board *b1, const Board *b2) {
-  assert(b1->transposed == b2->transposed);
-  assert(b1->tiles_played == b2->tiles_played);
-  for (int i = 0; i < (BOARD_DIM * BOARD_DIM * 2); i++) {
-    if (i < BOARD_DIM * BOARD_DIM) {
-      assert(b1->letters[i] == b2->letters[i]);
-      assert(b1->bonus_squares[i] == b2->bonus_squares[i]);
-    }
-    assert(b1->cross_sets[i] == b2->cross_sets[i]);
-    assert(b1->cross_scores[i] == b2->cross_scores[i]);
-    assert(b1->anchors[i] == b2->anchors[i]);
-  }
-}
-
 void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores) {
   assert(g1->consecutive_scoreless_turns == g2->consecutive_scoreless_turns);
   assert(g1->game_end_reason == g2->game_end_reason);
@@ -394,7 +380,7 @@ void test_playmove(TestConfig *testconfig) {
                                                  "E"));
   assert(game->player_on_turn_index == 1);
   assert(get_tiles_remaining(game->gen->bag) == 88);
-  assert(game->gen->board->tiles_played == 5);
+  assert(get_tiles_played(game->gen->board) == 5);
   reset_game(game);
 
   // Test exchange
@@ -410,7 +396,7 @@ void test_playmove(TestConfig *testconfig) {
   assert(game->players[0]->rack->number_of_letters == 7);
   assert(game->player_on_turn_index == 1);
   assert(get_tiles_remaining(game->gen->bag) == 93);
-  assert(game->gen->board->tiles_played == 0);
+  assert(get_tiles_played(game->gen->board) == 0);
   assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(
              game->gen->letter_distribution, "V")] == 0);
   assert(game->players[0]->rack->array[human_readable_letter_to_machine_letter(
@@ -523,7 +509,7 @@ void test_backups(TestConfig *testconfig) {
 
   assert(game->players[0]->score == 36);
   assert(game->players[1]->score == 131);
-  assert(game->gen->board->letters[7] ==
+  assert(get_letter(game->gen->board, 0, 7) ==
          human_readable_letter_to_machine_letter(game->gen->letter_distribution,
                                                  "Q"));
   // let's unplay QUATORZE
@@ -547,7 +533,7 @@ void test_backups(TestConfig *testconfig) {
              game->gen->letter_distribution, "Z")] == 1);
   assert(game->players[1]->rack->number_of_letters == 7);
 
-  assert(game->gen->board->letters[7] == 0);
+  assert(get_letter(game->gen->board, 0, 7) == 0);
   // was 85 after drawing racks for both players, then was 80 after KYNDE
   // and drawing 5 replacement tiles, then 73 after QUATORZ(E) and 7 replacement
   // tiles, then back to 80 after unplay.

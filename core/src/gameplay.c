@@ -31,7 +31,8 @@ void play_move_on_board(const Move *move, Game *game) {
     take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
                           letter);
   }
-  game->gen->board->tiles_played += move->tiles_played;
+
+  incrememt_tiles_played(game->gen->board, move->tiles_played);
 
   // updateAnchorsForMove
   int row = move->row_start;

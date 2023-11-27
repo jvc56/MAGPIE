@@ -38,26 +38,6 @@ int count_nonscoring_plays(const MoveList *ml) {
   return sum;
 }
 
-void boards_equal(const Board *b1, const Board *b2) {
-  assert(b1->tiles_played == b2->tiles_played);
-  for (int i = 0; i < BOARD_DIM; i++) {
-    for (int j = 0; j < BOARD_DIM; j++) {
-      assert(get_letter(b1, i, j) == get_letter(b2, i, j));
-      assert(get_bonus_square(b1, i, j) == get_bonus_square(b2, i, j));
-      assert(get_cross_score(b1, i, j, BOARD_HORIZONTAL_DIRECTION, 0) ==
-             get_cross_score(b2, i, j, BOARD_HORIZONTAL_DIRECTION, 0));
-      assert(get_cross_score(b1, i, j, BOARD_VERTICAL_DIRECTION, 0) ==
-             get_cross_score(b2, i, j, BOARD_VERTICAL_DIRECTION, 0));
-      assert(get_cross_set(b1, i, j, BOARD_HORIZONTAL_DIRECTION, 0) ==
-             get_cross_set(b2, i, j, BOARD_HORIZONTAL_DIRECTION, 0));
-      assert(get_cross_set(b1, i, j, BOARD_VERTICAL_DIRECTION, 0) ==
-             get_cross_set(b2, i, j, BOARD_VERTICAL_DIRECTION, 0));
-      assert(get_anchor(b1, i, j, 0) == get_anchor(b2, i, j, 0));
-      assert(get_anchor(b1, i, j, 1) == get_anchor(b2, i, j, 1));
-    }
-  }
-}
-
 void execute_recursive_gen(Generator *gen, int col, Player *player,
                            int leftstrip, int rightstrip, bool unique_play) {
   gen->move_sort_type = player->move_sort_type;
@@ -345,7 +325,7 @@ void macondo_tests(TestConfig *testconfig) {
                           game_two->gen->board,
                           game->data_is_shared[PLAYERS_DATA_TYPE_KWG]);
 
-  boards_equal(game->gen->board, game_two->gen->board);
+  assert_boards_are_equal(game->gen->board, game_two->gen->board);
 
   reset_game(game);
   reset_game(game_two);

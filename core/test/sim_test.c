@@ -59,7 +59,7 @@ void test_sim_single_iteration(TestConfig *testconfig) {
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
 
-  assert(game->gen->board->tiles_played == 0);
+  assert(get_tiles_played(game->gen->board) == 0);
 
   destroy_game(game);
   destroy_simmer(simmer);

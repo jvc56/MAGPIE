@@ -37,6 +37,7 @@ void assert_strings_equal(const char *str1, const char *str2);
 void assert_move(const Game *game, const SortedMoveList *sml, int move_index,
                  const char *expected_move_string);
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
+void assert_boards_are_equal(const Board *b1, const Board *b2);
 void print_game(const Game *game);
 void print_inference(const Inference *inference, const Rack *rack);
 void load_config_or_die(Config *config, const char *cmd);

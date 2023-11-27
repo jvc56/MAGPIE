@@ -217,6 +217,28 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
   destroy_rack(rack);
 }
 
+// Assumes b1 and b2 use the same lexicon and therefore
+// does not compare the cross set index of 1.
+void assert_boards_are_equal(const Board *b1, const Board *b2) {
+  assert(get_transpose(b1) == get_transpose(b2));
+  assert(get_tiles_played(b1) == get_tiles_played(b2));
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      assert(get_letter(b1, row, col) == get_letter(b2, row, col));
+      assert(get_bonus_square(b1, row, col) == get_bonus_square(b2, row, col));
+      for (int dir = 0; dir < 2; dir++) {
+        assert(get_anchor(b1, row, col, dir) == get_anchor(b2, row, col, dir));
+        // For now, assume all boards tested in this method
+        // share the same lexicon
+        assert(get_cross_set(b1, row, col, dir, 0) ==
+               get_cross_set(b2, row, col, dir, 0));
+        assert(get_cross_score(b1, row, col, dir, 0) ==
+               get_cross_score(b2, row, col, dir, 0));
+      }
+    }
+  }
+}
+
 void assert_move(const Game *game, const SortedMoveList *sml, int move_index,
                  const char *expected_move_string) {
   StringBuilder *move_string = create_string_builder();

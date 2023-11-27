@@ -15,6 +15,24 @@
 #define BONUS_TRIPLE_LETTER_SCORE '"'
 #define BONUS_DOUBLE_LETTER_SCORE '\''
 
+typedef struct TraverseBackwardsReturnValues {
+
+} TraverseBackwardsReturnValues;
+
+struct Board {
+  uint8_t letters[BOARD_DIM * BOARD_DIM];
+  uint8_t bonus_squares[BOARD_DIM * BOARD_DIM];
+
+  uint64_t cross_sets[NUMBER_OF_CROSSES];
+  int cross_scores[NUMBER_OF_CROSSES];
+  int anchors[BOARD_DIM * BOARD_DIM * 2];
+  bool transposed;
+  int tiles_played;
+  // Values used for TraverseBackwards
+  uint32_t node_index;
+  bool path_is_valid;
+};
+
 bool dir_is_vertical(int dir) { return dir == BOARD_VERTICAL_DIRECTION; }
 
 board_layout_t
@@ -53,14 +71,6 @@ int get_tindex_player_cross(const Board *board, int row, int col, int dir,
 
 bool is_empty(const Board *board, int row, int col) {
   return get_letter(board, row, col) == ALPHABET_EMPTY_SQUARE_MARKER;
-}
-
-void set_letter_by_index(Board *board, int index, uint8_t letter) {
-  board->letters[index] = letter;
-}
-
-uint8_t get_letter_by_index(const Board *board, int index) {
-  return board->letters[index];
 }
 
 void set_letter(Board *board, int row, int col, uint8_t letter) {
@@ -293,6 +303,8 @@ void set_bonus_squares(Board *board) {
   }
 }
 
+bool get_transpose(const Board *board) { return board->transposed; }
+
 void transpose(Board *board) { board->transposed = !board->transposed; }
 
 void set_transpose(Board *board, bool transposed) {
@@ -301,10 +313,28 @@ void set_transpose(Board *board, bool transposed) {
 
 void reset_transpose(Board *board) { board->transposed = false; }
 
+int get_tiles_played(const Board *board) { return board->tiles_played; }
+
+void incrememt_tiles_played(Board *board, int tiles_played) {
+  board->tiles_played += tiles_played;
+}
+
+uint32_t get_board_node_index(const Board *board) { return board->node_index; }
+
+bool get_board_path_is_valid(const Board *board) {
+  return board->path_is_valid;
+}
+
+void set_board_node_index(Board *board, uint32_t value) {
+  board->node_index = value;
+}
+
+void set_board_path_is_valid(Board *board, bool value) {
+  board->path_is_valid = value;
+}
+
 Board *create_board() {
   Board *board = malloc_or_die(sizeof(Board));
-  board->traverse_backwards_return_values =
-      malloc_or_die(sizeof(TraverseBackwardsReturnValues));
   reset_board(board);
   set_bonus_squares(board);
   return board;
@@ -312,8 +342,6 @@ Board *create_board() {
 
 Board *board_duplicate(const Board *board) {
   Board *new_board = malloc_or_die(sizeof(Board));
-  new_board->traverse_backwards_return_values =
-      malloc_or_die(sizeof(TraverseBackwardsReturnValues));
   board_copy(new_board, board);
   return new_board;
 }
@@ -347,7 +375,4 @@ void board_copy(Board *dst, const Board *src) {
   dst->tiles_played = src->tiles_played;
 }
 
-void destroy_board(Board *board) {
-  free(board->traverse_backwards_return_values);
-  free(board);
-}
+void destroy_board(Board *board) { free(board); }

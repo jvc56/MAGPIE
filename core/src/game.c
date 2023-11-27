@@ -62,7 +62,7 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
       // assume that player 0 placed all of the tiles
       // for convenience.
       draw_letter(game->gen->bag, machine_letters[i], 0);
-      game->gen->board->tiles_played++;
+      incrememt_tiles_played(game->gen->board, 1);
     }
     *current_column_index = *current_column_index + number_of_machine_letters;
   }

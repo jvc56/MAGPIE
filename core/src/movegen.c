@@ -83,7 +83,7 @@ double get_spare_move_equity(const Generator *gen, const Player *player,
   double leave_adjustment = 0;
   double other_adjustments = 0;
 
-  if (gen->apply_placement_adjustment && gen->board->tiles_played == 0 &&
+  if (gen->apply_placement_adjustment && get_tiles_played(gen->board) == 0 &&
       gen->move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
   }
@@ -693,7 +693,7 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
 
   shadow_start(opp_rack, gen, get_cross_set_index(gen, player->index));
   add_anchor(gen->anchor_list, gen->current_row_index, col,
-             gen->last_anchor_col, gen->board->transposed,
+             gen->last_anchor_col, get_transpose(gen->board),
              dir_is_vertical(gen->dir), gen->highest_shadow_equity);
 }
 
