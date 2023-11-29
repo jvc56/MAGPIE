@@ -9,15 +9,12 @@
 #include "sim.h"
 #include "string_util.h"
 
-typedef struct CommandVars {
-  char *command;
-  Config *config;
-  Game *game;
-  Simmer *simmer;
-  Inference *inference;
-  AutoplayResults *autoplay_results;
-  ErrorStatus *error_status;
-} CommandVars;
+struct CommandVars;
+typedef struct CommandVars CommandVars;
+
+Config *get_config(const struct CommandVars *cmd_vars);
+Game *get_game(const struct CommandVars *cmd_vars);
+ErrorStatus *get_error_status(const struct CommandVars *cmd_vars);
 
 void execute_command_sync(CommandVars *command_vars, const char *command);
 void execute_command_async(CommandVars *command_vars, const char *command);

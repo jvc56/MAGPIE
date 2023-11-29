@@ -17,6 +17,36 @@
 #define STOP_COMMAND_STRING "stop"
 #define FILE_COMMAND_STRING "file"
 
+struct CommandVars {
+  char *command;
+  Config *config;
+  Game *game;
+  Simmer *simmer;
+  Inference *inference;
+  AutoplayResults *autoplay_results;
+  ErrorStatus *error_status;
+};
+
+char *get_command(const CommandVars *cmd_vars) { return cmd_vars->command; }
+
+Config *get_config(const CommandVars *cmd_vars) { return cmd_vars->config; }
+
+Game *get_game(const CommandVars *cmd_vars) { return cmd_vars->game; }
+
+Simmer *get_simmer(const CommandVars *cmd_vars) { return cmd_vars->simmer; }
+
+Inference *get_inference(const CommandVars *cmd_vars) {
+  return cmd_vars->inference;
+}
+
+AutoplayResults *get_autoplay_results(const CommandVars *cmd_vars) {
+  return cmd_vars->autoplay_results;
+}
+
+ErrorStatus *get_error_status(const CommandVars *cmd_vars) {
+  return cmd_vars->error_status;
+}
+
 CommandVars *create_command_vars() {
   CommandVars *command_vars = malloc_or_die(sizeof(CommandVars));
   command_vars->command = NULL;

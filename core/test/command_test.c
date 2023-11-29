@@ -92,8 +92,9 @@ void destroy_main_args(MainArgs *main_args) {
 void block_for_search(CommandVars *command_vars, int max_seconds) {
   // Poll for the end of the command
   int seconds_elapsed = 0;
+  Config *config = get_config(command_vars);
   while (1) {
-    if (get_mode(command_vars->config->thread_control) == MODE_STOPPED) {
+    if (get_mode(config->thread_control) == MODE_STOPPED) {
       break;
     } else {
       sleep(1);
@@ -142,26 +143,28 @@ void assert_command_status_and_output(CommandVars *command_vars,
   log_set_error_out(errorout_fh);
 
   execute_command_async(command_vars, command);
+  Config *config = get_config(command_vars);
   if (should_halt) {
     // If halting, let the search start
     sleep(2);
-    halt(command_vars->config->thread_control, HALT_STATUS_USER_INTERRUPT);
+    halt(config->thread_control, HALT_STATUS_USER_INTERRUPT);
   }
   block_for_search(command_vars, seconds_to_wait);
 
   fclose(errorout_fh);
 
-  if (command_vars->error_status->type != expected_error_status_type) {
+  ErrorStatus *error_status = get_error_status(command_vars);
+  if (error_status->type != expected_error_status_type) {
     printf("expected error status != actual error status (%d != %d)\n",
-           expected_error_status_type, command_vars->error_status->type);
+           expected_error_status_type, error_status->type);
   }
-  if (command_vars->error_status->code != expected_error_code) {
+  if (error_status->code != expected_error_code) {
     printf("expected error code != actual error code (%d != %d)\n",
-           expected_error_code, command_vars->error_status->code);
+           expected_error_code, error_status->code);
   }
-  assert(command_vars->error_status->type == expected_error_status_type);
-  assert(command_vars->error_status->code == expected_error_code);
-  assert(get_mode(command_vars->config->thread_control) == MODE_STOPPED);
+  assert(error_status->type == expected_error_status_type);
+  assert(error_status->code == expected_error_code);
+  assert(get_mode(config->thread_control) == MODE_STOPPED);
 
   char *test_output = get_string_from_file(test_output_filename);
   int newlines_in_output = count_newlines(test_output);

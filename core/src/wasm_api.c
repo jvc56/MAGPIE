@@ -25,12 +25,12 @@ Game *get_game_from_cgp(const char *cgp) {
   char *cgp_command = get_formatted_string("position cgp %s", cgp);
   execute_command_sync(iso_command_vars, cgp_command);
   free(cgp_command);
-  if (iso_command_vars->error_status->type != ERROR_STATUS_TYPE_NONE) {
+  ErrorStatus *error_status = get_error_status(iso_command_vars);
+  if (error_status->type != ERROR_STATUS_TYPE_NONE) {
     log_fatal("wasm command failed with error type %d code %d\n",
-              iso_command_vars->error_status->type,
-              iso_command_vars->error_status->code);
+              error_status->type, error_status->code);
   }
-  return iso_command_vars->game;
+  return get_game(iso_command_vars);
 }
 
 // tiles must contain 0 for play-through tiles!
