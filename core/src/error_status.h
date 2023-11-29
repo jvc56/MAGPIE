@@ -10,10 +10,8 @@ typedef enum {
   ERROR_STATUS_TYPE_AUTOPLAY,
 } error_status_t;
 
-typedef struct ErrorStatus {
-  error_status_t type;
-  int code;
-} ErrorStatus;
+struct ErrorStatus;
+typedef struct ErrorStatus ErrorStatus;
 
 void set_error_status(ErrorStatus *error_status, error_status_t type, int code);
 ErrorStatus *create_error_status(error_status_t type, int code);

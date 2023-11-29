@@ -27,25 +27,7 @@ struct CommandVars {
   ErrorStatus *error_status;
 };
 
-char *get_command(const CommandVars *cmd_vars) { return cmd_vars->command; }
-
-Config *get_config(const CommandVars *cmd_vars) { return cmd_vars->config; }
-
 Game *get_game(const CommandVars *cmd_vars) { return cmd_vars->game; }
-
-Simmer *get_simmer(const CommandVars *cmd_vars) { return cmd_vars->simmer; }
-
-Inference *get_inference(const CommandVars *cmd_vars) {
-  return cmd_vars->inference;
-}
-
-AutoplayResults *get_autoplay_results(const CommandVars *cmd_vars) {
-  return cmd_vars->autoplay_results;
-}
-
-ErrorStatus *get_error_status(const CommandVars *cmd_vars) {
-  return cmd_vars->error_status;
-}
 
 CommandVars *create_command_vars() {
   CommandVars *command_vars = malloc_or_die(sizeof(CommandVars));
@@ -83,6 +65,8 @@ void set_command(CommandVars *command_vars, const char *command) {
   command_vars->command = string_duplicate(command);
 }
 
+// Returns NULL and prints a warning if a search is ongoing or some other error
+// occurred
 char *command_search_status(CommandVars *command_vars, bool should_halt) {
   if (!command_vars) {
     log_warn("The command variables struct has not been initialized.");
@@ -117,16 +101,16 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
     status_string = ucgi_sim_stats(command_vars->game, command_vars->simmer, 1);
     break;
   case COMMAND_TYPE_AUTOPLAY:
-    log_warn("autoplay status unimplemented");
+    status_string = string_duplicate("autoplay status unimplemented");
     break;
   case COMMAND_TYPE_LOAD_CGP:
-    log_warn("no status available for load cgp");
+    status_string = string_duplicate("no status available for load cgp");
     break;
   case COMMAND_TYPE_SET_OPTIONS:
-    log_warn("no status available for set options");
+    status_string = string_duplicate("no status available for set options");
     break;
   case COMMAND_TYPE_INFER:
-    log_warn("infer status unimplemented");
+    status_string = string_duplicate("infer status unimplemented");
     break;
   }
   return status_string;

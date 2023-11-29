@@ -25,11 +25,6 @@ Game *get_game_from_cgp(const char *cgp) {
   char *cgp_command = get_formatted_string("position cgp %s", cgp);
   execute_command_sync(iso_command_vars, cgp_command);
   free(cgp_command);
-  ErrorStatus *error_status = get_error_status(iso_command_vars);
-  if (error_status->type != ERROR_STATUS_TYPE_NONE) {
-    log_fatal("wasm command failed with error type %d code %d\n",
-              error_status->type, error_status->code);
-  }
   return get_game(iso_command_vars);
 }
 

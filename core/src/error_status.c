@@ -5,6 +5,11 @@
 #include "string_util.h"
 #include "util.h"
 
+struct ErrorStatus {
+  error_status_t type;
+  int code;
+};
+
 void set_error_status(ErrorStatus *error_status, error_status_t type,
                       int code) {
   error_status->code = code;

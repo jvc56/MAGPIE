@@ -12,9 +12,12 @@
 struct CommandVars;
 typedef struct CommandVars CommandVars;
 
-Config *get_config(const struct CommandVars *cmd_vars);
+// FIXME: This is a temporary exposure of the game
+// that should only used for wasm. The
+// static_evaluation and score_play functions in wasm_api.c
+// should be moved to game.c so the command vars do not
+// have to be exposed like this.
 Game *get_game(const struct CommandVars *cmd_vars);
-ErrorStatus *get_error_status(const struct CommandVars *cmd_vars);
 
 void execute_command_sync(CommandVars *command_vars, const char *command);
 void execute_command_async(CommandVars *command_vars, const char *command);
