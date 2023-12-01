@@ -1,0 +1,6 @@
+#ifndef GAME_HISTORY_DEFS_H
+#define GAME_HISTORY_DEFS_H
+
+#define MAX_GAME_EVENTS 200
+
+#endif

@@ -6,7 +6,7 @@
 
 #include "../src/move.h"
 #include "../src/sim.h"
-#include "../src/winpct.h"
+#include "../src/win_pct.h"
 
 #include "test_util.h"
 #include "testconfig.h"

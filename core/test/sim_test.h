@@ -1,5 +1,5 @@
-#ifndef WINPCT_TEST_H
-#define WINPCT_TEST_H
+#ifndef WIN_PCT_TEST_H
+#define WIN_PCT_TEST_H
 
 #include "../src/config.h"
 #include "testconfig.h"
