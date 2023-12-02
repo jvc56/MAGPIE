@@ -27,7 +27,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
       create_sorted_move_list(game->gen->move_list);
 
   const Move *top_move = vortex_sorted_move_list->moves[0];
-  assert(top_move->col_start == 6);
+  assert(topget_col_start(move) == 6);
   assert(top_move->tiles_played == 6);
   assert(top_move->score == 48);
   assert(within_epsilon(
@@ -45,7 +45,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
       create_sorted_move_list(game->gen->move_list);
 
   top_move = jibed_sorted_move_list->moves[0];
-  assert(top_move->col_start == 3);
+  assert(topget_col_start(move) == 3);
   assert(top_move->tiles_played == 5);
   assert(top_move->score == 46);
   assert(within_epsilon((double)(top_move->score +
@@ -62,7 +62,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   SortedMoveList *facete_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
   top_move = facete_sorted_move_list->moves[0];
-  assert(top_move->col_start == 3);
+  assert(topget_col_start(move) == 3);
   assert(top_move->tiles_played == 6);
   assert(top_move->score == 30);
   assert(within_epsilon((double)(top_move->score +
@@ -78,7 +78,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   SortedMoveList *atalaya_sorted_move_list =
       create_sorted_move_list(game->gen->move_list);
   top_move = atalaya_sorted_move_list->moves[0];
-  assert(top_move->col_start == 6);
+  assert(topget_col_start(move) == 6);
   assert(top_move->tiles_played == 7);
   assert(top_move->score == 78);
   assert(within_epsilon((double)(top_move->score +

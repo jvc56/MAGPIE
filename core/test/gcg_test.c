@@ -151,12 +151,12 @@ void assert_game_event(const GameHistory *game_history, int event_index,
   const Move *move = game_event->move;
   if (move) {
 
-    assert(move->move_type == move_type);
-    assert(move->score == move_score);
+    assertget_move_type(move) == move_type);
+    assertget_score(move) == move_score);
 
     if (move_type != GAME_EVENT_PASS) {
-      assert(move->tiles_played == tiles_played);
-      assert(move->tiles_length == tiles_length);
+      assertget_tiles_played(move) == tiles_played);
+      assertget_tiles_length(move) == tiles_length);
       uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * tiles_length);
       int number_of_machine_letters = str_to_machine_letters(
           game_history->letter_distribution, tiles_string,
@@ -165,7 +165,7 @@ void assert_game_event(const GameHistory *game_history, int event_index,
       bool tiles_match = number_of_machine_letters == tiles_length;
       if (tiles_match) {
         for (int i = 0; i < tiles_length; i++) {
-          tiles_match = tiles_match && move->tiles[i] == machine_letters[i];
+          tiles_match = tiles_match &&get_tile(move, i] == machine_letters[i);
         }
       }
       free(machine_letters);
@@ -173,9 +173,9 @@ void assert_game_event(const GameHistory *game_history, int event_index,
     }
 
     if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      assert(move->dir == dir);
-      assert(move->row_start == move_row_start);
-      assert(move->col_start == move_col_start);
+      assertget_dir(move) == dir);
+      assertget_row_start(move) == move_row_start);
+      assertget_col_start(move) == move_col_start);
     }
   }
 }

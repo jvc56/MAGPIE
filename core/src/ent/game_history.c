@@ -1,16 +1,43 @@
-
-#include <stddef.h>
-#include <stdint.h>
 #include <stdlib.h>
 
-#include "game.h"
-#include "game_event.h"
+#include "../def/board_defs.h"
+#include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
+
 #include "game_history.h"
-#include "log.h"
+#include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
-#include "string_util.h"
-#include "util.h"
+struct GameEvent {
+  game_event_t event_type;
+  int player_index;
+  int cumulative_score;
+  Rack *rack;
+  Move *move;
+  char *note;
+};
+
+GameEvent *create_game_event() {
+  GameEvent *game_event = malloc_or_die(sizeof(GameEvent));
+  game_event->event_type = GAME_EVENT_UNKNOWN;
+  game_event->player_index = -1;
+  game_event->cumulative_score = 0;
+  game_event->move = NULL;
+  game_event->rack = NULL;
+  game_event->note = NULL;
+  return game_event;
+}
+
+void destroy_game_event(GameEvent *game_event) {
+  if (game_event->move) {
+    destroy_move(game_event->move);
+  }
+  if (game_event->rack) {
+    destroy_rack(game_event->rack);
+  }
+  free(game_event->note);
+  free(game_event);
+}
 
 struct GameHistoryPlayer {
   char *name;
@@ -93,11 +120,6 @@ void destroy_game_history(GameHistory *game_history) {
   }
   free(game_history->events);
   free(game_history);
-}
-
-Game *play_to_turn(const GameHistory *game_history, int turn_number) {
-  log_fatal("unimplemented: %p, %d\n", game_history, turn_number);
-  return NULL;
 }
 
 void set_cumulative_scores(GameHistory *game_history) {

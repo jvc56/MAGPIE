@@ -1,11 +1,9 @@
 #include <stdlib.h>
 
-#include "constants.h"
 #include "klv.h"
 #include "kwg.h"
 #include "log.h"
 #include "players_data.h"
-#include "util.h"
 
 struct PlayersData {
   bool data_is_shared[NUMBER_OF_DATA];
@@ -87,8 +85,7 @@ void players_data_set_data_name(PlayersData *players_data,
     return;
   }
   players_data_destroy_data_name(players_data, players_data_type, player_index);
-  players_data->data_names[data_name_index] =
-      string_duplicate(data_name);
+  players_data->data_names[data_name_index] = string_duplicate(data_name);
 }
 
 void *players_data_get_data(const PlayersData *players_data,

@@ -160,15 +160,15 @@ bool equal_rack(const Rack *expected_rack, const Rack *actual_rack) {
            actual_rack->number_of_letters);
     return false;
   }
-  if (expected_rack->array_size != actual_rack->array_size) {
-    printf("sizes: %d != %d\n", expected_rack->array_size,
-           actual_rack->array_size);
+  if (expected_get_array_size(rack) != actual_get_array_size(rack)) {
+    printf("sizes: %d != %d\n", expected_get_array_size(rack),
+           actual_get_array_size(rack));
     return false;
   }
-  for (int i = 0; i < (expected_rack->array_size); i++) {
-    if (expected_rack->array[i] != actual_rack->array[i]) {
-      printf("different: %d: %d != %d\n", i, expected_rack->array[i],
-             actual_rack->array[i]);
+  for (int i = 0; i < (expected_get_array_size(rack)); i++) {
+    if (expected_get_number_of_letter(rack, i) != actual_get_number_of_letter(rack, i)) {
+      printf("different: %d: %d != %d\n", i, expected_get_number_of_letter(rack, i),
+             actual_get_number_of_letter(rack, i));
       return false;
     }
   }
@@ -210,7 +210,7 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
     take_letter_from_rack(rack, letter);
   }
 
-  assert(rack->empty);
+  assertrack_is_empty);
 
   destroy_bag(b1_copy);
   destroy_bag(b2_copy);

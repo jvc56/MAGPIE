@@ -8,7 +8,7 @@
 #include "game.h"
 #include "gameplay.h"
 #include "stats.h"
-#include "util.h"
+#include "../util/util.h"
 
 typedef struct AutoplayWorker {
   const Config *config;

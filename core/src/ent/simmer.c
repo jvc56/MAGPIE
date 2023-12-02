@@ -6,14 +6,14 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "../util/util.h"
+
 #include "gameplay.h"
 #include "log.h"
 #include "rack.h"
-#include "sim.h"
+#include "simmer.h"
 #include "stats.h"
 #include "ucgi_formats.h"
-#include "ucgi_print.h"
-#include "util.h"
 #include "xoshiro.h"
 
 #define MAX_STOPPING_ITERATION_CT 4000
@@ -199,8 +199,8 @@ void add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
 }
 
 void add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
-                     float leftover, game_end_reason_t game_end_reason,
-                     int tiles_unseen, bool plies_are_odd, bool lock) {
+                      float leftover, game_end_reason_t game_end_reason,
+                      int tiles_unseen, bool plies_are_odd, bool lock) {
 
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
@@ -472,8 +472,8 @@ bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
     simmer->similar_plays_rack->array[ml]--;
   }
 
-  for (int i = 0; i < simmer->similar_plays_rack->array_size; i++) {
-    if (simmer->similar_plays_rack->array[i] != 0) {
+  for (int i = 0; i < simmer->similar_plays_get_array_size(rack); i++) {
+    if (simmer->similar_plays_get_number_of_letter(rack, i) != 0) {
       simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
       simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
       return false;

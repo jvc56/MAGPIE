@@ -293,11 +293,11 @@ void macondo_tests(TestConfig *testconfig) {
       create_sorted_move_list(game->gen->move_list);
 
   const Move *move = test_generate_empty_board_sorted_move_list->moves[0];
-  assert(move->score == 80);
-  assert(move->tiles_played == 7);
-  assert(move->tiles_length == 7);
-  assert(move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE);
-  assert(move->row_start == 7);
+  assertget_score(move) == 80);
+  assertget_tiles_played(move) == 7);
+  assertget_tiles_length(move) == 7);
+  assertget_move_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assertget_row_start(move) == 7);
 
   destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
   reset_rack(player->rack);
@@ -514,11 +514,11 @@ void equity_test(TestConfig *testconfig) {
 
   for (int i = 0; i < number_of_moves - 1; i++) {
     const Move *move = equity_test_sorted_move_list->moves[i];
-    assert(move->equity <= previous_equity);
+    assertget_equity(move) <= previous_equity);
     set_rack_to_string(game->gen->letter_distribution, move_rack, "AFGIIIS");
     double leave_value = get_leave_value_for_move(klv, move, move_rack);
-    assert(within_epsilon(move->equity, (((double)move->score) + leave_value)));
-    previous_equity = move->equity;
+    assert(within_epsilonget_equity(move), (((doubleget_score(move)) + leave_value)));
+    previous_equity =get_equity(move);
   }
   assert(equity_test_sorted_move_list->moves[number_of_moves - 1]->move_type ==
          GAME_EVENT_PASS);

@@ -1,23 +1,16 @@
 #ifndef MOVEGEN_H
 #define MOVEGEN_H
 
+#include "../def/move_defs.h"
 #include "../def/movegen_defs.h"
-
-#include "anchor.h"
-#include "bag.h"
-#include "board.h"
-#include "config.h"
-#include "constants.h"
-#include "klv.h"
-#include "kwg.h"
-#include "leave_map.h"
-#include "letter_distribution.h"
-#include "move.h"
-#include "player.h"
-#include "rack.h"
 
 struct Generator;
 typedef struct Generator Generator;
+
+Board *gen_get_board(Generator *gen);
+Bag *gen_get_bag(Generator *gen);
+LetterDistribution *gen_get_ld(Generator *gen);
+MoveList *gen_get_move_list(Generator *gen);
 
 Generator *create_generator(const Config *config, int move_list_capacity);
 Generator *generate_duplicate(const Generator *gen, int move_list_capacity);

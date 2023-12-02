@@ -4,7 +4,6 @@
 #include <stdint.h>
 
 #include "board.h"
-#include "constants.h"
 #include "kwg.h"
 #include "rack.h"
 

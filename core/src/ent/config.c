@@ -270,77 +270,89 @@ typedef struct Config {
   exec_mode_t exec_mode;
 } Config;
 
-command_t get_command_type(const Config *config) {
+command_t config_get_command_type(const Config *config) {
   return config->command_type;
 }
 
-bool get_lexicons_loaded(const Config *config) {
+bool config_get_lexicons_loaded(const Config *config) {
   return config->lexicons_loaded;
 }
 
-LetterDistribution *get_letter_distribution(const Config *config) {
+LetterDistribution *config_get_letter_distribution(const Config *config) {
   return config->letter_distribution;
 }
 
-char *get_ld_name(const Config *config) { return config->ld_name; }
+char *config_get_ld_name(const Config *config) { return config->ld_name; }
 
-char *get_cgp(const Config *config) { return config->cgp; }
+char *config_get_cgp(const Config *config) { return config->cgp; }
 
-int get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
+int config_get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
 
-board_layout_t get_board_layout(const Config *config) {
+board_layout_t config_get_board_layout(const Config *config) {
   return config->board_layout;
 }
 
-game_variant_t get_game_variant(const Config *config) {
+game_variant_t config_get_game_variant(const Config *config) {
   return config->game_variant;
 }
 
-PlayersData *get_players_data(const Config *config) {
+PlayersData *config_get_players_data(const Config *config) {
   return config->players_data;
 }
 
-Rack *get_rack(const Config *config) { return config->rack; }
+Rack *config_get_rack(const Config *config) { return config->rack; }
 
-int get_player_to_infer_index(const Config *config) {
+int config_get_player_to_infer_index(const Config *config) {
   return config->player_to_infer_index;
 }
 
-int get_actual_score(const Config *config) { return config->actual_score; }
+int config_get_actual_score(const Config *config) {
+  return config->actual_score;
+}
 
-int get_number_of_tiles_exchanged(const Config *config) {
+int config_get_number_of_tiles_exchanged(const Config *config) {
   return config->number_of_tiles_exchanged;
 }
 
-double get_equity_margin(const Config *config) { return config->equity_margin; }
+double config_get_equity_margin(const Config *config) {
+  return config->equity_margin;
+}
 
-WinPct *get_win_pcts(const Config *config) { return config->win_pcts; }
+WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 
-char *get_win_pct_name(const Config *config) { return config->win_pct_name; }
+char *config_get_win_pct_name(const Config *config) {
+  return config->win_pct_name;
+}
 
-int get_num_plays(const Config *config) { return config->num_plays; }
+int config_get_num_plays(const Config *config) { return config->num_plays; }
 
-int get_plies(const Config *config) { return config->plies; }
+int config_get_plies(const Config *config) { return config->plies; }
 
-int get_max_iterations(const Config *config) { return config->max_iterations; }
+int config_get_max_iterations(const Config *config) {
+  return config->max_iterations;
+}
 
-sim_stopping_condition_t get_stopping_condition(const Config *config) {
+sim_stopping_condition_t config_get_stopping_condition(const Config *config) {
   return config->stopping_condition;
 }
 
-bool get_static_search_only(const Config *config) {
+bool config_get_static_search_only(const Config *config) {
   return config->static_search_only;
 }
 
-bool get_use_game_pairs(const Config *config) { return config->use_game_pairs; }
+bool config_get_use_game_pairs(const Config *config) {
+  return config->use_game_pairs;
+}
 
-uint64_t get_seed(const Config *config) { return config->seed; }
+uint64_t config_get_seed(const Config *config) { return config->seed; }
 
-ThreadControl *get_thread_control(const Config *config) {
+ThreadControl *config_get_thread_control(const Config *config) {
   return config->thread_control;
 }
 
-exec_mode_t get_exec_mode(const Config *config) { return config->exec_mode; }
+exec_mode_t config_get_exec_mode(const Config *config) {
+  return config->exec_mode;
+}
 
 SingleArg *create_single_arg() {
   SingleArg *single_arg = malloc_or_die(sizeof(SingleArg));
@@ -741,8 +753,8 @@ load_print_info_interval_for_config(Config *config,
   if (!is_all_digits_or_empty(print_info_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL;
   }
-  config->thread_control->print_info_interval =
-      string_to_int(print_info_interval);
+  set_print_info_interval(config->thread_control,
+                          string_to_int(print_info_interval));
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -752,8 +764,8 @@ load_check_stop_interval_for_config(Config *config,
   if (!is_all_digits_or_empty(check_stop_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL;
   }
-  config->thread_control->check_stopping_condition_interval =
-      string_to_int(check_stop_interval);
+  set_check_stopping_condition_interval(config->thread_control,
+                                        string_to_int(check_stop_interval));
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -1022,7 +1034,8 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     free(updated_letter_distribution_name);
   }
 
-  update_or_create_rack(&config->rack, config->letter_distribution->size);
+  update_or_create_rack(
+      &config->rack, letter_distribution_get_size(config->letter_distribution));
 
   if (new_rack) {
     if (!strings_equal(EMPTY_RACK_STRING, new_rack)) {

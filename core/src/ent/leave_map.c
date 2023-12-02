@@ -1,6 +1,9 @@
 #include <stdint.h>
 
+#include "../def/rack_defs.h"
+
 #include "leave_map.h"
+#include "rack.h"
 
 struct LeaveMap {
   uint32_t rack_array_size;
@@ -41,4 +44,31 @@ void set_current_value(LeaveMap *leave_map, double value) {
 
 double get_current_value(const LeaveMap *leave_map) {
   return leave_map->leave_values[leave_map->current_index];
+}
+
+void leave_map_take_letter(LeaveMap *leave_map, uint8_t letter,
+                           int number_of_letter_on_rack) {
+  int base_index = leave_map->letter_base_index_map[letter];
+  int offset = number_of_letter_on_rack;
+  int bit_index = base_index + offset;
+  leave_map->current_index &= ~(1 << bit_index);
+}
+
+void leave_map_add_letter(LeaveMap *leave_map, uint8_t letter,
+                          int number_of_letter_on_rack) {
+  int base_index = leave_map->letter_base_index_map[letter];
+  int offset = number_of_letter_on_rack;
+  int bit_index = base_index + offset;
+  leave_map->current_index |= 1 << bit_index;
+}
+
+void init_leave_map(const Rack *rack, LeaveMap *leave_map) {
+  int current_base_index = 0;
+  for (int i = 0; i < get_array_size(rack); i++) {
+    if (get_number_of_letter(rack, i) > 0) {
+      leave_map->letter_base_index_map[i] = current_base_index;
+      current_base_index += get_number_of_letter(rack, i);
+    }
+  }
+  leave_map->current_index = (1 << current_base_index) - 1;
 }

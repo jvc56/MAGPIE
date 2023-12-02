@@ -24,6 +24,18 @@ char *get_kwg_filepath(const char *kwg_name) {
                               KWG_FILE_EXTENSION);
 }
 
+void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
+                                FILE *stream) {
+  kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
+  size_t result = fread(kwg->nodes, sizeof(uint32_t), number_of_nodes, stream);
+  if (result != number_of_nodes) {
+    log_fatal("kwg nodes fread failure: %zd != %zd", result, number_of_nodes);
+  }
+  for (uint32_t i = 0; i < number_of_nodes; i++) {
+    kwg->nodes[i] = le32toh(kwg->nodes[i]);
+  }
+}
+
 void load_kwg(KWG *kwg, const char *kwg_name) {
   char *kwg_filename = get_kwg_filepath(kwg_name);
 
@@ -39,22 +51,20 @@ void load_kwg(KWG *kwg, const char *kwg_name) {
 
   size_t number_of_nodes = kwg_size / sizeof(uint32_t);
 
-  size_t result;
+  kwg_read_nodes_from_stream(kwg, number_of_nodes, stream);
 
-  kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
-  result = fread(kwg->nodes, sizeof(uint32_t), number_of_nodes, stream);
-  if (result != number_of_nodes) {
-    log_fatal("kwg nodes fread failure: %zd != %zd", result, number_of_nodes);
-  }
-  for (uint32_t i = 0; i < number_of_nodes; i++) {
-    kwg->nodes[i] = le32toh(kwg->nodes[i]);
-  }
   fclose(stream);
 }
 
 KWG *create_kwg(const char *kwg_name) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
   load_kwg(kwg, kwg_name);
+  return kwg;
+}
+
+KWG *create_empty_kwg(size_t number_of_nodes) {
+  KWG *kwg = malloc_or_die(sizeof(KWG));
+  kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
   return kwg;
 }
 

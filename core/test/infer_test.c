@@ -208,7 +208,7 @@ void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
 void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Rack *rack = create_rack(game->players[0]->rack->array_size);
+  Rack *rack = create_rack(game->players[0]->get_array_size(rack));
   Bag *bag = game->gen->bag;
   const KLV *klv = game->players[0]->klv;
   const LetterDistribution *ld = config->letter_distribution;

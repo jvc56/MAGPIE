@@ -11,7 +11,7 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "util.h"
+#include "../util/util.h"
 #include "xoshiro.h"
 
 /* This is xoshiro256++ 1.0, one of our all-purpose, rock-solid generators.

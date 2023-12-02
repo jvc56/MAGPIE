@@ -1,9 +1,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
+
+#include "../util/util.h"
+
 #include "board.h"
 #include "log.h"
-#include "util.h"
 #include "words.h"
 
 typedef struct FormedWord {
@@ -15,7 +19,7 @@ typedef struct FormedWord {
 struct FormedWords {
   int num_words;
   FormedWord words[RACK_SIZE + 1]; // max number of words we can form
-} FormedWords;
+};
 
 FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
                           int word_end_index, int row, int col, int dir) {

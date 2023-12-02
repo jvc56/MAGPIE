@@ -1,11 +1,10 @@
-
-#include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 
-#include "config.h"
+#include "../def/move_defs.h"
+
+#include "klv.h"
+#include "kwg.h"
 #include "player.h"
-#include "util.h"
 
 struct Player {
   int index;
@@ -21,20 +20,52 @@ struct Player {
   const KLV *klv;
 };
 
+// Getters
+
+int player_get_index(const Player *player) { return player->index; }
+
+const char *player_get_name(const Player *player) { return player->name; }
+
+Rack *player_get_rack(const Player *player) { return player->rack; }
+
+int player_get_score(const Player *player) { return player->score; }
+
+move_sort_t player_get_move_sort_type(const Player *player) {
+  return player->move_sort_type;
+}
+
+move_record_t player_get_move_record_type(const Player *player) {
+  return player->move_record_type;
+}
+
+const KWG *player_get_kwg(const Player *player) { return player->kwg; }
+
+const KLV *player_get_klv(const Player *player) { return player->klv; }
+
+// Setters
+
+void player_set_name(Player *player, const char *name) { player->name = name; }
+
+void player_set_rack(Player *player, Rack *rack) { player->rack = rack; }
+
+void player_set_score(Player *player, int score) { player->score = score; }
+
+void player_set_move_sort_type(Player *player, move_sort_t move_sort_type) {
+  player->move_sort_type = move_sort_type;
+}
+
+void player_set_move_record_type(Player *player,
+                                 move_record_t move_record_type) {
+  player->move_record_type = move_record_type;
+}
+
+void player_set_kwg(Player *player, const KWG *kwg) { player->kwg = kwg; }
+
+void player_set_klv(Player *player, const KLV *klv) { player->klv = klv; }
+
 void reset_player(Player *player) {
   reset_rack(player->rack);
   player->score = 0;
-}
-
-void update_player(const Config *config, Player *player) {
-  player->name = players_data_get_name(config->players_data, player->index);
-  player->move_sort_type =
-      players_data_get_move_sort_type(config->players_data, player->index);
-  player->move_record_type =
-      players_data_get_move_record_type(config->players_data, player->index);
-  player->kwg = players_data_get_kwg(config->players_data, player->index);
-  player->klv = players_data_get_klv(config->players_data, player->index);
-  update_or_create_rack(&player->rack, config->letter_distribution->size);
 }
 
 Player *create_player(const Config *config, int player_index) {

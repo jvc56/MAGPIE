@@ -26,24 +26,6 @@ typedef struct LetterDistribution {
                                               [MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
-#include <stdbool.h>
-#include <stdint.h>
-
-#define MACHINE_LETTER_MAX_VALUE 26
-#define MAX_LETTER_BYTE_LENGTH 2
-
-typedef struct LetterDistribution {
-  uint32_t size;
-  uint32_t distribution[MACHINE_LETTER_MAX_VALUE];
-  uint32_t scores[MACHINE_LETTER_MAX_VALUE];
-  uint32_t score_order[MACHINE_LETTER_MAX_VALUE];
-  bool is_vowel[MACHINE_LETTER_MAX_VALUE];
-  int total_tiles;
-  int max_tile_length;
-  char machine_letter_to_human_readable_letter[MACHINE_LETTER_MAX_VALUE]
-                                              [MAX_LETTER_BYTE_LENGTH];
-} LetterDistribution;
-
 uint32_t letter_distribution_get_size(const LetterDistribution *ld) {
   return ld->size;
 }
@@ -53,8 +35,8 @@ uint32_t letter_distribution_get_distribution(const LetterDistribution *ld,
   return ld->distribution[machine_letter];
 }
 
-uint32_t letter_distribution_get_scores(const LetterDistribution *ld,
-                                        uint8_t machine_letter) {
+uint32_t letter_distribution_get_score(const LetterDistribution *ld,
+                                       uint8_t machine_letter) {
   return ld->scores[machine_letter];
 }
 

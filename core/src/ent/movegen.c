@@ -4,16 +4,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../def/cross_set_defs.h"
+#include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
+
+#include "anchor.h"
+#include "bag.h"
 #include "config.h"
-#include "constants.h"
 #include "cross_set.h"
 #include "klv.h"
 #include "kwg.h"
 #include "leave_map.h"
+#include "move.h"
 #include "movegen.h"
 #include "player.h"
 #include "rack.h"
-#include "util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
@@ -56,35 +61,38 @@ void go_on(const Rack *opp_rack, Generator *gen, int current_col, uint8_t L,
            Player *player, uint32_t new_node_index, bool accepts, int leftstrip,
            int rightstrip, bool unique_play);
 
+Board *gen_get_board(Generator *gen) { return gen->board; }
+
+Bag *gen_get_bag(Generator *gen) { return gen->bag; }
+
+LetterDistribution *gen_get_ld(Generator *gen) {
+  return gen->letter_distribution;
+}
+
+MoveList *gen_get_move_list(Generator *gen) { return gen->move_list; }
+
+int score_on_rack(const LetterDistribution *letter_distribution,
+                  const Rack *rack) {
+  int sum = 0;
+  for (int i = 0; i < get_array_size(rack); i++) {
+    sum += get_number_of_letter(rack, i) *
+           letter_distribution_get_score(letter_distribution, i);
+  }
+  return sum;
+}
+
 // Leave map
 
 void take_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
                                           uint8_t letter) {
   take_letter_from_rack(rack, letter);
-  int base_index = leave_map->letter_base_index_map[letter];
-  int offset = rack->array[letter];
-  int bit_index = base_index + offset;
-  leave_map->current_index &= ~(1 << bit_index);
+  leave_map_take_letter(leave_map, letter, get_number_of_letter(rack, letter));
 }
 
 void add_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
                                          uint8_t letter) {
   add_letter_to_rack(rack, letter);
-  int base_index = leave_map->letter_base_index_map[letter];
-  int offset = rack->array[letter] - 1;
-  int bit_index = base_index + offset;
-  leave_map->current_index |= 1 << bit_index;
-}
-
-void init_leave_map(const Rack *rack, LeaveMap *leave_map) {
-  int current_base_index = 0;
-  for (int i = 0; i < rack->array_size; i++) {
-    if (rack->array[i] > 0) {
-      leave_map->letter_base_index_map[i] = current_base_index;
-      current_base_index += rack->array[i];
-    }
-  }
-  leave_map->current_index = (1 << current_base_index) - 1;
+  leave_map_add_letter(leave_map, letter, get_number_of_letter(rack, letter));
 }
 
 int get_cross_set_index(const Generator *gen, int player_index) {
@@ -92,19 +100,19 @@ int get_cross_set_index(const Generator *gen, int player_index) {
 }
 
 double placement_adjustment(const Generator *gen, const Move *move) {
-  int start = move->col_start;
-  int end = start + move->tiles_played;
+  int start = get_col_start(move);
+  int end = start + get_tiles_played(move);
 
   int j = start;
   double penalty = 0;
   double v_penalty = OPENING_HOTSPOT_PENALTY;
 
   while (j < end) {
-    int tile = move->tiles[j - start];
+    int tile = get_tile(move, j - start);
     if (is_blanked(tile)) {
       tile = get_unblanked_machine_letter(tile);
     }
-    if (gen->letter_distribution->is_vowel[tile] &&
+    if (letter_distribution_get_is_vowel(gen->letter_distribution, tile) &&
         (j == 2 || j == 6 || j == 8 || j == 12)) {
       penalty += v_penalty;
     }
@@ -134,7 +142,7 @@ double shadow_endgame_adjustment(const Generator *gen, const Rack *opp_rack,
 
 double endgame_adjustment(const Generator *gen, const Rack *rack,
                           const Rack *opp_rack) {
-  if (!rack->empty) {
+  if (rack_is_empty) {
     // This play is not going out. We should penalize it by our own score
     // plus some constant.
     return ((-(double)score_on_rack(gen->letter_distribution, rack)) *
@@ -149,26 +157,26 @@ double get_spare_move_equity(const Generator *gen, const Player *player,
   double leave_adjustment = 0;
   double other_adjustments = 0;
 
+  Move *spare_move = get_spare_move(gen->move_list);
   if (gen->apply_placement_adjustment && get_tiles_played(gen->board) == 0 &&
-      gen->move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
+      get_move_type(spare_move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    other_adjustments = placement_adjustment(gen, spare_move);
   }
 
   if (!bag_is_empty(gen->bag)) {
     leave_adjustment = get_current_value(gen->leave_map);
     int bag_plus_rack_size = get_tiles_remaining(gen->bag) -
-                             gen->move_list->spare_move->tiles_played +
-                             RACK_SIZE;
+                             get_tiles_played(spare_move) + RACK_SIZE;
     if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
       other_adjustments +=
           gen->preendgame_adjustment_values[bag_plus_rack_size];
     }
   } else {
-    other_adjustments += endgame_adjustment(gen, player->rack, opp_rack);
+    other_adjustments +=
+        endgame_adjustment(gen, player_get_rack(player), opp_rack);
   }
 
-  return ((double)gen->move_list->spare_move->score) + leave_adjustment +
-         other_adjustments;
+  return ((double)get_score(spare_move)) + leave_adjustment + other_adjustments;
 }
 
 // this function assumes the word is always horizontal. If this isn't the case,
@@ -203,7 +211,7 @@ int score_move(const Board *board,
     if (is_blanked(ml)) {
       ls = 0;
     } else {
-      ls = letter_distribution->scores[ml];
+      ls = letter_distribution_get_score(letter_distribution, ml);
     }
 
     main_word_score += ls * letter_multiplier;
@@ -239,7 +247,7 @@ void record_play(const Player *player, const Rack *opp_rack, Generator *gen,
     score = score_move(gen->board, gen->letter_distribution, gen->strip,
                        leftstrip, rightstrip, start_row, start_col,
                        tiles_played, !dir_is_vertical(gen->dir),
-                       get_cross_set_index(gen, player->index));
+                       get_cross_set_index(gen, player_get_index(player)));
     strip = gen->strip;
   } else if (move_type == GAME_EVENT_EXCHANGE) {
     // ignore the empty exchange case
@@ -270,21 +278,26 @@ void record_play(const Player *player, const Rack *opp_rack, Generator *gen,
 
 void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
                              int stripidx, bool add_exchange) {
-  while (ml < (gen->letter_distribution->size) &&
-         player->rack->array[ml] == 0) {
+  uint32_t letter_distribution_size =
+      letter_distribution_get_size(gen->letter_distribution);
+  Rack *player_rack = player_get_rack(player);
+  while (ml < letter_distribution_size &&
+         get_number_of_letter(player_rack, ml) == 0) {
     ml++;
   }
-  if (ml == (gen->letter_distribution->size)) {
+  if (ml == letter_distribution_size) {
     // The recording of an exchange should never require
     // the opponent's rack.
 
     // Ignore the empty exchange case for full racks
     // to avoid out of bounds errors for the best_leaves array
-    if (player->rack->number_of_letters < RACK_SIZE) {
-      double current_value = get_leave_value(player->klv, player->rack);
+    int number_of_letters_on_rack = get_number_of_letters(player_rack);
+    if (number_of_letters_on_rack < RACK_SIZE) {
+      double current_value =
+          get_leave_value(player_get_klv(player), player_rack);
       set_current_value(gen->leave_map, current_value);
-      if (current_value > gen->best_leaves[player->rack->number_of_letters]) {
-        gen->best_leaves[player->rack->number_of_letters] = current_value;
+      if (current_value > gen->best_leaves[number_of_letters_on_rack]) {
+        gen->best_leaves[number_of_letters_on_rack] = current_value;
       }
       if (add_exchange) {
         record_play(player, NULL, gen, 0, stripidx, GAME_EVENT_EXCHANGE);
@@ -292,15 +305,15 @@ void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
     }
   } else {
     generate_exchange_moves(gen, player, ml + 1, stripidx, add_exchange);
-    int num_this = player->rack->array[ml];
+    int num_this = get_number_of_letter(player_rack, ml);
     for (int i = 0; i < num_this; i++) {
       gen->exchange_strip[stripidx] = ml;
       stripidx += 1;
-      take_letter_and_update_current_index(gen->leave_map, player->rack, ml);
+      take_letter_and_update_current_index(gen->leave_map, player_rack, ml);
       generate_exchange_moves(gen, player, ml + 1, stripidx, add_exchange);
     }
     for (int i = 0; i < num_this; i++) {
-      add_letter_and_update_current_index(gen->leave_map, player->rack, ml);
+      add_letter_and_update_current_index(gen->leave_map, player_rack, ml);
     }
   }
 }
@@ -321,15 +334,19 @@ int is_empty_cache(const Generator *gen, int col) {
 
 bool better_play_has_been_found(const Generator *gen,
                                 double highest_possible_value) {
+  Move *move = move_list_get_move(gen->move_list, 0);
   const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
-                                      ? gen->move_list->moves[0]->equity
-                                      : gen->move_list->moves[0]->score;
+                                      ? get_equity(move)
+                                      : get_score(move);
   return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
 }
 
 void recursive_gen(const Rack *opp_rack, Generator *gen, int col,
                    Player *player, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play) {
+  Rack *player_rack = player_get_rack(player);
+  KWG *kwg = player_get_kwg(player);
+  int player_index = player_get_index(player);
   int cs_dir;
   uint8_t current_letter = get_letter_cache(gen, col);
   if (dir_is_vertical(gen->dir)) {
@@ -339,53 +356,54 @@ void recursive_gen(const Rack *opp_rack, Generator *gen, int col,
   }
   uint64_t cross_set =
       get_cross_set(gen->board, gen->current_row_index, col, cs_dir,
-                    get_cross_set_index(gen, player->index));
+                    get_cross_set_index(gen, player_index));
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     int raw = get_unblanked_machine_letter(current_letter);
     int next_node_index = 0;
     bool accepts = false;
     for (int i = node_index;; i++) {
-      if (kwg_tile(player->kwg, i) == raw) {
-        next_node_index = kwg_arc_index(player->kwg, i);
-        accepts = kwg_accepts(player->kwg, i);
+      if (kwg_tile(kwg, i) == raw) {
+        next_node_index = kwg_arc_index(kwg, i);
+        accepts = kwg_accepts(kwg, i);
         break;
       }
-      if (kwg_is_end(player->kwg, i)) {
+      if (kwg_is_end(kwg, i)) {
         break;
       }
     }
     go_on(opp_rack, gen, col, current_letter, player, next_node_index, accepts,
           leftstrip, rightstrip, unique_play);
-  } else if (!player->rack->empty) {
+  } else if (!rack_is_empty(player_rack)) {
     for (int i = node_index;; i++) {
-      int ml = kwg_tile(player->kwg, i);
+      int ml = kwg_tile(kwg, i);
+      int number_of_ml = get_number_of_letter(player_rack, ml);
       if (ml != 0 &&
-          (player->rack->array[ml] != 0 || player->rack->array[0] != 0) &&
+          (number_of_ml != 0 ||
+           get_number_of_letter(player_rack, BLANK_MACHINE_LETTER) != 0) &&
           allowed(cross_set, ml)) {
-        int next_node_index = kwg_arc_index(player->kwg, i);
-        bool accepts = kwg_accepts(player->kwg, i);
-        if (player->rack->array[ml] > 0) {
-          take_letter_and_update_current_index(gen->leave_map, player->rack,
-                                               ml);
+        int next_node_index = kwg_arc_index(kwg, i);
+        bool accepts = kwg_accepts(kwg, i);
+        if (number_of_ml > 0) {
+          take_letter_and_update_current_index(gen->leave_map, player_rack, ml);
           gen->tiles_played++;
           go_on(opp_rack, gen, col, ml, player, next_node_index, accepts,
                 leftstrip, rightstrip, unique_play);
           gen->tiles_played--;
-          add_letter_and_update_current_index(gen->leave_map, player->rack, ml);
+          add_letter_and_update_current_index(gen->leave_map, player_rack, ml);
         }
         // check blank
-        if (player->rack->array[0] > 0) {
-          take_letter_and_update_current_index(gen->leave_map, player->rack,
+        if (get_number_of_letter(player_rack, BLANK_MACHINE_LETTER) > 0) {
+          take_letter_and_update_current_index(gen->leave_map, player_rack,
                                                BLANK_MACHINE_LETTER);
           gen->tiles_played++;
           go_on(opp_rack, gen, col, get_blanked_machine_letter(ml), player,
                 next_node_index, accepts, leftstrip, rightstrip, unique_play);
           gen->tiles_played--;
-          add_letter_and_update_current_index(gen->leave_map, player->rack,
+          add_letter_and_update_current_index(gen->leave_map, player_rack,
                                               BLANK_MACHINE_LETTER);
         }
       }
-      if (kwg_is_end(player->kwg, i)) {
+      if (kwg_is_end(kwg, i)) {
         break;
       }
     }
@@ -395,6 +413,8 @@ void recursive_gen(const Rack *opp_rack, Generator *gen, int col,
 void go_on(const Rack *opp_rack, Generator *gen, int current_col, uint8_t L,
            Player *player, uint32_t new_node_index, bool accepts, int leftstrip,
            int rightstrip, bool unique_play) {
+  KWG *kwg = player_get_kwg(player);
+  int player_index = player_get_index(player);
   if (current_col <= gen->current_anchor_col) {
     if (!is_empty_cache(gen, current_col)) {
       gen->strip[current_col] = PLAYED_THROUGH_MARKER;
@@ -402,7 +422,7 @@ void go_on(const Rack *opp_rack, Generator *gen, int current_col, uint8_t L,
       gen->strip[current_col] = L;
       if (gen->dir && (get_cross_set(gen->board, gen->current_row_index,
                                      current_col, BOARD_HORIZONTAL_DIRECTION,
-                                     get_cross_set_index(gen, player->index)) ==
+                                     get_cross_set_index(gen, player_index)) ==
                        TRIVIAL_CROSS_SET)) {
         unique_play = true;
       }
@@ -426,8 +446,8 @@ void go_on(const Rack *opp_rack, Generator *gen, int current_col, uint8_t L,
                     leftstrip, rightstrip, unique_play);
     }
 
-    uint32_t separation_node_index = kwg_get_next_node_index(
-        player->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
+    uint32_t separation_node_index =
+        kwg_get_next_node_index(kwg, new_node_index, SEPARATION_MACHINE_LETTER);
     if (separation_node_index != 0 && no_letter_directly_left &&
         gen->current_anchor_col < BOARD_DIM - 1) {
       recursive_gen(opp_rack, gen, gen->current_anchor_col + 1, player,
@@ -441,7 +461,7 @@ void go_on(const Rack *opp_rack, Generator *gen, int current_col, uint8_t L,
       if (dir_is_vertical(gen->dir) &&
           (get_cross_set(gen->board, gen->current_row_index, current_col,
                          BOARD_HORIZONTAL_DIRECTION,
-                         get_cross_set_index(gen, player->index)) ==
+                         get_cross_set_index(gen, player_index)) ==
            TRIVIAL_CROSS_SET)) {
         unique_play = true;
       }
@@ -595,8 +615,8 @@ void shadow_play_right(const Rack *opp_rack, Generator *gen,
         break;
       }
       if (!is_blanked(next_letter)) {
-        main_played_through_score +=
-            gen->letter_distribution->scores[next_letter];
+        main_played_through_score += letter_distribution_get_score(
+            gen->letter_distribution, next_letter);
       }
       gen->current_right_col++;
     }
@@ -708,8 +728,8 @@ void shadow_start(const Rack *opp_rack, Generator *gen, int cross_set_index) {
     // square
     while (1) {
       if (!is_blanked(current_letter)) {
-        main_played_through_score +=
-            gen->letter_distribution->scores[current_letter];
+        main_played_through_score += letter_distribution_get_score(
+            gen->letter_distribution, current_letter);
       }
       if (gen->current_left_col == 0 ||
           gen->current_left_col == gen->last_anchor_col + 1) {
@@ -733,6 +753,7 @@ void shadow_start(const Rack *opp_rack, Generator *gen, int cross_set_index) {
 
 void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
                             Player *player) {
+  Rack *player_rack = player_get_rack(player);
   // set cols
   gen->current_left_col = col;
   gen->current_right_col = col;
@@ -741,7 +762,7 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
   gen->highest_shadow_equity = 0;
 
   // Set the number of letters
-  gen->number_of_letters_on_rack = player->rack->number_of_letters;
+  gen->number_of_letters_on_rack = get_number_of_letters(player_rack);
 
   // Set the current anchor column
   gen->current_anchor_col = col;
@@ -751,13 +772,15 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
 
   // Set rack cross set
   gen->rack_cross_set = 0;
-  for (uint32_t i = 0; i < gen->letter_distribution->size; i++) {
-    if (player->rack->array[i] > 0) {
+  for (uint32_t i = 0;
+       i < letter_distribution_get_size(gen->letter_distribution); i++) {
+    if (get_number_of_letter(player_rack, i) > 0) {
       gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
     }
   }
 
-  shadow_start(opp_rack, gen, get_cross_set_index(gen, player->index));
+  shadow_start(opp_rack, gen,
+               get_cross_set_index(gen, player_get_index(player)));
   add_anchor(gen->anchor_list, gen->current_row_index, col,
              gen->last_anchor_col, get_transpose(gen->board),
              dir_is_vertical(gen->dir), gen->highest_shadow_equity);
@@ -780,13 +803,14 @@ void shadow_by_orientation(const Rack *opp_rack, Generator *gen, Player *player,
 
 void set_descending_tile_scores(Generator *gen, Player *player) {
   int i = 0;
-  for (int j = 0; j < (int)gen->letter_distribution->size; j++) {
-    for (int k = 0;
-         k < player->rack->array[gen->letter_distribution->score_order[j]];
-         k++) {
-      gen->descending_tile_scores[i] =
-          gen->letter_distribution
-              ->scores[gen->letter_distribution->score_order[j]];
+  Rack *player_rack = player_get_rack(player);
+  for (int j = 0;
+       j < (int)letter_distribution_get_size(gen->letter_distribution); j++) {
+    int j_score_order =
+        letter_distribution_get_score_order(gen->letter_distribution, j);
+    for (int k = 0; k < get_number_of_letter(player_rack, j_score_order); k++) {
+      gen->descending_tile_scores[i] = letter_distribution_get_score(
+          gen->letter_distribution, j_score_order);
       i++;
     }
   }
@@ -800,15 +824,16 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
   gen->move_record_type = move_record_type;
   gen->apply_placement_adjustment = apply_placement_adjustment;
 
+  Rack *player_rack = player_get_rack(player);
   // Reset the best leaves
   for (int i = 0; i < (RACK_SIZE); i++) {
     gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
   }
 
-  init_leave_map(player->rack, gen->leave_map);
-  if (player->rack->number_of_letters < RACK_SIZE) {
+  init_leave_map(player_rack, gen->leave_map);
+  if (get_number_of_letters(player_rack) < RACK_SIZE) {
     set_current_value(gen->leave_map,
-                      get_leave_value(player->klv, player->rack));
+                      get_leave_value(player_get_klv(player), player_rack));
   } else {
     set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
@@ -844,8 +869,8 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
     set_transpose(gen->board, get_anchor_transposed(anchor_list, i));
     load_row_letter_cache(gen, gen->current_row_index);
     recursive_gen(opp_rack, gen, gen->current_anchor_col, player,
-                  kwg_get_root_node_index(player->kwg), gen->current_anchor_col,
-                  gen->current_anchor_col, !gen->dir);
+                  kwg_get_root_node_index(player_get_kwg(player)),
+                  gen->current_anchor_col, gen->current_anchor_col, !gen->dir);
 
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for this
@@ -856,15 +881,12 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
 
   reset_transpose(gen->board);
 
+  Move *top_move = move_list_get_move(gen->move_list, 0);
   // Add the pass move
   if (move_record_type == MOVE_RECORD_ALL ||
-      gen->move_list->moves[0]->equity < PASS_MOVE_EQUITY) {
+      get_equity(top_move) < PASS_MOVE_EQUITY) {
     set_spare_move_as_pass(gen->move_list);
     insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
-  } else if (move_record_type == MOVE_RECORD_BEST) {
-    // The move list count is still 0 at this point, so set it to 1.
-    // This is done here to avoid repeatedly checking/updating the move count.
-    gen->move_list->count = 1;
   }
 }
 
@@ -888,31 +910,34 @@ void load_zero_preendgame_adjustment_values(Generator *gen) {
 }
 
 void update_generator(const Config *config, Generator *gen) {
-  gen->letter_distribution = config->letter_distribution;
-  update_move_list(gen->move_list, config->num_plays);
+  gen->letter_distribution = config_get_letter_distribution(config);
+  update_move_list(gen->move_list, config_get_num_plays(config));
   update_bag(gen->letter_distribution, gen->bag);
-  update_leave_map(gen->leave_map, gen->letter_distribution->size);
+  update_leave_map(gen->leave_map,
+                   letter_distribution_get_size(gen->letter_distribution));
 }
 
 Generator *create_generator(const Config *config, int move_list_capacity) {
   Generator *generator = malloc_or_die(sizeof(Generator));
-  generator->bag = create_bag(config->letter_distribution);
+  LetterDistribution *ld = config_get_letter_distribution(config);
+  uint32_t letter_distribution_size = letter_distribution_get_size(ld);
+  generator->bag = create_bag(config_get_letter_distribution(config));
   generator->board = create_board();
   generator->move_list = create_move_list(move_list_capacity);
   generator->anchor_list = create_anchor_list();
-  generator->leave_map = create_leave_map(config->letter_distribution->size);
-  generator->letter_distribution = config->letter_distribution;
+  generator->leave_map = create_leave_map(letter_distribution_size);
+  generator->letter_distribution = ld;
   generator->tiles_played = 0;
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
   generator->last_anchor_col = 0;
-  generator->kwgs_are_distinct =
-      !players_data_get_is_shared(config->players_data, PLAYERS_DATA_TYPE_KWG);
+  generator->kwgs_are_distinct = !players_data_get_is_shared(
+      config_get_players_data(config), PLAYERS_DATA_TYPE_KWG);
 
   // On by default
   generator->apply_placement_adjustment = true;
 
-  generator->exchange_strip = (uint8_t *)malloc_or_die(
-      config->letter_distribution->size * sizeof(uint8_t));
+  generator->exchange_strip =
+      (uint8_t *)malloc_or_die(letter_distribution_size * sizeof(uint8_t));
   // Just load the zero values for now
   load_zero_preendgame_adjustment_values(generator);
 
@@ -921,12 +946,14 @@ Generator *create_generator(const Config *config, int move_list_capacity) {
 
 Generator *generate_duplicate(const Generator *gen, int move_list_capacity) {
   Generator *new_generator = malloc_or_die(sizeof(Generator));
+  uint32_t letter_distribution_size =
+      letter_distribution_get_size(gen->letter_distribution);
   new_generator->bag = bag_duplicate(gen->bag);
   new_generator->board = board_duplicate(gen->board);
   // Move list, anchor list, and leave map can be new
   new_generator->move_list = create_move_list(move_list_capacity);
   new_generator->anchor_list = create_anchor_list();
-  new_generator->leave_map = create_leave_map(gen->letter_distribution->size);
+  new_generator->leave_map = create_leave_map(letter_distribution_size);
   // KWG and letter distribution are read only and can share pointers
   new_generator->letter_distribution = gen->letter_distribution;
   new_generator->tiles_played = 0;
@@ -936,8 +963,8 @@ Generator *generate_duplicate(const Generator *gen, int move_list_capacity) {
 
   new_generator->apply_placement_adjustment = gen->apply_placement_adjustment;
 
-  new_generator->exchange_strip = (uint8_t *)malloc_or_die(
-      gen->letter_distribution->size * sizeof(uint8_t));
+  new_generator->exchange_strip =
+      (uint8_t *)malloc_or_die(letter_distribution_size * sizeof(uint8_t));
   // Just load the zero values for now
   load_zero_preendgame_adjustment_values(new_generator);
 

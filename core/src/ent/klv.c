@@ -112,15 +112,9 @@ void load_klv(KLV *klv, const char *klv_name) {
   }
   kwg_size = le32toh(kwg_size);
 
-  klv->kwg = malloc_or_die(sizeof(KWG));
-  klv->kwg->nodes = (uint32_t *)malloc_or_die(kwg_size * sizeof(uint32_t));
-  result = fread(klv->kwg->nodes, sizeof(uint32_t), kwg_size, stream);
-  if (result != kwg_size) {
-    log_fatal("kwg nodes fread failure: %zd != %d\n", result, kwg_size);
-  }
-  for (uint32_t i = 0; i < kwg_size; i++) {
-    klv->kwg->nodes[i] = le32toh(klv->kwg->nodes[i]);
-  }
+  klv->kwg = create_empty_kwg(kwg_size);
+
+  kwg_read_nodes_from_stream(klv->kwg, kwg_size, stream);
 
   uint32_t number_of_leaves;
   result = fread(&number_of_leaves, sizeof(number_of_leaves), 1, stream);

@@ -1,13 +1,29 @@
 #ifndef MOVE_H
 #define MOVE_H
 
-#include "../def/game_event_defs.h"
+#include <stdint.h>
+
+#include "../def/game_history_defs.h"
 
 struct Move;
 typedef struct Move Move;
 
 struct MoveList;
 typedef struct MoveList MoveList;
+
+game_event_t get_move_type(const struct Move *move);
+int get_score(const struct Move *move);
+int get_row_start(const struct Move *move);
+int get_col_start(const struct Move *move);
+int get_tiles_played(const struct Move *move);
+int get_tiles_length(const struct Move *move);
+double get_equity(const struct Move *move);
+int get_dir(const struct Move *move);
+uint8_t get_tile(const struct Move *move, int index);
+Move *get_spare_move(MoveList *ml);
+int *move_list_get_count(MoveList *ml);
+int *move_list_get_capacity(MoveList *ml);
+Move *move_list_get_move(MoveList *ml, int move_index);
 
 Move *create_move();
 void move_copy(Move *dest_move, const Move *src_move);

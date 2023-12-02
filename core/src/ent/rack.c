@@ -1,13 +1,10 @@
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdint.h>
 
-#include "bag.h"
+#include "../def/rack_defs.h"
+
 #include "letter_distribution.h"
-#include "log.h"
 #include "rack.h"
-#include "string_util.h"
-#include "util.h"
 
 struct Rack {
   int array_size;
@@ -15,6 +12,16 @@ struct Rack {
   bool empty;
   int number_of_letters;
 };
+
+int get_array_size(Rack *rack) { return rack->array_size; }
+
+int get_number_of_letter(Rack *rack, uint8_t machine_letter) {
+  return rack->array[machine_letter];
+}
+
+int get_number_of_letters(Rack *rack) { return rack->number_of_letters; }
+
+bool rack_is_empty(Rack *rack) { return rack->empty; }
 
 void reset_rack(Rack *rack) {
   for (int i = 0; i < (rack->array_size); i++) {
@@ -79,37 +86,17 @@ void add_letter_to_rack(Rack *rack, uint8_t letter) {
   }
 }
 
-int score_on_rack(const LetterDistribution *letter_distribution,
-                  const Rack *rack) {
-  int sum = 0;
-  for (int i = 0; i < (rack->array_size); i++) {
-    sum += rack->array[i] * letter_distribution->scores[i];
-  }
-  return sum;
-}
-
 int set_rack_to_string(const LetterDistribution *letter_distribution,
                        Rack *rack, const char *rack_string) {
   reset_rack(rack);
 
-  uint8_t mls[MAX_BAG_SIZE];
+  uint8_t mls[MAX_RACK_SIZE];
   int num_mls = str_to_machine_letters(letter_distribution, rack_string, false,
-                                       mls, MAX_BAG_SIZE);
+                                       mls, MAX_RACK_SIZE);
   for (int i = 0; i < num_mls; i++) {
     add_letter_to_rack(rack, mls[i]);
   }
   return num_mls;
-}
-
-void string_builder_add_rack(const Rack *rack,
-                             const LetterDistribution *letter_distribution,
-                             StringBuilder *string_builder) {
-  for (int i = 0; i < rack->array_size; i++) {
-    for (int j = 0; j < rack->array[i]; j++) {
-      string_builder_add_user_visible_letter(letter_distribution,
-                                             string_builder, i);
-    }
-  }
 }
 
 bool racks_are_equal(const Rack *rack1, const Rack *rack2) {

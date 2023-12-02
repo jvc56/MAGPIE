@@ -10,7 +10,7 @@
 #include "stats.h"
 #include "thread_control.h"
 #include "ucgi_formats.h"
-#include "util.h"
+#include "../util/util.h"
 
 // Inference
 

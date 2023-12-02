@@ -13,7 +13,7 @@ void destroy_letter_distribution(LetterDistribution *letter_distribution);
 uint32_t letter_distribution_get_size(const LetterDistribution *ld);
 uint32_t letter_distribution_get_distribution(const LetterDistribution *ld,
                                               uint8_t machine_letter);
-uint32_t letter_distribution_get_scores(const LetterDistribution *ld,
+uint32_t letter_distribution_get_score(const LetterDistribution *ld,
                                         uint8_t machine_letter);
 uint32_t letter_distribution_get_score_order(const LetterDistribution *ld,
                                              uint8_t machine_letter);

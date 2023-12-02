@@ -1,12 +1,7 @@
 #ifndef THREAD_CONTROL_H
 #define THREAD_CONTROL_H
 
-#include <pthread.h>
-#include <stdatomic.h>
-#include <stdbool.h>
-#include <stdio.h>
-
-#include "file_handler.h"
+#include "../def/thread_control_defs.h"
 
 struct ThreadControl;
 typedef struct ThreadControl ThreadControl;
@@ -17,8 +12,10 @@ bool halt(ThreadControl *thread_control, halt_status_t halt_status);
 bool unhalt(ThreadControl *thread_control);
 bool is_halted(ThreadControl *thread_control);
 halt_status_t get_halt_status(ThreadControl *thread_control);
+int get_print_info_interval(ThreadControl *thread_control);
 void set_print_info_interval(ThreadControl *thread_control,
                              int print_info_interval);
+int get_check_stopping_condition_interval(ThreadControl *thread_control);
 void set_check_stopping_condition_interval(
     ThreadControl *thread_control, int check_stopping_condition_interval);
 bool set_mode_searching(ThreadControl *thread_control);

@@ -8,6 +8,8 @@ struct KWG;
 typedef struct KWG KWG;
 
 KWG *create_kwg(const char *kwg_name);
+KWG *create_empty_kwg(size_t number_of_nodes);
+void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes, FILE *stream);
 void destroy_kwg(KWG *kwg);
 // FIXME: find a way to force inline these functions
 // with an opaque pointer.

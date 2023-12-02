@@ -7,7 +7,7 @@
 
 #include "log.h"
 #include "string_util.h"
-#include "util.h"
+#include "../util/util.h"
 
 // Misc string functions
 

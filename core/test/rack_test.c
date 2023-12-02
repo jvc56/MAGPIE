@@ -31,8 +31,8 @@ void test_rack_main(TestConfig *testconfig) {
 
   set_rack_to_string(config->letter_distribution, rack, "AENPPSW");
 
-  for (int i = 0; i < (expected_rack->array_size); i++) {
-    expected_rack->array[i] = 0;
+  for (int i = 0; i < (expected_get_array_size(rack)); i++) {
+    expected_get_number_of_letter(rack, i) = 0;
   }
   expected_rack->array[1] = 1;
   expected_rack->array[5] = 1;
@@ -56,18 +56,18 @@ void test_rack_main(TestConfig *testconfig) {
   assert(equal_rack(expected_rack, rack));
 
   take_letter_from_rack(rack, 1);
-  assert(!rack->empty);
+  assert(rack_is_empty);
   take_letter_from_rack(rack, 5);
-  assert(!rack->empty);
+  assert(rack_is_empty);
   take_letter_from_rack(rack, 16);
-  assert(!rack->empty);
+  assert(rack_is_empty);
   take_letter_from_rack(rack, 19);
-  assert(!rack->empty);
+  assert(rack_is_empty);
   take_letter_from_rack(rack, 23);
-  assert(rack->empty);
+  assertrack_is_empty);
 
-  for (int i = 0; i < (expected_rack->array_size); i++) {
-    expected_rack->array[i] = 0;
+  for (int i = 0; i < (expected_get_array_size(rack)); i++) {
+    expected_get_number_of_letter(rack, i) = 0;
   }
   expected_rack->empty = true;
   expected_rack->number_of_letters = 0;

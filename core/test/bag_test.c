@@ -42,7 +42,7 @@ void test_bag(TestConfig *testconfig) {
   }
 
   for (uint32_t i = 0; i < ld->size; i++) {
-    assert((int)ld->distribution[i] == rack->array[i]);
+    assert((int)ld->distribution[i] == get_number_of_letter(rack, i));
   }
 
   reset_bag(ld, bag);
@@ -54,14 +54,14 @@ void test_bag(TestConfig *testconfig) {
     draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
     drawing_player = 1 - drawing_player;
     number_of_remaining_tiles -= RACK_SIZE;
-    assert(!rack->empty);
+    assert(rack_is_empty);
     assert(rack->number_of_letters == RACK_SIZE);
     reset_rack(rack);
   }
 
   draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
   assert(bag_is_empty(bag));
-  assert(!rack->empty);
+  assert(rack_is_empty);
   assert(rack->number_of_letters == number_of_remaining_tiles);
   reset_rack(rack);
 

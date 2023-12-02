@@ -18,13 +18,13 @@ void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
 
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
-  for (int idx = 0; idx < move->tiles_length; idx++) {
-    uint8_t letter = move->tiles[idx];
+  for (int idx = 0; idx <get_tiles_length(move); idx++) {
+    uint8_t letter =get_tile(move, idx);
     if (letter == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    set_letter(game->gen->board, move->row_start + (move->dir * idx),
-               move->col_start + ((1 - move->dir) * idx), letter);
+    set_letter(game->gen->board,get_row_start(move) + get_dir(move) * idx),
+              get_col_start(move) + ((1 -get_dir(move)) * idx), letter);
     if (is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
     }
@@ -32,37 +32,37 @@ void play_move_on_board(const Move *move, Game *game) {
                           letter);
   }
 
-  incrememt_tiles_played(game->gen->board, move->tiles_played);
+  incrememt_tiles_played(game->gen->board,get_tiles_played(move));
 
   // updateAnchorsForMove
-  int row = move->row_start;
-  int col = move->col_start;
-  if (dir_is_vertical(move->dir)) {
-    row = move->col_start;
-    col = move->row_start;
+  int row =get_row_start(move);
+  int col =get_col_start(move);
+  if (dir_is_verticalget_dir(move))) {
+    row =get_col_start(move);
+    col =get_row_start(move);
   }
 
-  for (int i = col; i < move->tiles_length + col; i++) {
-    update_anchors(game->gen->board, row, i, move->dir);
+  for (int i = col; i <get_tiles_length(move) + col; i++) {
+    update_anchors(game->gen->board, row, i,get_dir(move));
     if (row > 0) {
-      update_anchors(game->gen->board, row - 1, i, move->dir);
+      update_anchors(game->gen->board, row - 1, i,get_dir(move));
     }
     if (row < BOARD_DIM - 1) {
-      update_anchors(game->gen->board, row + 1, i, move->dir);
+      update_anchors(game->gen->board, row + 1, i,get_dir(move));
     }
   }
   if (col - 1 >= 0) {
-    update_anchors(game->gen->board, row, col - 1, move->dir);
+    update_anchors(game->gen->board, row, col - 1,get_dir(move));
   }
-  if (move->tiles_length + col < BOARD_DIM) {
-    update_anchors(game->gen->board, row, move->tiles_length + col, move->dir);
+  if get_tiles_length(move) + col < BOARD_DIM) {
+    update_anchors(game->gen->board, row,get_tiles_length(move) + col,get_dir(move));
   }
 }
 
 void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
                      int csd) {
-  for (int row = row_start; row < move->tiles_length + row_start; row++) {
-    if (move->tiles[row - row_start] == PLAYED_THROUGH_MARKER) {
+  for (int row = row_start; row <get_tiles_length(move) + row_start; row++) {
+    if get_tile(move, row - row_start) == PLAYED_THROUGH_MARKER) {
       continue;
     }
 
@@ -89,7 +89,7 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
 
 void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
                    int csd) {
-  for (int col = col_start - 1; col <= col_start + move->tiles_length; col++) {
+  for (int col = col_start - 1; col <= col_start +get_tiles_length(move); col++) {
     gen_cross_set(game->players[0]->kwg, game->gen->letter_distribution,
                   game->gen->board, row_start, col, csd, 0);
     if (game->gen->kwgs_are_distinct) {
@@ -100,34 +100,34 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
 }
 
 void update_cross_set_for_move(const Move *move, Game *game) {
-  if (dir_is_vertical(move->dir)) {
-    calc_for_across(move, game, move->row_start, move->col_start,
+  if (dir_is_verticalget_dir(move))) {
+    calc_for_across(move, game,get_row_start(move),get_col_start(move),
                     BOARD_HORIZONTAL_DIRECTION);
     transpose(game->gen->board);
-    calc_for_self(move, game, move->col_start, move->row_start,
+    calc_for_self(move, game,get_col_start(move),get_row_start(move),
                   BOARD_VERTICAL_DIRECTION);
     transpose(game->gen->board);
   } else {
-    calc_for_self(move, game, move->row_start, move->col_start,
+    calc_for_self(move, game,get_row_start(move),get_col_start(move),
                   BOARD_HORIZONTAL_DIRECTION);
     transpose(game->gen->board);
-    calc_for_across(move, game, move->col_start, move->row_start,
+    calc_for_across(move, game,get_col_start(move),get_row_start(move),
                     BOARD_VERTICAL_DIRECTION);
     transpose(game->gen->board);
   }
 }
 
 void execute_exchange_move(const Move *move, Game *game) {
-  for (int i = 0; i < move->tiles_played; i++) {
+  for (int i = 0; i <get_tiles_played(move); i++) {
     take_letter_from_rack(game->players[game->player_on_turn_index]->rack,
-                          move->tiles[i]);
+                         get_tile(move, i));
   }
   int player_draw_index = get_player_on_turn_draw_index(game);
   draw_at_most_to_rack(game->gen->bag,
                        game->players[game->player_on_turn_index]->rack,
-                       move->tiles_played, player_draw_index);
-  for (int i = 0; i < move->tiles_played; i++) {
-    add_letter(game->gen->bag, move->tiles[i], player_draw_index);
+                      get_tiles_played(move), player_draw_index);
+  for (int i = 0; i <get_tiles_played(move); i++) {
+    add_letter(game->gen->bag,get_tile(move, i), player_draw_index);
   }
 }
 
@@ -149,20 +149,20 @@ void play_move(const Move *move, Game *game) {
   if (game->backup_mode == BACKUP_MODE_SIMULATION) {
     backup_game(game);
   }
-  if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  if get_move_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     play_move_on_board(move, game);
     update_cross_set_for_move(move, game);
     game->consecutive_scoreless_turns = 0;
-    game->players[game->player_on_turn_index]->score += move->score;
+    game->players[game->player_on_turn_index]->score +=get_score(move);
     draw_at_most_to_rack(
         game->gen->bag, game->players[game->player_on_turn_index]->rack,
-        move->tiles_played, get_player_on_turn_draw_index(game));
+       get_tiles_played(move), get_player_on_turn_draw_index(game));
     if (game->players[game->player_on_turn_index]->rack->empty) {
       standard_end_of_game_calculations(game);
     }
-  } else if (move->move_type == GAME_EVENT_PASS) {
+  } else if get_move_type(move) == GAME_EVENT_PASS) {
     game->consecutive_scoreless_turns++;
-  } else if (move->move_type == GAME_EVENT_EXCHANGE) {
+  } else if get_move_type(move) == GAME_EVENT_EXCHANGE) {
     execute_exchange_move(move, game);
     game->consecutive_scoreless_turns++;
   }
@@ -189,9 +189,9 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
     ntiles = RACK_SIZE;
   }
   // throw in existing rack, then redraw from the bag.
-  for (int i = 0; i < prack->array_size; i++) {
-    if (prack->array[i] > 0) {
-      for (int j = 0; j < prack->array[i]; j++) {
+  for (int i = 0; i < pget_array_size(rack); i++) {
+    if (pget_number_of_letter(rack, i) > 0) {
+      for (int j = 0; j < pget_number_of_letter(rack, i); j++) {
         add_letter(game->gen->bag, i, player_draw_index);
       }
     }
@@ -199,8 +199,8 @@ void set_random_rack(Game *game, int pidx, Rack *known_rack) {
   reset_rack(prack);
   int ndrawn = 0;
   if (known_rack && known_rack->number_of_letters > 0) {
-    for (int i = 0; i < known_rack->array_size; i++) {
-      for (int j = 0; j < known_rack->array[i]; j++) {
+    for (int i = 0; i < known_get_array_size(rack); i++) {
+      for (int j = 0; j < known_get_number_of_letter(rack, i); j++) {
         draw_letter_to_rack(game->gen->bag, prack, i, player_draw_index);
         ndrawn++;
       }

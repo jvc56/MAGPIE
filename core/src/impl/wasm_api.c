@@ -10,7 +10,7 @@
 #include "move.h"
 #include "ucgi_formats.h"
 #include "ucgi_print.h"
-#include "util.h"
+#include "../util/util.h"
 #include "words.h"
 
 static CommandVars *wasm_command_vars = NULL;

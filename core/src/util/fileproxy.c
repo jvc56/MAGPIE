@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 #include "log.h"
-#include "util.h"
+#include "../util/util.h"
 
 #define MAX_CACHE_SIZE 32
 #define MAX_DATA_FILENAME_LENGTH 64

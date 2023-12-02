@@ -1,16 +1,46 @@
+#include "leave_rack.h"
 #include "rack.h"
-typedef struct LeaveRack {
+struct LeaveRack {
   Rack *leave;
   Rack *exchanged;
   int draws;
   double equity;
-} LeaveRack;
+};
+
 struct LeaveRackList {
   int count;
   int capacity;
   LeaveRack *spare_leave_rack;
   LeaveRack **leave_racks;
 };
+
+Rack *leave_rack_get_leave(const LeaveRack *leaveRack) {
+  return leaveRack->leave;
+}
+
+Rack *leave_rack_get_exchanged(const LeaveRack *leaveRack) {
+  return leaveRack->exchanged;
+}
+
+int leave_rack_get_draws(const LeaveRack *leaveRack) {
+  return leaveRack->draws;
+}
+
+double leave_rack_get_equity(const LeaveRack *leaveRack) {
+  return leaveRack->equity;
+}
+
+int get_leave_rack_list_count(LeaveRackList *leave_rack_list) {
+  return leave_rack_list->count;
+}
+
+int get_leave_rack_list_capacity(LeaveRackList *leave_rack_list) {
+  return leave_rack_list->capacity;
+}
+
+int get_leave_rack(LeaveRackList *leave_rack_list, int index) {
+  return leave_rack_list->leave_racks[index];
+}
 
 LeaveRack *create_leave_rack(int distribution_size) {
   LeaveRack *leave_rack = malloc_or_die(sizeof(LeaveRack));
@@ -95,17 +125,17 @@ void insert_leave_rack(const Rack *leave, const Rack *exchanged,
                        LeaveRackList *lrl, int number_of_draws_for_leave,
                        double equity) {
   reset_rack(lrl->spare_leave_rack->leave);
-  for (int i = 0; i < leave->array_size; i++) {
-    for (int j = 0; j < leave->array[i]; j++) {
+  for (int i = 0; i < get_array_size(leave); i++) {
+    for (int j = 0; j < get_number_of_letter(leave, i); j++) {
       add_letter_to_rack(lrl->spare_leave_rack->leave, i);
     }
   }
   lrl->spare_leave_rack->draws = number_of_draws_for_leave;
   lrl->spare_leave_rack->equity = equity;
-  if (exchanged && !exchanged->empty) {
+  if (exchanged && !rack_is_empty(exchanged)) {
     reset_rack(lrl->spare_leave_rack->exchanged);
-    for (int i = 0; i < exchanged->array_size; i++) {
-      for (int j = 0; j < exchanged->array[i]; j++) {
+    for (int i = 0; i < get_array_size(exchanged); i++) {
+      for (int j = 0; j < get_number_of_letter(exchanged, i); j++) {
         add_letter_to_rack(lrl->spare_leave_rack->exchanged, i);
       }
     }

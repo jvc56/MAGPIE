@@ -16,7 +16,7 @@
 #include "string_util.h"
 #include "thread_control.h"
 #include "ucgi_print.h"
-#include "util.h"
+#include "../util/util.h"
 
 InferenceRecord *create_inference_record(int draw_and_leave_subtotals_size) {
   InferenceRecord *record = malloc_or_die(sizeof(InferenceRecord));
@@ -123,10 +123,10 @@ uint64_t choose(uint64_t n, uint64_t k) {
 uint64_t get_number_of_draws_for_rack(const Rack *bag_as_rack,
                                       const Rack *rack) {
   uint64_t number_of_ways = 1;
-  for (int i = 0; i < rack->array_size; i++) {
-    if (rack->array[i] > 0) {
+  for (int i = 0; i < get_array_size(rack); i++) {
+    if (get_number_of_letter(rack, i) > 0) {
       number_of_ways *=
-          choose(bag_as_rack->array[i] + rack->array[i], rack->array[i]);
+          choose(bag_as_get_number_of_letter(rack, i) + get_number_of_letter(rack, i), get_number_of_letter(rack, i));
     }
   }
   return number_of_ways;
@@ -203,12 +203,12 @@ double get_probability_for_random_minimum_draw(
 
 void increment_subtotals_for_record(const Rack *rack, InferenceRecord *record,
                                     uint64_t number_of_draws_for_leave) {
-  for (int i = 0; i < rack->array_size; i++) {
-    if (rack->array[i] > 0) {
-      add_to_letter_subtotal(record, i, rack->array[i],
+  for (int i = 0; i < get_array_size(rack); i++) {
+    if (get_number_of_letter(rack, i) > 0) {
+      add_to_letter_subtotal(record, i, get_number_of_letter(rack, i),
                              INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW,
                              number_of_draws_for_leave);
-      add_to_letter_subtotal(record, i, rack->array[i],
+      add_to_letter_subtotal(record, i, get_number_of_letter(rack, i),
                              INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE, 1);
     }
   }
@@ -407,8 +407,8 @@ void initialize_inference_for_evaluation(
 
   // Add any existing tiles on the player's rack
   // to the player's leave for partial inferences
-  for (int i = 0; i < inference->player_to_infer_rack->array_size; i++) {
-    for (int j = 0; j < inference->player_to_infer_rack->array[i]; j++) {
+  for (int i = 0; i < inference->player_to_infer_get_array_size(rack); i++) {
+    for (int j = 0; j < inference->player_to_infer_get_number_of_letter(rack, i); j++) {
       add_letter_to_rack(inference->leave, i);
     }
   }
@@ -696,7 +696,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 
 inference_status_t verify_inference(const Inference *inference) {
   for (int i = 0; i < inference->distribution_size; i++) {
-    if (inference->bag_as_rack->array[i] < 0) {
+    if (inference->bag_as_get_number_of_letter(rack, i) < 0) {
       return INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG;
     }
   }
@@ -753,8 +753,8 @@ inference_status_t infer(const Config *config, Game *game,
 
   // Return the player to infer rack to it's original
   // state since the inference does not own that struct
-  for (int i = 0; i < config->rack->array_size; i++) {
-    for (int j = 0; j < config->rack->array[i]; j++) {
+  for (int i = 0; i < config->get_array_size(rack); i++) {
+    for (int j = 0; j < config->get_number_of_letter(rack, i); j++) {
       take_letter_from_rack(inference->player_to_infer_rack, i);
     }
   }

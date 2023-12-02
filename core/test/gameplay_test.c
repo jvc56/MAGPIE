@@ -11,8 +11,8 @@
 #include "testconfig.h"
 
 void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
-  for (int i = 0; i < (rack->array_size); i++) {
-    for (int j = 0; j < rack->array[i]; j++) {
+  for (int i = 0; i < (get_array_size(rack)); i++) {
+    for (int j = 0; j < get_number_of_letter(rack, i); j++) {
       add_letter(bag, i, player_draw_index);
     }
   }
@@ -480,8 +480,8 @@ void test_set_random_rack(TestConfig *testconfig) {
   assert(game->players[0]->rack->number_of_letters == 2);
   // ensure the rack isn't corrupt
   int ct = 0;
-  for (int i = 0; i < game->players[0]->rack->array_size; i++) {
-    ct += game->players[0]->rack->array[i];
+  for (int i = 0; i < game->players[0]->get_array_size(rack); i++) {
+    ct += game->players[0]->get_number_of_letter(rack, i);
   }
   assert(ct == 2);
 

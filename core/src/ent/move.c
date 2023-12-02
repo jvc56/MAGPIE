@@ -1,10 +1,7 @@
-#include <math.h>
-#include <stdint.h>
-#include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
-#include "../def/game_event_defs.h"
 #include "../def/move_defs.h"
 
 #include "move.h"
@@ -27,6 +24,57 @@ struct MoveList {
   Move *spare_move;
   Move **moves;
 };
+
+#include <stdint.h>
+
+// Assuming BOARD_DIM is defined somewhere in your code
+#define BOARD_DIM 10
+
+typedef /* define game_event_t type */ int game_event_t;
+
+struct Move {
+  game_event_t move_type;
+  int score;
+  int row_start;
+  int col_start;
+  int tiles_played;
+  int tiles_length;
+  double equity;
+  int dir;
+  uint8_t tiles[BOARD_DIM];
+};
+
+// Getter functions
+
+game_event_t get_move_type(const struct Move *move) { return move->move_type; }
+
+int get_score(const struct Move *move) { return move->score; }
+
+int get_row_start(const struct Move *move) { return move->row_start; }
+
+int get_col_start(const struct Move *move) { return move->col_start; }
+
+int get_tiles_played(const struct Move *move) { return move->tiles_played; }
+
+int get_tiles_length(const struct Move *move) { return move->tiles_length; }
+
+double get_equity(const struct Move *move) { return move->equity; }
+
+int get_dir(const struct Move *move) { return move->dir; }
+
+uint8_t get_tile(const struct Move *move, int index) {
+  return move->tiles[index];
+}
+
+Move *get_spare_move(MoveList *ml) { return ml->spare_move; }
+
+int *move_list_get_count(MoveList *ml) { return ml->count; }
+
+int *move_list_get_capacity(MoveList *ml) { return ml->capacity; }
+
+Move *move_list_get_move(MoveList *ml, int move_index) {
+  return ml->moves[move_index];
+}
 
 Move *create_move() { return malloc_or_die(sizeof(Move)); }
 
@@ -225,6 +273,7 @@ void insert_spare_move_top_equity(MoveList *ml, double equity) {
     Move *swap = ml->moves[0];
     ml->moves[0] = ml->spare_move;
     ml->spare_move = swap;
+    ml->count = 1;
   }
 }
 
@@ -251,115 +300,5 @@ void sort_moves(MoveList *ml) {
     Move *swap = ml->moves[ml->count];
     ml->moves[ml->count] = move;
     ml->spare_move = swap;
-  }
-}
-
-// Human readable print function
-
-void string_builder_add_move_description(const Move *move,
-                                         const LetterDistribution *ld,
-                                         StringBuilder *move_string_builder) {
-  if (move->move_type != GAME_EVENT_PASS) {
-    if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      if (dir_is_vertical(move->dir)) {
-        string_builder_add_formatted_string(move_string_builder, "%c%d ",
-                                            move->col_start + 'A',
-                                            move->row_start + 1);
-      } else {
-        string_builder_add_formatted_string(move_string_builder, "%d%c ",
-                                            move->row_start + 1,
-                                            move->col_start + 'A');
-      }
-    } else {
-      string_builder_add_string(move_string_builder, "(Exch ");
-    }
-
-    int number_of_tiles_to_print = move->tiles_length;
-
-    for (int i = 0; i < number_of_tiles_to_print; i++) {
-      uint8_t letter = move->tiles[i];
-      if (letter == PLAYED_THROUGH_MARKER &&
-          move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-        string_builder_add_char(move_string_builder, ASCII_PLAYED_THROUGH);
-      } else {
-        string_builder_add_user_visible_letter(ld, move_string_builder, letter);
-      }
-    }
-    if (move->move_type == GAME_EVENT_EXCHANGE) {
-      string_builder_add_string(move_string_builder, ")");
-    }
-  } else {
-    string_builder_add_string(move_string_builder, "(Pass)");
-  }
-}
-
-void string_builder_add_move(const Board *board, const Move *m,
-                             const LetterDistribution *letter_distribution,
-                             StringBuilder *string_builder) {
-  if (m->move_type == GAME_EVENT_PASS) {
-    string_builder_add_string(string_builder, "pass 0");
-    return;
-  }
-
-  if (m->move_type == GAME_EVENT_EXCHANGE) {
-    string_builder_add_string(string_builder, "(exch ");
-    for (int i = 0; i < m->tiles_played; i++) {
-      string_builder_add_user_visible_letter(letter_distribution,
-                                             string_builder, m->tiles[i]);
-    }
-    string_builder_add_string(string_builder, ")");
-    return;
-  }
-
-  if (dir_is_vertical(m->dir)) {
-    string_builder_add_char(string_builder, m->col_start + 'A');
-    string_builder_add_int(string_builder, m->row_start + 1);
-  } else {
-    string_builder_add_int(string_builder, m->row_start + 1);
-    string_builder_add_char(string_builder, m->col_start + 'A');
-  }
-
-  string_builder_add_spaces(string_builder, 1);
-  int current_row = m->row_start;
-  int current_col = m->col_start;
-  for (int i = 0; i < m->tiles_length; i++) {
-    uint8_t tile = m->tiles[i];
-    uint8_t print_tile = tile;
-    if (tile == PLAYED_THROUGH_MARKER) {
-      if (board) {
-        print_tile = get_letter(board, current_row, current_col);
-      }
-      if (i == 0 && board) {
-        string_builder_add_string(string_builder, "(");
-      }
-    }
-
-    if (tile == PLAYED_THROUGH_MARKER && !board) {
-      string_builder_add_string(string_builder, ".");
-    } else {
-      string_builder_add_user_visible_letter(letter_distribution,
-                                             string_builder, print_tile);
-    }
-
-    if (board && (tile == PLAYED_THROUGH_MARKER) &&
-        (i == m->tiles_length - 1 ||
-         m->tiles[i + 1] != PLAYED_THROUGH_MARKER)) {
-      string_builder_add_string(string_builder, ")");
-    }
-
-    if (board && tile != PLAYED_THROUGH_MARKER && (i + 1 < m->tiles_length) &&
-        m->tiles[i + 1] == PLAYED_THROUGH_MARKER) {
-      string_builder_add_string(string_builder, "(");
-    }
-
-    if (dir_is_vertical(m->dir)) {
-      current_row++;
-    } else {
-      current_col++;
-    }
-  }
-  string_builder_add_spaces(string_builder, 1);
-  if (board) {
-    string_builder_add_int(string_builder, m->score);
   }
 }

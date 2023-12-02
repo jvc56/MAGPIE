@@ -10,7 +10,7 @@
 #include "sim.h"
 #include "thread_control.h"
 #include "ucgi_print.h"
-#include "util.h"
+#include "../util/util.h"
 
 #define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"

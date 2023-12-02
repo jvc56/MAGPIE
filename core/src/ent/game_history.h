@@ -1,6 +1,12 @@
 #ifndef GAME_HISTORY_H
 #define GAME_HISTORY_H
 
+struct GameEvent;
+typedef struct GameEvent GameEvent;
+
+GameEvent *create_game_event();
+void destroy_game_event(GameEvent *game_event);
+
 struct GameHistoryPlayer;
 typedef struct GameHistoryPlayer GameHistoryPlayer;
 

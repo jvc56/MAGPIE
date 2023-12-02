@@ -45,7 +45,7 @@ void test_leave_map(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
   const LetterDistribution *letter_distribution = config->letter_distribution;
   Rack *rack = create_rack(config->letter_distribution->size);
-  LeaveMap *leave_map = create_leave_map(rack->array_size);
+  LeaveMap *leave_map = create_leave_map(get_array_size(rack));
 
   set_rack_to_string(letter_distribution, rack, "ABCDEFG");
   init_leave_map(rack, leave_map);

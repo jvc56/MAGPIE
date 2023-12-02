@@ -10,12 +10,12 @@
 #include "rack.h"
 
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
-  for (int i = 0; i < move->tiles_length; i++) {
-    if (move->tiles[i] != PLAYED_THROUGH_MARKER) {
-      if (is_blanked(move->tiles[i])) {
+  for (int i = 0; i <get_tiles_length(move); i++) {
+    if get_tile(move, i) != PLAYED_THROUGH_MARKER) {
+      if (is_blankedget_tile(move, i))) {
         take_letter_from_rack(rack, BLANK_MACHINE_LETTER);
       } else {
-        take_letter_from_rack(rack, move->tiles[i]);
+        take_letter_from_rack(rack,get_tile(move, i));
       }
     }
   }

@@ -1,10 +1,10 @@
 #include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdbool.h>
 
-#include "log.h"
+#include "../def/file_handler_defs.h"
+
+#include "file_handler.h"
 #include "thread_control.h"
-#include "util.h"
 
 struct ThreadControl {
   int number_of_threads;
@@ -71,9 +71,17 @@ void set_io(ThreadControl *thread_control, const char *in_filename,
                    FILE_HANDLER_MODE_WRITE);
 }
 
+int get_print_info_interval(ThreadControl *thread_control) {
+  return thread_control->print_info_interval;
+}
+
 void set_print_info_interval(ThreadControl *thread_control,
                              int print_info_interval) {
   thread_control->print_info_interval = print_info_interval;
+}
+
+int get_check_stopping_condition_interval(ThreadControl *thread_control) {
+  thread_control->check_stopping_condition_interval;
 }
 
 void set_check_stopping_condition_interval(
