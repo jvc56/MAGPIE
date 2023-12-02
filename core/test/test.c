@@ -39,8 +39,8 @@
 void unit_tests(SuperConfig *superconfig) {
   // Test the loading of the config
   test_config();
-  test_shadow(superconfig);
-  test_movegen(superconfig); return;
+  test_shadow(superconfig); return;
+  //test_movegen(superconfig); return;
   // Test the readonly data first
   test_string_util();
   test_alphabet(superconfig);

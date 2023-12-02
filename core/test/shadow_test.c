@@ -136,6 +136,7 @@ void test_shadow_score(SuperConfig *superconfig) {
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 8));
 
   load_and_generate(game, player, KA_OPENING_CGP, "EE", 0);
+  assert(game->gen->anchor_list->count == 6);
   // KAE and EE
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 10));
@@ -154,15 +155,9 @@ void test_shadow_score(SuperConfig *superconfig) {
   // EEE
   assert(within_epsilon(
       game->gen->anchor_list->anchors[5]->highest_possible_equity, 3));
-  // The rest are prevented by invalid cross sets
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[6]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[7]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
   load_and_generate(game, player, KA_OPENING_CGP, "E?", 0);
+  assert(game->gen->anchor_list->count == 9);
   // oK, oE, EA
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 10));
@@ -192,6 +187,7 @@ void test_shadow_score(SuperConfig *superconfig) {
       game->gen->anchor_list->anchors[8]->highest_possible_equity, 2));
 
   load_and_generate(game, player, KA_OPENING_CGP, "J", 0);
+  assert(game->gen->anchor_list->count == 4);
   // J(K) veritcally
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 21));
@@ -204,18 +200,9 @@ void test_shadow_score(SuperConfig *superconfig) {
   // J(A) vertically
   assert(within_epsilon(
       game->gen->anchor_list->anchors[3]->highest_possible_equity, 9));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[4]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[5]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[6]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[7]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
   load_and_generate(game, player, AA_OPENING_CGP, "JF", 0);
+  assert(game->gen->anchor_list->count == 6);
   // JF, JA, and FA
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 42));
@@ -234,13 +221,6 @@ void test_shadow_score(SuperConfig *superconfig) {
   // AJF
   assert(within_epsilon(
       game->gen->anchor_list->anchors[5]->highest_possible_equity, 13));
-  // Remaining anchors are prevented by invalid cross sets
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[6]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[7]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
   // Making JA, FA, and JFU, doubling the U on the double letter
   load_and_generate(game, player, AA_OPENING_CGP, "JFU", 0);
@@ -702,12 +682,12 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(load_cgp(game, kaki_yond) == CGP_PARSE_STATUS_SUCCESS);
   Player *player = game->players[game->player_on_turn_index];
   Rack *opp_rack = game->players[1 - game->player_on_turn_index]->rack;
-
+/*
   StringBuilder *sb = create_string_builder();
   string_builder_add_game(game, sb);
   printf("%s\n", string_builder_peek(sb));
   destroy_string_builder(sb);
-
+*/
   reset_anchor_list(al);
   gen->current_row_index = 8;
   gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
@@ -977,6 +957,29 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   // 9b ISTRIMI(YOND)
   assert(within_epsilon((*shadow_limit_table)[5][7].highest_equity, 84));
   assert(within_epsilon((*shadow_limit_table)[5][7].num_playthrough, 4));
+
+  reset_game(game);
+  char qi_qi[300] = "15/15/15/15/15/15/15/6QI7/6I8/15/15/15/15/15/15 FRUITED/EGGCUPS 22/12 0 lex CSW21";
+  assert(load_cgp(game, qi_qi) == CGP_PARSE_STATUS_SUCCESS);
+  player = game->players[game->player_on_turn_index];
+  opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_game(game, sb);
+  printf("%s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+
+  reset_anchor_list(al);
+  set_descending_tile_scores(gen, player);
+  shadow_by_orientation(gen, player, false, opp_rack);
+  sort_anchor_list(gen->anchor_list);
+
+  // 8g (QI)DURFITE 128
+  // 9c DURT(I)FIE 70
+  // 7h FURTIDE 69
+
+  assert(al->count == 3);
+  //split_anchors_for_bingos(gen->anchor_list, true);
 
   destroy_game(game);
 }

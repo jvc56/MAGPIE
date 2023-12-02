@@ -561,22 +561,115 @@ void equity_test(SuperConfig *superconfig) {
   destroy_game(game);
 }
 
+void set_up_gen_for_anchor(Generator *gen, int i) {
+  reset_move_list(gen->move_list);
+  gen->tiles_played = 0;
+  gen->current_anchor_col = gen->anchor_list->anchors[i]->col;
+  gen->current_row_index = gen->anchor_list->anchors[i]->row;
+  gen->last_anchor_col = gen->anchor_list->anchors[i]->last_anchor_col;
+  gen->vertical = gen->anchor_list->anchors[i]->vertical;
+  gen->min_num_playthrough = gen->anchor_list->anchors[i]->min_num_playthrough;
+  gen->max_num_playthrough = gen->anchor_list->anchors[i]->max_num_playthrough;
+  gen->min_tiles_to_play = gen->anchor_list->anchors[i]->min_tiles_to_play;
+  gen->max_tiles_to_play = gen->anchor_list->anchors[i]->max_tiles_to_play;
+  gen->highest_shadow_equity =
+      gen->anchor_list->anchors[i]->highest_possible_equity;
+  memcpy(gen->max_tiles_starting_left_by,
+         gen->anchor_list->anchors[i]->max_tiles_starting_left_by,
+         sizeof(gen->max_tiles_starting_left_by));
+  memcpy(gen->highest_equity_by_length,
+         gen->anchor_list->anchors[i]->highest_equity_by_length,
+         sizeof(gen->highest_equity_by_length));
+  for (int len = gen->max_tiles_to_play; len > 0; len--) {
+    for (int shorter_len = len - 1; shorter_len >= 0; shorter_len--) {
+      if (gen->highest_equity_by_length[shorter_len] <
+          gen->highest_equity_by_length[len]) {
+        gen->highest_equity_by_length[shorter_len] =
+            gen->highest_equity_by_length[len];
+      }
+    }
+  }
+  set_transpose(gen->board, gen->anchor_list->anchors[i]->transpose_state);
+  load_row_letter_cache(gen, gen->current_row_index);
+}
+
 void bingo_anchor_tests(SuperConfig *superconfig) {
   Config *config = get_csw_config(superconfig);
   Game *game = create_game(config);
   Generator *gen = game->gen;
   AnchorList *al = gen->anchor_list;
+  Player *player = game->players[game->player_on_turn_index];
+  Rack *opp_rack = game->players[1 - game->player_on_turn_index]->rack;
 
   char kaki_yond[300] =
       "15/15/15/15/15/15/15/6KAkI5/8YOND3/15/15/15/15/15/15 MIRITIS/EEEEEEE "
       "14/22 0 lex CSW21";
   assert(load_cgp(game, kaki_yond) == CGP_PARSE_STATUS_SUCCESS);
-  Player *player = game->players[game->player_on_turn_index];
-  Rack *opp_rack = game->players[1 - game->player_on_turn_index]->rack;
-
   look_up_bingos_for_game(game);
   assert(gen->number_of_bingos == 1);
   assert_bingo_found(gen, "MIRITIS");
+  gen->current_row_index = 8;
+  gen->current_anchor_col = 6;
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  gen->vertical = false;
+  for (int i = 0; i < (BOARD_DIM); i++) {
+    gen->max_tiles_starting_left_by[i] = (i == 6) ? 7 : 0;
+  }
+  bingo_gen(gen, player, opp_rack);
+  // don't make 9b MIRITIS(YOND)
+  assert(gen->move_list->count == 0);
+
+  reset_game(game);
+  char playthrough[300] =
+      "15/15/15/15/15/11I3/7S3R3/3QUACK3E3/7YAULD3/15/15/15/15/15/15 "
+      "AENORST/WEEWEED 70/25 0 lex CSW21";
+  assert(load_cgp(game, playthrough) == CGP_PARSE_STATUS_SUCCESS);
+   look_up_bingos_for_game(game);
+  assert(gen->number_of_bingos == 4);
+  player = game->players[game->player_on_turn_index];
+  opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+
+  reset_anchor_list(al);
+  gen->current_row_index = 5;
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  set_descending_tile_scores(gen, player);
+  load_row_letter_cache(gen, gen->current_row_index);
+  shadow_play_for_anchor(gen, 7, player, opp_rack);
+  split_anchors_for_bingos(al, true);
+  assert(al->count == 3);
+  sort_anchor_list(al);
+
+  assert(al->anchors[0]->highest_possible_equity == 73);
+  set_up_gen_for_anchor(gen, 0);
+  init_leave_map(gen->leave_map, player->rack);
+  recursive_gen(gen, 7, player, opp_rack,
+                kwg_get_root_node_index(player->strategy_params->kwg), 7, 7,
+                !gen->vertical);
+  assert(gen->move_list->count == 2);
+  SortedMoveList *sorted_move_list = create_sorted_move_list(gen->move_list);
+  assert_move(game, sorted_move_list, 0, "6E ANOESTR(I) 73");
+  assert_move(game, sorted_move_list, 1, "6G SENOR(I)TA 73");
+  destroy_sorted_move_list(sorted_move_list);
+
+  assert(al->anchors[1]->highest_possible_equity == 72);
+  set_up_gen_for_anchor(gen, 1);
+  bingo_gen(gen, player, opp_rack);
+  assert(gen->move_list->count == 2);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+  assert_move(game, sorted_move_list, 0, "6D ATONERS 72");
+  assert_move(game, sorted_move_list, 1, "6D SANTERO 72");
+  destroy_sorted_move_list(sorted_move_list);
+
+  assert(al->anchors[2]->highest_possible_equity == 22);
+  set_up_gen_for_anchor(gen, 2);
+  init_leave_map(gen->leave_map, player->rack);
+  recursive_gen(gen, 7, player, opp_rack,
+                kwg_get_root_node_index(player->strategy_params->kwg), 7, 7,
+                !gen->vertical);
+  assert(gen->move_list->count == 168);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+  assert_move(game, sorted_move_list, 0, "6F ANESTR(I) 22");
+  destroy_sorted_move_list(sorted_move_list);
 
   destroy_game(game);
 }
@@ -600,6 +693,9 @@ void bingo_gen_tests(SuperConfig *superconfig) {
   gen->current_anchor_col = 3;
   gen->vertical = false;
   gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  for (int i = 0; i < (BOARD_DIM); i++) {
+    gen->max_tiles_starting_left_by[i] = (i <= 3) ? 7 : 0;
+  }
   player->strategy_params->play_recorder_type = MOVE_RECORDER_ALL;
   bingo_gen(gen, player, NULL);
   assert(gen->move_list->count == 1);
@@ -637,6 +733,9 @@ void bingo_gen_tests(SuperConfig *superconfig) {
   reset_move_list(gen->move_list);
   gen->current_anchor_col = 7;
   gen->last_anchor_col = 6;
+  for (int i = 0; i < (BOARD_DIM); i++) {
+    gen->max_tiles_starting_left_by[i] = (i == 0) ? 7 : 0;
+  }
   bingo_gen(gen, player, NULL);
   assert(gen->move_list->count == 3);
   sorted_move_list = create_sorted_move_list(gen->move_list);
@@ -661,6 +760,11 @@ void bingo_gen_tests(SuperConfig *superconfig) {
   reset_move_list(gen->move_list);
   gen->current_anchor_col = 9;
   gen->last_anchor_col = 8;
+  // I don't know if this type of anchor gets created, seems like it could be
+  // avoided, but if it shows up it should not produce any moves.
+  for (int i = 0; i < (BOARD_DIM); i++) {
+    gen->max_tiles_starting_left_by[i] = 0;
+  }
   bingo_gen(gen, player, NULL);
   assert(gen->move_list->count == 0);
 
@@ -683,6 +787,9 @@ void bingo_gen_tests(SuperConfig *superconfig) {
   gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
   gen->vertical = true;
   Rack *opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+  for (int i = 0; i < (BOARD_DIM); i++) {
+    gen->max_tiles_starting_left_by[i] = ((i >= 2) && (i <= 6)) ? 7 : 0;
+  }
   bingo_gen(gen, player, opp_rack);
   assert(gen->move_list->count == 1);
   assert_move(game, NULL, 0, "B9 FALTERS 81");
@@ -700,6 +807,9 @@ void bingo_gen_tests(SuperConfig *superconfig) {
   // Setting it to 6 gives us just the 8H moves.
   gen->last_anchor_col = 6;
   gen->vertical = false;
+  for (int i = 0; i < (BOARD_DIM); i++) {
+    gen->max_tiles_starting_left_by[i] = (i == 0) ? 7 : 0;
+  }
   bingo_gen(gen, player, NULL);
   // FACEOFF x 3
   // AFFORCE x 2
@@ -819,7 +929,6 @@ void distinct_lexica_test(SuperConfig *superconfig) {
 }
 
 void test_movegen(SuperConfig *superconfig) {
-  bingo_anchor_tests(superconfig); return;
   macondo_tests(superconfig);
   exchange_tests(superconfig);
   bingo_anchor_tests(superconfig);

@@ -78,6 +78,8 @@ void generate_moves(Generator *gen, Player *player, Rack *opp_rack,
 void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
                              int stripidx, int add_exchange);
 void set_descending_tile_scores(Generator *gen, Player *player);                             
+void shadow_by_orientation(Generator *gen, Player *player, int dir,
+                           Rack *opp_rack);
 void shadow_play_for_anchor(Generator *gen, int col, Player *player,
                             Rack *opp_rack);
 void look_up_bingos(Generator *gen, Player *player);     
