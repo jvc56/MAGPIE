@@ -51,6 +51,8 @@ int game_get_player_on_turn_index(Game *game) {
   return game->player_on_turn_index;
 }
 
+int game_get_game_end_reason(Game *game) { return game->game_end_reason; }
+
 int get_player_draw_index(Game *game, int player_index) {
   return player_index ^ game->starting_player_index;
 }

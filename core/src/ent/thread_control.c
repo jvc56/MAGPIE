@@ -5,6 +5,7 @@
 
 #include "file_handler.h"
 #include "thread_control.h"
+#include "timer.h"
 
 struct ThreadControl {
   int number_of_threads;
@@ -19,7 +20,7 @@ struct ThreadControl {
   pthread_mutex_t searching_mode_mutex;
   FileHandler *outfile;
   FileHandler *infile;
-  struct timespec start_time;
+  Timer *timer;
 };
 
 ThreadControl *create_thread_control() {
@@ -38,12 +39,14 @@ ThreadControl *create_thread_control() {
       STDOUT_FILENAME, FILE_HANDLER_MODE_WRITE);
   thread_control->infile =
       create_file_handler_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
+  thread_control->timer = create_timer();
   return thread_control;
 }
 
 void destroy_thread_control(ThreadControl *thread_control) {
   destroy_file_handler(thread_control->outfile);
   destroy_file_handler(thread_control->infile);
+  destroy_timer(thread_control->timer);
   free(thread_control);
 }
 
@@ -69,6 +72,14 @@ void set_io(ThreadControl *thread_control, const char *in_filename,
 
   set_file_handler(thread_control->outfile, nonnull_out_filename,
                    FILE_HANDLER_MODE_WRITE);
+}
+
+FileHandler *get_infile(ThreadControl *thread_control) {
+  return thread_control->infile;
+}
+
+Timer *get_timer(ThreadControl *thread_control) {
+  return thread_control->timer;
 }
 
 int get_print_info_interval(ThreadControl *thread_control) {

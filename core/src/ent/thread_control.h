@@ -11,6 +11,7 @@ void destroy_thread_control(ThreadControl *thread_control);
 bool halt(ThreadControl *thread_control, halt_status_t halt_status);
 bool unhalt(ThreadControl *thread_control);
 bool is_halted(ThreadControl *thread_control);
+FileHandler *get_infile(ThreadControl *thread_control);
 halt_status_t get_halt_status(ThreadControl *thread_control);
 int get_print_info_interval(ThreadControl *thread_control);
 void set_print_info_interval(ThreadControl *thread_control,

@@ -1,11 +1,8 @@
-#include <inttypes.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include "../def/cross_set_defs.h"
 
-#include "board.h"
-#include "constants.h"
-#include "cross_set.h"
-#include "kwg.h"
+#include "../ent/board.h"
+#include "../ent/kwg.h"
+#include "../ent/letter_distribution.h"
 
 int allowed(uint64_t cross_set, uint8_t letter) {
   return (cross_set & ((uint64_t)1 << letter)) != 0;

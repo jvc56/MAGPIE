@@ -1,16 +1,23 @@
 #include <stdlib.h>
 
-#include "autoplay_results.h"
-#include "command.h"
-#include "config.h"
-#include "error_status.h"
-#include "game.h"
-#include "infer.h"
-#include "log.h"
-#include "sim.h"
-#include "thread_control.h"
-#include "ucgi_print.h"
+#include "../def/autoplay_defs.h"
+#include "../def/file_handler_defs.h"
+#include "../def/inference_defs.h"
+
+#include "../util/log.h"
 #include "../util/util.h"
+
+#include "../str/string_util.h"
+
+#include "../ent/autoplay_results.h"
+#include "../ent/command.h"
+#include "../ent/config.h"
+#include "../ent/error_status.h"
+#include "../ent/file_handler.h"
+#include "../ent/game.h"
+#include "../ent/inference.h"
+#include "../ent/simmer.h"
+#include "../ent/thread_control.h"
 
 #define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"
@@ -73,7 +80,8 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
     return NULL;
   }
 
-  ThreadControl *thread_control = command_vars->config->thread_control;
+  ThreadControl *thread_control =
+      config_get_thread_control(command_vars->config);
 
   int mode = get_mode(thread_control);
   if (mode != MODE_SEARCHING) {
@@ -89,7 +97,8 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
   }
 
   char *status_string = NULL;
-  switch (command_vars->config->command_type) {
+
+  switch (config_get_command_type(command_vars->config)) {
   case COMMAND_TYPE_SIM:
     if (!command_vars->simmer) {
       log_warn("Simmer has not been initialized.");
@@ -175,12 +184,12 @@ void execute_command(CommandVars *command_vars) {
   // guaranteed to be a set options
   // command and the rest of the function
   // will be a no-op.
-  if (config->lexicons_loaded) {
+  if (config_get_lexicons_loaded(config)) {
     update_or_create_game(config, command_vars);
 
-    if (config->command_set_cgp) {
+    if (config_get_command_set_cgp(config)) {
       cgp_parse_status_t cgp_parse_status =
-          load_cgp(command_vars->game, config->cgp);
+          load_cgp(command_vars->game, config_get_cgp(config));
       set_or_clear_error_status(command_vars->error_status,
                                 ERROR_STATUS_TYPE_CGP_LOAD,
                                 (int)cgp_parse_status);
@@ -190,7 +199,7 @@ void execute_command(CommandVars *command_vars) {
     }
   }
 
-  switch (config->command_type) {
+  switch (config_get_command_type(config)) {
   case COMMAND_TYPE_SET_OPTIONS:
     // this operation is just for loading the config
     // so the execution is a no-op
@@ -215,7 +224,7 @@ void execute_command(CommandVars *command_vars) {
 void execute_command_and_set_mode_stopped(CommandVars *command_vars) {
   execute_command(command_vars);
   log_warn_if_failed(command_vars->error_status);
-  set_mode_stopped(command_vars->config->thread_control);
+  set_mode_stopped(config_get_thread_control(command_vars->config));
 }
 
 void *execute_command_thread_worker(void *uncasted_command_vars) {
@@ -226,7 +235,9 @@ void *execute_command_thread_worker(void *uncasted_command_vars) {
 
 void execute_command_sync_or_async(CommandVars *command_vars,
                                    const char *command, bool sync) {
-  if (!set_mode_searching(command_vars->config->thread_control)) {
+  ThreadControl *thread_control =
+      config_get_thread_control(command_vars->config);
+  if (!set_mode_searching(thread_control)) {
     log_warn("still searching");
     return;
   }
@@ -249,7 +260,7 @@ void execute_command_sync_or_async(CommandVars *command_vars,
                             (int)config_load_status);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     log_warn_if_failed(command_vars->error_status);
-    set_mode_stopped(command_vars->config->thread_control);
+    set_mode_stopped(thread_control);
     return;
   }
 
@@ -273,7 +284,8 @@ void execute_command_async(CommandVars *command_vars, const char *command) {
 
 void process_ucgi_command(CommandVars *command_vars, const char *command) {
   // Assume cmd is already trimmed of whitespace
-  ThreadControl *thread_control = command_vars->config->thread_control;
+  ThreadControl *thread_control =
+      config_get_thread_control(command_vars->config);
   if (strings_equal(command, UCGI_COMMAND_STRING)) {
     // More of a formality to align with UCI
     print_to_outfile(thread_control, "id name MAGPIE 0.1\nucgiok\n");
@@ -291,9 +303,11 @@ void process_ucgi_command(CommandVars *command_vars, const char *command) {
 }
 
 bool continue_on_coldstart(const Config *config) {
-  return config->command_type == COMMAND_TYPE_SET_OPTIONS ||
-         config->command_type == COMMAND_TYPE_LOAD_CGP ||
-         config->command_set_infile || config->command_set_exec_mode;
+  command_t command_type = config_get_command_type(config);
+  return command_type == COMMAND_TYPE_SET_OPTIONS ||
+         command_type == COMMAND_TYPE_LOAD_CGP ||
+         config_get_command_set_infile(config) ||
+         config_get_command_set_exec_mode(config);
 }
 
 void command_scan_loop(CommandVars *command_vars,
@@ -302,15 +316,17 @@ void command_scan_loop(CommandVars *command_vars,
   if (!continue_on_coldstart(command_vars->config)) {
     return;
   }
+  ThreadControl *thread_control =
+      config_get_thread_control(command_vars->config);
   char *input = NULL;
   while (1) {
-    exec_mode_t exec_mode = command_vars->config->exec_mode;
+    exec_mode_t exec_mode = config_get_exec_mode(command_vars->config);
 
-    FileHandler *infile = command_vars->config->thread_control->infile;
+    FileHandler *infile = get_infile(thread_control);
 
     if (exec_mode == EXEC_MODE_CONSOLE &&
         strings_equal(STDIN_FILENAME, get_file_handler_filename(infile))) {
-      print_to_outfile(command_vars->config->thread_control, "magpie>");
+      print_to_outfile(thread_control, "magpie>");
     }
 
     free(input);

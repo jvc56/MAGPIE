@@ -1,5 +1,7 @@
-#include "../board.h"
-#include "../letter_distribution.h"
+#include <stdint.h>
+
+#include "../ent/board.h"
+#include "../ent/letter_distribution.h"
 
 int traverse_backwards_for_score(const Board *board,
                                  const LetterDistribution *letter_distribution,
@@ -11,9 +13,10 @@ int traverse_backwards_for_score(const Board *board,
       break;
     }
     if (is_blanked(ml)) {
-      score += letter_distribution->scores[BLANK_MACHINE_LETTER];
+      score += letter_distribution_get_score(letter_distribution,
+                                             BLANK_MACHINE_LETTER);
     } else {
-      score += letter_distribution->scores[ml];
+      score += letter_distribution_get_score(letter_distribution, ml);
     }
     col--;
   }
