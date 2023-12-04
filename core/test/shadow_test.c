@@ -972,15 +972,60 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   reset_anchor_list(al);
   set_descending_tile_scores(gen, player);
   shadow_by_orientation(gen, player, false, opp_rack);
-  sort_anchor_list(gen->anchor_list);
+  sort_anchor_list(al);
 
   // 8g (QI)DURFITE 128
   // 9c DURT(I)FIE 70
   // 7h FURTIDE 69
-
   assert(al->count == 3);
-  //split_anchors_for_bingos(gen->anchor_list, true);
+  sort_anchor_list(al);
 
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 128));
+  assert(al->anchors[0]->row == 7);
+  assert(al->anchors[0]->col == 7);
+  assert(al->anchors[0]->min_tiles_to_play == 1);
+  assert(al->anchors[0]->max_tiles_to_play == 7);
+  assert(al->anchors[0]->max_tiles_starting_left_by[0] == 0);
+  assert(al->anchors[0]->max_tiles_starting_left_by[1] == 7);
+  
+  split_anchors_for_bingos(al, true);
+  // 7h FURTED 18
+  assert(al->count == 4);
+  sort_anchor_list(al);
+
+  // 8g (QI)DURFITE 128
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 128));
+  assert(al->anchors[0]->row == 7);
+  assert(al->anchors[0]->col == 7);
+  assert(al->anchors[0]->min_tiles_to_play == 1);
+  assert(al->anchors[0]->max_tiles_to_play == 7);
+  assert(al->anchors[0]->max_tiles_starting_left_by[0] == 0);
+  assert(al->anchors[0]->max_tiles_starting_left_by[1] == 7);
+  
+  // 9c DURT(I)FIE 70
+  assert(within_epsilon(al->anchors[1]->highest_possible_equity, 70));
+  assert(al->anchors[1]->row == 8);
+  assert(al->anchors[1]->col == 6);
+  assert(al->anchors[1]->min_tiles_to_play == 1);
+  assert(al->anchors[1]->max_tiles_to_play == 7);
+  assert(al->anchors[1]->max_tiles_starting_left_by[0] == 7);
+
+  // 7h FURTIDE 69
+  assert(within_epsilon(al->anchors[2]->highest_possible_equity, 69));
+  assert(al->anchors[2]->row == 6);
+  assert(al->anchors[2]->col == 7);
+  assert(al->anchors[2]->min_tiles_to_play == 7);
+  assert(al->anchors[2]->max_tiles_to_play == 7);
+  assert(al->anchors[2]->max_tiles_starting_left_by[0] == 7);
+
+  // 7h FURTED 18
+  assert(within_epsilon(al->anchors[3]->highest_possible_equity, 18));
+  assert(al->anchors[3]->row == 6);
+  assert(al->anchors[3]->col == 7);
+  assert(al->anchors[3]->min_tiles_to_play == 1);
+  assert(al->anchors[3]->max_tiles_to_play == 6);
+  assert(al->anchors[3]->max_tiles_starting_left_by[0] == 6);
+  
   destroy_game(game);
 }
 
