@@ -46,25 +46,23 @@ struct Move {
 
 // Getter functions
 
-game_event_t get_move_type(const struct Move *move) { return move->move_type; }
+game_event_t get_move_type(const Move *move) { return move->move_type; }
 
-int get_score(const struct Move *move) { return move->score; }
+int get_score(const Move *move) { return move->score; }
 
-int get_row_start(const struct Move *move) { return move->row_start; }
+int get_row_start(const Move *move) { return move->row_start; }
 
-int get_col_start(const struct Move *move) { return move->col_start; }
+int get_col_start(const Move *move) { return move->col_start; }
 
-int get_tiles_played(const struct Move *move) { return move->tiles_played; }
+int get_tiles_played(const Move *move) { return move->tiles_played; }
 
-int get_tiles_length(const struct Move *move) { return move->tiles_length; }
+int get_tiles_length(const Move *move) { return move->tiles_length; }
 
-double get_equity(const struct Move *move) { return move->equity; }
+double get_equity(const Move *move) { return move->equity; }
 
-int get_dir(const struct Move *move) { return move->dir; }
+int get_dir(const Move *move) { return move->dir; }
 
-uint8_t get_tile(const struct Move *move, int index) {
-  return move->tiles[index];
-}
+uint8_t get_tile(const Move *move, int index) { return move->tiles[index]; }
 
 Move *get_spare_move(MoveList *ml) { return ml->spare_move; }
 
@@ -74,6 +72,38 @@ int *move_list_get_capacity(MoveList *ml) { return ml->capacity; }
 
 Move *move_list_get_move(MoveList *ml, int move_index) {
   return ml->moves[move_index];
+}
+
+void move_set_type(Move *move, game_event_t move_type) {
+  move->move_type = move_type;
+}
+
+void move_set_score(Move *move, int score) { move->score = score; }
+
+void move_set_row_start(Move *move, int row_start) {
+  move->row_start = row_start;
+}
+
+void move_set_col_start(Move *move, int col_start) {
+  move->col_start = col_start;
+}
+
+void move_set_tiles_played(Move *move, int tiles_played) {
+  move->tiles_played = tiles_played;
+}
+
+void move_set_tiles_length(Move *move, int tiles_length) {
+  move->tiles_length = tiles_length;
+}
+
+void move_set_equity(Move *move, double equity) { move->equity = equity; }
+
+void move_set_dir(Move *move, int dir) { move->dir = dir; }
+
+void move_set_tile_at_index(Move *move, uint8_t tile, int index) {
+  if (index >= 0 && index < BOARD_DIM) {
+    move->tiles[index] = tile;
+  }
 }
 
 Move *create_move() { return malloc_or_die(sizeof(Move)); }

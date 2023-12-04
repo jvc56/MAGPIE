@@ -20,6 +20,16 @@ struct KLV {
   float *leave_values;
 };
 
+int klv_get_word_count(const KLV *klv, int word_count_index) {
+  return klv->word_counts[word_count_index];
+}
+
+float klv_get_leave_value(const KLV *klv, int leave_value_index) {
+  return klv->leave_values[leave_value_index];
+}
+
+const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
+
 int count_words_at(const KLV *klv, int p, int kwg_size) {
   if (p >= kwg_size) {
     return 0;

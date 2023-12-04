@@ -11,19 +11,29 @@ typedef struct Move Move;
 struct MoveList;
 typedef struct MoveList MoveList;
 
-game_event_t get_move_type(const struct Move *move);
-int get_score(const struct Move *move);
-int get_row_start(const struct Move *move);
-int get_col_start(const struct Move *move);
-int get_tiles_played(const struct Move *move);
-int get_tiles_length(const struct Move *move);
-double get_equity(const struct Move *move);
-int get_dir(const struct Move *move);
-uint8_t get_tile(const struct Move *move, int index);
+game_event_t get_move_type(const Move *move);
+int get_score(const Move *move);
+int get_row_start(const Move *move);
+int get_col_start(const Move *move);
+int get_tiles_played(const Move *move);
+int get_tiles_length(const Move *move);
+double get_equity(const Move *move);
+int get_dir(const Move *move);
+uint8_t get_tile(const Move *move, int index);
 Move *get_spare_move(MoveList *ml);
 int *move_list_get_count(MoveList *ml);
 int *move_list_get_capacity(MoveList *ml);
 Move *move_list_get_move(MoveList *ml, int move_index);
+
+void move_set_type(Move *move, game_event_t move_type);
+void move_set_score(Move *move, int score);
+void move_set_row_start(Move *move, int row_start);
+void move_set_col_start(Move *move, int col_start);
+void move_set_tiles_played(Move *move, int tiles_played);
+void move_set_tiles_length(Move *move, int tiles_length);
+void move_set_equity(Move *move, double equity);
+void move_set_dir(Move *move, int dir);
+void move_set_tile_at_index(Move *move, uint8_t tile, int index);
 
 Move *create_move();
 void move_copy(Move *dest_move, const Move *src_move);

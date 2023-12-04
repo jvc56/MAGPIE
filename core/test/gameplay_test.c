@@ -21,9 +21,9 @@ void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
 
 void return_racks_to_bag(Game *game) {
   return_rack_to_bag(game->players[0]->rack, game->gen->bag,
-                     get_player_draw_index(game, 0));
+                     game_get_player_draw_index(game, 0));
   return_rack_to_bag(game->players[1]->rack, game->gen->bag,
-                     get_player_draw_index(game, 1));
+                     game_get_player_draw_index(game, 1));
 }
 
 void assert_players_are_equal(const Player *p1, const Player *p2,
@@ -84,7 +84,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
           actual_game->gen->bag,
           actual_game->players[1 - actual_game->player_on_turn_index]->rack,
           RACK_SIZE,
-          get_player_draw_index(actual_game,
+          game_get_player_draw_index(actual_game,
                                 1 - actual_game->player_on_turn_index));
     }
 
@@ -410,9 +410,9 @@ void test_playmove(TestConfig *testconfig) {
            "3PAIGLE2X1TO/2JANN4FAQIR/4C2MOKES1ZO/4EBIoNISE2U/2ODDITY1R1S2G/"
            "1DUI1EALE3YEH/CODGER2LOTIONS/9RIN3 / 517/349 5 lex CSW21;");
   draw_at_most_to_rack(game->gen->bag, game->players[0]->rack, 1,
-                       get_player_draw_index(game, 0));
+                       game_get_player_draw_index(game, 0));
   draw_at_most_to_rack(game->gen->bag, game->players[1]->rack, 1,
-                       get_player_draw_index(game, 1));
+                       game_get_player_draw_index(game, 1));
 
   int player0_score = game->players[0]->score;
   int player1_score = game->players[1]->score;

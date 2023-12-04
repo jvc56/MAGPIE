@@ -24,6 +24,8 @@ void player_set_move_record_type(Player *player,
                                  move_record_t move_record_type);
 void player_set_kwg(Player *player, const KWG *kwg);
 void player_set_klv(Player *player, const KLV *klv);
+void player_increment_score(Player *player, int score);
+void player_decrement_score(Player *player, int score);
 
 Player *create_player(const Config *config, int player_index);
 void update_player(const Config *config, Player *player);

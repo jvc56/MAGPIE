@@ -71,6 +71,10 @@ LetterDistribution *gen_get_ld(Generator *gen) {
 
 MoveList *gen_get_move_list(Generator *gen) { return gen->move_list; }
 
+bool *gen_get_kwgs_are_distinct(Generator *gen) {
+  return gen->kwgs_are_distinct;
+}
+
 int score_on_rack(const LetterDistribution *letter_distribution,
                   const Rack *rack) {
   int sum = 0;

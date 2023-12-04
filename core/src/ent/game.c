@@ -41,24 +41,50 @@ struct Game {
   bool backups_preallocated;
 };
 
-Generator *game_get_gen(Game *game) { return game->gen; }
+Generator *game_get_gen(const Game *game) { return game->gen; }
 
-Player *game_get_player(Game *game, int player_index) {
+Player *game_get_player(const Game *game, int player_index) {
   return game->players[player_index];
 }
 
-int game_get_player_on_turn_index(Game *game) {
+int game_get_player_on_turn_index(const Game *game) {
   return game->player_on_turn_index;
 }
 
-int game_get_game_end_reason(Game *game) { return game->game_end_reason; }
+game_end_reason_t game_get_game_end_reason(const Game *game) {
+  return game->game_end_reason;
+}
 
-int get_player_draw_index(Game *game, int player_index) {
+void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason) {
+  game->game_end_reason = game_end_reason;
+}
+
+int game_get_player_draw_index(const Game *game, int player_index) {
   return player_index ^ game->starting_player_index;
 }
 
-int get_player_on_turn_draw_index(Game *game) {
-  return get_player_draw_index(game, game->player_on_turn_index);
+int game_get_player_on_turn_draw_index(const Game *game) {
+  return game_get_player_draw_index(game, game->player_on_turn_index);
+}
+
+backup_mode_t game_get_backup_mode(const Game *game) {
+  return game->backup_mode;
+}
+
+int game_get_consecutive_scoreless_turns(const Game *game) {
+  return game->consecutive_scoreless_turns;
+}
+
+void game_set_consecutive_scoreless_turns(Game *game, int value) {
+  game->consecutive_scoreless_turns = value;
+}
+
+void game_increment_consecutive_scoreless_turns(Game *game) {
+  game->consecutive_scoreless_turns++;
+}
+
+void game_start_next_player_turn(Game *game) {
+  game->player_on_turn_index = 1 - game->player_on_turn_index;
 }
 
 void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
@@ -193,7 +219,7 @@ parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
       draw_rack_from_bag(gen_get_ld(game->gen), gen_get_bag(game->gen),
                          player_get_rack(game->players[0]),
                          string_splitter_get_item(player_racks, 0),
-                         get_player_draw_index(game, 0));
+                         game_get_player_draw_index(game, 0));
   if (number_of_letters_added < 0) {
     return CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
   }
@@ -201,7 +227,7 @@ parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
       draw_rack_from_bag(gen_get_ld(game->gen), gen_get_bag(game->gen),
                          player_get_rack(game->players[1]),
                          string_splitter_get_item(player_racks, 1),
-                         get_player_draw_index(game, 1));
+                         game_get_player_draw_index(game, 1));
   if (number_of_letters_added < 0) {
     cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
   }
