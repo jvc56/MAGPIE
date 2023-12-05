@@ -27,6 +27,7 @@ typedef struct Generator {
   int current_anchor_col;
   int last_anchor_col;
   int dir;
+  int max_tiles_to_play;
   int tiles_played;
   int number_of_plays;
   int move_sort_type;

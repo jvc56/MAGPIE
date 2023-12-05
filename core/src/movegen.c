@@ -1,3 +1,5 @@
+#include "movegen.h"
+
 #include <assert.h>
 #include <ctype.h>
 #include <stdint.h>
@@ -10,7 +12,6 @@
 #include "klv.h"
 #include "kwg.h"
 #include "leave_map.h"
-#include "movegen.h"
 #include "player.h"
 #include "rack.h"
 #include "util.h"
@@ -480,6 +481,9 @@ void shadow_record(const Rack *opp_rack, Generator *gen, int left_col,
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
   }
+  if (gen->tiles_played > gen->max_tiles_to_play) {
+    gen->max_tiles_to_play = gen->tiles_played;
+  }
 }
 
 void shadow_play_right(const Rack *opp_rack, Generator *gen,
@@ -681,6 +685,7 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
   gen->current_anchor_col = col;
 
   // Reset tiles played
+  gen->max_tiles_to_play = 0;
   gen->tiles_played = 0;
 
   // Set rack cross set
@@ -692,6 +697,9 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
   }
 
   shadow_start(opp_rack, gen, get_cross_set_index(gen, player->index));
+  if (gen->max_tiles_to_play == 0) {
+    return;
+  }
   add_anchor(gen->anchor_list, gen->current_row_index, col,
              gen->last_anchor_col, gen->board->transposed,
              dir_is_vertical(gen->dir), gen->highest_shadow_equity);
@@ -707,6 +715,12 @@ void shadow_by_orientation(const Rack *opp_rack, Generator *gen, Player *player,
       if (get_anchor(gen->board, row, col, dir)) {
         shadow_play_for_anchor(opp_rack, gen, col, player);
         gen->last_anchor_col = col;
+        // The next anchor to search after a playthrough tile should
+        // leave a gap of one square so that it will not search backwards
+        // into the square adjacent to the playthrough tile.
+        if (!is_empty_cache(gen, col)) {
+          gen->last_anchor_col++;
+        }
       }
     }
   }
