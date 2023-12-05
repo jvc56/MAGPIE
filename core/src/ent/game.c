@@ -371,7 +371,7 @@ void set_starting_player_index(Game *game, int starting_player_index) {
 
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
-  LetterDistribution *ld = gen_get_ld(game);
+  LetterDistribution *ld = gen_get_ld(gen);
   uint32_t ld_size = letter_distribution_get_size(ld);
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));

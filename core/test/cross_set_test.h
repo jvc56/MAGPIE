@@ -1,7 +1,7 @@
 #ifndef CROSS_SET_TEST_H
 #define CROSS_SET_TEST_H
 
-#include "../src/game.h"
+#include "../src/ent/game.h"
 
 #include "testconfig.h"
 

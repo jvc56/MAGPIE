@@ -46,6 +46,10 @@ double get_current_value(const LeaveMap *leave_map) {
   return leave_map->leave_values[leave_map->current_index];
 }
 
+int leave_map_get_current_index(const LeaveMap *leave_map) {
+  return leave_map->current_index;
+}
+
 void leave_map_take_letter(LeaveMap *leave_map, uint8_t letter,
                            int number_of_letter_on_rack) {
   int base_index = leave_map->letter_base_index_map[letter];

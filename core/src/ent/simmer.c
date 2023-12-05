@@ -114,6 +114,10 @@ int simmer_get_number_of_plays(Simmer *simmer) {
 
 int simmer_get_max_plies(Simmer *simmer) { return simmer->max_plies; }
 
+int simmer_get_iteration_count(Simmer *simmer) {
+  return simmer->iteration_count;
+}
+
 SimmedPlay *simmer_get_simmed_play(Simmer *simmer, int simmed_play_index) {
   return simmer->simmed_plays[simmed_play_index];
 }

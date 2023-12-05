@@ -16,6 +16,7 @@ bool simmed_play_is_ignore(const SimmedPlay *simmed_play);
 int simmed_play_get_id(const SimmedPlay *simmed_play);
 pthread_mutex_t *simmed_play_get_mutex(const SimmedPlay *simmed_play);
 bool is_simmed_play_ignore(const SimmedPlay *simmed_play);
+int simmer_get_iteration_count(Simmer *simmer);
 
 struct Simmer;
 typedef struct Simmer Simmer;

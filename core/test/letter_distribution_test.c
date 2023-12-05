@@ -1,32 +1,37 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../src/config.h"
-#include "../src/letter_distribution.h"
+#include "../src/ent/config.h"
+#include "../src/ent/letter_distribution.h"
 
 #include "testconfig.h"
 
 void test_letter_distribution(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
-  const LetterDistribution *ld = config->letter_distribution;
+  const LetterDistribution *ld = config_get_letter_distribution(config);
+  int ld_size = letter_distribution_get_size(ld);
 
   uint32_t previous_score;
-  for (uint32_t i = 0; i < ld->size; i++) {
-    int score_order_index = ld->score_order[i];
+  for (uint32_t i = 0; i < ld_size; i++) {
+    int score_order_index = letter_distribution_get_score_order(ld, i);
     if (i == 0) {
-      previous_score = ld->scores[score_order_index];
+      previous_score = letter_distribution_get_score(ld, BLANK_MACHINE_LETTER);
     }
-    assert(ld->scores[score_order_index] <= previous_score);
+    assert(letter_distribution_get_score(ld, score_order_index) <=
+           previous_score);
   }
 }
 
 void test_str_to_machine_letters(TestConfig *testconfig) {
   const Config *nwl_config = get_nwl_config(testconfig);
-  const LetterDistribution *english_ld = nwl_config->letter_distribution;
+  const LetterDistribution *english_ld =
+      config_get_letter_distribution(nwl_config);
   const Config *disc_config = get_disc_config(testconfig);
-  const LetterDistribution *catalan_ld = disc_config->letter_distribution;
+  const LetterDistribution *catalan_ld =
+      config_get_letter_distribution(disc_config);
   const Config *osps_config = get_osps_config(testconfig);
-  const LetterDistribution *polish_ld = osps_config->letter_distribution;
+  const LetterDistribution *polish_ld =
+      config_get_letter_distribution(osps_config);
 
   uint8_t mls[4];
   int num_mls = str_to_machine_letters(english_ld, "??", false, mls, 4);

@@ -1,7 +1,7 @@
 #include <assert.h>
 
-#include "../src/log.h"
-#include "../src/players_data.h"
+#include "../src/util/log.h"
+#include "../src/ent/players_data.h"
 
 #include "test_util.h"
 

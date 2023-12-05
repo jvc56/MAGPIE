@@ -1,15 +1,16 @@
 #ifndef TEST_UTIL_H
 #define TEST_UTIL_H
 
-#include "../src/board.h"
-#include "../src/config.h"
-#include "../src/game.h"
-#include "../src/infer.h"
-#include "../src/klv.h"
-#include "../src/letter_distribution.h"
-#include "../src/move.h"
-#include "../src/movegen.h"
-#include "../src/rack.h"
+#include "../src/ent/bag.h"
+#include "../src/ent/board.h"
+#include "../src/ent/config.h"
+#include "../src/ent/game.h"
+#include "../src/ent/inference.h"
+#include "../src/ent/klv.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
+#include "../src/ent/movegen.h"
+#include "../src/ent/rack.h"
 
 typedef struct SortedMoveList {
   int count;

@@ -3,18 +3,19 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "../src/log.h"
-#include "../src/string_util.h"
-#include "../src/util.h"
+#include "../src/str/string_util.h"
+#include "../src/util/log.h"
+#include "../src/util/util.h"
 
 #include "test_util.h"
 #include "testconfig.h"
 
 void test_leaves(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
-  const KLV *klv = players_data_get_klv(config->players_data, 0);
-  const LetterDistribution *letter_distribution = config->letter_distribution;
-  Rack *rack = create_rack(config->letter_distribution->size);
+  const KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
+  const LetterDistribution *letter_distribution =
+      config_get_letter_distribution(config);
+  Rack *rack = create_rack(letter_distribution_get_size(letter_distribution));
 
   const char *leaves_csv_filename = "./data/lexica/CSW21.csv";
   FILE *file = fopen(leaves_csv_filename, "r");

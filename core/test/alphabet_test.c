@@ -1,13 +1,16 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../src/config.h"
+#include "../src/ent/config.h"
+
+#include "../src/str/string_util.h"
 
 #include "test_util.h"
 #include "testconfig.h"
 
 void test_alphabet(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
+  LetterDistribution *ld = config_get_letter_distribution(config);
   // Test blank
   assert(get_blanked_machine_letter(1) == (1 | BLANK_MASK));
   assert(get_blanked_machine_letter(5) == (5 | BLANK_MASK));
@@ -18,20 +21,16 @@ void test_alphabet(TestConfig *testconfig) {
 
   // Test val
   // blank
-  assert(human_readable_letter_to_machine_letter(config->letter_distribution,
-                                                 "?") == BLANK_MACHINE_LETTER);
+  assert(human_readable_letter_to_machine_letter(ld, "?") ==
+         BLANK_MACHINE_LETTER);
   // blank
-  assert(human_readable_letter_to_machine_letter(config->letter_distribution,
-                                                 "a") ==
+  assert(human_readable_letter_to_machine_letter(ld, "a") ==
          get_blanked_machine_letter(1));
-  assert(human_readable_letter_to_machine_letter(config->letter_distribution,
-                                                 "b") ==
+  assert(human_readable_letter_to_machine_letter(ld, "b") ==
          get_blanked_machine_letter(2));
   // not blank
-  assert(human_readable_letter_to_machine_letter(config->letter_distribution,
-                                                 "C") == 3);
-  assert(human_readable_letter_to_machine_letter(config->letter_distribution,
-                                                 "D") == 4);
+  assert(human_readable_letter_to_machine_letter(ld, "C") == 3);
+  assert(human_readable_letter_to_machine_letter(ld, "D") == 4);
 
   // Test user visible
   // separation token
@@ -40,35 +39,34 @@ void test_alphabet(TestConfig *testconfig) {
   StringBuilder *letter = create_string_builder();
 
   // blank
-  string_builder_add_user_visible_letter(config->letter_distribution, letter,
-                                         BLANK_MACHINE_LETTER);
+  string_builder_add_user_visible_letter(ld, letter, BLANK_MACHINE_LETTER);
   assert_strings_equal(string_builder_peek(letter), "?");
   string_builder_clear(letter);
 
   // blank A
-  string_builder_add_user_visible_letter(config->letter_distribution, letter,
+  string_builder_add_user_visible_letter(ld, letter,
                                          get_blanked_machine_letter(1));
   assert_strings_equal(string_builder_peek(letter), "a");
   string_builder_clear(letter);
 
-  string_builder_add_user_visible_letter(config->letter_distribution, letter,
+  string_builder_add_user_visible_letter(ld, letter,
                                          get_blanked_machine_letter(2));
   assert_strings_equal(string_builder_peek(letter), "b");
   string_builder_clear(letter);
 
   // not blank
-  string_builder_add_user_visible_letter(config->letter_distribution, letter,
-                                         3);
+  string_builder_add_user_visible_letter(ld, letter, 3);
   assert_strings_equal(string_builder_peek(letter), "C");
   string_builder_clear(letter);
-  string_builder_add_user_visible_letter(config->letter_distribution, letter,
-                                         4);
+  string_builder_add_user_visible_letter(ld, letter, 4);
   assert_strings_equal(string_builder_peek(letter), "D");
   string_builder_clear(letter);
 
   const Config *catalan_config = get_disc_config(testconfig);
-  string_builder_add_user_visible_letter(catalan_config->letter_distribution,
-                                         letter,
+  LetterDistribution *catalan_ld =
+      config_get_letter_distribution(catalan_config);
+
+  string_builder_add_user_visible_letter(catalan_ld, letter,
                                          get_blanked_machine_letter(13));
   assert_strings_equal(string_builder_peek(letter), "l·l");
   string_builder_clear(letter);

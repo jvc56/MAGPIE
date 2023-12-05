@@ -6,13 +6,18 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../src/command.h"
-#include "../src/game.h"
-#include "../src/infer.h"
-#include "../src/log.h"
-#include "../src/sim.h"
-#include "../src/thread_control.h"
-#include "../src/util.h"
+#include "../src/def/error_status_defs.h"
+
+#include "../src/ent/command.h"
+#include "../src/ent/game.h"
+#include "../src/ent/inference.h"
+#include "../src/ent/simmer.h"
+#include "../src/ent/thread_control.h"
+
+#include "../src/str/string_util.h"
+
+#include "../src/util/log.h"
+#include "../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

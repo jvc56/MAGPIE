@@ -2,9 +2,10 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-#include "../src/config.h"
-#include "../src/cross_set.h"
-#include "../src/game.h"
+#include "../src/ent/config.h"
+#include "../src/ent/game.h"
+
+#include "../src/impl/cross_set.h"
 
 #include "board_test.h"
 #include "test_constants.h"
@@ -13,23 +14,25 @@
 
 void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
   // Test cross set
-  clear_cross_set(game->gen->board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
-                  cross_set_index);
-  set_cross_set_letter(get_cross_set_pointer(game->gen->board, 0, 0,
+  Generator *gen = game_get_gen(game);
+  Board *board = gen_get_board(gen);
+
+  clear_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+  set_cross_set_letter(get_cross_set_pointer(board, 0, 0,
                                              BOARD_HORIZONTAL_DIRECTION,
                                              cross_set_index),
                        13);
-  assert(get_cross_set(game->gen->board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
+  assert(get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
                        cross_set_index) == 8192);
-  set_cross_set_letter(get_cross_set_pointer(game->gen->board, 0, 0,
+  set_cross_set_letter(get_cross_set_pointer(board, 0, 0,
                                              BOARD_HORIZONTAL_DIRECTION,
                                              cross_set_index),
                        0);
-  assert(get_cross_set(game->gen->board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
+  assert(get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
                        cross_set_index) == 8193);
 
-  uint64_t cs = get_cross_set(game->gen->board, 0, 0,
-                              BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+  uint64_t cs =
+      get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
   assert(!allowed(cs, 1));
   assert(allowed(cs, 0));
   assert(!allowed(cs, 14));
@@ -40,14 +43,14 @@ void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
 void test_board(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
+  Generator *gen = game_get_gen(game);
+  Board *board = gen_get_board(gen);
+
   load_cgp(game, VS_ED);
 
-  assert(!get_anchor(game->gen->board, 3, 3, 0) &&
-         !get_anchor(game->gen->board, 3, 3, 1));
-  assert(get_anchor(game->gen->board, 12, 12, 0) &&
-         get_anchor(game->gen->board, 12, 12, 1));
-  assert(get_anchor(game->gen->board, 4, 3, 1) &&
-         !get_anchor(game->gen->board, 4, 3, 0));
+  assert(!get_anchor(board, 3, 3, 0) && !get_anchor(board, 3, 3, 1));
+  assert(get_anchor(board, 12, 12, 0) && get_anchor(board, 12, 12, 1));
+  assert(get_anchor(board, 4, 3, 1) && !get_anchor(board, 4, 3, 0));
 
   test_board_cross_set_for_cross_set_index(game, 0);
   test_board_cross_set_for_cross_set_index(game, 1);

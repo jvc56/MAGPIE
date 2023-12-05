@@ -1,10 +1,9 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../src/config.h"
-#include "../src/constants.h"
-#include "../src/letter_distribution.h"
-#include "../src/rack.h"
+#include "../src/ent/config.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/rack.h"
 
 #include "rack_test.h"
 #include "test_util.h"
@@ -12,81 +11,77 @@
 
 void test_rack_main(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
-  Rack *rack = create_rack(config->letter_distribution->size);
-  Rack *expected_rack = create_rack(config->letter_distribution->size);
+  LetterDistribution *ld = config_get_letter_distribution(config);
+  int ld_size = letter_distribution_get_size(ld);
+  Rack *rack = create_rack(ld_size);
+  Rack *expected_rack = create_rack(ld_size);
 
   // Test score on rack
-  set_rack_to_string(config->letter_distribution, rack, "ABCDEFG");
-  assert(score_on_rack(config->letter_distribution, rack) == 16);
-  set_rack_to_string(config->letter_distribution, rack, "XYZ");
-  assert(score_on_rack(config->letter_distribution, rack) == 22);
-  set_rack_to_string(config->letter_distribution, rack, "??");
-  assert(score_on_rack(config->letter_distribution, rack) == 0);
-  set_rack_to_string(config->letter_distribution, rack, "?QWERTY");
-  assert(score_on_rack(config->letter_distribution, rack) == 21);
-  set_rack_to_string(config->letter_distribution, rack, "RETINAO");
-  assert(score_on_rack(config->letter_distribution, rack) == 7);
-  set_rack_to_string(config->letter_distribution, rack, "AABBEWW");
-  assert(score_on_rack(config->letter_distribution, rack) == 17);
+  set_rack_to_string(ld, rack, "ABCDEFG");
+  assert(score_on_rack(ld, rack) == 16);
+  set_rack_to_string(ld, rack, "XYZ");
+  assert(score_on_rack(ld, rack) == 22);
+  set_rack_to_string(ld, rack, "??");
+  assert(score_on_rack(ld, rack) == 0);
+  set_rack_to_string(ld, rack, "?QWERTY");
+  assert(score_on_rack(ld, rack) == 21);
+  set_rack_to_string(ld, rack, "RETINAO");
+  assert(score_on_rack(ld, rack) == 7);
+  set_rack_to_string(ld, rack, "AABBEWW");
+  assert(score_on_rack(ld, rack) == 17);
 
-  set_rack_to_string(config->letter_distribution, rack, "AENPPSW");
+  set_rack_to_string(ld, rack, "AENPPSW");
 
-  for (int i = 0; i < (expected_get_array_size(rack)); i++) {
-    expected_get_number_of_letter(rack, i) = 0;
-  }
-  expected_rack->array[1] = 1;
-  expected_rack->array[5] = 1;
-  expected_rack->array[14] = 1;
-  expected_rack->array[16] = 2;
-  expected_rack->array[19] = 1;
-  expected_rack->array[23] = 1;
-  expected_rack->empty = false;
-  expected_rack->number_of_letters = 7;
-
-  assert(equal_rack(expected_rack, rack));
+  assert(get_number_of_letter(rack, 1) == 1);
+  assert(get_number_of_letter(rack, 5) == 1);
+  assert(get_number_of_letter(rack, 14) == 1);
+  assert(get_number_of_letter(rack, 16) == 2);
+  assert(get_number_of_letter(rack, 19) == 1);
+  assert(get_number_of_letter(rack, 23) == 1);
+  assert(!rack_is_empty(rack));
+  assert(get_number_of_letters(rack) == 7);
 
   take_letter_from_rack(rack, 16);
-  expected_rack->array[16] = 1;
-  expected_rack->number_of_letters = 6;
-  assert(equal_rack(expected_rack, rack));
+  assert(get_number_of_letter(rack, 1) == 1);
+  assert(get_number_of_letter(rack, 5) == 1);
+  assert(get_number_of_letter(rack, 14) == 1);
+  assert(get_number_of_letter(rack, 16) == 1);
+  assert(get_number_of_letter(rack, 19) == 1);
+  assert(get_number_of_letter(rack, 23) == 1);
+  assert(!rack_is_empty(rack));
+  assert(get_number_of_letters(rack) == 7);
 
   take_letter_from_rack(rack, 14);
-  expected_rack->array[14] = 0;
-  expected_rack->number_of_letters = 5;
-  assert(equal_rack(expected_rack, rack));
+  assert(get_number_of_letter(rack, 1) == 1);
+  assert(get_number_of_letter(rack, 5) == 1);
+  assert(get_number_of_letter(rack, 14) == 0);
+  assert(get_number_of_letter(rack, 16) == 1);
+  assert(get_number_of_letter(rack, 19) == 1);
+  assert(get_number_of_letter(rack, 23) == 1);
+  assert(!rack_is_empty(rack));
+  assert(get_number_of_letters(rack) == 7);
 
   take_letter_from_rack(rack, 1);
-  assert(rack_is_empty);
+  assert(!rack_is_empty(rack));
   take_letter_from_rack(rack, 5);
-  assert(rack_is_empty);
+  assert(!rack_is_empty(rack));
   take_letter_from_rack(rack, 16);
-  assert(rack_is_empty);
+  assert(!rack_is_empty(rack));
   take_letter_from_rack(rack, 19);
-  assert(rack_is_empty);
+  assert(!rack_is_empty(rack));
   take_letter_from_rack(rack, 23);
-  assertrack_is_empty);
-
-  for (int i = 0; i < (expected_get_array_size(rack)); i++) {
-    expected_get_number_of_letter(rack, i) = 0;
-  }
-  expected_rack->empty = true;
-  expected_rack->number_of_letters = 0;
-
-  assert(equal_rack(expected_rack, rack));
+  assert(rack_is_empty(rack));
 
   add_letter_to_rack(rack, 13);
   take_letter_from_rack(rack, 13);
   add_letter_to_rack(rack, 13);
   add_letter_to_rack(rack, 13);
 
-  expected_rack->array[13] = 2;
-  expected_rack->empty = false;
-  expected_rack->number_of_letters = 2;
-
-  assert(equal_rack(expected_rack, rack));
+  assert(get_number_of_letter(rack, 13) == 2);
+  assert(!rack_is_empty(rack));
+  assert(get_number_of_letters(rack) == 2);
 
   destroy_rack(rack);
-  destroy_rack(expected_rack);
 }
 
 void test_rack(TestConfig *testconfig) { test_rack_main(testconfig); }

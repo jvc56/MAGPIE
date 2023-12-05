@@ -6,9 +6,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../src/log.h"
-#include "../src/thread_control.h"
-#include "../src/util.h"
+#include "../src/ent/thread_control.h"
+#include "../src/str/string_util.h"
+#include "../src/util/log.h"
+#include "../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

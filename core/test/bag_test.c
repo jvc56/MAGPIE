@@ -2,10 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../src/config.h"
-#include "../src/gameplay.h"
-#include "../src/letter_distribution.h"
-#include "../src/string_util.h"
+#include "../src/str/string_util.h"
+
+#include "../src/impl/gameplay.h"
+
+#include "../src/def/rack_defs.h"
+
+#include "../src/ent/config.h"
+#include "../src/ent/letter_distribution.h"
 
 #include "test_util.h"
 #include "testconfig.h"
@@ -14,12 +18,10 @@
 
 void test_add_letter(const Config *config, Bag *bag, char *r,
                      char *expected_bag_string, int player_index) {
-  add_letter(
-      bag,
-      human_readable_letter_to_machine_letter(config->letter_distribution, r),
-      player_index);
+  LetterDistribution *ld = config_get_letter_distribution(config);
+  add_letter(bag, human_readable_letter_to_machine_letter(ld, r), player_index);
   StringBuilder *bag_string = create_string_builder();
-  string_builder_add_bag(bag, config->letter_distribution, bag_string);
+  string_builder_add_bag(bag, ld, bag_string);
   assert_strings_equal(string_builder_peek(bag_string), expected_bag_string);
   destroy_string_builder(bag_string);
 }
@@ -30,10 +32,11 @@ int get_drawn_tile_index(int drawn_tiles, int player_index) {
 
 void test_bag(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
-  const LetterDistribution *ld = config->letter_distribution;
+  const LetterDistribution *ld = config_get_letter_distribution(config);
+  int ld_size = letter_distribution_get_size(ld);
   Bag *bag = create_bag(ld);
-  Rack *rack = create_rack(ld->size);
-  Rack *rack2 = create_rack(ld->size);
+  Rack *rack = create_rack(ld_size);
+  Rack *rack2 = create_rack(ld_size);
 
   int number_of_remaining_tiles = get_tiles_remaining(bag);
   for (int k = 0; k < number_of_remaining_tiles; k++) {
@@ -41,8 +44,9 @@ void test_bag(TestConfig *testconfig) {
     add_letter_to_rack(rack, letter);
   }
 
-  for (uint32_t i = 0; i < ld->size; i++) {
-    assert((int)ld->distribution[i] == get_number_of_letter(rack, i));
+  for (uint32_t i = 0; i < ld_size; i++) {
+    assert((int)letter_distribution_get_distribution(ld, i) ==
+           get_number_of_letter(rack, i));
   }
 
   reset_bag(ld, bag);
@@ -55,14 +59,14 @@ void test_bag(TestConfig *testconfig) {
     drawing_player = 1 - drawing_player;
     number_of_remaining_tiles -= RACK_SIZE;
     assert(rack_is_empty);
-    assert(rack->number_of_letters == RACK_SIZE);
+    assert(get_number_of_letters(rack) == RACK_SIZE);
     reset_rack(rack);
   }
 
   draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
   assert(bag_is_empty(bag));
   assert(rack_is_empty);
-  assert(rack->number_of_letters == number_of_remaining_tiles);
+  assert(get_number_of_letters(rack) == number_of_remaining_tiles);
   reset_rack(rack);
 
   // Check adding letters to the bag
@@ -138,7 +142,7 @@ void test_bag(TestConfig *testconfig) {
     add_letter(bag, draw_order[tiles_index], player_index);
   }
 
-  assert_bags_are_equal(bag, copy_of_bag, ld->size);
+  assert_bags_are_equal(bag, copy_of_bag, ld_size);
 
   bag_copy(bag, copy_of_bag);
   tiles_drawn[0] = 0;
@@ -195,7 +199,7 @@ void test_bag(TestConfig *testconfig) {
     add_letter(bag, draw_order[tiles_index], 1);
   }
 
-  assert_bags_are_equal(bag, copy_of_bag, ld->size);
+  assert_bags_are_equal(bag, copy_of_bag, ld_size);
 
   destroy_bag(bag);
   destroy_bag(copy_of_bag);

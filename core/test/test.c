@@ -2,9 +2,9 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "../src/config.h"
-#include "../src/log.h"
-#include "../src/string_util.h"
+#include "../src/ent/config.h"
+#include "../src/util/log.h"
+#include "../src/str/string_util.h"
 
 #include "alphabet_test.h"
 #include "autoplay_test.h"

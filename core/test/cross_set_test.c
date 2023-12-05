@@ -2,10 +2,13 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-#include "../src/config.h"
-#include "../src/cross_set.h"
-#include "../src/game.h"
-#include "../src/letter_distribution.h"
+#include "../src/def/cross_set_defs.h"
+
+#include "../src/impl/cross_set.h"
+
+#include "../src/ent/config.h"
+#include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -31,26 +34,33 @@ uint64_t cross_set_from_string(const LetterDistribution *letter_distribution,
 
 // This test function only works for single-char alphabets
 void set_row(Game *game, int row, const char *row_content) {
+  Generator *gen = game_get_gen(game);
+  Board *board = gen_get_board(gen);
+  LetterDistribution *ld = gen_get_ld(gen);
+
   for (int i = 0; i < BOARD_DIM; i++) {
-    set_letter(game->gen->board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
+    set_letter(board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
   }
   char letter[2];
   letter[1] = '\0';
   for (size_t i = 0; i < string_length(row_content); i++) {
     if (row_content[i] != ' ') {
       letter[0] = row_content[i];
-      set_letter(game->gen->board, row, i,
-                 human_readable_letter_to_machine_letter(
-                     game->gen->letter_distribution, letter));
-      incrememt_tiles_played(game->gen->board, 1);
+      set_letter(board, row, i,
+                 human_readable_letter_to_machine_letter(ld, letter));
+      incrememt_tiles_played(board, 1);
     }
   }
 }
 
 // This test function only works for single-char alphabets
 void set_col(Game *game, int col, const char *col_content) {
+  Generator *gen = game_get_gen(game);
+  Board *board = gen_get_board(gen);
+  LetterDistribution *ld = gen_get_ld(gen);
+
   for (int i = 0; i < BOARD_DIM; i++) {
-    set_letter(game->gen->board, i, col, ALPHABET_EMPTY_SQUARE_MARKER);
+    set_letter(board, i, col, ALPHABET_EMPTY_SQUARE_MARKER);
   }
 
   char letter[2];
@@ -59,10 +69,9 @@ void set_col(Game *game, int col, const char *col_content) {
   for (size_t i = 0; i < string_length(col_content); i++) {
     if (col_content[i] != ' ') {
       letter[0] = col_content[i];
-      set_letter(game->gen->board, i, col,
-                 human_readable_letter_to_machine_letter(
-                     game->gen->letter_distribution, letter));
-      incrememt_tiles_played(game->gen->board, 1);
+      set_letter(board, i, col,
+                 human_readable_letter_to_machine_letter(ld, letter));
+      incrememt_tiles_played(board, 1);
     }
   }
 }
@@ -70,19 +79,21 @@ void set_col(Game *game, int col, const char *col_content) {
 void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
                         const char *letters, int expected_cross_score,
                         bool run_gcs) {
-  int cross_set_index = get_cross_set_index(game->gen, player_index);
+  Generator *gen = game_get_gen(game);
+  Board *board = gen_get_board(gen);
+  LetterDistribution *ld = gen_get_ld(gen);
+
+  int cross_set_index = get_cross_set_index(gen, player_index);
   if (run_gcs) {
-    gen_cross_set(game->players[player_index]->kwg,
-                  game->gen->letter_distribution, game->gen->board, row, col,
-                  dir, cross_set_index);
+    gen_cross_set(player_get_kwg(game_get_player(game, player_index)), ld,
+                  board, row, col, dir, cross_set_index);
   }
-  uint64_t expected_cross_set =
-      cross_set_from_string(game->gen->letter_distribution, letters);
+  uint64_t expected_cross_set = cross_set_from_string(ld, letters);
   uint64_t actual_cross_set =
-      get_cross_set(game->gen->board, row, col, dir, cross_set_index);
+      get_cross_set(board, row, col, dir, cross_set_index);
   assert(expected_cross_set == actual_cross_set);
   int actual_cross_score =
-      get_cross_score(game->gen->board, row, col, dir, cross_set_index);
+      get_cross_score(board, row, col, dir, cross_set_index);
   assert(expected_cross_score == actual_cross_score);
 }
 
@@ -107,7 +118,8 @@ void test_gen_cross_set_col(Game *game, int row, int col, int dir,
 void test_cross_set(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  const KWG *kwg = game->players[0]->kwg;
+  Player *player0 = game_get_player(game, 0);
+  const KWG *kwg = player_get_kwg(player0);
 
   // TestGencross_setLoadedGame
   load_cgp(game, VS_MATT);
@@ -179,21 +191,20 @@ void test_cross_set(TestConfig *testconfig) {
   test_gen_cross_set(game, 12, 12, BOARD_VERTICAL_DIRECTION, 0, "", 0, false);
 
   // TestUpdateSinglecross_set
+  Generator *gen = game_get_gen(game);
+  LetterDistribution *ld = gen_get_ld(gen);
+  Board *board = gen_get_board(gen);
   load_cgp(game, VS_MATT);
-  set_letter(game->gen->board, 8, 10, 19);
-  set_letter(game->gen->board, 9, 10, 0);
-  set_letter(game->gen->board, 10, 10, 4);
-  set_letter(game->gen->board, 11, 10, 11);
-  gen_cross_set(kwg, game->gen->letter_distribution, game->gen->board, 7, 10,
-                BOARD_HORIZONTAL_DIRECTION, 0);
-  transpose(game->gen->board);
-  gen_cross_set(kwg, game->gen->letter_distribution, game->gen->board, 10, 7,
-                BOARD_VERTICAL_DIRECTION, 0);
-  transpose(game->gen->board);
-  assert(get_cross_set(game->gen->board, 7, 10, BOARD_HORIZONTAL_DIRECTION,
-                       0) == 0);
-  assert(get_cross_set(game->gen->board, 7, 10, BOARD_VERTICAL_DIRECTION, 0) ==
-         0);
+  set_letter(board, 8, 10, 19);
+  set_letter(board, 9, 10, 0);
+  set_letter(board, 10, 10, 4);
+  set_letter(board, 11, 10, 11);
+  gen_cross_set(kwg, ld, board, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0);
+  transpose(board);
+  gen_cross_set(kwg, ld, board, 10, 7, BOARD_VERTICAL_DIRECTION, 0);
+  transpose(board);
+  assert(get_cross_set(board, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0) == 0);
+  assert(get_cross_set(board, 7, 10, BOARD_VERTICAL_DIRECTION, 0) == 0);
 
   destroy_game(game);
 }

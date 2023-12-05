@@ -1,9 +1,9 @@
 #include <assert.h>
 #include <stddef.h>
 
-#include "../src/config.h"
-#include "../src/log.h"
-#include "../src/string_util.h"
+#include "../src/ent/config.h"
+#include "../src/str/string_util.h"
+#include "../src/util/log.h"
 
 #include "config_test.h"
 #include "test_constants.h"
@@ -170,59 +170,66 @@ void test_config_success() {
 
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
-  assert(config->command_type == COMMAND_TYPE_SET_OPTIONS);
-  assert(!config->command_set_cgp);
-  assert(config->game_variant == GAME_VARIANT_WORDSMOG);
-  assert(players_data_get_move_sort_type(config->players_data, 0) ==
+  assert(config_get_command_type(config) == COMMAND_TYPE_SET_OPTIONS);
+  assert(!config_get_command_set_cgp(config));
+  assert(config_get_game_variant(config) == GAME_VARIANT_WORDSMOG);
+  assert(players_data_get_move_sort_type(config_get_players_data(config), 0) ==
          MOVE_SORT_SCORE);
-  assert(players_data_get_move_record_type(config->players_data, 0) ==
-         MOVE_RECORD_ALL);
-  assert(players_data_get_move_sort_type(config->players_data, 1) ==
+  assert(players_data_get_move_record_type(config_get_players_data(config),
+                                           0) == MOVE_RECORD_ALL);
+  assert(players_data_get_move_sort_type(config_get_players_data(config), 1) ==
          MOVE_SORT_EQUITY);
-  assert(players_data_get_move_record_type(config->players_data, 1) ==
-         MOVE_RECORD_BEST);
-  assert(config->bingo_bonus == bingo_bonus);
-  assert(config->player_to_infer_index == pindex);
-  assert(config->actual_score == score);
-  assert(config->number_of_tiles_exchanged == number_exch);
-  assert(within_epsilon(config->equity_margin, equity_margin));
-  assert(config->num_plays == num_plays);
-  assert(config->plies == plies);
-  assert(config->max_iterations == max_iterations);
-  assert(config->stopping_condition == SIM_STOPPING_CONDITION_98PCT);
-  assert(config->seed == (uint64_t)seed);
-  assert(config->thread_control->number_of_threads == number_of_threads);
-  assert(config->thread_control->print_info_interval == print_info);
-  assert(config->thread_control->check_stopping_condition_interval ==
-         check_stop);
-  assert(config->static_search_only);
-  assert(config->use_game_pairs);
+  assert(players_data_get_move_record_type(config_get_players_data(config),
+                                           1) == MOVE_RECORD_BEST);
+  assert(config_get_bingo_bonus(config) == bingo_bonus);
+  assert(config_get_player_to_infer_index(config) == pindex);
+  assert(config_get_actual_score(config) == score);
+  assert(config_get_number_of_tiles_exchanged(config) == number_exch);
+  assert(within_epsilon(config_get_equity_margin(config), equity_margin));
+  assert(config_get_num_plays(config) == num_plays);
+  assert(config_get_plies(config) == plies);
+  assert(config_get_max_iterations(config) == max_iterations);
+  assert(config_get_stopping_condition(config) == SIM_STOPPING_CONDITION_98PCT);
+  assert(config_get_seed(config) == (uint64_t)seed);
+  assert(get_number_of_threads(config_get_thread_control(config)) ==
+         number_of_threads);
+  assert(get_print_info_interval(config_get_thread_control(config)) ==
+         print_info);
+  assert(get_check_stopping_condition_interval(
+             config_get_thread_control(config)) == check_stop);
+  assert(config_get_static_search_only(config));
+  assert(config_get_use_game_pairs(config));
 
-  assert(strings_equal(config->ld_name, ld_name));
-  assert(strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KWG, 0),
-                       l1));
-  assert(strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KWG, 1),
-                       l2));
+  assert(strings_equal(config_get_ld_name(config), ld_name));
+  assert(
+      strings_equal(players_data_get_data_name(config_get_players_data(config),
+                                               PLAYERS_DATA_TYPE_KWG, 0),
+                    l1));
+  assert(
+      strings_equal(players_data_get_data_name(config_get_players_data(config),
+                                               PLAYERS_DATA_TYPE_KWG, 1),
+                    l2));
   // KLVs should use the same name
-  assert(strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KLV, 0),
-                       l1));
-  assert(strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KLV, 1),
-                       l2));
+  assert(
+      strings_equal(players_data_get_data_name(config_get_players_data(config),
+                                               PLAYERS_DATA_TYPE_KLV, 0),
+                    l1));
+  assert(
+      strings_equal(players_data_get_data_name(config_get_players_data(config),
+                                               PLAYERS_DATA_TYPE_KLV, 1),
+                    l2));
 
   string_builder_clear(test_string_builder);
-  string_builder_add_rack(config->rack, config->letter_distribution,
+  string_builder_add_rack(config_get_rack(config),
+                          config_get_letter_distribution(config),
                           test_string_builder);
   assert(strings_equal(rack, string_builder_peek(test_string_builder)));
 
   // Save KWG pointers as these shouldn't be reused
-  const KWG *p1_csw_kwg =
-      players_data_get_data(config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
-  const KWG *p2_nwl_kwg =
-      players_data_get_data(config->players_data, PLAYERS_DATA_TYPE_KWG, 1);
+  const KWG *p1_csw_kwg = players_data_get_data(config_get_players_data(config),
+                                                PLAYERS_DATA_TYPE_KWG, 0);
+  const KWG *p2_nwl_kwg = players_data_get_data(config_get_players_data(config),
+                                                PLAYERS_DATA_TYPE_KWG, 1);
 
   // Change some fields, confirm that
   // other fields retain their value.
@@ -253,55 +260,61 @@ void test_config_success() {
 
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
-  assert(config->command_type == COMMAND_TYPE_SET_OPTIONS);
-  assert(!config->command_set_cgp);
-  assert(config->game_variant == GAME_VARIANT_WORDSMOG);
-  assert(players_data_get_move_sort_type(config->players_data, 0) ==
+  assert(config_get_command_type(config) == COMMAND_TYPE_SET_OPTIONS);
+  assert(!config_get_command_set_cgp(config));
+  assert(config_get_game_variant(config) == GAME_VARIANT_WORDSMOG);
+  assert(players_data_get_move_sort_type(config_get_players_data(config), 0) ==
          MOVE_SORT_EQUITY);
-  assert(players_data_get_move_record_type(config->players_data, 0) ==
-         MOVE_RECORD_BEST);
-  assert(players_data_get_move_sort_type(config->players_data, 1) ==
+  assert(players_data_get_move_record_type(config_get_players_data(config),
+                                           0) == MOVE_RECORD_BEST);
+  assert(players_data_get_move_sort_type(config_get_players_data(config), 1) ==
          MOVE_SORT_SCORE);
-  assert(players_data_get_move_record_type(config->players_data, 1) ==
-         MOVE_RECORD_ALL);
-  assert(config->bingo_bonus == bingo_bonus);
-  assert(config->player_to_infer_index == pindex);
-  assert(config->actual_score == score);
-  assert(config->number_of_tiles_exchanged == number_exch);
-  assert(within_epsilon(config->equity_margin, equity_margin));
-  assert(config->num_plays == num_plays);
-  assert(config->plies == plies);
-  assert(config->max_iterations == max_iterations);
-  assert(config->stopping_condition == SIM_STOPPING_CONDITION_98PCT);
-  assert(config->thread_control->number_of_threads == number_of_threads);
-  assert(config->thread_control->print_info_interval == print_info);
-  assert(config->thread_control->check_stopping_condition_interval ==
-         check_stop);
-  assert(!config->static_search_only);
-  assert(!config->use_game_pairs);
+  assert(players_data_get_move_record_type(config_get_players_data(config),
+                                           1) == MOVE_RECORD_ALL);
+  assert(config_get_bingo_bonus(config) == bingo_bonus);
+  assert(config_get_player_to_infer_index(config) == pindex);
+  assert(config_get_actual_score(config) == score);
+  assert(config_get_number_of_tiles_exchanged(config) == number_exch);
+  assert(within_epsilon(config_get_equity_margin(config), equity_margin));
+  assert(config_get_num_plays(config) == num_plays);
+  assert(config_get_plies(config) == plies);
+  assert(config_get_max_iterations(config) == max_iterations);
+  assert(config_get_stopping_condition(config) == SIM_STOPPING_CONDITION_98PCT);
+  assert(get_number_of_threads(config_get_thread_control(config)) ==
+         number_of_threads);
+  assert(get_print_info_interval(config_get_thread_control(config)) ==
+         print_info);
+  assert(get_check_stopping_condition_interval(
+             config_get_thread_control(config)) == check_stop);
+  assert(!config_get_static_search_only(config));
+  assert(!config_get_use_game_pairs(config));
 
-  assert(strings_equal(config->ld_name, ld_name));
-  assert(strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KWG, 0),
-                       l1));
-  assert(strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KWG, 1),
-                       l2));
+  assert(strings_equal(config_get_ld_name(config), ld_name));
+  assert(
+      strings_equal(players_data_get_data_name(config_get_players_data(config),
+                                               PLAYERS_DATA_TYPE_KWG, 0),
+                    l1));
+  assert(
+      strings_equal(players_data_get_data_name(config_get_players_data(config),
+                                               PLAYERS_DATA_TYPE_KWG, 1),
+                    l2));
   // KLVs should use the same name
-  assert(strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KLV, 0),
-                       l1));
-  assert(strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KLV, 1),
-                       l2));
-  assert(config->rack->empty);
+  assert(
+      strings_equal(players_data_get_data_name(config_get_players_data(config),
+                                               PLAYERS_DATA_TYPE_KLV, 0),
+                    l1));
+  assert(
+      strings_equal(players_data_get_data_name(config_get_players_data(config),
+                                               PLAYERS_DATA_TYPE_KLV, 1),
+                    l2));
+  assert(rack_is_empty(config_get_rack(config)));
 
   // The players data should have swapped the lexicons
   // and not created or destroyed any new KWGs
-  const KWG *p1_nwl_kwg =
-      players_data_get_data(config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
-  const KWG *p2_csw_kwg =
-      players_data_get_data(config->players_data, PLAYERS_DATA_TYPE_KWG, 1);
+  const KWG *p1_nwl_kwg = players_data_get_data(config_get_players_data(config),
+                                                PLAYERS_DATA_TYPE_KWG, 0);
+  const KWG *p2_csw_kwg = players_data_get_data(config_get_players_data(config),
+                                                PLAYERS_DATA_TYPE_KWG, 1);
   assert(p1_csw_kwg == p2_csw_kwg);
   assert(p1_nwl_kwg == p2_nwl_kwg);
 
@@ -316,10 +329,11 @@ void test_config_success() {
   string_builder_add_formatted_string(test_string_builder, "position cgp %s",
                                       DOUG_V_EMELY_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
-  assert(config->command_type == COMMAND_TYPE_LOAD_CGP);
-  assert(config->command_set_cgp);
-  assert_strings_equal(config->cgp, "15/15/15/15/15/15/15/3WINDY7/15/15/15/15/"
-                                    "15/15/15 ADEEGIL/AEILOUY 0/32 0");
+  assert(config_get_command_type(config) == COMMAND_TYPE_LOAD_CGP);
+  assert(config_get_command_set_cgp(config));
+  assert_strings_equal(config_get_cgp(config),
+                       "15/15/15/15/15/15/15/3WINDY7/15/15/15/15/"
+                       "15/15/15 ADEEGIL/AEILOUY 0/32 0");
 
   // Ensure that cgp arg works for all commands
 
@@ -327,20 +341,21 @@ void test_config_success() {
   string_builder_add_formatted_string(test_string_builder, "go sim cgp %s",
                                       NOAH_VS_MISHU_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
-  assert(config->command_type == COMMAND_TYPE_SIM);
-  assert(config->command_set_cgp);
+  assert(config_get_command_type(config) == COMMAND_TYPE_SIM);
+  assert(config_get_command_set_cgp(config));
   assert_strings_equal(
-      config->cgp, "15/15/15/15/15/15/12BOA/6VOX1ATONY/7FIVER3/11E3/8MOANED1/"
-                   "7QI2C3/8MU1H3/15/15 AAIRSSU/AELORTT 76/120 0");
+      config_get_cgp(config),
+      "15/15/15/15/15/15/12BOA/6VOX1ATONY/7FIVER3/11E3/8MOANED1/"
+      "7QI2C3/8MU1H3/15/15 AAIRSSU/AELORTT 76/120 0");
 
   string_builder_clear(test_string_builder);
   string_builder_add_formatted_string(test_string_builder, "go infer cgp %s",
                                       NOAH_VS_PETER_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
-  assert(config->command_type == COMMAND_TYPE_INFER);
-  assert(config->command_set_cgp);
+  assert(config_get_command_type(config) == COMMAND_TYPE_INFER);
+  assert(config_get_command_set_cgp(config));
   assert_strings_equal(
-      config->cgp,
+      config_get_cgp(config),
       "15/9O5/7GIP5/7H1E3T1/7E5E1/5CUTTY3EF/7T6O/7OR4UP/7SEMINAL1/4AX2S4V1/"
       "2DILUTION3AE/8L5V/8D5I/8e5T/8R5E AFK/ABIMQSW 172/249 0");
 
@@ -349,12 +364,13 @@ void test_config_success() {
   string_builder_add_formatted_string(test_string_builder, "go autoplay cgp %s",
                                       SOME_ISC_GAME_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
-  assert(config->command_type == COMMAND_TYPE_AUTOPLAY);
-  assert(config->command_set_cgp);
+  assert(config_get_command_type(config) == COMMAND_TYPE_AUTOPLAY);
+  assert(config_get_command_set_cgp(config));
   assert_strings_equal(
-      config->cgp, "15/1V13/1O13/1D12P/1U12O/1NA2C7FE/2N2R7AM/OUTFLYING2AHIS/"
-                   "2I1O2AILERON1/2R1O10/2I1I2D2WAG2/2O1EXPUNgES3/2t4C7/"
-                   "6SKOALING1/7Y7 EEHMRTZ/AEIJQRU 264/306 0");
+      config_get_cgp(config),
+      "15/1V13/1O13/1D12P/1U12O/1NA2C7FE/2N2R7AM/OUTFLYING2AHIS/"
+      "2I1O2AILERON1/2R1O10/2I1I2D2WAG2/2O1EXPUNgES3/2t4C7/"
+      "6SKOALING1/7Y7 EEHMRTZ/AEIJQRU 264/306 0");
 
   // English and French should be able to play each other
   // with either distribution
@@ -372,30 +388,36 @@ void test_config_success() {
   string_builder_add_string(test_string_builder, "setoptions lex NWL20");
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
-  assert_strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KWG, 0),
-                       "NWL20");
-  assert_strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KWG, 1),
-                       "NWL20");
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KWG, 0),
+      "NWL20");
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KWG, 1),
+      "NWL20");
 
   // Correctly set leave and letter distribution defaults
   string_builder_clear(test_string_builder);
   string_builder_add_string(test_string_builder, "setoptions lex FRA20");
   load_config_or_fail(config, string_builder_peek(test_string_builder));
-  assert_strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KWG, 0),
-                       "FRA20");
-  assert_strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KWG, 1),
-                       "FRA20");
-  assert_strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KLV, 0),
-                       "FRA20");
-  assert_strings_equal(players_data_get_data_name(config->players_data,
-                                                  PLAYERS_DATA_TYPE_KLV, 1),
-                       "FRA20");
-  assert_strings_equal(config->ld_name, "french");
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KWG, 0),
+      "FRA20");
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KWG, 1),
+      "FRA20");
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KLV, 0),
+      "FRA20");
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KLV, 1),
+      "FRA20");
+  assert_strings_equal(config_get_ld_name(config), "french");
 
   destroy_string_builder(test_string_builder);
   destroy_config(config);

@@ -1,8 +1,8 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../src/config.h"
-#include "../src/game.h"
+#include "../src/ent/config.h"
+#include "../src/ent/game.h"
 #include "game_test.h"
 #include "rack_test.h"
 #include "test_constants.h"
@@ -143,39 +143,42 @@ void test_load_cgp(TestConfig *testconfig) {
 
 void test_game_main(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
-  const LetterDistribution *ld = config->letter_distribution;
+  const LetterDistribution *ld = config_get_letter_distribution(config);
   Game *game = create_game(config);
-  Rack *rack = create_rack(config->letter_distribution->size);
+  Rack *rack = create_rack(letter_distribution_get_size(ld));
   cgp_parse_status_t cgp_parse_status;
 
+  Rack *player0_rack = player_get_rack(game_get_player(game, 0));
+  Rack *player1_rack = player_get_rack(game_get_player(game, 1));
+
   // Test Reset
-  game->consecutive_scoreless_turns = 3;
-  game->game_end_reason = GAME_END_REASON_STANDARD;
+  game_set_consecutive_scoreless_turns(game, 3);
+  game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
   reset_game(game);
-  assert(game->consecutive_scoreless_turns == 0);
-  assert(game->game_end_reason == GAME_END_REASON_NONE);
+  assert(game_get_consecutive_scoreless_turns(game) == 0);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
 
   // Test opening racks
   cgp_parse_status = load_cgp(game, OPENING_CGP);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
   set_rack_to_string(ld, rack, "ABCDEFG");
-  assert(equal_rack(rack, game->players[0]->rack));
+  assert(equal_rack(rack, player0_rack));
   set_rack_to_string(ld, rack, "HIJKLM?");
-  assert(equal_rack(rack, game->players[1]->rack));
+  assert(equal_rack(rack, player1_rack));
 
   // Test CGP with excessive whitespace
   cgp_parse_status = load_cgp(game, EXCESSIVE_WHITESPACE_CGP);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
   set_rack_to_string(ld, rack, "ABCDEFG");
-  assert(equal_rack(rack, game->players[0]->rack));
+  assert(equal_rack(rack, player0_rack));
   set_rack_to_string(ld, rack, "HIJKLM?");
-  assert(equal_rack(rack, game->players[1]->rack));
-  assert(game->consecutive_scoreless_turns == 4);
+  assert(equal_rack(rack, player1_rack));
+  assert(game_get_consecutive_scoreless_turns(game) == 4);
 
   // Test CGP with one consecutive zero
   cgp_parse_status = load_cgp(game, ONE_CONSECUTIVE_ZERO_CGP);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
-  assert(game->consecutive_scoreless_turns == 1);
+  assert(game_get_consecutive_scoreless_turns(game) == 1);
   reset_game(game);
 
   destroy_rack(rack);

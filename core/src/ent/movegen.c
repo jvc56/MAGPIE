@@ -71,6 +71,12 @@ LetterDistribution *gen_get_ld(Generator *gen) {
 
 MoveList *gen_get_move_list(Generator *gen) { return gen->move_list; }
 
+AnchorList *gen_get_anchor_list(Generator *gen) { return gen->anchor_list; }
+
+double *gen_get_best_leaves(Generator *gen) { return gen->best_leaves; }
+
+LeaveMap *gen_get_leave_map(Generator *gen) { return gen->leave_map; }
+
 bool *gen_get_kwgs_are_distinct(Generator *gen) {
   return gen->kwgs_are_distinct;
 }

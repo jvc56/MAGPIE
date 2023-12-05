@@ -1,7 +1,7 @@
 #ifndef testconfig_H
 #define testconfig_H
 
-#include "../src/config.h"
+#include "../src/ent/config.h"
 
 typedef struct TestConfig {
   Config *csw_config;

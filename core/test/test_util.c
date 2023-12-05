@@ -6,17 +6,21 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../src/board.h"
-#include "../src/config.h"
-#include "../src/constants.h"
-#include "../src/game.h"
-#include "../src/gameplay.h"
-#include "../src/infer.h"
-#include "../src/klv.h"
-#include "../src/log.h"
-#include "../src/move.h"
-#include "../src/rack.h"
-#include "../src/util.h"
+#include "../def/rack_defs.h"
+
+#include "../src/str/string_util.h"
+
+#include "../src/ent/board.h"
+#include "../src/ent/config.h"
+#include "../src/ent/game.h"
+#include "../src/ent/inference.h"
+#include "../src/ent/klv.h"
+#include "../src/ent/leave_map.h"
+#include "../src/ent/move.h"
+#include "../src/ent/rack.h"
+#include "../src/impl/gameplay.h"
+#include "../src/util/log.h"
+#include "../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -35,31 +39,41 @@ void load_config_or_die(Config *config, const char *cmd) {
 }
 
 void generate_moves_for_game(Game *game) {
-  generate_moves(game->players[1 - game->player_on_turn_index]->rack, game->gen,
-                 game->players[game->player_on_turn_index],
-                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
-                 game->players[game->player_on_turn_index]->move_record_type,
-                 game->players[game->player_on_turn_index]->move_sort_type,
-                 true);
+  Generator *gen = game_get_gen(game);
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Bag *bag = gen_get_bag(gen);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
+  Rack *opponent_rack = player_get_rack(opponent);
+  generate_moves(opponent_rack, gen, player_on_turn,
+                 get_tiles_remaining(bag) >= RACK_SIZE,
+                 player_get_move_record_type(player_on_turn),
+                 player_get_move_sort_type(player_on_turn), true);
 }
 
 void generate_leaves_for_game(Game *game, bool add_exchange) {
-  Generator *gen = game->gen;
-  Player *player = game->players[game->player_on_turn_index];
-  init_leave_map(player->rack, gen->leave_map);
-  if (player->rack->number_of_letters < RACK_SIZE) {
-    set_current_value(gen->leave_map,
-                      get_leave_value(player->klv, player->rack));
+  Generator *gen = game_get_gen(game);
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+
+  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
+  LeaveMap *leave_map = gen_get_leave_map(gen);
+
+  init_leave_map(player_on_turn_rack, leave_map);
+  if (get_number_of_letters(player_on_turn_rack) < RACK_SIZE) {
+    set_current_value(leave_map, get_leave_value(player_get_klv(player_on_turn),
+                                                 player_on_turn_rack));
   } else {
-    set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
+    set_current_value(leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
 
   // Set the best leaves and maybe add exchanges.
-  generate_exchange_moves(gen, player, 0, 0, add_exchange);
+  generate_exchange_moves(gen, player_on_turn, 0, 0, add_exchange);
 }
 
 SortedMoveList *create_sorted_move_list(MoveList *ml) {
-  int number_of_moves = ml->count;
+  int number_of_moves = move_list_get_count(ml);
   SortedMoveList *sorted_move_list = malloc_or_die((sizeof(SortedMoveList)));
   sorted_move_list->moves = malloc_or_die((sizeof(Move *)) * (number_of_moves));
   sorted_move_list->count = number_of_moves;
@@ -111,17 +125,24 @@ void sort_and_print_move_list(const Board *board,
 }
 
 void play_top_n_equity_move(Game *game, int n) {
-  generate_moves(game->players[1 - game->player_on_turn_index]->rack, game->gen,
-                 game->players[game->player_on_turn_index],
-                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
-                 game->players[game->player_on_turn_index]->move_record_type,
-                 game->players[game->player_on_turn_index]->move_sort_type,
-                 true);
-  SortedMoveList *sorted_move_list =
-      create_sorted_move_list(game->gen->move_list);
+  Generator *gen = game_get_gen(game);
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Bag *bag = gen_get_bag(gen);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
+  Rack *opponent_rack = player_get_rack(opponent);
+  MoveList *move_list = gen_get_move_list(gen);
+
+  generate_moves(opponent_rack, gen, player_on_turn,
+                 get_tiles_remaining(bag) >= RACK_SIZE,
+                 player_get_move_record_type(player_on_turn),
+                 player_get_move_sort_type(player_on_turn), true);
+
+  SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
   play_move(sorted_move_list->moves[n], game);
   destroy_sorted_move_list(sorted_move_list);
-  reset_move_list(game->gen->move_list);
+  reset_move_list(move_list);
 }
 
 void draw_rack_to_string(const LetterDistribution *letter_distribution,
@@ -151,24 +172,27 @@ int count_newlines(const char *str) {
 }
 
 bool equal_rack(const Rack *expected_rack, const Rack *actual_rack) {
-  if (expected_rack->empty != actual_rack->empty) {
+  if (rack_is_empty(expected_rack) != rack_is_empty(actual_rack)) {
     printf("not empty\n");
     return false;
   }
-  if (expected_rack->number_of_letters != actual_rack->number_of_letters) {
-    printf("num letters: %d != %d\n", expected_rack->number_of_letters,
-           actual_rack->number_of_letters);
+  if (get_number_of_letters(expected_rack) !=
+      get_number_of_letters(actual_rack)) {
+    printf("num letters: %d != %d\n", get_number_of_letters(expected_rack),
+           get_number_of_letters(actual_rack));
     return false;
   }
-  if (expected_get_array_size(rack) != actual_get_array_size(rack)) {
-    printf("sizes: %d != %d\n", expected_get_array_size(rack),
-           actual_get_array_size(rack));
+  if (get_array_size(expected_rack) != get_array_size(actual_rack)) {
+    printf("sizes: %d != %d\n", get_array_size(expected_rack),
+           get_array_size(actual_rack));
     return false;
   }
-  for (int i = 0; i < (expected_get_array_size(rack)); i++) {
-    if (expected_get_number_of_letter(rack, i) != actual_get_number_of_letter(rack, i)) {
-      printf("different: %d: %d != %d\n", i, expected_get_number_of_letter(rack, i),
-             actual_get_number_of_letter(rack, i));
+  for (int i = 0; i < get_array_size(expected_rack); i++) {
+    if (get_number_of_letter(expected_rack, i) !=
+        get_number_of_letter(actual_rack, i)) {
+      printf("different: %d: %d != %d\n", i,
+             get_number_of_letter(expected_rack, i),
+             get_number_of_letter(actual_rack, i));
       return false;
     }
   }
@@ -206,11 +230,11 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
 
   for (int i = 0; i < b2_number_of_tiles_remaining; i++) {
     uint8_t letter = draw_random_letter(b2_copy, 0);
-    assert(rack->array[letter] > 0);
+    assert(get_number_of_letter(rack, letter) > 0);
     take_letter_from_rack(rack, letter);
   }
 
-  assertrack_is_empty);
+  assert(rack_is_empty(rack));
 
   destroy_bag(b1_copy);
   destroy_bag(b2_copy);
@@ -241,15 +265,20 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
 
 void assert_move(const Game *game, const SortedMoveList *sml, int move_index,
                  const char *expected_move_string) {
+
+  Generator *gen = game_get_gen(game);
+  LetterDistribution *ld = gen_get_ld(gen);
+  MoveList *move_list = gen_get_move_list(gen);
+  Board *board = gen_get_board(gen);
+
   StringBuilder *move_string = create_string_builder();
   Move *move;
   if (sml) {
     move = sml->moves[move_index];
   } else {
-    move = game->gen->move_list->moves[move_index];
+    move = move_list_get_move(move_list, move_index);
   }
-  string_builder_add_move(game->gen->board, move,
-                          game->gen->letter_distribution, move_string);
+  string_builder_add_move(board, move, ld, move_string);
   if (!strings_equal(string_builder_peek(move_string), expected_move_string)) {
     fprintf(stderr, "moves are not equal\ngot: >%s<\nexp: >%s",
             string_builder_peek(move_string), expected_move_string);

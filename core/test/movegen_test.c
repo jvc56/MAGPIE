@@ -3,14 +3,14 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "../src/bag.h"
-#include "../src/cross_set.h"
-#include "../src/game.h"
-#include "../src/gameplay.h"
-#include "../src/move.h"
-#include "../src/movegen.h"
-#include "../src/player.h"
-#include "../src/util.h"
+#include "../src/ent/bag.h"
+#include "../src/ent/game.h"
+#include "../src/ent/move.h"
+#include "../src/ent/movegen.h"
+#include "../src/ent/player.h"
+#include "../src/impl/cross_set.h"
+#include "../src/impl/gameplay.h"
+#include "../src/util/util.h"
 
 #include "cross_set_test.h"
 #include "rack_test.h"
@@ -20,8 +20,9 @@
 
 int count_scoring_plays(const MoveList *ml) {
   int sum = 0;
-  for (int i = 0; i < ml->count; i++) {
-    if (ml->moves[i]->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  for (int i = 0; i < move_list_get_count(ml); i++) {
+    if (get_move_type(move_list_get_move(ml, i)) ==
+        GAME_EVENT_TILE_PLACEMENT_MOVE) {
       sum++;
     }
   }
@@ -30,8 +31,9 @@ int count_scoring_plays(const MoveList *ml) {
 
 int count_nonscoring_plays(const MoveList *ml) {
   int sum = 0;
-  for (int i = 0; i < ml->count; i++) {
-    if (ml->moves[i]->move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  for (int i = 0; i < move_list_get_count(ml); i++) {
+    if (get_move_type(move_list_get_move(ml, i)) !=
+        GAME_EVENT_TILE_PLACEMENT_MOVE) {
       sum++;
     }
   }
@@ -517,8 +519,9 @@ void equity_test(TestConfig *testconfig) {
     assertget_equity(move) <= previous_equity);
     set_rack_to_string(game->gen->letter_distribution, move_rack, "AFGIIIS");
     double leave_value = get_leave_value_for_move(klv, move, move_rack);
-    assert(within_epsilonget_equity(move), (((doubleget_score(move)) + leave_value)));
-    previous_equity =get_equity(move);
+    assert(within_epsilonget_equity(move),
+           (((doubleget_score(move)) + leave_value)));
+    previous_equity = get_equity(move);
   }
   assert(equity_test_sorted_move_list->moves[number_of_moves - 1]->move_type ==
          GAME_EVENT_PASS);

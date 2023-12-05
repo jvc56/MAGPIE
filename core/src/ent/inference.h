@@ -1,6 +1,9 @@
 #ifndef INFERENCE_H
 #define INFERENCE_H
 
+#include "leave_rack.h"
+#include "stats.h"
+
 struct InferenceRecord;
 typedef struct InferenceRecord InferenceRecord;
 

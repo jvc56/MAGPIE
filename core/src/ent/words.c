@@ -23,6 +23,10 @@ struct FormedWords {
 
 int formed_words_get_num_words(FormedWords *fw) { return fw->num_words; }
 
+uint8_t *formed_words_get_word(FormedWords *fw, int word_index) {
+  return fw->words[word_index].word;
+}
+
 int formed_words_get_word_length(FormedWords *fw, int word_index) {
   return fw->words[word_index].word_length;
 }

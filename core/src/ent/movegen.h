@@ -14,6 +14,9 @@ Bag *gen_get_bag(Generator *gen);
 LetterDistribution *gen_get_ld(Generator *gen);
 MoveList *gen_get_move_list(Generator *gen);
 bool *gen_get_kwgs_are_distinct(Generator *gen);
+AnchorList *gen_get_anchor_list(Generator *gen);
+double *gen_get_best_leaves(Generator *gen);
+LeaveMap *gen_get_leave_map(Generator *gen);
 
 Generator *create_generator(const Config *config, int move_list_capacity);
 Generator *generate_duplicate(const Generator *gen, int move_list_capacity);

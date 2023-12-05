@@ -1,8 +1,8 @@
 #include <stdlib.h>
 
-#include "../src/config.h"
-#include "../src/log.h"
-#include "../src/util.h"
+#include "../src/ent/config.h"
+#include "../src/util/util.h"
+#include "../util/log.h"
 
 #include "testconfig.h"
 
