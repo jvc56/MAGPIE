@@ -2,15 +2,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../def/rack_defs.h"
+
+#include "../str/string_util.h"
+
+#include "bag.h"
 #include "command.h"
 #include "config.h"
 #include "error_status.h"
 #include "game.h"
-#include "log.h"
 #include "move.h"
-#include "ucgi_formats.h"
-#include "ucgi_print.h"
-#include "../util/util.h"
+#include "movegen.h"
 #include "words.h"
 
 static CommandVars *wasm_command_vars = NULL;
@@ -31,9 +33,13 @@ Game *get_game_from_cgp(const char *cgp) {
 // tiles must contain 0 for play-through tiles!
 char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
                  uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
-  clock_t begin = clock();
-
   const Game *game = get_game_from_cgp(cgpstr);
+  const Generator *gen = game_get_gen(game);
+  const LetterDistribution *ld = gen_get_ld(gen);
+  const Bag *bag = gen_get_bag(gen);
+  const Board *board = gen_get_board(gen);
+  const KWG *kwg = player_get_kwg(game_get_player(game, 0));
+  const KLV *klv = player_get_klv(game_get_player(game, 0));
 
   int tiles_played = 0;
   for (int i = 0; i < ntiles; i++) {
@@ -44,7 +50,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 
   // score_move assumes the play is always horizontal.
   if (dir_is_vertical(dir)) {
-    transpose(game->gen->board);
+    transpose(bag);
     int ph = row;
     row = col;
     col = ph;
@@ -54,44 +60,46 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   FormedWords *fw = NULL;
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Assume that that kwg is shared
-    points = score_move(game->gen->board, game->gen->letter_distribution, tiles,
-                        0, ntiles - 1, row, col, tiles_played, !dir, 0);
+    points = score_move(bag, ld, tiles, 0, ntiles - 1, row, col, tiles_played,
+                        !dir, 0);
 
     if (dir_is_vertical(dir)) {
       // transpose back.
-      transpose(game->gen->board);
+      transpose(bag);
       int ph = row;
       row = col;
       col = ph;
     }
 
-    fw = words_played(game->gen->board, tiles, 0, ntiles - 1, row, col, dir);
+    fw = words_played(bag, tiles, 0, ntiles - 1, row, col, dir);
     // Assume that that kwg is shared
-    populate_word_validities(game->players[0]->kwg, fw);
+    populate_word_validities(kwg, fw);
   }
 
   Rack *leave_rack = NULL;
 
   if (nleave > 0) {
-    leave_rack = create_rack(game->gen->letter_distribution->size);
+    leave_rack = create_rack(letter_distribution_get_size(ld));
     for (int i = 0; i < nleave; i++) {
       add_letter_to_rack(leave_rack, leave[i]);
     }
-    leave_value = get_leave_value(game->players[0]->klv, leave_rack);
+    // Assume that that klv is shared
+    leave_value = get_leave_value(klv, leave_rack);
   }
 
   bool phonies_exist = false;
   StringBuilder *phonies_string_builder = create_string_builder();
+  int number_of_words = formed_words_get_num_words(fw);
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    for (int i = 0; i < fw->num_words; i++) {
-      if (!fw->words[i].valid) {
+    for (int i = 0; i < number_of_words; i++) {
+      if (!formed_words_get_word_valid(fw, i)) {
         phonies_exist = true;
-        for (int mli = 0; mli < fw->words[i].word_length; mli++) {
-          string_builder_add_user_visible_letter(game->gen->letter_distribution,
-                                                 phonies_string_builder,
-                                                 fw->words[i].word[mli]);
+        for (int mli = 0; mli < formed_words_get_word_length(fw, i); mli++) {
+          string_builder_add_user_visible_letter(
+              ld, phonies_string_builder,
+              formed_words_get_word_letter(fw, i, mli));
         }
-        if (i < fw->num_words - 1) {
+        if (i < number_of_words - 1) {
           string_builder_add_string(phonies_string_builder, ",");
         }
       }
@@ -110,9 +118,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   set_move(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, dir,
            move_type);
 
-  string_builder_add_ucgi_move(move, game->gen->board,
-                               game->gen->letter_distribution,
-                               move_string_builder);
+  string_builder_add_ucgi_move(move, board, ld, move_string_builder);
   destroy_move(move);
 
   string_builder_add_formatted_string(return_string_builder, "currmove %s",
@@ -137,9 +143,6 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   }
   char *return_string = string_builder_dump(return_string_builder, NULL);
   destroy_string_builder(return_string_builder);
-  clock_t end = clock();
-  log_debug("score_play took %0.6f seconds",
-            (double)(end - begin) / CLOCKS_PER_SEC);
   // Caller can use UTF8ToString on the returned pointer but it MUST FREE
   // this string after it's done with it!
   return return_string;
@@ -147,26 +150,28 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 
 // a synchronous function to return a static eval of a position.
 char *static_evaluation(const char *cgpstr, int num_plays) {
-  clock_t begin = clock();
 
   const Game *game = get_game_from_cgp(cgpstr);
 
-  generate_moves(game->players[1 - game->player_on_turn_index]->rack, game->gen,
-                 game->players[game->player_on_turn_index],
-                 get_tiles_remaining(game->gen->bag) >= RACK_SIZE,
-                 MOVE_RECORD_ALL, MOVE_SORT_EQUITY, true);
-  int number_of_moves_generated = game->gen->move_list->count;
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+  const Generator *gen = game_get_gen(game);
+  const Bag *bag = gen_get_bag(gen);
+
+  generate_moves(player_get_rack(opponent), gen, player_on_turn,
+                 get_tiles_remaining(bag) >= RACK_SIZE, MOVE_RECORD_ALL,
+                 MOVE_SORT_EQUITY, true);
+
+  MoveList *move_list = gen_get_move_list(gen);
+  int number_of_moves_generated = move_list_get_count(move_list);
   if (number_of_moves_generated < num_plays) {
     num_plays = number_of_moves_generated;
   }
-  sort_moves(game->gen->move_list);
+  sort_moves(move_list);
 
   // This pointer needs to be freed by the caller:
   char *val = ucgi_static_moves(game, num_plays);
-
-  clock_t end = clock();
-  log_debug("static_evaluation took %0.6f seconds",
-            (double)(end - begin) / CLOCKS_PER_SEC);
   return val;
 }
 

@@ -25,7 +25,7 @@ void string_builder_add_player_row(
     display_player_name = string_duplicate(player_name);
   } else {
     display_player_name =
-        get_formatted_string("player%d", player_get_index(player) + 1);
+        get_formatted_string("Player %d", player_get_index(player) + 1);
   }
 
   Rack *player_rack = player_get_rack(player);

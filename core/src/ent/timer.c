@@ -12,22 +12,22 @@ struct Timer {
   bool is_running;
 };
 
-void timer_reset(Timer *timer) {
+void mtimer_reset(Timer *timer) {
   timer->start_time = 0;
   timer->end_time = 0;
   timer->is_running = false;
 }
 
-Timer *create_timer() {
+Timer *mtimer_create() {
   Timer *timer = (Timer *)malloc_or_die(sizeof(Timer));
 
-  timer_reset(timer);
+  mtimer_reset(timer);
   return timer;
 }
 
-void destroy_timer(Timer *timer) { free(timer); }
+void mtimer_destroy(Timer *timer) { free(timer); }
 
-void timer_start(Timer *timer) {
+void mtimer_start(Timer *timer) {
   if (timer->is_running) {
     log_fatal("Timer is already running.");
   }
@@ -36,7 +36,7 @@ void timer_start(Timer *timer) {
   timer->is_running = true;
 }
 
-void timer_stop(Timer *timer) {
+void mtimer_stop(Timer *timer) {
   if (!timer->is_running) {
     log_fatal("Timer is not running or has already stopped.");
   }
@@ -45,7 +45,7 @@ void timer_stop(Timer *timer) {
   timer->is_running = false;
 }
 
-double timer_elapsed_seconds(Timer *timer) {
+double mtimer_elapsed_seconds(Timer *timer) {
   if (timer->is_running) {
     clock_t current_time = clock();
     return ((double)(current_time - timer->start_time)) / CLOCKS_PER_SEC;

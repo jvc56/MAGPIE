@@ -107,7 +107,8 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
     // FIXME: need an option for ucgi vs. human readable
     // since the command module is an abstraction layer
     // above UCGI.
-    status_string = ucgi_sim_stats(command_vars->game, command_vars->simmer, 1);
+    status_string = ucgi_sim_stats(command_vars->game, command_vars->simmer,
+                                   thread_control, true);
     break;
   case COMMAND_TYPE_AUTOPLAY:
     status_string = string_duplicate("autoplay status unimplemented");

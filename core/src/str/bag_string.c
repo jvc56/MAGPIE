@@ -1,5 +1,8 @@
+#include <stdint.h>
+
 #include "../ent/bag.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/rack.h"
 
 #include "string_util.h"
 
@@ -8,36 +11,26 @@
 void string_builder_add_bag(const Bag *bag,
                             const LetterDistribution *letter_distribution,
                             StringBuilder *bag_string_builder) {
-  int number_of_tiles_remaining = get_tiles_remaining(bag);
-  uint8_t *sorted_bag = malloc_or_die(sizeof(uint8_t) * bag->size);
-  for (int i = 0; i < number_of_tiles_remaining; i++) {
-    sorted_bag[i] = bag->tiles[i + bag->start_tile_index];
-    // Make blanks some arbitrarily large number
-    // so that they are printed last.
-    if (sorted_bag[i] == BLANK_MACHINE_LETTER) {
-      sorted_bag[i] = BLANK_SORT_VALUE;
-    }
-  }
-  int x;
-  int i = 1;
-  int k;
-  while (i < number_of_tiles_remaining) {
-    x = sorted_bag[i];
-    k = i - 1;
-    while (k >= 0 && x < sorted_bag[k]) {
-      sorted_bag[k + 1] = sorted_bag[k];
-      k--;
-    }
-    sorted_bag[k + 1] = x;
-    i++;
+  Bag *copied_bag = bag_duplicate(bag);
+  uint32_t ld_size = letter_distribution_get_size(letter_distribution);
+  Rack *bag_as_rack = create_rack(ld_size);
+
+  int number_of_tiles = get_tiles_remaining(bag);
+  for (int i = 0; i < number_of_tiles; i++) {
+    add_letter_to_rack(bag_as_rack, draw_random_letter(copied_bag, 0));
   }
 
-  for (int i = 0; i < number_of_tiles_remaining; i++) {
-    if (sorted_bag[i] == BLANK_SORT_VALUE) {
-      sorted_bag[i] = 0;
+  for (int i = 1; i < ld_size; i++) {
+    for (int j = 0; j < get_number_of_letter(bag_as_rack, i); j++) {
+      string_builder_add_user_visible_letter(letter_distribution,
+                                             bag_string_builder, i);
     }
-    string_builder_add_user_visible_letter(letter_distribution,
-                                           bag_string_builder, sorted_bag[i]);
   }
-  free(sorted_bag);
+
+  // Print the blanks at the end
+  for (int i = 0; i < get_number_of_letter(bag_as_rack, BLANK_MACHINE_LETTER);
+       i++) {
+    string_builder_add_user_visible_letter(
+        letter_distribution, bag_string_builder, BLANK_MACHINE_LETTER);
+  }
 }

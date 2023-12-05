@@ -21,6 +21,21 @@ struct FormedWords {
   FormedWord words[RACK_SIZE + 1]; // max number of words we can form
 };
 
+int formed_words_get_num_words(FormedWords *fw) { return fw->num_words; }
+
+int formed_words_get_word_length(FormedWords *fw, int word_index) {
+  return fw->words[word_index].word_length;
+}
+
+int formed_words_get_word_valid(FormedWords *fw, int word_index) {
+  return fw->words[word_index].valid;
+}
+
+int formed_words_get_word_letter(FormedWords *fw, int word_index,
+                                 int letter_index) {
+  return fw->words[word_index].word[letter_index];
+}
+
 FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
                           int word_end_index, int row, int col, int dir) {
 

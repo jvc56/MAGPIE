@@ -13,7 +13,7 @@
 
 void print_sim_stats(const Game *game, Simmer *simmer) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
-  sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
+  sort_plays_by_win_rate_while_locked(simmer->simmed_plays, simmer->num_simmed_plays);
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
 
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
@@ -76,7 +76,7 @@ void test_more_iterations(TestConfig *testconfig) {
   sim_status_t status = simulate(config, game, simmer);
   assert(status == SIM_STATUS_SUCCESS);
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
-  sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
+  sort_plays_by_win_rate_while_locked(simmer->simmed_plays, simmer->num_simmed_plays);
 
   StringBuilder *move_string_builder = create_string_builder();
   string_builder_add_move_description(simmer->simmed_plays[0]->move,
@@ -110,7 +110,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   printf("%d iters took %0.6f seconds\n", iters,
          (double)(end - begin) / CLOCKS_PER_SEC);
   print_sim_stats(game, simmer);
-  sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
+  sort_plays_by_win_rate_while_locked(simmer->simmed_plays, simmer->num_simmed_plays);
 
   StringBuilder *move_string_builder = create_string_builder();
   string_builder_add_move_description(simmer->simmed_plays[0]->move,
@@ -137,7 +137,7 @@ void perf_test_multithread_sim(Config *config) {
   assert(config->thread_control->halt_status == HALT_STATUS_MAX_ITERATIONS);
 
   print_sim_stats(game, simmer);
-  sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
+  sort_plays_by_win_rate_while_locked(simmer->simmed_plays, simmer->num_simmed_plays);
 
   StringBuilder *move_string_builder = create_string_builder();
   string_builder_add_move_description(simmer->simmed_plays[0]->move,
@@ -164,7 +164,7 @@ void perf_test_multithread_blocking_sim(Config *config) {
   sim_status_t status = simulate(config, game, simmer);
   assert(status == SIM_STATUS_SUCCESS);
   print_sim_stats(game, simmer);
-  sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
+  sort_plays_by_win_rate_while_locked(simmer->simmed_plays, simmer->num_simmed_plays);
 
   StringBuilder *move_string_builder = create_string_builder();
   string_builder_add_move_description(simmer->simmed_plays[0]->move,

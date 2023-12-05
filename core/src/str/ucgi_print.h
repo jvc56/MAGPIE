@@ -5,8 +5,8 @@
 
 #include "autoplay_results.h"
 #include "game.h"
-#include "infer.h"
-#include "sim.h"
+#include "inference.h"
+#include "simmer.h"
 #include "thread_control.h"
 
 void print_ucgi_static_moves(const Game *game, int nmoves,

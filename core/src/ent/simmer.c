@@ -21,7 +21,7 @@
 #define PER_PLY_STOPPING_SCALING 1250
 #define SIMILAR_PLAYS_ITER_CUTOFF 1000
 
-typedef struct SimmedPlay {
+struct SimmedPlay {
   Move *move;
   Stat **score_stat;
   Stat **bingo_stat;
@@ -31,7 +31,45 @@ typedef struct SimmedPlay {
   bool ignore;
   int play_id;
   pthread_mutex_t mutex;
-} SimmedPlay;
+};
+
+Move *get_simmed_play_move(const SimmedPlay *simmed_play) {
+  return simmed_play->move;
+}
+
+Stat *get_simmed_play_score_stat(const SimmedPlay *simmed_play,
+                                 int stat_index) {
+  return simmed_play->score_stat[stat_index];
+}
+
+Stat *get_simmed_play_bingo_stat(const SimmedPlay *simmed_play,
+                                 int stat_index) {
+  return simmed_play->bingo_stat[stat_index];
+}
+
+Stat *get_simmed_play_equity_stat(const SimmedPlay *simmed_play) {
+  return simmed_play->equity_stat;
+}
+
+Stat *get_simmed_play_leftover_stat(const SimmedPlay *simmed_play) {
+  return simmed_play->leftover_stat;
+}
+
+Stat *get_simmed_play_win_pct_stat(const SimmedPlay *simmed_play) {
+  return simmed_play->win_pct_stat;
+}
+
+bool is_simmed_play_ignore(const SimmedPlay *simmed_play) {
+  return simmed_play->ignore;
+}
+
+int get_simmed_play_id(const SimmedPlay *simmed_play) {
+  return simmed_play->play_id;
+}
+
+pthread_mutex_t *get_simmed_play_mutex(const SimmedPlay *simmed_play) {
+  return (pthread_mutex_t *)&simmed_play->mutex;
+}
 
 struct Simmer {
   int initial_spread;
@@ -65,6 +103,20 @@ typedef struct SimmerWorker {
   Rack *rack_placeholder;
   Simmer *simmer;
 } SimmerWorker;
+
+int simmer_get_node_count(Simmer *simmer) {
+  return atomic_load(&simmer->node_count);
+}
+
+int simmer_get_number_of_plays(Simmer *simmer) {
+  return simmer->num_simmed_plays;
+}
+
+int simmer_get_max_plies(Simmer *simmer) { return simmer->max_plies; }
+
+SimmedPlay *simmer_get_simmed_play(Simmer *simmer, int simmed_play_index) {
+  return simmer->simmed_plays[simmed_play_index];
+}
 
 Simmer *create_simmer(const Config *config) {
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
@@ -250,7 +302,8 @@ void ignore_play(SimmedPlay *sp, bool lock) {
 
 bool handle_potential_stopping_condition(Simmer *simmer) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
-  sort_plays_by_win_rate(simmer->simmed_plays, simmer->num_simmed_plays);
+  sort_plays_by_win_rate_while_locked(simmer->simmed_plays,
+                                      simmer->num_simmed_plays);
 
   double zval = 0;
   switch (simmer->stopping_condition) {
@@ -531,7 +584,17 @@ int compare_simmed_plays(const void *a, const void *b) {
   }
 }
 
-void sort_plays_by_win_rate(SimmedPlay **simmed_plays, int num_simmed_plays) {
+// Must be called with a lock on the sorted plays mutex
+void sort_plays_by_win_rate(Simmer *simmer) {
+  pthread_mutex_lock(&simmer->simmed_plays_mutex);
+  sort_plays_by_win_rate_while_locked(simmer->simmed_plays,
+                                      simmer->num_simmed_plays);
+  pthread_mutex_unlock(&simmer->simmed_plays_mutex);
+}
+
+// Must be called with a lock on the sorted plays mutex
+void sort_plays_by_win_rate_while_locked(SimmedPlay **simmed_plays,
+                                         int num_simmed_plays) {
   qsort(simmed_plays, num_simmed_plays, sizeof(SimmedPlay *),
         compare_simmed_plays);
 }
