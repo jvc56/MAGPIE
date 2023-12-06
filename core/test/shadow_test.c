@@ -682,12 +682,12 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(load_cgp(game, kaki_yond) == CGP_PARSE_STATUS_SUCCESS);
   Player *player = game->players[game->player_on_turn_index];
   Rack *opp_rack = game->players[1 - game->player_on_turn_index]->rack;
-/*
-  StringBuilder *sb = create_string_builder();
-  string_builder_add_game(game, sb);
-  printf("%s\n", string_builder_peek(sb));
-  destroy_string_builder(sb);
-*/
+  /*
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_game(game, sb);
+    printf("%s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+  */
   reset_anchor_list(al);
   gen->current_row_index = 8;
   gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
@@ -923,7 +923,7 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[1]->max_tiles_starting_left_by[5] == 0);
   assert(al->anchors[1]->max_tiles_starting_left_by[6] == 7);
 
-  shadow_limit_table =  &(al->anchors[1]->shadow_limit_table);
+  shadow_limit_table = &(al->anchors[1]->shadow_limit_table);
   // 9a IISTRIM
   assert(within_epsilon((*shadow_limit_table)[6][7].highest_equity, 74));
   assert(within_epsilon((*shadow_limit_table)[6][7].num_playthrough, 0));
@@ -941,7 +941,7 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(al->anchors[2]->max_tiles_starting_left_by[5] == 7);
   assert(al->anchors[2]->max_tiles_starting_left_by[6] == 0);
 
-  shadow_limit_table =  &(al->anchors[2]->shadow_limit_table);
+  shadow_limit_table = &(al->anchors[2]->shadow_limit_table);
   // 9e RIMI(YOND)IST
   assert(within_epsilon((*shadow_limit_table)[2][7].highest_equity, 84));
   assert(within_epsilon((*shadow_limit_table)[2][7].num_playthrough, 4));
@@ -959,8 +959,77 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   assert(within_epsilon((*shadow_limit_table)[5][7].num_playthrough, 4));
 
   reset_game(game);
-  char qi_qi[300] = "15/15/15/15/15/15/15/6QI7/6I8/15/15/15/15/15/15 FRUITED/EGGCUPS 22/12 0 lex CSW21";
-  assert(load_cgp(game, qi_qi) == CGP_PARSE_STATUS_SUCCESS);
+  char qi_qis[300] =
+      "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
+      "0 lex CSW21";
+  assert(load_cgp(game, qi_qis) == CGP_PARSE_STATUS_SUCCESS);
+  player = game->players[game->player_on_turn_index];
+  opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+
+  /*
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_game(game, sb);
+    printf("%s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+  */
+
+  reset_anchor_list(al);
+  set_descending_tile_scores(gen, player);
+  for (int dir = 0; dir < 2; dir++) {
+    gen->vertical = dir % 2 != 0;
+    shadow_by_orientation(gen, player, dir, opp_rack);
+    transpose(gen->board);
+  }
+  sort_anchor_list(al);
+
+  // 8g (QI)DURFITE 128
+  // h8 (I)DURFITE 103
+  // f9 UFTRIDE 88 (can split)
+  // 7g EF(QIS)RTUDI 79
+  // 10b FURED(S)IT 74
+  // 9c DURT(I)FIE 70
+  // 7h FURTIDE 69 (can split)
+  // h10 DUFTIE 45
+  // f10 FURIDE 35
+  assert(al->count == 9);
+  sort_anchor_list(al);
+
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 128));
+  assert(al->anchors[0]->row == 7);
+  assert(al->anchors[0]->col == 7);
+  assert(al->anchors[0]->vertical == false);
+  assert(al->anchors[0]->min_tiles_to_play == 1);
+  assert(al->anchors[0]->max_tiles_to_play == 7);
+  assert(al->anchors[0]->max_tiles_starting_left_by[0] == 0);
+  assert(al->anchors[0]->max_tiles_starting_left_by[1] == 7);
+
+  assert(within_epsilon(al->anchors[1]->highest_possible_equity, 103));
+  assert(al->anchors[1]->row == 7);
+  assert(al->anchors[1]->col == 7);
+  assert(al->anchors[1]->vertical == true);
+  assert(al->anchors[1]->min_tiles_to_play == 1);
+  assert(al->anchors[1]->max_tiles_to_play == 7);
+  assert(al->anchors[1]->max_tiles_starting_left_by[0] == 7);
+  assert(al->anchors[1]->max_tiles_starting_left_by[1] == 7);
+
+  assert(within_epsilon(al->anchors[2]->highest_possible_equity, 88));
+  assert(al->anchors[2]->row == 5);
+  assert(al->anchors[2]->col == 8);
+  assert(al->anchors[2]->vertical == true);
+  assert(al->anchors[2]->min_tiles_to_play == 2);
+  assert(al->anchors[2]->max_tiles_to_play == 7);
+  assert(al->anchors[2]->max_tiles_starting_left_by[0] == 7);
+  assert(al->anchors[2]->max_tiles_starting_left_by[1] == 0);
+
+  split_anchors_for_bingos(al, true);
+  sort_anchor_list(al);
+  assert(al->count == 11);
+
+  reset_game(game);
+  char e_t[300] =
+      "15/15/15/15/10E4/15/15/15/15/15/15/9T5/15/15/15 AAELNRT/ADJNOPS 311/106 "
+      "0 lex CSW21";
+  assert(load_cgp(game, e_t) == CGP_PARSE_STATUS_SUCCESS);
   player = game->players[game->player_on_turn_index];
   opp_rack = game->players[1 - game->player_on_turn_index]->rack;
 
@@ -971,61 +1040,46 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
 
   reset_anchor_list(al);
   set_descending_tile_scores(gen, player);
-  shadow_by_orientation(gen, player, false, opp_rack);
+  transpose(gen->board);
+  shadow_by_orientation(gen, player, 1, opp_rack);
+
   sort_anchor_list(al);
 
-  // 8g (QI)DURFITE 128
-  // 9c DURT(I)FIE 70
-  // 7h FURTIDE 69
-  assert(al->count == 3);
-  sort_anchor_list(al);
+  // just the vertical plays
 
-  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 128));
-  assert(al->anchors[0]->row == 7);
-  assert(al->anchors[0]->col == 7);
-  assert(al->anchors[0]->min_tiles_to_play == 1);
-  assert(al->anchors[0]->max_tiles_to_play == 7);
-  assert(al->anchors[0]->max_tiles_starting_left_by[0] == 0);
-  assert(al->anchors[0]->max_tiles_starting_left_by[1] == 7);
-  
-  split_anchors_for_bingos(al, true);
-  // 7h FURTED 18
-  assert(al->count == 4);
-  sort_anchor_list(al);
+  // k5 (E)NTRALEA 68 (doubled, hooking a two)
+  // l1 LATERAN 68 (doubled + a DLS, hooking a two)
+  // k8 LATERAN 66 (doubled, hooking a two)
+  // j5 ALTERAN(T) 64 (two TLS, hooking a two)
+  // i7 LATERAN 62 (three DLS, hooking a two)
+  // j7 TARLE(T)AN 62 (two TLS)
+  assert(al->count == 6);
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 68));
+  assert(within_epsilon(al->anchors[1]->highest_possible_equity, 68));
+  assert(within_epsilon(al->anchors[2]->highest_possible_equity, 66));
 
-  // 8g (QI)DURFITE 128
-  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 128));
-  assert(al->anchors[0]->row == 7);
-  assert(al->anchors[0]->col == 7);
-  assert(al->anchors[0]->min_tiles_to_play == 1);
-  assert(al->anchors[0]->max_tiles_to_play == 7);
-  assert(al->anchors[0]->max_tiles_starting_left_by[0] == 0);
-  assert(al->anchors[0]->max_tiles_starting_left_by[1] == 7);
-  
-  // 9c DURT(I)FIE 70
-  assert(within_epsilon(al->anchors[1]->highest_possible_equity, 70));
-  assert(al->anchors[1]->row == 8);
-  assert(al->anchors[1]->col == 6);
-  assert(al->anchors[1]->min_tiles_to_play == 1);
-  assert(al->anchors[1]->max_tiles_to_play == 7);
-  assert(al->anchors[1]->max_tiles_starting_left_by[0] == 7);
+  assert(within_epsilon(al->anchors[3]->highest_possible_equity, 64));
+  assert(al->anchors[3]->row == 9);
+  assert(al->anchors[3]->col == 4);
+  assert(al->anchors[3]->vertical == true);
+  assert(al->anchors[3]->min_tiles_to_play == 2);
+  assert(al->anchors[3]->max_tiles_to_play == 7);
+  assert(al->anchors[3]->min_num_playthrough == 0);
+  assert(al->anchors[3]->max_num_playthrough == 1);
 
-  // 7h FURTIDE 69
-  assert(within_epsilon(al->anchors[2]->highest_possible_equity, 69));
-  assert(al->anchors[2]->row == 6);
-  assert(al->anchors[2]->col == 7);
-  assert(al->anchors[2]->min_tiles_to_play == 7);
-  assert(al->anchors[2]->max_tiles_to_play == 7);
-  assert(al->anchors[2]->max_tiles_starting_left_by[0] == 7);
+  // word starts at anchor, eight letter bingo reaches the playthrough tile (T).
+  assert(within_epsilon(al->anchors[3]->shadow_limit_table[0][7].highest_equity,
+                        64));
+  assert(al->anchors[3]->shadow_limit_table[0][7].num_playthrough == 1);
 
-  // 7h FURTED 18
-  assert(within_epsilon(al->anchors[3]->highest_possible_equity, 18));
-  assert(al->anchors[3]->row == 6);
-  assert(al->anchors[3]->col == 7);
-  assert(al->anchors[3]->min_tiles_to_play == 1);
-  assert(al->anchors[3]->max_tiles_to_play == 6);
-  assert(al->anchors[3]->max_tiles_starting_left_by[0] == 6);
-  
+  // seven letter bingo, no playthrough
+  assert(within_epsilon(al->anchors[3]->shadow_limit_table[1][7].highest_equity,
+                        63));
+  assert(al->anchors[3]->shadow_limit_table[1][7].num_playthrough == 0);
+
+  assert(within_epsilon(al->anchors[4]->highest_possible_equity, 62));
+  assert(within_epsilon(al->anchors[5]->highest_possible_equity, 62));
+
   destroy_game(game);
 }
 

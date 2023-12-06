@@ -197,13 +197,12 @@ void record_bingo(Generator *gen, Player *player, Rack *opp_rack, int row,
   set_spare_move(gen->move_list, bingo, 0, tiles_played - 1, score, row, col,
                  tiles_played, gen->vertical, GAME_EVENT_TILE_PLACEMENT_MOVE);
 
-/*
   StringBuilder *sb = create_string_builder();
   string_builder_add_move(gen->board, gen->move_list->spare_move,
                           gen->letter_distribution, sb);
   printf("recording bingo %s\n", string_builder_peek(sb));
   destroy_string_builder(sb);
-*/
+
   if (player->strategy_params->play_recorder_type == MOVE_RECORDER_ALL) {
     double equity;
     if (player->strategy_params->move_sorting == MOVE_SORT_EQUITY) {
@@ -937,6 +936,12 @@ void shadow_by_orientation(Generator *gen, Player *player, int dir,
       if (get_anchor(gen->board, row, col, dir)) {
         shadow_play_for_anchor(gen, col, player, opp_rack);
         gen->last_anchor_col = col;
+        // The next anchor to search after a playthrough tile should
+        // leave a gap of one square so that it will not search backwards
+        // into the square adjacent to the playthrough tile.
+        if (!is_empty(gen->board, row, col)) {
+          gen->last_anchor_col++;
+        }
       }
     }
   }
@@ -1136,14 +1141,12 @@ void bingo_gen(Generator *gen, Player *player, Rack *opp_rack) {
   // Calculate it for the leftmost position, then adjust the rolling sum
   // for each subsequent position.
   int hook_totals[BOARD_DIM];
-
 /*
   printf(
       "bingo_gen: row=%d dir=%d leftmost_start_col=%d "
       "rightmost_start_col = %d\n ",
-      row, dir, leftmost_start_col, rightmost_start_col);
+      row, gen->vertical, leftmost_start_col, rightmost_start_col);
 */
-
   const int csi = get_cross_set_index(gen, player->index);
   int csd;
   if (gen->vertical) {
