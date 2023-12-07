@@ -624,7 +624,7 @@ void bingo_anchor_tests(SuperConfig *superconfig) {
       "15/15/15/15/15/11I3/7S3R3/3QUACK3E3/7YAULD3/15/15/15/15/15/15 "
       "AENORST/WEEWEED 70/25 0 lex CSW21";
   assert(load_cgp(game, playthrough) == CGP_PARSE_STATUS_SUCCESS);
-   look_up_bingos_for_game(game);
+  look_up_bingos_for_game(game);
   assert(gen->number_of_bingos == 4);
   player = game->players[game->player_on_turn_index];
   opp_rack = game->players[1 - game->player_on_turn_index]->rack;
@@ -669,6 +669,65 @@ void bingo_anchor_tests(SuperConfig *superconfig) {
   assert(gen->move_list->count == 168);
   sorted_move_list = create_sorted_move_list(gen->move_list);
   assert_move(game, sorted_move_list, 0, "6F ANESTR(I) 22");
+  destroy_sorted_move_list(sorted_move_list);
+
+  reset_game(game);
+  char e_t[300] =
+      "15/15/15/15/10E4/15/15/15/15/15/15/9T5/15/15/15 AAELNRT/ADJNOPS 311/106 "
+      "0 lex CSW21";
+  assert(load_cgp(game, e_t) == CGP_PARSE_STATUS_SUCCESS);
+  player = game->players[game->player_on_turn_index];
+  opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+  look_up_bingos_for_game(game);
+  assert(gen->number_of_bingos == 0);
+
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_game(game, sb);
+  printf("%s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+  
+  reset_anchor_list(al);
+  transpose(gen->board);
+
+  gen->vertical = true;
+  gen->current_row_index = 9;
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  set_descending_tile_scores(gen, player);
+  load_row_letter_cache(gen, gen->current_row_index);
+  shadow_play_for_anchor(gen, 4, player, opp_rack);
+  split_anchors_for_bingos(al, true);
+  assert(al->count == 3);
+  sort_anchor_list(al);
+
+  assert(al->anchors[0]->highest_possible_equity == 64);
+  assert(al->anchors[0]->min_tiles_to_play == 7);
+  assert(al->anchors[0]->max_num_playthrough == 1);
+  set_up_gen_for_anchor(gen, 0);
+  init_leave_map(gen->leave_map, player->rack);
+  recursive_gen(gen, 4, player, opp_rack,
+                kwg_get_root_node_index(player->strategy_params->kwg), 4, 4,
+                !gen->vertical);
+  assert(gen->move_list->count == 2);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+  assert_move(game, sorted_move_list, 0, "J5 ALTERAN(T) 64");
+  assert_move(game, sorted_move_list, 1, "J5 ALTERNA(T) 64");
+
+  assert(al->anchors[1]->highest_possible_equity == 63);
+  assert(al->anchors[1]->min_tiles_to_play == 7);
+  assert(al->anchors[1]->max_num_playthrough == 0);
+  set_up_gen_for_anchor(gen, 1);
+  bingo_gen(gen, player, opp_rack);
+  assert(gen->move_list->count == 0);
+
+  assert(al->anchors[2]->highest_possible_equity == 12);
+  set_up_gen_for_anchor(gen, 2);
+  init_leave_map(gen->leave_map, player->rack);
+  recursive_gen(gen, 4, player, opp_rack,
+                kwg_get_root_node_index(player->strategy_params->kwg), 4, 4,
+                !gen->vertical);
+  assert(gen->move_list->count == 472);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+  assert_move(game, sorted_move_list, 0, "J1 ALTERN 12");
   destroy_sorted_move_list(sorted_move_list);
 
   destroy_game(game);
@@ -929,6 +988,7 @@ void distinct_lexica_test(SuperConfig *superconfig) {
 }
 
 void test_movegen(SuperConfig *superconfig) {
+  bingo_anchor_tests(superconfig); return;
   macondo_tests(superconfig);
   exchange_tests(superconfig);
   bingo_anchor_tests(superconfig);

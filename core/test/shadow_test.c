@@ -1054,9 +1054,21 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
   // i7 LATERAN 62 (three DLS, hooking a two)
   // j7 TARLE(T)AN 62 (two TLS)
   assert(al->count == 6);
+
   assert(within_epsilon(al->anchors[0]->highest_possible_equity, 68));
+  assert(al->anchors[0]->row == 10);
+  assert(al->anchors[0]->col == 4);
+  assert(al->anchors[0]->vertical == true);
+  assert(al->anchors[0]->min_tiles_to_play == 1);
+  assert(al->anchors[0]->max_tiles_to_play == 7);
+  assert(al->anchors[0]->min_num_playthrough == 1);
+  assert(al->anchors[0]->max_num_playthrough == 1);
+
   assert(within_epsilon(al->anchors[1]->highest_possible_equity, 68));
+  assert(al->anchors[1]->max_num_playthrough == 0);
+
   assert(within_epsilon(al->anchors[2]->highest_possible_equity, 66));
+  assert(al->anchors[1]->max_num_playthrough == 0);
 
   assert(within_epsilon(al->anchors[3]->highest_possible_equity, 64));
   assert(al->anchors[3]->row == 9);
@@ -1079,6 +1091,60 @@ void test_split_anchors_for_bingos(SuperConfig *superconfig) {
 
   assert(within_epsilon(al->anchors[4]->highest_possible_equity, 62));
   assert(within_epsilon(al->anchors[5]->highest_possible_equity, 62));
+
+  split_anchors_for_bingos(al, true);
+  sort_anchor_list(al);
+
+  // k5 (E)NTRALEA 68 (doubled, hooking a two)
+  // l1 LATERAN 68 (doubled + a DLS, hooking a two) -> 2
+  // k8 LATERAN 66 (doubled, hooking a two) -> 2
+  // j5 ALTERAN(T) 64 (two TLS, hooking a two) -> 3
+  // i7 LATERAN 62 (three DLS, hooking a two) -> 2
+  // j7 TARLE(T)AN 62 (two TLS)
+  assert(al->count == 11);
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 68));
+  assert(within_epsilon(al->anchors[1]->highest_possible_equity, 68));
+  assert(within_epsilon(al->anchors[2]->highest_possible_equity, 66));
+
+  // just the playthrough eight-letter bingo starting at j5, nothing shorter
+  assert(within_epsilon(al->anchors[3]->highest_possible_equity, 64));
+  assert(al->anchors[3]->row == 9);
+  assert(al->anchors[3]->col == 4);
+  assert(al->anchors[3]->vertical == true);
+  assert(al->anchors[3]->min_tiles_to_play == 7);
+  assert(al->anchors[3]->max_tiles_to_play == 7);
+  assert(al->anchors[3]->min_num_playthrough == 1);
+  assert(al->anchors[3]->max_num_playthrough == 1);
+
+  // word starts at anchor, eight letter bingo reaches the playthrough tile (T).
+  assert(within_epsilon(al->anchors[3]->shadow_limit_table[0][7].highest_equity,
+                        64));
+  assert(al->anchors[3]->shadow_limit_table[0][7].num_playthrough == 1);
+
+  // seven letter bingo, no playthrough
+  assert(within_epsilon(al->anchors[3]->shadow_limit_table[1][7].highest_equity,
+                        63));
+  assert(al->anchors[3]->shadow_limit_table[1][7].num_playthrough == 0);
+
+  // seven letter bingos anchored at j5
+  assert(within_epsilon(al->anchors[4]->highest_possible_equity, 63));
+  assert(al->anchors[4]->row == 9);
+  assert(al->anchors[4]->col == 4);
+  assert(al->anchors[4]->vertical == true);
+  assert(al->anchors[4]->min_tiles_to_play == 7);
+  assert(al->anchors[4]->max_tiles_to_play == 7);
+  assert(al->anchors[4]->min_num_playthrough == 0);
+  assert(al->anchors[4]->max_num_playthrough == 0);
+
+  // word starts at anchor, eight letter bingo reaches the playthrough tile (T).
+  assert(within_epsilon(al->anchors[4]->shadow_limit_table[0][7].highest_equity,
+                        64));
+  assert(al->anchors[4]->shadow_limit_table[0][7].num_playthrough == 1);
+
+  // seven letter bingo, no playthrough
+  assert(within_epsilon(al->anchors[4]->shadow_limit_table[1][7].highest_equity,
+                        63));
+  assert(al->anchors[4]->shadow_limit_table[1][7].num_playthrough == 0);
 
   destroy_game(game);
 }
