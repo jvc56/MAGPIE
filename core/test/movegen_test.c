@@ -695,6 +695,25 @@ void bingo_anchor_tests(SuperConfig *superconfig) {
   set_descending_tile_scores(gen, player);
   load_row_letter_cache(gen, gen->current_row_index);
   shadow_play_for_anchor(gen, 4, player, opp_rack);
+  assert(al->count == 1);
+  assert(al->anchors[0]->highest_possible_equity == 64);
+  assert(al->anchors[0]->min_tiles_to_play == 2);
+  assert(al->anchors[0]->max_tiles_to_play == 7);
+  assert(al->anchors[0]->min_num_playthrough == 0);
+  assert(al->anchors[0]->max_num_playthrough == 1);
+  set_up_gen_for_anchor(gen, 0);
+  init_leave_map(gen->leave_map, player->rack);
+  recursive_gen(gen, 4, player, opp_rack,
+                kwg_get_root_node_index(player->strategy_params->kwg), 4, 4,
+                !gen->vertical);
+  assert(gen->move_list->count == 474);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+
+  transpose(gen->board);
+  assert_move(game, sorted_move_list, 0, "J5 ALTERAN(T) 64");
+  assert_move(game, sorted_move_list, 1, "J5 ALTERNA(T) 64");
+  transpose(gen->board);
+
   split_anchors_for_bingos(al, true);
   assert(al->count == 3);
   sort_anchor_list(al);
@@ -709,8 +728,11 @@ void bingo_anchor_tests(SuperConfig *superconfig) {
                 !gen->vertical);
   assert(gen->move_list->count == 2);
   sorted_move_list = create_sorted_move_list(gen->move_list);
+
+  transpose(gen->board);
   assert_move(game, sorted_move_list, 0, "J5 ALTERAN(T) 64");
   assert_move(game, sorted_move_list, 1, "J5 ALTERNA(T) 64");
+  transpose(gen->board);
 
   assert(al->anchors[1]->highest_possible_equity == 63);
   assert(al->anchors[1]->min_tiles_to_play == 7);
@@ -727,7 +749,11 @@ void bingo_anchor_tests(SuperConfig *superconfig) {
                 !gen->vertical);
   assert(gen->move_list->count == 472);
   sorted_move_list = create_sorted_move_list(gen->move_list);
+
+  transpose(gen->board);
   assert_move(game, sorted_move_list, 0, "J1 ALTERN 12");
+  transpose(gen->board);
+
   destroy_sorted_move_list(sorted_move_list);
 
   destroy_game(game);

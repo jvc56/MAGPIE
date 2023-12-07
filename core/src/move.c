@@ -1,3 +1,6 @@
+#include "move.h"
+
+#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,7 +8,6 @@
 #include "board.h"
 #include "constants.h"
 #include "log.h"
-#include "move.h"
 #include "string_util.h"
 #include "util.h"
 
@@ -79,7 +81,7 @@ int compare_moves(Move *move_1, Move *move_2) {
   if (move_1->move_type == GAME_EVENT_PASS) {
     return 0;
   }
-  //log_fatal("duplicate move in move list detected\n");  DO NOT SUBMIT
+  // log_fatal("duplicate move in move list detected\n");  DO NOT SUBMIT
   return 0;
 }
 
@@ -101,10 +103,8 @@ void down_heapify(MoveList *ml, int parent_node) {
   int min;
   Move *temp;
 
-  if (left >= ml->count || left < 0)
-    left = -1;
-  if (right >= ml->count || right < 0)
-    right = -1;
+  if (left >= ml->count || left < 0) left = -1;
+  if (right >= ml->count || right < 0) right = -1;
 
   if (left != -1 && compare_moves(ml->moves[parent_node], ml->moves[left]))
     min = left;

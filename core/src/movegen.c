@@ -261,12 +261,14 @@ void record_play(Generator *gen, Player *player, Rack *opp_rack, int leftstrip,
     } else {
       equity = score;
     }
-    //printf("equity: %f\n", equity);
-    //StringBuilder *sb = create_string_builder();
-    //string_builder_add_move(gen->board, gen->move_list->spare_move,
-    //                        gen->letter_distribution, sb);
-    //printf("recording play %s\n", string_builder_peek(sb));
-    //destroy_string_builder(sb);
+    /*
+    printf("equity: %f\n", equity);
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_move(gen->board, gen->move_list->spare_move,
+                            gen->letter_distribution, sb);
+    printf("recording play %s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+    */
     insert_spare_move(gen->move_list, equity);
   } else {
     insert_spare_move_top_equity(gen->move_list,
