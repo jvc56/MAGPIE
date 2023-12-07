@@ -121,6 +121,7 @@ void test_shadow_score(TestConfig *testconfig) {
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 8));
 
   load_and_generate(game, player, KA_OPENING_CGP, "EE", false);
+  assert(game->gen->anchor_list->count == 6);
   // KAE and EE
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 10));
@@ -140,12 +141,6 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[5]->highest_possible_equity, 3));
   // The rest are prevented by invalid cross sets
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[6]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[7]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
   load_and_generate(game, player, KA_OPENING_CGP, "E?", false);
   // oK, oE, EA
@@ -177,6 +172,7 @@ void test_shadow_score(TestConfig *testconfig) {
       game->gen->anchor_list->anchors[8]->highest_possible_equity, 2));
 
   load_and_generate(game, player, KA_OPENING_CGP, "J", false);
+  assert(game->gen->anchor_list->count == 4);
   // J(K) veritcally
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 21));
@@ -189,19 +185,10 @@ void test_shadow_score(TestConfig *testconfig) {
   // J(A) vertically
   assert(within_epsilon(
       game->gen->anchor_list->anchors[3]->highest_possible_equity, 9));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[4]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[5]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[6]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[7]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
   load_and_generate(game, player, AA_OPENING_CGP, "JF", false);
   // JF, JA, and FA
+  assert(game->gen->anchor_list->count == 6);
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 42));
   // JA and JF or FA and FJ
@@ -220,12 +207,6 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[5]->highest_possible_equity, 13));
   // Remaining anchors are prevented by invalid cross sets
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[6]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[7]->highest_possible_equity, 0));
-  assert(within_epsilon(
-      game->gen->anchor_list->anchors[8]->highest_possible_equity, 0));
 
   // Makeing JA, FA, and JFU, doubling the U on the double letter
   load_and_generate(game, player, AA_OPENING_CGP, "JFU", false);
@@ -477,6 +458,38 @@ void test_shadow_score(TestConfig *testconfig) {
   assert(within_epsilon(
       game->gen->anchor_list->anchors[0]->highest_possible_equity, 2036));
 
+  reset_game(game);
+  char qi_qis[300] =
+      "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
+      "0 lex CSW21";
+  load_and_generate(game, player, qi_qis, "FRUITED", false);
+  AnchorList *al = game->gen->anchor_list;
+  // 8g (QI)DURFITE 128
+  // h8 (I)DURFITE 103
+  // f9 UFTRIDE 88
+  // 7g EF(QIS)RTUDI 79
+  // 10b FURED(S)IT 74
+  // 9c DURT(I)FIE 70
+  // 7h FURTIDE 69
+  // h10 DUFTIE 45
+  // f10 FURIDE 35
+  assert(al->count == 9);
+  assert(within_epsilon(al->anchors[0]->highest_possible_equity, 128));
+  assert(al->anchors[0]->row == 7);
+  assert(al->anchors[0]->col == 7);
+  assert(al->anchors[0]->dir == BOARD_HORIZONTAL_DIRECTION);
+  
+  assert(within_epsilon(al->anchors[1]->highest_possible_equity, 103));
+  assert(al->anchors[1]->row == 7);
+  assert(al->anchors[1]->col == 7);
+  assert(al->anchors[1]->dir == BOARD_VERTICAL_DIRECTION);
+
+  // f9 UFTRIDE for 88, not h9 DURFITE for 100 (which does not fit)
+  assert(within_epsilon(al->anchors[2]->highest_possible_equity, 88));
+  assert(al->anchors[2]->row == 5);
+  assert(al->anchors[2]->col == 8);
+  assert(al->anchors[2]->dir == BOARD_VERTICAL_DIRECTION);
+  
   destroy_game(game);
 }
 
