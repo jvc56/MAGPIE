@@ -1,6 +1,8 @@
 #ifndef AUTOPLAY_RESULTS_H
 #define AUTOPLAY_RESULTS_H
 
+#include "stats.h"
+
 struct AutoplayResults;
 typedef struct AutoplayResults AutoplayResults;
 

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "../util/log.h"
+#include "../util/util.h"
 
 #include "timer.h"
 

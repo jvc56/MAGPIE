@@ -4,7 +4,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
 
-#include "string_util.h"
+#include "../util/string_util.h"
 
 void string_builder_add_rack(const Rack *rack,
                              const LetterDistribution *letter_distribution,

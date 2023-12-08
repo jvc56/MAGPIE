@@ -2,6 +2,8 @@
 
 #include "../def/move_defs.h"
 
+#include "../util/util.h"
+
 #include "klv.h"
 #include "kwg.h"
 #include "player.h"

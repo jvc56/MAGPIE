@@ -1,21 +1,15 @@
 #include "../def/cross_set_defs.h"
 #include "../def/rack_defs.h"
 
-#include "bag.h"
-#include "board.h"
-#include "cross_set.h"
-#include "game.h"
-#include "gameplay.h"
-#include "move.h"
-#include "movegen.h"
-#include "rack.h"
+#include "../ent/bag.h"
+#include "../ent/board.h"
+#include "../ent/game.h"
+#include "../ent/move.h"
+#include "../ent/movegen.h"
+#include "../ent/rack.h"
 
-void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
-  while (n > 0 && !bag_is_empty(bag)) {
-    add_letter_to_rack(rack, draw_random_letter(bag, player_draw_index));
-    n--;
-  }
-}
+#include "../impl/cross_set.h"
+#include "../impl/gameplay.h"
 
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
@@ -30,11 +24,12 @@ void play_move_on_board(const Move *move, Game *game) {
     if (is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
     }
-    take_letter_from_rack(player_get_rack(game_get_player_on_turn_index(game)),
+    take_letter_from_rack(player_get_rack(game_get_player(
+                              game, game_get_player_on_turn_index(game))),
                           letter);
   }
 
-  incrememt_tiles_played(board, get_tiles_played(move));
+  incrememt_tiles_played(board, move_get_tiles_played(move));
 
   // updateAnchorsForMove
   int row = get_row_start(move);
@@ -43,8 +38,6 @@ void play_move_on_board(const Move *move, Game *game) {
     row = get_col_start(move);
     col = get_row_start(move);
   }
-
-  Board *board = gen_get_board(game_get_gen(game));
 
   for (int i = col; i < get_tiles_length(move) + col; i++) {
     update_anchors(board, row, i, get_dir(move));
@@ -76,13 +69,13 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
 
     int right_col = word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
     int left_col = word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
-    KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
+    const KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
     LetterDistribution *ld = gen_get_ld(gen);
     gen_cross_set(player0_kwg, ld, board, row, right_col + 1, csd, 0);
     gen_cross_set(player0_kwg, ld, board, row, left_col - 1, csd, 0);
     gen_cross_set(player0_kwg, ld, board, row, col_start, csd, 0);
     if (kwgs_are_distinct) {
-      KWG *player1_kwg = player_get_kwg(game_get_player(game, 1));
+      const KWG *player1_kwg = player_get_kwg(game_get_player(game, 1));
       gen_cross_set(player1_kwg, ld, board, row, right_col + 1, csd, 1);
       gen_cross_set(player1_kwg, ld, board, row, left_col - 1, csd, 1);
       gen_cross_set(player1_kwg, ld, board, row, col_start, csd, 1);
@@ -92,7 +85,7 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
 
 void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
                    int csd) {
-  KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
+  const KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
   Generator *gen = game_get_gen(game);
   Board *board = gen_get_board(gen);
   LetterDistribution *ld = gen_get_ld(gen);
@@ -103,7 +96,7 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
     gen_cross_set(player0_kwg, ld, board, row_start, col, csd, 0);
   }
   if (kwgs_are_distinct) {
-    KWG *player1_kwg = player_get_kwg(game_get_player(game, 1));
+    const KWG *player1_kwg = player_get_kwg(game_get_player(game, 1));
     for (int col = col_start - 1; col <= col_start + get_tiles_length(move);
          col++) {
       gen_cross_set(player1_kwg, ld, board, row_start, col, csd, 1);
@@ -135,13 +128,13 @@ void execute_exchange_move(const Move *move, Game *game) {
       game_get_player(game, game_get_player_on_turn_index(game)));
   Bag *bag = gen_get_bag(game_get_gen(game));
 
-  for (int i = 0; i < get_tiles_played(move); i++) {
+  for (int i = 0; i < move_get_tiles_played(move); i++) {
     take_letter_from_rack(player_on_turn_rack, get_tile(move, i));
   }
   int player_draw_index = game_get_player_on_turn_draw_index(game);
-  draw_at_most_to_rack(bag, player_on_turn_rack, get_tiles_played(move),
+  draw_at_most_to_rack(bag, player_on_turn_rack, move_get_tiles_played(move),
                        player_draw_index);
-  for (int i = 0; i < get_tiles_played(move); i++) {
+  for (int i = 0; i < move_get_tiles_played(move); i++) {
     add_letter(bag, get_tile(move, i), player_draw_index);
   }
 }
@@ -184,7 +177,7 @@ void play_move(const Move *move, Game *game) {
     Rack *player_on_turn_rack = player_get_rack(player_on_turn);
 
     player_increment_score(player_on_turn, get_score(move));
-    draw_at_most_to_rack(bag, player_on_turn_rack, get_tiles_played(move),
+    draw_at_most_to_rack(bag, player_on_turn_rack, move_get_tiles_played(move),
                          game_get_player_on_turn_draw_index(game));
     if (rack_is_empty(player_on_turn_rack)) {
       standard_end_of_game_calculations(game);
@@ -197,8 +190,8 @@ void play_move(const Move *move, Game *game) {
   }
 
   if (game_get_consecutive_scoreless_turns(game) == MAX_SCORELESS_TURNS) {
-    Rack *player0 = game_get_player(game, 0);
-    Rack *player1 = game_get_player(game, 1);
+    Player *player0 = game_get_player(game, 0);
+    Player *player1 = game_get_player(game, 1);
     player_decrement_score(player0,
                            score_on_rack(ld, player_get_rack(player0)));
     player_decrement_score(player1,
@@ -209,36 +202,6 @@ void play_move(const Move *move, Game *game) {
   if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     game_start_next_player_turn(game);
   }
-}
-
-void set_random_rack(Game *game, int pidx, Rack *known_rack) {
-  Bag *bag = gen_get_bag(game_get_gen(game));
-  Rack *prack = player_get_rack(game_get_player(game, pidx));
-  int ntiles = get_number_of_letters(prack);
-  int player_draw_index = game_get_player_draw_index(game, pidx);
-  // always try to fill rack if possible.
-  if (ntiles < RACK_SIZE) {
-    ntiles = RACK_SIZE;
-  }
-  // throw in existing rack, then redraw from the bag.
-  for (int i = 0; i < get_array_size(prack); i++) {
-    if (get_number_of_letter(prack, i) > 0) {
-      for (int j = 0; j < get_number_of_letter(prack, i); j++) {
-        add_letter(bag, i, player_draw_index);
-      }
-    }
-  }
-  reset_rack(prack);
-  int ndrawn = 0;
-  if (known_rack && get_number_of_letters(known_rack) > 0) {
-    for (int i = 0; i < get_array_size(known_rack); i++) {
-      for (int j = 0; j < get_number_of_letter(known_rack, i); j++) {
-        draw_letter_to_rack(bag, prack, i, player_draw_index);
-        ndrawn++;
-      }
-    }
-  }
-  draw_at_most_to_rack(bag, prack, ntiles - ndrawn, player_draw_index);
 }
 
 Move *get_top_equity_move(Game *game) {

@@ -3,7 +3,8 @@
 
 #include "../src/ent/config.h"
 
-#include "../src/str/string_util.h"
+#include "../src/str/letter_distribution_string.h"
+#include "../src/util/string_util.h"
 
 #include "test_util.h"
 #include "testconfig.h"
@@ -21,16 +22,13 @@ void test_alphabet(TestConfig *testconfig) {
 
   // Test val
   // blank
-  assert(human_readable_letter_to_machine_letter(ld, "?") ==
-         BLANK_MACHINE_LETTER);
+  assert(hl_to_ml(ld, "?") == BLANK_MACHINE_LETTER);
   // blank
-  assert(human_readable_letter_to_machine_letter(ld, "a") ==
-         get_blanked_machine_letter(1));
-  assert(human_readable_letter_to_machine_letter(ld, "b") ==
-         get_blanked_machine_letter(2));
+  assert(hl_to_ml(ld, "a") == get_blanked_machine_letter(1));
+  assert(hl_to_ml(ld, "b") == get_blanked_machine_letter(2));
   // not blank
-  assert(human_readable_letter_to_machine_letter(ld, "C") == 3);
-  assert(human_readable_letter_to_machine_letter(ld, "D") == 4);
+  assert(hl_to_ml(ld, "C") == 3);
+  assert(hl_to_ml(ld, "D") == 4);
 
   // Test user visible
   // separation token

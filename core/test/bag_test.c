@@ -2,7 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../src/str/string_util.h"
+#include "../src/str/bag_string.h"
+#include "../src/util/string_util.h"
 
 #include "../src/impl/gameplay.h"
 
@@ -19,7 +20,7 @@
 void test_add_letter(const Config *config, Bag *bag, char *r,
                      char *expected_bag_string, int player_index) {
   LetterDistribution *ld = config_get_letter_distribution(config);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, r), player_index);
+  add_letter(bag, hl_to_ml(ld, r), player_index);
   StringBuilder *bag_string = create_string_builder();
   string_builder_add_bag(bag, ld, bag_string);
   assert_strings_equal(string_builder_peek(bag_string), expected_bag_string);
@@ -44,7 +45,7 @@ void test_bag(TestConfig *testconfig) {
     add_letter_to_rack(rack, letter);
   }
 
-  for (uint32_t i = 0; i < ld_size; i++) {
+  for (int i = 0; i < ld_size; i++) {
     assert((int)letter_distribution_get_distribution(ld, i) ==
            get_number_of_letter(rack, i));
   }
@@ -58,14 +59,14 @@ void test_bag(TestConfig *testconfig) {
     draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
     drawing_player = 1 - drawing_player;
     number_of_remaining_tiles -= RACK_SIZE;
-    assert(rack_is_empty);
+    assert(rack_is_empty(rack));
     assert(get_number_of_letters(rack) == RACK_SIZE);
     reset_rack(rack);
   }
 
   draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
   assert(bag_is_empty(bag));
-  assert(rack_is_empty);
+  assert(rack_is_empty(rack));
   assert(get_number_of_letters(rack) == number_of_remaining_tiles);
   reset_rack(rack);
 

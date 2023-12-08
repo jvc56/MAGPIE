@@ -8,10 +8,11 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 
+#include "../util/util.h"
+
 #include "anchor.h"
 #include "bag.h"
 #include "config.h"
-#include "cross_set.h"
 #include "klv.h"
 #include "kwg.h"
 #include "leave_map.h"
@@ -44,7 +45,7 @@ struct Generator {
   Bag *bag;
 
   LeaveMap *leave_map;
-  const LetterDistribution *letter_distribution;
+  LetterDistribution *letter_distribution;
 
   // Shadow plays
   int current_left_col;
@@ -77,9 +78,44 @@ double *gen_get_best_leaves(Generator *gen) { return gen->best_leaves; }
 
 LeaveMap *gen_get_leave_map(Generator *gen) { return gen->leave_map; }
 
-bool *gen_get_kwgs_are_distinct(Generator *gen) {
+bool gen_get_kwgs_are_distinct(const Generator *gen) {
   return gen->kwgs_are_distinct;
 }
+
+int gen_get_current_row_index(const Generator *gen) {
+  return gen->current_row_index;
+}
+
+int gen_get_current_anchor_col(const Generator *gen) {
+  return gen->current_anchor_col;
+}
+
+void gen_set_move_sort_type(Generator *gen, move_sort_t move_sort_type) {
+  gen->move_sort_type = move_sort_type;
+}
+
+void gen_set_move_record_type(Generator *gen, move_record_t move_record_type) {
+  gen->move_record_type = move_record_type;
+}
+
+void gen_set_apply_placement_adjustment(Generator *gen,
+                                        bool apply_placement_adjustment) {
+  gen->apply_placement_adjustment = apply_placement_adjustment;
+}
+
+void gen_set_current_anchor_col(Generator *gen, int anchor_col) {
+  gen->current_anchor_col = anchor_col;
+}
+
+void gen_set_last_anchor_col(Generator *gen, int anchor_col) {
+  gen->last_anchor_col = anchor_col;
+}
+
+void gen_set_current_row_index(Generator *gen, int row_index) {
+  gen->current_row_index = row_index;
+}
+
+void gen_set_dir(Generator *gen, int dir) { gen->dir = dir; }
 
 int score_on_rack(const LetterDistribution *letter_distribution,
                   const Rack *rack) {
@@ -91,27 +127,13 @@ int score_on_rack(const LetterDistribution *letter_distribution,
   return sum;
 }
 
-// Leave map
-
-void take_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
-                                          uint8_t letter) {
-  take_letter_from_rack(rack, letter);
-  leave_map_take_letter(leave_map, letter, get_number_of_letter(rack, letter));
-}
-
-void add_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
-                                         uint8_t letter) {
-  add_letter_to_rack(rack, letter);
-  leave_map_add_letter(leave_map, letter, get_number_of_letter(rack, letter));
-}
-
 int get_cross_set_index(const Generator *gen, int player_index) {
   return gen->kwgs_are_distinct && player_index;
 }
 
 double placement_adjustment(const Generator *gen, const Move *move) {
   int start = get_col_start(move);
-  int end = start + get_tiles_played(move);
+  int end = start + move_get_tiles_played(move);
 
   int j = start;
   double penalty = 0;
@@ -152,7 +174,7 @@ double shadow_endgame_adjustment(const Generator *gen, const Rack *opp_rack,
 
 double endgame_adjustment(const Generator *gen, const Rack *rack,
                           const Rack *opp_rack) {
-  if (rack_is_empty) {
+  if (!rack_is_empty(rack)) {
     // This play is not going out. We should penalize it by our own score
     // plus some constant.
     return ((-(double)score_on_rack(gen->letter_distribution, rack)) *
@@ -176,7 +198,7 @@ double get_spare_move_equity(const Generator *gen, const Player *player,
   if (!bag_is_empty(gen->bag)) {
     leave_adjustment = get_current_value(gen->leave_map);
     int bag_plus_rack_size = get_tiles_remaining(gen->bag) -
-                             get_tiles_played(spare_move) + RACK_SIZE;
+                             move_get_tiles_played(spare_move) + RACK_SIZE;
     if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
       other_adjustments +=
           gen->preendgame_adjustment_values[bag_plus_rack_size];
@@ -304,7 +326,7 @@ void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
     int number_of_letters_on_rack = get_number_of_letters(player_rack);
     if (number_of_letters_on_rack < RACK_SIZE) {
       double current_value =
-          get_leave_value(player_get_klv(player), player_rack);
+          klv_get_leave_value(player_get_klv(player), player_rack);
       set_current_value(gen->leave_map, current_value);
       if (current_value > gen->best_leaves[number_of_letters_on_rack]) {
         gen->best_leaves[number_of_letters_on_rack] = current_value;
@@ -351,11 +373,15 @@ bool better_play_has_been_found(const Generator *gen,
   return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
 }
 
+int allowed(uint64_t cross_set, uint8_t letter) {
+  return (cross_set & ((uint64_t)1 << letter)) != 0;
+}
+
 void recursive_gen(const Rack *opp_rack, Generator *gen, int col,
                    Player *player, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play) {
   Rack *player_rack = player_get_rack(player);
-  KWG *kwg = player_get_kwg(player);
+  const KWG *kwg = player_get_kwg(player);
   int player_index = player_get_index(player);
   int cs_dir;
   uint8_t current_letter = get_letter_cache(gen, col);
@@ -423,7 +449,7 @@ void recursive_gen(const Rack *opp_rack, Generator *gen, int col,
 void go_on(const Rack *opp_rack, Generator *gen, int current_col, uint8_t L,
            Player *player, uint32_t new_node_index, bool accepts, int leftstrip,
            int rightstrip, bool unique_play) {
-  KWG *kwg = player_get_kwg(player);
+  const KWG *kwg = player_get_kwg(player);
   int player_index = player_get_index(player);
   if (current_col <= gen->current_anchor_col) {
     if (!is_empty_cache(gen, current_col)) {
@@ -782,8 +808,8 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
 
   // Set rack cross set
   gen->rack_cross_set = 0;
-  for (uint32_t i = 0;
-       i < letter_distribution_get_size(gen->letter_distribution); i++) {
+  for (int i = 0; i < letter_distribution_get_size(gen->letter_distribution);
+       i++) {
     if (get_number_of_letter(player_rack, i) > 0) {
       gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
     }
@@ -843,7 +869,7 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
   init_leave_map(player_rack, gen->leave_map);
   if (get_number_of_letters(player_rack) < RACK_SIZE) {
     set_current_value(gen->leave_map,
-                      get_leave_value(player_get_klv(player), player_rack));
+                      klv_get_leave_value(player_get_klv(player), player_rack));
   } else {
     set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }

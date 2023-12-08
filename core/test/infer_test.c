@@ -4,7 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../def/inference_defs.h"
+#include "../src/def/inference_defs.h"
+
+#include "../src/util/string_util.h"
 
 #include "../src/ent/game.h"
 #include "../src/ent/inference.h"
@@ -35,50 +37,33 @@ void test_trivial_random_probability(TestConfig *testconfig) {
 
   // A minimum of zero should always be 100% probability
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave,
-                            human_readable_letter_to_machine_letter(ld, "Z"), 0,
-                            3),
+                            bag_as_rack, leave, hl_to_ml(ld, "Z"), 0, 3),
                         1));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave,
-                            human_readable_letter_to_machine_letter(ld, "Z"), 0,
-                            4),
+                            bag_as_rack, leave, hl_to_ml(ld, "Z"), 0, 4),
                         1));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave,
-                            human_readable_letter_to_machine_letter(ld, "E"), 0,
-                            6),
+                            bag_as_rack, leave, hl_to_ml(ld, "E"), 0, 6),
                         1));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave,
-                            human_readable_letter_to_machine_letter(ld, "E"),
-                            -1, 4),
+                            bag_as_rack, leave, hl_to_ml(ld, "E"), -1, 4),
                         1));
 
   // Minimum N where letters in bag is M and M > N
   // should always be 0
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave,
-                            human_readable_letter_to_machine_letter(ld, "E"),
-                            20, 4),
+                            bag_as_rack, leave, hl_to_ml(ld, "E"), 20, 4),
                         0));
 
   // If the player is emptying the bag and there are the minimum
   // number of leaves remaining, the probability is trivially 1.
-  add_letter_to_rack(bag_as_rack,
-                     human_readable_letter_to_machine_letter(ld, "E"));
-  add_letter_to_rack(bag_as_rack,
-                     human_readable_letter_to_machine_letter(ld, "E"));
-  add_letter_to_rack(bag_as_rack,
-                     human_readable_letter_to_machine_letter(ld, "E"));
-  add_letter_to_rack(bag_as_rack,
-                     human_readable_letter_to_machine_letter(ld, "E"));
-  add_letter_to_rack(bag_as_rack,
-                     human_readable_letter_to_machine_letter(ld, "E"));
+  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
+  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
+  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
+  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
+  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave,
-                            human_readable_letter_to_machine_letter(ld, "E"), 4,
-                            1),
+                            bag_as_rack, leave, hl_to_ml(ld, "E"), 4, 1),
                         1));
 
   destroy_game(game);
@@ -207,16 +192,15 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   Generator *gen = game_get_gen(game);
   LetterDistribution *ld = gen_get_ld(gen);
   int ld_size = letter_distribution_get_size(ld);
-  Rack *rack = create_rack(get_array_size(rack));
-  Player *player0 = game_get_player(game, 0);
+  Rack *rack = create_rack(ld_size);
   Bag *bag = gen_get_bag(gen);
-  const KLV *klv = player_get_klv(player0);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
+  const KLV *klv = player_get_klv(player0);
 
-  Player *player0_rack = player_get_rack(player0);
-  Player *player1_rack = player_get_rack(player1);
+  Rack *player0_rack = player_get_rack(player0);
+  Rack *player1_rack = player_get_rack(player1);
 
   Inference *inference = create_inference();
   Stat *letter_stat = create_stat();
@@ -239,9 +223,10 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(get_weight(equity_values) == 3);
   assert(get_cardinality(equity_values) == 1);
   set_rack_to_string(ld, rack, "S");
-  assert(within_epsilon(get_mean(equity_values), get_leave_value(klv, rack)));
-  for (uint32_t i = 0; i < ld_size; i++) {
-    if (i == human_readable_letter_to_machine_letter(ld, "S")) {
+  assert(
+      within_epsilon(get_mean(equity_values), klv_get_leave_value(klv, rack)));
+  for (int i = 0; i < ld_size; i++) {
+    if (i == hl_to_ml(ld, "S")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 3);
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
@@ -252,17 +237,17 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
     }
   }
   get_stat_for_letter(inference_get_leave_record(inference), letter_stat,
-                      human_readable_letter_to_machine_letter(ld, "S"));
+                      hl_to_ml(ld, "S"));
   assert(within_epsilon(get_mean(letter_stat), 1));
   assert(within_epsilon(get_stdev(letter_stat), 0));
-  assert(within_epsilon(
-      get_probability_for_random_minimum_draw(
-          inference_get_bag_as_rack(inference), inference_get_leave(inference),
-          human_readable_letter_to_machine_letter(ld, "S"), 1, 6),
-      (double)3 / 94));
+  assert(within_epsilon(get_probability_for_random_minimum_draw(
+                            inference_get_bag_as_rack(inference),
+                            inference_get_leave(inference), hl_to_ml(ld, "S"),
+                            1, 6),
+                        (double)3 / 94));
   // Both game racks should be empty
-  assert(get_number_of_letters(player0) == 0);
-  assert(get_number_of_letters(player1) == 0);
+  assert(get_number_of_letters(player0_rack) == 0);
+  assert(get_number_of_letters(player1_rack) == 0);
 
   load_config_or_die(config,
                      "setoptions rack MUZAKY pindex 0 score 58 exch 0 eq 0");
@@ -276,12 +261,10 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   // Z - none in bag
   assert(get_weight(equity_values) == 83);
   assert(get_cardinality(equity_values) == 22);
-  for (uint32_t i = 0; i < ld_size; i++) {
-    if (i == human_readable_letter_to_machine_letter(ld, "A") ||
-        i == human_readable_letter_to_machine_letter(ld, "B") ||
-        i == human_readable_letter_to_machine_letter(ld, "K") ||
-        i == human_readable_letter_to_machine_letter(ld, "Q") ||
-        i == human_readable_letter_to_machine_letter(ld, "Z")) {
+  for (int i = 0; i < ld_size; i++) {
+    if (i == hl_to_ml(ld, "A") || i == hl_to_ml(ld, "B") ||
+        i == hl_to_ml(ld, "K") || i == hl_to_ml(ld, "Q") ||
+        i == hl_to_ml(ld, "Z")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
@@ -292,21 +275,21 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
     }
   }
   get_stat_for_letter(inference_get_leave_record(inference), letter_stat,
-                      human_readable_letter_to_machine_letter(ld, "E"));
+                      hl_to_ml(ld, "E"));
   assert(within_epsilon(get_mean(letter_stat), (double)12 / 83));
-  assert(within_epsilon(
-      get_probability_for_random_minimum_draw(
-          inference_get_bag_as_rack(inference), inference_get_leave(inference),
-          human_readable_letter_to_machine_letter(ld, "Q"), 1, 6),
-      (double)1 / 94));
-  assert(within_epsilon(
-      get_probability_for_random_minimum_draw(
-          inference_get_bag_as_rack(inference), inference_get_leave(inference),
-          human_readable_letter_to_machine_letter(ld, "B"), 1, 6),
-      (double)2 / 94));
+  assert(within_epsilon(get_probability_for_random_minimum_draw(
+                            inference_get_bag_as_rack(inference),
+                            inference_get_leave(inference), hl_to_ml(ld, "Q"),
+                            1, 6),
+                        (double)1 / 94));
+  assert(within_epsilon(get_probability_for_random_minimum_draw(
+                            inference_get_bag_as_rack(inference),
+                            inference_get_leave(inference), hl_to_ml(ld, "B"),
+                            1, 6),
+                        (double)2 / 94));
   // Both game racks should be empty
-  assert(get_number_of_letters(player0) == 0);
-  assert(get_number_of_letters(player1) == 0);
+  assert(get_number_of_letters(player0_rack) == 0);
+  assert(get_number_of_letters(player1_rack) == 0);
 
   load_config_or_die(config,
                      "setoptions rack MUZAK pindex 0 score 50 exch 0 eq 0");
@@ -314,11 +297,9 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Can't have B or Y because of ZAMBUK and MUZAKY
   // Can't have K or Z because there are none in the bag
-  for (uint32_t i = 0; i < ld_size; i++) {
-    if (i == human_readable_letter_to_machine_letter(ld, "B") ||
-        i == human_readable_letter_to_machine_letter(ld, "K") ||
-        i == human_readable_letter_to_machine_letter(ld, "Y") ||
-        i == human_readable_letter_to_machine_letter(ld, "Z")) {
+  for (int i = 0; i < ld_size; i++) {
+    if (i == hl_to_ml(ld, "B") || i == hl_to_ml(ld, "K") ||
+        i == hl_to_ml(ld, "Y") || i == hl_to_ml(ld, "Z")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
     } else {
@@ -326,14 +307,14 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
     }
   }
-  assert(within_epsilon(
-      get_probability_for_random_minimum_draw(
-          inference_get_bag_as_rack(inference), inference_get_leave(inference),
-          human_readable_letter_to_machine_letter(ld, "B"), 2, 5),
-      (double)1 / choose(95, 2)));
+  assert(within_epsilon(get_probability_for_random_minimum_draw(
+                            inference_get_bag_as_rack(inference),
+                            inference_get_leave(inference), hl_to_ml(ld, "B"),
+                            2, 5),
+                        (double)1 / choose(95, 2)));
   // Both game racks should be empty
-  assert(get_number_of_letters(player0) == 0);
-  assert(get_number_of_letters(player1) == 0);
+  assert(get_number_of_letters(player0_rack) == 0);
+  assert(get_number_of_letters(player1_rack) == 0);
 
   load_cgp(game, VS_JEREMY_WITH_P2_RACK);
   // Score doesn't matter since the bag
@@ -347,16 +328,15 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(get_weight(equity_values) == 1);
   assert(get_cardinality(equity_values) == 1);
   set_rack_to_string(ld, rack, "DDSW??");
-  assert(within_epsilon(get_mean(equity_values), get_leave_value(klv, rack)));
-  for (uint32_t i = 0; i < ld_size; i++) {
-    if (i == human_readable_letter_to_machine_letter(ld, "S") ||
-        i == human_readable_letter_to_machine_letter(ld, "W")) {
+  assert(
+      within_epsilon(get_mean(equity_values), klv_get_leave_value(klv, rack)));
+  for (int i = 0; i < ld_size; i++) {
+    if (i == hl_to_ml(ld, "S") || i == hl_to_ml(ld, "W")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 1);
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
-    } else if (i == human_readable_letter_to_machine_letter(ld, "D") ||
-               i == human_readable_letter_to_machine_letter(ld, "?")) {
+    } else if (i == hl_to_ml(ld, "D") || i == hl_to_ml(ld, "?")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 2,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 1);
       assert(get_subtotal(inference_get_leave_record(inference), i, 2,
@@ -383,32 +363,32 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   // to easily check that the combinatorial math is correct
   assert(get_weight(equity_values) == 450);
   assert(get_cardinality(equity_values) == 3);
-  for (uint32_t i = 0; i < ld_size; i++) {
-    if (i == human_readable_letter_to_machine_letter(ld, "?")) {
+  for (int i = 0; i < ld_size; i++) {
+    if (i == hl_to_ml(ld, "?")) {
       // The blank was only in leave 1
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 50);
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
-    } else if (i == human_readable_letter_to_machine_letter(ld, "E")) {
+    } else if (i == hl_to_ml(ld, "E")) {
       // The E was only in leave 2
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 275);
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
-    } else if (i == human_readable_letter_to_machine_letter(ld, "N")) {
+    } else if (i == hl_to_ml(ld, "N")) {
       // The N was in leaves 1 and 3
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 175);
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 2);
-    } else if (i == human_readable_letter_to_machine_letter(ld, "R")) {
+    } else if (i == hl_to_ml(ld, "R")) {
       // The R was found in all of the leaves
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 450);
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 3);
-    } else if (i == human_readable_letter_to_machine_letter(ld, "T")) {
+    } else if (i == hl_to_ml(ld, "T")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 400);
     } else {
@@ -419,11 +399,11 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
     }
   }
   get_stat_for_letter(inference_get_leave_record(inference), letter_stat,
-                      human_readable_letter_to_machine_letter(ld, "E"));
+                      hl_to_ml(ld, "E"));
   assert(within_epsilon(get_mean(letter_stat), (double)275 / 450));
   assert(within_epsilon(get_stdev(letter_stat), 0.48749802152178456360));
   get_stat_for_letter(inference_get_leave_record(inference), letter_stat,
-                      human_readable_letter_to_machine_letter(ld, "R"));
+                      hl_to_ml(ld, "R"));
   assert(within_epsilon(get_mean(letter_stat), 1));
   assert(within_epsilon(get_stdev(letter_stat), 0));
 
@@ -438,18 +418,18 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
     draw_random_letter(bag, 0);
   }
 
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "I"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "I"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "I"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "I"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "I"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "I"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "I"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "E"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "E"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "E"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "E"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "Z"), 0);
+  add_letter(bag, hl_to_ml(ld, "I"), 0);
+  add_letter(bag, hl_to_ml(ld, "I"), 0);
+  add_letter(bag, hl_to_ml(ld, "I"), 0);
+  add_letter(bag, hl_to_ml(ld, "I"), 0);
+  add_letter(bag, hl_to_ml(ld, "I"), 0);
+  add_letter(bag, hl_to_ml(ld, "I"), 0);
+  add_letter(bag, hl_to_ml(ld, "I"), 0);
+  add_letter(bag, hl_to_ml(ld, "E"), 0);
+  add_letter(bag, hl_to_ml(ld, "E"), 0);
+  add_letter(bag, hl_to_ml(ld, "E"), 0);
+  add_letter(bag, hl_to_ml(ld, "E"), 0);
+  add_letter(bag, hl_to_ml(ld, "Z"), 0);
 
   // Z(OOPSYCHOLOGY) is over 100 points so keeping the Z will never be
   // inferred
@@ -469,8 +449,8 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   // possible draws
   assert(get_weight(equity_values) == 35);
   assert(get_cardinality(equity_values) == 4);
-  for (uint32_t i = 0; i < ld_size; i++) {
-    if (i == human_readable_letter_to_machine_letter(ld, "E")) {
+  for (int i = 0; i < ld_size; i++) {
+    if (i == hl_to_ml(ld, "E")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 12);
       assert(get_subtotal_sum_with_minimum(
@@ -503,7 +483,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
       assert(get_subtotal_sum_with_minimum(
                  inference_get_leave_record(inference), i, 3,
                  INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 1);
-    } else if (i == human_readable_letter_to_machine_letter(ld, "I")) {
+    } else if (i == hl_to_ml(ld, "I")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 18);
       assert(get_subtotal_sum_with_minimum(
@@ -549,11 +529,11 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
                  INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE) == 0);
     }
   }
-  assert(within_epsilon(
-      get_probability_for_random_minimum_draw(
-          inference_get_bag_as_rack(inference), inference_get_leave(inference),
-          human_readable_letter_to_machine_letter(ld, "E"), 3, 4),
-      (double)4 / choose(8, 3)));
+  assert(within_epsilon(get_probability_for_random_minimum_draw(
+                            inference_get_bag_as_rack(inference),
+                            inference_get_leave(inference), hl_to_ml(ld, "E"),
+                            3, 4),
+                        (double)4 / choose(8, 3)));
   reset_game(game);
 
   // Check that the equity margin works
@@ -572,11 +552,9 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(get_weight(equity_values) == 91);
   // All letters except the 4 described above are possible, so 27 - 4 = 23
   assert(get_cardinality(equity_values) == 23);
-  for (uint32_t i = 0; i < ld_size; i++) {
-    if (i == human_readable_letter_to_machine_letter(ld, "B") ||
-        i == human_readable_letter_to_machine_letter(ld, "K") ||
-        i == human_readable_letter_to_machine_letter(ld, "Q") ||
-        i == human_readable_letter_to_machine_letter(ld, "Z")) {
+  for (int i = 0; i < ld_size; i++) {
+    if (i == hl_to_ml(ld, "B") || i == hl_to_ml(ld, "K") ||
+        i == hl_to_ml(ld, "Q") || i == hl_to_ml(ld, "Z")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
     } else {
@@ -591,7 +569,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   // before the inference are not removed from the bag, so
   // we have to remove it here.
   set_rack_to_string(ld, player0_rack, "?");
-  draw_letter(bag, human_readable_letter_to_machine_letter(ld, "?"), 0);
+  draw_letter(bag, hl_to_ml(ld, "?"), 0);
   load_config_or_die(config,
                      "setoptions rack GRIND pindex 0 score 18 exch 0 eq 0");
   status = infer_for_test(config, game, inference);
@@ -601,10 +579,10 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(get_weight(equity_values) == 2);
   assert(get_cardinality(equity_values) == 1);
   set_rack_to_string(ld, rack, "X?");
-  assert(within_epsilon(get_mean(equity_values), get_leave_value(klv, rack)));
-  for (uint32_t i = 0; i < ld_size; i++) {
-    if (i == human_readable_letter_to_machine_letter(ld, "?") ||
-        i == human_readable_letter_to_machine_letter(ld, "X")) {
+  assert(
+      within_epsilon(get_mean(equity_values), klv_get_leave_value(klv, rack)));
+  for (int i = 0; i < ld_size; i++) {
+    if (i == hl_to_ml(ld, "?") || i == hl_to_ml(ld, "X")) {
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
                           INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 2);
       assert(get_subtotal(inference_get_leave_record(inference), i, 1,
@@ -617,7 +595,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   reset_game(game);
 
   set_rack_to_string(ld, player0_rack, "H");
-  draw_letter(bag, human_readable_letter_to_machine_letter(ld, "H"), 0);
+  draw_letter(bag, hl_to_ml(ld, "H"), 0);
   load_config_or_die(config,
                      "setoptions rack RIN pindex 0 score 6 exch 0 eq 0");
   status = infer_for_test(config, game, inference);
@@ -631,13 +609,13 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(get_weight(equity_values) == 660);
   assert(get_cardinality(equity_values) == 3);
   set_rack_to_string(ld, rack, "?HIR");
-  double bhir_value = get_leave_value(klv, rack);
+  double bhir_value = klv_get_leave_value(klv, rack);
   double bhir_weighted_value = bhir_value * 160;
   set_rack_to_string(ld, rack, "?HNR");
-  double bhnr_value = get_leave_value(klv, rack);
+  double bhnr_value = klv_get_leave_value(klv, rack);
   double bhnr_weighted_value = bhnr_value * 100;
   set_rack_to_string(ld, rack, "HINR");
-  double hirn_value = get_leave_value(klv, rack);
+  double hirn_value = klv_get_leave_value(klv, rack);
   double hirn_weighted_value = hirn_value * 400;
   double mean_rin_leave_value =
       (bhir_weighted_value + bhnr_weighted_value + hirn_weighted_value) / 660;
@@ -647,16 +625,16 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   load_cgp(game, VS_JEREMY);
   // Take out good letters and throw in bad ones to force certain
   // racks to have exchange as the best play
-  draw_letter(bag, human_readable_letter_to_machine_letter(ld, "?"), 0);
-  draw_letter(bag, human_readable_letter_to_machine_letter(ld, "?"), 0);
-  draw_letter(bag, human_readable_letter_to_machine_letter(ld, "E"), 0);
-  draw_letter(bag, human_readable_letter_to_machine_letter(ld, "A"), 0);
+  draw_letter(bag, hl_to_ml(ld, "?"), 0);
+  draw_letter(bag, hl_to_ml(ld, "?"), 0);
+  draw_letter(bag, hl_to_ml(ld, "E"), 0);
+  draw_letter(bag, hl_to_ml(ld, "A"), 0);
 
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "Q"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "W"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "W"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "V"), 0);
-  add_letter(bag, human_readable_letter_to_machine_letter(ld, "V"), 0);
+  add_letter(bag, hl_to_ml(ld, "Q"), 0);
+  add_letter(bag, hl_to_ml(ld, "W"), 0);
+  add_letter(bag, hl_to_ml(ld, "W"), 0);
+  add_letter(bag, hl_to_ml(ld, "V"), 0);
+  add_letter(bag, hl_to_ml(ld, "V"), 0);
 
   reset_rack(rack);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
@@ -666,42 +644,42 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Keeping any one of D, H, R, or S is valid
   assert(get_subtotal(inference_get_leave_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "D"), 1,
+                      hl_to_ml(ld, "D"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
   assert(get_subtotal(inference_get_leave_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "H"), 1,
+                      hl_to_ml(ld, "H"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
   assert(get_subtotal(inference_get_leave_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "R"), 1,
+                      hl_to_ml(ld, "R"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
   assert(get_subtotal(inference_get_leave_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "S"), 1,
+                      hl_to_ml(ld, "S"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
 
   // There are exchanges where throwing back at least one
   // of these is correct
   assert(get_subtotal(inference_get_exchanged_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "D"), 1,
+                      hl_to_ml(ld, "D"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
   assert(get_subtotal(inference_get_exchanged_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "L"), 1,
+                      hl_to_ml(ld, "L"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
   assert(get_subtotal(inference_get_exchanged_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "Q"), 1,
+                      hl_to_ml(ld, "Q"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
   assert(get_subtotal(inference_get_exchanged_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "V"), 1,
+                      hl_to_ml(ld, "V"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
   assert(get_subtotal(inference_get_exchanged_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "W"), 1,
+                      hl_to_ml(ld, "W"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
 
   // Exchanges with the I are never correct
   assert(get_subtotal(inference_get_leave_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "I"), 1,
+                      hl_to_ml(ld, "I"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
   assert(get_subtotal(inference_get_exchanged_record(inference),
-                      human_readable_letter_to_machine_letter(ld, "I"), 1,
+                      hl_to_ml(ld, "I"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
 
   reset_game(game);

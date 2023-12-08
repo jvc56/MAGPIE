@@ -1,9 +1,12 @@
 #ifndef THREAD_CONTROL_H
 #define THREAD_CONTROL_H
 
+#include <stdbool.h>
+
 #include "../def/thread_control_defs.h"
 
 #include "file_handler.h"
+#include "timer.h"
 
 struct ThreadControl;
 typedef struct ThreadControl ThreadControl;

@@ -6,9 +6,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../def/rack_defs.h"
+#include "../src/def/rack_defs.h"
 
-#include "../src/str/string_util.h"
+#include "../src/str/game_string.h"
+#include "../src/str/inference_string.h"
+#include "../src/str/move_string.h"
+#include "../src/util/string_util.h"
 
 #include "../src/ent/board.h"
 #include "../src/ent/config.h"
@@ -27,10 +30,6 @@
 
 bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
-double get_leave_value_for_rack(const KLV *klv, const Rack *rack) {
-  return get_leave_value(klv, rack);
-}
-
 void load_config_or_die(Config *config, const char *cmd) {
   config_load_status_t status = load_config(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
@@ -44,7 +43,6 @@ void generate_moves_for_game(Game *game) {
   Bag *bag = gen_get_bag(gen);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
   Rack *opponent_rack = player_get_rack(opponent);
   generate_moves(opponent_rack, gen, player_on_turn,
                  get_tiles_remaining(bag) >= RACK_SIZE,
@@ -62,8 +60,9 @@ void generate_leaves_for_game(Game *game, bool add_exchange) {
 
   init_leave_map(player_on_turn_rack, leave_map);
   if (get_number_of_letters(player_on_turn_rack) < RACK_SIZE) {
-    set_current_value(leave_map, get_leave_value(player_get_klv(player_on_turn),
-                                                 player_on_turn_rack));
+    set_current_value(leave_map,
+                      klv_get_leave_value(player_get_klv(player_on_turn),
+                                          player_on_turn_rack));
   } else {
     set_current_value(leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
@@ -102,7 +101,7 @@ void print_move_list(const Board *board,
   destroy_string_builder(move_list_string);
 }
 
-void print_game(const Game *game) {
+void print_game(Game *game) {
   StringBuilder *game_string = create_string_builder();
   string_builder_add_game(game, game_string);
   printf("%s\n", string_builder_peek(game_string));
@@ -130,7 +129,6 @@ void play_top_n_equity_move(Game *game, int n) {
   Bag *bag = gen_get_bag(gen);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
   Rack *opponent_rack = player_get_rack(opponent);
   MoveList *move_list = gen_get_move_list(gen);
 
@@ -263,7 +261,7 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
   }
 }
 
-void assert_move(const Game *game, const SortedMoveList *sml, int move_index,
+void assert_move(Game *game, const SortedMoveList *sml, int move_index,
                  const char *expected_move_string) {
 
   Generator *gen = game_get_gen(game);

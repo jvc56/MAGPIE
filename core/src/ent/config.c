@@ -1,8 +1,6 @@
-// #include <assert.h>
-// #include <getopt.h>
-// #include <stdio.h>
-// #include <stdlib.h>
+#include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
@@ -10,16 +8,15 @@
 #include "../def/simmer_defs.h"
 #include "../def/win_pct_defs.h"
 
-#include "../str/string_util.h"
+#include "../util/string_util.h"
 
-// #include "board.h"
-// #include "config.h"
-// #include "constants.h"
-// #include "game.h"
-// #include "klv.h"
-// #include "kwg.h"
+#include "../util/log.h"
+#include "../util/util.h"
+
+#include "board.h"
+#include "config.h"
+#include "game.h"
 #include "letter_distribution.h"
-// #include "log.h"
 #include "players_data.h"
 #include "rack.h"
 #include "thread_control.h"
@@ -222,53 +219,17 @@ typedef struct ParsedArgs {
   SingleArg *args[NUMBER_OF_ARG_TOKENS];
 } ParsedArgs;
 
-#include <stdbool.h>
-#include <stdint.h>
+bool config_get_command_set_cgp(const Config *config) {
+  return config->command_set_cgp;
+}
 
-typedef struct Config {
-  // Transient fields
-  // these fields are reset
-  // every time the config is loaded
-  bool command_set_cgp;
-  bool command_set_infile;
-  bool command_set_exec_mode;
-  // Persistent fields
-  // these fields maintain their
-  // value between config loads
-  command_t command_type;
-  bool lexicons_loaded;
-  // Game
-  LetterDistribution *letter_distribution;
-  char *ld_name;
-  char *cgp;
-  int bingo_bonus;
-  board_layout_t board_layout;
-  game_variant_t game_variant;
-  PlayersData *players_data;
-  // Inference
-  // This can act as the known opp tiles
-  // or the tiles play in an inference
-  Rack *rack;
-  int player_to_infer_index;
-  int actual_score;
-  int number_of_tiles_exchanged;
-  double equity_margin;
-  // Sim
-  WinPct *win_pcts;
-  char *win_pct_name;
-  int num_plays;
-  int plies;
-  int max_iterations;
-  sim_stopping_condition_t stopping_condition;
-  bool static_search_only;
-  // Autoplay
-  bool use_game_pairs;
-  uint64_t seed;
-  // Thread Control
-  ThreadControl *thread_control;
-  // Config mode and command file execution
-  exec_mode_t exec_mode;
-} Config;
+bool config_get_command_set_infile(const Config *config) {
+  return config->command_set_infile;
+}
+
+bool config_get_command_set_exec_mode(const Config *config) {
+  return config->command_set_exec_mode;
+}
 
 command_t config_get_command_type(const Config *config) {
   return config->command_type;
@@ -739,7 +700,7 @@ load_number_of_threads_for_config(Config *config,
   if (!is_all_digits_or_empty(number_of_threads_string)) {
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
   }
-  int number_of_threads = string_to_int(number_of_threads);
+  int number_of_threads = string_to_int(number_of_threads_string);
   if (number_of_threads < 1) {
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
   }

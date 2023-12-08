@@ -1,5 +1,9 @@
+#include <stdlib.h>
+
 #include "leave_rack.h"
 #include "rack.h"
+
+#include "../util/util.h"
 struct LeaveRack {
   Rack *leave;
   Rack *exchanged;
@@ -38,7 +42,7 @@ int get_leave_rack_list_capacity(LeaveRackList *leave_rack_list) {
   return leave_rack_list->capacity;
 }
 
-int get_leave_rack(LeaveRackList *leave_rack_list, int index) {
+LeaveRack *get_leave_rack(LeaveRackList *leave_rack_list, int index) {
   return leave_rack_list->leave_racks[index];
 }
 

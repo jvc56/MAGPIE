@@ -6,6 +6,11 @@
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
 
+#include "../util/string_util.h"
+
+#include "../util/log.h"
+#include "../util/util.h"
+
 #include "board.h"
 
 struct Board {

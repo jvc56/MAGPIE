@@ -4,6 +4,10 @@
 #include "../def/inference_defs.h"
 #include "../def/rack_defs.h"
 
+#include "../util/util.h"
+
+#include "../str/inference_string.h"
+
 #include "bag.h"
 #include "game.h"
 #include "inference.h"
@@ -246,7 +250,7 @@ uint64_t get_number_of_draws_for_rack(const Rack *bag_as_rack,
   uint64_t number_of_ways = 1;
   for (int i = 0; i < get_array_size(rack); i++) {
     if (get_number_of_letter(rack, i) > 0) {
-      number_of_ways *= choose(bag_as_get_number_of_letter(rack, i) +
+      number_of_ways *= choose(get_number_of_letter(bag_as_rack, i) +
                                    get_number_of_letter(rack, i),
                                get_number_of_letter(rack, i));
     }
@@ -366,14 +370,14 @@ Move *get_top_move(Inference *inference) {
 void evaluate_possible_leave(Inference *inference) {
   double current_leave_value = 0;
   if (inference->number_of_tiles_exchanged == 0) {
-    current_leave_value = get_leave_value(inference->klv, inference->leave);
+    current_leave_value = klv_get_leave_value(inference->klv, inference->leave);
   }
   const Move *top_move = get_top_move(inference);
   bool is_within_equity_margin = inference->actual_score + current_leave_value +
                                      inference->equity_margin +
                                      (INFERENCE_EQUITY_EPSILON) >=
                                  get_equity(top_move);
-  int tiles_played = get_tiles_played(top_move);
+  int tiles_played = move_get_tiles_played(top_move);
   bool number_exchanged_matches =
       get_move_type(top_move) == GAME_EVENT_EXCHANGE &&
       tiles_played == inference->number_of_tiles_exchanged;
@@ -394,11 +398,12 @@ void evaluate_possible_leave(Inference *inference) {
         take_letter_from_rack(inference->leave, tile_exchanged);
       }
       record_valid_leave(inference->leave, inference->leave_record,
-                         get_leave_value(inference->klv, inference->leave),
+                         klv_get_leave_value(inference->klv, inference->leave),
                          number_of_draws_for_leave);
-      record_valid_leave(inference->exchanged, inference->exchanged_record,
-                         get_leave_value(inference->klv, inference->exchanged),
-                         number_of_draws_for_leave);
+      record_valid_leave(
+          inference->exchanged, inference->exchanged_record,
+          klv_get_leave_value(inference->klv, inference->exchanged),
+          number_of_draws_for_leave);
       insert_leave_rack(inference->leave, inference->exchanged,
                         inference->leave_rack_list, number_of_draws_for_leave,
                         current_leave_value);

@@ -3,10 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "file_handler.h"
-#include "log.h"
-#include "string_util.h"
+#include "../util/log.h"
+#include "../util/string_util.h"
 #include "../util/util.h"
+
+#include "file_handler.h"
 
 struct FileHandler {
   FILE *file;

@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 #include "../src/ent/thread_control.h"
-#include "../src/str/string_util.h"
+#include "../src/util/string_util.h"
 #include "../src/util/log.h"
 #include "../src/util/util.h"
 

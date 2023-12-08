@@ -2,10 +2,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../def/gcg_defs.h"
+#include "../src/def/gcg_defs.h"
 
 #include "../src/ent/game_history.h"
+#include "../src/ent/letter_distribution.h"
+
 #include "../src/impl/gcg.h"
+
+#include "../src/util/string_util.h"
+
 #include "../src/util/util.h"
 
 #include "test_constants.h"
@@ -139,35 +144,35 @@ void assert_game_event(const GameHistory *game_history, int event_index,
   GameEvent *game_event = get_game_history_event(game_history, event_index);
   int ld_size = letter_distribution_get_size(letter_distribution);
   // Game Event assertions
-  assert(get_game_event_event_type(game_event) == event_type);
-  assert(get_game_event_player_index(game_event) == player_index);
-  assert(get_game_event_cumulative_score(game_event) == cumulative_score);
+  assert(game_event_get_type(game_event) == event_type);
+  assert(game_event_get_player_index(game_event) == player_index);
+  assert(game_event_get_cumulative_score(game_event) == cumulative_score);
   Rack *expected_rack = NULL;
   bool racks_match = false;
   if (string_length(rack_string) > 0) {
     expected_rack = create_rack(ld_size);
     set_rack_to_string(letter_distribution, expected_rack, rack_string);
     racks_match =
-        racks_are_equal(expected_rack, get_game_event_rack(game_event));
+        racks_are_equal(expected_rack, game_event_get_rack(game_event));
     destroy_rack(expected_rack);
   } else {
     racks_match =
-        racks_are_equal(expected_rack, get_game_event_rack(game_event));
+        racks_are_equal(expected_rack, game_event_get_rack(game_event));
   }
 
   assert(racks_match);
-  assert((!get_game_event_note(game_event) && string_length(note) == 0) ||
-         strings_equal(get_game_event_note(game_event), note));
+  assert((!game_event_get_note(game_event) && string_length(note) == 0) ||
+         strings_equal(game_event_get_note(game_event), note));
 
   // Move assertions
-  const Move *move = get_game_event_move(game_event);
+  const Move *move = game_event_get_move(game_event);
   if (move) {
 
     assert(get_move_type(move) == move_type);
     assert(get_score(move) == move_score);
 
     if (move_type != GAME_EVENT_PASS) {
-      assert(get_tiles_played(move) == tiles_played);
+      assert(move_get_tiles_played(move) == tiles_played);
       assert(get_tiles_length(move) == tiles_length);
       uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * tiles_length);
       int number_of_machine_letters = str_to_machine_letters(
@@ -198,8 +203,8 @@ void test_success_standard() {
   const LetterDistribution *ld =
       get_game_history_letter_distribution(game_history);
 
-  Player *player0 = get_game_history_player(game_history, 0);
-  Player *player1 = get_game_history_player(game_history, 1);
+  GameHistoryPlayer *player0 = get_game_history_player(game_history, 0);
+  GameHistoryPlayer *player1 = get_game_history_player(game_history, 1);
 
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);

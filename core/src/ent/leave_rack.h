@@ -1,6 +1,8 @@
 #ifndef LEAVE_RACK_H
 #define LEAVE_RACK_H
 
+#include "rack.h"
+
 struct LeaveRack;
 typedef struct LeaveRack LeaveRack;
 
@@ -11,7 +13,7 @@ Rack *leave_rack_get_leave(const LeaveRack *leaveRack);
 Rack *leave_rack_get_exchanged(const LeaveRack *leaveRack);
 int leave_rack_get_draws(const LeaveRack *leaveRack);
 double leave_rack_get_equity(const LeaveRack *leaveRack);
-int get_leave_rack(LeaveRackList *leave_rack_list, int index);
+LeaveRack *get_leave_rack(LeaveRackList *leave_rack_list, int index);
 
 LeaveRackList *create_leave_rack_list(int capacity, int distribution_size);
 void destroy_leave_rack_list(LeaveRackList *lrl);

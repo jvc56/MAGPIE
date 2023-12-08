@@ -3,29 +3,32 @@
 
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 
 #include "letter_distribution.h"
+#include "move.h"
+#include "rack.h"
 
 struct GameEvent;
 typedef struct GameEvent GameEvent;
 
-void set_game_event_type(GameEvent *event, game_event_t event_type);
-game_event_t get_game_event_type(const GameEvent *event);
+void game_event_set_type(GameEvent *event, game_event_t event_type);
+game_event_t game_event_get_type(const GameEvent *event);
 
-void set_game_event_player_index(GameEvent *event, int player_index);
-int get_game_event_player_index(const GameEvent *event);
+void game_event_set_player_index(GameEvent *event, int player_index);
+int game_event_get_player_index(const GameEvent *event);
 
-void set_game_event_cumulative_score(GameEvent *event, int cumulative_score);
-int get_game_event_cumulative_score(const GameEvent *event);
+void game_event_set_cumulative_score(GameEvent *event, int cumulative_score);
+int game_event_get_cumulative_score(const GameEvent *event);
 
-void set_game_event_rack(GameEvent *event, Rack *rack);
-Rack *get_game_event_rack(const GameEvent *event);
+void game_event_set_rack(GameEvent *event, Rack *rack);
+Rack *game_event_get_rack(const GameEvent *event);
 
-void set_game_event_move(GameEvent *event, Move *move);
-Move *get_game_event_move(const GameEvent *event);
+void game_event_set_move(GameEvent *event, Move *move);
+Move *game_event_get_move(const GameEvent *event);
 
-void set_game_event_note(GameEvent *event, const char *note);
-const char *get_game_event_note(const GameEvent *event);
+void game_event_set_note(GameEvent *event, const char *note);
+const char *game_event_get_note(const GameEvent *event);
 
 void game_event_set_score(GameEvent *event, int score);
 

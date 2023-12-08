@@ -1,9 +1,20 @@
+#include <assert.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 
 #include "../def/rack_defs.h"
 #include "../def/stats_defs.h"
+
+#include "../util/log.h"
+#include "../util/util.h"
+
+// FIXME: sad circular import
+#include "../str/game_string.h"
+#include "../str/sim_string.h"
+
+// FIXME: sad circular import
+#include "../impl/gameplay.h"
 
 #include "bag.h"
 #include "game.h"
@@ -33,41 +44,41 @@ struct SimmedPlay {
   pthread_mutex_t mutex;
 };
 
-Move *get_simmed_play_move(const SimmedPlay *simmed_play) {
+Move *simmed_play_get_move(const SimmedPlay *simmed_play) {
   return simmed_play->move;
 }
 
-Stat *get_simmed_play_score_stat(const SimmedPlay *simmed_play,
+Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play,
                                  int stat_index) {
   return simmed_play->score_stat[stat_index];
 }
 
-Stat *get_simmed_play_bingo_stat(const SimmedPlay *simmed_play,
+Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play,
                                  int stat_index) {
   return simmed_play->bingo_stat[stat_index];
 }
 
-Stat *get_simmed_play_equity_stat(const SimmedPlay *simmed_play) {
+Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play) {
   return simmed_play->equity_stat;
 }
 
-Stat *get_simmed_play_leftover_stat(const SimmedPlay *simmed_play) {
+Stat *simmed_play_get_leftover_stat(const SimmedPlay *simmed_play) {
   return simmed_play->leftover_stat;
 }
 
-Stat *get_simmed_play_win_pct_stat(const SimmedPlay *simmed_play) {
+Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
 }
 
-bool is_simmed_play_ignore(const SimmedPlay *simmed_play) {
+bool simmed_play_get_ignore(const SimmedPlay *simmed_play) {
   return simmed_play->ignore;
 }
 
-int get_simmed_play_id(const SimmedPlay *simmed_play) {
+int simmed_play_get_id(const SimmedPlay *simmed_play) {
   return simmed_play->play_id;
 }
 
-pthread_mutex_t *get_simmed_play_mutex(const SimmedPlay *simmed_play) {
+pthread_mutex_t *simmed_play_get_mutex(const SimmedPlay *simmed_play) {
   return (pthread_mutex_t *)&simmed_play->mutex;
 }
 
@@ -137,7 +148,7 @@ Simmer *create_simmer(const Config *config) {
   return simmer;
 }
 
-void create_simmed_plays(const Game *game, Simmer *simmer) {
+void create_simmed_plays(Game *game, Simmer *simmer) {
   simmer->simmed_plays =
       malloc_or_die((sizeof(SimmedPlay)) * simmer->num_simmed_plays);
   for (int i = 0; i < simmer->num_simmed_plays; i++) {
@@ -304,6 +315,46 @@ void ignore_play(SimmedPlay *sp, bool lock) {
   }
 }
 
+int compare_simmed_plays(const void *a, const void *b) {
+  const SimmedPlay *play_a = *(const SimmedPlay **)a;
+  const SimmedPlay *play_b = *(const SimmedPlay **)b;
+
+  if (play_a->ignore && !play_b->ignore) {
+    return 1;
+  } else if (play_b->ignore && !play_a->ignore) {
+    return -1;
+  }
+
+  // Compare the mean values of win_pct_stat
+  double mean_a = get_mean(play_a->win_pct_stat);
+  double mean_b = get_mean(play_b->win_pct_stat);
+
+  if (mean_a > mean_b) {
+    return -1;
+  } else if (mean_a < mean_b) {
+    return 1;
+  } else {
+    // If win_pct_stat->mean values are equal, compare equity_stat->mean
+    double equity_mean_a = get_mean(play_a->equity_stat);
+    double equity_mean_b = get_mean(play_b->equity_stat);
+
+    if (equity_mean_a > equity_mean_b) {
+      return -1;
+    } else if (equity_mean_a < equity_mean_b) {
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+}
+
+// Must be called with a lock on the sorted plays mutex
+void sort_plays_by_win_rate_while_locked(SimmedPlay **simmed_plays,
+                                         int num_simmed_plays) {
+  qsort(simmed_plays, num_simmed_plays, sizeof(SimmedPlay *),
+        compare_simmed_plays);
+}
+
 bool handle_potential_stopping_condition(Simmer *simmer) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
   sort_plays_by_win_rate_while_locked(simmer->simmed_plays,
@@ -384,7 +435,6 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
     for (int ply = 0; ply < plies; ply++) {
       int player_on_turn_index = game_get_player_on_turn_index(game);
       Player *player_on_turn = game_get_player(game, player_on_turn_index);
-      Player *opponent = game_get_player(game, 1 - player_on_turn_index);
       game_end_reason_t game_end_reason = game_get_game_end_reason(game);
 
       if (game_end_reason != GAME_END_REASON_NONE) {
@@ -406,7 +456,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
         }
       }
       add_score_stat(simmer->simmed_plays[i], get_score(best_play),
-                     get_tiles_played(best_play) == RACK_SIZE, ply,
+                     move_get_tiles_played(best_play) == RACK_SIZE, ply,
                      is_multithreaded(simmer));
     }
 
@@ -457,7 +507,7 @@ void *simmer_worker(void *uncasted_simmer_worker) {
     int print_info_interval = get_print_info_interval(thread_control);
     if (print_info_interval > 0 && current_iteration_count > 0 &&
         current_iteration_count % print_info_interval == 0) {
-      print_ucgi_sim_stats(simmer_worker->game, simmer, 0);
+      print_ucgi_sim_stats(simmer_worker->game, simmer, thread_control, 0);
     }
 
     int check_stopping_condition_interval =
@@ -508,7 +558,7 @@ bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
     simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
     return false;
   }
-  if (!(get_tiles_played(m1->move) == get_tiles_played(m2->move) &&
+  if (!(move_get_tiles_played(m1->move) == move_get_tiles_played(m2->move) &&
         get_tiles_length(m1->move) == get_tiles_length(m2->move))) {
     simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
     simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
@@ -555,39 +605,6 @@ bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
   return true;
 }
 
-int compare_simmed_plays(const void *a, const void *b) {
-  const SimmedPlay *play_a = *(const SimmedPlay **)a;
-  const SimmedPlay *play_b = *(const SimmedPlay **)b;
-
-  if (play_a->ignore && !play_b->ignore) {
-    return 1;
-  } else if (play_b->ignore && !play_a->ignore) {
-    return -1;
-  }
-
-  // Compare the mean values of win_pct_stat
-  double mean_a = get_mean(play_a->win_pct_stat);
-  double mean_b = get_mean(play_b->win_pct_stat);
-
-  if (mean_a > mean_b) {
-    return -1;
-  } else if (mean_a < mean_b) {
-    return 1;
-  } else {
-    // If win_pct_stat->mean values are equal, compare equity_stat->mean
-    double equity_mean_a = get_mean(play_a->equity_stat);
-    double equity_mean_b = get_mean(play_b->equity_stat);
-
-    if (equity_mean_a > equity_mean_b) {
-      return -1;
-    } else if (equity_mean_a < equity_mean_b) {
-      return 1;
-    } else {
-      return 0;
-    }
-  }
-}
-
 // Must be called with a lock on the sorted plays mutex
 void sort_plays_by_win_rate(Simmer *simmer) {
   pthread_mutex_lock(&simmer->simmed_plays_mutex);
@@ -596,14 +613,7 @@ void sort_plays_by_win_rate(Simmer *simmer) {
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
 }
 
-// Must be called with a lock on the sorted plays mutex
-void sort_plays_by_win_rate_while_locked(SimmedPlay **simmed_plays,
-                                         int num_simmed_plays) {
-  qsort(simmed_plays, num_simmed_plays, sizeof(SimmedPlay *),
-        compare_simmed_plays);
-}
-
-sim_status_t simulate(const Config *config, const Game *game, Simmer *simmer) {
+sim_status_t simulate(const Config *config, Game *game, Simmer *simmer) {
   ThreadControl *thread_control = config_get_thread_control(config);
   unhalt(thread_control);
 
@@ -615,8 +625,7 @@ sim_status_t simulate(const Config *config, const Game *game, Simmer *simmer) {
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
   reset_move_list(move_list);
-  generate_moves(player_get_rack(opponent), gen,
-                 player_get_rack(player_on_turn),
+  generate_moves(player_get_rack(opponent), gen, player_on_turn,
                  get_tiles_remaining(bag) >= RACK_SIZE, MOVE_RECORD_ALL,
                  MOVE_SORT_EQUITY, true);
   int number_of_moves_generated = move_list_get_count(move_list);
@@ -693,7 +702,7 @@ sim_status_t simulate(const Config *config, const Game *game, Simmer *simmer) {
         malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
 
     Timer *timer = get_timer(thread_control);
-    timer_start(timer);
+    mtimer_start(timer);
 
     for (int thread_index = 0; thread_index < number_of_threads;
          thread_index++) {
@@ -715,6 +724,6 @@ sim_status_t simulate(const Config *config, const Game *game, Simmer *simmer) {
   }
 
   // Print out the stats
-  print_ucgi_sim_stats(game, simmer, 1);
+  print_ucgi_sim_stats(game, simmer, thread_control, 1);
   return SIM_STATUS_SUCCESS;
 }

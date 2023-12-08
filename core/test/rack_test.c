@@ -14,7 +14,6 @@ void test_rack_main(TestConfig *testconfig) {
   LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
   Rack *rack = create_rack(ld_size);
-  Rack *expected_rack = create_rack(ld_size);
 
   // Test score on rack
   set_rack_to_string(ld, rack, "ABCDEFG");

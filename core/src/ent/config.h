@@ -44,6 +44,9 @@ bool config_get_use_game_pairs(const Config *config);
 uint64_t config_get_seed(const Config *config);
 ThreadControl *config_get_thread_control(const Config *config);
 exec_mode_t config_get_exec_mode(const Config *config);
+bool config_get_command_set_cgp(const Config *config);
+bool config_get_command_set_infile(const Config *config);
+bool config_get_command_set_exec_mode(const Config *config);
 
 config_load_status_t load_config(Config *config, const char *cmd);
 bool continue_on_coldstart(const Config *config);

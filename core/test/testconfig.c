@@ -1,8 +1,9 @@
 #include <stdlib.h>
 
 #include "../src/ent/config.h"
+
+#include "../src/util/log.h"
 #include "../src/util/util.h"
-#include "../util/log.h"
 
 #include "testconfig.h"
 

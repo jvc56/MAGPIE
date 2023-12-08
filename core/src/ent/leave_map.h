@@ -1,6 +1,10 @@
 #ifndef LEAVE_MAP_H
 #define LEAVE_MAP_H
 
+#include <stdint.h>
+
+#include "rack.h"
+
 struct LeaveMap;
 typedef struct LeaveMap LeaveMap;
 
@@ -15,5 +19,11 @@ void leave_map_take_letter(LeaveMap *leave_map, uint8_t letter,
 void leave_map_add_letter(LeaveMap *leave_map, uint8_t letter,
                           int number_of_letter_on_rack);
 void init_leave_map(const Rack *rack, LeaveMap *leave_map);
+
+double *leave_map_get_leave_values(const LeaveMap *leave_map);
+void take_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
+                                          uint8_t letter);
+void add_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
+                                         uint8_t letter);
 
 #endif

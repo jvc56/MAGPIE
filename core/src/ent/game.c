@@ -1,10 +1,15 @@
+#include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "../def/cross_set_defs.h"
 #include "../def/game_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 
-#include "../str/string_util.h"
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 
 #include "bag.h"
 #include "board.h"
@@ -41,9 +46,9 @@ struct Game {
   bool backups_preallocated;
 };
 
-Generator *game_get_gen(const Game *game) { return game->gen; }
+Generator *game_get_gen(Game *game) { return game->gen; }
 
-Player *game_get_player(const Game *game, int player_index) {
+Player *game_get_player(Game *game, int player_index) {
   return game->players[player_index];
 }
 
@@ -101,6 +106,191 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
     game_variant = GAME_VARIANT_WORDSMOG;
   }
   return game_variant;
+}
+
+void set_random_rack(Game *game, int pidx, Rack *known_rack) {
+  Bag *bag = gen_get_bag(game_get_gen(game));
+  Rack *prack = player_get_rack(game_get_player(game, pidx));
+  int ntiles = get_number_of_letters(prack);
+  int player_draw_index = game_get_player_draw_index(game, pidx);
+  // always try to fill rack if possible.
+  if (ntiles < RACK_SIZE) {
+    ntiles = RACK_SIZE;
+  }
+  // throw in existing rack, then redraw from the bag.
+  for (int i = 0; i < get_array_size(prack); i++) {
+    if (get_number_of_letter(prack, i) > 0) {
+      for (int j = 0; j < get_number_of_letter(prack, i); j++) {
+        add_letter(bag, i, player_draw_index);
+      }
+    }
+  }
+  reset_rack(prack);
+  int ndrawn = 0;
+  if (known_rack && get_number_of_letters(known_rack) > 0) {
+    for (int i = 0; i < get_array_size(known_rack); i++) {
+      for (int j = 0; j < get_number_of_letter(known_rack, i); j++) {
+        draw_letter_to_rack(bag, prack, i, player_draw_index);
+        ndrawn++;
+      }
+    }
+  }
+  draw_at_most_to_rack(bag, prack, ntiles - ndrawn, player_draw_index);
+}
+
+int traverse_backwards_for_score(const Board *board,
+                                 const LetterDistribution *letter_distribution,
+                                 int row, int col) {
+  int score = 0;
+  while (pos_exists(row, col)) {
+    uint8_t ml = get_letter(board, row, col);
+    if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+      break;
+    }
+    if (is_blanked(ml)) {
+      score += letter_distribution_get_score(letter_distribution,
+                                             BLANK_MACHINE_LETTER);
+    } else {
+      score += letter_distribution_get_score(letter_distribution, ml);
+    }
+    col--;
+  }
+  return score;
+}
+
+void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
+                        uint32_t node_index, bool check_letter_set,
+                        int left_most_col) {
+  while (pos_exists(row, col)) {
+    uint8_t ml = get_letter(board, row, col);
+    if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+      break;
+    }
+
+    if (check_letter_set && col == left_most_col) {
+      if (kwg_in_letter_set(kwg, ml, node_index)) {
+        set_board_node_index(board, node_index);
+        set_board_path_is_valid(board, true);
+        return;
+      }
+
+      set_board_node_index(board, node_index);
+      set_board_path_is_valid(board, false);
+      return;
+    }
+
+    node_index = kwg_get_next_node_index(kwg, node_index,
+                                         get_unblanked_machine_letter(ml));
+    if (node_index == 0) {
+      set_board_node_index(board, node_index);
+      set_board_path_is_valid(board, false);
+      return;
+    }
+
+    col--;
+  }
+
+  set_board_node_index(board, node_index);
+  set_board_path_is_valid(board, true);
+}
+
+void gen_cross_set(const KWG *kwg,
+                   const LetterDistribution *letter_distribution, Board *board,
+                   int row, int col, int dir, int cross_set_index) {
+  if (!pos_exists(row, col)) {
+    return;
+  }
+
+  if (!is_empty(board, row, col)) {
+    set_cross_set(board, row, col, 0, dir, cross_set_index);
+    set_cross_score(board, row, col, 0, dir, cross_set_index);
+    return;
+  }
+  if (left_and_right_empty(board, row, col)) {
+    set_cross_set(board, row, col, TRIVIAL_CROSS_SET, dir, cross_set_index);
+    set_cross_score(board, row, col, 0, dir, cross_set_index);
+    return;
+  }
+
+  int right_col = word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
+  if (right_col == col) {
+    traverse_backwards(kwg, board, row, col - 1, kwg_get_root_node_index(kwg),
+                       false, 0);
+    uint32_t lnode_index = get_board_node_index(board);
+    int lpath_is_valid = get_board_path_is_valid(board);
+    int score =
+        traverse_backwards_for_score(board, letter_distribution, row, col - 1);
+    set_cross_score(board, row, col, score, dir, cross_set_index);
+
+    if (!lpath_is_valid) {
+      set_cross_set(board, row, col, 0, dir, cross_set_index);
+      return;
+    }
+    uint32_t s_index =
+        kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
+    uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
+    set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+  } else {
+    int left_col = word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
+    traverse_backwards(kwg, board, row, right_col, kwg_get_root_node_index(kwg),
+                       false, 0);
+    uint32_t lnode_index = get_board_node_index(board);
+    int lpath_is_valid = get_board_path_is_valid(board);
+    int score_r = traverse_backwards_for_score(board, letter_distribution, row,
+                                               right_col);
+    int score_l =
+        traverse_backwards_for_score(board, letter_distribution, row, col - 1);
+    set_cross_score(board, row, col, score_r + score_l, dir, cross_set_index);
+    if (!lpath_is_valid) {
+      set_cross_set(board, row, col, 0, dir, cross_set_index);
+      return;
+    }
+    if (left_col == col) {
+      uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
+      set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+    } else {
+      uint64_t *cross_set =
+          get_cross_set_pointer(board, row, col, dir, cross_set_index);
+      *cross_set = 0;
+      for (int i = lnode_index;; i++) {
+        int t = kwg_tile(kwg, i);
+        if (t != 0) {
+          int next_node_index = kwg_arc_index(kwg, i);
+          traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
+                             left_col);
+          if (get_board_path_is_valid(board)) {
+            set_cross_set_letter(cross_set, t);
+          }
+        }
+        if (kwg_is_end(kwg, i)) {
+          break;
+        }
+      }
+    }
+  }
+}
+
+void generate_all_cross_sets(const KWG *kwg_1, const KWG *kwg_2,
+                             const LetterDistribution *letter_distribution,
+                             Board *board, bool kwgs_are_distinct) {
+  for (int i = 0; i < BOARD_DIM; i++) {
+    for (int j = 0; j < BOARD_DIM; j++) {
+      gen_cross_set(kwg_1, letter_distribution, board, i, j, 0, 0);
+      if (kwgs_are_distinct) {
+        gen_cross_set(kwg_2, letter_distribution, board, i, j, 0, 1);
+      }
+    }
+  }
+  transpose(board);
+  for (int i = 0; i < BOARD_DIM; i++) {
+    for (int j = 0; j < BOARD_DIM; j++) {
+      gen_cross_set(kwg_1, letter_distribution, board, i, j, 1, 0);
+      if (kwgs_are_distinct) {
+        gen_cross_set(kwg_2, letter_distribution, board, i, j, 1, 1);
+      }
+    }
+  }
+  transpose(board);
 }
 
 cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
@@ -371,7 +561,7 @@ void set_starting_player_index(Game *game, int starting_player_index) {
 
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
-  LetterDistribution *ld = gen_get_ld(gen);
+  LetterDistribution *ld = gen_get_ld(game_get_gen(game));
   uint32_t ld_size = letter_distribution_get_size(ld);
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
@@ -397,7 +587,7 @@ void update_player(const Config *config, Player *player) {
   player_set_name(player, players_data_get_name(players_data, player_index));
   player_set_move_sort_type(
       player, players_data_get_move_sort_type(players_data, player_index));
-  player_move_record_type(
+  player_set_move_record_type(
       player, players_data_get_move_record_type(players_data, player_index));
   player_set_kwg(player, players_data_get_kwg(players_data, player_index));
   player_set_klv(player, players_data_get_klv(players_data, player_index));

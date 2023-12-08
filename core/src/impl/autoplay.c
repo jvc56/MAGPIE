@@ -1,17 +1,22 @@
+#include <pthread.h>
 #include <stdlib.h>
 #include <time.h>
+
+#include "../str/autoplay_string.h"
 
 #include "../def/autoplay_defs.h"
 #include "../def/rack_defs.h"
 
+#include "../ent/autoplay_results.h"
+#include "../ent/config.h"
+#include "../ent/game.h"
+#include "../ent/movegen.h"
+#include "../ent/player.h"
+#include "../ent/stats.h"
+
+#include "../impl/gameplay.h"
+
 #include "../util/util.h"
-#include "autoplay_results.h"
-#include "config.h"
-#include "game.h"
-#include "gameplay.h"
-#include "movegen.h"
-#include "player.h"
-#include "stats.h"
 
 typedef struct AutoplayWorker {
   const Config *config;
@@ -38,11 +43,11 @@ void destroy_autoplay_worker(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
-void record_results(const Game *game, AutoplayResults *autoplay_results,
+void record_results(Game *game, AutoplayResults *autoplay_results,
                     int starting_player_index) {
 
-  int p0_score = get_score(game_get_player(game, 0));
-  int p1_score = get_score(game_get_player(game, 1));
+  int p0_score = player_get_score(game_get_player(game, 0));
+  int p1_score = player_get_score(game_get_player(game, 1));
 
   increment_total_games(autoplay_results);
   if (p0_score > p1_score) {
@@ -63,7 +68,7 @@ void play_autoplay_game(Game *game, AutoplayResults *autoplay_results,
                         int starting_player_index) {
   game_end_reason_t game_end_reason = game_get_game_end_reason(game);
   int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player_on_turn = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
   Generator *gen = game_get_gen(game);
   Bag *bag = gen_get_bag(gen);

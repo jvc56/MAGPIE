@@ -4,10 +4,11 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
+#include "../util/log.h"
+#include "../util/string_util.h"
 #include "../util/util.h"
 
 #include "board.h"
-#include "log.h"
 #include "words.h"
 
 typedef struct FormedWord {

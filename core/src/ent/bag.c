@@ -1,9 +1,11 @@
-// #include <stdio.h>
-// #include <stdlib.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "../util/log.h"
+#include "../util/util.h"
 
 #include "bag.h"
+#include "rack.h"
 #include "xoshiro.h"
 
 struct Bag {
@@ -37,10 +39,10 @@ void shuffle(Bag *bag) {
 
 void reset_bag(const LetterDistribution *letter_distribution, Bag *bag) {
   int tile_index = 0;
-  uint32_t letter_distribution_size =
+  int letter_distribution_size =
       letter_distribution_get_size(letter_distribution);
-  for (uint32_t i = 0; i < letter_distribution_size; i++) {
-    for (uint32_t k = 0;
+  for (int i = 0; i < letter_distribution_size; i++) {
+    for (int k = 0;
          k < letter_distribution_get_distribution(letter_distribution, i);
          k++) {
       bag->tiles[tile_index] = i;
@@ -53,8 +55,7 @@ void reset_bag(const LetterDistribution *letter_distribution, Bag *bag) {
 }
 
 void update_bag(const LetterDistribution *letter_distribution, Bag *bag) {
-  uint32_t total_tiles =
-      letter_distribution_get_total_tiles(letter_distribution);
+  int total_tiles = letter_distribution_get_total_tiles(letter_distribution);
   if (bag->size != total_tiles) {
     free(bag->tiles);
     bag->size = total_tiles;
@@ -175,5 +176,18 @@ void seed_bag_for_worker(Bag *bag, uint64_t seed, int worker_index) {
   seed_prng(bag->prng, seed);
   for (int j = 0; j < worker_index; j++) {
     xoshiro_jump(bag->prng);
+  }
+}
+
+void add_bag_to_rack(Bag *bag, Rack *rack) {
+  for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
+    add_letter_to_rack(rack, bag->tiles[i]);
+  }
+}
+
+void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
+  while (n > 0 && !bag_is_empty(bag)) {
+    add_letter_to_rack(rack, draw_random_letter(bag, player_draw_index));
+    n--;
   }
 }

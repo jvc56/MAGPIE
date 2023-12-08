@@ -2,7 +2,10 @@
 #include <stddef.h>
 
 #include "../src/ent/config.h"
-#include "../src/str/string_util.h"
+
+#include "../src/str/rack_string.h"
+#include "../src/util/string_util.h"
+
 #include "../src/util/log.h"
 
 #include "config_test.h"

@@ -1,19 +1,26 @@
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "../def/rack_defs.h"
+
+#include "../util/util.h"
 
 #include "leave_map.h"
 #include "rack.h"
 
 struct LeaveMap {
-  uint32_t rack_array_size;
+  int rack_array_size;
   double *leave_values;
   int *letter_base_index_map;
   int current_index;
 };
 
+double *leave_map_get_leave_values(const LeaveMap *leave_map) {
+  return leave_map->leave_values;
+}
+
 void update_leave_map(LeaveMap *leave_map, int new_rack_array_size) {
-  if (leave_map->rack_array_size != (uint32_t)new_rack_array_size) {
+  if (leave_map->rack_array_size != new_rack_array_size) {
     free(leave_map->letter_base_index_map);
     leave_map->rack_array_size = new_rack_array_size;
     leave_map->letter_base_index_map =
@@ -64,6 +71,18 @@ void leave_map_add_letter(LeaveMap *leave_map, uint8_t letter,
   int offset = number_of_letter_on_rack;
   int bit_index = base_index + offset;
   leave_map->current_index |= 1 << bit_index;
+}
+
+void take_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
+                                          uint8_t letter) {
+  take_letter_from_rack(rack, letter);
+  leave_map_take_letter(leave_map, letter, get_number_of_letter(rack, letter));
+}
+
+void add_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
+                                         uint8_t letter) {
+  add_letter_to_rack(rack, letter);
+  leave_map_add_letter(leave_map, letter, get_number_of_letter(rack, letter));
 }
 
 void init_leave_map(const Rack *rack, LeaveMap *leave_map) {

@@ -1,6 +1,9 @@
 #ifndef BOARD_H
 #define BOARD_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "../def/board_defs.h"
 
 struct Board;

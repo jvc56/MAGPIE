@@ -7,6 +7,8 @@
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/thread_control.h"
 
+#include "../src/util/string_util.h"
+
 #include "../src/impl/autoplay.h"
 
 #include "test_util.h"

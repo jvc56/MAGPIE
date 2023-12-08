@@ -3,6 +3,8 @@
 
 #include "../def/rack_defs.h"
 
+#include "../util/util.h"
+
 #include "letter_distribution.h"
 #include "rack.h"
 
@@ -13,15 +15,15 @@ struct Rack {
   int number_of_letters;
 };
 
-int get_array_size(Rack *rack) { return rack->array_size; }
+int get_array_size(const Rack *rack) { return rack->array_size; }
 
-int get_number_of_letter(Rack *rack, uint8_t machine_letter) {
+int get_number_of_letter(const Rack *rack, uint8_t machine_letter) {
   return rack->array[machine_letter];
 }
 
-int get_number_of_letters(Rack *rack) { return rack->number_of_letters; }
+int get_number_of_letters(const Rack *rack) { return rack->number_of_letters; }
 
-bool rack_is_empty(Rack *rack) { return rack->empty; }
+bool rack_is_empty(const Rack *rack) { return rack->empty; }
 
 void reset_rack(Rack *rack) {
   for (int i = 0; i < (rack->array_size); i++) {

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "letter_distribution.h"
+#include "rack.h"
 
 #define MAX_BAG_SIZE 1000
 
@@ -25,5 +26,6 @@ void reset_bag(const LetterDistribution *letter_distribution, Bag *bag);
 void seed_bag_for_worker(Bag *bag, uint64_t seed, int worker_index);
 void shuffle(Bag *bag);
 void update_bag(const LetterDistribution *letter_distribution, Bag *bag);
+void add_bag_to_rack(Bag *bag, Rack *rack);
 
 #endif

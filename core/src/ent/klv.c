@@ -9,10 +9,15 @@
 
 #include "../def/klv_defs.h"
 
-#include "fileproxy.h"
+#include "../util/string_util.h"
+
+#include "../util/fileproxy.h"
+#include "../util/log.h"
+#include "../util/util.h"
+
 #include "klv.h"
 #include "kwg.h"
-#include "log.h"
+#include "rack.h"
 
 struct KLV {
   KWG *kwg;
@@ -22,10 +27,6 @@ struct KLV {
 
 int klv_get_word_count(const KLV *klv, int word_count_index) {
   return klv->word_counts[word_count_index];
-}
-
-float klv_get_leave_value(const KLV *klv, int leave_value_index) {
-  return klv->leave_values[leave_value_index];
 }
 
 const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
@@ -164,4 +165,66 @@ void destroy_klv(KLV *klv) {
   free(klv->leave_values);
   free(klv->word_counts);
   free(klv);
+}
+
+int get_word_index_of(const KLV *klv, const Rack *leave, uint32_t node_index) {
+  int idx = 0;
+  int lidx = 0;
+  int lidx_letter_count = get_number_of_letter(leave, lidx);
+  int number_of_letters = get_number_of_letters(leave);
+
+  // Advance lidx
+  while (lidx_letter_count == 0) {
+    lidx++;
+    lidx_letter_count = get_number_of_letter(leave, lidx);
+  }
+
+  while (node_index != 0) {
+    idx += klv->word_counts[node_index];
+    while (kwg_tile(klv->kwg, node_index) != (uint8_t)lidx) {
+      if (kwg_is_end(klv->kwg, node_index)) {
+        return -1;
+      }
+      node_index++;
+    }
+    idx -= klv->word_counts[node_index];
+
+    lidx_letter_count--;
+    number_of_letters--;
+
+    // Advance lidx
+    while (lidx_letter_count == 0) {
+      lidx++;
+      if (lidx >= get_array_size(leave)) {
+        break;
+      }
+      lidx_letter_count = get_number_of_letter(leave, lidx);
+    }
+
+    if (number_of_letters == 0) {
+      if (kwg_accepts(klv->kwg, node_index)) {
+        return idx;
+      }
+      return -1;
+    }
+    if (kwg_accepts(klv->kwg, node_index)) {
+      idx += 1;
+    }
+    node_index = kwg_arc_index(klv->kwg, node_index);
+  }
+  return -1;
+}
+
+double klv_get_leave_value(const KLV *klv, const Rack *leave) {
+  if (rack_is_empty(leave)) {
+    return 0.0;
+  }
+  if (!klv) {
+    return 0.0;
+  }
+  int index = get_word_index_of(klv, leave, kwg_arc_index(klv->kwg, 0));
+  if (index != -1) {
+    return (double)klv->leave_values[index];
+  }
+  return 0.0;
 }

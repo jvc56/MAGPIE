@@ -3,6 +3,11 @@
 
 #include "../def/win_pct_defs.h"
 
+#include "../util/log.h"
+#include "../util/util.h"
+
+#include "../util/string_util.h"
+
 #include "win_pct.h"
 
 struct WinPct {

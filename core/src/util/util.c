@@ -3,23 +3,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "constants.h"
-#include "klv.h"
+#include "../ent/klv.h"
+#include "../ent/move.h"
+#include "../ent/rack.h"
+
 #include "log.h"
-#include "move.h"
-#include "rack.h"
 
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
-  for (int i = 0; i <get_tiles_length(move); i++) {
-    if get_tile(move, i) != PLAYED_THROUGH_MARKER) {
-      if (is_blankedget_tile(move, i))) {
+  for (int i = 0; i < get_tiles_length(move); i++) {
+    if (get_tile(move, i) != PLAYED_THROUGH_MARKER) {
+      if (is_blanked(get_tile(move, i))) {
         take_letter_from_rack(rack, BLANK_MACHINE_LETTER);
       } else {
-        take_letter_from_rack(rack,get_tile(move, i));
+        take_letter_from_rack(rack, get_tile(move, i));
       }
     }
   }
-  return get_leave_value(klv, rack);
+  return klv_get_leave_value(klv, rack);
 }
 
 void *malloc_or_die(size_t size) {

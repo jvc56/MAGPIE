@@ -1,8 +1,12 @@
+#include <math.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
 #include "../def/move_defs.h"
+
+#include "../util/log.h"
+#include "../util/util.h"
 
 #include "move.h"
 
@@ -25,27 +29,6 @@ struct MoveList {
   Move **moves;
 };
 
-#include <stdint.h>
-
-// Assuming BOARD_DIM is defined somewhere in your code
-#define BOARD_DIM 10
-
-typedef /* define game_event_t type */ int game_event_t;
-
-struct Move {
-  game_event_t move_type;
-  int score;
-  int row_start;
-  int col_start;
-  int tiles_played;
-  int tiles_length;
-  double equity;
-  int dir;
-  uint8_t tiles[BOARD_DIM];
-};
-
-// Getter functions
-
 game_event_t get_move_type(const Move *move) { return move->move_type; }
 
 int get_score(const Move *move) { return move->score; }
@@ -54,7 +37,7 @@ int get_row_start(const Move *move) { return move->row_start; }
 
 int get_col_start(const Move *move) { return move->col_start; }
 
-int get_tiles_played(const Move *move) { return move->tiles_played; }
+int move_get_tiles_played(const Move *move) { return move->tiles_played; }
 
 int get_tiles_length(const Move *move) { return move->tiles_length; }
 
@@ -64,13 +47,13 @@ int get_dir(const Move *move) { return move->dir; }
 
 uint8_t get_tile(const Move *move, int index) { return move->tiles[index]; }
 
-Move *get_spare_move(MoveList *ml) { return ml->spare_move; }
+Move *get_spare_move(const MoveList *ml) { return ml->spare_move; }
 
-int *move_list_get_count(MoveList *ml) { return ml->count; }
+int move_list_get_count(const MoveList *ml) { return ml->count; }
 
-int *move_list_get_capacity(MoveList *ml) { return ml->capacity; }
+int move_list_get_capacity(const MoveList *ml) { return ml->capacity; }
 
-Move *move_list_get_move(MoveList *ml, int move_index) {
+Move *move_list_get_move(const MoveList *ml, int move_index) {
   return ml->moves[move_index];
 }
 

@@ -15,7 +15,6 @@ void load_and_generate(Game *game, Player *player, const char *cgp,
 
   Generator *gen = game_get_gen(game);
   LetterDistribution *ld = gen_get_ld(gen);
-  Board *board = gen_get_board(gen);
   Rack *player_rack = player_get_rack(player);
   AnchorList *anchor_list = gen_get_anchor_list(gen);
 
@@ -454,7 +453,7 @@ void test_shadow_equity(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Player *player = game_get_player(game, 0);
-  KLV *klv = player_get_klv(player);
+  const KLV *klv = player_get_klv(player);
   Generator *gen = game_get_gen(game);
   AnchorList *anchor_list = gen_get_anchor_list(gen);
   LetterDistribution *ld = gen_get_ld(gen);
@@ -470,37 +469,30 @@ void test_shadow_equity(TestConfig *testconfig) {
   double *best_leaves = gen_get_best_leaves(gen);
 
   set_rack_to_string(ld, leave_rack, "");
-  assert(within_epsilon(best_leaves[0],
-                        get_leave_value_for_rack(klv, leave_rack)));
+  assert(within_epsilon(best_leaves[0], klv_get_leave_value(klv, leave_rack)));
 
   set_rack_to_string(ld, leave_rack, "S");
-  assert(within_epsilon(best_leaves[1],
-                        get_leave_value_for_rack(klv, leave_rack)));
+  assert(within_epsilon(best_leaves[1], klv_get_leave_value(klv, leave_rack)));
 
   set_rack_to_string(ld, leave_rack, "ES");
-  assert(within_epsilon(best_leaves[2],
-                        get_leave_value_for_rack(klv, leave_rack)));
+  assert(within_epsilon(best_leaves[2], klv_get_leave_value(klv, leave_rack)));
 
   set_rack_to_string(ld, leave_rack, "ERS");
-  assert(within_epsilon(best_leaves[3],
-                        get_leave_value_for_rack(klv, leave_rack)));
+  assert(within_epsilon(best_leaves[3], klv_get_leave_value(klv, leave_rack)));
 
   set_rack_to_string(ld, leave_rack, "EQSU");
-  assert(within_epsilon(best_leaves[4],
-                        get_leave_value_for_rack(klv, leave_rack)));
+  assert(within_epsilon(best_leaves[4], klv_get_leave_value(klv, leave_rack)));
 
   set_rack_to_string(ld, leave_rack, "EQRSU");
-  assert(within_epsilon(best_leaves[5],
-                        get_leave_value_for_rack(klv, leave_rack)));
+  assert(within_epsilon(best_leaves[5], klv_get_leave_value(klv, leave_rack)));
 
   set_rack_to_string(ld, leave_rack, "EQRSUV");
-  assert(within_epsilon(best_leaves[6],
-                        get_leave_value_for_rack(klv, leave_rack)));
+  assert(within_epsilon(best_leaves[6], klv_get_leave_value(klv, leave_rack)));
 
   load_and_generate(game, player, EMPTY_CGP, "ESQW", true);
   set_rack_to_string(ld, leave_rack, "ES");
   assert(within_epsilon(get_anchor_highest_possible_equity(anchor_list, 0),
-                        28 + get_leave_value_for_rack(klv, leave_rack)));
+                        28 + klv_get_leave_value(klv, leave_rack)));
 
   destroy_game(game);
   destroy_rack(leave_rack);

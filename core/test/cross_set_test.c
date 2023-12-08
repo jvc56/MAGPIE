@@ -10,6 +10,8 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 
+#include "../src/util/string_util.h"
+
 #include "test_constants.h"
 #include "test_util.h"
 #include "testconfig.h"
@@ -26,8 +28,7 @@ uint64_t cross_set_from_string(const LetterDistribution *letter_distribution,
 
   for (size_t i = 0; i < string_length(letters); i++) {
     letter[0] = letters[i];
-    set_cross_set_letter(&c, human_readable_letter_to_machine_letter(
-                                 letter_distribution, letter));
+    set_cross_set_letter(&c, hl_to_ml(letter_distribution, letter));
   }
   return c;
 }
@@ -46,8 +47,7 @@ void set_row(Game *game, int row, const char *row_content) {
   for (size_t i = 0; i < string_length(row_content); i++) {
     if (row_content[i] != ' ') {
       letter[0] = row_content[i];
-      set_letter(board, row, i,
-                 human_readable_letter_to_machine_letter(ld, letter));
+      set_letter(board, row, i, hl_to_ml(ld, letter));
       incrememt_tiles_played(board, 1);
     }
   }
@@ -69,8 +69,7 @@ void set_col(Game *game, int col, const char *col_content) {
   for (size_t i = 0; i < string_length(col_content); i++) {
     if (col_content[i] != ' ') {
       letter[0] = col_content[i];
-      set_letter(board, i, col,
-                 human_readable_letter_to_machine_letter(ld, letter));
+      set_letter(board, i, col, hl_to_ml(ld, letter));
       incrememt_tiles_played(board, 1);
     }
   }

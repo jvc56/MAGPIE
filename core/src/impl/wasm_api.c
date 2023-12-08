@@ -4,16 +4,21 @@
 
 #include "../def/rack_defs.h"
 
-#include "../str/string_util.h"
+#include "../str/game_string.h"
+#include "../str/letter_distribution_string.h"
+#include "../str/move_string.h"
+#include "../util/string_util.h"
 
-#include "bag.h"
-#include "command.h"
-#include "config.h"
-#include "error_status.h"
-#include "game.h"
-#include "move.h"
-#include "movegen.h"
-#include "words.h"
+#include "../ent/bag.h"
+#include "../ent/command.h"
+#include "../ent/config.h"
+#include "../ent/error_status.h"
+#include "../ent/game.h"
+#include "../ent/move.h"
+#include "../ent/movegen.h"
+#include "../ent/words.h"
+
+#include "../impl/exec.h"
 
 static CommandVars *wasm_command_vars = NULL;
 static CommandVars *iso_command_vars = NULL;
@@ -27,17 +32,16 @@ Game *get_game_from_cgp(const char *cgp) {
   char *cgp_command = get_formatted_string("position cgp %s", cgp);
   execute_command_sync(iso_command_vars, cgp_command);
   free(cgp_command);
-  return get_game(iso_command_vars);
+  return command_vars_get_game(iso_command_vars);
 }
 
 // tiles must contain 0 for play-through tiles!
 char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
                  uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
-  const Game *game = get_game_from_cgp(cgpstr);
-  const Generator *gen = game_get_gen(game);
-  const LetterDistribution *ld = gen_get_ld(gen);
-  const Bag *bag = gen_get_bag(gen);
-  const Board *board = gen_get_board(gen);
+  Game *game = get_game_from_cgp(cgpstr);
+  Generator *gen = game_get_gen(game);
+  LetterDistribution *ld = gen_get_ld(gen);
+  Board *board = gen_get_board(gen);
   const KWG *kwg = player_get_kwg(game_get_player(game, 0));
   const KLV *klv = player_get_klv(game_get_player(game, 0));
 
@@ -50,7 +54,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 
   // score_move assumes the play is always horizontal.
   if (dir_is_vertical(dir)) {
-    transpose(bag);
+    transpose(board);
     int ph = row;
     row = col;
     col = ph;
@@ -60,18 +64,18 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   FormedWords *fw = NULL;
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Assume that that kwg is shared
-    points = score_move(bag, ld, tiles, 0, ntiles - 1, row, col, tiles_played,
+    points = score_move(board, ld, tiles, 0, ntiles - 1, row, col, tiles_played,
                         !dir, 0);
 
     if (dir_is_vertical(dir)) {
       // transpose back.
-      transpose(bag);
+      transpose(board);
       int ph = row;
       row = col;
       col = ph;
     }
 
-    fw = words_played(bag, tiles, 0, ntiles - 1, row, col, dir);
+    fw = words_played(board, tiles, 0, ntiles - 1, row, col, dir);
     // Assume that that kwg is shared
     populate_word_validities(kwg, fw);
   }
@@ -84,7 +88,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
       add_letter_to_rack(leave_rack, leave[i]);
     }
     // Assume that that klv is shared
-    leave_value = get_leave_value(klv, leave_rack);
+    leave_value = klv_get_leave_value(klv, leave_rack);
   }
 
   bool phonies_exist = false;
@@ -151,12 +155,12 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 // a synchronous function to return a static eval of a position.
 char *static_evaluation(const char *cgpstr, int num_plays) {
 
-  const Game *game = get_game_from_cgp(cgpstr);
+  Game *game = get_game_from_cgp(cgpstr);
 
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  const Generator *gen = game_get_gen(game);
+  Generator *gen = game_get_gen(game);
   const Bag *bag = gen_get_bag(gen);
 
   generate_moves(player_get_rack(opponent), gen, player_on_turn,

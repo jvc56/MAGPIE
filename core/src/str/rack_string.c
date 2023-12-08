@@ -1,4 +1,5 @@
-#include "string_util.h"
+#include "../util/string_util.h"
+#include "letter_distribution_string.h"
 
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"

@@ -5,11 +5,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "log.h"
-#include "string_util.h"
+#include "../util/log.h"
 #include "../util/util.h"
 
+#include "string_util.h"
+
 // Misc string functions
+
+void *memory_copy(void *dest, const void *src, size_t n) {
+  // FIXME: probably need to check if dest is big enough
+  return memcpy(dest, src, n);
+}
+
+int memory_compare(const void *s1, const void *s2, size_t n) {
+  return memcmp(s1, s2, n);
+}
 
 bool has_prefix(const char *pre, const char *str) {
   return strncmp(pre, str, string_length(pre)) == 0;
@@ -81,15 +91,6 @@ char *string_duplicate(const char *str) {
 char *string_copy(char *dest, const char *src) {
   // FIXME: this is unsafe, need to check bounds
   return strcpy(dest, src);
-}
-
-void *memory_copy(void *dest, const void *src, size_t n) {
-  // FIXME: probably need to check if dest is big enough
-  return memcpy(dest, src, n);
-}
-
-int memory_compare(const void *s1, const void *s2, size_t n) {
-  return memcmp(s1, s2, n);
 }
 
 void remove_first_newline(char *str) { str[strcspn(str, "\n")] = 0; }

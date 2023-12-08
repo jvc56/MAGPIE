@@ -1,6 +1,8 @@
 #include "autoplay_results.h"
 #include "stats.h"
 
+#include "../util/util.h"
+
 struct AutoplayResults {
   int total_games;
   int p1_wins;

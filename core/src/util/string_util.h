@@ -14,8 +14,6 @@ bool strings_equal(const char *str1, const char *str2);
 bool strings_iequal(const char *str1, const char *str2);
 char *string_duplicate(const char *str);
 char *string_copy(char *dest, const char *src);
-void *memory_copy(void *dest, const void *src, size_t n);
-int memory_compare(const void *s1, const void *s2, size_t n);
 bool is_string_empty(const char *str1);
 bool is_string_empty_or_null(const char *str);
 void remove_first_newline(char *str);
@@ -27,6 +25,8 @@ char *get_string_from_file(const char *filename);
 void write_string_to_file(const char *filename, const char *mode,
                           const char *string);
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
+void *memory_copy(void *dest, const void *src, size_t n);
+int memory_compare(const void *s1, const void *s2, size_t n);
 
 struct StringSplitter;
 typedef struct StringSplitter StringSplitter;

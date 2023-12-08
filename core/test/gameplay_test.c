@@ -27,8 +27,8 @@ void return_racks_to_bag(Game *game) {
   Bag *bag = gen_get_bag(gen);
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
-  Player *player0_rack = player_get_rack(player0);
-  Player *player1_rack = player_get_rack(player1);
+  Rack *player0_rack = player_get_rack(player0);
+  Rack *player1_rack = player_get_rack(player1);
   return_rack_to_bag(player0_rack, bag, game_get_player_draw_index(game, 0));
   return_rack_to_bag(player1_rack, bag, game_get_player_draw_index(game, 1));
 }
@@ -41,7 +41,7 @@ void assert_players_are_equal(const Player *p1, const Player *p2,
   }
 }
 
-void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores) {
+void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
   assert(game_get_consecutive_scoreless_turns(g1) ==
          game_get_consecutive_scoreless_turns(g2));
   assert(game_get_game_end_reason(g1) == game_get_game_end_reason(g2));
@@ -71,8 +71,8 @@ void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores) {
   Bag *bag2 = gen_get_bag(game_get_gen(g2));
 
   assert_boards_are_equal(board1, board2);
-  assert_bags_are_equal(bag1, bag2,
-                        letter_distribution_get_size(gen_get_ld(g1)));
+  assert_bags_are_equal(
+      bag1, bag2, letter_distribution_get_size(gen_get_ld(game_get_gen(g1))));
 }
 
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
@@ -117,8 +117,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     Player *player0 = game_get_player(actual_game, 0);
     Player *player1 = game_get_player(actual_game, 1);
 
-    Player *player0_rack = player_get_rack(player0);
-    Player *player1_rack = player_get_rack(player1);
+    Rack *player0_rack = player_get_rack(player0);
+    Rack *player1_rack = player_get_rack(player1);
 
     if (i == array_length - 1) {
       player0_score_before_last_move = player_get_score(player0);
@@ -385,22 +385,14 @@ void test_playmove(TestConfig *testconfig) {
 
   Generator *gen = game_get_gen(game);
   LetterDistribution *ld = gen_get_ld(gen);
-  MoveList *move_list = gen_get_move_list(gen);
   Bag *bag = gen_get_bag(gen);
   Board *board = gen_get_board(gen);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
 
-  Player *player0_rack = player_get_rack(player0);
-  Player *player1_rack = player_get_rack(player1);
-
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  int opponent_index = 1 - player_on_turn_index;
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
-  Rack *opponent_rack = player_get_rack(opponent);
+  Rack *player0_rack = player_get_rack(player0);
+  Rack *player1_rack = player_get_rack(player1);
 
   // Test play
   draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
@@ -412,16 +404,11 @@ void test_playmove(TestConfig *testconfig) {
   assert(player_get_score(player1) == 0);
   assert(!rack_is_empty(player0_rack));
   assert(get_number_of_letters(player0_rack) == 7);
-  assert(get_letter(board, 7, 3) ==
-         human_readable_letter_to_machine_letter(ld, "K"));
-  assert(get_letter(board, 7, 4) ==
-         human_readable_letter_to_machine_letter(ld, "Y"));
-  assert(get_letter(board, 7, 5) ==
-         human_readable_letter_to_machine_letter(ld, "N"));
-  assert(get_letter(board, 7, 6) ==
-         human_readable_letter_to_machine_letter(ld, "D"));
-  assert(get_letter(board, 7, 7) ==
-         human_readable_letter_to_machine_letter(ld, "E"));
+  assert(get_letter(board, 7, 3) == hl_to_ml(ld, "K"));
+  assert(get_letter(board, 7, 4) == hl_to_ml(ld, "Y"));
+  assert(get_letter(board, 7, 5) == hl_to_ml(ld, "N"));
+  assert(get_letter(board, 7, 6) == hl_to_ml(ld, "D"));
+  assert(get_letter(board, 7, 7) == hl_to_ml(ld, "E"));
   assert(game_get_player_on_turn_index(game) == 1);
   assert(get_tiles_remaining(bag) == 88);
   assert(get_tiles_played(board) == 5);
@@ -441,15 +428,9 @@ void test_playmove(TestConfig *testconfig) {
   assert(get_tiles_remaining(bag) == 93);
   assert(get_tiles_played(board) == 0);
 
-  assert(get_number_of_letter(
-             player0_rack, human_readable_letter_to_machine_letter(ld, "V")) ==
-         0);
-  assert(get_number_of_letter(
-             player0_rack, human_readable_letter_to_machine_letter(ld, "W")) ==
-         0);
-  assert(get_number_of_letter(
-             player0_rack, human_readable_letter_to_machine_letter(ld, "U")) ==
-         2);
+  assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "V")) == 0);
+  assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "W")) == 0);
+  assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "U")) == 2);
 
   // Test pass
   load_cgp(game,
@@ -497,22 +478,11 @@ void test_set_random_rack(TestConfig *testconfig) {
 
   Generator *gen = game_get_gen(game);
   LetterDistribution *ld = gen_get_ld(gen);
-  MoveList *move_list = gen_get_move_list(gen);
   Bag *bag = gen_get_bag(gen);
-  Board *board = gen_get_board(gen);
 
   Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
 
-  Player *player0_rack = player_get_rack(player0);
-  Player *player1_rack = player_get_rack(player1);
-
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  int opponent_index = 1 - player_on_turn_index;
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
-  Rack *opponent_rack = player_get_rack(opponent);
+  Rack *player0_rack = player_get_rack(player0);
 
   assert(get_tiles_remaining(bag) == 100);
   // draw some random rack.
@@ -556,22 +526,14 @@ void test_backups(TestConfig *testconfig) {
 
   Generator *gen = game_get_gen(game);
   LetterDistribution *ld = gen_get_ld(gen);
-  MoveList *move_list = gen_get_move_list(gen);
   Bag *bag = gen_get_bag(gen);
   Board *board = gen_get_board(gen);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
 
-  Player *player0_rack = player_get_rack(player0);
-  Player *player1_rack = player_get_rack(player1);
-
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  int opponent_index = 1 - player_on_turn_index;
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
-  Rack *opponent_rack = player_get_rack(opponent);
+  Rack *player0_rack = player_get_rack(player0);
+  Rack *player1_rack = player_get_rack(player1);
 
   // draw some random rack.
   draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
@@ -587,34 +549,19 @@ void test_backups(TestConfig *testconfig) {
 
   assert(player_get_score(player0) == 36);
   assert(player_get_score(player1) == 131);
-  assert(get_letter(board, 0, 7) ==
-         human_readable_letter_to_machine_letter(ld, "Q"));
+  assert(get_letter(board, 0, 7) == hl_to_ml(ld, "Q"));
   // let's unplay QUATORZE
   unplay_last_move(game);
   assert(player_get_score(player0) == 36);
   assert(player_get_score(player1) == 0);
 
-  assert(get_number_of_letter(
-             player1_rack, human_readable_letter_to_machine_letter(ld, "A")) ==
-         1);
-  assert(get_number_of_letter(
-             player1_rack, human_readable_letter_to_machine_letter(ld, "O")) ==
-         1);
-  assert(get_number_of_letter(
-             player1_rack, human_readable_letter_to_machine_letter(ld, "Q")) ==
-         1);
-  assert(get_number_of_letter(
-             player1_rack, human_readable_letter_to_machine_letter(ld, "R")) ==
-         1);
-  assert(get_number_of_letter(
-             player1_rack, human_readable_letter_to_machine_letter(ld, "T")) ==
-         1);
-  assert(get_number_of_letter(
-             player1_rack, human_readable_letter_to_machine_letter(ld, "U")) ==
-         1);
-  assert(get_number_of_letter(
-             player1_rack, human_readable_letter_to_machine_letter(ld, "Z")) ==
-         1);
+  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "A")) == 1);
+  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "O")) == 1);
+  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "Q")) == 1);
+  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "R")) == 1);
+  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "T")) == 1);
+  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "U")) == 1);
+  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "Z")) == 1);
 
   assert(get_letter(board, 0, 7) == 0);
   // was 85 after drawing racks for both players, then was 80 after KYNDE

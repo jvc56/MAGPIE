@@ -1,8 +1,11 @@
 #include <stdlib.h>
 
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
+
 #include "klv.h"
 #include "kwg.h"
-#include "log.h"
 #include "players_data.h"
 
 struct PlayersData {

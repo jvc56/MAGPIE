@@ -3,6 +3,10 @@
 
 #include "../def/file_handler_defs.h"
 
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
+
 #include "file_handler.h"
 #include "thread_control.h"
 #include "timer.h"
@@ -39,14 +43,14 @@ ThreadControl *create_thread_control() {
       STDOUT_FILENAME, FILE_HANDLER_MODE_WRITE);
   thread_control->infile =
       create_file_handler_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
-  thread_control->timer = create_timer();
+  thread_control->timer = mtimer_create();
   return thread_control;
 }
 
 void destroy_thread_control(ThreadControl *thread_control) {
   destroy_file_handler(thread_control->outfile);
   destroy_file_handler(thread_control->infile);
-  destroy_timer(thread_control->timer);
+  mtimer_destroy(thread_control->timer);
   free(thread_control);
 }
 
@@ -92,7 +96,7 @@ void set_print_info_interval(ThreadControl *thread_control,
 }
 
 int get_check_stopping_condition_interval(ThreadControl *thread_control) {
-  thread_control->check_stopping_condition_interval;
+  return thread_control->check_stopping_condition_interval;
 }
 
 void set_check_stopping_condition_interval(

@@ -4,7 +4,9 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
 
-#include "string_util.h"
+#include "../util/string_util.h"
+#include "bag_string.h"
+#include "letter_distribution_string.h"
 
 #define BLANK_SORT_VALUE 255
 
@@ -12,7 +14,7 @@ void string_builder_add_bag(const Bag *bag,
                             const LetterDistribution *letter_distribution,
                             StringBuilder *bag_string_builder) {
   Bag *copied_bag = bag_duplicate(bag);
-  uint32_t ld_size = letter_distribution_get_size(letter_distribution);
+  int ld_size = letter_distribution_get_size(letter_distribution);
   Rack *bag_as_rack = create_rack(ld_size);
 
   int number_of_tiles = get_tiles_remaining(bag);

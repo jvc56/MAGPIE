@@ -1,8 +1,15 @@
 #ifndef INFERENCE_H
 #define INFERENCE_H
 
+#include "../def/inference_defs.h"
+
+#include "../util/log.h"
+
+#include "config.h"
+#include "game.h"
 #include "leave_rack.h"
 #include "stats.h"
+#include "thread_control.h"
 
 struct InferenceRecord;
 typedef struct InferenceRecord InferenceRecord;
@@ -39,4 +46,19 @@ uint64_t inference_get_current_rack_index(const Inference *inference);
 uint64_t inference_get_total_racks_evaluated(const Inference *inference);
 ThreadControl *inference_get_thread_control(const Inference *inference);
 
+uint64_t get_subtotal(const InferenceRecord *record, uint8_t letter,
+                      int number_of_letters, int subtotal_index_offset);
+uint64_t get_subtotal_sum_with_minimum(const InferenceRecord *record,
+                                       uint8_t letter,
+                                       int minimum_number_of_letters,
+                                       int subtotal_index_offset);
+void get_stat_for_letter(const InferenceRecord *record, Stat *stat,
+                         uint8_t letter);
+double get_probability_for_random_minimum_draw(
+    const Rack *bag_as_rack, const Rack *rack, uint8_t this_letter, int minimum,
+    int number_of_actual_tiles_played);
+uint64_t choose(uint64_t n, uint64_t k);
+
+inference_status_t infer(const Config *config, Game *game,
+                         Inference *inference);
 #endif

@@ -8,6 +8,9 @@
 #include "../def/inference_defs.h"
 #include "../def/simmer_defs.h"
 
+#include "../util/log.h"
+#include "../util/util.h"
+
 #include "error_status.h"
 
 struct ErrorStatus {

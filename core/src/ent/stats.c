@@ -1,4 +1,7 @@
 #include <math.h>
+#include <stdlib.h>
+
+#include "../util/util.h"
 
 #include "stats.h"
 

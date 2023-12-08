@@ -1,3 +1,5 @@
+#include <stdlib.h>
+
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
@@ -6,7 +8,11 @@
 #include "../ent/movegen.h"
 #include "../ent/player.h"
 
-#include "string_util.h"
+#include "../util/string_util.h"
+#include "bag_string.h"
+#include "letter_distribution_string.h"
+#include "move_string.h"
+#include "rack_string.h"
 
 void string_builder_add_player_row(
     const LetterDistribution *letter_distribution, const Player *player,
@@ -20,7 +26,7 @@ void string_builder_add_player_row(
   }
 
   char *display_player_name;
-  char *player_name = player_get_name(player);
+  const char *player_name = player_get_name(player);
   if (player_name) {
     display_player_name = string_duplicate(player_name);
   } else {
@@ -57,12 +63,10 @@ void string_builder_add_board_row(const LetterDistribution *letter_distribution,
   string_builder_add_string(game_string, "|");
 }
 
-void string_builder_add_move_with_rank_and_equity(const Game *game,
+void string_builder_add_move_with_rank_and_equity(Game *game,
                                                   StringBuilder *game_string,
                                                   int move_index) {
   Generator *gen = game_get_gen(game);
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
   MoveList *move_list = gen_get_move_list(gen);
   Move *move = move_list_get_move(move_list, move_index);
   Board *board = gen_get_board(gen);
@@ -72,7 +76,7 @@ void string_builder_add_move_with_rank_and_equity(const Game *game,
   string_builder_add_formatted_string(game_string, " %0.2f", get_equity(move));
 }
 
-void string_builder_add_game(const Game *game, StringBuilder *game_string) {
+void string_builder_add_game(Game *game, StringBuilder *game_string) {
   // TODO: update for super crossword game
   Generator *gen = game_get_gen(game);
   Player *player0 = game_get_player(game, 0);
@@ -112,4 +116,37 @@ void string_builder_add_game(const Game *game, StringBuilder *game_string) {
   }
 
   string_builder_add_string(game_string, "   ------------------------------\n");
+}
+
+char *ucgi_static_moves(Game *game, int nmoves) {
+  StringBuilder *moves_string_builder = create_string_builder();
+  LetterDistribution *ld = gen_get_ld(game_get_gen(game));
+  Generator *gen = game_get_gen(game);
+  MoveList *move_list = gen_get_move_list(gen);
+  Board *board = gen_get_board(gen);
+
+  for (int i = 0; i < nmoves; i++) {
+    Move *move = move_list_get_move(move_list, i);
+    string_builder_add_string(moves_string_builder, "info currmove ");
+    string_builder_add_ucgi_move(move, board, ld, moves_string_builder);
+
+    string_builder_add_formatted_string(moves_string_builder,
+                                        " sc %d eq %.3f it 0\n",
+                                        get_score(move), get_equity(move));
+  }
+  string_builder_add_string(moves_string_builder, "bestmove ");
+  string_builder_add_ucgi_move(move_list_get_move(move_list, 0), board, ld,
+                               moves_string_builder);
+  string_builder_add_string(moves_string_builder, "\n");
+  char *ucgi_static_moves_string =
+      string_builder_dump(moves_string_builder, NULL);
+  destroy_string_builder(moves_string_builder);
+  return ucgi_static_moves_string;
+}
+
+void print_ucgi_static_moves(Game *game, int nmoves,
+                             ThreadControl *thread_control) {
+  char *starting_moves_string_pointer = ucgi_static_moves(game, nmoves);
+  print_to_outfile(thread_control, starting_moves_string_pointer);
+  free(starting_moves_string_pointer);
 }

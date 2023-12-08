@@ -1,9 +1,11 @@
 #ifndef UTIL_H
 #define UTIL_H
 
-#include "klv.h"
-#include "move.h"
-#include "rack.h"
+#include <stdlib.h>
+
+#include "../ent/klv.h"
+#include "../ent/move.h"
+#include "../ent/rack.h"
 
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 bool has_prefix(const char *pre, const char *str);

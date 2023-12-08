@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "../src/str/string_util.h"
+#include "../src/util/string_util.h"
 #include "../src/util/log.h"
 #include "../src/util/util.h"
 
@@ -28,7 +28,7 @@ void test_leaves(TestConfig *testconfig) {
     StringSplitter *leave_and_value = split_string(line, ',', true);
     set_rack_to_string(letter_distribution, rack,
                        string_splitter_get_item(leave_and_value, 0));
-    double klv_leave_value = get_leave_value(klv, rack);
+    double klv_leave_value = klv_get_leave_value(klv, rack);
     assert(within_epsilon(
         klv_leave_value,
         string_to_double(string_splitter_get_item(leave_and_value, 1))));

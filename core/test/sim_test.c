@@ -2,11 +2,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <unistd.h> // for sleep
+#include <unistd.h>
 
-#include "../def/stats_defs.h"
+#include "../src/def/stats_defs.h"
 
-#include "../src/str/string_util.h"
+#include "../src/str/move_string.h"
+#include "../src/util/string_util.h"
 
 #include "../src/ent/move.h"
 #include "../src/ent/simmer.h"
@@ -16,7 +17,7 @@
 #include "test_util.h"
 #include "testconfig.h"
 
-void print_sim_stats(const Game *game, Simmer *simmer) {
+void print_sim_stats(Game *game, Simmer *simmer) {
   sort_plays_by_win_rate(simmer);
   Generator *gen = game_get_gen(game);
   LetterDistribution *ld = gen_get_ld(gen);
@@ -35,7 +36,7 @@ void print_sim_stats(const Game *game, Simmer *simmer) {
     char *wp = get_formatted_string("%.3f±%.3f", wp_mean, wp_se);
     char *eq = get_formatted_string("%.3f±%.3f", eq_mean, eq_se);
 
-    const char *ignore = simmed_play_is_ignore(play) ? "❌" : "";
+    const char *ignore = simmed_play_get_ignore(play) ? "❌" : "";
     Move *move = simmed_play_get_move(play);
     string_builder_add_move_description(move, ld, move_description);
     printf("%-20s%-9d%-16s%-16s%s\n", string_builder_peek(move_description),
@@ -62,7 +63,7 @@ void test_sim_single_iteration(TestConfig *testconfig) {
   Bag *bag = gen_get_bag(gen);
   Board *board = gen_get_board(gen);
   Player *player0 = game_get_player(game, 0);
-  Player *player0_rack = player_get_rack(player0);
+  Rack *player0_rack = player_get_rack(player0);
   ThreadControl *thread_control = config_get_thread_control(config);
 
   draw_rack_to_string(ld, bag, player0_rack, "AAADERW", 0);
@@ -86,7 +87,7 @@ void test_more_iterations(TestConfig *testconfig) {
   LetterDistribution *ld = gen_get_ld(gen);
   Bag *bag = gen_get_bag(gen);
   Player *player0 = game_get_player(game, 0);
-  Player *player0_rack = player_get_rack(player0);
+  Rack *player0_rack = player_get_rack(player0);
   ThreadControl *thread_control = config_get_thread_control(config);
 
   draw_rack_to_string(ld, bag, player0_rack, "AEIQRST", 0);
@@ -217,7 +218,7 @@ void test_play_similarity(TestConfig *testconfig) {
   Bag *bag = gen_get_bag(gen);
   Player *player0 = game_get_player(game, 0);
 
-  Player *player0_rack = player_get_rack(player0);
+  Rack *player0_rack = player_get_rack(player0);
 
   draw_rack_to_string(ld, bag, player0_rack, "ACEIRST", 0);
   Simmer *simmer = create_simmer(config);

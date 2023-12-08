@@ -4,7 +4,10 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 
-#include "../str/string_util.h"
+#include "../util/string_util.h"
+
+#include "../util/log.h"
+#include "../util/util.h"
 
 #include "game_history.h"
 #include "letter_distribution.h"
@@ -21,47 +24,37 @@ struct GameEvent {
 };
 
 // Setter and getter functions for GameEvent struct
-void game_event_set_game_event_type(GameEvent *event, game_event_t event_type) {
+void game_event_set_type(GameEvent *event, game_event_t event_type) {
   event->event_type = event_type;
 }
 
-game_event_t game_event_get_game_event_type(const GameEvent *event) {
+game_event_t game_event_get_type(const GameEvent *event) {
   return event->event_type;
 }
 
-void game_event_set_game_event_player_index(GameEvent *event,
-                                            int player_index) {
+void game_event_set_player_index(GameEvent *event, int player_index) {
   event->player_index = player_index;
 }
 
-int game_event_get_game_event_player_index(const GameEvent *event) {
+int game_event_get_player_index(const GameEvent *event) {
   return event->player_index;
 }
 
-void game_event_set_game_event_cumulative_score(GameEvent *event,
-                                                int cumulative_score) {
+void game_event_set_cumulative_score(GameEvent *event, int cumulative_score) {
   event->cumulative_score = cumulative_score;
 }
 
-int game_event_get_game_event_cumulative_score(const GameEvent *event) {
+int game_event_get_cumulative_score(const GameEvent *event) {
   return event->cumulative_score;
 }
 
-void game_event_set_game_event_rack(GameEvent *event, Rack *rack) {
-  event->rack = rack;
-}
+void game_event_set_rack(GameEvent *event, Rack *rack) { event->rack = rack; }
 
-Rack *game_event_get_game_event_rack(const GameEvent *event) {
-  return event->rack;
-}
+Rack *game_event_get_rack(const GameEvent *event) { return event->rack; }
 
-void game_event_set_game_event_move(GameEvent *event, Move *move) {
-  event->move = move;
-}
+void game_event_set_move(GameEvent *event, Move *move) { event->move = move; }
 
-Move *game_event_get_game_event_move(const GameEvent *event) {
-  return event->move;
-}
+Move *game_event_get_move(const GameEvent *event) { return event->move; }
 
 void game_event_set_score(GameEvent *event, int score) {
   move_set_score(event->move, score);
@@ -69,14 +62,12 @@ void game_event_set_score(GameEvent *event, int score) {
 
 Move *game_event_get_score(const GameEvent *event) { return event->move; }
 
-void game_event_set_game_event_note(GameEvent *event, const char *note) {
+void game_event_set_note(GameEvent *event, const char *note) {
   free(event->note);
   event->note = string_duplicate(note);
 }
 
-const char *game_event_get_game_event_note(const GameEvent *event) {
-  return event->note;
-}
+const char *game_event_get_note(const GameEvent *event) { return event->note; }
 
 GameEvent *create_game_event() {
   GameEvent *game_event = malloc_or_die(sizeof(GameEvent));

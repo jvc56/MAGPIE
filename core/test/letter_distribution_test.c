@@ -11,8 +11,8 @@ void test_letter_distribution(TestConfig *testconfig) {
   const LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
 
-  uint32_t previous_score;
-  for (uint32_t i = 0; i < ld_size; i++) {
+  int previous_score;
+  for (int i = 0; i < ld_size; i++) {
     int score_order_index = letter_distribution_get_score_order(ld, i);
     if (i == 0) {
       previous_score = letter_distribution_get_score(ld, BLANK_MACHINE_LETTER);
