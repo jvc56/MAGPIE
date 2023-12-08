@@ -458,9 +458,9 @@ void test_shadow_equity(TestConfig *testconfig) {
   AnchorList *anchor_list = gen_get_anchor_list(gen);
   LetterDistribution *ld = gen_get_ld(gen);
   int ld_size = letter_distribution_get_size(ld);
-  // This test checks scores only, so set move sorting
-  // to sort by score.
-  player_set_move_sort_type(player, MOVE_SORT_SCORE);
+  // This test checks equity, so set the move sorting
+  // to equity.
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
 
   // Check best leave values for a give rack.
   Rack *leave_rack = create_rack(ld_size);

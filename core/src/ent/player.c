@@ -82,7 +82,8 @@ Player *create_player(const Config *config, int player_index) {
   Player *player = malloc_or_die(sizeof(Player));
   player->index = player_index;
   player->score = 0;
-  player->rack = NULL;
+  player->rack = create_rack(
+      letter_distribution_get_size(config_get_letter_distribution(config)));
   update_player(config, player);
   return player;
 }

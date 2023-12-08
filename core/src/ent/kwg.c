@@ -68,9 +68,8 @@ KWG *create_kwg(const char *kwg_name) {
   return kwg;
 }
 
-KWG *create_empty_kwg(size_t number_of_nodes) {
+KWG *create_empty_kwg() {
   KWG *kwg = malloc_or_die(sizeof(KWG));
-  kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
   return kwg;
 }
 

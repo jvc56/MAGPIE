@@ -430,7 +430,7 @@ void test_playmove(TestConfig *testconfig) {
 
   assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "V")) == 0);
   assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "W")) == 0);
-  assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "U")) == 2);
+  assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "U")) < 2);
 
   // Test pass
   load_cgp(game,

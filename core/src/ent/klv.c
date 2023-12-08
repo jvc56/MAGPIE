@@ -123,7 +123,7 @@ void load_klv(KLV *klv, const char *klv_name) {
   }
   kwg_size = le32toh(kwg_size);
 
-  klv->kwg = create_empty_kwg(kwg_size);
+  klv->kwg = create_empty_kwg();
 
   kwg_read_nodes_from_stream(klv->kwg, kwg_size, stream);
 

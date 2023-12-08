@@ -13,14 +13,15 @@
 void string_builder_add_bag(const Bag *bag,
                             const LetterDistribution *letter_distribution,
                             StringBuilder *bag_string_builder) {
-  Bag *copied_bag = bag_duplicate(bag);
   int ld_size = letter_distribution_get_size(letter_distribution);
   Rack *bag_as_rack = create_rack(ld_size);
 
+  Bag *copied_bag = bag_duplicate(bag);
   int number_of_tiles = get_tiles_remaining(bag);
   for (int i = 0; i < number_of_tiles; i++) {
     add_letter_to_rack(bag_as_rack, draw_random_letter(copied_bag, 0));
   }
+  destroy_bag(copied_bag);
 
   for (int i = 1; i < ld_size; i++) {
     for (int j = 0; j < get_number_of_letter(bag_as_rack, i); j++) {
@@ -35,4 +36,5 @@ void string_builder_add_bag(const Bag *bag,
     string_builder_add_user_visible_letter(
         letter_distribution, bag_string_builder, BLANK_MACHINE_LETTER);
   }
+  destroy_rack(bag_as_rack);
 }

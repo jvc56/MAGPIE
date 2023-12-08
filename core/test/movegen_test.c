@@ -73,12 +73,15 @@ void test_simple_case(Game *game, Player *player, const char *rack_string,
   reset_game(game);
   reset_rack(player_get_rack(player));
   gen_set_current_anchor_col(gen, current_anchor_col);
-  set_rack_to_string(ld, player_get_rack(player), rack_string);
+  int num_mls = set_rack_to_string(ld, player_get_rack(player), rack_string);
+  if (num_mls < 0) {
+    log_fatal("could not set rack to string: %s\n", rack_string);
+  }
   set_row(game, row, row_string);
-  gen_set_current_anchor_col(gen, row);
+  gen_set_current_row_index(gen, row);
   execute_recursive_gen(gen, gen_get_current_anchor_col(gen), player,
                         gen_get_current_anchor_col(gen),
-                        gen_get_current_anchor_col(gen), 1);
+                        gen_get_current_anchor_col(gen), true);
   assert(expected_plays == move_list_get_count(move_list));
   reset_game(game);
   reset_rack(player_get_rack(player));
@@ -102,7 +105,7 @@ void macondo_tests(TestConfig *testconfig) {
   set_rack_to_string(ld, player_get_rack(player), "AEINRST");
   execute_recursive_gen(gen, gen_get_current_anchor_col(gen), player,
                         gen_get_current_anchor_col(gen),
-                        gen_get_current_anchor_col(gen), 1);
+                        gen_get_current_anchor_col(gen), true);
   assert(move_list_get_count(move_list) == 0);
 
   // TestSimpleRowGen
@@ -135,7 +138,7 @@ void macondo_tests(TestConfig *testconfig) {
                        ml);
   execute_recursive_gen(gen, gen_get_current_anchor_col(gen), player,
                         gen_get_current_anchor_col(gen),
-                        gen_get_current_anchor_col(gen), 1);
+                        gen_get_current_anchor_col(gen), true);
   // it should generate HITHERMOST only
   assert(move_list_get_count(move_list) == 1);
   assert_move(game, NULL, 0, "5B HI(THERMOS)T 36");
@@ -149,7 +152,7 @@ void macondo_tests(TestConfig *testconfig) {
   gen_set_current_anchor_col(gen, 8);
   execute_recursive_gen(gen, gen_get_current_anchor_col(gen), player,
                         gen_get_current_anchor_col(gen),
-                        gen_get_current_anchor_col(gen), 1);
+                        gen_get_current_anchor_col(gen), true);
 
   assert(move_list_get_count(move_list) == 2);
 
@@ -169,7 +172,7 @@ void macondo_tests(TestConfig *testconfig) {
   gen_set_current_anchor_col(gen, 8);
   execute_recursive_gen(gen, gen_get_current_anchor_col(gen), player,
                         gen_get_current_anchor_col(gen),
-                        gen_get_current_anchor_col(gen), 1);
+                        gen_get_current_anchor_col(gen), true);
   assert(move_list_get_count(move_list) == 1);
   assert_move(game, NULL, 0, "15C A(VENGED) 12");
 
@@ -182,7 +185,7 @@ void macondo_tests(TestConfig *testconfig) {
   gen_set_current_anchor_col(gen, 11);
   execute_recursive_gen(gen, gen_get_current_anchor_col(gen), player,
                         gen_get_current_anchor_col(gen),
-                        gen_get_current_anchor_col(gen), 1);
+                        gen_get_current_anchor_col(gen), true);
   assert(move_list_get_count(move_list) == 1);
   assert_move(game, NULL, 0, "1L (F)A 5");
 
@@ -199,7 +202,7 @@ void macondo_tests(TestConfig *testconfig) {
     gen_set_current_anchor_col(gen, anchor_col);
     execute_recursive_gen(gen, gen_get_current_anchor_col(gen), player,
                           gen_get_current_anchor_col(gen),
-                          gen_get_current_anchor_col(gen), 0);
+                          gen_get_current_anchor_col(gen), false);
     gen_set_last_anchor_col(gen, anchor_col);
   }
   assert(move_list_get_count(move_list) == 34);

@@ -11,14 +11,12 @@ void test_letter_distribution(TestConfig *testconfig) {
   const LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
 
-  int previous_score;
+  int previous_score = 100000;
   for (int i = 0; i < ld_size; i++) {
     int score_order_index = letter_distribution_get_score_order(ld, i);
-    if (i == 0) {
-      previous_score = letter_distribution_get_score(ld, BLANK_MACHINE_LETTER);
-    }
     assert(letter_distribution_get_score(ld, score_order_index) <=
            previous_score);
+    previous_score = letter_distribution_get_score(ld, score_order_index);
   }
 }
 

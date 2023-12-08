@@ -92,13 +92,13 @@ void string_builder_add_move(const Board *board, const Move *move,
 
     if (board && (tile == PLAYED_THROUGH_MARKER) &&
         (i == get_tiles_length(move) - 1 ||
-         get_tile(move, i) != PLAYED_THROUGH_MARKER)) {
+         get_tile(move, i + 1) != PLAYED_THROUGH_MARKER)) {
       string_builder_add_string(string_builder, ")");
     }
 
-    if (board && tile != PLAYED_THROUGH_MARKER &&
+    if (board && (tile != PLAYED_THROUGH_MARKER) &&
         (i + 1 < get_tiles_length(move)) &&
-        get_tile(move, i) == PLAYED_THROUGH_MARKER) {
+        get_tile(move, i + 1) == PLAYED_THROUGH_MARKER) {
       string_builder_add_string(string_builder, "(");
     }
 

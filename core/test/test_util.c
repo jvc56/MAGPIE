@@ -278,7 +278,7 @@ void assert_move(Game *game, const SortedMoveList *sml, int move_index,
   }
   string_builder_add_move(board, move, ld, move_string);
   if (!strings_equal(string_builder_peek(move_string), expected_move_string)) {
-    fprintf(stderr, "moves are not equal\ngot: >%s<\nexp: >%s",
+    fprintf(stderr, "moves are not equal\ngot: >%s<\nexp: >%s<\n",
             string_builder_peek(move_string), expected_move_string);
     assert(0);
   }

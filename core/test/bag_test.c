@@ -59,14 +59,14 @@ void test_bag(TestConfig *testconfig) {
     draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
     drawing_player = 1 - drawing_player;
     number_of_remaining_tiles -= RACK_SIZE;
-    assert(rack_is_empty(rack));
+    assert(!rack_is_empty(rack));
     assert(get_number_of_letters(rack) == RACK_SIZE);
     reset_rack(rack);
   }
 
   draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
   assert(bag_is_empty(bag));
-  assert(rack_is_empty(rack));
+  assert(!rack_is_empty(rack));
   assert(get_number_of_letters(rack) == number_of_remaining_tiles);
   reset_rack(rack);
 

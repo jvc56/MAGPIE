@@ -48,7 +48,7 @@ void test_rack_main(TestConfig *testconfig) {
   assert(get_number_of_letter(rack, 19) == 1);
   assert(get_number_of_letter(rack, 23) == 1);
   assert(!rack_is_empty(rack));
-  assert(get_number_of_letters(rack) == 7);
+  assert(get_number_of_letters(rack) == 6);
 
   take_letter_from_rack(rack, 14);
   assert(get_number_of_letter(rack, 1) == 1);
@@ -58,7 +58,7 @@ void test_rack_main(TestConfig *testconfig) {
   assert(get_number_of_letter(rack, 19) == 1);
   assert(get_number_of_letter(rack, 23) == 1);
   assert(!rack_is_empty(rack));
-  assert(get_number_of_letters(rack) == 7);
+  assert(get_number_of_letters(rack) == 5);
 
   take_letter_from_rack(rack, 1);
   assert(!rack_is_empty(rack));

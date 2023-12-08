@@ -82,7 +82,8 @@ void take_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
 void add_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
                                          uint8_t letter) {
   add_letter_to_rack(rack, letter);
-  leave_map_add_letter(leave_map, letter, get_number_of_letter(rack, letter));
+  leave_map_add_letter(leave_map, letter,
+                       get_number_of_letter(rack, letter) - 1);
 }
 
 void init_leave_map(const Rack *rack, LeaveMap *leave_map) {

@@ -60,6 +60,8 @@ void run_all(TestConfig *testconfig) {
   test_stats();
   test_infer(testconfig);
   test_sim(testconfig);
+  // FIXME: find out why this breaks
+  // on github CLI
   // test_command(testconfig);
   test_gcg();
   test_autoplay(testconfig);
@@ -72,15 +74,15 @@ void run_test(TestConfig *testconfig, const char *subtest) {
     test_config();
   } else if (strings_equal(subtest, "players")) {
     test_players_data();
-  } else if (strings_equal(subtest, "stringutil")) {
+  } else if (strings_equal(subtest, "string")) {
     test_string_util();
-  } else if (strings_equal(subtest, "alphabet")) {
+  } else if (strings_equal(subtest, "alpha")) {
     test_alphabet(testconfig);
   } else if (strings_equal(subtest, "ld")) {
     test_letter_distribution(testconfig);
   } else if (strings_equal(subtest, "sml")) {
     test_str_to_machine_letters(testconfig);
-  } else if (strings_equal(subtest, "leaves")) {
+  } else if (strings_equal(subtest, "l")) {
     test_leaves(testconfig);
   } else if (strings_equal(subtest, "leavemap")) {
     test_leave_map(testconfig);
@@ -98,7 +100,7 @@ void run_test(TestConfig *testconfig, const char *subtest) {
     test_shadow(testconfig);
   } else if (strings_equal(subtest, "movegen")) {
     test_movegen(testconfig);
-  } else if (strings_equal(subtest, "equityadjustments")) {
+  } else if (strings_equal(subtest, "eq")) {
     test_equity_adjustments(testconfig);
   } else if (strings_equal(subtest, "gameplay")) {
     test_gameplay(testconfig);

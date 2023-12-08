@@ -17,16 +17,18 @@
 #define MULTICHAR_START_DELIMITIER '['
 #define MULTICHAR_END_DELIMITIER ']'
 
-typedef struct LetterDistribution {
+struct LetterDistribution {
   int size;
   int *distribution;
   int *scores;
+  // machine letters sorted in descending
+  // score order
   int *score_order;
   bool *is_vowel;
   int total_tiles;
   int max_tile_length;
   char ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
-} LetterDistribution;
+};
 
 int letter_distribution_get_size(const LetterDistribution *ld) {
   return ld->size;
@@ -71,6 +73,25 @@ char *get_letter_distribution_filepath(const char *ld_name) {
   }
   return get_formatted_string("%s%s%s", LETTER_DISTRIBUTION_FILEPATH, ld_name,
                               LETTER_DISTRIBUTION_FILE_EXTENSION);
+}
+
+// Sort the machine letters in descending score order
+void sort_score_order(LetterDistribution *letter_distribution) {
+  int *score_order = letter_distribution->score_order;
+  int *scores = letter_distribution->scores;
+  int size = letter_distribution->size;
+
+  for (int i = 1; i < size; ++i) {
+    int key = score_order[i];
+    int j = i - 1;
+
+    while (j >= 0 && scores[score_order[j]] < scores[key]) {
+      score_order[j + 1] = score_order[j];
+      --j;
+    }
+
+    score_order[j + 1] = key;
+  }
 }
 
 void load_letter_distribution(LetterDistribution *letter_distribution,
@@ -129,6 +150,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     }
 
     letter_distribution->distribution[machine_letter] = dist;
+    letter_distribution->score_order[i] = machine_letter;
     letter_distribution->scores[machine_letter] = score;
     letter_distribution->is_vowel[machine_letter] = is_vowel == 1;
 
@@ -140,22 +162,13 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
       string_copy(letter_distribution->ml_to_hl[blanked_machine_letter],
                   lower_case_letter);
     }
-
-    // FIXME: use qsort or some sort library
-    int i = machine_letter;
-    for (;
-         i > 0 &&
-         (int)letter_distribution
-                 ->scores[(int)letter_distribution->score_order[i - 1]] < score;
-         i--) {
-      letter_distribution->score_order[i] =
-          letter_distribution->score_order[i - 1];
-    }
-    letter_distribution->score_order[i] = machine_letter;
     destroy_string_splitter(single_letter_info);
     machine_letter++;
   }
   destroy_string_splitter(letter_distribution_lines);
+
+  sort_score_order(letter_distribution);
+
   letter_distribution->max_tile_length = max_tile_length;
 }
 
