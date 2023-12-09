@@ -93,8 +93,8 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 
   bool phonies_exist = false;
   StringBuilder *phonies_string_builder = create_string_builder();
-  int number_of_words = formed_words_get_num_words(fw);
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    int number_of_words = formed_words_get_num_words(fw);
     for (int i = 0; i < number_of_words; i++) {
       if (!formed_words_get_word_valid(fw, i)) {
         phonies_exist = true;
