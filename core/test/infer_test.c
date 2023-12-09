@@ -66,6 +66,8 @@ void test_trivial_random_probability(TestConfig *testconfig) {
                             bag_as_rack, leave, hl_to_ml(ld, "E"), 4, 1),
                         1));
 
+  destroy_rack(leave);
+  destroy_rack(bag_as_rack);
   destroy_game(game);
   destroy_inference(inference);
 }
@@ -643,18 +645,14 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
 
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Keeping any one of D, H, R, or S is valid
-  assert(get_subtotal(inference_get_leave_record(inference),
-                      hl_to_ml(ld, "D"), 1,
-                      INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
-  assert(get_subtotal(inference_get_leave_record(inference),
-                      hl_to_ml(ld, "H"), 1,
-                      INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
-  assert(get_subtotal(inference_get_leave_record(inference),
-                      hl_to_ml(ld, "R"), 1,
-                      INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
-  assert(get_subtotal(inference_get_leave_record(inference),
-                      hl_to_ml(ld, "S"), 1,
-                      INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
+  assert(get_subtotal(inference_get_leave_record(inference), hl_to_ml(ld, "D"),
+                      1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
+  assert(get_subtotal(inference_get_leave_record(inference), hl_to_ml(ld, "H"),
+                      1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
+  assert(get_subtotal(inference_get_leave_record(inference), hl_to_ml(ld, "R"),
+                      1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
+  assert(get_subtotal(inference_get_leave_record(inference), hl_to_ml(ld, "S"),
+                      1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
 
   // There are exchanges where throwing back at least one
   // of these is correct
@@ -675,9 +673,8 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) != 0);
 
   // Exchanges with the I are never correct
-  assert(get_subtotal(inference_get_leave_record(inference),
-                      hl_to_ml(ld, "I"), 1,
-                      INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
+  assert(get_subtotal(inference_get_leave_record(inference), hl_to_ml(ld, "I"),
+                      1, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);
   assert(get_subtotal(inference_get_exchanged_record(inference),
                       hl_to_ml(ld, "I"), 1,
                       INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW) == 0);

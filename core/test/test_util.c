@@ -33,7 +33,7 @@ bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 void load_config_or_die(Config *config, const char *cmd) {
   config_load_status_t status = load_config(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
-    log_fatal("load config failed with status %d\n", status);
+    log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
 }
 

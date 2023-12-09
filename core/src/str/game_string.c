@@ -30,6 +30,7 @@ void string_builder_add_player_row(
   if (player_name) {
     display_player_name = string_duplicate(player_name);
   } else {
+    printf("player index: %d\n", player_get_index(player));
     display_player_name =
         get_formatted_string("Player %d", player_get_index(player) + 1);
   }

@@ -276,8 +276,8 @@ void test_sim(TestConfig *testconfig) {
   Config *config = create_default_config();
   load_config_or_die(
       config,
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1000000 "
-      "threads 4"
+      "setoptions s1 score s2 score r1 all r2 all numplays 1000000 "
+      "threads 4 "
       "cgp "
       "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"
       "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ "

@@ -66,10 +66,6 @@ void record_results(Game *game, AutoplayResults *autoplay_results,
 
 void play_autoplay_game(Game *game, AutoplayResults *autoplay_results,
                         int starting_player_index) {
-  game_end_reason_t game_end_reason = game_get_game_end_reason(game);
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
   Generator *gen = game_get_gen(game);
   Bag *bag = gen_get_bag(gen);
   MoveList *move_list = gen_get_move_list(gen);
@@ -77,7 +73,10 @@ void play_autoplay_game(Game *game, AutoplayResults *autoplay_results,
   reset_game(game);
   set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
-  while (game_end_reason == GAME_END_REASON_NONE) {
+  while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+    int player_on_turn_index = game_get_player_on_turn_index(game);
+    Player *player_on_turn = game_get_player(game, player_on_turn_index);
+    Player *opponent = game_get_player(game, 1 - player_on_turn_index);
     generate_moves(player_get_rack(opponent), gen, player_on_turn,
                    get_tiles_remaining(bag) >= RACK_SIZE, MOVE_RECORD_BEST,
                    player_get_move_sort_type(player_on_turn), true);

@@ -45,6 +45,7 @@ void autoplay_game_pairs_test(TestConfig *testconfig) {
                         get_stdev(get_p2_score(autoplay_results))));
 
   load_config_or_die(csw_config, "setoptions i 7 nogp threads 2");
+  max_iterations = config_get_max_iterations(csw_config);
 
   // Autoplay should reset the stats
   status = autoplay(csw_config, autoplay_results);

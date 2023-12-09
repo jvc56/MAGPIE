@@ -90,6 +90,7 @@ Player *create_player(const Config *config, int player_index) {
 
 Player *player_duplicate(const Player *player) {
   Player *new_player = malloc_or_die(sizeof(Player));
+  new_player->index = player->index;
   new_player->name = player->name;
   new_player->rack = rack_duplicate(player->rack);
   new_player->score = player->score;

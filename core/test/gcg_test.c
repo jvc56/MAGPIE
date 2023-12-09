@@ -200,15 +200,15 @@ void assert_game_event(const GameHistory *game_history, int event_index,
 void test_success_standard() {
   const char *gcg_filename = "success_standard.gcg";
   GameHistory *game_history = create_game_history();
-  const LetterDistribution *ld =
-      get_game_history_letter_distribution(game_history);
-
-  GameHistoryPlayer *player0 = get_game_history_player(game_history, 0);
-  GameHistoryPlayer *player1 = get_game_history_player(game_history, 1);
-
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+
+  const LetterDistribution *ld =
+      get_game_history_letter_distribution(game_history);
+  GameHistoryPlayer *player0 = get_game_history_player(game_history, 0);
+  GameHistoryPlayer *player1 = get_game_history_player(game_history, 1);
+
   assert(strings_equal(get_game_history_title(game_history), "test game"));
   assert(strings_equal(get_game_history_description(game_history),
                        "Created with Macondo"));
@@ -266,11 +266,11 @@ void test_success_standard() {
 void test_success_five_point_challenge() {
   const char *gcg_filename = "success_five_point_challenge.gcg";
   GameHistory *game_history = create_game_history();
-  const LetterDistribution *ld =
-      get_game_history_letter_distribution(game_history);
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  const LetterDistribution *ld =
+      get_game_history_letter_distribution(game_history);
   assert_game_event(game_history, 16, GAME_EVENT_CHALLENGE_BONUS, 1, 398,
                     "DEIINRR", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0,
                     0, 0, "", ld);

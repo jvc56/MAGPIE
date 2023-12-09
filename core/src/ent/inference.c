@@ -599,11 +599,11 @@ Inference *inference_duplicate(const Inference *inference,
       move_list_get_capacity(gen_get_move_list(game_get_gen(inference->game))));
   // KLV can just be a pointer since it is read only
   new_inference->klv = inference->klv;
-  // Need the rack from the newly copied game
-  new_inference->player_to_infer_rack = player_get_rack(
-      game_get_player(inference->game, inference->player_to_infer_index));
-
   new_inference->player_to_infer_index = inference->player_to_infer_index;
+  // Need the rack from the newly copied game
+  new_inference->player_to_infer_rack = player_get_rack(game_get_player(
+      new_inference->game, new_inference->player_to_infer_index));
+
   new_inference->actual_score = inference->actual_score;
   new_inference->number_of_tiles_exchanged =
       inference->number_of_tiles_exchanged;
@@ -788,7 +788,6 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
     rack_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
   }
 
-  // Combine and free
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
     Inference *inference_worker = inferences_for_workers[thread_index];
