@@ -21,4 +21,8 @@ bool rack_is_empty(const Rack *rack);
 int get_number_of_letters(const Rack *rack);
 int set_rack_to_string(const LetterDistribution *letter_distribution,
                        Rack *rack, const char *rack_string);
+
+int score_on_rack(const LetterDistribution *letter_distribution,
+                  const Rack *rack);
+
 #endif

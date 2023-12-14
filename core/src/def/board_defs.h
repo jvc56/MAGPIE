@@ -8,6 +8,7 @@
 #define NUMBER_OF_CROSSES BOARD_DIM *BOARD_DIM * 2 * 2
 #define BOARD_HORIZONTAL_DIRECTION 0
 #define BOARD_VERTICAL_DIRECTION 1
+#define DEFAULT_BINGO_BONUS 50
 
 // TODO: read this from file to make it easier to configure custom boards
 #define CROSSWORD_GAME_BOARD                                                   \

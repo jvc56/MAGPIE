@@ -15,6 +15,16 @@ struct Rack {
   int number_of_letters;
 };
 
+int score_on_rack(const LetterDistribution *letter_distribution,
+                  const Rack *rack) {
+  int sum = 0;
+  for (int i = 0; i < get_array_size(rack); i++) {
+    sum += get_number_of_letter(rack, i) *
+           letter_distribution_get_score(letter_distribution, i);
+  }
+  return sum;
+}
+
 int get_array_size(const Rack *rack) { return rack->array_size; }
 
 int get_number_of_letter(const Rack *rack, uint8_t machine_letter) {

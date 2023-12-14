@@ -5,6 +5,7 @@
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 
 #include "../util/string_util.h"
 
@@ -25,6 +26,14 @@ struct Board {
   uint32_t node_index;
   bool path_is_valid;
 };
+
+int allowed(uint64_t cross_set, uint8_t letter) {
+  return (cross_set & ((uint64_t)1 << letter)) != 0;
+}
+
+int get_cross_set_index(bool kwgs_are_distinct, int player_index) {
+  return kwgs_are_distinct && player_index;
+}
 
 bool dir_is_vertical(int dir) { return dir == BOARD_VERTICAL_DIRECTION; }
 
@@ -351,3 +360,50 @@ void board_copy(Board *dst, const Board *src) {
 }
 
 void destroy_board(Board *board) { free(board); }
+
+// this function assumes the word is always horizontal. If this isn't the case,
+// the board needs to be transposed ahead of time.
+int score_move(const Board *board,
+               const LetterDistribution *letter_distribution, uint8_t word[],
+               int word_start_index, int word_end_index, int row, int col,
+               int tiles_played, int cross_dir, int cross_set_index) {
+  int ls;
+  int main_word_score = 0;
+  int cross_scores = 0;
+  int bingo_bonus = 0;
+  if (tiles_played == RACK_SIZE) {
+    bingo_bonus = DEFAULT_BINGO_BONUS;
+  }
+  int word_multiplier = 1;
+  for (int idx = 0; idx < word_end_index - word_start_index + 1; idx++) {
+    uint8_t ml = word[idx + word_start_index];
+    uint8_t bonus_square = get_bonus_square(board, row, col + idx);
+    int letter_multiplier = 1;
+    int this_word_multiplier = 1;
+    bool fresh_tile = false;
+    if (ml == PLAYED_THROUGH_MARKER) {
+      ml = get_letter(board, row, col + idx);
+    } else {
+      fresh_tile = true;
+      this_word_multiplier = bonus_square >> 4;
+      letter_multiplier = bonus_square & 0x0F;
+      word_multiplier *= this_word_multiplier;
+    }
+    int cs = get_cross_score(board, row, col + idx, cross_dir, cross_set_index);
+    if (is_blanked(ml)) {
+      ls = 0;
+    } else {
+      ls = letter_distribution_get_score(letter_distribution, ml);
+    }
+
+    main_word_score += ls * letter_multiplier;
+    bool actual_cross_word =
+        (row > 0 && !is_empty(board, row - 1, col + idx)) ||
+        ((row < BOARD_DIM - 1) && !is_empty(board, row + 1, col + idx));
+    if (fresh_tile && actual_cross_word) {
+      cross_scores += ls * letter_multiplier * this_word_multiplier +
+                      cs * this_word_multiplier;
+    }
+  }
+  return main_word_score * word_multiplier + cross_scores + bingo_bonus;
+}

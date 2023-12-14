@@ -6,8 +6,12 @@
 
 #include "../def/board_defs.h"
 
+#include "letter_distribution.h"
+
 struct Board;
 typedef struct Board Board;
+
+int allowed(uint64_t cross_set, uint8_t letter);
 
 bool dir_is_vertical(int dir);
 board_layout_t
@@ -52,5 +56,10 @@ void incrememt_tiles_played(Board *board, int tiles_played);
 void update_anchors(Board *board, int row, int col, int dir);
 void update_all_anchors(Board *board);
 int word_edge(const Board *board, int row, int col, int dir);
+int score_move(const Board *board,
+               const LetterDistribution *letter_distribution, uint8_t word[],
+               int word_start_index, int word_end_index, int row, int col,
+               int tiles_played, int cross_dir, int cross_set_index);
+int get_cross_set_index(bool kwgs_are_distinct, int player_index);
 
 #endif

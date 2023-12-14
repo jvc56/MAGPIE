@@ -68,61 +68,11 @@ struct MoveGen {
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play);
 
-MoveList *gen_get_move_list(MoveGen *gen) { return gen->move_list; }
-
 AnchorList *gen_get_anchor_list(MoveGen *gen) { return gen->anchor_list; }
 
 double *gen_get_best_leaves(MoveGen *gen) { return gen->best_leaves; }
 
 LeaveMap *gen_get_leave_map(MoveGen *gen) { return gen->leave_map; }
-
-bool gen_get_kwgs_are_distinct(const MoveGen *gen) {
-  return gen->kwgs_are_distinct;
-}
-
-int gen_get_current_row_index(const MoveGen *gen) {
-  return gen->current_row_index;
-}
-
-int gen_get_current_anchor_col(const MoveGen *gen) {
-  return gen->current_anchor_col;
-}
-
-void gen_set_move_sort_type(MoveGen *gen, move_sort_t move_sort_type) {
-  gen->move_sort_type = move_sort_type;
-}
-
-void gen_set_move_record_type(MoveGen *gen, move_record_t move_record_type) {
-  gen->move_record_type = move_record_type;
-}
-
-void gen_set_current_anchor_col(MoveGen *gen, int anchor_col) {
-  gen->current_anchor_col = anchor_col;
-}
-
-void gen_set_last_anchor_col(MoveGen *gen, int anchor_col) {
-  gen->last_anchor_col = anchor_col;
-}
-
-void gen_set_current_row_index(MoveGen *gen, int row_index) {
-  gen->current_row_index = row_index;
-}
-
-void gen_set_dir(MoveGen *gen, int dir) { gen->dir = dir; }
-
-int score_on_rack(const LetterDistribution *letter_distribution,
-                  const Rack *rack) {
-  int sum = 0;
-  for (int i = 0; i < get_array_size(rack); i++) {
-    sum += get_number_of_letter(rack, i) *
-           letter_distribution_get_score(letter_distribution, i);
-  }
-  return sum;
-}
-
-int get_cross_set_index(bool kwgs_are_distinct, int player_index) {
-  return kwgs_are_distinct && player_index;
-}
 
 double placement_adjustment(const MoveGen *gen, const Move *move) {
   int start = get_col_start(move);
@@ -201,53 +151,6 @@ double get_spare_move_equity(const MoveGen *gen) {
   }
 
   return ((double)get_score(spare_move)) + leave_adjustment + other_adjustments;
-}
-
-// this function assumes the word is always horizontal. If this isn't the case,
-// the board needs to be transposed ahead of time.
-int score_move(const Board *board,
-               const LetterDistribution *letter_distribution, uint8_t word[],
-               int word_start_index, int word_end_index, int row, int col,
-               int tiles_played, int cross_dir, int cross_set_index) {
-  int ls;
-  int main_word_score = 0;
-  int cross_scores = 0;
-  int bingo_bonus = 0;
-  if (tiles_played == RACK_SIZE) {
-    bingo_bonus = DEFAULT_BINGO_BONUS;
-  }
-  int word_multiplier = 1;
-  for (int idx = 0; idx < word_end_index - word_start_index + 1; idx++) {
-    uint8_t ml = word[idx + word_start_index];
-    uint8_t bonus_square = get_bonus_square(board, row, col + idx);
-    int letter_multiplier = 1;
-    int this_word_multiplier = 1;
-    bool fresh_tile = false;
-    if (ml == PLAYED_THROUGH_MARKER) {
-      ml = get_letter(board, row, col + idx);
-    } else {
-      fresh_tile = true;
-      this_word_multiplier = bonus_square >> 4;
-      letter_multiplier = bonus_square & 0x0F;
-      word_multiplier *= this_word_multiplier;
-    }
-    int cs = get_cross_score(board, row, col + idx, cross_dir, cross_set_index);
-    if (is_blanked(ml)) {
-      ls = 0;
-    } else {
-      ls = letter_distribution_get_score(letter_distribution, ml);
-    }
-
-    main_word_score += ls * letter_multiplier;
-    bool actual_cross_word =
-        (row > 0 && !is_empty(board, row - 1, col + idx)) ||
-        ((row < BOARD_DIM - 1) && !is_empty(board, row + 1, col + idx));
-    if (fresh_tile && actual_cross_word) {
-      cross_scores += ls * letter_multiplier * this_word_multiplier +
-                      cs * this_word_multiplier;
-    }
-  }
-  return main_word_score * word_multiplier + cross_scores + bingo_bonus;
 }
 
 void record_play(MoveGen *gen, int leftstrip, int rightstrip,
@@ -361,10 +264,6 @@ bool better_play_has_been_found(const MoveGen *gen,
                                       ? get_equity(move)
                                       : get_score(move);
   return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
-}
-
-int allowed(uint64_t cross_set, uint8_t letter) {
-  return (cross_set & ((uint64_t)1 << letter)) != 0;
 }
 
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
