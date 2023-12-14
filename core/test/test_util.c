@@ -37,21 +37,8 @@ void load_config_or_die(Config *config, const char *cmd) {
   }
 }
 
-void generate_moves_for_game(Game *game) {
-  Generator *gen = game_get_gen(game);
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Bag *bag = gen_get_bag(gen);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  Rack *opponent_rack = player_get_rack(opponent);
-  generate_moves(opponent_rack, gen, player_on_turn,
-                 get_tiles_remaining(bag) >= RACK_SIZE,
-                 player_get_move_record_type(player_on_turn),
-                 player_get_move_sort_type(player_on_turn), true);
-}
-
 void generate_leaves_for_game(Game *game, bool add_exchange) {
-  Generator *gen = game_get_gen(game);
+  MoveGen *gen = game_get_move_gen(game);
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
 
@@ -68,7 +55,21 @@ void generate_leaves_for_game(Game *game, bool add_exchange) {
   }
 
   // Set the best leaves and maybe add exchanges.
-  generate_exchange_moves(gen, player_on_turn, 0, 0, add_exchange);
+  generate_exchange_moves(gen, 0, 0, add_exchange);
+}
+
+// Comparison function for qsort
+int compare_moves_for_sml(const void *a, const void *b) {
+  const Move *move_a = *(const Move **)a;
+  const Move *move_b = *(const Move **)b;
+
+  // Compare moves based on their scores
+  return get_score(move_b) - get_score(move_a);
+}
+
+// Function to sort the moves in the SortedMoveList
+void resort_sorted_move_list_by_score(SortedMoveList *sml) {
+  qsort(sml->moves, sml->count, sizeof(Move *), compare_moves_for_sml);
 }
 
 SortedMoveList *create_sorted_move_list(MoveList *ml) {
@@ -93,7 +94,7 @@ void print_move_list(const Board *board,
                      const SortedMoveList *sml, int move_list_length) {
   StringBuilder *move_list_string = create_string_builder();
   for (int i = 0; i < move_list_length; i++) {
-    string_builder_add_move(board, sml->moves[0], letter_distribution,
+    string_builder_add_move(board, sml->moves[i], letter_distribution,
                             move_list_string);
     string_builder_add_string(move_list_string, "\n");
   }
@@ -124,23 +125,18 @@ void sort_and_print_move_list(const Board *board,
 }
 
 void play_top_n_equity_move(Game *game, int n) {
-  Generator *gen = game_get_gen(game);
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Bag *bag = gen_get_bag(gen);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  Rack *opponent_rack = player_get_rack(opponent);
-  MoveList *move_list = gen_get_move_list(gen);
-
-  generate_moves(opponent_rack, gen, player_on_turn,
-                 get_tiles_remaining(bag) >= RACK_SIZE,
-                 player_get_move_record_type(player_on_turn),
-                 player_get_move_sort_type(player_on_turn), true);
-
+  generate_moves_for_game_with_player_move_types(game);
+  MoveList *move_list = game_get_move_list(game);
   SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
   play_move(sorted_move_list->moves[n], game);
   destroy_sorted_move_list(sorted_move_list);
-  reset_move_list(move_list);
+}
+
+void load_cgp_or_die(Game *game, const char *cgp) {
+  cgp_parse_status_t cgp_parse_status = load_cgp(game, cgp);
+  if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+    log_fatal("cgp load failed with %d\n", cgp_parse_status);
+  }
 }
 
 void draw_rack_to_string(const LetterDistribution *letter_distribution,
@@ -263,11 +259,9 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
 
 void assert_move(Game *game, const SortedMoveList *sml, int move_index,
                  const char *expected_move_string) {
-
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
-  MoveList *move_list = gen_get_move_list(gen);
-  Board *board = gen_get_board(gen);
+  Board *board = game_get_board(game);
+  LetterDistribution *ld = game_get_ld(game);
+  MoveList *move_list = game_get_move_list(game);
 
   StringBuilder *move_string = create_string_builder();
   Move *move;

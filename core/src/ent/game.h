@@ -3,9 +3,11 @@
 
 #include "../def/game_defs.h"
 
+#include "bag.h"
 #include "board.h"
 #include "config.h"
-#include "movegen.h"
+#include "move.h"
+#include "move_gen.h"
 #include "player.h"
 
 struct MinimalGameBackup;
@@ -14,7 +16,11 @@ typedef struct MinimalGameBackup MinimalGameBackup;
 struct Game;
 typedef struct Game Game;
 
-Generator *game_get_gen(Game *game);
+MoveGen *game_get_move_gen(Game *game);
+MoveList *game_get_move_list(Game *game);
+Board *game_get_board(Game *game);
+Bag *game_get_bag(Game *game);
+LetterDistribution *game_get_ld(Game *game);
 Player *game_get_player(Game *game, int player_index);
 int game_get_player_on_turn_index(const Game *game);
 game_end_reason_t game_get_game_end_reason(const Game *game);
@@ -22,6 +28,8 @@ backup_mode_t game_get_backup_mode(const Game *game);
 int game_get_consecutive_scoreless_turns(const Game *game);
 int game_get_player_draw_index(const Game *game, int player_index);
 int game_get_player_on_turn_draw_index(const Game *game);
+bool game_get_data_is_shared(const Game *game,
+                             players_data_t players_data_type);
 void game_set_consecutive_scoreless_turns(Game *game, int value);
 void game_increment_consecutive_scoreless_turns(Game *game);
 

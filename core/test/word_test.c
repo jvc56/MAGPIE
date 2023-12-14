@@ -16,8 +16,7 @@ void test_words_played(TestConfig *testconfig) {
   Game *game = create_game(config);
   load_cgp(game, VS_ED);
 
-  Generator *gen = game_get_gen(game);
-  Board *board = gen_get_board(gen);
+  Board *board = game_get_board(game);
   Player *player0 = game_get_player(game, 0);
   const KWG *kwg = player_get_kwg(player0);
 

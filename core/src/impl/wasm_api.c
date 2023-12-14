@@ -15,33 +15,36 @@
 #include "../ent/error_status.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
-#include "../ent/movegen.h"
+#include "../ent/move_gen.h"
 #include "../ent/words.h"
 
 #include "../impl/exec.h"
+#include "../impl/gameplay.h"
 
 static CommandVars *wasm_command_vars = NULL;
 static CommandVars *iso_command_vars = NULL;
 
-Game *get_game_from_cgp(const char *cgp) {
+void load_cgp_into_iso_command_vars(const char *cgp, int num_plays) {
   // Use a separate command vars to get
   // a game for score_play and static_evaluation
   if (!iso_command_vars) {
     iso_command_vars = create_command_vars();
   }
-  char *cgp_command = get_formatted_string("position cgp %s", cgp);
+  char *cgp_command =
+      get_formatted_string("position cgp %s numplays %d", cgp, num_plays);
   execute_command_sync(iso_command_vars, cgp_command);
   free(cgp_command);
-  return command_vars_get_game(iso_command_vars);
 }
 
 // tiles must contain 0 for play-through tiles!
 char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
                  uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
-  Game *game = get_game_from_cgp(cgpstr);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
-  Board *board = gen_get_board(gen);
+  load_cgp_into_iso_command_vars(cgpstr, 1);
+  Game *game = command_vars_get_game(iso_command_vars);
+  Board *board = game_get_board(game);
+  LetterDistribution *ld = game_get_ld(game);
+
+  // Assume players are using the same kwg and klv
   const KWG *kwg = player_get_kwg(game_get_player(game, 0));
   const KLV *klv = player_get_klv(game_get_player(game, 0));
 
@@ -154,28 +157,13 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 
 // a synchronous function to return a static eval of a position.
 char *static_evaluation(const char *cgpstr, int num_plays) {
-
-  Game *game = get_game_from_cgp(cgpstr);
-
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  Generator *gen = game_get_gen(game);
-  const Bag *bag = gen_get_bag(gen);
-
-  generate_moves(player_get_rack(opponent), gen, player_on_turn,
-                 get_tiles_remaining(bag) >= RACK_SIZE, MOVE_RECORD_ALL,
-                 MOVE_SORT_EQUITY, true);
-
-  MoveList *move_list = gen_get_move_list(gen);
-  int number_of_moves_generated = move_list_get_count(move_list);
-  if (number_of_moves_generated < num_plays) {
-    num_plays = number_of_moves_generated;
-  }
-  sort_moves(move_list);
+  load_cgp_into_iso_command_vars(cgpstr, num_plays);
+  Game *game = command_vars_get_game(iso_command_vars);
+  generate_moves_for_game(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY);
+  sort_moves(game_get_move_list(game));
 
   // This pointer needs to be freed by the caller:
-  char *val = ucgi_static_moves(game, num_plays);
+  char *val = ucgi_static_moves(game);
   return val;
 }
 

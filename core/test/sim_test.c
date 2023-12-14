@@ -19,8 +19,7 @@
 
 void print_sim_stats(Game *game, Simmer *simmer) {
   sort_plays_by_win_rate(simmer);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
+  LetterDistribution *ld = game_get_ld(game);
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
   StringBuilder *move_description = create_string_builder();
   for (int i = 0; i < simmer_get_number_of_plays(simmer); i++) {
@@ -58,10 +57,9 @@ void test_win_pct(TestConfig *testconfig) {
 void test_sim_single_iteration(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
-  Bag *bag = gen_get_bag(gen);
-  Board *board = gen_get_board(gen);
+  Board *board = game_get_board(game);
+  Bag *bag = game_get_bag(game);
+  LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
   Rack *player0_rack = player_get_rack(player0);
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -83,9 +81,8 @@ void test_sim_single_iteration(TestConfig *testconfig) {
 void test_more_iterations(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
-  Bag *bag = gen_get_bag(gen);
+  Bag *bag = game_get_bag(game);
+  LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
   Rack *player0_rack = player_get_rack(player0);
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -113,8 +110,7 @@ void test_more_iterations(TestConfig *testconfig) {
 
 void perf_test_sim(Config *config, ThreadControl *thread_control) {
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
+  LetterDistribution *ld = game_get_ld(game);
 
   load_cgp(game, config_get_cgp(config));
   Simmer *simmer = create_simmer(config);
@@ -149,8 +145,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
 
 void perf_test_multithread_sim(Config *config) {
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
+  LetterDistribution *ld = game_get_ld(game);
   ThreadControl *thread_control = config_get_thread_control(config);
 
   int num_threads = get_number_of_threads(thread_control);
@@ -181,8 +176,7 @@ void perf_test_multithread_sim(Config *config) {
 void perf_test_multithread_blocking_sim(Config *config) {
   Game *game = create_game(config);
   ThreadControl *thread_control = config_get_thread_control(config);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
+  LetterDistribution *ld = game_get_ld(game);
 
   int num_threads = get_number_of_threads(thread_control);
   printf("Using %d threads\n", num_threads);
@@ -211,11 +205,10 @@ void perf_test_multithread_blocking_sim(Config *config) {
 void test_play_similarity(TestConfig *testconfig) {
   Config *config = testconfig->nwl_config;
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
+  Bag *bag = game_get_bag(game);
+  LetterDistribution *ld = game_get_ld(game);
   ThreadControl *thread_control = config_get_thread_control(config);
 
-  Bag *bag = gen_get_bag(gen);
   Player *player0 = game_get_player(game, 0);
 
   Rack *player0_rack = player_get_rack(player0);

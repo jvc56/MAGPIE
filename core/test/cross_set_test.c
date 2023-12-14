@@ -4,8 +4,6 @@
 
 #include "../src/def/cross_set_defs.h"
 
-#include "../src/impl/cross_set.h"
-
 #include "../src/ent/config.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
@@ -35,9 +33,8 @@ uint64_t cross_set_from_string(const LetterDistribution *letter_distribution,
 
 // This test function only works for single-char alphabets
 void set_row(Game *game, int row, const char *row_content) {
-  Generator *gen = game_get_gen(game);
-  Board *board = gen_get_board(gen);
-  LetterDistribution *ld = gen_get_ld(gen);
+  Board *board = game_get_board(game);
+  LetterDistribution *ld = game_get_ld(game);
 
   for (int i = 0; i < BOARD_DIM; i++) {
     set_letter(board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
@@ -55,9 +52,8 @@ void set_row(Game *game, int row, const char *row_content) {
 
 // This test function only works for single-char alphabets
 void set_col(Game *game, int col, const char *col_content) {
-  Generator *gen = game_get_gen(game);
-  Board *board = gen_get_board(gen);
-  LetterDistribution *ld = gen_get_ld(gen);
+  Board *board = game_get_board(game);
+  LetterDistribution *ld = game_get_ld(game);
 
   for (int i = 0; i < BOARD_DIM; i++) {
     set_letter(board, i, col, ALPHABET_EMPTY_SQUARE_MARKER);
@@ -78,11 +74,10 @@ void set_col(Game *game, int col, const char *col_content) {
 void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
                         const char *letters, int expected_cross_score,
                         bool run_gcs) {
-  Generator *gen = game_get_gen(game);
-  Board *board = gen_get_board(gen);
-  LetterDistribution *ld = gen_get_ld(gen);
+  Board *board = game_get_board(game);
+  LetterDistribution *ld = game_get_ld(game);
 
-  int cross_set_index = get_cross_set_index(gen, player_index);
+  int cross_set_index = get_cross_set_index(false, player_index);
   if (run_gcs) {
     gen_cross_set(player_get_kwg(game_get_player(game, player_index)), ld,
                   board, row, col, dir, cross_set_index);
@@ -190,9 +185,8 @@ void test_cross_set(TestConfig *testconfig) {
   test_gen_cross_set(game, 12, 12, BOARD_VERTICAL_DIRECTION, 0, "", 0, false);
 
   // TestUpdateSinglecross_set
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
-  Board *board = gen_get_board(gen);
+  Board *board = game_get_board(game);
+  LetterDistribution *ld = game_get_ld(game);
   load_cgp(game, VS_MATT);
   set_letter(board, 8, 10, 19);
   set_letter(board, 9, 10, 0);

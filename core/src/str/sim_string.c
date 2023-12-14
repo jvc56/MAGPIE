@@ -18,7 +18,7 @@
 #include "../ent/game.h"
 #include "../ent/inference.h"
 #include "../ent/leave_rack.h"
-#include "../ent/movegen.h"
+#include "../ent/move_gen.h"
 #include "../ent/simmer.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
@@ -44,9 +44,8 @@ char *ucgi_sim_stats(Game *game, Simmer *simmer, ThreadControl *thread_control,
   // (error), eq(e) - equity (error) scm - mean of score, scd - stdev of
   // score, bp - bingo perc ig - this play has been cut-off
   // FIXME: get better numbers
-  LetterDistribution *ld = gen_get_ld(game_get_gen(game));
-  Generator *gen = game_get_gen(game);
-  Board *board = gen_get_board(gen);
+  LetterDistribution *ld = game_get_ld(game);
+  Board *board = game_get_board(game);
   StringBuilder *sim_stats_string_builder = create_string_builder();
   int number_of_simmed_plays = simmer_get_number_of_plays(simmer);
   for (int i = 0; i < number_of_simmed_plays; i++) {

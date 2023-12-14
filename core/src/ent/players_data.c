@@ -8,6 +8,10 @@
 #include "kwg.h"
 #include "players_data.h"
 
+// The PlayersData struct holds all of the
+// information that can be set during configuration.
+// This is then copied to the Player struct in the
+// game before any operations on the game are performed.
 struct PlayersData {
   bool data_is_shared[NUMBER_OF_DATA];
   char *data_names[(NUMBER_OF_DATA * 2)];
@@ -59,13 +63,13 @@ move_record_t players_data_get_move_record_type(const PlayersData *players_data,
 
 bool players_data_get_is_shared(const PlayersData *players_data,
                                 players_data_t players_data_type) {
-  return players_data->data_is_shared[players_data_type];
+  return players_data->data_is_shared[(int)players_data_type];
 }
 
 void players_data_set_is_shared(PlayersData *players_data,
                                 players_data_t players_data_type,
                                 bool is_shared) {
-  players_data->data_is_shared[players_data_type] = is_shared;
+  players_data->data_is_shared[(int)players_data_type] = is_shared;
 }
 
 void players_data_destroy_data_name(PlayersData *players_data,

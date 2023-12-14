@@ -15,7 +15,7 @@
 #include "board.h"
 #include "game.h"
 #include "move.h"
-#include "movegen.h"
+#include "move_gen.h"
 #include "player.h"
 #include "rack.h"
 
@@ -33,20 +33,34 @@ struct MinimalGameBackup {
 };
 
 struct Game {
-  Generator *gen;
-  Player *players[2];
-  bool data_is_shared[NUMBER_OF_DATA];
   int player_on_turn_index;
   int starting_player_index;
   int consecutive_scoreless_turns;
   game_end_reason_t game_end_reason;
+  bool data_is_shared[NUMBER_OF_DATA];
+  Board *board;
+  Bag *bag;
+  Player *players[2];
+  MoveList *move_list;
+  MoveGen *gen;
+  // Owned by the caller
+  LetterDistribution *ld;
+  // Backups
   MinimalGameBackup *game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
   int backup_mode;
   bool backups_preallocated;
 };
 
-Generator *game_get_gen(Game *game) { return game->gen; }
+MoveGen *game_get_move_gen(Game *game) { return game->gen; }
+
+MoveList *game_get_move_list(Game *game) { return game->move_list; }
+
+Board *game_get_board(Game *game) { return game->board; }
+
+Bag *game_get_bag(Game *game) { return game->bag; }
+
+LetterDistribution *game_get_ld(Game *game) { return game->ld; }
 
 Player *game_get_player(Game *game, int player_index) {
   return game->players[player_index];
@@ -80,6 +94,11 @@ int game_get_consecutive_scoreless_turns(const Game *game) {
   return game->consecutive_scoreless_turns;
 }
 
+bool game_get_data_is_shared(const Game *game,
+                             players_data_t players_data_type) {
+  return game->data_is_shared[(int)players_data_type];
+}
+
 void game_set_consecutive_scoreless_turns(Game *game, int value) {
   game->consecutive_scoreless_turns = value;
 }
@@ -109,7 +128,7 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
 }
 
 void set_random_rack(Game *game, int pidx, Rack *known_rack) {
-  Bag *bag = gen_get_bag(game_get_gen(game));
+  Bag *bag = game_get_bag(game);
   Rack *prack = player_get_rack(game_get_player(game, pidx));
   int ntiles = get_number_of_letters(prack);
   int player_draw_index = game_get_player_draw_index(game, pidx);
@@ -299,7 +318,7 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
   size_t letters_length = string_length(letters);
   uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * letters_length);
   int number_of_machine_letters = str_to_machine_letters(
-      gen_get_ld(game->gen), letters, false, machine_letters, letters_length);
+      game->ld, letters, false, machine_letters, letters_length);
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   int col_start = *current_column_index;
 
@@ -307,13 +326,12 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
     cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_BOARD_LETTERS;
   } else {
     for (int i = 0; i < number_of_machine_letters; i++) {
-      set_letter(gen_get_board(game->gen), row_start, col_start + i,
-                 machine_letters[i]);
+      set_letter(game->board, row_start, col_start + i, machine_letters[i]);
       // When placing letters on the board, we
       // assume that player 0 placed all of the tiles
       // for convenience.
-      draw_letter(gen_get_bag(game->gen), machine_letters[i], 0);
-      incrememt_tiles_played(gen_get_board(game->gen), 1);
+      draw_letter(game->bag, machine_letters[i], 0);
+      incrememt_tiles_played(game->board, 1);
     }
     *current_column_index = *current_column_index + number_of_machine_letters;
   }
@@ -406,16 +424,14 @@ parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
                                      Game *game) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   int number_of_letters_added =
-      draw_rack_from_bag(gen_get_ld(game->gen), gen_get_bag(game->gen),
-                         player_get_rack(game->players[0]),
+      draw_rack_from_bag(game->ld, game->bag, player_get_rack(game->players[0]),
                          string_splitter_get_item(player_racks, 0),
                          game_get_player_draw_index(game, 0));
   if (number_of_letters_added < 0) {
     return CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
   }
   number_of_letters_added =
-      draw_rack_from_bag(gen_get_ld(game->gen), gen_get_bag(game->gen),
-                         player_get_rack(game->players[1]),
+      draw_rack_from_bag(game->ld, game->bag, player_get_rack(game->players[1]),
                          string_splitter_get_item(player_racks, 1),
                          game_get_player_draw_index(game, 1));
   if (number_of_letters_added < 0) {
@@ -519,13 +535,13 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
   Player *player1 = game->players[1];
 
   generate_all_cross_sets(player_get_kwg(player0), player_get_kwg(player1),
-                          gen_get_ld(game->gen), gen_get_board(game->gen),
+                          game->ld, game->board,
                           game->data_is_shared[PLAYERS_DATA_TYPE_KWG]);
-  update_all_anchors(gen_get_board(game->gen));
+  update_all_anchors(game->board);
 
   if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
     game->game_end_reason = GAME_END_REASON_CONSECUTIVE_ZEROS;
-  } else if (bag_is_empty(gen_get_bag(game->gen)) &&
+  } else if (bag_is_empty(game->bag) &&
              (rack_is_empty(player_get_rack(player0)) ||
               rack_is_empty(player_get_rack(player1)))) {
     game->game_end_reason = GAME_END_REASON_STANDARD;
@@ -539,11 +555,12 @@ int tiles_unseen(const Game *game) {
   Player *player_not_on_turn = game->players[1 - game->player_on_turn_index];
   Rack *player_not_on_turn_rack = player_get_rack(player_not_on_turn);
   int their_rack_tiles = get_number_of_letters(player_not_on_turn_rack);
-  return (their_rack_tiles + get_tiles_remaining(gen_get_bag(game->gen)));
+  return (their_rack_tiles + get_tiles_remaining(game->bag));
 }
 
 void reset_game(Game *game) {
-  reset_generator(game->gen);
+  reset_board(game->board);
+  reset_bag(game->ld, game->bag);
   reset_player(game->players[0]);
   reset_player(game->players[1]);
   game->player_on_turn_index = 0;
@@ -561,7 +578,7 @@ void set_starting_player_index(Game *game, int starting_player_index) {
 
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
-  LetterDistribution *ld = gen_get_ld(game_get_gen(game));
+  LetterDistribution *ld = game_get_ld(game);
   uint32_t ld_size = letter_distribution_get_size(ld);
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
@@ -604,12 +621,17 @@ void update_game(const Config *config, Game *game) {
   for (int player_index = 0; player_index < 2; player_index++) {
     update_player(config, game->players[player_index]);
   }
-  update_generator(config, game->gen);
+
+  game->ld = config_get_letter_distribution(config);
+  update_bag(game->ld, game->bag);
+  update_move_list(game->move_list, config_get_num_plays(config));
 }
 
 Game *create_game(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
-  game->gen = create_generator(config, config_get_num_plays(config));
+  game->ld = config_get_letter_distribution(config);
+  game->bag = create_bag(game->ld);
+  game->board = create_board();
   for (int player_index = 0; player_index < 2; player_index++) {
     game->players[player_index] = create_player(config, player_index);
   }
@@ -617,20 +639,32 @@ Game *create_game(const Config *config) {
     game->data_is_shared[i] = players_data_get_is_shared(
         config_get_players_data(config), (players_data_t)i);
   }
+  game->gen = create_generator(letter_distribution_get_size(game->ld));
+  game->move_list = create_move_list(config_get_num_plays(config));
 
   game->starting_player_index = 0;
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
+  for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+    game->game_backups[i] = NULL;
+  }
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->backups_preallocated = false;
   return game;
 }
 
+// This creates a move list and a generator but does
+// not copy them from game.
 Game *game_duplicate(const Game *game, int move_list_capacity) {
   Game *new_game = malloc_or_die(sizeof(Game));
-  new_game->gen = generate_duplicate(game->gen, move_list_capacity);
+  new_game->bag = bag_duplicate(game->bag);
+  new_game->board = board_duplicate(game->board);
+  new_game->ld = game->ld;
+  new_game->move_list = create_move_list(move_list_capacity);
+  new_game->gen = create_generator(letter_distribution_get_size(game->ld));
+
   for (int j = 0; j < 2; j++) {
     new_game->players[j] = player_duplicate(game->players[j]);
   }
@@ -643,20 +677,25 @@ Game *game_duplicate(const Game *game, int move_list_capacity) {
   new_game->game_end_reason = game->game_end_reason;
   // note: game backups must be explicitly handled by the caller if they want
   // game copies to have backups.
+  for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+    new_game->game_backups[i] = NULL;
+  }
   new_game->backup_cursor = 0;
   new_game->backup_mode = BACKUP_MODE_OFF;
   new_game->backups_preallocated = false;
   return new_game;
 }
 
+// Backups do not restore the move list or
+// generator.
 void backup_game(Game *game) {
   if (game->backup_mode == BACKUP_MODE_OFF) {
     return;
   }
   if (game->backup_mode == BACKUP_MODE_SIMULATION) {
     MinimalGameBackup *state = game->game_backups[game->backup_cursor];
-    board_copy(state->board, gen_get_board(game->gen));
-    bag_copy(state->bag, gen_get_bag(game->gen));
+    board_copy(state->board, game->board);
+    bag_copy(state->bag, game->bag);
     state->game_end_reason = game->game_end_reason;
     state->player_on_turn_index = game->player_on_turn_index;
     state->starting_player_index = game->starting_player_index;
@@ -691,8 +730,8 @@ void unplay_last_move(Game *game) {
   player_set_score(player1, state->p1score);
   rack_copy(player_get_rack(player0), state->p0rack);
   rack_copy(player_get_rack(player1), state->p1rack);
-  bag_copy(gen_get_bag(game->gen), state->bag);
-  board_copy(gen_get_board(game->gen), state->board);
+  bag_copy(game->bag, state->bag);
+  board_copy(game->board, state->board);
 }
 
 void destroy_backups(Game *game) {
@@ -705,10 +744,15 @@ void destroy_backups(Game *game) {
   }
 }
 
+// This does not destroy the letter distribution,
+// the caller must handle that.
 void destroy_game(Game *game) {
-  destroy_generator(game->gen);
+  destroy_board(game->board);
+  destroy_bag(game->bag);
   destroy_player(game->players[0]);
   destroy_player(game->players[1]);
+  destroy_move_list(game->move_list);
+  destroy_generator(game->gen);
   if (game->backups_preallocated) {
     destroy_backups(game);
   }

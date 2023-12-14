@@ -10,7 +10,7 @@
 #include "../ent/autoplay_results.h"
 #include "../ent/config.h"
 #include "../ent/game.h"
-#include "../ent/movegen.h"
+#include "../ent/move_gen.h"
 #include "../ent/player.h"
 #include "../ent/stats.h"
 
@@ -66,22 +66,11 @@ void record_results(Game *game, AutoplayResults *autoplay_results,
 
 void play_autoplay_game(Game *game, AutoplayResults *autoplay_results,
                         int starting_player_index) {
-  Generator *gen = game_get_gen(game);
-  Bag *bag = gen_get_bag(gen);
-  MoveList *move_list = gen_get_move_list(gen);
-
   reset_game(game);
   set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    int player_on_turn_index = game_get_player_on_turn_index(game);
-    Player *player_on_turn = game_get_player(game, player_on_turn_index);
-    Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-    generate_moves(player_get_rack(opponent), gen, player_on_turn,
-                   get_tiles_remaining(bag) >= RACK_SIZE, MOVE_RECORD_BEST,
-                   player_get_move_sort_type(player_on_turn), true);
-    play_move(move_list_get_move(move_list, 0), game);
-    reset_move_list(move_list);
+    play_move(get_top_equity_move(game), game);
   }
   record_results(game, autoplay_results, starting_player_index);
 }
@@ -91,8 +80,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   ThreadControl *thread_control =
       config_get_thread_control(autoplay_worker->config);
   Game *game = create_game(autoplay_worker->config);
-  Generator *gen = game_get_gen(game);
-  Bag *bag = gen_get_bag(gen);
+  Bag *bag = game_get_bag(game);
 
   // Declare local vars for autoplay_worker fields for convenience
   bool use_game_pairs = config_get_use_game_pairs(autoplay_worker->config);
@@ -105,7 +93,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
     // to use for game pairs. The initial seed does
     // not matter since it will be overwritten before
     // the first game of the pair is played.
-    game_pair_bag = create_bag(gen_get_ld(gen));
+    game_pair_bag = create_bag(game_get_ld(game));
   }
   seed_bag_for_worker(bag, autoplay_worker->seed, worker_index);
 

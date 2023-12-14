@@ -22,7 +22,7 @@
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
-#include "movegen_test.h"
+#include "move_gen_test.h"
 #include "players_data_test.h"
 #include "rack_test.h"
 #include "shadow_test.h"
@@ -54,7 +54,7 @@ void run_all(TestConfig *testconfig) {
   test_cross_set(testconfig);
   test_game(testconfig);
   test_shadow(testconfig);
-  test_movegen(testconfig);
+  test_move_gen(testconfig);
   test_equity_adjustments(testconfig);
   test_gameplay(testconfig);
   test_stats();
@@ -99,7 +99,7 @@ void run_test(TestConfig *testconfig, const char *subtest) {
   } else if (strings_equal(subtest, "shadow")) {
     test_shadow(testconfig);
   } else if (strings_equal(subtest, "movegen")) {
-    test_movegen(testconfig);
+    test_move_gen(testconfig);
   } else if (strings_equal(subtest, "eq")) {
     test_equity_adjustments(testconfig);
   } else if (strings_equal(subtest, "gameplay")) {
@@ -121,7 +121,7 @@ void run_test(TestConfig *testconfig, const char *subtest) {
   } else if (strings_equal(subtest, "fh")) {
     test_file_handler();
   } else {
-    log_warn("skipping unrecognized test: %s\n", subtest);
+    log_fatal("unrecognized test: %s\n", subtest);
   }
 }
 

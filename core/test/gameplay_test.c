@@ -23,8 +23,7 @@ void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
 }
 
 void return_racks_to_bag(Game *game) {
-  Generator *gen = game_get_gen(game);
-  Bag *bag = gen_get_bag(gen);
+  Bag *bag = game_get_bag(game);
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
   Rack *player0_rack = player_get_rack(player0);
@@ -64,15 +63,15 @@ void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
   assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn,
                            check_scores);
 
-  Board *board1 = gen_get_board(game_get_gen(g1));
-  Board *board2 = gen_get_board(game_get_gen(g2));
+  Board *board1 = game_get_board(g1);
+  Board *board2 = game_get_board(g2);
 
-  Bag *bag1 = gen_get_bag(game_get_gen(g1));
-  Bag *bag2 = gen_get_bag(game_get_gen(g2));
+  Bag *bag1 = game_get_bag(g1);
+  Bag *bag2 = game_get_bag(g2);
 
   assert_boards_are_equal(board1, board2);
-  assert_bags_are_equal(
-      bag1, bag2, letter_distribution_get_size(gen_get_ld(game_get_gen(g1))));
+  assert_bags_are_equal(bag1, bag2,
+                        letter_distribution_get_size(game_get_ld(g1)));
 }
 
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
@@ -91,9 +90,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     assert(game_get_game_end_reason(actual_game) == GAME_END_REASON_NONE);
     return_racks_to_bag(actual_game);
 
-    Generator *gen = game_get_gen(actual_game);
-    LetterDistribution *ld = gen_get_ld(gen);
-    Bag *bag = gen_get_bag(gen);
+    LetterDistribution *ld = game_get_ld(actual_game);
+    Bag *bag = game_get_bag(actual_game);
 
     int player_on_turn_index = game_get_player_on_turn_index(actual_game);
     int opponent_index = 1 - player_on_turn_index;
@@ -383,10 +381,9 @@ void test_playmove(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
-  Bag *bag = gen_get_bag(gen);
-  Board *board = gen_get_board(gen);
+  Board *board = game_get_board(game);
+  Bag *bag = game_get_bag(game);
+  LetterDistribution *ld = game_get_ld(game);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
@@ -476,9 +473,8 @@ void test_set_random_rack(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
-  Bag *bag = gen_get_bag(gen);
+  Bag *bag = game_get_bag(game);
+  LetterDistribution *ld = game_get_ld(game);
 
   Player *player0 = game_get_player(game, 0);
 
@@ -524,10 +520,9 @@ void test_backups(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
 
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
-  Bag *bag = gen_get_bag(gen);
-  Board *board = gen_get_board(gen);
+  Board *board = game_get_board(game);
+  Bag *bag = game_get_bag(game);
+  LetterDistribution *ld = game_get_ld(game);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);

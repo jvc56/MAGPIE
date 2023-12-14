@@ -19,7 +19,7 @@
 #include "bag.h"
 #include "game.h"
 #include "move.h"
-#include "movegen.h"
+#include "move_gen.h"
 #include "player.h"
 #include "rack.h"
 #include "simmer.h"
@@ -151,11 +151,11 @@ Simmer *create_simmer(const Config *config) {
 void create_simmed_plays(Game *game, Simmer *simmer) {
   simmer->simmed_plays =
       malloc_or_die((sizeof(SimmedPlay)) * simmer->num_simmed_plays);
+  MoveList *move_list = game_get_move_list(game);
   for (int i = 0; i < simmer->num_simmed_plays; i++) {
     SimmedPlay *sp = malloc_or_die(sizeof(SimmedPlay));
     sp->move = create_move();
-    move_copy(sp->move,
-              move_list_get_move(gen_get_move_list(game_get_gen(game)), i));
+    move_copy(sp->move, move_list_get_move(move_list, i));
 
     sp->score_stat = malloc_or_die(sizeof(Stat *) * simmer->max_plies);
     sp->bingo_stat = malloc_or_die(sizeof(Stat *) * simmer->max_plies);
@@ -226,11 +226,10 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
     player_set_move_record_type(game_get_player(new_game, j), MOVE_RECORD_BEST);
   }
 
-  simmer_worker->rack_placeholder = create_rack(
-      letter_distribution_get_size(gen_get_ld(game_get_gen(new_game))));
+  simmer_worker->rack_placeholder =
+      create_rack(letter_distribution_get_size(game_get_ld(new_game)));
 
-  seed_bag_for_worker(gen_get_bag(game_get_gen(new_game)), simmer->seed,
-                      worker_index);
+  seed_bag_for_worker(game_get_bag(new_game), simmer->seed, worker_index);
 
   return simmer_worker;
 }
@@ -417,7 +416,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
   set_random_rack(game, 1 - game_get_player_on_turn_index(game),
                   simmer->known_opp_rack);
   // need a new shuffle for every iteration:
-  Bag *bag = gen_get_bag(game_get_gen(game));
+  Bag *bag = game_get_bag(game);
   shuffle(bag);
 
   for (int i = 0; i < simmer->num_simmed_plays; i++) {
@@ -613,27 +612,33 @@ void sort_plays_by_win_rate(Simmer *simmer) {
   pthread_mutex_unlock(&simmer->simmed_plays_mutex);
 }
 
+// FIXME: this should use the gameplay function
+// once this is moved to impl
+void simmer_generate_moves_for_game(Game *game) {
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+  generate_moves(game_get_ld(game), player_get_kwg(player_on_turn),
+                 player_get_klv(player_on_turn), player_get_rack(opponent),
+                 game_get_move_gen(game), game_get_move_list(game),
+                 game_get_board(game), player_get_rack(player_on_turn),
+                 player_on_turn_index, get_tiles_remaining(game_get_bag(game)),
+                 MOVE_RECORD_ALL, MOVE_SORT_EQUITY,
+                 game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG));
+}
+
 sim_status_t simulate(const Config *config, Game *game, Simmer *simmer) {
   ThreadControl *thread_control = config_get_thread_control(config);
   unhalt(thread_control);
 
-  Generator *gen = game_get_gen(game);
-  Bag *bag = gen_get_bag(gen);
-  MoveList *move_list = gen_get_move_list(gen);
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-
-  reset_move_list(move_list);
-  generate_moves(player_get_rack(opponent), gen, player_on_turn,
-                 get_tiles_remaining(bag) >= RACK_SIZE, MOVE_RECORD_ALL,
-                 MOVE_SORT_EQUITY, true);
+  simmer_generate_moves_for_game(game);
+  MoveList *move_list = game_get_move_list(game);
   int number_of_moves_generated = move_list_get_count(move_list);
   sort_moves(move_list);
+  print_ucgi_static_moves(game, thread_control);
 
-  int num_plays = config_get_num_plays(config);
   if (config_get_static_search_only(config)) {
-    print_ucgi_static_moves(game, num_plays, thread_control);
+    print_ucgi_static_moves(game, thread_control);
     return SIM_STATUS_SUCCESS;
   }
 
@@ -658,6 +663,10 @@ sim_status_t simulate(const Config *config, Game *game, Simmer *simmer) {
   if (number_of_moves_generated < simmer->num_simmed_plays) {
     simmer->num_simmed_plays = number_of_moves_generated;
   }
+
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
   simmer->iteration_count = 0;
   simmer->initial_player = player_on_turn_index;
   simmer->initial_spread =
@@ -683,6 +692,8 @@ sim_status_t simulate(const Config *config, Game *game, Simmer *simmer) {
     }
 
     free(simmer->play_similarity_cache);
+
+    int num_plays = config_get_num_plays(config);
     simmer->play_similarity_cache =
         malloc_or_die(sizeof(int) * num_plays * num_plays);
     for (int i = 0; i < num_plays; i++) {

@@ -12,7 +12,7 @@
 #include "../ent/inference.h"
 #include "../ent/leave_rack.h"
 #include "../ent/letter_distribution.h"
-#include "../ent/movegen.h"
+#include "../ent/move_gen.h"
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 
@@ -71,7 +71,7 @@ void string_builder_add_letter_line(Game *game, const InferenceRecord *record,
                                     int max_duplicate_letter_draw,
                                     int number_of_tiles_played_or_exchanged) {
   get_stat_for_letter(record, letter_stat, letter);
-  string_builder_add_user_visible_letter(gen_get_ld(game_get_gen(game)),
+  string_builder_add_user_visible_letter(game_get_ld(game),
                                          inference_string, letter);
   string_builder_add_formatted_string(inference_string, ": %4.2f %4.2f",
                                       get_mean(letter_stat),
@@ -104,7 +104,7 @@ void string_builder_add_inference_record(
       get_stdev(record_equity_values));
   int max_duplicate_letter_draw = 0;
   uint32_t ld_size =
-      letter_distribution_get_size(gen_get_ld(game_get_gen(game)));
+      letter_distribution_get_size(game_get_ld(game));
   for (int letter = 0; letter < (int)ld_size; letter++) {
     for (int number_of_letter = 1; number_of_letter <= (RACK_SIZE);
          number_of_letter++) {
@@ -152,7 +152,7 @@ void string_builder_add_inference(const Inference *inference,
   bool is_exchange = number_of_tiles_exchanged > 0;
   int number_of_tiles_played_or_exchanged;
 
-  LetterDistribution *ld = gen_get_ld(game_get_gen(game));
+  LetterDistribution *ld = game_get_ld(game);
 
   string_builder_add_game(game, inference_string);
 
@@ -298,7 +298,7 @@ void string_builder_ucgi_add_letter_line(
     Stat *letter_stat, uint8_t letter, int number_of_tiles_played_or_exchanged,
     const char *inference_record_type) {
 
-  LetterDistribution *ld = gen_get_ld(game_get_gen(game));
+  LetterDistribution *ld = game_get_ld(game);
 
   get_stat_for_letter(record, letter_stat, letter);
   string_builder_add_formatted_string(ucgi_string_builder, "infertile %s ",
@@ -322,7 +322,7 @@ void string_builder_ucgi_add_inference_record(
     Stat *letter_stat, int number_of_tiles_played_or_exchanged,
     const char *inference_record_type) {
   Stat *equity_values = inference_record_get_equity_values(record);
-  LetterDistribution *ld = gen_get_ld(game_get_gen(game));
+  LetterDistribution *ld = game_get_ld(game);
 
   uint64_t total_draws = get_weight(equity_values);
   uint64_t total_leaves = get_cardinality(equity_values);
@@ -353,7 +353,7 @@ void print_ucgi_inference(const Inference *inference,
         (RACK_SIZE)-inference_get_initial_tiles_to_infer(inference);
   }
   Game *game = inference_get_game(inference);
-  LetterDistribution *ld = gen_get_ld(game_get_gen(game));
+  LetterDistribution *ld = game_get_ld(game);
 
   // Create a transient stat to use the stat functions
   Stat *letter_stat = create_stat();

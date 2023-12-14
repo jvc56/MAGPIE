@@ -14,7 +14,7 @@
 #include "klv.h"
 #include "leave_rack.h"
 #include "move.h"
-#include "movegen.h"
+#include "move_gen.h"
 #include "player.h"
 #include "rack.h"
 #include "stats.h"
@@ -350,21 +350,26 @@ void record_valid_leave(const Rack *rack, InferenceRecord *record,
   increment_subtotals_for_record(rack, record, number_of_draws_for_leave);
 }
 
-Move *get_top_move(Inference *inference) {
-  Game *game = inference->game;
-  Generator *gen = game_get_gen(game);
-  Player *player_to_infer =
-      game_get_player(game, inference->player_to_infer_index);
-  Player *opponent =
-      game_get_player(game, 1 - inference->player_to_infer_index);
-  Rack *opponent_rack = player_get_rack(opponent);
-  MoveList *move_list = gen_get_move_list(gen);
+// FIXME: this should use the gameplay function
+// once this is moved to impl
+void inference_generate_moves_for_game(Game *game) {
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+  generate_moves(game_get_ld(game), player_get_kwg(player_on_turn),
+                 player_get_klv(player_on_turn), player_get_rack(opponent),
+                 game_get_move_gen(game), game_get_move_list(game),
+                 game_get_board(game), player_get_rack(player_on_turn),
+                 player_on_turn_index, get_tiles_remaining(game_get_bag(game)),
+                 MOVE_RECORD_BEST, MOVE_SORT_EQUITY,
+                 game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG));
+}
 
-  reset_move_list(move_list);
-  generate_moves(opponent_rack, gen, player_to_infer,
-                 get_tiles_remaining(gen_get_bag(gen)) >= RACK_SIZE,
-                 MOVE_RECORD_BEST, MOVE_SORT_EQUITY, false);
-  return move_list_get_move(move_list, 0);
+// FIXME: this should use the gameplay function
+// once this is moved to impl
+Move *get_top_move(Inference *inference) {
+  inference_generate_moves_for_game(inference->game);
+  return move_list_get_move(game_get_move_list(inference->game), 0);
 }
 
 void evaluate_possible_leave(Inference *inference) {
@@ -539,7 +544,7 @@ void initialize_inference_for_evaluation(
   reset_rack(inference->bag_as_rack);
   reset_rack(inference->leave);
 
-  add_bag_to_rack(gen_get_bag(game_get_gen(game)), inference->bag_as_rack);
+  add_bag_to_rack(game_get_bag(game), inference->bag_as_rack);
 
   // Add any existing tiles on the player's rack
   // to the player's leave for partial inferences
@@ -594,9 +599,7 @@ Inference *inference_duplicate(const Inference *inference,
       inference->distribution_size);
 
   // Game must be deep copied since we use the move generator
-  new_inference->game = game_duplicate(
-      inference->game,
-      move_list_get_capacity(gen_get_move_list(game_get_gen(inference->game))));
+  new_inference->game = game_duplicate(inference->game, 1);
   // KLV can just be a pointer since it is read only
   new_inference->klv = inference->klv;
   new_inference->player_to_infer_index = inference->player_to_infer_index;
@@ -724,14 +727,12 @@ void *infer_worker(void *uncasted_inference) {
   Inference *inference = (Inference *)uncasted_inference;
   iterate_through_all_possible_leaves(
       inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER, 1);
-  reset_move_list(gen_get_move_list(game_get_gen(inference->game)));
   return NULL;
 }
 
 void infer_worker_single_threaded(Inference *inference) {
   iterate_through_all_possible_leaves(
       inference, inference->initial_tiles_to_infer, BLANK_MACHINE_LETTER, 0);
-  reset_move_list(gen_get_move_list(game_get_gen(inference->game)));
 }
 
 void set_shared_variables_for_inference(

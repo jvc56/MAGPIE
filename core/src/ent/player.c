@@ -11,7 +11,7 @@
 struct Player {
   int index;
   // All const fields are owned
-  // by PlayerData and are
+  // by PlayersData and are
   // treated as read-only
   const char *name;
   Rack *rack;

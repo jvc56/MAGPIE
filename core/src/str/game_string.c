@@ -5,7 +5,7 @@
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../ent/movegen.h"
+#include "../ent/move_gen.h"
 #include "../ent/player.h"
 
 #include "../util/string_util.h"
@@ -30,7 +30,6 @@ void string_builder_add_player_row(
   if (player_name) {
     display_player_name = string_duplicate(player_name);
   } else {
-    printf("player index: %d\n", player_get_index(player));
     display_player_name =
         get_formatted_string("Player %d", player_get_index(player) + 1);
   }
@@ -65,27 +64,24 @@ void string_builder_add_board_row(const LetterDistribution *letter_distribution,
 }
 
 void string_builder_add_move_with_rank_and_equity(Game *game,
+                                                  MoveList *move_list,
                                                   StringBuilder *game_string,
                                                   int move_index) {
-  Generator *gen = game_get_gen(game);
-  MoveList *move_list = gen_get_move_list(gen);
+  Board *board = game_get_board(game);
   Move *move = move_list_get_move(move_list, move_index);
-  Board *board = gen_get_board(gen);
-  LetterDistribution *ld = gen_get_ld(gen);
+  LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(board, move, ld, game_string);
   string_builder_add_formatted_string(game_string, " %0.2f", get_equity(move));
 }
 
 void string_builder_add_game(Game *game, StringBuilder *game_string) {
-  // TODO: update for super crossword game
-  Generator *gen = game_get_gen(game);
+  Board *board = game_get_board(game);
+  Bag *bag = game_get_bag(game);
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
-  MoveList *move_list = gen_get_move_list(gen);
-  Board *board = gen_get_board(gen);
-  Bag *bag = gen_get_bag(gen);
-  LetterDistribution *ld = gen_get_ld(gen);
+  LetterDistribution *ld = game_get_ld(game);
+  MoveList *move_list = game_get_move_list(game);
   int number_of_moves = move_list_get_count(move_list);
   int player_on_turn_index = game_get_player_on_turn_index(game);
 
@@ -111,7 +107,8 @@ void string_builder_add_game(Game *game, StringBuilder *game_string) {
                                           get_tiles_remaining(bag));
 
     } else if (i - 2 < number_of_moves) {
-      string_builder_add_move_with_rank_and_equity(game, game_string, i - 2);
+      string_builder_add_move_with_rank_and_equity(game, move_list, game_string,
+                                                   i - 2);
     }
     string_builder_add_string(game_string, "\n");
   }
@@ -119,14 +116,13 @@ void string_builder_add_game(Game *game, StringBuilder *game_string) {
   string_builder_add_string(game_string, "   ------------------------------\n");
 }
 
-char *ucgi_static_moves(Game *game, int nmoves) {
+char *ucgi_static_moves(Game *game) {
+  MoveList *move_list = game_get_move_list(game);
   StringBuilder *moves_string_builder = create_string_builder();
-  LetterDistribution *ld = gen_get_ld(game_get_gen(game));
-  Generator *gen = game_get_gen(game);
-  MoveList *move_list = gen_get_move_list(gen);
-  Board *board = gen_get_board(gen);
+  LetterDistribution *ld = game_get_ld(game);
+  Board *board = game_get_board(game);
 
-  for (int i = 0; i < nmoves; i++) {
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
     Move *move = move_list_get_move(move_list, i);
     string_builder_add_string(moves_string_builder, "info currmove ");
     string_builder_add_ucgi_move(move, board, ld, moves_string_builder);
@@ -145,9 +141,8 @@ char *ucgi_static_moves(Game *game, int nmoves) {
   return ucgi_static_moves_string;
 }
 
-void print_ucgi_static_moves(Game *game, int nmoves,
-                             ThreadControl *thread_control) {
-  char *starting_moves_string_pointer = ucgi_static_moves(game, nmoves);
+void print_ucgi_static_moves(Game *game, ThreadControl *thread_control) {
+  char *starting_moves_string_pointer = ucgi_static_moves(game);
   print_to_outfile(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
 }

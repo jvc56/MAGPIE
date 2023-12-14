@@ -154,8 +154,7 @@ void test_infer_exchange_score_not_zero(TestConfig *testconfig) {
 void test_infer_exchange_not_allowed(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
-  Bag *bag = gen_get_bag(gen);
+  Bag *bag = game_get_bag(game);
 
   // There are 13 tiles in the bag
   load_cgp(game, VS_JEREMY);
@@ -191,11 +190,10 @@ void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
 void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
+  Bag *bag = game_get_bag(game);
+  LetterDistribution *ld = game_get_ld(game);
   int ld_size = letter_distribution_get_size(ld);
   Rack *rack = create_rack(ld_size);
-  Bag *bag = gen_get_bag(gen);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);

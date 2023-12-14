@@ -5,7 +5,7 @@
 #include "../src/ent/config.h"
 #include "../src/ent/game.h"
 
-#include "../src/impl/cross_set.h"
+#include "../src/ent/move_gen.h"
 
 #include "board_test.h"
 #include "test_constants.h"
@@ -14,8 +14,7 @@
 
 void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
   // Test cross set
-  Generator *gen = game_get_gen(game);
-  Board *board = gen_get_board(gen);
+  Board *board = game_get_board(game);
 
   clear_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
   set_cross_set_letter(get_cross_set_pointer(board, 0, 0,
@@ -43,8 +42,7 @@ void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
 void test_board(TestConfig *testconfig) {
   const Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
-  Board *board = gen_get_board(gen);
+  Board *board = game_get_board(game);
 
   load_cgp(game, VS_ED);
 

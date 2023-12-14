@@ -1,19 +1,19 @@
 #include "../def/cross_set_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
-#include "../ent/movegen.h"
+#include "../ent/move_gen.h"
 #include "../ent/rack.h"
 
-#include "../impl/cross_set.h"
 #include "../impl/gameplay.h"
 
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
-  Board *board = gen_get_board(game_get_gen(game));
+  Board *board = game_get_board(game);
   for (int idx = 0; idx < get_tiles_length(move); idx++) {
     uint8_t letter = get_tile(move, idx);
     if (letter == PLAYED_THROUGH_MARKER) {
@@ -63,14 +63,14 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
       continue;
     }
 
-    Generator *gen = game_get_gen(game);
-    Board *board = gen_get_board(gen);
-    bool kwgs_are_distinct = gen_get_kwgs_are_distinct(gen);
+    Board *board = game_get_board(game);
+    bool kwgs_are_distinct =
+        !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
     int right_col = word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
     int left_col = word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
     const KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
-    LetterDistribution *ld = gen_get_ld(gen);
+    LetterDistribution *ld = game_get_ld(game);
     gen_cross_set(player0_kwg, ld, board, row, right_col + 1, csd, 0);
     gen_cross_set(player0_kwg, ld, board, row, left_col - 1, csd, 0);
     gen_cross_set(player0_kwg, ld, board, row, col_start, csd, 0);
@@ -86,10 +86,10 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
 void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
                    int csd) {
   const KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
-  Generator *gen = game_get_gen(game);
-  Board *board = gen_get_board(gen);
-  LetterDistribution *ld = gen_get_ld(gen);
-  bool kwgs_are_distinct = gen_get_kwgs_are_distinct(gen);
+  Board *board = game_get_board(game);
+  LetterDistribution *ld = game_get_ld(game);
+  bool kwgs_are_distinct =
+      !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
   for (int col = col_start - 1; col <= col_start + get_tiles_length(move);
        col++) {
@@ -105,7 +105,7 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
 }
 
 void update_cross_set_for_move(const Move *move, Game *game) {
-  Board *board = gen_get_board(game_get_gen(game));
+  Board *board = game_get_board(game);
   if (dir_is_vertical(get_dir(move))) {
     calc_for_across(move, game, get_row_start(move), get_col_start(move),
                     BOARD_HORIZONTAL_DIRECTION);
@@ -126,7 +126,7 @@ void update_cross_set_for_move(const Move *move, Game *game) {
 void execute_exchange_move(const Move *move, Game *game) {
   Rack *player_on_turn_rack = player_get_rack(
       game_get_player(game, game_get_player_on_turn_index(game)));
-  Bag *bag = gen_get_bag(game_get_gen(game));
+  Bag *bag = game_get_bag(game);
 
   for (int i = 0; i < move_get_tiles_played(move); i++) {
     take_letter_from_rack(player_on_turn_rack, get_tile(move, i));
@@ -144,8 +144,7 @@ void standard_end_of_game_calculations(Game *game) {
 
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
+  LetterDistribution *ld = game_get_ld(game);
 
   player_increment_score(player_on_turn,
                          2 * score_on_rack(ld, player_get_rack(opponent)));
@@ -153,7 +152,7 @@ void standard_end_of_game_calculations(Game *game) {
 }
 
 void draw_starting_racks(Game *game) {
-  Bag *bag = gen_get_bag(game_get_gen(game));
+  Bag *bag = game_get_bag(game);
   draw_at_most_to_rack(bag, player_get_rack(game_get_player(game, 0)),
                        RACK_SIZE, game_get_player_draw_index(game, 0));
   draw_at_most_to_rack(bag, player_get_rack(game_get_player(game, 1)),
@@ -164,8 +163,7 @@ void play_move(const Move *move, Game *game) {
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
     backup_game(game);
   }
-  Generator *gen = game_get_gen(game);
-  LetterDistribution *ld = gen_get_ld(gen);
+  LetterDistribution *ld = game_get_ld(game);
   if (get_move_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     play_move_on_board(move, game);
     update_cross_set_for_move(move, game);
@@ -173,7 +171,7 @@ void play_move(const Move *move, Game *game) {
 
     Player *player_on_turn =
         game_get_player(game, game_get_player_on_turn_index(game));
-    Bag *bag = gen_get_bag(game_get_gen(game));
+    Bag *bag = game_get_bag(game);
     Rack *player_on_turn_rack = player_get_rack(player_on_turn);
 
     player_increment_score(player_on_turn, get_score(move));
@@ -204,18 +202,28 @@ void play_move(const Move *move, Game *game) {
   }
 }
 
-Move *get_top_equity_move(Game *game) {
-  Generator *gen = game_get_gen(game);
-  MoveList *move_list = gen_get_move_list(gen);
-  Bag *bag = gen_get_bag(gen);
-
+void generate_moves_for_game(Game *game, move_record_t move_record_type,
+                             move_sort_t move_sort_type) {
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+  generate_moves(game_get_ld(game), player_get_kwg(player_on_turn),
+                 player_get_klv(player_on_turn), player_get_rack(opponent),
+                 game_get_move_gen(game), game_get_move_list(game),
+                 game_get_board(game), player_get_rack(player_on_turn),
+                 player_on_turn_index, get_tiles_remaining(game_get_bag(game)),
+                 move_record_type, move_sort_type,
+                 !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG));
+}
 
-  reset_move_list(move_list);
-  generate_moves(player_get_rack(opponent), gen, player_on_turn,
-                 get_tiles_remaining(bag) >= RACK_SIZE, MOVE_RECORD_BEST,
-                 MOVE_SORT_EQUITY, true);
-  return move_list_get_move(move_list, 0);
+void generate_moves_for_game_with_player_move_types(Game *game) {
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  generate_moves_for_game(game, player_get_move_record_type(player_on_turn),
+                          player_get_move_sort_type(player_on_turn));
+}
+
+Move *get_top_equity_move(Game *game) {
+  generate_moves_for_game(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY);
+  return move_list_get_move(game_get_move_list(game), 0);
 }

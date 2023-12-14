@@ -16,16 +16,16 @@
 void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
   Player *player0 = game_get_player(game, 0);
   Rack *rack = player_get_rack(player0);
   const KLV *klv = player_get_klv(player0);
-  const LetterDistribution *ld = gen_get_ld(gen);
+  const LetterDistribution *ld = game_get_ld(game);
   set_rack_to_string(ld, rack, "EORSTVX");
-  generate_moves_for_game(game);
+  generate_moves_for_game(game, player_get_move_record_type(player0),
+                          player_get_move_sort_type(player0));
 
   // Should be 8G VORTEX
-  MoveList *move_list = gen_get_move_list(gen);
+  MoveList *move_list = game_get_move_list(game);
 
   SortedMoveList *vortex_sorted_move_list = create_sorted_move_list(move_list);
 
@@ -41,8 +41,9 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   reset_game(game);
 
   set_rack_to_string(ld, rack, "BDEIIIJ");
-  generate_moves_for_game(game);
   // Should be 8D JIBED
+  generate_moves_for_game(game, player_get_move_record_type(player0),
+                          player_get_move_sort_type(player0));
 
   SortedMoveList *jibed_sorted_move_list = create_sorted_move_list(move_list);
 
@@ -59,7 +60,8 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   reset_game(game);
 
   set_rack_to_string(ld, rack, "ACEEEFT");
-  generate_moves_for_game(game);
+  generate_moves_for_game(game, player_get_move_record_type(player0),
+                          player_get_move_sort_type(player0));
   // Should be 8D FACETE
   SortedMoveList *facete_sorted_move_list = create_sorted_move_list(move_list);
   top_move = facete_sorted_move_list->moves[0];
@@ -74,7 +76,8 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   reset_game(game);
 
   set_rack_to_string(ld, rack, "AAAALTY");
-  generate_moves_for_game(game);
+  generate_moves_for_game(game, player_get_move_record_type(player0),
+                          player_get_move_sort_type(player0));
   // Should be 8G ATALAYA
   SortedMoveList *atalaya_sorted_move_list = create_sorted_move_list(move_list);
   top_move = atalaya_sorted_move_list->moves[0];
@@ -93,15 +96,16 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
 void test_macondo_endgame_equity_adjustments(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-  Generator *gen = game_get_gen(game);
-  MoveList *move_list = gen_get_move_list(gen);
+  Player *player0 = game_get_player(game, 0);
+  MoveList *move_list = game_get_move_list(game);
 
   load_cgp(game,
            "4RUMMAGED2C/7A6A/2H1G2T6V/2O1O2I6E/2WAB2PREBENDS/2ER3O3n3/2SI6COW2/"
            "3L2HUE2KANE/3LI3FILII2/J1TANGENT2T1Z1/A2TA5FA1OP/R2EN5Ok1OU/"
            "VILDE5YEX1D/I3R6SUQS/E13Y INR/OT 440/448 0 lex CSW21;");
 
-  generate_moves_for_game(game);
+  generate_moves_for_game(game, player_get_move_record_type(player0),
+                          player_get_move_sort_type(player0));
 
   SortedMoveList *endgame_sorted_move_list = create_sorted_move_list(move_list);
 
