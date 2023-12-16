@@ -11,16 +11,17 @@
 #include "../util/string_util.h"
 
 #include "../ent/autoplay_results.h"
-#include "../ent/command.h"
 #include "../ent/config.h"
 #include "../ent/error_status.h"
 #include "../ent/file_handler.h"
 #include "../ent/game.h"
 #include "../ent/inference.h"
-#include "../ent/simmer.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/thread_control.h"
 
-#include "../impl/autoplay.h"
+#include "autoplay.h"
+#include "command.h"
+#include "simmer.h"
 
 #define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"
@@ -62,9 +63,10 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
     // FIXME: need an option for ucgi vs. human readable
     // since the command module is an abstraction layer
     // above UCGI.
-    status_string = ucgi_sim_stats(command_vars_get_game(command_vars),
-                                   command_vars_get_simmer(command_vars),
-                                   thread_control, true);
+    status_string = ucgi_sim_stats(
+        command_vars_get_game(command_vars),
+        simmer_get_sim_results(command_vars_get_simmer(command_vars)),
+        thread_control, true);
     break;
   case COMMAND_TYPE_AUTOPLAY:
     status_string = string_duplicate("autoplay status unimplemented");
@@ -82,12 +84,23 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
   return status_string;
 }
 
-void update_or_create_game(const Config *config, CommandVars *command_vars) {
-  if (!command_vars_get_game(command_vars)) {
-    command_vars_set_game(command_vars, create_game(config));
-  } else {
-    update_game(config, command_vars_get_game(command_vars));
+// This function recreates fields of the command vars
+// which have dynamically sized allocations that can
+// change based on the config.
+void reset_game_and_move_gen(const Config *config, CommandVars *command_vars) {
+  if (command_vars_get_game(command_vars)) {
+    destroy_game(command_vars_get_game(command_vars));
   }
+  command_vars_set_game(command_vars, create_game(config));
+
+  if (command_vars_get_gen(command_vars)) {
+    destroy_generator(command_vars_get_gen(command_vars));
+  }
+  command_vars_set_gen(
+      command_vars,
+      create_generator(config_get_num_plays(config),
+                       letter_distribution_get_size(
+                           config_get_letter_distribution(config))));
 }
 
 void set_or_clear_error_status(ErrorStatus *error_status,
@@ -101,10 +114,12 @@ void set_or_clear_error_status(ErrorStatus *error_status,
 }
 
 void execute_sim(const Config *config, CommandVars *command_vars) {
-  if (!command_vars_get_simmer(command_vars)) {
-    command_vars_set_simmer(command_vars, create_simmer(config));
+  if (command_vars_get_simmer(command_vars)) {
+    destroy_simmer(command_vars_get_simmer(command_vars));
   }
+  command_vars_set_simmer(command_vars, create_simmer(config));
   sim_status_t status = simulate(config, command_vars_get_game(command_vars),
+                                 command_vars_get_gen(command_vars),
                                  command_vars_get_simmer(command_vars));
   set_or_clear_error_status(command_vars_get_error_status(command_vars),
                             ERROR_STATUS_TYPE_SIM, (int)status);
@@ -121,9 +136,10 @@ void execute_autoplay(const Config *config, CommandVars *command_vars) {
 }
 
 void execute_infer(const Config *config, CommandVars *command_vars) {
-  if (!command_vars_get_inference(command_vars)) {
-    command_vars_set_inference(command_vars, create_inference());
+  if (command_vars_get_inference(command_vars)) {
+    destroy_inference(command_vars_get_inference(command_vars));
   }
+  command_vars_set_inference(command_vars, create_inference());
   inference_status_t status = infer(config, command_vars_get_game(command_vars),
                                     command_vars_get_inference(command_vars));
   set_or_clear_error_status(command_vars_get_error_status(command_vars),
@@ -143,7 +159,7 @@ void execute_command(CommandVars *command_vars) {
   // command and the rest of the function
   // will be a no-op.
   if (config_get_lexicons_loaded(config)) {
-    update_or_create_game(config, command_vars);
+    reset_game_and_move_gen(config, command_vars);
 
     if (config_get_command_set_cgp(config)) {
       cgp_parse_status_t cgp_parse_status =

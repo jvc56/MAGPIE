@@ -77,6 +77,9 @@ void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
                            int array_length) {
   Game *actual_game = create_game(config);
+  MoveGen *actual_gen = create_generator(
+      config_get_num_plays(config),
+      letter_distribution_get_size(config_get_letter_distribution(config)));
   Game *expected_game = create_game(config);
 
   int player0_last_score_on_rack = -1;
@@ -123,7 +126,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
       player1_score_before_last_move = player_get_score(player1);
     }
 
-    play_top_n_equity_move(actual_game, 0);
+    play_top_n_equity_move(actual_game, actual_gen, 0);
 
     if (i == array_length - 1) {
       player0_last_score_on_rack = score_on_rack(ld, player0_rack);
@@ -160,6 +163,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
   }
 
   destroy_game(actual_game);
+  destroy_generator(actual_gen);
   destroy_game(expected_game);
 }
 
@@ -380,7 +384,9 @@ void test_standard_game(TestConfig *testconfig) {
 void test_playmove(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-
+  MoveGen *gen = create_generator(
+      config_get_num_plays(config),
+      letter_distribution_get_size(config_get_letter_distribution(config)));
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   LetterDistribution *ld = game_get_ld(game);
@@ -393,7 +399,7 @@ void test_playmove(TestConfig *testconfig) {
 
   // Test play
   draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
-  play_top_n_equity_move(game, 0);
+  play_top_n_equity_move(game, gen, 0);
 
   assert(game_get_consecutive_scoreless_turns(game) == 0);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
@@ -413,7 +419,7 @@ void test_playmove(TestConfig *testconfig) {
 
   // Test exchange
   draw_rack_to_string(ld, bag, player0_rack, "UUUVVWW", 0);
-  play_top_n_equity_move(game, 0);
+  play_top_n_equity_move(game, gen, 0);
 
   assert(game_get_consecutive_scoreless_turns(game) == 1);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
@@ -452,7 +458,7 @@ void test_playmove(TestConfig *testconfig) {
   assert(game_get_player_on_turn_index(game) == 0);
   assert(bag_is_empty(bag));
 
-  play_top_n_equity_move(game, 0);
+  play_top_n_equity_move(game, gen, 0);
 
   assert(game_get_consecutive_scoreless_turns(game) == 6);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
@@ -466,6 +472,7 @@ void test_playmove(TestConfig *testconfig) {
   assert(game_get_player_on_turn_index(game) == 0);
   assert(bag_is_empty(bag));
 
+  destroy_generator(gen);
   destroy_game(game);
 }
 
@@ -519,7 +526,9 @@ void test_set_random_rack(TestConfig *testconfig) {
 void test_backups(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
-
+  MoveGen *gen = create_generator(
+      config_get_num_plays(config),
+      letter_distribution_get_size(config_get_letter_distribution(config)));
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   LetterDistribution *ld = game_get_ld(game);
@@ -538,8 +547,8 @@ void test_backups(TestConfig *testconfig) {
 
   // backup
   set_backup_mode(game, BACKUP_MODE_SIMULATION);
-  play_top_n_equity_move(game, 0);
-  play_top_n_equity_move(game, 0);
+  play_top_n_equity_move(game, gen, 0);
+  play_top_n_equity_move(game, gen, 0);
   assert(get_tiles_remaining(bag) == 74);
 
   assert(player_get_score(player0) == 36);

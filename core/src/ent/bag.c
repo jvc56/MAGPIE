@@ -54,16 +54,6 @@ void reset_bag(const LetterDistribution *letter_distribution, Bag *bag) {
   shuffle(bag);
 }
 
-void update_bag(const LetterDistribution *letter_distribution, Bag *bag) {
-  int total_tiles = letter_distribution_get_total_tiles(letter_distribution);
-  if (bag->size != total_tiles) {
-    free(bag->tiles);
-    bag->size = total_tiles;
-    bag->tiles = malloc_or_die(sizeof(uint8_t) * bag->size);
-    reset_bag(letter_distribution, bag);
-  }
-}
-
 Bag *create_bag(const LetterDistribution *letter_distribution) {
   Bag *bag = malloc_or_die(sizeof(Bag));
   // call reseed_prng if needed.

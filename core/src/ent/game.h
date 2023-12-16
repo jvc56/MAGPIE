@@ -7,7 +7,6 @@
 #include "board.h"
 #include "config.h"
 #include "move.h"
-#include "move_gen.h"
 #include "player.h"
 
 struct MinimalGameBackup;
@@ -16,8 +15,6 @@ typedef struct MinimalGameBackup MinimalGameBackup;
 struct Game;
 typedef struct Game Game;
 
-MoveGen *game_get_move_gen(Game *game);
-MoveList *game_get_move_list(Game *game);
 Board *game_get_board(Game *game);
 Bag *game_get_bag(Game *game);
 LetterDistribution *game_get_ld(Game *game);
@@ -37,9 +34,8 @@ void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
 void game_start_next_player_turn(Game *game);
 
 void reset_game(Game *game);
-void update_game(const Config *config, Game *game);
 Game *create_game(const Config *config);
-Game *game_duplicate(const Game *game, int move_list_capacity);
+Game *game_duplicate(const Game *game);
 void destroy_game(Game *game);
 cgp_parse_status_t load_cgp(Game *game, const char *cgp);
 void set_backup_mode(Game *game, int backup_mode);

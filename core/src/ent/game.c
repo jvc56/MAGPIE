@@ -15,7 +15,6 @@
 #include "board.h"
 #include "game.h"
 #include "move.h"
-#include "move_gen.h"
 #include "player.h"
 #include "rack.h"
 
@@ -40,9 +39,11 @@ struct Game {
   bool data_is_shared[NUMBER_OF_DATA];
   Board *board;
   Bag *bag;
+  // Some data in the Player objects
+  // are owned by the caller. See Player
+  // for details.
   Player *players[2];
-  MoveList *move_list;
-  MoveGen *gen;
+
   // Owned by the caller
   LetterDistribution *ld;
   // Backups
@@ -51,10 +52,6 @@ struct Game {
   int backup_mode;
   bool backups_preallocated;
 };
-
-MoveGen *game_get_move_gen(Game *game) { return game->gen; }
-
-MoveList *game_get_move_list(Game *game) { return game->move_list; }
 
 Board *game_get_board(Game *game) { return game->board; }
 
@@ -598,35 +595,6 @@ void set_backup_mode(Game *game, int backup_mode) {
   }
 }
 
-void update_player(const Config *config, Player *player) {
-  int player_index = player_get_index(player);
-  PlayersData *players_data = config_get_players_data(config);
-  player_set_name(player, players_data_get_name(players_data, player_index));
-  player_set_move_sort_type(
-      player, players_data_get_move_sort_type(players_data, player_index));
-  player_set_move_record_type(
-      player, players_data_get_move_record_type(players_data, player_index));
-  player_set_kwg(player, players_data_get_kwg(players_data, player_index));
-  player_set_klv(player, players_data_get_klv(players_data, player_index));
-  Rack *player_rack = player_get_rack(player);
-  update_or_create_rack(
-      &player_rack,
-      letter_distribution_get_size(config_get_letter_distribution(config)));
-}
-
-void update_game(const Config *config, Game *game) {
-  // Player names are owned by config, so
-  // we only need to update the move_list capacity.
-  // In the future, we will need to update the board dimensions.
-  for (int player_index = 0; player_index < 2; player_index++) {
-    update_player(config, game->players[player_index]);
-  }
-
-  game->ld = config_get_letter_distribution(config);
-  update_bag(game->ld, game->bag);
-  update_move_list(game->move_list, config_get_num_plays(config));
-}
-
 Game *create_game(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
   game->ld = config_get_letter_distribution(config);
@@ -639,9 +607,6 @@ Game *create_game(const Config *config) {
     game->data_is_shared[i] = players_data_get_is_shared(
         config_get_players_data(config), (players_data_t)i);
   }
-  game->gen = create_generator(letter_distribution_get_size(game->ld));
-  game->move_list = create_move_list(config_get_num_plays(config));
-
   game->starting_player_index = 0;
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
@@ -657,13 +622,11 @@ Game *create_game(const Config *config) {
 
 // This creates a move list and a generator but does
 // not copy them from game.
-Game *game_duplicate(const Game *game, int move_list_capacity) {
+Game *game_duplicate(const Game *game) {
   Game *new_game = malloc_or_die(sizeof(Game));
   new_game->bag = bag_duplicate(game->bag);
   new_game->board = board_duplicate(game->board);
   new_game->ld = game->ld;
-  new_game->move_list = create_move_list(move_list_capacity);
-  new_game->gen = create_generator(letter_distribution_get_size(game->ld));
 
   for (int j = 0; j < 2; j++) {
     new_game->players[j] = player_duplicate(game->players[j]);
@@ -751,8 +714,6 @@ void destroy_game(Game *game) {
   destroy_bag(game->bag);
   destroy_player(game->players[0]);
   destroy_player(game->players[1]);
-  destroy_move_list(game->move_list);
-  destroy_generator(game->gen);
   if (game->backups_preallocated) {
     destroy_backups(game);
   }

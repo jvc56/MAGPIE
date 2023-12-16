@@ -9,10 +9,10 @@
 #include "player.h"
 
 struct Player {
-  int index;
   // All const fields are owned
-  // by PlayersData and are
+  // by the caller and are
   // treated as read-only
+  int index;
   const char *name;
   Rack *rack;
   int score;
@@ -84,7 +84,19 @@ Player *create_player(const Config *config, int player_index) {
   player->score = 0;
   player->rack = create_rack(
       letter_distribution_get_size(config_get_letter_distribution(config)));
-  update_player(config, player);
+
+  PlayersData *players_data = config_get_players_data(config);
+  player->name = players_data_get_name(players_data, player->index);
+  player->move_sort_type =
+      players_data_get_move_sort_type(players_data, player->index);
+  player->move_record_type =
+      players_data_get_move_record_type(players_data, player->index);
+  player->kwg = players_data_get_kwg(players_data, player->index);
+  player->klv = players_data_get_klv(players_data, player->index);
+  update_or_create_rack(
+      &player->rack,
+      letter_distribution_get_size(config_get_letter_distribution(config)));
+
   return player;
 }
 

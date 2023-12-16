@@ -2,7 +2,7 @@
 #ifndef EXEC_H
 #define EXEC_H
 
-#include "../ent/command.h"
+#include "command.h"
 
 void execute_command_sync(CommandVars *command_vars, const char *command);
 void execute_command_async(CommandVars *command_vars, const char *command);

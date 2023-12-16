@@ -10,9 +10,9 @@
 #include "../ent/autoplay_results.h"
 #include "../ent/config.h"
 #include "../ent/game.h"
-#include "../ent/move_gen.h"
 #include "../ent/player.h"
 #include "../ent/stats.h"
+#include "../impl/move_gen.h"
 
 #include "../impl/gameplay.h"
 
@@ -64,22 +64,26 @@ void record_results(Game *game, AutoplayResults *autoplay_results,
   increment_p2_score(autoplay_results, p1_score);
 }
 
-void play_autoplay_game(Game *game, AutoplayResults *autoplay_results,
+void play_autoplay_game(Game *game, MoveGen *gen,
+                        AutoplayResults *autoplay_results,
                         int starting_player_index) {
   reset_game(game);
   set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    play_move(get_top_equity_move(game), game);
+    play_move(get_top_equity_move(game, gen), game);
   }
   record_results(game, autoplay_results, starting_player_index);
 }
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
-  ThreadControl *thread_control =
-      config_get_thread_control(autoplay_worker->config);
-  Game *game = create_game(autoplay_worker->config);
+  const Config *config = autoplay_worker->config;
+  ThreadControl *thread_control = config_get_thread_control(config);
+  Game *game = create_game(config);
+  MoveGen *gen = create_generator(
+      config_get_num_plays(config),
+      letter_distribution_get_size(config_get_letter_distribution(config)));
   Bag *bag = game_get_bag(game);
 
   // Declare local vars for autoplay_worker fields for convenience
@@ -111,11 +115,11 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
       bag_copy(game_pair_bag, bag);
     }
 
-    play_autoplay_game(game, autoplay_worker->autoplay_results,
+    play_autoplay_game(game, gen, autoplay_worker->autoplay_results,
                        starting_player_index);
     if (use_game_pairs) {
       bag_copy(bag, game_pair_bag);
-      play_autoplay_game(game, autoplay_worker->autoplay_results,
+      play_autoplay_game(game, gen, autoplay_worker->autoplay_results,
                          1 - starting_player_index);
     }
   }

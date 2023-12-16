@@ -25,7 +25,6 @@ void reseed_prng(Bag *bag, uint64_t seed);
 void reset_bag(const LetterDistribution *letter_distribution, Bag *bag);
 void seed_bag_for_worker(Bag *bag, uint64_t seed, int worker_index);
 void shuffle(Bag *bag);
-void update_bag(const LetterDistribution *letter_distribution, Bag *bag);
 void add_bag_to_rack(Bag *bag, Rack *rack);
 
 #endif

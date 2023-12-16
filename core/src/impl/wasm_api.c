@@ -10,16 +10,16 @@
 #include "../util/string_util.h"
 
 #include "../ent/bag.h"
-#include "../ent/command.h"
 #include "../ent/config.h"
 #include "../ent/error_status.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
-#include "../ent/move_gen.h"
 #include "../ent/words.h"
 
-#include "../impl/exec.h"
-#include "../impl/gameplay.h"
+#include "command.h"
+#include "exec.h"
+#include "gameplay.h"
+#include "move_gen.h"
 
 static CommandVars *wasm_command_vars = NULL;
 static CommandVars *iso_command_vars = NULL;
@@ -42,7 +42,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   load_cgp_into_iso_command_vars(cgpstr, 1);
   Game *game = command_vars_get_game(iso_command_vars);
   Board *board = game_get_board(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   // Assume players are using the same kwg and klv
   const KWG *kwg = player_get_kwg(game_get_player(game, 0));
@@ -159,11 +159,12 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 char *static_evaluation(const char *cgpstr, int num_plays) {
   load_cgp_into_iso_command_vars(cgpstr, num_plays);
   Game *game = command_vars_get_game(iso_command_vars);
-  generate_moves_for_game(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY);
-  sort_moves(game_get_move_list(game));
+  MoveGen *gen = command_vars_get_gen(iso_command_vars);
+  generate_moves_for_game(game, gen, MOVE_RECORD_ALL, MOVE_SORT_EQUITY);
+  sort_moves(gen_get_move_list(gen));
 
   // This pointer needs to be freed by the caller:
-  char *val = ucgi_static_moves(game);
+  char *val = ucgi_static_moves(game, gen_get_move_list(gen));
   return val;
 }
 

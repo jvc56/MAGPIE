@@ -5,8 +5,6 @@
 #include "../src/ent/config.h"
 #include "../src/ent/game.h"
 
-#include "../src/ent/move_gen.h"
-
 #include "board_test.h"
 #include "test_constants.h"
 #include "test_util.h"

@@ -21,9 +21,12 @@
 #include "../src/ent/leave_map.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
-#include "../src/impl/gameplay.h"
+
 #include "../src/util/log.h"
 #include "../src/util/util.h"
+
+#include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -37,8 +40,7 @@ void load_config_or_die(Config *config, const char *cmd) {
   }
 }
 
-void generate_leaves_for_game(Game *game, bool add_exchange) {
-  MoveGen *gen = game_get_move_gen(game);
+void generate_leaves_for_game(Game *game, MoveGen *gen, bool add_exchange) {
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
 
@@ -102,9 +104,9 @@ void print_move_list(const Board *board,
   destroy_string_builder(move_list_string);
 }
 
-void print_game(Game *game) {
+void print_game(Game *game, MoveList *move_list) {
   StringBuilder *game_string = create_string_builder();
-  string_builder_add_game(game, game_string);
+  string_builder_add_game(game, move_list, game_string);
   printf("%s\n", string_builder_peek(game_string));
   destroy_string_builder(game_string);
 }
@@ -124,9 +126,9 @@ void sort_and_print_move_list(const Board *board,
   destroy_sorted_move_list(sml);
 }
 
-void play_top_n_equity_move(Game *game, int n) {
-  generate_moves_for_game_with_player_move_types(game);
-  MoveList *move_list = game_get_move_list(game);
+void play_top_n_equity_move(Game *game, MoveGen *gen, int n) {
+  generate_moves_for_game_with_player_move_types(game, gen);
+  MoveList *move_list = gen_get_move_list(gen);
   SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
   play_move(sorted_move_list->moves[n], game);
   destroy_sorted_move_list(sorted_move_list);
@@ -257,11 +259,11 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
   }
 }
 
-void assert_move(Game *game, const SortedMoveList *sml, int move_index,
-                 const char *expected_move_string) {
+void assert_move(Game *game, MoveGen *gen, const SortedMoveList *sml,
+                 int move_index, const char *expected_move_string) {
   Board *board = game_get_board(game);
   LetterDistribution *ld = game_get_ld(game);
-  MoveList *move_list = game_get_move_list(game);
+  MoveList *move_list = gen_get_move_list(gen);
 
   StringBuilder *move_string = create_string_builder();
   Move *move;

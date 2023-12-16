@@ -1,20 +1,24 @@
+#include "command.h"
+
 #include <stdlib.h>
 
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-#include "autoplay_results.h"
-#include "command.h"
-#include "config.h"
-#include "error_status.h"
-#include "game.h"
-#include "inference.h"
+#include "../ent/autoplay_results.h"
+#include "../ent/config.h"
+#include "../ent/error_status.h"
+#include "../ent/game.h"
+#include "../ent/inference.h"
+
+#include "move_gen.h"
 #include "simmer.h"
 
 struct CommandVars {
   char *command;
   Config *config;
   Game *game;
+  MoveGen *gen;
   Simmer *simmer;
   Inference *inference;
   AutoplayResults *autoplay_results;
@@ -25,6 +29,7 @@ CommandVars *create_command_vars() {
   CommandVars *command_vars = malloc_or_die(sizeof(CommandVars));
   command_vars->command = NULL;
   command_vars->game = NULL;
+  command_vars->gen = NULL;
   command_vars->simmer = NULL;
   command_vars->inference = NULL;
   command_vars->autoplay_results = NULL;
@@ -36,6 +41,9 @@ CommandVars *create_command_vars() {
 void destroy_command_vars(CommandVars *command_vars) {
   if (command_vars->game) {
     destroy_game(command_vars->game);
+  }
+  if (command_vars->gen) {
+    destroy_generator(command_vars->gen);
   }
   if (command_vars->simmer) {
     destroy_simmer(command_vars->simmer);
@@ -62,6 +70,10 @@ Config *command_vars_get_config(CommandVars *command_vars) {
 
 Game *command_vars_get_game(CommandVars *command_vars) {
   return command_vars->game;
+}
+
+MoveGen *command_vars_get_gen(CommandVars *command_vars) {
+  return command_vars->gen;
 }
 
 Simmer *command_vars_get_simmer(CommandVars *command_vars) {
@@ -93,6 +105,10 @@ void command_vars_set_config(CommandVars *command_vars, Config *config) {
 
 void command_vars_set_game(CommandVars *command_vars, Game *game) {
   command_vars->game = game;
+}
+
+void command_vars_set_gen(CommandVars *command_vars, MoveGen *gen) {
+  command_vars->gen = gen;
 }
 
 void command_vars_set_simmer(CommandVars *command_vars, Simmer *simmer) {

@@ -1,3 +1,5 @@
+#include "move_gen.h"
+
 #include <assert.h>
 #include <ctype.h>
 #include <stdint.h>
@@ -10,17 +12,16 @@
 
 #include "../util/util.h"
 
-#include "anchor.h"
-#include "bag.h"
-#include "config.h"
-#include "game.h"
-#include "klv.h"
-#include "kwg.h"
-#include "leave_map.h"
-#include "move.h"
-#include "move_gen.h"
-#include "player.h"
-#include "rack.h"
+#include "../ent/anchor.h"
+#include "../ent/bag.h"
+#include "../ent/config.h"
+#include "../ent/game.h"
+#include "../ent/klv.h"
+#include "../ent/kwg.h"
+#include "../ent/leave_map.h"
+#include "../ent/move.h"
+#include "../ent/player.h"
+#include "../ent/rack.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
@@ -52,6 +53,9 @@ struct MoveGen {
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
 
+  // Output owned by this MoveGen struct
+  MoveList *move_list;
+
   // Owned by the caller
   const LetterDistribution *letter_distribution;
   const KLV *klv;
@@ -61,8 +65,6 @@ struct MoveGen {
   Rack *player_rack;
   // Board is transposed during move generation
   Board *board;
-  // Output owned by caller
-  MoveList *move_list;
 };
 
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
@@ -73,6 +75,8 @@ AnchorList *gen_get_anchor_list(MoveGen *gen) { return gen->anchor_list; }
 double *gen_get_best_leaves(MoveGen *gen) { return gen->best_leaves; }
 
 LeaveMap *gen_get_leave_map(MoveGen *gen) { return gen->leave_map; }
+
+MoveList *gen_get_move_list(MoveGen *gen) { return gen->move_list; }
 
 double placement_adjustment(const MoveGen *gen, const Move *move) {
   int start = get_col_start(move);
@@ -733,15 +737,13 @@ void set_descending_tile_scores(MoveGen *gen) {
 
 void generate_moves(const LetterDistribution *ld, const KWG *kwg,
                     const KLV *klv, const Rack *opponent_rack, MoveGen *gen,
-                    MoveList *move_list, Board *board, Rack *player_rack,
-                    int player_index, int number_of_tiles_in_bag,
-                    move_record_t move_record_type, move_sort_t move_sort_type,
-                    bool kwgs_are_distinct) {
+                    Board *board, Rack *player_rack, int player_index,
+                    int number_of_tiles_in_bag, move_record_t move_record_type,
+                    move_sort_t move_sort_type, bool kwgs_are_distinct) {
   gen->letter_distribution = ld;
   gen->kwg = kwg;
   gen->klv = klv;
   gen->opponent_rack = opponent_rack;
-  gen->move_list = move_list;
   gen->board = board;
   gen->player_index = player_index;
   gen->player_rack = player_rack;
@@ -835,29 +837,10 @@ void load_zero_preendgame_adjustment_values(MoveGen *gen) {
   }
 }
 
-void update_generator(const Config *config, MoveGen *gen) {
-  update_leave_map(gen->leave_map, letter_distribution_get_size(
-                                       config_get_letter_distribution(config)));
-}
-
-MoveGen *generate_duplicate(const MoveGen *gen) {
-  MoveGen *new_generator = malloc_or_die(sizeof(MoveGen));
-  uint32_t letter_distribution_size =
-      letter_distribution_get_size(gen->letter_distribution);
-  // Allocations
-  new_generator->anchor_list = create_anchor_list();
-  new_generator->leave_map = create_leave_map(letter_distribution_size);
-  new_generator->exchange_strip =
-      (uint8_t *)malloc_or_die(letter_distribution_size * sizeof(uint8_t));
-
-  // Just load the zero values for now
-  load_zero_preendgame_adjustment_values(new_generator);
-
-  return new_generator;
-}
-
-MoveGen *create_generator(int letter_distribution_size) {
+MoveGen *create_generator(int move_list_capacity,
+                          int letter_distribution_size) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
+  generator->move_list = create_move_list(move_list_capacity);
   generator->anchor_list = create_anchor_list();
   generator->leave_map = create_leave_map(letter_distribution_size);
   generator->tiles_played = 0;
@@ -871,6 +854,7 @@ MoveGen *create_generator(int letter_distribution_size) {
 }
 
 void destroy_generator(MoveGen *gen) {
+  destroy_move_list(gen->move_list);
   destroy_anchor_list(gen->anchor_list);
   destroy_leave_map(gen->leave_map);
   free(gen->exchange_strip);

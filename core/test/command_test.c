@@ -8,18 +8,17 @@
 
 #include "../src/def/error_status_defs.h"
 
-#include "../src/ent/command.h"
 #include "../src/ent/game.h"
 #include "../src/ent/inference.h"
-#include "../src/ent/simmer.h"
 #include "../src/ent/thread_control.h"
 
-#include "../src/impl/exec.h"
-
-#include "../src/util/string_util.h"
-
 #include "../src/util/log.h"
+#include "../src/util/string_util.h"
 #include "../src/util/util.h"
+
+#include "../src/impl/command.h"
+#include "../src/impl/exec.h"
+#include "../src/impl/simmer.h"
 
 #include "test_constants.h"
 #include "test_util.h"

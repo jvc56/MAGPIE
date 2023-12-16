@@ -5,7 +5,6 @@
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../ent/move_gen.h"
 #include "../ent/player.h"
 
 #include "../util/string_util.h"
@@ -69,20 +68,23 @@ void string_builder_add_move_with_rank_and_equity(Game *game,
                                                   int move_index) {
   Board *board = game_get_board(game);
   Move *move = move_list_get_move(move_list, move_index);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(board, move, ld, game_string);
   string_builder_add_formatted_string(game_string, " %0.2f", get_equity(move));
 }
 
-void string_builder_add_game(Game *game, StringBuilder *game_string) {
+void string_builder_add_game(Game *game, MoveList *move_list,
+                             StringBuilder *game_string) {
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
-  LetterDistribution *ld = game_get_ld(game);
-  MoveList *move_list = game_get_move_list(game);
-  int number_of_moves = move_list_get_count(move_list);
+  const LetterDistribution *ld = game_get_ld(game);
+  int number_of_moves = 0;
+  if (move_list) {
+    number_of_moves = move_list_get_count(move_list);
+  }
   int player_on_turn_index = game_get_player_on_turn_index(game);
 
   string_builder_add_string(game_string, "   A B C D E F G H I J K L M N O   ");
@@ -116,10 +118,9 @@ void string_builder_add_game(Game *game, StringBuilder *game_string) {
   string_builder_add_string(game_string, "   ------------------------------\n");
 }
 
-char *ucgi_static_moves(Game *game) {
-  MoveList *move_list = game_get_move_list(game);
+char *ucgi_static_moves(Game *game, MoveList *move_list) {
   StringBuilder *moves_string_builder = create_string_builder();
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
 
   for (int i = 0; i < move_list_get_count(move_list); i++) {
@@ -141,8 +142,9 @@ char *ucgi_static_moves(Game *game) {
   return ucgi_static_moves_string;
 }
 
-void print_ucgi_static_moves(Game *game, ThreadControl *thread_control) {
-  char *starting_moves_string_pointer = ucgi_static_moves(game);
+void print_ucgi_static_moves(Game *game, MoveList *move_list,
+                             ThreadControl *thread_control) {
+  char *starting_moves_string_pointer = ucgi_static_moves(game, move_list);
   print_to_outfile(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
 }
