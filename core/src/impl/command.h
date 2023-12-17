@@ -5,8 +5,8 @@
 #include "../ent/config.h"
 #include "../ent/error_status.h"
 #include "../ent/game.h"
-#include "../ent/inference.h"
 
+#include "inference.h"
 #include "move_gen.h"
 #include "simmer.h"
 

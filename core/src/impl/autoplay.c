@@ -127,6 +127,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   if (use_game_pairs) {
     destroy_bag(game_pair_bag);
   }
+  destroy_generator(gen);
   destroy_game(game);
   return NULL;
 }

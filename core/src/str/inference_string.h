@@ -1,8 +1,9 @@
 #ifndef INFERENCE_STRING_H
 #define INFERENCE_STRING_H
 
-#include "../ent/inference.h"
 #include "../ent/rack.h"
+
+#include "../impl/inference.h"
 
 #include "../util/string_util.h"
 

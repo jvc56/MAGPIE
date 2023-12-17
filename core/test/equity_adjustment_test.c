@@ -92,6 +92,7 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
                         get_equity(top_move)));
 
   destroy_sorted_move_list(atalaya_sorted_move_list);
+  destroy_generator(gen);
   destroy_game(game);
 }
 
@@ -157,6 +158,7 @@ void test_macondo_endgame_equity_adjustments(TestConfig *testconfig) {
   assert(within_epsilon(get_equity(move5), -2));
 
   destroy_sorted_move_list(endgame_sorted_move_list);
+  destroy_generator(gen);
   destroy_game(game);
 }
 

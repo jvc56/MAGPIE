@@ -306,6 +306,7 @@ void macondo_tests(TestConfig *testconfig) {
   generate_moves_for_game_with_player_move_types(game, gen);
   assert(count_nonscoring_plays(move_list) == 128);
 
+  destroy_generator(gen);
   destroy_game(game);
   destroy_game(game_two);
 }

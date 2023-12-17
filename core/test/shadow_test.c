@@ -446,6 +446,7 @@ void test_shadow_score(TestConfig *testconfig) {
       within_epsilon(get_anchor_highest_possible_equity(anchor_list, 0), 2036));
 
   destroy_game(game);
+  destroy_generator(gen);
 }
 
 void test_shadow_equity(TestConfig *testconfig) {
@@ -496,6 +497,7 @@ void test_shadow_equity(TestConfig *testconfig) {
                         28 + klv_get_leave_value(klv, leave_rack)));
 
   destroy_game(game);
+  destroy_generator(gen);
   destroy_rack(leave_rack);
 }
 
@@ -516,6 +518,7 @@ void test_shadow_top_move(TestConfig *testconfig) {
   assert(within_epsilon(get_score(move_list_get_move(move_list, 0)), 21));
 
   destroy_game(game);
+  destroy_generator(gen);
 }
 
 void test_shadow(TestConfig *testconfig) {

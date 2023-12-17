@@ -430,7 +430,6 @@ sim_status_t simulate(const Config *config, Game *game, MoveGen *gen,
   // to a sorted array with count == 0, so the number of
   // moves must be obtained before sorting.
   int number_of_moves_generated = move_list_get_count(move_list);
-  printf("moves generated: %d\n", number_of_moves_generated);
   sort_moves(move_list);
 
   if (config_get_static_search_only(config)) {

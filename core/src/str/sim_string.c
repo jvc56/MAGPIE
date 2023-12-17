@@ -16,12 +16,12 @@
 
 #include "../ent/autoplay_results.h"
 #include "../ent/game.h"
-#include "../ent/inference.h"
 #include "../ent/leave_rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/timer.h"
+#include "../impl/inference.h"
 
 char *ucgi_sim_stats(Game *game, SimResults *sim_results,
                      ThreadControl *thread_control, bool best_known_play) {

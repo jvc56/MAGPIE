@@ -5,11 +5,11 @@
 #include "../src/ent/board.h"
 #include "../src/ent/config.h"
 #include "../src/ent/game.h"
-#include "../src/ent/inference.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
+#include "../src/impl/inference.h"
 
 #include "../src/impl/move_gen.h"
 

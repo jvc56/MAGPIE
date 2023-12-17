@@ -15,12 +15,12 @@
 #include "../ent/error_status.h"
 #include "../ent/file_handler.h"
 #include "../ent/game.h"
-#include "../ent/inference.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/thread_control.h"
 
 #include "autoplay.h"
 #include "command.h"
+#include "inference.h"
 #include "simmer.h"
 
 #define UCGI_COMMAND_STRING "ucgi"

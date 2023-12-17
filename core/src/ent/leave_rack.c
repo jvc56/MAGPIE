@@ -34,15 +34,16 @@ double leave_rack_get_equity(const LeaveRack *leaveRack) {
   return leaveRack->equity;
 }
 
-int get_leave_rack_list_count(LeaveRackList *leave_rack_list) {
+int get_leave_rack_list_count(const LeaveRackList *leave_rack_list) {
   return leave_rack_list->count;
 }
 
-int get_leave_rack_list_capacity(LeaveRackList *leave_rack_list) {
+int get_leave_rack_list_capacity(const LeaveRackList *leave_rack_list) {
   return leave_rack_list->capacity;
 }
 
-LeaveRack *get_leave_rack(LeaveRackList *leave_rack_list, int index) {
+const LeaveRack *get_leave_rack(const LeaveRackList *leave_rack_list,
+                                int index) {
   return leave_rack_list->leave_racks[index];
 }
 

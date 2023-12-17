@@ -572,6 +572,7 @@ void test_backups(TestConfig *testconfig) {
   // and drawing 5 replacement tiles, then 73 after QUATORZ(E) and 7 replacement
   // tiles, then back to 80 after unplay.
   assert(get_tiles_remaining(bag) == 81);
+  destroy_generator(gen);
   destroy_game(game);
 }
 

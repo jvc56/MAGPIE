@@ -2,9 +2,6 @@
 #define INFERENCE_DEFS_H
 
 #define INFERENCE_EQUITY_EPSILON 0.000000001
-// FIXME: probably make this an enum
-#define INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW 0
-#define INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE 1
 
 typedef enum {
   INFERENCE_STATUS_SUCCESS,
@@ -15,5 +12,16 @@ typedef enum {
   INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO,
   INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED,
 } inference_status_t;
+
+typedef enum {
+  INFERENCE_TYPE_LEAVE,
+  INFERENCE_TYPE_EXCHANGED,
+  INFERENCE_TYPE_RACK,
+} inference_stat_t;
+
+typedef enum {
+  INFERENCE_SUBTOTAL_DRAW,
+  INFERENCE_SUBTOTAL_LEAVE,
+} inference_subtotal_t;
 
 #endif

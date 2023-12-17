@@ -9,11 +9,12 @@
 #include "rack_string.h"
 
 #include "../ent/game.h"
-#include "../ent/inference.h"
+#include "../ent/inference_results.h"
 #include "../ent/leave_rack.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
 #include "../ent/stats.h"
+#include "../impl/inference.h"
 
 void string_builder_add_leave_rack(
     const LeaveRack *leave_rack, const LetterDistribution *letter_distribution,
@@ -44,18 +45,21 @@ void string_builder_add_leave_rack(
 }
 
 void string_builder_add_letter_minimum(
-    const InferenceRecord *record, const Rack *rack, const Rack *bag_as_rack,
-    StringBuilder *inference_string, uint8_t letter, int minimum,
-    int number_of_tiles_played_or_exchanged) {
+    InferenceResults *inference_results, inference_stat_t inference_stat_type,
+    const Rack *rack, const Rack *bag_as_rack, StringBuilder *inference_string,
+    uint8_t letter, int minimum, int number_of_tiles_played_or_exchanged) {
 
-  Stat *record_equity_values = inference_record_get_equity_values(record);
+  Stat *equity_values = inference_results_get_equity_values(
+      inference_results, inference_stat_type);
 
-  int draw_subtotal = get_subtotal_sum_with_minimum(
-      record, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
-  int leave_subtotal = get_subtotal_sum_with_minimum(
-      record, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE);
+  int draw_subtotal =
+      get_subtotal_sum_with_minimum(inference_results, inference_stat_type,
+                                    letter, minimum, INFERENCE_SUBTOTAL_DRAW);
+  int leave_subtotal =
+      get_subtotal_sum_with_minimum(inference_results, inference_stat_type,
+                                    letter, minimum, INFERENCE_SUBTOTAL_LEAVE);
   double inference_probability =
-      ((double)draw_subtotal) / (double)get_weight(record_equity_values);
+      ((double)draw_subtotal) / (double)get_weight(equity_values);
   double random_probability = get_probability_for_random_minimum_draw(
       bag_as_rack, rack, letter, minimum, number_of_tiles_played_or_exchanged);
   string_builder_add_formatted_string(
@@ -63,13 +67,16 @@ void string_builder_add_letter_minimum(
       random_probability * 100, draw_subtotal, leave_subtotal);
 }
 
-void string_builder_add_letter_line(Game *game, const InferenceRecord *record,
+void string_builder_add_letter_line(Game *game,
+                                    InferenceResults *inference_results,
+                                    inference_stat_t inference_stat_type,
                                     const Rack *rack, const Rack *bag_as_rack,
                                     StringBuilder *inference_string,
                                     Stat *letter_stat, uint8_t letter,
                                     int max_duplicate_letter_draw,
                                     int number_of_tiles_played_or_exchanged) {
-  get_stat_for_letter(record, letter_stat, letter);
+  set_stat_for_letter(inference_results, inference_stat_type, letter_stat,
+                      letter);
   string_builder_add_user_visible_letter(game_get_ld(game), inference_string,
                                          letter);
   string_builder_add_formatted_string(inference_string, ": %4.2f %4.2f",
@@ -77,38 +84,40 @@ void string_builder_add_letter_line(Game *game, const InferenceRecord *record,
                                       get_stdev(letter_stat));
 
   for (int i = 1; i <= max_duplicate_letter_draw; i++) {
-    string_builder_add_letter_minimum(record, rack, bag_as_rack,
-                                      inference_string, letter, i,
-                                      number_of_tiles_played_or_exchanged);
+    string_builder_add_letter_minimum(
+        inference_results, inference_stat_type, rack, bag_as_rack,
+        inference_string, letter, i, number_of_tiles_played_or_exchanged);
   }
   string_builder_add_string(inference_string, "\n");
 }
 
-void string_builder_add_inference_record(
-    const InferenceRecord *record, Game *game, const Rack *rack,
-    const Rack *bag_as_rack, StringBuilder *inference_string, Stat *letter_stat,
+void string_builder_add_inference_type(
+    InferenceResults *inference_results, inference_stat_t inference_stat_type,
+    Game *game, const Rack *rack, const Rack *bag_as_rack,
+    StringBuilder *inference_string, Stat *letter_stat,
     int number_of_tiles_played_or_exchanged) {
 
-  Stat *record_equity_values = inference_record_get_equity_values(record);
+  Stat *equity_values = inference_results_get_equity_values(
+      inference_results, inference_stat_type);
 
-  uint64_t total_draws = get_weight(record_equity_values);
-  uint64_t total_leaves = get_cardinality(record_equity_values);
+  uint64_t total_draws = get_weight(equity_values);
+  uint64_t total_leaves = get_cardinality(equity_values);
 
   string_builder_add_formatted_string(
       inference_string,
       "Total possible leave draws:   %lu\nTotal possible unique leaves: "
       "%lu\nAverage leave value:          %0.2fStdev leave value:            "
       "%0.2f",
-      total_draws, total_leaves, get_mean(record_equity_values),
-      get_stdev(record_equity_values));
+      total_draws, total_leaves, get_mean(equity_values),
+      get_stdev(equity_values));
   int max_duplicate_letter_draw = 0;
   uint32_t ld_size = letter_distribution_get_size(game_get_ld(game));
   for (int letter = 0; letter < (int)ld_size; letter++) {
     for (int number_of_letter = 1; number_of_letter <= (RACK_SIZE);
          number_of_letter++) {
-      int draws =
-          get_subtotal_sum_with_minimum(record, letter, number_of_letter,
-                                        INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
+      int draws = get_subtotal_sum_with_minimum(
+          inference_results, inference_stat_type, letter, number_of_letter,
+          INFERENCE_SUBTOTAL_DRAW);
       if (draws == 0) {
         break;
       }
@@ -134,8 +143,9 @@ void string_builder_add_inference_record(
   if (total_draws > 0) {
     for (int i = 0; i < (int)ld_size; i++) {
       string_builder_add_letter_line(
-          game, record, rack, bag_as_rack, inference_string, letter_stat, i,
-          max_duplicate_letter_draw, number_of_tiles_played_or_exchanged);
+          game, inference_results, inference_stat_type, rack, bag_as_rack,
+          inference_string, letter_stat, i, max_duplicate_letter_draw,
+          number_of_tiles_played_or_exchanged);
     }
   }
 }
@@ -184,28 +194,28 @@ void string_builder_add_inference(const Inference *inference,
   // Create a transient stat to use the stat functions
   Stat *letter_stat = create_stat();
 
-  InferenceRecord *leave_record = inference_get_leave_record(inference);
-  InferenceRecord *rack_record = inference_get_rack_record(inference);
-  InferenceRecord *exchanged_record = inference_get_exchanged_record(inference);
   Rack *inference_leave = inference_get_leave(inference);
   Rack *bag_as_rack = inference_get_bag_as_rack(inference);
+  InferenceResults *inference_results = inference_get_results(inference);
 
-  string_builder_add_inference_record(
-      leave_record, game, inference_leave, bag_as_rack, inference_string,
-      letter_stat, number_of_tiles_played_or_exchanged);
-  const InferenceRecord *common_leaves_record = leave_record;
+  string_builder_add_inference_type(inference_results, INFERENCE_TYPE_LEAVE,
+                                    game, inference_leave, bag_as_rack,
+                                    inference_string, letter_stat,
+                                    number_of_tiles_played_or_exchanged);
+  inference_stat_t common_leaves_type = INFERENCE_TYPE_LEAVE;
   if (is_exchange) {
-    common_leaves_record = rack_record;
+    common_leaves_type = INFERENCE_TYPE_RACK;
     string_builder_add_string(inference_string, "\n\nTiles Exchanged\n\n");
     Rack *unknown_exchange_rack = create_rack(get_array_size(inference_leave));
-    string_builder_add_inference_record(
-        exchanged_record, game, unknown_exchange_rack, bag_as_rack,
-        inference_string, letter_stat, number_of_tiles_exchanged);
+    string_builder_add_inference_type(
+        inference_results, INFERENCE_TYPE_EXCHANGED, game,
+        unknown_exchange_rack, bag_as_rack, inference_string, letter_stat,
+        number_of_tiles_exchanged);
     destroy_rack(unknown_exchange_rack);
     string_builder_add_string(inference_string, "\n\nRack\n\n");
-    string_builder_add_inference_record(rack_record, game, inference_leave,
-                                        bag_as_rack, inference_string,
-                                        letter_stat, 0);
+    string_builder_add_inference_type(inference_results, INFERENCE_TYPE_RACK,
+                                      game, inference_leave, bag_as_rack,
+                                      inference_string, letter_stat, 0);
     string_builder_add_string(
         inference_string,
         "\nMost Common       \n\n#   Leave   Exch    Pct    Draws\n");
@@ -216,16 +226,20 @@ void string_builder_add_inference(const Inference *inference,
   }
   destroy_stat(letter_stat);
 
-  LeaveRackList *leave_rack_list = inference_get_leave_rack_list(inference);
+  const LeaveRackList *leave_rack_list =
+      inference_results_get_leave_rack_list(inference_get_results(inference));
   // Get the list of most common leaves
   int number_of_common_leaves = get_leave_rack_list_count(leave_rack_list);
-  sort_leave_racks(leave_rack_list);
+  // FIXME: Sort this in the inference probably
+  // sort_leave_racks(leave_rack_list);
   for (int common_leave_index = 0; common_leave_index < number_of_common_leaves;
        common_leave_index++) {
-    LeaveRack *leave_rack = get_leave_rack(leave_rack_list, common_leave_index);
+    const LeaveRack *leave_rack =
+        get_leave_rack(leave_rack_list, common_leave_index);
     string_builder_add_leave_rack(
         leave_rack, ld, inference_string, common_leave_index,
-        get_weight(inference_record_get_equity_values(common_leaves_record)));
+        get_weight(inference_results_get_equity_values(inference_results,
+                                                       common_leaves_type)));
   }
 }
 
@@ -273,16 +287,20 @@ void string_builder_add_ucgi_leave_rack(
 }
 
 void string_builder_ucgi_add_letter_minimum(
-    const InferenceRecord *record, const Rack *rack, const Rack *bag_as_rack,
+    InferenceResults *inference_results, inference_stat_t inference_stat_type,
+    const Rack *rack, const Rack *bag_as_rack,
     StringBuilder *ucgi_string_builder, uint8_t letter, int minimum,
     int number_of_tiles_played_or_exchanged) {
-  int draw_subtotal = get_subtotal_sum_with_minimum(
-      record, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_DRAW);
-  int leave_subtotal = get_subtotal_sum_with_minimum(
-      record, letter, minimum, INFERENCE_SUBTOTAL_INDEX_OFFSET_LEAVE);
+  int draw_subtotal =
+      get_subtotal_sum_with_minimum(inference_results, inference_stat_type,
+                                    letter, minimum, INFERENCE_SUBTOTAL_DRAW);
+  int leave_subtotal =
+      get_subtotal_sum_with_minimum(inference_results, inference_stat_type,
+                                    letter, minimum, INFERENCE_SUBTOTAL_LEAVE);
   double inference_probability =
       ((double)draw_subtotal) /
-      (double)get_weight(inference_record_get_equity_values(record));
+      (double)get_weight(inference_results_get_equity_values(
+          inference_results, inference_stat_type));
   double random_probability = get_probability_for_random_minimum_draw(
       bag_as_rack, rack, letter, minimum, number_of_tiles_played_or_exchanged);
   string_builder_add_formatted_string(
@@ -291,14 +309,16 @@ void string_builder_ucgi_add_letter_minimum(
 }
 
 void string_builder_ucgi_add_letter_line(
-    Game *game, const InferenceRecord *record, const Rack *rack,
+    Game *game, InferenceResults *inference_results,
+    inference_stat_t inference_stat_type, const Rack *rack,
     const Rack *bag_as_rack, StringBuilder *ucgi_string_builder,
     Stat *letter_stat, uint8_t letter, int number_of_tiles_played_or_exchanged,
     const char *inference_record_type) {
 
   const LetterDistribution *ld = game_get_ld(game);
 
-  get_stat_for_letter(record, letter_stat, letter);
+  set_stat_for_letter(inference_results, inference_stat_type, letter_stat,
+                      letter);
   string_builder_add_formatted_string(ucgi_string_builder, "infertile %s ",
                                       inference_record_type, 0);
   string_builder_add_user_visible_letter(ld, ucgi_string_builder, letter);
@@ -307,19 +327,21 @@ void string_builder_ucgi_add_letter_line(
                                       get_stdev(letter_stat));
 
   for (int i = 1; i <= (RACK_SIZE); i++) {
-    string_builder_ucgi_add_letter_minimum(record, rack, bag_as_rack,
-                                           ucgi_string_builder, letter, i,
-                                           number_of_tiles_played_or_exchanged);
+    string_builder_ucgi_add_letter_minimum(
+        inference_results, inference_stat_type, rack, bag_as_rack,
+        ucgi_string_builder, letter, i, number_of_tiles_played_or_exchanged);
   }
   string_builder_add_string(ucgi_string_builder, "\n");
 }
 
 void string_builder_ucgi_add_inference_record(
-    const InferenceRecord *record, Game *game, const Rack *rack,
-    const Rack *bag_as_rack, StringBuilder *ucgi_string_builder,
-    Stat *letter_stat, int number_of_tiles_played_or_exchanged,
+    InferenceResults *inference_results, inference_stat_t inference_stat_type,
+    Game *game, const Rack *rack, const Rack *bag_as_rack,
+    StringBuilder *ucgi_string_builder, Stat *letter_stat,
+    int number_of_tiles_played_or_exchanged,
     const char *inference_record_type) {
-  Stat *equity_values = inference_record_get_equity_values(record);
+  Stat *equity_values = inference_results_get_equity_values(
+      inference_results, inference_stat_type);
   const LetterDistribution *ld = game_get_ld(game);
 
   uint64_t total_draws = get_weight(equity_values);
@@ -336,7 +358,8 @@ void string_builder_ucgi_add_inference_record(
       get_stdev(equity_values));
   for (int i = 0; i < (int)letter_distribution_get_size(ld); i++) {
     string_builder_ucgi_add_letter_line(
-        game, record, rack, bag_as_rack, ucgi_string_builder, letter_stat, i,
+        game, inference_results, inference_stat_type, rack, bag_as_rack,
+        ucgi_string_builder, letter_stat, i,
         number_of_tiles_played_or_exchanged, inference_record_type);
   }
 }
@@ -355,37 +378,40 @@ void print_ucgi_inference(const Inference *inference,
 
   // Create a transient stat to use the stat functions
   Stat *letter_stat = create_stat();
+  InferenceResults *inference_results = inference_get_results(inference);
 
   StringBuilder *ucgi_string_builder = create_string_builder();
   string_builder_ucgi_add_inference_record(
-      inference_get_leave_record(inference), game,
+      inference_results, INFERENCE_TYPE_LEAVE, game,
       inference_get_leave(inference), inference_get_bag_as_rack(inference),
       ucgi_string_builder, letter_stat, number_of_tiles_played_or_exchanged,
       "leave");
-  const InferenceRecord *common_leaves_record =
-      inference_get_leave_record(inference);
+  inference_stat_t common_leaves_type = INFERENCE_TYPE_LEAVE;
   if (is_exchange) {
-    common_leaves_record = inference_get_rack_record(inference);
+    common_leaves_type = INFERENCE_TYPE_RACK;
     Rack *unknown_exchange_rack =
         create_rack(get_array_size(inference_get_leave(inference)));
     string_builder_ucgi_add_inference_record(
-        inference_get_exchanged_record(inference), game, unknown_exchange_rack,
-        inference_get_bag_as_rack(inference), ucgi_string_builder, letter_stat,
+        inference_results, INFERENCE_TYPE_EXCHANGED, game,
+        unknown_exchange_rack, inference_get_bag_as_rack(inference),
+        ucgi_string_builder, letter_stat,
         inference_get_number_of_tiles_exchanged(inference), "exch");
     destroy_rack(unknown_exchange_rack);
     string_builder_ucgi_add_inference_record(
-        inference_get_rack_record(inference), game,
+        inference_results, INFERENCE_TYPE_RACK, game,
         inference_get_leave(inference), inference_get_bag_as_rack(inference),
         ucgi_string_builder, letter_stat, 0, "rack");
   }
   destroy_stat(letter_stat);
 
   // Get the list of most common leaves
-  LeaveRackList *leave_rack_list = inference_get_leave_rack_list(inference);
+  const LeaveRackList *leave_rack_list =
+      inference_results_get_leave_rack_list(inference_get_results(inference));
   int number_of_common_leaves = get_leave_rack_list_count(leave_rack_list);
-  sort_leave_racks(leave_rack_list);
-  Stat *common_leave_equity_values =
-      inference_record_get_equity_values(common_leaves_record);
+  // Sort this in the inference probably
+  // sort_leave_racks(leave_rack_list);
+  Stat *common_leave_equity_values = inference_results_get_equity_values(
+      inference_results, common_leaves_type);
   for (int common_leave_index = 0; common_leave_index < number_of_common_leaves;
        common_leave_index++) {
     const LeaveRack *leave_rack =
