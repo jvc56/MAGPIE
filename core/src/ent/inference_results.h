@@ -10,13 +10,25 @@
 struct InferenceResults;
 typedef struct InferenceResults InferenceResults;
 
-InferenceResults *inference_results_create(int move_capacity, int ld_size,
-                                           int subtotals_size);
+InferenceResults *inference_results_create(int move_capacity, int ld_size);
 void inference_results_destroy(InferenceResults *inference_results);
+void inference_results_finalize(InferenceResults *results, int target_score,
+                                int target_number_of_tiles_exchanged,
+                                double equity_margin, Rack *target_played_tiles,
+                                Rack *target_known_unplayed_tiles,
+                                Rack *bag_as_rack);
+int inference_results_get_target_number_of_tiles_exchanged(
+    const InferenceResults *results);
+int inference_results_get_target_score(const InferenceResults *results);
+double inference_results_get_equity_margin(const InferenceResults *results);
+Rack *
+inference_results_get_target_played_tiles(const InferenceResults *results);
+Rack *inference_results_get_target_known_unplayed_tiles(
+    const InferenceResults *results);
+Rack *inference_results_get_bag_as_rack(const InferenceResults *results);
 
 Stat *inference_results_get_equity_values(InferenceResults *results,
                                           inference_stat_t inference_stat_type);
-
 uint64_t get_subtotal(InferenceResults *results,
                       inference_stat_t inference_stat_type, uint8_t letter,
                       int number_of_letters,

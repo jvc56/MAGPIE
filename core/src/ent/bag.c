@@ -169,7 +169,7 @@ void seed_bag_for_worker(Bag *bag, uint64_t seed, int worker_index) {
   }
 }
 
-void add_bag_to_rack(Bag *bag, Rack *rack) {
+void add_bag_to_rack(const Bag *bag, Rack *rack) {
   for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
     add_letter_to_rack(rack, bag->tiles[i]);
   }

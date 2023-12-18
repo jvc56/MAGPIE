@@ -5,11 +5,11 @@
 #include "../src/ent/board.h"
 #include "../src/ent/config.h"
 #include "../src/ent/game.h"
+#include "../src/ent/inference_results.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
-#include "../src/impl/inference.h"
 
 #include "../src/impl/move_gen.h"
 
@@ -40,7 +40,8 @@ void assert_move(Game *game, MoveGen *gen, const SortedMoveList *sml,
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
 void assert_boards_are_equal(const Board *b1, const Board *b2);
 void print_game(Game *game, MoveList *move_list);
-void print_inference(const Inference *inference, const Rack *rack);
+void print_inference(const LetterDistribution *ld,
+                     InferenceResults *inference_results);
 void load_config_or_die(Config *config, const char *cmd);
 void load_cgp_or_die(Game *game, const char *cgp);
 char *get_test_filename(const char *filename);

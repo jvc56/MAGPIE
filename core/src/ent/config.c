@@ -57,10 +57,10 @@
 #define ARG_STOPPING_CONDITION "cond"
 #define ARG_STATIC_SEARCH_ON "static"
 #define ARG_STATIC_SEARCH_OFF "nostatic"
-#define ARG_PLAYER_TO_INFER_INDEX "pindex"
+#define ARG_target_index "pindex"
 #define ARG_SCORE "score"
 #define ARG_EQUITY_MARGIN "eq"
-#define ARG_NUMBER_OF_TILES_EXCHANGED "exch"
+#define ARG_target_number_of_tiles_exchanged "exch"
 #define ARG_GAME_PAIRS_ON "gp"
 #define ARG_GAME_PAIRS_OFF "nogp"
 #define ARG_RANDOM_SEED "rs"
@@ -102,9 +102,9 @@ struct Config {
   // This can act as the known opp tiles
   // or the tiles play in an inference
   Rack *rack;
-  int player_to_infer_index;
-  int actual_score;
-  int number_of_tiles_exchanged;
+  int target_index;
+  int target_score;
+  int target_number_of_tiles_exchanged;
   double equity_margin;
   // Sim
   WinPct *win_pcts;
@@ -161,10 +161,10 @@ typedef enum {
   ARG_TOKEN_STATIC_SEARCH_OFF,
   // Infer
   // Rack is shared with sim
-  ARG_TOKEN_PLAYER_TO_INFER_INDEX,
+  ARG_TOKEN_target_index,
   ARG_TOKEN_SCORE,
   ARG_TOKEN_EQUITY_MARGIN,
-  ARG_TOKEN_NUMBER_OF_TILES_EXCHANGED,
+  ARG_TOKEN_target_number_of_tiles_exchanged,
   // Autoplay
   ARG_TOKEN_GAME_PAIRS_ON,
   ARG_TOKEN_GAME_PAIRS_OFF,
@@ -262,16 +262,16 @@ PlayersData *config_get_players_data(const Config *config) {
 
 Rack *config_get_rack(const Config *config) { return config->rack; }
 
-int config_get_player_to_infer_index(const Config *config) {
-  return config->player_to_infer_index;
+int config_get_target_index(const Config *config) {
+  return config->target_index;
 }
 
-int config_get_actual_score(const Config *config) {
-  return config->actual_score;
+int config_get_target_score(const Config *config) {
+  return config->target_score;
 }
 
-int config_get_number_of_tiles_exchanged(const Config *config) {
-  return config->number_of_tiles_exchanged;
+int config_get_target_number_of_tiles_exchanged(const Config *config) {
+  return config->target_number_of_tiles_exchanged;
 }
 
 double config_get_equity_margin(const Config *config) {
@@ -407,13 +407,13 @@ ParsedArgs *create_parsed_args() {
 
   // Inference args
   // rack is KNOWN_OPP_RACK shared with sim
-  set_single_arg(parsed_args, index++, ARG_TOKEN_PLAYER_TO_INFER_INDEX,
-                 ARG_PLAYER_TO_INFER_INDEX, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_target_index,
+                 ARG_target_index, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_SCORE, ARG_SCORE, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_EQUITY_MARGIN,
                  ARG_EQUITY_MARGIN, 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_NUMBER_OF_TILES_EXCHANGED,
-                 ARG_NUMBER_OF_TILES_EXCHANGED, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_target_number_of_tiles_exchanged,
+                 ARG_target_number_of_tiles_exchanged, 1);
   // Autoplay
   set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_PAIRS_ON,
                  ARG_GAME_PAIRS_ON, 0);
@@ -634,15 +634,15 @@ load_static_search_only_for_config(Config *config, bool static_search_only) {
 }
 
 config_load_status_t
-load_player_to_infer_index_for_config(Config *config,
-                                      const char *player_to_infer_index) {
-  if (!is_all_digits_or_empty(player_to_infer_index)) {
-    return CONFIG_LOAD_STATUS_MALFORMED_PLAYER_TO_INFER_INDEX;
+load_target_index_for_config(Config *config,
+                                      const char *target_index) {
+  if (!is_all_digits_or_empty(target_index)) {
+    return CONFIG_LOAD_STATUS_MALFORMED_target_index;
   }
-  config->player_to_infer_index = string_to_int(player_to_infer_index);
-  if (config->player_to_infer_index != 0 &&
-      config->player_to_infer_index != 1) {
-    return CONFIG_LOAD_STATUS_MALFORMED_PLAYER_TO_INFER_INDEX;
+  config->target_index = string_to_int(target_index);
+  if (config->target_index != 0 &&
+      config->target_index != 1) {
+    return CONFIG_LOAD_STATUS_MALFORMED_target_index;
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
@@ -651,7 +651,7 @@ config_load_status_t load_score_for_config(Config *config, const char *score) {
   if (!is_all_digits_or_empty(score)) {
     return CONFIG_LOAD_STATUS_MALFORMED_SCORE;
   }
-  config->actual_score = string_to_int(score);
+  config->target_score = string_to_int(score);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -669,12 +669,12 @@ load_equity_margin_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_number_of_tiles_exchanged_for_config(
-    Config *config, const char *number_of_tiles_exchanged) {
-  if (!is_all_digits_or_empty(number_of_tiles_exchanged)) {
-    return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED;
+config_load_status_t load_target_number_of_tiles_exchanged_for_config(
+    Config *config, const char *target_number_of_tiles_exchanged) {
+  if (!is_all_digits_or_empty(target_number_of_tiles_exchanged)) {
+    return CONFIG_LOAD_STATUS_MALFORMED_target_number_of_tiles_exchanged;
   }
-  config->number_of_tiles_exchanged = string_to_int(number_of_tiles_exchanged);
+  config->target_number_of_tiles_exchanged = string_to_int(target_number_of_tiles_exchanged);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -1127,9 +1127,9 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
     case ARG_TOKEN_STATIC_SEARCH_OFF:
       config_load_status = load_static_search_only_for_config(config, false);
       break;
-    case ARG_TOKEN_PLAYER_TO_INFER_INDEX:
+    case ARG_TOKEN_target_index:
       config_load_status =
-          load_player_to_infer_index_for_config(config, arg_values[0]);
+          load_target_index_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_SCORE:
       config_load_status = load_score_for_config(config, arg_values[0]);
@@ -1137,9 +1137,9 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
     case ARG_TOKEN_EQUITY_MARGIN:
       config_load_status = load_equity_margin_for_config(config, arg_values[0]);
       break;
-    case ARG_TOKEN_NUMBER_OF_TILES_EXCHANGED:
+    case ARG_TOKEN_target_number_of_tiles_exchanged:
       config_load_status =
-          load_number_of_tiles_exchanged_for_config(config, arg_values[0]);
+          load_target_number_of_tiles_exchanged_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_GAME_PAIRS_ON:
       config_load_status = load_use_game_pairs_for_config(config, true);
@@ -1256,9 +1256,9 @@ Config *create_default_config() {
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->players_data = create_players_data();
   config->rack = NULL;
-  config->player_to_infer_index = 0;
-  config->actual_score = 0;
-  config->number_of_tiles_exchanged = 0;
+  config->target_index = 0;
+  config->target_score = 0;
+  config->target_number_of_tiles_exchanged = 0;
   config->equity_margin = 0;
   config->win_pcts = NULL;
   config->win_pct_name = NULL;

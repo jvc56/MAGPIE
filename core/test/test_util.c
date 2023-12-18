@@ -111,9 +111,10 @@ void print_game(Game *game, MoveList *move_list) {
   destroy_string_builder(game_string);
 }
 
-void print_inference(const Inference *inference, const Rack *rack) {
+void print_inference(const LetterDistribution *ld,
+                     InferenceResults *inference_results) {
   StringBuilder *inference_string = create_string_builder();
-  string_builder_add_inference(inference, rack, inference_string);
+  string_builder_add_inference(ld, inference_results, inference_string);
   printf("%s\n", string_builder_peek(inference_string));
   destroy_string_builder(inference_string);
 }

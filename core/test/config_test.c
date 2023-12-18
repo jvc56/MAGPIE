@@ -84,11 +84,11 @@ void test_config_error_cases() {
   test_config_error(config, "go sim cond NO",
                     CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
   test_config_error(config, "go sim pindex 3",
-                    CONFIG_LOAD_STATUS_MALFORMED_PLAYER_TO_INFER_INDEX);
+                    CONFIG_LOAD_STATUS_MALFORMED_target_index);
   test_config_error(config, "go sim pindex -1",
-                    CONFIG_LOAD_STATUS_MALFORMED_PLAYER_TO_INFER_INDEX);
+                    CONFIG_LOAD_STATUS_MALFORMED_target_index);
   test_config_error(config, "go sim pindex one",
-                    CONFIG_LOAD_STATUS_MALFORMED_PLAYER_TO_INFER_INDEX);
+                    CONFIG_LOAD_STATUS_MALFORMED_target_index);
   test_config_error(config, "go sim score over9000",
                     CONFIG_LOAD_STATUS_MALFORMED_SCORE);
   test_config_error(config, "go sim score -11",
@@ -102,9 +102,9 @@ void test_config_error_cases() {
   test_config_error(config, "go sim eq none",
                     CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN);
   test_config_error(config, "go sim exch five",
-                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED);
+                    CONFIG_LOAD_STATUS_MALFORMED_target_number_of_tiles_exchanged);
   test_config_error(config, "go sim exch -4",
-                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED);
+                    CONFIG_LOAD_STATUS_MALFORMED_target_number_of_tiles_exchanged);
   test_config_error(config, "go sim rs zero",
                     CONFIG_LOAD_STATUS_MALFORMED_RANDOM_SEED);
   test_config_error(config, "go sim rs -4",
@@ -185,9 +185,9 @@ void test_config_success() {
   assert(players_data_get_move_record_type(config_get_players_data(config),
                                            1) == MOVE_RECORD_BEST);
   assert(config_get_bingo_bonus(config) == bingo_bonus);
-  assert(config_get_player_to_infer_index(config) == pindex);
-  assert(config_get_actual_score(config) == score);
-  assert(config_get_number_of_tiles_exchanged(config) == number_exch);
+  assert(config_get_target_index(config) == pindex);
+  assert(config_get_target_score(config) == score);
+  assert(config_get_target_number_of_tiles_exchanged(config) == number_exch);
   assert(within_epsilon(config_get_equity_margin(config), equity_margin));
   assert(config_get_num_plays(config) == num_plays);
   assert(config_get_plies(config) == plies);
@@ -275,9 +275,9 @@ void test_config_success() {
   assert(players_data_get_move_record_type(config_get_players_data(config),
                                            1) == MOVE_RECORD_ALL);
   assert(config_get_bingo_bonus(config) == bingo_bonus);
-  assert(config_get_player_to_infer_index(config) == pindex);
-  assert(config_get_actual_score(config) == score);
-  assert(config_get_number_of_tiles_exchanged(config) == number_exch);
+  assert(config_get_target_index(config) == pindex);
+  assert(config_get_target_score(config) == score);
+  assert(config_get_target_number_of_tiles_exchanged(config) == number_exch);
   assert(within_epsilon(config_get_equity_margin(config), equity_margin));
   assert(config_get_num_plays(config) == num_plays);
   assert(config_get_plies(config) == plies);

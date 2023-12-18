@@ -20,7 +20,7 @@ struct CommandVars {
   Game *game;
   MoveGen *gen;
   Simmer *simmer;
-  Inference *inference;
+  InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
   ErrorStatus *error_status;
 };
@@ -31,7 +31,7 @@ CommandVars *create_command_vars() {
   command_vars->game = NULL;
   command_vars->gen = NULL;
   command_vars->simmer = NULL;
-  command_vars->inference = NULL;
+  command_vars->inference_results = NULL;
   command_vars->autoplay_results = NULL;
   command_vars->config = create_default_config();
   command_vars->error_status = create_error_status();
@@ -48,8 +48,8 @@ void destroy_command_vars(CommandVars *command_vars) {
   if (command_vars->simmer) {
     destroy_simmer(command_vars->simmer);
   }
-  if (command_vars->inference) {
-    destroy_inference(command_vars->inference);
+  if (command_vars->inference_results) {
+    inference_results_destroy(command_vars->inference_results);
   }
   if (command_vars->autoplay_results) {
     destroy_autoplay_results(command_vars->autoplay_results);
@@ -80,8 +80,9 @@ Simmer *command_vars_get_simmer(CommandVars *command_vars) {
   return command_vars->simmer;
 }
 
-Inference *command_vars_get_inference(CommandVars *command_vars) {
-  return command_vars->inference;
+InferenceResults **
+command_vars_get_inference_results(CommandVars *command_vars) {
+  return &command_vars->inference_results;
 }
 
 AutoplayResults *command_vars_get_autoplay_results(CommandVars *command_vars) {
@@ -115,9 +116,9 @@ void command_vars_set_simmer(CommandVars *command_vars, Simmer *simmer) {
   command_vars->simmer = simmer;
 }
 
-void command_vars_set_inference(CommandVars *command_vars,
-                                Inference *inference) {
-  command_vars->inference = inference;
+void command_vars_set_inference_results(CommandVars *command_vars,
+                                        InferenceResults *inference_results) {
+  command_vars->inference_results = inference_results;
 }
 
 void command_vars_set_autoplay_results(CommandVars *command_vars,

@@ -17,21 +17,36 @@ struct InferenceResults {
   // Indexed by inference_stat_t
   uint64_t *subtotals[NUMBER_OF_STAT_TYPES];
   LeaveRackList *leave_rack_list;
+
+  // Fields that are finalized at the end of
+  // the inference execution
+  int target_number_of_tiles_exchanged;
+  int target_score;
+  double equity_margin;
+  Rack *target_played_tiles;
+  Rack *target_known_unplayed_tiles;
+  Rack *bag_as_rack;
 };
 
-InferenceResults *inference_results_create(int move_capacity, int ld_size,
-                                           int subtotals_size) {
+int get_subtotals_size(int ld_size) { return ld_size * (RACK_SIZE) * 2; }
+
+// The created inference results takes ownership of all of the
+// Rack pointers passed to it in the constructor.
+InferenceResults *inference_results_create(int move_capacity, int ld_size) {
   InferenceResults *results = malloc_or_die(sizeof(InferenceResults));
-  results->subtotals_size = subtotals_size;
+  results->subtotals_size = get_subtotals_size(ld_size);
   for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
     results->equity_values[i] = create_stat();
     results->subtotals[i] =
-        (uint64_t *)malloc_or_die(subtotals_size * sizeof(uint64_t));
-    for (int j = 0; j < subtotals_size; j++) {
+        (uint64_t *)malloc_or_die(results->subtotals_size * sizeof(uint64_t));
+    for (int j = 0; j < results->subtotals_size; j++) {
       results->subtotals[i][j] = 0;
     }
   }
   results->leave_rack_list = create_leave_rack_list(move_capacity, ld_size);
+  results->target_played_tiles = NULL;
+  results->target_known_unplayed_tiles = NULL;
+  results->bag_as_rack = NULL;
   return results;
 }
 
@@ -41,13 +56,68 @@ void inference_results_destroy(InferenceResults *results) {
     free(results->subtotals[i]);
   }
   destroy_leave_rack_list(results->leave_rack_list);
+  if (results->target_played_tiles) {
+    destroy_rack(results->target_played_tiles);
+  }
+  if (results->target_known_unplayed_tiles) {
+    destroy_rack(results->target_known_unplayed_tiles);
+  }
+  if (results->bag_as_rack) {
+    destroy_rack(results->bag_as_rack);
+  }
   free(results);
+}
+
+void inference_results_finalize(InferenceResults *results, int target_score,
+                                int target_number_of_tiles_exchanged,
+                                double equity_margin, Rack *target_played_tiles,
+                                Rack *target_known_unplayed_tiles,
+                                Rack *bag_as_rack) {
+  results->target_score = target_score;
+  results->target_number_of_tiles_exchanged = target_number_of_tiles_exchanged;
+  results->equity_margin = equity_margin;
+  results->target_played_tiles = rack_duplicate(target_played_tiles);
+  results->target_known_unplayed_tiles =
+      rack_duplicate(target_known_unplayed_tiles);
+  results->bag_as_rack = rack_duplicate(bag_as_rack);
+}
+
+int inference_results_get_target_number_of_tiles_exchanged(
+    const InferenceResults *results) {
+  return results->target_number_of_tiles_exchanged;
+}
+
+int inference_results_get_target_score(const InferenceResults *results) {
+  return results->target_score;
+}
+
+double inference_results_get_equity_margin(const InferenceResults *results) {
+  return results->equity_margin;
+}
+
+Rack *
+inference_results_get_target_played_tiles(const InferenceResults *results) {
+  return results->target_played_tiles;
+}
+
+Rack *inference_results_get_target_known_unplayed_tiles(
+    const InferenceResults *results) {
+  return results->target_known_unplayed_tiles;
+}
+
+Rack *inference_results_get_bag_as_rack(const InferenceResults *results) {
+  return results->bag_as_rack;
 }
 
 Stat *
 inference_results_get_equity_values(InferenceResults *results,
                                     inference_stat_t inference_stat_type) {
   return results->equity_values[(int)inference_stat_type];
+}
+
+LeaveRackList *
+inference_results_get_leave_rack_list(InferenceResults *inference_results) {
+  return inference_results->leave_rack_list;
 }
 
 int get_letter_subtotal_index(uint8_t letter, int number_of_letters,
@@ -84,11 +154,6 @@ uint64_t get_subtotal_sum_with_minimum(InferenceResults *results,
                         subtotal_index_offset);
   }
   return sum;
-}
-
-LeaveRackList *
-inference_results_get_leave_rack_list(InferenceResults *inference_results) {
-  return inference_results->leave_rack_list;
 }
 
 void inference_results_add_subtotals(InferenceResults *result_being_added,

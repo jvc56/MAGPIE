@@ -136,12 +136,9 @@ void execute_autoplay(const Config *config, CommandVars *command_vars) {
 }
 
 void execute_infer(const Config *config, CommandVars *command_vars) {
-  if (command_vars_get_inference(command_vars)) {
-    destroy_inference(command_vars_get_inference(command_vars));
-  }
-  command_vars_set_inference(command_vars, create_inference());
-  inference_status_t status = infer(config, command_vars_get_game(command_vars),
-                                    command_vars_get_inference(command_vars));
+  inference_status_t status =
+      infer(config, command_vars_get_game(command_vars),
+            command_vars_get_inference_results(command_vars));
   set_or_clear_error_status(command_vars_get_error_status(command_vars),
                             ERROR_STATUS_TYPE_INFER, (int)status);
 }
