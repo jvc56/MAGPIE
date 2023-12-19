@@ -22,7 +22,6 @@ Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 int simmed_play_get_id(const SimmedPlay *simmed_play);
 pthread_mutex_t *simmed_play_get_mutex(const SimmedPlay *simmed_play);
 bool simmed_play_get_ignore(const SimmedPlay *simmed_play);
-
 void simmed_play_set_ignore(SimmedPlay *simmed_play, bool ignore);
 
 void add_score_stat(SimmedPlay *sp, int score, bool is_bingo, int ply,
@@ -35,10 +34,9 @@ void add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
 struct SimResults;
 typedef struct SimResults SimResults;
 
-SimResults *sim_results_create();
+SimResults *sim_results_create(MoveList *move_list, int num_simmed_plays,
+                               int max_plies);
 void sim_results_destroy(SimResults *sim_results);
-void sim_results_init(SimResults *sim_results, MoveList *move_list,
-                      int num_simmed_plays, int max_plies);
 
 int sim_results_get_number_of_plays(SimResults *sim_results);
 int sim_results_get_max_plies(SimResults *sim_results);
@@ -48,5 +46,7 @@ void sim_results_increment_node_count(SimResults *sim_results);
 int sim_results_get_node_count(SimResults *sim_results);
 int sim_results_get_iteration_count(SimResults *sim_results);
 void sim_results_increment_iteration_count(SimResults *sim_results);
+void sim_results_lock_simmed_plays(SimResults *sim_results);
+void sim_results_unlock_simmed_plays(SimResults *sim_results);
 
 #endif

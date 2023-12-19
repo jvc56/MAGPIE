@@ -88,6 +88,14 @@ AutoplayResults *create_autoplay_results() {
   return autoplay_results;
 }
 
+void create_or_reset_autoplay_results(AutoplayResults **autoplay_results) {
+  if (!*autoplay_results) {
+    *autoplay_results = create_autoplay_results();
+  } else {
+    reset_autoplay_results(*autoplay_results);
+  }
+}
+
 void destroy_autoplay_results(AutoplayResults *autoplay_results) {
   destroy_stat(autoplay_results->p1_score);
   destroy_stat(autoplay_results->p2_score);

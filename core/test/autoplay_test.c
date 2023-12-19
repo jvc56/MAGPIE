@@ -28,9 +28,9 @@ void autoplay_game_pairs_test(TestConfig *testconfig) {
 
   free(options_string);
 
-  AutoplayResults *autoplay_results = create_autoplay_results();
+  AutoplayResults *autoplay_results = NULL;
 
-  autoplay_status_t status = autoplay(csw_config, autoplay_results);
+  autoplay_status_t status = autoplay(csw_config, &autoplay_results);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
   int max_iterations = config_get_max_iterations(csw_config);
   assert(get_total_games(autoplay_results) == max_iterations * 2);
@@ -48,7 +48,7 @@ void autoplay_game_pairs_test(TestConfig *testconfig) {
   max_iterations = config_get_max_iterations(csw_config);
 
   // Autoplay should reset the stats
-  status = autoplay(csw_config, autoplay_results);
+  status = autoplay(csw_config, &autoplay_results);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
   assert(get_total_games(autoplay_results) == max_iterations);
 

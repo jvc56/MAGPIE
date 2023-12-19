@@ -2,11 +2,11 @@
 #ifndef EXEC_H
 #define EXEC_H
 
-#include "command.h"
+#include "../ent/exec_state.h"
 
-void execute_command_sync(CommandVars *command_vars, const char *command);
-void execute_command_async(CommandVars *command_vars, const char *command);
-char *command_search_status(CommandVars *command_vars, bool should_halt);
+void execute_command_sync(ExecState *exec_state, const char *command);
+void execute_command_async(ExecState *exec_state, const char *command);
+char *command_search_status(ExecState *exec_state, bool should_halt);
 void process_command(int argc, char *argv[]);
 
 #endif

@@ -13,13 +13,13 @@
 #include "../ent/autoplay_results.h"
 #include "../ent/config.h"
 #include "../ent/error_status.h"
+#include "../ent/exec_state.h"
 #include "../ent/file_handler.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/thread_control.h"
 
 #include "autoplay.h"
-#include "command.h"
 #include "inference.h"
 #include "simmer.h"
 
@@ -30,14 +30,14 @@
 
 // Returns NULL and prints a warning if a search is ongoing or some other error
 // occurred
-char *command_search_status(CommandVars *command_vars, bool should_halt) {
-  if (!command_vars) {
+char *command_search_status(ExecState *exec_state, bool should_halt) {
+  if (!exec_state) {
     log_warn("The command variables struct has not been initialized.");
     return NULL;
   }
 
   ThreadControl *thread_control =
-      config_get_thread_control(command_vars_get_config(command_vars));
+      config_get_thread_control(exec_state_get_config(exec_state));
 
   int mode = get_mode(thread_control);
   if (mode != MODE_SEARCHING) {
@@ -53,20 +53,20 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
   }
 
   char *status_string = NULL;
+  SimResults *sim_results = NULL;
 
-  switch (config_get_command_type(command_vars_get_config(command_vars))) {
+  switch (config_get_command_type(exec_state_get_config(exec_state))) {
   case COMMAND_TYPE_SIM:
-    if (!command_vars_get_simmer(command_vars)) {
+    sim_results = exec_state_get_sim_results(exec_state);
+    if (!sim_results) {
       log_warn("Simmer has not been initialized.");
       return NULL;
     }
     // FIXME: need an option for ucgi vs. human readable
     // since the command module is an abstraction layer
     // above UCGI.
-    status_string = ucgi_sim_stats(
-        command_vars_get_game(command_vars),
-        simmer_get_sim_results(command_vars_get_simmer(command_vars)),
-        thread_control, true);
+    status_string = ucgi_sim_stats(exec_state_get_game(exec_state), sim_results,
+                                   thread_control, true);
     break;
   case COMMAND_TYPE_AUTOPLAY:
     status_string = string_duplicate("autoplay status unimplemented");
@@ -87,17 +87,17 @@ char *command_search_status(CommandVars *command_vars, bool should_halt) {
 // This function recreates fields of the command vars
 // which have dynamically sized allocations that can
 // change based on the config.
-void reset_game_and_move_gen(const Config *config, CommandVars *command_vars) {
-  if (command_vars_get_game(command_vars)) {
-    destroy_game(command_vars_get_game(command_vars));
+void reset_game_and_move_gen(const Config *config, ExecState *exec_state) {
+  if (exec_state_get_game(exec_state)) {
+    destroy_game(exec_state_get_game(exec_state));
   }
-  command_vars_set_game(command_vars, create_game(config));
+  exec_state_set_game(exec_state, create_game(config));
 
-  if (command_vars_get_gen(command_vars)) {
-    destroy_generator(command_vars_get_gen(command_vars));
+  if (exec_state_get_gen(exec_state)) {
+    destroy_generator(exec_state_get_gen(exec_state));
   }
-  command_vars_set_gen(
-      command_vars,
+  exec_state_set_gen(
+      exec_state,
       create_generator(config_get_num_plays(config),
                        letter_distribution_get_size(
                            config_get_letter_distribution(config))));
@@ -113,55 +113,56 @@ void set_or_clear_error_status(ErrorStatus *error_status,
   }
 }
 
-void execute_sim(const Config *config, CommandVars *command_vars) {
-  if (command_vars_get_simmer(command_vars)) {
-    destroy_simmer(command_vars_get_simmer(command_vars));
-  }
-  command_vars_set_simmer(command_vars, create_simmer(config));
-  sim_status_t status = simulate(config, command_vars_get_game(command_vars),
-                                 command_vars_get_gen(command_vars),
-                                 command_vars_get_simmer(command_vars));
-  set_or_clear_error_status(command_vars_get_error_status(command_vars),
+void execute_sim(const Config *config, ExecState *exec_state) {
+  SimResults *sim_results = exec_state_get_sim_results(exec_state);
+  sim_status_t status = simulate(config, exec_state_get_game(exec_state),
+                                 exec_state_get_gen(exec_state), &sim_results);
+  // The sim results could have been a NULL pointer, so we
+  // have to set the potentially newly created sim_results here.
+  exec_state_set_sim_results(exec_state, sim_results);
+  set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_SIM, (int)status);
 }
 
-void execute_autoplay(const Config *config, CommandVars *command_vars) {
-  if (!command_vars_get_autoplay_results(command_vars)) {
-    command_vars_set_autoplay_results(command_vars, create_autoplay_results());
-  }
-  autoplay_status_t status =
-      autoplay(config, command_vars_get_autoplay_results(command_vars));
-  set_or_clear_error_status(command_vars_get_error_status(command_vars),
+void execute_autoplay(const Config *config, ExecState *exec_state) {
+  AutoplayResults *autoplay_results =
+      exec_state_get_autoplay_results(exec_state);
+  autoplay_status_t status = autoplay(config, &autoplay_results);
+  exec_state_set_autoplay_results(exec_state, autoplay_results);
+  set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_AUTOPLAY, (int)status);
 }
 
-void execute_infer(const Config *config, CommandVars *command_vars) {
+void execute_infer(const Config *config, ExecState *exec_state) {
+  InferenceResults *inference_results =
+      exec_state_get_inference_results(exec_state);
   inference_status_t status =
-      infer(config, command_vars_get_game(command_vars),
-            command_vars_get_inference_results(command_vars));
-  set_or_clear_error_status(command_vars_get_error_status(command_vars),
+      infer(config, exec_state_get_game(exec_state), &inference_results);
+  exec_state_set_inference_results(exec_state, inference_results);
+  set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_INFER, (int)status);
 }
 
-void execute_command(CommandVars *command_vars) {
+void execute_command(ExecState *exec_state) {
   // This function assumes that the config
   // is already loaded
 
   // Once the config is loaded, we should regard it as
   // read-only. We create a new const pointer to enforce this.
-  const Config *config = command_vars_get_config(command_vars);
+  const Config *config = exec_state_get_config(exec_state);
 
   // If the lexicons aren't loaded, this is
   // guaranteed to be a set options
   // command and the rest of the function
   // will be a no-op.
   if (config_get_lexicons_loaded(config)) {
-    reset_game_and_move_gen(config, command_vars);
+    // FIXME: only reset if the lexicons or letter distribution changes
+    reset_game_and_move_gen(config, exec_state);
 
     if (config_get_command_set_cgp(config)) {
       cgp_parse_status_t cgp_parse_status =
-          load_cgp(command_vars_get_game(command_vars), config_get_cgp(config));
-      set_or_clear_error_status(command_vars_get_error_status(command_vars),
+          load_cgp(exec_state_get_game(exec_state), config_get_cgp(config));
+      set_or_clear_error_status(exec_state_get_error_status(exec_state),
                                 ERROR_STATUS_TYPE_CGP_LOAD,
                                 (int)cgp_parse_status);
       if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
@@ -181,40 +182,38 @@ void execute_command(CommandVars *command_vars) {
     // above. No further processing is necessary.
     break;
   case COMMAND_TYPE_SIM:
-    execute_sim(config, command_vars);
+    execute_sim(config, exec_state);
     break;
   case COMMAND_TYPE_AUTOPLAY:
-    execute_autoplay(config, command_vars);
+    execute_autoplay(config, exec_state);
     break;
   case COMMAND_TYPE_INFER:
-    execute_infer(config, command_vars);
+    execute_infer(config, exec_state);
     break;
   }
 }
 
-void execute_command_and_set_mode_stopped(CommandVars *command_vars) {
-  execute_command(command_vars);
-  log_warn_if_failed(command_vars_get_error_status(command_vars));
+void execute_command_and_set_mode_stopped(ExecState *exec_state) {
+  execute_command(exec_state);
+  log_warn_if_failed(exec_state_get_error_status(exec_state));
   set_mode_stopped(
-      config_get_thread_control(command_vars_get_config(command_vars)));
+      config_get_thread_control(exec_state_get_config(exec_state)));
 }
 
-void *execute_command_thread_worker(void *uncasted_command_vars) {
-  CommandVars *command_vars = (CommandVars *)uncasted_command_vars;
-  execute_command_and_set_mode_stopped(command_vars);
+void *execute_command_thread_worker(void *uncasted_exec_state) {
+  ExecState *exec_state = (ExecState *)uncasted_exec_state;
+  execute_command_and_set_mode_stopped(exec_state);
   return NULL;
 }
 
-void execute_command_sync_or_async(CommandVars *command_vars,
-                                   const char *command, bool sync) {
+void execute_command_sync_or_async(ExecState *exec_state, const char *command,
+                                   bool sync) {
   ThreadControl *thread_control =
-      config_get_thread_control(command_vars_get_config(command_vars));
+      config_get_thread_control(exec_state_get_config(exec_state));
   if (!set_mode_searching(thread_control)) {
     log_warn("still searching");
     return;
   }
-
-  command_vars_set_command(command_vars, command);
 
   // Loading the config should always be
   // done synchronously to prevent deadlock
@@ -226,39 +225,38 @@ void execute_command_sync_or_async(CommandVars *command_vars,
   // Loading the config is relatively
   // fast so humans shouldn't notice anything
   config_load_status_t config_load_status =
-      load_config(command_vars_get_config(command_vars),
-                  command_vars_get_command(command_vars));
-  set_or_clear_error_status(command_vars_get_error_status(command_vars),
+      load_config(exec_state_get_config(exec_state), command);
+  set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             (int)config_load_status);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    log_warn_if_failed(command_vars_get_error_status(command_vars));
+    log_warn_if_failed(exec_state_get_error_status(exec_state));
     set_mode_stopped(thread_control);
     return;
   }
 
   if (sync) {
-    execute_command_and_set_mode_stopped(command_vars);
+    execute_command_and_set_mode_stopped(exec_state);
   } else {
     pthread_t cmd_execution_thread;
     pthread_create(&cmd_execution_thread, NULL, execute_command_thread_worker,
-                   command_vars);
+                   exec_state);
     pthread_detach(cmd_execution_thread);
   }
 }
 
-void execute_command_sync(CommandVars *command_vars, const char *command) {
-  execute_command_sync_or_async(command_vars, command, true);
+void execute_command_sync(ExecState *exec_state, const char *command) {
+  execute_command_sync_or_async(exec_state, command, true);
 }
 
-void execute_command_async(CommandVars *command_vars, const char *command) {
-  execute_command_sync_or_async(command_vars, command, false);
+void execute_command_async(ExecState *exec_state, const char *command) {
+  execute_command_sync_or_async(exec_state, command, false);
 }
 
-void process_ucgi_command(CommandVars *command_vars, const char *command) {
+void process_ucgi_command(ExecState *exec_state, const char *command) {
   // Assume cmd is already trimmed of whitespace
   ThreadControl *thread_control =
-      config_get_thread_control(command_vars_get_config(command_vars));
+      config_get_thread_control(exec_state_get_config(exec_state));
   if (strings_equal(command, UCGI_COMMAND_STRING)) {
     // More of a formality to align with UCI
     print_to_outfile(thread_control, "id name MAGPIE 0.1\nucgiok\n");
@@ -271,7 +269,7 @@ void process_ucgi_command(CommandVars *command_vars, const char *command) {
       log_warn("There is no search to stop.");
     }
   } else {
-    execute_command_async(command_vars, command);
+    execute_command_async(exec_state, command);
   }
 }
 
@@ -283,18 +281,18 @@ bool continue_on_coldstart(const Config *config) {
          config_get_command_set_exec_mode(config);
 }
 
-void command_scan_loop(CommandVars *command_vars,
+void command_scan_loop(ExecState *exec_state,
                        const char *initial_command_string) {
-  execute_command_sync(command_vars, initial_command_string);
-  if (!continue_on_coldstart(command_vars_get_config(command_vars))) {
+  execute_command_sync(exec_state, initial_command_string);
+  if (!continue_on_coldstart(exec_state_get_config(exec_state))) {
     return;
   }
   ThreadControl *thread_control =
-      config_get_thread_control(command_vars_get_config(command_vars));
+      config_get_thread_control(exec_state_get_config(exec_state));
   char *input = NULL;
   while (1) {
     exec_mode_t exec_mode =
-        config_get_exec_mode(command_vars_get_config(command_vars));
+        config_get_exec_mode(exec_state_get_config(exec_state));
 
     FileHandler *infile = get_infile(thread_control);
 
@@ -323,10 +321,10 @@ void command_scan_loop(CommandVars *command_vars,
 
     switch (exec_mode) {
     case EXEC_MODE_CONSOLE:
-      execute_command_sync(command_vars, input);
+      execute_command_sync(exec_state, input);
       break;
     case EXEC_MODE_UCGI:
-      process_ucgi_command(command_vars, input);
+      process_ucgi_command(exec_state, input);
       break;
     }
   }
@@ -345,9 +343,9 @@ char *create_command_from_args(int argc, char *argv[]) {
 
 void process_command(int argc, char *argv[]) {
   log_set_level(LOG_WARN);
-  CommandVars *command_vars = create_command_vars();
+  ExecState *exec_state = create_exec_state();
   char *initial_command_string = create_command_from_args(argc, argv);
-  command_scan_loop(command_vars, initial_command_string);
+  command_scan_loop(exec_state, initial_command_string);
   free(initial_command_string);
-  destroy_command_vars(command_vars);
+  destroy_exec_state(exec_state);
 }

@@ -567,8 +567,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   free(worker_ids);
 }
 
-inference_status_t verify_inference(const Inference *inference,
-                                    Rack *config_target_played_tiles) {
+inference_status_t verify_inference(const Inference *inference) {
   Rack *bag_as_rack = inference->bag_as_rack;
   for (int i = 0; i < inference->ld_size; i++) {
     if (get_number_of_letter(bag_as_rack, i) < 0) {
@@ -577,7 +576,7 @@ inference_status_t verify_inference(const Inference *inference,
   }
 
   int infer_rack_number_of_letters =
-      get_number_of_letters(config_target_played_tiles);
+      get_number_of_letters(inference->current_target_rack);
 
   int number_of_letters_in_bag = get_number_of_letters(bag_as_rack);
 
@@ -626,8 +625,7 @@ inference_status_t infer(const Config *config, Game *game,
       config_get_target_number_of_tiles_exchanged(config),
       config_get_equity_margin(config));
 
-  inference_status_t status =
-      verify_inference(inference, config_target_played_tiles);
+  inference_status_t status = verify_inference(inference);
 
   if (status == INFERENCE_STATUS_SUCCESS) {
     infer_manager(thread_control, inference);

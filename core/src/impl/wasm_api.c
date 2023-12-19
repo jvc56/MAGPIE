@@ -12,35 +12,36 @@
 #include "../ent/bag.h"
 #include "../ent/config.h"
 #include "../ent/error_status.h"
+#include "../ent/exec_state.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/words.h"
 
-#include "command.h"
 #include "exec.h"
 #include "gameplay.h"
 #include "move_gen.h"
 
-static CommandVars *wasm_command_vars = NULL;
-static CommandVars *iso_command_vars = NULL;
+static ExecState *wasm_exec_state = NULL;
+// FIXME: implement score and static eval without ExecState
+static ExecState *iso_exec_state = NULL;
 
-void load_cgp_into_iso_command_vars(const char *cgp, int num_plays) {
+void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
   // Use a separate command vars to get
   // a game for score_play and static_evaluation
-  if (!iso_command_vars) {
-    iso_command_vars = create_command_vars();
+  if (!iso_exec_state) {
+    iso_exec_state = create_exec_state();
   }
   char *cgp_command =
       get_formatted_string("position cgp %s numplays %d", cgp, num_plays);
-  execute_command_sync(iso_command_vars, cgp_command);
+  execute_command_sync(iso_exec_state, cgp_command);
   free(cgp_command);
 }
 
 // tiles must contain 0 for play-through tiles!
 char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
                  uint8_t *tiles, uint8_t *leave, int ntiles, int nleave) {
-  load_cgp_into_iso_command_vars(cgpstr, 1);
-  Game *game = command_vars_get_game(iso_command_vars);
+  load_cgp_into_iso_exec_state(cgpstr, 1);
+  Game *game = exec_state_get_game(iso_exec_state);
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
@@ -157,9 +158,9 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 
 // a synchronous function to return a static eval of a position.
 char *static_evaluation(const char *cgpstr, int num_plays) {
-  load_cgp_into_iso_command_vars(cgpstr, num_plays);
-  Game *game = command_vars_get_game(iso_command_vars);
-  MoveGen *gen = command_vars_get_gen(iso_command_vars);
+  load_cgp_into_iso_exec_state(cgpstr, num_plays);
+  Game *game = exec_state_get_game(iso_exec_state);
+  MoveGen *gen = exec_state_get_gen(iso_exec_state);
   generate_moves_for_game(game, gen, MOVE_RECORD_ALL, MOVE_SORT_EQUITY);
   sort_moves(gen_get_move_list(gen));
 
@@ -172,17 +173,17 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 // I'm not sure about this part of WASM, it might
 // need to be freed
 int process_command_wasm(const char *cmd) {
-  if (!wasm_command_vars) {
-    wasm_command_vars = create_command_vars();
+  if (!wasm_exec_state) {
+    wasm_exec_state = create_exec_state();
   }
-  execute_command_async(wasm_command_vars, cmd);
+  execute_command_async(wasm_exec_state, cmd);
   return 0;
 }
 
 char *get_search_status_wasm() {
-  return command_search_status(wasm_command_vars, false);
+  return command_search_status(wasm_exec_state, false);
 }
 
 char *get_stop_search_wasm() {
-  return command_search_status(wasm_command_vars, true);
+  return command_search_status(wasm_exec_state, true);
 }

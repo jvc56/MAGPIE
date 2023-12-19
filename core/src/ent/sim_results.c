@@ -28,6 +28,7 @@ struct SimResults {
   int max_plies;
   int num_simmed_plays;
   int iteration_count;
+  pthread_mutex_t simmed_plays_mutex;
   atomic_int node_count;
   SimmedPlay **simmed_plays;
 };
@@ -78,11 +79,16 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
   free(simmed_plays);
 }
 
-SimResults *sim_results_create() {
+SimResults *sim_results_create(MoveList *move_list, int num_simmed_plays,
+                               int max_plies) {
   SimResults *sim_results = malloc_or_die(sizeof(SimResults));
-  sim_results->num_simmed_plays = 0;
-  sim_results->max_plies = 0;
-  sim_results->simmed_plays = NULL;
+  sim_results->num_simmed_plays = num_simmed_plays;
+  sim_results->max_plies = max_plies;
+  sim_results->iteration_count = 0;
+  pthread_mutex_init(&sim_results->simmed_plays_mutex, NULL);
+  atomic_init(&sim_results->node_count, 0);
+  sim_results->simmed_plays =
+      simmed_plays_create(move_list, num_simmed_plays, max_plies);
   return sim_results;
 }
 
@@ -95,24 +101,6 @@ void sim_results_destroy(SimResults *sim_results) {
   }
 
   free(sim_results);
-}
-
-void sim_results_init(SimResults *sim_results, MoveList *move_list,
-                      int num_simmed_plays, int max_plies) {
-  // We need to destroy the simmed plays before
-  // setting new values for num_simmed_plays and max_plies
-  // because the destructor needs these old values to
-  // properly free the simmed plays.
-  if (sim_results->simmed_plays) {
-    simmed_plays_destroy(sim_results->simmed_plays,
-                         sim_results->num_simmed_plays, sim_results->max_plies);
-  }
-  sim_results->num_simmed_plays = num_simmed_plays;
-  sim_results->max_plies = max_plies;
-  sim_results->iteration_count = 0;
-  atomic_init(&sim_results->node_count, 0);
-  sim_results->simmed_plays =
-      simmed_plays_create(move_list, num_simmed_plays, max_plies);
 }
 
 Move *simmed_play_get_move(const SimmedPlay *simmed_play) {
@@ -193,6 +181,14 @@ SimmedPlay *sim_results_get_simmed_play(SimResults *sim_results, int index) {
 
 void sim_results_increment_node_count(SimResults *sim_results) {
   atomic_fetch_add(&sim_results->node_count, 1);
+}
+
+void sim_results_lock_simmed_plays(SimResults *sim_results) {
+  pthread_mutex_lock(&sim_results->simmed_plays_mutex);
+}
+
+void sim_results_unlock_simmed_plays(SimResults *sim_results) {
+  pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
 }
 
 void add_score_stat(SimmedPlay *sp, int score, bool is_bingo, int ply,
@@ -289,7 +285,7 @@ int compare_simmed_plays(const void *a, const void *b) {
   }
 }
 
-// Not thread safe. Must be called with a lock on the sorted plays mutex
+// Not thread safe. Must be called with a lock on the simmed plays mutex
 // during multithreaded simming.
 void sim_results_sort_plays_by_win_rate(SimResults *sim_results) {
   qsort(sim_results->simmed_plays, sim_results->num_simmed_plays,

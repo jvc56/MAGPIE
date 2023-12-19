@@ -8,16 +8,16 @@
 
 #include "../src/def/error_status_defs.h"
 
+#include "../src/ent/exec_state.h"
 #include "../src/ent/game.h"
 #include "../src/ent/thread_control.h"
-#include "../src/impl/inference.h"
 
 #include "../src/util/log.h"
 #include "../src/util/string_util.h"
 #include "../src/util/util.h"
 
-#include "../src/impl/command.h"
 #include "../src/impl/exec.h"
+#include "../src/impl/inference.h"
 #include "../src/impl/simmer.h"
 
 #include "test_constants.h"
@@ -95,11 +95,11 @@ void destroy_main_args(MainArgs *main_args) {
   free(main_args);
 }
 
-void block_for_search(CommandVars *command_vars, int max_seconds) {
+void block_for_search(ExecState *exec_state, int max_seconds) {
   // Poll for the end of the command
   int seconds_elapsed = 0;
   while (1) {
-    if (command_search_status(command_vars, false)) {
+    if (command_search_status(exec_state, false)) {
       break;
     } else {
       sleep(1);
@@ -127,7 +127,7 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
   }
 }
 
-void assert_command_status_and_output(CommandVars *command_vars,
+void assert_command_status_and_output(ExecState *exec_state,
                                       const char *command_without_io,
                                       bool should_halt, int seconds_to_wait,
                                       int expected_output_line_count,
@@ -145,17 +145,17 @@ void assert_command_status_and_output(CommandVars *command_vars,
 
   log_set_error_out(errorout_fh);
 
-  execute_command_async(command_vars, command);
+  execute_command_async(exec_state, command);
 
   if (should_halt) {
     // If halting, let the search start
     sleep(2);
-    char *status_string = command_search_status(command_vars, true);
+    char *status_string = command_search_status(exec_state, true);
     // For now, we do not care about the contents of of the status,
     // we just want to halt the command.
     free(status_string);
   }
-  block_for_search(command_vars, seconds_to_wait);
+  block_for_search(exec_state, seconds_to_wait);
 
   fclose(errorout_fh);
 
@@ -183,139 +183,139 @@ void assert_command_status_and_output(CommandVars *command_vars,
 }
 
 void test_command_execution() {
-  CommandVars *command_vars = create_command_vars();
+  ExecState *exec_state = create_exec_state();
 
-  assert_command_status_and_output(command_vars,
+  assert_command_status_and_output(exec_state,
                                    "go sim lex CSW21 i 1000 plies 2h3", false,
                                    5, ERROR_STATUS_TYPE_CONFIG_LOAD, 1);
 
   assert_command_status_and_output(
-      command_vars,
+      exec_state,
       "position cgp 15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 "
       "ABC5DF/YXZ 0/0 0 lex CSW21",
       false, 5, ERROR_STATUS_TYPE_CGP_LOAD, 1);
 
   // Test load cgp
-  assert_command_status_and_output(
-      command_vars, "position cgp " ION_OPENING_CGP, false, 5, 0, 0);
+  assert_command_status_and_output(exec_state, "position cgp " ION_OPENING_CGP,
+                                   false, 5, 0, 0);
 
   // Sim finishing probabilistically
   assert_command_status_and_output(
-      command_vars,
+      exec_state,
       "go sim plies 2 cond 95 threads 8 numplays 3 i 100000 check 300 "
       "info 500 cgp " ZILLION_OPENING_CGP,
       false, 60, 5, 0);
 
   // Sim statically
   assert_command_status_and_output(
-      command_vars,
+      exec_state,
       "go sim plies 2 cond 95 threads 8 numplays 20 i 100000 check 300 "
       "info 70 static cgp " ZILLION_OPENING_CGP,
       false, 60, 21, 0);
 
   // Sim finishes with max iterations
   assert_command_status_and_output(
-      command_vars,
+      exec_state,
       "go sim plies 2 threads 10 numplays 15 i "
       "200 info 60 nostatic cgp " DELDAR_VS_HARSHAN_CGP,
       false, 60, 68, 0);
 
   // Sim interrupted by user
   assert_command_status_and_output(
-      command_vars,
+      exec_state,
       "go sim plies 2 threads 10 numplays 15 i "
       "1000000 info 1000000 cgp " DELDAR_VS_HARSHAN_CGP,
       true, 5, 17, 0);
 
   // Infer finishes normally
   assert_command_status_and_output(
-      command_vars,
+      exec_state,
       "go infer rack MUZAKY pindex 0 score 58 exch 0 numplays 20 threads 4 "
       "cgp " EMPTY_CGP,
       false, 60, 52, 0);
 
   // Infer interrupted
   assert_command_status_and_output(
-      command_vars,
+      exec_state,
       "go infer rack " EMPTY_RACK_STRING
       " pindex 0 score 0 exch 3 numplays 20 threads 3 "
       "cgp " EMPTY_CGP,
       true, 5, 1, 0);
 
   // Autoplay finishes normally
-  assert_command_status_and_output(command_vars,
+  assert_command_status_and_output(exec_state,
                                    "go autoplay lex CSW21 s1 equity s2 equity "
                                    "r1 best r2 best i 10 numplays 1 threads 3",
                                    false, 30, 1, 0);
 
   // Autoplay interrupted
-  assert_command_status_and_output(command_vars,
+  assert_command_status_and_output(exec_state,
                                    "go autoplay lex CSW21 s1 equity s2 equity "
                                    "r1 best r2 best i 10000000 threads 5",
                                    true, 5, 1, 0);
 
   for (int i = 0; i < 3; i++) {
     // Catalan
-    assert_command_status_and_output(command_vars, "position cgp " CATALAN_CGP,
+    assert_command_status_and_output(exec_state, "position cgp " CATALAN_CGP,
                                      false, 5, 0, 0);
-    assert_command_status_and_output(command_vars,
+    assert_command_status_and_output(exec_state,
                                      "go sim plies 2 threads 10 numplays 15 i "
                                      "200 info 60 cgp " CATALAN_CGP,
                                      false, 60, 68, 0);
     assert_command_status_and_output(
-        command_vars,
+        exec_state,
         "go infer rack AIMSX pindex 0 score 52 exch "
         "0 numplays 20 threads 4 info 1000000 cgp " EMPTY_CATALAN_CGP,
         false, 60, 52, 0);
 
     assert_command_status_and_output(
-        command_vars,
+        exec_state,
         "go autoplay s1 equity s2 equity "
         "r1 best r2 best i 10 numplays 1 cgp " CATALAN_CGP,
         false, 30, 1, 0);
     // CSW
     assert_command_status_and_output(
-        command_vars, "position cgp " ION_OPENING_CGP, false, 5, 0, 0);
+        exec_state, "position cgp " ION_OPENING_CGP, false, 5, 0, 0);
 
-    assert_command_status_and_output(command_vars,
+    assert_command_status_and_output(exec_state,
                                      "go sim plies 2 threads 10 numplays 15 i "
                                      "200 info 60 cgp " DELDAR_VS_HARSHAN_CGP,
                                      false, 60, 68, 0);
 
     assert_command_status_and_output(
-        command_vars,
+        exec_state,
         "go infer rack DGINR pindex 0 score 18 exch 0 numplays 20 threads 4 "
         "info 1000000 "
         "cgp " EMPTY_CGP,
         false, 60, 52, 0);
 
     assert_command_status_and_output(
-        command_vars,
+        exec_state,
         "go autoplay lex CSW21 s1 equity s2 equity "
         "r1 best r2 best i 10 numplays 1",
         false, 30, 1, 0);
     // Polish
-    assert_command_status_and_output(command_vars, "position cgp " POLISH_CGP,
+    assert_command_status_and_output(exec_state, "position cgp " POLISH_CGP,
                                      false, 5, 0, 0);
 
-    assert_command_status_and_output(command_vars,
+    assert_command_status_and_output(exec_state,
                                      "go sim plies 2 threads 10 numplays 15 i "
                                      "200 info 60 cgp " POLISH_CGP,
                                      false, 60, 68, 0);
 
     assert_command_status_and_output(
-        command_vars,
+        exec_state,
         "go infer rack HUJA pindex 0 score 20 exch 0 "
         "numplays 20 info 1000000  threads 4 cgp " EMPTY_POLISH_CGP,
         false, 60, 58, 0);
 
     assert_command_status_and_output(
-        command_vars,
+        exec_state,
         "go autoplay s1 equity s2 equity "
         "r1 best r2 best i 10 numplays 1 lex OSPS44",
         false, 30, 1, 0);
   }
-  destroy_command_vars(command_vars);
+  destroy_exec_state(exec_state);
 }
 
 void test_process_command(const char *arg_string,

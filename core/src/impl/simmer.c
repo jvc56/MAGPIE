@@ -32,7 +32,7 @@
 #define PER_PLY_STOPPING_SCALING 1250
 #define SIMILAR_PLAYS_ITER_CUTOFF 1000
 
-struct Simmer {
+typedef struct Simmer {
   int initial_spread;
   int initial_player;
   int max_iterations;
@@ -40,7 +40,6 @@ struct Simmer {
   int threads;
   uint64_t seed;
   pthread_mutex_t iteration_count_mutex;
-  pthread_mutex_t sim_results_mutex;
 
   Rack *known_opp_rack;
   Rack *similar_plays_rack;
@@ -50,7 +49,7 @@ struct Simmer {
   const WinPct *win_pcts;
   ThreadControl *thread_control;
   SimResults *sim_results;
-};
+} Simmer;
 
 typedef struct SimmerWorker {
   int thread_index;
@@ -60,19 +59,59 @@ typedef struct SimmerWorker {
   Simmer *simmer;
 } SimmerWorker;
 
-Simmer *create_simmer(const Config *config) {
+Simmer *create_simmer(const Config *config, Game *game, MoveList *move_list,
+                      int num_simmed_plays, SimResults **sim_results) {
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
-  simmer->threads = get_number_of_threads(config_get_thread_control(config));
-  simmer->win_pcts = config_get_win_pcts(config);
-  simmer->max_iterations = 0;
-  simmer->stopping_condition = SIM_STOPPING_CONDITION_NONE;
-  simmer->sim_results = NULL;
-  simmer->known_opp_rack = NULL;
-  simmer->play_similarity_cache = NULL;
-  simmer->similar_plays_rack = NULL;
+  ThreadControl *thread_control = config_get_thread_control(config);
+  int ld_size =
+      letter_distribution_get_size(config_get_letter_distribution(config));
+
+  simmer->initial_player = game_get_player_on_turn_index(game);
+  simmer->initial_spread =
+      player_get_score(game_get_player(game, simmer->initial_player)) -
+      player_get_score(game_get_player(game, 1 - simmer->initial_player));
+  simmer->max_iterations = config_get_max_iterations(config);
+  simmer->stopping_condition = config_get_stopping_condition(config);
+  simmer->threads = get_number_of_threads(thread_control);
+  simmer->seed = config_get_seed(config);
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
-  pthread_mutex_init(&simmer->sim_results_mutex, NULL);
-  simmer->sim_results = sim_results_create();
+
+  Rack *opponent_known_tiles = config_get_rack(config);
+  if (opponent_known_tiles) {
+    simmer->known_opp_rack = rack_duplicate(opponent_known_tiles);
+  } else {
+    simmer->known_opp_rack = NULL;
+  }
+
+  simmer->similar_plays_rack = create_rack(ld_size);
+
+  simmer->play_similarity_cache =
+      malloc_or_die(sizeof(int) * num_simmed_plays * num_simmed_plays);
+  for (int i = 0; i < num_simmed_plays; i++) {
+    for (int j = 0; j < num_simmed_plays; j++) {
+      if (i == j) {
+        simmer->play_similarity_cache[i * num_simmed_plays + j] =
+            PLAYS_IDENTICAL;
+      } else {
+        simmer->play_similarity_cache[i * num_simmed_plays + j] =
+            UNINITIALIZED_SIMILARITY;
+      }
+    }
+  }
+
+  simmer->win_pcts = config_get_win_pcts(config);
+
+  simmer->thread_control = thread_control;
+
+  if (*sim_results) {
+    sim_results_destroy(*sim_results);
+  }
+
+  *sim_results =
+      sim_results_create(move_list, num_simmed_plays, config_get_plies(config));
+
+  simmer->sim_results = *sim_results;
+
   return simmer;
 }
 
@@ -80,40 +119,42 @@ void destroy_simmer(Simmer *simmer) {
   if (simmer->similar_plays_rack) {
     destroy_rack(simmer->similar_plays_rack);
   }
-
   if (simmer->known_opp_rack) {
     destroy_rack(simmer->known_opp_rack);
   }
-
-  sim_results_destroy(simmer->sim_results);
   free(simmer->play_similarity_cache);
   free(simmer);
-}
-
-SimResults *simmer_get_sim_results(Simmer *simmer) {
-  return simmer->sim_results;
 }
 
 SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
                                    int worker_index) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
 
-  simmer_worker->simmer = simmer;
+  // Thread index
   simmer_worker->thread_index = worker_index;
-  Game *new_game = game_duplicate(game);
-  simmer_worker->game = new_game;
-  simmer_worker->gen =
-      create_generator(1, letter_distribution_get_size(game_get_ld(new_game)));
-  set_backup_mode(new_game, BACKUP_MODE_SIMULATION);
+
+  // Game
+  simmer_worker->game = game_duplicate(game);
+  set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
+  seed_bag_for_worker(game_get_bag(simmer_worker->game), simmer->seed,
+                      worker_index);
+  // FIXME: this won't be necessary with the new generate moves
   for (int j = 0; j < 2; j++) {
     // Simmer only needs to record top equity plays:
-    player_set_move_record_type(game_get_player(new_game, j), MOVE_RECORD_BEST);
+    player_set_move_record_type(game_get_player(simmer_worker->game, j),
+                                MOVE_RECORD_BEST);
   }
 
-  simmer_worker->rack_placeholder =
-      create_rack(letter_distribution_get_size(game_get_ld(new_game)));
+  int ld_size = letter_distribution_get_size(game_get_ld(simmer_worker->game));
 
-  seed_bag_for_worker(game_get_bag(new_game), simmer->seed, worker_index);
+  // Generator
+  simmer_worker->gen = create_generator(1, ld_size);
+
+  // Rack placeholder
+  simmer_worker->rack_placeholder = create_rack(ld_size);
+
+  // Simmer
+  simmer_worker->simmer = simmer;
 
   return simmer_worker;
 }
@@ -125,10 +166,98 @@ void destroy_simmer_worker(SimmerWorker *simmer_worker) {
   free(simmer_worker);
 }
 
+bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
+                       Simmer *simmer) {
+  // look in the cache first
+  int m1_play_id = simmed_play_get_id(m1);
+  int m2_play_id = simmed_play_get_id(m2);
+
+  Move *m1_move = simmed_play_get_move(m1);
+  Move *m2_move = simmed_play_get_move(m2);
+
+  SimResults *sim_results = simmer->sim_results;
+
+  int number_of_plays = sim_results_get_number_of_plays(sim_results);
+
+  int cache_value =
+      simmer->play_similarity_cache[m1_play_id + number_of_plays * m2_play_id];
+  assert(cache_value != PLAYS_IDENTICAL);
+  if (cache_value == PLAYS_SIMILAR) {
+    return true;
+  } else if (cache_value == PLAYS_NOT_SIMILAR) {
+    return false;
+  }
+  int cache_index1 = m1_play_id + number_of_plays * m2_play_id;
+  int cache_index2 = m2_play_id + number_of_plays * m1_play_id;
+
+  if (get_move_type(m1_move) != get_move_type(m2_move)) {
+    simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
+    simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
+    return false;
+  }
+
+  // Otherwise, we must compute play similarity and fill in the cache.
+  // two plays are "similar" if they use the same tiles, and they start at
+  // the same square.
+  if (!(get_dir(m1_move) == get_dir(m2_move) &&
+        get_col_start(m1_move) == get_col_start(m2_move) &&
+        get_row_start(m1_move) == get_row_start(m2_move))) {
+
+    simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
+    simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
+    return false;
+  }
+  if (!(move_get_tiles_played(m1_move) == move_get_tiles_played(m2_move) &&
+        get_tiles_length(m1_move) == get_tiles_length(m2_move))) {
+    simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
+    simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
+    return false;
+  }
+
+  // Create a rack from m1, then subtract the rack from m2. The final
+  // rack should have all zeroes.
+  reset_rack(simmer->similar_plays_rack);
+  for (int i = 0; i < get_tiles_length(m1_move); i++) {
+    uint8_t tile = get_tile(m1_move, i);
+    if (tile == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    int ml = tile;
+    if (is_blanked(ml)) {
+      ml = 0;
+    }
+    add_letter_to_rack(simmer->similar_plays_rack, ml);
+  }
+
+  for (int i = 0; i < get_tiles_length(m2_move); i++) {
+    uint8_t tile = get_tile(m1_move, i);
+    if (tile == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    int ml = tile;
+    if (is_blanked(ml)) {
+      ml = 0;
+    }
+    take_letter_from_rack(simmer->similar_plays_rack, ml);
+  }
+
+  for (int i = 0; i < get_array_size(simmer->similar_plays_rack); i++) {
+    if (get_number_of_letter(simmer->similar_plays_rack, i) != 0) {
+      simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
+      simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
+      return false;
+    }
+  }
+  simmer->play_similarity_cache[cache_index1] = PLAYS_SIMILAR;
+  simmer->play_similarity_cache[cache_index2] = PLAYS_SIMILAR;
+
+  return true;
+}
+
 bool is_multithreaded(const Simmer *simmer) { return simmer->threads > 1; }
 
 bool handle_potential_stopping_condition(Simmer *simmer) {
-  pthread_mutex_lock(&simmer->sim_results_mutex);
+  sim_results_lock_simmed_plays(simmer->sim_results);
   sim_results_sort_plays_by_win_rate(simmer->sim_results);
 
   double zval = 0;
@@ -175,7 +304,7 @@ bool handle_potential_stopping_condition(Simmer *simmer) {
     }
   }
 
-  pthread_mutex_unlock(&simmer->sim_results_mutex);
+  sim_results_unlock_simmed_plays(simmer->sim_results);
   log_debug("total ignored: %d\n", total_ignored);
   if (total_ignored >= number_of_plays - 1) {
     // if there is only 1 unignored play, exit.
@@ -310,99 +439,10 @@ void *simmer_worker(void *uncasted_simmer_worker) {
   return NULL;
 }
 
-bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
-                       Simmer *simmer) {
-  // look in the cache first
-  int m1_play_id = simmed_play_get_id(m1);
-  int m2_play_id = simmed_play_get_id(m2);
-
-  Move *m1_move = simmed_play_get_move(m1);
-  Move *m2_move = simmed_play_get_move(m2);
-
-  SimResults *sim_results = simmer->sim_results;
-
-  int number_of_plays = sim_results_get_number_of_plays(sim_results);
-
-  int cache_value =
-      simmer->play_similarity_cache[m1_play_id + number_of_plays * m2_play_id];
-  assert(cache_value != PLAYS_IDENTICAL);
-  if (cache_value == PLAYS_SIMILAR) {
-    return true;
-  } else if (cache_value == PLAYS_NOT_SIMILAR) {
-    return false;
-  }
-  int cache_index1 = m1_play_id + number_of_plays * m2_play_id;
-  int cache_index2 = m2_play_id + number_of_plays * m1_play_id;
-
-  if (get_move_type(m1_move) != get_move_type(m2_move)) {
-    simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
-    simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
-    return false;
-  }
-
-  // Otherwise, we must compute play similarity and fill in the cache.
-  // two plays are "similar" if they use the same tiles, and they start at
-  // the same square.
-  if (!(get_dir(m1_move) == get_dir(m2_move) &&
-        get_col_start(m1_move) == get_col_start(m2_move) &&
-        get_row_start(m1_move) == get_row_start(m2_move))) {
-
-    simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
-    simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
-    return false;
-  }
-  if (!(move_get_tiles_played(m1_move) == move_get_tiles_played(m2_move) &&
-        get_tiles_length(m1_move) == get_tiles_length(m2_move))) {
-    simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
-    simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
-    return false;
-  }
-
-  // Create a rack from m1, then subtract the rack from m2. The final
-  // rack should have all zeroes.
-  reset_rack(simmer->similar_plays_rack);
-  for (int i = 0; i < get_tiles_length(m1_move); i++) {
-    uint8_t tile = get_tile(m1_move, i);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    int ml = tile;
-    if (is_blanked(ml)) {
-      ml = 0;
-    }
-    add_letter_to_rack(simmer->similar_plays_rack, ml);
-  }
-
-  for (int i = 0; i < get_tiles_length(m2_move); i++) {
-    uint8_t tile = get_tile(m1_move, i);
-    if (tile == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    int ml = tile;
-    if (is_blanked(ml)) {
-      ml = 0;
-    }
-    take_letter_from_rack(simmer->similar_plays_rack, ml);
-  }
-
-  for (int i = 0; i < get_array_size(simmer->similar_plays_rack); i++) {
-    if (get_number_of_letter(simmer->similar_plays_rack, i) != 0) {
-      simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
-      simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
-      return false;
-    }
-  }
-  simmer->play_similarity_cache[cache_index1] = PLAYS_SIMILAR;
-  simmer->play_similarity_cache[cache_index2] = PLAYS_SIMILAR;
-
-  return true;
-}
-
-// Must be called with a lock on the sorted plays mutex
 void simmer_sort_plays_by_win_rate(Simmer *simmer) {
-  pthread_mutex_lock(&simmer->sim_results_mutex);
+  sim_results_lock_simmed_plays(simmer->sim_results);
   sim_results_sort_plays_by_win_rate(simmer->sim_results);
-  pthread_mutex_unlock(&simmer->sim_results_mutex);
+  sim_results_unlock_simmed_plays(simmer->sim_results);
 }
 
 // FIXME: this should use the gameplay function
@@ -420,7 +460,7 @@ void simmer_generate_moves_for_game(Game *game, MoveGen *gen) {
 }
 
 sim_status_t simulate(const Config *config, Game *game, MoveGen *gen,
-                      Simmer *simmer) {
+                      SimResults **sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
   unhalt(thread_control);
 
@@ -437,91 +477,45 @@ sim_status_t simulate(const Config *config, Game *game, MoveGen *gen,
     return SIM_STATUS_SUCCESS;
   }
 
-  int number_of_threads = get_number_of_threads(thread_control);
-  // Prepare the shared simmer attributes
-  simmer->thread_control = thread_control;
-  simmer->threads = number_of_threads;
-  simmer->seed = config_get_seed(config);
-  simmer->max_iterations = config_get_max_iterations(config);
-  simmer->stopping_condition = config_get_stopping_condition(config);
-
-  int max_plies = config_get_plies(config);
   int num_simmed_plays = config_get_num_plays(config);
 
   if (number_of_moves_generated < num_simmed_plays) {
     num_simmed_plays = number_of_moves_generated;
   }
 
-  sim_results_init(simmer->sim_results, move_list, num_simmed_plays, max_plies);
-
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  simmer->initial_player = player_on_turn_index;
-  simmer->initial_spread =
-      player_get_score(player_on_turn) - player_get_score(opponent);
-
-  // The letter distribution may have changed,
-  // so we might need to recreate the rack.
-  update_or_create_rack(
-      &simmer->similar_plays_rack,
-      letter_distribution_get_size(config_get_letter_distribution(config)));
-
-  Rack *config_rack = config_get_rack(config);
-  if (num_simmed_plays > 0) {
-    if (config_rack) {
-      if (simmer->known_opp_rack) {
-        destroy_rack(simmer->known_opp_rack);
-      }
-      simmer->known_opp_rack = rack_duplicate(config_rack);
-    } else {
-      simmer->known_opp_rack = NULL;
-    }
-
-    free(simmer->play_similarity_cache);
-
-    int num_plays = config_get_num_plays(config);
-    simmer->play_similarity_cache =
-        malloc_or_die(sizeof(int) * num_plays * num_plays);
-    for (int i = 0; i < num_plays; i++) {
-      for (int j = 0; j < num_plays; j++) {
-        if (i == j) {
-          simmer->play_similarity_cache[i * num_plays + j] = PLAYS_IDENTICAL;
-        } else {
-          simmer->play_similarity_cache[i * num_plays + j] =
-              UNINITIALIZED_SIMILARITY;
-        }
-      }
-    }
-
-    SimmerWorker **simmer_workers =
-        malloc_or_die((sizeof(SimmerWorker *)) * (number_of_threads));
-    pthread_t *worker_ids =
-        malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
-
-    Timer *timer = get_timer(thread_control);
-    mtimer_start(timer);
-
-    for (int thread_index = 0; thread_index < number_of_threads;
-         thread_index++) {
-      simmer_workers[thread_index] =
-          create_simmer_worker(game, simmer, thread_index);
-      pthread_create(&worker_ids[thread_index], NULL, simmer_worker,
-                     simmer_workers[thread_index]);
-    }
-
-    for (int thread_index = 0; thread_index < number_of_threads;
-         thread_index++) {
-      pthread_join(worker_ids[thread_index], NULL);
-      destroy_simmer_worker(simmer_workers[thread_index]);
-    }
-
-    // Destroy intrasim structs
-    free(simmer_workers);
-    free(worker_ids);
+  if (num_simmed_plays == 0) {
+    return SIM_STATUS_SUCCESS;
   }
 
+  Simmer *simmer =
+      create_simmer(config, game, move_list, num_simmed_plays, sim_results);
+
+  SimmerWorker **simmer_workers =
+      malloc_or_die((sizeof(SimmerWorker *)) * (simmer->threads));
+  pthread_t *worker_ids =
+      malloc_or_die((sizeof(pthread_t)) * (simmer->threads));
+
+  Timer *timer = get_timer(thread_control);
+  mtimer_start(timer);
+
+  for (int thread_index = 0; thread_index < simmer->threads; thread_index++) {
+    simmer_workers[thread_index] =
+        create_simmer_worker(game, simmer, thread_index);
+    pthread_create(&worker_ids[thread_index], NULL, simmer_worker,
+                   simmer_workers[thread_index]);
+  }
+
+  for (int thread_index = 0; thread_index < simmer->threads; thread_index++) {
+    pthread_join(worker_ids[thread_index], NULL);
+    destroy_simmer_worker(simmer_workers[thread_index]);
+  }
+
+  // Destroy intrasim structs
+  free(simmer_workers);
+  free(worker_ids);
+  destroy_simmer(simmer);
+
   // Print out the stats
-  print_ucgi_sim_stats(game, simmer->sim_results, thread_control, 1);
+  print_ucgi_sim_stats(game, *sim_results, thread_control, true);
   return SIM_STATUS_SUCCESS;
 }
