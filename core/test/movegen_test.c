@@ -685,7 +685,7 @@ void bingo_anchor_tests(SuperConfig *superconfig) {
   string_builder_add_game(game, sb);
   printf("%s\n", string_builder_peek(sb));
   destroy_string_builder(sb);
-  
+
   reset_anchor_list(al);
   transpose(gen->board);
 
@@ -756,6 +756,142 @@ void bingo_anchor_tests(SuperConfig *superconfig) {
 
   destroy_sorted_move_list(sorted_move_list);
 
+  reset_game(game);
+  char sondelis_not_insoles[300] =
+      "3E3A7/2BY3D7/2ERVALENTA4/2KI3P7/2NE3T7/1BO7T4/1OW7O4/1INQUIET1NOCTUA/"
+      "1L3OXO2T4/7GIFS4/3HIJRA2E4/YELM6D4/E14/G14/G14 ?ELNOSS/EIPRSUW 279/295 "
+      "0 lex CSW21";
+  assert(load_cgp(game, sondelis_not_insoles) == CGP_PARSE_STATUS_SUCCESS);
+  player = game->players[game->player_on_turn_index];
+  opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+
+  sb = create_string_builder();
+  string_builder_add_game(game, sb);
+  printf("%s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+
+  look_up_bingos_for_game(game);
+  assert(gen->number_of_bingos == 17);
+
+  reset_anchor_list(al);
+  transpose(gen->board);
+
+  gen->vertical = true;
+  gen->current_row_index = 11;
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  set_descending_tile_scores(gen, player);
+  load_row_letter_cache(gen, gen->current_row_index);
+  shadow_play_for_anchor(gen, 2, player, opp_rack);
+  assert(al->count == 1);
+  assert(al->anchors[0]->highest_possible_equity == 87);
+  assert(al->anchors[0]->min_tiles_to_play == 2);
+  assert(al->anchors[0]->max_tiles_to_play == 7);
+  assert(al->anchors[0]->min_num_playthrough == 0);
+  assert(al->anchors[0]->max_num_playthrough == 1);
+
+  assert(within_epsilon(al->anchors[0]->shadow_limit_table[2][3].highest_equity,
+                        17));
+  assert(al->anchors[0]->shadow_limit_table[2][3].num_playthrough == 0);
+
+  assert(within_epsilon(al->anchors[0]->shadow_limit_table[2][4].highest_equity,
+                        23));
+  assert(al->anchors[0]->shadow_limit_table[2][4].num_playthrough == 0);
+
+  assert(within_epsilon(al->anchors[0]->shadow_limit_table[2][5].highest_equity,
+                        25));
+  assert(al->anchors[0]->shadow_limit_table[2][5].num_playthrough == 0);
+
+  assert(within_epsilon(al->anchors[0]->shadow_limit_table[2][6].highest_equity,
+                        29));
+  assert(al->anchors[0]->shadow_limit_table[2][6].num_playthrough == 0);
+
+  assert(within_epsilon(al->anchors[0]->shadow_limit_table[2][7].highest_equity,
+                        87));
+  assert(al->anchors[0]->shadow_limit_table[2][7].num_playthrough == 1);
+
+  split_anchors_for_bingos(al, true);
+  sort_anchor_list(al);
+
+  // Splits into 2, not 3. We have
+  // * bingos with playthrough
+  // * nonbingos (with or without playthrough)
+  // but not bingos without playthrough.
+  assert(al->count == 2);
+  assert(al->anchors[0]->highest_possible_equity == 87);
+  assert(al->anchors[0]->min_tiles_to_play == 7);
+  assert(al->anchors[0]->min_num_playthrough == 1);
+  assert(al->anchors[0]->max_num_playthrough == 1);
+
+  assert(al->anchors[1]->highest_possible_equity == 37);
+  assert(al->anchors[1]->max_tiles_to_play == 6);
+  assert(al->anchors[1]->min_num_playthrough == 0);
+  assert(al->anchors[1]->max_num_playthrough == 1);
+  assert(within_epsilon(al->anchors[1]->shadow_limit_table[0][6].highest_equity,
+                        37));
+
+  reset_game(game);
+  char foedarie[300] =
+      "15/15/15/15/15/7FOO5/7A7/7WHARF3/15/15/15/15/15/15/15 "
+      "AEEIOD?/AAIIDRS 114/125 0 lex CSW21";
+  assert(load_cgp(game, foedarie) == CGP_PARSE_STATUS_SUCCESS);
+  player = game->players[game->player_on_turn_index];
+  opp_rack = game->players[1 - game->player_on_turn_index]->rack;
+
+  sb = create_string_builder();
+  string_builder_add_game(game, sb);
+  printf("%s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+
+  look_up_bingos_for_game(game);
+  assert(gen->number_of_bingos == 0);
+
+  reset_anchor_list(al);
+  transpose(gen->board);
+
+  gen->vertical = true;
+  gen->current_row_index = 10;
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  set_descending_tile_scores(gen, player);
+  load_row_letter_cache(gen, gen->current_row_index);
+  shadow_play_for_anchor(gen, 5, player, opp_rack);
+  assert(al->count == 1);
+  assert(al->anchors[0]->highest_possible_equity == 90);  // 2x2 hooking FOOD
+  assert(al->anchors[0]->min_tiles_to_play == 2);
+  assert(al->anchors[0]->max_tiles_to_play == 7);
+  assert(al->anchors[0]->min_num_playthrough == 0);
+  assert(al->anchors[0]->max_num_playthrough == 1);
+
+  split_anchors_for_bingos(al, true);
+  sort_anchor_list(al);
+
+  // Splits into 2, not 3. We have
+  // * bingos with playthrough
+  // * nonbingos (with or without playthrough)
+  // but not bingos without playthrough.
+  assert(al->count == 2);
+  assert(al->anchors[0]->highest_possible_equity == 90);
+  assert(al->anchors[0]->min_tiles_to_play == 7);
+  assert(al->anchors[0]->min_num_playthrough == 1);
+  assert(al->anchors[0]->max_num_playthrough == 1);
+
+  assert(al->anchors[1]->highest_possible_equity == 40);  // nonbingo 2x2
+  assert(al->anchors[1]->max_tiles_to_play == 6);
+  assert(al->anchors[1]->min_num_playthrough == 0);
+  assert(al->anchors[1]->max_num_playthrough == 1);
+  assert(within_epsilon(al->anchors[1]->shadow_limit_table[1][6].highest_equity,
+                        40));
+
+  set_up_gen_for_anchor(gen, 0);
+  init_leave_map(gen->leave_map, player->rack);
+  recursive_gen(gen, 5, player, opp_rack,
+                kwg_get_root_node_index(player->strategy_params->kwg), 5, 5,
+                !gen->vertical);
+  assert(gen->move_list->count == 1);
+  sorted_move_list = create_sorted_move_list(gen->move_list);
+
+  transpose(gen->board);
+  assert_move(game, sorted_move_list, 0, "K3 fOEDA(R)IE 74");
+  transpose(gen->board);
   destroy_game(game);
 }
 
@@ -1014,7 +1150,8 @@ void distinct_lexica_test(SuperConfig *superconfig) {
 }
 
 void test_movegen(SuperConfig *superconfig) {
-  bingo_anchor_tests(superconfig); return;
+  bingo_anchor_tests(superconfig);
+  return;
   macondo_tests(superconfig);
   exchange_tests(superconfig);
   bingo_anchor_tests(superconfig);
