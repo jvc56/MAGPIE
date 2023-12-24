@@ -22,7 +22,6 @@
 #include "move_gen.h"
 
 static ExecState *wasm_exec_state = NULL;
-// FIXME: implement score and static eval without ExecState
 static ExecState *iso_exec_state = NULL;
 
 void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
@@ -160,12 +159,12 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
 char *static_evaluation(const char *cgpstr, int num_plays) {
   load_cgp_into_iso_exec_state(cgpstr, num_plays);
   Game *game = exec_state_get_game(iso_exec_state);
-  MoveGen *gen = exec_state_get_gen(iso_exec_state);
-  generate_moves_for_game(game, gen, MOVE_RECORD_ALL, MOVE_SORT_EQUITY);
-  sort_moves(gen_get_move_list(gen));
+  MoveList *move_list = NULL;
+  generate_moves_for_game(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, &move_list);
+  sort_moves(move_list);
 
   // This pointer needs to be freed by the caller:
-  char *val = ucgi_static_moves(game, gen_get_move_list(gen));
+  char *val = ucgi_static_moves(game, move_list);
   return val;
 }
 

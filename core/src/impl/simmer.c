@@ -54,7 +54,7 @@ typedef struct Simmer {
 typedef struct SimmerWorker {
   int thread_index;
   Game *game;
-  MoveGen *gen;
+  MoveList *move_list;
   Rack *rack_placeholder;
   Simmer *simmer;
 } SimmerWorker;
@@ -138,6 +138,10 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
   set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   seed_bag_for_worker(game_get_bag(simmer_worker->game), simmer->seed,
                       worker_index);
+
+  // MoveList
+  simmer_worker->move_list = NULL;
+
   // FIXME: this won't be necessary with the new generate moves
   for (int j = 0; j < 2; j++) {
     // Simmer only needs to record top equity plays:
@@ -146,9 +150,6 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
   }
 
   int ld_size = letter_distribution_get_size(game_get_ld(simmer_worker->game));
-
-  // Generator
-  simmer_worker->gen = create_generator(1, ld_size);
 
   // Rack placeholder
   simmer_worker->rack_placeholder = create_rack(ld_size);
@@ -161,7 +162,9 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
 
 void destroy_simmer_worker(SimmerWorker *simmer_worker) {
   destroy_game(simmer_worker->game);
-  destroy_generator(simmer_worker->gen);
+  if (simmer_worker->move_list) {
+    destroy_move_list(simmer_worker->move_list);
+  }
   destroy_rack(simmer_worker->rack_placeholder);
   free(simmer_worker);
 }
@@ -315,7 +318,6 @@ bool handle_potential_stopping_condition(Simmer *simmer) {
 
 void sim_single_iteration(SimmerWorker *simmer_worker) {
   Game *game = simmer_worker->game;
-  MoveGen *gen = simmer_worker->gen;
   Rack *rack_placeholder = simmer_worker->rack_placeholder;
   Simmer *simmer = simmer_worker->simmer;
   SimResults *sim_results = simmer->sim_results;
@@ -352,7 +354,8 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
         break;
       }
 
-      const Move *best_play = get_top_equity_move(game, gen);
+      const Move *best_play =
+          get_top_equity_move(game, simmer_worker->move_list);
       rack_copy(rack_placeholder, player_get_rack(player_on_turn));
       play_move(best_play, game);
       sim_results_increment_node_count(sim_results);
@@ -445,27 +448,13 @@ void simmer_sort_plays_by_win_rate(Simmer *simmer) {
   sim_results_unlock_simmed_plays(simmer->sim_results);
 }
 
-// FIXME: this should use the gameplay function
-// once this is moved to impl
-void simmer_generate_moves_for_game(Game *game, MoveGen *gen) {
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  generate_moves(game_get_ld(game), player_get_kwg(player_on_turn),
-                 player_get_klv(player_on_turn), player_get_rack(opponent), gen,
-                 game_get_board(game), player_get_rack(player_on_turn),
-                 player_on_turn_index, get_tiles_remaining(game_get_bag(game)),
-                 MOVE_RECORD_ALL, MOVE_SORT_EQUITY,
-                 game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG));
-}
-
-sim_status_t simulate(const Config *config, Game *game, MoveGen *gen,
+sim_status_t simulate(const Config *config, Game *game,
                       SimResults **sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
   unhalt(thread_control);
 
-  MoveList *move_list = gen_get_move_list(gen);
-  simmer_generate_moves_for_game(game, gen);
+  MoveList *move_list = NULL;
+  generate_moves_for_game(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, &move_list);
   // Sorting moves converts the move list from a min heap
   // to a sorted array with count == 0, so the number of
   // moves must be obtained before sorting.

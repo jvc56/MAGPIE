@@ -18,4 +18,7 @@ typedef enum {
   HALT_STATUS_USER_INTERRUPT,
 } halt_status_t;
 
+// FIXME: enforce this at config parsing
+#define MAX_THREADS 512
+
 #endif

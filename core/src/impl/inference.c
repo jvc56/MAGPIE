@@ -57,8 +57,8 @@ typedef struct Inference {
   Rack *current_target_rack;
   // The bag represented by a rack for convenience
   Rack *bag_as_rack;
-  // MoveGen used by the inference to generate moves
-  MoveGen *gen;
+  // MoveList used by the inference to generate moves
+  MoveList *move_list;
   ThreadControl *thread_control;
   InferenceResults *results;
 } Inference;
@@ -67,7 +67,9 @@ void destroy_inference(Inference *inference) {
   destroy_rack(inference->current_target_leave);
   destroy_rack(inference->current_target_exchanged);
   destroy_rack(inference->bag_as_rack);
-  destroy_generator(inference->gen);
+  if (inference->move_list) {
+    destroy_move_list(inference->move_list);
+  }
   free(inference);
 }
 
@@ -179,34 +181,14 @@ void record_valid_leave(const Rack *rack, InferenceResults *results,
                                   number_of_draws_for_leave);
 }
 
-// FIXME: this should use the gameplay function
-// once this is moved to impl
-void inference_generate_moves_for_game(Game *game, MoveGen *gen) {
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  generate_moves(game_get_ld(game), player_get_kwg(player_on_turn),
-                 player_get_klv(player_on_turn), player_get_rack(opponent), gen,
-                 game_get_board(game), player_get_rack(player_on_turn),
-                 player_on_turn_index, get_tiles_remaining(game_get_bag(game)),
-                 MOVE_RECORD_BEST, MOVE_SORT_EQUITY,
-                 game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG));
-}
-
-// FIXME: this should use the gameplay function
-// once this is moved to impl
-Move *get_top_move(Inference *inference) {
-  inference_generate_moves_for_game(inference->game, inference->gen);
-  return move_list_get_move(gen_get_move_list(inference->gen), 0);
-}
-
 void evaluate_possible_leave(Inference *inference) {
   double current_leave_value = 0;
   if (inference->target_number_of_tiles_exchanged == 0) {
     current_leave_value =
         klv_get_leave_value(inference->klv, inference->current_target_leave);
   }
-  const Move *top_move = get_top_move(inference);
+  const Move *top_move =
+      get_top_equity_move(inference->game, &inference->move_list);
   bool is_within_equity_margin = inference->target_score + current_leave_value +
                                      inference->equity_margin +
                                      (INFERENCE_EQUITY_EPSILON) >=
@@ -306,7 +288,6 @@ Inference *inference_create(InferenceResults **results, Game *game,
   inference->current_target_rack =
       player_get_rack(game_get_player(game, target_index));
   inference->bag_as_rack = create_rack(inference->ld_size);
-  inference->gen = create_generator(1, inference->ld_size);
 
   // Recreate the results since the ld_size may have changed
   // and also to reset the info.
@@ -368,7 +349,6 @@ Inference *inference_duplicate(const Inference *inference,
   new_inference->current_target_rack = player_get_rack(
       game_get_player(new_inference->game, new_inference->target_index));
   new_inference->bag_as_rack = rack_duplicate(inference->bag_as_rack);
-  new_inference->gen = create_generator(1, new_inference->ld_size);
 
   new_inference->results = inference_results_create(
       get_leave_rack_list_capacity(

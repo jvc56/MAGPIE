@@ -9,6 +9,7 @@
 #include "../def/cross_set_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/thread_control_defs.h"
 
 #include "../util/util.h"
 
@@ -25,7 +26,7 @@
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
-struct MoveGen {
+typedef struct MoveGen {
   // Owned by this MoveGen struct
   int current_row_index;
   int current_anchor_col;
@@ -53,9 +54,6 @@ struct MoveGen {
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
 
-  // Output owned by this MoveGen struct
-  MoveList *move_list;
-
   // Owned by the caller
   const LetterDistribution *letter_distribution;
   const KLV *klv;
@@ -65,7 +63,58 @@ struct MoveGen {
   Rack *player_rack;
   // Board is transposed during move generation
   Board *board;
-};
+  // Output owned by this MoveGen struct
+  MoveList *move_list;
+} MoveGen;
+
+static MoveGen *cached_gens[MAX_THREADS];
+
+MoveGen *create_generator(int move_list_capacity,
+                          int letter_distribution_size) {
+  MoveGen *generator = malloc_or_die(sizeof(MoveGen));
+  generator->move_list = create_move_list(move_list_capacity);
+  generator->anchor_list = create_anchor_list();
+  generator->leave_map = create_leave_map(letter_distribution_size);
+  generator->tiles_played = 0;
+  generator->dir = BOARD_HORIZONTAL_DIRECTION;
+  generator->exchange_strip =
+      (uint8_t *)malloc_or_die(letter_distribution_size * sizeof(uint8_t));
+  // Just load the zero values for now
+  load_zero_preendgame_adjustment_values(generator);
+
+  return generator;
+}
+
+void destroy_generator(MoveGen *gen) {
+  destroy_move_list(gen->move_list);
+  destroy_anchor_list(gen->anchor_list);
+  destroy_leave_map(gen->leave_map);
+  free(gen->exchange_strip);
+  free(gen);
+}
+
+MoveGen *get_movegen(int thread_index, int move_list_capacity,
+                     int letter_distribution_size) {
+  if (!cached_gens[thread_index]) {
+    cached_gens[thread_index] =
+        create_generator(move_list_capacity, letter_distribution_size);
+  }
+  return cached_gens[thread_index];
+}
+
+void gen_init_cache() {
+  for (int i = 0; i < (MAX_THREADS); i++) {
+    cached_gens[i] = NULL;
+  }
+}
+
+void gen_clear_cache() {
+  for (int i = 0; i < (MAX_THREADS); i++) {
+    if (cached_gens[i]) {
+      destroy_generator(cached_gens[i]);
+    }
+  }
+}
 
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play);
@@ -736,10 +785,23 @@ void set_descending_tile_scores(MoveGen *gen) {
 }
 
 void generate_moves(const LetterDistribution *ld, const KWG *kwg,
-                    const KLV *klv, const Rack *opponent_rack, MoveGen *gen,
+                    const KLV *klv, const Rack *opponent_rack, int thread_index,
                     Board *board, Rack *player_rack, int player_index,
                     int number_of_tiles_in_bag, move_record_t move_record_type,
-                    move_sort_t move_sort_type, bool kwgs_are_distinct) {
+                    move_sort_t move_sort_type, bool kwgs_are_distinct,
+                    int move_list_capacity, MoveList **move_list) {
+
+  int ld_size = letter_distribution_get_size(ld);
+  MoveGen *gen = get_movegen(thread_index, move_list_capacity, ld_size);
+
+  if (*move_list && move_list_get_capacity(*move_list) != move_list_capacity) {
+    destroy_move_list(*move_list);
+  }
+
+  if (!*move_list) {
+    *move_list = create_move_list(move_list_capacity);
+  }
+
   gen->letter_distribution = ld;
   gen->kwg = kwg;
   gen->klv = klv;
@@ -751,6 +813,7 @@ void generate_moves(const LetterDistribution *ld, const KWG *kwg,
   gen->kwgs_are_distinct = kwgs_are_distinct;
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;
+  gen->move_list = *move_list;
 
   // Reset the move list
   reset_move_list(gen->move_list);
@@ -835,28 +898,4 @@ void load_zero_preendgame_adjustment_values(MoveGen *gen) {
   for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
     gen->preendgame_adjustment_values[i] = 0;
   }
-}
-
-MoveGen *create_generator(int move_list_capacity,
-                          int letter_distribution_size) {
-  MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  generator->move_list = create_move_list(move_list_capacity);
-  generator->anchor_list = create_anchor_list();
-  generator->leave_map = create_leave_map(letter_distribution_size);
-  generator->tiles_played = 0;
-  generator->dir = BOARD_HORIZONTAL_DIRECTION;
-  generator->exchange_strip =
-      (uint8_t *)malloc_or_die(letter_distribution_size * sizeof(uint8_t));
-  // Just load the zero values for now
-  load_zero_preendgame_adjustment_values(generator);
-
-  return generator;
-}
-
-void destroy_generator(MoveGen *gen) {
-  destroy_move_list(gen->move_list);
-  destroy_anchor_list(gen->anchor_list);
-  destroy_leave_map(gen->leave_map);
-  free(gen->exchange_strip);
-  free(gen);
 }

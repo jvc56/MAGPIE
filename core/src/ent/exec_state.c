@@ -16,7 +16,7 @@
 struct ExecState {
   Config *config;
   Game *game;
-  MoveGen *gen;
+  MoveList *move_list;
   SimResults *sim_results;
   InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
@@ -26,7 +26,8 @@ struct ExecState {
 ExecState *create_exec_state() {
   ExecState *exec_state = malloc_or_die(sizeof(ExecState));
   exec_state->game = NULL;
-  exec_state->gen = NULL;
+  // FIXME: is move list needed?
+  exec_state->move_list = NULL;
   exec_state->sim_results = NULL;
   exec_state->inference_results = NULL;
   exec_state->autoplay_results = NULL;
@@ -39,8 +40,8 @@ void destroy_exec_state(ExecState *exec_state) {
   if (exec_state->game) {
     destroy_game(exec_state->game);
   }
-  if (exec_state->gen) {
-    destroy_generator(exec_state->gen);
+  if (exec_state->move_list) {
+    destroy_move_list(exec_state->move_list);
   }
   if (exec_state->sim_results) {
     sim_results_destroy(exec_state->sim_results);
@@ -64,8 +65,8 @@ Game *exec_state_get_game(const ExecState *exec_state) {
   return exec_state->game;
 }
 
-MoveGen *exec_state_get_gen(const ExecState *exec_state) {
-  return exec_state->gen;
+MoveList *exec_state_get_move_list(const ExecState *exec_state) {
+  return exec_state->move_list;
 }
 
 SimResults *exec_state_get_sim_results(const ExecState *exec_state) {
@@ -91,10 +92,6 @@ void exec_state_set_config(ExecState *exec_state, Config *config) {
 
 void exec_state_set_game(ExecState *exec_state, Game *game) {
   exec_state->game = game;
-}
-
-void exec_state_set_gen(ExecState *exec_state, MoveGen *gen) {
-  exec_state->gen = gen;
 }
 
 void exec_state_set_sim_results(ExecState *exec_state,
