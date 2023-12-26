@@ -32,30 +32,31 @@ int get_subtotals_size(int ld_size) { return ld_size * (RACK_SIZE) * 2; }
 
 // The created inference results takes ownership of all of the
 // Rack pointers passed to it in the constructor.
-InferenceResults *inference_results_create(int move_capacity, int ld_size) {
+InferenceResults *inference_results_create() {
   InferenceResults *results = malloc_or_die(sizeof(InferenceResults));
-  results->subtotals_size = get_subtotals_size(ld_size);
+  results->subtotals_size = 0;
   for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
-    results->equity_values[i] = create_stat();
-    results->subtotals[i] =
-        (uint64_t *)malloc_or_die(results->subtotals_size * sizeof(uint64_t));
-    for (int j = 0; j < results->subtotals_size; j++) {
-      results->subtotals[i][j] = 0;
-    }
+    results->equity_values[i] = NULL;
+    results->subtotals[i] = NULL;
   }
-  results->leave_rack_list = create_leave_rack_list(move_capacity, ld_size);
+  results->leave_rack_list = NULL;
   results->target_played_tiles = NULL;
   results->target_known_unplayed_tiles = NULL;
   results->bag_as_rack = NULL;
+  results->subtotals_size = 0;
   return results;
 }
 
-void inference_results_destroy(InferenceResults *results) {
+void inference_results_destroy_internal(InferenceResults *results) {
   for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
-    destroy_stat(results->equity_values[i]);
+    if (results->equity_values[i]) {
+      destroy_stat(results->equity_values[i]);
+    }
     free(results->subtotals[i]);
   }
-  destroy_leave_rack_list(results->leave_rack_list);
+  if (results->leave_rack_list) {
+    destroy_leave_rack_list(results->leave_rack_list);
+  }
   if (results->target_played_tiles) {
     destroy_rack(results->target_played_tiles);
   }
@@ -65,7 +66,31 @@ void inference_results_destroy(InferenceResults *results) {
   if (results->bag_as_rack) {
     destroy_rack(results->bag_as_rack);
   }
+}
+
+void inference_results_destroy(InferenceResults *results) {
+  inference_results_destroy_internal(results);
   free(results);
+}
+
+void inference_results_reset(InferenceResults *results, int move_capacity,
+                             int ld_size) {
+  inference_results_destroy_internal(results);
+
+  results->subtotals_size = get_subtotals_size(ld_size);
+  for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
+    results->equity_values[i] = create_stat();
+    results->subtotals[i] =
+        (uint64_t *)malloc_or_die(results->subtotals_size * sizeof(uint64_t));
+    for (int j = 0; j < results->subtotals_size; j++) {
+      results->subtotals[i][j] = 0;
+    }
+  }
+
+  results->leave_rack_list = create_leave_rack_list(move_capacity, ld_size);
+  results->target_played_tiles = NULL;
+  results->target_known_unplayed_tiles = NULL;
+  results->bag_as_rack = NULL;
 }
 
 void inference_results_finalize(InferenceResults *results, int target_score,

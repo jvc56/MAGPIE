@@ -78,13 +78,7 @@ void reset_player(Player *player) {
   player->score = 0;
 }
 
-Player *create_player(const Config *config, int player_index) {
-  Player *player = malloc_or_die(sizeof(Player));
-  player->index = player_index;
-  player->score = 0;
-  player->rack = create_rack(
-      letter_distribution_get_size(config_get_letter_distribution(config)));
-
+void update_player(const Config *config, Player *player) {
   PlayersData *players_data = config_get_players_data(config);
   player->name = players_data_get_name(players_data, player->index);
   player->move_sort_type =
@@ -96,6 +90,16 @@ Player *create_player(const Config *config, int player_index) {
   update_or_create_rack(
       &player->rack,
       letter_distribution_get_size(config_get_letter_distribution(config)));
+}
+
+Player *create_player(const Config *config, int player_index) {
+  Player *player = malloc_or_die(sizeof(Player));
+  player->index = player_index;
+  player->score = 0;
+  player->rack = create_rack(
+      letter_distribution_get_size(config_get_letter_distribution(config)));
+
+  update_player(config, player);
 
   return player;
 }

@@ -38,6 +38,7 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
 void assert_boards_are_equal(const Board *b1, const Board *b2);
 void print_game(Game *game, MoveList *move_list);
 void print_inference(const LetterDistribution *ld,
+                     const Rack *target_played_tiles,
                      InferenceResults *inference_results);
 void load_config_or_die(Config *config, const char *cmd);
 void load_cgp_or_die(Game *game, const char *cgp);

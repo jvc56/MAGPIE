@@ -85,14 +85,16 @@ struct Config {
   bool command_set_cgp;
   bool command_set_infile;
   bool command_set_exec_mode;
+
   // Persistent fields
   // these fields maintain their
   // value between config loads
+
   command_t command_type;
-  bool lexicons_loaded;
   // Game
   LetterDistribution *letter_distribution;
   char *ld_name;
+  bool ld_name_changed;
   char *cgp;
   int bingo_bonus;
   board_layout_t board_layout;
@@ -234,15 +236,15 @@ command_t config_get_command_type(const Config *config) {
   return config->command_type;
 }
 
-bool config_get_lexicons_loaded(const Config *config) {
-  return config->lexicons_loaded;
-}
-
 LetterDistribution *config_get_letter_distribution(const Config *config) {
   return config->letter_distribution;
 }
 
 char *config_get_ld_name(const Config *config) { return config->ld_name; }
+
+bool config_get_ld_name_changed(const Config *config) {
+  return config->ld_name_changed;
+}
 
 char *config_get_cgp(const Config *config) { return config->cgp; }
 
@@ -407,12 +409,13 @@ ParsedArgs *create_parsed_args() {
 
   // Inference args
   // rack is KNOWN_OPP_RACK shared with sim
-  set_single_arg(parsed_args, index++, ARG_TOKEN_target_index,
-                 ARG_target_index, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_target_index, ARG_target_index,
+                 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_SCORE, ARG_SCORE, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_EQUITY_MARGIN,
                  ARG_EQUITY_MARGIN, 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_target_number_of_tiles_exchanged,
+  set_single_arg(parsed_args, index++,
+                 ARG_TOKEN_target_number_of_tiles_exchanged,
                  ARG_target_number_of_tiles_exchanged, 1);
   // Autoplay
   set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_PAIRS_ON,
@@ -633,15 +636,13 @@ load_static_search_only_for_config(Config *config, bool static_search_only) {
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_target_index_for_config(Config *config,
-                                      const char *target_index) {
+config_load_status_t load_target_index_for_config(Config *config,
+                                                  const char *target_index) {
   if (!is_all_digits_or_empty(target_index)) {
     return CONFIG_LOAD_STATUS_MALFORMED_target_index;
   }
   config->target_index = string_to_int(target_index);
-  if (config->target_index != 0 &&
-      config->target_index != 1) {
+  if (config->target_index != 0 && config->target_index != 1) {
     return CONFIG_LOAD_STATUS_MALFORMED_target_index;
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
@@ -674,7 +675,8 @@ config_load_status_t load_target_number_of_tiles_exchanged_for_config(
   if (!is_all_digits_or_empty(target_number_of_tiles_exchanged)) {
     return CONFIG_LOAD_STATUS_MALFORMED_target_number_of_tiles_exchanged;
   }
-  config->target_number_of_tiles_exchanged = string_to_int(target_number_of_tiles_exchanged);
+  config->target_number_of_tiles_exchanged =
+      string_to_int(target_number_of_tiles_exchanged);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -910,8 +912,6 @@ config_load_status_t load_lexicon_dependent_data_for_config(
   set_players_data(config->players_data, PLAYERS_DATA_TYPE_KWG,
                    updated_p1_lexicon_name, updated_p2_lexicon_name);
 
-  config->lexicons_loaded = true;
-
   // Load the leaves
 
   char *updated_p1_leaves_name;
@@ -990,8 +990,10 @@ config_load_status_t load_lexicon_dependent_data_for_config(
 
     free(config->ld_name);
     config->ld_name = updated_letter_distribution_name;
+    config->ld_name_changed = true;
   } else {
     free(updated_letter_distribution_name);
+    config->ld_name_changed = false;
   }
 
   update_or_create_rack(
@@ -1128,8 +1130,7 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
       config_load_status = load_static_search_only_for_config(config, false);
       break;
     case ARG_TOKEN_target_index:
-      config_load_status =
-          load_target_index_for_config(config, arg_values[0]);
+      config_load_status = load_target_index_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_SCORE:
       config_load_status = load_score_for_config(config, arg_values[0]);
@@ -1138,8 +1139,8 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
       config_load_status = load_equity_margin_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_target_number_of_tiles_exchanged:
-      config_load_status =
-          load_target_number_of_tiles_exchanged_for_config(config, arg_values[0]);
+      config_load_status = load_target_number_of_tiles_exchanged_for_config(
+          config, arg_values[0]);
       break;
     case ARG_TOKEN_GAME_PAIRS_ON:
       config_load_status = load_use_game_pairs_for_config(config, true);
@@ -1247,9 +1248,9 @@ Config *create_default_config() {
   config->command_set_infile = false;
   config->command_set_exec_mode = false;
   config->command_type = COMMAND_TYPE_SET_OPTIONS;
-  config->lexicons_loaded = false;
   config->letter_distribution = NULL;
   config->ld_name = NULL;
+  config->ld_name_changed = false;
   config->cgp = NULL;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->board_layout = DEFAULT_BOARD_LAYOUT;

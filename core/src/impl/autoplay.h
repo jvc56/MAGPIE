@@ -7,6 +7,6 @@
 #include "../ent/config.h"
 
 autoplay_status_t autoplay(const Config *config,
-                           AutoplayResults **autoplay_results);
+                           AutoplayResults *autoplay_results);
 
 #endif

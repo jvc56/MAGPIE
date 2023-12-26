@@ -16,7 +16,6 @@
 struct ExecState {
   Config *config;
   Game *game;
-  MoveList *move_list;
   SimResults *sim_results;
   InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
@@ -25,34 +24,23 @@ struct ExecState {
 
 ExecState *create_exec_state() {
   ExecState *exec_state = malloc_or_die(sizeof(ExecState));
-  exec_state->game = NULL;
-  // FIXME: is move list needed?
-  exec_state->move_list = NULL;
-  exec_state->sim_results = NULL;
-  exec_state->inference_results = NULL;
-  exec_state->autoplay_results = NULL;
   exec_state->config = create_default_config();
+  exec_state->game = NULL;
+  exec_state->sim_results = sim_results_create();
+  exec_state->inference_results = inference_results_create();
+  exec_state->autoplay_results = create_autoplay_results();
   exec_state->error_status = create_error_status();
   return exec_state;
 }
 
 void destroy_exec_state(ExecState *exec_state) {
+  destroy_config(exec_state->config);
   if (exec_state->game) {
     destroy_game(exec_state->game);
   }
-  if (exec_state->move_list) {
-    destroy_move_list(exec_state->move_list);
-  }
-  if (exec_state->sim_results) {
-    sim_results_destroy(exec_state->sim_results);
-  }
-  if (exec_state->inference_results) {
-    inference_results_destroy(exec_state->inference_results);
-  }
-  if (exec_state->autoplay_results) {
-    destroy_autoplay_results(exec_state->autoplay_results);
-  }
-  destroy_config(exec_state->config);
+  sim_results_destroy(exec_state->sim_results);
+  inference_results_destroy(exec_state->inference_results);
+  destroy_autoplay_results(exec_state->autoplay_results);
   destroy_error_status(exec_state->error_status);
   free(exec_state);
 }
@@ -63,10 +51,6 @@ Config *exec_state_get_config(const ExecState *exec_state) {
 
 Game *exec_state_get_game(const ExecState *exec_state) {
   return exec_state->game;
-}
-
-MoveList *exec_state_get_move_list(const ExecState *exec_state) {
-  return exec_state->move_list;
 }
 
 SimResults *exec_state_get_sim_results(const ExecState *exec_state) {
@@ -86,30 +70,28 @@ ErrorStatus *exec_state_get_error_status(const ExecState *exec_state) {
   return exec_state->error_status;
 }
 
-void exec_state_set_config(ExecState *exec_state, Config *config) {
-  exec_state->config = config;
+bool is_game_recreation_required(const Config *config) {
+  // If the ld changes (bag and rack size)
+  // a recreation is required to resize the
+  // dynamically allocated fields.
+  return config_get_ld_name_changed(config);
 }
 
-void exec_state_set_game(ExecState *exec_state, Game *game) {
-  exec_state->game = game;
-}
+// Creates a game if none exists or recreates the game
+// if the ld size or other dynamically allocated
+// data sizes have changed.
+//
+// Preconditions:
+//  - The config is loaded
+void exec_state_init_game(ExecState *exec_state) {
+  if (exec_state->game && is_game_recreation_required(exec_state->config)) {
+    destroy_game(exec_state->game);
+    exec_state->game = NULL;
+  }
 
-void exec_state_set_sim_results(ExecState *exec_state,
-                                SimResults *sim_results) {
-  exec_state->sim_results = sim_results;
-}
-
-void exec_state_set_inference_results(ExecState *exec_state,
-                                      InferenceResults *inference_results) {
-  exec_state->inference_results = inference_results;
-}
-
-void exec_state_set_autoplay_results(ExecState *exec_state,
-                                     AutoplayResults *autoplay_results) {
-  exec_state->autoplay_results = autoplay_results;
-}
-
-void exec_state_set_error_status(ExecState *exec_state,
-                                 ErrorStatus *error_status) {
-  exec_state->error_status = error_status;
+  if (!exec_state->game) {
+    exec_state->game = create_game(exec_state->config);
+  } else {
+    update_game(exec_state->config, exec_state->game);
+  }
 }

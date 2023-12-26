@@ -20,9 +20,9 @@ typedef struct Config Config;
 // Getter functions
 
 command_t config_get_command_type(const Config *config);
-bool config_get_lexicons_loaded(const Config *config);
 LetterDistribution *config_get_letter_distribution(const Config *config);
 char *config_get_ld_name(const Config *config);
+bool config_get_ld_name_changed(const Config *config);
 char *config_get_cgp(const Config *config);
 int config_get_bingo_bonus(const Config *config);
 board_layout_t config_get_board_layout(const Config *config);

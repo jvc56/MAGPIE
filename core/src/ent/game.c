@@ -595,6 +595,17 @@ void set_backup_mode(Game *game, int backup_mode) {
   }
 }
 
+void update_game(const Config *config, Game *game) {
+  game->ld = config_get_letter_distribution(config);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    update_player(config, game->players[player_index]);
+  }
+  for (int i = 0; i < NUMBER_OF_DATA; i++) {
+    game->data_is_shared[i] = players_data_get_is_shared(
+        config_get_players_data(config), (players_data_t)i);
+  }
+}
+
 Game *create_game(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
   game->ld = config_get_letter_distribution(config);

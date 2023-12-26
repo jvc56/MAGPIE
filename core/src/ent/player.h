@@ -28,6 +28,7 @@ void player_increment_score(Player *player, int score);
 void player_decrement_score(Player *player, int score);
 
 Player *create_player(const Config *config, int player_index);
+void update_player(const Config *config, Player *player);
 Player *player_duplicate(const Player *player);
 void destroy_player(Player *player);
 void reset_player(Player *player);

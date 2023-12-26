@@ -143,10 +143,10 @@ int get_number_of_games_for_worker(int max_iterations, int number_of_threads,
 }
 
 autoplay_status_t autoplay(const Config *config,
-                           AutoplayResults **autoplay_results) {
+                           AutoplayResults *autoplay_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
   unhalt(thread_control);
-  create_or_reset_autoplay_results(autoplay_results);
+  reset_autoplay_results(autoplay_results);
 
   int number_of_threads = get_number_of_threads(thread_control);
   AutoplayWorker **autoplay_workers =
@@ -172,7 +172,7 @@ autoplay_status_t autoplay(const Config *config,
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
     add_autoplay_results(autoplay_workers[thread_index]->autoplay_results,
-                         *autoplay_results);
+                         autoplay_results);
     p1_score_stats[thread_index] =
         get_p1_score(autoplay_workers[thread_index]->autoplay_results);
     p2_score_stats[thread_index] =
@@ -184,11 +184,11 @@ autoplay_status_t autoplay(const Config *config,
   halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
 
   combine_stats(p1_score_stats, number_of_threads,
-                get_p1_score(*autoplay_results));
+                get_p1_score(autoplay_results));
   free(p1_score_stats);
 
   combine_stats(p2_score_stats, number_of_threads,
-                get_p2_score(*autoplay_results));
+                get_p2_score(autoplay_results));
   free(p2_score_stats);
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
@@ -199,6 +199,6 @@ autoplay_status_t autoplay(const Config *config,
   free(autoplay_workers);
   free(worker_ids);
 
-  print_ucgi_autoplay_results(*autoplay_results, thread_control);
+  print_ucgi_autoplay_results(autoplay_results, thread_control);
   return AUTOPLAY_STATUS_SUCCESS;
 }

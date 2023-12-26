@@ -24,6 +24,15 @@
 static ExecState *wasm_exec_state = NULL;
 static ExecState *iso_exec_state = NULL;
 
+void destroy_wasm_exec_states() {
+  if (wasm_exec_state) {
+    destroy_exec_state(wasm_exec_state);
+  }
+  if (iso_exec_state) {
+    destroy_exec_state(iso_exec_state);
+  }
+}
+
 void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
   // Use a separate command vars to get
   // a game for score_play and static_evaluation

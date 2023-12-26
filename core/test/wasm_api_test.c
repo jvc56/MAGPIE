@@ -44,4 +44,6 @@ void test_wasm_api() {
   assert(strings_equal(
       retstr, "currmove 2b.THUMP result scored valid true sc 50 eq 54.356"));
   free(retstr);
+
+  destroy_wasm_exec_states();
 }

@@ -34,6 +34,7 @@ typedef struct Inference {
   // The following fields are owned by this struct.
 
   int ld_size;
+  int move_capacity;
   // Target player index in the game
   int target_index;
   int target_score;
@@ -262,11 +263,11 @@ void decrement_letter_for_inference(Inference *inference, uint8_t letter) {
   take_letter_from_rack(inference->current_target_leave, letter);
 }
 
-Inference *inference_create(InferenceResults **results, Game *game,
-                            Rack *target_played_tiles, int move_capacity,
-                            int target_index, int target_score,
+Inference *inference_create(Game *game, Rack *target_played_tiles,
+                            int move_capacity, int target_index,
+                            int target_score,
                             int target_number_of_tiles_exchanged,
-                            double equity_margin) {
+                            double equity_margin, InferenceResults *results) {
 
   Inference *inference = malloc_or_die(sizeof(Inference));
 
@@ -274,6 +275,7 @@ Inference *inference_create(InferenceResults **results, Game *game,
   inference->klv = player_get_klv(game_get_player(game, target_index));
 
   inference->ld_size = get_array_size(target_played_tiles);
+  inference->move_capacity = move_capacity;
   inference->target_index = target_index;
   inference->target_score = target_score;
   inference->target_number_of_tiles_exchanged =
@@ -296,15 +298,10 @@ Inference *inference_create(InferenceResults **results, Game *game,
       player_get_rack(game_get_player(game, target_index));
   inference->bag_as_rack = create_rack(inference->ld_size);
 
-  // Recreate the results since the ld_size may have changed
-  // and also to reset the info.
-  if (*results) {
-    inference_results_destroy(*results);
-  }
+  inference_results_reset(results, inference->move_capacity,
+                          inference->ld_size);
 
-  *results = inference_results_create(move_capacity, inference->ld_size);
-
-  inference->results = *results;
+  inference->results = results;
 
   // Set the initial bag
   add_bag_to_rack(game_get_bag(game), inference->bag_as_rack);
@@ -342,6 +339,7 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
       game_get_player(new_inference->game, inference->target_index));
 
   new_inference->ld_size = inference->ld_size;
+  new_inference->move_capacity = inference->move_capacity;
   new_inference->target_index = inference->target_index;
   new_inference->target_score = inference->target_score;
   new_inference->target_number_of_tiles_exchanged =
@@ -358,10 +356,9 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
       game_get_player(new_inference->game, new_inference->target_index));
   new_inference->bag_as_rack = rack_duplicate(inference->bag_as_rack);
 
-  new_inference->results = inference_results_create(
-      get_leave_rack_list_capacity(
-          inference_results_get_leave_rack_list(inference->results)),
-      new_inference->ld_size);
+  new_inference->results = inference_results_create();
+  inference_results_reset(new_inference->results, inference->move_capacity,
+                          new_inference->ld_size);
 
   // Multithreading
   new_inference->thread_control = thread_control;
@@ -597,7 +594,7 @@ inference_status_t verify_inference(const Inference *inference) {
 }
 
 inference_status_t infer(const Config *config, Game *game,
-                         InferenceResults **results) {
+                         InferenceResults *results) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
   unhalt(thread_control);
@@ -609,10 +606,10 @@ inference_status_t infer(const Config *config, Game *game,
   }
 
   Inference *inference = inference_create(
-      results, game, config_target_played_tiles, config_get_num_plays(config),
+      game, config_target_played_tiles, config_get_num_plays(config),
       config_get_target_index(config), config_get_target_score(config),
       config_get_target_number_of_tiles_exchanged(config),
-      config_get_equity_margin(config));
+      config_get_equity_margin(config), results);
 
   inference_status_t status = verify_inference(inference);
 

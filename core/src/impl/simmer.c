@@ -60,7 +60,7 @@ typedef struct SimmerWorker {
 } SimmerWorker;
 
 Simmer *create_simmer(const Config *config, Game *game, MoveList *move_list,
-                      int num_simmed_plays, SimResults **sim_results) {
+                      int num_simmed_plays, SimResults *sim_results) {
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
   ThreadControl *thread_control = config_get_thread_control(config);
   int ld_size =
@@ -103,14 +103,10 @@ Simmer *create_simmer(const Config *config, Game *game, MoveList *move_list,
 
   simmer->thread_control = thread_control;
 
-  if (*sim_results) {
-    sim_results_destroy(*sim_results);
-  }
+  sim_results_reset(sim_results, move_list, num_simmed_plays,
+                    config_get_plies(config));
 
-  *sim_results =
-      sim_results_create(move_list, num_simmed_plays, config_get_plies(config));
-
-  simmer->sim_results = *sim_results;
+  simmer->sim_results = sim_results;
 
   return simmer;
 }
@@ -451,7 +447,7 @@ void simmer_sort_plays_by_win_rate(Simmer *simmer) {
 }
 
 sim_status_t simulate(const Config *config, Game *game,
-                      SimResults **sim_results) {
+                      SimResults *sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
   unhalt(thread_control);
 
@@ -510,6 +506,6 @@ sim_status_t simulate(const Config *config, Game *game,
   destroy_simmer(simmer);
 
   // Print out the stats
-  print_ucgi_sim_stats(game, *sim_results, thread_control, true);
+  print_ucgi_sim_stats(game, sim_results, thread_control, true);
   return SIM_STATUS_SUCCESS;
 }

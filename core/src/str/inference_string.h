@@ -17,6 +17,7 @@ void print_ucgi_inference(const LetterDistribution *ld,
 
 void string_builder_add_inference(const LetterDistribution *ld,
                                   InferenceResults *inference_results,
+                                  const Rack *target_played_tiles,
                                   StringBuilder *inference_string);
 
 #endif

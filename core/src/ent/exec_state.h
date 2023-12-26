@@ -22,14 +22,6 @@ InferenceResults *exec_state_get_inference_results(const ExecState *exec_state);
 AutoplayResults *exec_state_get_autoplay_results(const ExecState *exec_state);
 ErrorStatus *exec_state_get_error_status(const ExecState *exec_state);
 
-void exec_state_set_config(ExecState *exec_state, Config *config);
-void exec_state_set_game(ExecState *exec_state, Game *game);
-void exec_state_set_sim_results(ExecState *exec_state, SimResults *sim_results);
-void exec_state_set_inference_results(ExecState *exec_state,
-                                      InferenceResults *inference_results);
-void exec_state_set_autoplay_results(ExecState *exec_state,
-                                     AutoplayResults *autoplay_results);
-void exec_state_set_error_status(ExecState *exec_state,
-                                 ErrorStatus *error_status);
+void exec_state_init_game(ExecState *exec_state);
 
 #endif

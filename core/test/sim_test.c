@@ -67,10 +67,10 @@ void test_sim_single_iteration(TestConfig *testconfig) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
   draw_rack_to_string(ld, bag, player0_rack, "AAADERW", 0);
-  SimResults *sim_results = NULL;
+  SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1 cond none");
-  sim_status_t status = simulate(config, game, &sim_results);
+  sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 
@@ -90,10 +90,10 @@ void test_more_iterations(TestConfig *testconfig) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
   draw_rack_to_string(ld, bag, player0_rack, "AEIQRST", 0);
-  SimResults *sim_results = NULL;
+  SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 400 cond none");
-  sim_status_t status = simulate(config, game, &sim_results);
+  sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
   sim_results_sort_plays_by_win_rate(sim_results);
@@ -115,7 +115,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   LetterDistribution *ld = game_get_ld(game);
 
   load_cgp(game, config_get_cgp(config));
-  SimResults *sim_results = NULL;
+  SimResults *sim_results = sim_results_create();
 
   int iters = 10000;
   char *setoptions_string = get_formatted_string(
@@ -124,7 +124,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   load_config_or_die(config, setoptions_string);
   free(setoptions_string);
   clock_t begin = clock();
-  sim_status_t status = simulate(config, game, &sim_results);
+  sim_status_t status = simulate(config, game, sim_results);
   clock_t end = clock();
   assert(status == SIM_STATUS_SUCCESS);
   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
@@ -153,10 +153,10 @@ void perf_test_multithread_sim(Config *config) {
   int num_threads = get_number_of_threads(thread_control);
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config_get_cgp(config));
-  SimResults *sim_results = NULL;
+  SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1000 cond none");
-  sim_status_t status = simulate(config, game, &sim_results);
+  sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 
@@ -184,11 +184,11 @@ void perf_test_multithread_blocking_sim(Config *config) {
   printf("Using %d threads\n", num_threads);
   load_cgp(game, config_get_cgp(config));
 
-  SimResults *sim_results = NULL;
+  SimResults *sim_results = sim_results_create();
   load_config_or_die(config,
                      "setoptions rack " EMPTY_RACK_STRING
                      " plies 2 threads 1 numplays 15 i 1000000 cond 99");
-  sim_status_t status = simulate(config, game, &sim_results);
+  sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   print_sim_stats(game, sim_results);
   sim_results_sort_plays_by_win_rate(sim_results);
@@ -221,10 +221,10 @@ void perf_test_multithread_blocking_sim(Config *config) {
 //   Rack *player0_rack = player_get_rack(player0);
 
 //   draw_rack_to_string(ld, bag, player0_rack, "ACEIRST", 0);
-//   SimResults *sim_results = NULL;
+//   SimResults *sim_results = sim_results_create();
 //   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
 //                              " plies 2 threads 1 numplays 15 i 0 cond none");
-//   sim_status_t status = simulate(config, game, &sim_results);
+//   sim_status_t status = simulate(config, game, sim_results);
 //   assert(status == SIM_STATUS_SUCCESS);
 //   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 //   // The first four plays all score 74. Only

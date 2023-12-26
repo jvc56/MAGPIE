@@ -34,8 +34,9 @@ void add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
 struct SimResults;
 typedef struct SimResults SimResults;
 
-SimResults *sim_results_create(MoveList *move_list, int num_simmed_plays,
-                               int max_plies);
+SimResults *sim_results_create();
+void sim_results_reset(SimResults *sim_results, MoveList *move_list,
+                       int num_simmed_plays, int max_plies);
 void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(SimResults *sim_results);

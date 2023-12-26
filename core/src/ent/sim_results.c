@@ -79,28 +79,41 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
   free(simmed_plays);
 }
 
-SimResults *sim_results_create(MoveList *move_list, int num_simmed_plays,
-                               int max_plies) {
-  SimResults *sim_results = malloc_or_die(sizeof(SimResults));
-  sim_results->num_simmed_plays = num_simmed_plays;
-  sim_results->max_plies = max_plies;
-  sim_results->iteration_count = 0;
-  pthread_mutex_init(&sim_results->simmed_plays_mutex, NULL);
-  atomic_init(&sim_results->node_count, 0);
-  sim_results->simmed_plays =
-      simmed_plays_create(move_list, num_simmed_plays, max_plies);
-  return sim_results;
-}
-
-// destructors
-
-void sim_results_destroy(SimResults *sim_results) {
+void sim_results_destroy_internal(SimResults *sim_results) {
   if (sim_results->simmed_plays) {
     simmed_plays_destroy(sim_results->simmed_plays,
                          sim_results->num_simmed_plays, sim_results->max_plies);
+    sim_results->simmed_plays = NULL;
   }
+}
 
+void sim_results_destroy(SimResults *sim_results) {
+  sim_results_destroy_internal(sim_results);
   free(sim_results);
+}
+
+void sim_results_reset(SimResults *sim_results, MoveList *move_list,
+                       int num_simmed_plays, int max_plies) {
+  sim_results_destroy_internal(sim_results);
+
+  sim_results->simmed_plays =
+      simmed_plays_create(move_list, num_simmed_plays, max_plies);
+
+  sim_results->num_simmed_plays = num_simmed_plays;
+  sim_results->max_plies = max_plies;
+  sim_results->iteration_count = 0;
+  atomic_init(&sim_results->node_count, 0);
+}
+
+SimResults *sim_results_create() {
+  SimResults *sim_results = malloc_or_die(sizeof(SimResults));
+  sim_results->num_simmed_plays = 0;
+  sim_results->max_plies = 0;
+  sim_results->iteration_count = 0;
+  atomic_init(&sim_results->node_count, 0);
+  pthread_mutex_init(&sim_results->simmed_plays_mutex, NULL);
+  sim_results->simmed_plays = NULL;
+  return sim_results;
 }
 
 Move *simmed_play_get_move(const SimmedPlay *simmed_play) {

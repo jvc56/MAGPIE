@@ -53,7 +53,7 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
   }
 
   char *status_string = NULL;
-  SimResults *sim_results = NULL;
+  SimResults *sim_results = sim_results_create();
 
   switch (config_get_command_type(exec_state_get_config(exec_state))) {
   case COMMAND_TYPE_SIM:
@@ -84,16 +84,6 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
   return status_string;
 }
 
-// This function recreates fields of the command vars
-// which have dynamically sized allocations that can
-// change based on the config.
-void recreate_game(const Config *config, ExecState *exec_state) {
-  if (exec_state_get_game(exec_state)) {
-    destroy_game(exec_state_get_game(exec_state));
-  }
-  exec_state_set_game(exec_state, create_game(config));
-}
-
 void set_or_clear_error_status(ErrorStatus *error_status,
                                error_status_t error_status_type,
                                int error_code) {
@@ -105,31 +95,23 @@ void set_or_clear_error_status(ErrorStatus *error_status,
 }
 
 void execute_sim(const Config *config, ExecState *exec_state) {
-  SimResults *sim_results = exec_state_get_sim_results(exec_state);
-  sim_status_t status =
-      simulate(config, exec_state_get_game(exec_state), &sim_results);
-  // The sim results could have been a NULL pointer, so we
-  // have to set the potentially newly created sim_results here.
-  exec_state_set_sim_results(exec_state, sim_results);
+  sim_status_t status = simulate(config, exec_state_get_game(exec_state),
+                                 exec_state_get_sim_results(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_SIM, (int)status);
 }
 
 void execute_autoplay(const Config *config, ExecState *exec_state) {
-  AutoplayResults *autoplay_results =
-      exec_state_get_autoplay_results(exec_state);
-  autoplay_status_t status = autoplay(config, &autoplay_results);
-  exec_state_set_autoplay_results(exec_state, autoplay_results);
+  autoplay_status_t status =
+      autoplay(config, exec_state_get_autoplay_results(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_AUTOPLAY, (int)status);
 }
 
 void execute_infer(const Config *config, ExecState *exec_state) {
-  InferenceResults *inference_results =
-      exec_state_get_inference_results(exec_state);
   inference_status_t status =
-      infer(config, exec_state_get_game(exec_state), &inference_results);
-  exec_state_set_inference_results(exec_state, inference_results);
+      infer(config, exec_state_get_game(exec_state),
+            exec_state_get_inference_results(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_INFER, (int)status);
 }
@@ -142,23 +124,16 @@ void execute_command(ExecState *exec_state) {
   // read-only. We create a new const pointer to enforce this.
   const Config *config = exec_state_get_config(exec_state);
 
-  // If the lexicons aren't loaded, this is
-  // guaranteed to be a set options
-  // command and the rest of the function
-  // will be a no-op.
-  if (config_get_lexicons_loaded(config)) {
-    // FIXME: only reset if the lexicons or letter distribution changes
-    recreate_game(config, exec_state);
+  exec_state_init_game(exec_state);
 
-    if (config_get_command_set_cgp(config)) {
-      cgp_parse_status_t cgp_parse_status =
-          load_cgp(exec_state_get_game(exec_state), config_get_cgp(config));
-      set_or_clear_error_status(exec_state_get_error_status(exec_state),
-                                ERROR_STATUS_TYPE_CGP_LOAD,
-                                (int)cgp_parse_status);
-      if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
-        return;
-      }
+  if (config_get_command_set_cgp(config)) {
+    cgp_parse_status_t cgp_parse_status =
+        load_cgp(exec_state_get_game(exec_state), config_get_cgp(config));
+    set_or_clear_error_status(exec_state_get_error_status(exec_state),
+                              ERROR_STATUS_TYPE_CGP_LOAD,
+                              (int)cgp_parse_status);
+    if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+      return;
     }
   }
 

@@ -27,6 +27,5 @@ void increment_p2_score(AutoplayResults *autoplay_results, int score);
 void add_autoplay_results(const AutoplayResults *result_to_add,
                           AutoplayResults *result_to_be_updated);
 void reset_autoplay_results(AutoplayResults *autoplay_results);
-void create_or_reset_autoplay_results(AutoplayResults **autoplay_results);
 
 #endif

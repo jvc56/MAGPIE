@@ -92,9 +92,11 @@ void print_game(Game *game, MoveList *move_list) {
 }
 
 void print_inference(const LetterDistribution *ld,
+                     const Rack *target_played_tiles,
                      InferenceResults *inference_results) {
   StringBuilder *inference_string = create_string_builder();
-  string_builder_add_inference(ld, inference_results, inference_string);
+  string_builder_add_inference(ld, inference_results, target_played_tiles,
+                               inference_string);
   printf("%s\n", string_builder_peek(inference_string));
   destroy_string_builder(inference_string);
 }

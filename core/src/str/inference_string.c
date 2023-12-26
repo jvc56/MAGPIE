@@ -105,8 +105,8 @@ void string_builder_add_inference_type(
   string_builder_add_formatted_string(
       inference_string,
       "Total possible leave draws:   %lu\nTotal possible unique leaves: "
-      "%lu\nAverage leave value:          %0.2fStdev leave value:            "
-      "%0.2f",
+      "%lu\nAverage leave value:          %0.2f\nStdev leave value:            "
+      "%0.2f\n",
       total_draws, total_leaves, get_mean(equity_values),
       get_stdev(equity_values));
   int max_duplicate_letter_draw = 0;
@@ -128,8 +128,8 @@ void string_builder_add_inference_type(
 
   string_builder_add_string(inference_string, "               ");
   for (int i = 0; i < max_duplicate_letter_draw; i++) {
-    string_builder_add_formatted_string(inference_string, "Has at least %d of",
-                                        i + 1);
+    string_builder_add_formatted_string(
+        inference_string, "Has at least %d of            ", i + 1);
   }
   string_builder_add_string(inference_string, "\n\n   Avg  Std ");
 

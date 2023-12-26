@@ -35,6 +35,8 @@ void game_start_next_player_turn(Game *game);
 
 void reset_game(Game *game);
 Game *create_game(const Config *config);
+// FIXME: rethink game relation to config
+void update_game(const Config *config, Game *game);
 Game *game_duplicate(const Game *game);
 void destroy_game(Game *game);
 cgp_parse_status_t load_cgp(Game *game, const char *cgp);

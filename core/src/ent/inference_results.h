@@ -10,7 +10,9 @@
 struct InferenceResults;
 typedef struct InferenceResults InferenceResults;
 
-InferenceResults *inference_results_create(int move_capacity, int ld_size);
+void inference_results_reset(InferenceResults *results, int move_capacity,
+                             int ld_size);
+InferenceResults *inference_results_create();
 void inference_results_destroy(InferenceResults *inference_results);
 void inference_results_finalize(InferenceResults *results, int target_score,
                                 int target_number_of_tiles_exchanged,
