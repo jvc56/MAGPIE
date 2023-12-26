@@ -64,14 +64,16 @@ void record_results(Game *game, AutoplayResults *autoplay_results,
   increment_p2_score(autoplay_results, p1_score);
 }
 
-void play_autoplay_game(Game *game, MoveGen *gen,
+void play_autoplay_game(Game *game, MoveList **move_list,
                         AutoplayResults *autoplay_results,
-                        int starting_player_index) {
+                        int starting_player_index, int thread_index) {
   reset_game(game);
   set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    play_move(get_top_equity_move(game, gen), game);
+    // FIXME: this code doesn't care about
+    // capacity or move_list
+    play_move(get_top_equity_move(game, thread_index, 1, move_list), game);
   }
   record_results(game, autoplay_results, starting_player_index);
 }
@@ -81,10 +83,8 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   const Config *config = autoplay_worker->config;
   ThreadControl *thread_control = config_get_thread_control(config);
   Game *game = create_game(config);
-  MoveGen *gen = create_generator(
-      config_get_num_plays(config),
-      letter_distribution_get_size(config_get_letter_distribution(config)));
   Bag *bag = game_get_bag(game);
+  MoveList *move_list = create_move_list(1);
 
   // Declare local vars for autoplay_worker fields for convenience
   bool use_game_pairs = config_get_use_game_pairs(autoplay_worker->config);
@@ -115,19 +115,20 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
       bag_copy(game_pair_bag, bag);
     }
 
-    play_autoplay_game(game, gen, autoplay_worker->autoplay_results,
-                       starting_player_index);
+    play_autoplay_game(game, &move_list, autoplay_worker->autoplay_results,
+                       starting_player_index, autoplay_worker->worker_index);
     if (use_game_pairs) {
       bag_copy(bag, game_pair_bag);
-      play_autoplay_game(game, gen, autoplay_worker->autoplay_results,
-                         1 - starting_player_index);
+      play_autoplay_game(game, &move_list, autoplay_worker->autoplay_results,
+                         1 - starting_player_index,
+                         autoplay_worker->worker_index);
     }
   }
 
   if (use_game_pairs) {
     destroy_bag(game_pair_bag);
   }
-  destroy_generator(gen);
+  destroy_move_list(move_list);
   destroy_game(game);
   return NULL;
 }

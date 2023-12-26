@@ -87,20 +87,11 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
 // This function recreates fields of the command vars
 // which have dynamically sized allocations that can
 // change based on the config.
-void reset_game_and_move_gen(const Config *config, ExecState *exec_state) {
+void recreate_game(const Config *config, ExecState *exec_state) {
   if (exec_state_get_game(exec_state)) {
     destroy_game(exec_state_get_game(exec_state));
   }
   exec_state_set_game(exec_state, create_game(config));
-
-  if (exec_state_get_gen(exec_state)) {
-    destroy_generator(exec_state_get_gen(exec_state));
-  }
-  exec_state_set_gen(
-      exec_state,
-      create_generator(config_get_num_plays(config),
-                       letter_distribution_get_size(
-                           config_get_letter_distribution(config))));
 }
 
 void set_or_clear_error_status(ErrorStatus *error_status,
@@ -115,8 +106,8 @@ void set_or_clear_error_status(ErrorStatus *error_status,
 
 void execute_sim(const Config *config, ExecState *exec_state) {
   SimResults *sim_results = exec_state_get_sim_results(exec_state);
-  sim_status_t status = simulate(config, exec_state_get_game(exec_state),
-                                 exec_state_get_gen(exec_state), &sim_results);
+  sim_status_t status =
+      simulate(config, exec_state_get_game(exec_state), &sim_results);
   // The sim results could have been a NULL pointer, so we
   // have to set the potentially newly created sim_results here.
   exec_state_set_sim_results(exec_state, sim_results);
@@ -157,7 +148,7 @@ void execute_command(ExecState *exec_state) {
   // will be a no-op.
   if (config_get_lexicons_loaded(config)) {
     // FIXME: only reset if the lexicons or letter distribution changes
-    reset_game_and_move_gen(config, exec_state);
+    recreate_game(config, exec_state);
 
     if (config_get_command_set_cgp(config)) {
       cgp_parse_status_t cgp_parse_status =

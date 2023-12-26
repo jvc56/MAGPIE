@@ -59,9 +59,6 @@ void test_win_pct(TestConfig *testconfig) {
 void test_sim_single_iteration(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  MoveGen *gen = create_generator(
-      config_get_num_plays(config),
-      letter_distribution_get_size(config_get_letter_distribution(config)));
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   LetterDistribution *ld = game_get_ld(game);
@@ -73,13 +70,12 @@ void test_sim_single_iteration(TestConfig *testconfig) {
   SimResults *sim_results = NULL;
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1 cond none");
-  sim_status_t status = simulate(config, game, gen, &sim_results);
+  sim_status_t status = simulate(config, game, &sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 
   assert(get_tiles_played(board) == 0);
 
-  destroy_generator(gen);
   destroy_game(game);
   sim_results_destroy(sim_results);
 }
@@ -87,9 +83,6 @@ void test_sim_single_iteration(TestConfig *testconfig) {
 void test_more_iterations(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
-  MoveGen *gen = create_generator(
-      config_get_num_plays(config),
-      letter_distribution_get_size(config_get_letter_distribution(config)));
   Bag *bag = game_get_bag(game);
   LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
@@ -100,7 +93,7 @@ void test_more_iterations(TestConfig *testconfig) {
   SimResults *sim_results = NULL;
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 400 cond none");
-  sim_status_t status = simulate(config, game, gen, &sim_results);
+  sim_status_t status = simulate(config, game, &sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
   sim_results_sort_plays_by_win_rate(sim_results);
@@ -112,7 +105,6 @@ void test_more_iterations(TestConfig *testconfig) {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "8G QI"));
 
-  destroy_generator(gen);
   destroy_game(game);
   sim_results_destroy(sim_results);
   destroy_string_builder(move_string_builder);
@@ -120,9 +112,6 @@ void test_more_iterations(TestConfig *testconfig) {
 
 void perf_test_sim(Config *config, ThreadControl *thread_control) {
   Game *game = create_game(config);
-  MoveGen *gen = create_generator(
-      config_get_num_plays(config),
-      letter_distribution_get_size(config_get_letter_distribution(config)));
   LetterDistribution *ld = game_get_ld(game);
 
   load_cgp(game, config_get_cgp(config));
@@ -135,7 +124,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   load_config_or_die(config, setoptions_string);
   free(setoptions_string);
   clock_t begin = clock();
-  sim_status_t status = simulate(config, game, gen, &sim_results);
+  sim_status_t status = simulate(config, game, &sim_results);
   clock_t end = clock();
   assert(status == SIM_STATUS_SUCCESS);
   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
@@ -152,16 +141,12 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
   destroy_string_builder(move_string_builder);
-  destroy_generator(gen);
   destroy_game(game);
   sim_results_destroy(sim_results);
 }
 
 void perf_test_multithread_sim(Config *config) {
   Game *game = create_game(config);
-  MoveGen *gen = create_generator(
-      config_get_num_plays(config),
-      letter_distribution_get_size(config_get_letter_distribution(config)));
   LetterDistribution *ld = game_get_ld(game);
   ThreadControl *thread_control = config_get_thread_control(config);
 
@@ -171,7 +156,7 @@ void perf_test_multithread_sim(Config *config) {
   SimResults *sim_results = NULL;
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1000 cond none");
-  sim_status_t status = simulate(config, game, gen, &sim_results);
+  sim_status_t status = simulate(config, game, &sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 
@@ -186,16 +171,12 @@ void perf_test_multithread_sim(Config *config) {
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
   destroy_string_builder(move_string_builder);
-  destroy_generator(gen);
   destroy_game(game);
   sim_results_destroy(sim_results);
 }
 
 void perf_test_multithread_blocking_sim(Config *config) {
   Game *game = create_game(config);
-  MoveGen *gen = create_generator(
-      config_get_num_plays(config),
-      letter_distribution_get_size(config_get_letter_distribution(config)));
   ThreadControl *thread_control = config_get_thread_control(config);
   LetterDistribution *ld = game_get_ld(game);
 
@@ -207,7 +188,7 @@ void perf_test_multithread_blocking_sim(Config *config) {
   load_config_or_die(config,
                      "setoptions rack " EMPTY_RACK_STRING
                      " plies 2 threads 1 numplays 15 i 1000000 cond 99");
-  sim_status_t status = simulate(config, game, gen, &sim_results);
+  sim_status_t status = simulate(config, game, &sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   print_sim_stats(game, sim_results);
   sim_results_sort_plays_by_win_rate(sim_results);
@@ -219,7 +200,6 @@ void perf_test_multithread_blocking_sim(Config *config) {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
   destroy_string_builder(move_string_builder);
-  destroy_generator(gen);
   destroy_game(game);
   sim_results_destroy(sim_results);
 }
@@ -244,7 +224,7 @@ void perf_test_multithread_blocking_sim(Config *config) {
 //   SimResults *sim_results = NULL;
 //   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
 //                              " plies 2 threads 1 numplays 15 i 0 cond none");
-//   sim_status_t status = simulate(config, game, gen, &sim_results);
+//   sim_status_t status = simulate(config, game, &sim_results);
 //   assert(status == SIM_STATUS_SUCCESS);
 //   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 //   // The first four plays all score 74. Only
@@ -286,7 +266,6 @@ void perf_test_multithread_blocking_sim(Config *config) {
 
 //   assert(!plays_are_similar(play_3, play_4, simmer));
 //   destroy_game(game);
-//   destroy_generator(gen);
 //   sim_results_destroy(sim_results);
 // }
 

@@ -10,6 +10,8 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 
+#include "move_gen.h"
+
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
   Board *board = game_get_board(game);
@@ -202,27 +204,35 @@ void play_move(const Move *move, Game *game) {
 }
 
 void generate_moves_for_game(Game *game, move_record_t move_record_type,
-                             move_sort_t move_sort_type, MoveList **move_list) {
+                             move_sort_t move_sort_type, int thread_index,
+                             int move_list_capacity, MoveList **move_list) {
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
   generate_moves(game_get_ld(game), player_get_kwg(player_on_turn),
                  player_get_klv(player_on_turn), player_get_rack(opponent),
-                 game_get_board(game), player_get_rack(player_on_turn),
-                 player_on_turn_index, get_tiles_remaining(game_get_bag(game)),
-                 move_record_type, move_sort_type,
-                 !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG));
+                 thread_index, game_get_board(game),
+                 player_get_rack(player_on_turn), player_on_turn_index,
+                 get_tiles_remaining(game_get_bag(game)), move_record_type,
+                 move_sort_type,
+                 !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+                 move_list_capacity, move_list);
 }
 
 void generate_moves_for_game_with_player_move_types(Game *game,
+                                                    int thread_index,
+                                                    int move_list_capacity,
                                                     MoveList **move_list) {
   Player *player_on_turn =
       game_get_player(game, game_get_player_on_turn_index(game));
   generate_moves_for_game(game, player_get_move_record_type(player_on_turn),
-                          player_get_move_sort_type(player_on_turn), move_list);
+                          player_get_move_sort_type(player_on_turn),
+                          thread_index, move_list_capacity, move_list);
 }
 
-Move *get_top_equity_move(Game *game, MoveList **move_list) {
-  generate_moves_for_game(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, move_list);
+Move *get_top_equity_move(Game *game, int thread_index, int move_list_capacity,
+                          MoveList **move_list) {
+  generate_moves_for_game(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY,
+                          thread_index, move_list_capacity, move_list);
   return move_list_get_move(*move_list, 0);
 }

@@ -354,8 +354,10 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
         break;
       }
 
-      const Move *best_play =
-          get_top_equity_move(game, simmer_worker->move_list);
+      // FIXME: this code doesn't care about
+      // capacity or move_list
+      const Move *best_play = get_top_equity_move(
+          game, simmer_worker->thread_index, 1, &simmer_worker->move_list);
       rack_copy(rack_placeholder, player_get_rack(player_on_turn));
       play_move(best_play, game);
       sim_results_increment_node_count(sim_results);
@@ -453,8 +455,11 @@ sim_status_t simulate(const Config *config, Game *game,
   ThreadControl *thread_control = config_get_thread_control(config);
   unhalt(thread_control);
 
+  int num_simmed_plays = config_get_num_plays(config);
+
   MoveList *move_list = NULL;
-  generate_moves_for_game(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, &move_list);
+  generate_moves_for_game(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0,
+                          num_simmed_plays, &move_list);
   // Sorting moves converts the move list from a min heap
   // to a sorted array with count == 0, so the number of
   // moves must be obtained before sorting.
@@ -466,8 +471,6 @@ sim_status_t simulate(const Config *config, Game *game,
     return SIM_STATUS_SUCCESS;
   }
 
-  int num_simmed_plays = config_get_num_plays(config);
-
   if (number_of_moves_generated < num_simmed_plays) {
     num_simmed_plays = number_of_moves_generated;
   }
@@ -478,6 +481,8 @@ sim_status_t simulate(const Config *config, Game *game,
 
   Simmer *simmer =
       create_simmer(config, game, move_list, num_simmed_plays, sim_results);
+
+  destroy_move_list(move_list);
 
   SimmerWorker **simmer_workers =
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->threads));

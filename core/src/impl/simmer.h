@@ -5,9 +5,7 @@
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
 
-#include "move_gen.h"
-
-sim_status_t simulate(const Config *config, Game *game, MoveGen *gen,
+sim_status_t simulate(const Config *config, Game *game,
                       SimResults **sim_results);
 
 #endif

@@ -69,10 +69,22 @@ typedef struct MoveGen {
 
 static MoveGen *cached_gens[MAX_THREADS];
 
+void load_quackle_preendgame_adjustment_values(MoveGen *gen) {
+  double values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
+  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
+    gen->preendgame_adjustment_values[i] = values[i];
+  }
+}
+
+void load_zero_preendgame_adjustment_values(MoveGen *gen) {
+  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
+    gen->preendgame_adjustment_values[i] = 0;
+  }
+}
+
 MoveGen *create_generator(int move_list_capacity,
                           int letter_distribution_size) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  generator->move_list = create_move_list(move_list_capacity);
   generator->anchor_list = create_anchor_list();
   generator->leave_map = create_leave_map(letter_distribution_size);
   generator->tiles_played = 0;
@@ -86,7 +98,6 @@ MoveGen *create_generator(int move_list_capacity,
 }
 
 void destroy_generator(MoveGen *gen) {
-  destroy_move_list(gen->move_list);
   destroy_anchor_list(gen->anchor_list);
   destroy_leave_map(gen->leave_map);
   free(gen->exchange_strip);
@@ -784,6 +795,7 @@ void set_descending_tile_scores(MoveGen *gen) {
   }
 }
 
+// FIXME: this should go back to taking a game
 void generate_moves(const LetterDistribution *ld, const KWG *kwg,
                     const KLV *klv, const Rack *opponent_rack, int thread_index,
                     Board *board, Rack *player_rack, int player_index,
@@ -792,10 +804,12 @@ void generate_moves(const LetterDistribution *ld, const KWG *kwg,
                     int move_list_capacity, MoveList **move_list) {
 
   int ld_size = letter_distribution_get_size(ld);
+  // FIXME: these needs to be freed by clearing the cache
   MoveGen *gen = get_movegen(thread_index, move_list_capacity, ld_size);
 
   if (*move_list && move_list_get_capacity(*move_list) != move_list_capacity) {
     destroy_move_list(*move_list);
+    *move_list = NULL;
   }
 
   if (!*move_list) {
@@ -884,18 +898,5 @@ void generate_moves(const LetterDistribution *ld, const KWG *kwg,
       get_equity(top_move) < PASS_MOVE_EQUITY) {
     set_spare_move_as_pass(gen->move_list);
     insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
-  }
-}
-
-void load_quackle_preendgame_adjustment_values(MoveGen *gen) {
-  double values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
-  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
-    gen->preendgame_adjustment_values[i] = values[i];
-  }
-}
-
-void load_zero_preendgame_adjustment_values(MoveGen *gen) {
-  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
-    gen->preendgame_adjustment_values[i] = 0;
   }
 }

@@ -40,26 +40,6 @@ void load_config_or_die(Config *config, const char *cmd) {
   }
 }
 
-void generate_leaves_for_game(Game *game, MoveGen *gen, bool add_exchange) {
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-
-  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
-  LeaveMap *leave_map = gen_get_leave_map(gen);
-
-  init_leave_map(player_on_turn_rack, leave_map);
-  if (get_number_of_letters(player_on_turn_rack) < RACK_SIZE) {
-    set_current_value(leave_map,
-                      klv_get_leave_value(player_get_klv(player_on_turn),
-                                          player_on_turn_rack));
-  } else {
-    set_current_value(leave_map, INITIAL_TOP_MOVE_EQUITY);
-  }
-
-  // Set the best leaves and maybe add exchanges.
-  generate_exchange_moves(gen, 0, 0, add_exchange);
-}
-
 // Comparison function for qsort
 int compare_moves_for_sml(const void *a, const void *b) {
   const Move *move_a = *(const Move **)a;
@@ -127,12 +107,13 @@ void sort_and_print_move_list(const Board *board,
   destroy_sorted_move_list(sml);
 }
 
-void play_top_n_equity_move(Game *game, MoveGen *gen, int n) {
-  generate_moves_for_game_with_player_move_types(game, gen);
-  MoveList *move_list = gen_get_move_list(gen);
+void play_top_n_equity_move(Game *game, int n) {
+  MoveList *move_list = NULL;
+  generate_moves_for_game_with_player_move_types(game, 0, n + 1, &move_list);
   SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
   play_move(sorted_move_list->moves[n], game);
   destroy_sorted_move_list(sorted_move_list);
+  destroy_move_list(move_list);
 }
 
 void load_cgp_or_die(Game *game, const char *cgp) {
@@ -260,11 +241,10 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
   }
 }
 
-void assert_move(Game *game, MoveGen *gen, const SortedMoveList *sml,
+void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
                  int move_index, const char *expected_move_string) {
   Board *board = game_get_board(game);
   LetterDistribution *ld = game_get_ld(game);
-  MoveList *move_list = gen_get_move_list(gen);
 
   StringBuilder *move_string = create_string_builder();
   Move *move;
