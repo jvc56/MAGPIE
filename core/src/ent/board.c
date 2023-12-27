@@ -14,12 +14,18 @@
 
 #include "board.h"
 
+// Cross sets use a x4 multiplier for
+// - Horizontal and vertical directions
+// - Player 1 and player 2
+// Anchors use a x2 multiplier for
+// - Horizontal and vertical directions
+
 struct Board {
   uint8_t letters[BOARD_DIM * BOARD_DIM];
   uint8_t bonus_squares[BOARD_DIM * BOARD_DIM];
-  uint64_t cross_sets[NUMBER_OF_CROSSES];
-  int cross_scores[NUMBER_OF_CROSSES];
-  int anchors[BOARD_DIM * BOARD_DIM * 2];
+  uint64_t cross_sets[BOARD_DIM * BOARD_DIM * 4];
+  int cross_scores[BOARD_DIM * BOARD_DIM * 4];
+  bool anchors[BOARD_DIM * BOARD_DIM * 2];
   bool transposed;
   int tiles_played;
   // Values used for traverse backwards for score
@@ -86,17 +92,16 @@ uint8_t get_letter(const Board *board, int row, int col) {
 
 // Anchors
 
-int get_anchor(const Board *board, int row, int col, int dir) {
+bool get_anchor(const Board *board, int row, int col, int dir) {
   return board->anchors[get_tindex_dir(board, row, col, dir)];
 }
 
 void set_anchor(Board *board, int row, int col, int dir) {
-  board->anchors[get_tindex_dir(board, row, col, dir)] = 1;
+  board->anchors[get_tindex_dir(board, row, col, dir)] = true;
 }
 
-void reset_anchors(Board *board, int row, int col) {
-  board->anchors[get_tindex_dir(board, row, col, 0)] = 0;
-  board->anchors[get_tindex_dir(board, row, col, 1)] = 0;
+void reset_anchor(Board *board, int row, int col, int dir) {
+  board->anchors[get_tindex_dir(board, row, col, dir)] = false;
 }
 
 // Cross sets and scores
@@ -146,19 +151,19 @@ void clear_cross_set(Board *board, int row, int col, int dir,
 }
 
 void set_all_crosses(Board *board) {
-  for (int i = 0; i < NUMBER_OF_CROSSES; i++) {
+  for (int i = 0; i < BOARD_DIM * BOARD_DIM * 2 * 2; i++) {
     board->cross_sets[i] = TRIVIAL_CROSS_SET;
   }
 }
 
 void clear_all_crosses(Board *board) {
-  for (size_t i = 0; i < NUMBER_OF_CROSSES; i++) {
+  for (size_t i = 0; i < BOARD_DIM * BOARD_DIM * 2 * 2; i++) {
     board->cross_sets[i] = 0;
   }
 }
 
 void reset_all_cross_scores(Board *board) {
-  for (size_t i = 0; i < (NUMBER_OF_CROSSES); i++) {
+  for (size_t i = 0; i < (BOARD_DIM * BOARD_DIM * 2 * 2); i++) {
     board->cross_scores[i] = 0;
   }
 }
@@ -186,7 +191,8 @@ void update_anchors(Board *board, int row, int col, int dir) {
     col = temp;
   }
 
-  reset_anchors(board, row, col);
+  reset_anchor(board, row, col, 0);
+  reset_anchor(board, row, col, 1);
   bool tile_above = false;
   bool tile_below = false;
   bool tile_left = false;
@@ -233,11 +239,12 @@ void update_all_anchors(Board *board) {
   } else {
     for (int i = 0; i < BOARD_DIM; i++) {
       for (int j = 0; j < BOARD_DIM; j++) {
-        reset_anchors(board, i, j);
+        reset_anchor(board, i, j, 0);
+        reset_anchor(board, i, j, 1);
       }
     }
     int rc = BOARD_DIM / 2;
-    board->anchors[get_tindex_dir(board, rc, rc, 0)] = 1;
+    set_anchor(board, rc, rc, 0);
   }
 }
 
@@ -289,10 +296,7 @@ void set_bonus_squares(Board *board) {
 
 bool get_transpose(const Board *board) { return board->transposed; }
 
-void transpose(Board *board) {
-  board->transposed = !board->transposed;
-  printf("board is now %d\n", board->transposed);
-}
+void transpose(Board *board) { board->transposed = !board->transposed; }
 
 void set_transpose(Board *board, bool transposed) {
   board->transposed = transposed;
@@ -330,36 +334,41 @@ Board *create_board() {
 Board *board_duplicate(const Board *board) {
   Board *new_board = malloc_or_die(sizeof(Board));
   board_copy(new_board, board);
+  set_bonus_squares(new_board);
   return new_board;
 }
 
-// copy src into dst; assume dst is already allocated.
+// Copies the letters, cross sets, anchors,
+// transposed state, and number of tiles played
+// from src to dst. Does not copy bonus squares
+// since it is assumed that src and dst have the
+// same bonus squares.
 void board_copy(Board *dst, const Board *src) {
-  for (int board_index = 0; board_index < (BOARD_DIM * BOARD_DIM);
-       board_index++) {
-    dst->letters[board_index] = src->letters[board_index];
-    dst->bonus_squares[board_index] = src->bonus_squares[board_index];
-    int directional_board_index = board_index * 2;
-    dst->cross_sets[directional_board_index] =
-        src->cross_sets[directional_board_index];
-    dst->cross_sets[directional_board_index + 1] =
-        src->cross_sets[directional_board_index + 1];
-    dst->cross_scores[directional_board_index] =
-        src->cross_scores[directional_board_index];
-    dst->cross_scores[directional_board_index + 1] =
-        src->cross_scores[directional_board_index + 1];
-    dst->anchors[directional_board_index] =
-        src->anchors[directional_board_index];
-    dst->anchors[directional_board_index + 1] =
-        src->anchors[directional_board_index + 1];
-    if (board_index >= (BOARD_DIM * BOARD_DIM) ||
-        directional_board_index + 1 >= (BOARD_DIM * BOARD_DIM) * 2) {
-      log_fatal("out of bounds error during board copy: %d, %d\n", board_index,
-                directional_board_index + 1);
-    }
-  }
+  // Transposed must be set before copying
+  // since the get and set methods use transpose
+  // for access.
   dst->transposed = src->transposed;
   dst->tiles_played = src->tiles_played;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      set_letter(dst, row, col, get_letter(src, row, col));
+      for (int dir = 0; dir < 2; dir++) {
+        if (get_anchor(src, row, col, dir)) {
+          set_anchor(dst, row, col, dir);
+        } else {
+          reset_anchor(dst, row, col, dir);
+        }
+        for (int cross_set_index = 0; cross_set_index < 2; cross_set_index++) {
+          set_cross_set(dst, row, col,
+                        get_cross_set(src, row, col, dir, cross_set_index), dir,
+                        cross_set_index);
+          set_cross_score(dst, row, col,
+                          get_cross_score(src, row, col, dir, cross_set_index),
+                          dir, cross_set_index);
+        }
+      }
+    }
+  }
 }
 
 void destroy_board(Board *board) { free(board); }

@@ -18,6 +18,8 @@
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 
+#include "../../test/test_util.h"
+
 #include "gameplay.h"
 #include "inference.h"
 
@@ -189,8 +191,7 @@ void evaluate_possible_leave(Inference *inference) {
     current_leave_value =
         klv_get_leave_value(inference->klv, inference->current_target_leave);
   }
-  // FIXME: this code doesn't care about
-  // capacity or move_list
+
   const Move *top_move = get_top_equity_move(
       inference->game, inference->thread_index, inference->move_list);
   bool is_within_equity_margin = inference->target_score + current_leave_value +
@@ -286,6 +287,7 @@ Inference *inference_create(Game *game, Rack *target_played_tiles,
   // thread index is only meaningful for
   // duplicated inferences used in multithreading
   inference->thread_index = -1;
+  // move_list is only needed for duplicated inferences
   inference->move_list = NULL;
 
   // shared rack index and shared rack index lock
@@ -334,7 +336,7 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
                                ThreadControl *thread_control) {
   Inference *new_inference = malloc_or_die(sizeof(Inference));
   new_inference->game = game_duplicate(inference->game);
-  new_inference->move_list = NULL;
+  new_inference->move_list = create_move_list(1);
   new_inference->klv = player_get_klv(
       game_get_player(new_inference->game, inference->target_index));
 

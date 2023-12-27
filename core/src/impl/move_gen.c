@@ -339,9 +339,6 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   uint64_t cross_set = get_cross_set(
       gen->board, gen->current_row_index, col, cs_dir,
       get_cross_set_index(gen->kwgs_are_distinct, gen->player_index));
-  printf("%d, %d, %d, %d is %ld\n", gen->current_row_index, col, cs_dir,
-         get_cross_set_index(gen->kwgs_are_distinct, gen->player_index),
-         cross_set);
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     int raw = get_unblanked_machine_letter(current_letter);
     int next_node_index = 0;
@@ -819,7 +816,6 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
   // FIXME: change all distinct to shared
   gen->kwgs_are_distinct =
       !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-  printf("kwgs: %d\n", gen->kwgs_are_distinct);
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;
   gen->move_list = move_list;

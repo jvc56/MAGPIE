@@ -2,10 +2,6 @@
 #define BOARD_DEFS_H
 
 #define BOARD_DIM 15
-// Use 2 * 2 for
-// vert and horizontal sets and
-// player 1 and player 2 sets, when using different lexica
-#define NUMBER_OF_CROSSES BOARD_DIM *BOARD_DIM * 2 * 2
 #define BOARD_HORIZONTAL_DIRECTION 0
 #define BOARD_VERTICAL_DIRECTION 1
 #define DEFAULT_BINGO_BONUS 50

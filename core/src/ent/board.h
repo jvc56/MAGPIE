@@ -23,7 +23,7 @@ Board *create_board();
 Board *board_duplicate(const Board *board);
 void board_copy(Board *dst, const Board *src);
 void destroy_board(Board *board);
-int get_anchor(const Board *board, int row, int col, int dir);
+bool get_anchor(const Board *board, int row, int col, int dir);
 uint8_t get_bonus_square(const Board *board, int row, int col);
 int get_cross_score(const Board *board, int row, int col, int dir,
                     int cross_set_index);

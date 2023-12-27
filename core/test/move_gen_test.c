@@ -554,21 +554,18 @@ void distinct_lexica_test(TestConfig *testconfig) {
   Rack *player1_rack = player_get_rack(player1);
 
   player_set_move_record_type(player0, MOVE_RECORD_BEST);
-  player_set_move_record_type(player1, MOVE_RECORD_ALL);
+  player_set_move_record_type(player1, MOVE_RECORD_BEST);
 
   // Play SPORK, better than best NWL move of PORKS
   set_rack_to_string(ld, player0_rack, "KOPRRSS");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "8H SPORK 32");
-  print_game(game, move_list);
 
   play_move(move_list_get_move(move_list, 0), game);
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
   set_rack_to_string(ld, player1_rack, "CEHIIRZ");
-  MoveList *move_list2 = create_move_list(12);
-  generate_moves_for_game(game, 0, move_list2);
-  print_game(game, move_list2);
+  generate_moves_for_game(game, 0, move_list);
 
   assert_move(game, move_list, NULL, 0, "H8 (S)CHIZIER 146");
 
@@ -594,10 +591,9 @@ void distinct_lexica_test(TestConfig *testconfig) {
 }
 
 void test_move_gen(TestConfig *testconfig) {
-  // FIXME: uncomment tests
-  // macondo_tests(testconfig);
-  // exchange_tests(testconfig);
-  // equity_test(testconfig);
-  // top_equity_play_recorder_test(testconfig);
+  macondo_tests(testconfig);
+  exchange_tests(testconfig);
+  equity_test(testconfig);
+  top_equity_play_recorder_test(testconfig);
   distinct_lexica_test(testconfig);
 }

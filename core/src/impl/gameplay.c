@@ -10,6 +10,8 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 
+#include "../../test/test_util.h"
+
 #include "move_gen.h"
 
 void play_move_on_board(const Move *move, Game *game) {
@@ -107,33 +109,19 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
 void update_cross_set_for_move(const Move *move, Game *game) {
   Board *board = game_get_board(game);
   if (dir_is_vertical(get_dir(move))) {
-    printf("1 cross set for 7, 8, 1, 1, %d ==== is %ld\n", get_transpose(board),
-           get_cross_set(game_get_board(game), 7, 8, 1, 1));
     calc_for_across(move, game, get_row_start(move), get_col_start(move),
                     BOARD_HORIZONTAL_DIRECTION);
-    printf("2 cross set for 7, 8, 1, 1, %d ==== is %ld\n", get_transpose(board),
-           get_cross_set(game_get_board(game), 7, 8, 1, 1));
     transpose(board);
     calc_for_self(move, game, get_col_start(move), get_row_start(move),
                   BOARD_VERTICAL_DIRECTION);
-    printf("3 cross set for 7, 8, 1, 1, %d ==== is %ld\n", get_transpose(board),
-           get_cross_set(game_get_board(game), 7, 8, 1, 1));
     transpose(board);
   } else {
-    printf("4 cross set for 7, 8, 1, 1, %d ==== is %ld\n", get_transpose(board),
-           get_cross_set(game_get_board(game), 7, 8, 1, 1));
     calc_for_self(move, game, get_row_start(move), get_col_start(move),
                   BOARD_HORIZONTAL_DIRECTION);
-    printf("5 cross set for 7, 8, 1, 1, %d ==== is %ld\n", get_transpose(board),
-           get_cross_set(game_get_board(game), 7, 8, 1, 1));
     transpose(board);
     calc_for_across(move, game, get_col_start(move), get_row_start(move),
                     BOARD_VERTICAL_DIRECTION);
-    printf("6 cross set for 7, 8, 1, 1, %d ==== is %ld\n", get_transpose(board),
-           get_cross_set(game_get_board(game), 7, 8, 1, 1));
     transpose(board);
-    printf("7 cross set for 7, 8, 1, 1, %d ==== is %ld\n", get_transpose(board),
-           get_cross_set(game_get_board(game), 7, 8, 1, 1));
   }
 }
 
@@ -181,9 +169,6 @@ void play_move(const Move *move, Game *game) {
   if (get_move_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     play_move_on_board(move, game);
     update_cross_set_for_move(move, game);
-    printf("F cross set for 7, 8, 1, 1, %d ==== is %ld\n",
-           get_transpose(game_get_board(game)),
-           get_cross_set(game_get_board(game), 7, 8, 1, 1));
     game_set_consecutive_scoreless_turns(game, 0);
 
     Player *player_on_turn =

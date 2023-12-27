@@ -42,7 +42,6 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
   // sc - score, wp(e) - win perc
   // (error), eq(e) - equity (error) scm - mean of score, scd - stdev of
   // score, bp - bingo perc ig - this play has been cut-off
-  // FIXME: get better numbers
   const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
   StringBuilder *sim_stats_string_builder = create_string_builder();

@@ -136,7 +136,7 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
                       worker_index);
 
   // MoveList
-  simmer_worker->move_list = NULL;
+  simmer_worker->move_list = create_move_list(1);
 
   // FIXME: this won't be necessary with the new generate moves
   for (int j = 0; j < 2; j++) {
@@ -158,9 +158,7 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
 
 void destroy_simmer_worker(SimmerWorker *simmer_worker) {
   destroy_game(simmer_worker->game);
-  if (simmer_worker->move_list) {
-    destroy_move_list(simmer_worker->move_list);
-  }
+  destroy_move_list(simmer_worker->move_list);
   destroy_rack(simmer_worker->rack_placeholder);
   free(simmer_worker);
 }
@@ -350,8 +348,6 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
         break;
       }
 
-      // FIXME: this code doesn't care about
-      // capacity or move_list
       const Move *best_play = get_top_equity_move(
           game, simmer_worker->thread_index, simmer_worker->move_list);
       rack_copy(rack_placeholder, player_get_rack(player_on_turn));
@@ -453,7 +449,7 @@ sim_status_t simulate(const Config *config, Game *game,
 
   int num_simmed_plays = config_get_num_plays(config);
 
-  MoveList *move_list = NULL;
+  MoveList *move_list = create_move_list(num_simmed_plays);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
   // Sorting moves converts the move list from a min heap
   // to a sorted array with count == 0, so the number of
