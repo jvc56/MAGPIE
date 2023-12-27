@@ -20,9 +20,8 @@
 // void generate_exchange_moves(MoveGen *gen, uint8_t ml, int stripidx,
 //                              bool add_exchange);
 
-// FIXME: stop using this double pointer bullshit
-// for everything and move resets inside result/movelist entities
-// FIXME: game should be const for movegen
+void gen_init_cache();
+void gen_clear_cache();
 void generate_moves(const Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
                     MoveList *move_list);

@@ -18,7 +18,6 @@ double get_probability_for_random_minimum_draw(
 
 uint64_t choose(uint64_t n, uint64_t k);
 
-// FIXME: game should be const
-inference_status_t infer(const Config *config, Game *game,
+inference_status_t infer(const Config *config, const Game *game,
                          InferenceResults *inference_results);
 #endif

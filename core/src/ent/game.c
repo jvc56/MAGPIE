@@ -288,11 +288,11 @@ void gen_cross_set(const KWG *kwg,
 
 void generate_all_cross_sets(const KWG *kwg_1, const KWG *kwg_2,
                              const LetterDistribution *letter_distribution,
-                             Board *board, bool kwgs_are_distinct) {
+                             Board *board, bool kwgs_are_shared) {
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
       gen_cross_set(kwg_1, letter_distribution, board, i, j, 0, 0);
-      if (kwgs_are_distinct) {
+      if (!kwgs_are_shared) {
         gen_cross_set(kwg_2, letter_distribution, board, i, j, 0, 1);
       }
     }
@@ -301,7 +301,7 @@ void generate_all_cross_sets(const KWG *kwg_1, const KWG *kwg_2,
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
       gen_cross_set(kwg_1, letter_distribution, board, i, j, 1, 0);
-      if (kwgs_are_distinct) {
+      if (!kwgs_are_shared) {
         gen_cross_set(kwg_2, letter_distribution, board, i, j, 1, 1);
       }
     }

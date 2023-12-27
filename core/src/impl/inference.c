@@ -22,6 +22,7 @@
 
 #include "gameplay.h"
 #include "inference.h"
+#include "move_gen.h"
 
 typedef struct Inference {
   // The following fields are owned by the caller
@@ -595,7 +596,7 @@ inference_status_t verify_inference(const Inference *inference) {
   return INFERENCE_STATUS_SUCCESS;
 }
 
-inference_status_t infer(const Config *config, Game *game,
+inference_status_t infer(const Config *config, const Game *input_game,
                          InferenceResults *results) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
@@ -606,6 +607,8 @@ inference_status_t infer(const Config *config, Game *game,
   if (!config_target_played_tiles) {
     return INFERENCE_STATUS_NO_TILES_PLAYED;
   }
+
+  Game *game = game_duplicate(input_game);
 
   Inference *inference = inference_create(
       game, config_target_played_tiles, config_get_num_plays(config),
@@ -642,7 +645,9 @@ inference_status_t infer(const Config *config, Game *game,
     }
   }
 
+  destroy_game(game);
   destroy_inference(inference);
+  gen_clear_cache();
 
   return status;
 }

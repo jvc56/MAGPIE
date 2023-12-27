@@ -21,6 +21,7 @@
 
 #include "autoplay.h"
 #include "inference.h"
+#include "move_gen.h"
 #include "simmer.h"
 
 #define UCGI_COMMAND_STRING "ucgi"
@@ -62,9 +63,6 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
       log_warn("Simmer has not been initialized.");
       return NULL;
     }
-    // FIXME: need an option for ucgi vs. human readable
-    // since the command module is an abstraction layer
-    // above UCGI.
     status_string = ucgi_sim_stats(exec_state_get_game(exec_state), sim_results,
                                    thread_control, true);
     break;
@@ -308,10 +306,12 @@ char *create_command_from_args(int argc, char *argv[]) {
 }
 
 void process_command(int argc, char *argv[]) {
+  gen_init_cache();
   log_set_level(LOG_WARN);
   ExecState *exec_state = create_exec_state();
   char *initial_command_string = create_command_from_args(argc, argv);
   command_scan_loop(exec_state, initial_command_string);
   free(initial_command_string);
   destroy_exec_state(exec_state);
+  gen_clear_cache();
 }

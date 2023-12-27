@@ -535,7 +535,6 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (!get_game_history_letter_distribution(game_history)) {
       const char *lexicon_name = get_game_history_lexicon_name(game_history);
       if (!lexicon_name) {
-        // FIXME: add test for this
         return GCG_PARSE_STATUS_LEXICON_NOT_FOUND;
       }
       if (!get_game_history_letter_distribution_name(game_history)) {

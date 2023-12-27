@@ -37,8 +37,8 @@ int allowed(uint64_t cross_set, uint8_t letter) {
   return (cross_set & ((uint64_t)1 << letter)) != 0;
 }
 
-int get_cross_set_index(bool kwgs_are_distinct, int player_index) {
-  return kwgs_are_distinct && player_index;
+int get_cross_set_index(bool kwgs_are_shared, int player_index) {
+  return (!kwgs_are_shared) && player_index;
 }
 
 bool dir_is_vertical(int dir) { return dir == BOARD_VERTICAL_DIRECTION; }

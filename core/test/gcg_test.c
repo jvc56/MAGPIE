@@ -39,6 +39,8 @@ void test_single_error_case(const char *gcg_filename,
 
 void test_error_cases() {
   test_single_error_case("empty.gcg", GCG_PARSE_STATUS_GCG_EMPTY);
+  test_single_error_case("lexicon_missing.gcg",
+                         GCG_PARSE_STATUS_LEXICON_NOT_FOUND);
   test_single_error_case("unsupported_character_encoding.gcg",
                          GCG_PARSE_STATUS_UNSUPPORTED_CHARACTER_ENCODING);
   test_single_error_case("duplicate_nicknames.gcg",

@@ -138,13 +138,6 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
   // MoveList
   simmer_worker->move_list = create_move_list(1);
 
-  // FIXME: this won't be necessary with the new generate moves
-  for (int j = 0; j < 2; j++) {
-    // Simmer only needs to record top equity plays:
-    player_set_move_record_type(game_get_player(simmer_worker->game, j),
-                                MOVE_RECORD_BEST);
-  }
-
   int ld_size = letter_distribution_get_size(game_get_ld(simmer_worker->game));
 
   // Rack placeholder
@@ -442,8 +435,8 @@ void simmer_sort_plays_by_win_rate(Simmer *simmer) {
   sim_results_unlock_simmed_plays(simmer->sim_results);
 }
 
-sim_status_t simulate(const Config *config, Game *game,
-                      SimResults *sim_results) {
+sim_status_t simulate_with_game_copy(const Config *config, Game *game,
+                                     SimResults *sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
   unhalt(thread_control);
 
@@ -503,4 +496,13 @@ sim_status_t simulate(const Config *config, Game *game,
   // Print out the stats
   print_ucgi_sim_stats(game, sim_results, thread_control, true);
   return SIM_STATUS_SUCCESS;
+}
+
+sim_status_t simulate(const Config *config, const Game *input_game,
+                      SimResults *sim_results) {
+  Game *game = game_duplicate(input_game);
+  sim_status_t sim_status = simulate_with_game_copy(config, game, sim_results);
+  destroy_game(game);
+  gen_clear_cache();
+  return sim_status;
 }

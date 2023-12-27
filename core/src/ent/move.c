@@ -301,7 +301,8 @@ Move *pop_move(MoveList *ml) {
   return ml->spare_move;
 }
 
-// FIXME: inplace sort is error-prone for this, need to rethink
+// Converts the MoveList from a min heap
+// to a descending sorted array.
 void sort_moves(MoveList *ml) {
   int number_of_moves = ml->count;
   for (int i = 1; i < number_of_moves; i++) {

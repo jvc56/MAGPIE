@@ -67,8 +67,7 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
     }
 
     Board *board = game_get_board(game);
-    bool kwgs_are_distinct =
-        !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+    bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
     int right_col = word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
     int left_col = word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
     const KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
@@ -76,7 +75,7 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
     gen_cross_set(player0_kwg, ld, board, row, right_col + 1, csd, 0);
     gen_cross_set(player0_kwg, ld, board, row, left_col - 1, csd, 0);
     gen_cross_set(player0_kwg, ld, board, row, col_start, csd, 0);
-    if (kwgs_are_distinct) {
+    if (!kwgs_are_shared) {
       const KWG *player1_kwg = player_get_kwg(game_get_player(game, 1));
       gen_cross_set(player1_kwg, ld, board, row, right_col + 1, csd, 1);
       gen_cross_set(player1_kwg, ld, board, row, left_col - 1, csd, 1);
@@ -90,14 +89,13 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
   const KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
-  bool kwgs_are_distinct =
-      !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
   for (int col = col_start - 1; col <= col_start + get_tiles_length(move);
        col++) {
     gen_cross_set(player0_kwg, ld, board, row_start, col, csd, 0);
   }
-  if (kwgs_are_distinct) {
+  if (!kwgs_are_shared) {
     const KWG *player1_kwg = player_get_kwg(game_get_player(game, 1));
     for (int col = col_start - 1; col <= col_start + get_tiles_length(move);
          col++) {

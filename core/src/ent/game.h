@@ -35,7 +35,6 @@ void game_start_next_player_turn(Game *game);
 
 void reset_game(Game *game);
 Game *create_game(const Config *config);
-// FIXME: rethink game relation to config
 void update_game(const Config *config, Game *game);
 Game *game_duplicate(const Game *game);
 void destroy_game(Game *game);
@@ -50,7 +49,7 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
                          int player_draw_index);
 void generate_all_cross_sets(const KWG *kwg_1, const KWG *kwg_2,
                              const LetterDistribution *letter_distribution,
-                             Board *board, bool kwgs_are_distinct);
+                             Board *board, bool kwgs_are_shared);
 void gen_cross_set(const KWG *kwg,
                    const LetterDistribution *letter_distribution, Board *board,
                    int row, int col, int dir, int cross_set_index);

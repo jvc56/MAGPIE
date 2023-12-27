@@ -71,8 +71,6 @@ void play_autoplay_game(Game *game, MoveList *move_list,
   set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    // FIXME: this code doesn't care about
-    // capacity or move_list
     play_move(get_top_equity_move(game, thread_index, move_list), game);
   }
   record_results(game, autoplay_results, starting_player_index);
@@ -200,5 +198,7 @@ autoplay_status_t autoplay(const Config *config,
   free(worker_ids);
 
   print_ucgi_autoplay_results(autoplay_results, thread_control);
+  gen_clear_cache();
+
   return AUTOPLAY_STATUS_SUCCESS;
 }

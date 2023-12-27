@@ -13,7 +13,6 @@
 // Misc string functions
 
 void *memory_copy(void *dest, const void *src, size_t n) {
-  // FIXME: probably need to check if dest is big enough
   return memcpy(dest, src, n);
 }
 
@@ -88,10 +87,7 @@ char *string_duplicate(const char *str) {
   return duplicate;
 }
 
-char *string_copy(char *dest, const char *src) {
-  // FIXME: this is unsafe, need to check bounds
-  return strcpy(dest, src);
-}
+char *string_copy(char *dest, const char *src) { return strcpy(dest, src); }
 
 void remove_first_newline(char *str) { str[strcspn(str, "\n")] = 0; }
 

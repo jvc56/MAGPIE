@@ -173,6 +173,8 @@ LeaveRack *pop_leave_rack(LeaveRackList *lrl) {
   return lrl->spare_leave_rack;
 }
 
+// Converts the LeaveRackList from a min heap
+// to a descending sorted array.
 void sort_leave_racks(LeaveRackList *lrl) {
   int number_of_leave_racks = lrl->count;
   for (int i = 1; i < number_of_leave_racks; i++) {

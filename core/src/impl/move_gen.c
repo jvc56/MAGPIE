@@ -38,7 +38,7 @@ typedef struct MoveGen {
   int move_record_type;
   int number_of_tiles_in_bag;
   int player_index;
-  bool kwgs_are_distinct;
+  bool kwgs_are_shared;
   uint8_t row_letter_cache[(BOARD_DIM)];
   uint8_t strip[(BOARD_DIM)];
   uint8_t *exchange_strip;
@@ -120,6 +120,7 @@ void gen_clear_cache() {
   for (int i = 0; i < (MAX_THREADS); i++) {
     if (cached_gens[i]) {
       destroy_generator(cached_gens[i]);
+      cached_gens[i] = NULL;
     }
   }
 }
@@ -235,7 +236,7 @@ void record_play(MoveGen *gen, int leftstrip, int rightstrip,
     score = score_move(
         gen->board, gen->letter_distribution, gen->strip, leftstrip, rightstrip,
         start_row, start_col, tiles_played, !dir_is_vertical(gen->dir),
-        get_cross_set_index(gen->kwgs_are_distinct, gen->player_index));
+        get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
     strip = gen->strip;
   } else if (move_type == GAME_EVENT_EXCHANGE) {
     // ignore the empty exchange case
@@ -338,7 +339,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   }
   uint64_t cross_set = get_cross_set(
       gen->board, gen->current_row_index, col, cs_dir,
-      get_cross_set_index(gen->kwgs_are_distinct, gen->player_index));
+      get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     int raw = get_unblanked_machine_letter(current_letter);
     int next_node_index = 0;
@@ -403,7 +404,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
       gen->strip[current_col] = L;
       if (gen->dir && (get_cross_set(gen->board, gen->current_row_index,
                                      current_col, BOARD_HORIZONTAL_DIRECTION,
-                                     get_cross_set_index(gen->kwgs_are_distinct,
+                                     get_cross_set_index(gen->kwgs_are_shared,
                                                          gen->player_index)) ==
                        TRIVIAL_CROSS_SET)) {
         unique_play = true;
@@ -440,10 +441,10 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     } else {
       gen->strip[current_col] = L;
       if (dir_is_vertical(gen->dir) &&
-          (get_cross_set(gen->board, gen->current_row_index, current_col,
-                         BOARD_HORIZONTAL_DIRECTION,
-                         get_cross_set_index(gen->kwgs_are_distinct,
-                                             gen->player_index)) ==
+          (get_cross_set(
+               gen->board, gen->current_row_index, current_col,
+               BOARD_HORIZONTAL_DIRECTION,
+               get_cross_set_index(gen->kwgs_are_shared, gen->player_index)) ==
            TRIVIAL_CROSS_SET)) {
         unique_play = true;
       }
@@ -757,7 +758,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   }
 
   shadow_start(gen,
-               get_cross_set_index(gen->kwgs_are_distinct, gen->player_index));
+               get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
   add_anchor(gen->anchor_list, gen->current_row_index, col,
              gen->last_anchor_col, get_transpose(gen->board),
              dir_is_vertical(gen->dir), gen->highest_shadow_equity);
@@ -792,13 +793,11 @@ void set_descending_tile_scores(MoveGen *gen) {
   }
 }
 
-// FIXME: this should go back to taking a game
 void generate_moves(const Game *input_game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
                     MoveList *move_list) {
   Game *game = game_duplicate(input_game);
   const LetterDistribution *ld = game_get_ld(game);
-  // FIXME: these needs to be freed by clearing the cache
   MoveGen *gen = get_movegen(thread_index, letter_distribution_get_size(ld));
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player = game_get_player(game, player_on_turn_index);
@@ -813,9 +812,7 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
   gen->player_rack = player_get_rack(player);
 
   gen->number_of_tiles_in_bag = get_tiles_remaining(game_get_bag(game));
-  // FIXME: change all distinct to shared
-  gen->kwgs_are_distinct =
-      !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;
   gen->move_list = move_list;
@@ -831,10 +828,6 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
     set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
 
-  // FIXME: check if this is necessary
-  // since they are just overwritten by generate
-  // exchanges anyway
-  // Reset the best leaves so generate exchanges
   for (int i = 0; i < (RACK_SIZE); i++) {
     gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
   }
@@ -880,9 +873,6 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
       assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
     }
   }
-
-  // FIXME: this should set the to original transposition
-  reset_transpose(gen->board);
 
   Move *top_move = move_list_get_move(gen->move_list, 0);
   // Add the pass move

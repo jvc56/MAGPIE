@@ -60,6 +60,6 @@ int score_move(const Board *board,
                const LetterDistribution *letter_distribution, uint8_t word[],
                int word_start_index, int word_end_index, int row, int col,
                int tiles_played, int cross_dir, int cross_set_index);
-int get_cross_set_index(bool kwgs_are_distinct, int player_index);
+int get_cross_set_index(bool kwgs_are_shared, int player_index);
 
 #endif
