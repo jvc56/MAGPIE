@@ -247,11 +247,13 @@ bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
 bool is_multithreaded(const Simmer *simmer) { return simmer->threads > 1; }
 
 bool handle_potential_stopping_condition(Simmer *simmer) {
-  sim_results_lock_simmed_plays(simmer->sim_results);
-  sim_results_sort_plays_by_win_rate(simmer->sim_results);
 
   double zval = 0;
+  bool use_stopping_cond = true;
   switch (simmer->stopping_condition) {
+  case SIM_STOPPING_CONDITION_NONE:
+    use_stopping_cond = false;
+    break;
   case SIM_STOPPING_CONDITION_95PCT:
     zval = STATS_Z95;
     break;
@@ -264,14 +266,18 @@ bool handle_potential_stopping_condition(Simmer *simmer) {
   }
 
   SimResults *sim_results = simmer->sim_results;
+  int number_of_plays = sim_results_get_number_of_plays(sim_results);
+  int total_ignored = 0;
+
+  sim_results_lock_simmed_plays(simmer->sim_results);
+  sim_results_sort_plays_by_win_rate(simmer->sim_results);
 
   const SimmedPlay *tentative_winner =
       sim_results_get_simmed_play(sim_results, 0);
   double mu = get_mean(simmed_play_get_win_pct_stat(tentative_winner));
-  double stderr =
+  double std_error =
       get_standard_error(simmed_play_get_win_pct_stat(tentative_winner), zval);
-  int total_ignored = 0;
-  int number_of_plays = sim_results_get_number_of_plays(sim_results);
+
   for (int i = 1; i < number_of_plays; i++) {
     SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
     if (simmed_play_get_ignore(simmed_play)) {
@@ -279,28 +285,21 @@ bool handle_potential_stopping_condition(Simmer *simmer) {
       continue;
     }
     double mu_i = get_mean(simmed_play_get_win_pct_stat(simmed_play));
-    double stderr_i =
+    double std_error_i =
         get_standard_error(simmed_play_get_win_pct_stat(simmed_play), zval);
 
-    if ((mu - stderr) > (mu_i + stderr_i)) {
+    if ((use_stopping_cond && (mu - std_error) > (mu_i + std_error_i)) ||
+        (sim_results_get_iteration_count(sim_results) >
+             SIMILAR_PLAYS_ITER_CUTOFF &&
+         plays_are_similar(tentative_winner, simmed_play, simmer))) {
       simmed_play_set_ignore(simmed_play, is_multithreaded(simmer));
       total_ignored++;
-    } else if (sim_results_get_iteration_count(sim_results) >
-               SIMILAR_PLAYS_ITER_CUTOFF) {
-      if (plays_are_similar(tentative_winner, simmed_play, simmer)) {
-        simmed_play_set_ignore(simmed_play, is_multithreaded(simmer));
-        total_ignored++;
-      }
     }
   }
-
   sim_results_unlock_simmed_plays(simmer->sim_results);
   log_debug("total ignored: %d\n", total_ignored);
-  if (total_ignored >= number_of_plays - 1) {
-    // if there is only 1 unignored play, exit.
-    return true;
-  }
-  return false;
+
+  return total_ignored >= number_of_plays - 1;
 }
 
 void sim_single_iteration(SimmerWorker *simmer_worker) {

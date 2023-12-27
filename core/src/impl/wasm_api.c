@@ -177,9 +177,6 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
   return val;
 }
 
-// FIXME: what exactly allocates the char* here?
-// I'm not sure about this part of WASM, it might
-// need to be freed
 int process_command_wasm(const char *cmd) {
   if (!wasm_exec_state) {
     wasm_exec_state = create_exec_state();

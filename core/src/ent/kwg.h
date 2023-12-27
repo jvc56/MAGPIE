@@ -12,9 +12,6 @@ KWG *create_kwg(const char *kwg_name);
 KWG *create_empty_kwg();
 void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes, FILE *stream);
 void destroy_kwg(KWG *kwg);
-// FIXME: find a way to force inline
-// these functions (if disassembly indicates they are not being inlined)
-// with an opaque pointer.
 bool kwg_is_end(const KWG *kwg, int node_index);
 bool kwg_accepts(const KWG *kwg, int node_index);
 int kwg_arc_index(const KWG *kwg, int node_index);

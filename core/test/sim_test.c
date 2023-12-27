@@ -204,76 +204,58 @@ void perf_test_multithread_blocking_sim(Config *config) {
   sim_results_destroy(sim_results);
 }
 
-// FIXME: either expose similarity or test differently
+void test_play_similarity(TestConfig *testconfig) {
+  Config *config = testconfig->nwl_config;
+  Game *game = create_game(config);
+  Bag *bag = game_get_bag(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  ThreadControl *thread_control = config_get_thread_control(config);
 
-// void test_play_similarity(TestConfig *testconfig) {
-//   Config *config = testconfig->nwl_config;
-//   Game *game = create_game(config);
-//   MoveGen *gen = create_generator(
-//       config_get_num_plays(config),
-//       letter_distribution_get_size(config_get_letter_distribution(config)));
-//   Bag *bag = game_get_bag(game);
-//   const LetterDistribution *ld = game_get_ld(game);
-//   ThreadControl *thread_control = config_get_thread_control(config);
+  Player *player0 = game_get_player(game, 0);
 
-//   Player *player0 = game_get_player(game, 0);
+  Rack *player0_rack = player_get_rack(player0);
 
-//   Rack *player0_rack = player_get_rack(player0);
+  draw_rack_to_string(ld, bag, player0_rack, "ACEIRST", 0);
+  SimResults *sim_results = sim_results_create();
+  load_config_or_die(config,
+                     "setoptions rack " EMPTY_RACK_STRING
+                     " plies 2 threads 1 numplays 4 i 1200 cond none check 50");
+  sim_status_t status = simulate(config, game, sim_results);
+  assert(status == SIM_STATUS_SUCCESS);
+  assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 
-//   draw_rack_to_string(ld, bag, player0_rack, "ACEIRST", 0);
-//   SimResults *sim_results = sim_results_create();
-//   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-//                              " plies 2 threads 1 numplays 15 i 0 cond none");
-//   sim_status_t status = simulate(config, game, sim_results);
-//   assert(status == SIM_STATUS_SUCCESS);
-//   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
-//   // The first four plays all score 74. Only
-//   // 8F ATRESIC and 8F STEARIC should show up as similar, though.
-//   // These are play indexes 1 and 2.
+  // The first four plays all score 74. Only
+  // 8F ATRESIC and 8F STEARIC should show up as similar, though.
+  // Only one of these plays should be marked as ignored and all
+  // others should not be ignored, since the stopping condition
+  // is NONE.
 
-//   StringBuilder *p1_string_builder = create_string_builder();
-//   StringBuilder *p2_string_builder = create_string_builder();
+  StringBuilder *p1_string_builder = create_string_builder();
+  bool found_ignored_play = false;
+  for (int i = 0; i < 4; i++) {
+    SimmedPlay *play_i = sim_results_get_simmed_play(sim_results, i);
+    Move *move_i = simmed_play_get_move(play_i);
+    string_builder_clear(p1_string_builder);
+    string_builder_add_move_description(move_i, ld, p1_string_builder);
 
-//   for (int i = 0; i < 4; i++) {
-//     for (int j = i + 1; j < 4; j++) {
-//       SimmedPlay *play_i = sim_results_get_simmed_play(sim_results, i);
-//       SimmedPlay *play_j = sim_results_get_simmed_play(sim_results, j);
-//       Move *move_i = simmed_play_get_move(play_i);
-//       Move *move_j = simmed_play_get_move(play_j);
-//       string_builder_clear(p1_string_builder);
-//       string_builder_add_move_description(move_i, ld, p1_string_builder);
-//       string_builder_clear(p2_string_builder);
-//       string_builder_add_move_description(move_j, ld, p2_string_builder);
-
-//       const char *p1 = string_builder_peek(p1_string_builder);
-//       const char *p2 = string_builder_peek(p2_string_builder);
-//       if (strings_equal(p1, "8F ATRESIC") && strings_equal(p2, "8F STEARIC"))
-//       {
-//         assert(plays_are_similar(play_i, play_j, simmer));
-//       } else if (strings_equal(p2, "8F ATRESIC") &&
-//                  strings_equal(p1, "8F STEARIC")) {
-//         assert(plays_are_similar(play_i, play_j, simmer));
-//       } else {
-//         assert(!plays_are_similar(play_i, play_j, simmer));
-//       }
-//     }
-//   }
-//   destroy_string_builder(p1_string_builder);
-//   destroy_string_builder(p2_string_builder);
-
-//   SimmedPlay *play_3 = sim_results_get_simmed_play(sim_results, 3);
-//   SimmedPlay *play_4 = sim_results_get_simmed_play(sim_results, 4);
-
-//   assert(!plays_are_similar(play_3, play_4, simmer));
-//   destroy_game(game);
-//   sim_results_destroy(sim_results);
-// }
+    const char *p1 = string_builder_peek(p1_string_builder);
+    if (simmed_play_get_ignore(play_i)) {
+      assert(strings_equal(p1, "8F ATRESIC") ||
+             strings_equal(p1, "8F STEARIC"));
+      assert(!found_ignored_play);
+      found_ignored_play = true;
+    }
+  }
+  destroy_string_builder(p1_string_builder);
+  destroy_game(game);
+  sim_results_destroy(sim_results);
+}
 
 void test_sim(TestConfig *testconfig) {
   test_win_pct(testconfig);
   test_sim_single_iteration(testconfig);
   test_more_iterations(testconfig);
-  // test_play_similarity(testconfig);
+  test_play_similarity(testconfig);
   Config *config = create_default_config();
   load_config_or_die(
       config,
