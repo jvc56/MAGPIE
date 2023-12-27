@@ -128,11 +128,11 @@ void gen_clear_cache() {
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play);
 
-AnchorList *gen_get_anchor_list(MoveGen *gen) { return gen->anchor_list; }
-
-double *gen_get_best_leaves(MoveGen *gen) { return gen->best_leaves; }
-
-LeaveMap *gen_get_leave_map(MoveGen *gen) { return gen->leave_map; }
+// This function is only used for testing and is exposed
+// in the move_gen_pi.h header in the test directory.
+AnchorList *gen_get_anchor_list(int thread_index) {
+  return cached_gens[thread_index]->anchor_list;
+}
 
 MoveList *gen_get_move_list(MoveGen *gen) { return gen->move_list; }
 

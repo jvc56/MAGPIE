@@ -310,112 +310,40 @@ void macondo_tests(TestConfig *testconfig) {
   destroy_game(game_two);
 }
 
-// FIXME: make this test work
-// print assertions to paste into leave_lookup_test
-// void print_leave_lookup_test(TestConfig *testconfig) {
-//   const Config *config = get_csw_config(testconfig);
-//   Game *game = create_game(config);
-//   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
-//                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
-//                   "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
-//   load_cgp(game, cgp);
+void leave_lookup_test(TestConfig *testconfig) {
+  const Config *config = get_csw_config(testconfig);
+  Game *game = create_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const KLV *klv = player_get_klv(game_get_player(game, 0));
+  MoveList *move_list = create_move_list(1000);
 
-//   double *leaves = leave_map_get_leave_values(gen_get_leave_map(gen));
-//   // Initialize data to notice which elements are not set.
-//   for (int i = 0; i < (1 << RACK_SIZE); i++) {
-//     leaves[i] = DBL_MAX;
-//   }
-//   // FIXME: figure out how to replace this
-//   // generate_leaves_for_game(game, true);
-//   const char rack[8] = "MOOORTT";
-//   for (int i = 0; i < (1 << RACK_SIZE); ++i) {
-//     const double value = leaves[i];
-//     if (value == DBL_MAX) {
-//       continue;
-//     }
-//     char leave_string[8];
-//     int k = 0;
-//     for (int j = 0; j < RACK_SIZE; ++j) {
-//       if (i & (1 << j)) {
-//         leave_string[k++] = rack[j];
-//       }
-//       leave_string[k] = '\0';
-//     }
-//     printf("assert(within_epsilon(leaves[%3d], %+14.6f));", i, value);
-//     printf(" // %s\n", leave_string);
-//   }
-//   destroy_move_list(move_list);
-//   destroy_game(game);
-// }
+  char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+                  "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+                  "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+  load_cgp(game, cgp);
 
-// FIXME: make this test work
-// void leave_lookup_test(TestConfig *testconfig) {
-//   const Config *config = get_csw_config(testconfig);
-//   Game *game = create_game(config);
-
-//   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
-//                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
-//                   "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
-//   load_cgp(game, cgp);
-
-//   for (int i = 0; i < 2; i++) {
-//     bool add_exchanges = i == 0;
-//     // FIXME: figure out how to replace this
-//     // generate_leaves_for_game(game, add_exchanges);
-//     const double *leaves =
-//     leave_map_get_leave_values(gen_get_leave_map(gen));
-//     assert(within_epsilon(leaves[0], +0.000000));        //
-//     assert(within_epsilon(leaves[1], -0.079110));        // M
-//     assert(within_epsilon(leaves[2], -1.092266));        // O
-//     assert(within_epsilon(leaves[3], +0.427566));        // MO
-//     assert(within_epsilon(leaves[6], -8.156165));        // OO
-//     assert(within_epsilon(leaves[7], -4.466051));        // MOO
-//     assert(within_epsilon(leaves[14], -18.868383));      // OOO
-//     assert(within_epsilon(leaves[15], -14.565833));      // MOOO
-//     assert(within_epsilon(leaves[16], +1.924450));       // R
-//     assert(within_epsilon(leaves[17], +0.965204));       // MR
-//     assert(within_epsilon(leaves[18], +1.631953));       // OR
-//     assert(within_epsilon(leaves[19], +2.601703));       // MOR
-//     assert(within_epsilon(leaves[22], -5.642596));       // OOR
-//     assert(within_epsilon(leaves[23], -1.488737));       // MOOR
-//     assert(within_epsilon(leaves[30], -17.137913));      // OOOR
-//     assert(within_epsilon(leaves[31], -12.899072));      // MOOOR
-//     assert(within_epsilon(leaves[48], -5.277321));       // RT
-//     assert(within_epsilon(leaves[49], -7.450112));       // MRT
-//     assert(within_epsilon(leaves[50], -4.813058));       // ORT
-//     assert(within_epsilon(leaves[51], -4.582363));       // MORT
-//     assert(within_epsilon(leaves[54], -11.206508));      // OORT
-//     assert(within_epsilon(leaves[55], -7.305244));       // MOORT
-//     assert(within_epsilon(leaves[62], -21.169294));      // OOORT
-//     assert(within_epsilon(leaves[63], -16.637489));      // MOOORT
-//     assert(within_epsilon(leaves[64], +0.878783));       // T
-//     assert(within_epsilon(leaves[65], -0.536439));       // MT
-//     assert(within_epsilon(leaves[66], +0.461634));       // OT
-//     assert(within_epsilon(leaves[67], +0.634061));       // MOT
-//     assert(within_epsilon(leaves[70], -6.678402));       // OOT
-//     assert(within_epsilon(leaves[71], -3.665847));       // MOOT
-//     assert(within_epsilon(leaves[78], -18.284534));      // OOOT
-//     assert(within_epsilon(leaves[79], -14.382346));      // MOOOT
-//     assert(within_epsilon(leaves[80], +2.934475));       // RT
-//     assert(within_epsilon(leaves[81], +0.090591));       // MRT
-//     assert(within_epsilon(leaves[82], +3.786163));       // ORT
-//     assert(within_epsilon(leaves[83], +2.442589));       // MORT
-//     assert(within_epsilon(leaves[86], -3.260469));       // OORT
-//     assert(within_epsilon(leaves[87], -0.355031));       // MOORT
-//     assert(within_epsilon(leaves[94], -15.671781));      // OOORT
-//     assert(within_epsilon(leaves[95], -12.082211));      // MOOORT
-//     assert(within_epsilon(leaves[112], -5.691820));      // RTT
-//     assert(within_epsilon(leaves[113], -10.848881));     // MRTT
-//     assert(within_epsilon(leaves[114], -3.967470));      // ORTT
-//     assert(within_epsilon(leaves[115], -7.316442));      // MORTT
-//     assert(within_epsilon(leaves[118], -9.621570));      // OORTT
-//     assert(within_epsilon(leaves[119], -8.197909));      // MOORTT
-//     assert(within_epsilon(leaves[126], -18.412781));     // OOORTT
-//     assert(within_epsilon(leaves[127], -100000.000000)); // MOOORTT
-//   }
-//   destroy_move_list(move_list);
-//   destroy_game(game);
-// }
+  Rack *rack = create_rack(letter_distribution_get_size(ld));
+  for (int i = 0; i < 2; i++) {
+    int number_of_moves = move_list_get_count(move_list);
+    for (int i = 0; i < number_of_moves; i++) {
+      Move *move = move_list_get_move(move_list, i);
+      // This is after the opening and before the endgame
+      // so the other equity adjustments will not be in effect.
+      double move_leave_value = get_equity(move) - get_score(move);
+      if (i == 0) {
+        set_rack_to_string(ld, rack, "MOOORRT");
+      } else {
+        set_rack_to_string(ld, rack, "BFQRTTV");
+      }
+      double leave_value = get_leave_value_for_move(klv, move, rack);
+      within_epsilon(move_leave_value, leave_value);
+    }
+    play_top_n_equity_move(game, 0);
+  }
+  destroy_rack(rack);
+  destroy_move_list(move_list);
+  destroy_game(game);
+}
 
 void exchange_tests(TestConfig *testconfig) {
   const Config *config = get_csw_config(testconfig);
@@ -591,6 +519,7 @@ void distinct_lexica_test(TestConfig *testconfig) {
 }
 
 void test_move_gen(TestConfig *testconfig) {
+  leave_lookup_test(testconfig);
   macondo_tests(testconfig);
   exchange_tests(testconfig);
   equity_test(testconfig);

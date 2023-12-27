@@ -12,14 +12,6 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 
-// FIXME: these functions are only used
-// for testing and shouldn't exist, need to rethink
-// AnchorList *gen_get_anchor_list(MoveGen *gen);
-// double *gen_get_best_leaves(MoveGen *gen);
-// LeaveMap *gen_get_leave_map(MoveGen *gen);
-// void generate_exchange_moves(MoveGen *gen, uint8_t ml, int stripidx,
-//                              bool add_exchange);
-
 void gen_init_cache();
 void gen_clear_cache();
 void generate_moves(const Game *game, move_record_t move_record_type,

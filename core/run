@@ -4,10 +4,12 @@ make clean
 if [ "$1" == "g" ]; then
 make magpie_test
 gdb --args ./bin/magpie_test $2
+
 # Run magpie with debugger
 elif [ "$1" == "d" ]; then
 make magpie
 gdb --args ./bin/magpie
+
 # Run tests with coverage
 elif [ "$1" == "c" ]; then
 make magpie_test BUILD=cov
@@ -18,13 +20,14 @@ ln -sf $PWD/obj/*/*.gc* cov
 lcov --capture --directory cov --output-file coverage.info
 genhtml coverage.info --output-directory covhtml
 xdg-open covhtml/index.html
+
 # Build release version of magpie
 elif [ "$1" == "r" ]; then
 make magpie BUILD=release
 ./bin/magpie
+
 # Run unit tests
 # Set $2 to run a specific test
-# see test.c for more details
 elif [ "$1" == "u" ]; then
 make magpie_test
 ./bin/magpie_test $2
