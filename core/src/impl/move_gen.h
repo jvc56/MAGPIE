@@ -23,11 +23,8 @@
 // FIXME: stop using this double pointer bullshit
 // for everything and move resets inside result/movelist entities
 // FIXME: game should be const for movegen
-void generate_moves(const LetterDistribution *ld, const KWG *kwg,
-                    const KLV *klv, const Rack *opponent_rack, int thread_index,
-                    Board *board, Rack *player_rack, int player_index,
-                    int number_of_tiles_in_bag, move_record_t move_record_type,
-                    move_sort_t move_sort_type, bool kwgs_are_distinct,
-                    int move_list_capacity, MoveList **move_list);
+void generate_moves(const Game *game, move_record_t move_record_type,
+                    move_sort_t move_sort_type, int thread_index,
+                    MoveList *move_list);
 
 #endif

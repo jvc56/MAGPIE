@@ -64,7 +64,7 @@ void record_results(Game *game, AutoplayResults *autoplay_results,
   increment_p2_score(autoplay_results, p1_score);
 }
 
-void play_autoplay_game(Game *game, MoveList **move_list,
+void play_autoplay_game(Game *game, MoveList *move_list,
                         AutoplayResults *autoplay_results,
                         int starting_player_index, int thread_index) {
   reset_game(game);
@@ -73,7 +73,7 @@ void play_autoplay_game(Game *game, MoveList **move_list,
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     // FIXME: this code doesn't care about
     // capacity or move_list
-    play_move(get_top_equity_move(game, thread_index, 1, move_list), game);
+    play_move(get_top_equity_move(game, thread_index, move_list), game);
   }
   record_results(game, autoplay_results, starting_player_index);
 }
@@ -115,11 +115,11 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
       bag_copy(game_pair_bag, bag);
     }
 
-    play_autoplay_game(game, &move_list, autoplay_worker->autoplay_results,
+    play_autoplay_game(game, move_list, autoplay_worker->autoplay_results,
                        starting_player_index, autoplay_worker->worker_index);
     if (use_game_pairs) {
       bag_copy(bag, game_pair_bag);
-      play_autoplay_game(game, &move_list, autoplay_worker->autoplay_results,
+      play_autoplay_game(game, move_list, autoplay_worker->autoplay_results,
                          1 - starting_player_index,
                          autoplay_worker->worker_index);
     }

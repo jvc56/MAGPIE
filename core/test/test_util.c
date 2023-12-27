@@ -110,8 +110,8 @@ void sort_and_print_move_list(const Board *board,
 }
 
 void play_top_n_equity_move(Game *game, int n) {
-  MoveList *move_list = NULL;
-  generate_moves_for_game_with_player_move_types(game, 0, n + 1, &move_list);
+  MoveList *move_list = create_move_list(n + 1);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
   SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
   play_move(sorted_move_list->moves[n], game);
   destroy_sorted_move_list(sorted_move_list);
@@ -246,7 +246,7 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
 void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
                  int move_index, const char *expected_move_string) {
   Board *board = game_get_board(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   StringBuilder *move_string = create_string_builder();
   Move *move;

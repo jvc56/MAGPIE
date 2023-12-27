@@ -57,7 +57,7 @@ Board *game_get_board(Game *game) { return game->board; }
 
 Bag *game_get_bag(Game *game) { return game->bag; }
 
-LetterDistribution *game_get_ld(Game *game) { return game->ld; }
+const LetterDistribution *game_get_ld(const Game *game) { return game->ld; }
 
 Player *game_get_player(Game *game, int player_index) {
   return game->players[player_index];
@@ -213,18 +213,23 @@ void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
 void gen_cross_set(const KWG *kwg,
                    const LetterDistribution *letter_distribution, Board *board,
                    int row, int col, int dir, int cross_set_index) {
+  printf("in gen cross set for %d, %d, %d, %d\n", row, col, dir,
+         cross_set_index);
   if (!pos_exists(row, col)) {
+    printf("return 1 without setting\n");
     return;
   }
 
   if (!is_empty(board, row, col)) {
     set_cross_set(board, row, col, 0, dir, cross_set_index);
     set_cross_score(board, row, col, 0, dir, cross_set_index);
+    printf("return 2 without setting\n");
     return;
   }
   if (left_and_right_empty(board, row, col)) {
     set_cross_set(board, row, col, TRIVIAL_CROSS_SET, dir, cross_set_index);
     set_cross_score(board, row, col, 0, dir, cross_set_index);
+    printf("return 3 without setting\n");
     return;
   }
 
@@ -240,11 +245,15 @@ void gen_cross_set(const KWG *kwg,
 
     if (!lpath_is_valid) {
       set_cross_set(board, row, col, 0, dir, cross_set_index);
+      printf("setting %d, %d, %d, %d to %d\n", row, col, dir, cross_set_index,
+             0);
       return;
     }
     uint32_t s_index =
         kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
     uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
+    printf("setting %d, %d, %d, %d to %ld\n", row, col, dir, cross_set_index,
+           letter_set);
     set_cross_set(board, row, col, letter_set, dir, cross_set_index);
   } else {
     int left_col = word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
@@ -259,10 +268,14 @@ void gen_cross_set(const KWG *kwg,
     set_cross_score(board, row, col, score_r + score_l, dir, cross_set_index);
     if (!lpath_is_valid) {
       set_cross_set(board, row, col, 0, dir, cross_set_index);
+      printf("setting %d, %d, %d, %d to %d\n", row, col, dir, cross_set_index,
+             0);
       return;
     }
     if (left_col == col) {
       uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
+      printf("setting %d, %d, %d, %d to %ld\n", row, col, dir, cross_set_index,
+             letter_set);
       set_cross_set(board, row, col, letter_set, dir, cross_set_index);
     } else {
       uint64_t *cross_set =
@@ -275,6 +288,8 @@ void gen_cross_set(const KWG *kwg,
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
                              left_col);
           if (get_board_path_is_valid(board)) {
+            printf("setting %d, %d, %d, %d to %d\n", row, col, dir,
+                   cross_set_index, t);
             set_cross_set_letter(cross_set, t);
           }
         }
@@ -575,7 +590,7 @@ void set_starting_player_index(Game *game, int starting_player_index) {
 
 void pre_allocate_backups(Game *game) {
   // pre-allocate heap backup structures to make backups as fast as possible.
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
   uint32_t ld_size = letter_distribution_get_size(ld);
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));

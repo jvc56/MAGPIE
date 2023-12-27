@@ -84,11 +84,11 @@ void test_config_error_cases() {
   test_config_error(config, "go sim cond NO",
                     CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
   test_config_error(config, "go sim pindex 3",
-                    CONFIG_LOAD_STATUS_MALFORMED_target_index);
+                    CONFIG_LOAD_STATUS_MALFORMED_PLAYER_INDEX);
   test_config_error(config, "go sim pindex -1",
-                    CONFIG_LOAD_STATUS_MALFORMED_target_index);
+                    CONFIG_LOAD_STATUS_MALFORMED_PLAYER_INDEX);
   test_config_error(config, "go sim pindex one",
-                    CONFIG_LOAD_STATUS_MALFORMED_target_index);
+                    CONFIG_LOAD_STATUS_MALFORMED_PLAYER_INDEX);
   test_config_error(config, "go sim score over9000",
                     CONFIG_LOAD_STATUS_MALFORMED_SCORE);
   test_config_error(config, "go sim score -11",
@@ -102,9 +102,9 @@ void test_config_error_cases() {
   test_config_error(config, "go sim eq none",
                     CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN);
   test_config_error(config, "go sim exch five",
-                    CONFIG_LOAD_STATUS_MALFORMED_target_number_of_tiles_exchanged);
+                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED);
   test_config_error(config, "go sim exch -4",
-                    CONFIG_LOAD_STATUS_MALFORMED_target_number_of_tiles_exchanged);
+                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED);
   test_config_error(config, "go sim rs zero",
                     CONFIG_LOAD_STATUS_MALFORMED_RANDOM_SEED);
   test_config_error(config, "go sim rs -4",
@@ -113,6 +113,8 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS);
   test_config_error(config, "go sim threads -100",
                     CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS);
+  test_config_error(config, "go sim threads 9001",
+                    CONFIG_LOAD_STATUS_EXCEEDED_MAX_NUMBER_OF_THREADS);
   test_config_error(config, "go sim info x",
                     CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL);
   test_config_error(config, "go sim info -40",
@@ -248,7 +250,7 @@ void test_config_success() {
   number_exch = 2;
   plies = 123;
   max_iterations = 6;
-  number_of_threads = 900;
+  number_of_threads = 9;
   print_info = 850;
 
   string_builder_clear(test_string_builder);

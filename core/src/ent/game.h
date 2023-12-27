@@ -17,7 +17,7 @@ typedef struct Game Game;
 
 Board *game_get_board(Game *game);
 Bag *game_get_bag(Game *game);
-LetterDistribution *game_get_ld(Game *game);
+const LetterDistribution *game_get_ld(const Game *game);
 Player *game_get_player(Game *game, int player_index);
 int game_get_player_on_turn_index(const Game *game);
 game_end_reason_t game_get_game_end_reason(const Game *game);

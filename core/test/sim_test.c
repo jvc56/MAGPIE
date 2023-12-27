@@ -61,7 +61,7 @@ void test_sim_single_iteration(TestConfig *testconfig) {
   Game *game = create_game(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
   Rack *player0_rack = player_get_rack(player0);
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -84,7 +84,7 @@ void test_more_iterations(TestConfig *testconfig) {
   Config *config = get_nwl_config(testconfig);
   Game *game = create_game(config);
   Bag *bag = game_get_bag(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
   Rack *player0_rack = player_get_rack(player0);
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -112,7 +112,7 @@ void test_more_iterations(TestConfig *testconfig) {
 
 void perf_test_sim(Config *config, ThreadControl *thread_control) {
   Game *game = create_game(config);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   load_cgp(game, config_get_cgp(config));
   SimResults *sim_results = sim_results_create();
@@ -147,7 +147,7 @@ void perf_test_sim(Config *config, ThreadControl *thread_control) {
 
 void perf_test_multithread_sim(Config *config) {
   Game *game = create_game(config);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
   ThreadControl *thread_control = config_get_thread_control(config);
 
   int num_threads = get_number_of_threads(thread_control);
@@ -178,7 +178,7 @@ void perf_test_multithread_sim(Config *config) {
 void perf_test_multithread_blocking_sim(Config *config) {
   Game *game = create_game(config);
   ThreadControl *thread_control = config_get_thread_control(config);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   int num_threads = get_number_of_threads(thread_control);
   printf("Using %d threads\n", num_threads);
@@ -213,7 +213,7 @@ void perf_test_multithread_blocking_sim(Config *config) {
 //       config_get_num_plays(config),
 //       letter_distribution_get_size(config_get_letter_distribution(config)));
 //   Bag *bag = game_get_bag(game);
-//   LetterDistribution *ld = game_get_ld(game);
+//   const LetterDistribution *ld = game_get_ld(game);
 //   ThreadControl *thread_control = config_get_thread_control(config);
 
 //   Player *player0 = game_get_player(game, 0);

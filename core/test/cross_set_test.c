@@ -34,7 +34,7 @@ uint64_t cross_set_from_string(const LetterDistribution *letter_distribution,
 // This test function only works for single-char alphabets
 void set_row(Game *game, int row, const char *row_content) {
   Board *board = game_get_board(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   for (int i = 0; i < BOARD_DIM; i++) {
     set_letter(board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
@@ -53,7 +53,7 @@ void set_row(Game *game, int row, const char *row_content) {
 // This test function only works for single-char alphabets
 void set_col(Game *game, int col, const char *col_content) {
   Board *board = game_get_board(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   for (int i = 0; i < BOARD_DIM; i++) {
     set_letter(board, i, col, ALPHABET_EMPTY_SQUARE_MARKER);
@@ -75,7 +75,7 @@ void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
                         const char *letters, int expected_cross_score,
                         bool run_gcs) {
   Board *board = game_get_board(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   int cross_set_index = get_cross_set_index(false, player_index);
   if (run_gcs) {
@@ -186,7 +186,7 @@ void test_cross_set(TestConfig *testconfig) {
 
   // TestUpdateSinglecross_set
   Board *board = game_get_board(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
   load_cgp(game, VS_MATT);
   set_letter(board, 8, 10, 19);
   set_letter(board, 9, 10, 0);

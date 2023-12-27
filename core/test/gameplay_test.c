@@ -90,7 +90,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     assert(game_get_game_end_reason(actual_game) == GAME_END_REASON_NONE);
     return_racks_to_bag(actual_game);
 
-    LetterDistribution *ld = game_get_ld(actual_game);
+    const LetterDistribution *ld = game_get_ld(actual_game);
     Bag *bag = game_get_bag(actual_game);
 
     int player_on_turn_index = game_get_player_on_turn_index(actual_game);
@@ -382,7 +382,7 @@ void test_playmove(TestConfig *testconfig) {
   Game *game = create_game(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
@@ -473,7 +473,7 @@ void test_set_random_rack(TestConfig *testconfig) {
   Game *game = create_game(config);
 
   Bag *bag = game_get_bag(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   Player *player0 = game_get_player(game, 0);
 
@@ -520,7 +520,7 @@ void test_backups(TestConfig *testconfig) {
   Game *game = create_game(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);

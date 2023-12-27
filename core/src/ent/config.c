@@ -639,11 +639,11 @@ load_static_search_only_for_config(Config *config, bool static_search_only) {
 config_load_status_t load_target_index_for_config(Config *config,
                                                   const char *target_index) {
   if (!is_all_digits_or_empty(target_index)) {
-    return CONFIG_LOAD_STATUS_MALFORMED_target_index;
+    return CONFIG_LOAD_STATUS_MALFORMED_PLAYER_INDEX;
   }
   config->target_index = string_to_int(target_index);
   if (config->target_index != 0 && config->target_index != 1) {
-    return CONFIG_LOAD_STATUS_MALFORMED_target_index;
+    return CONFIG_LOAD_STATUS_MALFORMED_PLAYER_INDEX;
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
@@ -673,7 +673,7 @@ load_equity_margin_for_config(Config *config,
 config_load_status_t load_target_number_of_tiles_exchanged_for_config(
     Config *config, const char *target_number_of_tiles_exchanged) {
   if (!is_all_digits_or_empty(target_number_of_tiles_exchanged)) {
-    return CONFIG_LOAD_STATUS_MALFORMED_target_number_of_tiles_exchanged;
+    return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED;
   }
   config->target_number_of_tiles_exchanged =
       string_to_int(target_number_of_tiles_exchanged);
@@ -704,6 +704,9 @@ load_number_of_threads_for_config(Config *config,
   int number_of_threads = string_to_int(number_of_threads_string);
   if (number_of_threads < 1) {
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
+  }
+  if (number_of_threads > MAX_THREADS) {
+    return CONFIG_LOAD_STATUS_EXCEEDED_MAX_NUMBER_OF_THREADS;
   }
   set_number_of_threads(config->thread_control, number_of_threads);
   return CONFIG_LOAD_STATUS_SUCCESS;

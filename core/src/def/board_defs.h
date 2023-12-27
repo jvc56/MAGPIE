@@ -10,7 +10,6 @@
 #define BOARD_VERTICAL_DIRECTION 1
 #define DEFAULT_BINGO_BONUS 50
 
-// FIXME: read this from file to make it easier to configure custom boards
 #define CROSSWORD_GAME_BOARD                                                   \
   "=  '   =   '  ="                                                            \
   " -   \"   \"   - "                                                          \

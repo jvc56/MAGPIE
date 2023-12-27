@@ -192,7 +192,7 @@ void evaluate_possible_leave(Inference *inference) {
   // FIXME: this code doesn't care about
   // capacity or move_list
   const Move *top_move = get_top_equity_move(
-      inference->game, inference->thread_index, 1, &inference->move_list);
+      inference->game, inference->thread_index, inference->move_list);
   bool is_within_equity_margin = inference->target_score + current_leave_value +
                                      inference->equity_margin +
                                      (INFERENCE_EQUITY_EPSILON) >=

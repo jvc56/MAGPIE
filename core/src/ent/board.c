@@ -289,7 +289,10 @@ void set_bonus_squares(Board *board) {
 
 bool get_transpose(const Board *board) { return board->transposed; }
 
-void transpose(Board *board) { board->transposed = !board->transposed; }
+void transpose(Board *board) {
+  board->transposed = !board->transposed;
+  printf("board is now %d\n", board->transposed);
+}
 
 void set_transpose(Board *board, bool transposed) {
   board->transposed = transposed;

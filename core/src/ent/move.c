@@ -118,10 +118,6 @@ void update_move_list(MoveList *ml, int new_capacity) {
 MoveList *create_move_list(int capacity) {
   MoveList *ml = malloc_or_die(sizeof(MoveList));
   ml->count = 0;
-  // We set increment capacity here
-  // because we need to temporarily hold
-  // capacity + 1 moves to before popping
-  // the least desirable move.
   ml->spare_move = create_move();
   create_moves(ml, capacity);
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;

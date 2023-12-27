@@ -169,8 +169,7 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
   load_cgp_into_iso_exec_state(cgpstr, num_plays);
   Game *game = exec_state_get_game(iso_exec_state);
   MoveList *move_list = NULL;
-  generate_moves_for_game(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, num_plays,
-                          &move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
   sort_moves(move_list);
 
   // This pointer needs to be freed by the caller:

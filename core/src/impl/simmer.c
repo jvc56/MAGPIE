@@ -353,7 +353,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
       // FIXME: this code doesn't care about
       // capacity or move_list
       const Move *best_play = get_top_equity_move(
-          game, simmer_worker->thread_index, 1, &simmer_worker->move_list);
+          game, simmer_worker->thread_index, simmer_worker->move_list);
       rack_copy(rack_placeholder, player_get_rack(player_on_turn));
       play_move(best_play, game);
       sim_results_increment_node_count(sim_results);
@@ -454,8 +454,7 @@ sim_status_t simulate(const Config *config, Game *game,
   int num_simmed_plays = config_get_num_plays(config);
 
   MoveList *move_list = NULL;
-  generate_moves_for_game(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0,
-                          num_simmed_plays, &move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
   // Sorting moves converts the move list from a min heap
   // to a sorted array with count == 0, so the number of
   // moves must be obtained before sorting.

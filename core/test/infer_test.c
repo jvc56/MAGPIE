@@ -189,7 +189,7 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   Bag *bag = game_get_bag(game);
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
   int ld_size = letter_distribution_get_size(ld);
   Rack *rack = create_rack(ld_size);
 

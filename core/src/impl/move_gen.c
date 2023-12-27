@@ -339,6 +339,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   uint64_t cross_set = get_cross_set(
       gen->board, gen->current_row_index, col, cs_dir,
       get_cross_set_index(gen->kwgs_are_distinct, gen->player_index));
+  printf("%d, %d, %d, %d is %ld\n", gen->current_row_index, col, cs_dir,
+         get_cross_set_index(gen->kwgs_are_distinct, gen->player_index),
+         cross_set);
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     int raw = get_unblanked_machine_letter(current_letter);
     int next_node_index = 0;
@@ -793,45 +796,41 @@ void set_descending_tile_scores(MoveGen *gen) {
 }
 
 // FIXME: this should go back to taking a game
-void generate_moves(const LetterDistribution *ld, const KWG *kwg,
-                    const KLV *klv, const Rack *opponent_rack, int thread_index,
-                    Board *board, Rack *player_rack, int player_index,
-                    int number_of_tiles_in_bag, move_record_t move_record_type,
-                    move_sort_t move_sort_type, bool kwgs_are_distinct,
-                    int move_list_capacity, MoveList **move_list) {
-
-  int ld_size = letter_distribution_get_size(ld);
+void generate_moves(const Game *input_game, move_record_t move_record_type,
+                    move_sort_t move_sort_type, int thread_index,
+                    MoveList *move_list) {
+  Game *game = game_duplicate(input_game);
+  const LetterDistribution *ld = game_get_ld(game);
   // FIXME: these needs to be freed by clearing the cache
-  MoveGen *gen = get_movegen(thread_index, ld_size);
-
-  if (*move_list && move_list_get_capacity(*move_list) != move_list_capacity) {
-    destroy_move_list(*move_list);
-    *move_list = NULL;
-  }
-
-  if (!*move_list) {
-    *move_list = create_move_list(move_list_capacity);
-  }
+  MoveGen *gen = get_movegen(thread_index, letter_distribution_get_size(ld));
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player = game_get_player(game, player_on_turn_index);
+  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
   gen->letter_distribution = ld;
-  gen->kwg = kwg;
-  gen->klv = klv;
-  gen->opponent_rack = opponent_rack;
-  gen->board = board;
-  gen->player_index = player_index;
-  gen->player_rack = player_rack;
-  gen->number_of_tiles_in_bag = number_of_tiles_in_bag;
-  gen->kwgs_are_distinct = kwgs_are_distinct;
+  gen->kwg = player_get_kwg(player);
+  gen->klv = player_get_klv(player);
+  gen->opponent_rack = player_get_rack(opponent);
+  gen->board = game_get_board(game);
+  gen->player_index = player_on_turn_index;
+  gen->player_rack = player_get_rack(player);
+
+  gen->number_of_tiles_in_bag = get_tiles_remaining(game_get_bag(game));
+  // FIXME: change all distinct to shared
+  gen->kwgs_are_distinct =
+      !game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  printf("kwgs: %d\n", gen->kwgs_are_distinct);
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;
-  gen->move_list = *move_list;
+  gen->move_list = move_list;
 
   // Reset the move list
   reset_move_list(gen->move_list);
 
-  init_leave_map(player_rack, gen->leave_map);
-  if (get_number_of_letters(player_rack) < RACK_SIZE) {
-    set_current_value(gen->leave_map, klv_get_leave_value(klv, player_rack));
+  init_leave_map(gen->player_rack, gen->leave_map);
+  if (get_number_of_letters(gen->player_rack) < RACK_SIZE) {
+    set_current_value(gen->leave_map,
+                      klv_get_leave_value(gen->klv, gen->player_rack));
   } else {
     set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
@@ -896,4 +895,5 @@ void generate_moves(const LetterDistribution *ld, const KWG *kwg,
     set_spare_move_as_pass(gen->move_list);
     insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
   }
+  destroy_game(game);
 }
