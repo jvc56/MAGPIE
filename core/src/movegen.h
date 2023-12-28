@@ -27,7 +27,6 @@ typedef struct Generator {
   int current_anchor_col;
   int last_anchor_col;
   int dir;
-  int max_tiles_to_play;
   int tiles_played;
   int number_of_plays;
   int move_sort_type;
@@ -50,7 +49,15 @@ typedef struct Generator {
   // Shadow plays
   int current_left_col;
   int current_right_col;
+  int num_tiles_played_through;
+  int min_num_playthrough;
+  int max_num_playthrough;
+  int min_tiles_to_play;
+  int max_tiles_to_play;
   double highest_shadow_equity;
+  double highest_equity_by_length[(RACK_SIZE + 1)];
+  int max_tiles_starting_left_by[(BOARD_DIM)];
+  ShadowLimit shadow_limit_table[(BOARD_DIM)][(RACK_SIZE + 1)];
   uint64_t rack_cross_set;
   int number_of_letters_on_rack;
   int descending_tile_scores[(RACK_SIZE)];

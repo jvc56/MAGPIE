@@ -1,9 +1,10 @@
-#include <stdlib.h>
-
 #include "anchor.h"
+
 #include "board.h"
 #include "constants.h"
+#include "stdio.h"
 #include "stdlib.h"
+#include "string.h"
 #include "util.h"
 
 AnchorList *create_anchor_list() {
@@ -26,15 +27,30 @@ void destroy_anchor_list(AnchorList *al) {
   free(al);
 }
 
-void add_anchor(AnchorList *al, int row, int col, int last_anchor_col,
-                bool transposed, int dir, double highest_possible_equity) {
+void add_anchor(
+    AnchorList *al, int row, int col, int last_anchor_col, bool transposed,
+    int dir, int min_num_playthrough, int max_num_playthrough,
+    int min_tiles_to_play, int max_tiles_to_play,
+    int max_tiles_starting_left_by[(BOARD_DIM)], double highest_possible_equity,
+    double *highest_equity_by_length,
+    ShadowLimit shadow_limit_table[(BOARD_DIM)][(RACK_SIZE + 1)]) {
   int i = al->count;
   al->anchors[i]->row = row;
   al->anchors[i]->col = col;
   al->anchors[i]->last_anchor_col = last_anchor_col;
   al->anchors[i]->transposed = transposed;
   al->anchors[i]->dir = dir;
+  al->anchors[i]->min_num_playthrough = min_num_playthrough;
+  al->anchors[i]->max_num_playthrough = max_num_playthrough;
+  al->anchors[i]->min_tiles_to_play = min_tiles_to_play;
+  al->anchors[i]->max_tiles_to_play = max_tiles_to_play;
+  memcpy(al->anchors[i]->max_tiles_starting_left_by, max_tiles_starting_left_by,
+         sizeof(int) * (BOARD_DIM));
   al->anchors[i]->highest_possible_equity = highest_possible_equity;
+  memcpy(al->anchors[i]->highest_equity_by_length, highest_equity_by_length,
+         sizeof(double) * ((RACK_SIZE + 1)));
+  memcpy(al->anchors[i]->shadow_limit_table, shadow_limit_table,
+         sizeof(ShadowLimit) * (BOARD_DIM) * (RACK_SIZE + 1));
   al->count++;
 }
 

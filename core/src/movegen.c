@@ -1,8 +1,10 @@
 #include <assert.h>
 #include <ctype.h>
+#include <float.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "config.h"
 #include "constants.h"
@@ -674,8 +676,18 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
   gen->current_left_col = col;
   gen->current_right_col = col;
 
-  // Reset shadow score
+  // Reset shadow equities
   gen->highest_shadow_equity = 0;
+  memset(gen->highest_equity_by_length, 0,
+         sizeof(gen->highest_equity_by_length));
+  memset(gen->max_tiles_starting_left_by, 0,
+         sizeof(gen->max_tiles_starting_left_by));
+  const struct ShadowLimit initial_shadow_limit = {0, -DBL_MAX};
+  for (int i = 0; i <= RACK_SIZE; i++) {
+    for (int j = 0; j <= RACK_SIZE; j++) {
+      gen->shadow_limit_table[i][j] = initial_shadow_limit;
+    }
+  }
 
   // Set the number of letters
   gen->number_of_letters_on_rack = player->rack->number_of_letters;
@@ -684,8 +696,12 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
   gen->current_anchor_col = col;
 
   // Reset tiles played
-  gen->max_tiles_to_play = 0;
   gen->tiles_played = 0;
+
+  gen->min_num_playthrough = BOARD_DIM - 1;
+  gen->max_num_playthrough = 0;
+  gen->min_tiles_to_play = RACK_SIZE;
+  gen->max_tiles_to_play = 0;
 
   // Set rack cross set
   gen->rack_cross_set = 0;
@@ -701,7 +717,11 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
   }
   add_anchor(gen->anchor_list, gen->current_row_index, col,
              gen->last_anchor_col, gen->board->transposed,
-             dir_is_vertical(gen->dir), gen->highest_shadow_equity);
+             dir_is_vertical(gen->dir), gen->min_num_playthrough,
+             gen->max_num_playthrough, gen->min_tiles_to_play,
+             gen->max_tiles_to_play, gen->max_tiles_starting_left_by,
+             gen->highest_shadow_equity, gen->highest_equity_by_length,
+             gen->shadow_limit_table);
 }
 
 void shadow_by_orientation(const Rack *opp_rack, Generator *gen, Player *player,
@@ -772,26 +792,59 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
     transpose(gen->board);
   }
 
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_rack(player->rack, gen->letter_distribution, sb);
+
+  uint64_t start_time;
+  uint64_t end_time;
+
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
   sort_anchor_list(gen->anchor_list);
+  uint64_t total_anchor_search_time = 0;
+  int anchors_searched = 0;
   for (int i = 0; i < gen->anchor_list->count; i++) {
     if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(
             gen, gen->anchor_list->anchors[i]->highest_possible_equity)) {
       break;
     }
+    start_time = __rdtsc();
     gen->current_anchor_col = gen->anchor_list->anchors[i]->col;
     gen->current_row_index = gen->anchor_list->anchors[i]->row;
     gen->last_anchor_col = gen->anchor_list->anchors[i]->last_anchor_col;
     gen->dir = gen->anchor_list->anchors[i]->dir;
+    gen->min_num_playthrough =
+        gen->anchor_list->anchors[i]->min_num_playthrough;
+    gen->max_num_playthrough =
+        gen->anchor_list->anchors[i]->max_num_playthrough;
+    gen->min_tiles_to_play = gen->anchor_list->anchors[i]->min_tiles_to_play;
+    gen->max_tiles_to_play = gen->anchor_list->anchors[i]->max_tiles_to_play;
+    gen->highest_shadow_equity =
+        gen->anchor_list->anchors[i]->highest_possible_equity;
+    memcpy(gen->max_tiles_starting_left_by,
+           gen->anchor_list->anchors[i]->max_tiles_starting_left_by,
+           sizeof(gen->max_tiles_starting_left_by));
+    memcpy(gen->highest_equity_by_length,
+           gen->anchor_list->anchors[i]->highest_equity_by_length,
+           sizeof(gen->highest_equity_by_length));    
     set_transpose(gen->board, gen->anchor_list->anchors[i]->transposed);
     load_row_letter_cache(gen, gen->current_row_index);
     recursive_gen(opp_rack, gen, gen->current_anchor_col, player,
                   kwg_get_root_node_index(player->kwg), gen->current_anchor_col,
                   gen->current_anchor_col, !gen->dir);
-
+    end_time = __rdtsc();
+    const uint64_t elapsed_time = end_time - start_time;
+    total_anchor_search_time += elapsed_time;
+    printf(
+        "player: %i, rack: %s, i: %i, row: %i, col: %i, dir: %i, time: %lluns, "
+        "moves[0].equity: %f, highest_possible_equity: %f\n",
+        player->index, string_builder_peek(sb), i, gen->current_row_index,
+        gen->current_anchor_col, gen->dir, elapsed_time,
+        gen->move_list->moves[0]->equity,
+        gen->anchor_list->anchors[i]->highest_possible_equity);
+    anchors_searched++;
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for this
       // anchor, highest_possible_equity was invalid.
@@ -799,6 +852,11 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
           gen, gen->anchor_list->anchors[i]->highest_possible_equity));
     }
   }
+
+  printf("player: %i rack: %s time: %lluns anchors searched: %d\n",
+         player->index, string_builder_peek(sb), total_anchor_search_time,
+         anchors_searched);
+  destroy_string_builder(sb);
 
   reset_transpose(gen->board);
 
