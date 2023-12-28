@@ -17,6 +17,44 @@
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
+// POC: english only. Can do others later.
+// 2 blank tiles (scoring 0 points)
+// 1 point: E, A, I, O, N, R, T, L, S, U 
+// 2 points: D, G
+// 3 points: B, C, M, P
+// 4 points: F, H, V, W, Y
+// 5 points: K
+// 8 points: J, X
+// 10 points: Q, Z
+#define MASK(c) (1 << (c - 'A' + 1))
+const uint64_t MASK1 = MASK('E') | MASK('A') | MASK('I') | MASK('O') | MASK('N') | MASK('R') | MASK('T') | MASK('L') | MASK('S') | MASK('U');
+const uint64_t MASK2 = MASK('D') | MASK('G');
+const uint64_t MASK3 = MASK('B') | MASK('C') | MASK('M') | MASK('P');
+const uint64_t MASK4 = MASK('F') | MASK('H') | MASK('V') | MASK('W') | MASK('Y');
+const uint64_t MASK5 = MASK('K');
+const uint64_t MASK8 = MASK('J') | MASK('X');
+const uint64_t MASK10 = MASK('Q') | MASK('Z');
+int extract_top_score(uint64_t mask) {
+  if (mask & MASK10) {
+    return 10;
+  } else if (mask & MASK8) {
+    return 8;
+  } else if (mask & MASK5) {
+    return 5;
+  } else if (mask & MASK4) {
+    return 4;
+  } else if (mask & MASK3) {
+    return 3;
+  } else if (mask & MASK2) {
+    return 2;
+  } else if (mask & MASK1) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+
 void go_on(const Rack *opp_rack, Generator *gen, int current_col, uint8_t L,
            Player *player, uint32_t new_node_index, bool accepts, int leftstrip,
            int rightstrip, bool unique_play);
@@ -409,14 +447,24 @@ bool shadow_allowed_in_cross_set(const Generator *gen, int col,
          ((gen->rack_cross_set & 1) && cross_set);
 }
 
+
 void shadow_record(const Rack *opp_rack, Generator *gen, int left_col,
                    int right_col, int main_played_through_score,
-                   int perpendicular_additional_score, int word_multiplier) {
+                   int perpendicular_additional_score, int word_multiplier,
+                   int cross_set_index) {
   int sorted_effective_letter_multipliers[(RACK_SIZE)];
   int current_tiles_played = 0;
+  int score_bound_new = 0;
+  // uint64_t rack_mask = rack_as_mask_set(opp_rack);
   for (int current_col = left_col; current_col <= right_col; current_col++) {
     uint8_t current_letter = get_letter_cache(gen, current_col);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+      uint64_t cross_set = get_cross_set(gen->board, gen->current_row_index, current_col, 
+                                         !dir_is_vertical(gen->dir), cross_set_index);
+      uint64_t playable = cross_set & gen->rack_cross_set;
+      if (!playable) break; // can't play thru dead spot
+      current_tiles_played++; // otherwise increment num of tiles played
+
       uint8_t bonus_square =
           get_bonus_square(gen->board, gen->current_row_index, current_col);
       int this_word_multiplier = bonus_square >> 4;
@@ -429,26 +477,11 @@ void shadow_record(const Rack *opp_rack, Generator *gen, int left_col,
       int effective_letter_multiplier =
           letter_multiplier *
           ((this_word_multiplier * is_cross_word) + word_multiplier);
-      // Insert the effective multiplier.
-      int insert_index = current_tiles_played;
-      for (; insert_index > 0 &&
-             sorted_effective_letter_multipliers[insert_index - 1] <
-                 effective_letter_multiplier;
-           insert_index--) {
-        sorted_effective_letter_multipliers[insert_index] =
-            sorted_effective_letter_multipliers[insert_index - 1];
-      }
-      sorted_effective_letter_multipliers[insert_index] =
-          effective_letter_multiplier;
-      current_tiles_played++;
+      score_bound_new += effective_letter_multiplier * extract_top_score(playable);
     }
   }
 
-  int tiles_played_score = 0;
-  for (int i = 0; i < current_tiles_played; i++) {
-    tiles_played_score +=
-        gen->descending_tile_scores[i] * sorted_effective_letter_multipliers[i];
-  }
+  int tiles_played_score = score_bound_new;
 
   int bingo_bonus = 0;
   if (gen->tiles_played == RACK_SIZE) {
@@ -541,7 +574,8 @@ void shadow_play_right(const Rack *opp_rack, Generator *gen,
     if (gen->tiles_played + is_unique >= 2) {
       shadow_record(opp_rack, gen, gen->current_left_col,
                     gen->current_right_col, main_played_through_score,
-                    perpendicular_additional_score, word_multiplier);
+                    perpendicular_additional_score, word_multiplier,
+                    cross_set_index);
     }
 
     shadow_play_right(opp_rack, gen, main_played_through_score,
@@ -595,7 +629,8 @@ void shadow_play_left(const Rack *opp_rack, Generator *gen,
     if (gen->tiles_played + is_unique >= 2) {
       shadow_record(opp_rack, gen, gen->current_left_col,
                     gen->current_right_col, main_played_through_score,
-                    perpendicular_additional_score, word_multiplier);
+                    perpendicular_additional_score, word_multiplier,
+                    cross_set_index);
     }
     shadow_play_left(opp_rack, gen, main_played_through_score,
                      perpendicular_additional_score, word_multiplier, is_unique,
@@ -634,7 +669,7 @@ void shadow_start(const Rack *opp_rack, Generator *gen, int cross_set_index) {
         // single tile
         shadow_record(opp_rack, gen, gen->current_left_col,
                       gen->current_right_col, main_played_through_score,
-                      perpendicular_additional_score, 0);
+                      perpendicular_additional_score, 0, cross_set_index);
       }
     } else {
       // Nothing hooks here, return
