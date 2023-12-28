@@ -47,5 +47,7 @@ void delete_file(const char *filename);
 void reset_file(const char *filename);
 void create_fifo(const char *fifo_name);
 void delete_fifo(const char *fifo_name);
+Config *create_config_or_die(const char *cmd);
+void set_row(Game *game, int row, const char *row_content);
 
 #endif

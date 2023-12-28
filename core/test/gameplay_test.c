@@ -11,7 +11,6 @@
 #include "../src/impl/gameplay.h"
 
 #include "test_util.h"
-#include "testconfig.h"
 
 void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
   for (int i = 0; i < (get_array_size(rack)); i++) {
@@ -163,8 +162,9 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
   destroy_game(expected_game);
 }
 
-void test_six_exchanges_game(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_six_exchanges_game() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
 
   char *racks[18] = {"UUUVVWW", "AEFRWYZ", "INOOQSU", "LUUUVVW", "EEEEEOO",
                      "AEIKLMO", "GNOOOPR", "EGIJLRS", "EEEOTTT", "EIILRSX",
@@ -208,10 +208,12 @@ void test_six_exchanges_game(TestConfig *testconfig) {
       "15/15/15/14Q/14U/14I/14N/7FRAWZEYS/6TOETOE3/7A3XI2/3FoREMAST4/7L7/"
       "5ELICITEd2/1JIG3K7/GONOPORE7 / 332/384 6 lex CSW21;"};
   test_gameplay_by_turn(config, cgps, racks, 18);
+  destroy_config(config);
 }
 
-void test_six_passes_game(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_six_passes_game() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
 
   char *racks[31] = {"AEGILPR", "ACELNTV", "DDEIOTY", "?ADIIUU", "?BEIINS",
                      "EEEKMNO", "AAEHINT", "CDEGORZ", "EGNOQRS", "AFIQRRT",
@@ -303,10 +305,12 @@ void test_six_passes_game(TestConfig *testconfig) {
       "CODGER2LOTIONS/9RIN3 / 348/513 6 lex CSW21;"};
 
   test_gameplay_by_turn(config, cgps, racks, 31);
+  destroy_config(config);
 }
 
-void test_standard_game(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_standard_game() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
 
   char *racks[23] = {"EGIILNO", "DRRTYYZ", "CEIOTTU", "AADEEMT", "AACDEKS",
                      "BEEIOOP", "DHLNORR", "BGIIJRV", "?DFMNPU", "EEEOQRW",
@@ -375,10 +379,12 @@ void test_standard_game(TestConfig *testconfig) {
       "5RHINO1ETA1/5E1E3DEXY AEGILU/ 439/425 0 lex CSW21;"};
 
   test_gameplay_by_turn(config, cgps, racks, 23);
+  destroy_config(config);
 }
 
-void test_playmove(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_playmove() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
@@ -466,10 +472,12 @@ void test_playmove(TestConfig *testconfig) {
   assert(bag_is_empty(bag));
 
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_set_random_rack(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_set_random_rack() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
 
   Bag *bag = game_get_bag(game);
@@ -513,10 +521,12 @@ void test_set_random_rack(TestConfig *testconfig) {
 
   destroy_rack(known_rack);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_backups(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_backups() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
@@ -562,13 +572,14 @@ void test_backups(TestConfig *testconfig) {
   // tiles, then back to 80 after unplay.
   assert(get_tiles_remaining(bag) == 81);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_gameplay(TestConfig *testconfig) {
-  test_playmove(testconfig);
-  test_six_exchanges_game(testconfig);
-  test_six_passes_game(testconfig);
-  test_standard_game(testconfig);
-  test_set_random_rack(testconfig);
-  test_backups(testconfig);
+void test_gameplay() {
+  test_playmove();
+  test_six_exchanges_game();
+  test_six_passes_game();
+  test_standard_game();
+  test_set_random_rack();
+  test_backups();
 }

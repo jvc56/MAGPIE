@@ -19,8 +19,9 @@ void reset_and_load_game_failure(Game *game, const char *cgp,
   assert(cgp_parse_status == expected_cgp_parse_status);
 }
 
-void test_load_cgp(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void test_load_cgp() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = create_game(config);
   // Test that loading various CGPs doesn't result in
   // any errors
@@ -139,10 +140,12 @@ void test_load_cgp(TestConfig *testconfig) {
       CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS);
 
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_game_main(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void test_game_main() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_letter_distribution(config);
   Game *game = create_game(config);
   Rack *rack = create_rack(letter_distribution_get_size(ld));
@@ -183,9 +186,10 @@ void test_game_main(TestConfig *testconfig) {
 
   destroy_rack(rack);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_game(TestConfig *testconfig) {
-  test_game_main(testconfig);
-  test_load_cgp(testconfig);
+void test_game() {
+  test_game_main();
+  test_load_cgp();
 }

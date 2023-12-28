@@ -8,7 +8,6 @@
 #include "board_test.h"
 #include "test_constants.h"
 #include "test_util.h"
-#include "testconfig.h"
 
 void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
   // Test cross set
@@ -37,8 +36,9 @@ void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
   assert(!allowed(cs, 12));
 }
 
-void test_board(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void test_board() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Board *board = game_get_board(game);
 
@@ -51,4 +51,5 @@ void test_board(TestConfig *testconfig) {
   test_board_cross_set_for_cross_set_index(game, 0);
   test_board_cross_set_for_cross_set_index(game, 1);
   destroy_game(game);
+  destroy_config(config);
 }

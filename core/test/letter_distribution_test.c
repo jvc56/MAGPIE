@@ -4,10 +4,11 @@
 #include "../src/ent/config.h"
 #include "../src/ent/letter_distribution.h"
 
-#include "testconfig.h"
+#include "test_util.h"
 
-void test_letter_distribution(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void test_letter_distribution_score_order() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
 
@@ -18,16 +19,22 @@ void test_letter_distribution(TestConfig *testconfig) {
            previous_score);
     previous_score = letter_distribution_get_score(ld, score_order_index);
   }
+  destroy_config(config);
 }
 
-void test_str_to_machine_letters(TestConfig *testconfig) {
-  const Config *nwl_config = get_nwl_config(testconfig);
+void test_str_to_machine_letters() {
+  Config *nwl_config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   const LetterDistribution *english_ld =
       config_get_letter_distribution(nwl_config);
-  const Config *disc_config = get_disc_config(testconfig);
+
+  Config *disc_config = create_config_or_die(
+      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
   const LetterDistribution *catalan_ld =
       config_get_letter_distribution(disc_config);
-  const Config *osps_config = get_osps_config(testconfig);
+
+  Config *osps_config = create_config_or_die(
+      "setoptions lex OSPS44 s1 equity s2 equity r1 all r2 all numplays 1");
   const LetterDistribution *polish_ld =
       config_get_letter_distribution(osps_config);
 
@@ -133,4 +140,13 @@ void test_str_to_machine_letters(TestConfig *testconfig) {
   assert(str_to_machine_letters(english_ld, "AB.F", false, imls, 40) == -1);
   assert(str_to_machine_letters(english_ld, "BEHF.", false, imls, 40) == -1);
   assert(str_to_machine_letters(english_ld, ".BDEF", false, imls, 40) == -1);
+
+  destroy_config(nwl_config);
+  destroy_config(osps_config);
+  destroy_config(disc_config);
+}
+
+void test_letter_distribution() {
+  test_letter_distribution_score_order();
+  test_str_to_machine_letters();
 }

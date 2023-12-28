@@ -12,7 +12,6 @@
 
 #include "test_constants.h"
 #include "test_util.h"
-#include "testconfig.h"
 
 // this test func only works for single-char alphabets
 uint64_t cross_set_from_string(const LetterDistribution *letter_distribution,
@@ -29,25 +28,6 @@ uint64_t cross_set_from_string(const LetterDistribution *letter_distribution,
     set_cross_set_letter(&c, hl_to_ml(letter_distribution, letter));
   }
   return c;
-}
-
-// This test function only works for single-char alphabets
-void set_row(Game *game, int row, const char *row_content) {
-  Board *board = game_get_board(game);
-  const LetterDistribution *ld = game_get_ld(game);
-
-  for (int i = 0; i < BOARD_DIM; i++) {
-    set_letter(board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
-  }
-  char letter[2];
-  letter[1] = '\0';
-  for (size_t i = 0; i < string_length(row_content); i++) {
-    if (row_content[i] != ' ') {
-      letter[0] = row_content[i];
-      set_letter(board, row, i, hl_to_ml(ld, letter));
-      incrememt_tiles_played(board, 1);
-    }
-  }
 }
 
 // This test function only works for single-char alphabets
@@ -109,8 +89,9 @@ void test_gen_cross_set_col(Game *game, int row, int col, int dir,
                      expected_cross_score, run_gcs);
 }
 
-void test_cross_set(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void test_cross_set() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Player *player0 = game_get_player(game, 0);
   const KWG *kwg = player_get_kwg(player0);
@@ -200,4 +181,5 @@ void test_cross_set(TestConfig *testconfig) {
   assert(get_cross_set(board, 7, 10, BOARD_VERTICAL_DIRECTION, 0) == 0);
 
   destroy_game(game);
+  destroy_config(config);
 }

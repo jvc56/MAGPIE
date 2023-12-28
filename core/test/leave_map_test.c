@@ -7,7 +7,6 @@
 
 #include "rack_test.h"
 #include "test_util.h"
-#include "testconfig.h"
 
 void take_set(const LetterDistribution *letter_distribution,
               LeaveMap *leave_map, Rack *rack, char *letter,
@@ -39,8 +38,9 @@ void take_set_add(const LetterDistribution *letter_distribution,
   assert(leave_map_get_current_index(leave_map) == expected_add_index);
 }
 
-void test_leave_map(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_leave_map() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
   Rack *rack = create_rack(ld_size);
@@ -109,4 +109,5 @@ void test_leave_map(TestConfig *testconfig) {
 
   destroy_rack(rack);
   destroy_leave_map(leave_map);
+  destroy_config(config);
 }

@@ -10,14 +10,12 @@
 
 #include "test_constants.h"
 #include "test_util.h"
-#include "testconfig.h"
 
 #include "move_gen_pi.h"
 
 void load_and_generate(Game *game, MoveList *move_list, Player *player,
                        const char *cgp, const char *rack) {
-
-  LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = game_get_ld(game);
   Rack *player_rack = player_get_rack(player);
 
   load_cgp(game, cgp);
@@ -33,8 +31,9 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
   }
 }
 
-void test_shadow_score(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_shadow_score() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = create_move_list(1000);
@@ -456,10 +455,12 @@ void test_shadow_score(TestConfig *testconfig) {
 
   destroy_game(game);
   destroy_move_list(move_list);
+  destroy_config(config);
 }
 
-void test_shadow_top_move(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_shadow_top_move() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = create_move_list(1);
@@ -473,9 +474,10 @@ void test_shadow_top_move(TestConfig *testconfig) {
 
   destroy_move_list(move_list);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_shadow(TestConfig *testconfig) {
-  test_shadow_score(testconfig);
-  test_shadow_top_move(testconfig);
+void test_shadow() {
+  test_shadow_score();
+  test_shadow_top_move();
 }

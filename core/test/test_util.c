@@ -33,11 +33,36 @@
 
 bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
+// This test function only works for single-char alphabets
+void set_row(Game *game, int row, const char *row_content) {
+  Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  for (int i = 0; i < BOARD_DIM; i++) {
+    set_letter(board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
+  }
+  char letter[2];
+  letter[1] = '\0';
+  for (size_t i = 0; i < string_length(row_content); i++) {
+    if (row_content[i] != ' ') {
+      letter[0] = row_content[i];
+      set_letter(board, row, i, hl_to_ml(ld, letter));
+      incrememt_tiles_played(board, 1);
+    }
+  }
+}
+
 void load_config_or_die(Config *config, const char *cmd) {
   config_load_status_t status = load_config(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
+}
+
+Config *create_config_or_die(const char *cmd) {
+  Config *config = create_default_config();
+  load_config_or_die(config, cmd);
+  return config;
 }
 
 // Comparison function for qsort

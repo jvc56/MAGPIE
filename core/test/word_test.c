@@ -9,10 +9,10 @@
 
 #include "test_constants.h"
 #include "test_util.h"
-#include "testconfig.h"
 
-void test_words_played(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void test_words_played() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = create_game(config);
   load_cgp(game, VS_ED);
 
@@ -111,6 +111,7 @@ void test_words_played(TestConfig *testconfig) {
 
   free(fw);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_words(TestConfig *testconfig) { test_words_played(testconfig); }
+void test_words() { test_words_played(); }

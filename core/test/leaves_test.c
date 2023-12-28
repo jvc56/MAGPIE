@@ -3,15 +3,15 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "../src/util/string_util.h"
 #include "../src/util/log.h"
+#include "../src/util/string_util.h"
 #include "../src/util/util.h"
 
 #include "test_util.h"
-#include "testconfig.h"
 
-void test_leaves(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_leaves() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
   const LetterDistribution *letter_distribution =
       config_get_letter_distribution(config);
@@ -36,6 +36,8 @@ void test_leaves(TestConfig *testconfig) {
     destroy_string_splitter(leave_and_value);
   }
 
-  destroy_rack(rack);
   fclose(file);
+
+  destroy_rack(rack);
+  destroy_config(config);
 }

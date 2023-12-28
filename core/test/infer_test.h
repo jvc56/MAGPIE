@@ -1,8 +1,6 @@
 #ifndef INFER_TEST_H
 #define INFER_TEST_H
 
-#include "testconfig.h"
-
-void test_infer(TestConfig *testconfig);
+void test_infer();
 
 #endif

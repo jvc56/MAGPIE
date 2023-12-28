@@ -18,7 +18,6 @@
 
 #include "test_constants.h"
 #include "test_util.h"
-#include "testconfig.h"
 
 inference_status_t infer_for_test(const Config *config, Game *game,
                                   InferenceResults *inference_results) {
@@ -26,8 +25,9 @@ inference_status_t infer_for_test(const Config *config, Game *game,
   return status;
 }
 
-void test_trivial_random_probability(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_trivial_random_probability() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
   Game *game = create_game(config);
@@ -68,10 +68,12 @@ void test_trivial_random_probability(TestConfig *testconfig) {
   destroy_rack(leave);
   destroy_rack(bag_as_rack);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_infer_rack_overflow(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+void test_infer_rack_overflow() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_letter_distribution(config);
   Game *game = create_game(config);
 
@@ -91,10 +93,12 @@ void test_infer_rack_overflow(TestConfig *testconfig) {
 
   inference_results_destroy(inference_results);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_infer_no_tiles_played_rack_empty(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+void test_infer_no_tiles_played_rack_empty() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
 
   InferenceResults *inference_results = inference_results_create();
@@ -105,10 +109,12 @@ void test_infer_no_tiles_played_rack_empty(TestConfig *testconfig) {
 
   inference_results_destroy(inference_results);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_infer_no_tiles_played_rack_null(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+void test_infer_no_tiles_played_rack_null() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
 
   InferenceResults *inference_results = inference_results_create();
@@ -119,10 +125,12 @@ void test_infer_no_tiles_played_rack_null(TestConfig *testconfig) {
 
   inference_results_destroy(inference_results);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_infer_both_play_and_exchange(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+void test_infer_both_play_and_exchange() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
 
   InferenceResults *inference_results = inference_results_create();
@@ -133,10 +141,12 @@ void test_infer_both_play_and_exchange(TestConfig *testconfig) {
 
   inference_results_destroy(inference_results);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_infer_exchange_score_not_zero(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+void test_infer_exchange_score_not_zero() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
 
   InferenceResults *inference_results = inference_results_create();
@@ -147,10 +157,12 @@ void test_infer_exchange_score_not_zero(TestConfig *testconfig) {
 
   inference_results_destroy(inference_results);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_infer_exchange_not_allowed(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+void test_infer_exchange_not_allowed() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Bag *bag = game_get_bag(game);
 
@@ -169,10 +181,12 @@ void test_infer_exchange_not_allowed(TestConfig *testconfig) {
 
   inference_results_destroy(inference_results);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
+void test_infer_tiles_played_not_in_bag() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
 
   InferenceResults *inference_results = inference_results_create();
@@ -183,10 +197,12 @@ void test_infer_tiles_played_not_in_bag(TestConfig *testconfig) {
 
   inference_results_destroy(inference_results);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
-  Config *config = get_csw_config(testconfig);
+void test_infer_nonerror_cases(int number_of_threads) {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -705,18 +721,19 @@ void test_infer_nonerror_cases(TestConfig *testconfig, int number_of_threads) {
   destroy_rack(rack);
   inference_results_destroy(inference_results);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_infer(TestConfig *testconfig) {
-  test_trivial_random_probability(testconfig);
-  test_infer_rack_overflow(testconfig);
-  test_infer_no_tiles_played_rack_empty(testconfig);
-  test_infer_no_tiles_played_rack_null(testconfig);
-  test_infer_both_play_and_exchange(testconfig);
-  test_infer_exchange_score_not_zero(testconfig);
-  test_infer_exchange_not_allowed(testconfig);
-  test_infer_tiles_played_not_in_bag(testconfig);
-  test_infer_nonerror_cases(testconfig, 1);
-  test_infer_nonerror_cases(testconfig, 2);
-  test_infer_nonerror_cases(testconfig, 7);
+void test_infer() {
+  test_trivial_random_probability();
+  test_infer_rack_overflow();
+  test_infer_no_tiles_played_rack_empty();
+  test_infer_no_tiles_played_rack_null();
+  test_infer_both_play_and_exchange();
+  test_infer_exchange_score_not_zero();
+  test_infer_exchange_not_allowed();
+  test_infer_tiles_played_not_in_bag();
+  test_infer_nonerror_cases(1);
+  test_infer_nonerror_cases(2);
+  test_infer_nonerror_cases(7);
 }

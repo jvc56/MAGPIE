@@ -7,10 +7,10 @@
 
 #include "rack_test.h"
 #include "test_util.h"
-#include "testconfig.h"
 
-void test_rack_main(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void test_rack_main() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
   Rack *rack = create_rack(ld_size);
@@ -81,6 +81,7 @@ void test_rack_main(TestConfig *testconfig) {
   assert(get_number_of_letters(rack) == 2);
 
   destroy_rack(rack);
+  destroy_config(config);
 }
 
-void test_rack(TestConfig *testconfig) { test_rack_main(testconfig); }
+void test_rack() { test_rack_main(); }

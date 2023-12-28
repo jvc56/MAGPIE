@@ -11,7 +11,6 @@
 #include "../src/util/string_util.h"
 
 #include "test_constants.h"
-#include "testconfig.h"
 
 const char *cgp1 = "4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/"
                    "15/15/15/15/15/15 AHMPRTU/ 177/44 0 lex CSW21; ld english;";

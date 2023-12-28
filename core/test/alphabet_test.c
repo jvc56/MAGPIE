@@ -7,10 +7,10 @@
 #include "../src/util/string_util.h"
 
 #include "test_util.h"
-#include "testconfig.h"
 
-void test_alphabet(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void test_alphabet() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   LetterDistribution *ld = config_get_letter_distribution(config);
   // Test blank
   assert(get_blanked_machine_letter(1) == (1 | BLANK_MASK));
@@ -60,7 +60,8 @@ void test_alphabet(TestConfig *testconfig) {
   assert_strings_equal(string_builder_peek(letter), "D");
   string_builder_clear(letter);
 
-  const Config *catalan_config = get_disc_config(testconfig);
+  Config *catalan_config = create_config_or_die(
+      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
   LetterDistribution *catalan_ld =
       config_get_letter_distribution(catalan_config);
 
@@ -70,4 +71,6 @@ void test_alphabet(TestConfig *testconfig) {
   string_builder_clear(letter);
 
   destroy_string_builder(letter);
+  destroy_config(config);
+  destroy_config(catalan_config);
 }

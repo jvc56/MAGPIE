@@ -12,10 +12,10 @@
 #include "../src/impl/autoplay.h"
 
 #include "test_util.h"
-#include "testconfig.h"
 
-void autoplay_game_pairs_test(TestConfig *testconfig) {
-  Config *csw_config = get_csw_config(testconfig);
+void autoplay_game_pairs_test() {
+  Config *csw_config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
 
   uint64_t seed = time(NULL);
 
@@ -53,8 +53,7 @@ void autoplay_game_pairs_test(TestConfig *testconfig) {
   assert(get_total_games(autoplay_results) == max_iterations);
 
   destroy_autoplay_results(autoplay_results);
+  destroy_config(csw_config);
 }
 
-void test_autoplay(TestConfig *testconfig) {
-  autoplay_game_pairs_test(testconfig);
-}
+void test_autoplay() { autoplay_game_pairs_test(); }

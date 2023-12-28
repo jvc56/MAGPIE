@@ -30,46 +30,44 @@
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "test_constants.h"
-#include "testconfig.h"
 #include "wasm_api_test.h"
 #include "word_test.h"
 
-void run_all(TestConfig *testconfig) {
+void run_all() {
   // Test the loading of the config
   test_players_data();
   test_config();
 
   // Test the readonly data first
   test_string_util();
-  test_alphabet(testconfig);
-  test_letter_distribution(testconfig);
-  test_str_to_machine_letters(testconfig);
-  test_leaves(testconfig);
-  test_leave_map(testconfig);
+  test_alphabet();
+  test_letter_distribution();
+  test_leaves();
+  test_leave_map();
 
   // Now test the rest
-  test_bag(testconfig);
-  test_rack(testconfig);
-  test_board(testconfig);
-  test_cross_set(testconfig);
-  test_game(testconfig);
-  test_shadow(testconfig);
-  test_move_gen(testconfig);
-  test_equity_adjustments(testconfig);
-  test_gameplay(testconfig);
+  test_bag();
+  test_rack();
+  test_board();
+  test_cross_set();
+  test_game();
+  test_shadow();
+  test_move_gen();
+  test_equity_adjustments();
+  test_gameplay();
   test_stats();
-  test_infer(testconfig);
-  test_sim(testconfig);
+  test_infer();
+  test_sim();
   // FIXME: find out why this breaks
   // on github CLI
-  // test_command(testconfig);
+  // test_command();
   test_gcg();
-  test_autoplay(testconfig);
+  test_autoplay();
   test_wasm_api();
   test_file_handler();
 }
 
-void run_test(TestConfig *testconfig, const char *subtest) {
+void run_test(const char *subtest) {
   if (strings_equal(subtest, "config")) {
     test_config();
   } else if (strings_equal(subtest, "players")) {
@@ -77,47 +75,45 @@ void run_test(TestConfig *testconfig, const char *subtest) {
   } else if (strings_equal(subtest, "string")) {
     test_string_util();
   } else if (strings_equal(subtest, "alpha")) {
-    test_alphabet(testconfig);
+    test_alphabet();
   } else if (strings_equal(subtest, "ld")) {
-    test_letter_distribution(testconfig);
-  } else if (strings_equal(subtest, "sml")) {
-    test_str_to_machine_letters(testconfig);
+    test_letter_distribution();
   } else if (strings_equal(subtest, "l")) {
-    test_leaves(testconfig);
+    test_leaves();
   } else if (strings_equal(subtest, "leavemap")) {
-    test_leave_map(testconfig);
+    test_leave_map();
   } else if (strings_equal(subtest, "bag")) {
-    test_bag(testconfig);
+    test_bag();
   } else if (strings_equal(subtest, "rack")) {
-    test_rack(testconfig);
+    test_rack();
   } else if (strings_equal(subtest, "board")) {
-    test_board(testconfig);
+    test_board();
   } else if (strings_equal(subtest, "crossset")) {
-    test_cross_set(testconfig);
+    test_cross_set();
   } else if (strings_equal(subtest, "game")) {
-    test_game(testconfig);
+    test_game();
   } else if (strings_equal(subtest, "shadow")) {
-    test_shadow(testconfig);
+    test_shadow();
   } else if (strings_equal(subtest, "movegen")) {
-    test_move_gen(testconfig);
+    test_move_gen();
   } else if (strings_equal(subtest, "eq")) {
-    test_equity_adjustments(testconfig);
+    test_equity_adjustments();
   } else if (strings_equal(subtest, "gameplay")) {
-    test_gameplay(testconfig);
+    test_gameplay();
   } else if (strings_equal(subtest, "stats")) {
-    test_stats(testconfig);
+    test_stats();
   } else if (strings_equal(subtest, "infer")) {
-    test_infer(testconfig);
+    test_infer();
   } else if (strings_equal(subtest, "sim")) {
-    test_sim(testconfig);
+    test_sim();
   } else if (strings_equal(subtest, "command")) {
-    test_command(testconfig);
+    test_command();
   } else if (strings_equal(subtest, "gcg")) {
-    test_gcg(testconfig);
+    test_gcg();
   } else if (strings_equal(subtest, "autoplay")) {
-    test_autoplay(testconfig);
+    test_autoplay();
   } else if (strings_equal(subtest, "wasm")) {
-    test_wasm_api(testconfig);
+    test_wasm_api();
   } else if (strings_equal(subtest, "fh")) {
     test_file_handler();
   } else {
@@ -127,27 +123,11 @@ void run_test(TestConfig *testconfig, const char *subtest) {
 
 int main(int argc, char *argv[]) {
   log_set_level(LOG_WARN);
-
-  TestConfig *testconfig = create_testconfig(
-      // CSW
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1000000",
-      // NWL
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1000000",
-      // OSPS
-      "setoptions lex OSPS44 s1 equity s2 equity r1 all r2 all numplays "
-      "1000000",
-      // DISC
-      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1000000",
-      // Distinct lexica
-      "setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity r1 all r2 all numplays "
-      "1000000");
-
   if (argc == 1) {
-    run_all(testconfig);
+    run_all();
   } else {
     for (int i = 1; i < argc; i++) {
-      run_test(testconfig, argv[i]);
+      run_test(argv[i]);
     }
   }
-  destroy_testconfig(testconfig);
 }

@@ -13,10 +13,10 @@
 
 #include "test_constants.h"
 #include "test_util.h"
-#include "testconfig.h"
 
-void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_macondo_opening_equity_adjustments() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Player *player0 = game_get_player(game, 0);
   Rack *rack = player_get_rack(player0);
@@ -89,10 +89,12 @@ void test_macondo_opening_equity_adjustments(TestConfig *testconfig) {
   destroy_sorted_move_list(atalaya_sorted_move_list);
   destroy_move_list(move_list);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_macondo_endgame_equity_adjustments(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void test_macondo_endgame_equity_adjustments() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   MoveList *move_list = create_move_list(6);
 
@@ -150,9 +152,10 @@ void test_macondo_endgame_equity_adjustments(TestConfig *testconfig) {
   destroy_sorted_move_list(endgame_sorted_move_list);
   destroy_move_list(move_list);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_equity_adjustments(TestConfig *testconfig) {
-  test_macondo_opening_equity_adjustments(testconfig);
-  test_macondo_endgame_equity_adjustments(testconfig);
+void test_equity_adjustments() {
+  test_macondo_opening_equity_adjustments();
+  test_macondo_endgame_equity_adjustments();
 }

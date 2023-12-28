@@ -13,7 +13,6 @@
 #include "../src/ent/letter_distribution.h"
 
 #include "test_util.h"
-#include "testconfig.h"
 
 #define TEST_BAG_SIZE 100
 
@@ -31,8 +30,9 @@ int get_drawn_tile_index(int drawn_tiles, int player_index) {
   return player_index * TEST_BAG_SIZE + drawn_tiles;
 }
 
-void test_bag(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void test_bag() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
   Bag *bag = create_bag(ld);
@@ -206,4 +206,5 @@ void test_bag(TestConfig *testconfig) {
   destroy_bag(copy_of_bag);
   destroy_rack(rack);
   destroy_rack(rack2);
+  destroy_config(config);
 }

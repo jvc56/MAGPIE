@@ -21,7 +21,6 @@
 #include "rack_test.h"
 #include "test_constants.h"
 #include "test_util.h"
-#include "testconfig.h"
 
 int count_scoring_plays(const MoveList *ml) {
   int sum = 0;
@@ -114,8 +113,9 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
   destroy_sorted_move_list(sml);
 }
 
-void macondo_tests(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void macondo_tests() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = create_game(config);
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -308,10 +308,12 @@ void macondo_tests(TestConfig *testconfig) {
   destroy_move_list(move_list);
   destroy_game(game);
   destroy_game(game_two);
+  destroy_config(config);
 }
 
-void leave_lookup_test(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void leave_lookup_test() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   const KLV *klv = player_get_klv(game_get_player(game, 0));
@@ -343,10 +345,12 @@ void leave_lookup_test(TestConfig *testconfig) {
   destroy_rack(rack);
   destroy_move_list(move_list);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void exchange_tests(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void exchange_tests() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   MoveList *move_list = create_move_list(10);
 
@@ -382,10 +386,12 @@ void exchange_tests(TestConfig *testconfig) {
 
   destroy_move_list(move_list);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void many_moves_tests(TestConfig *testconfig) {
-  const Config *config = get_csw_config(testconfig);
+void many_moves_tests() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = create_game(config);
   MoveList *move_list = create_move_list(239000);
 
@@ -396,10 +402,12 @@ void many_moves_tests(TestConfig *testconfig) {
 
   destroy_move_list(move_list);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void equity_test(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void equity_test() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = create_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   int ld_size = letter_distribution_get_size(ld);
@@ -442,10 +450,12 @@ void equity_test(TestConfig *testconfig) {
   destroy_rack(move_rack);
   destroy_move_list(move_list);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void top_equity_play_recorder_test(TestConfig *testconfig) {
-  const Config *config = get_nwl_config(testconfig);
+void top_equity_play_recorder_test() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = create_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
@@ -468,10 +478,13 @@ void top_equity_play_recorder_test(TestConfig *testconfig) {
 
   destroy_move_list(move_list);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void distinct_lexica_test(TestConfig *testconfig) {
-  Config *config = get_distinct_lexica_config(testconfig);
+void distinct_lexica_test() {
+  Config *config =
+      create_config_or_die("setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity "
+                           "r1 all r2 all numplays 1");
   Game *game = create_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = create_move_list(1);
@@ -516,13 +529,14 @@ void distinct_lexica_test(TestConfig *testconfig) {
 
   destroy_move_list(move_list);
   destroy_game(game);
+  destroy_config(config);
 }
 
-void test_move_gen(TestConfig *testconfig) {
-  leave_lookup_test(testconfig);
-  macondo_tests(testconfig);
-  exchange_tests(testconfig);
-  equity_test(testconfig);
-  top_equity_play_recorder_test(testconfig);
-  distinct_lexica_test(testconfig);
+void test_move_gen() {
+  leave_lookup_test();
+  macondo_tests();
+  exchange_tests();
+  equity_test();
+  top_equity_play_recorder_test();
+  distinct_lexica_test();
 }
