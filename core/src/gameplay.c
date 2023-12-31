@@ -145,6 +145,12 @@ void draw_starting_racks(Game *game) {
 }
 
 void play_move(const Move *move, Game *game) {
+/*  
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_move(game->gen->board, move, game->gen->letter_distribution, sb);
+  printf("play_move: %s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+*/  
   if (game->backup_mode == BACKUP_MODE_SIMULATION) {
     backup_game(game);
   }
