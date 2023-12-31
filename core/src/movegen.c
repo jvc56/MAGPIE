@@ -485,6 +485,8 @@ void shadow_record(const Rack *opp_rack, Generator *gen, int left_col,
   }
 }
 
+bool is_single_bit_set(uint64_t i) { return i && !(i & (i - 1)); }
+
 void shadow_play_right(const Rack *opp_rack, Generator *gen,
                        int main_played_through_score,
                        int perpendicular_additional_score, int word_multiplier,
@@ -502,10 +504,12 @@ void shadow_play_right(const Rack *opp_rack, Generator *gen,
   uint64_t cross_set =
       get_cross_set(gen->board, gen->current_row_index, gen->current_right_col,
                     !dir_is_vertical(gen->dir), cross_set_index);
+  uint64_t old_rack_cross_set = gen->rack_cross_set;
   // Allowed if
   // there is a letter on the rack in the cross set or,
   // there is anything in the cross set and the rack has a blank.
-  if ((cross_set & gen->rack_cross_set) != 0 ||
+  uint64_t cross_set_rack_intersection = cross_set & gen->rack_cross_set;
+  if ((cross_set_rack_intersection != 0) ||
       ((gen->rack_cross_set & 1) && cross_set)) {
     // Play tile and update scoring parameters
 
@@ -544,12 +548,20 @@ void shadow_play_right(const Rack *opp_rack, Generator *gen,
                     perpendicular_additional_score, word_multiplier);
     }
 
+    if (is_single_bit_set(cross_set_rack_intersection) &&
+        ((cross_set_rack_intersection & gen->rack_unique_letters_set) != 0)) {
+      if (gen->use_unique_letter_optimization) {
+        gen->rack_cross_set =
+            gen->rack_cross_set & ~cross_set_rack_intersection;
+      }
+    }
     shadow_play_right(opp_rack, gen, main_played_through_score,
                       perpendicular_additional_score, word_multiplier,
                       is_unique, cross_set_index);
   }
   gen->tiles_played--;
   gen->current_right_col = original_current_right_col;
+  gen->rack_cross_set = old_rack_cross_set;
 }
 
 void shadow_play_left(const Rack *opp_rack, Generator *gen,
@@ -571,10 +583,12 @@ void shadow_play_left(const Rack *opp_rack, Generator *gen,
   uint64_t cross_set =
       get_cross_set(gen->board, gen->current_row_index, gen->current_left_col,
                     !dir_is_vertical(gen->dir), cross_set_index);
+  uint64_t old_rack_cross_set = gen->rack_cross_set;
   // Allowed if
   // there is a letter on the rack in the cross set or,
   // there is anything in the cross set and the rack has a blank.
-  if ((cross_set & gen->rack_cross_set) != 0 ||
+  uint64_t cross_set_rack_intersection = cross_set & gen->rack_cross_set;
+  if ((cross_set_rack_intersection != 0) ||
       ((gen->rack_cross_set & 1) && cross_set)) {
     // Play tile and update scoring parameters
 
@@ -597,6 +611,14 @@ void shadow_play_left(const Rack *opp_rack, Generator *gen,
                     gen->current_right_col, main_played_through_score,
                     perpendicular_additional_score, word_multiplier);
     }
+    if (is_single_bit_set(cross_set_rack_intersection) &&
+        ((cross_set_rack_intersection & gen->rack_unique_letters_set) != 0)) {
+      assert((gen->rack_cross_set & 1) == 0);
+      if (gen->use_unique_letter_optimization) {
+        gen->rack_cross_set =
+            gen->rack_cross_set & ~cross_set_rack_intersection;
+      }
+    }
     shadow_play_left(opp_rack, gen, main_played_through_score,
                      perpendicular_additional_score, word_multiplier, is_unique,
                      cross_set_index);
@@ -606,6 +628,7 @@ void shadow_play_left(const Rack *opp_rack, Generator *gen,
                     cross_set_index);
   gen->current_left_col = original_current_left_col;
   gen->tiles_played--;
+  gen->rack_cross_set = old_rack_cross_set;
 }
 
 void shadow_start(const Rack *opp_rack, Generator *gen, int cross_set_index) {
@@ -614,10 +637,16 @@ void shadow_start(const Rack *opp_rack, Generator *gen, int cross_set_index) {
   int word_multiplier = 1;
   uint8_t current_letter = get_letter_cache(gen, gen->current_left_col);
 
+  uint64_t old_rack_cross_set = gen->rack_cross_set;
+  uint64_t cross_set_rack_intersection = 0;
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+    uint64_t cross_set =
+        get_cross_set(gen->board, gen->current_row_index, gen->current_left_col,
+                      !dir_is_vertical(gen->dir), cross_set_index);
+    cross_set_rack_intersection = cross_set & gen->rack_cross_set;
     // Only play a letter if a letter from the rack fits in the cross set
-    if (shadow_allowed_in_cross_set(gen, gen->current_left_col,
-                                    cross_set_index)) {
+    if ((cross_set_rack_intersection != 0) ||
+        ((gen->rack_cross_set & 1) && cross_set)) {
       // Play tile and update scoring parameters
 
       uint8_t bonus_square = get_bonus_square(
@@ -660,12 +689,20 @@ void shadow_start(const Rack *opp_rack, Generator *gen, int cross_set_index) {
       }
     }
   }
+  if (is_single_bit_set(cross_set_rack_intersection) &&
+      ((cross_set_rack_intersection & gen->rack_unique_letters_set) != 0)) {
+    assert((gen->rack_cross_set & 1) == 0);
+    if (gen->use_unique_letter_optimization) {
+      gen->rack_cross_set = gen->rack_cross_set & ~cross_set_rack_intersection;
+    }
+  }
   shadow_play_left(opp_rack, gen, main_played_through_score,
                    perpendicular_additional_score, word_multiplier,
                    !dir_is_vertical(gen->dir), cross_set_index);
   shadow_play_right(opp_rack, gen, main_played_through_score,
                     perpendicular_additional_score, word_multiplier,
                     !dir_is_vertical(gen->dir), cross_set_index);
+  gen->rack_cross_set = old_rack_cross_set;
 }
 
 void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
@@ -689,11 +726,20 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
 
   // Set rack cross set
   gen->rack_cross_set = 0;
+  gen->rack_unique_letters_set = 0;
   for (uint32_t i = 0; i < gen->letter_distribution->size; i++) {
     if (player->rack->array[i] > 0) {
-      gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
+      const uint64_t bit = 1ULL << i;
+      gen->rack_cross_set |= bit;
+      if (player->rack->array[i] == 1) {
+        gen->rack_unique_letters_set |= bit;
+      }
     }
   }
+  if (player->rack->array[0] > 0) {
+    gen->rack_unique_letters_set = 0;
+  }
+  gen->use_unique_letter_optimization = false; //(player->index == 0);
 
   shadow_start(opp_rack, gen, get_cross_set_index(gen, player->index));
   if (gen->max_tiles_to_play == 0) {
@@ -772,16 +818,26 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
     transpose(gen->board);
   }
 
+  /*
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_rack(player->rack, gen->letter_distribution, sb);
+
+    uint64_t start_time;
+    uint64_t end_time;
+    */
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
   sort_anchor_list(gen->anchor_list);
+  // uint64_t total_anchor_search_time = 0;
+  // int anchors_searched = 0;
   for (int i = 0; i < gen->anchor_list->count; i++) {
     if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(
             gen, gen->anchor_list->anchors[i]->highest_possible_equity)) {
       break;
     }
+    // start_time = __rdtsc();
     gen->current_anchor_col = gen->anchor_list->anchors[i]->col;
     gen->current_row_index = gen->anchor_list->anchors[i]->row;
     gen->last_anchor_col = gen->anchor_list->anchors[i]->last_anchor_col;
@@ -791,15 +847,44 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
     recursive_gen(opp_rack, gen, gen->current_anchor_col, player,
                   kwg_get_root_node_index(player->kwg), gen->current_anchor_col,
                   gen->current_anchor_col, !gen->dir);
-
+    /*
+        end_time = __rdtsc();
+        const uint64_t elapsed_time = end_time - start_time;
+        total_anchor_search_time += elapsed_time;
+        printf(
+            "player: %i, rack: %s, i: %i, row: %i, col: %i, dir: %i, time:
+       %lluns, " "moves[0].equity: %f, highest_possible_equity: %f\n ",
+            player->index, string_builder_peek(sb), i, gen->current_row_index,
+            gen->current_anchor_col, gen->dir, elapsed_time,
+            gen->move_list->moves[0]->equity,
+            gen->anchor_list->anchors[i]->highest_possible_equity);
+        anchors_searched++;
+        */
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for this
       // anchor, highest_possible_equity was invalid.
+      if (gen->move_list->moves[0]->equity >
+          gen->anchor_list->anchors[i]->highest_possible_equity) {
+        printf(
+            "Better play found than should have been possible for this "
+            "anchor! move: ");
+        StringBuilder *move_string_builder = create_string_builder();
+        string_builder_add_move(gen->board, gen->move_list->moves[0],
+                                gen->letter_distribution, move_string_builder);
+        printf("%s\n", string_builder_peek(move_string_builder));
+        destroy_string_builder(move_string_builder);
+      }
       assert(!better_play_has_been_found(
           gen, gen->anchor_list->anchors[i]->highest_possible_equity));
     }
   }
 
+  /*
+    printf("player: %i rack: %s time: %lluns anchors searched: %d\n",
+           player->index, string_builder_peek(sb), total_anchor_search_time,
+           anchors_searched);
+    destroy_string_builder(sb);
+  */
   reset_transpose(gen->board);
 
   // Add the pass move

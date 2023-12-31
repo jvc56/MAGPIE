@@ -52,6 +52,8 @@ typedef struct Generator {
   int current_right_col;
   double highest_shadow_equity;
   uint64_t rack_cross_set;
+  uint64_t rack_unique_letters_set;
+  bool use_unique_letter_optimization;
   int number_of_letters_on_rack;
   int descending_tile_scores[(RACK_SIZE)];
   double best_leaves[(RACK_SIZE)];

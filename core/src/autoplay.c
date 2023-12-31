@@ -95,6 +95,12 @@ void play_autoplay_game(Game *game, AutoplayResults *autoplay_results,
   set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (game->game_end_reason == GAME_END_REASON_NONE) {
+/*    
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_game(game, sb);
+    printf("%s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+*/    
     generate_moves(
         game->players[1 - game->player_on_turn_index]->rack, game->gen,
         game->players[game->player_on_turn_index],
