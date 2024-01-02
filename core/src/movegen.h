@@ -36,6 +36,11 @@ typedef struct Generator {
   bool apply_placement_adjustment;
 
   uint8_t row_letter_cache[(BOARD_DIM)];
+  bool is_cross_word_cache[(BOARD_DIM)];
+  uint8_t bonus_square_cache[(BOARD_DIM)];
+  uint64_t cross_set_cache[(BOARD_DIM)];
+  int bag_tiles_remaining;
+  
   uint8_t strip[(BOARD_DIM)];
   uint8_t *exchange_strip;
   double preendgame_adjustment_values[PREENDGAME_ADJUSTMENT_VALUES_LENGTH];
