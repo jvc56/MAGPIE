@@ -16,7 +16,7 @@ void autoplay_game_pairs_test(TestConfig *testconfig) {
   uint64_t seed = time(NULL);
   seed = 1703698211;  // DO NOT MERGE
   char *options_string =
-      get_formatted_string("setoptions i 1000 gp threads 11 rs %ld", seed);  // DO NOT MERGE
+      get_formatted_string("setoptions i 10000 gp threads 1 rs %ld", seed);  // DO NOT MERGE
 
   load_config_or_die(csw_config, options_string);
 

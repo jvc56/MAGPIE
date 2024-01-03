@@ -59,7 +59,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   FormedWords *fw = NULL;
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Assume that that kwg is shared
-    points = score_move(game->gen->board, game->gen->letter_distribution, tiles,
+    points = score_move(game->gen, game->gen->board, game->gen->letter_distribution, tiles,
                         0, ntiles - 1, row, col, tiles_played, !dir, 0);
 
     if (dir_is_vertical(dir)) {

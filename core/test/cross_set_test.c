@@ -70,7 +70,8 @@ void set_col(Game *game, int col, const char *col_content) {
 void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
                         const char *letters, int expected_cross_score,
                         bool run_gcs) {
-  int cross_set_index = get_cross_set_index(game->gen, player_index);
+  game->gen->player_index = player_index;                          
+  int cross_set_index = get_cross_set_index(game->gen);
   if (run_gcs) {
     gen_cross_set(game->players[player_index]->kwg,
                   game->gen->letter_distribution, game->gen->board, row, col,

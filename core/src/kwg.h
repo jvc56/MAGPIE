@@ -11,20 +11,40 @@ typedef struct KWG {
 KWG *create_kwg(const char *kwg_name);
 void destroy_kwg(KWG *kwg);
 
+inline uint32_t kwg_node(const KWG *kwg, int node_index) {
+  return kwg->nodes[node_index];
+}
+
 inline bool kwg_is_end(const KWG *kwg, int node_index) {
   return (kwg->nodes[node_index] & 0x400000) != 0;
+}
+
+inline bool kwg_node_is_end(uint32_t node) {
+  return (node & 0x400000) != 0;
 }
 
 inline bool kwg_accepts(const KWG *kwg, int node_index) {
   return (kwg->nodes[node_index] & 0x800000) != 0;
 }
 
+inline bool kwg_node_accepts(uint32_t node) {
+  return (node & 0x800000) != 0;
+}
+
 inline int kwg_arc_index(const KWG *kwg, int node_index) {
   return (kwg->nodes[node_index] & 0x3fffff);
 }
 
+inline int kwg_node_arc_index(uint32_t node) {
+  return (node & 0x3fffff);
+}
+
 inline int kwg_tile(const KWG *kwg, int node_index) {
   return kwg->nodes[node_index] >> 24;
+}
+
+inline int kwg_node_tile(uint32_t node) {
+  return node >> 24;
 }
 
 inline int kwg_get_root_node_index(const KWG *kwg) {

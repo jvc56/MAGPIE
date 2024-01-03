@@ -69,10 +69,11 @@ extern inline int kwg_get_root_node_index(const KWG *kwg);
 int kwg_get_next_node_index(const KWG *kwg, int node_index, int letter) {
   int i = node_index;
   while (1) {
-    if (kwg_tile(kwg, i) == letter) {
-      return kwg_arc_index(kwg, i);
+    const uint32_t node = kwg_node(kwg, i);
+    if (kwg_node_tile(node) == letter) {
+      return kwg_node_arc_index(node);
     }
-    if (kwg_is_end(kwg, i)) {
+    if (kwg_node_is_end(node)) {
       return 0;
     }
     i++;
@@ -83,10 +84,11 @@ bool kwg_in_letter_set(const KWG *kwg, int letter, int node_index) {
   letter = get_unblanked_machine_letter(letter);
   int i = node_index;
   while (1) {
-    if (kwg_tile(kwg, i) == letter) {
-      return kwg_accepts(kwg, i);
+    const uint32_t node = kwg_node(kwg, i);
+    if (kwg_node_tile(node) == letter) {
+      return kwg_node_accepts(node);
     }
-    if (kwg_is_end(kwg, i)) {
+    if (kwg_node_is_end(node)) {
       return false;
     }
     i++;
@@ -97,11 +99,12 @@ uint64_t kwg_get_letter_set(const KWG *kwg, int node_index) {
   uint64_t ls = 0;
   int i = node_index;
   while (1) {
-    int t = kwg_tile(kwg, i);
-    if (kwg_accepts(kwg, i)) {
+    const uint32_t node = kwg_node(kwg, i);
+    int t = kwg_node_tile(node);
+    if (kwg_node_accepts(node)) {
       ls |= ((uint64_t)1 << t);
     }
-    if (kwg_is_end(kwg, i)) {
+    if (kwg_node_is_end(node)) {
       break;
     }
     i++;

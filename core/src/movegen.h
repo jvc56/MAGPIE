@@ -32,6 +32,11 @@ typedef struct Generator {
   int number_of_plays;
   int move_sort_type;
   int move_record_type;
+  int player_index;
+  const KWG *kwg;
+  int kwg_root_index;
+  const KLV *klv;
+
   bool kwgs_are_distinct;
   bool apply_placement_adjustment;
 
@@ -39,6 +44,7 @@ typedef struct Generator {
   bool is_cross_word_cache[(BOARD_DIM)];
   uint8_t bonus_square_cache[(BOARD_DIM)];
   uint64_t cross_set_cache[(BOARD_DIM)];
+  uint8_t cross_score_cache[(BOARD_DIM)];
   int bag_tiles_remaining;
   
   uint8_t strip[(BOARD_DIM)];
@@ -51,6 +57,7 @@ typedef struct Generator {
 
   LeaveMap *leave_map;
   const LetterDistribution *letter_distribution;
+  uint8_t tile_scores[(MAX_ALPHABET_SIZE)];
 
   // Shadow plays
   int current_left_col;
@@ -78,8 +85,8 @@ void recursive_gen(const Rack *opp_rack, Generator *gen, int col,
                    int rightstrip, bool unique_play);
 void reset_generator(Generator *gen);
 void load_row_letter_cache(Generator *gen, int row);
-int get_cross_set_index(const Generator *gen, int player_index);
-int score_move(const Board *board,
+int get_cross_set_index(const Generator *gen);
+int score_move(Generator *gen, const Board *board,
                const LetterDistribution *letter_distribution, uint8_t word[],
                int word_start_index, int word_end_index, int row, int col,
                int tiles_played, int cross_dir, int cross_set_index);

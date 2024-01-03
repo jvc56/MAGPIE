@@ -104,16 +104,17 @@ void gen_cross_set(const KWG *kwg,
           get_cross_set_pointer(board, row, col, dir, cross_set_index);
       *cross_set = 0;
       for (int i = lnode_index;; i++) {
-        int t = kwg_tile(kwg, i);
+        uint32_t node = kwg_node(kwg, i);
+        int t = kwg_node_tile(node);
         if (t != 0) {
-          int next_node_index = kwg_arc_index(kwg, i);
+          int next_node_index = kwg_node_arc_index(node);
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
                              left_col);
           if (board->traverse_backwards_return_values->path_is_valid) {
             set_cross_set_letter(cross_set, t);
           }
         }
-        if (kwg_is_end(kwg, i)) {
+        if (kwg_node_is_end(node)) {
           break;
         }
       }
