@@ -29,8 +29,8 @@ void play_move_on_board(const Move *move, Game *game) {
       letter = BLANK_MACHINE_LETTER;
     }
     rack_take_letter(player_get_rack(game_get_player(
-                              game, game_get_player_on_turn_index(game))),
-                          letter);
+                         game, game_get_player_on_turn_index(game))),
+                     letter);
   }
 
   board_increment_tiles_played(board, move_get_tiles_played(move));
@@ -75,13 +75,10 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
     int left_col =
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
-    const KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
-    const LetterDistribution *ld = game_get_ld(game);
     game_gen_cross_set(game, row, right_col + 1, csd, 0);
     game_gen_cross_set(game, row, left_col - 1, csd, 0);
     game_gen_cross_set(game, row, col_start, csd, 0);
     if (!kwgs_are_shared) {
-      const KWG *player1_kwg = player_get_kwg(game_get_player(game, 1));
       game_gen_cross_set(game, row, right_col + 1, csd, 1);
       game_gen_cross_set(game, row, left_col - 1, csd, 1);
       game_gen_cross_set(game, row, col_start, csd, 1);
@@ -91,17 +88,11 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
 
 void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
                    int csd) {
-  const KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
-  Board *board = game_get_board(game);
-  const LetterDistribution *ld = game_get_ld(game);
-  bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-
   for (int col = col_start - 1; col <= col_start + move_get_tiles_length(move);
        col++) {
     game_gen_cross_set(game, row_start, col, csd, 0);
   }
-  if (!kwgs_are_shared) {
-    const KWG *player1_kwg = player_get_kwg(game_get_player(game, 1));
+  if (!game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
     for (int col = col_start - 1;
          col <= col_start + move_get_tiles_length(move); col++) {
       game_gen_cross_set(game, row_start, col, csd, 1);

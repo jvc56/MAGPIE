@@ -179,7 +179,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     return;
   }
 
-  KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
   const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
 

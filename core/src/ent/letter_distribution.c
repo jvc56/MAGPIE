@@ -30,48 +30,6 @@ struct LetterDistribution {
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 };
 
-LetterDistribution *ld_create(const char *ld_name) {
-  LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
-  load_ld(ld, ld_name);
-  return ld;
-}
-
-void ld_destroy(LetterDistribution *ld) {
-  free(ld->distribution);
-  free(ld->scores);
-  free(ld->is_vowel);
-  free(ld->score_order);
-  free(ld);
-}
-
-int ld_get_size(const LetterDistribution *ld) { return ld->size; }
-
-int ld_get_dist(const LetterDistribution *ld, uint8_t machine_letter) {
-  return ld->distribution[machine_letter];
-}
-
-int ld_get_score(const LetterDistribution *ld, uint8_t machine_letter) {
-  return ld->scores[machine_letter];
-}
-
-int ld_get_score_order(const LetterDistribution *ld, uint8_t machine_letter) {
-  return ld->score_order[machine_letter];
-}
-
-bool ld_get_is_vowel(const LetterDistribution *ld, uint8_t machine_letter) {
-  return ld->is_vowel[machine_letter];
-}
-
-int ld_get_total_tiles(const LetterDistribution *ld) { return ld->total_tiles; }
-
-int ld_get_max_tile_length(const LetterDistribution *ld) {
-  return ld->max_tile_length;
-}
-
-extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
-extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
-extern inline bool get_is_blanked(uint8_t ml);
-
 char *get_ld_filepath(const char *ld_name) {
   // Check for invalid inputs
   if (!ld_name) {
@@ -167,6 +125,44 @@ void load_ld(LetterDistribution *ld, const char *ld_name) {
   sort_score_order(ld);
 
   ld->max_tile_length = max_tile_length;
+}
+
+LetterDistribution *ld_create(const char *ld_name) {
+  LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
+  load_ld(ld, ld_name);
+  return ld;
+}
+
+void ld_destroy(LetterDistribution *ld) {
+  free(ld->distribution);
+  free(ld->scores);
+  free(ld->is_vowel);
+  free(ld->score_order);
+  free(ld);
+}
+
+int ld_get_size(const LetterDistribution *ld) { return ld->size; }
+
+int ld_get_dist(const LetterDistribution *ld, uint8_t machine_letter) {
+  return ld->distribution[machine_letter];
+}
+
+int ld_get_score(const LetterDistribution *ld, uint8_t machine_letter) {
+  return ld->scores[machine_letter];
+}
+
+int ld_get_score_order(const LetterDistribution *ld, uint8_t machine_letter) {
+  return ld->score_order[machine_letter];
+}
+
+bool ld_get_is_vowel(const LetterDistribution *ld, uint8_t machine_letter) {
+  return ld->is_vowel[machine_letter];
+}
+
+int ld_get_total_tiles(const LetterDistribution *ld) { return ld->total_tiles; }
+
+int ld_get_max_tile_length(const LetterDistribution *ld) {
+  return ld->max_tile_length;
 }
 
 char *ld_ml_to_hl(const LetterDistribution *ld, uint8_t ml) {

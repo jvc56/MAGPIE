@@ -53,8 +53,4 @@ void sim_results_increment_iteration_count(SimResults *sim_results);
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
 
-double get_probability_for_random_minimum_draw(
-    const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
-    int minimum, int number_of_target_played_tiles);
-
 #endif

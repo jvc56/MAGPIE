@@ -21,7 +21,7 @@
 #include "infer_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
-#include "ld_test.h"
+#include "letter_distribution_test.h"
 #include "move_gen_test.h"
 #include "players_data_test.h"
 #include "rack_test.h"

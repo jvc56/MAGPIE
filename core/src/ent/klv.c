@@ -65,6 +65,41 @@ float convert_little_endian_to_host(const float little_endian_float) {
   }
 }
 
+int klv_count_words_at(const KLV *klv, int p, int kwg_size) {
+  if (p >= kwg_size) {
+    return 0;
+  }
+  if (klv->word_counts[p] == -1) {
+    log_fatal("unexpected -1 at %d\n", p);
+  }
+  if (klv->word_counts[p] == 0) {
+    klv->word_counts[p] = -1;
+
+    int a = 0;
+    if (kwg_accepts(klv->kwg, p)) {
+      a = 1;
+    }
+    int b = 0;
+    int arc_index_p = kwg_arc_index(klv->kwg, p);
+    if (arc_index_p != 0) {
+      b = klv_count_words_at(klv, arc_index_p, kwg_size);
+    }
+    int c = 0;
+    bool is_not_end = !kwg_is_end(klv->kwg, p);
+    if (is_not_end) {
+      c = klv_count_words_at(klv, p + 1, kwg_size);
+    }
+    klv->word_counts[p] = a + b + c;
+  }
+  return klv->word_counts[p];
+}
+
+void klv_count_words(const KLV *klv, size_t kwg_size) {
+  for (int p = kwg_size - 1; p >= 0; p--) {
+    klv_count_words_at(klv, p, (int)kwg_size);
+  }
+}
+
 void klv_load(KLV *klv, const char *klv_name) {
   char *klv_filename = klv_get_filepath(klv_name);
   FILE *stream = stream_from_filename(klv_filename);
@@ -131,41 +166,6 @@ int klv_get_word_count(const KLV *klv, int word_count_index) {
 }
 
 const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
-
-int klv_count_words_at(const KLV *klv, int p, int kwg_size) {
-  if (p >= kwg_size) {
-    return 0;
-  }
-  if (klv->word_counts[p] == -1) {
-    log_fatal("unexpected -1 at %d\n", p);
-  }
-  if (klv->word_counts[p] == 0) {
-    klv->word_counts[p] = -1;
-
-    int a = 0;
-    if (kwg_accepts(klv->kwg, p)) {
-      a = 1;
-    }
-    int b = 0;
-    int arc_index_p = kwg_arc_index(klv->kwg, p);
-    if (arc_index_p != 0) {
-      b = klv_count_words_at(klv, arc_index_p, kwg_size);
-    }
-    int c = 0;
-    bool is_not_end = !kwg_is_end(klv->kwg, p);
-    if (is_not_end) {
-      c = klv_count_words_at(klv, p + 1, kwg_size);
-    }
-    klv->word_counts[p] = a + b + c;
-  }
-  return klv->word_counts[p];
-}
-
-void klv_count_words(const KLV *klv, size_t kwg_size) {
-  for (int p = kwg_size - 1; p >= 0; p--) {
-    klv_count_words_at(klv, p, (int)kwg_size);
-  }
-}
 
 int klv_get_word_index_of(const KLV *klv, const Rack *leave,
                           uint32_t node_index) {

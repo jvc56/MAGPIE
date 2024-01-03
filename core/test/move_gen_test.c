@@ -121,7 +121,6 @@ void macondo_tests() {
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(10000);
-  const KWG *kwg = player_get_kwg(player);
 
   // TestSimpleRowGen
   assert_move_gen_row(game, move_list, "P", "5REGNANT3", 2, 8, 1, NULL, NULL);
@@ -180,7 +179,8 @@ void macondo_tests() {
   int highest_scores[] = {38, 36, 36, 34, 34, 33, 30, 30, 30, 28};
   int number_of_highest_scores = sizeof(highest_scores) / sizeof(int);
   for (int i = 0; i < number_of_highest_scores; i++) {
-    assert(move_get_score(test_gen_all_moves_full_rack_sorted_move_list->moves[i]) ==
+    assert(move_get_score(
+               test_gen_all_moves_full_rack_sorted_move_list->moves[i]) ==
            highest_scores[i]);
   }
 
@@ -284,15 +284,12 @@ void macondo_tests() {
 
   Game *game_two = game_create(config);
   Board *board_two = game_get_board(game_two);
-  const LetterDistribution *ld_two = game_get_ld(game_two);
 
   set_row(game_two, 7, " INCITES");
   set_row(game_two, 8, "IS");
   set_row(game_two, 9, "T");
   board_update_all_anchors(board_two);
-  game_gen_all_cross_sets(
-      kwg, kwg, ld_two, board_two,
-      game_get_data_is_shared(game_two, PLAYERS_DATA_TYPE_KWG));
+  game_gen_all_cross_sets(game_two);
 
   assert_boards_are_equal(board, board_two);
 

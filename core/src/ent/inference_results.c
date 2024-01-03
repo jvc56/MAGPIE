@@ -215,8 +215,60 @@ void inference_results_set_stat_for_letter(InferenceResults *inference_results,
   // We do not have direct stats for when the letter
   // was never drawn so we infer it here
   uint64_t number_of_draws_without_letter =
-      stat_get_weight(inference_results_get_equity_values(inference_results,
-                                                     inference_stat_type)) -
+      stat_get_weight(inference_results_get_equity_values(
+          inference_results, inference_stat_type)) -
       stat_get_weight(stat);
   stat_push(stat, 0, number_of_draws_without_letter);
+}
+
+double get_probability_for_random_minimum_draw(
+    const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
+    int minimum, int number_of_target_played_tiles) {
+  int number_of_this_letters_already_on_rack =
+      rack_get_letter(target_rack, this_letter);
+  int minimum_adjusted_for_partial_rack =
+      minimum - number_of_this_letters_already_on_rack;
+  // If the partial leave already has the minimum
+  // number of letters, the probability is trivially 1.
+  if (minimum_adjusted_for_partial_rack <= 0) {
+    return 1;
+  }
+  int total_number_of_letters_in_bag = rack_get_total_letters(bag_as_rack);
+  int total_number_of_letters_on_rack = rack_get_total_letters(target_rack);
+  int number_of_this_letter_in_bag = rack_get_letter(bag_as_rack, this_letter);
+
+  // If there are not enough letters to meet the minimum, the probability
+  // is trivially 0.
+  if (number_of_this_letter_in_bag < minimum_adjusted_for_partial_rack) {
+    return 0;
+  }
+
+  int total_number_of_letters_to_draw =
+      (RACK_SIZE) -
+      (total_number_of_letters_on_rack + number_of_target_played_tiles);
+
+  // If the player is emptying the bag and there are the minimum
+  // number of leaves remaining, the probability is trivially 1.
+  if (total_number_of_letters_in_bag <= total_number_of_letters_to_draw &&
+      number_of_this_letter_in_bag >= minimum_adjusted_for_partial_rack) {
+    return 1;
+  }
+
+  uint64_t total_draws =
+      choose(total_number_of_letters_in_bag, total_number_of_letters_to_draw);
+  if (total_draws == 0) {
+    return 0;
+  }
+  int number_of_other_letters_in_bag =
+      total_number_of_letters_in_bag - number_of_this_letter_in_bag;
+  uint64_t total_draws_for_this_letter_minimum = 0;
+  for (int i = minimum_adjusted_for_partial_rack;
+       i <= total_number_of_letters_to_draw; i++) {
+    total_draws_for_this_letter_minimum +=
+        choose(number_of_this_letter_in_bag, i) *
+        choose(number_of_other_letters_in_bag,
+               total_number_of_letters_to_draw - i);
+  }
+
+  return ((double)total_draws_for_this_letter_minimum) / total_draws;
 }

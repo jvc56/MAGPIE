@@ -106,7 +106,7 @@ void formed_words_destroy(FormedWords *fw) { free(fw); }
 
 int formed_words_get_num_words(const FormedWords *fw) { return fw->num_words; }
 
-uint8_t *formed_words_get_word(const FormedWords *fw, int word_index) {
+const uint8_t *formed_words_get_word(const FormedWords *fw, int word_index) {
   return fw->words[word_index].word;
 }
 

@@ -92,8 +92,6 @@ void test_cross_set() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = game_create(config);
-  Player *player0 = game_get_player(game, 0);
-  const KWG *kwg = player_get_kwg(player0);
 
   // TestGencross_setLoadedGame
   game_load_cgp(game, VS_MATT);
@@ -166,7 +164,6 @@ void test_cross_set() {
 
   // TestUpdateSinglecross_set
   Board *board = game_get_board(game);
-  const LetterDistribution *ld = game_get_ld(game);
   game_load_cgp(game, VS_MATT);
   board_set_letter(board, 8, 10, 19);
   board_set_letter(board, 9, 10, 0);

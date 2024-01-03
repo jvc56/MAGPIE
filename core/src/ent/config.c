@@ -57,10 +57,10 @@
 #define ARG_STOPPING_CONDITION "cond"
 #define ARG_STATIC_SEARCH_ON "static"
 #define ARG_STATIC_SEARCH_OFF "nostatic"
-#define ARG_target_index "pindex"
+#define ARG_TARGET_INDEX "pindex"
 #define ARG_SCORE "score"
 #define ARG_EQUITY_MARGIN "eq"
-#define ARG_target_number_of_tiles_exchanged "exch"
+#define ARG_TARGET_NUMBER_OF_TILES_EXCHANGED "exch"
 #define ARG_GAME_PAIRS_ON "gp"
 #define ARG_GAME_PAIRS_OFF "nogp"
 #define ARG_RANDOM_SEED "rs"
@@ -236,9 +236,7 @@ command_t config_get_command_type(const Config *config) {
   return config->command_type;
 }
 
-LetterDistribution *config_get_ld(const Config *config) {
-  return config->ld;
-}
+LetterDistribution *config_get_ld(const Config *config) { return config->ld; }
 
 char *config_get_ld_name(const Config *config) { return config->ld_name; }
 
@@ -409,14 +407,14 @@ ParsedArgs *create_parsed_args() {
 
   // Inference args
   // rack is KNOWN_OPP_RACK shared with sim
-  set_single_arg(parsed_args, index++, ARG_TOKEN_target_index, ARG_target_index,
+  set_single_arg(parsed_args, index++, ARG_TOKEN_target_index, ARG_TARGET_INDEX,
                  1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_SCORE, ARG_SCORE, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_EQUITY_MARGIN,
                  ARG_EQUITY_MARGIN, 1);
   set_single_arg(parsed_args, index++,
                  ARG_TOKEN_target_number_of_tiles_exchanged,
-                 ARG_target_number_of_tiles_exchanged, 1);
+                 ARG_TARGET_NUMBER_OF_TILES_EXCHANGED, 1);
   // Autoplay
   set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_PAIRS_ON,
                  ARG_GAME_PAIRS_ON, 0);
@@ -730,7 +728,7 @@ load_check_stop_interval_for_config(Config *config,
     return CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL;
   }
   thread_control_set_check_stop_interval(config->thread_control,
-                                        string_to_int(check_stop_interval));
+                                         string_to_int(check_stop_interval));
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -794,8 +792,7 @@ config_load_status_t load_player_name_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-bool lds_are_compatible(const char *ld_name_1,
-                                         const char *ld_name_2) {
+bool lds_are_compatible(const char *ld_name_1, const char *ld_name_2) {
   return strings_equal(ld_name_1, ld_name_2) ||
          // English and French use the same letters so they are
          // board_is_letter_allowed_in_cross_set to play against each other.
@@ -816,11 +813,9 @@ bool lexicons_are_compatible(const char *p1_lexicon_name,
 }
 
 bool ld_is_compatible_with_lexicon(const char *lexicon_name,
-                                                    const char *ld_name) {
-  char *ld_from_lexicon_name =
-      ld_get_default_name(lexicon_name);
-  bool compatible =
-      lds_are_compatible(ld_from_lexicon_name, ld_name);
+                                   const char *ld_name) {
+  char *ld_from_lexicon_name = ld_get_default_name(lexicon_name);
+  bool compatible = lds_are_compatible(ld_from_lexicon_name, ld_name);
   free(ld_from_lexicon_name);
   return compatible;
 }
@@ -858,8 +853,7 @@ char *get_default_klv_name(const char *lexicon_name) {
 
 bool is_lexicon_required(const Config *config, const char *new_p1_leaves_name,
                          const char *new_p2_leaves_name,
-                         const char *new_ld_name,
-                         const char *new_rack) {
+                         const char *new_ld_name, const char *new_rack) {
   return config->command_type != COMMAND_TYPE_SET_OPTIONS || config->cgp ||
          config->command_set_cgp || new_p1_leaves_name || new_p2_leaves_name ||
          new_ld_name || new_rack;
@@ -954,25 +948,21 @@ config_load_status_t load_lexicon_dependent_data_for_config(
   if (!is_string_empty_or_null(new_ld_name)) {
     // if the user specified letter distribution
     // isn't compatible, return an error
-    if (!ld_is_compatible_with_lexicon(
-            updated_p1_lexicon_name, new_ld_name)) {
+    if (!ld_is_compatible_with_lexicon(updated_p1_lexicon_name, new_ld_name)) {
       return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
     }
-    updated_ld_name =
-        string_duplicate(new_ld_name);
+    updated_ld_name = string_duplicate(new_ld_name);
   } else if (is_string_empty_or_null(config->ld_name)) {
     // No letter distribution was specified and the current
     // letter distribution is null, so load the default letter
     // distribution based on player one's lexicon
-    updated_ld_name =
-        ld_get_default_name(updated_p1_lexicon_name);
+    updated_ld_name = ld_get_default_name(updated_p1_lexicon_name);
   } else {
     // If the existing letter distribution isn't compatible,
     // just assume we want to use the default.
     if (!ld_is_compatible_with_lexicon(updated_p1_lexicon_name,
-                                                        config->ld_name)) {
-      updated_ld_name =
-          ld_get_default_name(updated_p1_lexicon_name);
+                                       config->ld_name)) {
+      updated_ld_name = ld_get_default_name(updated_p1_lexicon_name);
     } else {
       updated_ld_name = string_duplicate(config->ld_name);
     }
@@ -984,8 +974,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
 
   // If the letter distribution name has changed, update it
   if (!strings_equal(config->ld_name, updated_ld_name)) {
-    LetterDistribution *updated_ld =
-        ld_create(updated_ld_name);
+    LetterDistribution *updated_ld = ld_create(updated_ld_name);
     if (config->ld) {
       ld_destroy(config->ld);
     }
@@ -1003,13 +992,12 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     rack_destroy(config->rack);
   }
 
-  config->rack =
-      rack_create(ld_get_size(config->ld));
+  config->rack = rack_create(ld_get_size(config->ld));
 
   if (new_rack) {
     if (!strings_equal(EMPTY_RACK_STRING, new_rack)) {
-      int number_of_letters_set = rack_set_to_string(
-          config->ld, config->rack, new_rack);
+      int number_of_letters_set =
+          rack_set_to_string(config->ld, config->rack, new_rack);
       if (number_of_letters_set < 0) {
         return CONFIG_LOAD_STATUS_MALFORMED_RACK;
       }
