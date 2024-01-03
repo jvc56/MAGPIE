@@ -71,6 +71,6 @@ void test_alphabet() {
   string_builder_clear(letter);
 
   destroy_string_builder(letter);
-  destroy_config(config);
-  destroy_config(catalan_config);
+  config_destroy(config);
+  config_destroy(catalan_config);
 }

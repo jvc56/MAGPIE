@@ -81,7 +81,7 @@ void test_rack_main() {
   assert(get_number_of_letters(rack) == 2);
 
   destroy_rack(rack);
-  destroy_config(config);
+  config_destroy(config);
 }
 
 void test_rack() { test_rack_main(); }

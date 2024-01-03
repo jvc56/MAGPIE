@@ -28,21 +28,21 @@ void autoplay_game_pairs_test() {
 
   free(options_string);
 
-  AutoplayResults *autoplay_results = create_autoplay_results();
+  AutoplayResults *autoplay_results = autoplay_results_create();
 
   autoplay_status_t status = autoplay(csw_config, autoplay_results);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
   int max_iterations = config_get_max_iterations(csw_config);
-  assert(get_total_games(autoplay_results) == max_iterations * 2);
-  assert(get_p1_firsts(autoplay_results) == max_iterations);
-  assert(get_weight(get_p1_score(autoplay_results)) ==
-         get_weight(get_p2_score(autoplay_results)));
-  assert(get_cardinality(get_p1_score(autoplay_results)) ==
-         get_cardinality(get_p2_score(autoplay_results)));
-  assert(within_epsilon(get_mean(get_p1_score(autoplay_results)),
-                        get_mean(get_p2_score(autoplay_results))));
-  assert(within_epsilon(get_stdev(get_p1_score(autoplay_results)),
-                        get_stdev(get_p2_score(autoplay_results))));
+  assert(autoplay_results_get_games(autoplay_results) == max_iterations * 2);
+  assert(autoplay_results_get_p1_firsts(autoplay_results) == max_iterations);
+  assert(get_weight(autoplay_results_get_p1_score(autoplay_results)) ==
+         get_weight(autoplay_results_get_p2_score(autoplay_results)));
+  assert(get_cardinality(autoplay_results_get_p1_score(autoplay_results)) ==
+         get_cardinality(autoplay_results_get_p2_score(autoplay_results)));
+  assert(within_epsilon(get_mean(autoplay_results_get_p1_score(autoplay_results)),
+                        get_mean(autoplay_results_get_p2_score(autoplay_results))));
+  assert(within_epsilon(get_stdev(autoplay_results_get_p1_score(autoplay_results)),
+                        get_stdev(autoplay_results_get_p2_score(autoplay_results))));
 
   load_config_or_die(csw_config, "setoptions i 7 nogp threads 2");
   max_iterations = config_get_max_iterations(csw_config);
@@ -50,10 +50,10 @@ void autoplay_game_pairs_test() {
   // Autoplay should reset the stats
   status = autoplay(csw_config, autoplay_results);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
-  assert(get_total_games(autoplay_results) == max_iterations);
+  assert(autoplay_results_get_games(autoplay_results) == max_iterations);
 
-  destroy_autoplay_results(autoplay_results);
-  destroy_config(csw_config);
+  autoplay_results_destroy(autoplay_results);
+  config_destroy(csw_config);
 }
 
 void test_autoplay() { autoplay_game_pairs_test(); }

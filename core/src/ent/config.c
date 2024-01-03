@@ -798,7 +798,7 @@ bool letter_distributions_are_compatible(const char *ld_name_1,
                                          const char *ld_name_2) {
   return strings_equal(ld_name_1, ld_name_2) ||
          // English and French use the same letters so they are
-         // allowed to play against each other.
+         // board_is_letter_allowed_in_cross_set to play against each other.
          (strings_equal(ld_name_1, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
           strings_equal(ld_name_2, FRENCH_LETTER_DISTRIBUTION_NAME)) ||
          (strings_equal(ld_name_2, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
@@ -999,8 +999,12 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     config->ld_name_changed = false;
   }
 
-  update_or_create_rack(
-      &config->rack, letter_distribution_get_size(config->letter_distribution));
+  if (config->rack) {
+    destroy_rack(config->rack);
+  }
+
+  config->rack =
+      create_rack(letter_distribution_get_size(config->letter_distribution));
 
   if (new_rack) {
     if (!strings_equal(EMPTY_RACK_STRING, new_rack)) {
@@ -1218,7 +1222,7 @@ void reset_transient_fields(Config *config) {
   config->seed = time(NULL);
 }
 
-config_load_status_t load_config(Config *config, const char *cmd) {
+config_load_status_t config_load(Config *config, const char *cmd) {
   reset_transient_fields(config);
   // If the command is empty, consider this a set options
   // command where zero options are set and return without error.
@@ -1245,7 +1249,7 @@ config_load_status_t load_config(Config *config, const char *cmd) {
   return config_load_status;
 }
 
-Config *create_default_config() {
+Config *config_create_default() {
   Config *config = malloc_or_die(sizeof(Config));
   config->command_set_cgp = false;
   config->command_set_infile = false;
@@ -1280,7 +1284,7 @@ Config *create_default_config() {
   return config;
 }
 
-void destroy_config(Config *config) {
+void config_destroy(Config *config) {
   if (config->letter_distribution) {
     destroy_letter_distribution(config->letter_distribution);
   }

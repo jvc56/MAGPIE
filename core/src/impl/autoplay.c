@@ -34,12 +34,12 @@ AutoplayWorker *create_autoplay_worker(const Config *config,
   autoplay_worker->max_games_for_worker = max_games_for_worker;
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->seed = seed;
-  autoplay_worker->autoplay_results = create_autoplay_results();
+  autoplay_worker->autoplay_results = autoplay_results_create();
   return autoplay_worker;
 }
 
 void destroy_autoplay_worker(AutoplayWorker *autoplay_worker) {
-  destroy_autoplay_results(autoplay_worker->autoplay_results);
+  autoplay_results_destroy(autoplay_worker->autoplay_results);
   free(autoplay_worker);
 }
 
@@ -49,25 +49,25 @@ void record_results(Game *game, AutoplayResults *autoplay_results,
   int p0_score = player_get_score(game_get_player(game, 0));
   int p1_score = player_get_score(game_get_player(game, 1));
 
-  increment_total_games(autoplay_results);
+  autoplay_results_increment_total_games(autoplay_results);
   if (p0_score > p1_score) {
-    increment_p1_wins(autoplay_results);
+    autoplay_results_increment_p1_wins(autoplay_results);
   } else if (p1_score > p0_score) {
-    increment_p1_losses(autoplay_results);
+    autoplay_results_increment_p1_losses(autoplay_results);
   } else {
-    increment_p1_ties(autoplay_results);
+    autoplay_results_increment_p1_ties(autoplay_results);
   }
   if (starting_player_index == 0) {
-    increment_p1_firsts(autoplay_results);
+    autoplay_results_increment_p1_firsts(autoplay_results);
   }
-  increment_p1_score(autoplay_results, p0_score);
-  increment_p2_score(autoplay_results, p1_score);
+  autoplay_results_increment_p1_score(autoplay_results, p0_score);
+  autoplay_results_increment_p2_score(autoplay_results, p1_score);
 }
 
 void play_autoplay_game(Game *game, MoveList *move_list,
                         AutoplayResults *autoplay_results,
                         int starting_player_index, int thread_index) {
-  reset_game(game);
+  game_reset(game);
   set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
@@ -80,7 +80,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
   const Config *config = autoplay_worker->config;
   ThreadControl *thread_control = config_get_thread_control(config);
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
   MoveList *move_list = create_move_list(1);
 
@@ -95,9 +95,9 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
     // to use for game pairs. The initial seed does
     // not matter since it will be overwritten before
     // the first game of the pair is played.
-    game_pair_bag = create_bag(game_get_ld(game));
+    game_pair_bag = bag_create(game_get_ld(game));
   }
-  seed_bag_for_worker(bag, autoplay_worker->seed, worker_index);
+  bag_seed_for_worker(bag, autoplay_worker->seed, worker_index);
 
   for (int i = 0; i < autoplay_worker->max_games_for_worker; i++) {
     if (is_halted(thread_control)) {
@@ -124,10 +124,10 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   }
 
   if (use_game_pairs) {
-    destroy_bag(game_pair_bag);
+    bag_destroy(game_pair_bag);
   }
   destroy_move_list(move_list);
-  destroy_game(game);
+  game_destroy(game);
   return NULL;
 }
 
@@ -144,7 +144,7 @@ autoplay_status_t autoplay(const Config *config,
                            AutoplayResults *autoplay_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
   unhalt(thread_control);
-  reset_autoplay_results(autoplay_results);
+  autoplay_results_reset(autoplay_results);
 
   int number_of_threads = get_number_of_threads(thread_control);
   AutoplayWorker **autoplay_workers =
@@ -169,12 +169,12 @@ autoplay_status_t autoplay(const Config *config,
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
-    add_autoplay_results(autoplay_workers[thread_index]->autoplay_results,
+    autoplay_results_add(autoplay_workers[thread_index]->autoplay_results,
                          autoplay_results);
     p1_score_stats[thread_index] =
-        get_p1_score(autoplay_workers[thread_index]->autoplay_results);
+        autoplay_results_get_p1_score(autoplay_workers[thread_index]->autoplay_results);
     p2_score_stats[thread_index] =
-        get_p2_score(autoplay_workers[thread_index]->autoplay_results);
+        autoplay_results_get_p2_score(autoplay_workers[thread_index]->autoplay_results);
   }
 
   // If autoplay was interrupted by the user,
@@ -182,11 +182,11 @@ autoplay_status_t autoplay(const Config *config,
   halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
 
   combine_stats(p1_score_stats, number_of_threads,
-                get_p1_score(autoplay_results));
+                autoplay_results_get_p1_score(autoplay_results));
   free(p1_score_stats);
 
   combine_stats(p2_score_stats, number_of_threads,
-                get_p2_score(autoplay_results));
+                autoplay_results_get_p2_score(autoplay_results));
   free(p2_score_stats);
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {

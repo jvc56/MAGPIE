@@ -44,8 +44,8 @@ int formed_words_get_word_letter(FormedWords *fw, int word_index,
 FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
                           int word_end_index, int row, int col, int dir) {
 
-  if (dir_is_vertical(dir)) {
-    transpose(board);
+  if (board_is_dir_vertical(dir)) {
+    board_transpose(board);
     int ph = col;
     col = row;
     row = ph;
@@ -60,7 +60,7 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
     bool fresh_tile = false;
 
     if (ml == PLAYED_THROUGH_MARKER) {
-      ml = get_letter(board, row, col + idx);
+      ml = board_get_letter(board, row, col + idx);
     } else {
       fresh_tile = true;
     }
@@ -69,14 +69,14 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
     main_word_idx++;
 
     bool actual_cross_word =
-        (row > 0 && !is_empty(board, row - 1, col + idx)) ||
-        ((row < BOARD_DIM - 1) && !is_empty(board, row + 1, col + idx));
+        (row > 0 && !board_is_empty(board, row - 1, col + idx)) ||
+        ((row < BOARD_DIM - 1) && !board_is_empty(board, row + 1, col + idx));
 
     if (fresh_tile && actual_cross_word) {
       // Search for a word
       int rbegin, rend;
       for (rbegin = row - 1; rbegin >= 0; rbegin--) {
-        if (is_empty(board, rbegin, col + idx)) {
+        if (board_is_empty(board, rbegin, col + idx)) {
           rbegin++;
           break;
         }
@@ -86,7 +86,7 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
       }
 
       for (rend = rbegin; rend < BOARD_DIM; rend++) {
-        if (rend != row && is_empty(board, rend, col + idx)) {
+        if (rend != row && board_is_empty(board, rend, col + idx)) {
           rend--;
           break;
         }
@@ -97,7 +97,7 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
       for (int r = rbegin; r <= rend; r++) {
         if (r != row) {
           uint8_t lt =
-              get_unblanked_machine_letter(get_letter(board, r, col + idx));
+              get_unblanked_machine_letter(board_get_letter(board, r, col + idx));
           ws->words[formed_words_idx].word[widx] = lt;
         } else {
           ws->words[formed_words_idx].word[widx] = ml;
@@ -114,7 +114,7 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
   ws->num_words = formed_words_idx;
 
   if (dir) {
-    transpose(board);
+    board_transpose(board);
   }
 
   return ws;

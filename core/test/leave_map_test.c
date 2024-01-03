@@ -109,5 +109,5 @@ void test_leave_map() {
 
   destroy_rack(rack);
   destroy_leave_map(leave_map);
-  destroy_config(config);
+  config_destroy(config);
 }

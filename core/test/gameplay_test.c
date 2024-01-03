@@ -15,7 +15,7 @@
 void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
   for (int i = 0; i < (get_array_size(rack)); i++) {
     for (int j = 0; j < get_number_of_letter(rack, i); j++) {
-      add_letter(bag, i, player_draw_index);
+      bag_add_letter(bag, i, player_draw_index);
     }
   }
   reset_rack(rack);
@@ -75,8 +75,8 @@ void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
 
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
                            int array_length) {
-  Game *actual_game = create_game(config);
-  Game *expected_game = create_game(config);
+  Game *actual_game = game_create(config);
+  Game *expected_game = game_create(config);
 
   int player0_last_score_on_rack = -1;
   int player1_last_score_on_rack = -1;
@@ -105,7 +105,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     // so the end of actual_game subtractions are correct. If the bag has less
     // than RACK_SIZE tiles, have the opponent draw the remaining tiles
     // so the endgame adjustments are added to the move equity values.
-    if (i == array_length - 1 || get_tiles_remaining(bag) < RACK_SIZE) {
+    if (i == array_length - 1 || bag_get_tiles(bag) < RACK_SIZE) {
       draw_at_most_to_rack(
           bag, opponent_rack, RACK_SIZE,
           game_get_player_draw_index(actual_game, opponent_index));
@@ -131,7 +131,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
       player1_final_score = player_get_score(player1);
     }
 
-    load_cgp(expected_game, cgps[i]);
+    game_load_cgp(expected_game, cgps[i]);
     // If the game is still ongoing,
     // return the racks to the bag so that
     // the bag from the expected game and
@@ -158,8 +158,40 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
            player1_final_score);
   }
 
-  destroy_game(actual_game);
-  destroy_game(expected_game);
+  game_destroy(actual_game);
+  game_destroy(expected_game);
+}
+
+void test_draw_at_most_to_rack() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+  const LetterDistribution *ld = config_get_letter_distribution(config);
+  int ld_size = letter_distribution_get_size(ld);
+  Bag *bag = bag_create(ld);
+  Rack *rack = create_rack(ld_size);
+
+  // Check drawing from the bag
+  int drawing_player = 0;
+  int number_of_remaining_tiles = bag_get_tiles(bag);
+
+  while (bag_get_tiles(bag) > RACK_SIZE) {
+    draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
+    drawing_player = 1 - drawing_player;
+    number_of_remaining_tiles -= RACK_SIZE;
+    assert(!rack_is_empty(rack));
+    assert(get_number_of_letters(rack) == RACK_SIZE);
+    reset_rack(rack);
+  }
+
+  draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
+  assert(bag_is_empty(bag));
+  assert(!rack_is_empty(rack));
+  assert(get_number_of_letters(rack) == number_of_remaining_tiles);
+  reset_rack(rack);
+
+  bag_destroy(bag);
+  destroy_rack(rack);
+  config_destroy(config);
 }
 
 void test_six_exchanges_game() {
@@ -208,7 +240,7 @@ void test_six_exchanges_game() {
       "15/15/15/14Q/14U/14I/14N/7FRAWZEYS/6TOETOE3/7A3XI2/3FoREMAST4/7L7/"
       "5ELICITEd2/1JIG3K7/GONOPORE7 / 332/384 6 lex CSW21;"};
   test_gameplay_by_turn(config, cgps, racks, 18);
-  destroy_config(config);
+  config_destroy(config);
 }
 
 void test_six_passes_game() {
@@ -305,7 +337,7 @@ void test_six_passes_game() {
       "CODGER2LOTIONS/9RIN3 / 348/513 6 lex CSW21;"};
 
   test_gameplay_by_turn(config, cgps, racks, 31);
-  destroy_config(config);
+  config_destroy(config);
 }
 
 void test_standard_game() {
@@ -379,13 +411,13 @@ void test_standard_game() {
       "5RHINO1ETA1/5E1E3DEXY AEGILU/ 439/425 0 lex CSW21;"};
 
   test_gameplay_by_turn(config, cgps, racks, 23);
-  destroy_config(config);
+  config_destroy(config);
 }
 
 void test_playmove() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -406,15 +438,15 @@ void test_playmove() {
   assert(player_get_score(player1) == 0);
   assert(!rack_is_empty(player0_rack));
   assert(get_number_of_letters(player0_rack) == 7);
-  assert(get_letter(board, 7, 3) == hl_to_ml(ld, "K"));
-  assert(get_letter(board, 7, 4) == hl_to_ml(ld, "Y"));
-  assert(get_letter(board, 7, 5) == hl_to_ml(ld, "N"));
-  assert(get_letter(board, 7, 6) == hl_to_ml(ld, "D"));
-  assert(get_letter(board, 7, 7) == hl_to_ml(ld, "E"));
+  assert(board_get_letter(board, 7, 3) == hl_to_ml(ld, "K"));
+  assert(board_get_letter(board, 7, 4) == hl_to_ml(ld, "Y"));
+  assert(board_get_letter(board, 7, 5) == hl_to_ml(ld, "N"));
+  assert(board_get_letter(board, 7, 6) == hl_to_ml(ld, "D"));
+  assert(board_get_letter(board, 7, 7) == hl_to_ml(ld, "E"));
   assert(game_get_player_on_turn_index(game) == 1);
-  assert(get_tiles_remaining(bag) == 88);
-  assert(get_tiles_played(board) == 5);
-  reset_game(game);
+  assert(bag_get_tiles(bag) == 88);
+  assert(board_get_tiles_played(board) == 5);
+  game_reset(game);
 
   // Test exchange
   draw_rack_to_string(ld, bag, player0_rack, "UUUVVWW", 0);
@@ -427,22 +459,22 @@ void test_playmove() {
   assert(!rack_is_empty(player0_rack));
   assert(get_number_of_letters(player0_rack) == 7);
   assert(game_get_player_on_turn_index(game) == 1);
-  assert(get_tiles_remaining(bag) == 93);
-  assert(get_tiles_played(board) == 0);
+  assert(bag_get_tiles(bag) == 93);
+  assert(board_get_tiles_played(board) == 0);
 
   assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "V")) == 0);
   assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "W")) == 0);
   assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "U")) < 2);
 
   // Test pass
-  load_cgp(game,
+  game_load_cgp(game,
            "15/15/12F2/11TROW/4V3EWE1A2/2iNAURATE1TIP1/4L1AAH2EM1B/"
            "3PAIGLE2X1TO/2JANN4FAQIR/4C2MOKES1ZO/4EBIoNISE2U/2ODDITY1R1S2G/"
            "1DUI1EALE3YEH/CODGER2LOTIONS/9RIN3 / 517/349 5 lex CSW21;");
   draw_at_most_to_rack(bag, player0_rack, 1,
-                       game_get_player_draw_index(game, 0));
+                           game_get_player_draw_index(game, 0));
   draw_at_most_to_rack(bag, player1_rack, 1,
-                       game_get_player_draw_index(game, 1));
+                           game_get_player_draw_index(game, 1));
 
   int player0_score = player_get_score(player0);
   int player1_score = player_get_score(player1);
@@ -471,14 +503,14 @@ void test_playmove() {
   assert(game_get_player_on_turn_index(game) == 0);
   assert(bag_is_empty(bag));
 
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_set_random_rack() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
 
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -487,20 +519,20 @@ void test_set_random_rack() {
 
   Rack *player0_rack = player_get_rack(player0);
 
-  assert(get_tiles_remaining(bag) == 100);
+  assert(bag_get_tiles(bag) == 100);
   // draw some random rack.
   draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
-  assert(get_tiles_remaining(bag) == 93);
+  assert(bag_get_tiles(bag) == 93);
 
   set_random_rack(game, 0, NULL);
-  assert(get_tiles_remaining(bag) == 93);
+  assert(bag_get_tiles(bag) == 93);
   assert(get_number_of_letters(player0_rack) == 7);
 
   // draw some random rack, but with 5 fixed tiles
   Rack *known_rack = create_rack(letter_distribution_get_size(ld));
   set_rack_to_string(ld, known_rack, "CESAR");
   set_random_rack(game, 0, known_rack);
-  assert(get_tiles_remaining(bag) == 93);
+  assert(bag_get_tiles(bag) == 93);
   assert(get_number_of_letters(player0_rack) == 7);
 
   // C E S A R
@@ -520,14 +552,14 @@ void test_set_random_rack() {
   assert(ct == 2);
 
   destroy_rack(known_rack);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_backups() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -542,19 +574,19 @@ void test_backups() {
   draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
 
   draw_rack_to_string(ld, bag, player1_rack, "AOQRTUZ", 1);
-  assert(get_tiles_remaining(bag) == 86);
+  assert(bag_get_tiles(bag) == 86);
 
   // backup
-  set_backup_mode(game, BACKUP_MODE_SIMULATION);
+  game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   play_top_n_equity_move(game, 0);
   play_top_n_equity_move(game, 0);
-  assert(get_tiles_remaining(bag) == 74);
+  assert(bag_get_tiles(bag) == 74);
 
   assert(player_get_score(player0) == 36);
   assert(player_get_score(player1) == 131);
-  assert(get_letter(board, 0, 7) == hl_to_ml(ld, "Q"));
+  assert(board_get_letter(board, 0, 7) == hl_to_ml(ld, "Q"));
   // let's unplay QUATORZE
-  unplay_last_move(game);
+  game_unplay_last_move(game);
   assert(player_get_score(player0) == 36);
   assert(player_get_score(player1) == 0);
 
@@ -566,16 +598,17 @@ void test_backups() {
   assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "U")) == 1);
   assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "Z")) == 1);
 
-  assert(get_letter(board, 0, 7) == 0);
+  assert(board_get_letter(board, 0, 7) == 0);
   // was 85 after drawing racks for both players, then was 80 after KYNDE
   // and drawing 5 replacement tiles, then 73 after QUATORZ(E) and 7 replacement
   // tiles, then back to 80 after unplay.
-  assert(get_tiles_remaining(bag) == 81);
-  destroy_game(game);
-  destroy_config(config);
+  assert(bag_get_tiles(bag) == 81);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_gameplay() {
+  test_draw_at_most_to_rack();
   test_playmove();
   test_six_exchanges_game();
   test_six_passes_game();

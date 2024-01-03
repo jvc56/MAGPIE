@@ -131,8 +131,8 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
 
   // Game
   simmer_worker->game = game_duplicate(game);
-  set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
-  seed_bag_for_worker(game_get_bag(simmer_worker->game), simmer->seed,
+  game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
+  bag_seed_for_worker(game_get_bag(simmer_worker->game), simmer->seed,
                       worker_index);
 
   // MoveList
@@ -150,7 +150,7 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
 }
 
 void destroy_simmer_worker(SimmerWorker *simmer_worker) {
-  destroy_game(simmer_worker->game);
+  game_destroy(simmer_worker->game);
   destroy_move_list(simmer_worker->move_list);
   destroy_rack(simmer_worker->rack_placeholder);
   free(simmer_worker);
@@ -310,12 +310,12 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
   int plies = sim_results_get_max_plies(sim_results);
   int number_of_plays = sim_results_get_number_of_plays(sim_results);
 
-  // set random rack for opponent (throw in rack, shuffle, draw new tiles).
+  // set random rack for opponent (throw in rack, bag_shuffle, draw new tiles).
   set_random_rack(game, 1 - game_get_player_on_turn_index(game),
                   simmer->known_opp_rack);
-  // need a new shuffle for every iteration:
+  // need a new bag_shuffle for every iteration:
   Bag *bag = game_get_bag(game);
-  shuffle(bag);
+  bag_shuffle(bag);
 
   for (int i = 0; i < number_of_plays; i++) {
     SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
@@ -324,11 +324,11 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
     }
 
     double leftover = 0.0;
-    set_backup_mode(game, BACKUP_MODE_SIMULATION);
+    game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
     // play move
     play_move(simmed_play_get_move(simmed_play), game);
     sim_results_increment_node_count(sim_results);
-    set_backup_mode(game, BACKUP_MODE_OFF);
+    game_set_backup_mode(game, BACKUP_MODE_OFF);
     // further plies will NOT be backed up.
     for (int ply = 0; ply < plies; ply++) {
       int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -368,12 +368,12 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
         simmer->win_pcts, simmed_play, spread, leftover,
         game_get_game_end_reason(game),
         // number of tiles unseen to us: bag tiles + tiles on opp rack.
-        get_tiles_remaining(bag) +
+        bag_get_tiles(bag) +
             get_number_of_letters(player_get_rack(
                 game_get_player(game, 1 - simmer->initial_player))),
         plies % 2, is_multithreaded(simmer));
     // reset to first state. we only need to restore one backup.
-    unplay_last_move(game);
+    game_unplay_last_move(game);
   }
 }
 
@@ -501,7 +501,7 @@ sim_status_t simulate(const Config *config, const Game *input_game,
                       SimResults *sim_results) {
   Game *game = game_duplicate(input_game);
   sim_status_t sim_status = simulate_with_game_copy(config, game, sim_results);
-  destroy_game(game);
+  game_destroy(game);
   gen_clear_cache();
   return sim_status;
 }

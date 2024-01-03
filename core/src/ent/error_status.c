@@ -18,21 +18,21 @@ struct ErrorStatus {
   int code;
 };
 
-void set_error_status(ErrorStatus *error_status, error_status_t type,
+void error_status_set_type_and_code(ErrorStatus *error_status, error_status_t type,
                       int code) {
   error_status->code = code;
   error_status->type = type;
 }
 
-ErrorStatus *create_error_status() {
+ErrorStatus *error_status_create() {
   ErrorStatus *error_status = malloc_or_die(sizeof(ErrorStatus));
-  set_error_status(error_status, ERROR_STATUS_TYPE_NONE, 0);
+  error_status_set_type_and_code(error_status, ERROR_STATUS_TYPE_NONE, 0);
   return error_status;
 }
 
-void destroy_error_status(ErrorStatus *error_status) { free(error_status); }
+void error_status_destroy(ErrorStatus *error_status) { free(error_status); }
 
-bool is_successful_error_code(error_status_t error_status_type,
+bool error_status_is_success(error_status_t error_status_type,
                               int error_code) {
   bool is_success = false;
   switch (error_status_type) {
@@ -58,7 +58,7 @@ bool is_successful_error_code(error_status_t error_status_type,
   return is_success;
 }
 
-void log_warn_if_failed(const ErrorStatus *error_status) {
+void error_status_log_warn_if_failed(const ErrorStatus *error_status) {
   if (error_status->type == ERROR_STATUS_TYPE_NONE) {
     return;
   }

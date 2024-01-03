@@ -5,7 +5,6 @@
 #include "../util/util.h"
 
 #include "bag.h"
-#include "rack.h"
 #include "xoshiro.h"
 
 struct Bag {
@@ -20,12 +19,12 @@ struct Bag {
   XoshiroPRNG *prng;
 };
 
-int get_tiles_remaining(const Bag *bag) {
+int bag_get_tiles(const Bag *bag) {
   return bag->end_tile_index - bag->start_tile_index;
 }
 
-void shuffle(Bag *bag) {
-  int tiles_remaining = get_tiles_remaining(bag);
+void bag_shuffle(Bag *bag) {
+  int tiles_remaining = bag_get_tiles(bag);
   if (tiles_remaining > 1) {
     int i;
     for (i = bag->start_tile_index; i < bag->end_tile_index - 1; i++) {
@@ -37,7 +36,7 @@ void shuffle(Bag *bag) {
   }
 }
 
-void reset_bag(const LetterDistribution *letter_distribution, Bag *bag) {
+void bag_reset(const LetterDistribution *letter_distribution, Bag *bag) {
   int tile_index = 0;
   int letter_distribution_size =
       letter_distribution_get_size(letter_distribution);
@@ -51,16 +50,16 @@ void reset_bag(const LetterDistribution *letter_distribution, Bag *bag) {
   }
   bag->start_tile_index = 0;
   bag->end_tile_index = tile_index;
-  shuffle(bag);
+  bag_shuffle(bag);
 }
 
-Bag *create_bag(const LetterDistribution *letter_distribution) {
+Bag *bag_create(const LetterDistribution *letter_distribution) {
   Bag *bag = malloc_or_die(sizeof(Bag));
-  // call reseed_prng if needed.
+  // call bag_reseed if needed.
   bag->prng = create_prng(42);
   bag->size = letter_distribution_get_total_tiles(letter_distribution);
   bag->tiles = malloc_or_die(sizeof(uint8_t) * bag->size);
-  reset_bag(letter_distribution, bag);
+  bag_reset(letter_distribution, bag);
   return bag;
 }
 
@@ -82,18 +81,18 @@ Bag *bag_duplicate(const Bag *bag) {
   return new_bag;
 }
 
-void destroy_bag(Bag *bag) {
+void bag_destroy(Bag *bag) {
   destroy_prng(bag->prng);
   free(bag->tiles);
   free(bag);
 }
 
-bool bag_is_empty(const Bag *bag) { return get_tiles_remaining(bag) == 0; }
+bool bag_is_empty(const Bag *bag) { return bag_get_tiles(bag) == 0; }
 
 // This assumes the bag is shuffled and nonempty.
 // The player index is used to determine which side
 // of the bag the player draws from.
-uint8_t draw_random_letter(Bag *bag, int player_draw_index) {
+uint8_t bag_draw_random_letter(Bag *bag, int player_draw_index) {
   uint8_t letter;
   // This assumes player_draw_index can only be 0 or 1
   // Player 0 draws from the end of the bag and
@@ -108,7 +107,7 @@ uint8_t draw_random_letter(Bag *bag, int player_draw_index) {
   return letter;
 }
 
-void draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
+void bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   if (is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
@@ -131,7 +130,7 @@ void draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   }
 }
 
-void add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
+void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   if (is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
@@ -139,7 +138,7 @@ void add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   // adding a tile for player 0, since the added tile
   // needs to be added to the end of the bag.
   int insert_index = bag->start_tile_index - 1 + (1 - player_draw_index);
-  int number_of_tiles_remaining = get_tiles_remaining(bag);
+  int number_of_tiles_remaining = bag_get_tiles(bag);
   if (number_of_tiles_remaining > 0) {
     insert_index +=
         xoshiro_get_random_number(bag->prng, number_of_tiles_remaining + 1);
@@ -157,27 +156,27 @@ void add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   bag->tiles[insert_index] = letter;
 }
 
-void reseed_prng(Bag *bag, uint64_t seed) { seed_prng(bag->prng, seed); }
+void bag_reseed(Bag *bag, uint64_t seed) { seed_prng(bag->prng, seed); }
 
 // This function ensures that all workers for a given
 // job are seeded with unique non-overlapping sequences
 // for the PRNGs in their bags.
-void seed_bag_for_worker(Bag *bag, uint64_t seed, int worker_index) {
+void bag_seed_for_worker(Bag *bag, uint64_t seed, int worker_index) {
   seed_prng(bag->prng, seed);
   for (int j = 0; j < worker_index; j++) {
     xoshiro_jump(bag->prng);
   }
 }
 
-void add_bag_to_rack(const Bag *bag, Rack *rack) {
+// Gets the number of a tiles 'ml' in the bag. For drawing tiles
+// to get the tile itself and update the bag, see
+// the bag_draw* functions.
+int bag_get_letter(const Bag *bag, uint8_t ml) {
+  int sum = 0;
   for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
-    add_letter_to_rack(rack, bag->tiles[i]);
+    if (bag->tiles[i] == ml) {
+      sum++;
+    }
   }
-}
-
-void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
-  while (n > 0 && !bag_is_empty(bag)) {
-    add_letter_to_rack(rack, draw_random_letter(bag, player_draw_index));
-    n--;
-  }
+  return sum;
 }

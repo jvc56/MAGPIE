@@ -6,20 +6,22 @@
 struct AnchorList;
 typedef struct AnchorList AnchorList;
 
-AnchorList *create_anchor_list();
-void destroy_anchor_list(AnchorList *al);
+AnchorList *anchor_list_create();
+void anchor_list_destroy(AnchorList *al);
 
-int get_anchor_col(const AnchorList *al, int index);
-int get_anchor_dir(const AnchorList *al, int index);
-double get_anchor_highest_possible_equity(const AnchorList *al, int index);
-int get_anchor_last_anchor_col(const AnchorList *al, int index);
-int get_anchor_row(const AnchorList *al, int index);
-bool get_anchor_transposed(const AnchorList *al, int index);
-int get_number_of_anchors(const AnchorList *al);
+int anchor_get_col(const AnchorList *al, int index);
+int anchor_get_dir(const AnchorList *al, int index);
+double anchor_get_highest_possible_equity(const AnchorList *al, int index);
+int anchor_get_last_anchor_col(const AnchorList *al, int index);
+int anchor_get_row(const AnchorList *al, int index);
+bool anchor_get_transposed(const AnchorList *al, int index);
 
-void add_anchor(AnchorList *al, int row, int col, int last_anchor_col,
-                bool transposed, int dir, double highest_possible_equity);
-void reset_anchor_list(AnchorList *al);
-void sort_anchor_list(AnchorList *al);
+int anchor_list_get_count(const AnchorList *al);
+
+void anchor_list_add_anchor(AnchorList *al, int row, int col,
+                            int last_anchor_col, bool transposed, int dir,
+                            double highest_possible_equity);
+void anchor_list_reset(AnchorList *al);
+void anchor_list_sort(AnchorList *al);
 
 #endif

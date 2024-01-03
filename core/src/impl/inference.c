@@ -79,7 +79,7 @@ void destroy_inference(Inference *inference) {
 }
 
 void destroy_inference_copy(Inference *inference) {
-  destroy_game(inference->game);
+  game_destroy(inference->game);
   inference_results_destroy(inference->results);
   destroy_inference(inference);
 }
@@ -306,18 +306,21 @@ Inference *inference_create(Game *game, Rack *target_played_tiles,
 
   inference->results = results;
 
-  // Set the initial bag
-  add_bag_to_rack(game_get_bag(game), inference->bag_as_rack);
-
   // Set the current target rack with the known unplayed tiles
   // of the target
 
-  // Add any existing tiles on the target's rack
-  // to the target's leave for partial inferences
+  const Bag *bag = game_get_bag(game);
+
   for (int i = 0; i < inference->ld_size; i++) {
+    // Add any existing tiles on the target's rack
+    // to the target's leave for partial inferences
     for (int j = 0; j < get_number_of_letter(inference->current_target_rack, i);
          j++) {
       add_letter_to_rack(inference->current_target_leave, i);
+    }
+
+    for (int j = 0; j < bag_get_letter(bag, i); j++) {
+      add_letter_to_rack(inference->bag_as_rack, i);
     }
   }
 
@@ -581,7 +584,7 @@ inference_status_t verify_inference(const Inference *inference) {
 
   if (inference->target_number_of_tiles_exchanged != 0 &&
       number_of_letters_in_bag < (RACK_SIZE) * 2) {
-    return INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
+    return INFERENCE_STATUS_EXCHANGE_NOT_board_is_letter_allowed_in_cross_set;
   }
 
   if (inference->target_number_of_tiles_exchanged != 0 &&
@@ -645,7 +648,7 @@ inference_status_t infer(const Config *config, const Game *input_game,
     }
   }
 
-  destroy_game(game);
+  game_destroy(game);
   destroy_inference(inference);
   gen_clear_cache();
 

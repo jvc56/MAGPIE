@@ -23,7 +23,28 @@ struct GameEvent {
   char *note;
 };
 
-// Setter and getter functions for GameEvent struct
+GameEvent *game_event_create() {
+  GameEvent *game_event = malloc_or_die(sizeof(GameEvent));
+  game_event->event_type = GAME_EVENT_UNKNOWN;
+  game_event->player_index = -1;
+  game_event->cumulative_score = 0;
+  game_event->move = NULL;
+  game_event->rack = NULL;
+  game_event->note = NULL;
+  return game_event;
+}
+
+void game_event_destroy(GameEvent *game_event) {
+  if (game_event->move) {
+    destroy_move(game_event->move);
+  }
+  if (game_event->rack) {
+    destroy_rack(game_event->rack);
+  }
+  free(game_event->note);
+  free(game_event);
+}
+
 void game_event_set_type(GameEvent *event, game_event_t event_type) {
   event->event_type = event_type;
 }
@@ -69,28 +90,6 @@ void game_event_set_note(GameEvent *event, const char *note) {
 
 const char *game_event_get_note(const GameEvent *event) { return event->note; }
 
-GameEvent *create_game_event() {
-  GameEvent *game_event = malloc_or_die(sizeof(GameEvent));
-  game_event->event_type = GAME_EVENT_UNKNOWN;
-  game_event->player_index = -1;
-  game_event->cumulative_score = 0;
-  game_event->move = NULL;
-  game_event->rack = NULL;
-  game_event->note = NULL;
-  return game_event;
-}
-
-void destroy_game_event(GameEvent *game_event) {
-  if (game_event->move) {
-    destroy_move(game_event->move);
-  }
-  if (game_event->rack) {
-    destroy_rack(game_event->rack);
-  }
-  free(game_event->note);
-  free(game_event);
-}
-
 struct GameHistoryPlayer {
   char *name;
   char *nickname;
@@ -98,39 +97,58 @@ struct GameHistoryPlayer {
   Rack *last_known_rack;
 };
 
-void set_game_history_player_name(GameHistoryPlayer *player, const char *name) {
+GameHistoryPlayer *game_history_player_create(const char *name,
+                                              const char *nickname) {
+  GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
+  player->name = string_duplicate(name);
+  player->nickname = string_duplicate(nickname);
+  player->score = 0;
+  player->last_known_rack = NULL;
+  return player;
+}
+
+void game_history_player_destroy(GameHistoryPlayer *player) {
+  free(player->name);
+  free(player->nickname);
+  if (player->last_known_rack) {
+    destroy_rack(player->last_known_rack);
+  }
+  free(player);
+}
+
+void game_history_set_player_name(GameHistoryPlayer *player, const char *name) {
   free(player->name);
   player->name = string_duplicate(name);
 }
 
-const char *get_game_history_player_name(const GameHistoryPlayer *player) {
+const char *game_history_get_player_name(const GameHistoryPlayer *player) {
   return player->name;
 }
 
-void set_game_history_player_nickname(GameHistoryPlayer *player,
+void game_history_set_player_nickname(GameHistoryPlayer *player,
                                       const char *nickname) {
   free(player->nickname);
   player->nickname = string_duplicate(nickname);
 }
 
-const char *get_game_history_player_nickname(const GameHistoryPlayer *player) {
+const char *game_history_get_player_nickname(const GameHistoryPlayer *player) {
   return player->nickname;
 }
 
-void set_game_history_player_score(GameHistoryPlayer *player, int score) {
+void game_history_set_player_score(GameHistoryPlayer *player, int score) {
   player->score = score;
 }
 
-int get_game_history_player_score(const GameHistoryPlayer *player) {
+int game_history_get_player_score(const GameHistoryPlayer *player) {
   return player->score;
 }
 
-void set_game_history_player_last_known_rack(GameHistoryPlayer *player,
+void game_history_set_player_last_known_rack(GameHistoryPlayer *player,
                                              Rack *rack) {
   player->last_known_rack = rack;
 }
 
-Rack *get_game_history_player_last_known_rack(const GameHistoryPlayer *player) {
+Rack *game_history_get_player_last_known_rack(const GameHistoryPlayer *player) {
   return player->last_known_rack;
 }
 
@@ -149,54 +167,54 @@ struct GameHistory {
   GameEvent **events;
 };
 
-void set_game_history_title(GameHistory *history, const char *title) {
+void game_history_set_title(GameHistory *history, const char *title) {
   free(history->title);
   history->title = string_duplicate(title);
 }
 
-const char *get_game_history_title(const GameHistory *history) {
+const char *game_history_get_title(const GameHistory *history) {
   return history->title;
 }
 
-void set_game_history_description(GameHistory *history,
+void game_history_set_description(GameHistory *history,
                                   const char *description) {
   free(history->description);
   history->description = string_duplicate(description);
 }
 
-const char *get_game_history_description(const GameHistory *history) {
+const char *game_history_get_description(const GameHistory *history) {
   return history->description;
 }
 
-void set_game_history_id_auth(GameHistory *history, const char *id_auth) {
+void game_history_set_id_auth(GameHistory *history, const char *id_auth) {
   free(history->id_auth);
   history->id_auth = string_duplicate(id_auth);
 }
 
-const char *get_game_history_id_auth(const GameHistory *history) {
+const char *game_history_get_id_auth(const GameHistory *history) {
   return history->id_auth;
 }
 
-void set_game_history_uid(GameHistory *history, const char *uid) {
+void game_history_set_uid(GameHistory *history, const char *uid) {
   free(history->uid);
   history->uid = string_duplicate(uid);
 }
 
-const char *get_game_history_uid(const GameHistory *history) {
+const char *game_history_get_uid(const GameHistory *history) {
   return history->uid;
 }
 
-void set_game_history_lexicon_name(GameHistory *history,
+void game_history_set_lexicon_name(GameHistory *history,
                                    const char *lexicon_name) {
   free(history->lexicon_name);
   history->lexicon_name = string_duplicate(lexicon_name);
 }
 
-const char *get_game_history_lexicon_name(const GameHistory *history) {
+const char *game_history_get_lexicon_name(const GameHistory *history) {
   return history->lexicon_name;
 }
 
-void set_game_history_letter_distribution_name(
+void game_history_set_letter_distribution_name(
     GameHistory *history, const char *letter_distribution_name) {
   free(history->letter_distribution_name);
   history->letter_distribution_name =
@@ -204,85 +222,66 @@ void set_game_history_letter_distribution_name(
 }
 
 const char *
-get_game_history_letter_distribution_name(const GameHistory *history) {
+game_history_get_letter_distribution_name(const GameHistory *history) {
   return history->letter_distribution_name;
 }
 
-void set_game_history_game_variant(GameHistory *history,
+void game_history_set_game_variant(GameHistory *history,
                                    game_variant_t game_variant) {
   history->game_variant = game_variant;
 }
 
-game_variant_t get_game_history_game_variant(const GameHistory *history) {
+game_variant_t game_history_get_game_variant(const GameHistory *history) {
   return history->game_variant;
 }
 
-void set_game_history_board_layout(GameHistory *history,
+void game_history_set_board_layout(GameHistory *history,
                                    board_layout_t board_layout) {
   history->board_layout = board_layout;
 }
 
-board_layout_t get_game_history_board_layout(const GameHistory *history) {
+board_layout_t game_history_get_board_layout(const GameHistory *history) {
   return history->board_layout;
 }
 
-void set_game_history_player(GameHistory *history, int player_index,
+void game_history_set_player(GameHistory *history, int player_index,
                              GameHistoryPlayer *player) {
   history->players[player_index] = player;
 }
 
-GameHistoryPlayer *get_game_history_player(const GameHistory *history,
+GameHistoryPlayer *game_history_get_player(const GameHistory *history,
                                            int player_index) {
   return history->players[player_index];
 }
 
-void set_game_history_number_of_events(GameHistory *history,
+void game_history_set_number_of_events(GameHistory *history,
                                        int number_of_events) {
   history->number_of_events = number_of_events;
 }
 
-int get_game_history_number_of_events(const GameHistory *history) {
+int game_history_get_number_of_events(const GameHistory *history) {
   return history->number_of_events;
 }
 
-void set_game_history_letter_distribution(
+void game_history_set_letter_distribution(
     GameHistory *history, LetterDistribution *letter_distribution) {
   history->letter_distribution = letter_distribution;
 }
 
 LetterDistribution *
-get_game_history_letter_distribution(const GameHistory *history) {
+game_history_get_letter_distribution(const GameHistory *history) {
   return history->letter_distribution;
 }
 
-void set_game_history_events(GameHistory *history, struct GameEvent **events) {
+void game_history_set_events(GameHistory *history, struct GameEvent **events) {
   history->events = events;
 }
 
-GameEvent *get_game_history_event(const GameHistory *history, int event_index) {
+GameEvent *game_history_get_event(const GameHistory *history, int event_index) {
   return history->events[event_index];
 }
 
-GameHistoryPlayer *create_game_history_player(const char *name,
-                                              const char *nickname) {
-  GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
-  player->name = string_duplicate(name);
-  player->nickname = string_duplicate(nickname);
-  player->score = 0;
-  player->last_known_rack = NULL;
-  return player;
-}
-
-void destroy_game_history_player(GameHistoryPlayer *player) {
-  free(player->name);
-  free(player->nickname);
-  if (player->last_known_rack) {
-    destroy_rack(player->last_known_rack);
-  }
-  free(player);
-}
-
-GameHistory *create_game_history() {
+GameHistory *game_history_create() {
   GameHistory *game_history = malloc_or_die(sizeof(GameHistory));
   game_history->title = NULL;
   game_history->description = NULL;
@@ -300,7 +299,7 @@ GameHistory *create_game_history() {
   return game_history;
 }
 
-void destroy_game_history(GameHistory *game_history) {
+void game_history_destroy(GameHistory *game_history) {
   free(game_history->title);
   free(game_history->description);
   free(game_history->id_auth);
@@ -314,26 +313,26 @@ void destroy_game_history(GameHistory *game_history) {
 
   for (int i = 0; i < 2; i++) {
     if (game_history->players[i]) {
-      destroy_game_history_player(game_history->players[i]);
+      game_history_player_destroy(game_history->players[i]);
     }
   }
   for (int i = 0; i < game_history->number_of_events; i++) {
-    destroy_game_event(game_history->events[i]);
+    game_event_destroy(game_history->events[i]);
   }
   free(game_history->events);
   free(game_history);
 }
 
-GameEvent *create_game_event_and_add_to_history(GameHistory *game_history) {
+GameEvent *game_history_create_and_add_game_event(GameHistory *game_history) {
   if (game_history->number_of_events == MAX_GAME_EVENTS) {
     log_fatal("game events overflow");
   }
-  GameEvent *game_event = create_game_event();
+  GameEvent *game_event = game_event_create();
   game_history->events[game_history->number_of_events++] = game_event;
   return game_event;
 }
 
-void set_cumulative_scores(GameHistory *game_history) {
+void game_history_set_cumulative_scores(GameHistory *game_history) {
   for (int i = 0; i < 2; i++) {
     for (int j = game_history->number_of_events - 1; j >= 0; j--) {
       if (game_history->events[j]->player_index == i) {

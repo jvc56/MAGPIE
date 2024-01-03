@@ -320,8 +320,8 @@ int get_player_index(const GCGParser *gcg_parser, const char *gcg_line,
   int player_index = -1;
   for (int i = 0; i < 2; i++) {
     GameHistoryPlayer *player =
-        get_game_history_player(gcg_parser->game_history, i);
-    if (strings_equal(get_game_history_player_nickname(player),
+        game_history_get_player(gcg_parser->game_history, i);
+    if (strings_equal(game_history_get_player_nickname(player),
                       player_nickname)) {
       player_index = i;
       break;
@@ -365,7 +365,7 @@ uint8_t *convert_tiles_string_to_machine_letters(
   uint8_t *machine_letters =
       malloc_or_die(sizeof(uint8_t) * machine_letters_size);
   *number_of_machine_letters = str_to_machine_letters(
-      get_game_history_letter_distribution(gcg_parser->game_history),
+      game_history_get_letter_distribution(gcg_parser->game_history),
       tiles_string, allow_played_through_marker, machine_letters,
       machine_letters_size);
   free(tiles_string);
@@ -437,7 +437,7 @@ Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
   char *player_rack_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
   LetterDistribution *ld =
-      get_game_history_letter_distribution(gcg_parser->game_history);
+      game_history_get_letter_distribution(gcg_parser->game_history);
   uint32_t ld_size = letter_distribution_get_size(ld);
   Rack *rack = create_rack(ld_size);
   int number_of_letters_set = set_rack_to_string(ld, rack, player_rack_string);
@@ -495,9 +495,9 @@ void finalize_note(GCGParser *gcg_parser) {
   }
 
   int number_of_events =
-      get_game_history_number_of_events(gcg_parser->game_history);
+      game_history_get_number_of_events(gcg_parser->game_history);
   GameEvent *event =
-      get_game_history_event(gcg_parser->game_history, number_of_events - 1);
+      game_history_get_event(gcg_parser->game_history, number_of_events - 1);
 
   game_event_set_note(event, string_builder_peek(gcg_parser->note_builder));
   string_builder_clear(gcg_parser->note_builder);
@@ -512,10 +512,10 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
   }
   GameEvent *previous_game_event = NULL;
   int number_of_events =
-      get_game_history_number_of_events(gcg_parser->game_history);
+      game_history_get_number_of_events(gcg_parser->game_history);
   if (number_of_events > 0) {
     previous_game_event =
-        get_game_history_event(gcg_parser->game_history, number_of_events - 1);
+        game_history_get_event(gcg_parser->game_history, number_of_events - 1);
   }
   // Perform logic with previous token here because it
   // is set.
@@ -526,35 +526,35 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
 
   if (token == GCG_MOVE_TOKEN || token == GCG_PASS_TOKEN ||
       token == GCG_EXCHANGE_TOKEN) {
-    GameHistoryPlayer *player0 = get_game_history_player(game_history, 0);
-    GameHistoryPlayer *player1 = get_game_history_player(game_history, 1);
+    GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
+    GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
     if (!player0 || !player1) {
       return GCG_PARSE_STATUS_MOVE_BEFORE_PLAYER;
     }
 
-    if (!get_game_history_letter_distribution(game_history)) {
-      const char *lexicon_name = get_game_history_lexicon_name(game_history);
+    if (!game_history_get_letter_distribution(game_history)) {
+      const char *lexicon_name = game_history_get_lexicon_name(game_history);
       if (!lexicon_name) {
         return GCG_PARSE_STATUS_LEXICON_NOT_FOUND;
       }
-      if (!get_game_history_letter_distribution_name(game_history)) {
+      if (!game_history_get_letter_distribution_name(game_history)) {
         char *default_letter_distribution_name =
             get_default_letter_distribution_name(lexicon_name);
-        set_game_history_letter_distribution_name(
+        game_history_set_letter_distribution_name(
             game_history, default_letter_distribution_name);
         free(default_letter_distribution_name);
       }
-      if (get_game_history_board_layout(game_history) == BOARD_LAYOUT_UNKNOWN) {
-        set_game_history_board_layout(game_history,
+      if (game_history_get_board_layout(game_history) == BOARD_LAYOUT_UNKNOWN) {
+        game_history_set_board_layout(game_history,
                                       BOARD_LAYOUT_CROSSWORD_GAME);
       }
-      if (get_game_history_game_variant(game_history) == GAME_VARIANT_UNKNOWN) {
-        set_game_history_game_variant(game_history, GAME_VARIANT_CLASSIC);
+      if (game_history_get_game_variant(game_history) == GAME_VARIANT_UNKNOWN) {
+        game_history_set_game_variant(game_history, GAME_VARIANT_CLASSIC);
       }
-      set_game_history_letter_distribution(
+      game_history_set_letter_distribution(
           game_history,
           create_letter_distribution(
-              get_game_history_letter_distribution_name(game_history)));
+              game_history_get_letter_distribution_name(game_history)));
     }
   }
 
@@ -570,28 +570,28 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
     player_index = get_matching_group_as_int(gcg_parser, gcg_line, 1) - 1;
-    if (get_game_history_player(game_history, player_index)) {
+    if (game_history_get_player(game_history, player_index)) {
       return GCG_PARSE_STATUS_PLAYER_NUMBER_REDUNDANT;
     }
     char *player_nickname =
         get_matching_group_as_string(gcg_parser, gcg_line, 2);
     char *player_name = get_matching_group_as_string(gcg_parser, gcg_line, 3);
-    set_game_history_player(
+    game_history_set_player(
         game_history, player_index,
-        create_game_history_player(player_name, player_nickname));
+        game_history_player_create(player_name, player_nickname));
     free(player_name);
     free(player_nickname);
-    if (get_game_history_player(game_history, 1 - player_index) &&
-        strings_equal(get_game_history_player_name(
-                          get_game_history_player(game_history, player_index)),
-                      get_game_history_player_name(get_game_history_player(
+    if (game_history_get_player(game_history, 1 - player_index) &&
+        strings_equal(game_history_get_player_name(
+                          game_history_get_player(game_history, player_index)),
+                      game_history_get_player_name(game_history_get_player(
                           game_history, 1 - player_index)))) {
       return GCG_PARSE_STATUS_DUPLICATE_NAMES;
     }
-    if (get_game_history_player(game_history, 1 - player_index) &&
-        strings_equal(get_game_history_player_nickname(
-                          get_game_history_player(game_history, player_index)),
-                      get_game_history_player_nickname(get_game_history_player(
+    if (game_history_get_player(game_history, 1 - player_index) &&
+        strings_equal(game_history_get_player_nickname(
+                          game_history_get_player(game_history, player_index)),
+                      game_history_get_player_nickname(game_history_get_player(
                           game_history, 1 - player_index)))) {
       return GCG_PARSE_STATUS_DUPLICATE_NICKNAMES;
     }
@@ -600,36 +600,36 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    if (get_game_history_title(game_history)) {
+    if (game_history_get_title(game_history)) {
       return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *title = get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    set_game_history_title(game_history, title);
+    game_history_set_title(game_history, title);
     free(title);
     break;
   case GCG_DESCRIPTION_TOKEN:
     if (number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    if (get_game_history_description(game_history)) {
+    if (game_history_get_description(game_history)) {
       return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *description = get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    set_game_history_description(game_history, description);
+    game_history_set_description(game_history, description);
     free(description);
     break;
   case GCG_ID_TOKEN:
     if (number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    if (get_game_history_id_auth(game_history) ||
-        get_game_history_uid(game_history)) {
+    if (game_history_get_id_auth(game_history) ||
+        game_history_get_uid(game_history)) {
       return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *id_auth = get_matching_group_as_string(gcg_parser, gcg_line, 1);
     char *uid = get_matching_group_as_string(gcg_parser, gcg_line, 2);
-    set_game_history_id_auth(game_history, id_auth);
-    set_game_history_uid(game_history, uid);
+    game_history_set_id_auth(game_history, id_auth);
+    game_history_set_uid(game_history, uid);
     free(id_auth);
     free(uid);
     break;
@@ -638,16 +638,16 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (!player_last_known_rack) {
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
-    set_game_history_player_last_known_rack(
-        get_game_history_player(game_history, 0), player_last_known_rack);
+    game_history_set_player_last_known_rack(
+        game_history_get_player(game_history, 0), player_last_known_rack);
     break;
   case GCG_RACK2_TOKEN:
     player_last_known_rack = get_rack_from_matching(gcg_parser, gcg_line, 1);
     if (!player_last_known_rack) {
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
-    set_game_history_player_last_known_rack(
-        get_game_history_player(game_history, 1), player_last_known_rack);
+    game_history_set_player_last_known_rack(
+        game_history_get_player(game_history, 1), player_last_known_rack);
     break;
   case GCG_ENCODING_TOKEN:
     return GCG_PARSE_STATUS_ENCODING_WRONG_PLACE;
@@ -660,7 +660,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event_and_add_to_history(game_history);
+    game_event = game_history_create_and_add_game_event(game_history);
     game_event_set_player_index(game_event, player_index);
     // Write the move rack
     game_event_set_type(game_event, GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -692,7 +692,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     }
 
     // Check if the play goes off the board
-    bool is_vertical = dir_is_vertical(get_dir(move));
+    bool is_vertical = board_is_dir_vertical(get_dir(move));
     int row_start = get_row_start(move);
     int col_start = get_col_start(move);
     int tiles_length = get_tiles_length(move);
@@ -743,23 +743,23 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    if (get_game_history_lexicon_name(game_history)) {
+    if (game_history_get_lexicon_name(game_history)) {
       return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *lexicon_name = get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    set_game_history_lexicon_name(game_history, lexicon_name);
+    game_history_set_lexicon_name(game_history, lexicon_name);
     free(lexicon_name);
     break;
   case GCG_BOARD_LAYOUT_TOKEN:
     if (number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    if (get_game_history_board_layout(game_history) != BOARD_LAYOUT_UNKNOWN) {
+    if (game_history_get_board_layout(game_history) != BOARD_LAYOUT_UNKNOWN) {
       return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *board_layout_string =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    set_game_history_board_layout(
+    game_history_set_board_layout(
         game_history, board_layout_string_to_board_layout(board_layout_string));
     free(board_layout_string);
     break;
@@ -767,12 +767,12 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    if (get_game_history_letter_distribution_name(game_history)) {
+    if (game_history_get_letter_distribution_name(game_history)) {
       return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *tile_distribution_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    set_game_history_letter_distribution_name(game_history,
+    game_history_set_letter_distribution_name(game_history,
                                               tile_distribution_name);
     free(tile_distribution_name);
     break;
@@ -780,12 +780,12 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    if (get_game_history_game_variant(game_history) != GAME_VARIANT_UNKNOWN) {
+    if (game_history_get_game_variant(game_history) != GAME_VARIANT_UNKNOWN) {
       return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *game_variant_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    set_game_history_game_variant(
+    game_history_set_game_variant(
         game_history, get_game_variant_type_from_name(game_variant_name));
     free(game_variant_name);
     break;
@@ -797,7 +797,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event_and_add_to_history(game_history);
+    game_event = game_history_create_and_add_game_event(game_history);
 
     game_event_rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
     game_event_set_rack(game_event, game_event_rack);
@@ -824,10 +824,10 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event_and_add_to_history(game_history);
+    game_event = game_history_create_and_add_game_event(game_history);
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_TIME_PENALTY);
-    // Rack is allowed to be empty for time penalty
+    // Rack is board_is_letter_allowed_in_cross_set to be empty for time penalty
     if (get_matching_group_string_length(gcg_parser, 2) == 0) {
       game_event_rack = NULL;
     } else {
@@ -847,7 +847,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event_and_add_to_history(game_history);
+    game_event = game_history_create_and_add_game_event(game_history);
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_END_RACK_PENALTY);
     game_event_rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
@@ -880,7 +880,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event_and_add_to_history(game_history);
+    game_event = game_history_create_and_add_game_event(game_history);
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_PASS);
     game_event_rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
@@ -902,7 +902,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event_and_add_to_history(game_history);
+    game_event = game_history_create_and_add_game_event(game_history);
     game_event_set_player_index(game_event, player_index);
     game_event_rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
     if (!game_event_rack) {
@@ -924,7 +924,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
-    game_event = create_game_event_and_add_to_history(game_history);
+    game_event = game_history_create_and_add_game_event(game_history);
 
     move = create_move();
     game_event_set_move(game_event, move);
@@ -1002,7 +1002,7 @@ gcg_parse_status_t parse_gcg_with_parser(GCGParser *gcg_parser,
   }
   if (gcg_parse_status == GCG_PARSE_STATUS_SUCCESS) {
     finalize_note(gcg_parser);
-    set_cumulative_scores(gcg_parser->game_history);
+    game_history_set_cumulative_scores(gcg_parser->game_history);
   }
 
   destroy_string_splitter(gcg_lines);

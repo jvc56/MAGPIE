@@ -14,7 +14,7 @@
 
 void test_config_error(Config *config, const char *cmd,
                        config_load_status_t expected_status) {
-  config_load_status_t actual_status = load_config(config, cmd);
+  config_load_status_t actual_status = config_load(config, cmd);
   if (actual_status != expected_status) {
     printf("config status mismatched: %d != %d\n>%s<\n", expected_status,
            actual_status, cmd);
@@ -23,7 +23,7 @@ void test_config_error(Config *config, const char *cmd,
 }
 
 void load_config_or_fail(Config *config, const char *cmd) {
-  config_load_status_t actual_status = load_config(config, cmd);
+  config_load_status_t actual_status = config_load(config, cmd);
   if (actual_status != CONFIG_LOAD_STATUS_SUCCESS) {
     printf("config load failed with error code %d\n>%s<\n", actual_status, cmd);
     assert(0);
@@ -31,7 +31,7 @@ void load_config_or_fail(Config *config, const char *cmd) {
 }
 
 void test_config_error_cases() {
-  Config *config = create_default_config();
+  Config *config = config_create_default();
   test_config_error(config, "position gcg",
                     CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
   test_config_error(config, "go sim lex CSW21 i 1000 plies 10 1",
@@ -131,11 +131,11 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
   test_config_error(config, "go sim l1 NWL20 l2 CSW21 ld german",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION);
-  destroy_config(config);
+  config_destroy(config);
 }
 
 void test_config_success() {
-  Config *config = create_default_config();
+  Config *config = config_create_default();
 
   const char *ld_name = "french";
   int bingo_bonus = 73;
@@ -425,7 +425,7 @@ void test_config_success() {
   assert_strings_equal(config_get_ld_name(config), "french");
 
   destroy_string_builder(test_string_builder);
-  destroy_config(config);
+  config_destroy(config);
 }
 
 void test_config() {

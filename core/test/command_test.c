@@ -183,7 +183,7 @@ void assert_command_status_and_output(ExecState *exec_state,
 }
 
 void test_command_execution() {
-  ExecState *exec_state = create_exec_state();
+  ExecState *exec_state = exec_state_create();
 
   assert_command_status_and_output(exec_state,
                                    "go sim lex CSW21 i 1000 plies 2h3", false,
@@ -315,7 +315,7 @@ void test_command_execution() {
         "r1 best r2 best i 10 numplays 1 lex OSPS44",
         false, 30, 1, 0);
   }
-  destroy_exec_state(exec_state);
+  exec_state_destroy(exec_state);
 }
 
 void test_process_command(const char *arg_string,
@@ -458,27 +458,27 @@ void test_exec_ucgi_command() {
                  process_args);
   pthread_detach(cmd_execution_thread);
 
-  FileHandler *input_writer = create_file_handler_from_filename(
+  FileHandler *input_writer = file_handler_create_from_filename(
       test_input_filename, FILE_HANDLER_MODE_WRITE);
 
   sleep(1);
-  write_to_file(input_writer, "r1 best r2 best i 10 numplays 1 threads 1\n");
+  file_handler_write(input_writer, "r1 best r2 best i 10 numplays 1 threads 1\n");
   sleep(1);
-  write_to_file(input_writer, "go autoplay lex CSW21 s1 equity s2 equity\n");
+  file_handler_write(input_writer, "go autoplay lex CSW21 s1 equity s2 equity\n");
   sleep(1);
-  write_to_file(input_writer,
+  file_handler_write(input_writer,
                 "go autoplay lex CSW21 s1 equity s2 equity i 10000000\n");
   sleep(1);
   // Interrupt the autoplay which won't finish in 1 second
-  write_to_file(input_writer, "stop\n");
+  file_handler_write(input_writer, "stop\n");
   sleep(1);
-  write_to_file(input_writer, "quit\n");
+  file_handler_write(input_writer, "quit\n");
   sleep(1);
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
-  destroy_file_handler(input_writer);
+  file_handler_destroy(input_writer);
   delete_fifo(test_input_filename);
   destroy_process_args(process_args);
   free(test_input_filename);
@@ -508,19 +508,19 @@ void test_exec_console_command() {
                  process_args);
   pthread_detach(cmd_execution_thread);
 
-  FileHandler *input_writer = create_file_handler_from_filename(
+  FileHandler *input_writer = file_handler_create_from_filename(
       test_input_filename, FILE_HANDLER_MODE_WRITE);
 
-  write_to_file(input_writer, "r1 best r2 best i 100 numplays 1 threads 4\n");
-  write_to_file(input_writer, "go autoplay lex CSW21 s1 equity s2 equity\n");
+  file_handler_write(input_writer, "r1 best r2 best i 100 numplays 1 threads 4\n");
+  file_handler_write(input_writer, "go autoplay lex CSW21 s1 equity s2 equity\n");
   // Stop should have no effect and appear as an error
-  write_to_file(input_writer, "stop\n");
-  write_to_file(input_writer, "quit\n");
+  file_handler_write(input_writer, "stop\n");
+  file_handler_write(input_writer, "quit\n");
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
-  destroy_file_handler(input_writer);
+  file_handler_destroy(input_writer);
   delete_fifo(test_input_filename);
   destroy_process_args(process_args);
   free(config_load_error_substr);

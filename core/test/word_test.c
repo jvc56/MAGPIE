@@ -13,8 +13,8 @@
 void test_words_played() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = create_game(config);
-  load_cgp(game, VS_ED);
+  Game *game = game_create(config);
+  game_load_cgp(game, VS_ED);
 
   Board *board = game_get_board(game);
   Player *player0 = game_get_player(game, 0);
@@ -110,8 +110,8 @@ void test_words_played() {
                         (uint8_t[]){19, 16, 1, 25, 19}, 5) == 0);
 
   free(fw);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_words() { test_words_played(); }

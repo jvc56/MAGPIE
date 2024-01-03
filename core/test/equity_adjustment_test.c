@@ -17,7 +17,7 @@
 void test_macondo_opening_equity_adjustments() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Player *player0 = game_get_player(game, 0);
   Rack *rack = player_get_rack(player0);
   const KLV *klv = player_get_klv(player0);
@@ -38,7 +38,7 @@ void test_macondo_opening_equity_adjustments() {
                         get_equity(top_move)));
 
   destroy_sorted_move_list(vortex_sorted_move_list);
-  reset_game(game);
+  game_reset(game);
 
   set_rack_to_string(ld, rack, "BDEIIIJ");
   // Should be 8D JIBED
@@ -56,7 +56,7 @@ void test_macondo_opening_equity_adjustments() {
                         get_equity(top_move)));
 
   destroy_sorted_move_list(jibed_sorted_move_list);
-  reset_game(game);
+  game_reset(game);
 
   set_rack_to_string(ld, rack, "ACEEEFT");
   generate_moves_for_game(game, 0, move_list);
@@ -71,7 +71,7 @@ void test_macondo_opening_equity_adjustments() {
                                  (2 * OPENING_HOTSPOT_PENALTY)),
                         get_equity(top_move)));
   destroy_sorted_move_list(facete_sorted_move_list);
-  reset_game(game);
+  game_reset(game);
 
   set_rack_to_string(ld, rack, "AAAALTY");
   generate_moves_for_game(game, 0, move_list);
@@ -88,17 +88,17 @@ void test_macondo_opening_equity_adjustments() {
 
   destroy_sorted_move_list(atalaya_sorted_move_list);
   destroy_move_list(move_list);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_macondo_endgame_equity_adjustments() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   MoveList *move_list = create_move_list(6);
 
-  load_cgp(game,
+  game_load_cgp(game,
            "4RUMMAGED2C/7A6A/2H1G2T6V/2O1O2I6E/2WAB2PREBENDS/2ER3O3n3/2SI6COW2/"
            "3L2HUE2KANE/3LI3FILII2/J1TANGENT2T1Z1/A2TA5FA1OP/R2EN5Ok1OU/"
            "VILDE5YEX1D/I3R6SUQS/E13Y INR/OT 440/448 0 lex CSW21;");
@@ -151,8 +151,8 @@ void test_macondo_endgame_equity_adjustments() {
 
   destroy_sorted_move_list(endgame_sorted_move_list);
   destroy_move_list(move_list);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_equity_adjustments() {

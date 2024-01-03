@@ -9,20 +9,20 @@
 #include "test_util.h"
 
 void reset_and_load_game_success(Game *game, const char *cgp) {
-  cgp_parse_status_t cgp_parse_status = load_cgp(game, cgp);
+  cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
 }
 
 void reset_and_load_game_failure(Game *game, const char *cgp,
                                  cgp_parse_status_t expected_cgp_parse_status) {
-  cgp_parse_status_t cgp_parse_status = load_cgp(game, cgp);
+  cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
   assert(cgp_parse_status == expected_cgp_parse_status);
 }
 
 void test_load_cgp() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   // Test that loading various CGPs doesn't result in
   // any errors
   reset_and_load_game_success(game, EMPTY_CGP);
@@ -139,15 +139,15 @@ void test_load_cgp() {
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDF/YXZ 0/0 H",
       CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS);
 
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_game_main() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_letter_distribution(config);
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Rack *rack = create_rack(letter_distribution_get_size(ld));
   cgp_parse_status_t cgp_parse_status;
 
@@ -157,12 +157,12 @@ void test_game_main() {
   // Test Reset
   game_set_consecutive_scoreless_turns(game, 3);
   game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
-  reset_game(game);
+  game_reset(game);
   assert(game_get_consecutive_scoreless_turns(game) == 0);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
 
   // Test opening racks
-  cgp_parse_status = load_cgp(game, OPENING_CGP);
+  cgp_parse_status = game_load_cgp(game, OPENING_CGP);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
   set_rack_to_string(ld, rack, "ABCDEFG");
   assert(equal_rack(rack, player0_rack));
@@ -170,7 +170,7 @@ void test_game_main() {
   assert(equal_rack(rack, player1_rack));
 
   // Test CGP with excessive whitespace
-  cgp_parse_status = load_cgp(game, EXCESSIVE_WHITESPACE_CGP);
+  cgp_parse_status = game_load_cgp(game, EXCESSIVE_WHITESPACE_CGP);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
   set_rack_to_string(ld, rack, "ABCDEFG");
   assert(equal_rack(rack, player0_rack));
@@ -179,14 +179,14 @@ void test_game_main() {
   assert(game_get_consecutive_scoreless_turns(game) == 4);
 
   // Test CGP with one consecutive zero
-  cgp_parse_status = load_cgp(game, ONE_CONSECUTIVE_ZERO_CGP);
+  cgp_parse_status = game_load_cgp(game, ONE_CONSECUTIVE_ZERO_CGP);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
   assert(game_get_consecutive_scoreless_turns(game) == 1);
-  reset_game(game);
+  game_reset(game);
 
   destroy_rack(rack);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_game() {

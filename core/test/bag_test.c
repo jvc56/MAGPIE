@@ -19,7 +19,7 @@
 void test_add_letter(const Config *config, Bag *bag, char *r,
                      char *expected_bag_string, int player_index) {
   LetterDistribution *ld = config_get_letter_distribution(config);
-  add_letter(bag, hl_to_ml(ld, r), player_index);
+  bag_add_letter(bag, hl_to_ml(ld, r), player_index);
   StringBuilder *bag_string = create_string_builder();
   string_builder_add_bag(bag, ld, bag_string);
   assert_strings_equal(string_builder_peek(bag_string), expected_bag_string);
@@ -35,13 +35,17 @@ void test_bag() {
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
-  Bag *bag = create_bag(ld);
+  Bag *bag = bag_create(ld);
   Rack *rack = create_rack(ld_size);
-  Rack *rack2 = create_rack(ld_size);
 
-  int number_of_remaining_tiles = get_tiles_remaining(bag);
+  for (int i = 0; i < ld_size; i++) {
+    assert((int)letter_distribution_get_distribution(ld, i) ==
+           bag_get_letter(bag, i));
+  }
+
+  int number_of_remaining_tiles = bag_get_tiles(bag);
   for (int k = 0; k < number_of_remaining_tiles; k++) {
-    uint8_t letter = draw_random_letter(bag, 0);
+    uint8_t letter = bag_draw_random_letter(bag, 0);
     add_letter_to_rack(rack, letter);
   }
 
@@ -50,25 +54,12 @@ void test_bag() {
            get_number_of_letter(rack, i));
   }
 
-  reset_bag(ld, bag);
+  bag_reset(ld, bag);
   reset_rack(rack);
 
-  // Check drawing from the bag
-  int drawing_player = 0;
-  while (get_tiles_remaining(bag) > RACK_SIZE) {
-    draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
-    drawing_player = 1 - drawing_player;
-    number_of_remaining_tiles -= RACK_SIZE;
-    assert(!rack_is_empty(rack));
-    assert(get_number_of_letters(rack) == RACK_SIZE);
-    reset_rack(rack);
+  while (!bag_is_empty(bag)) {
+    bag_draw_random_letter(bag, bag_get_tiles(bag) % 2);
   }
-
-  draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
-  assert(bag_is_empty(bag));
-  assert(!rack_is_empty(rack));
-  assert(get_number_of_letters(rack) == number_of_remaining_tiles);
-  reset_rack(rack);
 
   // Check adding letters to the bag
 
@@ -80,11 +71,7 @@ void test_bag() {
   test_add_letter(config, bag, "b", "ABFZ??", 1);
   test_add_letter(config, bag, "z", "ABFZ???", 0);
 
-  add_bag_to_rack(bag, rack);
-  set_rack_to_string(ld, rack2, "ABFZ???");
-  assert(racks_are_equal(rack, rack2));
-
-  reset_bag(ld, bag);
+  bag_reset(ld, bag);
   reset_rack(rack);
 
   Bag *copy_of_bag = bag_duplicate(bag);
@@ -98,7 +85,7 @@ void test_bag() {
   // Establish the initial draw order
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
     int player_index = i % 2;
-    uint8_t letter = draw_random_letter(bag, player_index);
+    uint8_t letter = bag_draw_random_letter(bag, player_index);
     int tiles_index =
         get_drawn_tile_index(tiles_drawn[player_index]++, player_index);
     draw_order[tiles_index] = letter;
@@ -114,7 +101,7 @@ void test_bag() {
 
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
     int player_index = i / ((TEST_BAG_SIZE) / 2);
-    uint8_t letter = draw_random_letter(bag, player_index);
+    uint8_t letter = bag_draw_random_letter(bag, player_index);
     int tiles_index =
         get_drawn_tile_index(tiles_drawn[player_index]++, player_index);
     assert(draw_order[tiles_index] == letter);
@@ -127,7 +114,7 @@ void test_bag() {
 
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
     int player_index = (i % 10) / 5;
-    uint8_t letter = draw_random_letter(bag, player_index);
+    uint8_t letter = bag_draw_random_letter(bag, player_index);
     int tiles_index =
         get_drawn_tile_index(tiles_drawn[player_index]++, player_index);
     assert(draw_order[tiles_index] == letter);
@@ -140,7 +127,7 @@ void test_bag() {
     tiles_drawn[player_index]--;
     int tiles_index =
         get_drawn_tile_index(tiles_drawn[player_index], player_index);
-    add_letter(bag, draw_order[tiles_index], player_index);
+    bag_add_letter(bag, draw_order[tiles_index], player_index);
   }
 
   assert_bags_are_equal(bag, copy_of_bag, ld_size);
@@ -152,7 +139,7 @@ void test_bag() {
   // One player draws way more than the other
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
     int player_index = i / ((TEST_BAG_SIZE)-10);
-    uint8_t letter = draw_random_letter(bag, player_index);
+    uint8_t letter = bag_draw_random_letter(bag, player_index);
     int tiles_index;
     if (i < (TEST_BAG_SIZE) / 2) {
       // Draws from the first half of the bag
@@ -178,7 +165,7 @@ void test_bag() {
 
   // Player 1 draws all tiles
   for (int i = 0; i < (TEST_BAG_SIZE); i++) {
-    uint8_t letter = draw_random_letter(bag, 1);
+    uint8_t letter = bag_draw_random_letter(bag, 1);
     int tiles_index;
     if (i < (TEST_BAG_SIZE) / 2) {
       tiles_index = get_drawn_tile_index(i, 1);
@@ -197,14 +184,13 @@ void test_bag() {
     } else {
       tiles_index = get_drawn_tile_index((TEST_BAG_SIZE)-1 - i, 0);
     }
-    add_letter(bag, draw_order[tiles_index], 1);
+    bag_add_letter(bag, draw_order[tiles_index], 1);
   }
 
   assert_bags_are_equal(bag, copy_of_bag, ld_size);
 
-  destroy_bag(bag);
-  destroy_bag(copy_of_bag);
+  bag_destroy(bag);
+  bag_destroy(copy_of_bag);
   destroy_rack(rack);
-  destroy_rack(rack2);
-  destroy_config(config);
+  config_destroy(config);
 }

@@ -13,64 +13,7 @@ struct AutoplayResults {
   Stat *p2_score;
 };
 
-int get_total_games(const AutoplayResults *autoplay_results) {
-  return autoplay_results->total_games;
-}
-
-int get_p1_wins(const AutoplayResults *autoplay_results) {
-  return autoplay_results->p1_wins;
-}
-
-int get_p1_losses(const AutoplayResults *autoplay_results) {
-  return autoplay_results->p1_losses;
-}
-
-int get_p1_ties(const AutoplayResults *autoplay_results) {
-  return autoplay_results->p1_ties;
-}
-
-int get_p1_firsts(const AutoplayResults *autoplay_results) {
-  return autoplay_results->p1_firsts;
-}
-
-Stat *get_p1_score(const AutoplayResults *autoplay_results) {
-  return autoplay_results->p1_score;
-}
-
-Stat *get_p2_score(const AutoplayResults *autoplay_results) {
-  return autoplay_results->p2_score;
-}
-
-// Setter functions
-void increment_total_games(AutoplayResults *autoplay_results) {
-  autoplay_results->total_games++;
-}
-
-void increment_p1_wins(AutoplayResults *autoplay_results) {
-  autoplay_results->p1_wins++;
-}
-
-void increment_p1_losses(AutoplayResults *autoplay_results) {
-  autoplay_results->p1_losses++;
-}
-
-void increment_p1_ties(AutoplayResults *autoplay_results) {
-  autoplay_results->p1_ties++;
-}
-
-void increment_p1_firsts(AutoplayResults *autoplay_results) {
-  autoplay_results->p1_firsts++;
-}
-
-void increment_p1_score(AutoplayResults *autoplay_results, int score) {
-  push(autoplay_results->p1_score, (double)score, 1);
-}
-
-void increment_p2_score(AutoplayResults *autoplay_results, int score) {
-  push(autoplay_results->p2_score, (double)score, 1);
-}
-
-void reset_autoplay_results(AutoplayResults *autoplay_results) {
+void autoplay_results_reset(AutoplayResults *autoplay_results) {
   autoplay_results->total_games = 0;
   autoplay_results->p1_wins = 0;
   autoplay_results->p1_losses = 0;
@@ -80,21 +23,79 @@ void reset_autoplay_results(AutoplayResults *autoplay_results) {
   reset_stat(autoplay_results->p2_score);
 }
 
-AutoplayResults *create_autoplay_results() {
+AutoplayResults *autoplay_results_create() {
   AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
   autoplay_results->p1_score = create_stat();
   autoplay_results->p2_score = create_stat();
-  reset_autoplay_results(autoplay_results);
+  autoplay_results_reset(autoplay_results);
   return autoplay_results;
 }
 
-void destroy_autoplay_results(AutoplayResults *autoplay_results) {
+void autoplay_results_destroy(AutoplayResults *autoplay_results) {
   destroy_stat(autoplay_results->p1_score);
   destroy_stat(autoplay_results->p2_score);
   free(autoplay_results);
 }
 
-void add_autoplay_results(const AutoplayResults *result_to_add,
+int autoplay_results_get_games(const AutoplayResults *autoplay_results) {
+  return autoplay_results->total_games;
+}
+
+int autoplay_results_get_p1_wins(const AutoplayResults *autoplay_results) {
+  return autoplay_results->p1_wins;
+}
+
+int autoplay_results_get_p1_losses(const AutoplayResults *autoplay_results) {
+  return autoplay_results->p1_losses;
+}
+
+int autoplay_results_get_p1_ties(const AutoplayResults *autoplay_results) {
+  return autoplay_results->p1_ties;
+}
+
+int autoplay_results_get_p1_firsts(const AutoplayResults *autoplay_results) {
+  return autoplay_results->p1_firsts;
+}
+
+Stat *autoplay_results_get_p1_score(const AutoplayResults *autoplay_results) {
+  return autoplay_results->p1_score;
+}
+
+Stat *autoplay_results_get_p2_score(const AutoplayResults *autoplay_results) {
+  return autoplay_results->p2_score;
+}
+
+void autoplay_results_increment_total_games(AutoplayResults *autoplay_results) {
+  autoplay_results->total_games++;
+}
+
+void autoplay_results_increment_p1_wins(AutoplayResults *autoplay_results) {
+  autoplay_results->p1_wins++;
+}
+
+void autoplay_results_increment_p1_losses(AutoplayResults *autoplay_results) {
+  autoplay_results->p1_losses++;
+}
+
+void autoplay_results_increment_p1_ties(AutoplayResults *autoplay_results) {
+  autoplay_results->p1_ties++;
+}
+
+void autoplay_results_increment_p1_firsts(AutoplayResults *autoplay_results) {
+  autoplay_results->p1_firsts++;
+}
+
+void autoplay_results_increment_p1_score(AutoplayResults *autoplay_results,
+                                         int score) {
+  push(autoplay_results->p1_score, (double)score, 1);
+}
+
+void autoplay_results_increment_p2_score(AutoplayResults *autoplay_results,
+                                         int score) {
+  push(autoplay_results->p2_score, (double)score, 1);
+}
+
+void autoplay_results_add(const AutoplayResults *result_to_add,
                           AutoplayResults *result_to_be_updated) {
   // Stats are combined elsewhere
   result_to_be_updated->p1_firsts += result_to_add->p1_firsts;

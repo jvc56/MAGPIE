@@ -39,66 +39,66 @@ void test_regular_file() {
   reset_file(test_output_filename1);
   reset_file(test_output_filename2);
 
-  FileHandler *fh = create_file_handler_from_filename(test_output_filename1,
+  FileHandler *fh = file_handler_create_from_filename(test_output_filename1,
                                                       FILE_HANDLER_MODE_WRITE);
 
-  write_to_file(fh, "line 1\n");
+  file_handler_write(fh, "line 1\n");
   char *file_content1 = get_string_from_file(test_output_filename1);
 
   assert_strings_equal(file_content1, "line 1\n");
   free(file_content1);
 
-  write_to_file(fh, "line 2\n");
+  file_handler_write(fh, "line 2\n");
   char *file_content2 = get_string_from_file(test_output_filename1);
 
   assert_strings_equal(file_content2, "line 1\nline 2\n");
   free(file_content2);
 
   // Set to a different file
-  set_file_handler(fh, test_output_filename2, FILE_HANDLER_MODE_WRITE);
+  file_handler_set_filename(fh, test_output_filename2, FILE_HANDLER_MODE_WRITE);
 
-  write_to_file(fh, "line 3\n");
+  file_handler_write(fh, "line 3\n");
   char *file_content3 = get_string_from_file(test_output_filename2);
 
   assert_strings_equal(file_content3, "line 3\n");
   free(file_content3);
 
-  write_to_file(fh, "line 4\n");
+  file_handler_write(fh, "line 4\n");
   char *file_content4 = get_string_from_file(test_output_filename2);
 
   assert_strings_equal(file_content4, "line 3\nline 4\n");
   free(file_content4);
 
   // Set back to file 1
-  set_file_handler(fh, test_output_filename1, FILE_HANDLER_MODE_WRITE);
-  write_to_file(fh, "line 5");
+  file_handler_set_filename(fh, test_output_filename1, FILE_HANDLER_MODE_WRITE);
+  file_handler_write(fh, "line 5");
   char *file_content5 = get_string_from_file(test_output_filename1);
 
   assert_strings_equal(file_content5, "line 1\nline 2\nline 5");
   free(file_content5);
 
   // Set to read file 1
-  set_file_handler(fh, test_output_filename1, FILE_HANDLER_MODE_READ);
+  file_handler_set_filename(fh, test_output_filename1, FILE_HANDLER_MODE_READ);
 
-  char *file_1_line_1 = getline_from_file(fh);
+  char *file_1_line_1 = file_handler_get_line(fh);
   assert_strings_equal("line 1", file_1_line_1);
   free(file_1_line_1);
 
-  char *file_1_line_2 = getline_from_file(fh);
+  char *file_1_line_2 = file_handler_get_line(fh);
   assert_strings_equal("line 2", file_1_line_2);
   free(file_1_line_2);
 
-  char *file_1_line_3 = getline_from_file(fh);
+  char *file_1_line_3 = file_handler_get_line(fh);
   assert_strings_equal("line 5", file_1_line_3);
   free(file_1_line_3);
 
   // File should be empty
-  char *file_1_eof_result = getline_from_file(fh);
+  char *file_1_eof_result = file_handler_get_line(fh);
   if (file_1_eof_result) {
   }
   assert(!file_1_eof_result);
 
-  destroy_file_handler(fh);
+  file_handler_destroy(fh);
   delete_file(test_output_filename1);
   delete_file(test_output_filename2);
   free(test_output_filename1);
@@ -128,11 +128,11 @@ void *read_fifo_thread(void *uncasted_test_fifo_args) {
   const char *fifo_filename = test_fifo_args->fifo_filename;
 
   FileHandler *fifo_reader =
-      create_file_handler_from_filename(fifo_filename, FILE_HANDLER_MODE_READ);
+      file_handler_create_from_filename(fifo_filename, FILE_HANDLER_MODE_READ);
 
   StringBuilder *result_builder = create_string_builder();
   while (1) {
-    char *line = getline_from_file(fifo_reader);
+    char *line = file_handler_get_line(fifo_reader);
     if (!line) {
       break;
     }
@@ -141,7 +141,7 @@ void *read_fifo_thread(void *uncasted_test_fifo_args) {
   }
   assert_strings_equal("abc", string_builder_peek(result_builder));
   destroy_string_builder(result_builder);
-  destroy_file_handler(fifo_reader);
+  file_handler_destroy(fifo_reader);
   test_fifo_args->done_reading = true;
   return NULL;
 }
@@ -152,16 +152,16 @@ void *write_fifo_thread(void *uncasted_test_fifo_args) {
   const char *fifo_filename = test_fifo_args->fifo_filename;
 
   FileHandler *fifo_writer =
-      create_file_handler_from_filename(fifo_filename, FILE_HANDLER_MODE_WRITE);
+      file_handler_create_from_filename(fifo_filename, FILE_HANDLER_MODE_WRITE);
 
   sleep(1);
-  write_to_file(fifo_writer, "a\n");
+  file_handler_write(fifo_writer, "a\n");
   sleep(1);
-  write_to_file(fifo_writer, "b\n");
+  file_handler_write(fifo_writer, "b\n");
   sleep(1);
-  write_to_file(fifo_writer, "c\n");
+  file_handler_write(fifo_writer, "c\n");
   sleep(1);
-  destroy_file_handler(fifo_writer);
+  file_handler_destroy(fifo_writer);
 
   test_fifo_args->done_writing = true;
 

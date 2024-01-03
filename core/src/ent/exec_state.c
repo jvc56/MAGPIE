@@ -22,26 +22,26 @@ struct ExecState {
   ErrorStatus *error_status;
 };
 
-ExecState *create_exec_state() {
+ExecState *exec_state_create() {
   ExecState *exec_state = malloc_or_die(sizeof(ExecState));
-  exec_state->config = create_default_config();
+  exec_state->config = config_create_default();
   exec_state->game = NULL;
   exec_state->sim_results = sim_results_create();
   exec_state->inference_results = inference_results_create();
-  exec_state->autoplay_results = create_autoplay_results();
-  exec_state->error_status = create_error_status();
+  exec_state->autoplay_results = autoplay_results_create();
+  exec_state->error_status = error_status_create();
   return exec_state;
 }
 
-void destroy_exec_state(ExecState *exec_state) {
-  destroy_config(exec_state->config);
+void exec_state_destroy(ExecState *exec_state) {
+  config_destroy(exec_state->config);
   if (exec_state->game) {
-    destroy_game(exec_state->game);
+    game_destroy(exec_state->game);
   }
   sim_results_destroy(exec_state->sim_results);
   inference_results_destroy(exec_state->inference_results);
-  destroy_autoplay_results(exec_state->autoplay_results);
-  destroy_error_status(exec_state->error_status);
+  autoplay_results_destroy(exec_state->autoplay_results);
+  error_status_destroy(exec_state->error_status);
   free(exec_state);
 }
 
@@ -85,13 +85,13 @@ bool is_game_recreation_required(const Config *config) {
 //  - The config is loaded
 void exec_state_init_game(ExecState *exec_state) {
   if (exec_state->game && is_game_recreation_required(exec_state->config)) {
-    destroy_game(exec_state->game);
+    game_destroy(exec_state->game);
     exec_state->game = NULL;
   }
 
   if (!exec_state->game) {
-    exec_state->game = create_game(exec_state->config);
+    exec_state->game = game_create(exec_state->config);
   } else {
-    update_game(exec_state->config, exec_state->game);
+    game_update(exec_state->config, exec_state->game);
   }
 }

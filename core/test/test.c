@@ -58,8 +58,6 @@ void run_all() {
   test_stats();
   test_infer();
   test_sim();
-  // FIXME: find out why this breaks
-  // on github CLI
   // test_command();
   test_gcg();
   test_autoplay();

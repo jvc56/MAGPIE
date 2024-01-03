@@ -17,7 +17,8 @@
 struct Config;
 typedef struct Config Config;
 
-// Getter functions
+Config *config_create_default();
+void config_destroy(Config *config);
 
 command_t config_get_command_type(const Config *config);
 LetterDistribution *config_get_letter_distribution(const Config *config);
@@ -48,9 +49,7 @@ bool config_get_command_set_cgp(const Config *config);
 bool config_get_command_set_infile(const Config *config);
 bool config_get_command_set_exec_mode(const Config *config);
 
-config_load_status_t load_config(Config *config, const char *cmd);
-bool continue_on_coldstart(const Config *config);
-Config *create_default_config();
-void destroy_config(Config *config);
+config_load_status_t config_load(Config *config, const char *cmd);
+bool config_continue_on_coldstart(const Config *config);
 
 #endif

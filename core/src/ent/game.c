@@ -110,7 +110,7 @@ void game_start_next_player_turn(Game *game) {
 
 void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
                          int player_draw_index) {
-  draw_letter(bag, letter, player_draw_index);
+  bag_draw_letter(bag, letter, player_draw_index);
   add_letter_to_rack(rack, letter);
 }
 
@@ -124,42 +124,12 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
   return game_variant;
 }
 
-void set_random_rack(Game *game, int pidx, Rack *known_rack) {
-  Bag *bag = game_get_bag(game);
-  Rack *prack = player_get_rack(game_get_player(game, pidx));
-  int ntiles = get_number_of_letters(prack);
-  int player_draw_index = game_get_player_draw_index(game, pidx);
-  // always try to fill rack if possible.
-  if (ntiles < RACK_SIZE) {
-    ntiles = RACK_SIZE;
-  }
-  // throw in existing rack, then redraw from the bag.
-  for (int i = 0; i < get_array_size(prack); i++) {
-    if (get_number_of_letter(prack, i) > 0) {
-      for (int j = 0; j < get_number_of_letter(prack, i); j++) {
-        add_letter(bag, i, player_draw_index);
-      }
-    }
-  }
-  reset_rack(prack);
-  int ndrawn = 0;
-  if (known_rack && get_number_of_letters(known_rack) > 0) {
-    for (int i = 0; i < get_array_size(known_rack); i++) {
-      for (int j = 0; j < get_number_of_letter(known_rack, i); j++) {
-        draw_letter_to_rack(bag, prack, i, player_draw_index);
-        ndrawn++;
-      }
-    }
-  }
-  draw_at_most_to_rack(bag, prack, ntiles - ndrawn, player_draw_index);
-}
-
 int traverse_backwards_for_score(const Board *board,
                                  const LetterDistribution *letter_distribution,
                                  int row, int col) {
   int score = 0;
-  while (pos_exists(row, col)) {
-    uint8_t ml = get_letter(board, row, col);
+  while (board_is_position_valid(row, col)) {
+    uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
     }
@@ -177,96 +147,100 @@ int traverse_backwards_for_score(const Board *board,
 void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
                         uint32_t node_index, bool check_letter_set,
                         int left_most_col) {
-  while (pos_exists(row, col)) {
-    uint8_t ml = get_letter(board, row, col);
+  while (board_is_position_valid(row, col)) {
+    uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
     }
 
     if (check_letter_set && col == left_most_col) {
       if (kwg_in_letter_set(kwg, ml, node_index)) {
-        set_board_node_index(board, node_index);
-        set_board_path_is_valid(board, true);
+        board_set_node_index(board, node_index);
+        board_set_path_is_valid(board, true);
         return;
       }
 
-      set_board_node_index(board, node_index);
-      set_board_path_is_valid(board, false);
+      board_set_node_index(board, node_index);
+      board_set_path_is_valid(board, false);
       return;
     }
 
     node_index = kwg_get_next_node_index(kwg, node_index,
                                          get_unblanked_machine_letter(ml));
     if (node_index == 0) {
-      set_board_node_index(board, node_index);
-      set_board_path_is_valid(board, false);
+      board_set_node_index(board, node_index);
+      board_set_path_is_valid(board, false);
       return;
     }
 
     col--;
   }
 
-  set_board_node_index(board, node_index);
-  set_board_path_is_valid(board, true);
+  board_set_node_index(board, node_index);
+  board_set_path_is_valid(board, true);
 }
 
 void gen_cross_set(const KWG *kwg,
                    const LetterDistribution *letter_distribution, Board *board,
                    int row, int col, int dir, int cross_set_index) {
-  if (!pos_exists(row, col)) {
+  if (!board_is_position_valid(row, col)) {
     return;
   }
 
-  if (!is_empty(board, row, col)) {
-    set_cross_set(board, row, col, 0, dir, cross_set_index);
-    set_cross_score(board, row, col, 0, dir, cross_set_index);
+  if (!board_is_empty(board, row, col)) {
+    board_set_cross_set(board, row, col, 0, dir, cross_set_index);
+    board_set_cross_score(board, row, col, 0, dir, cross_set_index);
     return;
   }
-  if (left_and_right_empty(board, row, col)) {
-    set_cross_set(board, row, col, TRIVIAL_CROSS_SET, dir, cross_set_index);
-    set_cross_score(board, row, col, 0, dir, cross_set_index);
+  if (board_are_left_and_right_empty(board, row, col)) {
+    board_set_cross_set(board, row, col, TRIVIAL_CROSS_SET, dir,
+                        cross_set_index);
+    board_set_cross_score(board, row, col, 0, dir, cross_set_index);
     return;
   }
 
-  int right_col = word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
+  int right_col =
+      board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
   if (right_col == col) {
     traverse_backwards(kwg, board, row, col - 1, kwg_get_root_node_index(kwg),
                        false, 0);
-    uint32_t lnode_index = get_board_node_index(board);
-    int lpath_is_valid = get_board_path_is_valid(board);
+    uint32_t lnode_index = board_get_node_index(board);
+    int lpath_is_valid = board_get_path_is_valid(board);
     int score =
         traverse_backwards_for_score(board, letter_distribution, row, col - 1);
-    set_cross_score(board, row, col, score, dir, cross_set_index);
+    board_set_cross_score(board, row, col, score, dir, cross_set_index);
 
     if (!lpath_is_valid) {
-      set_cross_set(board, row, col, 0, dir, cross_set_index);
+      board_set_cross_set(board, row, col, 0, dir, cross_set_index);
       return;
     }
     uint32_t s_index =
         kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
     uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
-    set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+    board_set_cross_set(board, row, col, letter_set, dir, cross_set_index);
   } else {
-    int left_col = word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
+    int left_col =
+        board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
     traverse_backwards(kwg, board, row, right_col, kwg_get_root_node_index(kwg),
                        false, 0);
-    uint32_t lnode_index = get_board_node_index(board);
-    int lpath_is_valid = get_board_path_is_valid(board);
+    uint32_t lnode_index = board_get_node_index(board);
+    int lpath_is_valid = board_get_path_is_valid(board);
     int score_r = traverse_backwards_for_score(board, letter_distribution, row,
                                                right_col);
     int score_l =
         traverse_backwards_for_score(board, letter_distribution, row, col - 1);
-    set_cross_score(board, row, col, score_r + score_l, dir, cross_set_index);
+    board_set_cross_score(board, row, col, score_r + score_l, dir,
+                          cross_set_index);
     if (!lpath_is_valid) {
-      set_cross_set(board, row, col, 0, dir, cross_set_index);
+      board_set_cross_set(board, row, col, 0, dir, cross_set_index);
       return;
     }
     if (left_col == col) {
       uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
-      set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+      board_set_cross_set(board, row, col, letter_set, dir, cross_set_index);
     } else {
       uint64_t *cross_set =
-          get_cross_set_pointer(board, row, col, dir, cross_set_index);
+          board_get_cross_set_pointer(board, row, col, dir, cross_set_index);
       *cross_set = 0;
       for (int i = lnode_index;; i++) {
         int t = kwg_tile(kwg, i);
@@ -274,8 +248,8 @@ void gen_cross_set(const KWG *kwg,
           int next_node_index = kwg_arc_index(kwg, i);
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
                              left_col);
-          if (get_board_path_is_valid(board)) {
-            set_cross_set_letter(cross_set, t);
+          if (board_get_path_is_valid(board)) {
+            board_set_cross_set_letter(cross_set, t);
           }
         }
         if (kwg_is_end(kwg, i)) {
@@ -297,7 +271,7 @@ void generate_all_cross_sets(const KWG *kwg_1, const KWG *kwg_2,
       }
     }
   }
-  transpose(board);
+  board_transpose(board);
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
       gen_cross_set(kwg_1, letter_distribution, board, i, j, 1, 0);
@@ -306,7 +280,7 @@ void generate_all_cross_sets(const KWG *kwg_1, const KWG *kwg_2,
       }
     }
   }
-  transpose(board);
+  board_transpose(board);
 }
 
 cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
@@ -323,12 +297,13 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
     cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_BOARD_LETTERS;
   } else {
     for (int i = 0; i < number_of_machine_letters; i++) {
-      set_letter(game->board, row_start, col_start + i, machine_letters[i]);
+      board_set_letter(game->board, row_start, col_start + i,
+                       machine_letters[i]);
       // When placing letters on the board, we
       // assume that player 0 placed all of the tiles
       // for convenience.
-      draw_letter(game->bag, machine_letters[i], 0);
-      incrememt_tiles_played(game->board, 1);
+      bag_draw_letter(game->bag, machine_letters[i], 0);
+      board_increment_tiles_played(game->board, 1);
     }
     *current_column_index = *current_column_index + number_of_machine_letters;
   }
@@ -410,7 +385,7 @@ int draw_rack_from_bag(const LetterDistribution *letter_distribution, Bag *bag,
       set_rack_to_string(letter_distribution, rack, rack_string);
   for (int i = 0; i < get_array_size(rack); i++) {
     for (int j = 0; j < get_number_of_letter(rack, i); j++) {
-      draw_letter(bag, i, player_draw_index);
+      bag_draw_letter(bag, i, player_draw_index);
     }
   }
   return number_of_letters_set;
@@ -519,8 +494,8 @@ cgp_parse_status_t parse_cgp(Game *game, const char *cgp) {
   return cgp_parse_status;
 }
 
-cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
-  reset_game(game);
+cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
+  game_reset(game);
   cgp_parse_status_t cgp_parse_status = parse_cgp(game, cgp);
   if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
     return cgp_parse_status;
@@ -534,7 +509,7 @@ cgp_parse_status_t load_cgp(Game *game, const char *cgp) {
   generate_all_cross_sets(player_get_kwg(player0), player_get_kwg(player1),
                           game->ld, game->board,
                           game->data_is_shared[PLAYERS_DATA_TYPE_KWG]);
-  update_all_anchors(game->board);
+  board_update_all_anchors(game->board);
 
   if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
     game->game_end_reason = GAME_END_REASON_CONSECUTIVE_ZEROS;
@@ -552,12 +527,12 @@ int tiles_unseen(const Game *game) {
   Player *player_not_on_turn = game->players[1 - game->player_on_turn_index];
   Rack *player_not_on_turn_rack = player_get_rack(player_not_on_turn);
   int their_rack_tiles = get_number_of_letters(player_not_on_turn_rack);
-  return (their_rack_tiles + get_tiles_remaining(game->bag));
+  return (their_rack_tiles + bag_get_tiles(game->bag));
 }
 
-void reset_game(Game *game) {
-  reset_board(game->board);
-  reset_bag(game->ld, game->bag);
+void game_reset(Game *game) {
+  board_reset(game->board);
+  bag_reset(game->ld, game->bag);
   reset_player(game->players[0]);
   reset_player(game->players[1]);
   game->player_on_turn_index = 0;
@@ -579,14 +554,14 @@ void pre_allocate_backups(Game *game) {
   uint32_t ld_size = letter_distribution_get_size(ld);
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
-    game->game_backups[i]->bag = create_bag(ld);
-    game->game_backups[i]->board = create_board();
+    game->game_backups[i]->bag = bag_create(ld);
+    game->game_backups[i]->board = board_create();
     game->game_backups[i]->p0rack = create_rack(ld_size);
     game->game_backups[i]->p1rack = create_rack(ld_size);
   }
 }
 
-void set_backup_mode(Game *game, int backup_mode) {
+void game_set_backup_mode(Game *game, int backup_mode) {
   game->backup_mode = backup_mode;
   if (backup_mode == BACKUP_MODE_SIMULATION && !game->backups_preallocated) {
     game->backup_cursor = 0;
@@ -595,7 +570,7 @@ void set_backup_mode(Game *game, int backup_mode) {
   }
 }
 
-void update_game(const Config *config, Game *game) {
+void game_update(const Config *config, Game *game) {
   game->ld = config_get_letter_distribution(config);
   for (int player_index = 0; player_index < 2; player_index++) {
     update_player(config, game->players[player_index]);
@@ -606,11 +581,11 @@ void update_game(const Config *config, Game *game) {
   }
 }
 
-Game *create_game(const Config *config) {
+Game *game_create(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
   game->ld = config_get_letter_distribution(config);
-  game->bag = create_bag(game->ld);
-  game->board = create_board();
+  game->bag = bag_create(game->ld);
+  game->board = board_create();
   for (int player_index = 0; player_index < 2; player_index++) {
     game->players[player_index] = create_player(config, player_index);
   }
@@ -662,7 +637,7 @@ Game *game_duplicate(const Game *game) {
 
 // Backups do not restore the move list or
 // generator.
-void backup_game(Game *game) {
+void game_backup(Game *game) {
   if (game->backup_mode == BACKUP_MODE_OFF) {
     return;
   }
@@ -685,7 +660,7 @@ void backup_game(Game *game) {
   }
 }
 
-void unplay_last_move(Game *game) {
+void game_unplay_last_move(Game *game) {
   // restore from backup (pop the last element).
   if (game->backup_cursor == 0) {
     log_fatal("error: no backup\n");
@@ -712,17 +687,17 @@ void destroy_backups(Game *game) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     destroy_rack(game->game_backups[i]->p0rack);
     destroy_rack(game->game_backups[i]->p1rack);
-    destroy_bag(game->game_backups[i]->bag);
-    destroy_board(game->game_backups[i]->board);
+    bag_destroy(game->game_backups[i]->bag);
+    board_destroy(game->game_backups[i]->board);
     free(game->game_backups[i]);
   }
 }
 
 // This does not destroy the letter distribution,
 // the caller must handle that.
-void destroy_game(Game *game) {
-  destroy_board(game->board);
-  destroy_bag(game->bag);
+void game_destroy(Game *game) {
+  board_destroy(game->board);
+  bag_destroy(game->bag);
   destroy_player(game->players[0]);
   destroy_player(game->players[1]);
   if (game->backups_preallocated) {

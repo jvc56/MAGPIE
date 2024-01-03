@@ -12,8 +12,8 @@
 struct ExecState;
 typedef struct ExecState ExecState;
 
-ExecState *create_exec_state();
-void destroy_exec_state(ExecState *exec_state);
+ExecState *exec_state_create();
+void exec_state_destroy(ExecState *exec_state);
 
 Config *exec_state_get_config(const ExecState *exec_state);
 Game *exec_state_get_game(const ExecState *exec_state);

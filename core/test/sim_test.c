@@ -54,13 +54,13 @@ void test_win_pct() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   assert(
       within_epsilon(win_pct(config_get_win_pcts(config), 118, 90), 0.844430));
-  destroy_config(config);
+  config_destroy(config);
 }
 
 void test_sim_single_iteration() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -76,17 +76,17 @@ void test_sim_single_iteration() {
   assert(status == SIM_STATUS_SUCCESS);
   assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 
-  assert(get_tiles_played(board) == 0);
+  assert(board_get_tiles_played(board) == 0);
 
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
   sim_results_destroy(sim_results);
 }
 
 void test_more_iterations() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
@@ -109,8 +109,8 @@ void test_more_iterations() {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "8G QI"));
 
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
   sim_results_destroy(sim_results);
   destroy_string_builder(move_string_builder);
 }
@@ -124,14 +124,14 @@ void perf_test_multithread_sim() {
       "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ "
       "336/298 0 lex NWL20;");
 
-  Game *game = create_game(config);
+  Game *game = game_create(config);
 
   const LetterDistribution *ld = game_get_ld(game);
   ThreadControl *thread_control = config_get_thread_control(config);
 
   int num_threads = get_number_of_threads(thread_control);
   printf("Using %d threads\n", num_threads);
-  load_cgp(game, config_get_cgp(config));
+  game_load_cgp(game, config_get_cgp(config));
   SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1000 cond none");
@@ -150,15 +150,15 @@ void perf_test_multithread_sim() {
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
   destroy_string_builder(move_string_builder);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
   sim_results_destroy(sim_results);
 }
 
 void test_play_similarity() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -199,8 +199,8 @@ void test_play_similarity() {
     }
   }
   destroy_string_builder(p1_string_builder);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
   sim_results_destroy(sim_results);
 }
 

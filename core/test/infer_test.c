@@ -30,7 +30,7 @@ void test_trivial_random_probability() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_letter_distribution(config);
   int ld_size = letter_distribution_get_size(ld);
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Rack *bag_as_rack = create_rack(ld_size);
   Rack *leave = create_rack(ld_size);
 
@@ -67,15 +67,15 @@ void test_trivial_random_probability() {
 
   destroy_rack(leave);
   destroy_rack(bag_as_rack);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_infer_rack_overflow() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_letter_distribution(config);
-  Game *game = create_game(config);
+  Game *game = game_create(config);
 
   InferenceResults *inference_results = inference_results_create();
   load_config_or_die(
@@ -83,7 +83,7 @@ void test_infer_rack_overflow() {
       "setoptions rack ABCDEFGH pindex 0 score 0 exch 0 eq 0 threads 1");
   inference_status_t status = infer_for_test(config, game, inference_results);
   assert(status == INFERENCE_STATUS_RACK_OVERFLOW);
-  reset_game(game);
+  game_reset(game);
 
   set_rack_to_string(ld, player_get_rack(game_get_player(game, 0)), "ABC");
   load_config_or_die(
@@ -92,14 +92,14 @@ void test_infer_rack_overflow() {
   assert(status == INFERENCE_STATUS_RACK_OVERFLOW);
 
   inference_results_destroy(inference_results);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_infer_no_tiles_played_rack_empty() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
 
   InferenceResults *inference_results = inference_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
@@ -108,14 +108,14 @@ void test_infer_no_tiles_played_rack_empty() {
   assert(status == INFERENCE_STATUS_NO_TILES_PLAYED);
 
   inference_results_destroy(inference_results);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_infer_no_tiles_played_rack_null() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
 
   InferenceResults *inference_results = inference_results_create();
   load_config_or_die(config,
@@ -124,14 +124,14 @@ void test_infer_no_tiles_played_rack_null() {
   assert(status == INFERENCE_STATUS_NO_TILES_PLAYED);
 
   inference_results_destroy(inference_results);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_infer_both_play_and_exchange() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
 
   InferenceResults *inference_results = inference_results_create();
   load_config_or_die(
@@ -140,14 +140,14 @@ void test_infer_both_play_and_exchange() {
   assert(status == INFERENCE_STATUS_BOTH_PLAY_AND_EXCHANGE);
 
   inference_results_destroy(inference_results);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_infer_exchange_score_not_zero() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
 
   InferenceResults *inference_results = inference_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
@@ -156,38 +156,38 @@ void test_infer_exchange_score_not_zero() {
   assert(status == INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
 
   inference_results_destroy(inference_results);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
-void test_infer_exchange_not_allowed() {
+void test_infer_exchange_not_board_is_letter_allowed_in_cross_set() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
 
   // There are 13 tiles in the bag
-  load_cgp(game, VS_JEREMY);
+  game_load_cgp(game, VS_JEREMY);
   InferenceResults *inference_results = inference_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " pindex 0 score 3 exch 1 eq 0 threads 1");
   inference_status_t status = infer_for_test(config, game, inference_results);
-  assert(status == INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED);
+  assert(status == INFERENCE_STATUS_EXCHANGE_NOT_board_is_letter_allowed_in_cross_set);
 
-  add_letter(bag, BLANK_MACHINE_LETTER, 0);
+  bag_add_letter(bag, BLANK_MACHINE_LETTER, 0);
   // There should now be 14 tiles in the bag
   status = infer_for_test(config, game, inference_results);
   assert(status == INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO);
 
   inference_results_destroy(inference_results);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_infer_tiles_played_not_in_bag() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
 
   InferenceResults *inference_results = inference_results_create();
   load_config_or_die(
@@ -196,14 +196,14 @@ void test_infer_tiles_played_not_in_bag() {
   assert(status == INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG);
 
   inference_results_destroy(inference_results);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_infer_nonerror_cases(int number_of_threads) {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = create_game(config);
+  Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
   int ld_size = letter_distribution_get_size(ld);
@@ -338,7 +338,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(get_number_of_letters(player0_rack) == 0);
   assert(get_number_of_letters(player1_rack) == 0);
 
-  load_cgp(game, VS_JEREMY_WITH_P2_RACK);
+  game_load_cgp(game, VS_JEREMY_WITH_P2_RACK);
   // Score doesn't matter since the bag
   // is empty and the inference_results should just be
   // the remaining tiles exactly. Since the played
@@ -372,7 +372,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
                           INFERENCE_SUBTOTAL_DRAW) == 0);
     }
   }
-  reset_game(game);
+  game_reset(game);
 
   load_config_or_die(config,
                      "setoptions rack RENT pindex 0 score 8 exch 0 eq 0");
@@ -438,25 +438,25 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   // Contrive an impossible situation to easily test
   // more combinatorics
-  load_cgp(game, OOPSYCHOLOGY_CGP);
+  game_load_cgp(game, OOPSYCHOLOGY_CGP);
 
   // Empty the bag
   while (!bag_is_empty(bag)) {
-    draw_random_letter(bag, 0);
+    bag_draw_random_letter(bag, 0);
   }
 
-  add_letter(bag, hl_to_ml(ld, "I"), 0);
-  add_letter(bag, hl_to_ml(ld, "I"), 0);
-  add_letter(bag, hl_to_ml(ld, "I"), 0);
-  add_letter(bag, hl_to_ml(ld, "I"), 0);
-  add_letter(bag, hl_to_ml(ld, "I"), 0);
-  add_letter(bag, hl_to_ml(ld, "I"), 0);
-  add_letter(bag, hl_to_ml(ld, "I"), 0);
-  add_letter(bag, hl_to_ml(ld, "E"), 0);
-  add_letter(bag, hl_to_ml(ld, "E"), 0);
-  add_letter(bag, hl_to_ml(ld, "E"), 0);
-  add_letter(bag, hl_to_ml(ld, "E"), 0);
-  add_letter(bag, hl_to_ml(ld, "Z"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "Z"), 0);
 
   // Z(OOPSYCHOLOGY) is over 100 points so keeping the Z will never be
   // inferred
@@ -566,7 +566,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
           inference_results_get_target_known_unplayed_tiles(inference_results),
           hl_to_ml(ld, "E"), 3, 4),
       (double)4 / choose(8, 3)));
-  reset_game(game);
+  game_reset(game);
 
   // Check that the equity margin works
   load_config_or_die(config,
@@ -605,7 +605,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // before the inference_results are not removed from the bag, so
   // we have to remove it here.
   set_rack_to_string(ld, player0_rack, "?");
-  draw_letter(bag, hl_to_ml(ld, "?"), 0);
+  bag_draw_letter(bag, hl_to_ml(ld, "?"), 0);
   load_config_or_die(config,
                      "setoptions rack GRIND pindex 0 score 18 exch 0 eq 0");
   status = infer_for_test(config, game, inference_results);
@@ -632,10 +632,10 @@ void test_infer_nonerror_cases(int number_of_threads) {
                           INFERENCE_SUBTOTAL_DRAW) == 0);
     }
   }
-  reset_game(game);
+  game_reset(game);
 
   set_rack_to_string(ld, player0_rack, "H");
-  draw_letter(bag, hl_to_ml(ld, "H"), 0);
+  bag_draw_letter(bag, hl_to_ml(ld, "H"), 0);
   load_config_or_die(config,
                      "setoptions rack RIN pindex 0 score 6 exch 0 eq 0");
   status = infer_for_test(config, game, inference_results);
@@ -666,19 +666,19 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(within_epsilon(get_mean(equity_values), mean_rin_leave_value));
 
   // Test exchanges
-  load_cgp(game, VS_JEREMY);
+  game_load_cgp(game, VS_JEREMY);
   // Take out good letters and throw in bad ones to force certain
   // racks to have exchange as the best play
-  draw_letter(bag, hl_to_ml(ld, "?"), 0);
-  draw_letter(bag, hl_to_ml(ld, "?"), 0);
-  draw_letter(bag, hl_to_ml(ld, "E"), 0);
-  draw_letter(bag, hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, hl_to_ml(ld, "?"), 0);
+  bag_draw_letter(bag, hl_to_ml(ld, "?"), 0);
+  bag_draw_letter(bag, hl_to_ml(ld, "E"), 0);
+  bag_draw_letter(bag, hl_to_ml(ld, "A"), 0);
 
-  add_letter(bag, hl_to_ml(ld, "Q"), 0);
-  add_letter(bag, hl_to_ml(ld, "W"), 0);
-  add_letter(bag, hl_to_ml(ld, "W"), 0);
-  add_letter(bag, hl_to_ml(ld, "V"), 0);
-  add_letter(bag, hl_to_ml(ld, "V"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "Q"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "W"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "W"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "V"), 0);
+  bag_add_letter(bag, hl_to_ml(ld, "V"), 0);
 
   reset_rack(rack);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
@@ -715,13 +715,13 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
                       hl_to_ml(ld, "I"), 1, INFERENCE_SUBTOTAL_DRAW) == 0);
 
-  reset_game(game);
+  game_reset(game);
 
   destroy_stat(letter_stat);
   destroy_rack(rack);
   inference_results_destroy(inference_results);
-  destroy_game(game);
-  destroy_config(config);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_infer() {
@@ -731,7 +731,7 @@ void test_infer() {
   test_infer_no_tiles_played_rack_null();
   test_infer_both_play_and_exchange();
   test_infer_exchange_score_not_zero();
-  test_infer_exchange_not_allowed();
+  test_infer_exchange_not_board_is_letter_allowed_in_cross_set();
   test_infer_tiles_played_not_in_bag();
   test_infer_nonerror_cases(1);
   test_infer_nonerror_cases(2);

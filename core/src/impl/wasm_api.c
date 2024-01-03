@@ -26,10 +26,10 @@ static ExecState *iso_exec_state = NULL;
 
 void destroy_wasm_exec_states() {
   if (wasm_exec_state) {
-    destroy_exec_state(wasm_exec_state);
+    exec_state_destroy(wasm_exec_state);
   }
   if (iso_exec_state) {
-    destroy_exec_state(iso_exec_state);
+    exec_state_destroy(iso_exec_state);
   }
 }
 
@@ -37,7 +37,7 @@ void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
   // Use a separate command vars to get
   // a game for score_play and static_evaluation
   if (!iso_exec_state) {
-    iso_exec_state = create_exec_state();
+    iso_exec_state = exec_state_create();
   }
   char *cgp_command =
       get_formatted_string("position cgp %s numplays %d", cgp, num_plays);
@@ -64,9 +64,9 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
     }
   }
 
-  // score_move assumes the play is always horizontal.
-  if (dir_is_vertical(dir)) {
-    transpose(board);
+  // board_score_move assumes the play is always horizontal.
+  if (board_is_dir_vertical(dir)) {
+    board_transpose(board);
     int ph = row;
     row = col;
     col = ph;
@@ -76,12 +76,12 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   FormedWords *fw = NULL;
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Assume that that kwg is shared
-    points = score_move(board, ld, tiles, 0, ntiles - 1, row, col, tiles_played,
+    points = board_score_move(board, ld, tiles, 0, ntiles - 1, row, col, tiles_played,
                         !dir, 0);
 
-    if (dir_is_vertical(dir)) {
-      // transpose back.
-      transpose(board);
+    if (board_is_dir_vertical(dir)) {
+      // board_transpose back.
+      board_transpose(board);
       int ph = row;
       row = col;
       col = ph;
@@ -153,7 +153,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   destroy_string_builder(phonies_string_builder);
   destroy_string_builder(move_string_builder);
   // keep config around for next call.
-  // destroy_config(config);
+  // config_destroy(config);
   if (leave_rack) {
     destroy_rack(leave_rack);
   }
@@ -179,7 +179,7 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 
 int process_command_wasm(const char *cmd) {
   if (!wasm_exec_state) {
-    wasm_exec_state = create_exec_state();
+    wasm_exec_state = exec_state_create();
   }
   execute_command_async(wasm_exec_state, cmd);
   return 0;

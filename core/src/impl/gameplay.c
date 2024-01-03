@@ -22,8 +22,8 @@ void play_move_on_board(const Move *move, Game *game) {
     if (letter == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    set_letter(board, get_row_start(move) + get_dir(move) * idx,
-               get_col_start(move) + ((1 - get_dir(move)) * idx), letter);
+    board_set_letter(board, get_row_start(move) + get_dir(move) * idx,
+                     get_col_start(move) + ((1 - get_dir(move)) * idx), letter);
     if (is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
     }
@@ -32,30 +32,31 @@ void play_move_on_board(const Move *move, Game *game) {
                           letter);
   }
 
-  incrememt_tiles_played(board, move_get_tiles_played(move));
+  board_increment_tiles_played(board, move_get_tiles_played(move));
 
   // updateAnchorsForMove
   int row = get_row_start(move);
   int col = get_col_start(move);
-  if (dir_is_vertical(get_dir(move))) {
+  if (board_is_dir_vertical(get_dir(move))) {
     row = get_col_start(move);
     col = get_row_start(move);
   }
 
   for (int i = col; i < get_tiles_length(move) + col; i++) {
-    update_anchors(board, row, i, get_dir(move));
+    board_update_anchors(board, row, i, get_dir(move));
     if (row > 0) {
-      update_anchors(board, row - 1, i, get_dir(move));
+      board_update_anchors(board, row - 1, i, get_dir(move));
     }
     if (row < BOARD_DIM - 1) {
-      update_anchors(board, row + 1, i, get_dir(move));
+      board_update_anchors(board, row + 1, i, get_dir(move));
     }
   }
   if (col - 1 >= 0) {
-    update_anchors(board, row, col - 1, get_dir(move));
+    board_update_anchors(board, row, col - 1, get_dir(move));
   }
   if (get_tiles_length(move) + col < BOARD_DIM) {
-    update_anchors(board, row, get_tiles_length(move) + col, get_dir(move));
+    board_update_anchors(board, row, get_tiles_length(move) + col,
+                         get_dir(move));
   }
 }
 
@@ -68,8 +69,10 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
 
     Board *board = game_get_board(game);
     bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-    int right_col = word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
-    int left_col = word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
+    int right_col =
+        board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
+    int left_col =
+        board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
     const KWG *player0_kwg = player_get_kwg(game_get_player(game, 0));
     const LetterDistribution *ld = game_get_ld(game);
     gen_cross_set(player0_kwg, ld, board, row, right_col + 1, csd, 0);
@@ -106,20 +109,27 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
 
 void update_cross_set_for_move(const Move *move, Game *game) {
   Board *board = game_get_board(game);
-  if (dir_is_vertical(get_dir(move))) {
+  if (board_is_dir_vertical(get_dir(move))) {
     calc_for_across(move, game, get_row_start(move), get_col_start(move),
                     BOARD_HORIZONTAL_DIRECTION);
-    transpose(board);
+    board_transpose(board);
     calc_for_self(move, game, get_col_start(move), get_row_start(move),
                   BOARD_VERTICAL_DIRECTION);
-    transpose(board);
+    board_transpose(board);
   } else {
     calc_for_self(move, game, get_row_start(move), get_col_start(move),
                   BOARD_HORIZONTAL_DIRECTION);
-    transpose(board);
+    board_transpose(board);
     calc_for_across(move, game, get_col_start(move), get_row_start(move),
                     BOARD_VERTICAL_DIRECTION);
-    transpose(board);
+    board_transpose(board);
+  }
+}
+
+void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
+  while (n > 0 && !bag_is_empty(bag)) {
+    add_letter_to_rack(rack, bag_draw_random_letter(bag, player_draw_index));
+    n--;
   }
 }
 
@@ -135,7 +145,7 @@ void execute_exchange_move(const Move *move, Game *game) {
   draw_at_most_to_rack(bag, player_on_turn_rack, move_get_tiles_played(move),
                        player_draw_index);
   for (int i = 0; i < move_get_tiles_played(move); i++) {
-    add_letter(bag, get_tile(move, i), player_draw_index);
+    bag_add_letter(bag, get_tile(move, i), player_draw_index);
   }
 }
 
@@ -161,7 +171,7 @@ void draw_starting_racks(Game *game) {
 
 void play_move(const Move *move, Game *game) {
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
-    backup_game(game);
+    game_backup(game);
   }
   const LetterDistribution *ld = game_get_ld(game);
   if (get_move_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
@@ -215,4 +225,34 @@ Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, thread_index,
                  move_list);
   return move_list_get_move(move_list, 0);
+}
+
+void set_random_rack(Game *game, int pidx, Rack *known_rack) {
+  Bag *bag = game_get_bag(game);
+  Rack *prack = player_get_rack(game_get_player(game, pidx));
+  int ntiles = get_number_of_letters(prack);
+  int player_draw_index = game_get_player_draw_index(game, pidx);
+  // always try to fill rack if possible.
+  if (ntiles < RACK_SIZE) {
+    ntiles = RACK_SIZE;
+  }
+  // throw in existing rack, then redraw from the bag.
+  for (int i = 0; i < get_array_size(prack); i++) {
+    if (get_number_of_letter(prack, i) > 0) {
+      for (int j = 0; j < get_number_of_letter(prack, i); j++) {
+        bag_add_letter(bag, i, player_draw_index);
+      }
+    }
+  }
+  reset_rack(prack);
+  int ndrawn = 0;
+  if (known_rack && get_number_of_letters(known_rack) > 0) {
+    for (int i = 0; i < get_array_size(known_rack); i++) {
+      for (int j = 0; j < get_number_of_letter(known_rack, i); j++) {
+        draw_letter_to_rack(bag, prack, i, player_draw_index);
+        ndrawn++;
+      }
+    }
+  }
+  draw_at_most_to_rack(bag, prack, ntiles - ndrawn, player_draw_index);
 }

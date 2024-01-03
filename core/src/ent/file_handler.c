@@ -26,11 +26,11 @@ void file_handler_clear_file_and_filename(FileHandler *fh) {
   fh->filename = NULL;
 }
 
-const char *get_file_handler_filename(const FileHandler *fh) {
+const char *file_handler_get_filename(const FileHandler *fh) {
   return fh->filename;
 }
 
-void set_file_handler_while_locked(FileHandler *fh, const char *filename,
+void file_handler_set_while_locked(FileHandler *fh, const char *filename,
                                    file_handler_mode_t mode) {
   if (strings_equal(filename, fh->filename) && fh->mode == mode) {
     return;
@@ -68,29 +68,29 @@ void set_file_handler_while_locked(FileHandler *fh, const char *filename,
 }
 
 // No-op if the filename matches the existing filename
-void set_file_handler(FileHandler *fh, const char *filename,
-                      file_handler_mode_t mode) {
+void file_handler_set_filename(FileHandler *fh, const char *filename,
+                               file_handler_mode_t mode) {
   pthread_mutex_lock(&fh->mutex);
-  set_file_handler_while_locked(fh, filename, mode);
+  file_handler_set_while_locked(fh, filename, mode);
   pthread_mutex_unlock(&fh->mutex);
 }
 
-FileHandler *create_file_handler_from_filename(const char *filename,
+FileHandler *file_handler_create_from_filename(const char *filename,
                                                file_handler_mode_t mode) {
   FileHandler *fh = (FileHandler *)malloc_or_die(sizeof(FileHandler));
   fh->file = NULL;
   fh->filename = NULL;
   pthread_mutex_init(&fh->mutex, NULL);
-  set_file_handler(fh, filename, mode);
+  file_handler_set_filename(fh, filename, mode);
   return fh;
 }
 
-void destroy_file_handler(FileHandler *fh) {
+void file_handler_destroy(FileHandler *fh) {
   file_handler_clear_file_and_filename(fh);
   free(fh);
 }
 
-void write_to_file_with_lock(const FileHandler *fh, const char *content) {
+void file_handler_write_with_lock(const FileHandler *fh, const char *content) {
   if (!fh) {
     log_fatal("cannot write to null file handler\n");
   }
@@ -115,13 +115,13 @@ void write_to_file_with_lock(const FileHandler *fh, const char *content) {
   }
 }
 
-void write_to_file(FileHandler *fh, const char *content) {
+void file_handler_write(FileHandler *fh, const char *content) {
   pthread_mutex_lock(&fh->mutex);
-  write_to_file_with_lock(fh, content);
+  file_handler_write_with_lock(fh, content);
   pthread_mutex_unlock(&fh->mutex);
 }
 
-char *getline_from_file_with_lock(FileHandler *fh) {
+char *file_handler_get_line_with_lock(FileHandler *fh) {
   if (!fh) {
     log_fatal("cannot getline from null file handler\n");
   }
@@ -155,9 +155,9 @@ char *getline_from_file_with_lock(FileHandler *fh) {
   return line;
 }
 
-char *getline_from_file(FileHandler *fh) {
+char *file_handler_get_line(FileHandler *fh) {
   pthread_mutex_lock(&fh->mutex);
-  char *line = getline_from_file_with_lock(fh);
+  char *line = file_handler_get_line_with_lock(fh);
   pthread_mutex_unlock(&fh->mutex);
   return line;
 }

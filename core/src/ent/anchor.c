@@ -18,54 +18,57 @@ struct AnchorList {
   Anchor **anchors;
 };
 
-AnchorList *create_anchor_list() {
+Anchor *anchor_create() { return malloc_or_die(sizeof(Anchor)); }
+
+AnchorList *anchor_list_create() {
   AnchorList *al = malloc_or_die(sizeof(AnchorList));
   al->count = 0;
   al->anchors = malloc_or_die((sizeof(Anchor *)) * ((BOARD_DIM) * (BOARD_DIM)));
   for (int i = 0; i < ((BOARD_DIM) * (BOARD_DIM)); i++) {
-    al->anchors[i] = malloc_or_die(sizeof(Anchor));
+    al->anchors[i] = anchor_create();
   }
   return al;
 }
 
-void destroy_anchor(Anchor *anchor) { free(anchor); }
+void anchor_destroy(Anchor *anchor) { free(anchor); }
 
-void destroy_anchor_list(AnchorList *al) {
+void anchor_list_destroy(AnchorList *al) {
   for (int i = 0; i < ((BOARD_DIM) * (BOARD_DIM)); i++) {
-    destroy_anchor(al->anchors[i]);
+    anchor_destroy(al->anchors[i]);
   }
   free(al->anchors);
   free(al);
 }
 
-int get_number_of_anchors(const AnchorList *al) { return al->count; }
-
-int get_anchor_row(const AnchorList *al, int index) {
-  return al->anchors[index]->row;
-}
-
-int get_anchor_col(const AnchorList *al, int index) {
+int anchor_get_col(const AnchorList *al, int index) {
   return al->anchors[index]->col;
 }
 
-int get_anchor_last_anchor_col(const AnchorList *al, int index) {
-  return al->anchors[index]->last_anchor_col;
-}
-
-bool get_anchor_transposed(const AnchorList *al, int index) {
-  return al->anchors[index]->transposed;
-}
-
-int get_anchor_dir(const AnchorList *al, int index) {
+int anchor_get_dir(const AnchorList *al, int index) {
   return al->anchors[index]->dir;
 }
 
-double get_anchor_highest_possible_equity(const AnchorList *al, int index) {
+double anchor_get_highest_possible_equity(const AnchorList *al, int index) {
   return al->anchors[index]->highest_possible_equity;
 }
 
-void add_anchor(AnchorList *al, int row, int col, int last_anchor_col,
-                bool transposed, int dir, double highest_possible_equity) {
+int anchor_get_last_anchor_col(const AnchorList *al, int index) {
+  return al->anchors[index]->last_anchor_col;
+}
+
+int anchor_get_row(const AnchorList *al, int index) {
+  return al->anchors[index]->row;
+}
+
+bool anchor_get_transposed(const AnchorList *al, int index) {
+  return al->anchors[index]->transposed;
+}
+
+int anchor_list_get_count(const AnchorList *al) { return al->count; }
+
+void anchor_list_add_anchor(AnchorList *al, int row, int col,
+                            int last_anchor_col, bool transposed, int dir,
+                            double highest_possible_equity) {
   int i = al->count;
   al->anchors[i]->row = row;
   al->anchors[i]->col = col;
@@ -76,7 +79,9 @@ void add_anchor(AnchorList *al, int row, int col, int last_anchor_col,
   al->count++;
 }
 
-int compare_anchors(const void *a, const void *b) {
+void anchor_list_reset(AnchorList *al) { al->count = 0; }
+
+int anchor_compare(const void *a, const void *b) {
   const Anchor *anchor_a = *(const Anchor **)a;
   const Anchor *anchor_b = *(const Anchor **)b;
   if (anchor_a->highest_possible_equity > anchor_b->highest_possible_equity) {
@@ -89,8 +94,6 @@ int compare_anchors(const void *a, const void *b) {
   }
 }
 
-void sort_anchor_list(AnchorList *al) {
-  qsort(al->anchors, al->count, sizeof(Anchor *), compare_anchors);
+void anchor_list_sort(AnchorList *al) {
+  qsort(al->anchors, al->count, sizeof(Anchor *), anchor_compare);
 }
-
-void reset_anchor_list(AnchorList *al) { al->count = 0; }

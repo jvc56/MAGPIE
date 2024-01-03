@@ -51,15 +51,6 @@ Rack *create_rack(int array_size) {
   return rack;
 }
 
-void update_or_create_rack(Rack **rack, int array_size) {
-  if (!(*rack)) {
-    *rack = create_rack(array_size);
-  } else if ((*rack)->array_size != array_size) {
-    destroy_rack(*rack);
-    *rack = create_rack(array_size);
-  }
-}
-
 Rack *rack_duplicate(const Rack *rack) {
   Rack *new_rack = malloc_or_die(sizeof(Rack));
   new_rack->array = (int *)malloc_or_die(rack->array_size * sizeof(int));

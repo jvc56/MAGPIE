@@ -39,28 +39,28 @@ void set_row(Game *game, int row, const char *row_content) {
   const LetterDistribution *ld = game_get_ld(game);
 
   for (int i = 0; i < BOARD_DIM; i++) {
-    set_letter(board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
+    board_set_letter(board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
   }
   char letter[2];
   letter[1] = '\0';
   for (size_t i = 0; i < string_length(row_content); i++) {
     if (row_content[i] != ' ') {
       letter[0] = row_content[i];
-      set_letter(board, row, i, hl_to_ml(ld, letter));
-      incrememt_tiles_played(board, 1);
+      board_set_letter(board, row, i, hl_to_ml(ld, letter));
+      board_increment_tiles_played(board, 1);
     }
   }
 }
 
 void load_config_or_die(Config *config, const char *cmd) {
-  config_load_status_t status = load_config(config, cmd);
+  config_load_status_t status = config_load(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
 }
 
 Config *create_config_or_die(const char *cmd) {
-  Config *config = create_default_config();
+  Config *config = config_create_default();
   load_config_or_die(config, cmd);
   return config;
 }
@@ -144,7 +144,7 @@ void play_top_n_equity_move(Game *game, int n) {
 }
 
 void load_cgp_or_die(Game *game, const char *cgp) {
-  cgp_parse_status_t cgp_parse_status = load_cgp(game, cgp);
+  cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
   if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
     log_fatal("cgp load failed with %d\n", cgp_parse_status);
   }
@@ -221,48 +221,48 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
   Bag *b1_copy = bag_duplicate(b1);
   Bag *b2_copy = bag_duplicate(b2);
 
-  int b1_number_of_tiles_remaining = get_tiles_remaining(b1_copy);
-  int b2_number_of_tiles_remaining = get_tiles_remaining(b2_copy);
+  int b1_number_of_tiles_remaining = bag_get_tiles(b1_copy);
+  int b2_number_of_tiles_remaining = bag_get_tiles(b2_copy);
 
   assert(b1_number_of_tiles_remaining == b2_number_of_tiles_remaining);
 
   Rack *rack = create_rack(rack_array_size);
 
   for (int i = 0; i < b1_number_of_tiles_remaining; i++) {
-    uint8_t letter = draw_random_letter(b1_copy, 0);
+    uint8_t letter = bag_draw_random_letter(b1_copy, 0);
     add_letter_to_rack(rack, letter);
   }
 
   for (int i = 0; i < b2_number_of_tiles_remaining; i++) {
-    uint8_t letter = draw_random_letter(b2_copy, 0);
+    uint8_t letter = bag_draw_random_letter(b2_copy, 0);
     assert(get_number_of_letter(rack, letter) > 0);
     take_letter_from_rack(rack, letter);
   }
 
   assert(rack_is_empty(rack));
 
-  destroy_bag(b1_copy);
-  destroy_bag(b2_copy);
+  bag_destroy(b1_copy);
+  bag_destroy(b2_copy);
   destroy_rack(rack);
 }
 
 // Assumes b1 and b2 use the same lexicon and therefore
 // does not compare the cross set index of 1.
 void assert_boards_are_equal(const Board *b1, const Board *b2) {
-  assert(get_transpose(b1) == get_transpose(b2));
-  assert(get_tiles_played(b1) == get_tiles_played(b2));
+  assert(board_get_transposed(b1) == board_get_transposed(b2));
+  assert(board_get_tiles_played(b1) == board_get_tiles_played(b2));
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      assert(get_letter(b1, row, col) == get_letter(b2, row, col));
-      assert(get_bonus_square(b1, row, col) == get_bonus_square(b2, row, col));
+      assert(board_get_letter(b1, row, col) == board_get_letter(b2, row, col));
+      assert(board_get_bonus_square(b1, row, col) == board_get_bonus_square(b2, row, col));
       for (int dir = 0; dir < 2; dir++) {
-        assert(get_anchor(b1, row, col, dir) == get_anchor(b2, row, col, dir));
+        assert(board_get_anchor(b1, row, col, dir) == board_get_anchor(b2, row, col, dir));
         // For now, assume all boards tested in this method
         // share the same lexicon
-        assert(get_cross_set(b1, row, col, dir, 0) ==
-               get_cross_set(b2, row, col, dir, 0));
-        assert(get_cross_score(b1, row, col, dir, 0) ==
-               get_cross_score(b2, row, col, dir, 0));
+        assert(board_get_cross_set(b1, row, col, dir, 0) ==
+               board_get_cross_set(b2, row, col, dir, 0));
+        assert(board_get_cross_score(b1, row, col, dir, 0) ==
+               board_get_cross_score(b2, row, col, dir, 0));
       }
     }
   }

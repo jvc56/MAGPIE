@@ -6,14 +6,15 @@
 struct FileHandler;
 typedef struct FileHandler FileHandler;
 
-const char *get_file_handler_filename(const FileHandler *fh);
-void set_file_handler(FileHandler *fh, const char *filename,
-                      file_handler_mode_t file_handler_mode_type);
 FileHandler *
-create_file_handler_from_filename(const char *filename,
+file_handler_create_from_filename(const char *filename,
                                   file_handler_mode_t file_handler_mode_type);
-void destroy_file_handler(FileHandler *fh);
-void write_to_file(FileHandler *fh, const char *content);
-char *getline_from_file(FileHandler *fh);
+void file_handler_destroy(FileHandler *fh);
+
+const char *file_handler_get_filename(const FileHandler *fh);
+void file_handler_set_filename(FileHandler *fh, const char *filename,
+                               file_handler_mode_t file_handler_mode_type);
+void file_handler_write(FileHandler *fh, const char *content);
+char *file_handler_get_line(FileHandler *fh);
 
 #endif

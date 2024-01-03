@@ -39,5 +39,5 @@ void test_leaves() {
   fclose(file);
 
   destroy_rack(rack);
-  destroy_config(config);
+  config_destroy(config);
 }

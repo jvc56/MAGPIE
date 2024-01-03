@@ -87,8 +87,12 @@ void update_player(const Config *config, Player *player) {
       players_data_get_move_record_type(players_data, player->index);
   player->kwg = players_data_get_kwg(players_data, player->index);
   player->klv = players_data_get_klv(players_data, player->index);
-  update_or_create_rack(
-      &player->rack,
+
+  if (player->rack) {
+    destroy_rack(player->rack);
+  }
+
+  player->rack = create_rack(
       letter_distribution_get_size(config_get_letter_distribution(config)));
 }
 

@@ -84,7 +84,7 @@ void load_zero_preendgame_adjustment_values(MoveGen *gen) {
 
 MoveGen *create_generator(int letter_distribution_size) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  generator->anchor_list = create_anchor_list();
+  generator->anchor_list = anchor_list_create();
   generator->leave_map = create_leave_map(letter_distribution_size);
   generator->tiles_played = 0;
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
@@ -97,7 +97,7 @@ MoveGen *create_generator(int letter_distribution_size) {
 }
 
 void destroy_generator(MoveGen *gen) {
-  destroy_anchor_list(gen->anchor_list);
+  anchor_list_destroy(gen->anchor_list);
   destroy_leave_map(gen->leave_map);
   free(gen->exchange_strip);
   free(gen);
@@ -194,7 +194,7 @@ double get_spare_move_equity(const MoveGen *gen) {
   double other_adjustments = 0;
 
   Move *spare_move = get_spare_move(gen->move_list);
-  if (get_tiles_played(gen->board) == 0 &&
+  if (board_get_tiles_played(gen->board) == 0 &&
       get_move_type(spare_move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     other_adjustments = placement_adjustment(gen, spare_move);
   }
@@ -223,7 +223,7 @@ void record_play(MoveGen *gen, int leftstrip, int rightstrip,
   int row = start_row;
   int col = start_col;
 
-  if (dir_is_vertical(gen->dir)) {
+  if (board_is_dir_vertical(gen->dir)) {
     int temp = row;
     row = col;
     col = temp;
@@ -233,10 +233,10 @@ void record_play(MoveGen *gen, int leftstrip, int rightstrip,
   uint8_t *strip = NULL;
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    score = score_move(
+    score = board_score_move(
         gen->board, gen->letter_distribution, gen->strip, leftstrip, rightstrip,
-        start_row, start_col, tiles_played, !dir_is_vertical(gen->dir),
-        get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
+        start_row, start_col, tiles_played, !board_is_dir_vertical(gen->dir),
+        board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
     strip = gen->strip;
   } else if (move_type == GAME_EVENT_EXCHANGE) {
     // ignore the empty exchange case
@@ -307,7 +307,7 @@ void generate_exchange_moves(MoveGen *gen, uint8_t ml, int stripidx,
 
 void load_row_letter_cache(MoveGen *gen, int row) {
   for (int col = 0; col < BOARD_DIM; col++) {
-    gen->row_letter_cache[col] = get_letter(gen->board, row, col);
+    gen->row_letter_cache[col] = board_get_letter(gen->board, row, col);
   }
 }
 
@@ -332,14 +332,14 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play) {
   int cs_dir;
   uint8_t current_letter = get_letter_cache(gen, col);
-  if (dir_is_vertical(gen->dir)) {
+  if (board_is_dir_vertical(gen->dir)) {
     cs_dir = BOARD_HORIZONTAL_DIRECTION;
   } else {
     cs_dir = BOARD_VERTICAL_DIRECTION;
   }
-  uint64_t cross_set = get_cross_set(
+  uint64_t cross_set = board_get_cross_set(
       gen->board, gen->current_row_index, col, cs_dir,
-      get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
+      board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     int raw = get_unblanked_machine_letter(current_letter);
     int next_node_index = 0;
@@ -363,7 +363,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
       if (ml != 0 &&
           (number_of_ml != 0 ||
            get_number_of_letter(gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
-          allowed(cross_set, ml)) {
+          board_is_letter_allowed_in_cross_set(cross_set, ml)) {
         int next_node_index = kwg_arc_index(gen->kwg, i);
         bool accepts = kwg_accepts(gen->kwg, i);
         if (number_of_ml > 0) {
@@ -402,9 +402,9 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
       gen->strip[current_col] = PLAYED_THROUGH_MARKER;
     } else {
       gen->strip[current_col] = L;
-      if (gen->dir && (get_cross_set(gen->board, gen->current_row_index,
+      if (gen->dir && (board_get_cross_set(gen->board, gen->current_row_index,
                                      current_col, BOARD_HORIZONTAL_DIRECTION,
-                                     get_cross_set_index(gen->kwgs_are_shared,
+                                     board_get_cross_set_index(gen->kwgs_are_shared,
                                                          gen->player_index)) ==
                        TRIVIAL_CROSS_SET)) {
         unique_play = true;
@@ -440,11 +440,11 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
       gen->strip[current_col] = PLAYED_THROUGH_MARKER;
     } else {
       gen->strip[current_col] = L;
-      if (dir_is_vertical(gen->dir) &&
-          (get_cross_set(
+      if (board_is_dir_vertical(gen->dir) &&
+          (board_get_cross_set(
                gen->board, gen->current_row_index, current_col,
                BOARD_HORIZONTAL_DIRECTION,
-               get_cross_set_index(gen->kwgs_are_shared, gen->player_index)) ==
+               board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index)) ==
            TRIVIAL_CROSS_SET)) {
         unique_play = true;
       }
@@ -465,12 +465,12 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-bool shadow_allowed_in_cross_set(const MoveGen *gen, int col,
+bool shadow_board_is_letter_allowed_in_cross_set_in_cross_set(const MoveGen *gen, int col,
                                  int cross_set_index) {
   uint64_t cross_set =
-      get_cross_set(gen->board, gen->current_row_index, col,
-                    !dir_is_vertical(gen->dir), cross_set_index);
-  // Allowed if
+      board_get_cross_set(gen->board, gen->current_row_index, col,
+                    !board_is_dir_vertical(gen->dir), cross_set_index);
+  // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
   // there is anything in the cross set and the rack has a blank.
   return (cross_set & gen->rack_cross_set) != 0 ||
@@ -486,14 +486,14 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
     uint8_t current_letter = get_letter_cache(gen, current_col);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       uint8_t bonus_square =
-          get_bonus_square(gen->board, gen->current_row_index, current_col);
+          board_get_bonus_square(gen->board, gen->current_row_index, current_col);
       int this_word_multiplier = bonus_square >> 4;
       int letter_multiplier = bonus_square & 0x0F;
       bool is_cross_word =
           (gen->current_row_index > 0 &&
-           !is_empty(gen->board, gen->current_row_index - 1, current_col)) ||
+           !board_is_empty(gen->board, gen->current_row_index - 1, current_col)) ||
           ((gen->current_row_index < BOARD_DIM - 1) &&
-           !is_empty(gen->board, gen->current_row_index + 1, current_col));
+           !board_is_empty(gen->board, gen->current_row_index + 1, current_col));
       int effective_letter_multiplier =
           letter_multiplier *
           ((this_word_multiplier * is_cross_word) + word_multiplier);
@@ -564,20 +564,20 @@ void shadow_play_right(MoveGen *gen, int main_played_through_score,
   gen->tiles_played++;
 
   uint64_t cross_set =
-      get_cross_set(gen->board, gen->current_row_index, gen->current_right_col,
-                    !dir_is_vertical(gen->dir), cross_set_index);
-  // Allowed if
+      board_get_cross_set(gen->board, gen->current_row_index, gen->current_right_col,
+                    !board_is_dir_vertical(gen->dir), cross_set_index);
+  // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
   // there is anything in the cross set and the rack has a blank.
   if ((cross_set & gen->rack_cross_set) != 0 ||
       ((gen->rack_cross_set & 1) && cross_set)) {
     // Play tile and update scoring parameters
 
-    uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index,
+    uint8_t bonus_square = board_get_bonus_square(gen->board, gen->current_row_index,
                                             gen->current_right_col);
-    int cross_score = get_cross_score(
+    int cross_score = board_get_cross_score(
         gen->board, gen->current_row_index, gen->current_right_col,
-        !dir_is_vertical(gen->dir), cross_set_index);
+        !board_is_dir_vertical(gen->dir), cross_set_index);
     int this_word_multiplier = bonus_square >> 4;
     perpendicular_additional_score += cross_score * this_word_multiplier;
     word_multiplier *= this_word_multiplier;
@@ -632,20 +632,20 @@ void shadow_play_left(MoveGen *gen, int main_played_through_score,
   gen->current_left_col--;
   gen->tiles_played++;
   uint64_t cross_set =
-      get_cross_set(gen->board, gen->current_row_index, gen->current_left_col,
-                    !dir_is_vertical(gen->dir), cross_set_index);
-  // Allowed if
+      board_get_cross_set(gen->board, gen->current_row_index, gen->current_left_col,
+                    !board_is_dir_vertical(gen->dir), cross_set_index);
+  // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
   // there is anything in the cross set and the rack has a blank.
   if ((cross_set & gen->rack_cross_set) != 0 ||
       ((gen->rack_cross_set & 1) && cross_set)) {
     // Play tile and update scoring parameters
 
-    uint8_t bonus_square = get_bonus_square(gen->board, gen->current_row_index,
+    uint8_t bonus_square = board_get_bonus_square(gen->board, gen->current_row_index,
                                             gen->current_left_col);
-    int cross_score = get_cross_score(
+    int cross_score = board_get_cross_score(
         gen->board, gen->current_row_index, gen->current_left_col,
-        !dir_is_vertical(gen->dir), cross_set_index);
+        !board_is_dir_vertical(gen->dir), cross_set_index);
     int this_word_multiplier = bonus_square >> 4;
     perpendicular_additional_score += cross_score * this_word_multiplier;
     word_multiplier *= this_word_multiplier;
@@ -679,20 +679,20 @@ void shadow_start(MoveGen *gen, int cross_set_index) {
 
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
     // Only play a letter if a letter from the rack fits in the cross set
-    if (shadow_allowed_in_cross_set(gen, gen->current_left_col,
+    if (shadow_board_is_letter_allowed_in_cross_set_in_cross_set(gen, gen->current_left_col,
                                     cross_set_index)) {
       // Play tile and update scoring parameters
 
-      uint8_t bonus_square = get_bonus_square(
+      uint8_t bonus_square = board_get_bonus_square(
           gen->board, gen->current_row_index, gen->current_left_col);
-      int cross_score = get_cross_score(
+      int cross_score = board_get_cross_score(
           gen->board, gen->current_row_index, gen->current_left_col,
-          !dir_is_vertical(gen->dir), cross_set_index);
+          !board_is_dir_vertical(gen->dir), cross_set_index);
       int this_word_multiplier = bonus_square >> 4;
       perpendicular_additional_score += (cross_score * this_word_multiplier);
       word_multiplier = this_word_multiplier;
       gen->tiles_played++;
-      if (!dir_is_vertical(gen->dir)) {
+      if (!board_is_dir_vertical(gen->dir)) {
         // word_multiplier is always hard-coded as 0 since we are recording a
         // single tile
         shadow_record(gen, gen->current_left_col, gen->current_right_col,
@@ -725,10 +725,10 @@ void shadow_start(MoveGen *gen, int cross_set_index) {
   }
   shadow_play_left(gen, main_played_through_score,
                    perpendicular_additional_score, word_multiplier,
-                   !dir_is_vertical(gen->dir), cross_set_index);
+                   !board_is_dir_vertical(gen->dir), cross_set_index);
   shadow_play_right(gen, main_played_through_score,
                     perpendicular_additional_score, word_multiplier,
-                    !dir_is_vertical(gen->dir), cross_set_index);
+                    !board_is_dir_vertical(gen->dir), cross_set_index);
 }
 
 void shadow_play_for_anchor(MoveGen *gen, int col) {
@@ -758,10 +758,10 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   }
 
   shadow_start(gen,
-               get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
-  add_anchor(gen->anchor_list, gen->current_row_index, col,
-             gen->last_anchor_col, get_transpose(gen->board),
-             dir_is_vertical(gen->dir), gen->highest_shadow_equity);
+               board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
+  anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
+                         gen->last_anchor_col, board_get_transposed(gen->board),
+                         board_is_dir_vertical(gen->dir), gen->highest_shadow_equity);
 }
 
 void shadow_by_orientation(MoveGen *gen, int dir) {
@@ -770,7 +770,7 @@ void shadow_by_orientation(MoveGen *gen, int dir) {
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
     load_row_letter_cache(gen, gen->current_row_index);
     for (int col = 0; col < BOARD_DIM; col++) {
-      if (get_anchor(gen->board, row, col, dir)) {
+      if (board_get_anchor(gen->board, row, col, dir)) {
         shadow_play_for_anchor(gen, col);
         gen->last_anchor_col = col;
       }
@@ -811,7 +811,7 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
   gen->player_index = player_on_turn_index;
   gen->player_rack = player_get_rack(player);
 
-  gen->number_of_tiles_in_bag = get_tiles_remaining(game_get_bag(game));
+  gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;
@@ -835,33 +835,33 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
   // Set the best leaves and maybe add exchanges.
   generate_exchange_moves(gen, 0, 0, gen->number_of_tiles_in_bag >= RACK_SIZE);
 
-  reset_anchor_list(gen->anchor_list);
+  anchor_list_reset(gen->anchor_list);
   set_descending_tile_scores(gen);
 
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir % 2 != 0;
     shadow_by_orientation(gen, dir);
-    transpose(gen->board);
+    board_transpose(gen->board);
   }
 
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
-  sort_anchor_list(gen->anchor_list);
+  anchor_list_sort(gen->anchor_list);
   const AnchorList *anchor_list = gen->anchor_list;
   const int kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
-  for (int i = 0; i < get_number_of_anchors(anchor_list); i++) {
+  for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
     double anchor_highest_possible_equity =
-        get_anchor_highest_possible_equity(anchor_list, i);
+        anchor_get_highest_possible_equity(anchor_list, i);
     if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(gen, anchor_highest_possible_equity)) {
       break;
     }
-    gen->current_anchor_col = get_anchor_col(anchor_list, i);
-    gen->current_row_index = get_anchor_row(anchor_list, i);
-    gen->last_anchor_col = get_anchor_last_anchor_col(anchor_list, i);
-    gen->dir = get_anchor_dir(anchor_list, i);
-    set_transpose(gen->board, get_anchor_transposed(anchor_list, i));
+    gen->current_anchor_col = anchor_get_col(anchor_list, i);
+    gen->current_row_index = anchor_get_row(anchor_list, i);
+    gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
+    gen->dir = anchor_get_dir(anchor_list, i);
+    board_set_transposed(gen->board, anchor_get_transposed(anchor_list, i));
     load_row_letter_cache(gen, gen->current_row_index);
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
                   gen->current_anchor_col, gen->current_anchor_col,
@@ -881,5 +881,5 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
     set_spare_move_as_pass(gen->move_list);
     insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
   }
-  destroy_game(game);
+  game_destroy(game);
 }

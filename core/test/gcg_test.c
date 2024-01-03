@@ -30,10 +30,10 @@ gcg_parse_status_t test_parse_gcg(const char *gcg_filename,
 
 void test_single_error_case(const char *gcg_filename,
                             gcg_parse_status_t expected_gcg_parse_status) {
-  GameHistory *game_history = create_game_history();
+  GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
-  destroy_game_history(game_history);
+  game_history_destroy(game_history);
   assert(gcg_parse_status == expected_gcg_parse_status);
 }
 
@@ -87,52 +87,52 @@ void test_error_cases() {
 
 void test_parse_special_char() {
   const char *gcg_filename = "name_iso8859-1.gcg";
-  GameHistory *game_history = create_game_history();
+  GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  GameHistoryPlayer *player0 = get_game_history_player(game_history, 0);
-  GameHistoryPlayer *player1 = get_game_history_player(game_history, 1);
-  assert_strings_equal(get_game_history_player_name(player0), "césar");
-  assert_strings_equal(get_game_history_player_name(player1), "hércules");
-  destroy_game_history(game_history);
+  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
+  GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
+  assert_strings_equal(game_history_get_player_name(player0), "césar");
+  assert_strings_equal(game_history_get_player_name(player1), "hércules");
+  game_history_destroy(game_history);
 }
 
 void test_parse_special_utf8_no_header() {
   const char *gcg_filename = "name_utf8_noheader.gcg";
-  GameHistory *game_history = create_game_history();
+  GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  GameHistoryPlayer *player0 = get_game_history_player(game_history, 0);
-  assert(strings_equal(get_game_history_player_name(player0), "cÃ©sar"));
-  destroy_game_history(game_history);
+  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
+  assert(strings_equal(game_history_get_player_name(player0), "cÃ©sar"));
+  game_history_destroy(game_history);
 }
 
 void test_parse_special_utf8_with_header() {
   const char *gcg_filename = "name_utf8_with_header.gcg";
-  GameHistory *game_history = create_game_history();
+  GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  GameHistoryPlayer *player0 = get_game_history_player(game_history, 0);
-  assert(strings_equal(get_game_history_player_name(player0), "césar"));
-  destroy_game_history(game_history);
+  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
+  assert(strings_equal(game_history_get_player_name(player0), "césar"));
+  game_history_destroy(game_history);
 }
 
 void test_parse_dos_mode() {
   const char *gcg_filename = "utf8_dos.gcg";
-  GameHistory *game_history = create_game_history();
+  GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  GameHistoryPlayer *player0 = get_game_history_player(game_history, 0);
-  GameHistoryPlayer *player1 = get_game_history_player(game_history, 1);
+  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
+  GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
   assert(
-      strings_equal(get_game_history_player_nickname(player0), "angwantibo"));
+      strings_equal(game_history_get_player_nickname(player0), "angwantibo"));
   assert(
-      strings_equal(get_game_history_player_nickname(player1), "Michal_Josko"));
-  destroy_game_history(game_history);
+      strings_equal(game_history_get_player_nickname(player1), "Michal_Josko"));
+  game_history_destroy(game_history);
 }
 
 void assert_game_event(const GameHistory *game_history, int event_index,
@@ -143,7 +143,7 @@ void assert_game_event(const GameHistory *game_history, int event_index,
                        int tiles_played, int tiles_length,
                        const char *tiles_string,
                        const LetterDistribution *letter_distribution) {
-  GameEvent *game_event = get_game_history_event(game_history, event_index);
+  GameEvent *game_event = game_history_get_event(game_history, event_index);
   int ld_size = letter_distribution_get_size(letter_distribution);
   // Game Event assertions
   assert(game_event_get_type(game_event) == event_type);
@@ -178,7 +178,7 @@ void assert_game_event(const GameHistory *game_history, int event_index,
       assert(get_tiles_length(move) == tiles_length);
       uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * tiles_length);
       int number_of_machine_letters = str_to_machine_letters(
-          get_game_history_letter_distribution(game_history), tiles_string,
+          game_history_get_letter_distribution(game_history), tiles_string,
           move_type == GAME_EVENT_TILE_PLACEMENT_MOVE, machine_letters,
           tiles_length);
       bool tiles_match = number_of_machine_letters == tiles_length;
@@ -201,36 +201,36 @@ void assert_game_event(const GameHistory *game_history, int event_index,
 
 void test_success_standard() {
   const char *gcg_filename = "success_standard.gcg";
-  GameHistory *game_history = create_game_history();
+  GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
   const LetterDistribution *ld =
-      get_game_history_letter_distribution(game_history);
-  GameHistoryPlayer *player0 = get_game_history_player(game_history, 0);
-  GameHistoryPlayer *player1 = get_game_history_player(game_history, 1);
+      game_history_get_letter_distribution(game_history);
+  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
+  GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
 
-  assert(strings_equal(get_game_history_title(game_history), "test game"));
-  assert(strings_equal(get_game_history_description(game_history),
+  assert(strings_equal(game_history_get_title(game_history), "test game"));
+  assert(strings_equal(game_history_get_description(game_history),
                        "Created with Macondo"));
-  assert(strings_equal(get_game_history_id_auth(game_history), "io.woogles"));
-  assert(strings_equal(get_game_history_uid(game_history), "p6QRjJHG"));
-  assert(strings_equal(get_game_history_lexicon_name(game_history), "CSW21"));
-  assert(strings_equal(get_game_history_letter_distribution_name(game_history),
+  assert(strings_equal(game_history_get_id_auth(game_history), "io.woogles"));
+  assert(strings_equal(game_history_get_uid(game_history), "p6QRjJHG"));
+  assert(strings_equal(game_history_get_lexicon_name(game_history), "CSW21"));
+  assert(strings_equal(game_history_get_letter_distribution_name(game_history),
                        "english"));
-  assert(get_game_history_game_variant(game_history) == GAME_VARIANT_CLASSIC);
-  assert(get_game_history_board_layout(game_history) ==
+  assert(game_history_get_game_variant(game_history) == GAME_VARIANT_CLASSIC);
+  assert(game_history_get_board_layout(game_history) ==
          BOARD_LAYOUT_CROSSWORD_GAME);
-  assert(strings_equal(get_game_history_player_nickname(player0), "HastyBot"));
-  assert(get_game_history_player_score(player0) == 516);
-  assert(!get_game_history_player_last_known_rack(player0));
-  assert(strings_equal(get_game_history_player_nickname(player1),
+  assert(strings_equal(game_history_get_player_nickname(player0), "HastyBot"));
+  assert(game_history_get_player_score(player0) == 516);
+  assert(!game_history_get_player_last_known_rack(player0));
+  assert(strings_equal(game_history_get_player_nickname(player1),
                        "RightBehindYou"));
-  assert(get_game_history_player_score(player1) == 358);
-  assert(!get_game_history_player_last_known_rack(player1));
+  assert(game_history_get_player_score(player1) == 358);
+  assert(!game_history_get_player_last_known_rack(player1));
 
-  assert(get_game_history_number_of_events(game_history) == 29);
+  assert(game_history_get_number_of_events(game_history) == 29);
   assert_game_event(game_history, 0, GAME_EVENT_EXCHANGE, 0, 0, "DIIIILU", "",
                     GAME_EVENT_EXCHANGE, 0, 0, 0, 0, 5, 5, "IIILU", ld);
   assert_game_event(game_history, 1, GAME_EVENT_TILE_PLACEMENT_MOVE, 1, 22,
@@ -262,17 +262,17 @@ void test_success_standard() {
                     ld);
   assert_game_event(game_history, 28, GAME_EVENT_TIME_PENALTY, 1, 358, "", "",
                     GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0, 0, "", ld);
-  destroy_game_history(game_history);
+  game_history_destroy(game_history);
 }
 
 void test_success_five_point_challenge() {
   const char *gcg_filename = "success_five_point_challenge.gcg";
-  GameHistory *game_history = create_game_history();
+  GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   const LetterDistribution *ld =
-      get_game_history_letter_distribution(game_history);
+      game_history_get_letter_distribution(game_history);
   assert_game_event(game_history, 16, GAME_EVENT_CHALLENGE_BONUS, 1, 398,
                     "DEIINRR", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0,
                     0, 0, "", ld);
@@ -282,7 +282,7 @@ void test_success_five_point_challenge() {
   assert_game_event(game_history, 24, GAME_EVENT_TIME_PENALTY, 0, 339, "AGLO",
                     "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0, 0, "",
                     ld);
-  destroy_game_history(game_history);
+  game_history_destroy(game_history);
 }
 
 void test_gcg() {

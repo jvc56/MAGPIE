@@ -85,10 +85,10 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
 void set_or_clear_error_status(ErrorStatus *error_status,
                                error_status_t error_status_type,
                                int error_code) {
-  if (is_successful_error_code(error_status_type, error_code)) {
-    set_error_status(error_status, ERROR_STATUS_TYPE_NONE, 0);
+  if (error_status_is_success(error_status_type, error_code)) {
+    error_status_set_type_and_code(error_status, ERROR_STATUS_TYPE_NONE, 0);
   } else {
-    set_error_status(error_status, error_status_type, error_code);
+    error_status_set_type_and_code(error_status, error_status_type, error_code);
   }
 }
 
@@ -126,7 +126,7 @@ void execute_command(ExecState *exec_state) {
 
   if (config_get_command_set_cgp(config)) {
     cgp_parse_status_t cgp_parse_status =
-        load_cgp(exec_state_get_game(exec_state), config_get_cgp(config));
+        game_load_cgp(exec_state_get_game(exec_state), config_get_cgp(config));
     set_or_clear_error_status(exec_state_get_error_status(exec_state),
                               ERROR_STATUS_TYPE_CGP_LOAD,
                               (int)cgp_parse_status);
@@ -159,7 +159,7 @@ void execute_command(ExecState *exec_state) {
 
 void execute_command_and_set_mode_stopped(ExecState *exec_state) {
   execute_command(exec_state);
-  log_warn_if_failed(exec_state_get_error_status(exec_state));
+  error_status_log_warn_if_failed(exec_state_get_error_status(exec_state));
   set_mode_stopped(
       config_get_thread_control(exec_state_get_config(exec_state)));
 }
@@ -189,12 +189,12 @@ void execute_command_sync_or_async(ExecState *exec_state, const char *command,
   // Loading the config is relatively
   // fast so humans shouldn't notice anything
   config_load_status_t config_load_status =
-      load_config(exec_state_get_config(exec_state), command);
+      config_load(exec_state_get_config(exec_state), command);
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             (int)config_load_status);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    log_warn_if_failed(exec_state_get_error_status(exec_state));
+    error_status_log_warn_if_failed(exec_state_get_error_status(exec_state));
     set_mode_stopped(thread_control);
     return;
   }
@@ -237,7 +237,7 @@ void process_ucgi_command(ExecState *exec_state, const char *command) {
   }
 }
 
-bool continue_on_coldstart(const Config *config) {
+bool config_continue_on_coldstart(const Config *config) {
   command_t command_type = config_get_command_type(config);
   return command_type == COMMAND_TYPE_SET_OPTIONS ||
          command_type == COMMAND_TYPE_LOAD_CGP ||
@@ -248,7 +248,7 @@ bool continue_on_coldstart(const Config *config) {
 void command_scan_loop(ExecState *exec_state,
                        const char *initial_command_string) {
   execute_command_sync(exec_state, initial_command_string);
-  if (!continue_on_coldstart(exec_state_get_config(exec_state))) {
+  if (!config_continue_on_coldstart(exec_state_get_config(exec_state))) {
     return;
   }
   ThreadControl *thread_control =
@@ -261,13 +261,13 @@ void command_scan_loop(ExecState *exec_state,
     FileHandler *infile = get_infile(thread_control);
 
     if (exec_mode == EXEC_MODE_CONSOLE &&
-        strings_equal(STDIN_FILENAME, get_file_handler_filename(infile))) {
+        strings_equal(STDIN_FILENAME, file_handler_get_filename(infile))) {
       print_to_outfile(thread_control, "magpie>");
     }
 
     free(input);
 
-    input = getline_from_file(infile);
+    input = file_handler_get_line(infile);
     if (!input) {
       // NULL input indicates an EOF
       break;
@@ -308,10 +308,10 @@ char *create_command_from_args(int argc, char *argv[]) {
 void process_command(int argc, char *argv[]) {
   gen_init_cache();
   log_set_level(LOG_WARN);
-  ExecState *exec_state = create_exec_state();
+  ExecState *exec_state = exec_state_create();
   char *initial_command_string = create_command_from_args(argc, argv);
   command_scan_loop(exec_state, initial_command_string);
   free(initial_command_string);
-  destroy_exec_state(exec_state);
+  exec_state_destroy(exec_state);
   gen_clear_cache();
 }

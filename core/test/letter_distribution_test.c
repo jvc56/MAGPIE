@@ -19,7 +19,7 @@ void test_letter_distribution_score_order() {
            previous_score);
     previous_score = letter_distribution_get_score(ld, score_order_index);
   }
-  destroy_config(config);
+  config_destroy(config);
 }
 
 void test_str_to_machine_letters() {
@@ -136,14 +136,14 @@ void test_str_to_machine_letters() {
   assert(str_to_machine_letters(english_ld, "2", true, imls, 40) == -1);
   assert(str_to_machine_letters(english_ld, "ABC9EFG", true, imls, 40) == -1);
 
-  // Play through not allowed
+  // Play through not board_is_letter_allowed_in_cross_set
   assert(str_to_machine_letters(english_ld, "AB.F", false, imls, 40) == -1);
   assert(str_to_machine_letters(english_ld, "BEHF.", false, imls, 40) == -1);
   assert(str_to_machine_letters(english_ld, ".BDEF", false, imls, 40) == -1);
 
-  destroy_config(nwl_config);
-  destroy_config(osps_config);
-  destroy_config(disc_config);
+  config_destroy(nwl_config);
+  config_destroy(osps_config);
+  config_destroy(disc_config);
 }
 
 void test_letter_distribution() {

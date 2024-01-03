@@ -49,7 +49,7 @@ void string_builder_add_board_row(const LetterDistribution *letter_distribution,
                                   StringBuilder *game_string, int row) {
   string_builder_add_formatted_string(game_string, "%2d|", row + 1);
   for (int i = 0; i < BOARD_DIM; i++) {
-    uint8_t current_letter = get_letter(board, row, i);
+    uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       string_builder_add_char(game_string,
                               CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i]);
@@ -106,7 +106,7 @@ void string_builder_add_game(Game *game, MoveList *move_list,
       string_builder_add_bag(bag, ld, game_string);
 
       string_builder_add_formatted_string(game_string, "  %d",
-                                          get_tiles_remaining(bag));
+                                          bag_get_tiles(bag));
 
     } else if (i - 2 < number_of_moves) {
       string_builder_add_move_with_rank_and_equity(game, move_list, game_string,

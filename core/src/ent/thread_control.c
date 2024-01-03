@@ -39,17 +39,17 @@ ThreadControl *create_thread_control() {
   pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
   pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
   pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
-  thread_control->outfile = create_file_handler_from_filename(
+  thread_control->outfile = file_handler_create_from_filename(
       STDOUT_FILENAME, FILE_HANDLER_MODE_WRITE);
   thread_control->infile =
-      create_file_handler_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
+      file_handler_create_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
   thread_control->timer = mtimer_create();
   return thread_control;
 }
 
 void destroy_thread_control(ThreadControl *thread_control) {
-  destroy_file_handler(thread_control->outfile);
-  destroy_file_handler(thread_control->infile);
+  file_handler_destroy(thread_control->outfile);
+  file_handler_destroy(thread_control->infile);
   mtimer_destroy(thread_control->timer);
   free(thread_control);
 }
@@ -58,12 +58,12 @@ void set_io(ThreadControl *thread_control, const char *in_filename,
             const char *out_filename) {
   const char *nonnull_in_filename = in_filename;
   if (!nonnull_in_filename) {
-    nonnull_in_filename = get_file_handler_filename(thread_control->infile);
+    nonnull_in_filename = file_handler_get_filename(thread_control->infile);
   }
 
   const char *nonnull_out_filename = out_filename;
   if (!nonnull_out_filename) {
-    nonnull_out_filename = get_file_handler_filename(thread_control->outfile);
+    nonnull_out_filename = file_handler_get_filename(thread_control->outfile);
   }
 
   if (strings_equal(nonnull_in_filename, nonnull_out_filename)) {
@@ -71,10 +71,10 @@ void set_io(ThreadControl *thread_control, const char *in_filename,
     return;
   }
 
-  set_file_handler(thread_control->infile, nonnull_in_filename,
+  file_handler_set_filename(thread_control->infile, nonnull_in_filename,
                    FILE_HANDLER_MODE_READ);
 
-  set_file_handler(thread_control->outfile, nonnull_out_filename,
+  file_handler_set_filename(thread_control->outfile, nonnull_out_filename,
                    FILE_HANDLER_MODE_WRITE);
 }
 
@@ -212,7 +212,7 @@ void set_number_of_threads(ThreadControl *thread_control,
 }
 
 void print_to_outfile(ThreadControl *thread_control, const char *content) {
-  write_to_file(thread_control->outfile, content);
+  file_handler_write(thread_control->outfile, content);
 }
 
 void wait_for_mode_stopped(ThreadControl *thread_control) {
