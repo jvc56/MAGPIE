@@ -12,13 +12,13 @@
 #include "../src/ent/game.h"
 #include "../src/ent/thread_control.h"
 
-#include "../src/util/log.h"
-#include "../src/util/string_util.h"
-#include "../src/util/util.h"
-
 #include "../src/impl/exec.h"
 #include "../src/impl/inference.h"
 #include "../src/impl/simmer.h"
+
+#include "../src/util/log.h"
+#include "../src/util/string_util.h"
+#include "../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -462,12 +462,14 @@ void test_exec_ucgi_command() {
       test_input_filename, FILE_HANDLER_MODE_WRITE);
 
   sleep(1);
-  file_handler_write(input_writer, "r1 best r2 best i 10 numplays 1 threads 1\n");
-  sleep(1);
-  file_handler_write(input_writer, "go autoplay lex CSW21 s1 equity s2 equity\n");
+  file_handler_write(input_writer,
+                     "r1 best r2 best i 10 numplays 1 threads 1\n");
   sleep(1);
   file_handler_write(input_writer,
-                "go autoplay lex CSW21 s1 equity s2 equity i 10000000\n");
+                     "go autoplay lex CSW21 s1 equity s2 equity\n");
+  sleep(1);
+  file_handler_write(input_writer,
+                     "go autoplay lex CSW21 s1 equity s2 equity i 10000000\n");
   sleep(1);
   // Interrupt the autoplay which won't finish in 1 second
   file_handler_write(input_writer, "stop\n");
@@ -511,8 +513,10 @@ void test_exec_console_command() {
   FileHandler *input_writer = file_handler_create_from_filename(
       test_input_filename, FILE_HANDLER_MODE_WRITE);
 
-  file_handler_write(input_writer, "r1 best r2 best i 100 numplays 1 threads 4\n");
-  file_handler_write(input_writer, "go autoplay lex CSW21 s1 equity s2 equity\n");
+  file_handler_write(input_writer,
+                     "r1 best r2 best i 100 numplays 1 threads 4\n");
+  file_handler_write(input_writer,
+                     "go autoplay lex CSW21 s1 equity s2 equity\n");
   // Stop should have no effect and appear as an error
   file_handler_write(input_writer, "stop\n");
   file_handler_write(input_writer, "quit\n");

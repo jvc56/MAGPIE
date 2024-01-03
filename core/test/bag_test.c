@@ -2,15 +2,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../src/str/bag_string.h"
-#include "../src/util/string_util.h"
-
-#include "../src/impl/gameplay.h"
-
 #include "../src/def/rack_defs.h"
 
 #include "../src/ent/config.h"
 #include "../src/ent/letter_distribution.h"
+
+#include "../src/impl/gameplay.h"
+
+#include "../src/str/bag_string.h"
+
+#include "../src/util/string_util.h"
 
 #include "test_util.h"
 
@@ -39,8 +40,7 @@ void test_bag() {
   Rack *rack = rack_create(ld_size);
 
   for (int i = 0; i < ld_size; i++) {
-    assert((int)ld_get_dist(ld, i) ==
-           bag_get_letter(bag, i));
+    assert((int)ld_get_dist(ld, i) == bag_get_letter(bag, i));
   }
 
   int number_of_remaining_tiles = bag_get_tiles(bag);
@@ -50,8 +50,7 @@ void test_bag() {
   }
 
   for (int i = 0; i < ld_size; i++) {
-    assert((int)ld_get_dist(ld, i) ==
-           rack_get_letter(rack, i));
+    assert((int)ld_get_dist(ld, i) == rack_get_letter(rack, i));
   }
 
   bag_reset(ld, bag);

@@ -4,13 +4,6 @@
 #include "../def/file_handler_defs.h"
 #include "../def/inference_defs.h"
 
-#include "../util/fileproxy.h"
-#include "../util/log.h"
-#include "../util/string_util.h"
-#include "../util/util.h"
-
-#include "../str/sim_string.h"
-
 #include "../ent/autoplay_results.h"
 #include "../ent/config.h"
 #include "../ent/error_status.h"
@@ -24,6 +17,13 @@
 #include "inference.h"
 #include "move_gen.h"
 #include "simmer.h"
+
+#include "../str/sim_string.h"
+
+#include "../util/fileproxy.h"
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 
 #define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"

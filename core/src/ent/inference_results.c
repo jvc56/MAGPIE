@@ -3,10 +3,10 @@
 #include "../def/inference_defs.h"
 #include "../def/rack_defs.h"
 
-#include "../util/util.h"
-
 #include "leave_rack.h"
 #include "stats.h"
+
+#include "../util/util.h"
 
 #define NUMBER_OF_STAT_TYPES 3
 
@@ -93,11 +93,12 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
   results->bag_as_rack = NULL;
 }
 
-void inference_results_finalize(InferenceResults *results, int target_score,
+void inference_results_finalize(const Rack *target_played_tiles,
+                                const Rack *target_known_unplayed_tiles,
+                                const Rack *bag_as_rack,
+                                InferenceResults *results, int target_score,
                                 int target_number_of_tiles_exchanged,
-                                double equity_margin, Rack *target_played_tiles,
-                                Rack *target_known_unplayed_tiles,
-                                Rack *bag_as_rack) {
+                                double equity_margin) {
   results->target_score = target_score;
   results->target_number_of_tiles_exchanged = target_number_of_tiles_exchanged;
   results->equity_margin = equity_margin;

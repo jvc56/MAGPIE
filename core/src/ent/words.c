@@ -1,15 +1,16 @@
+#include "words.h"
+
 #include <stdint.h>
 #include <stdlib.h>
 
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
+#include "board.h"
+
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
-
-#include "board.h"
-#include "words.h"
 
 typedef struct FormedWord {
   uint8_t word[BOARD_DIM];

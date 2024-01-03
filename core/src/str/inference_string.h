@@ -3,8 +3,6 @@
 
 #include "../ent/rack.h"
 
-#include "../impl/inference.h"
-
 #include "../util/string_util.h"
 
 void print_ucgi_inference_current_rack(uint64_t current_rack_index,

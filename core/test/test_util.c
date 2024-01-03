@@ -8,11 +8,6 @@
 
 #include "../src/def/rack_defs.h"
 
-#include "../src/str/game_string.h"
-#include "../src/str/inference_string.h"
-#include "../src/str/move_string.h"
-#include "../src/util/string_util.h"
-
 #include "../src/ent/board.h"
 #include "../src/ent/config.h"
 #include "../src/ent/game.h"
@@ -22,11 +17,16 @@
 #include "../src/ent/rack.h"
 #include "../src/impl/inference.h"
 
-#include "../src/util/log.h"
-#include "../src/util/util.h"
-
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+
+#include "../src/str/game_string.h"
+#include "../src/str/inference_string.h"
+#include "../src/str/move_string.h"
+
+#include "../src/util/log.h"
+#include "../src/util/string_util.h"
+#include "../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -96,13 +96,11 @@ void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
   free(sorted_move_list);
 }
 
-void print_move_list(const Board *board,
-                     const LetterDistribution *ld,
+void print_move_list(const Board *board, const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length) {
   StringBuilder *move_list_string = create_string_builder();
   for (int i = 0; i < move_list_length; i++) {
-    string_builder_add_move(board, sml->moves[i], ld,
-                            move_list_string);
+    string_builder_add_move(board, sml->moves[i], ld, move_list_string);
     string_builder_add_string(move_list_string, "\n");
   }
   printf("%s\n", string_builder_peek(move_list_string));
@@ -126,8 +124,7 @@ void print_inference(const LetterDistribution *ld,
   destroy_string_builder(inference_string);
 }
 
-void sort_and_print_move_list(const Board *board,
-                              const LetterDistribution *ld,
+void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
                               MoveList *ml) {
   SortedMoveList *sml = create_sorted_move_list(ml);
   print_move_list(board, ld, sml, sml->count);
@@ -150,13 +147,11 @@ void load_cgp_or_die(Game *game, const char *cgp) {
   }
 }
 
-void draw_rack_to_string(const LetterDistribution *ld,
-                         Bag *bag, Rack *rack, char *letters,
-                         int player_index) {
+void draw_rack_to_string(const LetterDistribution *ld, Bag *bag, Rack *rack,
+                         char *letters, int player_index) {
 
   uint8_t mls[MAX_BAG_SIZE];
-  int num_mls = ld_str_to_mls(ld, letters, false, mls,
-                                       MAX_BAG_SIZE);
+  int num_mls = ld_str_to_mls(ld, letters, false, mls, MAX_BAG_SIZE);
   for (int i = 0; i < num_mls; i++) {
     // For tests we assume that player_index == player_draw_index
     // since starting_player_index will always be 0.
@@ -193,10 +188,8 @@ bool equal_rack(const Rack *expected_rack, const Rack *actual_rack) {
     return false;
   }
   for (int i = 0; i < rack_get_dist_size(expected_rack); i++) {
-    if (rack_get_letter(expected_rack, i) !=
-        rack_get_letter(actual_rack, i)) {
-      printf("different: %d: %d != %d\n", i,
-             rack_get_letter(expected_rack, i),
+    if (rack_get_letter(expected_rack, i) != rack_get_letter(actual_rack, i)) {
+      printf("different: %d: %d != %d\n", i, rack_get_letter(expected_rack, i),
              rack_get_letter(actual_rack, i));
       return false;
     }
@@ -254,9 +247,11 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       assert(board_get_letter(b1, row, col) == board_get_letter(b2, row, col));
-      assert(board_get_bonus_square(b1, row, col) == board_get_bonus_square(b2, row, col));
+      assert(board_get_bonus_square(b1, row, col) ==
+             board_get_bonus_square(b2, row, col));
       for (int dir = 0; dir < 2; dir++) {
-        assert(board_get_anchor(b1, row, col, dir) == board_get_anchor(b2, row, col, dir));
+        assert(board_get_anchor(b1, row, col, dir) ==
+               board_get_anchor(b2, row, col, dir));
         // For now, assume all boards tested in this method
         // share the same lexicon
         assert(board_get_cross_set(b1, row, col, dir, 0) ==

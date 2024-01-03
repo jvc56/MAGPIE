@@ -1,3 +1,5 @@
+#include "board.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -7,12 +9,9 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
-#include "../util/string_util.h"
-
 #include "../util/log.h"
+#include "../util/string_util.h"
 #include "../util/util.h"
-
-#include "board.h"
 
 // Cross sets use a x4 multiplier for
 // - Horizontal and vertical directions
@@ -380,8 +379,7 @@ void board_destroy(Board *board) { free(board); }
 
 // this function assumes the word is always horizontal. If this isn't the case,
 // the board needs to be transposed ahead of time.
-int board_score_move(const Board *board,
-                     const LetterDistribution *ld,
+int board_score_move(const Board *board, const LetterDistribution *ld,
                      uint8_t word[], int word_start_index, int word_end_index,
                      int row, int col, int tiles_played, int cross_dir,
                      int cross_set_index) {

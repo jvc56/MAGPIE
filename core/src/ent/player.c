@@ -1,12 +1,13 @@
+#include "player.h"
+
 #include <stdlib.h>
 
 #include "../def/move_defs.h"
 
-#include "../util/util.h"
-
 #include "klv.h"
 #include "kwg.h"
-#include "player.h"
+
+#include "../util/util.h"
 
 struct Player {
   // All const fields are owned
@@ -44,7 +45,7 @@ void player_update(const Config *config, Player *player) {
   player->rack = rack_create(ld_get_size(config_get_ld(config)));
 }
 
-Player *create_player(const Config *config, int player_index) {
+Player *player_create(const Config *config, int player_index) {
   Player *player = malloc_or_die(sizeof(Player));
   player->index = player_index;
   player->score = 0;
@@ -68,7 +69,7 @@ Player *player_duplicate(const Player *player) {
   return new_player;
 }
 
-void destroy_player(Player *player) {
+void player_destroy(Player *player) {
   rack_destroy(player->rack);
   free(player);
 }

@@ -1,12 +1,13 @@
+#include "leave_map.h"
+
 #include <stdint.h>
 #include <stdlib.h>
 
 #include "../def/rack_defs.h"
 
-#include "../util/util.h"
-
-#include "leave_map.h"
 #include "rack.h"
+
+#include "../util/util.h"
 
 struct LeaveMap {
   int rack_array_size;
@@ -83,8 +84,7 @@ void leave_map_take_letter_and_update_current_index(LeaveMap *leave_map,
 void leave_map_add_letter_and_update_current_index(LeaveMap *leave_map,
                                                    Rack *rack, uint8_t letter) {
   rack_add_letter(rack, letter);
-  leave_map_add_letter(leave_map, letter,
-                       rack_get_letter(rack, letter) - 1);
+  leave_map_add_letter(leave_map, letter, rack_get_letter(rack, letter) - 1);
 }
 
 void leave_map_init(const Rack *rack, LeaveMap *leave_map) {

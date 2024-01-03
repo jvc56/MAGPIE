@@ -6,15 +6,16 @@
 
 #include "../src/def/stats_defs.h"
 
-#include "../src/str/move_string.h"
-#include "../src/util/string_util.h"
-
 #include "../src/ent/move.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/win_pct.h"
 
 #include "../src/impl/simmer.h"
+
+#include "../src/str/move_string.h"
+
+#include "../src/util/string_util.h"
 
 #include "test_util.h"
 
@@ -52,8 +53,8 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
 void test_win_pct() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  assert(
-      within_epsilon(win_pct_get(config_get_win_pcts(config), 118, 90), 0.844430));
+  assert(within_epsilon(win_pct_get(config_get_win_pcts(config), 118, 90),
+                        0.844430));
   config_destroy(config);
 }
 
@@ -74,7 +75,8 @@ void test_sim_single_iteration() {
                              " plies 2 threads 1 numplays 15 i 1 cond none");
   sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
-  assert(thread_control_get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
+  assert(thread_control_get_halt_status(thread_control) ==
+         HALT_STATUS_MAX_ITERATIONS);
 
   assert(board_get_tiles_played(board) == 0);
 
@@ -99,7 +101,8 @@ void test_more_iterations() {
                              " plies 2 threads 1 numplays 15 i 400 cond none");
   sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
-  assert(thread_control_get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
+  assert(thread_control_get_halt_status(thread_control) ==
+         HALT_STATUS_MAX_ITERATIONS);
   sim_results_sort_plays_by_win_rate(sim_results);
 
   SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
@@ -137,7 +140,8 @@ void perf_test_multithread_sim() {
                              " plies 2 threads 1 numplays 15 i 1000 cond none");
   sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
-  assert(thread_control_get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
+  assert(thread_control_get_halt_status(thread_control) ==
+         HALT_STATUS_MAX_ITERATIONS);
 
   print_sim_stats(game, sim_results);
   sim_results_sort_plays_by_win_rate(sim_results);
@@ -174,7 +178,8 @@ void test_play_similarity() {
                      " plies 2 threads 1 numplays 4 i 1200 cond none check 50");
   sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
-  assert(thread_control_get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
+  assert(thread_control_get_halt_status(thread_control) ==
+         HALT_STATUS_MAX_ITERATIONS);
 
   // The first four plays all score 74. Only
   // 8F ATRESIC and 8F STEARIC should show up as similar, though.

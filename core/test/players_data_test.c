@@ -1,9 +1,8 @@
 #include <assert.h>
 
-#include "../src/util/log.h"
-
 #include "../src/ent/players_data.h"
 
+#include "../src/util/log.h"
 #include "../src/util/string_util.h"
 
 #include "test_util.h"

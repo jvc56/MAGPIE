@@ -17,9 +17,9 @@ void thread_control_destroy(ThreadControl *thread_control);
 bool thread_control_get_is_halted(ThreadControl *thread_control);
 FileHandler *thread_control_get_infile(ThreadControl *thread_control);
 Timer *thread_control_get_timer(ThreadControl *thread_control);
-int thread_control_get_print_info_interval(ThreadControl *thread_control);
-int thread_control_get_check_stop_interval(ThreadControl *thread_control);
-int thread_control_get_threads(ThreadControl *thread_control);
+int thread_control_get_print_info_interval(const ThreadControl *thread_control);
+int thread_control_get_check_stop_interval(const ThreadControl *thread_control);
+int thread_control_get_threads(const ThreadControl *thread_control);
 
 bool thread_control_halt(ThreadControl *thread_control,
                          halt_status_t halt_status);

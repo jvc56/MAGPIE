@@ -7,8 +7,8 @@
 struct Player;
 typedef struct Player Player;
 
-Player *create_player(const Config *config, int player_index);
-void destroy_player(Player *player);
+Player *player_create(const Config *config, int player_index);
+void player_destroy(Player *player);
 
 int player_get_index(const Player *player);
 const char *player_get_name(const Player *player);

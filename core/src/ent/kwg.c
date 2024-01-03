@@ -1,3 +1,5 @@
+#include "kwg.h"
+
 #if defined(__APPLE__)
 #include "../compat/endian.h"
 #else
@@ -11,11 +13,8 @@
 
 #include "../util/fileproxy.h"
 #include "../util/log.h"
-#include "../util/util.h"
-
 #include "../util/string_util.h"
-
-#include "kwg.h"
+#include "../util/util.h"
 
 struct KWG {
   uint32_t *nodes;

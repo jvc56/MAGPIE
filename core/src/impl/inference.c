@@ -4,10 +4,6 @@
 #include "../def/inference_defs.h"
 #include "../def/rack_defs.h"
 
-#include "../util/util.h"
-
-#include "../str/inference_string.h"
-
 #include "../ent/bag.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -18,11 +14,13 @@
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 
-#include "../../test/test_util.h"
-
 #include "gameplay.h"
-#include "inference.h"
 #include "move_gen.h"
+
+#include "../str/inference_string.h"
+
+#include "../util/log.h"
+#include "../util/util.h"
 
 typedef struct Inference {
   // The following fields are owned by the caller
@@ -202,7 +200,7 @@ void decrement_letter_for_inference(Inference *inference, uint8_t letter) {
   rack_take_letter(inference->current_target_leave, letter);
 }
 
-Inference *inference_create(Game *game, Rack *target_played_tiles,
+Inference *inference_create(const Rack *target_played_tiles, Game *game,
                             int move_capacity, int target_index,
                             int target_score,
                             int target_number_of_tiles_exchanged,
@@ -544,7 +542,7 @@ inference_status_t infer(const Config *config, const Game *input_game,
 
   thread_control_unhalt(thread_control);
 
-  Rack *config_target_played_tiles = config_get_rack(config);
+  const Rack *config_target_played_tiles = config_get_rack(config);
 
   if (!config_target_played_tiles) {
     return INFERENCE_STATUS_NO_TILES_PLAYED;
@@ -553,7 +551,7 @@ inference_status_t infer(const Config *config, const Game *input_game,
   Game *game = game_duplicate(input_game);
 
   Inference *inference = inference_create(
-      game, config_target_played_tiles, config_get_num_plays(config),
+      config_target_played_tiles, game, config_get_num_plays(config),
       config_get_target_index(config), config_get_target_score(config),
       config_get_target_number_of_tiles_exchanged(config),
       config_get_equity_margin(config), results);
@@ -564,10 +562,9 @@ inference_status_t infer(const Config *config, const Game *input_game,
     infer_manager(thread_control, inference);
 
     inference_results_finalize(
-        inference->results, inference->target_score,
-        inference->target_number_of_tiles_exchanged, inference->equity_margin,
         config_target_played_tiles, inference->current_target_leave,
-        inference->bag_as_rack);
+        inference->bag_as_rack, inference->results, inference->target_score,
+        inference->target_number_of_tiles_exchanged, inference->equity_margin);
 
     if (thread_control_get_halt_status(thread_control) ==
         HALT_STATUS_MAX_ITERATIONS) {

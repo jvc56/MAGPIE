@@ -1,3 +1,5 @@
+#include "error_status.h"
+
 #include <stdbool.h>
 #include <stdlib.h>
 
@@ -11,15 +13,13 @@
 #include "../util/log.h"
 #include "../util/util.h"
 
-#include "error_status.h"
-
 struct ErrorStatus {
   error_status_t type;
   int code;
 };
 
-void error_status_set_type_and_code(ErrorStatus *error_status, error_status_t type,
-                      int code) {
+void error_status_set_type_and_code(ErrorStatus *error_status,
+                                    error_status_t type, int code) {
   error_status->code = code;
   error_status->type = type;
 }
@@ -32,8 +32,7 @@ ErrorStatus *error_status_create() {
 
 void error_status_destroy(ErrorStatus *error_status) { free(error_status); }
 
-bool error_status_is_success(error_status_t error_status_type,
-                              int error_code) {
+bool error_status_is_success(error_status_t error_status_type, int error_code) {
   bool is_success = false;
   switch (error_status_type) {
   case ERROR_STATUS_TYPE_NONE:

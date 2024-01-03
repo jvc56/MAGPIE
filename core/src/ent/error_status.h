@@ -1,6 +1,8 @@
 #ifndef ERROR_STATUS_H
 #define ERROR_STATUS_H
 
+#include <stdbool.h>
+
 #include "../def/error_status_defs.h"
 
 struct ErrorStatus;

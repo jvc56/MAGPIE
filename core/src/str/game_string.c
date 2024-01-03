@@ -7,15 +7,17 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 
-#include "../util/string_util.h"
 #include "bag_string.h"
 #include "letter_distribution_string.h"
 #include "move_string.h"
 #include "rack_string.h"
 
-void string_builder_add_player_row(
-    const LetterDistribution *ld, const Player *player,
-    StringBuilder *game_string, bool player_on_turn) {
+#include "../util/string_util.h"
+
+void string_builder_add_player_row(const LetterDistribution *ld,
+                                   const Player *player,
+                                   StringBuilder *game_string,
+                                   bool player_on_turn) {
 
   const char *player_on_turn_marker = "-> ";
   const char *player_off_turn_marker = "   ";
@@ -54,8 +56,7 @@ void string_builder_add_board_row(const LetterDistribution *ld,
       string_builder_add_char(game_string,
                               CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i]);
     } else {
-      string_builder_add_user_visible_letter(ld, game_string,
-                                             current_letter);
+      string_builder_add_user_visible_letter(ld, game_string, current_letter);
     }
     string_builder_add_string(game_string, " ");
   }
@@ -71,7 +72,8 @@ void string_builder_add_move_with_rank_and_equity(Game *game,
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(board, move, ld, game_string);
-  string_builder_add_formatted_string(game_string, " %0.2f", move_get_equity(move));
+  string_builder_add_formatted_string(game_string, " %0.2f",
+                                      move_get_equity(move));
 }
 
 void string_builder_add_game(Game *game, MoveList *move_list,
@@ -128,9 +130,9 @@ char *ucgi_static_moves(Game *game, MoveList *move_list) {
     string_builder_add_string(moves_string_builder, "info currmove ");
     string_builder_add_ucgi_move(move, board, ld, moves_string_builder);
 
-    string_builder_add_formatted_string(moves_string_builder,
-                                        " sc %d eq %.3f it 0\n",
-                                        move_get_score(move), move_get_equity(move));
+    string_builder_add_formatted_string(
+        moves_string_builder, " sc %d eq %.3f it 0\n", move_get_score(move),
+        move_get_equity(move));
   }
   string_builder_add_string(moves_string_builder, "bestmove ");
   string_builder_add_ucgi_move(move_list_get_move(move_list, 0), board, ld,

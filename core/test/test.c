@@ -3,6 +3,7 @@
 #include <time.h>
 
 #include "../src/ent/config.h"
+
 #include "../src/util/log.h"
 #include "../src/util/string_util.h"
 

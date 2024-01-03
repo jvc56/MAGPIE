@@ -1,5 +1,6 @@
 #ifndef WASM_API_H
 #define WASM_API_H
+
 #include <stdint.h>
 
 void destroy_wasm_exec_states();

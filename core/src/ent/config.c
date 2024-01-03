@@ -1,3 +1,5 @@
+#include "config.h"
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,19 +10,17 @@
 #include "../def/simmer_defs.h"
 #include "../def/win_pct_defs.h"
 
-#include "../util/string_util.h"
-
-#include "../util/log.h"
-#include "../util/util.h"
-
 #include "board.h"
-#include "config.h"
 #include "game.h"
 #include "letter_distribution.h"
 #include "players_data.h"
 #include "rack.h"
 #include "thread_control.h"
 #include "win_pct.h"
+
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 
 #define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
 #define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC

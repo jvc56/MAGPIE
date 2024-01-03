@@ -1,3 +1,5 @@
+#include "file_handler.h"
+
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -6,8 +8,6 @@
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
-
-#include "file_handler.h"
 
 struct FileHandler {
   FILE *file;

@@ -8,11 +8,12 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
 
 /* Modified by MAGPIE team to add a struct and parallelizability. */
 
+#include "xoshiro.h"
+
 #include <stdint.h>
 #include <stdlib.h>
 
 #include "../util/util.h"
-#include "xoshiro.h"
 
 /* This is xoshiro256++ 1.0, one of our all-purpose, rock-solid generators.
    It has excellent (sub-ns) speed, a state (256 bits) that is large

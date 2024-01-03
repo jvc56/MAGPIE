@@ -1,9 +1,9 @@
+#include "stats.h"
+
 #include <math.h>
 #include <stdlib.h>
 
 #include "../util/util.h"
-
-#include "stats.h"
 
 struct Stat {
   uint64_t cardinality;

@@ -7,11 +7,11 @@
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
 
-#include "../util/util.h"
-
 #include "move.h"
 #include "stats.h"
 #include "win_pct.h"
+
+#include "../util/util.h"
 
 struct SimmedPlay {
   Move *move;
@@ -34,8 +34,8 @@ struct SimResults {
   SimmedPlay **simmed_plays;
 };
 
-SimmedPlay **simmed_plays_create(MoveList *move_list, int num_simmed_plays,
-                                 int max_plies) {
+SimmedPlay **simmed_plays_create(const MoveList *move_list,
+                                 int num_simmed_plays, int max_plies) {
   SimmedPlay **simmed_plays =
       malloc_or_die((sizeof(SimmedPlay)) * num_simmed_plays);
 
@@ -93,7 +93,7 @@ void sim_results_destroy(SimResults *sim_results) {
   free(sim_results);
 }
 
-void sim_results_reset(SimResults *sim_results, MoveList *move_list,
+void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_simmed_plays, int max_plies) {
   sim_results_destroy_internal(sim_results);
 
@@ -165,21 +165,21 @@ void simmed_play_set_ignore(SimmedPlay *sp, bool lock) {
   }
 }
 
-int sim_results_get_number_of_plays(SimResults *sim_results) {
+int sim_results_get_number_of_plays(const SimResults *sim_results) {
   return sim_results->num_simmed_plays;
 }
 
-int sim_results_get_max_plies(SimResults *sim_results) {
+int sim_results_get_max_plies(const SimResults *sim_results) {
   return sim_results->max_plies;
 }
 
-int sim_results_get_node_count(SimResults *sim_results) {
+int sim_results_get_node_count(const SimResults *sim_results) {
   return atomic_load(&sim_results->node_count);
 }
 
 // Not thread safe. Caller is responsible for ensuring thread
 // safety
-int sim_results_get_iteration_count(SimResults *sim_results) {
+int sim_results_get_iteration_count(const SimResults *sim_results) {
   return sim_results->iteration_count;
 }
 

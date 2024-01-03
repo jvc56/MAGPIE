@@ -5,18 +5,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../def/gcg_defs.h"
 #include "../def/rack_defs.h"
-
-#include "../util/log.h"
-#include "../util/util.h"
-
-#include "../util/string_util.h"
 
 #include "../ent/board.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 
-#include "gcg.h"
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 
 #define MAX_GROUPS 7
 
@@ -365,9 +363,8 @@ uint8_t *convert_tiles_string_to_machine_letters(
   uint8_t *machine_letters =
       malloc_or_die(sizeof(uint8_t) * machine_letters_size);
   *number_of_machine_letters = ld_str_to_mls(
-      game_history_get_ld(gcg_parser->game_history),
-      tiles_string, allow_played_through_marker, machine_letters,
-      machine_letters_size);
+      game_history_get_ld(gcg_parser->game_history), tiles_string,
+      allow_played_through_marker, machine_letters, machine_letters_size);
   free(tiles_string);
   if (*number_of_machine_letters < 0) {
     free(machine_letters);
@@ -436,8 +433,7 @@ Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
   }
   char *player_rack_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  LetterDistribution *ld =
-      game_history_get_ld(gcg_parser->game_history);
+  LetterDistribution *ld = game_history_get_ld(gcg_parser->game_history);
   uint32_t ld_size = ld_get_size(ld);
   Rack *rack = rack_create(ld_size);
   int number_of_letters_set = rack_set_to_string(ld, rack, player_rack_string);
@@ -538,10 +534,8 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
         return GCG_PARSE_STATUS_LEXICON_NOT_FOUND;
       }
       if (!game_history_get_ld_name(game_history)) {
-        char *default_ld_name =
-            ld_get_default_name(lexicon_name);
-        game_history_set_ld_name(
-            game_history, default_ld_name);
+        char *default_ld_name = ld_get_default_name(lexicon_name);
+        game_history_set_ld_name(game_history, default_ld_name);
         free(default_ld_name);
       }
       if (game_history_get_board_layout(game_history) == BOARD_LAYOUT_UNKNOWN) {
@@ -551,10 +545,8 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
       if (game_history_get_game_variant(game_history) == GAME_VARIANT_UNKNOWN) {
         game_history_set_game_variant(game_history, GAME_VARIANT_CLASSIC);
       }
-      game_history_set_ld(
-          game_history,
-          ld_create(
-              game_history_get_ld_name(game_history)));
+      game_history_set_ld(game_history,
+                          ld_create(game_history_get_ld_name(game_history)));
     }
   }
 
@@ -772,8 +764,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     }
     char *tile_distribution_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    game_history_set_ld_name(game_history,
-                                              tile_distribution_name);
+    game_history_set_ld_name(game_history, tile_distribution_name);
     free(tile_distribution_name);
     break;
   case GCG_GAME_TYPE_TOKEN:

@@ -5,10 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "string_util.h"
+
 #include "../util/log.h"
 #include "../util/util.h"
-
-#include "string_util.h"
 
 // Misc string functions
 

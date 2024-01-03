@@ -4,11 +4,6 @@
 
 #include "../def/rack_defs.h"
 
-#include "../str/game_string.h"
-#include "../str/letter_distribution_string.h"
-#include "../str/move_string.h"
-#include "../util/string_util.h"
-
 #include "../ent/bag.h"
 #include "../ent/config.h"
 #include "../ent/error_status.h"
@@ -20,6 +15,12 @@
 #include "exec.h"
 #include "gameplay.h"
 #include "move_gen.h"
+
+#include "../str/game_string.h"
+#include "../str/letter_distribution_string.h"
+#include "../str/move_string.h"
+
+#include "../util/string_util.h"
 
 static ExecState *wasm_exec_state = NULL;
 static ExecState *iso_exec_state = NULL;

@@ -1,9 +1,10 @@
-#include "../util/string_util.h"
-#include "letter_distribution_string.h"
-
 #include "../ent/board.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+
+#include "letter_distribution_string.h"
+
+#include "../util/string_util.h"
 
 void string_builder_add_move_description(const Move *move,
                                          const LetterDistribution *ld,
@@ -53,8 +54,8 @@ void string_builder_add_move(const Board *board, const Move *move,
   if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
     string_builder_add_string(string_builder, "(exch ");
     for (int i = 0; i < move_get_tiles_played(move); i++) {
-      string_builder_add_user_visible_letter(ld,
-                                             string_builder, move_get_tile(move, i));
+      string_builder_add_user_visible_letter(ld, string_builder,
+                                             move_get_tile(move, i));
     }
     string_builder_add_string(string_builder, ")");
     return;
@@ -86,8 +87,7 @@ void string_builder_add_move(const Board *board, const Move *move,
     if (tile == PLAYED_THROUGH_MARKER && !board) {
       string_builder_add_string(string_builder, ".");
     } else {
-      string_builder_add_user_visible_letter(ld,
-                                             string_builder, print_tile);
+      string_builder_add_user_visible_letter(ld, string_builder, print_tile);
     }
 
     if (board && (tile == PLAYED_THROUGH_MARKER) &&

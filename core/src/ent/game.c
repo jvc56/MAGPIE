@@ -1,3 +1,5 @@
+#include "game.h"
+
 #include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -7,16 +9,15 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 
-#include "../util/log.h"
-#include "../util/string_util.h"
-#include "../util/util.h"
-
 #include "bag.h"
 #include "board.h"
-#include "game.h"
 #include "move.h"
 #include "player.h"
 #include "rack.h"
+
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 
 typedef struct MinimalGameBackup {
   Board *board;
@@ -577,7 +578,7 @@ Game *game_create(const Config *config) {
   game->bag = bag_create(game->ld);
   game->board = board_create();
   for (int player_index = 0; player_index < 2; player_index++) {
-    game->players[player_index] = create_player(config, player_index);
+    game->players[player_index] = player_create(config, player_index);
   }
   for (int i = 0; i < NUMBER_OF_DATA; i++) {
     game->data_is_shared[i] = players_data_get_is_shared(
@@ -688,8 +689,8 @@ void destroy_backups(Game *game) {
 void game_destroy(Game *game) {
   board_destroy(game->board);
   bag_destroy(game->bag);
-  destroy_player(game->players[0]);
-  destroy_player(game->players[1]);
+  player_destroy(game->players[0]);
+  player_destroy(game->players[1]);
   if (game->backups_preallocated) {
     destroy_backups(game);
   }

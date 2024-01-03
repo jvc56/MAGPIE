@@ -1,18 +1,18 @@
+#include "game_history.h"
+
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 
-#include "../util/string_util.h"
-
-#include "../util/log.h"
-#include "../util/util.h"
-
-#include "game_history.h"
 #include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
+
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 
 struct GameEvent {
   game_event_t event_type;
@@ -214,15 +214,12 @@ const char *game_history_get_lexicon_name(const GameHistory *history) {
   return history->lexicon_name;
 }
 
-void game_history_set_ld_name(
-    GameHistory *history, const char *ld_name) {
+void game_history_set_ld_name(GameHistory *history, const char *ld_name) {
   free(history->ld_name);
-  history->ld_name =
-      string_duplicate(ld_name);
+  history->ld_name = string_duplicate(ld_name);
 }
 
-const char *
-game_history_get_ld_name(const GameHistory *history) {
+const char *game_history_get_ld_name(const GameHistory *history) {
   return history->ld_name;
 }
 
@@ -263,13 +260,11 @@ int game_history_get_number_of_events(const GameHistory *history) {
   return history->number_of_events;
 }
 
-void game_history_set_ld(
-    GameHistory *history, LetterDistribution *ld) {
+void game_history_set_ld(GameHistory *history, LetterDistribution *ld) {
   history->ld = ld;
 }
 
-LetterDistribution *
-game_history_get_ld(const GameHistory *history) {
+LetterDistribution *game_history_get_ld(const GameHistory *history) {
   return history->ld;
 }
 

@@ -1,15 +1,16 @@
+#include "thread_control.h"
+
 #include <pthread.h>
 #include <stdbool.h>
 
 #include "../def/file_handler_defs.h"
 
+#include "file_handler.h"
+#include "timer.h"
+
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
-
-#include "file_handler.h"
-#include "thread_control.h"
-#include "timer.h"
 
 struct ThreadControl {
   int number_of_threads;
@@ -54,8 +55,8 @@ void thread_control_destroy(ThreadControl *thread_control) {
   free(thread_control);
 }
 
-void thread_control_set_io(ThreadControl *thread_control, const char *in_filename,
-            const char *out_filename) {
+void thread_control_set_io(ThreadControl *thread_control,
+                           const char *in_filename, const char *out_filename) {
   const char *nonnull_in_filename = in_filename;
   if (!nonnull_in_filename) {
     nonnull_in_filename = file_handler_get_filename(thread_control->infile);
@@ -72,10 +73,10 @@ void thread_control_set_io(ThreadControl *thread_control, const char *in_filenam
   }
 
   file_handler_set_filename(thread_control->infile, nonnull_in_filename,
-                   FILE_HANDLER_MODE_READ);
+                            FILE_HANDLER_MODE_READ);
 
   file_handler_set_filename(thread_control->outfile, nonnull_out_filename,
-                   FILE_HANDLER_MODE_WRITE);
+                            FILE_HANDLER_MODE_WRITE);
 }
 
 FileHandler *thread_control_get_infile(ThreadControl *thread_control) {
@@ -86,7 +87,8 @@ Timer *thread_control_get_timer(ThreadControl *thread_control) {
   return thread_control->timer;
 }
 
-int thread_control_get_print_info_interval(ThreadControl *thread_control) {
+int thread_control_get_print_info_interval(
+    const ThreadControl *thread_control) {
   return thread_control->print_info_interval;
 }
 
@@ -95,7 +97,8 @@ void set_print_info_interval(ThreadControl *thread_control,
   thread_control->print_info_interval = print_info_interval;
 }
 
-int thread_control_get_check_stop_interval(ThreadControl *thread_control) {
+int thread_control_get_check_stop_interval(
+    const ThreadControl *thread_control) {
   return thread_control->check_stopping_condition_interval;
 }
 
@@ -117,7 +120,8 @@ bool thread_control_get_is_halted(ThreadControl *thread_control) {
   return thread_control_get_halt_status(thread_control) != HALT_STATUS_NONE;
 }
 
-bool thread_control_halt(ThreadControl *thread_control, halt_status_t halt_status) {
+bool thread_control_halt(ThreadControl *thread_control,
+                         halt_status_t halt_status) {
   bool success = false;
   pthread_mutex_lock(&thread_control->halt_status_mutex);
   // Assume the first reason to thread_control_halt is the only
@@ -200,14 +204,14 @@ bool thread_control_set_check_stop_inactive(ThreadControl *thread_control) {
 
 // This does not require locking since it is
 // not called during a multithreaded commmand
-int thread_control_get_threads(ThreadControl *thread_control) {
+int thread_control_get_threads(const ThreadControl *thread_control) {
   return thread_control->number_of_threads;
 }
 
 // This does not require locking since it is
 // not called during a multithreaded commmand
 void thread_control_set_threads(ThreadControl *thread_control,
-                           int number_of_threads) {
+                                int number_of_threads) {
   thread_control->number_of_threads = number_of_threads;
 }
 

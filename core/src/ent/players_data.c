@@ -1,12 +1,13 @@
+#include "players_data.h"
+
 #include <stdlib.h>
+
+#include "klv.h"
+#include "kwg.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
-
-#include "klv.h"
-#include "kwg.h"
-#include "players_data.h"
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.

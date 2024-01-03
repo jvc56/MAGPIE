@@ -1,5 +1,3 @@
-#include "move_gen.h"
-
 #include <assert.h>
 #include <ctype.h>
 #include <stdint.h>
@@ -12,8 +10,6 @@
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 
-#include "../util/util.h"
-
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
 #include "../ent/config.h"
@@ -24,6 +20,8 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+
+#include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
@@ -134,8 +132,6 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 AnchorList *gen_get_anchor_list(int thread_index) {
   return cached_gens[thread_index]->anchor_list;
 }
-
-MoveList *gen_get_move_list(MoveGen *gen) { return gen->move_list; }
 
 double placement_adjustment(const MoveGen *gen, const Move *move) {
   int start = move_get_col_start(move);

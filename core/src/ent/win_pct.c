@@ -1,14 +1,13 @@
+#include "win_pct.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "../def/win_pct_defs.h"
 
 #include "../util/log.h"
-#include "../util/util.h"
-
 #include "../util/string_util.h"
-
-#include "win_pct.h"
+#include "../util/util.h"
 
 struct WinPct {
   float **win_pcts;
@@ -19,7 +18,7 @@ struct WinPct {
 };
 
 float win_pct_get(const WinPct *wp, int spread_plus_leftover,
-              unsigned int game_get_unseen_tiles) {
+                  unsigned int game_get_unseen_tiles) {
   if (spread_plus_leftover > wp->max_spread) {
     spread_plus_leftover = wp->max_spread;
   }
@@ -29,7 +28,8 @@ float win_pct_get(const WinPct *wp, int spread_plus_leftover,
   if (game_get_unseen_tiles > wp->max_tiles_unseen) {
     game_get_unseen_tiles = wp->max_tiles_unseen;
   }
-  return wp->win_pcts[wp->max_spread - spread_plus_leftover][game_get_unseen_tiles];
+  return wp
+      ->win_pcts[wp->max_spread - spread_plus_leftover][game_get_unseen_tiles];
 };
 
 char *get_win_pct_filepath(const char *win_pct_name) {

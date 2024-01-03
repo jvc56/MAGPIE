@@ -6,14 +6,6 @@
 #include "../def/rack_defs.h"
 #include "../def/stats_defs.h"
 
-#include "../util/log.h"
-#include "../util/util.h"
-
-#include "../util/string_util.h"
-#include "letter_distribution_string.h"
-#include "move_string.h"
-#include "rack_string.h"
-
 #include "../ent/autoplay_results.h"
 #include "../ent/game.h"
 #include "../ent/leave_rack.h"
@@ -21,7 +13,14 @@
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/timer.h"
-#include "../impl/inference.h"
+
+#include "letter_distribution_string.h"
+#include "move_string.h"
+#include "rack_string.h"
+
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 
 char *ucgi_sim_stats(Game *game, SimResults *sim_results,
                      ThreadControl *thread_control, bool best_known_play) {

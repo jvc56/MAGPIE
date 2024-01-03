@@ -10,7 +10,6 @@
 #include "../src/impl/gcg.h"
 
 #include "../src/util/string_util.h"
-
 #include "../src/util/util.h"
 
 #include "test_constants.h"
@@ -141,8 +140,7 @@ void assert_game_event(const GameHistory *game_history, int event_index,
                        const char *note, game_event_t move_type, int dir,
                        int move_row_start, int move_col_start, int move_score,
                        int tiles_played, int tiles_length,
-                       const char *tiles_string,
-                       const LetterDistribution *ld) {
+                       const char *tiles_string, const LetterDistribution *ld) {
   GameEvent *game_event = game_history_get_event(game_history, event_index);
   int ld_size = ld_get_size(ld);
   // Game Event assertions
@@ -177,14 +175,15 @@ void assert_game_event(const GameHistory *game_history, int event_index,
       assert(move_get_tiles_played(move) == tiles_played);
       assert(move_get_tiles_length(move) == tiles_length);
       uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * tiles_length);
-      int number_of_machine_letters = ld_str_to_mls(
-          game_history_get_ld(game_history), tiles_string,
-          move_type == GAME_EVENT_TILE_PLACEMENT_MOVE, machine_letters,
-          tiles_length);
+      int number_of_machine_letters =
+          ld_str_to_mls(game_history_get_ld(game_history), tiles_string,
+                        move_type == GAME_EVENT_TILE_PLACEMENT_MOVE,
+                        machine_letters, tiles_length);
       bool tiles_match = number_of_machine_letters == tiles_length;
       if (tiles_match) {
         for (int i = 0; i < tiles_length; i++) {
-          tiles_match = tiles_match && move_get_tile(move, i) == machine_letters[i];
+          tiles_match =
+              tiles_match && move_get_tile(move, i) == machine_letters[i];
         }
       }
       free(machine_letters);
@@ -206,8 +205,7 @@ void test_success_standard() {
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
-  const LetterDistribution *ld =
-      game_history_get_ld(game_history);
+  const LetterDistribution *ld = game_history_get_ld(game_history);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
 
@@ -217,8 +215,7 @@ void test_success_standard() {
   assert(strings_equal(game_history_get_id_auth(game_history), "io.woogles"));
   assert(strings_equal(game_history_get_uid(game_history), "p6QRjJHG"));
   assert(strings_equal(game_history_get_lexicon_name(game_history), "CSW21"));
-  assert(strings_equal(game_history_get_ld_name(game_history),
-                       "english"));
+  assert(strings_equal(game_history_get_ld_name(game_history), "english"));
   assert(game_history_get_game_variant(game_history) == GAME_VARIANT_CLASSIC);
   assert(game_history_get_board_layout(game_history) ==
          BOARD_LAYOUT_CROSSWORD_GAME);
@@ -271,8 +268,7 @@ void test_success_five_point_challenge() {
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  const LetterDistribution *ld =
-      game_history_get_ld(game_history);
+  const LetterDistribution *ld = game_history_get_ld(game_history);
   assert_game_event(game_history, 16, GAME_EVENT_CHALLENGE_BONUS, 1, 398,
                     "DEIINRR", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0,
                     0, 0, "", ld);

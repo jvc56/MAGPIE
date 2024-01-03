@@ -1,12 +1,13 @@
+#include "rack.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "../def/rack_defs.h"
 
-#include "../util/util.h"
-
 #include "letter_distribution.h"
-#include "rack.h"
+
+#include "../util/util.h"
 
 struct Rack {
   int array_size;

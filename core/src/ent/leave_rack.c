@@ -1,9 +1,11 @@
+#include "leave_rack.h"
+
 #include <stdlib.h>
 
-#include "leave_rack.h"
 #include "rack.h"
 
 #include "../util/util.h"
+
 struct LeaveRack {
   Rack *leave;
   Rack *exchanged;
@@ -43,7 +45,7 @@ int leave_rack_list_get_capacity(const LeaveRackList *leave_rack_list) {
 }
 
 const LeaveRack *leave_rack_list_get_rack(const LeaveRackList *leave_rack_list,
-                                int index) {
+                                          int index) {
   return leave_rack_list->leave_racks[index];
 }
 
@@ -127,8 +129,8 @@ void down_heapify_leave_rack(LeaveRackList *lrl, int parent_node) {
 }
 
 void leave_rack_list_insert_rack(const Rack *leave, const Rack *exchanged,
-                       LeaveRackList *lrl, int number_of_draws_for_leave,
-                       double equity) {
+                                 LeaveRackList *lrl,
+                                 int number_of_draws_for_leave, double equity) {
   rack_reset(lrl->spare_leave_rack->leave);
   for (int i = 0; i < rack_get_dist_size(leave); i++) {
     for (int j = 0; j < rack_get_letter(leave, i); j++) {

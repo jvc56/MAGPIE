@@ -4,6 +4,7 @@
 #include "../src/ent/config.h"
 
 #include "../src/str/letter_distribution_string.h"
+
 #include "../src/util/string_util.h"
 
 #include "test_util.h"
@@ -62,8 +63,7 @@ void test_alphabet() {
 
   Config *catalan_config = create_config_or_die(
       "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
-  LetterDistribution *catalan_ld =
-      config_get_ld(catalan_config);
+  LetterDistribution *catalan_ld = config_get_ld(catalan_config);
 
   string_builder_add_user_visible_letter(catalan_ld, letter,
                                          get_blanked_machine_letter(13));

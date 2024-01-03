@@ -3,8 +3,6 @@
 
 #include "../def/inference_defs.h"
 
-#include "../util/log.h"
-
 #include "../ent/config.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"

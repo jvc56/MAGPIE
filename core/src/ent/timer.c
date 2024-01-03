@@ -1,10 +1,10 @@
+#include "timer.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "../util/log.h"
 #include "../util/util.h"
-
-#include "timer.h"
 
 // Not thread safe
 struct Timer {
@@ -45,7 +45,7 @@ void mtimer_stop(Timer *timer) {
   timer->is_running = false;
 }
 
-double mtimer_elapsed_seconds(Timer *timer) {
+double mtimer_elapsed_seconds(const Timer *timer) {
   if (timer->is_running) {
     clock_t current_time = clock();
     return ((double)(current_time - timer->start_time)) / CLOCKS_PER_SEC;

@@ -3,6 +3,7 @@
 
 #include "../src/ent/config.h"
 #include "../src/ent/game.h"
+
 #include "game_test.h"
 #include "rack_test.h"
 #include "test_constants.h"

@@ -8,10 +8,10 @@
 
 #include "../src/impl/gameplay.h"
 
+#include "move_gen_pi.h"
+
 #include "test_constants.h"
 #include "test_util.h"
-
-#include "move_gen_pi.h"
 
 void load_and_generate(Game *game, MoveList *move_list, Player *player,
                        const char *cgp, const char *rack) {

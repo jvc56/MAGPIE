@@ -1,11 +1,12 @@
+#include "bag.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "xoshiro.h"
+
 #include "../util/log.h"
 #include "../util/util.h"
-
-#include "bag.h"
-#include "xoshiro.h"
 
 struct Bag {
   int size;
@@ -38,12 +39,9 @@ void bag_shuffle(Bag *bag) {
 
 void bag_reset(const LetterDistribution *ld, Bag *bag) {
   int tile_index = 0;
-  int ld_size =
-      ld_get_size(ld);
+  int ld_size = ld_get_size(ld);
   for (int i = 0; i < ld_size; i++) {
-    for (int k = 0;
-         k < ld_get_dist(ld, i);
-         k++) {
+    for (int k = 0; k < ld_get_dist(ld, i); k++) {
       bag->tiles[tile_index] = i;
       tile_index++;
     }

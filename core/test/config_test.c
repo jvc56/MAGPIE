@@ -4,9 +4,9 @@
 #include "../src/ent/config.h"
 
 #include "../src/str/rack_string.h"
-#include "../src/util/string_util.h"
 
 #include "../src/util/log.h"
+#include "../src/util/string_util.h"
 
 #include "config_test.h"
 #include "test_constants.h"
@@ -198,8 +198,8 @@ void test_config_success() {
   assert(config_get_seed(config) == (uint64_t)seed);
   assert(thread_control_get_threads(config_get_thread_control(config)) ==
          number_of_threads);
-  assert(thread_control_get_print_info_interval(config_get_thread_control(config)) ==
-         print_info);
+  assert(thread_control_get_print_info_interval(
+             config_get_thread_control(config)) == print_info);
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
   assert(config_get_static_search_only(config));
@@ -225,8 +225,7 @@ void test_config_success() {
                     l2));
 
   string_builder_clear(test_string_builder);
-  string_builder_add_rack(config_get_rack(config),
-                          config_get_ld(config),
+  string_builder_add_rack(config_get_rack(config), config_get_ld(config),
                           test_string_builder);
   assert(strings_equal(rack, string_builder_peek(test_string_builder)));
 
@@ -287,8 +286,8 @@ void test_config_success() {
   assert(config_get_stopping_condition(config) == SIM_STOPPING_CONDITION_98PCT);
   assert(thread_control_get_threads(config_get_thread_control(config)) ==
          number_of_threads);
-  assert(thread_control_get_print_info_interval(config_get_thread_control(config)) ==
-         print_info);
+  assert(thread_control_get_print_info_interval(
+             config_get_thread_control(config)) == print_info);
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
   assert(!config_get_static_search_only(config));

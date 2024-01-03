@@ -1,3 +1,5 @@
+#include "move.h"
+
 #include <math.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -7,8 +9,6 @@
 
 #include "../util/log.h"
 #include "../util/util.h"
-
-#include "move.h"
 
 struct Move {
   game_event_t move_type;

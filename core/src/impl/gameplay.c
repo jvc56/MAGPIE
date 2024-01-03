@@ -1,5 +1,3 @@
-#include "../impl/gameplay.h"
-
 #include "../def/cross_set_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
@@ -9,8 +7,6 @@
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
-
-#include "../../test/test_util.h"
 
 #include "move_gen.h"
 

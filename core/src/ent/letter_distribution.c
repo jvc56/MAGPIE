@@ -1,19 +1,17 @@
+#include "letter_distribution.h"
+
 #include <assert.h>
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../util/string_util.h"
-
 #include "../util/fileproxy.h"
 #include "../util/log.h"
+#include "../util/string_util.h"
 #include "../util/util.h"
 
-#include "letter_distribution.h"
-
 #define INVALID_LETTER (0x80 - 1)
-
 #define MULTICHAR_START_DELIMITIER '['
 #define MULTICHAR_END_DELIMITIER ']'
 

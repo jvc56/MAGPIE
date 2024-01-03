@@ -2,8 +2,6 @@
 
 #include <stdlib.h>
 
-#include "../util/util.h"
-
 #include "autoplay_results.h"
 #include "config.h"
 #include "error_status.h"
@@ -11,7 +9,7 @@
 #include "inference_results.h"
 #include "sim_results.h"
 
-#include "../impl/move_gen.h"
+#include "../util/util.h"
 
 struct ExecState {
   Config *config;

@@ -3,22 +3,23 @@
 #include "../def/inference_defs.h"
 #include "../def/rack_defs.h"
 
-#include "../util/string_util.h"
-#include "game_string.h"
-#include "letter_distribution_string.h"
-#include "rack_string.h"
-
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/leave_rack.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
 #include "../ent/stats.h"
-#include "../impl/inference.h"
 
-void string_builder_add_leave_rack(
-    const LeaveRack *leave_rack, const LetterDistribution *ld,
-    StringBuilder *inference_string, int index, uint64_t total_draws) {
+#include "game_string.h"
+#include "letter_distribution_string.h"
+#include "rack_string.h"
+
+#include "../util/string_util.h"
+
+void string_builder_add_leave_rack(const LeaveRack *leave_rack,
+                                   const LetterDistribution *ld,
+                                   StringBuilder *inference_string, int index,
+                                   uint64_t total_draws) {
 
   Rack *leave_rack_leave = leave_rack_get_leave(leave_rack);
   Rack *leave_rack_exchanged = leave_rack_get_exchanged(leave_rack);
@@ -26,18 +27,15 @@ void string_builder_add_leave_rack(
   double leave_rack_equity = leave_rack_get_equity(leave_rack);
 
   if (rack_is_empty(leave_rack_exchanged)) {
-    string_builder_add_rack(leave_rack_leave, ld,
-                            inference_string);
+    string_builder_add_rack(leave_rack_leave, ld, inference_string);
     string_builder_add_formatted_string(
         inference_string, "%-3d %-6.2f %-6d %0.2f\n", index + 1,
         ((double)leave_rack_draws / total_draws) * 100, leave_rack_draws,
         leave_rack_equity);
   } else {
-    string_builder_add_rack(leave_rack_leave, ld,
-                            inference_string);
+    string_builder_add_rack(leave_rack_leave, ld, inference_string);
     string_builder_add_spaces(inference_string, 1);
-    string_builder_add_rack(leave_rack_exchanged, ld,
-                            inference_string);
+    string_builder_add_rack(leave_rack_exchanged, ld, inference_string);
     string_builder_add_formatted_string(
         inference_string, "%-3d %-6.2f %-6d\n", index + 1,
         ((double)leave_rack_draws / total_draws) * 100, leave_rack_draws);
@@ -52,12 +50,12 @@ void string_builder_add_letter_minimum(
   Stat *equity_values = inference_results_get_equity_values(
       inference_results, inference_stat_type);
 
-  int draw_subtotal =
-      inference_results_get_subtotal_sum_with_minimum(inference_results, inference_stat_type,
-                                    letter, minimum, INFERENCE_SUBTOTAL_DRAW);
-  int leave_subtotal =
-      inference_results_get_subtotal_sum_with_minimum(inference_results, inference_stat_type,
-                                    letter, minimum, INFERENCE_SUBTOTAL_LEAVE);
+  int draw_subtotal = inference_results_get_subtotal_sum_with_minimum(
+      inference_results, inference_stat_type, letter, minimum,
+      INFERENCE_SUBTOTAL_DRAW);
+  int leave_subtotal = inference_results_get_subtotal_sum_with_minimum(
+      inference_results, inference_stat_type, letter, minimum,
+      INFERENCE_SUBTOTAL_LEAVE);
   double inference_probability =
       ((double)draw_subtotal) / (double)stat_get_weight(equity_values);
   double random_probability = get_probability_for_random_minimum_draw(
@@ -75,8 +73,8 @@ void string_builder_add_letter_line(const LetterDistribution *ld,
                                     Stat *letter_stat, uint8_t letter,
                                     int max_duplicate_letter_draw,
                                     int number_of_tiles_played_or_exchanged) {
-  inference_results_set_stat_for_letter(inference_results, inference_stat_type, letter_stat,
-                      letter);
+  inference_results_set_stat_for_letter(inference_results, inference_stat_type,
+                                        letter_stat, letter);
   string_builder_add_user_visible_letter(ld, inference_string, letter);
   string_builder_add_formatted_string(inference_string, ": %4.2f %4.2f",
                                       stat_get_mean(letter_stat),
@@ -232,8 +230,8 @@ void string_builder_add_inference(const LetterDistribution *ld,
         leave_rack_list_get_rack(leave_rack_list, common_leave_index);
     string_builder_add_leave_rack(
         leave_rack, ld, inference_string, common_leave_index,
-        stat_get_weight(inference_results_get_equity_values(inference_results,
-                                                       common_leaves_type)));
+        stat_get_weight(inference_results_get_equity_values(
+            inference_results, common_leaves_type)));
   }
 }
 
@@ -254,26 +252,24 @@ void print_ucgi_inference_total_racks_evaluated(uint64_t total_racks_evaluated,
   free(total_racks_info_string);
 }
 
-void string_builder_add_ucgi_leave_rack(
-    const LeaveRack *leave_rack, const LetterDistribution *ld,
-    StringBuilder *ucgi_string_builder, int index, uint64_t total_draws,
-    bool is_exchange) {
+void string_builder_add_ucgi_leave_rack(const LeaveRack *leave_rack,
+                                        const LetterDistribution *ld,
+                                        StringBuilder *ucgi_string_builder,
+                                        int index, uint64_t total_draws,
+                                        bool is_exchange) {
   Rack *leave_rack_leave = leave_rack_get_leave(leave_rack);
   Rack *leave_rack_exchanged = leave_rack_get_exchanged(leave_rack);
   int draws = leave_rack_get_draws(leave_rack);
   double equity = leave_rack_get_equity(leave_rack);
   if (!is_exchange) {
-    string_builder_add_rack(leave_rack_leave, ld,
-                            ucgi_string_builder);
+    string_builder_add_rack(leave_rack_leave, ld, ucgi_string_builder);
     string_builder_add_formatted_string(
         ucgi_string_builder, " %-3d %-6.2f %-6d %0.2f\n", index + 1,
         ((double)draws / total_draws) * 100, draws, equity);
   } else {
-    string_builder_add_rack(leave_rack_leave, ld,
-                            ucgi_string_builder);
+    string_builder_add_rack(leave_rack_leave, ld, ucgi_string_builder);
     string_builder_add_spaces(ucgi_string_builder, 1);
-    string_builder_add_rack(leave_rack_exchanged, ld,
-                            ucgi_string_builder);
+    string_builder_add_rack(leave_rack_exchanged, ld, ucgi_string_builder);
     string_builder_add_formatted_string(
         ucgi_string_builder, "%-3d %-6.2f %-6d\n", index + 1,
         ((double)draws / total_draws) * 100, draws);
@@ -285,12 +281,12 @@ void string_builder_ucgi_add_letter_minimum(
     const Rack *rack, const Rack *bag_as_rack,
     StringBuilder *ucgi_string_builder, uint8_t letter, int minimum,
     int number_of_tiles_played_or_exchanged) {
-  int draw_subtotal =
-      inference_results_get_subtotal_sum_with_minimum(inference_results, inference_stat_type,
-                                    letter, minimum, INFERENCE_SUBTOTAL_DRAW);
-  int leave_subtotal =
-      inference_results_get_subtotal_sum_with_minimum(inference_results, inference_stat_type,
-                                    letter, minimum, INFERENCE_SUBTOTAL_LEAVE);
+  int draw_subtotal = inference_results_get_subtotal_sum_with_minimum(
+      inference_results, inference_stat_type, letter, minimum,
+      INFERENCE_SUBTOTAL_DRAW);
+  int leave_subtotal = inference_results_get_subtotal_sum_with_minimum(
+      inference_results, inference_stat_type, letter, minimum,
+      INFERENCE_SUBTOTAL_LEAVE);
   double inference_probability =
       ((double)draw_subtotal) /
       (double)stat_get_weight(inference_results_get_equity_values(
@@ -309,8 +305,8 @@ void string_builder_ucgi_add_letter_line(
     Stat *letter_stat, uint8_t letter, int number_of_tiles_played_or_exchanged,
     const char *inference_record_type) {
 
-  inference_results_set_stat_for_letter(inference_results, inference_stat_type, letter_stat,
-                      letter);
+  inference_results_set_stat_for_letter(inference_results, inference_stat_type,
+                                        letter_stat, letter);
   string_builder_add_formatted_string(ucgi_string_builder, "infertile %s ",
                                       inference_record_type, 0);
   string_builder_add_user_visible_letter(ld, ucgi_string_builder, letter);
@@ -345,8 +341,8 @@ void string_builder_ucgi_add_inference_record(
       "inferleaveavg %s %f\n"
       "inferleavestdev %s %f\n",
       inference_record_type, total_draws, inference_record_type, total_leaves,
-      inference_record_type, stat_get_mean(equity_values), inference_record_type,
-      stat_get_stdev(equity_values));
+      inference_record_type, stat_get_mean(equity_values),
+      inference_record_type, stat_get_stdev(equity_values));
   for (int i = 0; i < (int)ld_get_size(ld); i++) {
     string_builder_ucgi_add_letter_line(
         ld, inference_results, inference_stat_type, rack, bag_as_rack,
@@ -412,6 +408,7 @@ void print_ucgi_inference(const LetterDistribution *ld,
         leave_rack, ld, ucgi_string_builder, common_leave_index,
         stat_get_weight(common_leave_equity_values), is_exchange);
   }
-  thread_control_print(thread_control, string_builder_peek(ucgi_string_builder));
+  thread_control_print(thread_control,
+                       string_builder_peek(ucgi_string_builder));
   destroy_string_builder(ucgi_string_builder);
 }

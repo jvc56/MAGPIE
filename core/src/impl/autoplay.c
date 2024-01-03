@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "../str/autoplay_string.h"
-
 #include "../def/autoplay_defs.h"
 #include "../def/rack_defs.h"
 
@@ -12,9 +10,11 @@
 #include "../ent/game.h"
 #include "../ent/player.h"
 #include "../ent/stats.h"
-#include "../impl/move_gen.h"
 
-#include "../impl/gameplay.h"
+#include "gameplay.h"
+#include "move_gen.h"
+
+#include "../str/autoplay_string.h"
 
 #include "../util/util.h"
 
@@ -171,10 +171,10 @@ autoplay_status_t autoplay(const Config *config,
     pthread_join(worker_ids[thread_index], NULL);
     autoplay_results_add(autoplay_workers[thread_index]->autoplay_results,
                          autoplay_results);
-    p1_score_stats[thread_index] =
-        autoplay_results_get_p1_score(autoplay_workers[thread_index]->autoplay_results);
-    p2_score_stats[thread_index] =
-        autoplay_results_get_p2_score(autoplay_workers[thread_index]->autoplay_results);
+    p1_score_stats[thread_index] = autoplay_results_get_p1_score(
+        autoplay_workers[thread_index]->autoplay_results);
+    p2_score_stats[thread_index] = autoplay_results_get_p2_score(
+        autoplay_workers[thread_index]->autoplay_results);
   }
 
   // If autoplay was interrupted by the user,

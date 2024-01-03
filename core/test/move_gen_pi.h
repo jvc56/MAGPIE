@@ -3,8 +3,6 @@
 
 #include "../src/ent/anchor.h"
 
-#include "../src/impl/move_gen.h"
-
 AnchorList *gen_get_anchor_list(int thread_index);
 
 #endif
