@@ -19,7 +19,7 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
   Rack *player_rack = player_get_rack(player);
 
   game_load_cgp(game, cgp);
-  set_rack_to_string(ld, player_rack, rack);
+  rack_set_to_string(ld, player_rack, rack);
   generate_moves_for_game(game, 0, move_list);
   AnchorList *anchor_list = gen_get_anchor_list(0);
   double previous_equity = 10000000;
@@ -36,7 +36,7 @@ void test_shadow_score() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = create_move_list(1000);
+  MoveList *move_list = move_list_create(1000);
 
   // This test checks scores only, so set the player move sorting
   // to sort by score.
@@ -455,7 +455,7 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 2036));
 
   game_destroy(game);
-  destroy_move_list(move_list);
+  move_list_destroy(move_list);
   config_destroy(config);
 }
 
@@ -464,16 +464,16 @@ void test_shadow_top_move() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = create_move_list(1);
+  MoveList *move_list = move_list_create(1);
 
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
   player_set_move_record_type(player, MOVE_RECORD_BEST);
 
   // Top play should be L1 Q(I)
   load_and_generate(game, move_list, player, UEY_CGP, "ACEQOOV");
-  assert(within_epsilon(get_score(move_list_get_move(move_list, 0)), 21));
+  assert(within_epsilon(move_get_score(move_list_get_move(move_list, 0)), 21));
 
-  destroy_move_list(move_list);
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }

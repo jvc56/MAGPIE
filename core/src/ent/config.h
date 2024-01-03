@@ -21,7 +21,7 @@ Config *config_create_default();
 void config_destroy(Config *config);
 
 command_t config_get_command_type(const Config *config);
-LetterDistribution *config_get_letter_distribution(const Config *config);
+LetterDistribution *config_get_ld(const Config *config);
 char *config_get_ld_name(const Config *config);
 bool config_get_ld_name_changed(const Config *config);
 char *config_get_cgp(const Config *config);

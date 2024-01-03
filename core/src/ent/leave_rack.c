@@ -34,15 +34,15 @@ double leave_rack_get_equity(const LeaveRack *leaveRack) {
   return leaveRack->equity;
 }
 
-int get_leave_rack_list_count(const LeaveRackList *leave_rack_list) {
+int leave_rack_list_get_count(const LeaveRackList *leave_rack_list) {
   return leave_rack_list->count;
 }
 
-int get_leave_rack_list_capacity(const LeaveRackList *leave_rack_list) {
+int leave_rack_list_get_capacity(const LeaveRackList *leave_rack_list) {
   return leave_rack_list->capacity;
 }
 
-const LeaveRack *get_leave_rack(const LeaveRackList *leave_rack_list,
+const LeaveRack *leave_rack_list_get_rack(const LeaveRackList *leave_rack_list,
                                 int index) {
   return leave_rack_list->leave_racks[index];
 }
@@ -51,18 +51,18 @@ LeaveRack *create_leave_rack(int distribution_size) {
   LeaveRack *leave_rack = malloc_or_die(sizeof(LeaveRack));
   leave_rack->draws = 0;
   leave_rack->equity = 0;
-  leave_rack->leave = create_rack(distribution_size);
-  leave_rack->exchanged = create_rack(distribution_size);
+  leave_rack->leave = rack_create(distribution_size);
+  leave_rack->exchanged = rack_create(distribution_size);
   return leave_rack;
 }
 
 void destroy_leave_rack(LeaveRack *leave_rack) {
-  destroy_rack(leave_rack->leave);
-  destroy_rack(leave_rack->exchanged);
+  rack_destroy(leave_rack->leave);
+  rack_destroy(leave_rack->exchanged);
   free(leave_rack);
 }
 
-LeaveRackList *create_leave_rack_list(int capacity, int distribution_size) {
+LeaveRackList *leave_rack_list_create(int capacity, int distribution_size) {
   LeaveRackList *lrl = malloc_or_die(sizeof(LeaveRackList));
   lrl->count = 0;
   lrl->capacity = capacity;
@@ -76,7 +76,7 @@ LeaveRackList *create_leave_rack_list(int capacity, int distribution_size) {
   return lrl;
 }
 
-void destroy_leave_rack_list(LeaveRackList *lrl) {
+void leave_rack_list_destroy(LeaveRackList *lrl) {
   for (int i = 0; i < lrl->capacity + 1; i++) {
     destroy_leave_rack(lrl->leave_racks[i]);
   }
@@ -85,7 +85,7 @@ void destroy_leave_rack_list(LeaveRackList *lrl) {
   free(lrl);
 }
 
-void reset_leave_rack_list(LeaveRackList *lrl) { lrl->count = 0; }
+void leave_rack_list_reset(LeaveRackList *lrl) { lrl->count = 0; }
 
 void up_heapify_leave_rack(LeaveRackList *lrl, int index) {
   LeaveRack *temp;
@@ -126,22 +126,22 @@ void down_heapify_leave_rack(LeaveRackList *lrl, int parent_node) {
   }
 }
 
-void insert_leave_rack(const Rack *leave, const Rack *exchanged,
+void leave_rack_list_insert_rack(const Rack *leave, const Rack *exchanged,
                        LeaveRackList *lrl, int number_of_draws_for_leave,
                        double equity) {
-  reset_rack(lrl->spare_leave_rack->leave);
-  for (int i = 0; i < get_array_size(leave); i++) {
-    for (int j = 0; j < get_number_of_letter(leave, i); j++) {
-      add_letter_to_rack(lrl->spare_leave_rack->leave, i);
+  rack_reset(lrl->spare_leave_rack->leave);
+  for (int i = 0; i < rack_get_dist_size(leave); i++) {
+    for (int j = 0; j < rack_get_letter(leave, i); j++) {
+      rack_add_letter(lrl->spare_leave_rack->leave, i);
     }
   }
   lrl->spare_leave_rack->draws = number_of_draws_for_leave;
   lrl->spare_leave_rack->equity = equity;
   if (exchanged && !rack_is_empty(exchanged)) {
-    reset_rack(lrl->spare_leave_rack->exchanged);
-    for (int i = 0; i < get_array_size(exchanged); i++) {
-      for (int j = 0; j < get_number_of_letter(exchanged, i); j++) {
-        add_letter_to_rack(lrl->spare_leave_rack->exchanged, i);
+    rack_reset(lrl->spare_leave_rack->exchanged);
+    for (int i = 0; i < rack_get_dist_size(exchanged); i++) {
+      for (int j = 0; j < rack_get_letter(exchanged, i); j++) {
+        rack_add_letter(lrl->spare_leave_rack->exchanged, i);
       }
     }
   }
@@ -154,11 +154,11 @@ void insert_leave_rack(const Rack *leave, const Rack *exchanged,
   lrl->count++;
 
   if (lrl->count > lrl->capacity) {
-    pop_leave_rack(lrl);
+    leave_rack_list_pop_rack(lrl);
   }
 }
 
-LeaveRack *pop_leave_rack(LeaveRackList *lrl) {
+LeaveRack *leave_rack_list_pop_rack(LeaveRackList *lrl) {
   if (lrl->count == 1) {
     lrl->count--;
     return lrl->leave_racks[0];
@@ -175,10 +175,10 @@ LeaveRack *pop_leave_rack(LeaveRackList *lrl) {
 
 // Converts the LeaveRackList from a min heap
 // to a descending sorted array.
-void sort_leave_racks(LeaveRackList *lrl) {
+void leave_rack_list_sort(LeaveRackList *lrl) {
   int number_of_leave_racks = lrl->count;
   for (int i = 1; i < number_of_leave_racks; i++) {
-    LeaveRack *leave_rack = pop_leave_rack(lrl);
+    LeaveRack *leave_rack = leave_rack_list_pop_rack(lrl);
     // Use a swap var to preserve the spare leave pointer
     LeaveRack *swap = lrl->leave_racks[lrl->count];
     lrl->leave_racks[lrl->count] = leave_rack;

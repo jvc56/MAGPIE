@@ -15,27 +15,7 @@ struct Rack {
   int number_of_letters;
 };
 
-int score_on_rack(const LetterDistribution *letter_distribution,
-                  const Rack *rack) {
-  int sum = 0;
-  for (int i = 0; i < get_array_size(rack); i++) {
-    sum += get_number_of_letter(rack, i) *
-           letter_distribution_get_score(letter_distribution, i);
-  }
-  return sum;
-}
-
-int get_array_size(const Rack *rack) { return rack->array_size; }
-
-int get_number_of_letter(const Rack *rack, uint8_t machine_letter) {
-  return rack->array[machine_letter];
-}
-
-int get_number_of_letters(const Rack *rack) { return rack->number_of_letters; }
-
-bool rack_is_empty(const Rack *rack) { return rack->empty; }
-
-void reset_rack(Rack *rack) {
+void rack_reset(Rack *rack) {
   for (int i = 0; i < (rack->array_size); i++) {
     rack->array[i] = 0;
   }
@@ -43,19 +23,16 @@ void reset_rack(Rack *rack) {
   rack->number_of_letters = 0;
 }
 
-Rack *create_rack(int array_size) {
+Rack *rack_create(int array_size) {
   Rack *rack = malloc_or_die(sizeof(Rack));
   rack->array_size = array_size;
   rack->array = (int *)malloc_or_die(rack->array_size * sizeof(int));
-  reset_rack(rack);
+  rack_reset(rack);
   return rack;
 }
 
 Rack *rack_duplicate(const Rack *rack) {
-  Rack *new_rack = malloc_or_die(sizeof(Rack));
-  new_rack->array = (int *)malloc_or_die(rack->array_size * sizeof(int));
-  new_rack->array_size = rack->array_size;
-  reset_rack(new_rack);
+  Rack *new_rack = rack_create(rack->array_size);
   rack_copy(new_rack, rack);
   return new_rack;
 }
@@ -68,12 +45,30 @@ void rack_copy(Rack *dst, const Rack *src) {
   dst->empty = src->empty;
 }
 
-void destroy_rack(Rack *rack) {
+void rack_destroy(Rack *rack) {
   free(rack->array);
   free(rack);
 }
 
-void take_letter_from_rack(Rack *rack, uint8_t letter) {
+int rack_get_dist_size(const Rack *rack) { return rack->array_size; }
+
+int rack_get_letter(const Rack *rack, uint8_t machine_letter) {
+  return rack->array[machine_letter];
+}
+
+int rack_get_total_letters(const Rack *rack) { return rack->number_of_letters; }
+
+bool rack_is_empty(const Rack *rack) { return rack->empty; }
+
+int rack_get_score(const LetterDistribution *ld, const Rack *rack) {
+  int sum = 0;
+  for (int i = 0; i < rack_get_dist_size(rack); i++) {
+    sum += rack_get_letter(rack, i) * ld_get_score(ld, i);
+  }
+  return sum;
+}
+
+void rack_take_letter(Rack *rack, uint8_t letter) {
   rack->array[letter]--;
   rack->number_of_letters--;
   if (rack->number_of_letters == 0) {
@@ -81,7 +76,7 @@ void take_letter_from_rack(Rack *rack, uint8_t letter) {
   }
 }
 
-void add_letter_to_rack(Rack *rack, uint8_t letter) {
+void rack_add_letter(Rack *rack, uint8_t letter) {
   rack->array[letter]++;
   rack->number_of_letters++;
   if (rack->empty == 1) {
@@ -89,15 +84,14 @@ void add_letter_to_rack(Rack *rack, uint8_t letter) {
   }
 }
 
-int set_rack_to_string(const LetterDistribution *letter_distribution,
-                       Rack *rack, const char *rack_string) {
-  reset_rack(rack);
+int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
+                       const char *rack_string) {
+  rack_reset(rack);
 
   uint8_t mls[MAX_RACK_SIZE];
-  int num_mls = str_to_machine_letters(letter_distribution, rack_string, false,
-                                       mls, MAX_RACK_SIZE);
+  int num_mls = ld_str_to_mls(ld, rack_string, false, mls, MAX_RACK_SIZE);
   for (int i = 0; i < num_mls; i++) {
-    add_letter_to_rack(rack, mls[i]);
+    rack_add_letter(rack, mls[i]);
   }
   return num_mls;
 }

@@ -27,46 +27,52 @@ struct LetterDistribution {
   bool *is_vowel;
   int total_tiles;
   int max_tile_length;
-  char ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
+  char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 };
 
-int letter_distribution_get_size(const LetterDistribution *ld) {
-  return ld->size;
+LetterDistribution *ld_create(const char *ld_name) {
+  LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
+  load_ld(ld, ld_name);
+  return ld;
 }
 
-int letter_distribution_get_distribution(const LetterDistribution *ld,
-                                         uint8_t machine_letter) {
+void ld_destroy(LetterDistribution *ld) {
+  free(ld->distribution);
+  free(ld->scores);
+  free(ld->is_vowel);
+  free(ld->score_order);
+  free(ld);
+}
+
+int ld_get_size(const LetterDistribution *ld) { return ld->size; }
+
+int ld_get_dist(const LetterDistribution *ld, uint8_t machine_letter) {
   return ld->distribution[machine_letter];
 }
 
-int letter_distribution_get_score(const LetterDistribution *ld,
-                                  uint8_t machine_letter) {
+int ld_get_score(const LetterDistribution *ld, uint8_t machine_letter) {
   return ld->scores[machine_letter];
 }
 
-int letter_distribution_get_score_order(const LetterDistribution *ld,
-                                        uint8_t machine_letter) {
+int ld_get_score_order(const LetterDistribution *ld, uint8_t machine_letter) {
   return ld->score_order[machine_letter];
 }
 
-bool letter_distribution_get_is_vowel(const LetterDistribution *ld,
-                                      uint8_t machine_letter) {
+bool ld_get_is_vowel(const LetterDistribution *ld, uint8_t machine_letter) {
   return ld->is_vowel[machine_letter];
 }
 
-int letter_distribution_get_total_tiles(const LetterDistribution *ld) {
-  return ld->total_tiles;
-}
+int ld_get_total_tiles(const LetterDistribution *ld) { return ld->total_tiles; }
 
-int letter_distribution_get_max_tile_length(const LetterDistribution *ld) {
+int ld_get_max_tile_length(const LetterDistribution *ld) {
   return ld->max_tile_length;
 }
 
 extern inline uint8_t get_blanked_machine_letter(uint8_t ml);
 extern inline uint8_t get_unblanked_machine_letter(uint8_t ml);
-extern inline bool is_blanked(uint8_t ml);
+extern inline bool get_is_blanked(uint8_t ml);
 
-char *get_letter_distribution_filepath(const char *ld_name) {
+char *get_ld_filepath(const char *ld_name) {
   // Check for invalid inputs
   if (!ld_name) {
     log_fatal("letter distribution name is null");
@@ -76,10 +82,10 @@ char *get_letter_distribution_filepath(const char *ld_name) {
 }
 
 // Sort the machine letters in descending score order
-void sort_score_order(LetterDistribution *letter_distribution) {
-  int *score_order = letter_distribution->score_order;
-  int *scores = letter_distribution->scores;
-  int size = letter_distribution->size;
+void sort_score_order(LetterDistribution *ld) {
+  int *score_order = ld->score_order;
+  int *scores = ld->scores;
+  int size = ld->size;
 
   for (int i = 1; i < size; ++i) {
     int key = score_order[i];
@@ -94,41 +100,33 @@ void sort_score_order(LetterDistribution *letter_distribution) {
   }
 }
 
-void load_letter_distribution(LetterDistribution *letter_distribution,
-                              const char *ld_name) {
+void load_ld(LetterDistribution *ld, const char *ld_name) {
   // This function call opens and closes the file, so
   // call it before the fopen to prevent a nested file read
-  char *letter_distribution_filename =
-      get_letter_distribution_filepath(ld_name);
+  char *ld_filename = get_ld_filepath(ld_name);
 
-  StringSplitter *letter_distribution_lines =
-      split_file_by_newline(letter_distribution_filename);
+  StringSplitter *ld_lines = split_file_by_newline(ld_filename);
 
-  free(letter_distribution_filename);
+  free(ld_filename);
 
-  int number_of_lines =
-      string_splitter_get_number_of_items(letter_distribution_lines);
+  int number_of_lines = string_splitter_get_number_of_items(ld_lines);
 
-  letter_distribution->size = number_of_lines;
+  ld->size = number_of_lines;
 
-  letter_distribution->distribution =
-      (int *)malloc_or_die(letter_distribution->size * sizeof(int));
-  letter_distribution->scores =
-      (int *)malloc_or_die(letter_distribution->size * sizeof(int));
-  letter_distribution->score_order =
-      (int *)malloc_or_die(letter_distribution->size * sizeof(int));
-  letter_distribution->is_vowel =
-      (bool *)malloc_or_die(letter_distribution->size * sizeof(bool));
+  ld->distribution = (int *)malloc_or_die(ld->size * sizeof(int));
+  ld->scores = (int *)malloc_or_die(ld->size * sizeof(int));
+  ld->score_order = (int *)malloc_or_die(ld->size * sizeof(int));
+  ld->is_vowel = (bool *)malloc_or_die(ld->size * sizeof(bool));
 
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
-    letter_distribution->ml_to_hl[i][0] = '\0';
+    ld->ld_ml_to_hl[i][0] = '\0';
   }
 
   int machine_letter = 0;
   int max_tile_length = 0;
-  letter_distribution->total_tiles = 0;
+  ld->total_tiles = 0;
   for (int i = 0; i < number_of_lines; i++) {
-    const char *line = string_splitter_get_item(letter_distribution_lines, i);
+    const char *line = string_splitter_get_item(ld_lines, i);
     StringSplitter *single_letter_info = split_string(line, ',', true);
     if (string_splitter_get_number_of_items(single_letter_info) != 5) {
       log_fatal("invalid letter distribution line in %s:\n>%s<\n", ld_name,
@@ -139,7 +137,7 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
     const char *lower_case_letter =
         string_splitter_get_item(single_letter_info, 1);
     int dist = string_to_int(string_splitter_get_item(single_letter_info, 2));
-    letter_distribution->total_tiles += dist;
+    ld->total_tiles += dist;
     int score = string_to_int(string_splitter_get_item(single_letter_info, 3));
     int is_vowel =
         string_to_int(string_splitter_get_item(single_letter_info, 4));
@@ -149,39 +147,38 @@ void load_letter_distribution(LetterDistribution *letter_distribution,
       max_tile_length = tile_length;
     }
 
-    letter_distribution->distribution[machine_letter] = dist;
-    letter_distribution->score_order[i] = machine_letter;
-    letter_distribution->scores[machine_letter] = score;
-    letter_distribution->is_vowel[machine_letter] = is_vowel == 1;
+    ld->distribution[machine_letter] = dist;
+    ld->score_order[i] = machine_letter;
+    ld->scores[machine_letter] = score;
+    ld->is_vowel[machine_letter] = is_vowel == 1;
 
-    string_copy(letter_distribution->ml_to_hl[machine_letter], letter);
+    string_copy(ld->ld_ml_to_hl[machine_letter], letter);
 
     if (machine_letter > 0) {
       uint8_t blanked_machine_letter =
           get_blanked_machine_letter(machine_letter);
-      string_copy(letter_distribution->ml_to_hl[blanked_machine_letter],
-                  lower_case_letter);
+      string_copy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter);
     }
     destroy_string_splitter(single_letter_info);
     machine_letter++;
   }
-  destroy_string_splitter(letter_distribution_lines);
+  destroy_string_splitter(ld_lines);
 
-  sort_score_order(letter_distribution);
+  sort_score_order(ld);
 
-  letter_distribution->max_tile_length = max_tile_length;
+  ld->max_tile_length = max_tile_length;
 }
 
-char *ml_to_hl(const LetterDistribution *ld, uint8_t ml) {
-  return string_duplicate(ld->ml_to_hl[ml]);
+char *ld_ml_to_hl(const LetterDistribution *ld, uint8_t ml) {
+  return string_duplicate(ld->ld_ml_to_hl[ml]);
 }
 
 // This is a linear search. This function should not be used for anything
 // that is speed-critical. If we ever need to use this in anything
 // speed-critical, we should use a hash.
-uint8_t hl_to_ml(const LetterDistribution *letter_distribution, char *letter) {
+uint8_t ld_hl_to_ml(const LetterDistribution *ld, char *letter) {
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
-    if (strings_equal(letter_distribution->ml_to_hl[i], letter)) {
+    if (strings_equal(ld->ld_ml_to_hl[i], letter)) {
       return i;
     }
   }
@@ -218,9 +215,9 @@ int get_number_of_utf8_bytes_for_code_point(uint8_t byte) {
 // the ml array; it is the caller's responsibility to make this array big
 // enough. This function will return -1 if it encounters an invalid letter.
 // Note: This is a slow function that should not be used in any hot loops.
-int str_to_machine_letters(const LetterDistribution *letter_distribution,
-                           const char *str, bool allow_played_through_marker,
-                           uint8_t *mls, size_t mls_size) {
+int ld_str_to_mls(const LetterDistribution *ld, const char *str,
+                  bool allow_played_through_marker, uint8_t *mls,
+                  size_t mls_size) {
 
   int num_mls = 0;
   size_t num_bytes = string_length(str);
@@ -312,7 +309,7 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
       if (num_mls >= (int)mls_size) {
         return -1;
       }
-      uint8_t ml = hl_to_ml(letter_distribution, current_letter);
+      uint8_t ml = ld_hl_to_ml(ld, current_letter);
       if (ml == INVALID_LETTER) {
         if (current_letter_byte_index == 1 && allow_played_through_marker &&
             current_char == ASCII_PLAYED_THROUGH) {
@@ -334,22 +331,7 @@ int str_to_machine_letters(const LetterDistribution *letter_distribution,
   return num_mls;
 }
 
-LetterDistribution *create_letter_distribution(const char *ld_name) {
-  LetterDistribution *letter_distribution =
-      malloc_or_die(sizeof(LetterDistribution));
-  load_letter_distribution(letter_distribution, ld_name);
-  return letter_distribution;
-}
-
-void destroy_letter_distribution(LetterDistribution *letter_distribution) {
-  free(letter_distribution->distribution);
-  free(letter_distribution->scores);
-  free(letter_distribution->is_vowel);
-  free(letter_distribution->score_order);
-  free(letter_distribution);
-}
-
-char *get_default_letter_distribution_name(const char *lexicon_name) {
+char *ld_get_default_name(const char *lexicon_name) {
   char *ld_name = NULL;
   if (has_prefix("CSW", lexicon_name) || has_prefix("NWL", lexicon_name) ||
       has_prefix("TWL", lexicon_name) || has_prefix("America", lexicon_name)) {
@@ -370,3 +352,9 @@ char *get_default_letter_distribution_name(const char *lexicon_name) {
   }
   return ld_name;
 }
+
+uint8_t get_blanked_machine_letter(uint8_t ml) { return ml | BLANK_MASK; }
+
+uint8_t get_unblanked_machine_letter(uint8_t ml) { return ml & UNBLANK_MASK; }
+
+bool get_is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }

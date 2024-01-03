@@ -92,7 +92,7 @@ struct Config {
 
   command_t command_type;
   // Game
-  LetterDistribution *letter_distribution;
+  LetterDistribution *ld;
   char *ld_name;
   bool ld_name_changed;
   char *cgp;
@@ -236,8 +236,8 @@ command_t config_get_command_type(const Config *config) {
   return config->command_type;
 }
 
-LetterDistribution *config_get_letter_distribution(const Config *config) {
-  return config->letter_distribution;
+LetterDistribution *config_get_ld(const Config *config) {
+  return config->ld;
 }
 
 char *config_get_ld_name(const Config *config) { return config->ld_name; }
@@ -576,9 +576,9 @@ config_load_status_t load_win_pct_for_config(Config *config,
     return CONFIG_LOAD_STATUS_SUCCESS;
   }
 
-  WinPct *new_win_pcts = create_win_pct(win_pct_name);
+  WinPct *new_win_pcts = win_pct_create(win_pct_name);
   if (config->win_pcts) {
-    destroy_win_pct(config->win_pcts);
+    win_pct_destroy(config->win_pcts);
   }
   config->win_pcts = new_win_pcts;
 
@@ -708,7 +708,7 @@ load_number_of_threads_for_config(Config *config,
   if (number_of_threads > MAX_THREADS) {
     return CONFIG_LOAD_STATUS_EXCEEDED_MAX_NUMBER_OF_THREADS;
   }
-  set_number_of_threads(config->thread_control, number_of_threads);
+  thread_control_set_threads(config->thread_control, number_of_threads);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -729,14 +729,14 @@ load_check_stop_interval_for_config(Config *config,
   if (!is_all_digits_or_empty(check_stop_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL;
   }
-  set_check_stopping_condition_interval(config->thread_control,
+  thread_control_set_check_stop_interval(config->thread_control,
                                         string_to_int(check_stop_interval));
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
 config_load_status_t load_io_for_config(Config *config, const char *infile_name,
                                         const char *outfile_name) {
-  set_io(config->thread_control, infile_name, outfile_name);
+  thread_control_set_io(config->thread_control, infile_name, outfile_name);
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -794,7 +794,7 @@ config_load_status_t load_player_name_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-bool letter_distributions_are_compatible(const char *ld_name_1,
+bool lds_are_compatible(const char *ld_name_1,
                                          const char *ld_name_2) {
   return strings_equal(ld_name_1, ld_name_2) ||
          // English and French use the same letters so they are
@@ -807,20 +807,20 @@ bool letter_distributions_are_compatible(const char *ld_name_1,
 
 bool lexicons_are_compatible(const char *p1_lexicon_name,
                              const char *p2_lexicon_name) {
-  char *p1_ld = get_default_letter_distribution_name(p1_lexicon_name);
-  char *p2_ld = get_default_letter_distribution_name(p2_lexicon_name);
-  bool compatible = letter_distributions_are_compatible(p1_ld, p2_ld);
+  char *p1_ld = ld_get_default_name(p1_lexicon_name);
+  char *p2_ld = ld_get_default_name(p2_lexicon_name);
+  bool compatible = lds_are_compatible(p1_ld, p2_ld);
   free(p1_ld);
   free(p2_ld);
   return compatible;
 }
 
-bool letter_distribution_is_compatible_with_lexicon(const char *lexicon_name,
+bool ld_is_compatible_with_lexicon(const char *lexicon_name,
                                                     const char *ld_name) {
   char *ld_from_lexicon_name =
-      get_default_letter_distribution_name(lexicon_name);
+      ld_get_default_name(lexicon_name);
   bool compatible =
-      letter_distributions_are_compatible(ld_from_lexicon_name, ld_name);
+      lds_are_compatible(ld_from_lexicon_name, ld_name);
   free(ld_from_lexicon_name);
   return compatible;
 }
@@ -846,7 +846,7 @@ config_load_status_t load_players_data_for_config(
   if (!lexicons_are_compatible(current_lexicon_name, p2_final_data_name)) {
     config_load_status = CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
   } else {
-    set_players_data(config->players_data, players_data_type,
+    players_data_set(config->players_data, players_data_type,
                      current_lexicon_name, p2_final_data_name);
   }
   return config_load_status;
@@ -858,17 +858,17 @@ char *get_default_klv_name(const char *lexicon_name) {
 
 bool is_lexicon_required(const Config *config, const char *new_p1_leaves_name,
                          const char *new_p2_leaves_name,
-                         const char *new_letter_distribution_name,
+                         const char *new_ld_name,
                          const char *new_rack) {
   return config->command_type != COMMAND_TYPE_SET_OPTIONS || config->cgp ||
          config->command_set_cgp || new_p1_leaves_name || new_p2_leaves_name ||
-         new_letter_distribution_name || new_rack;
+         new_ld_name || new_rack;
 }
 
 config_load_status_t load_lexicon_dependent_data_for_config(
     Config *config, const char *new_p1_lexicon_name,
     const char *new_p2_lexicon_name, const char *new_p1_leaves_name,
-    const char *new_p2_leaves_name, const char *new_letter_distribution_name,
+    const char *new_p2_leaves_name, const char *new_ld_name,
     const char *new_rack) {
 
   // Load lexicons first
@@ -900,7 +900,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     // are null, it is guaranteed that there are no leaves, ld, or
     // rack since they are all set after this if check.
     if (is_lexicon_required(config, new_p1_leaves_name, new_p2_leaves_name,
-                            new_letter_distribution_name, new_rack)) {
+                            new_ld_name, new_rack)) {
       return CONFIG_LOAD_STATUS_LEXICON_MISSING;
     } else {
       return CONFIG_LOAD_STATUS_SUCCESS;
@@ -912,7 +912,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
   }
 
-  set_players_data(config->players_data, PLAYERS_DATA_TYPE_KWG,
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
                    updated_p1_lexicon_name, updated_p2_lexicon_name);
 
   // Load the leaves
@@ -942,7 +942,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
   }
 
-  set_players_data(config->players_data, PLAYERS_DATA_TYPE_KLV,
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
                    updated_p1_leaves_name, updated_p2_leaves_name);
 
   free(updated_p1_leaves_name);
@@ -950,31 +950,31 @@ config_load_status_t load_lexicon_dependent_data_for_config(
 
   // Load letter distribution
 
-  char *updated_letter_distribution_name;
-  if (!is_string_empty_or_null(new_letter_distribution_name)) {
+  char *updated_ld_name;
+  if (!is_string_empty_or_null(new_ld_name)) {
     // if the user specified letter distribution
     // isn't compatible, return an error
-    if (!letter_distribution_is_compatible_with_lexicon(
-            updated_p1_lexicon_name, new_letter_distribution_name)) {
+    if (!ld_is_compatible_with_lexicon(
+            updated_p1_lexicon_name, new_ld_name)) {
       return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
     }
-    updated_letter_distribution_name =
-        string_duplicate(new_letter_distribution_name);
+    updated_ld_name =
+        string_duplicate(new_ld_name);
   } else if (is_string_empty_or_null(config->ld_name)) {
     // No letter distribution was specified and the current
     // letter distribution is null, so load the default letter
     // distribution based on player one's lexicon
-    updated_letter_distribution_name =
-        get_default_letter_distribution_name(updated_p1_lexicon_name);
+    updated_ld_name =
+        ld_get_default_name(updated_p1_lexicon_name);
   } else {
     // If the existing letter distribution isn't compatible,
     // just assume we want to use the default.
-    if (!letter_distribution_is_compatible_with_lexicon(updated_p1_lexicon_name,
+    if (!ld_is_compatible_with_lexicon(updated_p1_lexicon_name,
                                                         config->ld_name)) {
-      updated_letter_distribution_name =
-          get_default_letter_distribution_name(updated_p1_lexicon_name);
+      updated_ld_name =
+          ld_get_default_name(updated_p1_lexicon_name);
     } else {
-      updated_letter_distribution_name = string_duplicate(config->ld_name);
+      updated_ld_name = string_duplicate(config->ld_name);
     }
   }
 
@@ -983,38 +983,38 @@ config_load_status_t load_lexicon_dependent_data_for_config(
   // check the letter distribution with 1 lexicon
 
   // If the letter distribution name has changed, update it
-  if (!strings_equal(config->ld_name, updated_letter_distribution_name)) {
-    LetterDistribution *updated_letter_distribution =
-        create_letter_distribution(updated_letter_distribution_name);
-    if (config->letter_distribution) {
-      destroy_letter_distribution(config->letter_distribution);
+  if (!strings_equal(config->ld_name, updated_ld_name)) {
+    LetterDistribution *updated_ld =
+        ld_create(updated_ld_name);
+    if (config->ld) {
+      ld_destroy(config->ld);
     }
-    config->letter_distribution = updated_letter_distribution;
+    config->ld = updated_ld;
 
     free(config->ld_name);
-    config->ld_name = updated_letter_distribution_name;
+    config->ld_name = updated_ld_name;
     config->ld_name_changed = true;
   } else {
-    free(updated_letter_distribution_name);
+    free(updated_ld_name);
     config->ld_name_changed = false;
   }
 
   if (config->rack) {
-    destroy_rack(config->rack);
+    rack_destroy(config->rack);
   }
 
   config->rack =
-      create_rack(letter_distribution_get_size(config->letter_distribution));
+      rack_create(ld_get_size(config->ld));
 
   if (new_rack) {
     if (!strings_equal(EMPTY_RACK_STRING, new_rack)) {
-      int number_of_letters_set = set_rack_to_string(
-          config->letter_distribution, config->rack, new_rack);
+      int number_of_letters_set = rack_set_to_string(
+          config->ld, config->rack, new_rack);
       if (number_of_letters_set < 0) {
         return CONFIG_LOAD_STATUS_MALFORMED_RACK;
       }
     } else {
-      reset_rack(config->rack);
+      rack_reset(config->rack);
     }
   }
 
@@ -1033,7 +1033,7 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
   const char *new_p1_leaves_name = NULL;
   const char *new_p2_lexicon_name = NULL;
   const char *new_p2_leaves_name = NULL;
-  const char *new_letter_distribution_name = NULL;
+  const char *new_ld_name = NULL;
   const char *new_win_pct_name = NULL;
   const char *new_rack = NULL;
   const char *outfile = NULL;
@@ -1068,7 +1068,7 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
       config_load_status = load_game_variant_for_config(config, arg_values[0]);
       break;
     case ARG_TOKEN_LETTER_DISTRIBUTION:
-      new_letter_distribution_name = arg_values[0];
+      new_ld_name = arg_values[0];
       break;
     case ARG_TOKEN_LEXICON:
       new_p1_lexicon_name = arg_values[0];
@@ -1202,7 +1202,7 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
 
   config_load_status = load_lexicon_dependent_data_for_config(
       config, new_p1_lexicon_name, new_p2_lexicon_name, new_p1_leaves_name,
-      new_p2_leaves_name, new_letter_distribution_name, new_rack);
+      new_p2_leaves_name, new_ld_name, new_rack);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
@@ -1255,14 +1255,14 @@ Config *config_create_default() {
   config->command_set_infile = false;
   config->command_set_exec_mode = false;
   config->command_type = COMMAND_TYPE_SET_OPTIONS;
-  config->letter_distribution = NULL;
+  config->ld = NULL;
   config->ld_name = NULL;
   config->ld_name_changed = false;
   config->cgp = NULL;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->board_layout = DEFAULT_BOARD_LAYOUT;
   config->game_variant = DEFAULT_GAME_VARIANT;
-  config->players_data = create_players_data();
+  config->players_data = players_data_create();
   config->rack = NULL;
   config->target_index = 0;
   config->target_score = 0;
@@ -1279,25 +1279,25 @@ Config *config_create_default() {
   // The seed is set to a random value by default for each
   // load in reset_transient_fields.
   config->seed = 0;
-  config->thread_control = create_thread_control();
+  config->thread_control = thread_control_create();
   config->exec_mode = EXEC_MODE_CONSOLE;
   return config;
 }
 
 void config_destroy(Config *config) {
-  if (config->letter_distribution) {
-    destroy_letter_distribution(config->letter_distribution);
+  if (config->ld) {
+    ld_destroy(config->ld);
   }
   if (config->rack) {
-    destroy_rack(config->rack);
+    rack_destroy(config->rack);
   }
   if (config->win_pcts) {
-    destroy_win_pct(config->win_pcts);
+    win_pct_destroy(config->win_pcts);
   }
   free(config->ld_name);
   free(config->cgp);
   free(config->win_pct_name);
-  destroy_players_data(config->players_data);
-  destroy_thread_control(config->thread_control);
+  players_data_destroy(config->players_data);
+  thread_control_destroy(config->thread_control);
   free(config);
 }

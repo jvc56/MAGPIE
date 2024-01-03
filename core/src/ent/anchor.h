@@ -15,7 +15,6 @@ double anchor_get_highest_possible_equity(const AnchorList *al, int index);
 int anchor_get_last_anchor_col(const AnchorList *al, int index);
 int anchor_get_row(const AnchorList *al, int index);
 bool anchor_get_transposed(const AnchorList *al, int index);
-
 int anchor_list_get_count(const AnchorList *al);
 
 void anchor_list_add_anchor(AnchorList *al, int row, int col,

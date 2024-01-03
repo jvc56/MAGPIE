@@ -23,8 +23,8 @@ void test_words_played() {
   // Play PeNT vertically at N11 (col 14, row 11)
   uint8_t PeNT[] = {16, 5 | 0x80, 14, 20};
   // use 0-based indexing.
-  FormedWords *fw = words_played(board, PeNT, 0, 3, 10, 13, 1);
-  populate_word_validities(kwg, fw);
+  FormedWords *fw = formed_words_create(board, PeNT, 0, 3, 10, 13, 1);
+  formed_words_populate_validities(kwg, fw);
   assert(formed_words_get_num_words(fw) == 4);
   // Should generate 4 words: PIP, ONE, HEN, and the main word PENT
   assert(formed_words_get_word_length(fw, 0) == 3);
@@ -43,12 +43,12 @@ void test_words_played() {
   assert(formed_words_get_word_valid(fw, 3) == 1);
   assert(memory_compare(formed_words_get_word(fw, 3),
                         (uint8_t[]){16, 5, 14, 20}, 4) == 0);
-  free(fw);
+  formed_words_destroy(fw);
 
   // Play some random phoney making a lot of words 6G DI(PET)AZ
   uint8_t DIPETAZ[] = {4, 9, 0, 0, 0, 1, 26};
-  fw = words_played(board, DIPETAZ, 0, 6, 5, 6, 0);
-  populate_word_validities(kwg, fw);
+  fw = formed_words_create(board, DIPETAZ, 0, 6, 5, 6, 0);
+  formed_words_populate_validities(kwg, fw);
 
   assert(formed_words_get_num_words(fw) == 5);
   // should generate 5 "words":
@@ -74,12 +74,12 @@ void test_words_played() {
   assert(memory_compare(formed_words_get_word(fw, 4),
                         (uint8_t[]){4, 9, 16, 5, 20, 1, 26}, 7) == 0);
 
-  free(fw);
+  formed_words_destroy(fw);
 
   // play a single tile that makes two words. 9F (BOY)S
   uint8_t BOYS[] = {0, 0, 0, 19};
-  fw = words_played(board, BOYS, 0, 3, 8, 5, 0);
-  populate_word_validities(kwg, fw);
+  fw = formed_words_create(board, BOYS, 0, 3, 8, 5, 0);
+  formed_words_populate_validities(kwg, fw);
 
   assert(formed_words_get_num_words(fw) == 2);
   // generates SPAYS and BOYS
@@ -92,12 +92,12 @@ void test_words_played() {
   assert(memory_compare(formed_words_get_word(fw, 1),
                         (uint8_t[]){2, 15, 25, 19}, 4) == 0);
 
-  free(fw);
+  formed_words_destroy(fw);
 
   // same as above but dir - I5 SPAY(S)
   uint8_t SPAYS[] = {0, 0, 0, 0, 19};
-  fw = words_played(board, SPAYS, 0, 4, 4, 8, 1);
-  populate_word_validities(kwg, fw);
+  fw = formed_words_create(board, SPAYS, 0, 4, 4, 8, 1);
+  formed_words_populate_validities(kwg, fw);
 
   // generates BOYS and SPAYS
   assert(formed_words_get_word_length(fw, 0) == 4);
@@ -109,7 +109,7 @@ void test_words_played() {
   assert(memory_compare(formed_words_get_word(fw, 1),
                         (uint8_t[]){19, 16, 1, 25, 19}, 5) == 0);
 
-  free(fw);
+  formed_words_destroy(fw);
   game_destroy(game);
   config_destroy(config);
 }

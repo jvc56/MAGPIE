@@ -18,18 +18,18 @@ struct WinPct {
   unsigned int max_tiles_unseen;
 };
 
-float win_pct(const WinPct *wp, int spread_plus_leftover,
-              unsigned int tiles_unseen) {
+float win_pct_get(const WinPct *wp, int spread_plus_leftover,
+              unsigned int game_get_unseen_tiles) {
   if (spread_plus_leftover > wp->max_spread) {
     spread_plus_leftover = wp->max_spread;
   }
   if (spread_plus_leftover < wp->min_spread) {
     spread_plus_leftover = wp->min_spread;
   }
-  if (tiles_unseen > wp->max_tiles_unseen) {
-    tiles_unseen = wp->max_tiles_unseen;
+  if (game_get_unseen_tiles > wp->max_tiles_unseen) {
+    game_get_unseen_tiles = wp->max_tiles_unseen;
   }
-  return wp->win_pcts[wp->max_spread - spread_plus_leftover][tiles_unseen];
+  return wp->win_pcts[wp->max_spread - spread_plus_leftover][game_get_unseen_tiles];
 };
 
 char *get_win_pct_filepath(const char *win_pct_name) {
@@ -101,14 +101,14 @@ void parse_win_pct_csv(WinPct *wp, const char *win_pct_name) {
   wp->max_tiles_unseen = number_of_columns - 2;
 }
 
-WinPct *create_win_pct(const char *win_pct_name) {
+WinPct *win_pct_create(const char *win_pct_name) {
   WinPct *wp = malloc_or_die(sizeof(WinPct));
   parse_win_pct_csv(wp, win_pct_name);
   return wp;
 }
 
 // Function to free the memory allocated for the 2D array
-void destroy_win_pct(WinPct *wp) {
+void win_pct_destroy(WinPct *wp) {
   if (!wp) {
     return;
   }

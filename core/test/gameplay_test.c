@@ -13,12 +13,12 @@
 #include "test_util.h"
 
 void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
-  for (int i = 0; i < (get_array_size(rack)); i++) {
-    for (int j = 0; j < get_number_of_letter(rack, i); j++) {
+  for (int i = 0; i < (rack_get_dist_size(rack)); i++) {
+    for (int j = 0; j < rack_get_letter(rack, i); j++) {
       bag_add_letter(bag, i, player_draw_index);
     }
   }
-  reset_rack(rack);
+  rack_reset(rack);
 }
 
 void return_racks_to_bag(Game *game) {
@@ -70,7 +70,7 @@ void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
 
   assert_boards_are_equal(board1, board2);
   assert_bags_are_equal(bag1, bag2,
-                        letter_distribution_get_size(game_get_ld(g1)));
+                        ld_get_size(game_get_ld(g1)));
 }
 
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
@@ -125,8 +125,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     play_top_n_equity_move(actual_game, 0);
 
     if (i == array_length - 1) {
-      player0_last_score_on_rack = score_on_rack(ld, player0_rack);
-      player1_last_score_on_rack = score_on_rack(ld, player1_rack);
+      player0_last_score_on_rack = rack_get_score(ld, player0_rack);
+      player1_last_score_on_rack = rack_get_score(ld, player1_rack);
       player0_final_score = player_get_score(player0);
       player1_final_score = player_get_score(player1);
     }
@@ -165,10 +165,10 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
 void test_draw_at_most_to_rack() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  const LetterDistribution *ld = config_get_letter_distribution(config);
-  int ld_size = letter_distribution_get_size(ld);
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
   Bag *bag = bag_create(ld);
-  Rack *rack = create_rack(ld_size);
+  Rack *rack = rack_create(ld_size);
 
   // Check drawing from the bag
   int drawing_player = 0;
@@ -179,18 +179,18 @@ void test_draw_at_most_to_rack() {
     drawing_player = 1 - drawing_player;
     number_of_remaining_tiles -= RACK_SIZE;
     assert(!rack_is_empty(rack));
-    assert(get_number_of_letters(rack) == RACK_SIZE);
-    reset_rack(rack);
+    assert(rack_get_total_letters(rack) == RACK_SIZE);
+    rack_reset(rack);
   }
 
   draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
   assert(bag_is_empty(bag));
   assert(!rack_is_empty(rack));
-  assert(get_number_of_letters(rack) == number_of_remaining_tiles);
-  reset_rack(rack);
+  assert(rack_get_total_letters(rack) == number_of_remaining_tiles);
+  rack_reset(rack);
 
   bag_destroy(bag);
-  destroy_rack(rack);
+  rack_destroy(rack);
   config_destroy(config);
 }
 
@@ -437,12 +437,12 @@ void test_playmove() {
   assert(player_get_score(player0) == 36);
   assert(player_get_score(player1) == 0);
   assert(!rack_is_empty(player0_rack));
-  assert(get_number_of_letters(player0_rack) == 7);
-  assert(board_get_letter(board, 7, 3) == hl_to_ml(ld, "K"));
-  assert(board_get_letter(board, 7, 4) == hl_to_ml(ld, "Y"));
-  assert(board_get_letter(board, 7, 5) == hl_to_ml(ld, "N"));
-  assert(board_get_letter(board, 7, 6) == hl_to_ml(ld, "D"));
-  assert(board_get_letter(board, 7, 7) == hl_to_ml(ld, "E"));
+  assert(rack_get_total_letters(player0_rack) == 7);
+  assert(board_get_letter(board, 7, 3) == ld_hl_to_ml(ld, "K"));
+  assert(board_get_letter(board, 7, 4) == ld_hl_to_ml(ld, "Y"));
+  assert(board_get_letter(board, 7, 5) == ld_hl_to_ml(ld, "N"));
+  assert(board_get_letter(board, 7, 6) == ld_hl_to_ml(ld, "D"));
+  assert(board_get_letter(board, 7, 7) == ld_hl_to_ml(ld, "E"));
   assert(game_get_player_on_turn_index(game) == 1);
   assert(bag_get_tiles(bag) == 88);
   assert(board_get_tiles_played(board) == 5);
@@ -457,14 +457,14 @@ void test_playmove() {
   assert(player_get_score(player0) == 0);
   assert(player_get_score(player1) == 0);
   assert(!rack_is_empty(player0_rack));
-  assert(get_number_of_letters(player0_rack) == 7);
+  assert(rack_get_total_letters(player0_rack) == 7);
   assert(game_get_player_on_turn_index(game) == 1);
   assert(bag_get_tiles(bag) == 93);
   assert(board_get_tiles_played(board) == 0);
 
-  assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "V")) == 0);
-  assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "W")) == 0);
-  assert(get_number_of_letter(player0_rack, hl_to_ml(ld, "U")) < 2);
+  assert(rack_get_letter(player0_rack, ld_hl_to_ml(ld, "V")) == 0);
+  assert(rack_get_letter(player0_rack, ld_hl_to_ml(ld, "W")) == 0);
+  assert(rack_get_letter(player0_rack, ld_hl_to_ml(ld, "U")) < 2);
 
   // Test pass
   game_load_cgp(game,
@@ -483,9 +483,9 @@ void test_playmove() {
   assert(player0_score == 517);
   assert(player1_score == 349);
   assert(!rack_is_empty(player0_rack));
-  assert(get_number_of_letters(player0_rack) == 1);
+  assert(rack_get_total_letters(player0_rack) == 1);
   assert(!rack_is_empty(player1_rack));
-  assert(get_number_of_letters(player1_rack) == 1);
+  assert(rack_get_total_letters(player1_rack) == 1);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(bag_is_empty(bag));
 
@@ -494,12 +494,12 @@ void test_playmove() {
   assert(game_get_consecutive_scoreless_turns(game) == 6);
   assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
   assert(player_get_score(player0) ==
-         player0_score - score_on_rack(ld, player0_rack));
+         player0_score - rack_get_score(ld, player0_rack));
   assert(player_get_score(player1) ==
-         player1_score - score_on_rack(ld, player1_rack));
+         player1_score - rack_get_score(ld, player1_rack));
   assert(!rack_is_empty(player0_rack));
-  assert(get_number_of_letters(player0_rack) == 1);
-  assert(get_number_of_letters(player1_rack) == 1);
+  assert(rack_get_total_letters(player0_rack) == 1);
+  assert(rack_get_total_letters(player1_rack) == 1);
   assert(game_get_player_on_turn_index(game) == 0);
   assert(bag_is_empty(bag));
 
@@ -526,32 +526,32 @@ void test_set_random_rack() {
 
   set_random_rack(game, 0, NULL);
   assert(bag_get_tiles(bag) == 93);
-  assert(get_number_of_letters(player0_rack) == 7);
+  assert(rack_get_total_letters(player0_rack) == 7);
 
   // draw some random rack, but with 5 fixed tiles
-  Rack *known_rack = create_rack(letter_distribution_get_size(ld));
-  set_rack_to_string(ld, known_rack, "CESAR");
+  Rack *known_rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, known_rack, "CESAR");
   set_random_rack(game, 0, known_rack);
   assert(bag_get_tiles(bag) == 93);
-  assert(get_number_of_letters(player0_rack) == 7);
+  assert(rack_get_total_letters(player0_rack) == 7);
 
   // C E S A R
-  take_letter_from_rack(player0_rack, 3);
-  take_letter_from_rack(player0_rack, 5);
-  take_letter_from_rack(player0_rack, 19);
-  take_letter_from_rack(player0_rack, 1);
-  take_letter_from_rack(player0_rack, 18);
+  rack_take_letter(player0_rack, 3);
+  rack_take_letter(player0_rack, 5);
+  rack_take_letter(player0_rack, 19);
+  rack_take_letter(player0_rack, 1);
+  rack_take_letter(player0_rack, 18);
 
   assert(!rack_is_empty(player0_rack));
-  assert(get_number_of_letters(player0_rack) == 2);
+  assert(rack_get_total_letters(player0_rack) == 2);
   // ensure the rack isn't corrupt
   int ct = 0;
-  for (int i = 0; i < get_array_size(player0_rack); i++) {
-    ct += get_number_of_letter(player0_rack, i);
+  for (int i = 0; i < rack_get_dist_size(player0_rack); i++) {
+    ct += rack_get_letter(player0_rack, i);
   }
   assert(ct == 2);
 
-  destroy_rack(known_rack);
+  rack_destroy(known_rack);
   game_destroy(game);
   config_destroy(config);
 }
@@ -584,19 +584,19 @@ void test_backups() {
 
   assert(player_get_score(player0) == 36);
   assert(player_get_score(player1) == 131);
-  assert(board_get_letter(board, 0, 7) == hl_to_ml(ld, "Q"));
+  assert(board_get_letter(board, 0, 7) == ld_hl_to_ml(ld, "Q"));
   // let's unplay QUATORZE
   game_unplay_last_move(game);
   assert(player_get_score(player0) == 36);
   assert(player_get_score(player1) == 0);
 
-  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "A")) == 1);
-  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "O")) == 1);
-  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "Q")) == 1);
-  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "R")) == 1);
-  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "T")) == 1);
-  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "U")) == 1);
-  assert(get_number_of_letter(player1_rack, hl_to_ml(ld, "Z")) == 1);
+  assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "A")) == 1);
+  assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "O")) == 1);
+  assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "Q")) == 1);
+  assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "R")) == 1);
+  assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "T")) == 1);
+  assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "U")) == 1);
+  assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "Z")) == 1);
 
   assert(board_get_letter(board, 0, 7) == 0);
   // was 85 after drawing racks for both players, then was 80 after KYNDE

@@ -5,11 +5,11 @@
 #include "../ent/rack.h"
 
 void string_builder_add_rack(const Rack *rack,
-                             const LetterDistribution *letter_distribution,
+                             const LetterDistribution *ld,
                              StringBuilder *string_builder) {
-  for (int i = 0; i < get_array_size(rack); i++) {
-    for (int j = 0; j < get_number_of_letter(rack, i); j++) {
-      string_builder_add_user_visible_letter(letter_distribution,
+  for (int i = 0; i < rack_get_dist_size(rack); i++) {
+    for (int j = 0; j < rack_get_letter(rack, i); j++) {
+      string_builder_add_user_visible_letter(ld,
                                              string_builder, i);
     }
   }

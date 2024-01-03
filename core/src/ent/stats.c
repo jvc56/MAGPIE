@@ -12,23 +12,23 @@ struct Stat {
   double sum_of_mean_differences_squared;
 };
 
-void reset_stat(Stat *stat) {
+void stat_reset(Stat *stat) {
   stat->cardinality = 0;
   stat->weight = 0;
   stat->mean = 0;
   stat->sum_of_mean_differences_squared = 0;
 }
 
-Stat *create_stat() {
+Stat *stat_create() {
   Stat *stat = malloc_or_die(sizeof(Stat));
-  reset_stat(stat);
+  stat_reset(stat);
   return stat;
 }
 
-void destroy_stat(Stat *stat) { free(stat); }
+void stat_destroy(Stat *stat) { free(stat); }
 
 Stat *stat_duplicate(const Stat *stat) {
-  Stat *new_stat = create_stat();
+  Stat *new_stat = stat_create();
   new_stat->cardinality = stat->cardinality;
   new_stat->weight = stat->weight;
   new_stat->sum_of_mean_differences_squared =
@@ -51,15 +51,15 @@ void push_with_cardinality(Stat *stat, double value, uint64_t value_weight,
           (((double)value) - stat->mean);
 }
 
-void push(Stat *stat, double value, uint64_t value_weight) {
+void stat_push(Stat *stat, double value, uint64_t value_weight) {
   push_with_cardinality(stat, value, value_weight, 1);
 }
 
-uint64_t get_cardinality(const Stat *stat) { return stat->cardinality; }
+uint64_t stat_get_cardinality(const Stat *stat) { return stat->cardinality; }
 
-uint64_t get_weight(const Stat *stat) { return stat->weight; }
+uint64_t stat_get_weight(const Stat *stat) { return stat->weight; }
 
-double get_mean(const Stat *stat) { return stat->mean; }
+double stat_get_mean(const Stat *stat) { return stat->mean; }
 
 // Use a estimator function to easily change from
 // biased to unbiased estimations.
@@ -74,7 +74,7 @@ uint64_t get_estimator(uint64_t n) {
   return n;
 }
 
-double get_variance(const Stat *stat) {
+double stat_get_variance(const Stat *stat) {
   if (stat->weight <= 1) {
     return 0.0;
   }
@@ -82,18 +82,20 @@ double get_variance(const Stat *stat) {
          (((double)get_estimator(stat->weight)));
 }
 
-double get_stdev(const Stat *stat) { return sqrt(get_variance(stat)); }
+double stat_get_stdev(const Stat *stat) {
+  return sqrt(stat_get_variance(stat));
+}
 
-void combine_stats(Stat **stats, int number_of_stats, Stat *combined_stat) {
+void stats_combine(Stat **stats, int number_of_stats, Stat *combined_stat) {
   uint64_t combined_cardinality = 0;
   uint64_t combined_weight = 0;
   double combined_mean = 0;
   for (int i = 0; i < number_of_stats; i++) {
-    uint64_t cardinality = get_cardinality(stats[i]);
+    uint64_t cardinality = stat_get_cardinality(stats[i]);
     combined_cardinality += cardinality;
-    uint64_t weight = get_weight(stats[i]);
+    uint64_t weight = stat_get_weight(stats[i]);
     combined_weight += weight;
-    combined_mean += get_mean(stats[i]) * weight;
+    combined_mean += stat_get_mean(stats[i]) * weight;
   }
   if (combined_weight <= 0) {
     combined_stat->cardinality = 0;
@@ -106,15 +108,15 @@ void combine_stats(Stat **stats, int number_of_stats, Stat *combined_stat) {
 
   double combined_error_sum_of_squares = 0;
   for (int i = 0; i < number_of_stats; i++) {
-    double stdev = get_stdev(stats[i]);
-    uint64_t weight = get_weight(stats[i]);
+    double stdev = stat_get_stdev(stats[i]);
+    uint64_t weight = stat_get_weight(stats[i]);
     combined_error_sum_of_squares += (stdev * stdev) * get_estimator(weight);
   }
 
   double combined_sum_of_squares = 0;
   for (int i = 0; i < number_of_stats; i++) {
-    uint64_t weight = get_weight(stats[i]);
-    double mean = get_mean(stats[i]);
+    uint64_t weight = stat_get_weight(stats[i]);
+    double mean = stat_get_mean(stats[i]);
     double mean_diff = (mean - combined_mean);
     combined_sum_of_squares += (mean_diff * mean_diff) * weight;
   }
@@ -128,10 +130,6 @@ void combine_stats(Stat **stats, int number_of_stats, Stat *combined_stat) {
       combined_sum_of_mean_differences_squared;
 }
 
-double get_standard_error(const Stat *stat, double m) {
-  return m * sqrt(get_variance(stat) / (double)stat->cardinality);
-}
-
-int round_to_nearest_int(double a) {
-  return (int)(a + 0.5 - (a < 0)); // truncated to 55
+double stat_get_stderr(const Stat *stat, double m) {
+  return m * sqrt(stat_get_variance(stat) / (double)stat->cardinality);
 }

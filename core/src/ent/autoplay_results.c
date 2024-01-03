@@ -19,21 +19,21 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
   autoplay_results->p1_losses = 0;
   autoplay_results->p1_ties = 0;
   autoplay_results->p1_firsts = 0;
-  reset_stat(autoplay_results->p1_score);
-  reset_stat(autoplay_results->p2_score);
+  stat_reset(autoplay_results->p1_score);
+  stat_reset(autoplay_results->p2_score);
 }
 
 AutoplayResults *autoplay_results_create() {
   AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
-  autoplay_results->p1_score = create_stat();
-  autoplay_results->p2_score = create_stat();
+  autoplay_results->p1_score = stat_create();
+  autoplay_results->p2_score = stat_create();
   autoplay_results_reset(autoplay_results);
   return autoplay_results;
 }
 
 void autoplay_results_destroy(AutoplayResults *autoplay_results) {
-  destroy_stat(autoplay_results->p1_score);
-  destroy_stat(autoplay_results->p2_score);
+  stat_destroy(autoplay_results->p1_score);
+  stat_destroy(autoplay_results->p2_score);
   free(autoplay_results);
 }
 
@@ -87,12 +87,12 @@ void autoplay_results_increment_p1_firsts(AutoplayResults *autoplay_results) {
 
 void autoplay_results_increment_p1_score(AutoplayResults *autoplay_results,
                                          int score) {
-  push(autoplay_results->p1_score, (double)score, 1);
+  stat_push(autoplay_results->p1_score, (double)score, 1);
 }
 
 void autoplay_results_increment_p2_score(AutoplayResults *autoplay_results,
                                          int score) {
-  push(autoplay_results->p2_score, (double)score, 1);
+  stat_push(autoplay_results->p2_score, (double)score, 1);
 }
 
 void autoplay_results_add(const AutoplayResults *result_to_add,

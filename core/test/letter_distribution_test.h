@@ -1,6 +1,6 @@
 #ifndef LETTER_DISTRIBUTION_TEST_H
 #define LETTER_DISTRIBUTION_TEST_H
 
-void test_letter_distribution();
+void test_ld();
 
 #endif

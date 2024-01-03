@@ -21,7 +21,7 @@
 #include "infer_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
-#include "letter_distribution_test.h"
+#include "ld_test.h"
 #include "move_gen_test.h"
 #include "players_data_test.h"
 #include "rack_test.h"
@@ -41,7 +41,7 @@ void run_all() {
   // Test the readonly data first
   test_string_util();
   test_alphabet();
-  test_letter_distribution();
+  test_ld();
   test_leaves();
   test_leave_map();
 
@@ -75,7 +75,7 @@ void run_test(const char *subtest) {
   } else if (strings_equal(subtest, "alpha")) {
     test_alphabet();
   } else if (strings_equal(subtest, "ld")) {
-    test_letter_distribution();
+    test_ld();
   } else if (strings_equal(subtest, "l")) {
     test_leaves();
   } else if (strings_equal(subtest, "leavemap")) {

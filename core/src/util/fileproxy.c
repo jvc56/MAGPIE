@@ -49,7 +49,7 @@ void precache_file_data(const char *filename, char *raw_data, int num_bytes) {
   file_cache.num_items++;
 }
 
-void destroy_cache() {
+void fileproxy_destroy_cache() {
   for (int i = 0; i < file_cache.num_items; i++) {
     free(file_cache.entries[i].raw_data);
   }

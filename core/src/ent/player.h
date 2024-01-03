@@ -7,6 +7,9 @@
 struct Player;
 typedef struct Player Player;
 
+Player *create_player(const Config *config, int player_index);
+void destroy_player(Player *player);
+
 int player_get_index(const Player *player);
 const char *player_get_name(const Player *player);
 Rack *player_get_rack(const Player *player);
@@ -27,10 +30,8 @@ void player_set_klv(Player *player, const KLV *klv);
 void player_increment_score(Player *player, int score);
 void player_decrement_score(Player *player, int score);
 
-Player *create_player(const Config *config, int player_index);
-void update_player(const Config *config, Player *player);
+void player_update(const Config *config, Player *player);
 Player *player_duplicate(const Player *player);
-void destroy_player(Player *player);
-void reset_player(Player *player);
+void player_reset(Player *player);
 
 #endif

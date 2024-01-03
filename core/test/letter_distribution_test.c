@@ -6,47 +6,47 @@
 
 #include "test_util.h"
 
-void test_letter_distribution_score_order() {
+void test_ld_score_order() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  const LetterDistribution *ld = config_get_letter_distribution(config);
-  int ld_size = letter_distribution_get_size(ld);
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
 
   int previous_score = 100000;
   for (int i = 0; i < ld_size; i++) {
-    int score_order_index = letter_distribution_get_score_order(ld, i);
-    assert(letter_distribution_get_score(ld, score_order_index) <=
+    int score_order_index = ld_get_score_order(ld, i);
+    assert(ld_get_score(ld, score_order_index) <=
            previous_score);
-    previous_score = letter_distribution_get_score(ld, score_order_index);
+    previous_score = ld_get_score(ld, score_order_index);
   }
   config_destroy(config);
 }
 
-void test_str_to_machine_letters() {
+void test_ld_str_to_mls() {
   Config *nwl_config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   const LetterDistribution *english_ld =
-      config_get_letter_distribution(nwl_config);
+      config_get_ld(nwl_config);
 
   Config *disc_config = create_config_or_die(
       "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
   const LetterDistribution *catalan_ld =
-      config_get_letter_distribution(disc_config);
+      config_get_ld(disc_config);
 
   Config *osps_config = create_config_or_die(
       "setoptions lex OSPS44 s1 equity s2 equity r1 all r2 all numplays 1");
   const LetterDistribution *polish_ld =
-      config_get_letter_distribution(osps_config);
+      config_get_ld(osps_config);
 
   uint8_t mls[4];
-  int num_mls = str_to_machine_letters(english_ld, "??", false, mls, 4);
+  int num_mls = ld_str_to_mls(english_ld, "??", false, mls, 4);
   assert(num_mls == 2);
   assert(mls[0] == 0);
   assert(mls[1] == 0);
 
   // english:
   uint8_t emls[20];
-  num_mls = str_to_machine_letters(english_ld, "ABZ", false, emls, 20);
+  num_mls = ld_str_to_mls(english_ld, "ABZ", false, emls, 20);
   assert(num_mls == 3);
   assert(emls[0] == 1);
   assert(emls[1] == 2);
@@ -54,7 +54,7 @@ void test_str_to_machine_letters() {
 
   // catalan:
   uint8_t cmls[20];
-  num_mls = str_to_machine_letters(catalan_ld, "A[l·l]O[QU]IMI[qu]ES", false,
+  num_mls = ld_str_to_mls(catalan_ld, "A[l·l]O[QU]IMI[qu]ES", false,
                                    cmls, 20);
   assert(num_mls == 10);
   assert(cmls[0] == 1);
@@ -70,7 +70,7 @@ void test_str_to_machine_letters() {
 
   // Test consecutive multichar letters
   uint8_t cmls2[20];
-  num_mls = str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu]",
+  num_mls = ld_str_to_mls(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu]",
                                    false, cmls2, 20);
   assert(num_mls == 8);
   assert(cmls2[0] == 13);
@@ -84,7 +84,7 @@ void test_str_to_machine_letters() {
 
   // Polish
   uint8_t pmls[20];
-  num_mls = str_to_machine_letters(polish_ld, "FGÓIŁHAŃ", false, pmls, 20);
+  num_mls = ld_str_to_mls(polish_ld, "FGÓIŁHAŃ", false, pmls, 20);
   assert(num_mls == 8);
   assert(pmls[0] == 9);
   assert(pmls[1] == 10);
@@ -95,7 +95,7 @@ void test_str_to_machine_letters() {
   assert(pmls[6] == 1);
   assert(pmls[7] == 19);
 
-  num_mls = str_to_machine_letters(polish_ld, "ŻŚŻGÓI", false, pmls, 20);
+  num_mls = ld_str_to_mls(polish_ld, "ŻŚŻGÓI", false, pmls, 20);
   assert(num_mls == 6);
   assert(pmls[0] == 32);
   assert(pmls[1] == 25);
@@ -107,46 +107,46 @@ void test_str_to_machine_letters() {
   uint8_t imls[40];
 
   // Ensure allowing playthrough tiles works
-  assert(str_to_machine_letters(english_ld, ".BDEF", true, imls, 40) == 5);
-  assert(str_to_machine_letters(english_ld, ".B.D.E.F..", true, imls, 40) ==
+  assert(ld_str_to_mls(english_ld, ".BDEF", true, imls, 40) == 5);
+  assert(ld_str_to_mls(english_ld, ".B.D.E.F..", true, imls, 40) ==
          10);
 
   // Ensure invalid racks return -1
 
   // Invalid multichar strings
-  assert(str_to_machine_letters(polish_ld, "ŻŚ[Ż]GÓI", true, imls, 40) == -1);
-  assert(str_to_machine_letters(polish_ld, "Ż[ŚŻ]GÓI", true, imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "A[ES]A", true, imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "ABCD[ABCEFGH]EGD", true, imls,
+  assert(ld_str_to_mls(polish_ld, "ŻŚ[Ż]GÓI", true, imls, 40) == -1);
+  assert(ld_str_to_mls(polish_ld, "Ż[ŚŻ]GÓI", true, imls, 40) == -1);
+  assert(ld_str_to_mls(catalan_ld, "A[ES]A", true, imls, 40) == -1);
+  assert(ld_str_to_mls(catalan_ld, "ABCD[ABCEFGH]EGD", true, imls,
                                 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "[", true, imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "]", true, imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "[]", true, imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "ABC[DE", true, imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "ABCD]E", true, imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "ABC[D]E", true, imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "[L·L[QU]]ES", true, imls, 40) ==
+  assert(ld_str_to_mls(catalan_ld, "[", true, imls, 40) == -1);
+  assert(ld_str_to_mls(catalan_ld, "]", true, imls, 40) == -1);
+  assert(ld_str_to_mls(catalan_ld, "[]", true, imls, 40) == -1);
+  assert(ld_str_to_mls(catalan_ld, "ABC[DE", true, imls, 40) == -1);
+  assert(ld_str_to_mls(catalan_ld, "ABCD]E", true, imls, 40) == -1);
+  assert(ld_str_to_mls(catalan_ld, "ABC[D]E", true, imls, 40) == -1);
+  assert(ld_str_to_mls(catalan_ld, "[L·L[QU]]ES", true, imls, 40) ==
          -1);
-  assert(str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu][]A[QU][qu]", true,
+  assert(ld_str_to_mls(catalan_ld, "[L·L]ES[QU][qu][]A[QU][qu]", true,
                                 imls, 40) == -1);
-  assert(str_to_machine_letters(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu", true,
+  assert(ld_str_to_mls(catalan_ld, "[L·L]ES[QU][qu]A[QU][qu", true,
                                 imls, 40) == -1);
 
   // Invalid letters
-  assert(str_to_machine_letters(english_ld, "2", true, imls, 40) == -1);
-  assert(str_to_machine_letters(english_ld, "ABC9EFG", true, imls, 40) == -1);
+  assert(ld_str_to_mls(english_ld, "2", true, imls, 40) == -1);
+  assert(ld_str_to_mls(english_ld, "ABC9EFG", true, imls, 40) == -1);
 
   // Play through not board_is_letter_allowed_in_cross_set
-  assert(str_to_machine_letters(english_ld, "AB.F", false, imls, 40) == -1);
-  assert(str_to_machine_letters(english_ld, "BEHF.", false, imls, 40) == -1);
-  assert(str_to_machine_letters(english_ld, ".BDEF", false, imls, 40) == -1);
+  assert(ld_str_to_mls(english_ld, "AB.F", false, imls, 40) == -1);
+  assert(ld_str_to_mls(english_ld, "BEHF.", false, imls, 40) == -1);
+  assert(ld_str_to_mls(english_ld, ".BDEF", false, imls, 40) == -1);
 
   config_destroy(nwl_config);
   config_destroy(osps_config);
   config_destroy(disc_config);
 }
 
-void test_letter_distribution() {
-  test_letter_distribution_score_order();
-  test_str_to_machine_letters();
+void test_ld() {
+  test_ld_score_order();
+  test_ld_str_to_mls();
 }

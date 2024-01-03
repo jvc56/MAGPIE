@@ -128,10 +128,10 @@ void *players_data_create_data(players_data_t players_data_type,
   void *data = NULL;
   switch (players_data_type) {
   case PLAYERS_DATA_TYPE_KWG:
-    data = create_kwg(data_name);
+    data = kwg_create(data_name);
     break;
   case PLAYERS_DATA_TYPE_KLV:
-    data = create_klv(data_name);
+    data = klv_create(data_name);
     break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
@@ -148,10 +148,10 @@ void players_data_destroy_data(PlayersData *players_data,
   if (players_data->data[data_index]) {
     switch (players_data_type) {
     case PLAYERS_DATA_TYPE_KWG:
-      destroy_kwg(players_data->data[data_index]);
+      kwg_destroy(players_data->data[data_index]);
       break;
     case PLAYERS_DATA_TYPE_KLV:
-      destroy_klv(players_data->data[data_index]);
+      klv_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -184,7 +184,7 @@ char *players_data_get_data_name(const PlayersData *players_data,
   return players_data->data_names[data_name_index];
 }
 
-PlayersData *create_players_data() {
+PlayersData *players_data_create() {
   PlayersData *players_data = malloc_or_die(sizeof(PlayersData));
   for (int player_index = 0; player_index < 2; player_index++) {
     for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {
@@ -203,7 +203,7 @@ PlayersData *create_players_data() {
   return players_data;
 }
 
-void destroy_players_data(PlayersData *players_data) {
+void players_data_destroy(PlayersData *players_data) {
   for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {
     bool is_shared =
         players_data_get_is_shared(players_data, (players_data_t)data_index);
@@ -219,7 +219,7 @@ void destroy_players_data(PlayersData *players_data) {
   free(players_data);
 }
 
-void set_players_data(PlayersData *players_data,
+void players_data_set(PlayersData *players_data,
                       players_data_t players_data_type,
                       const char *p1_data_name, const char *p2_data_name) {
 

@@ -2,15 +2,9 @@
 #define MOVE_GEN_H
 
 #include "../def/move_defs.h"
-#include "../def/move_gen_defs.h"
 
-#include "../ent/anchor.h"
-#include "../ent/bag.h"
-#include "../ent/board.h"
 #include "../ent/game.h"
-#include "../ent/leave_map.h"
 #include "../ent/move.h"
-#include "../ent/player.h"
 
 void gen_init_cache();
 void gen_clear_cache();

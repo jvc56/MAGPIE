@@ -381,7 +381,7 @@ void board_destroy(Board *board) { free(board); }
 // this function assumes the word is always horizontal. If this isn't the case,
 // the board needs to be transposed ahead of time.
 int board_score_move(const Board *board,
-                     const LetterDistribution *letter_distribution,
+                     const LetterDistribution *ld,
                      uint8_t word[], int word_start_index, int word_end_index,
                      int row, int col, int tiles_played, int cross_dir,
                      int cross_set_index) {
@@ -409,10 +409,10 @@ int board_score_move(const Board *board,
     }
     int cs = board_get_cross_score(board, row, col + idx, cross_dir,
                                    cross_set_index);
-    if (is_blanked(ml)) {
+    if (get_is_blanked(ml)) {
       ls = 0;
     } else {
-      ls = letter_distribution_get_score(letter_distribution, ml);
+      ls = ld_get_score(ld, ml);
     }
 
     main_word_score += ls * letter_multiplier;

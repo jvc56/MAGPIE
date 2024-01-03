@@ -152,7 +152,7 @@ void assert_command_status_and_output(ExecState *exec_state,
     sleep(2);
     char *status_string = command_search_status(exec_state, true);
     // For now, we do not care about the contents of of the status,
-    // we just want to halt the command.
+    // we just want to thread_control_halt the command.
     free(status_string);
   }
   block_for_search(exec_state, seconds_to_wait);

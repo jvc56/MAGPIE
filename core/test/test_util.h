@@ -16,16 +16,16 @@ typedef struct SortedMoveList {
   Move **moves;
 } SortedMoveList;
 
-void draw_rack_to_string(const LetterDistribution *letter_distribution,
+void draw_rack_to_string(const LetterDistribution *ld,
                          Bag *bag, Rack *rack, char *letters, int player_index);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *create_sorted_move_list(MoveList *ml);
 void destroy_sorted_move_list(SortedMoveList *sorted_move_list);
 void print_move_list(const Board *board,
-                     const LetterDistribution *letter_distribution,
+                     const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length);
 void sort_and_print_move_list(const Board *board,
-                              const LetterDistribution *letter_distribution,
+                              const LetterDistribution *ld,
                               MoveList *ml);
 void resort_sorted_move_list_by_score(SortedMoveList *sml);
 bool within_epsilon(double a, double b);

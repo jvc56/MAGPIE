@@ -35,14 +35,14 @@ void autoplay_game_pairs_test() {
   int max_iterations = config_get_max_iterations(csw_config);
   assert(autoplay_results_get_games(autoplay_results) == max_iterations * 2);
   assert(autoplay_results_get_p1_firsts(autoplay_results) == max_iterations);
-  assert(get_weight(autoplay_results_get_p1_score(autoplay_results)) ==
-         get_weight(autoplay_results_get_p2_score(autoplay_results)));
-  assert(get_cardinality(autoplay_results_get_p1_score(autoplay_results)) ==
-         get_cardinality(autoplay_results_get_p2_score(autoplay_results)));
-  assert(within_epsilon(get_mean(autoplay_results_get_p1_score(autoplay_results)),
-                        get_mean(autoplay_results_get_p2_score(autoplay_results))));
-  assert(within_epsilon(get_stdev(autoplay_results_get_p1_score(autoplay_results)),
-                        get_stdev(autoplay_results_get_p2_score(autoplay_results))));
+  assert(stat_get_weight(autoplay_results_get_p1_score(autoplay_results)) ==
+         stat_get_weight(autoplay_results_get_p2_score(autoplay_results)));
+  assert(stat_get_cardinality(autoplay_results_get_p1_score(autoplay_results)) ==
+         stat_get_cardinality(autoplay_results_get_p2_score(autoplay_results)));
+  assert(within_epsilon(stat_get_mean(autoplay_results_get_p1_score(autoplay_results)),
+                        stat_get_mean(autoplay_results_get_p2_score(autoplay_results))));
+  assert(within_epsilon(stat_get_stdev(autoplay_results_get_p1_score(autoplay_results)),
+                        stat_get_stdev(autoplay_results_get_p2_score(autoplay_results))));
 
   load_config_or_die(csw_config, "setoptions i 7 nogp threads 2");
   max_iterations = config_get_max_iterations(csw_config);

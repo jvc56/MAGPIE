@@ -28,7 +28,7 @@ void assert_players_data(const PlayersData *players_data,
 void test_for_data_type(const char **data_names,
                         players_data_t players_data_type,
                         int number_of_data_names) {
-  PlayersData *players_data = create_players_data();
+  PlayersData *players_data = players_data_create();
   // Verify initial NULL values
   for (int i = 0; i < NUMBER_OF_DATA; i++) {
     assert(!players_data_get_is_shared(players_data, (players_data_t)i));
@@ -42,7 +42,7 @@ void test_for_data_type(const char **data_names,
   const void *previous_data_2 = NULL;
   const char *previous_data_name_2 = NULL;
   for (int i = 0; i < number_of_data_names; i += 2) {
-    set_players_data(players_data, players_data_type, data_names[i],
+    players_data_set(players_data, players_data_type, data_names[i],
                      data_names[i + 1]);
     assert_players_data(players_data, players_data_type, data_names[i],
                         data_names[i + 1]);
@@ -64,11 +64,11 @@ void test_for_data_type(const char **data_names,
     previous_data_2 = players_data_get_data(players_data, players_data_type, 1);
     previous_data_name_2 = data_names[i + 1];
   }
-  destroy_players_data(players_data);
+  players_data_destroy(players_data);
 }
 
 void test_unshared_data() {
-  PlayersData *players_data = create_players_data();
+  PlayersData *players_data = players_data_create();
 
   const char *p1_name = "Alice";
   move_sort_t p1_move_sort_type = MOVE_SORT_SCORE;
@@ -98,7 +98,7 @@ void test_unshared_data() {
   players_data_set_name(players_data, 1, p2_name);
   assert_strings_equal(players_data_get_name(players_data, 1), p2_name);
 
-  destroy_players_data(players_data);
+  players_data_destroy(players_data);
 }
 
 void test_players_data() {

@@ -28,45 +28,45 @@ inference_status_t infer_for_test(const Config *config, Game *game,
 void test_trivial_random_probability() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  const LetterDistribution *ld = config_get_letter_distribution(config);
-  int ld_size = letter_distribution_get_size(ld);
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
   Game *game = game_create(config);
-  Rack *bag_as_rack = create_rack(ld_size);
-  Rack *leave = create_rack(ld_size);
+  Rack *bag_as_rack = rack_create(ld_size);
+  Rack *leave = rack_create(ld_size);
 
   // A minimum of zero should always be 100% probability
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave, hl_to_ml(ld, "Z"), 0, 3),
+                            bag_as_rack, leave, ld_hl_to_ml(ld, "Z"), 0, 3),
                         1));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave, hl_to_ml(ld, "Z"), 0, 4),
+                            bag_as_rack, leave, ld_hl_to_ml(ld, "Z"), 0, 4),
                         1));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave, hl_to_ml(ld, "E"), 0, 6),
+                            bag_as_rack, leave, ld_hl_to_ml(ld, "E"), 0, 6),
                         1));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave, hl_to_ml(ld, "E"), -1, 4),
+                            bag_as_rack, leave, ld_hl_to_ml(ld, "E"), -1, 4),
                         1));
 
   // Minimum N where letters in bag is M and M > N
   // should always be 0
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave, hl_to_ml(ld, "E"), 20, 4),
+                            bag_as_rack, leave, ld_hl_to_ml(ld, "E"), 20, 4),
                         0));
 
   // If the player is emptying the bag and there are the minimum
   // number of leaves remaining, the probability is trivially 1.
-  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
-  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
-  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
-  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
-  add_letter_to_rack(bag_as_rack, hl_to_ml(ld, "E"));
+  rack_add_letter(bag_as_rack, ld_hl_to_ml(ld, "E"));
+  rack_add_letter(bag_as_rack, ld_hl_to_ml(ld, "E"));
+  rack_add_letter(bag_as_rack, ld_hl_to_ml(ld, "E"));
+  rack_add_letter(bag_as_rack, ld_hl_to_ml(ld, "E"));
+  rack_add_letter(bag_as_rack, ld_hl_to_ml(ld, "E"));
   assert(within_epsilon(get_probability_for_random_minimum_draw(
-                            bag_as_rack, leave, hl_to_ml(ld, "E"), 4, 1),
+                            bag_as_rack, leave, ld_hl_to_ml(ld, "E"), 4, 1),
                         1));
 
-  destroy_rack(leave);
-  destroy_rack(bag_as_rack);
+  rack_destroy(leave);
+  rack_destroy(bag_as_rack);
   game_destroy(game);
   config_destroy(config);
 }
@@ -74,7 +74,7 @@ void test_trivial_random_probability() {
 void test_infer_rack_overflow() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  const LetterDistribution *ld = config_get_letter_distribution(config);
+  const LetterDistribution *ld = config_get_ld(config);
   Game *game = game_create(config);
 
   InferenceResults *inference_results = inference_results_create();
@@ -85,7 +85,7 @@ void test_infer_rack_overflow() {
   assert(status == INFERENCE_STATUS_RACK_OVERFLOW);
   game_reset(game);
 
-  set_rack_to_string(ld, player_get_rack(game_get_player(game, 0)), "ABC");
+  rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "ABC");
   load_config_or_die(
       config, "setoptions rack DEFGH pindex 0 score 0 exch 0 eq 0 threads 1");
   status = infer_for_test(config, game, inference_results);
@@ -206,8 +206,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
-  int ld_size = letter_distribution_get_size(ld);
-  Rack *rack = create_rack(ld_size);
+  int ld_size = ld_get_size(ld);
+  Rack *rack = rack_create(ld_size);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
@@ -217,7 +217,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   Rack *player1_rack = player_get_rack(player1);
 
   InferenceResults *inference_results = inference_results_create();
-  Stat *letter_stat = create_stat();
+  Stat *letter_stat = stat_create();
   inference_status_t status;
 
   char *setoptions_thread_string =
@@ -234,35 +234,35 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   Stat *equity_values = inference_results_get_equity_values(
       inference_results, INFERENCE_TYPE_LEAVE);
-  assert(get_weight(equity_values) == 3);
-  assert(get_cardinality(equity_values) == 1);
-  set_rack_to_string(ld, rack, "S");
+  assert(stat_get_weight(equity_values) == 3);
+  assert(stat_get_cardinality(equity_values) == 1);
+  rack_set_to_string(ld, rack, "S");
   assert(
-      within_epsilon(get_mean(equity_values), klv_get_leave_value(klv, rack)));
+      within_epsilon(stat_get_mean(equity_values), klv_get_leave_value(klv, rack)));
   for (int i = 0; i < ld_size; i++) {
-    if (i == hl_to_ml(ld, "S")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+    if (i == ld_hl_to_ml(ld, "S")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 3);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
     } else {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 0);
     }
   }
-  set_stat_for_letter(inference_results, INFERENCE_TYPE_LEAVE, letter_stat,
-                      hl_to_ml(ld, "S"));
-  assert(within_epsilon(get_mean(letter_stat), 1));
-  assert(within_epsilon(get_stdev(letter_stat), 0));
+  inference_results_set_stat_for_letter(inference_results, INFERENCE_TYPE_LEAVE, letter_stat,
+                      ld_hl_to_ml(ld, "S"));
+  assert(within_epsilon(stat_get_mean(letter_stat), 1));
+  assert(within_epsilon(stat_get_stdev(letter_stat), 0));
   assert(within_epsilon(
       get_probability_for_random_minimum_draw(
           inference_results_get_bag_as_rack(inference_results),
           inference_results_get_target_known_unplayed_tiles(inference_results),
-          hl_to_ml(ld, "S"), 1, 6),
+          ld_hl_to_ml(ld, "S"), 1, 6),
       (double)3 / 94));
   // Both game racks should be empty
-  assert(get_number_of_letters(player0_rack) == 0);
-  assert(get_number_of_letters(player1_rack) == 0);
+  assert(rack_get_total_letters(player0_rack) == 0);
+  assert(rack_get_total_letters(player1_rack) == 0);
 
   load_config_or_die(config,
                      "setoptions rack MUZAKY pindex 0 score 58 exch 0 eq 0");
@@ -278,39 +278,39 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(get_weight(equity_values) == 83);
-  assert(get_cardinality(equity_values) == 22);
+  assert(stat_get_weight(equity_values) == 83);
+  assert(stat_get_cardinality(equity_values) == 22);
   for (int i = 0; i < ld_size; i++) {
-    if (i == hl_to_ml(ld, "A") || i == hl_to_ml(ld, "B") ||
-        i == hl_to_ml(ld, "K") || i == hl_to_ml(ld, "Q") ||
-        i == hl_to_ml(ld, "Z")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+    if (i == ld_hl_to_ml(ld, "A") || i == ld_hl_to_ml(ld, "B") ||
+        i == ld_hl_to_ml(ld, "K") || i == ld_hl_to_ml(ld, "Q") ||
+        i == ld_hl_to_ml(ld, "Z")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 0);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 0);
     } else {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) != 0);
     }
   }
-  set_stat_for_letter(inference_results, INFERENCE_TYPE_LEAVE, letter_stat,
-                      hl_to_ml(ld, "E"));
-  assert(within_epsilon(get_mean(letter_stat), (double)12 / 83));
+  inference_results_set_stat_for_letter(inference_results, INFERENCE_TYPE_LEAVE, letter_stat,
+                      ld_hl_to_ml(ld, "E"));
+  assert(within_epsilon(stat_get_mean(letter_stat), (double)12 / 83));
   assert(within_epsilon(
       get_probability_for_random_minimum_draw(
           inference_results_get_bag_as_rack(inference_results),
           inference_results_get_target_known_unplayed_tiles(inference_results),
-          hl_to_ml(ld, "Q"), 1, 6),
+          ld_hl_to_ml(ld, "Q"), 1, 6),
       (double)1 / 94));
   assert(within_epsilon(
       get_probability_for_random_minimum_draw(
           inference_results_get_bag_as_rack(inference_results),
           inference_results_get_target_known_unplayed_tiles(inference_results),
-          hl_to_ml(ld, "B"), 1, 6),
+          ld_hl_to_ml(ld, "B"), 1, 6),
       (double)2 / 94));
   // Both game racks should be empty
-  assert(get_number_of_letters(player0_rack) == 0);
-  assert(get_number_of_letters(player1_rack) == 0);
+  assert(rack_get_total_letters(player0_rack) == 0);
+  assert(rack_get_total_letters(player1_rack) == 0);
 
   load_config_or_die(config,
                      "setoptions rack MUZAK pindex 0 score 50 exch 0 eq 0");
@@ -319,12 +319,12 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // Can't have B or Y because of ZAMBUK and MUZAKY
   // Can't have K or Z because there are none in the bag
   for (int i = 0; i < ld_size; i++) {
-    if (i == hl_to_ml(ld, "B") || i == hl_to_ml(ld, "K") ||
-        i == hl_to_ml(ld, "Y") || i == hl_to_ml(ld, "Z")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+    if (i == ld_hl_to_ml(ld, "B") || i == ld_hl_to_ml(ld, "K") ||
+        i == ld_hl_to_ml(ld, "Y") || i == ld_hl_to_ml(ld, "Z")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 0);
     } else {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) != 0);
     }
   }
@@ -332,11 +332,11 @@ void test_infer_nonerror_cases(int number_of_threads) {
       get_probability_for_random_minimum_draw(
           inference_results_get_bag_as_rack(inference_results),
           inference_results_get_target_known_unplayed_tiles(inference_results),
-          hl_to_ml(ld, "B"), 2, 5),
+          ld_hl_to_ml(ld, "B"), 2, 5),
       (double)1 / choose(95, 2)));
   // Both game racks should be empty
-  assert(get_number_of_letters(player0_rack) == 0);
-  assert(get_number_of_letters(player1_rack) == 0);
+  assert(rack_get_total_letters(player0_rack) == 0);
+  assert(rack_get_total_letters(player1_rack) == 0);
 
   game_load_cgp(game, VS_JEREMY_WITH_P2_RACK);
   // Score doesn't matter since the bag
@@ -351,24 +351,24 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(get_weight(equity_values) == 1);
-  assert(get_cardinality(equity_values) == 1);
-  set_rack_to_string(ld, rack, "DDSW??");
+  assert(stat_get_weight(equity_values) == 1);
+  assert(stat_get_cardinality(equity_values) == 1);
+  rack_set_to_string(ld, rack, "DDSW??");
   assert(
-      within_epsilon(get_mean(equity_values), klv_get_leave_value(klv, rack)));
+      within_epsilon(stat_get_mean(equity_values), klv_get_leave_value(klv, rack)));
   for (int i = 0; i < ld_size; i++) {
-    if (i == hl_to_ml(ld, "S") || i == hl_to_ml(ld, "W")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+    if (i == ld_hl_to_ml(ld, "S") || i == ld_hl_to_ml(ld, "W")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 1);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
-    } else if (i == hl_to_ml(ld, "D") || i == hl_to_ml(ld, "?")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
+    } else if (i == ld_hl_to_ml(ld, "D") || i == ld_hl_to_ml(ld, "?")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
                           INFERENCE_SUBTOTAL_DRAW) == 1);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
     } else {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 0);
     }
   }
@@ -388,53 +388,53 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(get_weight(equity_values) == 450);
-  assert(get_cardinality(equity_values) == 3);
+  assert(stat_get_weight(equity_values) == 450);
+  assert(stat_get_cardinality(equity_values) == 3);
   for (int i = 0; i < ld_size; i++) {
-    if (i == hl_to_ml(ld, "?")) {
+    if (i == ld_hl_to_ml(ld, "?")) {
       // The blank was only in leave 1
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 50);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
-    } else if (i == hl_to_ml(ld, "E")) {
+    } else if (i == ld_hl_to_ml(ld, "E")) {
       // The E was only in leave 2
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 275);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
-    } else if (i == hl_to_ml(ld, "N")) {
+    } else if (i == ld_hl_to_ml(ld, "N")) {
       // The N was in leaves 1 and 3
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 175);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 2);
-    } else if (i == hl_to_ml(ld, "R")) {
+    } else if (i == ld_hl_to_ml(ld, "R")) {
       // The R was found in all of the leaves
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 450);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 3);
-    } else if (i == hl_to_ml(ld, "T")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+    } else if (i == ld_hl_to_ml(ld, "T")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 400);
     } else {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 0);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 0);
     }
   }
-  set_stat_for_letter(inference_results, INFERENCE_TYPE_LEAVE, letter_stat,
-                      hl_to_ml(ld, "E"));
-  assert(within_epsilon(get_mean(letter_stat), (double)275 / 450));
-  assert(within_epsilon(get_stdev(letter_stat), 0.48749802152178456360));
-  set_stat_for_letter(inference_results, INFERENCE_TYPE_LEAVE, letter_stat,
-                      hl_to_ml(ld, "R"));
-  assert(within_epsilon(get_mean(letter_stat), 1));
-  assert(within_epsilon(get_stdev(letter_stat), 0));
+  inference_results_set_stat_for_letter(inference_results, INFERENCE_TYPE_LEAVE, letter_stat,
+                      ld_hl_to_ml(ld, "E"));
+  assert(within_epsilon(stat_get_mean(letter_stat), (double)275 / 450));
+  assert(within_epsilon(stat_get_stdev(letter_stat), 0.48749802152178456360));
+  inference_results_set_stat_for_letter(inference_results, INFERENCE_TYPE_LEAVE, letter_stat,
+                      ld_hl_to_ml(ld, "R"));
+  assert(within_epsilon(stat_get_mean(letter_stat), 1));
+  assert(within_epsilon(stat_get_stdev(letter_stat), 0));
 
-  assert(within_epsilon(get_stdev(equity_values), 6.53225818584641171327));
+  assert(within_epsilon(stat_get_stdev(equity_values), 6.53225818584641171327));
 
   // Contrive an impossible situation to easily test
   // more combinatorics
@@ -445,18 +445,18 @@ void test_infer_nonerror_cases(int number_of_threads) {
     bag_draw_random_letter(bag, 0);
   }
 
-  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "I"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "E"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "E"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "E"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "E"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "Z"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "Z"), 0);
 
   // Z(OOPSYCHOLOGY) is over 100 points so keeping the Z will never be
   // inferred
@@ -478,84 +478,84 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(get_weight(equity_values) == 35);
-  assert(get_cardinality(equity_values) == 4);
+  assert(stat_get_weight(equity_values) == 35);
+  assert(stat_get_cardinality(equity_values) == 4);
   for (int i = 0; i < ld_size; i++) {
-    if (i == hl_to_ml(ld, "E")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+    if (i == ld_hl_to_ml(ld, "E")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 12);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 1,
                                            INFERENCE_SUBTOTAL_DRAW) == 34);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 1,
                                            INFERENCE_SUBTOTAL_LEAVE) == 3);
 
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
                           INFERENCE_SUBTOTAL_DRAW) == 18);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 2,
                                            INFERENCE_SUBTOTAL_DRAW) == 22);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 2,
                                            INFERENCE_SUBTOTAL_LEAVE) == 2);
 
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 3,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 3,
                           INFERENCE_SUBTOTAL_DRAW) == 4);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 3,
                                            INFERENCE_SUBTOTAL_DRAW) == 4);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 3,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 3,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 3,
                                            INFERENCE_SUBTOTAL_LEAVE) == 1);
-    } else if (i == hl_to_ml(ld, "I")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+    } else if (i == ld_hl_to_ml(ld, "I")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 18);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 1,
                                            INFERENCE_SUBTOTAL_DRAW) == 31);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 1,
                                            INFERENCE_SUBTOTAL_LEAVE) == 3);
 
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
                           INFERENCE_SUBTOTAL_DRAW) == 12);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 2,
                                            INFERENCE_SUBTOTAL_DRAW) == 13);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 2,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 2,
                                            INFERENCE_SUBTOTAL_LEAVE) == 2);
 
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 3,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 3,
                           INFERENCE_SUBTOTAL_DRAW) == 1);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 3,
                                            INFERENCE_SUBTOTAL_DRAW) == 1);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 3,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 3,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 3,
                                            INFERENCE_SUBTOTAL_LEAVE) == 1);
     } else {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 0);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 1,
                                            INFERENCE_SUBTOTAL_DRAW) == 0);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 0);
-      assert(get_subtotal_sum_with_minimum(inference_results,
+      assert(inference_results_get_subtotal_sum_with_minimum(inference_results,
                                            INFERENCE_TYPE_LEAVE, i, 1,
                                            INFERENCE_SUBTOTAL_LEAVE) == 0);
     }
@@ -564,7 +564,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
       get_probability_for_random_minimum_draw(
           inference_results_get_bag_as_rack(inference_results),
           inference_results_get_target_known_unplayed_tiles(inference_results),
-          hl_to_ml(ld, "E"), 3, 4),
+          ld_hl_to_ml(ld, "E"), 3, 4),
       (double)4 / choose(8, 3)));
   game_reset(game);
 
@@ -585,16 +585,16 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(get_weight(equity_values) == 91);
+  assert(stat_get_weight(equity_values) == 91);
   // All letters except the 4 described above are possible, so 27 - 4 = 23
-  assert(get_cardinality(equity_values) == 23);
+  assert(stat_get_cardinality(equity_values) == 23);
   for (int i = 0; i < ld_size; i++) {
-    if (i == hl_to_ml(ld, "B") || i == hl_to_ml(ld, "K") ||
-        i == hl_to_ml(ld, "Q") || i == hl_to_ml(ld, "Z")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+    if (i == ld_hl_to_ml(ld, "B") || i == ld_hl_to_ml(ld, "K") ||
+        i == ld_hl_to_ml(ld, "Q") || i == ld_hl_to_ml(ld, "Z")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 0);
     } else {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) != 0);
     }
   }
@@ -604,8 +604,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // Partially known leaves that are on the player's rack
   // before the inference_results are not removed from the bag, so
   // we have to remove it here.
-  set_rack_to_string(ld, player0_rack, "?");
-  bag_draw_letter(bag, hl_to_ml(ld, "?"), 0);
+  rack_set_to_string(ld, player0_rack, "?");
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
   load_config_or_die(config,
                      "setoptions rack GRIND pindex 0 score 18 exch 0 eq 0");
   status = infer_for_test(config, game, inference_results);
@@ -616,26 +616,26 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(get_weight(equity_values) == 2);
-  assert(get_cardinality(equity_values) == 1);
-  set_rack_to_string(ld, rack, "X?");
+  assert(stat_get_weight(equity_values) == 2);
+  assert(stat_get_cardinality(equity_values) == 1);
+  rack_set_to_string(ld, rack, "X?");
   assert(
-      within_epsilon(get_mean(equity_values), klv_get_leave_value(klv, rack)));
+      within_epsilon(stat_get_mean(equity_values), klv_get_leave_value(klv, rack)));
   for (int i = 0; i < ld_size; i++) {
-    if (i == hl_to_ml(ld, "?") || i == hl_to_ml(ld, "X")) {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+    if (i == ld_hl_to_ml(ld, "?") || i == ld_hl_to_ml(ld, "X")) {
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 2);
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_LEAVE) == 1);
     } else {
-      assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
+      assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE, i, 1,
                           INFERENCE_SUBTOTAL_DRAW) == 0);
     }
   }
   game_reset(game);
 
-  set_rack_to_string(ld, player0_rack, "H");
-  bag_draw_letter(bag, hl_to_ml(ld, "H"), 0);
+  rack_set_to_string(ld, player0_rack, "H");
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "H"), 0);
   load_config_or_die(config,
                      "setoptions rack RIN pindex 0 score 6 exch 0 eq 0");
   status = infer_for_test(config, game, inference_results);
@@ -650,75 +650,75 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(get_weight(equity_values) == 660);
-  assert(get_cardinality(equity_values) == 3);
-  set_rack_to_string(ld, rack, "?HIR");
+  assert(stat_get_weight(equity_values) == 660);
+  assert(stat_get_cardinality(equity_values) == 3);
+  rack_set_to_string(ld, rack, "?HIR");
   double bhir_value = klv_get_leave_value(klv, rack);
   double bhir_weighted_value = bhir_value * 160;
-  set_rack_to_string(ld, rack, "?HNR");
+  rack_set_to_string(ld, rack, "?HNR");
   double bhnr_value = klv_get_leave_value(klv, rack);
   double bhnr_weighted_value = bhnr_value * 100;
-  set_rack_to_string(ld, rack, "HINR");
+  rack_set_to_string(ld, rack, "HINR");
   double hirn_value = klv_get_leave_value(klv, rack);
   double hirn_weighted_value = hirn_value * 400;
   double mean_rin_leave_value =
       (bhir_weighted_value + bhnr_weighted_value + hirn_weighted_value) / 660;
-  assert(within_epsilon(get_mean(equity_values), mean_rin_leave_value));
+  assert(within_epsilon(stat_get_mean(equity_values), mean_rin_leave_value));
 
   // Test exchanges
   game_load_cgp(game, VS_JEREMY);
   // Take out good letters and throw in bad ones to force certain
   // racks to have exchange as the best play
-  bag_draw_letter(bag, hl_to_ml(ld, "?"), 0);
-  bag_draw_letter(bag, hl_to_ml(ld, "?"), 0);
-  bag_draw_letter(bag, hl_to_ml(ld, "E"), 0);
-  bag_draw_letter(bag, hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "E"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
 
-  bag_add_letter(bag, hl_to_ml(ld, "Q"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "W"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "W"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "V"), 0);
-  bag_add_letter(bag, hl_to_ml(ld, "V"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "Q"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
 
-  reset_rack(rack);
+  rack_reset(rack);
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " pindex 0 score 0 exch 6 eq 0");
   status = infer_for_test(config, game, inference_results);
 
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Keeping any one of D, H, R, or S is valid
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                      hl_to_ml(ld, "D"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                      hl_to_ml(ld, "H"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                      hl_to_ml(ld, "R"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                      hl_to_ml(ld, "S"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
+                      ld_hl_to_ml(ld, "D"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
+                      ld_hl_to_ml(ld, "H"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
+                      ld_hl_to_ml(ld, "R"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
+                      ld_hl_to_ml(ld, "S"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
 
   // There are exchanges where throwing back at least one
   // of these is correct
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
-                      hl_to_ml(ld, "D"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
-                      hl_to_ml(ld, "L"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
-                      hl_to_ml(ld, "Q"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
-                      hl_to_ml(ld, "V"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
-                      hl_to_ml(ld, "W"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
+                      ld_hl_to_ml(ld, "D"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
+                      ld_hl_to_ml(ld, "L"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
+                      ld_hl_to_ml(ld, "Q"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
+                      ld_hl_to_ml(ld, "V"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
+                      ld_hl_to_ml(ld, "W"), 1, INFERENCE_SUBTOTAL_DRAW) != 0);
 
   // Exchanges with the I are never correct
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
-                      hl_to_ml(ld, "I"), 1, INFERENCE_SUBTOTAL_DRAW) == 0);
-  assert(get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
-                      hl_to_ml(ld, "I"), 1, INFERENCE_SUBTOTAL_DRAW) == 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
+                      ld_hl_to_ml(ld, "I"), 1, INFERENCE_SUBTOTAL_DRAW) == 0);
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_EXCHANGED,
+                      ld_hl_to_ml(ld, "I"), 1, INFERENCE_SUBTOTAL_DRAW) == 0);
 
   game_reset(game);
 
-  destroy_stat(letter_stat);
-  destroy_rack(rack);
+  stat_destroy(letter_stat);
+  rack_destroy(rack);
   inference_results_destroy(inference_results);
   game_destroy(game);
   config_destroy(config);

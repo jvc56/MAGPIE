@@ -146,9 +146,9 @@ void test_load_cgp() {
 void test_game_main() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  const LetterDistribution *ld = config_get_letter_distribution(config);
+  const LetterDistribution *ld = config_get_ld(config);
   Game *game = game_create(config);
-  Rack *rack = create_rack(letter_distribution_get_size(ld));
+  Rack *rack = rack_create(ld_get_size(ld));
   cgp_parse_status_t cgp_parse_status;
 
   Rack *player0_rack = player_get_rack(game_get_player(game, 0));
@@ -164,17 +164,17 @@ void test_game_main() {
   // Test opening racks
   cgp_parse_status = game_load_cgp(game, OPENING_CGP);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
-  set_rack_to_string(ld, rack, "ABCDEFG");
+  rack_set_to_string(ld, rack, "ABCDEFG");
   assert(equal_rack(rack, player0_rack));
-  set_rack_to_string(ld, rack, "HIJKLM?");
+  rack_set_to_string(ld, rack, "HIJKLM?");
   assert(equal_rack(rack, player1_rack));
 
   // Test CGP with excessive whitespace
   cgp_parse_status = game_load_cgp(game, EXCESSIVE_WHITESPACE_CGP);
   assert(cgp_parse_status == CGP_PARSE_STATUS_SUCCESS);
-  set_rack_to_string(ld, rack, "ABCDEFG");
+  rack_set_to_string(ld, rack, "ABCDEFG");
   assert(equal_rack(rack, player0_rack));
-  set_rack_to_string(ld, rack, "HIJKLM?");
+  rack_set_to_string(ld, rack, "HIJKLM?");
   assert(equal_rack(rack, player1_rack));
   assert(game_get_consecutive_scoreless_turns(game) == 4);
 
@@ -184,7 +184,7 @@ void test_game_main() {
   assert(game_get_consecutive_scoreless_turns(game) == 1);
   game_reset(game);
 
-  destroy_rack(rack);
+  rack_destroy(rack);
   game_destroy(game);
   config_destroy(config);
 }

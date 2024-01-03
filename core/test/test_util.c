@@ -46,7 +46,7 @@ void set_row(Game *game, int row, const char *row_content) {
   for (size_t i = 0; i < string_length(row_content); i++) {
     if (row_content[i] != ' ') {
       letter[0] = row_content[i];
-      board_set_letter(board, row, i, hl_to_ml(ld, letter));
+      board_set_letter(board, row, i, ld_hl_to_ml(ld, letter));
       board_increment_tiles_played(board, 1);
     }
   }
@@ -71,7 +71,7 @@ int compare_moves_for_sml(const void *a, const void *b) {
   const Move *move_b = *(const Move **)b;
 
   // Compare moves based on their scores
-  return get_score(move_b) - get_score(move_a);
+  return move_get_score(move_b) - move_get_score(move_a);
 }
 
 // Function to sort the moves in the SortedMoveList
@@ -85,7 +85,7 @@ SortedMoveList *create_sorted_move_list(MoveList *ml) {
   sorted_move_list->moves = malloc_or_die((sizeof(Move *)) * (number_of_moves));
   sorted_move_list->count = number_of_moves;
   for (int i = number_of_moves - 1; i >= 0; i--) {
-    Move *move = pop_move(ml);
+    Move *move = move_list_pop_move(ml);
     sorted_move_list->moves[i] = move;
   }
   return sorted_move_list;
@@ -97,11 +97,11 @@ void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
 }
 
 void print_move_list(const Board *board,
-                     const LetterDistribution *letter_distribution,
+                     const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length) {
   StringBuilder *move_list_string = create_string_builder();
   for (int i = 0; i < move_list_length; i++) {
-    string_builder_add_move(board, sml->moves[i], letter_distribution,
+    string_builder_add_move(board, sml->moves[i], ld,
                             move_list_string);
     string_builder_add_string(move_list_string, "\n");
   }
@@ -127,20 +127,20 @@ void print_inference(const LetterDistribution *ld,
 }
 
 void sort_and_print_move_list(const Board *board,
-                              const LetterDistribution *letter_distribution,
+                              const LetterDistribution *ld,
                               MoveList *ml) {
   SortedMoveList *sml = create_sorted_move_list(ml);
-  print_move_list(board, letter_distribution, sml, sml->count);
+  print_move_list(board, ld, sml, sml->count);
   destroy_sorted_move_list(sml);
 }
 
 void play_top_n_equity_move(Game *game, int n) {
-  MoveList *move_list = create_move_list(n + 1);
+  MoveList *move_list = move_list_create(n + 1);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
   SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
   play_move(sorted_move_list->moves[n], game);
   destroy_sorted_move_list(sorted_move_list);
-  destroy_move_list(move_list);
+  move_list_destroy(move_list);
 }
 
 void load_cgp_or_die(Game *game, const char *cgp) {
@@ -150,12 +150,12 @@ void load_cgp_or_die(Game *game, const char *cgp) {
   }
 }
 
-void draw_rack_to_string(const LetterDistribution *letter_distribution,
+void draw_rack_to_string(const LetterDistribution *ld,
                          Bag *bag, Rack *rack, char *letters,
                          int player_index) {
 
   uint8_t mls[MAX_BAG_SIZE];
-  int num_mls = str_to_machine_letters(letter_distribution, letters, false, mls,
+  int num_mls = ld_str_to_mls(ld, letters, false, mls,
                                        MAX_BAG_SIZE);
   for (int i = 0; i < num_mls; i++) {
     // For tests we assume that player_index == player_draw_index
@@ -181,23 +181,23 @@ bool equal_rack(const Rack *expected_rack, const Rack *actual_rack) {
     printf("not empty\n");
     return false;
   }
-  if (get_number_of_letters(expected_rack) !=
-      get_number_of_letters(actual_rack)) {
-    printf("num letters: %d != %d\n", get_number_of_letters(expected_rack),
-           get_number_of_letters(actual_rack));
+  if (rack_get_total_letters(expected_rack) !=
+      rack_get_total_letters(actual_rack)) {
+    printf("num letters: %d != %d\n", rack_get_total_letters(expected_rack),
+           rack_get_total_letters(actual_rack));
     return false;
   }
-  if (get_array_size(expected_rack) != get_array_size(actual_rack)) {
-    printf("sizes: %d != %d\n", get_array_size(expected_rack),
-           get_array_size(actual_rack));
+  if (rack_get_dist_size(expected_rack) != rack_get_dist_size(actual_rack)) {
+    printf("sizes: %d != %d\n", rack_get_dist_size(expected_rack),
+           rack_get_dist_size(actual_rack));
     return false;
   }
-  for (int i = 0; i < get_array_size(expected_rack); i++) {
-    if (get_number_of_letter(expected_rack, i) !=
-        get_number_of_letter(actual_rack, i)) {
+  for (int i = 0; i < rack_get_dist_size(expected_rack); i++) {
+    if (rack_get_letter(expected_rack, i) !=
+        rack_get_letter(actual_rack, i)) {
       printf("different: %d: %d != %d\n", i,
-             get_number_of_letter(expected_rack, i),
-             get_number_of_letter(actual_rack, i));
+             rack_get_letter(expected_rack, i),
+             rack_get_letter(actual_rack, i));
       return false;
     }
   }
@@ -226,24 +226,24 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
 
   assert(b1_number_of_tiles_remaining == b2_number_of_tiles_remaining);
 
-  Rack *rack = create_rack(rack_array_size);
+  Rack *rack = rack_create(rack_array_size);
 
   for (int i = 0; i < b1_number_of_tiles_remaining; i++) {
     uint8_t letter = bag_draw_random_letter(b1_copy, 0);
-    add_letter_to_rack(rack, letter);
+    rack_add_letter(rack, letter);
   }
 
   for (int i = 0; i < b2_number_of_tiles_remaining; i++) {
     uint8_t letter = bag_draw_random_letter(b2_copy, 0);
-    assert(get_number_of_letter(rack, letter) > 0);
-    take_letter_from_rack(rack, letter);
+    assert(rack_get_letter(rack, letter) > 0);
+    rack_take_letter(rack, letter);
   }
 
   assert(rack_is_empty(rack));
 
   bag_destroy(b1_copy);
   bag_destroy(b2_copy);
-  destroy_rack(rack);
+  rack_destroy(rack);
 }
 
 // Assumes b1 and b2 use the same lexicon and therefore

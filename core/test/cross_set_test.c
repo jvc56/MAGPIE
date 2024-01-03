@@ -14,7 +14,7 @@
 #include "test_util.h"
 
 // this test func only works for single-char alphabets
-uint64_t cross_set_from_string(const LetterDistribution *letter_distribution,
+uint64_t cross_set_from_string(const LetterDistribution *ld,
                                const char *letters) {
   if (strings_equal(letters, "TRIVIAL")) {
     return TRIVIAL_CROSS_SET;
@@ -25,7 +25,7 @@ uint64_t cross_set_from_string(const LetterDistribution *letter_distribution,
 
   for (size_t i = 0; i < string_length(letters); i++) {
     letter[0] = letters[i];
-    board_set_cross_set_letter(&c, hl_to_ml(letter_distribution, letter));
+    board_set_cross_set_letter(&c, ld_hl_to_ml(ld, letter));
   }
   return c;
 }
@@ -45,7 +45,7 @@ void set_col(Game *game, int col, const char *col_content) {
   for (size_t i = 0; i < string_length(col_content); i++) {
     if (col_content[i] != ' ') {
       letter[0] = col_content[i];
-      board_set_letter(board, i, col, hl_to_ml(ld, letter));
+      board_set_letter(board, i, col, ld_hl_to_ml(ld, letter));
       board_increment_tiles_played(board, 1);
     }
   }
@@ -59,8 +59,7 @@ void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
 
   int cross_set_index = board_get_cross_set_index(false, player_index);
   if (run_gcs) {
-    gen_cross_set(player_get_kwg(game_get_player(game, player_index)), ld,
-                  board, row, col, dir, cross_set_index);
+    game_gen_cross_set(game, row, col, dir, cross_set_index);
   }
   uint64_t expected_cross_set = cross_set_from_string(ld, letters);
   uint64_t actual_cross_set =
@@ -173,9 +172,9 @@ void test_cross_set() {
   board_set_letter(board, 9, 10, 0);
   board_set_letter(board, 10, 10, 4);
   board_set_letter(board, 11, 10, 11);
-  gen_cross_set(kwg, ld, board, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0);
+  game_gen_cross_set(game, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0);
   board_transpose(board);
-  gen_cross_set(kwg, ld, board, 10, 7, BOARD_VERTICAL_DIRECTION, 0);
+  game_gen_cross_set(game, 10, 7, BOARD_VERTICAL_DIRECTION, 0);
   board_transpose(board);
   assert(board_get_cross_set(board, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0) == 0);
   assert(board_get_cross_set(board, 7, 10, BOARD_VERTICAL_DIRECTION, 0) == 0);

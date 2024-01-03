@@ -11,7 +11,7 @@
 void test_alphabet() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  LetterDistribution *ld = config_get_letter_distribution(config);
+  LetterDistribution *ld = config_get_ld(config);
   // Test blank
   assert(get_blanked_machine_letter(1) == (1 | BLANK_MASK));
   assert(get_blanked_machine_letter(5) == (5 | BLANK_MASK));
@@ -22,13 +22,13 @@ void test_alphabet() {
 
   // Test val
   // blank
-  assert(hl_to_ml(ld, "?") == BLANK_MACHINE_LETTER);
+  assert(ld_hl_to_ml(ld, "?") == BLANK_MACHINE_LETTER);
   // blank
-  assert(hl_to_ml(ld, "a") == get_blanked_machine_letter(1));
-  assert(hl_to_ml(ld, "b") == get_blanked_machine_letter(2));
+  assert(ld_hl_to_ml(ld, "a") == get_blanked_machine_letter(1));
+  assert(ld_hl_to_ml(ld, "b") == get_blanked_machine_letter(2));
   // not blank
-  assert(hl_to_ml(ld, "C") == 3);
-  assert(hl_to_ml(ld, "D") == 4);
+  assert(ld_hl_to_ml(ld, "C") == 3);
+  assert(ld_hl_to_ml(ld, "D") == 4);
 
   // Test user visible
   // separation token
@@ -63,7 +63,7 @@ void test_alphabet() {
   Config *catalan_config = create_config_or_die(
       "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
   LetterDistribution *catalan_ld =
-      config_get_letter_distribution(catalan_config);
+      config_get_ld(catalan_config);
 
   string_builder_add_user_visible_letter(catalan_ld, letter,
                                          get_blanked_machine_letter(13));

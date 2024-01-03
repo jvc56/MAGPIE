@@ -14,7 +14,7 @@
 #include "rack_string.h"
 
 void string_builder_add_player_row(
-    const LetterDistribution *letter_distribution, const Player *player,
+    const LetterDistribution *ld, const Player *player,
     StringBuilder *game_string, bool player_on_turn) {
 
   const char *player_on_turn_marker = "-> ";
@@ -37,14 +37,14 @@ void string_builder_add_player_row(
   string_builder_add_formatted_string(
       game_string, "%s%s%*s", player_marker, display_player_name,
       25 - string_length(display_player_name), "");
-  string_builder_add_rack(player_rack, letter_distribution, game_string);
+  string_builder_add_rack(player_rack, ld, game_string);
   string_builder_add_formatted_string(game_string, "%*s%d",
-                                      10 - get_number_of_letters(player_rack),
+                                      10 - rack_get_total_letters(player_rack),
                                       "", player_get_score(player));
   free(display_player_name);
 }
 
-void string_builder_add_board_row(const LetterDistribution *letter_distribution,
+void string_builder_add_board_row(const LetterDistribution *ld,
                                   const Board *board,
                                   StringBuilder *game_string, int row) {
   string_builder_add_formatted_string(game_string, "%2d|", row + 1);
@@ -54,7 +54,7 @@ void string_builder_add_board_row(const LetterDistribution *letter_distribution,
       string_builder_add_char(game_string,
                               CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i]);
     } else {
-      string_builder_add_user_visible_letter(letter_distribution, game_string,
+      string_builder_add_user_visible_letter(ld, game_string,
                                              current_letter);
     }
     string_builder_add_string(game_string, " ");
@@ -71,7 +71,7 @@ void string_builder_add_move_with_rank_and_equity(Game *game,
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(board, move, ld, game_string);
-  string_builder_add_formatted_string(game_string, " %0.2f", get_equity(move));
+  string_builder_add_formatted_string(game_string, " %0.2f", move_get_equity(move));
 }
 
 void string_builder_add_game(Game *game, MoveList *move_list,
@@ -130,7 +130,7 @@ char *ucgi_static_moves(Game *game, MoveList *move_list) {
 
     string_builder_add_formatted_string(moves_string_builder,
                                         " sc %d eq %.3f it 0\n",
-                                        get_score(move), get_equity(move));
+                                        move_get_score(move), move_get_equity(move));
   }
   string_builder_add_string(moves_string_builder, "bestmove ");
   string_builder_add_ucgi_move(move_list_get_move(move_list, 0), board, ld,
@@ -145,6 +145,6 @@ char *ucgi_static_moves(Game *game, MoveList *move_list) {
 void print_ucgi_static_moves(Game *game, MoveList *move_list,
                              ThreadControl *thread_control) {
   char *starting_moves_string_pointer = ucgi_static_moves(game, move_list);
-  print_to_outfile(thread_control, starting_moves_string_pointer);
+  thread_control_print(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
 }

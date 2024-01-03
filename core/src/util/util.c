@@ -10,12 +10,12 @@
 #include "log.h"
 
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
-  for (int i = 0; i < get_tiles_length(move); i++) {
-    if (get_tile(move, i) != PLAYED_THROUGH_MARKER) {
-      if (is_blanked(get_tile(move, i))) {
-        take_letter_from_rack(rack, BLANK_MACHINE_LETTER);
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
+      if (get_is_blanked(move_get_tile(move, i))) {
+        rack_take_letter(rack, BLANK_MACHINE_LETTER);
       } else {
-        take_letter_from_rack(rack, get_tile(move, i));
+        rack_take_letter(rack, move_get_tile(move, i));
       }
     }
   }
@@ -89,4 +89,14 @@ double string_to_double(const char *str) {
     log_fatal("called string_to_double on NULL string\n");
   }
   return strtof(str, NULL);
+}
+
+uint64_t choose(uint64_t n, uint64_t k) {
+  if (n < k) {
+    return 0;
+  }
+  if (k == 0) {
+    return 1;
+  }
+  return (n * choose(n - 1, k - 1)) / k;
 }

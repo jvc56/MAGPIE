@@ -27,7 +27,7 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
                      ThreadControl *thread_control, bool best_known_play) {
   sim_results_sort_plays_by_win_rate(sim_results);
 
-  Timer *timer = get_timer(thread_control);
+  Timer *timer = thread_control_get_timer(thread_control);
   mtimer_stop(timer);
 
   double elapsed = mtimer_elapsed_seconds(timer);
@@ -49,13 +49,13 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
   for (int i = 0; i < number_of_simmed_plays; i++) {
     const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
     Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
-    double wp_mean = get_mean(win_pct_stat) * 100.0;
-    double wp_se = get_standard_error(win_pct_stat, STATS_Z99) * 100.0;
+    double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
+    double wp_se = stat_get_stderr(win_pct_stat, STATS_Z99) * 100.0;
 
     Stat *equity_stat = simmed_play_get_equity_stat(play);
-    double eq_mean = get_mean(equity_stat);
-    double eq_se = get_standard_error(equity_stat, STATS_Z99);
-    uint64_t niters = get_cardinality(equity_stat);
+    double eq_mean = stat_get_mean(equity_stat);
+    double eq_se = stat_get_stderr(equity_stat, STATS_Z99);
+    uint64_t niters = stat_get_cardinality(equity_stat);
 
     Move *move = simmed_play_get_move(play);
     string_builder_add_string(sim_stats_string_builder, "info currmove ");
@@ -65,16 +65,16 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
         sim_stats_string_builder,
         " sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %llu "
         "ig %d ",
-        get_score(move), wp_mean, wp_se, eq_mean, eq_se,
+        move_get_score(move), wp_mean, wp_se, eq_mean, eq_se,
         // need cast for WASM:
         (long long unsigned int)niters, ignore);
     for (int i = 0; i < sim_results_get_max_plies(sim_results); i++) {
       string_builder_add_formatted_string(
           sim_stats_string_builder,
           "ply%d-scm %.3f ply%d-scd %.3f ply%d-bp %.3f ", i + 1,
-          get_mean(simmed_play_get_score_stat(play, i)), i + 1,
-          get_stdev(simmed_play_get_score_stat(play, i)), i + 1,
-          get_mean(simmed_play_get_bingo_stat(play, i)) * 100.0);
+          stat_get_mean(simmed_play_get_score_stat(play, i)), i + 1,
+          stat_get_stdev(simmed_play_get_score_stat(play, i)), i + 1,
+          stat_get_mean(simmed_play_get_bingo_stat(play, i)) * 100.0);
     }
     string_builder_add_string(sim_stats_string_builder, "\n");
   }
@@ -98,6 +98,6 @@ void print_ucgi_sim_stats(Game *game, SimResults *sim_results,
                           ThreadControl *thread_control, bool print_best_play) {
   char *sim_stats_string =
       ucgi_sim_stats(game, sim_results, thread_control, print_best_play);
-  print_to_outfile(thread_control, sim_stats_string);
+  thread_control_print(thread_control, sim_stats_string);
   free(sim_stats_string);
 }

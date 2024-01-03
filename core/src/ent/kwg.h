@@ -8,10 +8,11 @@
 struct KWG;
 typedef struct KWG KWG;
 
-KWG *create_kwg(const char *kwg_name);
-KWG *create_empty_kwg();
+KWG *kwg_create(const char *kwg_name);
+KWG *kwg_create_empty();
+void kwg_destroy(KWG *kwg);
 void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes, FILE *stream);
-void destroy_kwg(KWG *kwg);
+
 bool kwg_is_end(const KWG *kwg, int node_index);
 bool kwg_accepts(const KWG *kwg, int node_index);
 int kwg_arc_index(const KWG *kwg, int node_index);

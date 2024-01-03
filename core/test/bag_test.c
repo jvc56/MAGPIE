@@ -18,8 +18,8 @@
 
 void test_add_letter(const Config *config, Bag *bag, char *r,
                      char *expected_bag_string, int player_index) {
-  LetterDistribution *ld = config_get_letter_distribution(config);
-  bag_add_letter(bag, hl_to_ml(ld, r), player_index);
+  LetterDistribution *ld = config_get_ld(config);
+  bag_add_letter(bag, ld_hl_to_ml(ld, r), player_index);
   StringBuilder *bag_string = create_string_builder();
   string_builder_add_bag(bag, ld, bag_string);
   assert_strings_equal(string_builder_peek(bag_string), expected_bag_string);
@@ -33,29 +33,29 @@ int get_drawn_tile_index(int drawn_tiles, int player_index) {
 void test_bag() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  const LetterDistribution *ld = config_get_letter_distribution(config);
-  int ld_size = letter_distribution_get_size(ld);
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
   Bag *bag = bag_create(ld);
-  Rack *rack = create_rack(ld_size);
+  Rack *rack = rack_create(ld_size);
 
   for (int i = 0; i < ld_size; i++) {
-    assert((int)letter_distribution_get_distribution(ld, i) ==
+    assert((int)ld_get_dist(ld, i) ==
            bag_get_letter(bag, i));
   }
 
   int number_of_remaining_tiles = bag_get_tiles(bag);
   for (int k = 0; k < number_of_remaining_tiles; k++) {
     uint8_t letter = bag_draw_random_letter(bag, 0);
-    add_letter_to_rack(rack, letter);
+    rack_add_letter(rack, letter);
   }
 
   for (int i = 0; i < ld_size; i++) {
-    assert((int)letter_distribution_get_distribution(ld, i) ==
-           get_number_of_letter(rack, i));
+    assert((int)ld_get_dist(ld, i) ==
+           rack_get_letter(rack, i));
   }
 
   bag_reset(ld, bag);
-  reset_rack(rack);
+  rack_reset(rack);
 
   while (!bag_is_empty(bag)) {
     bag_draw_random_letter(bag, bag_get_tiles(bag) % 2);
@@ -72,7 +72,7 @@ void test_bag() {
   test_add_letter(config, bag, "z", "ABFZ???", 0);
 
   bag_reset(ld, bag);
-  reset_rack(rack);
+  rack_reset(rack);
 
   Bag *copy_of_bag = bag_duplicate(bag);
 
@@ -191,6 +191,6 @@ void test_bag() {
 
   bag_destroy(bag);
   bag_destroy(copy_of_bag);
-  destroy_rack(rack);
+  rack_destroy(rack);
   config_destroy(config);
 }

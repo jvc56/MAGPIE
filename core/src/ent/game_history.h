@@ -42,19 +42,19 @@ GameHistoryPlayer *game_history_player_create(const char *name,
                                               const char *nickname);
 void game_history_player_destroy(GameHistoryPlayer *player);
 
-void game_history_set_player_name(GameHistoryPlayer *player, const char *name);
-const char *game_history_get_player_name(const GameHistoryPlayer *player);
+void game_history_player_set_name(GameHistoryPlayer *player, const char *name);
+const char *game_history_player_get_name(const GameHistoryPlayer *player);
 
-void game_history_set_player_nickname(GameHistoryPlayer *player,
+void game_history_player_set_nickname(GameHistoryPlayer *player,
                                       const char *nickname);
-const char *game_history_get_player_nickname(const GameHistoryPlayer *player);
+const char *game_history_player_get_nickname(const GameHistoryPlayer *player);
 
-void game_history_set_player_score(GameHistoryPlayer *player, int score);
-int game_history_get_player_score(const GameHistoryPlayer *player);
+void game_history_player_set_score(GameHistoryPlayer *player, int score);
+int game_history_player_get_score(const GameHistoryPlayer *player);
 
-void game_history_set_player_last_known_rack(GameHistoryPlayer *player,
+void game_history_player_set_last_known_rack(GameHistoryPlayer *player,
                                              Rack *rack);
-Rack *game_history_get_player_last_known_rack(const GameHistoryPlayer *player);
+Rack *game_history_player_get_last_known_rack(const GameHistoryPlayer *player);
 
 struct GameHistory;
 typedef struct GameHistory GameHistory;
@@ -79,10 +79,10 @@ void game_history_set_lexicon_name(GameHistory *history,
                                    const char *lexicon_name);
 const char *game_history_get_lexicon_name(const GameHistory *history);
 
-void game_history_set_letter_distribution_name(
-    GameHistory *history, const char *letter_distribution_name);
+void game_history_set_ld_name(
+    GameHistory *history, const char *ld_name);
 const char *
-game_history_get_letter_distribution_name(const GameHistory *history);
+game_history_get_ld_name(const GameHistory *history);
 
 void game_history_set_game_variant(GameHistory *history,
                                    game_variant_t game_variant);
@@ -101,10 +101,10 @@ void game_history_set_number_of_events(GameHistory *history,
                                        int number_of_events);
 int game_history_get_number_of_events(const GameHistory *history);
 
-void game_history_set_letter_distribution(
-    GameHistory *history, LetterDistribution *letter_distribution);
+void game_history_set_ld(
+    GameHistory *history, LetterDistribution *ld);
 LetterDistribution *
-game_history_get_letter_distribution(const GameHistory *history);
+game_history_get_ld(const GameHistory *history);
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 

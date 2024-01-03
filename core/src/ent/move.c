@@ -29,25 +29,31 @@ struct MoveList {
   Move **moves;
 };
 
-game_event_t get_move_type(const Move *move) { return move->move_type; }
+Move *move_create() { return malloc_or_die(sizeof(Move)); }
 
-int get_score(const Move *move) { return move->score; }
+void move_destroy(Move *move) { free(move); }
 
-int get_row_start(const Move *move) { return move->row_start; }
+game_event_t move_get_type(const Move *move) { return move->move_type; }
 
-int get_col_start(const Move *move) { return move->col_start; }
+int move_get_score(const Move *move) { return move->score; }
+
+int move_get_row_start(const Move *move) { return move->row_start; }
+
+int move_get_col_start(const Move *move) { return move->col_start; }
 
 int move_get_tiles_played(const Move *move) { return move->tiles_played; }
 
-int get_tiles_length(const Move *move) { return move->tiles_length; }
+int move_get_tiles_length(const Move *move) { return move->tiles_length; }
 
-double get_equity(const Move *move) { return move->equity; }
+double move_get_equity(const Move *move) { return move->equity; }
 
-int get_dir(const Move *move) { return move->dir; }
+int move_get_dir(const Move *move) { return move->dir; }
 
-uint8_t get_tile(const Move *move, int index) { return move->tiles[index]; }
+uint8_t move_get_tile(const Move *move, int index) {
+  return move->tiles[index];
+}
 
-Move *get_spare_move(const MoveList *ml) { return ml->spare_move; }
+Move *move_list_get_spare_move(const MoveList *ml) { return ml->spare_move; }
 
 int move_list_get_count(const MoveList *ml) { return ml->count; }
 
@@ -87,52 +93,6 @@ void move_set_tile_at_index(Move *move, uint8_t tile, int index) {
   if (index >= 0 && index < BOARD_DIM) {
     move->tiles[index] = tile;
   }
-}
-
-Move *create_move() { return malloc_or_die(sizeof(Move)); }
-
-void destroy_move(Move *move) { free(move); }
-
-void create_moves(MoveList *ml, int capacity) {
-  ml->capacity = capacity + 1;
-  ml->moves = malloc_or_die(sizeof(Move *) * ml->capacity);
-  for (int i = 0; i < ml->capacity; i++) {
-    ml->moves[i] = create_move();
-  }
-}
-
-void destroy_moves(MoveList *ml) {
-  for (int i = 0; i < ml->capacity; i++) {
-    destroy_move(ml->moves[i]);
-  }
-  free(ml->moves);
-}
-
-void update_move_list(MoveList *ml, int new_capacity) {
-  if (ml->capacity != new_capacity) {
-    destroy_moves(ml);
-    create_moves(ml, new_capacity);
-  }
-}
-
-MoveList *create_move_list(int capacity) {
-  MoveList *ml = malloc_or_die(sizeof(MoveList));
-  ml->count = 0;
-  ml->spare_move = create_move();
-  create_moves(ml, capacity);
-  ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
-  return ml;
-}
-
-void destroy_move_list(MoveList *ml) {
-  destroy_moves(ml);
-  destroy_move(ml->spare_move);
-  free(ml);
-}
-
-void reset_move_list(MoveList *ml) {
-  ml->count = 0;
-  ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
 }
 
 bool within_epsilon_for_equity(double a, double board) {
@@ -175,6 +135,80 @@ int compare_moves(const Move *move_1, const Move *move_2) {
   return 0;
 }
 
+void move_set_all(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
+                  int score, int row_start, int col_start, int tiles_played,
+                  int dir, game_event_t move_type) {
+  move->score = score;
+  move->row_start = row_start;
+  move->col_start = col_start;
+  move->tiles_played = tiles_played;
+  move->dir = dir;
+  move->move_type = move_type;
+  if (move_type == GAME_EVENT_EXCHANGE) {
+    move->tiles_length = move->tiles_played;
+  } else {
+    move->tiles_length = rightstrip - leftstrip + 1;
+  }
+  if (move_type != GAME_EVENT_PASS) {
+    for (int i = 0; i < move->tiles_length; i++) {
+      move->tiles[i] = strip[leftstrip + i];
+    }
+  }
+}
+
+void move_copy(Move *dest_move, const Move *src_move) {
+  for (int i = 0; i < (BOARD_DIM); i++) {
+    dest_move->tiles[i] = src_move->tiles[i];
+  }
+  dest_move->score = src_move->score;
+  dest_move->row_start = src_move->row_start;
+  dest_move->col_start = src_move->col_start;
+  dest_move->tiles_played = src_move->tiles_played;
+  dest_move->tiles_length = src_move->tiles_length;
+  dest_move->equity = src_move->equity;
+  dest_move->dir = src_move->dir;
+  dest_move->move_type = src_move->move_type;
+}
+
+void move_set_as_pass(Move *move) {
+  move_set_all(move, NULL, 0, 0, 0, 0, 0, 0, 0, GAME_EVENT_PASS);
+}
+
+void create_moves_for_move_list(MoveList *ml, int capacity) {
+  ml->capacity = capacity + 1;
+  ml->moves = malloc_or_die(sizeof(Move *) * ml->capacity);
+  for (int i = 0; i < ml->capacity; i++) {
+    ml->moves[i] = move_create();
+  }
+}
+
+void destroy_moves_for_move_list(MoveList *ml) {
+  for (int i = 0; i < ml->capacity; i++) {
+    move_destroy(ml->moves[i]);
+  }
+  free(ml->moves);
+}
+
+MoveList *move_list_create(int capacity) {
+  MoveList *ml = malloc_or_die(sizeof(MoveList));
+  ml->count = 0;
+  ml->spare_move = move_create();
+  create_moves_for_move_list(ml, capacity);
+  ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
+  return ml;
+}
+
+void move_list_destroy(MoveList *ml) {
+  destroy_moves_for_move_list(ml);
+  move_destroy(ml->spare_move);
+  free(ml);
+}
+
+void move_list_reset(MoveList *ml) {
+  ml->count = 0;
+  ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
+}
+
 void up_heapify(MoveList *ml, int index) {
   Move *temp;
   int parent_node = (index - 1) / 2;
@@ -213,55 +247,19 @@ void down_heapify(MoveList *ml, int parent_node) {
   }
 }
 
-void set_move(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
-              int score, int row_start, int col_start, int tiles_played,
-              int dir, game_event_t move_type) {
-  move->score = score;
-  move->row_start = row_start;
-  move->col_start = col_start;
-  move->tiles_played = tiles_played;
-  move->dir = dir;
-  move->move_type = move_type;
-  if (move_type == GAME_EVENT_EXCHANGE) {
-    move->tiles_length = move->tiles_played;
-  } else {
-    move->tiles_length = rightstrip - leftstrip + 1;
-  }
-  if (move_type != GAME_EVENT_PASS) {
-    for (int i = 0; i < move->tiles_length; i++) {
-      move->tiles[i] = strip[leftstrip + i];
-    }
-  }
+void move_list_set_spare_move_as_pass(MoveList *ml) {
+  move_set_as_pass(ml->spare_move);
 }
 
-void move_copy(Move *dest_move, const Move *src_move) {
-  for (int i = 0; i < (BOARD_DIM); i++) {
-    dest_move->tiles[i] = src_move->tiles[i];
-  }
-  dest_move->score = src_move->score;
-  dest_move->row_start = src_move->row_start;
-  dest_move->col_start = src_move->col_start;
-  dest_move->tiles_played = src_move->tiles_played;
-  dest_move->tiles_length = src_move->tiles_length;
-  dest_move->equity = src_move->equity;
-  dest_move->dir = src_move->dir;
-  dest_move->move_type = src_move->move_type;
+void move_list_set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
+                              int rightstrip, int score, int row_start,
+                              int col_start, int tiles_played, int dir,
+                              game_event_t move_type) {
+  move_set_all(ml->spare_move, strip, leftstrip, rightstrip, score, row_start,
+               col_start, tiles_played, dir, move_type);
 }
 
-void set_move_as_pass(Move *move) {
-  set_move(move, NULL, 0, 0, 0, 0, 0, 0, 0, GAME_EVENT_PASS);
-}
-
-void set_spare_move_as_pass(MoveList *ml) { set_move_as_pass(ml->spare_move); }
-
-void set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
-                    int rightstrip, int score, int row_start, int col_start,
-                    int tiles_played, int dir, game_event_t move_type) {
-  set_move(ml->spare_move, strip, leftstrip, rightstrip, score, row_start,
-           col_start, tiles_played, dir, move_type);
-}
-
-void insert_spare_move(MoveList *ml, double equity) {
+void move_list_insert_spare_move(MoveList *ml, double equity) {
   ml->spare_move->equity = equity;
 
   Move *swap = ml->moves[ml->count];
@@ -272,11 +270,11 @@ void insert_spare_move(MoveList *ml, double equity) {
   ml->count++;
 
   if (ml->count == ml->capacity) {
-    pop_move(ml);
+    move_list_pop_move(ml);
   }
 }
 
-void insert_spare_move_top_equity(MoveList *ml, double equity) {
+void move_list_insert_spare_move_top_equity(MoveList *ml, double equity) {
   ml->spare_move->equity = equity;
   if (compare_moves(ml->spare_move, ml->moves[0])) {
     Move *swap = ml->moves[0];
@@ -286,7 +284,7 @@ void insert_spare_move_top_equity(MoveList *ml, double equity) {
   }
 }
 
-Move *pop_move(MoveList *ml) {
+Move *move_list_pop_move(MoveList *ml) {
   if (ml->count == 1) {
     ml->count--;
     return ml->moves[0];
@@ -303,10 +301,10 @@ Move *pop_move(MoveList *ml) {
 
 // Converts the MoveList from a min heap
 // to a descending sorted array.
-void sort_moves(MoveList *ml) {
+void move_list_sort_moves(MoveList *ml) {
   int number_of_moves = ml->count;
   for (int i = 1; i < number_of_moves; i++) {
-    Move *move = pop_move(ml);
+    Move *move = move_list_pop_move(ml);
     // Use a swap var to preserve the spare leave pointer
     Move *swap = ml->moves[ml->count];
     ml->moves[ml->count] = move;

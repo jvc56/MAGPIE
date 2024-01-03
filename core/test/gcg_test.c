@@ -93,8 +93,8 @@ void test_parse_special_char() {
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
-  assert_strings_equal(game_history_get_player_name(player0), "césar");
-  assert_strings_equal(game_history_get_player_name(player1), "hércules");
+  assert_strings_equal(game_history_player_get_name(player0), "césar");
+  assert_strings_equal(game_history_player_get_name(player1), "hércules");
   game_history_destroy(game_history);
 }
 
@@ -105,7 +105,7 @@ void test_parse_special_utf8_no_header() {
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
-  assert(strings_equal(game_history_get_player_name(player0), "cÃ©sar"));
+  assert(strings_equal(game_history_player_get_name(player0), "cÃ©sar"));
   game_history_destroy(game_history);
 }
 
@@ -116,7 +116,7 @@ void test_parse_special_utf8_with_header() {
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
-  assert(strings_equal(game_history_get_player_name(player0), "césar"));
+  assert(strings_equal(game_history_player_get_name(player0), "césar"));
   game_history_destroy(game_history);
 }
 
@@ -129,9 +129,9 @@ void test_parse_dos_mode() {
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
   assert(
-      strings_equal(game_history_get_player_nickname(player0), "angwantibo"));
+      strings_equal(game_history_player_get_nickname(player0), "angwantibo"));
   assert(
-      strings_equal(game_history_get_player_nickname(player1), "Michal_Josko"));
+      strings_equal(game_history_player_get_nickname(player1), "Michal_Josko"));
   game_history_destroy(game_history);
 }
 
@@ -142,9 +142,9 @@ void assert_game_event(const GameHistory *game_history, int event_index,
                        int move_row_start, int move_col_start, int move_score,
                        int tiles_played, int tiles_length,
                        const char *tiles_string,
-                       const LetterDistribution *letter_distribution) {
+                       const LetterDistribution *ld) {
   GameEvent *game_event = game_history_get_event(game_history, event_index);
-  int ld_size = letter_distribution_get_size(letter_distribution);
+  int ld_size = ld_get_size(ld);
   // Game Event assertions
   assert(game_event_get_type(game_event) == event_type);
   assert(game_event_get_player_index(game_event) == player_index);
@@ -152,11 +152,11 @@ void assert_game_event(const GameHistory *game_history, int event_index,
   Rack *expected_rack = NULL;
   bool racks_match = false;
   if (string_length(rack_string) > 0) {
-    expected_rack = create_rack(ld_size);
-    set_rack_to_string(letter_distribution, expected_rack, rack_string);
+    expected_rack = rack_create(ld_size);
+    rack_set_to_string(ld, expected_rack, rack_string);
     racks_match =
         racks_are_equal(expected_rack, game_event_get_rack(game_event));
-    destroy_rack(expected_rack);
+    rack_destroy(expected_rack);
   } else {
     racks_match =
         racks_are_equal(expected_rack, game_event_get_rack(game_event));
@@ -170,21 +170,21 @@ void assert_game_event(const GameHistory *game_history, int event_index,
   const Move *move = game_event_get_move(game_event);
   if (move) {
 
-    assert(get_move_type(move) == move_type);
-    assert(get_score(move) == move_score);
+    assert(move_get_type(move) == move_type);
+    assert(move_get_score(move) == move_score);
 
     if (move_type != GAME_EVENT_PASS) {
       assert(move_get_tiles_played(move) == tiles_played);
-      assert(get_tiles_length(move) == tiles_length);
+      assert(move_get_tiles_length(move) == tiles_length);
       uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * tiles_length);
-      int number_of_machine_letters = str_to_machine_letters(
-          game_history_get_letter_distribution(game_history), tiles_string,
+      int number_of_machine_letters = ld_str_to_mls(
+          game_history_get_ld(game_history), tiles_string,
           move_type == GAME_EVENT_TILE_PLACEMENT_MOVE, machine_letters,
           tiles_length);
       bool tiles_match = number_of_machine_letters == tiles_length;
       if (tiles_match) {
         for (int i = 0; i < tiles_length; i++) {
-          tiles_match = tiles_match && get_tile(move, i) == machine_letters[i];
+          tiles_match = tiles_match && move_get_tile(move, i) == machine_letters[i];
         }
       }
       free(machine_letters);
@@ -192,9 +192,9 @@ void assert_game_event(const GameHistory *game_history, int event_index,
     }
 
     if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      assert(get_dir(move) == dir);
-      assert(get_row_start(move) == move_row_start);
-      assert(get_col_start(move) == move_col_start);
+      assert(move_get_dir(move) == dir);
+      assert(move_get_row_start(move) == move_row_start);
+      assert(move_get_col_start(move) == move_col_start);
     }
   }
 }
@@ -207,7 +207,7 @@ void test_success_standard() {
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
   const LetterDistribution *ld =
-      game_history_get_letter_distribution(game_history);
+      game_history_get_ld(game_history);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
 
@@ -217,18 +217,18 @@ void test_success_standard() {
   assert(strings_equal(game_history_get_id_auth(game_history), "io.woogles"));
   assert(strings_equal(game_history_get_uid(game_history), "p6QRjJHG"));
   assert(strings_equal(game_history_get_lexicon_name(game_history), "CSW21"));
-  assert(strings_equal(game_history_get_letter_distribution_name(game_history),
+  assert(strings_equal(game_history_get_ld_name(game_history),
                        "english"));
   assert(game_history_get_game_variant(game_history) == GAME_VARIANT_CLASSIC);
   assert(game_history_get_board_layout(game_history) ==
          BOARD_LAYOUT_CROSSWORD_GAME);
-  assert(strings_equal(game_history_get_player_nickname(player0), "HastyBot"));
-  assert(game_history_get_player_score(player0) == 516);
-  assert(!game_history_get_player_last_known_rack(player0));
-  assert(strings_equal(game_history_get_player_nickname(player1),
+  assert(strings_equal(game_history_player_get_nickname(player0), "HastyBot"));
+  assert(game_history_player_get_score(player0) == 516);
+  assert(!game_history_player_get_last_known_rack(player0));
+  assert(strings_equal(game_history_player_get_nickname(player1),
                        "RightBehindYou"));
-  assert(game_history_get_player_score(player1) == 358);
-  assert(!game_history_get_player_last_known_rack(player1));
+  assert(game_history_player_get_score(player1) == 358);
+  assert(!game_history_player_get_last_known_rack(player1));
 
   assert(game_history_get_number_of_events(game_history) == 29);
   assert_game_event(game_history, 0, GAME_EVENT_EXCHANGE, 0, 0, "DIIIILU", "",
@@ -272,7 +272,7 @@ void test_success_five_point_challenge() {
       test_parse_gcg(gcg_filename, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   const LetterDistribution *ld =
-      game_history_get_letter_distribution(game_history);
+      game_history_get_ld(game_history);
   assert_game_event(game_history, 16, GAME_EVENT_CHALLENGE_BONUS, 1, 398,
                     "DEIINRR", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0,
                     0, 0, "", ld);

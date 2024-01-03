@@ -69,11 +69,11 @@ typedef struct Inference {
 } Inference;
 
 void destroy_inference(Inference *inference) {
-  destroy_rack(inference->current_target_leave);
-  destroy_rack(inference->current_target_exchanged);
-  destroy_rack(inference->bag_as_rack);
+  rack_destroy(inference->current_target_leave);
+  rack_destroy(inference->current_target_exchanged);
+  rack_destroy(inference->bag_as_rack);
   if (inference->move_list) {
-    destroy_move_list(inference->move_list);
+    move_list_destroy(inference->move_list);
   }
   free(inference);
 }
@@ -84,94 +84,31 @@ void destroy_inference_copy(Inference *inference) {
   destroy_inference(inference);
 }
 
-uint64_t choose(uint64_t n, uint64_t k) {
-  if (n < k) {
-    return 0;
-  }
-  if (k == 0) {
-    return 1;
-  }
-  return (n * choose(n - 1, k - 1)) / k;
-}
-
 uint64_t get_number_of_draws_for_rack(const Rack *bag_as_rack,
                                       const Rack *rack) {
   uint64_t number_of_ways = 1;
-  for (int i = 0; i < get_array_size(rack); i++) {
-    if (get_number_of_letter(rack, i) > 0) {
-      number_of_ways *= choose(get_number_of_letter(bag_as_rack, i) +
-                                   get_number_of_letter(rack, i),
-                               get_number_of_letter(rack, i));
+  for (int i = 0; i < rack_get_dist_size(rack); i++) {
+    if (rack_get_letter(rack, i) > 0) {
+      number_of_ways *=
+          choose(rack_get_letter(bag_as_rack, i) + rack_get_letter(rack, i),
+                 rack_get_letter(rack, i));
     }
   }
   return number_of_ways;
-}
-
-double get_probability_for_random_minimum_draw(
-    const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
-    int minimum, int number_of_target_played_tiles) {
-  int number_of_this_letters_already_on_rack =
-      get_number_of_letter(target_rack, this_letter);
-  int minimum_adjusted_for_partial_rack =
-      minimum - number_of_this_letters_already_on_rack;
-  // If the partial leave already has the minimum
-  // number of letters, the probability is trivially 1.
-  if (minimum_adjusted_for_partial_rack <= 0) {
-    return 1;
-  }
-  int total_number_of_letters_in_bag = get_number_of_letters(bag_as_rack);
-  int total_number_of_letters_on_rack = get_number_of_letters(target_rack);
-  int number_of_this_letter_in_bag =
-      get_number_of_letter(bag_as_rack, this_letter);
-
-  // If there are not enough letters to meet the minimum, the probability
-  // is trivially 0.
-  if (number_of_this_letter_in_bag < minimum_adjusted_for_partial_rack) {
-    return 0;
-  }
-
-  int total_number_of_letters_to_draw =
-      (RACK_SIZE) -
-      (total_number_of_letters_on_rack + number_of_target_played_tiles);
-
-  // If the player is emptying the bag and there are the minimum
-  // number of leaves remaining, the probability is trivially 1.
-  if (total_number_of_letters_in_bag <= total_number_of_letters_to_draw &&
-      number_of_this_letter_in_bag >= minimum_adjusted_for_partial_rack) {
-    return 1;
-  }
-
-  uint64_t total_draws =
-      choose(total_number_of_letters_in_bag, total_number_of_letters_to_draw);
-  if (total_draws == 0) {
-    return 0;
-  }
-  int number_of_other_letters_in_bag =
-      total_number_of_letters_in_bag - number_of_this_letter_in_bag;
-  uint64_t total_draws_for_this_letter_minimum = 0;
-  for (int i = minimum_adjusted_for_partial_rack;
-       i <= total_number_of_letters_to_draw; i++) {
-    total_draws_for_this_letter_minimum +=
-        choose(number_of_this_letter_in_bag, i) *
-        choose(number_of_other_letters_in_bag,
-               total_number_of_letters_to_draw - i);
-  }
-
-  return ((double)total_draws_for_this_letter_minimum) / total_draws;
 }
 
 void increment_subtotals_for_results(const Rack *rack,
                                      InferenceResults *results,
                                      inference_stat_t inference_stat_type,
                                      uint64_t number_of_draws_for_leave) {
-  for (int i = 0; i < get_array_size(rack); i++) {
-    if (get_number_of_letter(rack, i) > 0) {
-      add_to_letter_subtotal(
-          results, inference_stat_type, i, get_number_of_letter(rack, i),
+  for (int i = 0; i < rack_get_dist_size(rack); i++) {
+    if (rack_get_letter(rack, i) > 0) {
+      inference_results_add_to_letter_subtotal(
+          results, inference_stat_type, i, rack_get_letter(rack, i),
           INFERENCE_SUBTOTAL_DRAW, number_of_draws_for_leave);
-      add_to_letter_subtotal(results, inference_stat_type, i,
-                             get_number_of_letter(rack, i),
-                             INFERENCE_SUBTOTAL_LEAVE, 1);
+      inference_results_add_to_letter_subtotal(results, inference_stat_type, i,
+                                               rack_get_letter(rack, i),
+                                               INFERENCE_SUBTOTAL_LEAVE, 1);
     }
   }
 }
@@ -180,8 +117,8 @@ void record_valid_leave(const Rack *rack, InferenceResults *results,
                         inference_stat_t inference_stat_type,
                         double current_leave_value,
                         uint64_t number_of_draws_for_leave) {
-  push(inference_results_get_equity_values(results, inference_stat_type),
-       (double)current_leave_value, number_of_draws_for_leave);
+  stat_push(inference_results_get_equity_values(results, inference_stat_type),
+            (double)current_leave_value, number_of_draws_for_leave);
   increment_subtotals_for_results(rack, results, inference_stat_type,
                                   number_of_draws_for_leave);
 }
@@ -198,10 +135,10 @@ void evaluate_possible_leave(Inference *inference) {
   bool is_within_equity_margin = inference->target_score + current_leave_value +
                                      inference->equity_margin +
                                      (INFERENCE_EQUITY_EPSILON) >=
-                                 get_equity(top_move);
+                                 move_get_equity(top_move);
   int tiles_played = move_get_tiles_played(top_move);
   bool number_exchanged_matches =
-      get_move_type(top_move) == GAME_EVENT_EXCHANGE &&
+      move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
       tiles_played == inference->target_number_of_tiles_exchanged;
   bool recordable = is_within_equity_margin || number_exchanged_matches ||
                     rack_is_empty(inference->bag_as_rack);
@@ -216,9 +153,9 @@ void evaluate_possible_leave(Inference *inference) {
       // but now we have to record the leave and the exchanged tiles
       for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
            exchanged_tile_index++) {
-        uint8_t tile_exchanged = get_tile(top_move, exchanged_tile_index);
-        add_letter_to_rack(inference->current_target_exchanged, tile_exchanged);
-        take_letter_from_rack(inference->current_target_leave, tile_exchanged);
+        uint8_t tile_exchanged = move_get_tile(top_move, exchanged_tile_index);
+        rack_add_letter(inference->current_target_exchanged, tile_exchanged);
+        rack_take_letter(inference->current_target_leave, tile_exchanged);
       }
       record_valid_leave(
           inference->current_target_leave, inference->results,
@@ -231,21 +168,21 @@ void evaluate_possible_leave(Inference *inference) {
           klv_get_leave_value(inference->klv,
                               inference->current_target_exchanged),
           number_of_draws_for_leave);
-      insert_leave_rack(
+      leave_rack_list_insert_rack(
           inference->current_target_leave, inference->current_target_exchanged,
           inference_results_get_leave_rack_list(inference->results),
           number_of_draws_for_leave, current_leave_value);
-      reset_rack(inference->current_target_exchanged);
+      rack_reset(inference->current_target_exchanged);
       for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
            exchanged_tile_index++) {
-        uint8_t tile_exchanged = get_tile(top_move, exchanged_tile_index);
-        add_letter_to_rack(inference->current_target_leave, tile_exchanged);
+        uint8_t tile_exchanged = move_get_tile(top_move, exchanged_tile_index);
+        rack_add_letter(inference->current_target_leave, tile_exchanged);
       }
     } else {
       record_valid_leave(inference->current_target_leave, inference->results,
                          INFERENCE_TYPE_LEAVE, current_leave_value,
                          number_of_draws_for_leave);
-      insert_leave_rack(
+      leave_rack_list_insert_rack(
           inference->current_target_leave, NULL,
           inference_results_get_leave_rack_list(inference->results),
           number_of_draws_for_leave, current_leave_value);
@@ -254,15 +191,15 @@ void evaluate_possible_leave(Inference *inference) {
 }
 
 void increment_letter_for_inference(Inference *inference, uint8_t letter) {
-  take_letter_from_rack(inference->bag_as_rack, letter);
-  add_letter_to_rack(inference->current_target_rack, letter);
-  add_letter_to_rack(inference->current_target_leave, letter);
+  rack_take_letter(inference->bag_as_rack, letter);
+  rack_add_letter(inference->current_target_rack, letter);
+  rack_add_letter(inference->current_target_leave, letter);
 }
 
 void decrement_letter_for_inference(Inference *inference, uint8_t letter) {
-  add_letter_to_rack(inference->bag_as_rack, letter);
-  take_letter_from_rack(inference->current_target_rack, letter);
-  take_letter_from_rack(inference->current_target_leave, letter);
+  rack_add_letter(inference->bag_as_rack, letter);
+  rack_take_letter(inference->current_target_rack, letter);
+  rack_take_letter(inference->current_target_leave, letter);
 }
 
 Inference *inference_create(Game *game, Rack *target_played_tiles,
@@ -276,7 +213,7 @@ Inference *inference_create(Game *game, Rack *target_played_tiles,
   inference->game = game;
   inference->klv = player_get_klv(game_get_player(game, target_index));
 
-  inference->ld_size = get_array_size(target_played_tiles);
+  inference->ld_size = rack_get_dist_size(target_played_tiles);
   inference->move_capacity = move_capacity;
   inference->target_index = target_index;
   inference->target_score = target_score;
@@ -295,11 +232,11 @@ Inference *inference_create(Game *game, Rack *target_played_tiles,
   // are shared pointers between threads and are
   // set elsewhere.
 
-  inference->current_target_leave = create_rack(inference->ld_size);
-  inference->current_target_exchanged = create_rack(inference->ld_size);
+  inference->current_target_leave = rack_create(inference->ld_size);
+  inference->current_target_exchanged = rack_create(inference->ld_size);
   inference->current_target_rack =
       player_get_rack(game_get_player(game, target_index));
-  inference->bag_as_rack = create_rack(inference->ld_size);
+  inference->bag_as_rack = rack_create(inference->ld_size);
 
   inference_results_reset(results, inference->move_capacity,
                           inference->ld_size);
@@ -314,22 +251,22 @@ Inference *inference_create(Game *game, Rack *target_played_tiles,
   for (int i = 0; i < inference->ld_size; i++) {
     // Add any existing tiles on the target's rack
     // to the target's leave for partial inferences
-    for (int j = 0; j < get_number_of_letter(inference->current_target_rack, i);
+    for (int j = 0; j < rack_get_letter(inference->current_target_rack, i);
          j++) {
-      add_letter_to_rack(inference->current_target_leave, i);
+      rack_add_letter(inference->current_target_leave, i);
     }
 
     for (int j = 0; j < bag_get_letter(bag, i); j++) {
-      add_letter_to_rack(inference->bag_as_rack, i);
+      rack_add_letter(inference->bag_as_rack, i);
     }
   }
 
   // Remove the tiles played in the move from the game bag
   // and add them to the target's rack
   for (int i = 0; i < inference->ld_size; i++) {
-    for (int j = 0; j < get_number_of_letter(target_played_tiles, i); j++) {
-      take_letter_from_rack(inference->bag_as_rack, i);
-      add_letter_to_rack(inference->current_target_rack, i);
+    for (int j = 0; j < rack_get_letter(target_played_tiles, i); j++) {
+      rack_take_letter(inference->bag_as_rack, i);
+      rack_add_letter(inference->current_target_rack, i);
     }
   }
 
@@ -340,7 +277,7 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
                                ThreadControl *thread_control) {
   Inference *new_inference = malloc_or_die(sizeof(Inference));
   new_inference->game = game_duplicate(inference->game);
-  new_inference->move_list = create_move_list(1);
+  new_inference->move_list = move_list_create(1);
   new_inference->klv = player_get_klv(
       game_get_player(new_inference->game, inference->target_index));
 
@@ -382,12 +319,13 @@ void add_inference(Inference *inference_to_add,
   LeaveRackList *lrl_to_update =
       inference_results_get_leave_rack_list(inference_to_update->results);
 
-  while (get_leave_rack_list_count(lrl_to_update) > 0) {
-    LeaveRack *leave_rack_to_update = pop_leave_rack(lrl_to_update);
-    insert_leave_rack(leave_rack_get_leave(leave_rack_to_update),
-                      leave_rack_get_exchanged(leave_rack_to_update),
-                      lrl_to_add, leave_rack_get_draws(leave_rack_to_update),
-                      leave_rack_get_equity(leave_rack_to_update));
+  while (leave_rack_list_get_count(lrl_to_update) > 0) {
+    LeaveRack *leave_rack_to_update = leave_rack_list_pop_rack(lrl_to_update);
+    leave_rack_list_insert_rack(leave_rack_get_leave(leave_rack_to_update),
+                                leave_rack_get_exchanged(leave_rack_to_update),
+                                lrl_to_add,
+                                leave_rack_get_draws(leave_rack_to_update),
+                                leave_rack_get_equity(leave_rack_to_update));
   }
 }
 
@@ -399,7 +337,7 @@ void get_total_racks_evaluated(Inference *inference, int tiles_to_infer,
     return;
   }
   for (int letter = start_letter; letter < inference->ld_size; letter++) {
-    if (get_number_of_letter(inference->bag_as_rack, letter) > 0) {
+    if (rack_get_letter(inference->bag_as_rack, letter) > 0) {
       increment_letter_for_inference(inference, letter);
       get_total_racks_evaluated(inference, tiles_to_infer - 1, letter,
                                 total_racks_evaluated);
@@ -409,7 +347,8 @@ void get_total_racks_evaluated(Inference *inference, int tiles_to_infer,
 }
 
 bool should_print_info(const Inference *inference) {
-  int print_info_interval = get_print_info_interval(inference->thread_control);
+  int print_info_interval =
+      thread_control_get_print_info_interval(inference->thread_control);
   return print_info_interval > 0 && inference->current_rack_index > 0 &&
          inference->current_rack_index % print_info_interval == 0;
 }
@@ -417,7 +356,7 @@ bool should_print_info(const Inference *inference) {
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter,
                                          bool multithreaded) {
-  if (is_halted(inference->thread_control)) {
+  if (thread_control_get_is_halted(inference->thread_control)) {
     return;
   }
   if (tiles_to_infer == 0) {
@@ -448,7 +387,7 @@ void iterate_through_all_possible_leaves(Inference *inference,
     return;
   }
   for (int letter = start_letter; letter < inference->ld_size; letter++) {
-    if (get_number_of_letter(inference->bag_as_rack, letter) > 0) {
+    if (rack_get_letter(inference->bag_as_rack, letter) > 0) {
       increment_letter_for_inference(inference, letter);
       iterate_through_all_possible_leaves(inference, tiles_to_infer - 1, letter,
                                           multithreaded);
@@ -461,7 +400,7 @@ void *infer_worker(void *uncasted_inference) {
   Inference *inference = (Inference *)uncasted_inference;
   iterate_through_all_possible_leaves(
       inference,
-      (RACK_SIZE)-get_number_of_letters(inference->current_target_rack),
+      (RACK_SIZE)-rack_get_total_letters(inference->current_target_rack),
       BLANK_MACHINE_LETTER, 1);
   return NULL;
 }
@@ -478,14 +417,14 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 
   get_total_racks_evaluated(
       inference,
-      (RACK_SIZE)-get_number_of_letters(inference->current_target_rack),
+      (RACK_SIZE)-rack_get_total_letters(inference->current_target_rack),
       BLANK_MACHINE_LETTER, &total_racks_evaluated);
   inference->total_racks_evaluated = total_racks_evaluated;
 
   print_ucgi_inference_total_racks_evaluated(total_racks_evaluated,
                                              thread_control);
 
-  int number_of_threads = get_number_of_threads(thread_control);
+  int number_of_threads = thread_control_get_threads(thread_control);
 
   uint64_t shared_rack_index = 0;
   pthread_mutex_t shared_rack_index_lock;
@@ -534,17 +473,17 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 
   // Infer was able to finish normally, which is when it
   // iterates through every rack
-  halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
+  thread_control_halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
 
-  combine_stats(leave_stats, number_of_threads,
+  stats_combine(leave_stats, number_of_threads,
                 inference_results_get_equity_values(inference->results,
                                                     INFERENCE_TYPE_LEAVE));
   free(leave_stats);
   if (inference->target_number_of_tiles_exchanged > 0) {
-    combine_stats(exchanged_stats, number_of_threads,
+    stats_combine(exchanged_stats, number_of_threads,
                   inference_results_get_equity_values(
                       inference->results, INFERENCE_TYPE_EXCHANGED));
-    combine_stats(rack_stats, number_of_threads,
+    stats_combine(rack_stats, number_of_threads,
                   inference_results_get_equity_values(inference->results,
                                                       INFERENCE_TYPE_RACK));
     free(exchanged_stats);
@@ -562,15 +501,15 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 inference_status_t verify_inference(const Inference *inference) {
   Rack *bag_as_rack = inference->bag_as_rack;
   for (int i = 0; i < inference->ld_size; i++) {
-    if (get_number_of_letter(bag_as_rack, i) < 0) {
+    if (rack_get_letter(bag_as_rack, i) < 0) {
       return INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG;
     }
   }
 
   int infer_rack_number_of_letters =
-      get_number_of_letters(inference->current_target_rack);
+      rack_get_total_letters(inference->current_target_rack);
 
-  int number_of_letters_in_bag = get_number_of_letters(bag_as_rack);
+  int number_of_letters_in_bag = rack_get_total_letters(bag_as_rack);
 
   if (infer_rack_number_of_letters == 0 &&
       inference->target_number_of_tiles_exchanged == 0) {
@@ -603,7 +542,7 @@ inference_status_t infer(const Config *config, const Game *input_game,
                          InferenceResults *results) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
-  unhalt(thread_control);
+  thread_control_unhalt(thread_control);
 
   Rack *config_target_played_tiles = config_get_rack(config);
 
@@ -630,9 +569,10 @@ inference_status_t infer(const Config *config, const Game *input_game,
         config_target_played_tiles, inference->current_target_leave,
         inference->bag_as_rack);
 
-    if (get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS) {
+    if (thread_control_get_halt_status(thread_control) ==
+        HALT_STATUS_MAX_ITERATIONS) {
       // Only print if infer was able to finish normally.
-      // If halt status isn't max iterations, it was interrupted
+      // If thread_control_halt status isn't max iterations, it was interrupted
       // by the user and the results will not be valid.
       print_ucgi_inference(game_get_ld(inference->game), inference->results,
                            thread_control);
@@ -640,10 +580,9 @@ inference_status_t infer(const Config *config, const Game *input_game,
 
     // Return the player to infer rack to it's original
     // state since the inference does not own that struct
-    for (int i = 0; i < get_array_size(config_target_played_tiles); i++) {
-      for (int j = 0; j < get_number_of_letter(config_target_played_tiles, i);
-           j++) {
-        take_letter_from_rack(inference->current_target_rack, i);
+    for (int i = 0; i < rack_get_dist_size(config_target_played_tiles); i++) {
+      for (int j = 0; j < rack_get_letter(config_target_played_tiles, i); j++) {
+        rack_take_letter(inference->current_target_rack, i);
       }
     }
   }

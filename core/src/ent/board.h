@@ -40,7 +40,7 @@ int board_get_word_edge(const Board *board, int row, int col, int dir);
 board_layout_t
 board_layout_string_to_board_layout(const char *board_layout_string);
 int board_score_move(const Board *board,
-                     const LetterDistribution *letter_distribution,
+                     const LetterDistribution *ld,
                      uint8_t word[], int word_start_index, int word_end_index,
                      int row, int col, int tiles_played, int cross_dir,
                      int cross_set_index);

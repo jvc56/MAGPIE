@@ -4,7 +4,6 @@
 #include <stdio.h>
 
 FILE *stream_from_filename(const char *filename);
-void precache_file(const char *filename);
-void destroy_cache();
+void fileproxy_destroy_cache();
 
 #endif

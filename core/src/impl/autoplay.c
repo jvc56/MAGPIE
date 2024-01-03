@@ -68,7 +68,7 @@ void play_autoplay_game(Game *game, MoveList *move_list,
                         AutoplayResults *autoplay_results,
                         int starting_player_index, int thread_index) {
   game_reset(game);
-  set_starting_player_index(game, starting_player_index);
+  game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     play_move(get_top_equity_move(game, thread_index, move_list), game);
@@ -82,7 +82,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   ThreadControl *thread_control = config_get_thread_control(config);
   Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
-  MoveList *move_list = create_move_list(1);
+  MoveList *move_list = move_list_create(1);
 
   // Declare local vars for autoplay_worker fields for convenience
   bool use_game_pairs = config_get_use_game_pairs(autoplay_worker->config);
@@ -100,7 +100,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   bag_seed_for_worker(bag, autoplay_worker->seed, worker_index);
 
   for (int i = 0; i < autoplay_worker->max_games_for_worker; i++) {
-    if (is_halted(thread_control)) {
+    if (thread_control_get_is_halted(thread_control)) {
       break;
     }
     int starting_player_index = (i + starting_player_for_thread) % 2;
@@ -126,7 +126,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   if (use_game_pairs) {
     bag_destroy(game_pair_bag);
   }
-  destroy_move_list(move_list);
+  move_list_destroy(move_list);
   game_destroy(game);
   return NULL;
 }
@@ -143,10 +143,10 @@ int get_number_of_games_for_worker(int max_iterations, int number_of_threads,
 autoplay_status_t autoplay(const Config *config,
                            AutoplayResults *autoplay_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
-  unhalt(thread_control);
+  thread_control_unhalt(thread_control);
   autoplay_results_reset(autoplay_results);
 
-  int number_of_threads = get_number_of_threads(thread_control);
+  int number_of_threads = thread_control_get_threads(thread_control);
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
   pthread_t *worker_ids =
@@ -179,13 +179,13 @@ autoplay_status_t autoplay(const Config *config,
 
   // If autoplay was interrupted by the user,
   // this will not change the status.
-  halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
+  thread_control_halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
 
-  combine_stats(p1_score_stats, number_of_threads,
+  stats_combine(p1_score_stats, number_of_threads,
                 autoplay_results_get_p1_score(autoplay_results));
   free(p1_score_stats);
 
-  combine_stats(p2_score_stats, number_of_threads,
+  stats_combine(p2_score_stats, number_of_threads,
                 autoplay_results_get_p2_score(autoplay_results));
   free(p2_score_stats);
 

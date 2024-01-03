@@ -25,7 +25,7 @@
 int count_scoring_plays(const MoveList *ml) {
   int sum = 0;
   for (int i = 0; i < move_list_get_count(ml); i++) {
-    if (get_move_type(move_list_get_move(ml, i)) ==
+    if (move_get_type(move_list_get_move(ml, i)) ==
         GAME_EVENT_TILE_PLACEMENT_MOVE) {
       sum++;
     }
@@ -36,7 +36,7 @@ int count_scoring_plays(const MoveList *ml) {
 int count_nonscoring_plays(const MoveList *ml) {
   int sum = 0;
   for (int i = 0; i < move_list_get_count(ml); i++) {
-    if (get_move_type(move_list_get_move(ml, i)) !=
+    if (move_get_type(move_list_get_move(ml, i)) !=
         GAME_EVENT_TILE_PLACEMENT_MOVE) {
       sum++;
     }
@@ -71,7 +71,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
   if (rack_string) {
     Player *player_on_turn =
         game_get_player(game, game_get_player_on_turn_index(game));
-    set_rack_to_string(game_get_ld(game), player_get_rack(player_on_turn),
+    rack_set_to_string(game_get_ld(game), player_get_rack(player_on_turn),
                        rack_string);
   }
 
@@ -82,9 +82,9 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
     int actual_plays = 0;
     for (int i = 0; i < sml->count; i++) {
       Move *move = sml->moves[i];
-      if (get_row_start(move) == row &&
-          get_dir(move) == BOARD_HORIZONTAL_DIRECTION &&
-          (min_length < 0 || get_tiles_length(move) >= min_length)) {
+      if (move_get_row_start(move) == row &&
+          move_get_dir(move) == BOARD_HORIZONTAL_DIRECTION &&
+          (min_length < 0 || move_get_tiles_length(move) >= min_length)) {
         actual_plays++;
       } else {
         sml->count--;
@@ -120,7 +120,7 @@ void macondo_tests() {
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = create_move_list(10000);
+  MoveList *move_list = move_list_create(10000);
   const KWG *kwg = player_get_kwg(player);
 
   // TestSimpleRowGen
@@ -163,13 +163,13 @@ void macondo_tests() {
 
   // TestGenAllMovesSingleTile
   game_load_cgp(game, VS_MATT);
-  set_rack_to_string(ld, player_get_rack(player), "A");
+  rack_set_to_string(ld, player_get_rack(player), "A");
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 24);
 
   // TestGenAllMovesFullRack
   game_load_cgp(game, VS_MATT);
-  set_rack_to_string(ld, player_get_rack(player), "AABDELT");
+  rack_set_to_string(ld, player_get_rack(player), "AABDELT");
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 667);
   assert(count_nonscoring_plays(move_list) == 96);
@@ -180,7 +180,7 @@ void macondo_tests() {
   int highest_scores[] = {38, 36, 36, 34, 34, 33, 30, 30, 30, 28};
   int number_of_highest_scores = sizeof(highest_scores) / sizeof(int);
   for (int i = 0; i < number_of_highest_scores; i++) {
-    assert(get_score(test_gen_all_moves_full_rack_sorted_move_list->moves[i]) ==
+    assert(move_get_score(test_gen_all_moves_full_rack_sorted_move_list->moves[i]) ==
            highest_scores[i]);
   }
 
@@ -188,28 +188,28 @@ void macondo_tests() {
 
   // TestGenAllMovesFullRackAgain
   game_load_cgp(game, VS_ED);
-  set_rack_to_string(ld, player_get_rack(player), "AFGIIIS");
+  rack_set_to_string(ld, player_get_rack(player), "AFGIIIS");
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 219);
   assert(count_nonscoring_plays(move_list) == 64);
 
   // TestGenAllMovesSingleBlank
   game_load_cgp(game, VS_ED);
-  set_rack_to_string(ld, player_get_rack(player), "?");
+  rack_set_to_string(ld, player_get_rack(player), "?");
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 169);
   assert(count_nonscoring_plays(move_list) == 2);
 
   // TestGenAllMovesTwoBlanksOnly
   game_load_cgp(game, VS_ED);
-  set_rack_to_string(ld, player_get_rack(player), "??");
+  rack_set_to_string(ld, player_get_rack(player), "??");
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 1961);
   assert(count_nonscoring_plays(move_list) == 3);
 
   // TestGenAllMovesWithBlanks
   game_load_cgp(game, VS_JEREMY);
-  set_rack_to_string(ld, player_get_rack(player), "DDESW??");
+  rack_set_to_string(ld, player_get_rack(player), "DDESW??");
   // Have the opponent draw any 7 tiles to prevent exchanges
   // from being generated
   draw_at_most_to_rack(game_get_bag(game),
@@ -228,11 +228,11 @@ void macondo_tests() {
 
   destroy_sorted_move_list(test_gen_all_moves_with_blanks_sorted_move_list);
 
-  reset_rack(player_get_rack(player));
+  rack_reset(player_get_rack(player));
 
   // TestGiantTwentySevenTimer
   game_load_cgp(game, VS_OXY);
-  set_rack_to_string(ld, player_get_rack(player), "ABEOPXZ");
+  rack_set_to_string(ld, player_get_rack(player), "ABEOPXZ");
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 513);
   assert(count_nonscoring_plays(move_list) == 128);
@@ -247,7 +247,7 @@ void macondo_tests() {
 
   // TestGenerateEmptyBoard
   game_reset(game);
-  set_rack_to_string(ld, player_get_rack(player), "DEGORV?");
+  rack_set_to_string(ld, player_get_rack(player), "DEGORV?");
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 3307);
   assert(count_nonscoring_plays(move_list) == 128);
@@ -256,18 +256,18 @@ void macondo_tests() {
       create_sorted_move_list(move_list);
 
   const Move *move = test_generate_empty_board_sorted_move_list->moves[0];
-  assert(get_score(move) == 80);
+  assert(move_get_score(move) == 80);
   assert(move_get_tiles_played(move) == 7);
-  assert(get_tiles_length(move) == 7);
-  assert(get_move_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
-  assert(get_row_start(move) == 7);
+  assert(move_get_tiles_length(move) == 7);
+  assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_row_start(move) == 7);
 
   destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
-  reset_rack(player_get_rack(player));
+  rack_reset(player_get_rack(player));
 
   // TestGenerateNoPlays
   game_load_cgp(game, VS_JEREMY);
-  set_rack_to_string(ld, player_get_rack(player), "V");
+  rack_set_to_string(ld, player_get_rack(player), "V");
   // Have the opponent draw any 7 tiles to prevent exchanges
   // from being generated
   draw_at_most_to_rack(game_get_bag(game),
@@ -275,9 +275,9 @@ void macondo_tests() {
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 0);
   assert(count_nonscoring_plays(move_list) == 1);
-  assert(get_move_type(move_list_get_move(move_list, 0)) == GAME_EVENT_PASS);
+  assert(move_get_type(move_list_get_move(move_list, 0)) == GAME_EVENT_PASS);
 
-  reset_rack(player_get_rack(player));
+  rack_reset(player_get_rack(player));
 
   // TestRowEquivalent
   game_load_cgp(game, TEST_DUPE);
@@ -290,7 +290,7 @@ void macondo_tests() {
   set_row(game_two, 8, "IS");
   set_row(game_two, 9, "T");
   board_update_all_anchors(board_two);
-  generate_all_cross_sets(
+  game_gen_all_cross_sets(
       kwg, kwg, ld_two, board_two,
       game_get_data_is_shared(game_two, PLAYERS_DATA_TYPE_KWG));
 
@@ -298,14 +298,14 @@ void macondo_tests() {
 
   game_reset(game);
   game_reset(game_two);
-  reset_rack(player_get_rack(player));
+  rack_reset(player_get_rack(player));
 
   // TestGenExchange
-  set_rack_to_string(ld, player_get_rack(player), "ABCDEF?");
+  rack_set_to_string(ld, player_get_rack(player), "ABCDEF?");
   generate_moves_for_game(game, 0, move_list);
   assert(count_nonscoring_plays(move_list) == 128);
 
-  destroy_move_list(move_list);
+  move_list_destroy(move_list);
   game_destroy(game);
   game_destroy(game_two);
   config_destroy(config);
@@ -317,33 +317,33 @@ void leave_lookup_test() {
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   const KLV *klv = player_get_klv(game_get_player(game, 0));
-  MoveList *move_list = create_move_list(1000);
+  MoveList *move_list = move_list_create(1000);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
                   "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   game_load_cgp(game, cgp);
 
-  Rack *rack = create_rack(letter_distribution_get_size(ld));
+  Rack *rack = rack_create(ld_get_size(ld));
   for (int i = 0; i < 2; i++) {
     int number_of_moves = move_list_get_count(move_list);
     for (int i = 0; i < number_of_moves; i++) {
       Move *move = move_list_get_move(move_list, i);
       // This is after the opening and before the endgame
       // so the other equity adjustments will not be in effect.
-      double move_leave_value = get_equity(move) - get_score(move);
+      double move_leave_value = move_get_equity(move) - move_get_score(move);
       if (i == 0) {
-        set_rack_to_string(ld, rack, "MOOORRT");
+        rack_set_to_string(ld, rack, "MOOORRT");
       } else {
-        set_rack_to_string(ld, rack, "BFQRTTV");
+        rack_set_to_string(ld, rack, "BFQRTTV");
       }
       double leave_value = get_leave_value_for_move(klv, move, rack);
       within_epsilon(move_leave_value, leave_value);
     }
     play_top_n_equity_move(game, 0);
   }
-  destroy_rack(rack);
-  destroy_move_list(move_list);
+  rack_destroy(rack);
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
@@ -352,7 +352,7 @@ void exchange_tests() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
-  MoveList *move_list = create_move_list(10);
+  MoveList *move_list = move_list_create(10);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
@@ -365,7 +365,7 @@ void exchange_tests() {
   generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, 0, move_list);
   SortedMoveList *test_not_an_exchange_sorted_move_list =
       create_sorted_move_list(move_list);
-  assert(get_move_type(test_not_an_exchange_sorted_move_list->moves[0]) ==
+  assert(move_get_type(test_not_an_exchange_sorted_move_list->moves[0]) ==
          GAME_EVENT_TILE_PLACEMENT_MOVE);
   destroy_sorted_move_list(test_not_an_exchange_sorted_move_list);
 
@@ -377,14 +377,14 @@ void exchange_tests() {
   SortedMoveList *test_exchange_sorted_move_list =
       create_sorted_move_list(move_list);
 
-  assert(get_move_type(test_exchange_sorted_move_list->moves[0]) ==
+  assert(move_get_type(test_exchange_sorted_move_list->moves[0]) ==
          GAME_EVENT_EXCHANGE);
-  assert(get_score(test_exchange_sorted_move_list->moves[0]) == 0);
-  assert(get_tiles_length(test_exchange_sorted_move_list->moves[0]) ==
+  assert(move_get_score(test_exchange_sorted_move_list->moves[0]) == 0);
+  assert(move_get_tiles_length(test_exchange_sorted_move_list->moves[0]) ==
          move_get_tiles_played(test_exchange_sorted_move_list->moves[0]));
   destroy_sorted_move_list(test_exchange_sorted_move_list);
 
-  destroy_move_list(move_list);
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
@@ -393,14 +393,14 @@ void many_moves_tests() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
-  MoveList *move_list = create_move_list(239000);
+  MoveList *move_list = move_list_create(239000);
 
   game_load_cgp(game, MANY_MOVES);
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 238895);
   assert(count_nonscoring_plays(move_list) == 96);
 
-  destroy_move_list(move_list);
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
@@ -410,10 +410,10 @@ void equity_test() {
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
-  int ld_size = letter_distribution_get_size(ld);
+  int ld_size = ld_get_size(ld);
 
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = create_move_list(300);
+  MoveList *move_list = move_list_create(300);
 
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
 
@@ -421,7 +421,7 @@ void equity_test() {
   // A middlegame is chosen to avoid
   // the opening and endgame equity adjustments
   game_load_cgp(game, VS_ED);
-  set_rack_to_string(ld, player_get_rack(player), "AFGIIIS");
+  rack_set_to_string(ld, player_get_rack(player), "AFGIIIS");
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 219);
   assert(count_nonscoring_plays(move_list) == 64);
@@ -430,25 +430,25 @@ void equity_test() {
       create_sorted_move_list(move_list);
 
   double previous_equity = 1000000.0;
-  Rack *move_rack = create_rack(ld_size);
+  Rack *move_rack = rack_create(ld_size);
   int number_of_moves = equity_test_sorted_move_list->count;
 
   for (int i = 0; i < number_of_moves - 1; i++) {
     const Move *move = equity_test_sorted_move_list->moves[i];
-    assert(get_equity(move) <= previous_equity);
-    set_rack_to_string(ld, move_rack, "AFGIIIS");
+    assert(move_get_equity(move) <= previous_equity);
+    rack_set_to_string(ld, move_rack, "AFGIIIS");
     double leave_value = get_leave_value_for_move(klv, move, move_rack);
-    assert(within_epsilon(get_equity(move),
-                          (double)get_score(move) + leave_value));
-    previous_equity = get_equity(move);
+    assert(within_epsilon(move_get_equity(move),
+                          (double)move_get_score(move) + leave_value));
+    previous_equity = move_get_equity(move);
   }
   assert(
-      get_move_type(equity_test_sorted_move_list->moves[number_of_moves - 1]) ==
+      move_get_type(equity_test_sorted_move_list->moves[number_of_moves - 1]) ==
       GAME_EVENT_PASS);
 
   destroy_sorted_move_list(equity_test_sorted_move_list);
-  destroy_rack(move_rack);
-  destroy_move_list(move_list);
+  rack_destroy(move_rack);
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
@@ -459,24 +459,24 @@ void top_equity_play_recorder_test() {
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = create_move_list(1);
+  MoveList *move_list = move_list_create(1);
   player_set_move_record_type(player, MOVE_RECORD_BEST);
 
   game_load_cgp(game, VS_JEREMY);
-  set_rack_to_string(ld, player_get_rack(player), "DDESW??");
+  rack_set_to_string(ld, player_get_rack(player), "DDESW??");
   generate_moves_for_game(game, 0, move_list);
 
   assert_move(game, move_list, NULL, 0, "14B hEaDW(OR)DS 106");
 
-  reset_rack(player_get_rack(player));
+  rack_reset(player_get_rack(player));
 
   game_load_cgp(game, VS_OXY);
-  set_rack_to_string(ld, player_get_rack(player), "ABEOPXZ");
+  rack_set_to_string(ld, player_get_rack(player), "ABEOPXZ");
   generate_moves_for_game(game, 0, move_list);
 
   assert_move(game, move_list, NULL, 0, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
 
-  destroy_move_list(move_list);
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
@@ -487,7 +487,7 @@ void distinct_lexica_test() {
                            "r1 all r2 all numplays 1");
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
-  MoveList *move_list = create_move_list(1);
+  MoveList *move_list = move_list_create(1);
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
@@ -498,14 +498,14 @@ void distinct_lexica_test() {
   player_set_move_record_type(player1, MOVE_RECORD_BEST);
 
   // Play SPORK, better than best NWL move of PORKS
-  set_rack_to_string(ld, player0_rack, "KOPRRSS");
+  rack_set_to_string(ld, player0_rack, "KOPRRSS");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "8H SPORK 32");
 
   play_move(move_list_get_move(move_list, 0), game);
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
-  set_rack_to_string(ld, player1_rack, "CEHIIRZ");
+  rack_set_to_string(ld, player1_rack, "CEHIIRZ");
   generate_moves_for_game(game, 0, move_list);
 
   assert_move(game, move_list, NULL, 0, "H8 (S)CHIZIER 146");
@@ -513,7 +513,7 @@ void distinct_lexica_test() {
   play_move(move_list_get_move(move_list, 0), game);
 
   // Play WIGGLY, not GOLLYWOG because that's NWL only
-  set_rack_to_string(ld, player0_rack, "GGLLOWY");
+  rack_set_to_string(ld, player0_rack, "GGLLOWY");
   generate_moves_for_game(game, 0, move_list);
 
   assert_move(game, move_list, NULL, 0, "11G W(I)GGLY 28");
@@ -521,13 +521,13 @@ void distinct_lexica_test() {
   play_move(move_list_get_move(move_list, 0), game);
 
   // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
-  set_rack_to_string(ld, player1_rack, "AEEQRSU");
+  rack_set_to_string(ld, player1_rack, "AEEQRSU");
 
   generate_moves_for_game(game, 0, move_list);
   player_set_move_record_type(player1, MOVE_RECORD_BEST);
   assert_move(game, move_list, NULL, 0, "13C QUEAS(I)ER 88");
 
-  destroy_move_list(move_list);
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }

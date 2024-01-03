@@ -22,27 +22,9 @@ struct FormedWords {
   FormedWord words[RACK_SIZE + 1]; // max number of words we can form
 };
 
-int formed_words_get_num_words(FormedWords *fw) { return fw->num_words; }
-
-uint8_t *formed_words_get_word(FormedWords *fw, int word_index) {
-  return fw->words[word_index].word;
-}
-
-int formed_words_get_word_length(FormedWords *fw, int word_index) {
-  return fw->words[word_index].word_length;
-}
-
-int formed_words_get_word_valid(FormedWords *fw, int word_index) {
-  return fw->words[word_index].valid;
-}
-
-int formed_words_get_word_letter(FormedWords *fw, int word_index,
-                                 int letter_index) {
-  return fw->words[word_index].word[letter_index];
-}
-
-FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
-                          int word_end_index, int row, int col, int dir) {
+FormedWords *formed_words_create(Board *board, uint8_t word[],
+                                 int word_start_index, int word_end_index,
+                                 int row, int col, int dir) {
 
   if (board_is_dir_vertical(dir)) {
     board_transpose(board);
@@ -96,8 +78,8 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
       ws->words[formed_words_idx].valid = false; // we don't know validity yet.
       for (int r = rbegin; r <= rend; r++) {
         if (r != row) {
-          uint8_t lt =
-              get_unblanked_machine_letter(board_get_letter(board, r, col + idx));
+          uint8_t lt = get_unblanked_machine_letter(
+              board_get_letter(board, r, col + idx));
           ws->words[formed_words_idx].word[widx] = lt;
         } else {
           ws->words[formed_words_idx].word[widx] = ml;
@@ -118,6 +100,27 @@ FormedWords *words_played(Board *board, uint8_t word[], int word_start_index,
   }
 
   return ws;
+}
+
+void formed_words_destroy(FormedWords *fw) { free(fw); }
+
+int formed_words_get_num_words(const FormedWords *fw) { return fw->num_words; }
+
+uint8_t *formed_words_get_word(const FormedWords *fw, int word_index) {
+  return fw->words[word_index].word;
+}
+
+int formed_words_get_word_length(const FormedWords *fw, int word_index) {
+  return fw->words[word_index].word_length;
+}
+
+int formed_words_get_word_valid(const FormedWords *fw, int word_index) {
+  return fw->words[word_index].valid;
+}
+
+int formed_words_get_word_letter(const FormedWords *fw, int word_index,
+                                 int letter_index) {
+  return fw->words[word_index].word[letter_index];
 }
 
 bool is_word_valid(const FormedWord *w, const KWG *kwg) {
@@ -148,7 +151,7 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg) {
   } while (1);
 }
 
-void populate_word_validities(const KWG *kwg, FormedWords *ws) {
+void formed_words_populate_validities(const KWG *kwg, FormedWords *ws) {
   for (int i = 0; i < ws->num_words; i++) {
     ws->words[i].valid = is_word_valid(&ws->words[i], kwg);
   }

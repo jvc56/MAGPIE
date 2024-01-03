@@ -16,5 +16,6 @@ int string_to_int(const char *str);
 uint64_t string_to_uint64(const char *str);
 double string_to_double(const char *str);
 bool is_decimal_number(const char *str);
+uint64_t choose(uint64_t n, uint64_t k);
 
 #endif

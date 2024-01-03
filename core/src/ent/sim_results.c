@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #include "../def/game_defs.h"
+#include "../def/rack_defs.h"
 
 #include "../util/util.h"
 
@@ -40,17 +41,17 @@ SimmedPlay **simmed_plays_create(MoveList *move_list, int num_simmed_plays,
 
   for (int i = 0; i < num_simmed_plays; i++) {
     SimmedPlay *sp = malloc_or_die(sizeof(SimmedPlay));
-    sp->move = create_move();
+    sp->move = move_create();
     move_copy(sp->move, move_list_get_move(move_list, i));
 
     sp->score_stat = malloc_or_die(sizeof(Stat *) * max_plies);
     sp->bingo_stat = malloc_or_die(sizeof(Stat *) * max_plies);
-    sp->equity_stat = create_stat();
-    sp->leftover_stat = create_stat();
-    sp->win_pct_stat = create_stat();
+    sp->equity_stat = stat_create();
+    sp->leftover_stat = stat_create();
+    sp->win_pct_stat = stat_create();
     for (int j = 0; j < max_plies; j++) {
-      sp->score_stat[j] = create_stat();
-      sp->bingo_stat[j] = create_stat();
+      sp->score_stat[j] = stat_create();
+      sp->bingo_stat[j] = stat_create();
     }
     sp->ignore = false;
     sp->play_id = i;
@@ -64,15 +65,15 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
                           int max_plies) {
   for (int i = 0; i < num_simmed_plays; i++) {
     for (int j = 0; j < max_plies; j++) {
-      destroy_stat(simmed_plays[i]->bingo_stat[j]);
-      destroy_stat(simmed_plays[i]->score_stat[j]);
+      stat_destroy(simmed_plays[i]->bingo_stat[j]);
+      stat_destroy(simmed_plays[i]->score_stat[j]);
     }
     free(simmed_plays[i]->bingo_stat);
     free(simmed_plays[i]->score_stat);
-    destroy_stat(simmed_plays[i]->equity_stat);
-    destroy_stat(simmed_plays[i]->leftover_stat);
-    destroy_stat(simmed_plays[i]->win_pct_stat);
-    destroy_move(simmed_plays[i]->move);
+    stat_destroy(simmed_plays[i]->equity_stat);
+    stat_destroy(simmed_plays[i]->leftover_stat);
+    stat_destroy(simmed_plays[i]->win_pct_stat);
+    move_destroy(simmed_plays[i]->move);
     pthread_mutex_destroy(&simmed_plays[i]->mutex);
     free(simmed_plays[i]);
   }
@@ -204,34 +205,40 @@ void sim_results_unlock_simmed_plays(SimResults *sim_results) {
   pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
 }
 
-void add_score_stat(SimmedPlay *sp, int score, bool is_bingo, int ply,
-                    bool lock) {
+void simmed_play_add_score_stat(SimmedPlay *sp, int score, bool is_bingo,
+                                int ply, bool lock) {
   if (lock) {
     pthread_mutex_lock(&sp->mutex);
   }
-  push(sp->score_stat[ply], (double)score, 1);
-  push(sp->bingo_stat[ply], (double)is_bingo, 1);
+  stat_push(sp->score_stat[ply], (double)score, 1);
+  stat_push(sp->bingo_stat[ply], (double)is_bingo, 1);
   if (lock) {
     pthread_mutex_unlock(&sp->mutex);
   }
 }
 
-void add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
-                     float leftover, bool lock) {
+void simmed_play_add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
+                                 float leftover, bool lock) {
   if (lock) {
     pthread_mutex_lock(&sp->mutex);
   }
-  push(sp->equity_stat, (double)(spread - initial_spread) + (double)(leftover),
-       1);
-  push(sp->leftover_stat, (double)leftover, 1);
+  stat_push(sp->equity_stat,
+            (double)(spread - initial_spread) + (double)(leftover), 1);
+  stat_push(sp->leftover_stat, (double)leftover, 1);
   if (lock) {
     pthread_mutex_unlock(&sp->mutex);
   }
 }
 
-void add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
-                      float leftover, game_end_reason_t game_end_reason,
-                      int tiles_unseen, bool plies_are_odd, bool lock) {
+int round_to_nearest_int(double a) {
+  return (int)(a + 0.5 - (a < 0)); // truncated to 55
+}
+
+void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
+                                  float leftover,
+                                  game_end_reason_t game_end_reason,
+                                  int game_get_unseen_tiles, bool plies_are_odd,
+                                  bool lock) {
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
     // the game ended; use the actual result.
@@ -250,7 +257,7 @@ void add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
     if (!plies_are_odd) {
       spread_plus_leftover = -spread_plus_leftover;
     }
-    wpct = (double)win_pct(wp, spread_plus_leftover, tiles_unseen);
+    wpct = (double)win_pct_get(wp, spread_plus_leftover, game_get_unseen_tiles);
     if (!plies_are_odd) {
       // see above comment regarding flipping win%
       wpct = 1.0 - wpct;
@@ -259,7 +266,7 @@ void add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
   if (lock) {
     pthread_mutex_lock(&sp->mutex);
   }
-  push(sp->win_pct_stat, wpct, 1);
+  stat_push(sp->win_pct_stat, wpct, 1);
   if (lock) {
     pthread_mutex_unlock(&sp->mutex);
   }
@@ -276,8 +283,8 @@ int compare_simmed_plays(const void *a, const void *b) {
   }
 
   // Compare the mean values of win_pct_stat
-  double mean_a = get_mean(play_a->win_pct_stat);
-  double mean_b = get_mean(play_b->win_pct_stat);
+  double mean_a = stat_get_mean(play_a->win_pct_stat);
+  double mean_b = stat_get_mean(play_b->win_pct_stat);
 
   if (mean_a > mean_b) {
     return -1;
@@ -285,8 +292,8 @@ int compare_simmed_plays(const void *a, const void *b) {
     return 1;
   } else {
     // If win_pct_stat->mean values are equal, compare equity_stat->mean
-    double equity_mean_a = get_mean(play_a->equity_stat);
-    double equity_mean_b = get_mean(play_b->equity_stat);
+    double equity_mean_a = stat_get_mean(play_a->equity_stat);
+    double equity_mean_b = stat_get_mean(play_b->equity_stat);
 
     if (equity_mean_a > equity_mean_b) {
       return -1;
@@ -303,4 +310,56 @@ int compare_simmed_plays(const void *a, const void *b) {
 void sim_results_sort_plays_by_win_rate(SimResults *sim_results) {
   qsort(sim_results->simmed_plays, sim_results->num_simmed_plays,
         sizeof(SimmedPlay *), compare_simmed_plays);
+}
+
+double get_probability_for_random_minimum_draw(
+    const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
+    int minimum, int number_of_target_played_tiles) {
+  int number_of_this_letters_already_on_rack =
+      rack_get_letter(target_rack, this_letter);
+  int minimum_adjusted_for_partial_rack =
+      minimum - number_of_this_letters_already_on_rack;
+  // If the partial leave already has the minimum
+  // number of letters, the probability is trivially 1.
+  if (minimum_adjusted_for_partial_rack <= 0) {
+    return 1;
+  }
+  int total_number_of_letters_in_bag = rack_get_total_letters(bag_as_rack);
+  int total_number_of_letters_on_rack = rack_get_total_letters(target_rack);
+  int number_of_this_letter_in_bag = rack_get_letter(bag_as_rack, this_letter);
+
+  // If there are not enough letters to meet the minimum, the probability
+  // is trivially 0.
+  if (number_of_this_letter_in_bag < minimum_adjusted_for_partial_rack) {
+    return 0;
+  }
+
+  int total_number_of_letters_to_draw =
+      (RACK_SIZE) -
+      (total_number_of_letters_on_rack + number_of_target_played_tiles);
+
+  // If the player is emptying the bag and there are the minimum
+  // number of leaves remaining, the probability is trivially 1.
+  if (total_number_of_letters_in_bag <= total_number_of_letters_to_draw &&
+      number_of_this_letter_in_bag >= minimum_adjusted_for_partial_rack) {
+    return 1;
+  }
+
+  uint64_t total_draws =
+      choose(total_number_of_letters_in_bag, total_number_of_letters_to_draw);
+  if (total_draws == 0) {
+    return 0;
+  }
+  int number_of_other_letters_in_bag =
+      total_number_of_letters_in_bag - number_of_this_letter_in_bag;
+  uint64_t total_draws_for_this_letter_minimum = 0;
+  for (int i = minimum_adjusted_for_partial_rack;
+       i <= total_number_of_letters_to_draw; i++) {
+    total_draws_for_this_letter_minimum +=
+        choose(number_of_this_letter_in_bag, i) *
+        choose(number_of_other_letters_in_bag,
+               total_number_of_letters_to_draw - i);
+  }
+
+  return ((double)total_draws_for_this_letter_minimum) / total_draws;
 }

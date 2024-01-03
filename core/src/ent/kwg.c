@@ -62,18 +62,18 @@ void load_kwg(KWG *kwg, const char *kwg_name) {
   fclose(stream);
 }
 
-KWG *create_kwg(const char *kwg_name) {
+KWG *kwg_create(const char *kwg_name) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
   load_kwg(kwg, kwg_name);
   return kwg;
 }
 
-KWG *create_empty_kwg() {
+KWG *kwg_create_empty() {
   KWG *kwg = malloc_or_die(sizeof(KWG));
   return kwg;
 }
 
-void destroy_kwg(KWG *kwg) {
+void kwg_destroy(KWG *kwg) {
   free(kwg->nodes);
   free(kwg);
 }

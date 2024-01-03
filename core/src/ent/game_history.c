@@ -36,10 +36,10 @@ GameEvent *game_event_create() {
 
 void game_event_destroy(GameEvent *game_event) {
   if (game_event->move) {
-    destroy_move(game_event->move);
+    move_destroy(game_event->move);
   }
   if (game_event->rack) {
-    destroy_rack(game_event->rack);
+    rack_destroy(game_event->rack);
   }
   free(game_event->note);
   free(game_event);
@@ -111,44 +111,44 @@ void game_history_player_destroy(GameHistoryPlayer *player) {
   free(player->name);
   free(player->nickname);
   if (player->last_known_rack) {
-    destroy_rack(player->last_known_rack);
+    rack_destroy(player->last_known_rack);
   }
   free(player);
 }
 
-void game_history_set_player_name(GameHistoryPlayer *player, const char *name) {
+void game_history_player_set_name(GameHistoryPlayer *player, const char *name) {
   free(player->name);
   player->name = string_duplicate(name);
 }
 
-const char *game_history_get_player_name(const GameHistoryPlayer *player) {
+const char *game_history_player_get_name(const GameHistoryPlayer *player) {
   return player->name;
 }
 
-void game_history_set_player_nickname(GameHistoryPlayer *player,
+void game_history_player_set_nickname(GameHistoryPlayer *player,
                                       const char *nickname) {
   free(player->nickname);
   player->nickname = string_duplicate(nickname);
 }
 
-const char *game_history_get_player_nickname(const GameHistoryPlayer *player) {
+const char *game_history_player_get_nickname(const GameHistoryPlayer *player) {
   return player->nickname;
 }
 
-void game_history_set_player_score(GameHistoryPlayer *player, int score) {
+void game_history_player_set_score(GameHistoryPlayer *player, int score) {
   player->score = score;
 }
 
-int game_history_get_player_score(const GameHistoryPlayer *player) {
+int game_history_player_get_score(const GameHistoryPlayer *player) {
   return player->score;
 }
 
-void game_history_set_player_last_known_rack(GameHistoryPlayer *player,
+void game_history_player_set_last_known_rack(GameHistoryPlayer *player,
                                              Rack *rack) {
   player->last_known_rack = rack;
 }
 
-Rack *game_history_get_player_last_known_rack(const GameHistoryPlayer *player) {
+Rack *game_history_player_get_last_known_rack(const GameHistoryPlayer *player) {
   return player->last_known_rack;
 }
 
@@ -158,12 +158,12 @@ struct GameHistory {
   char *id_auth;
   char *uid;
   char *lexicon_name;
-  char *letter_distribution_name;
+  char *ld_name;
   game_variant_t game_variant;
   board_layout_t board_layout;
   GameHistoryPlayer *players[2];
   int number_of_events;
-  LetterDistribution *letter_distribution;
+  LetterDistribution *ld;
   GameEvent **events;
 };
 
@@ -214,16 +214,16 @@ const char *game_history_get_lexicon_name(const GameHistory *history) {
   return history->lexicon_name;
 }
 
-void game_history_set_letter_distribution_name(
-    GameHistory *history, const char *letter_distribution_name) {
-  free(history->letter_distribution_name);
-  history->letter_distribution_name =
-      string_duplicate(letter_distribution_name);
+void game_history_set_ld_name(
+    GameHistory *history, const char *ld_name) {
+  free(history->ld_name);
+  history->ld_name =
+      string_duplicate(ld_name);
 }
 
 const char *
-game_history_get_letter_distribution_name(const GameHistory *history) {
-  return history->letter_distribution_name;
+game_history_get_ld_name(const GameHistory *history) {
+  return history->ld_name;
 }
 
 void game_history_set_game_variant(GameHistory *history,
@@ -263,14 +263,14 @@ int game_history_get_number_of_events(const GameHistory *history) {
   return history->number_of_events;
 }
 
-void game_history_set_letter_distribution(
-    GameHistory *history, LetterDistribution *letter_distribution) {
-  history->letter_distribution = letter_distribution;
+void game_history_set_ld(
+    GameHistory *history, LetterDistribution *ld) {
+  history->ld = ld;
 }
 
 LetterDistribution *
-game_history_get_letter_distribution(const GameHistory *history) {
-  return history->letter_distribution;
+game_history_get_ld(const GameHistory *history) {
+  return history->ld;
 }
 
 void game_history_set_events(GameHistory *history, struct GameEvent **events) {
@@ -288,12 +288,12 @@ GameHistory *game_history_create() {
   game_history->id_auth = NULL;
   game_history->uid = NULL;
   game_history->lexicon_name = NULL;
-  game_history->letter_distribution_name = NULL;
+  game_history->ld_name = NULL;
   game_history->game_variant = GAME_VARIANT_UNKNOWN;
   game_history->board_layout = BOARD_LAYOUT_UNKNOWN;
   game_history->players[0] = NULL;
   game_history->players[1] = NULL;
-  game_history->letter_distribution = NULL;
+  game_history->ld = NULL;
   game_history->number_of_events = 0;
   game_history->events = malloc_or_die(sizeof(GameEvent) * (MAX_GAME_EVENTS));
   return game_history;
@@ -305,10 +305,10 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history->id_auth);
   free(game_history->uid);
   free(game_history->lexicon_name);
-  free(game_history->letter_distribution_name);
+  free(game_history->ld_name);
 
-  if (game_history->letter_distribution) {
-    destroy_letter_distribution(game_history->letter_distribution);
+  if (game_history->ld) {
+    ld_destroy(game_history->ld);
   }
 
   for (int i = 0; i < 2; i++) {

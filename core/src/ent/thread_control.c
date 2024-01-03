@@ -27,7 +27,7 @@ struct ThreadControl {
   Timer *timer;
 };
 
-ThreadControl *create_thread_control() {
+ThreadControl *thread_control_create() {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
   thread_control->halt_status = HALT_STATUS_NONE;
   thread_control->current_mode = MODE_STOPPED;
@@ -47,14 +47,14 @@ ThreadControl *create_thread_control() {
   return thread_control;
 }
 
-void destroy_thread_control(ThreadControl *thread_control) {
+void thread_control_destroy(ThreadControl *thread_control) {
   file_handler_destroy(thread_control->outfile);
   file_handler_destroy(thread_control->infile);
   mtimer_destroy(thread_control->timer);
   free(thread_control);
 }
 
-void set_io(ThreadControl *thread_control, const char *in_filename,
+void thread_control_set_io(ThreadControl *thread_control, const char *in_filename,
             const char *out_filename) {
   const char *nonnull_in_filename = in_filename;
   if (!nonnull_in_filename) {
@@ -78,15 +78,15 @@ void set_io(ThreadControl *thread_control, const char *in_filename,
                    FILE_HANDLER_MODE_WRITE);
 }
 
-FileHandler *get_infile(ThreadControl *thread_control) {
+FileHandler *thread_control_get_infile(ThreadControl *thread_control) {
   return thread_control->infile;
 }
 
-Timer *get_timer(ThreadControl *thread_control) {
+Timer *thread_control_get_timer(ThreadControl *thread_control) {
   return thread_control->timer;
 }
 
-int get_print_info_interval(ThreadControl *thread_control) {
+int thread_control_get_print_info_interval(ThreadControl *thread_control) {
   return thread_control->print_info_interval;
 }
 
@@ -95,17 +95,17 @@ void set_print_info_interval(ThreadControl *thread_control,
   thread_control->print_info_interval = print_info_interval;
 }
 
-int get_check_stopping_condition_interval(ThreadControl *thread_control) {
+int thread_control_get_check_stop_interval(ThreadControl *thread_control) {
   return thread_control->check_stopping_condition_interval;
 }
 
-void set_check_stopping_condition_interval(
+void thread_control_set_check_stop_interval(
     ThreadControl *thread_control, int check_stopping_condition_interval) {
   thread_control->check_stopping_condition_interval =
       check_stopping_condition_interval;
 }
 
-halt_status_t get_halt_status(ThreadControl *thread_control) {
+halt_status_t thread_control_get_halt_status(ThreadControl *thread_control) {
   halt_status_t halt_status;
   pthread_mutex_lock(&thread_control->halt_status_mutex);
   halt_status = thread_control->halt_status;
@@ -113,15 +113,15 @@ halt_status_t get_halt_status(ThreadControl *thread_control) {
   return halt_status;
 }
 
-bool is_halted(ThreadControl *thread_control) {
-  return get_halt_status(thread_control) != HALT_STATUS_NONE;
+bool thread_control_get_is_halted(ThreadControl *thread_control) {
+  return thread_control_get_halt_status(thread_control) != HALT_STATUS_NONE;
 }
 
-bool halt(ThreadControl *thread_control, halt_status_t halt_status) {
+bool thread_control_halt(ThreadControl *thread_control, halt_status_t halt_status) {
   bool success = false;
   pthread_mutex_lock(&thread_control->halt_status_mutex);
-  // Assume the first reason to halt is the only
-  // reason we care about, so subsequent calls to halt
+  // Assume the first reason to thread_control_halt is the only
+  // reason we care about, so subsequent calls to thread_control_halt
   // can be ignored.
   if (thread_control->halt_status == HALT_STATUS_NONE &&
       halt_status != HALT_STATUS_NONE) {
@@ -132,7 +132,7 @@ bool halt(ThreadControl *thread_control, halt_status_t halt_status) {
   return success;
 }
 
-bool unhalt(ThreadControl *thread_control) {
+bool thread_control_unhalt(ThreadControl *thread_control) {
   bool success = false;
   pthread_mutex_lock(&thread_control->halt_status_mutex);
   if (thread_control->halt_status != HALT_STATUS_NONE) {
@@ -143,7 +143,7 @@ bool unhalt(ThreadControl *thread_control) {
   return success;
 }
 
-bool set_mode_searching(ThreadControl *thread_control) {
+bool thread_control_set_mode_searching(ThreadControl *thread_control) {
   bool success = false;
   pthread_mutex_lock(&thread_control->current_mode_mutex);
   if (thread_control->current_mode == MODE_STOPPED) {
@@ -156,7 +156,7 @@ bool set_mode_searching(ThreadControl *thread_control) {
   return success;
 }
 
-bool set_mode_stopped(ThreadControl *thread_control) {
+bool thread_control_set_mode_stopped(ThreadControl *thread_control) {
   bool success = false;
   pthread_mutex_lock(&thread_control->current_mode_mutex);
   if (thread_control->current_mode == MODE_SEARCHING) {
@@ -168,7 +168,7 @@ bool set_mode_stopped(ThreadControl *thread_control) {
   return success;
 }
 
-mode_search_status_t get_mode(ThreadControl *thread_control) {
+mode_search_status_t thread_control_get_mode(ThreadControl *thread_control) {
   mode_search_status_t mode;
   pthread_mutex_lock(&thread_control->current_mode_mutex);
   mode = thread_control->current_mode;
@@ -176,7 +176,7 @@ mode_search_status_t get_mode(ThreadControl *thread_control) {
   return mode;
 }
 
-bool set_check_stop_active(ThreadControl *thread_control) {
+bool thread_control_set_check_stop_active(ThreadControl *thread_control) {
   bool success = false;
   pthread_mutex_lock(&thread_control->check_stopping_condition_mutex);
   if (thread_control->check_stop_status == CHECK_STOP_INACTIVE) {
@@ -187,7 +187,7 @@ bool set_check_stop_active(ThreadControl *thread_control) {
   return success;
 }
 
-bool set_check_stop_inactive(ThreadControl *thread_control) {
+bool thread_control_set_check_stop_inactive(ThreadControl *thread_control) {
   bool success = false;
   pthread_mutex_lock(&thread_control->check_stopping_condition_mutex);
   if (thread_control->check_stop_status == CHECK_STOP_ACTIVE) {
@@ -200,22 +200,22 @@ bool set_check_stop_inactive(ThreadControl *thread_control) {
 
 // This does not require locking since it is
 // not called during a multithreaded commmand
-int get_number_of_threads(ThreadControl *thread_control) {
+int thread_control_get_threads(ThreadControl *thread_control) {
   return thread_control->number_of_threads;
 }
 
 // This does not require locking since it is
 // not called during a multithreaded commmand
-void set_number_of_threads(ThreadControl *thread_control,
+void thread_control_set_threads(ThreadControl *thread_control,
                            int number_of_threads) {
   thread_control->number_of_threads = number_of_threads;
 }
 
-void print_to_outfile(ThreadControl *thread_control, const char *content) {
+void thread_control_print(ThreadControl *thread_control, const char *content) {
   file_handler_write(thread_control->outfile, content);
 }
 
-void wait_for_mode_stopped(ThreadControl *thread_control) {
+void thread_control_wait_for_mode_stopped(ThreadControl *thread_control) {
   pthread_mutex_lock(&thread_control->searching_mode_mutex);
   // We can only acquire the lock once the search has stopped.
   pthread_mutex_unlock(&thread_control->searching_mode_mutex);

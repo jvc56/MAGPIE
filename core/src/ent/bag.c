@@ -28,7 +28,7 @@ void bag_shuffle(Bag *bag) {
   if (tiles_remaining > 1) {
     int i;
     for (i = bag->start_tile_index; i < bag->end_tile_index - 1; i++) {
-      int j = i + xoshiro_get_random_number(bag->prng, bag->end_tile_index - i);
+      int j = i + prng_get_random_number(bag->prng, bag->end_tile_index - i);
       int t = bag->tiles[j];
       bag->tiles[j] = bag->tiles[i];
       bag->tiles[i] = t;
@@ -36,13 +36,13 @@ void bag_shuffle(Bag *bag) {
   }
 }
 
-void bag_reset(const LetterDistribution *letter_distribution, Bag *bag) {
+void bag_reset(const LetterDistribution *ld, Bag *bag) {
   int tile_index = 0;
-  int letter_distribution_size =
-      letter_distribution_get_size(letter_distribution);
-  for (int i = 0; i < letter_distribution_size; i++) {
+  int ld_size =
+      ld_get_size(ld);
+  for (int i = 0; i < ld_size; i++) {
     for (int k = 0;
-         k < letter_distribution_get_distribution(letter_distribution, i);
+         k < ld_get_dist(ld, i);
          k++) {
       bag->tiles[tile_index] = i;
       tile_index++;
@@ -53,13 +53,13 @@ void bag_reset(const LetterDistribution *letter_distribution, Bag *bag) {
   bag_shuffle(bag);
 }
 
-Bag *bag_create(const LetterDistribution *letter_distribution) {
+Bag *bag_create(const LetterDistribution *ld) {
   Bag *bag = malloc_or_die(sizeof(Bag));
   // call bag_reseed if needed.
-  bag->prng = create_prng(42);
-  bag->size = letter_distribution_get_total_tiles(letter_distribution);
+  bag->prng = prng_create(42);
+  bag->size = ld_get_total_tiles(ld);
   bag->tiles = malloc_or_die(sizeof(uint8_t) * bag->size);
-  bag_reset(letter_distribution, bag);
+  bag_reset(ld, bag);
   return bag;
 }
 
@@ -74,7 +74,7 @@ void bag_copy(Bag *dst, const Bag *src) {
 
 Bag *bag_duplicate(const Bag *bag) {
   Bag *new_bag = malloc_or_die(sizeof(Bag));
-  new_bag->prng = create_prng(42);
+  new_bag->prng = prng_create(42);
   new_bag->size = bag->size;
   new_bag->tiles = malloc_or_die(sizeof(uint8_t) * new_bag->size);
   bag_copy(new_bag, bag);
@@ -82,7 +82,7 @@ Bag *bag_duplicate(const Bag *bag) {
 }
 
 void bag_destroy(Bag *bag) {
-  destroy_prng(bag->prng);
+  prng_destroy(bag->prng);
   free(bag->tiles);
   free(bag);
 }
@@ -108,7 +108,7 @@ uint8_t bag_draw_random_letter(Bag *bag, int player_draw_index) {
 }
 
 void bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
-  if (is_blanked(letter)) {
+  if (get_is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
   int letter_index = -1;
@@ -131,7 +131,7 @@ void bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
 }
 
 void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
-  if (is_blanked(letter)) {
+  if (get_is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
   // Use (1 - player_draw_index) to shift 1 to the right when
@@ -141,7 +141,7 @@ void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   int number_of_tiles_remaining = bag_get_tiles(bag);
   if (number_of_tiles_remaining > 0) {
     insert_index +=
-        xoshiro_get_random_number(bag->prng, number_of_tiles_remaining + 1);
+        prng_get_random_number(bag->prng, number_of_tiles_remaining + 1);
   }
   // Add swapped tiles
   // to the player's respective "side" of the bag.
@@ -156,15 +156,15 @@ void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   bag->tiles[insert_index] = letter;
 }
 
-void bag_reseed(Bag *bag, uint64_t seed) { seed_prng(bag->prng, seed); }
+void bag_reseed(Bag *bag, uint64_t seed) { prng_seed(bag->prng, seed); }
 
 // This function ensures that all workers for a given
 // job are seeded with unique non-overlapping sequences
 // for the PRNGs in their bags.
 void bag_seed_for_worker(Bag *bag, uint64_t seed, int worker_index) {
-  seed_prng(bag->prng, seed);
+  prng_seed(bag->prng, seed);
   for (int j = 0; j < worker_index; j++) {
-    xoshiro_jump(bag->prng);
+    prng_jump(bag->prng);
   }
 }
 

@@ -26,12 +26,12 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
   for (int i = 0; i < sim_results_get_number_of_plays(sim_results); i++) {
     const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
     Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
-    double wp_mean = get_mean(win_pct_stat) * 100.0;
-    double wp_se = get_standard_error(win_pct_stat, STATS_Z99) * 100.0;
+    double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
+    double wp_se = stat_get_stderr(win_pct_stat, STATS_Z99) * 100.0;
 
     Stat *equity_stat = simmed_play_get_equity_stat(play);
-    double eq_mean = get_mean(equity_stat);
-    double eq_se = get_standard_error(equity_stat, STATS_Z99);
+    double eq_mean = stat_get_mean(equity_stat);
+    double eq_se = stat_get_stderr(equity_stat, STATS_Z99);
 
     char *wp = get_formatted_string("%.3f±%.3f", wp_mean, wp_se);
     char *eq = get_formatted_string("%.3f±%.3f", eq_mean, eq_se);
@@ -40,7 +40,7 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
     Move *move = simmed_play_get_move(play);
     string_builder_add_move_description(move, ld, move_description);
     printf("%-20s%-9d%-16s%-16s%s\n", string_builder_peek(move_description),
-           get_score(move), wp, eq, ignore);
+           move_get_score(move), wp, eq, ignore);
     string_builder_clear(move_description);
     free(wp);
     free(eq);
@@ -53,7 +53,7 @@ void test_win_pct() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   assert(
-      within_epsilon(win_pct(config_get_win_pcts(config), 118, 90), 0.844430));
+      within_epsilon(win_pct_get(config_get_win_pcts(config), 118, 90), 0.844430));
   config_destroy(config);
 }
 
@@ -74,7 +74,7 @@ void test_sim_single_iteration() {
                              " plies 2 threads 1 numplays 15 i 1 cond none");
   sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
-  assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
+  assert(thread_control_get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 
   assert(board_get_tiles_played(board) == 0);
 
@@ -99,7 +99,7 @@ void test_more_iterations() {
                              " plies 2 threads 1 numplays 15 i 400 cond none");
   sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
-  assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
+  assert(thread_control_get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
   sim_results_sort_plays_by_win_rate(sim_results);
 
   SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
@@ -129,7 +129,7 @@ void perf_test_multithread_sim() {
   const LetterDistribution *ld = game_get_ld(game);
   ThreadControl *thread_control = config_get_thread_control(config);
 
-  int num_threads = get_number_of_threads(thread_control);
+  int num_threads = thread_control_get_threads(thread_control);
   printf("Using %d threads\n", num_threads);
   game_load_cgp(game, config_get_cgp(config));
   SimResults *sim_results = sim_results_create();
@@ -137,7 +137,7 @@ void perf_test_multithread_sim() {
                              " plies 2 threads 1 numplays 15 i 1000 cond none");
   sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
-  assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
+  assert(thread_control_get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 
   print_sim_stats(game, sim_results);
   sim_results_sort_plays_by_win_rate(sim_results);
@@ -174,7 +174,7 @@ void test_play_similarity() {
                      " plies 2 threads 1 numplays 4 i 1200 cond none check 50");
   sim_status_t status = simulate(config, game, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
-  assert(get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
+  assert(thread_control_get_halt_status(thread_control) == HALT_STATUS_MAX_ITERATIONS);
 
   // The first four plays all score 74. Only
   // 8F ATRESIC and 8F STEARIC should show up as similar, though.

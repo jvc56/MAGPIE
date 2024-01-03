@@ -7,6 +7,7 @@
 #include "../def/game_defs.h"
 
 #include "move.h"
+#include "rack.h"
 #include "stats.h"
 #include "win_pct.h"
 
@@ -24,13 +25,15 @@ pthread_mutex_t *simmed_play_get_mutex(const SimmedPlay *simmed_play);
 bool simmed_play_get_ignore(const SimmedPlay *simmed_play);
 void simmed_play_set_ignore(SimmedPlay *simmed_play, bool ignore);
 
-void add_score_stat(SimmedPlay *sp, int score, bool is_bingo, int ply,
-                    bool lock);
-void add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
-                     float leftover, bool lock);
-void add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
-                      float leftover, game_end_reason_t game_end_reason,
-                      int tiles_unseen, bool plies_are_odd, bool lock);
+void simmed_play_add_score_stat(SimmedPlay *sp, int score, bool is_bingo,
+                                int ply, bool lock);
+void simmed_play_add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
+                                 float leftover, bool lock);
+void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
+                                  float leftover,
+                                  game_end_reason_t game_end_reason,
+                                  int game_get_unseen_tiles, bool plies_are_odd,
+                                  bool lock);
 struct SimResults;
 typedef struct SimResults SimResults;
 
@@ -49,5 +52,9 @@ int sim_results_get_iteration_count(SimResults *sim_results);
 void sim_results_increment_iteration_count(SimResults *sim_results);
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
+
+double get_probability_for_random_minimum_draw(
+    const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
+    int minimum, int number_of_target_played_tiles);
 
 #endif

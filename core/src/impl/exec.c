@@ -4,11 +4,12 @@
 #include "../def/file_handler_defs.h"
 #include "../def/inference_defs.h"
 
+#include "../util/fileproxy.h"
 #include "../util/log.h"
+#include "../util/string_util.h"
 #include "../util/util.h"
 
 #include "../str/sim_string.h"
-#include "../util/string_util.h"
 
 #include "../ent/autoplay_results.h"
 #include "../ent/config.h"
@@ -40,17 +41,17 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
   ThreadControl *thread_control =
       config_get_thread_control(exec_state_get_config(exec_state));
 
-  int mode = get_mode(thread_control);
+  int mode = thread_control_get_mode(thread_control);
   if (mode != MODE_SEARCHING) {
     log_warn("Not currently searching.");
     return NULL;
   }
 
   if (should_halt) {
-    if (!halt(thread_control, HALT_STATUS_USER_INTERRUPT)) {
+    if (!thread_control_halt(thread_control, HALT_STATUS_USER_INTERRUPT)) {
       log_warn("Command already halted.");
     }
-    wait_for_mode_stopped(thread_control);
+    thread_control_wait_for_mode_stopped(thread_control);
   }
 
   char *status_string = NULL;
@@ -160,7 +161,7 @@ void execute_command(ExecState *exec_state) {
 void execute_command_and_set_mode_stopped(ExecState *exec_state) {
   execute_command(exec_state);
   error_status_log_warn_if_failed(exec_state_get_error_status(exec_state));
-  set_mode_stopped(
+  thread_control_set_mode_stopped(
       config_get_thread_control(exec_state_get_config(exec_state)));
 }
 
@@ -174,7 +175,7 @@ void execute_command_sync_or_async(ExecState *exec_state, const char *command,
                                    bool sync) {
   ThreadControl *thread_control =
       config_get_thread_control(exec_state_get_config(exec_state));
-  if (!set_mode_searching(thread_control)) {
+  if (!thread_control_set_mode_searching(thread_control)) {
     log_warn("still searching");
     return;
   }
@@ -195,7 +196,7 @@ void execute_command_sync_or_async(ExecState *exec_state, const char *command,
                             (int)config_load_status);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     error_status_log_warn_if_failed(exec_state_get_error_status(exec_state));
-    set_mode_stopped(thread_control);
+    thread_control_set_mode_stopped(thread_control);
     return;
   }
 
@@ -223,10 +224,10 @@ void process_ucgi_command(ExecState *exec_state, const char *command) {
       config_get_thread_control(exec_state_get_config(exec_state));
   if (strings_equal(command, UCGI_COMMAND_STRING)) {
     // More of a formality to align with UCI
-    print_to_outfile(thread_control, "id name MAGPIE 0.1\nucgiok\n");
+    thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
   } else if (strings_equal(command, STOP_COMMAND_STRING)) {
-    if (get_mode(thread_control) == MODE_SEARCHING) {
-      if (!halt(thread_control, HALT_STATUS_USER_INTERRUPT)) {
+    if (thread_control_get_mode(thread_control) == MODE_SEARCHING) {
+      if (!thread_control_halt(thread_control, HALT_STATUS_USER_INTERRUPT)) {
         log_warn("Search already received stop signal but has not stopped.");
       }
     } else {
@@ -258,11 +259,11 @@ void command_scan_loop(ExecState *exec_state,
     exec_mode_t exec_mode =
         config_get_exec_mode(exec_state_get_config(exec_state));
 
-    FileHandler *infile = get_infile(thread_control);
+    FileHandler *infile = thread_control_get_infile(thread_control);
 
     if (exec_mode == EXEC_MODE_CONSOLE &&
         strings_equal(STDIN_FILENAME, file_handler_get_filename(infile))) {
-      print_to_outfile(thread_control, "magpie>");
+      thread_control_print(thread_control, "magpie>");
     }
 
     free(input);
@@ -314,4 +315,5 @@ void process_command(int argc, char *argv[]) {
   free(initial_command_string);
   exec_state_destroy(exec_state);
   gen_clear_cache();
+  fileproxy_destroy_cache();
 }

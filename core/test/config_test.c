@@ -196,11 +196,11 @@ void test_config_success() {
   assert(config_get_max_iterations(config) == max_iterations);
   assert(config_get_stopping_condition(config) == SIM_STOPPING_CONDITION_98PCT);
   assert(config_get_seed(config) == (uint64_t)seed);
-  assert(get_number_of_threads(config_get_thread_control(config)) ==
+  assert(thread_control_get_threads(config_get_thread_control(config)) ==
          number_of_threads);
-  assert(get_print_info_interval(config_get_thread_control(config)) ==
+  assert(thread_control_get_print_info_interval(config_get_thread_control(config)) ==
          print_info);
-  assert(get_check_stopping_condition_interval(
+  assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
   assert(config_get_static_search_only(config));
   assert(config_get_use_game_pairs(config));
@@ -226,7 +226,7 @@ void test_config_success() {
 
   string_builder_clear(test_string_builder);
   string_builder_add_rack(config_get_rack(config),
-                          config_get_letter_distribution(config),
+                          config_get_ld(config),
                           test_string_builder);
   assert(strings_equal(rack, string_builder_peek(test_string_builder)));
 
@@ -285,11 +285,11 @@ void test_config_success() {
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
   assert(config_get_stopping_condition(config) == SIM_STOPPING_CONDITION_98PCT);
-  assert(get_number_of_threads(config_get_thread_control(config)) ==
+  assert(thread_control_get_threads(config_get_thread_control(config)) ==
          number_of_threads);
-  assert(get_print_info_interval(config_get_thread_control(config)) ==
+  assert(thread_control_get_print_info_interval(config_get_thread_control(config)) ==
          print_info);
-  assert(get_check_stopping_condition_interval(
+  assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
   assert(!config_get_static_search_only(config));
   assert(!config_get_use_game_pairs(config));

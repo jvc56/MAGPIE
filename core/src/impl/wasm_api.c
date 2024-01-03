@@ -76,8 +76,8 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   FormedWords *fw = NULL;
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Assume that that kwg is shared
-    points = board_score_move(board, ld, tiles, 0, ntiles - 1, row, col, tiles_played,
-                        !dir, 0);
+    points = board_score_move(board, ld, tiles, 0, ntiles - 1, row, col,
+                              tiles_played, !dir, 0);
 
     if (board_is_dir_vertical(dir)) {
       // board_transpose back.
@@ -87,17 +87,17 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
       col = ph;
     }
 
-    fw = words_played(board, tiles, 0, ntiles - 1, row, col, dir);
+    fw = formed_words_create(board, tiles, 0, ntiles - 1, row, col, dir);
     // Assume that that kwg is shared
-    populate_word_validities(kwg, fw);
+    formed_words_populate_validities(kwg, fw);
   }
 
   Rack *leave_rack = NULL;
 
   if (nleave > 0) {
-    leave_rack = create_rack(letter_distribution_get_size(ld));
+    leave_rack = rack_create(ld_get_size(ld));
     for (int i = 0; i < nleave; i++) {
-      add_letter_to_rack(leave_rack, leave[i]);
+      rack_add_letter(leave_rack, leave[i]);
     }
     // Assume that that klv is shared
     leave_value = klv_get_leave_value(klv, leave_rack);
@@ -120,7 +120,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
         }
       }
     }
-    free(fw);
+    formed_words_destroy(fw);
   }
 
   // Return a simple string
@@ -130,12 +130,12 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   StringBuilder *return_string_builder = create_string_builder();
   StringBuilder *move_string_builder = create_string_builder();
 
-  Move *move = create_move();
-  set_move(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, dir,
-           move_type);
+  Move *move = move_create();
+  move_set_all(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, dir,
+               move_type);
 
   string_builder_add_ucgi_move(move, board, ld, move_string_builder);
-  destroy_move(move);
+  move_destroy(move);
 
   string_builder_add_formatted_string(return_string_builder, "currmove %s",
                                       string_builder_peek(move_string_builder));
@@ -155,7 +155,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   // keep config around for next call.
   // config_destroy(config);
   if (leave_rack) {
-    destroy_rack(leave_rack);
+    rack_destroy(leave_rack);
   }
   char *return_string = string_builder_dump(return_string_builder, NULL);
   destroy_string_builder(return_string_builder);
@@ -170,7 +170,7 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
   Game *game = exec_state_get_game(iso_exec_state);
   MoveList *move_list = NULL;
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
-  sort_moves(move_list);
+  move_list_sort_moves(move_list);
 
   // This pointer needs to be freed by the caller:
   char *val = ucgi_static_moves(game, move_list);
