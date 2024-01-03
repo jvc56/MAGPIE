@@ -46,6 +46,7 @@ typedef struct Generator {
   uint64_t cross_set_cache[(BOARD_DIM)];
   uint8_t cross_score_cache[(BOARD_DIM)];
   int bag_tiles_remaining;
+  uint8_t player_rack_array[(MAX_ALPHABET_SIZE)];
   
   uint8_t strip[(BOARD_DIM)];
   uint8_t *exchange_strip;

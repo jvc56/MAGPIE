@@ -147,7 +147,7 @@ double get_spare_move_equity(const Generator *gen, const Player *player,
   double leave_adjustment = 0;
   double other_adjustments = 0;
 
-  if (gen->apply_placement_adjustment && gen->board->tiles_played == 0 &&
+  if (gen->apply_placement_adjustment &&
       gen->move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     other_adjustments = placement_adjustment(gen, gen->move_list->spare_move);
   }
@@ -302,6 +302,7 @@ void generate_exchange_moves(Generator *gen, Player *player, uint8_t ml,
     }
   }
 }
+
 bool better_play_has_been_found(const Generator *gen,
                                 double highest_possible_value) {
   const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
@@ -688,17 +689,13 @@ void shadow_start(const Rack *opp_rack, Generator *gen, int cross_set_index) {
                     !dir_is_vertical(gen->dir), cross_set_index);
 }
 
-void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
-                            Player *player) {
+void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col) {
   // set cols
   gen->current_left_col = col;
   gen->current_right_col = col;
 
   // Reset shadow score
   gen->highest_shadow_equity = 0;
-
-  // Set the number of letters
-  gen->number_of_letters_on_rack = player->rack->number_of_letters;
 
   // Set the current anchor column
   gen->current_anchor_col = col;
@@ -731,7 +728,7 @@ void shadow_by_orientation(const Rack *opp_rack, Generator *gen, Player *player,
                            get_cross_set_index(gen));
     for (int col = 0; col < BOARD_DIM; col++) {
       if (get_anchor(gen->board, row, col, dir)) {
-        shadow_play_for_anchor(opp_rack, gen, col, player);
+        shadow_play_for_anchor(opp_rack, gen, col);
         gen->last_anchor_col = col;
         // The next anchor to search after a playthrough tile should
         // leave a gap of one square so that it will not search backwards
@@ -763,7 +760,8 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
                     bool apply_placement_adjustment) {
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;
-  gen->apply_placement_adjustment = apply_placement_adjustment;
+  gen->apply_placement_adjustment =
+      apply_placement_adjustment && (gen->board->tiles_played == 0);
   gen->bag_tiles_remaining = get_tiles_remaining(gen->bag);
   gen->player_index = player->index;
   gen->kwg = player->kwg;
@@ -773,6 +771,11 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
   // Reset the best leaves
   for (int i = 0; i < (RACK_SIZE); i++) {
     gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
+  }
+
+  gen->number_of_letters_on_rack = player->rack->number_of_letters;
+  for (uint32_t i = 0; i < (int)gen->letter_distribution->size; i++) {
+    gen->player_rack_array[i] = player->rack->array[i];
   }
 
   init_leave_map(player->rack, gen->leave_map);
@@ -790,7 +793,7 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
 
   gen->rack_cross_set = 0;
   for (uint32_t i = 0; i < gen->letter_distribution->size; i++) {
-    if (player->rack->array[i] > 0) {
+    if (gen->player_rack_array[i] > 0) {
       gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
     }
     gen->tile_scores[i] = gen->letter_distribution->scores[i];
