@@ -168,8 +168,13 @@ int get_word_index_of(const KLV *klv, const Rack *leave, uint32_t node_index) {
 
   while (node_index != 0) {
     idx += klv->word_counts[node_index];
-    while (kwg_tile(klv->kwg, node_index) != (uint8_t)lidx) {
-      if (kwg_is_end(klv->kwg, node_index)) {
+    uint32_t node;
+    while (true) {
+      node = kwg_node(klv->kwg, node_index);
+      if (kwg_node_tile(node) == (uint8_t)lidx) {
+        break;
+      }
+      if (kwg_node_is_end(node)) {
         return -1;
       }
       node_index++;
@@ -189,15 +194,15 @@ int get_word_index_of(const KLV *klv, const Rack *leave, uint32_t node_index) {
     }
 
     if (number_of_letters == 0) {
-      if (kwg_accepts(klv->kwg, node_index)) {
+      if (kwg_node_accepts(node)) {
         return idx;
       }
       return -1;
     }
-    if (kwg_accepts(klv->kwg, node_index)) {
+    if (kwg_node_accepts(node)) {
       idx += 1;
     }
-    node_index = kwg_arc_index(klv->kwg, node_index);
+    node_index = kwg_node_arc_index(node);
   }
   return -1;
 }
