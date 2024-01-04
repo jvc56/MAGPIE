@@ -1,13 +1,10 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 
-#include "../ent/klv.h"
-#include "../ent/move.h"
-#include "../ent/rack.h"
-
-double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 bool has_prefix(const char *pre, const char *str);
 void *malloc_or_die(size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);

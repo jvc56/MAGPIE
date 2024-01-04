@@ -111,16 +111,6 @@ void game_start_next_player_turn(Game *game) {
   game->player_on_turn_index = 1 - game->player_on_turn_index;
 }
 
-game_variant_t get_game_variant_type_from_name(const char *variant_name) {
-  game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
-  if (strings_equal(variant_name, GAME_VARIANT_CLASSIC_NAME)) {
-    game_variant = GAME_VARIANT_CLASSIC;
-  } else if (strings_equal(variant_name, GAME_VARIANT_WORDSMOG_NAME)) {
-    game_variant = GAME_VARIANT_WORDSMOG;
-  }
-  return game_variant;
-}
-
 int traverse_backwards_for_score(const Board *board,
                                  const LetterDistribution *ld, int row,
                                  int col) {

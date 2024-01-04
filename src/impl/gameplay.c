@@ -21,6 +21,19 @@
 
 #include "move_gen.h"
 
+double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
+      if (get_is_blanked(move_get_tile(move, i))) {
+        rack_take_letter(rack, BLANK_MACHINE_LETTER);
+      } else {
+        rack_take_letter(rack, move_get_tile(move, i));
+      }
+    }
+  }
+  return klv_get_leave_value(klv, rack);
+}
+
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
   Board *board = game_get_board(game);

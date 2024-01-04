@@ -17,7 +17,6 @@
 #include "../def/win_pct_defs.h"
 
 #include "board.h"
-#include "game.h"
 #include "letter_distribution.h"
 #include "players_data.h"
 #include "rack.h"
@@ -534,6 +533,16 @@ config_load_status_t load_board_layout_for_config(Config *config,
     return CONFIG_LOAD_STATUS_UNKNOWN_BOARD_LAYOUT;
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+game_variant_t get_game_variant_type_from_name(const char *variant_name) {
+  game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
+  if (strings_equal(variant_name, GAME_VARIANT_CLASSIC_NAME)) {
+    game_variant = GAME_VARIANT_CLASSIC;
+  } else if (strings_equal(variant_name, GAME_VARIANT_WORDSMOG_NAME)) {
+    game_variant = GAME_VARIANT_WORDSMOG;
+  }
+  return game_variant;
 }
 
 config_load_status_t load_game_variant_for_config(Config *config,

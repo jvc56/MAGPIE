@@ -33,7 +33,6 @@ int game_get_player_on_turn_draw_index(const Game *game);
 bool game_get_data_is_shared(const Game *game,
                              players_data_t players_data_type);
 int game_get_unseen_tiles(const Game *game);
-game_variant_t get_game_variant_type_from_name(const char *variant_name);
 
 void game_set_consecutive_scoreless_turns(Game *game, int value);
 void game_increment_consecutive_scoreless_turns(Game *game);
