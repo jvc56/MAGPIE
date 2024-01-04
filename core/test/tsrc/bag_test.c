@@ -2,16 +2,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../src/def/rack_defs.h"
+#include "../../src/def/rack_defs.h"
 
-#include "../src/ent/config.h"
-#include "../src/ent/letter_distribution.h"
+#include "../../src/ent/config.h"
+#include "../../src/ent/letter_distribution.h"
 
-#include "../src/impl/gameplay.h"
+#include "../../src/impl/gameplay.h"
 
-#include "../src/str/bag_string.h"
+#include "../../src/str/bag_string.h"
 
-#include "../src/util/string_util.h"
+#include "../../src/util/string_util.h"
 
 #include "test_util.h"
 

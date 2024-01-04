@@ -4,18 +4,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../src/def/inference_defs.h"
+#include "../../src/def/inference_defs.h"
 
-#include "../src/ent/game.h"
-#include "../src/ent/inference_results.h"
-#include "../src/ent/klv.h"
-#include "../src/ent/move.h"
-#include "../src/ent/stats.h"
-#include "../src/ent/thread_control.h"
-#include "../src/impl/inference.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/inference_results.h"
+#include "../../src/ent/klv.h"
+#include "../../src/ent/move.h"
+#include "../../src/ent/stats.h"
+#include "../../src/ent/thread_control.h"
+#include "../../src/impl/inference.h"
 
-#include "../src/util/string_util.h"
-#include "../src/util/util.h"
+#include "../../src/util/string_util.h"
+#include "../../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

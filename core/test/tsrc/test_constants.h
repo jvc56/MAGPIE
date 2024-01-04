@@ -1,7 +1,7 @@
 #ifndef TEST_CONSTANTS_H
 #define TEST_CONSTANTS_H
 
-#define TESTDATA_FILEPATH "testdata/"
+#define TESTDATA_FILEPATH "test/testdata/"
 
 #define EMPTY_CGP                                                              \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;"

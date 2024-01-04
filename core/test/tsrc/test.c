@@ -2,13 +2,13 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "../src/ent/config.h"
+#include "../../src/ent/config.h"
 
-#include "../src/impl/exec.h"
+#include "../../src/impl/exec.h"
 
-#include "../src/util/fileproxy.h"
-#include "../src/util/log.h"
-#include "../src/util/string_util.h"
+#include "../../src/util/fileproxy.h"
+#include "../../src/util/log.h"
+#include "../../src/util/string_util.h"
 
 #include "alphabet_test.h"
 #include "autoplay_test.h"

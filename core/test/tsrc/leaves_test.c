@@ -3,9 +3,9 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "../src/util/log.h"
-#include "../src/util/string_util.h"
-#include "../src/util/util.h"
+#include "../../src/util/log.h"
+#include "../../src/util/string_util.h"
+#include "../../src/util/util.h"
 
 #include "test_util.h"
 

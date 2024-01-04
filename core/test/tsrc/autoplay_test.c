@@ -4,12 +4,12 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "../src/ent/autoplay_results.h"
-#include "../src/ent/thread_control.h"
+#include "../../src/ent/autoplay_results.h"
+#include "../../src/ent/thread_control.h"
 
-#include "../src/impl/autoplay.h"
+#include "../../src/impl/autoplay.h"
 
-#include "../src/util/string_util.h"
+#include "../../src/util/string_util.h"
 
 #include "test_util.h"
 

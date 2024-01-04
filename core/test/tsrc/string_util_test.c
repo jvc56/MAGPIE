@@ -1,6 +1,6 @@
 #include <assert.h>
 
-#include "../src/util/string_util.h"
+#include "../../src/util/string_util.h"
 
 #include "test_util.h"
 

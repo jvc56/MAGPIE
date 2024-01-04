@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../src/ent/stats.h"
-#include "../src/util/util.h"
+#include "../../src/ent/stats.h"
+#include "../../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

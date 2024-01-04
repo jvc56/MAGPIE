@@ -1,8 +1,8 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../src/ent/config.h"
-#include "../src/ent/letter_distribution.h"
+#include "../../src/ent/config.h"
+#include "../../src/ent/letter_distribution.h"
 
 #include "test_util.h"
 

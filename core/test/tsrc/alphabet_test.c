@@ -1,11 +1,11 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../src/ent/config.h"
+#include "../../src/ent/config.h"
 
-#include "../src/str/letter_distribution_string.h"
+#include "../../src/str/letter_distribution_string.h"
 
-#include "../src/util/string_util.h"
+#include "../../src/util/string_util.h"
 
 #include "test_util.h"
 

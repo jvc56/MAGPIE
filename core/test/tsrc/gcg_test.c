@@ -2,15 +2,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../src/def/gcg_defs.h"
+#include "../../src/def/gcg_defs.h"
 
-#include "../src/ent/game_history.h"
-#include "../src/ent/letter_distribution.h"
+#include "../../src/ent/game_history.h"
+#include "../../src/ent/letter_distribution.h"
 
-#include "../src/impl/gcg.h"
+#include "../../src/impl/gcg.h"
 
-#include "../src/util/string_util.h"
-#include "../src/util/util.h"
+#include "../../src/util/string_util.h"
+#include "../../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

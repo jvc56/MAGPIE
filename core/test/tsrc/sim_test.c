@@ -4,18 +4,18 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../src/def/stats_defs.h"
+#include "../../src/def/stats_defs.h"
 
-#include "../src/ent/move.h"
-#include "../src/ent/sim_results.h"
-#include "../src/ent/stats.h"
-#include "../src/ent/win_pct.h"
+#include "../../src/ent/move.h"
+#include "../../src/ent/sim_results.h"
+#include "../../src/ent/stats.h"
+#include "../../src/ent/win_pct.h"
 
-#include "../src/impl/simmer.h"
+#include "../../src/impl/simmer.h"
 
-#include "../src/str/move_string.h"
+#include "../../src/str/move_string.h"
 
-#include "../src/util/string_util.h"
+#include "../../src/util/string_util.h"
 
 #include "test_util.h"
 

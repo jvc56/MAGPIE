@@ -1,14 +1,14 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../src/def/rack_defs.h"
+#include "../../src/def/rack_defs.h"
 
-#include "../src/ent/bag.h"
-#include "../src/ent/board.h"
-#include "../src/ent/game.h"
-#include "../src/ent/player.h"
+#include "../../src/ent/bag.h"
+#include "../../src/ent/board.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/player.h"
 
-#include "../src/impl/gameplay.h"
+#include "../../src/impl/gameplay.h"
 
 #include "test_util.h"
 

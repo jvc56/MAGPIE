@@ -2,13 +2,13 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-#include "../src/def/cross_set_defs.h"
+#include "../../src/def/cross_set_defs.h"
 
-#include "../src/ent/config.h"
-#include "../src/ent/game.h"
-#include "../src/ent/letter_distribution.h"
+#include "../../src/ent/config.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/letter_distribution.h"
 
-#include "../src/util/string_util.h"
+#include "../../src/util/string_util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

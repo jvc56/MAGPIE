@@ -1,9 +1,9 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../src/ent/leave_map.h"
-#include "../src/ent/letter_distribution.h"
-#include "../src/ent/rack.h"
+#include "../../src/ent/leave_map.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/rack.h"
 
 #include "rack_test.h"
 #include "test_util.h"

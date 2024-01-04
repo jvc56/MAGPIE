@@ -2,13 +2,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../src/ent/anchor.h"
-#include "../src/ent/config.h"
-#include "../src/ent/game.h"
+#include "../../src/ent/anchor.h"
+#include "../../src/ent/config.h"
+#include "../../src/ent/game.h"
 
-#include "../src/impl/gameplay.h"
+#include "../../src/impl/gameplay.h"
 
-#include "move_gen_pi.h"
+#include "../pi/move_gen_pi.h"
 
 #include "test_constants.h"
 #include "test_util.h"

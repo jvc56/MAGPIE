@@ -1,8 +1,8 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "../src/ent/config.h"
-#include "../src/ent/game.h"
+#include "../../src/ent/config.h"
+#include "../../src/ent/game.h"
 
 #include "game_test.h"
 #include "rack_test.h"

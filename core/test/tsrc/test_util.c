@@ -6,27 +6,27 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../src/def/rack_defs.h"
+#include "../../src/def/rack_defs.h"
 
-#include "../src/ent/board.h"
-#include "../src/ent/config.h"
-#include "../src/ent/game.h"
-#include "../src/ent/klv.h"
-#include "../src/ent/leave_map.h"
-#include "../src/ent/move.h"
-#include "../src/ent/rack.h"
-#include "../src/impl/inference.h"
+#include "../../src/ent/board.h"
+#include "../../src/ent/config.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/klv.h"
+#include "../../src/ent/leave_map.h"
+#include "../../src/ent/move.h"
+#include "../../src/ent/rack.h"
+#include "../../src/impl/inference.h"
 
-#include "../src/impl/gameplay.h"
-#include "../src/impl/move_gen.h"
+#include "../../src/impl/gameplay.h"
+#include "../../src/impl/move_gen.h"
 
-#include "../src/str/game_string.h"
-#include "../src/str/inference_string.h"
-#include "../src/str/move_string.h"
+#include "../../src/str/game_string.h"
+#include "../../src/str/inference_string.h"
+#include "../../src/str/move_string.h"
 
-#include "../src/util/log.h"
-#include "../src/util/string_util.h"
-#include "../src/util/util.h"
+#include "../../src/util/log.h"
+#include "../../src/util/string_util.h"
+#include "../../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

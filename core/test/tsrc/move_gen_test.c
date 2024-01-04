@@ -3,19 +3,19 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "../src/def/rack_defs.h"
+#include "../../src/def/rack_defs.h"
 
-#include "../src/ent/bag.h"
-#include "../src/ent/game.h"
-#include "../src/ent/leave_map.h"
-#include "../src/ent/move.h"
-#include "../src/ent/player.h"
+#include "../../src/ent/bag.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/leave_map.h"
+#include "../../src/ent/move.h"
+#include "../../src/ent/player.h"
 
-#include "../src/impl/gameplay.h"
-#include "../src/impl/move_gen.h"
+#include "../../src/impl/gameplay.h"
+#include "../../src/impl/move_gen.h"
 
-#include "../src/util/string_util.h"
-#include "../src/util/util.h"
+#include "../../src/util/string_util.h"
+#include "../../src/util/util.h"
 
 #include "cross_set_test.h"
 #include "rack_test.h"
