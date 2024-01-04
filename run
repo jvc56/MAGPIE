@@ -6,6 +6,10 @@ if [ "$1" == "u" ]; then
 make magpie_test
 ./bin/magpie_test $2
 
+# Run include checks
+elif [ "$1" == "i" ]; then
+make -k CC=$2 CXXFLAGS="-Xiwyu --error_always"
+
 # Run tests with debugger
 # Set $2 to run a specific test
 elif [ "$1" == "g" ]; then

@@ -10,7 +10,7 @@ covhtml
 dev/*.txt
 perf*
 .env
-*/data/lexica/*
-*/data/strategy/*
+data/lexica/*
+data/strategy/*
 oprofile_data
 TODO
