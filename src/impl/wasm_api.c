@@ -1,19 +1,23 @@
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../def/rack_defs.h"
+#include "../def/game_history_defs.h"
+#include "../def/move_defs.h"
 
-#include "../ent/bag.h"
-#include "../ent/config.h"
-#include "../ent/error_status.h"
+#include "../ent/board.h"
 #include "../ent/exec_state.h"
 #include "../ent/game.h"
+#include "../ent/klv.h"
+#include "../ent/kwg.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
+#include "../ent/rack.h"
 #include "../ent/words.h"
 
 #include "exec.h"
-#include "gameplay.h"
 #include "move_gen.h"
 
 #include "../str/game_string.h"

@@ -1,9 +1,13 @@
 #include <assert.h>
-#include <inttypes.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 
+#include "../../src/def/board_defs.h"
 #include "../../src/def/cross_set_defs.h"
+#include "../../src/def/letter_distribution_defs.h"
 
+#include "../../src/ent/board.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"

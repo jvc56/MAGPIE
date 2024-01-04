@@ -2,8 +2,10 @@
 
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include "../def/file_handler_defs.h"
+#include "../def/thread_control_defs.h"
 
 #include "file_handler.h"
 #include "timer.h"

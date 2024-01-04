@@ -3,7 +3,6 @@
 
 #include "rack.h"
 
-struct LeaveRack;
 typedef struct LeaveRack LeaveRack;
 
 Rack *leave_rack_get_leave(const LeaveRack *leaveRack);
@@ -11,7 +10,6 @@ Rack *leave_rack_get_exchanged(const LeaveRack *leaveRack);
 int leave_rack_get_draws(const LeaveRack *leaveRack);
 double leave_rack_get_equity(const LeaveRack *leaveRack);
 
-struct LeaveRackList;
 typedef struct LeaveRackList LeaveRackList;
 
 LeaveRackList *leave_rack_list_create(int capacity, int distribution_size);

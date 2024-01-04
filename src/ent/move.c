@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
 
 #include "../util/log.h"

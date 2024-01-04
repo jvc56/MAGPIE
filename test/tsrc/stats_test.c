@@ -1,12 +1,9 @@
 #include <assert.h>
-#include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 #include "../../src/ent/stats.h"
 #include "../../src/util/util.h"
 
-#include "test_constants.h"
 #include "test_util.h"
 
 void test_single_stat() {
@@ -90,10 +87,13 @@ void test_combined_stats() {
   stat_push(singular_stat, 7, 1);
 
   stats_combine(fragmented_stats, 3, combined_stat);
-  assert(within_epsilon(stat_get_stdev(combined_stat), stat_get_stdev(singular_stat)));
-  assert(within_epsilon(stat_get_mean(combined_stat), stat_get_mean(singular_stat)));
+  assert(within_epsilon(stat_get_stdev(combined_stat),
+                        stat_get_stdev(singular_stat)));
+  assert(within_epsilon(stat_get_mean(combined_stat),
+                        stat_get_mean(singular_stat)));
   assert(stat_get_weight(combined_stat) == stat_get_weight(singular_stat));
-  assert(stat_get_cardinality(combined_stat) == stat_get_cardinality(singular_stat));
+  assert(stat_get_cardinality(combined_stat) ==
+         stat_get_cardinality(singular_stat));
 
   stat_push(fragmented_stats[1], 3, 1);
   stat_push(singular_stat, 3, 1);
@@ -102,27 +102,36 @@ void test_combined_stats() {
   stat_push(singular_stat, 6, 1);
 
   stats_combine(fragmented_stats, 3, combined_stat);
-  assert(within_epsilon(stat_get_stdev(combined_stat), stat_get_stdev(singular_stat)));
-  assert(within_epsilon(stat_get_mean(combined_stat), stat_get_mean(singular_stat)));
+  assert(within_epsilon(stat_get_stdev(combined_stat),
+                        stat_get_stdev(singular_stat)));
+  assert(within_epsilon(stat_get_mean(combined_stat),
+                        stat_get_mean(singular_stat)));
   assert(stat_get_weight(combined_stat) == stat_get_weight(singular_stat));
-  assert(stat_get_cardinality(combined_stat) == stat_get_cardinality(singular_stat));
+  assert(stat_get_cardinality(combined_stat) ==
+         stat_get_cardinality(singular_stat));
 
   stat_push(fragmented_stats[1], 10, 3);
   stat_push(singular_stat, 10, 3);
 
   stats_combine(fragmented_stats, 3, combined_stat);
-  assert(within_epsilon(stat_get_stdev(combined_stat), stat_get_stdev(singular_stat)));
-  assert(within_epsilon(stat_get_mean(combined_stat), stat_get_mean(singular_stat)));
+  assert(within_epsilon(stat_get_stdev(combined_stat),
+                        stat_get_stdev(singular_stat)));
+  assert(within_epsilon(stat_get_mean(combined_stat),
+                        stat_get_mean(singular_stat)));
   assert(stat_get_weight(combined_stat) == stat_get_weight(singular_stat));
-  assert(stat_get_cardinality(combined_stat) == stat_get_cardinality(singular_stat));
+  assert(stat_get_cardinality(combined_stat) ==
+         stat_get_cardinality(singular_stat));
   stat_push(fragmented_stats[2], 4, 6);
   stat_push(singular_stat, 4, 6);
 
   stats_combine(fragmented_stats, 3, combined_stat);
-  assert(within_epsilon(stat_get_stdev(combined_stat), stat_get_stdev(singular_stat)));
-  assert(within_epsilon(stat_get_mean(combined_stat), stat_get_mean(singular_stat)));
+  assert(within_epsilon(stat_get_stdev(combined_stat),
+                        stat_get_stdev(singular_stat)));
+  assert(within_epsilon(stat_get_mean(combined_stat),
+                        stat_get_mean(singular_stat)));
   assert(stat_get_weight(combined_stat) == stat_get_weight(singular_stat));
-  assert(stat_get_cardinality(combined_stat) == stat_get_cardinality(singular_stat));
+  assert(stat_get_cardinality(combined_stat) ==
+         stat_get_cardinality(singular_stat));
 
   for (int i = 0; i < 3; i++) {
     stat_destroy(fragmented_stats[i]);

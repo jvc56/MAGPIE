@@ -4,7 +4,6 @@
 #include "kwg.h"
 #include "rack.h"
 
-struct KLV;
 typedef struct KLV KLV;
 
 KLV *klv_create(const char *klv_name);

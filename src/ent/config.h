@@ -2,6 +2,7 @@
 #define CONFIG_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
@@ -14,7 +15,6 @@
 #include "thread_control.h"
 #include "win_pct.h"
 
-struct Config;
 typedef struct Config Config;
 
 Config *config_create_default();

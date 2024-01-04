@@ -1,13 +1,22 @@
 #include <assert.h>
 #include <pthread.h>
-#include <stdatomic.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+#include "../def/game_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/move_defs.h"
+#include "../def/simmer_defs.h"
+#include "../def/thread_control_defs.h"
 
 #include "../def/rack_defs.h"
 #include "../def/stats_defs.h"
 
 #include "../ent/bag.h"
+#include "../ent/config.h"
 #include "../ent/game.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"

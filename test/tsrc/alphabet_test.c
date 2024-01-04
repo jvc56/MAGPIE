@@ -1,7 +1,9 @@
 #include <assert.h>
-#include <stdio.h>
+
+#include "../../src/def/letter_distribution_defs.h"
 
 #include "../../src/ent/config.h"
+#include "../../src/ent/letter_distribution.h"
 
 #include "../../src/str/letter_distribution_string.h"
 

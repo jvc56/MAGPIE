@@ -1,15 +1,20 @@
 #include <assert.h>
-#include <float.h>
-#include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
 
+#include "../../src/def/board_defs.h"
+#include "../../src/def/game_history_defs.h"
+#include "../../src/def/move_defs.h"
 #include "../../src/def/rack_defs.h"
 
-#include "../../src/ent/bag.h"
+#include "../../src/ent/board.h"
+#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
-#include "../../src/ent/leave_map.h"
+#include "../../src/ent/klv.h"
+#include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
 
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
@@ -17,8 +22,6 @@
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
 
-#include "cross_set_test.h"
-#include "rack_test.h"
 #include "test_constants.h"
 #include "test_util.h"
 

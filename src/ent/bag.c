@@ -1,7 +1,8 @@
 #include "bag.h"
 
-#include <stdio.h>
 #include <stdlib.h>
+
+#include "../def/letter_distribution_defs.h"
 
 #include "xoshiro.h"
 

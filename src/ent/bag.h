@@ -2,12 +2,12 @@
 #define BAG_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "letter_distribution.h"
 
 #define MAX_BAG_SIZE 1000
 
-struct Bag;
 typedef struct Bag Bag;
 
 Bag *bag_create(const LetterDistribution *ld);

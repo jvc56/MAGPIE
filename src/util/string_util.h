@@ -30,7 +30,6 @@ int memory_compare(const void *s1, const void *s2, size_t n);
 
 char *get_substring(const char *input_string, int start_index, int end_index);
 
-struct StringSplitter;
 typedef struct StringSplitter StringSplitter;
 
 int string_splitter_get_number_of_items(const StringSplitter *string_splitter);
@@ -49,7 +48,6 @@ StringSplitter *split_string_by_newline(const char *input_string,
                                         bool ignore_empty);
 StringSplitter *split_file_by_newline(const char *filename);
 
-struct StringBuilder;
 typedef struct StringBuilder StringBuilder;
 
 StringBuilder *create_string_builder();

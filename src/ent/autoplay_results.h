@@ -3,7 +3,6 @@
 
 #include "stats.h"
 
-struct AutoplayResults;
 typedef struct AutoplayResults AutoplayResults;
 
 AutoplayResults *autoplay_results_create();

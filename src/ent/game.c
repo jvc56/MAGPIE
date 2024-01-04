@@ -4,15 +4,17 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/game_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
-#include "../def/rack_defs.h"
 
 #include "bag.h"
 #include "board.h"
-#include "move.h"
+#include "kwg.h"
 #include "player.h"
+#include "players_data.h"
 #include "rack.h"
 
 #include "../util/log.h"

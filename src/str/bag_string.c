@@ -1,4 +1,4 @@
-#include <stdint.h>
+#include "../def/letter_distribution_defs.h"
 
 #include "../ent/bag.h"
 #include "../ent/letter_distribution.h"

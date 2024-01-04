@@ -1,11 +1,21 @@
 #include <assert.h>
-#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include "../../src/def/config_defs.h"
+#include "../../src/def/game_defs.h"
+#include "../../src/def/move_defs.h"
+#include "../../src/def/players_data_defs.h"
+#include "../../src/def/simmer_defs.h"
 
 #include "../../src/ent/config.h"
+#include "../../src/ent/kwg.h"
+#include "../../src/ent/players_data.h"
+#include "../../src/ent/rack.h"
+#include "../../src/ent/thread_control.h"
 
 #include "../../src/str/rack_string.h"
 
-#include "../../src/util/log.h"
 #include "../../src/util/string_util.h"
 
 #include "config_test.h"

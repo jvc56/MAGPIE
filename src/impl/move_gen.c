@@ -1,10 +1,14 @@
 #include <assert.h>
-#include <ctype.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
+#include "../def/game_history_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/move_defs.h"
 #include "../def/move_gen_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
@@ -12,11 +16,12 @@
 
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
-#include "../ent/config.h"
+#include "../ent/board.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
 #include "../ent/leave_map.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"

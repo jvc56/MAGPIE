@@ -1,16 +1,17 @@
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #include "../def/inference_defs.h"
 #include "../def/rack_defs.h"
 
-#include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/leave_rack.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
 #include "../ent/stats.h"
+#include "../ent/thread_control.h"
 
-#include "game_string.h"
 #include "letter_distribution_string.h"
 #include "rack_string.h"
 

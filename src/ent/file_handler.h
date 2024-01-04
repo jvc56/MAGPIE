@@ -3,7 +3,6 @@
 
 #include "../def/file_handler_defs.h"
 
-struct FileHandler;
 typedef struct FileHandler FileHandler;
 
 FileHandler *

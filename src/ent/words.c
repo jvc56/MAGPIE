@@ -1,14 +1,16 @@
 #include "words.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
 #include "board.h"
+#include "letter_distribution.h"
 
-#include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 

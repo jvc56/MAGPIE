@@ -6,6 +6,8 @@
 
 #include "klv.h"
 #include "kwg.h"
+#include "letter_distribution.h"
+#include "players_data.h"
 
 #include "../util/util.h"
 

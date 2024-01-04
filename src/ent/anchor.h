@@ -3,7 +3,6 @@
 
 #include <stdbool.h>
 
-struct AnchorList;
 typedef struct AnchorList AnchorList;
 
 AnchorList *anchor_list_create();

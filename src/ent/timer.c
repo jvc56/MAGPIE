@@ -1,7 +1,9 @@
 #include "timer.h"
 
-#include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "../util/log.h"
 #include "../util/util.h"

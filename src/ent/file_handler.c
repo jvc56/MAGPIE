@@ -4,6 +4,9 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/types.h>
+
+#include "../def/file_handler_defs.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"

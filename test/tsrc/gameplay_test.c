@@ -1,12 +1,17 @@
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 
+#include "../../src/def/game_defs.h"
 #include "../../src/def/rack_defs.h"
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
+#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
+#include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
 
 #include "../../src/impl/gameplay.h"
 
@@ -69,8 +74,7 @@ void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
   Bag *bag2 = game_get_bag(g2);
 
   assert_boards_are_equal(board1, board2);
-  assert_bags_are_equal(bag1, bag2,
-                        ld_get_size(game_get_ld(g1)));
+  assert_bags_are_equal(bag1, bag2, ld_get_size(game_get_ld(g1)));
 }
 
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
@@ -467,14 +471,14 @@ void test_playmove() {
   assert(rack_get_letter(player0_rack, ld_hl_to_ml(ld, "U")) < 2);
 
   // Test pass
-  game_load_cgp(game,
-           "15/15/12F2/11TROW/4V3EWE1A2/2iNAURATE1TIP1/4L1AAH2EM1B/"
-           "3PAIGLE2X1TO/2JANN4FAQIR/4C2MOKES1ZO/4EBIoNISE2U/2ODDITY1R1S2G/"
-           "1DUI1EALE3YEH/CODGER2LOTIONS/9RIN3 / 517/349 5 lex CSW21;");
+  game_load_cgp(
+      game, "15/15/12F2/11TROW/4V3EWE1A2/2iNAURATE1TIP1/4L1AAH2EM1B/"
+            "3PAIGLE2X1TO/2JANN4FAQIR/4C2MOKES1ZO/4EBIoNISE2U/2ODDITY1R1S2G/"
+            "1DUI1EALE3YEH/CODGER2LOTIONS/9RIN3 / 517/349 5 lex CSW21;");
   draw_at_most_to_rack(bag, player0_rack, 1,
-                           game_get_player_draw_index(game, 0));
+                       game_get_player_draw_index(game, 0));
   draw_at_most_to_rack(bag, player1_rack, 1,
-                           game_get_player_draw_index(game, 1));
+                       game_get_player_draw_index(game, 1));
 
   int player0_score = player_get_score(player0);
   int player1_score = player_get_score(player1);

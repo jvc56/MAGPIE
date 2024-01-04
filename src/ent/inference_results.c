@@ -1,5 +1,7 @@
 #include "inference_results.h"
 
+#include <stdlib.h>
+
 #include "../def/inference_defs.h"
 #include "../def/rack_defs.h"
 

@@ -1,10 +1,16 @@
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
+#include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/thread_control_defs.h"
 
 #include "../ent/bag.h"
+#include "../ent/config.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
@@ -13,6 +19,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/stats.h"
+#include "../ent/thread_control.h"
 
 #include "gameplay.h"
 #include "move_gen.h"

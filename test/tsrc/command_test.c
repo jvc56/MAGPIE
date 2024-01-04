@@ -1,20 +1,18 @@
 #include <assert.h>
-#include <errno.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
+#include "../../src/def/config_defs.h"
 #include "../../src/def/error_status_defs.h"
+#include "../../src/def/file_handler_defs.h"
 
 #include "../../src/ent/exec_state.h"
-#include "../../src/ent/game.h"
-#include "../../src/ent/thread_control.h"
+#include "../../src/ent/file_handler.h"
 
 #include "../../src/impl/exec.h"
-#include "../../src/impl/inference.h"
-#include "../../src/impl/simmer.h"
 
 #include "../../src/util/log.h"
 #include "../../src/util/string_util.h"

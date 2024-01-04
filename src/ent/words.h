@@ -5,9 +5,7 @@
 
 #include "board.h"
 #include "kwg.h"
-#include "rack.h"
 
-struct FormedWords;
 typedef struct FormedWords FormedWords;
 
 FormedWords *formed_words_create(Board *board, uint8_t word[],

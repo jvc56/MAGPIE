@@ -1,18 +1,18 @@
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 
+#include "../../src/ent/config.h"
 #include "../../src/ent/leave_map.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/rack.h"
 
-#include "rack_test.h"
 #include "test_util.h"
 
-void take_set(const LetterDistribution *ld,
-              LeaveMap *leave_map, Rack *rack, char *letter,
-              int expected_take_index, double value) {
+void take_set(const LetterDistribution *ld, LeaveMap *leave_map, Rack *rack,
+              char *letter, int expected_take_index, double value) {
   leave_map_take_letter_and_update_current_index(leave_map, rack,
-                                       ld_hl_to_ml(ld, letter));
+                                                 ld_hl_to_ml(ld, letter));
   int current_index = leave_map_get_current_index(leave_map);
   if (current_index != expected_take_index) {
     printf("%d != %d\n", current_index, expected_take_index);
@@ -21,12 +21,11 @@ void take_set(const LetterDistribution *ld,
   leave_map_set_current_value(leave_map, value);
 }
 
-void take_set_add(const LetterDistribution *ld,
-                  LeaveMap *leave_map, Rack *rack, char *letter,
-                  int expected_take_index, int expected_add_index, double value,
-                  bool set) {
+void take_set_add(const LetterDistribution *ld, LeaveMap *leave_map, Rack *rack,
+                  char *letter, int expected_take_index, int expected_add_index,
+                  double value, bool set) {
   leave_map_take_letter_and_update_current_index(leave_map, rack,
-                                       ld_hl_to_ml(ld, letter));
+                                                 ld_hl_to_ml(ld, letter));
   assert(leave_map_get_current_index(leave_map) == expected_take_index);
   if (set) {
     leave_map_set_current_value(leave_map, value);
@@ -34,7 +33,7 @@ void take_set_add(const LetterDistribution *ld,
     assert(within_epsilon(leave_map_get_current_value(leave_map), value));
   }
   leave_map_add_letter_and_update_current_index(leave_map, rack,
-                                      ld_hl_to_ml(ld, letter));
+                                                ld_hl_to_ml(ld, letter));
   assert(leave_map_get_current_index(leave_map) == expected_add_index);
 }
 
@@ -91,19 +90,26 @@ void test_leave_map() {
   take_set(ld, leave_map, rack, "U", 0, 17.0);
 
   // Add back in a different order and check the value
-  leave_map_add_letter_and_update_current_index(leave_map, rack, ld_hl_to_ml(ld, "D"));
-  leave_map_add_letter_and_update_current_index(leave_map, rack, ld_hl_to_ml(ld, "I"));
-  leave_map_add_letter_and_update_current_index(leave_map, rack, ld_hl_to_ml(ld, "U"));
+  leave_map_add_letter_and_update_current_index(leave_map, rack,
+                                                ld_hl_to_ml(ld, "D"));
+  leave_map_add_letter_and_update_current_index(leave_map, rack,
+                                                ld_hl_to_ml(ld, "I"));
+  leave_map_add_letter_and_update_current_index(leave_map, rack,
+                                                ld_hl_to_ml(ld, "U"));
   assert(leave_map_get_current_index(leave_map) == 41);
   assert(within_epsilon(leave_map_get_current_value(leave_map), 14.0));
 
-  leave_map_add_letter_and_update_current_index(leave_map, rack, ld_hl_to_ml(ld, "D"));
-  leave_map_add_letter_and_update_current_index(leave_map, rack, ld_hl_to_ml(ld, "I"));
+  leave_map_add_letter_and_update_current_index(leave_map, rack,
+                                                ld_hl_to_ml(ld, "D"));
+  leave_map_add_letter_and_update_current_index(leave_map, rack,
+                                                ld_hl_to_ml(ld, "I"));
   assert(leave_map_get_current_index(leave_map) == 59);
   assert(within_epsilon(leave_map_get_current_value(leave_map), 12.0));
 
-  leave_map_add_letter_and_update_current_index(leave_map, rack, ld_hl_to_ml(ld, "U"));
-  leave_map_add_letter_and_update_current_index(leave_map, rack, ld_hl_to_ml(ld, "D"));
+  leave_map_add_letter_and_update_current_index(leave_map, rack,
+                                                ld_hl_to_ml(ld, "U"));
+  leave_map_add_letter_and_update_current_index(leave_map, rack,
+                                                ld_hl_to_ml(ld, "D"));
   assert(leave_map_get_current_index(leave_map) == 127);
   assert(within_epsilon(leave_map_get_current_value(leave_map), 100.0));
 

@@ -9,7 +9,6 @@
 #include "move.h"
 #include "rack.h"
 
-struct GameEvent;
 typedef struct GameEvent GameEvent;
 
 GameEvent *game_event_create();
@@ -35,7 +34,6 @@ const char *game_event_get_note(const GameEvent *event);
 
 void game_event_set_score(GameEvent *event, int score);
 
-struct GameHistoryPlayer;
 typedef struct GameHistoryPlayer GameHistoryPlayer;
 
 GameHistoryPlayer *game_history_player_create(const char *name,
@@ -56,7 +54,6 @@ void game_history_player_set_last_known_rack(GameHistoryPlayer *player,
                                              Rack *rack);
 Rack *game_history_player_get_last_known_rack(const GameHistoryPlayer *player);
 
-struct GameHistory;
 typedef struct GameHistory GameHistory;
 
 GameHistory *game_history_create();
@@ -79,10 +76,8 @@ void game_history_set_lexicon_name(GameHistory *history,
                                    const char *lexicon_name);
 const char *game_history_get_lexicon_name(const GameHistory *history);
 
-void game_history_set_ld_name(
-    GameHistory *history, const char *ld_name);
-const char *
-game_history_get_ld_name(const GameHistory *history);
+void game_history_set_ld_name(GameHistory *history, const char *ld_name);
+const char *game_history_get_ld_name(const GameHistory *history);
 
 void game_history_set_game_variant(GameHistory *history,
                                    game_variant_t game_variant);
@@ -101,10 +96,8 @@ void game_history_set_number_of_events(GameHistory *history,
                                        int number_of_events);
 int game_history_get_number_of_events(const GameHistory *history);
 
-void game_history_set_ld(
-    GameHistory *history, LetterDistribution *ld);
-LetterDistribution *
-game_history_get_ld(const GameHistory *history);
+void game_history_set_ld(GameHistory *history, LetterDistribution *ld);
+LetterDistribution *game_history_get_ld(const GameHistory *history);
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 

@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdbool.h>
 
 #include "../../src/util/string_util.h"
 

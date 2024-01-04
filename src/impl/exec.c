@@ -1,16 +1,22 @@
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 #include "../def/autoplay_defs.h"
+#include "../def/config_defs.h"
+#include "../def/error_status_defs.h"
 #include "../def/file_handler_defs.h"
+#include "../def/game_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/simmer_defs.h"
+#include "../def/thread_control_defs.h"
 
-#include "../ent/autoplay_results.h"
 #include "../ent/config.h"
 #include "../ent/error_status.h"
 #include "../ent/exec_state.h"
 #include "../ent/file_handler.h"
 #include "../ent/game.h"
-#include "../ent/letter_distribution.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 
 #include "autoplay.h"
@@ -23,7 +29,6 @@
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 #define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"
@@ -55,7 +60,7 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
   }
 
   char *status_string = NULL;
-  SimResults *sim_results = sim_results_create();
+  SimResults *sim_results = NULL;
 
   switch (config_get_command_type(exec_state_get_config(exec_state))) {
   case COMMAND_TYPE_SIM:

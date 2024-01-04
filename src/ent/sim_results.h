@@ -7,11 +7,9 @@
 #include "../def/game_defs.h"
 
 #include "move.h"
-#include "rack.h"
 #include "stats.h"
 #include "win_pct.h"
 
-struct SimmedPlay;
 typedef struct SimmedPlay SimmedPlay;
 
 Move *simmed_play_get_move(const SimmedPlay *simmed_play);
@@ -34,7 +32,7 @@ void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
                                   game_end_reason_t game_end_reason,
                                   int game_get_unseen_tiles, bool plies_are_odd,
                                   bool lock);
-struct SimResults;
+
 typedef struct SimResults SimResults;
 
 SimResults *sim_results_create();

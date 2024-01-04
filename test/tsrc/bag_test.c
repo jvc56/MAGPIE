@@ -1,13 +1,10 @@
 #include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdint.h>
 
-#include "../../src/def/rack_defs.h"
-
+#include "../../src/ent/bag.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/letter_distribution.h"
-
-#include "../../src/impl/gameplay.h"
+#include "../../src/ent/rack.h"
 
 #include "../../src/str/bag_string.h"
 

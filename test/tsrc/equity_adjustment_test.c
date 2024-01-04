@@ -1,17 +1,19 @@
 #include <assert.h>
-#include <stdio.h>
 
 #include "../../src/def/move_gen_defs.h"
 
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/klv.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/move.h"
+#include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
 
 #include "../../src/impl/gameplay.h"
 
 #include "../../src/util/util.h"
 
-#include "test_constants.h"
 #include "test_util.h"
 
 void test_macondo_opening_equity_adjustments() {
@@ -98,10 +100,11 @@ void test_macondo_endgame_equity_adjustments() {
   Game *game = game_create(config);
   MoveList *move_list = move_list_create(6);
 
-  game_load_cgp(game,
-           "4RUMMAGED2C/7A6A/2H1G2T6V/2O1O2I6E/2WAB2PREBENDS/2ER3O3n3/2SI6COW2/"
-           "3L2HUE2KANE/3LI3FILII2/J1TANGENT2T1Z1/A2TA5FA1OP/R2EN5Ok1OU/"
-           "VILDE5YEX1D/I3R6SUQS/E13Y INR/OT 440/448 0 lex CSW21;");
+  game_load_cgp(
+      game,
+      "4RUMMAGED2C/7A6A/2H1G2T6V/2O1O2I6E/2WAB2PREBENDS/2ER3O3n3/2SI6COW2/"
+      "3L2HUE2KANE/3LI3FILII2/J1TANGENT2T1Z1/A2TA5FA1OP/R2EN5Ok1OU/"
+      "VILDE5YEX1D/I3R6SUQS/E13Y INR/OT 440/448 0 lex CSW21;");
 
   generate_moves_for_game(game, 0, move_list);
 

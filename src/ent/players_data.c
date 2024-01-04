@@ -2,6 +2,9 @@
 
 #include <stdlib.h>
 
+#include "../def/move_defs.h"
+#include "../def/players_data_defs.h"
+
 #include "klv.h"
 #include "kwg.h"
 

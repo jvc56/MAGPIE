@@ -1,5 +1,7 @@
 #include "anchor.h"
 
+#include <stdlib.h>
+
 #include "../def/board_defs.h"
 
 #include "../util/util.h"

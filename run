@@ -10,6 +10,10 @@ make magpie_test
 elif [ "$1" == "i" ]; then
 make -k CC=$2 CXXFLAGS="-Xiwyu --error_always"
 
+# Run scan-build
+elif [ "$1" == "s" ]; then
+scan-build make
+
 # Run tests with debugger
 # Set $2 to run a specific test
 elif [ "$1" == "g" ]; then

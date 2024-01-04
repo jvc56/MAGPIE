@@ -1,14 +1,24 @@
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
-#include <unistd.h>
 
+#include "../../src/def/config_defs.h"
+#include "../../src/def/simmer_defs.h"
 #include "../../src/def/stats_defs.h"
+#include "../../src/def/thread_control_defs.h"
 
+#include "../../src/ent/bag.h"
+#include "../../src/ent/board.h"
+#include "../../src/ent/config.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
+#include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
 #include "../../src/ent/sim_results.h"
 #include "../../src/ent/stats.h"
+#include "../../src/ent/thread_control.h"
 #include "../../src/ent/win_pct.h"
 
 #include "../../src/impl/simmer.h"

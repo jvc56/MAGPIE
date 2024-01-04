@@ -1,13 +1,14 @@
 #ifndef INFERENCE_RESULTS_H
 #define INFERENCE_RESULTS_H
 
+#include <stdint.h>
+
 #include "../def/inference_defs.h"
 
 #include "leave_rack.h"
-#include "letter_distribution.h"
+#include "rack.h"
 #include "stats.h"
 
-struct InferenceResults;
 typedef struct InferenceResults InferenceResults;
 
 InferenceResults *inference_results_create();

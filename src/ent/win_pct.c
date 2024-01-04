@@ -1,6 +1,6 @@
 #include "win_pct.h"
 
-#include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 #include "../def/win_pct_defs.h"

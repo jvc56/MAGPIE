@@ -1,13 +1,14 @@
 #ifndef PLAYERS_DATA_H
 #define PLAYERS_DATA_H
 
+#include <stdbool.h>
+
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 
 #include "klv.h"
 #include "kwg.h"
 
-struct PlayersData;
 typedef struct PlayersData PlayersData;
 
 PlayersData *players_data_create();

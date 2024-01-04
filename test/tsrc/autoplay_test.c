@@ -1,11 +1,14 @@
 #include <assert.h>
-#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
+#include "../../src/def/autoplay_defs.h"
+
 #include "../../src/ent/autoplay_results.h"
-#include "../../src/ent/thread_control.h"
+#include "../../src/ent/config.h"
+#include "../../src/ent/stats.h"
 
 #include "../../src/impl/autoplay.h"
 

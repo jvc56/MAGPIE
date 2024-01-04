@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "string_util.h"
 
@@ -74,13 +75,13 @@ bool is_string_empty_or_null(const char *str) {
 }
 
 char *string_duplicate(const char *str) {
-  if (str == NULL) {
+  if (!str) {
     log_fatal("cannot duplicate null string");
   }
 
   char *duplicate = strdup(str);
 
-  if (duplicate == NULL) {
+  if (!duplicate) {
     log_fatal("string duplicate failed");
   }
 
@@ -199,7 +200,7 @@ void write_string_to_file(const char *filename, const char *mode,
 }
 
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string) {
-  if (iso_8859_1_string == NULL) {
+  if (!iso_8859_1_string) {
     return NULL;
   }
 

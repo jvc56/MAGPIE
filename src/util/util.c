@@ -1,9 +1,13 @@
 #include <ctype.h>
-#include <regex.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../def/letter_distribution_defs.h"
+
 #include "../ent/klv.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
 

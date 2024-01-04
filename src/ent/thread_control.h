@@ -8,7 +8,6 @@
 #include "file_handler.h"
 #include "timer.h"
 
-struct ThreadControl;
 typedef struct ThreadControl ThreadControl;
 
 ThreadControl *thread_control_create();

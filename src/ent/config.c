@@ -3,11 +3,17 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
 
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/move_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/simmer_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../def/win_pct_defs.h"
 
 #include "board.h"

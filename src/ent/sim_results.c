@@ -3,9 +3,9 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include "../def/game_defs.h"
-#include "../def/rack_defs.h"
 
 #include "move.h"
 #include "stats.h"

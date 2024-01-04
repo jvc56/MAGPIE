@@ -1,16 +1,22 @@
-#include <ctype.h>
 #include <regex.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../def/board_defs.h"
+#include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/gcg_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
 #include "../ent/board.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/letter_distribution.h"
+#include "../ent/move.h"
+#include "../ent/rack.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"

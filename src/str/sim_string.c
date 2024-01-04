@@ -1,26 +1,22 @@
-#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../def/inference_defs.h"
-#include "../def/rack_defs.h"
 #include "../def/stats_defs.h"
 
-#include "../ent/autoplay_results.h"
+#include "../ent/board.h"
 #include "../ent/game.h"
-#include "../ent/leave_rack.h"
+#include "../ent/letter_distribution.h"
+#include "../ent/move.h"
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/timer.h"
 
-#include "letter_distribution_string.h"
 #include "move_string.h"
-#include "rack_string.h"
 
-#include "../util/log.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 char *ucgi_sim_stats(Game *game, SimResults *sim_results,
                      ThreadControl *thread_control, bool best_known_play) {

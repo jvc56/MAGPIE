@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 
-struct XoshiroPRNG;
 typedef struct XoshiroPRNG XoshiroPRNG;
 
 XoshiroPRNG *prng_create(uint64_t seed);

@@ -1,8 +1,12 @@
 #include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+#include "../../src/def/move_defs.h"
+#include "../../src/def/players_data_defs.h"
 
 #include "../../src/ent/players_data.h"
 
-#include "../../src/util/log.h"
 #include "../../src/util/string_util.h"
 
 #include "test_util.h"

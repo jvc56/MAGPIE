@@ -1,6 +1,17 @@
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
+#include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
+#include "../def/letter_distribution_defs.h"
+#include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+
+#include "../ent/letter_distribution.h"
+#include "../ent/player.h"
 
 #include "../ent/bag.h"
 #include "../ent/board.h"

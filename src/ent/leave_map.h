@@ -5,7 +5,6 @@
 
 #include "rack.h"
 
-struct LeaveMap;
 typedef struct LeaveMap LeaveMap;
 
 LeaveMap *leave_map_create(int rack_array_size);

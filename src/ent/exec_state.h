@@ -6,10 +6,8 @@
 #include "error_status.h"
 #include "game.h"
 #include "inference_results.h"
-#include "move.h"
 #include "sim_results.h"
 
-struct ExecState;
 typedef struct ExecState ExecState;
 
 ExecState *exec_state_create();

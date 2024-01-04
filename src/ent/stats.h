@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 
-struct Stat;
 typedef struct Stat Stat;
 
 Stat *stat_create();

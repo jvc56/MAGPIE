@@ -11,6 +11,8 @@
 
 #include "../def/kwg_defs.h"
 
+#include "letter_distribution.h"
+
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"

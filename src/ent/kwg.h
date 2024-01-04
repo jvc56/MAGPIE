@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-struct KWG;
 typedef struct KWG KWG;
 
 KWG *kwg_create(const char *kwg_name);

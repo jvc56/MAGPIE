@@ -5,9 +5,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../def/letter_distribution_defs.h"
-
-struct LetterDistribution;
 typedef struct LetterDistribution LetterDistribution;
 
 LetterDistribution *ld_create(const char *ld_name);

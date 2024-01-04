@@ -1,7 +1,6 @@
 #ifndef WIN_PCT_H
 #define WIN_PCT_H
 
-struct WinPct;
 typedef struct WinPct WinPct;
 
 WinPct *win_pct_create(const char *win_pct_name);

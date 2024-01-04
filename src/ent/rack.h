@@ -1,9 +1,11 @@
 #ifndef RACK_H
 #define RACK_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "letter_distribution.h"
 
-struct Rack;
 typedef struct Rack Rack;
 
 Rack *rack_create(int array_size);

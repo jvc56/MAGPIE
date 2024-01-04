@@ -1,18 +1,18 @@
 #include <assert.h>
-#include <errno.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
-#include "../../src/ent/thread_control.h"
+#include "../../src/def/file_handler_defs.h"
+
+#include "../../src/ent/file_handler.h"
 
 #include "../../src/util/log.h"
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
 
-#include "test_constants.h"
 #include "test_util.h"
 
 typedef struct TestFIFOArgs {

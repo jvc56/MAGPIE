@@ -5,7 +5,6 @@
 
 #include "../def/error_status_defs.h"
 
-struct ErrorStatus;
 typedef struct ErrorStatus ErrorStatus;
 
 ErrorStatus *error_status_create();

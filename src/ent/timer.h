@@ -1,9 +1,6 @@
 #ifndef TIMER_H
 #define TIMER_H
 
-#include <time.h>
-
-struct Timer;
 typedef struct Timer Timer;
 
 Timer *mtimer_create();

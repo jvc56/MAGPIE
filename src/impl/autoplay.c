@@ -1,15 +1,20 @@
 #include <pthread.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
-#include <time.h>
 
 #include "../def/autoplay_defs.h"
-#include "../def/rack_defs.h"
+#include "../def/game_defs.h"
+#include "../def/thread_control_defs.h"
 
 #include "../ent/autoplay_results.h"
+#include "../ent/bag.h"
 #include "../ent/config.h"
 #include "../ent/game.h"
+#include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/stats.h"
+#include "../ent/thread_control.h"
 
 #include "gameplay.h"
 #include "move_gen.h"

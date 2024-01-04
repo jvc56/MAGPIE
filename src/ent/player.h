@@ -1,10 +1,13 @@
 #ifndef PLAYER_H
 #define PLAYER_H
 
+#include "../def/move_defs.h"
+
 #include "config.h"
+#include "klv.h"
+#include "kwg.h"
 #include "rack.h"
 
-struct Player;
 typedef struct Player Player;
 
 Player *player_create(const Config *config, int player_index);

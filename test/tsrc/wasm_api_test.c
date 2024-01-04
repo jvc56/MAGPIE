@@ -1,10 +1,9 @@
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "../../src/def/game_history_defs.h"
-
-#include "../../src/ent/game.h"
 
 #include "../../src/impl/wasm_api.h"
 

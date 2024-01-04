@@ -1,12 +1,13 @@
 #ifndef TEST_UTIL_H
 #define TEST_UTIL_H
 
+#include <stdbool.h>
+
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
-#include "../../src/ent/klv.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
@@ -16,16 +17,14 @@ typedef struct SortedMoveList {
   Move **moves;
 } SortedMoveList;
 
-void draw_rack_to_string(const LetterDistribution *ld,
-                         Bag *bag, Rack *rack, char *letters, int player_index);
+void draw_rack_to_string(const LetterDistribution *ld, Bag *bag, Rack *rack,
+                         char *letters, int player_index);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *create_sorted_move_list(MoveList *ml);
 void destroy_sorted_move_list(SortedMoveList *sorted_move_list);
-void print_move_list(const Board *board,
-                     const LetterDistribution *ld,
+void print_move_list(const Board *board, const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length);
-void sort_and_print_move_list(const Board *board,
-                              const LetterDistribution *ld,
+void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
                               MoveList *ml);
 void resort_sorted_move_list_by_score(SortedMoveList *sml);
 bool within_epsilon(double a, double b);

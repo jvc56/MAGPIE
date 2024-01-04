@@ -1,5 +1,6 @@
 #include "exec_state.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 
 #include "autoplay_results.h"

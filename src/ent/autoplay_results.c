@@ -1,5 +1,7 @@
 #include "autoplay_results.h"
 
+#include <stdlib.h>
+
 #include "stats.h"
 
 #include "../util/util.h"

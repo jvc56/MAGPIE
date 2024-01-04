@@ -5,7 +5,6 @@
 
 #include "../def/game_history_defs.h"
 
-struct Move;
 typedef struct Move Move;
 
 Move *move_create();
@@ -36,7 +35,6 @@ void move_set_all(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
 void move_set_as_pass(Move *move);
 void move_copy(Move *dest_move, const Move *src_move);
 
-struct MoveList;
 typedef struct MoveList MoveList;
 
 MoveList *move_list_create(int capacity);

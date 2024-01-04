@@ -1,21 +1,26 @@
 #include <assert.h>
 #include <errno.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../../src/def/rack_defs.h"
+#include "../../src/def/board_defs.h"
+#include "../../src/def/config_defs.h"
+#include "../../src/def/game_defs.h"
+#include "../../src/def/letter_distribution_defs.h"
+#include "../../src/def/move_defs.h"
 
+#include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
-#include "../../src/ent/klv.h"
-#include "../../src/ent/leave_map.h"
+#include "../../src/ent/inference_results.h"
+#include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
-#include "../../src/impl/inference.h"
 
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"

@@ -1,10 +1,13 @@
 #include <assert.h>
 #include <stdint.h>
-#include <stdlib.h>
 
+#include "../../src/ent/board.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
+#include "../../src/ent/kwg.h"
+#include "../../src/ent/player.h"
 #include "../../src/ent/words.h"
+
 #include "../../src/util/string_util.h"
 
 #include "test_constants.h"

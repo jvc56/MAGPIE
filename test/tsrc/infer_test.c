@@ -1,17 +1,20 @@
 #include <assert.h>
-#include <float.h>
-#include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 
+#include "../../src/def/config_defs.h"
 #include "../../src/def/inference_defs.h"
+#include "../../src/def/letter_distribution_defs.h"
 
+#include "../../src/ent/bag.h"
+#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/klv.h"
-#include "../../src/ent/move.h"
+#include "../../src/ent/letter_distribution.h"
+#include "../../src/ent/player.h"
+#include "../../src/ent/rack.h"
 #include "../../src/ent/stats.h"
-#include "../../src/ent/thread_control.h"
+
 #include "../../src/impl/inference.h"
 
 #include "../../src/util/string_util.h"

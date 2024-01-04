@@ -1,12 +1,10 @@
 #include "letter_distribution.h"
 
-#include <assert.h>
-#include <ctype.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 
-#include "../util/fileproxy.h"
+#include "../def/letter_distribution_defs.h"
+
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"

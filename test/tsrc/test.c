@@ -1,12 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-
-#include "../../src/ent/config.h"
-
 #include "../../src/impl/exec.h"
 
-#include "../../src/util/fileproxy.h"
 #include "../../src/util/log.h"
 #include "../../src/util/string_util.h"
 
@@ -33,7 +26,6 @@
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
-#include "test_constants.h"
 #include "wasm_api_test.h"
 #include "word_test.h"
 
@@ -66,6 +58,7 @@ void run_all() {
   test_gcg();
   test_autoplay();
   test_wasm_api();
+  test_words();
   test_file_handler();
 }
 
@@ -116,6 +109,8 @@ void run_test(const char *subtest) {
     test_autoplay();
   } else if (strings_equal(subtest, "wasm")) {
     test_wasm_api();
+  } else if (strings_equal(subtest, "words")) {
+    test_words();
   } else if (strings_equal(subtest, "fh")) {
     test_file_handler();
   } else {
