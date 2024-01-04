@@ -1,9 +1,22 @@
 make clean
 
+# Run unit tests
+# Set $2 to run a specific test
+if [ "$1" == "u" ]; then
+make magpie_test
+./bin/magpie_test $2
+
 # Run tests with debugger
-if [ "$1" == "g" ]; then
+# Set $2 to run a specific test
+elif [ "$1" == "g" ]; then
 make magpie_test
 gdb --args ./bin/magpie_test $2
+
+# Run valgrind
+# Set $2 to run a specific test
+elif [ "$1" == "v" ]; then
+make magpie_test BUILD=vlg
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./bin/magpie_test $2
 
 # Run magpie with debugger
 elif [ "$1" == "d" ]; then
@@ -26,11 +39,6 @@ elif [ "$1" == "r" ]; then
 make magpie BUILD=release
 ./bin/magpie
 
-# Run unit tests
-# Set $2 to run a specific test
-elif [ "$1" == "u" ]; then
-make magpie_test
-./bin/magpie_test $2
 # Run an autoplay perf test
 
 # The perf tool might need

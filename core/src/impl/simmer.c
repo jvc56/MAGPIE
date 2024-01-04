@@ -502,6 +502,6 @@ sim_status_t simulate(const Config *config, const Game *input_game,
   Game *game = game_duplicate(input_game);
   sim_status_t sim_status = simulate_with_game_copy(config, game, sim_results);
   game_destroy(game);
-  gen_clear_cache();
+  gen_destroy_cache();
   return sim_status;
 }

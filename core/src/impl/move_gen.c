@@ -112,13 +112,7 @@ MoveGen *get_movegen(int thread_index, int ld_size) {
   return cached_gens[thread_index];
 }
 
-void gen_init_cache() {
-  for (int i = 0; i < (MAX_THREADS); i++) {
-    cached_gens[i] = NULL;
-  }
-}
-
-void gen_clear_cache() {
+void gen_destroy_cache() {
   for (int i = 0; i < (MAX_THREADS); i++) {
     destroy_generator(cached_gens[i]);
     cached_gens[i] = NULL;

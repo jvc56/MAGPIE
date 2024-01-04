@@ -587,7 +587,7 @@ inference_status_t infer(const Config *config, const Game *input_game,
 
   game_destroy(game);
   destroy_inference(inference);
-  gen_clear_cache();
+  gen_destroy_cache();
 
   return status;
 }

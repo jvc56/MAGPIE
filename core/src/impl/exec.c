@@ -306,14 +306,17 @@ char *create_command_from_args(int argc, char *argv[]) {
   return command_string;
 }
 
+void destroy_caches() {
+  gen_destroy_cache();
+  fileproxy_destroy_cache();
+}
+
 void process_command(int argc, char *argv[]) {
-  gen_init_cache();
   log_set_level(LOG_WARN);
   ExecState *exec_state = exec_state_create();
   char *initial_command_string = create_command_from_args(argc, argv);
   command_scan_loop(exec_state, initial_command_string);
   free(initial_command_string);
   exec_state_destroy(exec_state);
-  gen_clear_cache();
-  fileproxy_destroy_cache();
+  destroy_caches();
 }

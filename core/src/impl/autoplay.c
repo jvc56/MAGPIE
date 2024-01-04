@@ -199,7 +199,7 @@ autoplay_status_t autoplay(const Config *config,
   free(worker_ids);
 
   print_ucgi_autoplay_results(autoplay_results, thread_control);
-  gen_clear_cache();
+  gen_destroy_cache();
 
   return AUTOPLAY_STATUS_SUCCESS;
 }

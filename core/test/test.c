@@ -4,6 +4,9 @@
 
 #include "../src/ent/config.h"
 
+#include "../src/impl/exec.h"
+
+#include "../src/util/fileproxy.h"
 #include "../src/util/log.h"
 #include "../src/util/string_util.h"
 
@@ -129,4 +132,6 @@ int main(int argc, char *argv[]) {
       run_test(argv[i]);
     }
   }
+
+  destroy_caches();
 }
