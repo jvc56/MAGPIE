@@ -12,8 +12,6 @@
 
 #include "../../src/impl/gameplay.h"
 
-#include "../../src/util/util.h"
-
 #include "test_util.h"
 
 void test_macondo_opening_equity_adjustments() {

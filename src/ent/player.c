@@ -39,10 +39,6 @@ void player_update(const Config *config, Player *player) {
       players_data_get_move_record_type(players_data, player->index);
   player->kwg = players_data_get_kwg(players_data, player->index);
   player->klv = players_data_get_klv(players_data, player->index);
-
-  rack_destroy(player->rack);
-
-  player->rack = rack_create(ld_get_size(config_get_ld(config)));
 }
 
 Player *player_create(const Config *config, int player_index) {

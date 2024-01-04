@@ -12,7 +12,7 @@
 #include "../def/rack_defs.h"
 
 #include "../ent/board.h"
-#include "../ent/game.h"
+#include "../ent/config.h"
 #include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"

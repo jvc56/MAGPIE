@@ -53,9 +53,6 @@ void inference_results_add_subtotals(InferenceResults *result_being_added,
 void inference_results_set_stat_for_letter(InferenceResults *inference_results,
                                            inference_stat_t inference_stat_type,
                                            Stat *stat, uint8_t letter);
-int inference_results_get_number_of_sorted_leave_racks(
-    const InferenceResults *inference_results);
-
 double get_probability_for_random_minimum_draw(
     const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
     int minimum, int number_of_target_played_tiles);

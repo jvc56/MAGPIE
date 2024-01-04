@@ -135,8 +135,8 @@ void down_heapify_leave_rack(LeaveRackList *lrl, int parent_node) {
 }
 
 void leave_rack_list_insert_rack(const Rack *leave, const Rack *exchanged,
-                                 LeaveRackList *lrl,
-                                 int number_of_draws_for_leave, double equity) {
+                                 int number_of_draws_for_leave, double equity,
+                                 LeaveRackList *lrl) {
   rack_reset(lrl->spare_leave_rack->leave);
   for (int i = 0; i < rack_get_dist_size(leave); i++) {
     for (int j = 0; j < rack_get_letter(leave, i); j++) {
@@ -182,7 +182,8 @@ LeaveRack *leave_rack_list_pop_rack(LeaveRackList *lrl) {
 }
 
 // Converts the LeaveRackList from a min heap
-// to a descending sorted array.
+// to a descending sorted array. The count stays
+// constant.
 void leave_rack_list_sort(LeaveRackList *lrl) {
   int number_of_leave_racks = lrl->count;
   for (int i = 1; i < number_of_leave_racks; i++) {
@@ -192,4 +193,5 @@ void leave_rack_list_sort(LeaveRackList *lrl) {
     lrl->leave_racks[lrl->count] = leave_rack;
     lrl->spare_leave_rack = swap;
   }
+  lrl->count = number_of_leave_racks;
 }

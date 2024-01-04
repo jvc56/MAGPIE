@@ -223,8 +223,7 @@ void string_builder_add_inference(const LetterDistribution *ld,
   const LeaveRackList *leave_rack_list =
       inference_results_get_leave_rack_list(inference_results);
   // Get the list of most common leaves
-  int number_of_common_leaves =
-      inference_results_get_number_of_sorted_leave_racks(inference_results);
+  int number_of_common_leaves = leave_rack_list_get_count(leave_rack_list);
   for (int common_leave_index = 0; common_leave_index < number_of_common_leaves;
        common_leave_index++) {
     const LeaveRack *leave_rack =
@@ -397,8 +396,7 @@ void print_ucgi_inference(const LetterDistribution *ld,
   // Get the list of most common leaves
   const LeaveRackList *leave_rack_list =
       inference_results_get_leave_rack_list(inference_results);
-  int number_of_common_leaves =
-      inference_results_get_number_of_sorted_leave_racks(inference_results);
+  int number_of_common_leaves = leave_rack_list_get_count(leave_rack_list);
   Stat *common_leave_equity_values = inference_results_get_equity_values(
       inference_results, common_leaves_type);
   for (int common_leave_index = 0; common_leave_index < number_of_common_leaves;

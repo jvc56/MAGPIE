@@ -176,8 +176,8 @@ void evaluate_possible_leave(Inference *inference) {
           number_of_draws_for_leave);
       leave_rack_list_insert_rack(
           inference->current_target_leave, inference->current_target_exchanged,
-          inference_results_get_leave_rack_list(inference->results),
-          number_of_draws_for_leave, current_leave_value);
+          number_of_draws_for_leave, current_leave_value,
+          inference_results_get_leave_rack_list(inference->results));
       rack_reset(inference->current_target_exchanged);
       for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
            exchanged_tile_index++) {
@@ -189,9 +189,9 @@ void evaluate_possible_leave(Inference *inference) {
                          INFERENCE_TYPE_LEAVE, current_leave_value,
                          number_of_draws_for_leave);
       leave_rack_list_insert_rack(
-          inference->current_target_leave, NULL,
-          inference_results_get_leave_rack_list(inference->results),
-          number_of_draws_for_leave, current_leave_value);
+          inference->current_target_leave, NULL, number_of_draws_for_leave,
+          current_leave_value,
+          inference_results_get_leave_rack_list(inference->results));
     }
   }
 }
@@ -325,13 +325,13 @@ void add_inference(Inference *inference_to_add,
   LeaveRackList *lrl_to_update =
       inference_results_get_leave_rack_list(inference_to_update->results);
 
-  while (leave_rack_list_get_count(lrl_to_update) > 0) {
-    LeaveRack *leave_rack_to_update = leave_rack_list_pop_rack(lrl_to_update);
-    leave_rack_list_insert_rack(leave_rack_get_leave(leave_rack_to_update),
-                                leave_rack_get_exchanged(leave_rack_to_update),
-                                lrl_to_add,
-                                leave_rack_get_draws(leave_rack_to_update),
-                                leave_rack_get_equity(leave_rack_to_update));
+  while (leave_rack_list_get_count(lrl_to_add) > 0) {
+    LeaveRack *leave_rack_to_add = leave_rack_list_pop_rack(lrl_to_add);
+    leave_rack_list_insert_rack(leave_rack_get_leave(leave_rack_to_add),
+                                leave_rack_get_exchanged(leave_rack_to_add),
+                                leave_rack_get_draws(leave_rack_to_add),
+                                leave_rack_get_equity(leave_rack_to_add),
+                                lrl_to_update);
   }
 }
 

@@ -312,9 +312,15 @@ int compare_simmed_plays(const void *a, const void *b) {
   }
 }
 
+// Returns true if the simmed plays were successfully sorted.
+// Returns false if the simmed plays have not been created yet.
 // Not thread safe. Must be called with a lock on the simmed plays mutex
 // during multithreaded simming.
-void sim_results_sort_plays_by_win_rate(SimResults *sim_results) {
+bool sim_results_sort_plays_by_win_rate(SimResults *sim_results) {
+  if (!sim_results->simmed_plays) {
+    return false;
+  }
   qsort(sim_results->simmed_plays, sim_results->num_simmed_plays,
         sizeof(SimmedPlay *), compare_simmed_plays);
+  return true;
 }

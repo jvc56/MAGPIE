@@ -5,6 +5,7 @@
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
 #include "../def/error_status_defs.h"
+#include "../def/exec_defs.h"
 #include "../def/file_handler_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
@@ -39,8 +40,7 @@
 // occurred
 char *command_search_status(ExecState *exec_state, bool should_halt) {
   if (!exec_state) {
-    log_warn("The command variables struct has not been initialized.");
-    return NULL;
+    log_fatal("The command variables struct has not been initialized.");
   }
 
   ThreadControl *thread_control =
@@ -48,8 +48,7 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
 
   int mode = thread_control_get_mode(thread_control);
   if (mode != MODE_SEARCHING) {
-    log_warn("Not currently searching.");
-    return NULL;
+    return string_duplicate(SEARCH_STATUS_FINISHED);
   }
 
   if (should_halt) {
@@ -128,16 +127,17 @@ void execute_command(ExecState *exec_state) {
   // read-only. We create a new const pointer to enforce this.
   const Config *config = exec_state_get_config(exec_state);
 
-  exec_state_init_game(exec_state);
-
-  if (config_get_command_set_cgp(config)) {
-    cgp_parse_status_t cgp_parse_status =
-        game_load_cgp(exec_state_get_game(exec_state), config_get_cgp(config));
-    set_or_clear_error_status(exec_state_get_error_status(exec_state),
-                              ERROR_STATUS_TYPE_CGP_LOAD,
-                              (int)cgp_parse_status);
-    if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
-      return;
+  if (config_get_ld(config)) {
+    exec_state_init_game(exec_state);
+    if (config_get_command_set_cgp(config)) {
+      cgp_parse_status_t cgp_parse_status = game_load_cgp(
+          exec_state_get_game(exec_state), config_get_cgp(config));
+      set_or_clear_error_status(exec_state_get_error_status(exec_state),
+                                ERROR_STATUS_TYPE_CGP_LOAD,
+                                (int)cgp_parse_status);
+      if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+        return;
+      }
     }
   }
 

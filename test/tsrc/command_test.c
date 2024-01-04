@@ -7,6 +7,7 @@
 
 #include "../../src/def/config_defs.h"
 #include "../../src/def/error_status_defs.h"
+#include "../../src/def/exec_defs.h"
 #include "../../src/def/file_handler_defs.h"
 
 #include "../../src/ent/exec_state.h"
@@ -103,14 +104,18 @@ void block_for_search(ExecState *exec_state, int max_seconds) {
   // Poll for the end of the command
   int seconds_elapsed = 0;
   while (1) {
-    if (command_search_status(exec_state, false)) {
+    char *search_status = command_search_status(exec_state, false);
+    bool search_is_finished =
+        strings_equal(search_status, SEARCH_STATUS_FINISHED);
+    free(search_status);
+    if (search_is_finished) {
       break;
     } else {
       sleep(1);
     }
     seconds_elapsed++;
     if (seconds_elapsed >= max_seconds) {
-      log_fatal("Test aborted after searching for %d seconds", max_seconds);
+      log_fatal("Test aborted after searching for %d seconds\b", max_seconds);
     }
   }
 }
@@ -126,7 +131,7 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
     }
     seconds_elapsed++;
     if (seconds_elapsed >= max_seconds) {
-      log_fatal("Test aborted after processing for %d seconds", max_seconds);
+      log_fatal("Test aborted after processing for %d seconds\n", max_seconds);
     }
   }
 }
@@ -168,6 +173,7 @@ void assert_command_status_and_output(ExecState *exec_state,
   if (newlines_in_output != expected_output_line_count) {
     printf("output counts do not match %d != %d\n", newlines_in_output,
            expected_output_line_count);
+    printf("got:\n%s", test_output);
     assert(0);
   }
 
@@ -176,6 +182,7 @@ void assert_command_status_and_output(ExecState *exec_state,
   if (newlines_in_outerror != expected_outerror_line_count) {
     printf("error counts do not match %d != %d\n", newlines_in_outerror,
            expected_outerror_line_count);
+    printf("got:\n%s", test_outerror);
     assert(0);
   }
 
@@ -189,15 +196,14 @@ void assert_command_status_and_output(ExecState *exec_state,
 void test_command_execution() {
   ExecState *exec_state = exec_state_create();
 
-  assert_command_status_and_output(exec_state,
-                                   "go sim lex CSW21 i 1000 plies 2h3", false,
-                                   5, ERROR_STATUS_TYPE_CONFIG_LOAD, 1);
+  assert_command_status_and_output(
+      exec_state, "go sim lex CSW21 i 1000 plies 2h3", false, 5, 0, 1);
 
   assert_command_status_and_output(
       exec_state,
       "position cgp 15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 "
       "ABC5DF/YXZ 0/0 0 lex CSW21",
-      false, 5, ERROR_STATUS_TYPE_CGP_LOAD, 1);
+      false, 5, 0, 1);
 
   // Test load cgp
   assert_command_status_and_output(exec_state, "position cgp " ION_OPENING_CGP,
@@ -359,6 +365,7 @@ void test_process_command(const char *arg_string,
   if (newlines_in_output != expected_output_line_count) {
     printf("counts do not match %d != %d\n", newlines_in_output,
            expected_output_line_count);
+    printf("got:\n%s\n", test_output);
     assert(0);
   }
 
@@ -402,7 +409,7 @@ void test_exec_file_commands() {
   // run a sim that exits with a warning, then (1 warning)
   // run an inference in Polish, then (58 output)
   // run autoplay in CSW (1 output)
-  // total output = 127
+  // total output = 195
   // total error = 1
 
   // Separate into distinct lines to prove

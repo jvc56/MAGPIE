@@ -16,6 +16,7 @@
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
+#include "../ent/klv.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
 

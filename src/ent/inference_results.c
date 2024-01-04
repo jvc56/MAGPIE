@@ -19,7 +19,6 @@ struct InferenceResults {
   // Indexed by inference_stat_t
   uint64_t *subtotals[NUMBER_OF_STAT_TYPES];
   LeaveRackList *leave_rack_list;
-  int number_of_sorted_leave_racks;
 
   // Fields that are finalized at the end of
   // the inference execution
@@ -45,7 +44,6 @@ InferenceResults *inference_results_create() {
   results->target_known_unplayed_tiles = NULL;
   results->bag_as_rack = NULL;
   results->subtotals_size = 0;
-  results->number_of_sorted_leave_racks = 0;
   return results;
 }
 
@@ -105,10 +103,6 @@ void inference_results_finalize(const Rack *target_played_tiles,
       rack_duplicate(target_known_unplayed_tiles);
   results->bag_as_rack = rack_duplicate(bag_as_rack);
 
-  // Sorting the leave racks in place sets the count
-  // to 0, so it must be saved before sorting.
-  results->number_of_sorted_leave_racks =
-      leave_rack_list_get_count(results->leave_rack_list);
   leave_rack_list_sort(results->leave_rack_list);
 }
 
@@ -148,11 +142,6 @@ inference_results_get_equity_values(InferenceResults *results,
 LeaveRackList *
 inference_results_get_leave_rack_list(InferenceResults *inference_results) {
   return inference_results->leave_rack_list;
-}
-
-int inference_results_get_number_of_sorted_leave_racks(
-    const InferenceResults *inference_results) {
-  return inference_results->number_of_sorted_leave_racks;
 }
 
 int get_letter_subtotal_index(uint8_t letter, int number_of_letters,

@@ -74,17 +74,19 @@ Simmer *create_simmer(const Config *config, const MoveList *move_list,
   int ld_size = ld_get_size(config_get_ld(config));
 
   simmer->initial_player = game_get_player_on_turn_index(game);
+  Player *player = game_get_player(game, simmer->initial_player);
+  Player *opponent = game_get_player(game, 1 - simmer->initial_player);
+
   simmer->initial_spread =
-      player_get_score(game_get_player(game, simmer->initial_player)) -
-      player_get_score(game_get_player(game, 1 - simmer->initial_player));
+      player_get_score(player) - player_get_score(opponent);
   simmer->max_iterations = config_get_max_iterations(config);
   simmer->stopping_condition = config_get_stopping_condition(config);
   simmer->threads = thread_control_get_threads(thread_control);
   simmer->seed = config_get_seed(config);
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
 
-  Rack *opponent_known_tiles = config_get_rack(config);
-  if (opponent_known_tiles) {
+  Rack *opponent_known_tiles = player_get_rack(opponent);
+  if (!rack_is_empty(opponent_known_tiles)) {
     simmer->known_opp_rack = rack_duplicate(opponent_known_tiles);
   } else {
     simmer->known_opp_rack = NULL;
@@ -278,7 +280,10 @@ bool handle_potential_stopping_condition(Simmer *simmer) {
   int total_ignored = 0;
 
   sim_results_lock_simmed_plays(simmer->sim_results);
-  sim_results_sort_plays_by_win_rate(simmer->sim_results);
+  bool success = sim_results_sort_plays_by_win_rate(simmer->sim_results);
+  if (!success) {
+    log_fatal("cannot sort null simmed plays");
+  }
 
   const SimmedPlay *tentative_winner =
       sim_results_get_simmed_play(sim_results, 0);
@@ -418,7 +423,7 @@ void *simmer_worker(void *uncasted_simmer_worker) {
     if (print_info_interval > 0 && current_iteration_count > 0 &&
         current_iteration_count % print_info_interval == 0) {
       print_ucgi_sim_stats(simmer_worker->game, simmer->sim_results,
-                           thread_control, 0);
+                           thread_control, false);
     }
 
     int check_stopping_condition_interval =
@@ -437,26 +442,17 @@ void *simmer_worker(void *uncasted_simmer_worker) {
   return NULL;
 }
 
-void simmer_sort_plays_by_win_rate(Simmer *simmer) {
-  sim_results_lock_simmed_plays(simmer->sim_results);
-  sim_results_sort_plays_by_win_rate(simmer->sim_results);
-  sim_results_unlock_simmed_plays(simmer->sim_results);
-}
-
-sim_status_t simulate_with_game_copy(const Config *config, Game *game,
-                                     SimResults *sim_results) {
+sim_status_t simulate_internal(const Config *config, Game *game,
+                               MoveList *move_list, SimResults *sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
-  thread_control_unhalt(thread_control);
 
-  int num_simmed_plays = config_get_num_plays(config);
+  int num_simmed_plays = move_list_get_capacity(move_list);
 
-  MoveList *move_list = move_list_create(num_simmed_plays);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
-  // Sorting moves converts the move list from a min heap
-  // to a sorted array with count == 0, so the number of
-  // moves must be obtained before sorting.
-  int number_of_moves_generated = move_list_get_count(move_list);
+
   move_list_sort_moves(move_list);
+
+  int number_of_moves_generated = move_list_get_count(move_list);
 
   if (config_get_static_search_only(config)) {
     print_ucgi_static_moves(game, move_list, thread_control);
@@ -474,15 +470,10 @@ sim_status_t simulate_with_game_copy(const Config *config, Game *game,
   Simmer *simmer =
       create_simmer(config, move_list, game, num_simmed_plays, sim_results);
 
-  move_list_destroy(move_list);
-
   SimmerWorker **simmer_workers =
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->threads));
   pthread_t *worker_ids =
       malloc_or_die((sizeof(pthread_t)) * (simmer->threads));
-
-  Timer *timer = thread_control_get_timer(thread_control);
-  mtimer_start(timer);
 
   for (int thread_index = 0; thread_index < simmer->threads; thread_index++) {
     simmer_workers[thread_index] =
@@ -508,9 +499,25 @@ sim_status_t simulate_with_game_copy(const Config *config, Game *game,
 
 sim_status_t simulate(const Config *config, const Game *input_game,
                       SimResults *sim_results) {
+  ThreadControl *thread_control = config_get_thread_control(config);
+  thread_control_unhalt(thread_control);
+
+  Timer *timer = thread_control_get_timer(thread_control);
+  mtimer_start(timer);
+
   Game *game = game_duplicate(input_game);
-  sim_status_t sim_status = simulate_with_game_copy(config, game, sim_results);
+
+  int num_simmed_plays = config_get_num_plays(config);
+  MoveList *move_list = move_list_create(num_simmed_plays);
+
+  sim_status_t sim_status =
+      simulate_internal(config, game, move_list, sim_results);
+
+  move_list_destroy(move_list);
   game_destroy(game);
   gen_destroy_cache();
+
+  mtimer_stop(timer);
+
   return sim_status;
 }

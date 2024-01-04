@@ -224,14 +224,16 @@ void test_infer_nonerror_cases(int number_of_threads) {
   InferenceResults *inference_results = inference_results_create();
   Stat *letter_stat = stat_create();
   inference_status_t status;
+  LeaveRackList *lrl;
 
   char *setoptions_thread_string =
       get_formatted_string("setoptions threads %d", number_of_threads);
   load_config_or_die(config, setoptions_thread_string);
   free(setoptions_thread_string);
 
-  load_config_or_die(config,
-                     "setoptions rack MUZAKS pindex 0 score 52 exch 0 eq 0");
+  load_config_or_die(
+      config,
+      "setoptions rack MUZAKS pindex 0 score 52 exch 0 eq 0 numplays 20");
   status = infer_for_test(config, game, inference_results);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // With this rack, only keeping an S is possible, and
@@ -268,6 +270,15 @@ void test_infer_nonerror_cases(int number_of_threads) {
           inference_results_get_target_known_unplayed_tiles(inference_results),
           ld_hl_to_ml(ld, "S"), 1, 6),
       (double)3 / 94));
+
+  lrl = inference_results_get_leave_rack_list(inference_results);
+
+  assert(leave_rack_list_get_count(lrl) == 1);
+  assert(rack_get_total_letters(
+             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0))) == 1);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
+                         ld_hl_to_ml(ld, "S")) == 1);
+
   // Both game racks should be empty
   assert(rack_get_total_letters(player0_rack) == 0);
   assert(rack_get_total_letters(player1_rack) == 0);
@@ -319,6 +330,17 @@ void test_infer_nonerror_cases(int number_of_threads) {
           inference_results_get_target_known_unplayed_tiles(inference_results),
           ld_hl_to_ml(ld, "B"), 1, 6),
       (double)2 / 94));
+
+  lrl = inference_results_get_leave_rack_list(inference_results);
+
+  assert(leave_rack_list_get_count(lrl) == 20);
+  assert(rack_get_total_letters(
+             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0))) == 1);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
+                         ld_hl_to_ml(ld, "E")) == 1);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
+                         ld_hl_to_ml(ld, "I")) == 1);
+
   // Both game racks should be empty
   assert(rack_get_total_letters(player0_rack) == 0);
   assert(rack_get_total_letters(player1_rack) == 0);
@@ -392,8 +414,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   }
   game_reset(game);
 
-  load_config_or_die(config,
-                     "setoptions rack RENT pindex 0 score 8 exch 0 eq 0");
+  load_config_or_die(
+      config, "setoptions rack RENT pindex 0 score 8 exch 0 eq 0 numplays 100");
   status = infer_for_test(config, game, inference_results);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // There are only 3 racks for which playing RENT for 8 on the opening is
@@ -464,6 +486,37 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(within_epsilon(stat_get_stdev(letter_stat), 0));
 
   assert(within_epsilon(stat_get_stdev(equity_values), 6.53225818584641171327));
+
+  lrl = inference_results_get_leave_rack_list(inference_results);
+
+  assert(leave_rack_list_get_count(lrl) == 3);
+
+  assert(rack_get_total_letters(
+             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0))) == 3);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
+                         ld_hl_to_ml(ld, "E")) == 1);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
+                         ld_hl_to_ml(ld, "R")) == 1);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 0)),
+                         ld_hl_to_ml(ld, "T")) == 1);
+
+  assert(rack_get_total_letters(
+             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1))) == 3);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
+                         ld_hl_to_ml(ld, "N")) == 1);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
+                         ld_hl_to_ml(ld, "R")) == 1);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 1)),
+                         ld_hl_to_ml(ld, "T")) == 1);
+
+  assert(rack_get_total_letters(
+             leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2))) == 3);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2)),
+                         ld_hl_to_ml(ld, "N")) == 1);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2)),
+                         ld_hl_to_ml(ld, "R")) == 1);
+  assert(rack_get_letter(leave_rack_get_leave(leave_rack_list_get_rack(lrl, 2)),
+                         BLANK_MACHINE_LETTER) == 1);
 
   // Contrive an impossible situation to easily test
   // more combinatorics

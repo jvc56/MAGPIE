@@ -309,7 +309,8 @@ Move *move_list_pop_move(MoveList *ml) {
 }
 
 // Converts the MoveList from a min heap
-// to a descending sorted array.
+// to a descending sorted array. The
+// count stays constant.
 void move_list_sort_moves(MoveList *ml) {
   int number_of_moves = ml->count;
   for (int i = 1; i < number_of_moves; i++) {
@@ -319,4 +320,6 @@ void move_list_sort_moves(MoveList *ml) {
     ml->moves[ml->count] = move;
     ml->spare_move = swap;
   }
+  // Reset the count
+  ml->count = number_of_moves;
 }

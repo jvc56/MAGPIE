@@ -20,7 +20,6 @@
 #include "../../src/impl/move_gen.h"
 
 #include "../../src/util/string_util.h"
-#include "../../src/util/util.h"
 
 #include "test_constants.h"
 #include "test_util.h"

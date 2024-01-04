@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../def/exec_defs.h"
 #include "../def/stats_defs.h"
 
 #include "../ent/board.h"
@@ -20,10 +21,15 @@
 
 char *ucgi_sim_stats(Game *game, SimResults *sim_results,
                      ThreadControl *thread_control, bool best_known_play) {
-  sim_results_sort_plays_by_win_rate(sim_results);
+  sim_results_lock_simmed_plays(sim_results);
+  bool success = sim_results_sort_plays_by_win_rate(sim_results);
+  sim_results_unlock_simmed_plays(sim_results);
+
+  if (!success) {
+    return string_duplicate(SEARCH_STATUS_STARTING);
+  }
 
   Timer *timer = thread_control_get_timer(thread_control);
-  mtimer_stop(timer);
 
   double elapsed = mtimer_elapsed_seconds(timer);
   int total_node_count = sim_results_get_node_count(sim_results);
