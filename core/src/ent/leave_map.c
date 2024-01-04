@@ -28,6 +28,9 @@ LeaveMap *leave_map_create(int rack_array_size) {
 }
 
 void leave_map_destroy(LeaveMap *leave_map) {
+  if (!leave_map) {
+    return;
+  }
   free(leave_map->leave_values);
   free(leave_map->letter_base_index_map);
   free(leave_map);

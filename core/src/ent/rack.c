@@ -47,6 +47,9 @@ void rack_copy(Rack *dst, const Rack *src) {
 }
 
 void rack_destroy(Rack *rack) {
+  if (!rack) {
+    return;
+  }
   free(rack->array);
   free(rack);
 }

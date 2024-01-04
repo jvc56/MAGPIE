@@ -31,7 +31,12 @@ struct MoveList {
 
 Move *move_create() { return malloc_or_die(sizeof(Move)); }
 
-void move_destroy(Move *move) { free(move); }
+void move_destroy(Move *move) {
+  if (!move) {
+    return;
+  }
+  free(move);
+}
 
 game_event_t move_get_type(const Move *move) { return move->move_type; }
 
@@ -199,6 +204,9 @@ MoveList *move_list_create(int capacity) {
 }
 
 void move_list_destroy(MoveList *ml) {
+  if (!ml) {
+    return;
+  }
   destroy_moves_for_move_list(ml);
   move_destroy(ml->spare_move);
   free(ml);

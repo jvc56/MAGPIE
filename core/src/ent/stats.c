@@ -25,7 +25,12 @@ Stat *stat_create() {
   return stat;
 }
 
-void stat_destroy(Stat *stat) { free(stat); }
+void stat_destroy(Stat *stat) {
+  if (!stat) {
+    return;
+  }
+  free(stat);
+}
 
 Stat *stat_duplicate(const Stat *stat) {
   Stat *new_stat = stat_create();

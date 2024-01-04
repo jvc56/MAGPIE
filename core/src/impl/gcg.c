@@ -126,6 +126,9 @@ TokenRegexPair *create_token_regex_pair(gcg_token_t token,
 }
 
 void destroy_token_regex_pair(TokenRegexPair *token_regex_pair) {
+  if (!token_regex_pair) {
+    return;
+  }
   regfree(&token_regex_pair->regex);
   free(token_regex_pair);
 }
@@ -187,6 +190,9 @@ GCGParser *create_gcg_parser(GameHistory *game_history) {
 }
 
 void destroy_gcg_parser(GCGParser *gcg_parser) {
+  if (!gcg_parser) {
+    return;
+  }
   for (int i = 0; i < (gcg_parser->number_of_token_regex_pairs); i++) {
     destroy_token_regex_pair(gcg_parser->token_regex_pairs[i]);
   }

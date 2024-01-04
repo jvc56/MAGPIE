@@ -30,6 +30,9 @@ TestFIFOArgs *create_test_fifo_args(const char *fifo_filename) {
 }
 
 void destroy_test_fifo_args(TestFIFOArgs *test_fifo_args) {
+  if (!test_fifo_args) {
+    return;
+  }
   free(test_fifo_args);
 }
 

@@ -110,12 +110,11 @@ Simmer *create_simmer(const Config *config, const MoveList *move_list,
 }
 
 void destroy_simmer(Simmer *simmer) {
-  if (simmer->similar_plays_rack) {
-    rack_destroy(simmer->similar_plays_rack);
+  if (!simmer) {
+    return;
   }
-  if (simmer->known_opp_rack) {
-    rack_destroy(simmer->known_opp_rack);
-  }
+  rack_destroy(simmer->similar_plays_rack);
+  rack_destroy(simmer->known_opp_rack);
   free(simmer->play_similarity_cache);
   free(simmer);
 }
@@ -148,6 +147,9 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
 }
 
 void destroy_simmer_worker(SimmerWorker *simmer_worker) {
+  if (!simmer_worker) {
+    return;
+  }
   game_destroy(simmer_worker->game);
   move_list_destroy(simmer_worker->move_list);
   rack_destroy(simmer_worker->rack_placeholder);

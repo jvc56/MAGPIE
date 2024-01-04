@@ -26,12 +26,8 @@ static ExecState *wasm_exec_state = NULL;
 static ExecState *iso_exec_state = NULL;
 
 void destroy_wasm_exec_states() {
-  if (wasm_exec_state) {
-    exec_state_destroy(wasm_exec_state);
-  }
-  if (iso_exec_state) {
-    exec_state_destroy(iso_exec_state);
-  }
+  exec_state_destroy(wasm_exec_state);
+  exec_state_destroy(iso_exec_state);
 }
 
 void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
@@ -155,9 +151,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   destroy_string_builder(move_string_builder);
   // keep config around for next call.
   // config_destroy(config);
-  if (leave_rack) {
-    rack_destroy(leave_rack);
-  }
+  rack_destroy(leave_rack);
   char *return_string = string_builder_dump(return_string_builder, NULL);
   destroy_string_builder(return_string_builder);
   // Caller can use UTF8ToString on the returned pointer but it MUST FREE

@@ -25,7 +25,12 @@ Timer *mtimer_create() {
   return timer;
 }
 
-void mtimer_destroy(Timer *timer) { free(timer); }
+void mtimer_destroy(Timer *timer) {
+  if (!timer) {
+    return;
+  }
+  free(timer);
+}
 
 void mtimer_start(Timer *timer) {
   if (timer->is_running) {

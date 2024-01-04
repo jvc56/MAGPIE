@@ -70,7 +70,12 @@ XoshiroPRNG *prng_create(uint64_t seed) {
   return prng;
 }
 
-void prng_destroy(XoshiroPRNG *prng) { free(prng); }
+void prng_destroy(XoshiroPRNG *prng) {
+  if (!prng) {
+    return;
+  }
+  free(prng);
+}
 
 static inline uint64_t rotl(const uint64_t x, int k) {
   return (x << k) | (x >> (64 - k));

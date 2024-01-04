@@ -80,6 +80,9 @@ Bag *bag_duplicate(const Bag *bag) {
 }
 
 void bag_destroy(Bag *bag) {
+  if (!bag) {
+    return;
+  }
   prng_destroy(bag->prng);
   free(bag->tiles);
   free(bag);

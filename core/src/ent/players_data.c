@@ -78,10 +78,8 @@ void players_data_destroy_data_name(PlayersData *players_data,
                                     int player_index) {
   int data_name_index =
       players_data_get_player_data_index(players_data_type, player_index);
-  if (players_data->data_names[data_name_index]) {
-    free(players_data->data_names[data_name_index]);
-    players_data->data_names[data_name_index] = NULL;
-  }
+  free(players_data->data_names[data_name_index]);
+  players_data->data_names[data_name_index] = NULL;
 }
 
 void players_data_set_data_name(PlayersData *players_data,
@@ -205,6 +203,9 @@ PlayersData *players_data_create() {
 }
 
 void players_data_destroy(PlayersData *players_data) {
+  if (!players_data) {
+    return;
+  }
   for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {
     bool is_shared =
         players_data_get_is_shared(players_data, (players_data_t)data_index);

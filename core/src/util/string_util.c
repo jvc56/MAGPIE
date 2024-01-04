@@ -444,6 +444,9 @@ StringSplitter *create_string_splitter() {
 }
 
 void destroy_string_splitter(StringSplitter *string_splitter) {
+  if (!string_splitter) {
+    return;
+  }
   for (int i = 0; i < string_splitter->number_of_items; i++) {
     free(string_splitter->items[i]);
   }
@@ -457,6 +460,9 @@ StringDelimiter *create_string_delimiter() {
 }
 
 void destroy_string_delimiter(StringDelimiter *string_delimiter) {
+  if (!string_delimiter) {
+    return;
+  }
   free(string_delimiter);
 }
 

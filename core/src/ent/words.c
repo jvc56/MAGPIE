@@ -103,7 +103,12 @@ FormedWords *formed_words_create(Board *board, uint8_t word[],
   return ws;
 }
 
-void formed_words_destroy(FormedWords *fw) { free(fw); }
+void formed_words_destroy(FormedWords *fw) {
+  if (!fw) {
+    return;
+  }
+  free(fw);
+}
 
 int formed_words_get_num_words(const FormedWords *fw) { return fw->num_words; }
 

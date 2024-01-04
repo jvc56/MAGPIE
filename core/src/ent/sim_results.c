@@ -63,6 +63,9 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
 
 void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
                           int max_plies) {
+  if (!simmed_plays) {
+    return;
+  }
   for (int i = 0; i < num_simmed_plays; i++) {
     for (int j = 0; j < max_plies; j++) {
       stat_destroy(simmed_plays[i]->bingo_stat[j]);
@@ -81,14 +84,18 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_simmed_plays,
 }
 
 void sim_results_destroy_internal(SimResults *sim_results) {
-  if (sim_results->simmed_plays) {
-    simmed_plays_destroy(sim_results->simmed_plays,
-                         sim_results->num_simmed_plays, sim_results->max_plies);
-    sim_results->simmed_plays = NULL;
+  if (!sim_results) {
+    return;
   }
+  simmed_plays_destroy(sim_results->simmed_plays, sim_results->num_simmed_plays,
+                       sim_results->max_plies);
+  sim_results->simmed_plays = NULL;
 }
 
 void sim_results_destroy(SimResults *sim_results) {
+  if (!sim_results) {
+    return;
+  }
   sim_results_destroy_internal(sim_results);
   free(sim_results);
 }

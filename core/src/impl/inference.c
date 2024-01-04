@@ -67,12 +67,13 @@ typedef struct Inference {
 } Inference;
 
 void destroy_inference(Inference *inference) {
+  if (!inference) {
+    return;
+  }
   rack_destroy(inference->current_target_leave);
   rack_destroy(inference->current_target_exchanged);
   rack_destroy(inference->bag_as_rack);
-  if (inference->move_list) {
-    move_list_destroy(inference->move_list);
-  }
+  move_list_destroy(inference->move_list);
   free(inference);
 }
 

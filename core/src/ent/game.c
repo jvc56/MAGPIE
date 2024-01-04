@@ -687,6 +687,9 @@ void destroy_backups(Game *game) {
 // This does not destroy the letter distribution,
 // the caller must handle that.
 void game_destroy(Game *game) {
+  if (!game) {
+    return;
+  }
   board_destroy(game->board);
   bag_destroy(game->bag);
   player_destroy(game->players[0]);

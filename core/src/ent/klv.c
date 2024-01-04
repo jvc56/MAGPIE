@@ -155,6 +155,9 @@ KLV *klv_create(const char *klv_name) {
 }
 
 void klv_destroy(KLV *klv) {
+  if (!klv) {
+    return;
+  }
   kwg_destroy(klv->kwg);
   free(klv->leave_values);
   free(klv->word_counts);

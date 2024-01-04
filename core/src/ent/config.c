@@ -320,6 +320,9 @@ SingleArg *create_single_arg() {
 }
 
 void destroy_single_arg(SingleArg *single_arg) {
+  if (!single_arg) {
+    return;
+  }
   free(single_arg->name);
   if (single_arg->has_value) {
     for (int i = 0; i < single_arg->number_of_values; i++) {
@@ -444,10 +447,33 @@ ParsedArgs *create_parsed_args() {
 }
 
 void destroy_parsed_args(ParsedArgs *parsed_args) {
+  if (!parsed_args) {
+    return;
+  }
   for (int i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
     destroy_single_arg(parsed_args->args[i]);
   }
   free(parsed_args);
+}
+
+void sort_parsed_args(ParsedArgs *parsed_args) {
+  // Do a simple insertion sort
+  // to order the args in the user
+  // input order to more easily
+  // validate the command and subcommand
+  SingleArg *temp_single_arg;
+  int j;
+
+  for (int i = 1; i < NUMBER_OF_ARG_TOKENS; i++) {
+    temp_single_arg = parsed_args->args[i];
+    j = i - 1;
+    while (j >= 0 &&
+           parsed_args->args[j]->position > temp_single_arg->position) {
+      parsed_args->args[j + 1] = parsed_args->args[j];
+      j = j - 1;
+    }
+    parsed_args->args[j + 1] = temp_single_arg;
+  }
 }
 
 config_load_status_t init_parsed_args(const StringSplitter *cmd,
@@ -481,24 +507,7 @@ config_load_status_t init_parsed_args(const StringSplitter *cmd,
     }
   }
 
-  // Do a simple insertion sort
-  // to order the args in the user
-  // input order to more easily
-  // validate the command and subcommand
-
-  SingleArg *temp_single_arg;
-  int j;
-
-  for (int i = 1; i < NUMBER_OF_ARG_TOKENS; i++) {
-    temp_single_arg = parsed_args->args[i];
-    j = i - 1;
-    while (j >= 0 &&
-           parsed_args->args[j]->position > temp_single_arg->position) {
-      parsed_args->args[j + 1] = parsed_args->args[j];
-      j = j - 1;
-    }
-    parsed_args->args[j + 1] = temp_single_arg;
-  }
+  sort_parsed_args(parsed_args);
 
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
@@ -575,9 +584,7 @@ config_load_status_t load_win_pct_for_config(Config *config,
   }
 
   WinPct *new_win_pcts = win_pct_create(win_pct_name);
-  if (config->win_pcts) {
-    win_pct_destroy(config->win_pcts);
-  }
+  win_pct_destroy(config->win_pcts);
   config->win_pcts = new_win_pcts;
 
   free(config->win_pct_name);
@@ -975,9 +982,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
   // If the letter distribution name has changed, update it
   if (!strings_equal(config->ld_name, updated_ld_name)) {
     LetterDistribution *updated_ld = ld_create(updated_ld_name);
-    if (config->ld) {
-      ld_destroy(config->ld);
-    }
+    ld_destroy(config->ld);
     config->ld = updated_ld;
 
     free(config->ld_name);
@@ -988,9 +993,7 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     config->ld_name_changed = false;
   }
 
-  if (config->rack) {
-    rack_destroy(config->rack);
-  }
+  rack_destroy(config->rack);
 
   config->rack = rack_create(ld_get_size(config->ld));
 
@@ -1273,15 +1276,12 @@ Config *config_create_default() {
 }
 
 void config_destroy(Config *config) {
-  if (config->ld) {
-    ld_destroy(config->ld);
+  if (!config) {
+    return;
   }
-  if (config->rack) {
-    rack_destroy(config->rack);
-  }
-  if (config->win_pcts) {
-    win_pct_destroy(config->win_pcts);
-  }
+  ld_destroy(config->ld);
+  rack_destroy(config->rack);
+  win_pct_destroy(config->win_pcts);
   free(config->ld_name);
   free(config->cgp);
   free(config->win_pct_name);

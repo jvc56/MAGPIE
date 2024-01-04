@@ -30,7 +30,12 @@ ErrorStatus *error_status_create() {
   return error_status;
 }
 
-void error_status_destroy(ErrorStatus *error_status) { free(error_status); }
+void error_status_destroy(ErrorStatus *error_status) {
+  if (!error_status) {
+    return;
+  }
+  free(error_status);
+}
 
 bool error_status_is_success(error_status_t error_status_type, int error_code) {
   bool is_success = false;

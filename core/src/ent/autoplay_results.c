@@ -33,6 +33,9 @@ AutoplayResults *autoplay_results_create() {
 }
 
 void autoplay_results_destroy(AutoplayResults *autoplay_results) {
+  if (!autoplay_results) {
+    return;
+  }
   stat_destroy(autoplay_results->p1_score);
   stat_destroy(autoplay_results->p2_score);
   free(autoplay_results);

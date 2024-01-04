@@ -48,27 +48,23 @@ InferenceResults *inference_results_create() {
 }
 
 void inference_results_destroy_internal(InferenceResults *results) {
+  if (!results) {
+    return;
+  }
   for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
-    if (results->equity_values[i]) {
-      stat_destroy(results->equity_values[i]);
-    }
+    stat_destroy(results->equity_values[i]);
     free(results->subtotals[i]);
   }
-  if (results->leave_rack_list) {
-    leave_rack_list_destroy(results->leave_rack_list);
-  }
-  if (results->target_played_tiles) {
-    rack_destroy(results->target_played_tiles);
-  }
-  if (results->target_known_unplayed_tiles) {
-    rack_destroy(results->target_known_unplayed_tiles);
-  }
-  if (results->bag_as_rack) {
-    rack_destroy(results->bag_as_rack);
-  }
+  leave_rack_list_destroy(results->leave_rack_list);
+  rack_destroy(results->target_played_tiles);
+  rack_destroy(results->target_known_unplayed_tiles);
+  rack_destroy(results->bag_as_rack);
 }
 
 void inference_results_destroy(InferenceResults *results) {
+  if (!results) {
+    return;
+  }
   inference_results_destroy_internal(results);
   free(results);
 }

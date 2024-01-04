@@ -55,6 +55,9 @@ ProcessArgs *create_process_args(const char *arg_string,
 }
 
 void destroy_process_args(ProcessArgs *process_args) {
+  if (!process_args) {
+    return;
+  }
   // All strings are owned by the caller
   free(process_args);
 }
@@ -88,6 +91,9 @@ MainArgs *get_main_args_from_string(const char *arg_string) {
 }
 
 void destroy_main_args(MainArgs *main_args) {
+  if (!main_args) {
+    return;
+  }
   for (int i = 0; i < main_args->argc; i++) {
     free(main_args->argv[i]);
   }

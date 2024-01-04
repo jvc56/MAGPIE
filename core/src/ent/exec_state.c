@@ -32,10 +32,11 @@ ExecState *exec_state_create() {
 }
 
 void exec_state_destroy(ExecState *exec_state) {
-  config_destroy(exec_state->config);
-  if (exec_state->game) {
-    game_destroy(exec_state->game);
+  if (!exec_state) {
+    return;
   }
+  config_destroy(exec_state->config);
+  game_destroy(exec_state->game);
   sim_results_destroy(exec_state->sim_results);
   inference_results_destroy(exec_state->inference_results);
   autoplay_results_destroy(exec_state->autoplay_results);

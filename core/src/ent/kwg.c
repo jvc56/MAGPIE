@@ -73,6 +73,9 @@ KWG *kwg_create_empty() {
 }
 
 void kwg_destroy(KWG *kwg) {
+  if (!kwg) {
+    return;
+  }
   free(kwg->nodes);
   free(kwg);
 }

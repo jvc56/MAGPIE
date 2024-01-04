@@ -375,7 +375,12 @@ void board_copy(Board *dst, const Board *src) {
   }
 }
 
-void board_destroy(Board *board) { free(board); }
+void board_destroy(Board *board) {
+  if (!board) {
+    return;
+  }
+  free(board);
+}
 
 // this function assumes the word is always horizontal. If this isn't the case,
 // the board needs to be transposed ahead of time.

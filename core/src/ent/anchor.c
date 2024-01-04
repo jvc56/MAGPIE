@@ -30,9 +30,17 @@ AnchorList *anchor_list_create() {
   return al;
 }
 
-void anchor_destroy(Anchor *anchor) { free(anchor); }
+void anchor_destroy(Anchor *anchor) {
+  if (!anchor) {
+    return;
+  }
+  free(anchor);
+}
 
 void anchor_list_destroy(AnchorList *al) {
+  if (!al) {
+    return;
+  }
   for (int i = 0; i < ((BOARD_DIM) * (BOARD_DIM)); i++) {
     anchor_destroy(al->anchors[i]);
   }

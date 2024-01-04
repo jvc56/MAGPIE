@@ -35,12 +35,11 @@ GameEvent *game_event_create() {
 }
 
 void game_event_destroy(GameEvent *game_event) {
-  if (game_event->move) {
-    move_destroy(game_event->move);
+  if (!game_event) {
+    return;
   }
-  if (game_event->rack) {
-    rack_destroy(game_event->rack);
-  }
+  move_destroy(game_event->move);
+  rack_destroy(game_event->rack);
   free(game_event->note);
   free(game_event);
 }
@@ -108,11 +107,12 @@ GameHistoryPlayer *game_history_player_create(const char *name,
 }
 
 void game_history_player_destroy(GameHistoryPlayer *player) {
+  if (!player) {
+    return;
+  }
   free(player->name);
   free(player->nickname);
-  if (player->last_known_rack) {
-    rack_destroy(player->last_known_rack);
-  }
+  rack_destroy(player->last_known_rack);
   free(player);
 }
 
@@ -295,6 +295,9 @@ GameHistory *game_history_create() {
 }
 
 void game_history_destroy(GameHistory *game_history) {
+  if (!game_history) {
+    return;
+  }
   free(game_history->title);
   free(game_history->description);
   free(game_history->id_auth);
@@ -302,14 +305,10 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history->lexicon_name);
   free(game_history->ld_name);
 
-  if (game_history->ld) {
-    ld_destroy(game_history->ld);
-  }
+  ld_destroy(game_history->ld);
 
   for (int i = 0; i < 2; i++) {
-    if (game_history->players[i]) {
-      game_history_player_destroy(game_history->players[i]);
-    }
+    game_history_player_destroy(game_history->players[i]);
   }
   for (int i = 0; i < game_history->number_of_events; i++) {
     game_event_destroy(game_history->events[i]);

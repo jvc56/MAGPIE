@@ -49,6 +49,9 @@ ThreadControl *thread_control_create() {
 }
 
 void thread_control_destroy(ThreadControl *thread_control) {
+  if (!thread_control) {
+    return;
+  }
   file_handler_destroy(thread_control->outfile);
   file_handler_destroy(thread_control->infile);
   mtimer_destroy(thread_control->timer);

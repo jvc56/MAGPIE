@@ -59,6 +59,9 @@ LeaveRack *create_leave_rack(int distribution_size) {
 }
 
 void destroy_leave_rack(LeaveRack *leave_rack) {
+  if (!leave_rack) {
+    return;
+  }
   rack_destroy(leave_rack->leave);
   rack_destroy(leave_rack->exchanged);
   free(leave_rack);
@@ -79,6 +82,9 @@ LeaveRackList *leave_rack_list_create(int capacity, int distribution_size) {
 }
 
 void leave_rack_list_destroy(LeaveRackList *lrl) {
+  if (!lrl) {
+    return;
+  }
   for (int i = 0; i < lrl->capacity + 1; i++) {
     destroy_leave_rack(lrl->leave_racks[i]);
   }

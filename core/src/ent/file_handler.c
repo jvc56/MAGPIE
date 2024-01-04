@@ -86,6 +86,9 @@ FileHandler *file_handler_create_from_filename(const char *filename,
 }
 
 void file_handler_destroy(FileHandler *fh) {
+  if (!fh) {
+    return;
+  }
   file_handler_clear_file_and_filename(fh);
   free(fh);
 }

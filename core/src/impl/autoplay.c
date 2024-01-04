@@ -39,6 +39,9 @@ AutoplayWorker *create_autoplay_worker(const Config *config,
 }
 
 void destroy_autoplay_worker(AutoplayWorker *autoplay_worker) {
+  if (!autoplay_worker) {
+    return;
+  }
   autoplay_results_destroy(autoplay_worker->autoplay_results);
   free(autoplay_worker);
 }
@@ -89,7 +92,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   int worker_index = autoplay_worker->worker_index;
   int starting_player_for_thread = worker_index % 2;
 
-  Bag *game_pair_bag;
+  Bag *game_pair_bag = NULL;
   if (use_game_pairs) {
     // Create a Bag to save the PRNG state of the game
     // to use for game pairs. The initial seed does
@@ -123,9 +126,7 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
     }
   }
 
-  if (use_game_pairs) {
-    bag_destroy(game_pair_bag);
-  }
+  bag_destroy(game_pair_bag);
   move_list_destroy(move_list);
   game_destroy(game);
   return NULL;

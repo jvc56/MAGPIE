@@ -96,6 +96,9 @@ MoveGen *create_generator(int ld_size) {
 }
 
 void destroy_generator(MoveGen *gen) {
+  if (!gen) {
+    return;
+  }
   anchor_list_destroy(gen->anchor_list);
   leave_map_destroy(gen->leave_map);
   free(gen->exchange_strip);
@@ -117,10 +120,8 @@ void gen_init_cache() {
 
 void gen_clear_cache() {
   for (int i = 0; i < (MAX_THREADS); i++) {
-    if (cached_gens[i]) {
-      destroy_generator(cached_gens[i]);
-      cached_gens[i] = NULL;
-    }
+    destroy_generator(cached_gens[i]);
+    cached_gens[i] = NULL;
   }
 }
 

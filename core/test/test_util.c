@@ -92,6 +92,9 @@ SortedMoveList *create_sorted_move_list(MoveList *ml) {
 }
 
 void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
+  if (!sorted_move_list) {
+    return;
+  }
   free(sorted_move_list->moves);
   free(sorted_move_list);
 }

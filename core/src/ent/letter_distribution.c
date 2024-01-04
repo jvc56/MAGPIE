@@ -132,6 +132,9 @@ LetterDistribution *ld_create(const char *ld_name) {
 }
 
 void ld_destroy(LetterDistribution *ld) {
+  if (!ld) {
+    return;
+  }
   free(ld->distribution);
   free(ld->scores);
   free(ld->is_vowel);

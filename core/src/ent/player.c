@@ -38,9 +38,7 @@ void player_update(const Config *config, Player *player) {
   player->kwg = players_data_get_kwg(players_data, player->index);
   player->klv = players_data_get_klv(players_data, player->index);
 
-  if (player->rack) {
-    rack_destroy(player->rack);
-  }
+  rack_destroy(player->rack);
 
   player->rack = rack_create(ld_get_size(config_get_ld(config)));
 }
@@ -70,6 +68,9 @@ Player *player_duplicate(const Player *player) {
 }
 
 void player_destroy(Player *player) {
+  if (!player) {
+    return;
+  }
   rack_destroy(player->rack);
   free(player);
 }
