@@ -32,16 +32,6 @@ void stat_destroy(Stat *stat) {
   free(stat);
 }
 
-Stat *stat_duplicate(const Stat *stat) {
-  Stat *new_stat = stat_create();
-  new_stat->cardinality = stat->cardinality;
-  new_stat->weight = stat->weight;
-  new_stat->sum_of_mean_differences_squared =
-      stat->sum_of_mean_differences_squared;
-  new_stat->mean = stat->mean;
-  return new_stat;
-}
-
 void push_with_cardinality(Stat *stat, double value, uint64_t value_weight,
                            uint64_t cardinality) {
   stat->cardinality += cardinality;

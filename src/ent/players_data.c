@@ -22,7 +22,7 @@ struct PlayersData {
   void *data[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
-  const char *player_names[2];
+  char *player_names[2];
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
@@ -35,7 +35,8 @@ int players_data_get_player_data_index(players_data_t players_data_type,
 
 void players_data_set_name(PlayersData *players_data, int player_index,
                            const char *player_name) {
-  players_data->player_names[player_index] = player_name;
+  free(players_data->player_names[player_index]);
+  players_data->player_names[player_index] = string_duplicate(player_name);
 }
 
 const char *players_data_get_name(const PlayersData *players_data,
@@ -200,7 +201,7 @@ PlayersData *players_data_create() {
                                     DEFAULT_MOVE_SORT_TYPE);
     players_data_set_move_record_type(players_data, player_index,
                                       DEFAULT_MOVE_RECORD_TYPE);
-    players_data_set_name(players_data, player_index, NULL);
+    players_data->player_names[player_index] = NULL;
   }
   return players_data;
 }
@@ -208,6 +209,9 @@ PlayersData *players_data_create() {
 void players_data_destroy(PlayersData *players_data) {
   if (!players_data) {
     return;
+  }
+  for (int i = 0; i < 2; i++) {
+    free(players_data->player_names[i]);
   }
   for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {
     bool is_shared =

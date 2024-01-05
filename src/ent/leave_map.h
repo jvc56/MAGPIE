@@ -10,9 +10,7 @@ typedef struct LeaveMap LeaveMap;
 LeaveMap *leave_map_create(int rack_array_size);
 void leave_map_destroy(LeaveMap *LeaveMap);
 void leave_map_init(const Rack *rack, LeaveMap *leave_map);
-void leave_map_update(LeaveMap *leave_map, int new_rack_array_size);
 
-double *leave_map_get_leave_values(const LeaveMap *leave_map);
 double leave_map_get_current_value(const LeaveMap *leave_map);
 int leave_map_get_current_index(const LeaveMap *leave_map);
 

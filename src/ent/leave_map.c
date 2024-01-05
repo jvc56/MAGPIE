@@ -36,19 +36,6 @@ void leave_map_destroy(LeaveMap *leave_map) {
   free(leave_map);
 }
 
-void leave_map_update(LeaveMap *leave_map, int new_rack_array_size) {
-  if (leave_map->rack_array_size != new_rack_array_size) {
-    free(leave_map->letter_base_index_map);
-    leave_map->rack_array_size = new_rack_array_size;
-    leave_map->letter_base_index_map =
-        (int *)malloc_or_die(leave_map->rack_array_size * sizeof(int));
-  }
-}
-
-double *leave_map_get_leave_values(const LeaveMap *leave_map) {
-  return leave_map->leave_values;
-}
-
 void leave_map_set_current_value(LeaveMap *leave_map, double value) {
   leave_map->leave_values[leave_map->current_index] = value;
 }

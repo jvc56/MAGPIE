@@ -54,7 +54,6 @@ void bag_reset(const LetterDistribution *ld, Bag *bag) {
 
 Bag *bag_create(const LetterDistribution *ld) {
   Bag *bag = malloc_or_die(sizeof(Bag));
-  // call bag_reseed if needed.
   bag->prng = prng_create(42);
   bag->size = ld_get_total_tiles(ld);
   bag->tiles = malloc_or_die(sizeof(uint8_t) * bag->size);
@@ -157,8 +156,6 @@ void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   }
   bag->tiles[insert_index] = letter;
 }
-
-void bag_reseed(Bag *bag, uint64_t seed) { prng_seed(bag->prng, seed); }
 
 // This function ensures that all workers for a given
 // job are seeded with unique non-overlapping sequences

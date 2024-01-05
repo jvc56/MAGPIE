@@ -142,10 +142,6 @@ Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play) {
   return simmed_play->equity_stat;
 }
 
-Stat *simmed_play_get_leftover_stat(const SimmedPlay *simmed_play) {
-  return simmed_play->leftover_stat;
-}
-
 Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
 }
@@ -156,10 +152,6 @@ bool simmed_play_get_ignore(const SimmedPlay *simmed_play) {
 
 int simmed_play_get_id(const SimmedPlay *simmed_play) {
   return simmed_play->play_id;
-}
-
-pthread_mutex_t *simmed_play_get_mutex(const SimmedPlay *simmed_play) {
-  return (pthread_mutex_t *)&simmed_play->mutex;
 }
 
 void simmed_play_set_ignore(SimmedPlay *sp, bool lock) {
@@ -244,7 +236,7 @@ int round_to_nearest_int(double a) {
 void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
                                   float leftover,
                                   game_end_reason_t game_end_reason,
-                                  int game_get_unseen_tiles, bool plies_are_odd,
+                                  int game_unseen_tiles, bool plies_are_odd,
                                   bool lock) {
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
@@ -264,7 +256,7 @@ void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
     if (!plies_are_odd) {
       spread_plus_leftover = -spread_plus_leftover;
     }
-    wpct = (double)win_pct_get(wp, spread_plus_leftover, game_get_unseen_tiles);
+    wpct = (double)win_pct_get(wp, spread_plus_leftover, game_unseen_tiles);
     if (!plies_are_odd) {
       // see above comment regarding flipping win%
       wpct = 1.0 - wpct;

@@ -506,13 +506,6 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
   return cgp_parse_status;
 }
 
-int game_get_unseen_tiles(const Game *game) {
-  Player *player_not_on_turn = game->players[1 - game->player_on_turn_index];
-  Rack *player_not_on_turn_rack = player_get_rack(player_not_on_turn);
-  int their_rack_tiles = rack_get_total_letters(player_not_on_turn_rack);
-  return (their_rack_tiles + bag_get_tiles(game->bag));
-}
-
 void game_reset(Game *game) {
   board_reset(game->board);
   bag_reset(game->ld, game->bag);

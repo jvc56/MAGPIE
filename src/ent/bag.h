@@ -22,7 +22,6 @@ bool bag_is_empty(const Bag *bag);
 void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index);
 void bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index);
 uint8_t bag_draw_random_letter(Bag *bag, int player_draw_index);
-void bag_reseed(Bag *bag, uint64_t seed);
 void bag_seed_for_worker(Bag *bag, uint64_t seed, int worker_index);
 void bag_reset(const LetterDistribution *ld, Bag *bag);
 void bag_shuffle(Bag *bag);

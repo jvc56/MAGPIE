@@ -47,7 +47,6 @@ void game_history_player_set_nickname(GameHistoryPlayer *player,
                                       const char *nickname);
 const char *game_history_player_get_nickname(const GameHistoryPlayer *player);
 
-void game_history_player_set_score(GameHistoryPlayer *player, int score);
 int game_history_player_get_score(const GameHistoryPlayer *player);
 
 void game_history_player_set_last_known_rack(GameHistoryPlayer *player,
@@ -92,8 +91,6 @@ void game_history_set_player(GameHistory *history, int player_index,
 GameHistoryPlayer *game_history_get_player(const GameHistory *history,
                                            int player_index);
 
-void game_history_set_number_of_events(GameHistory *history,
-                                       int number_of_events);
 int game_history_get_number_of_events(const GameHistory *history);
 
 void game_history_set_ld(GameHistory *history, LetterDistribution *ld);

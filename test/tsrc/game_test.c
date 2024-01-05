@@ -132,6 +132,11 @@ void test_load_cgp() {
       "15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 ABC5DF/YXZ 0/0 0",
       CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS);
 
+  reset_and_load_game_failure(
+      game,
+      "15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 ABCDF/YX;Z 0/0 0",
+      CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS);
+
   // Invalid scores
   reset_and_load_game_failure(game,
                               "15/15/15/15/15/15/15/15/5ABCDEFG3/15/15/15/15/"

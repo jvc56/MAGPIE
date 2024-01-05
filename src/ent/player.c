@@ -93,10 +93,6 @@ const KWG *player_get_kwg(const Player *player) { return player->kwg; }
 
 const KLV *player_get_klv(const Player *player) { return player->klv; }
 
-void player_set_name(Player *player, const char *name) { player->name = name; }
-
-void player_set_rack(Player *player, Rack *rack) { player->rack = rack; }
-
 void player_set_score(Player *player, int score) { player->score = score; }
 
 void player_increment_score(Player *player, int score) {
@@ -115,7 +111,3 @@ void player_set_move_record_type(Player *player,
                                  move_record_t move_record_type) {
   player->move_record_type = move_record_type;
 }
-
-void player_set_kwg(Player *player, const KWG *kwg) { player->kwg = kwg; }
-
-void player_set_klv(Player *player, const KLV *klv) { player->klv = klv; }

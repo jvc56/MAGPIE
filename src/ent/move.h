@@ -26,7 +26,6 @@ void move_set_row_start(Move *move, int row_start);
 void move_set_col_start(Move *move, int col_start);
 void move_set_tiles_played(Move *move, int tiles_played);
 void move_set_tiles_length(Move *move, int tiles_length);
-void move_set_equity(Move *move, double equity);
 void move_set_dir(Move *move, int dir);
 void move_set_tile_at_index(Move *move, uint8_t tile, int index);
 void move_set_all(Move *move, uint8_t strip[], int leftstrip, int rightstrip,

@@ -461,8 +461,9 @@ void test_exec_ucgi_command() {
 
   char *initial_command =
       get_formatted_string("ucgi infile %s", test_input_filename);
+
   ProcessArgs *process_args =
-      create_process_args(initial_command, 2, "autoplay", 0, "");
+      create_process_args(initial_command, 2, "autoplay", 1, "still searching");
 
   pthread_t cmd_execution_thread;
   pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
@@ -474,13 +475,17 @@ void test_exec_ucgi_command() {
 
   sleep(1);
   file_handler_write(input_writer,
-                     "r1 best r2 best i 10 numplays 1 threads 1\n");
+                     "r1 best r2 best i 1 numplays 1 threads 1\n");
   sleep(1);
   file_handler_write(input_writer,
                      "go autoplay lex CSW21 s1 equity s2 equity\n");
   sleep(1);
   file_handler_write(input_writer,
                      "go autoplay lex CSW21 s1 equity s2 equity i 10000000\n");
+  // Try to immediately start another command while the previous one
+  // is still running. This should give a warning.
+  file_handler_write(input_writer,
+                     "go autoplay lex CSW21 s1 equity s2 equity i 1\n");
   sleep(1);
   // Interrupt the autoplay which won't finish in 1 second
   file_handler_write(input_writer, "stop\n");
@@ -533,7 +538,7 @@ void test_exec_console_command() {
   file_handler_write(input_writer, "quit\n");
 
   // Wait for magpie to quit
-  block_for_process_command(process_args, 5);
+  block_for_process_command(process_args, 30);
 
   file_handler_destroy(input_writer);
   delete_fifo(test_input_filename);

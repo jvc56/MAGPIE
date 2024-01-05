@@ -7,7 +7,6 @@ typedef struct Stat Stat;
 
 Stat *stat_create();
 void stat_destroy(Stat *stat);
-Stat *stat_duplicate(const Stat *stat);
 void stat_reset(Stat *stat);
 
 uint64_t stat_get_cardinality(const Stat *stat);

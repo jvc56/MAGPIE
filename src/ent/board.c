@@ -154,12 +154,6 @@ void board_set_all_crosses(Board *board) {
   }
 }
 
-void board_clear_all_crosses(Board *board) {
-  for (size_t i = 0; i < BOARD_DIM * BOARD_DIM * 2 * 2; i++) {
-    board->cross_sets[i] = 0;
-  }
-}
-
 void board_reset_all_cross_scores(Board *board) {
   for (size_t i = 0; i < (BOARD_DIM * BOARD_DIM * 2 * 2); i++) {
     board->cross_scores[i] = 0;
@@ -302,8 +296,6 @@ void board_transpose(Board *board) { board->transposed = !board->transposed; }
 void board_set_transposed(Board *board, bool transposed) {
   board->transposed = transposed;
 }
-
-void board_reset_transposed(Board *board) { board->transposed = false; }
 
 int board_get_tiles_played(const Board *board) { return board->tiles_played; }
 

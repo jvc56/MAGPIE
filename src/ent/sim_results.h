@@ -16,10 +16,8 @@ Move *simmed_play_get_move(const SimmedPlay *simmed_play);
 Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play, int stat_index);
 Stat *simmed_play_get_bingo_stat(const SimmedPlay *simmed_play, int stat_index);
 Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
-Stat *simmed_play_get_leftover_stat(const SimmedPlay *simmed_play);
 Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 int simmed_play_get_id(const SimmedPlay *simmed_play);
-pthread_mutex_t *simmed_play_get_mutex(const SimmedPlay *simmed_play);
 bool simmed_play_get_ignore(const SimmedPlay *simmed_play);
 void simmed_play_set_ignore(SimmedPlay *simmed_play, bool ignore);
 
@@ -30,7 +28,7 @@ void simmed_play_add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
 void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
                                   float leftover,
                                   game_end_reason_t game_end_reason,
-                                  int game_get_unseen_tiles, bool plies_are_odd,
+                                  int game_unseen_tiles, bool plies_are_odd,
                                   bool lock);
 
 typedef struct SimResults SimResults;

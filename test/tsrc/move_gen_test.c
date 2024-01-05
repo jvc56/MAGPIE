@@ -483,7 +483,7 @@ void top_equity_play_recorder_test() {
 void distinct_lexica_test() {
   Config *config =
       create_config_or_die("setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity "
-                           "r1 all r2 all numplays 1");
+                           "r1 best r2 best numplays 1");
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
@@ -492,9 +492,6 @@ void distinct_lexica_test() {
   Player *player1 = game_get_player(game, 1);
   Rack *player0_rack = player_get_rack(player0);
   Rack *player1_rack = player_get_rack(player1);
-
-  player_set_move_record_type(player0, MOVE_RECORD_BEST);
-  player_set_move_record_type(player1, MOVE_RECORD_BEST);
 
   // Play SPORK, better than best NWL move of PORKS
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
@@ -523,11 +520,45 @@ void distinct_lexica_test() {
   rack_set_to_string(ld, player1_rack, "AEEQRSU");
 
   generate_moves_for_game(game, 0, move_list);
-  player_set_move_record_type(player1, MOVE_RECORD_BEST);
   assert_move(game, move_list, NULL, 0, "13C QUEAS(I)ER 88");
 
   move_list_destroy(move_list);
   game_destroy(game);
+
+  load_config_or_die(
+      config,
+      "setoptions l2 CSW21 l1 NWL20 k2 CSW21 k1 NWL20 s1 equity s2 equity "
+      "r1 best r2 best numplays 1");
+
+  // Ensure loading from CGP correctly sets the distinct cross sets
+  Game *game2 = game_create(config);
+
+  load_cgp_or_die(
+      game2,
+      "15/15/15/15/15/15/15/7SPORK3/7C7/7H7/6WIGGLY3/7Z7/7I7/7E7/7R7 / 0/0 0");
+
+  const LetterDistribution *ld2 = game_get_ld(game2);
+  ld = game_get_ld(game2);
+  MoveList *move_list2 = move_list_create(1);
+
+  player0 = game_get_player(game2, 0);
+  player1 = game_get_player(game2, 1);
+  player0_rack = player_get_rack(player0);
+  player1_rack = player_get_rack(player1);
+
+  rack_set_to_string(ld2, player0_rack, "AEEQRSU");
+  generate_moves_for_game(game2, 0, move_list2);
+  assert_move(game2, move_list2, NULL, 0, "13C QUEAS(I)ER 88");
+
+  game_start_next_player_turn(game2);
+
+  rack_set_to_string(ld2, player1_rack, "AEEQRSU");
+  generate_moves_for_game(game2, 0, move_list2);
+  assert_move(game2, move_list2, NULL, 0, "L3 SQUEA(K)ER(Y) 100");
+
+  move_list_destroy(move_list2);
+  game_destroy(game2);
+
   config_destroy(config);
 }
 

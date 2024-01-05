@@ -80,8 +80,6 @@ void game_event_set_score(GameEvent *event, int score) {
   move_set_score(event->move, score);
 }
 
-Move *game_event_get_score(const GameEvent *event) { return event->move; }
-
 void game_event_set_note(GameEvent *event, const char *note) {
   free(event->note);
   event->note = string_duplicate(note);
@@ -133,10 +131,6 @@ void game_history_player_set_nickname(GameHistoryPlayer *player,
 
 const char *game_history_player_get_nickname(const GameHistoryPlayer *player) {
   return player->nickname;
-}
-
-void game_history_player_set_score(GameHistoryPlayer *player, int score) {
-  player->score = score;
 }
 
 int game_history_player_get_score(const GameHistoryPlayer *player) {
@@ -251,11 +245,6 @@ GameHistoryPlayer *game_history_get_player(const GameHistory *history,
   return history->players[player_index];
 }
 
-void game_history_set_number_of_events(GameHistory *history,
-                                       int number_of_events) {
-  history->number_of_events = number_of_events;
-}
-
 int game_history_get_number_of_events(const GameHistory *history) {
   return history->number_of_events;
 }
@@ -266,10 +255,6 @@ void game_history_set_ld(GameHistory *history, LetterDistribution *ld) {
 
 LetterDistribution *game_history_get_ld(const GameHistory *history) {
   return history->ld;
-}
-
-void game_history_set_events(GameHistory *history, struct GameEvent **events) {
-  history->events = events;
 }
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index) {

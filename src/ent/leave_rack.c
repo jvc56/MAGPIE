@@ -40,10 +40,6 @@ int leave_rack_list_get_count(const LeaveRackList *leave_rack_list) {
   return leave_rack_list->count;
 }
 
-int leave_rack_list_get_capacity(const LeaveRackList *leave_rack_list) {
-  return leave_rack_list->capacity;
-}
-
 const LeaveRack *leave_rack_list_get_rack(const LeaveRackList *leave_rack_list,
                                           int index) {
   return leave_rack_list->leave_racks[index];
@@ -92,8 +88,6 @@ void leave_rack_list_destroy(LeaveRackList *lrl) {
   free(lrl->leave_racks);
   free(lrl);
 }
-
-void leave_rack_list_reset(LeaveRackList *lrl) { lrl->count = 0; }
 
 void up_heapify_leave_rack(LeaveRackList *lrl, int index) {
   LeaveRack *temp;

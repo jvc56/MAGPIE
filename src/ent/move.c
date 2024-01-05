@@ -91,8 +91,6 @@ void move_set_tiles_length(Move *move, int tiles_length) {
   move->tiles_length = tiles_length;
 }
 
-void move_set_equity(Move *move, double equity) { move->equity = equity; }
-
 void move_set_dir(Move *move, int dir) { move->dir = dir; }
 
 void move_set_tile_at_index(Move *move, uint8_t tile, int index) {

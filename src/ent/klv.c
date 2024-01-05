@@ -166,12 +166,6 @@ void klv_destroy(KLV *klv) {
   free(klv);
 }
 
-int klv_get_word_count(const KLV *klv, int word_count_index) {
-  return klv->word_counts[word_count_index];
-}
-
-const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
-
 int klv_get_word_index_of(const KLV *klv, const Rack *leave,
                           uint32_t node_index) {
   int idx = 0;

@@ -14,10 +14,8 @@ typedef struct LeaveRackList LeaveRackList;
 
 LeaveRackList *leave_rack_list_create(int capacity, int distribution_size);
 void leave_rack_list_destroy(LeaveRackList *lrl);
-void leave_rack_list_reset(LeaveRackList *lrl);
 void leave_rack_list_sort(LeaveRackList *lrl);
 
-int leave_rack_list_get_capacity(const LeaveRackList *leave_rack_list);
 int leave_rack_list_get_count(const LeaveRackList *leave_rack_list);
 const LeaveRack *leave_rack_list_get_rack(const LeaveRackList *leave_rack_list,
                                           int index);

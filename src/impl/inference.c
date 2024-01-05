@@ -360,8 +360,7 @@ bool should_print_info(const Inference *inference) {
 }
 
 void iterate_through_all_possible_leaves(Inference *inference,
-                                         int tiles_to_infer, int start_letter,
-                                         bool multithreaded) {
+                                         int tiles_to_infer, int start_letter) {
   if (thread_control_get_is_halted(inference->thread_control)) {
     return;
   }
@@ -369,18 +368,13 @@ void iterate_through_all_possible_leaves(Inference *inference,
     bool perform_evaluation = false;
     bool print_info = false;
 
-    if (multithreaded) {
-      pthread_mutex_lock(inference->shared_rack_index_lock);
-      if (inference->current_rack_index == *inference->shared_rack_index) {
-        print_info = should_print_info(inference);
-        perform_evaluation = true;
-        *inference->shared_rack_index += 1;
-      }
-      pthread_mutex_unlock(inference->shared_rack_index_lock);
-    } else {
+    pthread_mutex_lock(inference->shared_rack_index_lock);
+    if (inference->current_rack_index == *inference->shared_rack_index) {
       print_info = should_print_info(inference);
       perform_evaluation = true;
+      *inference->shared_rack_index += 1;
     }
+    pthread_mutex_unlock(inference->shared_rack_index_lock);
 
     if (perform_evaluation) {
       evaluate_possible_leave(inference);
@@ -395,8 +389,8 @@ void iterate_through_all_possible_leaves(Inference *inference,
   for (int letter = start_letter; letter < inference->ld_size; letter++) {
     if (rack_get_letter(inference->bag_as_rack, letter) > 0) {
       increment_letter_for_inference(inference, letter);
-      iterate_through_all_possible_leaves(inference, tiles_to_infer - 1, letter,
-                                          multithreaded);
+      iterate_through_all_possible_leaves(inference, tiles_to_infer - 1,
+                                          letter);
       decrement_letter_for_inference(inference, letter);
     }
   }
@@ -407,7 +401,7 @@ void *infer_worker(void *uncasted_inference) {
   iterate_through_all_possible_leaves(
       inference,
       (RACK_SIZE)-rack_get_total_letters(inference->current_target_rack),
-      BLANK_MACHINE_LETTER, 1);
+      BLANK_MACHINE_LETTER);
   return NULL;
 }
 

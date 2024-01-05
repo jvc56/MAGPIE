@@ -253,10 +253,6 @@ char *config_get_cgp(const Config *config) { return config->cgp; }
 
 int config_get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
 
-board_layout_t config_get_board_layout(const Config *config) {
-  return config->board_layout;
-}
-
 game_variant_t config_get_game_variant(const Config *config) {
   return config->game_variant;
 }
@@ -284,10 +280,6 @@ double config_get_equity_margin(const Config *config) {
 }
 
 WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
-
-char *config_get_win_pct_name(const Config *config) {
-  return config->win_pct_name;
-}
 
 int config_get_num_plays(const Config *config) { return config->num_plays; }
 
@@ -682,10 +674,9 @@ load_equity_margin_for_config(Config *config,
   if (!is_decimal_number(equity_margin_string)) {
     return CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN;
   }
+  // The equity margin cannot be < 0 since the is_decimal_number
+  // function returns false if the string contains "-"
   double equity_margin = string_to_double(equity_margin_string);
-  if (equity_margin < 0) {
-    return CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN;
-  }
   config->equity_margin = equity_margin;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
@@ -840,33 +831,6 @@ bool ld_is_compatible_with_lexicon(const char *lexicon_name,
   bool compatible = lds_are_compatible(ld_from_lexicon_name, ld_name);
   free(ld_from_lexicon_name);
   return compatible;
-}
-
-config_load_status_t load_players_data_for_config(
-    Config *config, players_data_t players_data_type,
-    const char *p1_new_data_name, const char *p1_default_data_name,
-    const char *p2_new_data_name, const char *p2_default_data_name) {
-  const char *current_lexicon_name = p1_new_data_name;
-  if (!current_lexicon_name) {
-    current_lexicon_name = p1_default_data_name;
-  }
-
-  const char *p2_final_data_name = p2_new_data_name;
-  if (!p2_final_data_name) {
-    p2_final_data_name = p2_default_data_name;
-  }
-
-  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
-
-  // Since KWG and KLV share names, they can both be arguments
-  // to the compatibility function.
-  if (!lexicons_are_compatible(current_lexicon_name, p2_final_data_name)) {
-    config_load_status = CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
-  } else {
-    players_data_set(config->players_data, players_data_type,
-                     current_lexicon_name, p2_final_data_name);
-  }
-  return config_load_status;
 }
 
 char *get_default_klv_name(const char *lexicon_name) {

@@ -44,7 +44,6 @@ int board_score_move(const Board *board, const LetterDistribution *ld,
                      int cross_set_index);
 int board_get_cross_set_index(bool kwgs_are_shared, int player_index);
 
-void board_clear_all_crosses(Board *board);
 void board_clear_cross_set(Board *board, int row, int col, int dir,
                            int cross_set_index);
 void board_reset(Board *board);
@@ -56,7 +55,6 @@ void board_set_cross_set(Board *board, int row, int col, uint64_t letter,
 void board_set_cross_set_letter(uint64_t *cross_set, uint8_t letter);
 void board_set_letter(Board *board, int row, int col, uint8_t letter);
 void board_transpose(Board *board);
-void board_reset_transposed(Board *board);
 void board_set_transposed(Board *board, bool transposed);
 
 void board_set_node_index(Board *board, uint32_t value);

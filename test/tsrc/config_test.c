@@ -9,6 +9,7 @@
 #include "../../src/def/simmer_defs.h"
 
 #include "../../src/ent/config.h"
+#include "../../src/ent/game.h"
 #include "../../src/ent/kwg.h"
 #include "../../src/ent/players_data.h"
 #include "../../src/ent/rack.h"
@@ -50,6 +51,8 @@ void test_config_error_cases() {
   test_config_error(config, "go sim i 1000 infer",
                     CONFIG_LOAD_STATUS_MISPLACED_COMMAND);
   test_config_error(config, "go sim i 1000",
+                    CONFIG_LOAD_STATUS_LEXICON_MISSING);
+  test_config_error(config, "go sim i 1000 l2 CSW21",
                     CONFIG_LOAD_STATUS_LEXICON_MISSING);
   test_config_error(config, "go sim lex CSW21 i 1000 plies",
                     CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
@@ -121,6 +124,8 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_MALFORMED_RANDOM_SEED);
   test_config_error(config, "go sim threads many",
                     CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS);
+  test_config_error(config, "go sim threads 0",
+                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS);
   test_config_error(config, "go sim threads -100",
                     CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS);
   test_config_error(config, "go sim threads 9001",
@@ -139,17 +144,27 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
   test_config_error(config, "go sim l1 NWL20 l2 OSPS44",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
+  test_config_error(config, "go sim l1 NWL20 l2 NWL20 k2 DISC2",
+                    CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
   test_config_error(config, "go sim l1 NWL20 l2 CSW21 ld german",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION);
+  test_config_error(config, "go sim ucgi console",
+                    CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES);
   config_destroy(config);
 }
 
 void test_config_success() {
   Config *config = config_create_default();
+  Game *game = NULL;
+
+  // Loading with whitespace should not fail
+  load_config_or_fail(config, "           ");
 
   const char *ld_name = "french";
   int bingo_bonus = 73;
   const char *game_variant = "wordsmog";
+  const char *p1 = "Alice";
+  const char *p2 = "Bob";
   const char *l1 = "CSW21";
   const char *l2 = "NWL20";
   const char *s1 = "score";
@@ -178,12 +193,13 @@ void test_config_success() {
       "setoptions ld %s bb %d var %s l1 %s l2 %s s1 %s r1 "
       "%s s2 %s r2 %s rack %s pindex %d score %d exch %d eq %0.2f numplays %d "
       "plies %d i "
-      "%d cond %d rs %d threads %d info %d check %d static gp",
+      "%d cond %d rs %d threads %d info %d check %d static gp p1 %s p2 %s",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, rack, pindex,
       score, number_exch, equity_margin, num_plays, plies, max_iterations,
-      stopping_cond, seed, number_of_threads, print_info, check_stop);
+      stopping_cond, seed, number_of_threads, print_info, check_stop, p1, p2);
 
   load_config_or_fail(config, string_builder_peek(test_string_builder));
+  game = game_create(config);
 
   assert(config_get_command_type(config) == COMMAND_TYPE_SET_OPTIONS);
   assert(!config_get_command_set_cgp(config));
@@ -214,6 +230,9 @@ void test_config_success() {
              config_get_thread_control(config)) == check_stop);
   assert(config_get_static_search_only(config));
   assert(config_get_use_game_pairs(config));
+
+  assert_strings_equal(p1, player_get_name(game_get_player(game, 0)));
+  assert_strings_equal(p2, player_get_name(game_get_player(game, 1)));
 
   assert(strings_equal(config_get_ld_name(config), ld_name));
   assert(
@@ -434,6 +453,7 @@ void test_config_success() {
   assert_strings_equal(config_get_ld_name(config), "french");
 
   destroy_string_builder(test_string_builder);
+  game_destroy(game);
   config_destroy(config);
 }
 

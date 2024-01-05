@@ -7,6 +7,7 @@ make magpie_test
 ./bin/magpie_test $2
 
 # Run include checks
+# Set $2 to the desired path to iwyu
 elif [ "$1" == "i" ]; then
 make -k CC=$2 CXXFLAGS="-Xiwyu --error_always"
 
@@ -37,7 +38,7 @@ make magpie_test BUILD=cov
 ./bin/magpie_test $2
 mkdir -p cov
 rm -f cov/*
-ln -sf $PWD/obj/*/*.gc* cov
+ln -sf $PWD/obj/*/*/*.gc* cov
 lcov --capture --directory cov --output-file coverage.info
 genhtml coverage.info --output-directory covhtml
 xdg-open covhtml/index.html
