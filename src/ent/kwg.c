@@ -18,6 +18,10 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+// The KWG data structure was originally
+// developed in wolges. For more details
+// on how the KWG data structure works, see
+// https://github.com/andy-k/wolges/blob/main/details.txt
 struct KWG {
   uint32_t *nodes;
 };

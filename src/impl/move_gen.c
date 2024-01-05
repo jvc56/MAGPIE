@@ -729,6 +729,10 @@ void shadow_start(MoveGen *gen, int cross_set_index) {
                     !board_is_dir_vertical(gen->dir), cross_set_index);
 }
 
+// The algorithm used in this file for
+// shadow playing was originally developed in wolges.
+// For more details about the shadow playing algorithm, see
+// https://github.com/andy-k/wolges/blob/main/details.txt
 void shadow_play_for_anchor(MoveGen *gen, int col) {
   // set cols
   gen->current_left_col = col;

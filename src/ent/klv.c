@@ -21,6 +21,10 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+// The KLV data structure was originally
+// developed in wolges. For more details
+// on how the KLV data structure works, see
+// https://github.com/andy-k/wolges/blob/main/details.txt
 struct KLV {
   KWG *kwg;
   int *word_counts;
