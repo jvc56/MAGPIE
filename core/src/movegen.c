@@ -700,10 +700,6 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
   if (gen->max_tiles_to_play == 0) {
     return;
   }
-  if ((gen->move_record_type == MOVE_RECORD_BEST) &&
-      better_play_has_been_found(gen, gen->highest_shadow_equity)) {
-    return;
-  }
   add_anchor(gen->anchor_list, gen->current_row_index, col,
              gen->last_anchor_col, gen->board->transposed,
              dir_is_vertical(gen->dir), gen->highest_shadow_equity);
