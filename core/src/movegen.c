@@ -1,3 +1,5 @@
+#include "movegen.h"
+
 #include <assert.h>
 #include <ctype.h>
 #include <stdint.h>
@@ -10,7 +12,6 @@
 #include "klv.h"
 #include "kwg.h"
 #include "leave_map.h"
-#include "movegen.h"
 #include "player.h"
 #include "rack.h"
 #include "util.h"
@@ -699,6 +700,10 @@ void shadow_play_for_anchor(const Rack *opp_rack, Generator *gen, int col,
   if (gen->max_tiles_to_play == 0) {
     return;
   }
+  if ((gen->move_record_type == MOVE_RECORD_BEST) &&
+      better_play_has_been_found(gen, gen->highest_shadow_equity)) {
+    return;
+  }
   add_anchor(gen->anchor_list, gen->current_row_index, col,
              gen->last_anchor_col, gen->board->transposed,
              dir_is_vertical(gen->dir), gen->highest_shadow_equity);
@@ -739,6 +744,19 @@ void set_descending_tile_scores(Generator *gen, Player *player) {
   }
 }
 
+void load_quackle_preendgame_adjustment_values(Generator *gen) {
+  double values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
+  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
+    gen->preendgame_adjustment_values[i] = values[i];
+  }
+}
+
+void load_zero_preendgame_adjustment_values(Generator *gen) {
+  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
+    gen->preendgame_adjustment_values[i] = 0;
+  }
+}
+
 void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
                     bool add_exchange, move_record_t move_record_type,
                     move_sort_t move_sort_type,
@@ -747,6 +765,11 @@ void generate_moves(const Rack *opp_rack, Generator *gen, Player *player,
   gen->move_record_type = move_record_type;
   gen->apply_placement_adjustment = apply_placement_adjustment;
 
+  if (player->index == 0) {
+    load_zero_preendgame_adjustment_values(gen);
+  } else {
+    load_quackle_preendgame_adjustment_values(gen);
+  }
   // Reset the best leaves
   for (int i = 0; i < (RACK_SIZE); i++) {
     gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
@@ -818,19 +841,6 @@ void reset_generator(Generator *gen) {
   reset_bag(gen->letter_distribution, gen->bag);
   reset_board(gen->board);
   reset_move_list(gen->move_list);
-}
-
-void load_quackle_preendgame_adjustment_values(Generator *gen) {
-  double values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
-  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
-    gen->preendgame_adjustment_values[i] = values[i];
-  }
-}
-
-void load_zero_preendgame_adjustment_values(Generator *gen) {
-  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
-    gen->preendgame_adjustment_values[i] = 0;
-  }
 }
 
 void update_generator(const Config *config, Generator *gen) {
