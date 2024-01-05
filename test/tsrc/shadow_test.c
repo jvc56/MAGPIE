@@ -130,6 +130,8 @@ void test_shadow_score() {
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 8));
 
   load_and_generate(game, move_list, player, KA_OPENING_CGP, "EE");
+  assert(anchor_list_get_count(anchor_list) == 6);
+
   // KAE and EE
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 10));
@@ -144,9 +146,6 @@ void test_shadow_score() {
   // EEE
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 3));
   // The rest are prevented by invalid cross sets
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 6), 0));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 7), 0));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 8), 0));
 
   load_and_generate(game, move_list, player, KA_OPENING_CGP, "E?");
   // oK, oE, EA
@@ -171,6 +170,7 @@ void test_shadow_score() {
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 8), 2));
 
   load_and_generate(game, move_list, player, KA_OPENING_CGP, "J");
+  assert(anchor_list_get_count(anchor_list) == 4);
   // J(K) veritcally
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 21));
@@ -181,13 +181,10 @@ void test_shadow_score() {
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 9));
   // J(A) vertically
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 9));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 0));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 0));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 6), 0));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 7), 0));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 8), 0));
 
   load_and_generate(game, move_list, player, AA_OPENING_CGP, "JF");
+  assert(anchor_list_get_count(anchor_list) == 6);
+
   // JF, JA, and FA
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 42));
@@ -207,9 +204,6 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 13));
   // Remaining anchors are prevented by invalid cross sets
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 6), 0));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 7), 0));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 8), 0));
 
   // Makeing JA, FA, and JFU, doubling the U on the double letter
   load_and_generate(game, move_list, player, AA_OPENING_CGP, "JFU");
@@ -457,6 +451,38 @@ void test_shadow_score() {
   // plays in all cross sets
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 2036));
+
+  game_reset(game);
+  char qi_qis[300] =
+      "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
+      "0 lex CSW21";
+  load_and_generate(game, move_list, player, qi_qis, "FRUITED");
+  AnchorList *al = gen_get_anchor_list(0);
+  // 8g (QI)DURFITE 128
+  // h8 (I)DURFITE 103
+  // f9 UFTRIDE 88
+  // 7g EF(QIS)RTUDI 79
+  // 10b FURED(S)IT 74
+  // 9c DURT(I)FIE 70
+  // 7h FURTIDE 69
+  // h10 DUFTIE 45
+  // f10 FURIDE 35
+  assert(anchor_list_get_count(al) == 9);
+  assert(within_epsilon(anchor_get_highest_possible_equity(al, 0), 128));
+  assert(anchor_get_row(al, 0) == 7);
+  assert(anchor_get_col(al, 0) == 7);
+  assert(anchor_get_dir(al, 0) == BOARD_HORIZONTAL_DIRECTION);
+
+  assert(within_epsilon(anchor_get_highest_possible_equity(al, 1), 103));
+  assert(anchor_get_row(al, 1) == 7);
+  assert(anchor_get_col(al, 1) == 7);
+  assert(anchor_get_dir(al, 1) == BOARD_VERTICAL_DIRECTION);
+
+  // f9 UFTRIDE for 88, not h9 DURFITE for 100 (which does not fit)
+  assert(within_epsilon(anchor_get_highest_possible_equity(al, 2), 88));
+  assert(anchor_get_row(al, 2) == 5);
+  assert(anchor_get_col(al, 2) == 8);
+  assert(anchor_get_dir(al, 2) == BOARD_VERTICAL_DIRECTION);
 
   game_destroy(game);
   move_list_destroy(move_list);

@@ -36,6 +36,7 @@ typedef struct MoveGen {
   int current_anchor_col;
   int last_anchor_col;
   int dir;
+  int max_tiles_to_play;
   int tiles_played;
   int number_of_plays;
   int move_sort_type;
@@ -548,6 +549,9 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
   }
+  if (gen->tiles_played > gen->max_tiles_to_play) {
+    gen->max_tiles_to_play = gen->tiles_played;
+  }
 }
 
 void shadow_play_right(MoveGen *gen, int main_played_through_score,
@@ -749,6 +753,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 
   // Reset tiles played
   gen->tiles_played = 0;
+  gen->max_tiles_to_play = 0;
 
   // Set rack cross set
   gen->rack_cross_set = 0;
@@ -760,6 +765,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 
   shadow_start(
       gen, board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
+  if (gen->max_tiles_to_play == 0) {
+    return;
+  }
   anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
                          gen->last_anchor_col, board_get_transposed(gen->board),
                          board_is_dir_vertical(gen->dir),
@@ -775,6 +783,12 @@ void shadow_by_orientation(MoveGen *gen, int dir) {
       if (board_get_anchor(gen->board, row, col, dir)) {
         shadow_play_for_anchor(gen, col);
         gen->last_anchor_col = col;
+        // The next anchor to search after a playthrough tile should
+        // leave a gap of one square so that it will not search backwards
+        // into the square adjacent to the playthrough tile.
+        if (!is_empty_cache(gen, col)) {
+          gen->last_anchor_col++;
+        }
       }
     }
   }
