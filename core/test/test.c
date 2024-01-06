@@ -32,6 +32,7 @@
 #include "test_constants.h"
 #include "testconfig.h"
 #include "wasm_api_test.h"
+#include "word_prune_test.h"
 #include "word_test.h"
 
 void run_all(TestConfig *testconfig) {
@@ -58,6 +59,7 @@ void run_all(TestConfig *testconfig) {
   test_equity_adjustments(testconfig);
   test_gameplay(testconfig);
   test_stats();
+  test_word_prune(testconfig);
   test_infer(testconfig);
   test_sim(testconfig);
   // test_command(testconfig);
@@ -104,6 +106,8 @@ void run_test(TestConfig *testconfig, const char *subtest) {
     test_gameplay(testconfig);
   } else if (strings_equal(subtest, "stats")) {
     test_stats(testconfig);
+  } else if (strings_equal(subtest, "wordprune")) {
+    test_word_prune(testconfig);
   } else if (strings_equal(subtest, "infer")) {
     test_infer(testconfig);
   } else if (strings_equal(subtest, "sim")) {
