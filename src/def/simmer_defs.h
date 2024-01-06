@@ -8,6 +8,8 @@ typedef enum {
   SIM_STOPPING_CONDITION_99PCT,
 } sim_stopping_condition_t;
 
+// We use this status type stub for consistency across
+// commands. We might add more in the future.
 typedef enum { SIM_STATUS_SUCCESS } sim_status_t;
 
 typedef enum {

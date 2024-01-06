@@ -12,21 +12,27 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-// Cross sets use a x4 multiplier for
-// - Horizontal and vertical directions
-// - Player 1 and player 2
-// Anchors use a x2 multiplier for
-// - Horizontal and vertical directions
-
 struct Board {
   uint8_t letters[BOARD_DIM * BOARD_DIM];
+  // Bonus squares are set at board creation
+  // and should not be modified.
   uint8_t bonus_squares[BOARD_DIM * BOARD_DIM];
+  // We use (number of squares * 4) for cross sets
+  // to account for
+  //   - vertical and horizontal board directions
+  //   - separate lexicons used by player 1 and player 2
   uint64_t cross_sets[BOARD_DIM * BOARD_DIM * 4];
+  // We use (number of squares * 4) for cross scores
+  // for reasons listed above.
   int cross_scores[BOARD_DIM * BOARD_DIM * 4];
+  // We use (number of squares * 2) for cross sets
+  // to account for
+  //   - vertical and horizontal board directions
   bool anchors[BOARD_DIM * BOARD_DIM * 2];
   bool transposed;
   int tiles_played;
-  // Values used for traverse backwards for score
+  // Scratch pad for return values used by
+  // traverse backwards for score
   uint32_t node_index;
   bool path_is_valid;
 };

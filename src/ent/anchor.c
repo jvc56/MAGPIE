@@ -7,11 +7,22 @@
 #include "../util/util.h"
 
 typedef struct Anchor {
+  // The row of the board for this anchor
   int row;
+  // The column of the board for this anchor
   int col;
+  // The the previous anchor column of the
+  // move generator for the row.
   int last_anchor_col;
+  // The transposed state of the board
+  // for this anchor column.
   bool transposed;
+  // The direction of the board for
+  // this anchor column.
   int dir;
+  // The highest possibly equity
+  // that can be achieved from this
+  // anchor column.
   double highest_possible_equity;
 } Anchor;
 

@@ -209,6 +209,9 @@ void inference_results_set_stat_for_letter(InferenceResults *inference_results,
   stat_push(stat, 0, number_of_draws_without_letter);
 }
 
+// Gets the probability that the target has at least
+// 'minimum' of 'this_letter' on their rack assuming
+// a uniform random distribution.
 double get_probability_for_random_minimum_draw(
     const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
     int minimum, int number_of_target_played_tiles) {

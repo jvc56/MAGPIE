@@ -34,6 +34,12 @@ typedef struct MinimalGameBackup {
   game_end_reason_t game_end_reason;
 } MinimalGameBackup;
 
+// The Game struct does not own the
+// letter distribution, which is the
+// caller's responsibility. There are
+// also some fields in Player which
+// are owned by the caller. See the Player
+// struct for more details.
 struct Game {
   int player_on_turn_index;
   int starting_player_index;

@@ -13,6 +13,10 @@ struct LeaveRack {
   double equity;
 };
 
+// Used by the inference_results
+// to store the most common leaves
+// (and possibly exchanges) for
+// an inference.
 struct LeaveRackList {
   int count;
   int capacity;

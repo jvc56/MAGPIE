@@ -72,6 +72,12 @@ typedef struct MoveGen {
   MoveList *move_list;
 } MoveGen;
 
+// Cache move generators since destroying
+// and recreating a movegen for
+// every request to generate moves would
+// be expensive. The infer and sim functions
+// don't have this problem since they are
+// only called once per command.
 static MoveGen *cached_gens[MAX_THREADS];
 
 void load_quackle_preendgame_adjustment_values(MoveGen *gen) {

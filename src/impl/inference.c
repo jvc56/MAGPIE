@@ -45,8 +45,13 @@ typedef struct Inference {
   int move_capacity;
   // Target player index in the game
   int target_index;
+  // Target player score
   int target_score;
+  // Number of tiles exchanged by the target
   int target_number_of_tiles_exchanged;
+  // Maximum equity loss the target can
+  // lose while still being considered
+  // the top move.
   double equity_margin;
   uint64_t current_rack_index;
   uint64_t total_racks_evaluated;

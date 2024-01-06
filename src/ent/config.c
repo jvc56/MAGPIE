@@ -106,8 +106,6 @@ struct Config {
   game_variant_t game_variant;
   PlayersData *players_data;
   // Inference
-  // This can act as the known opp tiles
-  // or the tiles play in an inference
   Rack *rack;
   int target_index;
   int target_score;
@@ -485,12 +483,17 @@ config_load_status_t init_parsed_args(const StringSplitter *cmd,
         if (single_arg->has_value) {
           return CONFIG_LOAD_STATUS_DUPLICATE_ARG;
         } else if (i + single_arg->number_of_values < number_of_input_args) {
+          // Since the input arg name has been recognized, parse the
+          // next single_arg->number_of_values to load the values
+          // for this arg.
           for (int k = 0; k < single_arg->number_of_values; k++) {
             single_arg->values[k] = get_formatted_string(
                 "%s", string_splitter_get_item(cmd, i + k + 1));
           }
           single_arg->has_value = true;
           single_arg->position = i;
+          // Advance the current arg past all of the
+          // values that were just loaded.
           i += single_arg->number_of_values + 1;
         } else {
           return CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES;
@@ -758,6 +761,11 @@ config_load_status_t load_mode_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
+// Starts at the beginning of the parsed args to determine the
+// type of command specified by the user. Does the following:
+// - Sets the command type, if a valid one is found
+// - Returns how many args were used for the command, so
+//   further arg parsing can contiue without rereading the same args.
 int set_command_type_for_config(Config *config, const ParsedArgs *parsed_args) {
   // If no valid sequences are found we use
   // the set options command as a default

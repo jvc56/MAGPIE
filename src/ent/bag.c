@@ -9,7 +9,14 @@
 #include "../util/log.h"
 #include "../util/util.h"
 
+// The bag uses a start and end
+// tile index to establish two "sides"
+// from which players draw tiles. This
+// reduces the variance of game pair
+// results.
 struct Bag {
+  // The total number of tiles
+  // in the bag for the initial state.
   int size;
   uint8_t *tiles;
   // Inclusive start index for when
@@ -18,6 +25,7 @@ struct Bag {
   // Exclusive end index for when
   // tiles end in the 'tiles' array.
   int end_tile_index;
+  // Deterministic PRNG for the bag.
   XoshiroPRNG *prng;
 };
 
@@ -38,6 +46,8 @@ void bag_shuffle(Bag *bag) {
   }
 }
 
+// Resets the bag to all of the letters in ld
+// and shuffles.
 void bag_reset(const LetterDistribution *ld, Bag *bag) {
   int tile_index = 0;
   int ld_size = ld_get_size(ld);
@@ -131,6 +141,9 @@ void bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   }
 }
 
+// The player index should be the player who drew the tile.
+// Failing to adhere to this requirement will result in
+// undefined behavior.
 void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   if (get_is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;

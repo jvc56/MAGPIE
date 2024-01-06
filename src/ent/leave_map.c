@@ -9,6 +9,14 @@
 
 #include "../util/util.h"
 
+// The LeaveMap struct is used by
+// movegen to lookup the leave value
+// for a move in O(1) time. It can be
+// viewed as a complement to the Gordon
+// Generator in that as the play on the
+// board changes one tile at a time
+// in the generator, the leave changes
+// one tile at a time in the LeaveMap.
 struct LeaveMap {
   int rack_array_size;
   double *leave_values;
