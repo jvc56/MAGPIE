@@ -48,6 +48,7 @@ void test_unique_rows(TestConfig *testconfig) {
   assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[5]) == 7);
 
   destroy_board_rows(board_rows);
+  destroy_game(game);
 }
 
 void test_add_words_without_playthrough(TestConfig *testconfig) {
@@ -89,6 +90,7 @@ void test_add_words_without_playthrough(TestConfig *testconfig) {
       printf("sort_words took %f seconds\n", (end_time - start_time) * 1e-9);
   */
   destroy_possible_word_list(possible_word_list);
+  destroy_game(game);
 }
 
 void test_add_playthrough_words_from_row(TestConfig *testconfig) {
@@ -113,21 +115,22 @@ void test_add_playthrough_words_from_row(TestConfig *testconfig) {
   add_playthrough_words_from_row(&board_rows->rows[4], game->players[0]->kwg,
                                  bag_as_rack, possible_word_list);
   // cat ~/scrabble/csw21.txt| grep QI | wc -l = 26
-  // QINGHAOSUS doesn't fit on the board and QI itself doesn't play a tile                                  
+  // QINGHAOSUS doesn't fit on the board and QI itself doesn't play a tile
   assert(possible_word_list->num_words == 24);
-/*  
-  for (int i = 0; i < possible_word_list->num_words; i++) {
-    for (int j = 0; j < possible_word_list->possible_words[i].word_length;
-         j++) {
-      uint8_t ml = possible_word_list->possible_words[i].word[j];
-      char c = 'A' + ml - 1;
-      printf("%c", c);
+  /*
+    for (int i = 0; i < possible_word_list->num_words; i++) {
+      for (int j = 0; j < possible_word_list->possible_words[i].word_length;
+           j++) {
+        uint8_t ml = possible_word_list->possible_words[i].word[j];
+        char c = 'A' + ml - 1;
+        printf("%c", c);
+      }
+      printf("\n");
     }
-    printf("\n");
-  }
-*/
+  */
   destroy_possible_word_list(possible_word_list);
   destroy_board_rows(board_rows);
+  destroy_game(game);
 }
 
 void test_possible_words(TestConfig *testconfig) {
@@ -143,6 +146,7 @@ void test_possible_words(TestConfig *testconfig) {
   PossibleWordList *possible_word_list = create_possible_word_list(game, NULL);
   assert(possible_word_list != NULL);
   destroy_possible_word_list(possible_word_list);
+  destroy_game(game);
 }
 
 void test_word_prune(TestConfig *testconfig) {
