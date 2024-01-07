@@ -29,6 +29,9 @@ typedef struct BoardRows {
 
 BoardRows* create_board_rows(const Game* game);
 void destroy_board_rows(BoardRows* board_rows);
+
+int max_nonplaythrough_spaces_in_row(BoardRow* board_row);
+
 PossibleWordList* create_possible_word_list(const Game *game, const KWG *kwg);
 void destroy_possible_word_list(PossibleWordList *possible_word_list);
 

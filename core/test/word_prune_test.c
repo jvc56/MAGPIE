@@ -40,6 +40,13 @@ void test_unique_rows(TestConfig *testconfig) {
   assert_row_equals(ld, board_rows, 4, "      QI       ");
   assert_row_equals(ld, board_rows, 5, "      S        ");
 
+  assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[0]) == 15);
+  assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[1]) == 6);
+  assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[2]) == 6);
+  assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[3]) == 7);
+  assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[4]) == 6);
+  assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[5]) == 7);
+  
   destroy_board_rows(board_rows);
 }
 
