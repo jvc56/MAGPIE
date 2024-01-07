@@ -78,7 +78,56 @@ void test_add_words_without_playthrough(TestConfig *testconfig) {
   // 24 of the 279077 words in CSW21 are not playable using a standard English
   // tile set. 17 have >3 Z's, 2 have >3 K's, 5 have >6 S's.
   assert(possible_word_list->num_words == 279053);
+
+  /*
+      shuffle_words(possible_word_list);
+      assert(possible_word_list->num_words == 279053);
+
+      uint64_t start_time = __rdtsc();  // in nanoseconds
+      sort_words(possible_word_list);
+      uint64_t end_time = __rdtsc();  // in milliseconds
+      printf("sort_words took %f seconds\n", (end_time - start_time) * 1e-9);
+  */
   destroy_possible_word_list(possible_word_list);
+}
+
+void test_add_playthrough_words_from_row(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
+  Game *game = create_game(config);
+  const LetterDistribution *ld = game->gen->letter_distribution;
+
+  char qi_qis[300] =
+      "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
+      "0 lex CSW21";
+  load_cgp(game, qi_qis);
+
+  BoardRows *board_rows = create_board_rows(game);
+  assert_row_equals(ld, board_rows, 4, "      QI       ");
+
+  PossibleWordList *possible_word_list = create_empty_possible_word_list();
+
+  Bag *full_bag = create_bag(game->gen->letter_distribution);
+  Rack *bag_as_rack = create_rack(game->gen->letter_distribution->size);
+  add_bag_to_rack(full_bag, bag_as_rack);
+
+  add_playthrough_words_from_row(&board_rows->rows[4], game->players[0]->kwg,
+                                 bag_as_rack, possible_word_list);
+  // cat ~/scrabble/csw21.txt| grep QI | wc -l = 26
+  // QINGHAOSUS doesn't fit on the board and QI itself doesn't play a tile                                  
+  assert(possible_word_list->num_words == 24);
+/*  
+  for (int i = 0; i < possible_word_list->num_words; i++) {
+    for (int j = 0; j < possible_word_list->possible_words[i].word_length;
+         j++) {
+      uint8_t ml = possible_word_list->possible_words[i].word[j];
+      char c = 'A' + ml - 1;
+      printf("%c", c);
+    }
+    printf("\n");
+  }
+*/
+  destroy_possible_word_list(possible_word_list);
+  destroy_board_rows(board_rows);
 }
 
 void test_possible_words(TestConfig *testconfig) {
@@ -99,5 +148,6 @@ void test_possible_words(TestConfig *testconfig) {
 void test_word_prune(TestConfig *testconfig) {
   test_unique_rows(testconfig);
   test_add_words_without_playthrough(testconfig);
+  test_add_playthrough_words_from_row(testconfig);
   test_possible_words(testconfig);
 }
