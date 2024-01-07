@@ -21,13 +21,29 @@ void assert_row_equals(const LetterDistribution *ld, BoardRows *board_rows,
   }
 }
 
+void assert_word_count(const LetterDistribution *ld, PossibleWordList *pwl,
+                       const char *human_readable_word, int expected_count) {
+  int expected_length = string_length(human_readable_word);
+  uint8_t expected[BOARD_DIM];
+  str_to_machine_letters(ld, human_readable_word, false, expected, BOARD_DIM);
+  int count = 0;
+  for (int i = 0; i < pwl->num_words; i++) {
+    if ((pwl->possible_words[i].word_length == expected_length) &&
+        (memory_compare(pwl->possible_words[i].word, expected,
+                        expected_length) == 0)) {
+      count++;
+    }
+  }
+  assert(count == expected_count);
+}
+
 void test_unique_rows(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
   Game *game = create_game(config);
   const LetterDistribution *ld = game->gen->letter_distribution;
 
   char qi_qis[300] =
-      "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
+      "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 / 22/12 "
       "0 lex CSW21";
   load_cgp(game, qi_qis);
 
@@ -53,7 +69,7 @@ void test_unique_rows(TestConfig *testconfig) {
 
 void test_add_words_without_playthrough(TestConfig *testconfig) {
   Config *config = get_csw_config(testconfig);
-  const Game *game = create_game(config);
+  Game *game = create_game(config);
   const KWG *kwg = game->players[game->player_on_turn_index]->kwg;
 
   PossibleWordList *possible_word_list = create_empty_possible_word_list();
@@ -90,6 +106,8 @@ void test_add_words_without_playthrough(TestConfig *testconfig) {
       printf("sort_words took %f seconds\n", (end_time - start_time) * 1e-9);
   */
   destroy_possible_word_list(possible_word_list);
+  destroy_rack(bag_as_rack);
+  destroy_bag(full_bag);
   destroy_game(game);
 }
 
@@ -99,7 +117,7 @@ void test_add_playthrough_words_from_row(TestConfig *testconfig) {
   const LetterDistribution *ld = game->gen->letter_distribution;
 
   char qi_qis[300] =
-      "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
+      "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 / 22/12 "
       "0 lex CSW21";
   load_cgp(game, qi_qis);
 
@@ -129,7 +147,76 @@ void test_add_playthrough_words_from_row(TestConfig *testconfig) {
     }
   */
   destroy_possible_word_list(possible_word_list);
+  destroy_rack(bag_as_rack);
+  destroy_bag(full_bag);
   destroy_board_rows(board_rows);
+  destroy_game(game);
+}
+
+void test_multiple_playthroughs_in_row(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
+  Game *game = create_game(config);
+  const LetterDistribution *ld = game->gen->letter_distribution;
+
+  char cgp[300] =
+      "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+      "2COVE1L7/5X1E7/7N7 / 340/419 0 lex CSW21;";
+  load_cgp(game, cgp);
+
+  /*
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_game(game, sb);
+    printf("%s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+  */
+
+  BoardRows *board_rows = create_board_rows(game);
+  assert(board_rows->num_rows == 30);
+
+  PossibleWordList *possible_word_list = create_empty_possible_word_list();
+  assert(possible_word_list != NULL);
+
+  Rack *bag_as_rack = create_rack(game->gen->letter_distribution->size);
+  add_bag_to_rack(game->gen->bag, bag_as_rack);
+  /*
+    sb = create_string_builder();
+    string_builder_add_rack(bag_as_rack, game->gen->letter_distribution, sb);
+    printf("rack: %s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+  */
+  assert_row_equals(ld, board_rows, 27, "U      GI   O  ");
+  add_playthrough_words_from_row(&board_rows->rows[27], game->players[0]->kwg,
+                                 bag_as_rack, possible_word_list);
+
+  // found both as (U)NGIRT and UN(GI)RT
+  assert_word_count(ld, possible_word_list, "UNGIRT", 2);
+
+  // check that we get some GI...O words only once
+  assert_word_count(ld, possible_word_list, "GITANO", 1);
+  assert_word_count(ld, possible_word_list, "GITANOS", 1);
+  assert_word_count(ld, possible_word_list, "GIUSTO", 1);
+  assert_word_count(ld, possible_word_list, "SIGISBEO", 1);
+
+  sort_possible_word_list(possible_word_list);
+  PossibleWordList *unique =
+      create_unique_possible_word_list(possible_word_list);
+  assert_word_count(ld, unique, "UNGIRT", 1);
+
+  /*
+    for (int i = 0; i < possible_word_list->num_words; i++) {
+      for (int j = 0; j < possible_word_list->possible_words[i].word_length;
+           j++) {
+        uint8_t ml = possible_word_list->possible_words[i].word[j];
+        char c = 'A' + ml - 1;
+        printf("%c", c);
+      }
+      printf("\n");
+    }
+  */
+  assert(unique->num_words == 2370);
+
+  destroy_possible_word_list(possible_word_list);
   destroy_game(game);
 }
 
@@ -140,11 +227,38 @@ void test_possible_words(TestConfig *testconfig) {
   char cgp[300] =
       "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
       "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
-      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+      "2COVE1L7/5X1E7/7N7 / 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
 
+/*
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_game(game, sb);
+    printf("%s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+*/
+
+//  uint64_t start_time = __rdtsc();  // in nanoseconds
   PossibleWordList *possible_word_list = create_possible_word_list(game, NULL);
-  assert(possible_word_list != NULL);
+//  uint64_t end_time = __rdtsc();  // in milliseconds
+/*
+  printf("create_possible_word_list took %f seconds\n",
+         (end_time - start_time) * 1e-9);
+  printf("possible_word_list->num_words: %d\n", possible_word_list->num_words);         
+*/
+  
+  /*
+    for (int i = 0; i < possible_word_list->num_words; i++) {
+      for (int j = 0; j < possible_word_list->possible_words[i].word_length;
+           j++) {
+        uint8_t ml = possible_word_list->possible_words[i].word[j];
+        char c = 'A' + ml - 1;
+        printf("%c", c);
+      }
+      printf("\n");
+    }
+  */
+
+  assert(possible_word_list->num_words == 61746);
   destroy_possible_word_list(possible_word_list);
   destroy_game(game);
 }
@@ -153,5 +267,6 @@ void test_word_prune(TestConfig *testconfig) {
   test_unique_rows(testconfig);
   test_add_words_without_playthrough(testconfig);
   test_add_playthrough_words_from_row(testconfig);
+  test_multiple_playthroughs_in_row(testconfig);
   test_possible_words(testconfig);
 }

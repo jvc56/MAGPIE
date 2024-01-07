@@ -62,7 +62,9 @@ PossibleWordList* create_possible_word_list(const Game* game,
 
 void shuffle_words(PossibleWordList* possible_word_list);
 
-void sort_words(PossibleWordList* possible_word_list);
+void sort_possible_word_list(PossibleWordList* possible_word_list);
+
+PossibleWordList* create_unique_possible_word_list(PossibleWordList* sorted_possible_word_list);
 
 void destroy_possible_word_list(PossibleWordList* possible_word_list);
 

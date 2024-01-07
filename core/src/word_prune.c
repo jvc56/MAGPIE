@@ -1,5 +1,6 @@
 #include "word_prune.h"
 
+#include <assert.h>
 #include <stdlib.h>
 
 #include "cross_set.h"
@@ -48,8 +49,9 @@ BoardRows* create_board_rows(const Game* game) {
   }
   for (int col = 0; col < BOARD_DIM; col++) {
     for (int row = 0; row < BOARD_DIM; row++) {
-      rows[BOARD_DIM + col].letters[row] =
-          get_letter(game->gen->board, row, col);
+      uint8_t letter = get_letter(game->gen->board, row, col);
+      uint8_t unblanked = get_unblanked_machine_letter(letter);
+      rows[BOARD_DIM + col].letters[row] = unblanked;
     }
   }
   container->num_rows = BOARD_DIM * 2;
@@ -88,13 +90,17 @@ int max_nonplaythrough_spaces_in_row(BoardRow* board_row) {
 
 void add_word(PossibleWordList* possible_word_list, uint8_t* word,
               int word_length) {
-/*                
-  printf("adding word ");
   for (int i = 0; i < word_length; i++) {
-    printf("%c", 'A' + word[i] - 1);
+    assert(word[i] >= 1);
+    assert(word[i] <= 26);
   }
-  printf("\n");
-*/                  
+  /*
+    printf("adding word ");
+    for (int i = 0; i < word_length; i++) {
+      printf("%c", 'A' + word[i] - 1);
+    }
+    printf("\n");
+  */
   if (possible_word_list->num_words == possible_word_list->capacity) {
     possible_word_list->capacity *= 2;
     possible_word_list->possible_words =
@@ -167,19 +173,19 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
                                      int tiles_played, uint8_t* strip,
                                      PossibleWordList* possible_word_list) {
   const uint8_t current_letter = board_row->letters[col];
-/*  
-  char c = 'A' + current_letter - 1;
-  if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-    c = '_';
-  }
-  printf(
-      "playthrough_words_recursive_gen: col: %d, anchor_col: %d, "
-      "current_letter: %c, node_index: %d, leftstrip: %d, rightstrip: %d, "
-      "tiles_played: %d\n",
-      col, anchor_col, c, node_index, leftstrip, rightstrip, tiles_played);
-*/      
+  /*
+    char c = 'A' + current_letter - 1;
+    if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+      c = '_';
+    }
+    printf(
+        "playthrough_words_recursive_gen: col: %d, anchor_col: %d, "
+        "current_letter: %c, node_index: %d, leftstrip: %d, rightstrip: %d, "
+        "tiles_played: %d\n",
+        col, anchor_col, c, node_index, leftstrip, rightstrip, tiles_played);
+  */
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-    const uint8_t ml = get_unblanked_machine_letter(current_letter);
+    const uint8_t ml = current_letter; // already unblanked
     int next_node_index = 0;
     bool accepts = false;
     for (int i = node_index;; i++) {
@@ -233,15 +239,15 @@ void playthrough_words_go_on(const BoardRow* board_row, const KWG* kwg,
                              bool accepts, int leftstrip, int rightstrip,
                              int leftmost_col, int tiles_played, uint8_t* strip,
                              PossibleWordList* possible_word_list) {
-/*                                
-  char c = 'A' + current_letter - 1;
-  printf(
-      "playthrough_words_go_on: current_col: %d, anchor_col: %d, "
-      "current_letter: %c, new_node_index: %d, accepts: %d, leftstrip: %d, "
-      "rightstrip: %d, leftmost_col: %d, tiles_played: %d\n",
-      current_col, anchor_col, c, new_node_index, accepts, leftstrip,
-      rightstrip, leftmost_col, tiles_played);
-*/      
+  /*
+    char c = 'A' + current_letter - 1;
+    printf(
+        "playthrough_words_go_on: current_col: %d, anchor_col: %d, "
+        "current_letter: %c, new_node_index: %d, accepts: %d, leftstrip: %d, "
+        "rightstrip: %d, leftmost_col: %d, tiles_played: %d\n",
+        current_col, anchor_col, c, new_node_index, accepts, leftstrip,
+        rightstrip, leftmost_col, tiles_played);
+  */
   if (current_col <= anchor_col) {
     if (board_row->letters[current_col] != ALPHABET_EMPTY_SQUARE_MARKER) {
       strip[current_col] = board_row->letters[current_col];
@@ -312,11 +318,15 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
     uint8_t current_letter = board_row->letters[col];
     if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
       while ((col < BOARD_DIM) &&
-             (board_row->letters[col + 1] != ALPHABET_EMPTY_SQUARE_MARKER)) {
+             ((col == BOARD_DIM - 1) ||
+              (board_row->letters[col + 1] != ALPHABET_EMPTY_SQUARE_MARKER))) {
         col++;
       }
+      if (col >= BOARD_DIM) {
+        return;
+      }
       current_letter = board_row->letters[col];
-      const uint8_t ml = get_unblanked_machine_letter(current_letter);
+      const uint8_t ml = current_letter;  // already unblanked
       int next_node_index = 0;
       bool accepts = false;
       for (int i = gaddag_root;; i++) {
@@ -361,6 +371,12 @@ PossibleWordList* create_possible_word_list(const Game* game,
   Rack* bag_as_rack = create_rack(game->gen->letter_distribution->size);
   add_bag_to_rack(game->gen->bag, bag_as_rack);
 
+/*
+  StringBuilder* sb = create_string_builder();
+  string_builder_add_rack(bag_as_rack, game->gen->letter_distribution, sb);
+  printf("rack: %s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+*/
   // actually direction-agnostic: both rows and columns together
   BoardRows* board_rows = create_board_rows(game);
 
@@ -378,16 +394,19 @@ PossibleWordList* create_possible_word_list(const Game* game,
                                 bag_as_rack, max_nonplaythrough_spaces, word, 0,
                                 false, possible_word_list);
 
-  /*
-    for (int i = 0; i < board_rows->num_rows; i++) {
-      add_playthrough_words_from_row(&board_rows->rows[i], kwg, bag_as_rack,
-                                     possible_word_list);
-    }
-  */
+  for (int i = 0; i < board_rows->num_rows; i++) {
+    add_playthrough_words_from_row(&board_rows->rows[i], kwg, bag_as_rack,
+                                   possible_word_list);
+  }
 
   destroy_rack(bag_as_rack);
   destroy_board_rows(board_rows);
-  return possible_word_list;
+
+  sort_possible_word_list(possible_word_list);
+  PossibleWordList* unique =
+      create_unique_possible_word_list(possible_word_list);
+  destroy_possible_word_list(possible_word_list);
+  return unique;
 }
 
 void shuffle_words(PossibleWordList* possible_word_list) {
@@ -427,9 +446,23 @@ int compare_possible_words(const void* a, const void* b) {
   return 0;
 }
 
-void sort_words(PossibleWordList* possible_word_list) {
+void sort_possible_word_list(PossibleWordList* possible_word_list) {
   qsort(possible_word_list->possible_words, possible_word_list->num_words,
         sizeof(PossibleWord), compare_possible_words);
+}
+
+PossibleWordList* create_unique_possible_word_list(
+    PossibleWordList* sorted_possible_word_list) {
+  PossibleWordList* ret = create_empty_possible_word_list();
+  for (int i = 0; i < sorted_possible_word_list->num_words; i++) {
+    if (i == 0 || compare_possible_words(
+                      &sorted_possible_word_list->possible_words[i],
+                      &sorted_possible_word_list->possible_words[i - 1]) != 0) {
+      add_word(ret, sorted_possible_word_list->possible_words[i].word,
+               sorted_possible_word_list->possible_words[i].word_length);
+    }
+  }
+  return ret;
 }
 
 void destroy_possible_word_list(PossibleWordList* possible_word_list) {
