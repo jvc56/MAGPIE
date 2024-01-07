@@ -64,6 +64,7 @@ extern inline bool kwg_is_end(const KWG *kwg, int node_index);
 extern inline bool kwg_accepts(const KWG *kwg, int node_index);
 extern inline int kwg_arc_index(const KWG *kwg, int node_index);
 extern inline int kwg_tile(const KWG *kwg, int node_index);
+extern inline int kwg_get_dawg_root_node_index(const KWG *kwg);
 extern inline int kwg_get_root_node_index(const KWG *kwg);
 
 int kwg_get_next_node_index(const KWG *kwg, int node_index, int letter) {

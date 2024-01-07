@@ -8,14 +8,14 @@
 #include "rack.h"
 
 typedef struct PossibleWord {
-    uint8_t word[(BOARD_DIM)];
-    int word_length;
+  uint8_t word[(BOARD_DIM)];
+  int word_length;
 } PossibleWord;
 
 typedef struct PossibleWordList {
-    PossibleWord *possible_words;
-    int num_words;
-    int capacity;
+  PossibleWord* possible_words;
+  int num_words;
+  int capacity;
 } PossibleWordList;
 
 typedef struct BoardRow {
@@ -32,7 +32,15 @@ void destroy_board_rows(BoardRows* board_rows);
 
 int max_nonplaythrough_spaces_in_row(BoardRow* board_row);
 
-PossibleWordList* create_possible_word_list(const Game *game, const KWG *kwg);
-void destroy_possible_word_list(PossibleWordList *possible_word_list);
+void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
+                                   Rack* bag_as_rack, int max_nonplaythrough,
+                                   uint8_t* word, int tiles_played,
+                                   bool accepts,
+                                   PossibleWordList* possible_word_list);
+                                   
+PossibleWordList* create_empty_possible_word_list();
+PossibleWordList* create_possible_word_list(const Game* game,
+                                            const KWG* override_kwg);
+void destroy_possible_word_list(PossibleWordList* possible_word_list);
 
-#endif // WORD_PRUNE_H
+#endif  // WORD_PRUNE_H

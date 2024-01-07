@@ -85,20 +85,90 @@ int max_nonplaythrough_spaces_in_row(BoardRow* board_row) {
   return max_empty_spaces;
 }
 
-void add_words_without_playthrough(const KWG* kwg, Rack* bag_as_rack,
-                                   int max_empty_spaces,
-                                   PossibleWordList* possible_word_list) {}
+void add_word(PossibleWordList* possible_word_list, uint8_t* word,
+              int word_length) {
+  if (possible_word_list->num_words == possible_word_list->capacity) {
+    possible_word_list->capacity *= 2;
+    possible_word_list->possible_words =
+        realloc_or_die(possible_word_list->possible_words,
+                       sizeof(PossibleWord) * possible_word_list->capacity);
+  }
+  PossibleWord* possible_word =
+      &possible_word_list->possible_words[possible_word_list->num_words];
+  possible_word_list->num_words++;
+  memory_copy(possible_word->word, word, word_length);
+  possible_word->word_length = word_length;
+}
 
-void add_playthrough_words_from_row(BoardRow* board_row, const KWG* kwg, Rack* bag_as_rack,
-                        PossibleWordList* possible_word_list) {}
+void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
+                                   Rack* bag_as_rack, int max_nonplaythrough,
+                                   uint8_t* word, int tiles_played,
+                                   bool accepts,
+                                   PossibleWordList* possible_word_list) {
+  if (accepts) {
+    add_word(possible_word_list, word, tiles_played);
+  }
+  if (tiles_played == max_nonplaythrough) {
+    return;
+  }
+  if (node_index == 0) {
+    return;
+  }
+  for (int i = node_index;; i++) {
+    const int ml = kwg_tile(kwg, i);
+    const int new_node_index = kwg_arc_index(kwg, i);
+    if ((bag_as_rack->array[ml] != 0) || (bag_as_rack->array[BLANK_MACHINE_LETTER] != 0)) {
+      int accepts = kwg_accepts(kwg, i);
+      // Manipulating the rack's array directly is a little bit
+      // dirty, and doesn't update rack->number_of_letters or
+      // rack->empty, but those aren't used here, and the original
+      // rack will be restored at the end.
+      if (bag_as_rack->array[ml] > 0) {
+        bag_as_rack->array[ml]--;
+        word[tiles_played] = ml;
+        add_words_without_playthrough(kwg, new_node_index, bag_as_rack,
+                                      max_nonplaythrough, word, tiles_played + 1,
+                                      accepts, possible_word_list);
+        bag_as_rack->array[ml]++;
+      } else if (bag_as_rack->array[BLANK_MACHINE_LETTER] > 0) {
+        bag_as_rack->array[BLANK_MACHINE_LETTER]--;
+        word[tiles_played] = ml;
+        add_words_without_playthrough(kwg, new_node_index, bag_as_rack,
+                                      max_nonplaythrough, word, tiles_played + 1,
+                                      accepts, possible_word_list);
+        bag_as_rack->array[BLANK_MACHINE_LETTER]++;
+      }
+    }
+    if (kwg_is_end(kwg, i)) {
+      break;
+    }
+  }
+}
 
-PossibleWordList* create_possible_word_list(const Game* game, const KWG* kwg) {
+/*
+void add_playthrough_words_from_row(BoardRow* board_row, const KWG* kwg,
+                                    Rack* bag_as_rack,
+                                    PossibleWordList* possible_word_list) {}
+*/
+
+PossibleWordList* create_empty_possible_word_list() {
   PossibleWordList* possible_word_list =
       malloc_or_die(sizeof(PossibleWordList));
   possible_word_list->capacity = POSSIBLE_WORDS_INITIAL_CAPACITY;
   possible_word_list->possible_words =
       malloc_or_die(sizeof(PossibleWord) * possible_word_list->capacity);
   possible_word_list->num_words = 0;
+  return possible_word_list;
+}
+
+PossibleWordList* create_possible_word_list(const Game* game,
+                                            const KWG* override_kwg) {
+  const KWG* kwg = override_kwg;
+  if (kwg == NULL) {
+    const Player* player = game->players[game->player_on_turn_index];
+    kwg = player->kwg;
+  }
+  PossibleWordList* possible_word_list = create_empty_possible_word_list();
 
   Rack* bag_as_rack = create_rack(game->gen->letter_distribution->size);
   add_bag_to_rack(game->gen->bag, bag_as_rack);
@@ -114,13 +184,18 @@ PossibleWordList* create_possible_word_list(const Game* game, const KWG* kwg) {
       max_nonplaythrough_spaces = nonplaythrough_spaces;
     }
   }
-  add_words_without_playthrough(kwg, bag_as_rack, max_nonplaythrough_spaces,
-                                possible_word_list);
 
-  for (int i = 0; i < board_rows->num_rows; i++) {
-    add_playthrough_words_from_row(&board_rows->rows[i], kwg, bag_as_rack,
-                       possible_word_list);
-  }
+  uint8_t word[BOARD_DIM];
+  add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
+                                bag_as_rack, max_nonplaythrough_spaces, word, 0,
+                                false, possible_word_list);
+
+  /*
+    for (int i = 0; i < board_rows->num_rows; i++) {
+      add_playthrough_words_from_row(&board_rows->rows[i], kwg, bag_as_rack,
+                                     possible_word_list);
+    }
+  */
 
   destroy_rack(bag_as_rack);
   destroy_board_rows(board_rows);

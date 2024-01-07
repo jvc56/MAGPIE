@@ -6,14 +6,14 @@
 #include "testconfig.h"
 
 void assert_row_equals(const LetterDistribution *ld, BoardRows *board_rows,
-                       int row, const char *human_readable_row) {                        
-  char row_copy[BOARD_DIM+1];
-  memory_copy(row_copy, human_readable_row, BOARD_DIM+1);
+                       int row, const char *human_readable_row) {
+  char row_copy[BOARD_DIM + 1];
+  memory_copy(row_copy, human_readable_row, BOARD_DIM + 1);
   for (int i = 0; i < BOARD_DIM; i++) {
     if (row_copy[i] == ' ') {
       row_copy[i] = '?';
     }
-  }                        
+  }
   uint8_t expected[BOARD_DIM];
   str_to_machine_letters(ld, row_copy, false, expected, BOARD_DIM);
   for (int i = 0; i < BOARD_DIM; i++) {
@@ -46,8 +46,39 @@ void test_unique_rows(TestConfig *testconfig) {
   assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[3]) == 7);
   assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[4]) == 6);
   assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[5]) == 7);
-  
+
   destroy_board_rows(board_rows);
+}
+
+void test_add_words_without_playthrough(TestConfig *testconfig) {
+  Config *config = get_csw_config(testconfig);
+  const Game *game = create_game(config);
+  const KWG *kwg = game->players[game->player_on_turn_index]->kwg;
+
+  PossibleWordList *possible_word_list = create_empty_possible_word_list();
+  assert(possible_word_list != NULL);
+  assert(possible_word_list->num_words == 0);
+  Bag *full_bag = create_bag(game->gen->letter_distribution);
+  Rack *bag_as_rack = create_rack(game->gen->letter_distribution->size);
+  add_bag_to_rack(full_bag, bag_as_rack);
+  uint8_t word[BOARD_DIM];
+  add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
+                                bag_as_rack, 2, word, 0, false,
+                                possible_word_list);
+  assert(possible_word_list->num_words == 127);  // all two letter words
+  destroy_possible_word_list(possible_word_list);
+
+  possible_word_list = create_empty_possible_word_list();
+  assert(possible_word_list != NULL);
+  assert(possible_word_list->num_words == 0);
+  add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
+                                bag_as_rack, 15, word, 0, false,
+                                possible_word_list);
+  // all words except unplayable (PIZZAZZ, etc.)
+  // 24 of the 279077 words in CSW21 are not playable using a standard English
+  // tile set. 17 have >3 Z's, 2 have >3 K's, 5 have >6 S's.
+  assert(possible_word_list->num_words == 279053);
+  destroy_possible_word_list(possible_word_list);
 }
 
 void test_possible_words(TestConfig *testconfig) {
@@ -67,5 +98,6 @@ void test_possible_words(TestConfig *testconfig) {
 
 void test_word_prune(TestConfig *testconfig) {
   test_unique_rows(testconfig);
+  test_add_words_without_playthrough(testconfig);
   test_possible_words(testconfig);
 }
