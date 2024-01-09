@@ -21,7 +21,7 @@ git clone https://github.com/jvc56/MAGPIE.git
 
 ## Compilation
 
-To compile the MAGPIE executable, navigate to the `/MAGPIE/core/` directory and run:
+To compile the MAGPIE executable, run:
 
 ```
 make magpie BUILD=release
@@ -29,7 +29,7 @@ make magpie BUILD=release
 
 ## Usage
 
-Once MAGPIE is compiled, you can now execute commands from the `/MAGPIE/core/` directory.
+Once MAGPIE is compiled, you can execute commands.
 
 MAGPIE has four different execution modes:
 
@@ -126,7 +126,7 @@ If you are using vscode to develop, using the following attributes in your `.vsc
 
 ### Testing
 
-When creating a new module or functionality that is sufficiently complex, add a test for it in `MAGPIE/core/test/`.
+When creating a new module or functionality that is sufficiently complex, add a test for it in `MAGPIE/test/`.
 
 ## Commands and Arguments
 
