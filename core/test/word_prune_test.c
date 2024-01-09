@@ -216,6 +216,7 @@ void test_multiple_playthroughs_in_row(TestConfig *testconfig) {
   */
   assert(unique->num_words == 2370);
 
+  destroy_board_rows(board_rows);
   destroy_possible_word_list(unique);
   destroy_possible_word_list(possible_word_list);
   destroy_rack(bag_as_rack);
@@ -292,9 +293,10 @@ void test_enguard_d_row(TestConfig *testconfig) {
 
   assert(unique->num_words == 1827);
 
+  destroy_board_rows(board_rows);
   destroy_possible_word_list(unique);
   destroy_possible_word_list(possible_word_list);
-    destroy_rack(bag_as_rack);
+  destroy_rack(bag_as_rack);
   destroy_game(game);
 }
 
