@@ -102,7 +102,10 @@ int kwg_tile(const KWG *kwg, int node_index) {
   return kwg->nodes[node_index] >> 24;
 }
 
-int kwg_get_dawg_root_node_index(const KWG *kwg) { return kwg_arc_index(kwg, 0); }
+int kwg_get_dawg_root_node_index(const KWG *kwg) {
+  return kwg_arc_index(kwg, 0);
+}
+
 int kwg_get_root_node_index(const KWG *kwg) { return kwg_arc_index(kwg, 1); }
 
 int kwg_get_next_node_index(const KWG *kwg, int node_index, int letter) {
