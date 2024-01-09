@@ -218,6 +218,7 @@ void test_multiple_playthroughs_in_row(TestConfig *testconfig) {
 
   destroy_possible_word_list(unique);
   destroy_possible_word_list(possible_word_list);
+  destroy_rack(bag_as_rack);
   destroy_game(game);
 }
 
@@ -233,12 +234,12 @@ void test_enguard_d_row(TestConfig *testconfig) {
       "2COVE1L7/5X1E7/7N7 / 340/419 0 lex CSW21;";
   load_cgp(game, cgp);
 
-/*
-  StringBuilder *sb = create_string_builder();
-  string_builder_add_game(game, sb);
-  printf("%s\n", string_builder_peek(sb));
-  destroy_string_builder(sb);
-*/
+  /*
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_game(game, sb);
+    printf("%s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+  */
 
   BoardRows *board_rows = create_board_rows(game);
   assert(board_rows->num_rows == 30);
@@ -249,25 +250,26 @@ void test_enguard_d_row(TestConfig *testconfig) {
   Rack *bag_as_rack = create_rack(game->gen->letter_distribution->size);
   add_bag_to_rack(game->gen->bag, bag_as_rack);
 
-/*
-  sb = create_string_builder();
-  string_builder_add_rack(bag_as_rack, game->gen->letter_distribution, sb);
-  printf("rack: %s\n", string_builder_peek(sb));
-  destroy_string_builder(sb);
-*/
+  /*
+    sb = create_string_builder();
+    string_builder_add_rack(bag_as_rack, game->gen->letter_distribution, sb);
+    printf("rack: %s\n", string_builder_peek(sb));
+    destroy_string_builder(sb);
+  */
 
   assert_row_equals(ld, board_rows, 10, " ENGUARD      D");
 
-  //uint64_t start_time = __rdtsc();  // in nanoseconds
+  // uint64_t start_time = __rdtsc();  // in nanoseconds
   add_playthrough_words_from_row(&board_rows->rows[10], game->players[0]->kwg,
                                  bag_as_rack, possible_word_list);
-  //uint64_t end_time = __rdtsc();  // in milliseconds
+  // uint64_t end_time = __rdtsc();  // in milliseconds
 
-/*
-  printf("add_playthrough_words_from_row took %f seconds\n",
-         (end_time - start_time) * 1e-9);
-  printf("possible_word_list->num_words: %d\n", possible_word_list->num_words);
-*/
+  /*
+    printf("add_playthrough_words_from_row took %f seconds\n",
+           (end_time - start_time) * 1e-9);
+    printf("possible_word_list->num_words: %d\n",
+    possible_word_list->num_words);
+  */
 
   /*
    for (int i = 0; i < possible_word_list->num_words; i++) {
@@ -292,6 +294,7 @@ void test_enguard_d_row(TestConfig *testconfig) {
 
   destroy_possible_word_list(unique);
   destroy_possible_word_list(possible_word_list);
+    destroy_rack(bag_as_rack);
   destroy_game(game);
 }
 
