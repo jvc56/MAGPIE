@@ -203,17 +203,6 @@ void test_multiple_playthroughs_in_row(TestConfig *testconfig) {
       create_unique_possible_word_list(possible_word_list);
   assert_word_count(ld, unique, "UNGIRT", 1);
 
-  /*
-    for (int i = 0; i < possible_word_list->num_words; i++) {
-      for (int j = 0; j < possible_word_list->possible_words[i].word_length;
-           j++) {
-        uint8_t ml = possible_word_list->possible_words[i].word[j];
-        char c = 'A' + ml - 1;
-        printf("%c", c);
-      }
-      printf("\n");
-    }
-  */
   assert(unique->num_words == 2370);
 
   destroy_board_rows(board_rows);
