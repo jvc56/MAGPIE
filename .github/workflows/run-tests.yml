@@ -16,15 +16,15 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            core/data/lexica
-            core/data/strategy
+            data/lexica
+            data/strategy
           key: downloaded-data-files-x # use a better cache busting strategy
 
       - name: Download data files
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: >
-          mkdir -p core/data/strategy &&
-          mkdir -p core/data/lexica &&
+          mkdir -p data/strategy &&
+          mkdir -p data/lexica &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/NWL20.kwg &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.kwg &&
           wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/DISC2.kwg &&
@@ -40,14 +40,27 @@ jobs:
           ln -sf english.klv2 OSPS44.klv2 &&
           ln -sf catalan.klv2 DISC2.klv2 &&
           ln -sf french.klv2 FRA20.klv2 &&
-          mv *.kwg core/data/lexica &&
-          mv *.klv2 core/data/lexica &&
-          mv *.csv core/data/strategy &&
+          mv *.kwg data/lexica &&
+          mv *.klv2 data/lexica &&
+          mv *.csv data/strategy &&
           gunzip CSW21.csv.gz &&
-          mv *.csv core/data/lexica
+          mv *.csv data/lexica
 
       - name: Run unit tests
-        run: cd core && ./run u
+        run: ./run u
 
       - name: Build release
-        run: cd core && make clean && make magpie BUILD=release
+        run: make clean && make magpie BUILD=release
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r github_action_reqs.txt
+
+      - name: Check circular dependencies
+        run: python3 find_circ_deps.py
