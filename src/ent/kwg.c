@@ -1,7 +1,7 @@
 #include "kwg.h"
 
 #if defined(__APPLE__)
-#include "../compat/endian.h"
+#include "../../compat/endian.h"
 #else
 #include <endian.h>
 #endif
