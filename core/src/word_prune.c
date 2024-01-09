@@ -44,7 +44,9 @@ BoardRows* create_board_rows(const Game* game) {
   BoardRow* rows = container->rows;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      rows[row].letters[col] = get_letter(game->gen->board, row, col);
+      uint8_t letter = get_letter(game->gen->board, row, col);
+      uint8_t unblanked = get_unblanked_machine_letter(letter);
+      rows[row].letters[col] = unblanked;
     }
   }
   for (int col = 0; col < BOARD_DIM; col++) {
@@ -173,7 +175,7 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
                                      int tiles_played, uint8_t* strip,
                                      PossibleWordList* possible_word_list) {
   const uint8_t current_letter = board_row->letters[col];
-  /*
+/*  
     char c = 'A' + current_letter - 1;
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       c = '_';
@@ -183,7 +185,7 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
         "current_letter: %c, node_index: %d, leftstrip: %d, rightstrip: %d, "
         "tiles_played: %d\n",
         col, anchor_col, c, node_index, leftstrip, rightstrip, tiles_played);
-  */
+*/        
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     const uint8_t ml = current_letter; // already unblanked
     int next_node_index = 0;
@@ -239,7 +241,7 @@ void playthrough_words_go_on(const BoardRow* board_row, const KWG* kwg,
                              bool accepts, int leftstrip, int rightstrip,
                              int leftmost_col, int tiles_played, uint8_t* strip,
                              PossibleWordList* possible_word_list) {
-  /*
+/*                            
     char c = 'A' + current_letter - 1;
     printf(
         "playthrough_words_go_on: current_col: %d, anchor_col: %d, "
@@ -247,7 +249,7 @@ void playthrough_words_go_on(const BoardRow* board_row, const KWG* kwg,
         "rightstrip: %d, leftmost_col: %d, tiles_played: %d\n",
         current_col, anchor_col, c, new_node_index, accepts, leftstrip,
         rightstrip, leftmost_col, tiles_played);
-  */
+*/
   if (current_col <= anchor_col) {
     if (board_row->letters[current_col] != ALPHABET_EMPTY_SQUARE_MARKER) {
       strip[current_col] = board_row->letters[current_col];
@@ -317,13 +319,12 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
   for (int col = 0; col < BOARD_DIM; col++) {
     uint8_t current_letter = board_row->letters[col];
     if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-      while ((col < BOARD_DIM) &&
-             ((col == BOARD_DIM - 1) ||
+      while (((col < BOARD_DIM - 2) &&
               (board_row->letters[col + 1] != ALPHABET_EMPTY_SQUARE_MARKER))) {
         col++;
       }
-      if (col >= BOARD_DIM) {
-        return;
+      if (col == BOARD_DIM) {
+        col--;
       }
       current_letter = board_row->letters[col];
       const uint8_t ml = current_letter;  // already unblanked
