@@ -73,6 +73,7 @@ void test_unique_rows() {
 
   destroy_board_rows(board_rows);
   game_destroy(game);
+  config_destroy(config);
 }
 
 void test_add_words_without_playthrough() {
@@ -126,6 +127,7 @@ void test_add_words_without_playthrough() {
   rack_destroy(bag_as_rack);
   bag_destroy(full_bag);
   game_destroy(game);
+  config_destroy(config);
 }
 
 void test_add_playthrough_words_from_row() {
@@ -176,6 +178,7 @@ void test_add_playthrough_words_from_row() {
   bag_destroy(full_bag);
   destroy_board_rows(board_rows);
   game_destroy(game);
+  config_destroy(config);
 }
 
 void test_multiple_playthroughs_in_row() {
@@ -243,6 +246,7 @@ void test_multiple_playthroughs_in_row() {
   destroy_possible_word_list(possible_word_list);
   rack_destroy(bag_as_rack);
   game_destroy(game);
+  config_destroy(config);
 }
 
 // tests blank playthrough and edge of board
@@ -328,6 +332,7 @@ void test_enguard_d_row() {
   destroy_possible_word_list(possible_word_list);
   rack_destroy(bag_as_rack);
   game_destroy(game);
+  config_destroy(config);
 }
 
 void test_possible_words() {
@@ -373,6 +378,7 @@ void test_possible_words() {
   assert(possible_word_list->num_words == 62702);
   destroy_possible_word_list(possible_word_list);
   game_destroy(game);
+  config_destroy(config);
 }
 
 void test_word_prune() {
