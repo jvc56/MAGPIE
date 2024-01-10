@@ -2,7 +2,6 @@
 #define WORD_PRUNE_H
 
 #include "board.h"
-#include "constants.h"
 #include "game.h"
 #include "kwg.h"
 #include "rack.h"
@@ -27,7 +26,7 @@ typedef struct BoardRows {
   int num_rows;
 } BoardRows;
 
-BoardRows* create_board_rows(const Game* game);
+BoardRows* create_board_rows(Game* game);
 void destroy_board_rows(BoardRows* board_rows);
 
 int max_nonplaythrough_spaces_in_row(BoardRow* board_row);
@@ -57,7 +56,7 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
                                     PossibleWordList* possible_word_list);
 
 PossibleWordList* create_empty_possible_word_list();
-PossibleWordList* create_possible_word_list(const Game* game,
+PossibleWordList* create_possible_word_list(Game* game,
                                             const KWG* override_kwg);
 
 void sort_possible_word_list(PossibleWordList* possible_word_list);

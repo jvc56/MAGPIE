@@ -1,9 +1,14 @@
-#include "../src/word_prune.h"
+#include "../../src/ent/word_prune.h"
 
 #include <assert.h>
 
-#include "../src/game.h"
-#include "testconfig.h"
+#include "../../src/def/letter_distribution_defs.h"
+#include "../../src/ent/config.h"
+#include "../../src/ent/game.h"
+#include "../../src/ent/player.h"
+#include "../../src/util/string_util.h"
+#include "../../src/util/util.h"
+#include "test_util.h"
 
 void assert_row_equals(const LetterDistribution *ld, BoardRows *board_rows,
                        int row, const char *human_readable_row) {
@@ -15,7 +20,8 @@ void assert_row_equals(const LetterDistribution *ld, BoardRows *board_rows,
     }
   }
   uint8_t expected[BOARD_DIM];
-  str_to_machine_letters(ld, row_copy, false, expected, BOARD_DIM);
+  const int mls = ld_str_to_mls(ld, row_copy, false, expected, BOARD_DIM);
+  assert(mls == BOARD_DIM);
   for (int i = 0; i < BOARD_DIM; i++) {
     assert(board_rows->rows[row].letters[i] == expected[i]);
   }
@@ -25,7 +31,8 @@ void assert_word_count(const LetterDistribution *ld, PossibleWordList *pwl,
                        const char *human_readable_word, int expected_count) {
   int expected_length = string_length(human_readable_word);
   uint8_t expected[BOARD_DIM];
-  str_to_machine_letters(ld, human_readable_word, false, expected, BOARD_DIM);
+  ld_str_to_mls(ld, human_readable_word, false, expected,
+                string_length(human_readable_word));
   int count = 0;
   for (int i = 0; i < pwl->num_words; i++) {
     if ((pwl->possible_words[i].word_length == expected_length) &&
@@ -37,15 +44,16 @@ void assert_word_count(const LetterDistribution *ld, PossibleWordList *pwl,
   assert(count == expected_count);
 }
 
-void test_unique_rows(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
-  const LetterDistribution *ld = game->gen->letter_distribution;
+void test_unique_rows() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
 
   char qi_qis[300] =
       "15/15/15/15/15/15/15/6Qi7/6I8/6S8/15/15/15/15/15 / 22/12 "
       "0 lex CSW21";
-  load_cgp(game, qi_qis);
+  game_load_cgp(game, qi_qis);
 
   BoardRows *board_rows = create_board_rows(game);
   assert(board_rows->num_rows == 6);
@@ -64,20 +72,29 @@ void test_unique_rows(TestConfig *testconfig) {
   assert(max_nonplaythrough_spaces_in_row(&board_rows->rows[5]) == 7);
 
   destroy_board_rows(board_rows);
-  destroy_game(game);
+  game_destroy(game);
 }
 
-void test_add_words_without_playthrough(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
-  const KWG *kwg = game->players[game->player_on_turn_index]->kwg;
+void test_add_words_without_playthrough() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  const KWG *kwg = player_get_kwg(player_on_turn);
 
   PossibleWordList *possible_word_list = create_empty_possible_word_list();
   assert(possible_word_list != NULL);
   assert(possible_word_list->num_words == 0);
-  Bag *full_bag = create_bag(game->gen->letter_distribution);
-  Rack *bag_as_rack = create_rack(game->gen->letter_distribution->size);
-  add_bag_to_rack(full_bag, bag_as_rack);
+  Bag *full_bag = bag_create(ld);
+  const int ld_size = ld_get_size(ld);
+  Rack *bag_as_rack = rack_create(ld_size);
+  for (int i = 0; i < ld_size; i++) {
+    for (int j = 0; j < bag_get_letter(full_bag, i); j++) {
+      rack_add_letter(bag_as_rack, i);
+    }
+  }
   uint8_t word[BOARD_DIM];
   add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
                                 bag_as_rack, 2, word, 0, false,
@@ -106,32 +123,40 @@ void test_add_words_without_playthrough(TestConfig *testconfig) {
       printf("sort_words took %f seconds\n", (end_time - start_time) * 1e-9);
   */
   destroy_possible_word_list(possible_word_list);
-  destroy_rack(bag_as_rack);
-  destroy_bag(full_bag);
-  destroy_game(game);
+  rack_destroy(bag_as_rack);
+  bag_destroy(full_bag);
+  game_destroy(game);
 }
 
-void test_add_playthrough_words_from_row(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
-  const LetterDistribution *ld = game->gen->letter_distribution;
+void test_add_playthrough_words_from_row() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
 
   char qi_qis[300] =
       "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 / 22/12 "
       "0 lex CSW21";
-  load_cgp(game, qi_qis);
+  game_load_cgp(game, qi_qis);
 
   BoardRows *board_rows = create_board_rows(game);
   assert_row_equals(ld, board_rows, 4, "      QI       ");
 
   PossibleWordList *possible_word_list = create_empty_possible_word_list();
 
-  Bag *full_bag = create_bag(game->gen->letter_distribution);
-  Rack *bag_as_rack = create_rack(game->gen->letter_distribution->size);
-  add_bag_to_rack(full_bag, bag_as_rack);
-
-  add_playthrough_words_from_row(&board_rows->rows[4], game->players[0]->kwg,
-                                 bag_as_rack, possible_word_list);
+  Bag *full_bag = bag_create(ld);
+  const int ld_size = ld_get_size(ld);
+  Rack *bag_as_rack = rack_create(ld_size);
+  for (int i = 0; i < ld_size; i++) {
+    for (int j = 0; j < bag_get_letter(full_bag, i); j++) {
+      rack_add_letter(bag_as_rack, i);
+    }
+  }
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  const KWG *kwg = player_get_kwg(player_on_turn);
+  add_playthrough_words_from_row(&board_rows->rows[4], kwg, bag_as_rack,
+                                 possible_word_list);
   // cat ~/scrabble/csw21.txt| grep QI | wc -l = 26
   // QINGHAOSUS doesn't fit on the board and QI itself doesn't play a tile
   assert(possible_word_list->num_words == 24);
@@ -147,22 +172,23 @@ void test_add_playthrough_words_from_row(TestConfig *testconfig) {
     }
   */
   destroy_possible_word_list(possible_word_list);
-  destroy_rack(bag_as_rack);
-  destroy_bag(full_bag);
+  rack_destroy(bag_as_rack);
+  bag_destroy(full_bag);
   destroy_board_rows(board_rows);
-  destroy_game(game);
+  game_destroy(game);
 }
 
-void test_multiple_playthroughs_in_row(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
-  const LetterDistribution *ld = game->gen->letter_distribution;
+void test_multiple_playthroughs_in_row() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
 
+  const LetterDistribution *ld = game_get_ld(game);
   char cgp[300] =
       "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
       "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
       "2COVE1L7/5X1E7/7N7 / 340/419 0 lex CSW21;";
-  load_cgp(game, cgp);
+  game_load_cgp(game, cgp);
 
   /*
     StringBuilder *sb = create_string_builder();
@@ -177,8 +203,13 @@ void test_multiple_playthroughs_in_row(TestConfig *testconfig) {
   PossibleWordList *possible_word_list = create_empty_possible_word_list();
   assert(possible_word_list != NULL);
 
-  Rack *bag_as_rack = create_rack(game->gen->letter_distribution->size);
-  add_bag_to_rack(game->gen->bag, bag_as_rack);
+  const int ld_size = ld_get_size(ld);
+  Rack *bag_as_rack = rack_create(ld_size);
+  for (int i = 0; i < ld_size; i++) {
+    for (int j = 0; j < bag_get_letter(game_get_bag(game), i); j++) {
+      rack_add_letter(bag_as_rack, i);
+    }
+  }
   /*
     sb = create_string_builder();
     string_builder_add_rack(bag_as_rack, game->gen->letter_distribution, sb);
@@ -186,8 +217,10 @@ void test_multiple_playthroughs_in_row(TestConfig *testconfig) {
     destroy_string_builder(sb);
   */
   assert_row_equals(ld, board_rows, 27, "U      GI   O  ");
-  add_playthrough_words_from_row(&board_rows->rows[27], game->players[0]->kwg,
-                                 bag_as_rack, possible_word_list);
+  Player *player = game_get_player(game, game_get_player_on_turn_index(game));
+  const KWG *kwg = player_get_kwg(player);
+  add_playthrough_words_from_row(&board_rows->rows[27], kwg, bag_as_rack,
+                                 possible_word_list);
 
   // found both as (U)NGIRT and UN(GI)RT
   assert_word_count(ld, possible_word_list, "UNGIRT", 2);
@@ -208,21 +241,22 @@ void test_multiple_playthroughs_in_row(TestConfig *testconfig) {
   destroy_board_rows(board_rows);
   destroy_possible_word_list(unique);
   destroy_possible_word_list(possible_word_list);
-  destroy_rack(bag_as_rack);
-  destroy_game(game);
+  rack_destroy(bag_as_rack);
+  game_destroy(game);
 }
 
 // tests blank playthrough and edge of board
-void test_enguard_d_row(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
-  const LetterDistribution *ld = game->gen->letter_distribution;
+void test_enguard_d_row() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
 
   char cgp[300] =
       "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
       "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
       "2COVE1L7/5X1E7/7N7 / 340/419 0 lex CSW21;";
-  load_cgp(game, cgp);
+  game_load_cgp(game, cgp);
 
   /*
     StringBuilder *sb = create_string_builder();
@@ -237,8 +271,13 @@ void test_enguard_d_row(TestConfig *testconfig) {
   PossibleWordList *possible_word_list = create_empty_possible_word_list();
   assert(possible_word_list != NULL);
 
-  Rack *bag_as_rack = create_rack(game->gen->letter_distribution->size);
-  add_bag_to_rack(game->gen->bag, bag_as_rack);
+  const int ld_size = ld_get_size(ld);
+  Rack *bag_as_rack = rack_create(ld_size);
+  for (int i = 0; i < ld_size; i++) {
+    for (int j = 0; j < bag_get_letter(game_get_bag(game), i); j++) {
+      rack_add_letter(bag_as_rack, i);
+    }
+  }
 
   /*
     sb = create_string_builder();
@@ -250,8 +289,10 @@ void test_enguard_d_row(TestConfig *testconfig) {
   assert_row_equals(ld, board_rows, 10, " ENGUARD      D");
 
   // uint64_t start_time = __rdtsc();  // in nanoseconds
-  add_playthrough_words_from_row(&board_rows->rows[10], game->players[0]->kwg,
-                                 bag_as_rack, possible_word_list);
+  Player *player = game_get_player(game, game_get_player_on_turn_index(game));
+  const KWG *kwg = player_get_kwg(player);
+  add_playthrough_words_from_row(&board_rows->rows[10], kwg, bag_as_rack,
+                                 possible_word_list);
   // uint64_t end_time = __rdtsc();  // in milliseconds
 
   /*
@@ -285,19 +326,20 @@ void test_enguard_d_row(TestConfig *testconfig) {
   destroy_board_rows(board_rows);
   destroy_possible_word_list(unique);
   destroy_possible_word_list(possible_word_list);
-  destroy_rack(bag_as_rack);
-  destroy_game(game);
+  rack_destroy(bag_as_rack);
+  game_destroy(game);
 }
 
-void test_possible_words(TestConfig *testconfig) {
-  Config *config = get_csw_config(testconfig);
-  Game *game = create_game(config);
+void test_possible_words() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
 
   char cgp[300] =
       "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
       "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
       "2COVE1L7/5X1E7/7N7 / 340/419 0 lex CSW21;";
-  load_cgp(game, cgp);
+  game_load_cgp(game, cgp);
 
   /*
       StringBuilder *sb = create_string_builder();
@@ -330,14 +372,14 @@ void test_possible_words(TestConfig *testconfig) {
 
   assert(possible_word_list->num_words == 62702);
   destroy_possible_word_list(possible_word_list);
-  destroy_game(game);
+  game_destroy(game);
 }
 
-void test_word_prune(TestConfig *testconfig) {
-  test_unique_rows(testconfig);
-  test_add_words_without_playthrough(testconfig);
-  test_add_playthrough_words_from_row(testconfig);
-  test_enguard_d_row(testconfig);
-  test_multiple_playthroughs_in_row(testconfig);
-  test_possible_words(testconfig);
+void test_word_prune() {
+  test_unique_rows();
+  test_add_words_without_playthrough();
+  test_add_playthrough_words_from_row();
+  test_enguard_d_row();
+  test_multiple_playthroughs_in_row();
+  test_possible_words();
 }

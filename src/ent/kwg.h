@@ -16,6 +16,7 @@ bool kwg_is_end(const KWG *kwg, int node_index);
 bool kwg_accepts(const KWG *kwg, int node_index);
 int kwg_arc_index(const KWG *kwg, int node_index);
 int kwg_tile(const KWG *kwg, int node_index);
+int kwg_get_dawg_root_node_index(const KWG *kwg);
 int kwg_get_root_node_index(const KWG *kwg);
 int kwg_get_next_node_index(const KWG *kwg, int node_index, int letter);
 bool kwg_in_letter_set(const KWG *kwg, int letter, int node_index);
