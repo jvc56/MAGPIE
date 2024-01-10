@@ -85,7 +85,7 @@ MainArgs *get_main_args_from_string(const char *arg_string) {
     main_args->argv[i] = get_formatted_string(
         "%s", string_splitter_get_item(arg_string_splitter, i));
   }
-  destroy_string_splitter(arg_string_splitter);
+  string_splitter_destroy(arg_string_splitter);
   return main_args;
 }
 

@@ -302,12 +302,12 @@ void command_scan_loop(ExecState *exec_state,
 }
 
 char *create_command_from_args(int argc, char *argv[]) {
-  StringBuilder *command_string_builder = create_string_builder();
+  StringBuilder *command_string_builder = string_builder_create();
   for (int i = 1; i < argc; i++) {
     string_builder_add_formatted_string(command_string_builder, "%s ", argv[i]);
   }
   char *command_string = string_builder_dump(command_string_builder, NULL);
-  destroy_string_builder(command_string_builder);
+  string_builder_destroy(command_string_builder);
   return command_string;
 }
 

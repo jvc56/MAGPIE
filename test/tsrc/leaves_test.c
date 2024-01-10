@@ -36,7 +36,7 @@ void test_leaves() {
         klv_leave_value,
         string_to_double(string_splitter_get_item(leave_and_value, 1))));
 
-    destroy_string_splitter(leave_and_value);
+    string_splitter_destroy(leave_and_value);
   }
 
   fclose(file);

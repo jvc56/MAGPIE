@@ -134,7 +134,7 @@ void *read_fifo_thread(void *uncasted_test_fifo_args) {
   FileHandler *fifo_reader =
       file_handler_create_from_filename(fifo_filename, FILE_HANDLER_MODE_READ);
 
-  StringBuilder *result_builder = create_string_builder();
+  StringBuilder *result_builder = string_builder_create();
   while (1) {
     char *line = file_handler_get_line(fifo_reader);
     if (!line) {
@@ -144,7 +144,7 @@ void *read_fifo_thread(void *uncasted_test_fifo_args) {
     free(line);
   }
   assert_strings_equal("abc", string_builder_peek(result_builder));
-  destroy_string_builder(result_builder);
+  string_builder_destroy(result_builder);
   file_handler_destroy(fifo_reader);
   test_fifo_args->done_reading = true;
   return NULL;

@@ -128,7 +128,7 @@ void string_builder_add_game(Game *game, MoveList *move_list,
 }
 
 char *ucgi_static_moves(Game *game, MoveList *move_list) {
-  StringBuilder *moves_string_builder = create_string_builder();
+  StringBuilder *moves_string_builder = string_builder_create();
   const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
 
@@ -147,7 +147,7 @@ char *ucgi_static_moves(Game *game, MoveList *move_list) {
   string_builder_add_string(moves_string_builder, "\n");
   char *ucgi_static_moves_string =
       string_builder_dump(moves_string_builder, NULL);
-  destroy_string_builder(moves_string_builder);
+  string_builder_destroy(moves_string_builder);
   return ucgi_static_moves_string;
 }
 

@@ -45,7 +45,7 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
   // score, bp - bingo perc ig - this play has been cut-off
   const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
-  StringBuilder *sim_stats_string_builder = create_string_builder();
+  StringBuilder *sim_stats_string_builder = string_builder_create();
   int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
   for (int i = 0; i < number_of_simmed_plays; i++) {
     const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
@@ -91,7 +91,7 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
   string_builder_add_formatted_string(sim_stats_string_builder,
                                       "\ninfo nps %f\n", nps);
   char *sim_stats_string = string_builder_dump(sim_stats_string_builder, NULL);
-  destroy_string_builder(sim_stats_string_builder);
+  string_builder_destroy(sim_stats_string_builder);
   return sim_stats_string;
 }
 

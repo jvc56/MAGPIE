@@ -142,7 +142,7 @@ void destroy_token_regex_pair(TokenRegexPair *token_regex_pair) {
 GCGParser *create_gcg_parser(GameHistory *game_history) {
   GCGParser *gcg_parser = malloc_or_die(sizeof(GCGParser));
   gcg_parser->game_history = game_history;
-  gcg_parser->note_builder = create_string_builder();
+  gcg_parser->note_builder = string_builder_create();
   // Allocate enough space for all of the tokens
   gcg_parser->token_regex_pairs =
       malloc_or_die(sizeof(TokenRegexPair) * (NUMBER_OF_GCG_TOKENS));
@@ -202,7 +202,7 @@ void destroy_gcg_parser(GCGParser *gcg_parser) {
   for (int i = 0; i < (gcg_parser->number_of_token_regex_pairs); i++) {
     destroy_token_regex_pair(gcg_parser->token_regex_pairs[i]);
   }
-  destroy_string_builder(gcg_parser->note_builder);
+  string_builder_destroy(gcg_parser->note_builder);
   free(gcg_parser->token_regex_pairs);
   free(gcg_parser);
 }
@@ -300,7 +300,7 @@ StringSplitter *decode_gcg(GCGParser *gcg_parser, const char *gcg_string) {
   StringSplitter *gcg_lines = split_string_by_newline(gcg_string, true);
   StringSplitter *utf8_gcg_lines =
       decode_gcg_with_gcg_lines(gcg_lines, gcg_parser);
-  destroy_string_splitter(gcg_lines);
+  string_splitter_destroy(gcg_lines);
   return utf8_gcg_lines;
 }
 
@@ -1008,7 +1008,7 @@ gcg_parse_status_t parse_gcg_with_parser(GCGParser *gcg_parser,
     game_history_set_cumulative_scores(gcg_parser->game_history);
   }
 
-  destroy_string_splitter(gcg_lines);
+  string_splitter_destroy(gcg_lines);
 
   return gcg_parse_status;
 }

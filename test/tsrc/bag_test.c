@@ -18,10 +18,10 @@ void test_add_letter(const Config *config, Bag *bag, char *r,
                      char *expected_bag_string, int player_index) {
   LetterDistribution *ld = config_get_ld(config);
   bag_add_letter(bag, ld_hl_to_ml(ld, r), player_index);
-  StringBuilder *bag_string = create_string_builder();
+  StringBuilder *bag_string = string_builder_create();
   string_builder_add_bag(bag, ld, bag_string);
   assert_strings_equal(string_builder_peek(bag_string), expected_bag_string);
-  destroy_string_builder(bag_string);
+  string_builder_destroy(bag_string);
 }
 
 int get_drawn_tile_index(int drawn_tiles, int player_index) {

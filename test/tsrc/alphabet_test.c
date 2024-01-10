@@ -37,7 +37,7 @@ void test_alphabet() {
   // separation token
   // The separation letter and machine letter should be the only machine
   // letters that map to the same value, since
-  StringBuilder *letter = create_string_builder();
+  StringBuilder *letter = string_builder_create();
 
   // blank
   string_builder_add_user_visible_letter(ld, letter, BLANK_MACHINE_LETTER);
@@ -72,7 +72,7 @@ void test_alphabet() {
   assert_strings_equal(string_builder_peek(letter), "l·l");
   string_builder_clear(letter);
 
-  destroy_string_builder(letter);
+  string_builder_destroy(letter);
   config_destroy(config);
   config_destroy(catalan_config);
 }

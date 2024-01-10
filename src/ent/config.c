@@ -34,6 +34,7 @@
 
 #define ARG_POSITION "position"
 #define ARG_CGP "cgp"
+#define ARG_MOVES "m"
 #define ARG_GO "go"
 #define ARG_SIM "sim"
 #define ARG_INFER "infer"
@@ -88,6 +89,7 @@ struct Config {
   // these fields are reset
   // every time the config is loaded
   bool command_set_cgp;
+  bool command_set_moves;
   bool command_set_infile;
   bool command_set_exec_mode;
 
@@ -101,6 +103,7 @@ struct Config {
   char *ld_name;
   bool ld_name_changed;
   char *cgp;
+  char *moves;
   int bingo_bonus;
   board_layout_t board_layout;
   game_variant_t game_variant;
@@ -132,6 +135,7 @@ typedef enum {
   // Commands
   ARG_TOKEN_POSITION,
   ARG_TOKEN_CGP,
+  ARG_TOKEN_MOVES,
   ARG_TOKEN_GO,
   ARG_TOKEN_SIM,
   ARG_TOKEN_INFER,
@@ -227,6 +231,10 @@ bool config_get_command_set_cgp(const Config *config) {
   return config->command_set_cgp;
 }
 
+bool config_get_command_set_moves(const Config *config) {
+  return config->command_set_moves;
+}
+
 bool config_get_command_set_infile(const Config *config) {
   return config->command_set_infile;
 }
@@ -248,6 +256,8 @@ bool config_get_ld_name_changed(const Config *config) {
 }
 
 char *config_get_cgp(const Config *config) { return config->cgp; }
+
+char *config_get_moves(const Config *config) { return config->moves; }
 
 int config_get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
 
@@ -350,6 +360,7 @@ ParsedArgs *create_parsed_args() {
   // Command args
   set_single_arg(parsed_args, index++, ARG_TOKEN_POSITION, ARG_POSITION, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_CGP, ARG_CGP, 4);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_MOVES, ARG_MOVES, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_GO, ARG_GO, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_SIM, ARG_SIM, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_INFER, ARG_INFER, 0);
@@ -806,6 +817,14 @@ config_load_status_t set_cgp_string_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
+config_load_status_t set_moves_string_for_config(Config *config,
+                                                 const char *moves) {
+  free(config->moves);
+  config->moves = string_duplicate(moves);
+  config->command_set_moves;
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
 config_load_status_t load_player_name_for_config(Config *config,
                                                  int player_index,
                                                  const char *player_name) {
@@ -849,8 +868,8 @@ bool is_lexicon_required(const Config *config, const char *new_p1_leaves_name,
                          const char *new_p2_leaves_name,
                          const char *new_ld_name, const char *new_rack) {
   return config->command_type != COMMAND_TYPE_SET_OPTIONS || config->cgp ||
-         config->command_set_cgp || new_p1_leaves_name || new_p2_leaves_name ||
-         new_ld_name || new_rack;
+         config->command_set_cgp || config->command_set_moves ||
+         new_p1_leaves_name || new_p2_leaves_name || new_ld_name || new_rack;
 }
 
 config_load_status_t load_lexicon_dependent_data_for_config(
@@ -1036,6 +1055,9 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
     case ARG_TOKEN_CGP:
       config_load_status = set_cgp_string_for_config(config, single_arg);
       break;
+    case ARG_TOKEN_MOVES:
+      config_load_status = set_moves_string_for_config(config, arg_values[0]);
+      break;
     case ARG_TOKEN_BINGO_BONUS:
       config_load_status = load_bingo_bonus_for_config(config, arg_values[0]);
       break;
@@ -1195,6 +1217,7 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
 
 void reset_transient_fields(Config *config) {
   config->command_set_cgp = false;
+  config->command_set_moves = false;
   config->command_set_infile = false;
   config->command_set_exec_mode = false;
   config->seed = time(NULL);
@@ -1222,7 +1245,7 @@ config_load_status_t config_load(Config *config, const char *cmd) {
   }
 
   destroy_parsed_args(parsed_args);
-  destroy_string_splitter(cmd_split_string);
+  string_splitter_destroy(cmd_split_string);
 
   return config_load_status;
 }
@@ -1230,8 +1253,10 @@ config_load_status_t config_load(Config *config, const char *cmd) {
 Config *config_create_default() {
   Config *config = malloc_or_die(sizeof(Config));
   config->command_set_cgp = false;
+  config->command_set_moves = false;
   config->command_set_infile = false;
   config->command_set_exec_mode = false;
+  config->moves = NULL;
   config->command_type = COMMAND_TYPE_SET_OPTIONS;
   config->ld = NULL;
   config->ld_name = NULL;
@@ -1271,6 +1296,7 @@ void config_destroy(Config *config) {
   win_pct_destroy(config->win_pcts);
   free(config->ld_name);
   free(config->cgp);
+  free(config->moves);
   free(config->win_pct_name);
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);

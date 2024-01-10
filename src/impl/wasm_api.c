@@ -105,7 +105,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   }
 
   bool phonies_exist = false;
-  StringBuilder *phonies_string_builder = create_string_builder();
+  StringBuilder *phonies_string_builder = string_builder_create();
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     int number_of_words = formed_words_get_num_words(fw);
     for (int i = 0; i < number_of_words; i++) {
@@ -128,8 +128,8 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   // result <scored|error> valid <true|false> invalid_words FU,BARZ
   // eq 123.45 sc 100 currmove f3.FU etc
 
-  StringBuilder *return_string_builder = create_string_builder();
-  StringBuilder *move_string_builder = create_string_builder();
+  StringBuilder *return_string_builder = string_builder_create();
+  StringBuilder *move_string_builder = string_builder_create();
 
   Move *move = move_create();
   move_set_all(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, dir,
@@ -151,13 +151,13 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   string_builder_add_formatted_string(return_string_builder, " sc %d eq %.3f",
                                       points, (double)points + leave_value);
 
-  destroy_string_builder(phonies_string_builder);
-  destroy_string_builder(move_string_builder);
+  string_builder_destroy(phonies_string_builder);
+  string_builder_destroy(move_string_builder);
   // keep config around for next call.
   // config_destroy(config);
   rack_destroy(leave_rack);
   char *return_string = string_builder_dump(return_string_builder, NULL);
-  destroy_string_builder(return_string_builder);
+  string_builder_destroy(return_string_builder);
   // Caller can use UTF8ToString on the returned pointer but it MUST FREE
   // this string after it's done with it!
   return return_string;

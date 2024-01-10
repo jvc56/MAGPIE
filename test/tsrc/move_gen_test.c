@@ -53,7 +53,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
                          int row, int min_length, int expected_plays,
                          int *move_indexes, const char **move_strings) {
   if (row_string) {
-    StringBuilder *cgp_builder = create_string_builder();
+    StringBuilder *cgp_builder = string_builder_create();
     for (int i = 0; i < BOARD_DIM; i++) {
       if (i == row) {
         string_builder_add_string(cgp_builder, row_string);
@@ -67,7 +67,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
 
     string_builder_add_formatted_string(cgp_builder, " %s/ 0/0 0", rack_string);
     load_cgp_or_die(game, string_builder_peek(cgp_builder));
-    destroy_string_builder(cgp_builder);
+    string_builder_destroy(cgp_builder);
   }
 
   if (rack_string) {

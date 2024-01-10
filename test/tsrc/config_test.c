@@ -187,7 +187,7 @@ void test_config_success() {
   int print_info = 200;
   int check_stop = 700;
 
-  StringBuilder *test_string_builder = create_string_builder();
+  StringBuilder *test_string_builder = string_builder_create();
   string_builder_add_formatted_string(
       test_string_builder,
       "setoptions ld %s bb %d var %s l1 %s l2 %s s1 %s r1 "
@@ -452,7 +452,7 @@ void test_config_success() {
       "FRA20");
   assert_strings_equal(config_get_ld_name(config), "french");
 
-  destroy_string_builder(test_string_builder);
+  string_builder_destroy(test_string_builder);
   game_destroy(game);
   config_destroy(config);
 }
