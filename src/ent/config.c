@@ -88,8 +88,6 @@ struct Config {
   // Transient fields
   // these fields are reset
   // every time the config is loaded
-  bool command_set_cgp;
-  bool command_set_moves;
   bool command_set_infile;
   bool command_set_exec_mode;
 
@@ -227,14 +225,6 @@ typedef struct ParsedArgs {
   SingleArg *args[NUMBER_OF_ARG_TOKENS];
 } ParsedArgs;
 
-bool config_get_command_set_cgp(const Config *config) {
-  return config->command_set_cgp;
-}
-
-bool config_get_command_set_moves(const Config *config) {
-  return config->command_set_moves;
-}
-
 bool config_get_command_set_infile(const Config *config) {
   return config->command_set_infile;
 }
@@ -255,9 +245,9 @@ bool config_get_ld_name_changed(const Config *config) {
   return config->ld_name_changed;
 }
 
-char *config_get_cgp(const Config *config) { return config->cgp; }
+const char *config_get_cgp(const Config *config) { return config->cgp; }
 
-char *config_get_moves(const Config *config) { return config->moves; }
+const char *config_get_moves(const Config *config) { return config->moves; }
 
 int config_get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
 
@@ -813,7 +803,6 @@ config_load_status_t set_cgp_string_for_config(Config *config,
   config->cgp = get_formatted_string("%s %s %s %s", cgp_arg->values[0],
                                      cgp_arg->values[1], cgp_arg->values[2],
                                      cgp_arg->values[3]);
-  config->command_set_cgp = true;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -821,7 +810,6 @@ config_load_status_t set_moves_string_for_config(Config *config,
                                                  const char *moves) {
   free(config->moves);
   config->moves = string_duplicate(moves);
-  config->command_set_moves;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -868,8 +856,8 @@ bool is_lexicon_required(const Config *config, const char *new_p1_leaves_name,
                          const char *new_p2_leaves_name,
                          const char *new_ld_name, const char *new_rack) {
   return config->command_type != COMMAND_TYPE_SET_OPTIONS || config->cgp ||
-         config->command_set_cgp || config->command_set_moves ||
-         new_p1_leaves_name || new_p2_leaves_name || new_ld_name || new_rack;
+         config->cgp || config->moves || new_p1_leaves_name ||
+         new_p2_leaves_name || new_ld_name || new_rack;
 }
 
 config_load_status_t load_lexicon_dependent_data_for_config(
@@ -1216,11 +1204,11 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
 }
 
 void reset_transient_fields(Config *config) {
-  config->command_set_cgp = false;
-  config->command_set_moves = false;
   config->command_set_infile = false;
   config->command_set_exec_mode = false;
   config->seed = time(NULL);
+  free(config->cgp);
+  free(config->moves);
 }
 
 config_load_status_t config_load(Config *config, const char *cmd) {
@@ -1252,8 +1240,6 @@ config_load_status_t config_load(Config *config, const char *cmd) {
 
 Config *config_create_default() {
   Config *config = malloc_or_die(sizeof(Config));
-  config->command_set_cgp = false;
-  config->command_set_moves = false;
   config->command_set_infile = false;
   config->command_set_exec_mode = false;
   config->moves = NULL;

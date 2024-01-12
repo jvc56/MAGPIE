@@ -11,6 +11,7 @@
 #include "../def/inference_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../def/validated_move_defs.h"
 
 #include "../ent/config.h"
 #include "../ent/error_status.h"
@@ -19,6 +20,7 @@
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/validated_move.h"
 
 #include "autoplay.h"
 #include "inference.h"
@@ -129,15 +131,53 @@ void execute_command(ExecState *exec_state) {
 
   if (config_get_ld(config)) {
     exec_state_init_game(exec_state);
-    if (config_get_command_set_cgp(config)) {
-      cgp_parse_status_t cgp_parse_status = game_load_cgp(
-          exec_state_get_game(exec_state), config_get_cgp(config));
+
+    // Update the game with the cgp, if
+    // it was specified in the config
+    const char *cgp = config_get_cgp(config);
+    if (cgp) {
+      Game *game = exec_state_get_game(exec_state);
+      // First duplicate the game so that potential
+      // cgp parse failures don't corrupt it.
+      Game *game_dupe = game_duplicate(game);
+      cgp_parse_status_t dupe_cgp_parse_status = game_load_cgp(game_dupe, cgp);
       set_or_clear_error_status(exec_state_get_error_status(exec_state),
                                 ERROR_STATUS_TYPE_CGP_LOAD,
-                                (int)cgp_parse_status);
-      if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+                                (int)dupe_cgp_parse_status);
+      game_destroy(game_dupe);
+      if (dupe_cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+        return;
+      } else {
+        // Now that the duplicate game has been successfully loaded
+        // with the cgp, load the actual game. A cgp parse failure
+        // here should be impossible (since the duplicated game
+        // was parsed without error) and is treated as a
+        // catastrophic error.
+        cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
+        if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+          log_fatal("unexpected cgp load failure for: %s", cgp);
+        }
+      }
+    }
+
+    // Update the validated move list
+    // with new moves, if specified
+    const char *moves = config_get_moves(config);
+    if (moves) {
+      Game *game = exec_state_get_game(exec_state);
+      ValidatedMoves *new_validated_moves = validated_moves_create(game, moves);
+      move_validation_status_t move_validation_status =
+          validated_moves_get_validation_status(new_validated_moves);
+      if (move_validation_status != MOVE_VALIDATION_STATUS_SUCCESS) {
+        set_or_clear_error_status(exec_state_get_error_status(exec_state),
+                                  ERROR_STATUS_TYPE_MOVE_VALIDATION,
+                                  (int)move_validation_status);
+        validated_moves_destroy(new_validated_moves);
         return;
       }
+
+      validated_moves_combine(exec_state_get_validated_moves(exec_state),
+                              new_validated_moves);
     }
   }
 

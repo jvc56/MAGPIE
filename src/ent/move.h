@@ -28,9 +28,13 @@ void move_set_tiles_played(Move *move, int tiles_played);
 void move_set_tiles_length(Move *move, int tiles_length);
 void move_set_dir(Move *move, int dir);
 void move_set_tile_at_index(Move *move, uint8_t tile, int index);
+void move_set_all_except_equity(Move *move, uint8_t strip[], int leftstrip,
+                                int rightstrip, int score, int row_start,
+                                int col_start, int tiles_played, int dir,
+                                game_event_t move_type);
 void move_set_all(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
                   int score, int row_start, int col_start, int tiles_played,
-                  int dir, game_event_t move_type);
+                  int dir, game_event_t move_type, double leave_value);
 void move_set_as_pass(Move *move);
 void move_copy(Move *dest_move, const Move *src_move);
 

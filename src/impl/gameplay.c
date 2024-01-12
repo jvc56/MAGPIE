@@ -5,7 +5,6 @@
 #include "../def/cross_set_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-#include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
@@ -183,16 +182,6 @@ void draw_starting_racks(Game *game) {
                        RACK_SIZE, game_get_player_draw_index(game, 0));
   draw_at_most_to_rack(bag, player_get_rack(game_get_player(game, 1)),
                        RACK_SIZE, game_get_player_draw_index(game, 1));
-}
-
-move_parse_status_t validate_move(Game *game, const char *move) {}
-
-move_parse_status_t validate_moves(Game *game, StringSplitter *split_moves) {
-  move_parse_status_t status = MOVE_PARSE_STATUS_SUCCESS;
-  for (int i = 0; i < string_splitter_get_number_of_items(split_moves); i++) {
-    status = validate_move(game, string_splitter_get_item(split_moves, i));
-  }
-  return status;
 }
 
 // Assumes the move has been validated

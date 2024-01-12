@@ -132,7 +132,7 @@ char *score_play(const char *cgpstr, int move_type, int row, int col, int dir,
   StringBuilder *move_string_builder = string_builder_create();
 
   Move *move = move_create();
-  move_set_all(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, dir,
+  move_set_all_except_equity(move, tiles, 0, ntiles - 1, points, row, col, tiles_played, dir,
                move_type);
 
   string_builder_add_ucgi_move(move, board, ld, move_string_builder);

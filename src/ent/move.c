@@ -139,9 +139,10 @@ int compare_moves(const Move *move_1, const Move *move_2) {
   return 0;
 }
 
-void move_set_all(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
-                  int score, int row_start, int col_start, int tiles_played,
-                  int dir, game_event_t move_type) {
+void move_set_all_except_equity(Move *move, uint8_t strip[], int leftstrip,
+                                int rightstrip, int score, int row_start,
+                                int col_start, int tiles_played, int dir,
+                                game_event_t move_type) {
   move->score = score;
   move->row_start = row_start;
   move->col_start = col_start;
@@ -160,6 +161,15 @@ void move_set_all(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
   }
 }
 
+void move_set_all(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
+                  int score, int row_start, int col_start, int tiles_played,
+                  int dir, game_event_t move_type, double leave_value) {
+  move_set_all_except_equity(move, strip, leftstrip, rightstrip, score,
+                             row_start, col_start, tiles_played, dir,
+                             move_type);
+  move->equity = score + leave_value;
+}
+
 void move_copy(Move *dest_move, const Move *src_move) {
   for (int i = 0; i < (BOARD_DIM); i++) {
     dest_move->tiles[i] = src_move->tiles[i];
@@ -175,7 +185,7 @@ void move_copy(Move *dest_move, const Move *src_move) {
 }
 
 void move_set_as_pass(Move *move) {
-  move_set_all(move, NULL, 0, 0, 0, 0, 0, 0, 0, GAME_EVENT_PASS);
+  move_set_all_except_equity(move, NULL, 0, 0, 0, 0, 0, 0, 0, GAME_EVENT_PASS);
 }
 
 void create_moves_for_move_list(MoveList *ml, int capacity) {
@@ -262,8 +272,9 @@ void move_list_set_spare_move(MoveList *ml, uint8_t strip[], int leftstrip,
                               int rightstrip, int score, int row_start,
                               int col_start, int tiles_played, int dir,
                               game_event_t move_type) {
-  move_set_all(ml->spare_move, strip, leftstrip, rightstrip, score, row_start,
-               col_start, tiles_played, dir, move_type);
+  move_set_all_except_equity(ml->spare_move, strip, leftstrip, rightstrip,
+                             score, row_start, col_start, tiles_played, dir,
+                             move_type);
 }
 
 void move_list_insert_spare_move(MoveList *ml, double equity) {
