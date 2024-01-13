@@ -75,6 +75,7 @@ void test_possible_words() {
   assert(dictionary_word_list_get_count(possible_word_list) == 62702);
   dictionary_word_list_destroy(possible_word_list);
   game_destroy(game);
+  config_destroy(config);
 }
 
 void test_word_prune() { test_possible_words(); }

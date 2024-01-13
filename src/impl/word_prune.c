@@ -309,16 +309,15 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
 
 void generate_possible_words(Game* game, const KWG* override_kwg,
                              DictionaryWordList* possible_word_list) {
-  printf("possible word list count: %d\n",
-         dictionary_word_list_get_count(possible_word_list));
   const KWG* kwg = override_kwg;
   if (kwg == NULL) {
     const Player* player =
         game_get_player(game, game_get_player_on_turn_index(game));
     kwg = player_get_kwg(player);
   }
+  // Accumulates words, then gets sorted. After pushing unique words to
+  // possible_word_list, this is destroyed.
   DictionaryWordList* temp_list = dictionary_word_list_create();
-  printf("temp list count: %d\n", dictionary_word_list_get_count(temp_list));
 
   const int ld_size = ld_get_size(game_get_ld(game));
   Rack* bag_as_rack = rack_create(ld_size);
@@ -351,7 +350,7 @@ void generate_possible_words(Game* game, const KWG* override_kwg,
     add_playthrough_words_from_row(&board_rows->rows[i], kwg, bag_as_rack,
                                    temp_list);
   }
-  
+
   rack_destroy(bag_as_rack);
   destroy_board_rows(board_rows);
 
