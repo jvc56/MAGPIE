@@ -7,8 +7,6 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-#define POSSIBLE_WORDS_INITIAL_CAPACITY 1000
-
 int compare_board_rows(const void* a, const void* b) {
   const BoardRow* row_a = (const BoardRow*)a;
   const BoardRow* row_b = (const BoardRow*)b;
@@ -91,34 +89,20 @@ int max_nonplaythrough_spaces_in_row(BoardRow* board_row) {
   return max_empty_spaces;
 }
 
-void add_word(PossibleWordList* possible_word_list, uint8_t* word,
-              int word_length) {
-  if (possible_word_list->num_words == possible_word_list->capacity) {
-    possible_word_list->capacity *= 2;
-    possible_word_list->possible_words =
-        realloc_or_die(possible_word_list->possible_words,
-                       sizeof(PossibleWord) * possible_word_list->capacity);
-  }
-  PossibleWord* possible_word =
-      &possible_word_list->possible_words[possible_word_list->num_words];
-  possible_word_list->num_words++;
-  memory_copy(possible_word->word, word, word_length);
-  possible_word->word_length = word_length;
-}
-
-void add_playthrough_word(PossibleWordList* possible_word_list, uint8_t* strip,
-                          int leftstrip, int rightstrip) {
+void add_playthrough_word(DictionaryWordList* possible_word_list,
+                          uint8_t* strip, int leftstrip, int rightstrip) {
   int word_length = rightstrip - leftstrip + 1;
-  add_word(possible_word_list, strip + leftstrip, word_length);
+  dictionary_word_list_add_word(possible_word_list, strip + leftstrip,
+                                word_length);
 }
 
 void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
                                    Rack* bag_as_rack, int max_nonplaythrough,
                                    uint8_t* word, int tiles_played,
                                    bool accepts,
-                                   PossibleWordList* possible_word_list) {
+                                   DictionaryWordList* possible_word_list) {
   if (accepts) {
-    add_word(possible_word_list, word, tiles_played);
+    dictionary_word_list_add_word(possible_word_list, word, tiles_played);
   }
   if (tiles_played == max_nonplaythrough) {
     return;
@@ -132,10 +116,6 @@ void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
     if ((rack_get_letter(bag_as_rack, ml) > 0) ||
         (rack_get_letter(bag_as_rack, BLANK_MACHINE_LETTER) > 0)) {
       int accepts = kwg_accepts(kwg, i);
-      // Manipulating the rack's array directly is a little bit
-      // dirty, and doesn't update rack->number_of_letters or
-      // rack->empty, but those aren't used here, and the original
-      // rack will be restored at the end.
       if (rack_get_letter(bag_as_rack, ml) > 0) {
         rack_take_letter(bag_as_rack, ml);
         word[tiles_played] = ml;
@@ -158,15 +138,22 @@ void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
   }
 }
 
+void playthrough_words_go_on(const BoardRow* board_row, const KWG* kwg,
+                             Rack* rack, int current_col, int anchor_col,
+                             uint8_t current_letter, uint32_t new_node_index,
+                             bool accepts, int leftstrip, int rightstrip,
+                             int leftmost_col, int tiles_played, uint8_t* strip,
+                             DictionaryWordList* possible_word_list);
+
 void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
                                      Rack* rack, int col, int anchor_col,
                                      uint32_t node_index, int leftstrip,
                                      int rightstrip, int leftmost_col,
                                      int tiles_played, uint8_t* strip,
-                                     PossibleWordList* possible_word_list) {
+                                     DictionaryWordList* possible_word_list) {
   const uint8_t current_letter = board_row->letters[col];
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-    const uint8_t ml = current_letter; // already unblanked
+    const uint8_t ml = current_letter;  // already unblanked
     int next_node_index = 0;
     bool accepts = false;
     for (int i = node_index;; i++) {
@@ -219,7 +206,7 @@ void playthrough_words_go_on(const BoardRow* board_row, const KWG* kwg,
                              uint8_t current_letter, uint32_t new_node_index,
                              bool accepts, int leftstrip, int rightstrip,
                              int leftmost_col, int tiles_played, uint8_t* strip,
-                             PossibleWordList* possible_word_list) {
+                             DictionaryWordList* possible_word_list) {
   if (current_col <= anchor_col) {
     if (board_row->letters[current_col] != ALPHABET_EMPTY_SQUARE_MARKER) {
       strip[current_col] = board_row->letters[current_col];
@@ -282,7 +269,7 @@ void playthrough_words_go_on(const BoardRow* board_row, const KWG* kwg,
 
 void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
                                     Rack* bag_as_rack,
-                                    PossibleWordList* possible_word_list) {
+                                    DictionaryWordList* possible_word_list) {
   uint8_t strip[BOARD_DIM];
   int gaddag_root = kwg_get_root_node_index(kwg);
   int leftmost_col = 0;
@@ -320,24 +307,18 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
   }
 }
 
-PossibleWordList* create_empty_possible_word_list() {
-  PossibleWordList* possible_word_list =
-      malloc_or_die(sizeof(PossibleWordList));
-  possible_word_list->capacity = POSSIBLE_WORDS_INITIAL_CAPACITY;
-  possible_word_list->possible_words =
-      malloc_or_die(sizeof(PossibleWord) * possible_word_list->capacity);
-  possible_word_list->num_words = 0;
-  return possible_word_list;
-}
-
-PossibleWordList* create_possible_word_list(Game* game,
-                                            const KWG* override_kwg) {
+void generate_possible_words(Game* game, const KWG* override_kwg,
+                             DictionaryWordList* possible_word_list) {
+  printf("possible word list count: %d\n",
+         dictionary_word_list_get_count(possible_word_list));
   const KWG* kwg = override_kwg;
   if (kwg == NULL) {
-    const Player* player = game_get_player(game, game_get_player_on_turn_index(game));
+    const Player* player =
+        game_get_player(game, game_get_player_on_turn_index(game));
     kwg = player_get_kwg(player);
   }
-  PossibleWordList* possible_word_list = create_empty_possible_word_list();
+  DictionaryWordList* temp_list = dictionary_word_list_create();
+  printf("temp list count: %d\n", dictionary_word_list_get_count(temp_list));
 
   const int ld_size = ld_get_size(game_get_ld(game));
   Rack* bag_as_rack = rack_create(ld_size);
@@ -365,70 +346,16 @@ PossibleWordList* create_possible_word_list(Game* game,
   uint8_t word[BOARD_DIM];
   add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
                                 bag_as_rack, max_nonplaythrough_spaces, word, 0,
-                                false, possible_word_list);
-
+                                false, temp_list);
   for (int i = 0; i < board_rows->num_rows; i++) {
     add_playthrough_words_from_row(&board_rows->rows[i], kwg, bag_as_rack,
-                                   possible_word_list);
+                                   temp_list);
   }
-
+  
   rack_destroy(bag_as_rack);
   destroy_board_rows(board_rows);
 
-  sort_possible_word_list(possible_word_list);
-  PossibleWordList* unique =
-      create_unique_possible_word_list(possible_word_list);
-  destroy_possible_word_list(possible_word_list);
-  return unique;
-}
-
-int compare_possible_words(const void* a, const void* b) {
-  const PossibleWord* word_a = (const PossibleWord*)a;
-  const PossibleWord* word_b = (const PossibleWord*)b;
-
-  // Compare the words lexicographically
-  int min_length = word_a->word_length < word_b->word_length
-                       ? word_a->word_length
-                       : word_b->word_length;
-  for (int i = 0; i < min_length; i++) {
-    if (word_a->word[i] < word_b->word[i]) {
-      return -1;
-    } else if (word_a->word[i] > word_b->word[i]) {
-      return 1;
-    }
-  }
-
-  // If the words are the same up to the length of the shorter word,
-  // the shorter word is considered "less" than the longer one
-  if (word_a->word_length < word_b->word_length) {
-    return -1;
-  } else if (word_a->word_length > word_b->word_length) {
-    return 1;
-  }
-
-  return 0;
-}
-
-void sort_possible_word_list(PossibleWordList* possible_word_list) {
-  qsort(possible_word_list->possible_words, possible_word_list->num_words,
-        sizeof(PossibleWord), compare_possible_words);
-}
-
-PossibleWordList* create_unique_possible_word_list(
-    PossibleWordList* sorted_possible_word_list) {
-  PossibleWordList* ret = create_empty_possible_word_list();
-  for (int i = 0; i < sorted_possible_word_list->num_words; i++) {
-    if (i == 0 || compare_possible_words(
-                      &sorted_possible_word_list->possible_words[i],
-                      &sorted_possible_word_list->possible_words[i - 1]) != 0) {
-      add_word(ret, sorted_possible_word_list->possible_words[i].word,
-               sorted_possible_word_list->possible_words[i].word_length);
-    }
-  }
-  return ret;
-}
-
-void destroy_possible_word_list(PossibleWordList* possible_word_list) {
-  free(possible_word_list->possible_words);
-  free(possible_word_list);
+  dictionary_word_list_sort(temp_list);
+  dictionary_word_list_unique(temp_list, possible_word_list);
+  dictionary_word_list_destroy(temp_list);
 }
