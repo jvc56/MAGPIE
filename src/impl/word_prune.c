@@ -97,7 +97,7 @@ void add_playthrough_word(DictionaryWordList* possible_word_list,
 }
 
 void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
-                                   Rack* bag_as_rack, int max_nonplaythrough,
+                                   Rack* rack, int max_nonplaythrough,
                                    uint8_t* word, int tiles_played,
                                    bool accepts,
                                    DictionaryWordList* possible_word_list) {
@@ -113,23 +113,23 @@ void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
   for (int i = node_index;; i++) {
     const int ml = kwg_tile(kwg, i);
     const int new_node_index = kwg_arc_index(kwg, i);
-    if ((rack_get_letter(bag_as_rack, ml) > 0) ||
-        (rack_get_letter(bag_as_rack, BLANK_MACHINE_LETTER) > 0)) {
+    if ((rack_get_letter(rack, ml) > 0) ||
+        (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0)) {
       int accepts = kwg_accepts(kwg, i);
-      if (rack_get_letter(bag_as_rack, ml) > 0) {
-        rack_take_letter(bag_as_rack, ml);
+      if (rack_get_letter(rack, ml) > 0) {
+        rack_take_letter(rack, ml);
         word[tiles_played] = ml;
         add_words_without_playthrough(
-            kwg, new_node_index, bag_as_rack, max_nonplaythrough, word,
+            kwg, new_node_index, rack, max_nonplaythrough, word,
             tiles_played + 1, accepts, possible_word_list);
-        rack_add_letter(bag_as_rack, ml);
-      } else if (rack_get_letter(bag_as_rack, BLANK_MACHINE_LETTER) > 0) {
-        rack_take_letter(bag_as_rack, BLANK_MACHINE_LETTER);
+        rack_add_letter(rack, ml);
+      } else if (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0) {
+        rack_take_letter(rack, BLANK_MACHINE_LETTER);
         word[tiles_played] = ml;
         add_words_without_playthrough(
-            kwg, new_node_index, bag_as_rack, max_nonplaythrough, word,
+            kwg, new_node_index, rack, max_nonplaythrough, word,
             tiles_played + 1, accepts, possible_word_list);
-        rack_add_letter(bag_as_rack, BLANK_MACHINE_LETTER);
+        rack_add_letter(rack, BLANK_MACHINE_LETTER);
       }
     }
     if (kwg_is_end(kwg, i)) {
@@ -276,7 +276,7 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
   for (int col = 0; col < BOARD_DIM; col++) {
     uint8_t current_letter = board_row->letters[col];
     if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-      while (((col < BOARD_DIM - 2) &&
+      while (((col < BOARD_DIM - 1) &&
               (board_row->letters[col + 1] != ALPHABET_EMPTY_SQUARE_MARKER))) {
         col++;
       }
@@ -320,13 +320,19 @@ void generate_possible_words(Game* game, const KWG* override_kwg,
   DictionaryWordList* temp_list = dictionary_word_list_create();
 
   const int ld_size = ld_get_size(game_get_ld(game));
-  Rack* bag_as_rack = rack_create(ld_size);
+  Rack* unplayed_as_rack = rack_create(ld_size);
   Bag* bag = game_get_bag(game);
   for (int i = 0; i < ld_size; i++) {
-    // Add any existing tiles on the target's rack
-    // to the target's leave for partial inferences
     for (int j = 0; j < bag_get_letter(bag, i); j++) {
-      rack_add_letter(bag_as_rack, i);
+      rack_add_letter(unplayed_as_rack, i);
+    }
+    // Add tiles from players' racks
+    for (int player_index = 0; player_index < 2; player_index++) {
+      const Player* player = game_get_player(game, player_index);
+      const Rack* rack = player_get_rack(player);
+      for (int j = 0; j < rack_get_letter(rack, i); j++) {
+        rack_add_letter(unplayed_as_rack, i);
+      }
     }
   }
 
@@ -344,14 +350,14 @@ void generate_possible_words(Game* game, const KWG* override_kwg,
 
   uint8_t word[BOARD_DIM];
   add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
-                                bag_as_rack, max_nonplaythrough_spaces, word, 0,
+                                unplayed_as_rack, max_nonplaythrough_spaces, word, 0,
                                 false, temp_list);
   for (int i = 0; i < board_rows->num_rows; i++) {
-    add_playthrough_words_from_row(&board_rows->rows[i], kwg, bag_as_rack,
+    add_playthrough_words_from_row(&board_rows->rows[i], kwg, unplayed_as_rack,
                                    temp_list);
   }
 
-  rack_destroy(bag_as_rack);
+  rack_destroy(unplayed_as_rack);
   destroy_board_rows(board_rows);
 
   dictionary_word_list_sort(temp_list);

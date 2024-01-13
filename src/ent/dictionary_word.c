@@ -1,6 +1,5 @@
 #include "dictionary_word.h"
 
-#include <assert.h>
 #include <stdint.h>
 
 #include "../def/board_defs.h"
@@ -37,9 +36,12 @@ DictionaryWordList* dictionary_word_list_create() {
   return dictionary_word_list;
 }
 
+void dictionary_word_list_clear(DictionaryWordList* dictionary_word_list) {
+  dictionary_word_list->count = 0;
+}
+
 void dictionary_word_list_add_word(DictionaryWordList* dictionary_word_list,
                                    uint8_t* word, int word_length) {
-  assert(word_length <= BOARD_DIM);
   if (dictionary_word_list->count == dictionary_word_list->capacity) {
     dictionary_word_list->dictionary_words = realloc_or_die(
         dictionary_word_list->dictionary_words,
