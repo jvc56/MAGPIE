@@ -47,6 +47,12 @@ void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
   }
 }
 
+void kwg_allocate_nodes(KWG *kwg, size_t number_of_nodes) {
+  kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
+}
+
+uint32_t *kwg_get_mutable_nodes(KWG *kwg) { return kwg->nodes; }
+
 void load_kwg(KWG *kwg, const char *kwg_name) {
   char *kwg_filename = get_kwg_filepath(kwg_name);
 
@@ -87,19 +93,19 @@ void kwg_destroy(KWG *kwg) {
 }
 
 bool kwg_is_end(const KWG *kwg, int node_index) {
-  return (kwg->nodes[node_index] & 0x400000) != 0;
+  return (kwg->nodes[node_index] & KWG_NODE_IS_END_FLAG) != 0;
 }
 
 bool kwg_accepts(const KWG *kwg, int node_index) {
-  return (kwg->nodes[node_index] & 0x800000) != 0;
+  return (kwg->nodes[node_index] & KWG_NODE_ACCEPTS_FLAG) != 0;
 }
 
 int kwg_arc_index(const KWG *kwg, int node_index) {
-  return (kwg->nodes[node_index] & 0x3fffff);
+  return (kwg->nodes[node_index] & KWG_ARC_INDEX_MASK);
 }
 
 int kwg_tile(const KWG *kwg, int node_index) {
-  return kwg->nodes[node_index] >> 24;
+  return kwg->nodes[node_index] >> KWG_TILE_BIT_OFFSET;
 }
 
 int kwg_get_dawg_root_node_index(const KWG *kwg) {

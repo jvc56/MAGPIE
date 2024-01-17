@@ -16,6 +16,7 @@
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "infer_test.h"
+#include "kwg_maker_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
@@ -61,6 +62,7 @@ void run_all() {
   test_wasm_api();
   test_words();
   test_word_prune();
+  test_kwg_maker();
   test_file_handler();
 }
 
@@ -115,6 +117,8 @@ void run_test(const char *subtest) {
     test_words();
   } else if (strings_equal(subtest, "wordprune")) {
     test_word_prune();
+  } else if (strings_equal(subtest, "kwgmaker")) {
+    test_kwg_maker();
   } else if (strings_equal(subtest, "fh")) {
     test_file_handler();
   } else {

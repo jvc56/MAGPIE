@@ -2,13 +2,13 @@
 
 #include <stdint.h>
 
-#include "../def/board_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/dictionary_word_defs.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
 struct DictionaryWord {
-  uint8_t word[BOARD_DIM];
+  uint8_t word[MAX_KWG_STRING_LENGTH];
   uint8_t length;
 };
 
@@ -41,7 +41,7 @@ void dictionary_word_list_clear(DictionaryWordList* dictionary_word_list) {
 }
 
 void dictionary_word_list_add_word(DictionaryWordList* dictionary_word_list,
-                                   uint8_t* word, int word_length) {
+                                   const uint8_t* word, int word_length) {
   if (dictionary_word_list->count == dictionary_word_list->capacity) {
     dictionary_word_list->dictionary_words = realloc_or_die(
         dictionary_word_list->dictionary_words,
@@ -55,12 +55,13 @@ void dictionary_word_list_add_word(DictionaryWordList* dictionary_word_list,
   dictionary_word_list->count++;
 }
 
-int dictionary_word_list_get_count(DictionaryWordList* dictionary_word_list) {
+int dictionary_word_list_get_count(
+    const DictionaryWordList* dictionary_word_list) {
   return dictionary_word_list->count;
 }
 
 DictionaryWord* dictionary_word_list_get_word(
-    DictionaryWordList* dictionary_word_list, int index) {
+    const DictionaryWordList* dictionary_word_list, int index) {
   return &dictionary_word_list->dictionary_words[index];
 }
 

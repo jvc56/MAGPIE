@@ -1,0 +1,11 @@
+#ifndef KWG_MAKER_H
+#define KWG_MAKER_H
+
+#include "../def/kwg_defs.h"
+#include "../ent/dictionary_word.h"
+#include "../ent/kwg.h"
+
+KWG *make_kwg_from_words(const DictionaryWordList *words, kwg_maker_output_t output,
+                         kwg_maker_merge_t merge);
+
+#endif
