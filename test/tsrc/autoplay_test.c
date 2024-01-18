@@ -23,7 +23,7 @@ void autoplay_game_pairs_test() {
   uint64_t seed = time(NULL);
 
   char *options_string =
-      get_formatted_string("setoptions i 1000 gp threads 11 rs %ld", seed);
+      get_formatted_string("setoptions i 2000 gp threads 1 rs %ld", seed);
 
   load_config_or_die(csw_config, options_string);
 

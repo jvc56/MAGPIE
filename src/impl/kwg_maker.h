@@ -5,7 +5,9 @@
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 
-KWG *make_kwg_from_words(const DictionaryWordList *words, kwg_maker_output_t output,
-                         kwg_maker_merge_t merge);
+KWG *make_kwg_from_words(const DictionaryWordList *words,
+                         kwg_maker_output_t output, kwg_maker_merge_t merge);
+
+void kwg_write_words(const KWG *kwg, int node_index, DictionaryWordList *words);
 
 #endif

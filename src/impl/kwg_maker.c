@@ -19,7 +19,7 @@ typedef struct NodeIndexList {
 } NodeIndexList;
 
 void node_index_list_initialize(NodeIndexList *list) {
-  list->capacity = 4;
+  list->capacity = 5;
   list->indices = malloc_or_die(sizeof(uint32_t) * list->capacity);
   list->count = 0;
 }
@@ -39,8 +39,10 @@ typedef struct MutableNode {
   bool accepts;
   bool is_end;
   NodeIndexList children;
-  uint64_t hash_value;
-  bool hash_computed;
+  uint64_t hash_with_just_children;
+  uint64_t hash_with_node;
+  bool hash_with_just_children_computed;
+  bool hash_with_node_computed;
   struct MutableNode *merged_into;
   uint8_t merge_offset;
   uint32_t final_index;
@@ -54,7 +56,7 @@ typedef struct MutableNodeList {
 
 MutableNodeList *mutable_node_list_create() {
   MutableNodeList *mutable_node_list = malloc_or_die(sizeof(MutableNodeList));
-  mutable_node_list->capacity = 1000;
+  mutable_node_list->capacity = 1000000;
   mutable_node_list->nodes =
       malloc_or_die(sizeof(MutableNode) * mutable_node_list->capacity);
   mutable_node_list->count = 0;
@@ -73,7 +75,8 @@ MutableNode *mutable_node_list_add(MutableNodeList *nodes) {
   node->is_end = false;
   node->merged_into = NULL;
   node->merge_offset = 0;
-  node->hash_computed = false;
+  node->hash_with_just_children_computed = false;
+  node->hash_with_node_computed = false;
   // printf("adding nodes->nodes[%zu]\n", nodes->count);
   nodes->count++;
   return node;
@@ -98,53 +101,61 @@ int add_child(int node_index, MutableNodeList *nodes, uint8_t ml) {
 
 uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
                                  bool check_node) {
-  static const uint64_t k0 = 0xc3a5c85c97cb3127ULL;
+  //static const uint64_t k0 = 0xc3a5c85c97cb3127ULL;
   static const uint64_t k1 = 0xb492b66fbe98f273ULL;
-  //static const uint64_t k2 = 0x9ae16a3b2f90404fULL;
-  // printf("mutable_node_hash_value node: %c\n", 'A' + node->ml - 1);
-  if (node->hash_computed) {
-    // printf("hash already computed: %llu\n", node->hash_value);
-    return node->hash_value;
-  }
-  uint64_t hash_value = 0;
+  static const uint64_t k2 = 0x9ae16a3b2f90404fULL;
   if (check_node) {
-    uint8_t ml = node->ml;
-    bool accepts = node->accepts;
-    hash_value = 1 + ml;
-    if (accepts) {
-      hash_value |= 1 << 6;
+    if (node->hash_with_node_computed) {
+      return node->hash_with_node;
+    }
+  } else {
+    if (node->hash_with_just_children_computed) {
+      return node->hash_with_just_children;
     }
   }
+  uint64_t hash_with_just_children = 0;
+
   for (uint8_t i = 0; i < node->children.count; i++) {
-    uint64_t child_node_hash = 0;
-    uint64_t child_subtrie_hash = 0;
+    uint64_t child_hash = 0;
     const int child_index = node->children.indices[i];
-    // printf("i: %i, child_index: %i\n", i, child_index);
     if (child_index != 0) {
       MutableNode *child = &nodes->nodes[node->children.indices[i]];
-      uint8_t ml = child->ml;
-      bool accepts = child->accepts;
-      child_node_hash = 1 + ml;
-      if (accepts) {
-        child_node_hash |= 1 << 6;
-      }
-      child_subtrie_hash = mutable_node_hash_value(child, nodes, true);
+      child_hash = mutable_node_hash_value(child, nodes, true);
     }
-    hash_value = (hash_value << 19) | (hash_value >> (64 - 19));
-    hash_value ^= child_node_hash * k0;
-    hash_value = (hash_value << 27) | (hash_value >> (64 - 27));
-    hash_value ^= child_subtrie_hash * k1;
+    hash_with_just_children = (hash_with_just_children << 27) |
+                              (hash_with_just_children >> (64 - 27));
+    hash_with_just_children ^= child_hash * k1;
   }
-  hash_value = (hash_value << 1) | (hash_value >> (64 - 1));
-  // printf(""hash_value: %llu\n", hash_value);
-  node->hash_value = hash_value;
-  node->hash_computed = true;
-  return hash_value;
+  // rotate by one bit to designate the end of the child list
+  hash_with_just_children =
+      (hash_with_just_children << 1) | (hash_with_just_children >> (64 - 1));
+
+  node->hash_with_just_children = hash_with_just_children;
+  node->hash_with_just_children = true;
+  if (!check_node) {
+    return hash_with_just_children;
+  }
+  uint64_t hash_with_node = hash_with_just_children * k2;
+
+  uint8_t ml = node->ml;
+  bool accepts = node->accepts;
+  hash_with_node ^= 1 + ml;
+  if (accepts) {
+    hash_with_node ^= 1 << 6;
+  }
+  node->hash_with_node = hash_with_node;
+  node->hash_with_node_computed = true;
+  return hash_with_node;
 }
 
 bool mutable_node_equals(MutableNode *node_a, MutableNode *node_b,
                          MutableNodeList *nodes, bool check_node) {
   if (check_node) {
+    if (node_a->hash_with_node != node_b->hash_with_node) {
+      // printf("node_a->hash_value: %llu node_b->hash_value: %llu\n",
+      //        node_a->hash_value, node_b->hash_value);
+      return false;
+    }
     if (node_a->ml != node_b->ml) {
       // printf("node_a->ml: %c node_b->ml: %c\n", 'A' + node_a->ml - 1,
       //        'A' + node_b->ml - 1);
@@ -179,7 +190,7 @@ typedef struct NodePointerList {
 
 NodePointerList *node_pointer_list_create() {
   NodePointerList *node_pointer_list = malloc_or_die(sizeof(NodePointerList));
-  node_pointer_list->capacity = 1000;
+  node_pointer_list->capacity = 1000000;
   node_pointer_list->nodes =
       malloc_or_die(sizeof(MutableNode *) * node_pointer_list->capacity);
   node_pointer_list->count = 0;
@@ -187,7 +198,7 @@ NodePointerList *node_pointer_list_create() {
 }
 
 void node_pointer_list_initialize(NodePointerList *list) {
-  list->capacity = 4;
+  list->capacity = 2;
   list->nodes = malloc_or_die(sizeof(MutableNode *) * list->capacity);
   list->count = 0;
 }
@@ -218,16 +229,13 @@ void node_hash_table_initialize(NodeHashTable *table, size_t bucket_count) {
 MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
                                             MutableNode *node,
                                             MutableNodeList *nodes) {
-  // printf("getting hash value for node: %c\n", 'A' + node->ml - 1);
   uint64_t hash_value = mutable_node_hash_value(node, nodes, false);
-  // printf("hash_value: %llu\n", hash_value);
   size_t bucket_index = hash_value % table->bucket_count;
   // printf("bucket_index: %zu\n", bucket_index);
   NodePointerList *bucket = &table->buckets[bucket_index];
   for (size_t i = 0; i < bucket->count; i++) {
     MutableNode *candidate = bucket->nodes[i];
     if (mutable_node_equals(node, candidate, nodes, false)) {
-      // printf("found identical node\n");
       return candidate;
     } else {
       // printf("hash collision\n");
@@ -239,7 +247,7 @@ MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
 
 void set_final_indices(MutableNode *node, MutableNodeList *nodes,
                        NodePointerList *ordered_pointers, int depth,
-                       kwg_maker_index_phase_t phase) {
+                       bool is_end, kwg_maker_index_phase_t phase) {
   /*
     printf(
         "set_final_indices.. node: %c ordered_pointers->count: %zu, depth: %i, "
@@ -248,6 +256,7 @@ void set_final_indices(MutableNode *node, MutableNodeList *nodes,
   */
   if (((phase == KWG_MAKER_INDEX_ROOT) && (depth == 1)) ||
       ((phase == KWG_MAKER_INDEX_REST) && (depth > 1))) {
+    node->is_end = is_end;
     node->final_index = ordered_pointers->count;
     node_pointer_list_add(ordered_pointers, node);
   }
@@ -256,10 +265,11 @@ void set_final_indices(MutableNode *node, MutableNodeList *nodes,
     return;
   }
 
-  for (int i = 0; i < node->children.count; i++) {
+  for (size_t i = 0; i < node->children.count; i++) {
     const int child_index = node->children.indices[i];
     MutableNode *child = &nodes->nodes[child_index];
-    set_final_indices(child, nodes, ordered_pointers, depth + 1, phase);
+    set_final_indices(child, nodes, ordered_pointers, depth + 1,
+                      i == node->children.count - 1, phase);
   }
 }
 
@@ -299,9 +309,9 @@ void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
                 KWG *kwg) {
   uint32_t *kwg_nodes = kwg_get_mutable_nodes(kwg);
   for (size_t node_idx = 0; node_idx < ordered_pointers->count; node_idx++) {
-    // printf("node_idx: %zu\n", node_idx);
+    //printf("node_idx: %zu\n", node_idx);
     MutableNode *node = ordered_pointers->nodes[node_idx];
-    // printf("node->ml: %c\n", 'A' + node->ml - 1);
+    //printf("node->ml: %c\n", 'A' + node->ml - 1);
     uint32_t serialized_node = node->ml << KWG_TILE_BIT_OFFSET;
     if (node->accepts) {
       serialized_node |= KWG_NODE_ACCEPTS_FLAG;
@@ -316,8 +326,6 @@ void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
       int original_child_index = children->indices[0];
       uint32_t final_child_index =
           nodes->nodes[original_child_index].final_index;
-      // printf("original_child_index: %i final_child_index: %02x\n",
-      //        original_child_index, final_child_index);
       serialized_node |= final_child_index;
     }
     kwg_nodes[node_idx] = serialized_node;
@@ -349,15 +357,40 @@ void add_gaddag_strings_for_word(const DictionaryWord *word,
 }
 
 void add_gaddag_strings(const DictionaryWordList *words,
-                        DictionaryWordList *gaddag_strings,
-                        kwg_maker_merge_t merging) {
+                        DictionaryWordList *gaddag_strings) {
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
     add_gaddag_strings_for_word(word, gaddag_strings);
   }
-  if (merging != KWG_MAKER_MERGE_UNORDERED_SUBLIST) {
-    dictionary_word_list_sort(gaddag_strings);
+  dictionary_word_list_sort(gaddag_strings);
+}
+
+void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
+                     int prefix_length, bool accepts,
+                     DictionaryWordList *words) {
+  if (accepts) {
+    dictionary_word_list_add_word(words, prefix, prefix_length);
   }
+  if (node_index == 0) {
+    return;
+  }
+  for (int i = node_index;; i++) {
+    const int ml = kwg_tile(kwg, i);
+    const int new_node_index = kwg_arc_index(kwg, i);
+    bool accepts = kwg_accepts(kwg, i);
+    prefix[prefix_length] = ml;
+    write_words_aux(kwg, new_node_index, prefix, prefix_length + 1, accepts,
+                    words);
+    if (kwg_is_end(kwg, i)) {
+      break;
+    }
+  }
+}
+
+void kwg_write_words(const KWG *kwg, int node_index,
+                     DictionaryWordList *words) {
+  uint8_t prefix[MAX_KWG_STRING_LENGTH];
+  write_words_aux(kwg, node_index, prefix, 0, false, words);
 }
 
 KWG *make_kwg_from_words(const DictionaryWordList *words,
@@ -385,12 +418,10 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   const int gaddag_root_node_index = mutable_node_list_add_root(nodes);
   if (output_gaddag) {
     DictionaryWordList *gaddag_strings = dictionary_word_list_create();
-    add_gaddag_strings(words, gaddag_strings, merging);
-    dictionary_word_list_sort(gaddag_strings);
+    add_gaddag_strings(words, gaddag_strings);
     for (int i = 0; i < dictionary_word_list_get_count(gaddag_strings); i++) {
       const DictionaryWord *gaddag_string =
           dictionary_word_list_get_word(gaddag_strings, i);
-
       /*
             printf("i: %d gaddag_string: ", i);
             for (int k = 0; k < dictionary_word_get_length(gaddag_string); k++)
@@ -404,7 +435,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
 
   if (merging == KWG_MAKER_MERGE_EXACT) {
     NodeHashTable table;
-    node_hash_table_initialize(&table, 4999999);  // prime
+    node_hash_table_initialize(&table, 758633);  // prime
     for (size_t i = 0; i < nodes->count; i++) {
       if (!output_dawg && (i == 0)) {
         continue;
@@ -446,29 +477,31 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   node_pointer_list_add(ordered_pointers, gaddag_root);
 
   if (output_dawg) {
-    set_final_indices(dawg_root, nodes, ordered_pointers, 0,
+    set_final_indices(dawg_root, nodes, ordered_pointers, 0, false,
                       KWG_MAKER_INDEX_ROOT);
   }
   if (output_gaddag) {
-    set_final_indices(gaddag_root, nodes, ordered_pointers, 0,
+    set_final_indices(gaddag_root, nodes, ordered_pointers, 0, false,
                       KWG_MAKER_INDEX_ROOT);
   }
   if (output_dawg) {
-    set_final_indices(dawg_root, nodes, ordered_pointers, 0,
+    set_final_indices(dawg_root, nodes, ordered_pointers, 0, false,
                       KWG_MAKER_INDEX_REST);
   }
   if (output_gaddag) {
-    set_final_indices(gaddag_root, nodes, ordered_pointers, 0,
+    set_final_indices(gaddag_root, nodes, ordered_pointers, 0, false,
                       KWG_MAKER_INDEX_REST);
   }
   const int final_node_count = ordered_pointers->count;
-  // printf("final_node_count: %d\n", final_node_count);
+  printf("final_node_count: %d\n", final_node_count);
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);
-  // for (int i = 0; i < final_node_count; i++) {
-  //   const uint32_t node = kwg_get_mutable_nodes(kwg)[i];
-  //   printf("%02x: %08x\n", i, node);
-  // }
+/*  
+  for (int i = 0; i < final_node_count; i++) {
+    const uint32_t node = kwg_get_mutable_nodes(kwg)[i];
+    printf("%02x: %08x\n", i, node);
+  }
+*/  
   return kwg;
 }
