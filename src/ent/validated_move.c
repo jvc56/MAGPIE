@@ -13,6 +13,9 @@
 typedef struct ValidatedMove {
   Move *move;
   FormedWords *formed_words;
+  Rack *rack;
+  int challenge_points;
+  bool challenge_turn_loss;
   move_validation_status_t status;
 } ValidatedMove;
 
@@ -20,6 +23,12 @@ struct ValidatedMoves {
   ValidatedMove **moves;
   int number_of_moves;
 };
+
+move_validation_status_t validate_split_move(StringSplitter *split_move,
+                                             int player_index,
+                                             bool allow_phonies) {
+  int number_of_fields = string_splitter_get_number_of_items(split_move);
+}
 
 move_validation_status_t *
 validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
@@ -29,6 +38,14 @@ validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
   }
   if (player_index != 0 && player_index != 1) {
     return MOVE_VALIDATION_STATUS_INVALID_PLAYER_INDEX;
+  }
+
+  StringSplitter *split_move = split_string(ucgi_move_string, '.', false);
+
+  move_validation_status_t status =
+      validate_split_move(split_move, player_index, allow_phonies);
+  if (move_fields < 2) {
+    return MOVE_VALIDATION_STATUS_MISSING_FIELDS;
   }
 
   // horizontal, full rack unknown. No challenge pts, no challenge turn loss
@@ -77,7 +94,7 @@ validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
                     UCGI_EXCHANGE_MOVE)) {
     game_event_type = GAME_EVENT_EXCHANGE;
   } else {
-    }
+  }
 
   for (int i = 0; i < split_move; i++) {
     vms->moves[i] = validated_move_create(
@@ -152,6 +169,7 @@ ValidatedMove *validated_move_create(const Game *game, int player_index,
   ValidatedMove *vm = malloc_or_die(sizeof(ValidatedMove));
   vm->move = NULL;
   vm->formed_words = NULL;
+  vm->rack = NULL;
   vm->status = validated_move_load(game, ucgi_move_string, allow_phonies);
   return vm;
 }
@@ -162,10 +180,12 @@ void validated_move_destroy(ValidatedMove *vm) {
   }
   move_destroy(vm->move);
   formed_words_destroy(vm->formed_words);
+  rack_destroy(vm->rack);
   free(vm);
 }
 
-ValidatedMoves *validated_moves_create(const Game *game, const char *moves,
+ValidatedMoves *validated_moves_create(const Game *game, int player_index,
+                                       const char *ucgi_move_string,
                                        bool allow_phonies) {
   ValidatedMoves *vms = malloc_or_die(sizeof(ValidatedMoves));
 

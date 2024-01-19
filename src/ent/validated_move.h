@@ -8,7 +8,8 @@
 typedef struct ValidatedMoves ValidatedMoves;
 
 ValidatedMoves *validated_moves_create(const Game *game, int player_index,
-                                       const char *moves, bool allow_phonies);
+                                       const char *ucgi_move_string,
+                                       bool allow_phonies);
 ValidatedMoves *validated_moves_create_empty();
 void validated_moves_destroy(ValidatedMoves *vms);
 
