@@ -19,6 +19,7 @@ int rack_get_letter(const Rack *rack, uint8_t machine_letter);
 int rack_get_total_letters(const Rack *rack);
 bool rack_is_empty(const Rack *rack);
 bool racks_are_equal(const Rack *rack1, const Rack *rack2);
+bool rack_subtract(Rack *rack, Rack *subrack);
 
 void rack_add_letter(Rack *rack, uint8_t letter);
 void rack_take_letter(Rack *rack, uint8_t letter);

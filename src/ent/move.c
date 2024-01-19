@@ -16,7 +16,9 @@ struct Move {
   int score;
   int row_start;
   int col_start;
+  // Number of tiles played or exchanged
   int tiles_played;
+  // Equal to tiles_played for exchanges
   int tiles_length;
   double equity;
   int dir;

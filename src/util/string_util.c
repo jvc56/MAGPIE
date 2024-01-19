@@ -35,6 +35,8 @@ bool is_all_whitespace_or_empty(const char *str) {
   return true;
 }
 
+// Returns false for negative numbers
+// since they contain a '-' character
 bool is_all_digits_or_empty(const char *str) {
   while (*str != '\0') {
     if (!isdigit((unsigned char)*str)) {

@@ -361,6 +361,7 @@ void copy_cumulative_score_to_game_event(const GCGParser *gcg_parser,
   free(cumulative_score_string);
 }
 
+// FIXME: use move validation functions
 uint8_t *convert_tiles_string_to_machine_letters(
     const GCGParser *gcg_parser, const char *gcg_line, int group_index,
     bool allow_played_through_marker, int *number_of_machine_letters) {
@@ -385,6 +386,7 @@ uint8_t *convert_tiles_string_to_machine_letters(
   return machine_letters;
 }
 
+// FIXME: use move validation functions
 bool copy_played_tiles_to_game_event(const GCGParser *gcg_parser,
                                      GameEvent *game_event,
                                      const char *gcg_line, int group_index) {
@@ -457,6 +459,7 @@ Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
   return rack;
 }
 
+// FIXME: this should use the validated move function
 gcg_parse_status_t copy_position_to_game_event(const GCGParser *gcg_parser,
                                                GameEvent *game_event,
                                                const char *gcg_line,

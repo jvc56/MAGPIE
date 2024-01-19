@@ -17,6 +17,7 @@ void board_destroy(Board *board);
 
 bool board_is_empty(const Board *board, int row, int col);
 bool board_are_left_and_right_empty(const Board *board, int row, int col);
+bool board_are_all_adjacent_squares_empty(const Board *board, int row, int col);
 bool board_is_position_valid(int row, int col);
 int board_is_letter_allowed_in_cross_set(uint64_t cross_set, uint8_t letter);
 bool board_is_dir_vertical(int dir);
