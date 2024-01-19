@@ -178,7 +178,7 @@ void test_careen_career_exact_merged_gaddag() {
   assert(kwg_gaddag_prefix_arc(kwg, ld, "N") != 0);
   assert(kwg_gaddag_prefix_arc(kwg, ld, "R") != 0);
   // N does not exactly equal R because R also has suffixes starting from the R
-  // in the of the word.
+  // in the middle of the word.
   assert(kwg_gaddag_prefix_arc(kwg, ld, "N") !=
          kwg_gaddag_prefix_arc(kwg, ld, "R"));
 
