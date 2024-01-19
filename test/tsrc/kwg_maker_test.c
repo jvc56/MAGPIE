@@ -107,7 +107,7 @@ void test_qi_xi_xu_word_trie() {
   assert(kwg_dawg_prefix_arc(kwg, ld, "Z") == 0);
 
   DictionaryWordList *encoded_words = dictionary_word_list_create();
-  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words);
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
 
   assert_word_lists_are_equal(words, encoded_words);
 
@@ -225,7 +225,7 @@ void test_two_letter_trie() {
          kwg_dawg_prefix_arc(kwg, ld, "T"));
 
   DictionaryWordList *encoded_words = dictionary_word_list_create();
-  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words);
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
   dictionary_word_list_destroy(two_letter_words);
   kwg_destroy(kwg);
@@ -261,7 +261,7 @@ void test_two_letter_merged_dawg() {
          kwg_dawg_prefix_arc(kwg, ld, "T"));
 
   DictionaryWordList *encoded_words = dictionary_word_list_create();
-  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words);
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
   dictionary_word_list_destroy(two_letter_words);
   kwg_destroy(kwg);
@@ -299,7 +299,7 @@ void test_large_gaddag() {
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
   DictionaryWordList *words = dictionary_word_list_create();
-  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words);
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
   DictionaryWordList *q_words = dictionary_word_list_create();
   const uint8_t q = ld_hl_to_ml(ld, "Q");
@@ -321,16 +321,24 @@ void test_large_gaddag() {
   KWG *kwg = make_kwg_from_words(q_words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                  KWG_MAKER_MERGE_EXACT);
 
+  bool *nodes_reached =
+      calloc_or_die(kwg_get_number_of_nodes(kwg), sizeof(bool));
   DictionaryWordList *encoded_words = dictionary_word_list_create();
-  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words);
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words,
+                  nodes_reached);
   assert_word_lists_are_equal(q_words, encoded_words);
   dictionary_word_list_destroy(q_words);
 
   DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
-  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings);
+  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings, nodes_reached);
   assert_word_lists_are_equal(q_gaddag_strings, encoded_gaddag_strings);
   dictionary_word_list_destroy(q_gaddag_strings);
 
+  // first two nodes point to the dawg root and gaddag
+  for (int i = 2; i < kwg_get_number_of_nodes(kwg); i++) {
+    assert(nodes_reached[i]);
+  }
+  free(nodes_reached);
   kwg_destroy(kwg);
   config_destroy(config);
 }
@@ -342,8 +350,5 @@ void test_kwg_maker() {
   test_careen_career_exact_merged_gaddag();
   test_two_letter_trie();
   test_two_letter_merged_dawg();
-  // for (int i = 0; i < 100; i++) {
-  //  test_word_prune_dawg_and_gaddag();
-  //}
   test_large_gaddag();
 }

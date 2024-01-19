@@ -360,7 +360,7 @@ void add_gaddag_strings(const DictionaryWordList *words,
 
 void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
                      int prefix_length, bool accepts,
-                     DictionaryWordList *words) {
+                     DictionaryWordList *words, bool *nodes_reached) {
   if (accepts) {
     dictionary_word_list_add_word(words, prefix, prefix_length);
   }
@@ -368,22 +368,25 @@ void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
     return;
   }
   for (int i = node_index;; i++) {
+    if (nodes_reached != NULL) {
+    nodes_reached[i] = true;
+  }
     const int ml = kwg_tile(kwg, i);
     const int new_node_index = kwg_arc_index(kwg, i);
     bool accepts = kwg_accepts(kwg, i);
     prefix[prefix_length] = ml;
     write_words_aux(kwg, new_node_index, prefix, prefix_length + 1, accepts,
-                    words);
+                    words, nodes_reached);
     if (kwg_is_end(kwg, i)) {
       break;
     }
   }
 }
 
-void kwg_write_words(const KWG *kwg, int node_index,
-                     DictionaryWordList *words) {
+void kwg_write_words(const KWG *kwg, int node_index, DictionaryWordList *words,
+                     bool *nodes_reached) {
   uint8_t prefix[MAX_KWG_STRING_LENGTH];
-  write_words_aux(kwg, node_index, prefix, 0, false, words);
+  write_words_aux(kwg, node_index, prefix, 0, false, words, nodes_reached);
 }
 
 KWG *make_kwg_from_words(const DictionaryWordList *words,
@@ -415,13 +418,13 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     for (int i = 0; i < dictionary_word_list_get_count(gaddag_strings); i++) {
       const DictionaryWord *gaddag_string =
           dictionary_word_list_get_word(gaddag_strings, i);
-/*          
-      printf("i: %d gaddag_string: ", i);
-      for (int k = 0; k < dictionary_word_get_length(gaddag_string); k++) {
-        printf("%c", 'A' + dictionary_word_get_word(gaddag_string)[k] - 1);
-      }
-      printf("\n");
-*/      
+      /*
+            printf("i: %d gaddag_string: ", i);
+            for (int k = 0; k < dictionary_word_get_length(gaddag_string); k++)
+         { printf("%c", 'A' + dictionary_word_get_word(gaddag_string)[k] - 1);
+            }
+            printf("\n");
+      */
       insert_suffix(gaddag_root_node_index, nodes, gaddag_string, 0);
     }
   }
@@ -464,9 +467,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   }
 
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
-  //dawg_root->final_index = 0;
   MutableNode *gaddag_root = &nodes->nodes[gaddag_root_node_index];
-  //gaddag_root->final_index = 0;
   NodePointerList *ordered_pointers = node_pointer_list_create();
   node_pointer_list_add(ordered_pointers, dawg_root);
   node_pointer_list_add(ordered_pointers, gaddag_root);

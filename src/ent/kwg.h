@@ -23,5 +23,6 @@ int kwg_get_root_node_index(const KWG *kwg);
 int kwg_get_next_node_index(const KWG *kwg, int node_index, int letter);
 bool kwg_in_letter_set(const KWG *kwg, int letter, int node_index);
 uint64_t kwg_get_letter_set(const KWG *kwg, int node_index);
+int kwg_get_number_of_nodes(const KWG *kwg);
 
 #endif
