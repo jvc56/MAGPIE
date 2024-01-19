@@ -101,9 +101,8 @@ int add_child(int node_index, MutableNodeList *nodes, uint8_t ml) {
 
 uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
                                  bool check_node) {
-  //static const uint64_t k0 = 0xc3a5c85c97cb3127ULL;
-  static const uint64_t k1 = 0xb492b66fbe98f273ULL;
-  static const uint64_t k2 = 0x9ae16a3b2f90404fULL;
+  static const uint64_t k0 = 0xb492b66fbe98f273ULL;
+  static const uint64_t k1 = 0x9ae16a3b2f90404fULL;
   if (check_node) {
     if (node->hash_with_node_computed) {
       return node->hash_with_node;
@@ -124,7 +123,7 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
     }
     hash_with_just_children = (hash_with_just_children << 27) |
                               (hash_with_just_children >> (64 - 27));
-    hash_with_just_children ^= child_hash * k1;
+    hash_with_just_children ^= child_hash * k0;
   }
   // rotate by one bit to designate the end of the child list
   hash_with_just_children =
@@ -135,7 +134,7 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
   if (!check_node) {
     return hash_with_just_children;
   }
-  uint64_t hash_with_node = hash_with_just_children * k2;
+  uint64_t hash_with_node = hash_with_just_children * k1;
 
   uint8_t ml = node->ml;
   bool accepts = node->accepts;
@@ -246,61 +245,55 @@ MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
 }
 
 void set_final_indices(MutableNode *node, MutableNodeList *nodes,
-                       NodePointerList *ordered_pointers, int depth,
-                       bool is_end, kwg_maker_index_phase_t phase) {
-  /*
-    printf(
-        "set_final_indices.. node: %c ordered_pointers->count: %zu, depth: %i, "
-        "phase: %i\n",
-        'A' + node->ml - 1, ordered_pointers->count, depth, phase);
-  */
-  if (((phase == KWG_MAKER_INDEX_ROOT) && (depth == 1)) ||
-      ((phase == KWG_MAKER_INDEX_REST) && (depth > 1))) {
-    node->is_end = is_end;
-    node->final_index = ordered_pointers->count;
-    node_pointer_list_add(ordered_pointers, node);
-  }
-
-  if (node->merged_into != NULL) {
-    return;
-  }
-
+                       NodePointerList *ordered_pointers) {
+  printf("set_final_indices node->ml: %c, ordered_pointers->count: %zu\n",
+         'A' + node->ml - 1, ordered_pointers->count);
+  printf("node has %zu children\n", node->children.count);
   for (size_t i = 0; i < node->children.count; i++) {
     const int child_index = node->children.indices[i];
     MutableNode *child = &nodes->nodes[child_index];
-    set_final_indices(child, nodes, ordered_pointers, depth + 1,
-                      i == node->children.count - 1, phase);
+    child->is_end = (i == (node->children.count - 1));
+    child->final_index = ordered_pointers->count;
+    node_pointer_list_add(ordered_pointers, child);
+  }
+  for (size_t i = 0; i < node->children.count; i++) {
+    const int child_index = node->children.indices[i];
+    MutableNode *child = &nodes->nodes[child_index];
+    if (child->merged_into != NULL) {
+      continue;
+    }
+    set_final_indices(child, nodes, ordered_pointers);
   }
 }
 
 void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
                    const DictionaryWord *word, int pos) {
   MutableNode *node = &nodes->nodes[node_index];
-  /*
-    printf("insert_suffix pos: %i, suffix: ", pos);
-    for (int i = pos; i < dictionary_word_get_length(word); i++) {
-      printf("%c", 'A' + dictionary_word_get_word(word)[i] - 1);
-    }
-    printf("\n");
-    */
+  printf("insert_suffix pos: %i, suffix: ", pos);
+  for (int i = pos; i < dictionary_word_get_length(word); i++) {
+    printf("%c", 'A' + dictionary_word_get_word(word)[i] - 1);
+  }
+  printf("\n");
   const int length = dictionary_word_get_length(word);
   if (pos == length) {
     node->accepts = true;
     return;
   }
   const int ml = dictionary_word_get_word(word)[pos];
+  printf("ml: %c\n", 'A' + ml - 1);
   const uint8_t node_num_children = node->children.count;
+  printf("node_num_children: %d\n", node_num_children);
   for (uint8_t i = 0; i < node_num_children; i++) {
     node = &nodes->nodes[node_index];
     const int child_index = node->children.indices[i];
     const MutableNode *child = &nodes->nodes[node->children.indices[i]];
     if (child->ml == ml) {
-      // printf("found child with ml: %c at %d\n", 'A' + ml - 1, i);
+      printf("found child with ml: %c at %d\n", 'A' + ml - 1, i);
       insert_suffix(child_index, nodes, word, pos + 1);
       return;
     }
   }
-  // printf("adding child for ml: %c\n", 'A' + ml - 1);
+  printf("adding child for ml: %c\n", 'A' + ml - 1);
   const int child_index = add_child(node_index, nodes, ml);
   insert_suffix(child_index, nodes, word, pos + 1);
 }
@@ -309,9 +302,9 @@ void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
                 KWG *kwg) {
   uint32_t *kwg_nodes = kwg_get_mutable_nodes(kwg);
   for (size_t node_idx = 0; node_idx < ordered_pointers->count; node_idx++) {
-    //printf("node_idx: %zu\n", node_idx);
+    // printf("node_idx: %zu\n", node_idx);
     MutableNode *node = ordered_pointers->nodes[node_idx];
-    //printf("node->ml: %c\n", 'A' + node->ml - 1);
+    // printf("node->ml: %c\n", 'A' + node->ml - 1);
     uint32_t serialized_node = node->ml << KWG_TILE_BIT_OFFSET;
     if (node->accepts) {
       serialized_node |= KWG_NODE_ACCEPTS_FLAG;
@@ -422,16 +415,16 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     for (int i = 0; i < dictionary_word_list_get_count(gaddag_strings); i++) {
       const DictionaryWord *gaddag_string =
           dictionary_word_list_get_word(gaddag_strings, i);
-      /*
-            printf("i: %d gaddag_string: ", i);
-            for (int k = 0; k < dictionary_word_get_length(gaddag_string); k++)
-         { printf("%c", 'A' + dictionary_word_get_word(gaddag_string)[k] - 1);
-            }
-            printf("\n");
-      */
+      printf("i: %d gaddag_string: ", i);
+      for (int k = 0; k < dictionary_word_get_length(gaddag_string); k++) {
+        printf("%c", 'A' + dictionary_word_get_word(gaddag_string)[k] - 1);
+      }
+      printf("\n");
       insert_suffix(gaddag_root_node_index, nodes, gaddag_string, 0);
     }
   }
+
+  printf("nodes->count: %zu\n", nodes->count);
 
   if (merging == KWG_MAKER_MERGE_EXACT) {
     NodeHashTable table;
@@ -469,39 +462,27 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   }
 
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
+  dawg_root->final_index = 0;
   MutableNode *gaddag_root = &nodes->nodes[gaddag_root_node_index];
+  gaddag_root->final_index = 0;
   NodePointerList *ordered_pointers = node_pointer_list_create();
-  if (output_dawg) {
-    node_pointer_list_add(ordered_pointers, dawg_root);
-  }
+  node_pointer_list_add(ordered_pointers, dawg_root);
   node_pointer_list_add(ordered_pointers, gaddag_root);
 
   if (output_dawg) {
-    set_final_indices(dawg_root, nodes, ordered_pointers, 0, false,
-                      KWG_MAKER_INDEX_ROOT);
+    set_final_indices(dawg_root, nodes, ordered_pointers);
   }
   if (output_gaddag) {
-    set_final_indices(gaddag_root, nodes, ordered_pointers, 0, false,
-                      KWG_MAKER_INDEX_ROOT);
-  }
-  if (output_dawg) {
-    set_final_indices(dawg_root, nodes, ordered_pointers, 0, false,
-                      KWG_MAKER_INDEX_REST);
-  }
-  if (output_gaddag) {
-    set_final_indices(gaddag_root, nodes, ordered_pointers, 0, false,
-                      KWG_MAKER_INDEX_REST);
+    set_final_indices(gaddag_root, nodes, ordered_pointers);
   }
   const int final_node_count = ordered_pointers->count;
   printf("final_node_count: %d\n", final_node_count);
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);
-/*  
   for (int i = 0; i < final_node_count; i++) {
     const uint32_t node = kwg_get_mutable_nodes(kwg)[i];
     printf("%02x: %08x\n", i, node);
   }
-*/  
   return kwg;
 }

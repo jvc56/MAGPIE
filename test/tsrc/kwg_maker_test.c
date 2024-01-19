@@ -35,11 +35,11 @@ void assert_word_lists_are_equal(const DictionaryWordList *expected,
 
 uint32_t kwg_prefix_arc_aux(const KWG *kwg, uint32_t node_index,
                             const DictionaryWord *prefix, int pos) {
-  //printf("kwg_prefix_arc_aux(%d, %d)\n", node_index, pos);                               
+  printf("kwg_prefix_arc_aux(%d, %d)\n", node_index, pos);
   const uint8_t ml = dictionary_word_get_word(prefix)[pos];
-  //printf("ml: %d\n", ml);
+  printf("ml: %d\n", ml);
   const uint32_t next_node_index = kwg_get_next_node_index(kwg, node_index, ml);
-  //printf("ml: %d, next_node_index: %d\n", ml, next_node_index);
+  printf("ml: %d, next_node_index: %d\n", ml, next_node_index);
   if (pos + 1 == dictionary_word_get_length(prefix)) {
     return next_node_index;
   }
@@ -63,6 +63,27 @@ uint32_t kwg_dawg_prefix_arc(const KWG *kwg, LetterDistribution *ld,
   return kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg), prefix, 0);
 }
 
+uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
+                               const char *human_readable_prefix) {
+  char string_for_conversion[MAX_KWG_STRING_LENGTH];
+  string_copy(string_for_conversion, human_readable_prefix);
+  for (size_t i = 0; i < string_length(human_readable_prefix); i++) {
+    if (string_for_conversion[i] == '@') {
+      string_for_conversion[i] = '?';
+    }
+  }
+  // Make a list with one word in it just because I don't have a handy function
+  // to create a DictionaryWord by itself.
+  DictionaryWordList *prefix_list = dictionary_word_list_create();
+  uint8_t prefix_bytes[MAX_KWG_STRING_LENGTH];
+  ld_str_to_mls(ld, string_for_conversion, false, prefix_bytes,
+                string_length(string_for_conversion));
+  dictionary_word_list_add_word(prefix_list, prefix_bytes,
+                                string_length(string_for_conversion));
+  DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
+  return kwg_prefix_arc_aux(kwg, kwg_get_root_node_index(kwg), prefix, 0);
+}
+
 void test_qi_xi_xu_word_trie() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
@@ -75,12 +96,15 @@ void test_qi_xi_xu_word_trie() {
   KWG *kwg =
       make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_NONE);
 
+  // Q and X prefixes are not empty
   assert(kwg_dawg_prefix_arc(kwg, ld, "Q") != 0);
   assert(kwg_dawg_prefix_arc(kwg, ld, "X") != 0);
+  // The full words are empty, none of them can be extended
   assert(kwg_dawg_prefix_arc(kwg, ld, "QI") == 0);
   assert(kwg_dawg_prefix_arc(kwg, ld, "XI") == 0);
   assert(kwg_dawg_prefix_arc(kwg, ld, "XU") == 0);
 
+  // Q and X prefixes are not merged, Z is not found and thus returning empty
   assert(kwg_dawg_prefix_arc(kwg, ld, "Q") !=
          kwg_dawg_prefix_arc(kwg, ld, "X"));
   assert(kwg_dawg_prefix_arc(kwg, ld, "Z") == 0);
@@ -96,6 +120,24 @@ void test_qi_xi_xu_word_trie() {
   config_destroy(config);
 }
 
+void test_egg_unmerged_gaddag() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  LetterDistribution *ld = config_get_ld(config);
+  DictionaryWordList *words = dictionary_word_list_create();
+  add_test_word(ld, words, "EGG");
+
+  KWG *kwg =
+      make_kwg_from_words(words, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_NONE);
+
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "G") != 0);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "GG") != 0);
+
+  dictionary_word_list_destroy(words);
+  kwg_destroy(kwg);
+  config_destroy(config);
+}
+
 void test_careen_career_unmerged_gaddag() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
@@ -106,6 +148,19 @@ void test_careen_career_unmerged_gaddag() {
 
   KWG *kwg =
       make_kwg_from_words(words, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_NONE);
+
+  // Reversed words are gaddag entries. Check that the last letters of the words
+  // are nonempty prefixes. However, they are not merged.
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "N") != 0);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "R") != 0);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "N") !=
+         kwg_gaddag_prefix_arc(kwg, ld, "R"));
+
+  // Some other checks
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "NEERA") != 0);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "C@AREE") != 0);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "AC@RE") != 0);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "RAC@E") != 0);
 
   dictionary_word_list_destroy(words);
   kwg_destroy(kwg);
@@ -123,6 +178,20 @@ void test_careen_career_exact_merged_gaddag() {
   KWG *kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_GADDAG,
                                  KWG_MAKER_MERGE_EXACT);
 
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "N") != 0);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "R") != 0);
+  // N does not exactly equal R because R also has suffixes starting from the R
+  // in the of the word.
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "N") !=
+         kwg_gaddag_prefix_arc(kwg, ld, "R"));
+
+  // But all of these merge to the same node.
+  uint32_t c_aree = kwg_gaddag_prefix_arc(kwg, ld, "C@AREE");
+  assert(c_aree != 0);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "AC@REE") == c_aree);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "RAC@EE") == c_aree);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "ERAC@E") == c_aree);
+  assert(kwg_gaddag_prefix_arc(kwg, ld, "EERAC@") == c_aree);
   dictionary_word_list_destroy(words);
   kwg_destroy(kwg);
   config_destroy(config);
@@ -193,8 +262,6 @@ void test_two_letter_merged_dawg() {
          kwg_dawg_prefix_arc(kwg, ld, "P"));
   assert(kwg_dawg_prefix_arc(kwg, ld, "D") ==
          kwg_dawg_prefix_arc(kwg, ld, "T"));
-  assert(kwg_dawg_prefix_arc(kwg, ld, "P") ==
-         kwg_dawg_prefix_arc(kwg, ld, "T"));         
 
   DictionaryWordList *encoded_words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words);
@@ -244,12 +311,13 @@ void test_large_gaddag() {
 
 void test_kwg_maker() {
   test_qi_xi_xu_word_trie();
-  // test_careen_career_unmerged_gaddag();
-  // test_careen_career_exact_merged_gaddag();
+  test_egg_unmerged_gaddag();
+  test_careen_career_unmerged_gaddag();
+  test_careen_career_exact_merged_gaddag();
   test_two_letter_trie();
   test_two_letter_merged_dawg();
   // for (int i = 0; i < 100; i++) {
   //  test_word_prune_dawg_and_gaddag();
   //}
-  //test_large_gaddag();
+  // test_large_gaddag();
 }
