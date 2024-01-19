@@ -35,11 +35,8 @@ void assert_word_lists_are_equal(const DictionaryWordList *expected,
 
 uint32_t kwg_prefix_arc_aux(const KWG *kwg, uint32_t node_index,
                             const DictionaryWord *prefix, int pos) {
-  printf("kwg_prefix_arc_aux(%d, %d)\n", node_index, pos);
   const uint8_t ml = dictionary_word_get_word(prefix)[pos];
-  printf("ml: %d\n", ml);
   const uint32_t next_node_index = kwg_get_next_node_index(kwg, node_index, ml);
-  printf("ml: %d, next_node_index: %d\n", ml, next_node_index);
   if (pos + 1 == dictionary_word_get_length(prefix)) {
     return next_node_index;
   }
@@ -297,14 +294,43 @@ void test_word_prune_dawg_and_gaddag() {
 void test_large_gaddag() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-
   Game *game = game_create(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
   DictionaryWordList *words = dictionary_word_list_create();
-  generate_possible_words(game, NULL, words);
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words);
 
-  KWG *kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_GADDAG,
-                                 KWG_MAKER_MERGE_EXACT);
+  DictionaryWordList *q_words = dictionary_word_list_create();
+  const uint8_t q = ld_hl_to_ml(ld, "Q");
+  for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
+    const DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    const uint8_t length = dictionary_word_get_length(word);
+    for (int j = 0; j < length; j++) {
+      if (dictionary_word_get_word(word)[j] == q) {
+        dictionary_word_list_add_word(q_words, dictionary_word_get_word(word),
+                                      length);
+        break;
+      }
+    }
+  }
   dictionary_word_list_destroy(words);
+  DictionaryWordList *q_gaddag_strings = dictionary_word_list_create();
+  add_gaddag_strings(q_words, q_gaddag_strings);
+
+  KWG *kwg = make_kwg_from_words(q_words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
+                                 KWG_MAKER_MERGE_EXACT);
+
+  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words);
+  assert_word_lists_are_equal(q_words, encoded_words);
+  dictionary_word_list_destroy(q_words);
+
+  DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
+  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings);
+  assert_word_lists_are_equal(q_gaddag_strings, encoded_gaddag_strings);
+  dictionary_word_list_destroy(q_gaddag_strings);
+
   kwg_destroy(kwg);
   config_destroy(config);
 }
@@ -319,5 +345,5 @@ void test_kwg_maker() {
   // for (int i = 0; i < 100; i++) {
   //  test_word_prune_dawg_and_gaddag();
   //}
-  // test_large_gaddag();
+  test_large_gaddag();
 }

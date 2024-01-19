@@ -10,4 +10,6 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
 
 void kwg_write_words(const KWG *kwg, int node_index, DictionaryWordList *words);
 
+void add_gaddag_strings(const DictionaryWordList *words,
+                        DictionaryWordList *gaadag_strings);
 #endif

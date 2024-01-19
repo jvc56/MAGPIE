@@ -246,9 +246,9 @@ MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
 
 void set_final_indices(MutableNode *node, MutableNodeList *nodes,
                        NodePointerList *ordered_pointers) {
-  printf("set_final_indices node->ml: %c, ordered_pointers->count: %zu\n",
-         'A' + node->ml - 1, ordered_pointers->count);
-  printf("node has %zu children\n", node->children.count);
+  // printf("set_final_indices node->ml: %c, ordered_pointers->count: %zu\n",
+  //        'A' + node->ml - 1, ordered_pointers->count);
+  // printf("node has %zu children\n", node->children.count);
   for (size_t i = 0; i < node->children.count; i++) {
     const int child_index = node->children.indices[i];
     MutableNode *child = &nodes->nodes[child_index];
@@ -269,31 +269,31 @@ void set_final_indices(MutableNode *node, MutableNodeList *nodes,
 void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
                    const DictionaryWord *word, int pos) {
   MutableNode *node = &nodes->nodes[node_index];
-  printf("insert_suffix pos: %i, suffix: ", pos);
-  for (int i = pos; i < dictionary_word_get_length(word); i++) {
-    printf("%c", 'A' + dictionary_word_get_word(word)[i] - 1);
-  }
-  printf("\n");
+  // printf("insert_suffix pos: %i, suffix: ", pos);
+  // for (int i = pos; i < dictionary_word_get_length(word); i++) {
+  //   printf("%c", 'A' + dictionary_word_get_word(word)[i] - 1);
+  // }
+  // printf("\n");
   const int length = dictionary_word_get_length(word);
   if (pos == length) {
     node->accepts = true;
     return;
   }
   const int ml = dictionary_word_get_word(word)[pos];
-  printf("ml: %c\n", 'A' + ml - 1);
+  // printf("ml: %c\n", 'A' + ml - 1);
   const uint8_t node_num_children = node->children.count;
-  printf("node_num_children: %d\n", node_num_children);
+  // printf("node_num_children: %d\n", node_num_children);
   for (uint8_t i = 0; i < node_num_children; i++) {
     node = &nodes->nodes[node_index];
     const int child_index = node->children.indices[i];
     const MutableNode *child = &nodes->nodes[node->children.indices[i]];
     if (child->ml == ml) {
-      printf("found child with ml: %c at %d\n", 'A' + ml - 1, i);
+      // printf("found child with ml: %c at %d\n", 'A' + ml - 1, i);
       insert_suffix(child_index, nodes, word, pos + 1);
       return;
     }
   }
-  printf("adding child for ml: %c\n", 'A' + ml - 1);
+  // printf("adding child for ml: %c\n", 'A' + ml - 1);
   const int child_index = add_child(node_index, nodes, ml);
   insert_suffix(child_index, nodes, word, pos + 1);
 }
@@ -415,11 +415,13 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     for (int i = 0; i < dictionary_word_list_get_count(gaddag_strings); i++) {
       const DictionaryWord *gaddag_string =
           dictionary_word_list_get_word(gaddag_strings, i);
+/*          
       printf("i: %d gaddag_string: ", i);
       for (int k = 0; k < dictionary_word_get_length(gaddag_string); k++) {
         printf("%c", 'A' + dictionary_word_get_word(gaddag_string)[k] - 1);
       }
       printf("\n");
+*/      
       insert_suffix(gaddag_root_node_index, nodes, gaddag_string, 0);
     }
   }
@@ -462,9 +464,9 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   }
 
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
-  dawg_root->final_index = 0;
+  //dawg_root->final_index = 0;
   MutableNode *gaddag_root = &nodes->nodes[gaddag_root_node_index];
-  gaddag_root->final_index = 0;
+  //gaddag_root->final_index = 0;
   NodePointerList *ordered_pointers = node_pointer_list_create();
   node_pointer_list_add(ordered_pointers, dawg_root);
   node_pointer_list_add(ordered_pointers, gaddag_root);
@@ -480,9 +482,11 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);
-  for (int i = 0; i < final_node_count; i++) {
-    const uint32_t node = kwg_get_mutable_nodes(kwg)[i];
-    printf("%02x: %08x\n", i, node);
-  }
+  /*
+    for (int i = 0; i < final_node_count; i++) {
+      const uint32_t node = kwg_get_mutable_nodes(kwg)[i];
+      printf("%02x: %08x\n", i, node);
+    }
+    */
   return kwg;
 }
