@@ -67,11 +67,11 @@ DictionaryWord* dictionary_word_list_get_word(
 int dictionary_word_compare(const void* a, const void* b) {
   const DictionaryWord* word_a = (const DictionaryWord*)a;
   const DictionaryWord* word_b = (const DictionaryWord*)b;
-  int length_a = dictionary_word_get_length(word_a);
-  int length_b = dictionary_word_get_length(word_b);
+  const int length_a = dictionary_word_get_length(word_a);
+  const int length_b = dictionary_word_get_length(word_b);
 
   // Compare the words lexicographically
-  int min_length = length_a < length_b ? length_a : length_b;
+  const int min_length = length_a < length_b ? length_a : length_b;
   for (int i = 0; i < min_length; i++) {
     if (dictionary_word_get_word(word_a)[i] <
         dictionary_word_get_word(word_b)[i]) {
