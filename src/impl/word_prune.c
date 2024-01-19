@@ -1,9 +1,10 @@
-#include "word_prune.h"
-
 #include <stdlib.h>
 
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
+
+#include "word_prune.h"
+
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -91,7 +92,7 @@ int max_nonplaythrough_spaces_in_row(BoardRow* board_row) {
 
 void add_playthrough_word(DictionaryWordList* possible_word_list,
                           uint8_t* strip, int leftstrip, int rightstrip) {
-  int word_length = rightstrip - leftstrip + 1;
+  const int word_length = rightstrip - leftstrip + 1;
   dictionary_word_list_add_word(possible_word_list, strip + leftstrip,
                                 word_length);
 }
@@ -175,8 +176,8 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
       const uint8_t ml = kwg_tile(kwg, i);
       if (ml != SEPARATION_MACHINE_LETTER) {
         if (rack_get_letter(rack, ml) > 0) {
-          uint32_t next_node_index = kwg_arc_index(kwg, i);
-          bool accepts = kwg_accepts(kwg, i);
+          const uint32_t next_node_index = kwg_arc_index(kwg, i);
+          const bool accepts = kwg_accepts(kwg, i);
           rack_take_letter(rack, ml);
           playthrough_words_go_on(board_row, kwg, rack, col, anchor_col, ml,
                                   next_node_index, accepts, leftstrip,
@@ -184,8 +185,8 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
                                   strip, possible_word_list);
           rack_add_letter(rack, ml);
         } else if (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0) {
-          uint32_t next_node_index = kwg_arc_index(kwg, i);
-          bool accepts = kwg_accepts(kwg, i);
+          const uint32_t next_node_index = kwg_arc_index(kwg, i);
+          const bool accepts = kwg_accepts(kwg, i);
           rack_take_letter(rack, BLANK_MACHINE_LETTER);
           playthrough_words_go_on(board_row, kwg, rack, col, anchor_col, ml,
                                   next_node_index, accepts, leftstrip,
@@ -229,7 +230,7 @@ void playthrough_words_go_on(const BoardRow* board_row, const KWG* kwg,
                                       strip, possible_word_list);
     }
 
-    bool no_letter_directly_left =
+    const bool no_letter_directly_left =
         current_col == 0 ||
         board_row->letters[current_col - 1] == ALPHABET_EMPTY_SQUARE_MARKER;
 
@@ -271,7 +272,7 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
                                     Rack* bag_as_rack,
                                     DictionaryWordList* possible_word_list) {
   uint8_t strip[BOARD_DIM];
-  int gaddag_root = kwg_get_root_node_index(kwg);
+  const int gaddag_root = kwg_get_root_node_index(kwg);
   int leftmost_col = 0;
   for (int col = 0; col < BOARD_DIM; col++) {
     uint8_t current_letter = board_row->letters[col];
@@ -350,8 +351,8 @@ void generate_possible_words(Game* game, const KWG* override_kwg,
 
   uint8_t word[BOARD_DIM];
   add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
-                                unplayed_as_rack, max_nonplaythrough_spaces, word, 0,
-                                false, temp_list);
+                                unplayed_as_rack, max_nonplaythrough_spaces,
+                                word, 0, false, temp_list);
   for (int i = 0; i < board_rows->num_rows; i++) {
     add_playthrough_words_from_row(&board_rows->rows[i], kwg, unplayed_as_rack,
                                    temp_list);

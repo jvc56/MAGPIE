@@ -1,5 +1,3 @@
-#include "../../src/impl/word_prune.h"
-
 #include <assert.h>
 
 #include "../../src/def/board_defs.h"
@@ -8,6 +6,7 @@
 #include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/player.h"
+#include "../../src/impl/word_prune.h"
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
 #include "test_util.h"
@@ -16,8 +15,7 @@ void assert_word_count(const LetterDistribution *ld, DictionaryWordList *words,
                        const char *human_readable_word, int expected_count) {
   int expected_length = string_length(human_readable_word);
   uint8_t expected[BOARD_DIM];
-  ld_str_to_mls(ld, human_readable_word, false, expected,
-                string_length(human_readable_word));
+  ld_str_to_mls(ld, human_readable_word, false, expected, expected_length);
   int count = 0;
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     DictionaryWord *word = dictionary_word_list_get_word(words, i);
