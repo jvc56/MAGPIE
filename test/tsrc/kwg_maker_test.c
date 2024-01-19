@@ -199,8 +199,10 @@ void test_two_letter_trie() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   LetterDistribution *ld = config_get_ld(config);
   Game *game = game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
   DictionaryWordList *words = dictionary_word_list_create();
-  generate_possible_words(game, NULL, words);
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
   DictionaryWordList *two_letter_words = dictionary_word_list_create();
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
@@ -228,6 +230,8 @@ void test_two_letter_trie() {
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
   dictionary_word_list_destroy(two_letter_words);
+
+  game_destroy(game);
   kwg_destroy(kwg);
   config_destroy(config);
 }
@@ -237,8 +241,10 @@ void test_two_letter_merged_dawg() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   LetterDistribution *ld = config_get_ld(config);
   Game *game = game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
   DictionaryWordList *words = dictionary_word_list_create();
-  generate_possible_words(game, NULL, words);
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
   DictionaryWordList *two_letter_words = dictionary_word_list_create();
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
@@ -264,6 +270,8 @@ void test_two_letter_merged_dawg() {
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
   dictionary_word_list_destroy(two_letter_words);
+
+  game_destroy(game);
   kwg_destroy(kwg);
   config_destroy(config);
 }
@@ -339,6 +347,8 @@ void test_large_gaddag() {
     assert(nodes_reached[i]);
   }
   free(nodes_reached);
+
+  game_destroy(game);
   kwg_destroy(kwg);
   config_destroy(config);
 }

@@ -212,6 +212,11 @@ void node_pointer_list_add(NodePointerList *list, MutableNode *node) {
   list->count++;
 }
 
+void node_pointer_list_destroy(NodePointerList *list) {
+  free(list->nodes);
+  free(list);
+}
+
 typedef struct NodeHashTable {
   NodePointerList *buckets;
   size_t bucket_count;
@@ -359,8 +364,8 @@ void add_gaddag_strings(const DictionaryWordList *words,
 }
 
 void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
-                     int prefix_length, bool accepts,
-                     DictionaryWordList *words, bool *nodes_reached) {
+                     int prefix_length, bool accepts, DictionaryWordList *words,
+                     bool *nodes_reached) {
   if (accepts) {
     dictionary_word_list_add_word(words, prefix, prefix_length);
   }
@@ -369,8 +374,8 @@ void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
   }
   for (int i = node_index;; i++) {
     if (nodes_reached != NULL) {
-    nodes_reached[i] = true;
-  }
+      nodes_reached[i] = true;
+    }
     const int ml = kwg_tile(kwg, i);
     const int new_node_index = kwg_arc_index(kwg, i);
     bool accepts = kwg_accepts(kwg, i);
@@ -462,8 +467,10 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
         max_bucket_size = bucket->count;
       }
     }
+    node_pointer_list_destroy(table.buckets);
     printf("buckets_used: %d max_bucket_size: %zu\n", buckets_used,
            max_bucket_size);
+
   }
 
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
