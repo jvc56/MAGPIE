@@ -18,28 +18,25 @@ jobs:
           path: |
             data/lexica
             data/strategy
-          key: downloaded-data-files-x # use a better cache busting strategy
+          key: downloaded-data-files-y # use a better cache busting strategy
 
       - name: Download data files
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: >
           mkdir -p data/strategy &&
           mkdir -p data/lexica &&
-          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/NWL20.kwg &&
-          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.kwg &&
-          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/DISC2.kwg &&
-          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/FRA20.kwg &&
-          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/CSW21.klv2 &&
-          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/english.klv2 &&
-          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/catalan.klv2 &&
-          wget https://github.com/domino14/liwords/raw/master/liwords-ui/public/wasm/french.klv2 &&
+          wget https://github.com/woogles-io/liwords/raw/master/liwords-ui/public/wasm/2024/NWL20.kwg &&
+          wget https://github.com/woogles-io/liwords/raw/master/liwords-ui/public/wasm/2024/CSW21.kwg &&
+          wget https://github.com/woogles-io/liwords/raw/master/liwords-ui/public/wasm/2024/DISC2.kwg &&
+          wget https://github.com/woogles-io/liwords/raw/master/liwords-ui/public/wasm/2024/FRA20.kwg &&
+          wget https://github.com/woogles-io/liwords/raw/master/liwords-ui/public/wasm/2024/CSW21.klv2 &&
+          wget https://github.com/woogles-io/liwords/raw/master/liwords-ui/public/wasm/2024/NWL20.klv2 &&
+          wget https://github.com/woogles-io/liwords/raw/master/liwords-ui/public/wasm/2024/DISC2.klv2 &&
+          wget https://github.com/woogles-io/liwords/raw/master/liwords-ui/public/wasm/2024/FRA20.klv2 &&
+          wget https://github.com/woogles-io/liwords/raw/master/liwords-ui/public/wasm/2024/OSPS49.klv2 &&
           wget https://github.com/domino14/macondo/raw/master/data/strategy/default_english/winpct.csv &&
           wget https://woogles-prod-assets.s3.amazonaws.com/CSW21.csv.gz &&
-          wget https://woogles-prod-assets.s3.amazonaws.com/OSPS44.kwg &&
-          ln -sf english.klv2 NWL20.klv2 &&
-          ln -sf english.klv2 OSPS44.klv2 &&
-          ln -sf catalan.klv2 DISC2.klv2 &&
-          ln -sf french.klv2 FRA20.klv2 &&
+          wget https://woogles-prod-assets.s3.amazonaws.com/OSPS49.kwg &&
           mv *.kwg data/lexica &&
           mv *.klv2 data/lexica &&
           mv *.csv data/strategy &&

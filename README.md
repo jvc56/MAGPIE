@@ -305,7 +305,7 @@ magpie>go sim static plies 1 threads 1 numplays 15 cgp C14/O2TOY9/mIRADOR8/F4DAB
 Run an inference:
 
 ```
- ./bin/magpie go infer rack HUJA pindex 0 score 20 exch 0 numplays 20 info 1000000 threads 4 lex OSPS44
+ ./bin/magpie go infer rack HUJA pindex 0 score 20 exch 0 numplays 20 info 1000000 threads 4 lex OSPS49
 ```
 
 Run autoplay games in ucgi mode and then stop:

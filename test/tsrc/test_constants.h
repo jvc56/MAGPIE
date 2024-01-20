@@ -8,7 +8,7 @@
 #define EMPTY_CATALAN_CGP                                                      \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex DISC2;"
 #define EMPTY_POLISH_CGP                                                       \
-  "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex OSPS44;"
+  "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex OSPS49;"
 #define EMPTY_PLAYER0_RACK_CGP                                                 \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 /ABC 0/0 0 lex CSW21;"
 #define EMPTY_PLAYER1_RACK_CGP                                                 \
@@ -150,5 +150,5 @@
 #define POLISH_CGP                                                                 \
   "15/15/11FiŚ1/11LI2/9CŁA3/9Z1N3/8HOI4/6STĘPIĆ3/5AUR1Y5/4SAMY2G4/2CLE4JA1K2/" \
   "2LARWO1SAMBIE1/2I1WENTO1O1IW1/E6END3Y1/ZDZIAŁaJ1Y5 ACNNPRW/AHIKPZŻ "          \
-  "240/200 0 lex OSPS44;"
+  "240/200 0 lex OSPS49;"
 #endif
