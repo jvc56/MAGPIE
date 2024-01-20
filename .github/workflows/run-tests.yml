@@ -18,7 +18,7 @@ jobs:
           path: |
             data/lexica
             data/strategy
-          key: downloaded-data-files-y # use a better cache busting strategy
+          key: downloaded-data-files-a1 # use a better cache busting strategy
 
       - name: Download data files
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
