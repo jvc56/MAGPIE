@@ -7,6 +7,18 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+// The KWG data structure was originally
+// developed in wolges. For more details
+// on how the KWG data structure works, see
+// https://github.com/andy-k/wolges/blob/main/details.txt
+
+// This has a subset of the logic for KWG creation, and only merges arcs
+// for nodes sharing all of their subtries, whereas
+// the reference implementation in wolges merges arcs can merge nodes where
+// one's subtries are a tail of the other's, with the node with fewer children
+// pointing midway into the the other's list of children, sharing an end but not
+// a beginning. This extra merging reduces KWG size roughly 3%.
+
 typedef enum {
   KWG_MAKER_INDEX_ROOT,
   KWG_MAKER_INDEX_REST,
@@ -34,9 +46,7 @@ void node_index_list_add(NodeIndexList *list, uint32_t index) {
   list->count++;
 }
 
-void node_index_list_destroy(NodeIndexList *list) {
-  free(list->indices);
-}
+void node_index_list_destroy(NodeIndexList *list) { free(list->indices); }
 
 typedef struct MutableNode {
   uint8_t ml;
@@ -212,9 +222,7 @@ void node_pointer_list_add(NodePointerList *list, MutableNode *node) {
   list->count++;
 }
 
-void node_pointer_list_destroy(NodePointerList *list) {
-  free(list->nodes);
-}
+void node_pointer_list_destroy(NodePointerList *list) { free(list->nodes); }
 
 typedef struct NodeHashTable {
   NodePointerList *buckets;
@@ -254,7 +262,7 @@ MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
 
 void set_final_indices(MutableNode *node, MutableNodeList *nodes,
                        NodePointerList *ordered_pointers) {
-  // Add the children in a sequence.                       
+  // Add the children in a sequence.
   for (size_t i = 0; i < node->children.count; i++) {
     const int child_index = node->children.indices[i];
     MutableNode *child = &nodes->nodes[child_index];
@@ -262,7 +270,7 @@ void set_final_indices(MutableNode *node, MutableNodeList *nodes,
     child->final_index = ordered_pointers->count;
     node_pointer_list_add(ordered_pointers, child);
   }
-  // Then add each of their subtries afterwards. 
+  // Then add each of their subtries afterwards.
   for (size_t i = 0; i < node->children.count; i++) {
     const int child_index = node->children.indices[i];
     MutableNode *child = &nodes->nodes[child_index];
