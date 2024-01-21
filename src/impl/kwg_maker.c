@@ -101,8 +101,6 @@ int add_child(int node_index, MutableNodeList *nodes, uint8_t ml) {
 
 uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
                                  bool check_node) {
-  static const uint64_t k0 = 0xb492b66fbe98f273ULL;
-  static const uint64_t k1 = 0x9ae16a3b2f90404fULL;
   if (check_node) {
     if (node->hash_with_node_computed) {
       return node->hash_with_node;
@@ -121,20 +119,19 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
       MutableNode *child = &nodes->nodes[node->children.indices[i]];
       child_hash = mutable_node_hash_value(child, nodes, true);
     }
-    hash_with_just_children = (hash_with_just_children << 27) |
-                              (hash_with_just_children >> (64 - 27));
-    hash_with_just_children ^= child_hash * k0;
+    hash_with_just_children ^= child_hash * KWG_HASH_COMBINING_PRIME_1;
   }
   // rotate by one bit to designate the end of the child list
   hash_with_just_children =
       (hash_with_just_children << 1) | (hash_with_just_children >> (64 - 1));
 
   node->hash_with_just_children = hash_with_just_children;
-  node->hash_with_just_children = true;
+  node->hash_with_just_children_computed = true;
   if (!check_node) {
     return hash_with_just_children;
   }
-  uint64_t hash_with_node = hash_with_just_children * k1;
+  uint64_t hash_with_node =
+      hash_with_just_children * KWG_HASH_COMBINING_PRIME_2;
 
   uint8_t ml = node->ml;
   bool accepts = node->accepts;
@@ -149,26 +146,18 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
 
 bool mutable_node_equals(MutableNode *node_a, MutableNode *node_b,
                          MutableNodeList *nodes, bool check_node) {
+  // check_node is false at the root node of a the comparison, we are looking
+  // for nodes with different prefixes, including the content of this node,
+  // but with identical child subtries. So we only check the letters and accepts
+  // within subtries.
   if (check_node) {
-    if (node_a->hash_with_node != node_b->hash_with_node) {
-      // printf("node_a->hash_value: %llu node_b->hash_value: %llu\n",
-      //        node_a->hash_value, node_b->hash_value);
-      return false;
-    }
-    if (node_a->ml != node_b->ml) {
-      // printf("node_a->ml: %c node_b->ml: %c\n", 'A' + node_a->ml - 1,
-      //        'A' + node_b->ml - 1);
-      return false;
-    }
-    if (node_a->accepts != node_b->accepts) {
-      // printf("node_a->accepts: %i node_b->accepts: %i\n", node_a->accepts,
-      //        node_b->accepts);
+    if ((node_a->hash_with_node != node_b->hash_with_node) ||
+        (node_a->ml != node_b->ml) || (node_a->accepts != node_b->accepts)) {
       return false;
     }
   }
-  if (node_a->children.count != node_b->children.count) {
-    // printf("node_a->children.count: %zu node_b->children.count: %zu\n",
-    //        node_a->children.count, node_b->children.count);
+  if ((node_a->hash_with_just_children != node_b->hash_with_just_children) ||
+      (node_a->children.count != node_b->children.count)) {
     return false;
   }
   for (uint8_t i = 0; i < node_a->children.count; i++) {
@@ -235,14 +224,11 @@ MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
                                             MutableNodeList *nodes) {
   uint64_t hash_value = mutable_node_hash_value(node, nodes, false);
   size_t bucket_index = hash_value % table->bucket_count;
-  // printf("bucket_index: %zu\n", bucket_index);
   NodePointerList *bucket = &table->buckets[bucket_index];
   for (size_t i = 0; i < bucket->count; i++) {
     MutableNode *candidate = bucket->nodes[i];
     if (mutable_node_equals(node, candidate, nodes, false)) {
       return candidate;
-    } else {
-      // printf("hash collision\n");
     }
   }
   node_pointer_list_add(bucket, node);
@@ -251,9 +237,7 @@ MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
 
 void set_final_indices(MutableNode *node, MutableNodeList *nodes,
                        NodePointerList *ordered_pointers) {
-  // printf("set_final_indices node->ml: %c, ordered_pointers->count: %zu\n",
-  //        'A' + node->ml - 1, ordered_pointers->count);
-  // printf("node has %zu children\n", node->children.count);
+  // Add the children in a sequence.                       
   for (size_t i = 0; i < node->children.count; i++) {
     const int child_index = node->children.indices[i];
     MutableNode *child = &nodes->nodes[child_index];
@@ -261,6 +245,7 @@ void set_final_indices(MutableNode *node, MutableNodeList *nodes,
     child->final_index = ordered_pointers->count;
     node_pointer_list_add(ordered_pointers, child);
   }
+  // Then add each of their subtries afterwards. 
   for (size_t i = 0; i < node->children.count; i++) {
     const int child_index = node->children.indices[i];
     MutableNode *child = &nodes->nodes[child_index];
@@ -272,44 +257,36 @@ void set_final_indices(MutableNode *node, MutableNodeList *nodes,
 }
 
 void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
-                   const DictionaryWord *word, int pos) {
+                   const DictionaryWord *word, int pos,
+                   int *cached_node_indices) {
   MutableNode *node = &nodes->nodes[node_index];
-  // printf("insert_suffix pos: %i, suffix: ", pos);
-  // for (int i = pos; i < dictionary_word_get_length(word); i++) {
-  //   printf("%c", 'A' + dictionary_word_get_word(word)[i] - 1);
-  // }
-  // printf("\n");
   const int length = dictionary_word_get_length(word);
   if (pos == length) {
     node->accepts = true;
     return;
   }
   const int ml = dictionary_word_get_word(word)[pos];
-  // printf("ml: %c\n", 'A' + ml - 1);
   const uint8_t node_num_children = node->children.count;
-  // printf("node_num_children: %d\n", node_num_children);
   for (uint8_t i = 0; i < node_num_children; i++) {
     node = &nodes->nodes[node_index];
     const int child_index = node->children.indices[i];
     const MutableNode *child = &nodes->nodes[node->children.indices[i]];
     if (child->ml == ml) {
-      // printf("found child with ml: %c at %d\n", 'A' + ml - 1, i);
-      insert_suffix(child_index, nodes, word, pos + 1);
+      assert(cached_node_indices[pos + 1] == child_index);
+      insert_suffix(child_index, nodes, word, pos + 1, cached_node_indices);
       return;
     }
   }
-  // printf("adding child for ml: %c\n", 'A' + ml - 1);
   const int child_index = add_child(node_index, nodes, ml);
-  insert_suffix(child_index, nodes, word, pos + 1);
+  cached_node_indices[pos + 1] = child_index;
+  insert_suffix(child_index, nodes, word, pos + 1, cached_node_indices);
 }
 
 void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
                 KWG *kwg) {
   uint32_t *kwg_nodes = kwg_get_mutable_nodes(kwg);
   for (size_t node_idx = 0; node_idx < ordered_pointers->count; node_idx++) {
-    // printf("node_idx: %zu\n", node_idx);
     MutableNode *node = ordered_pointers->nodes[node_idx];
-    // printf("node->ml: %c\n", 'A' + node->ml - 1);
     uint32_t serialized_node = node->ml << KWG_TILE_BIT_OFFSET;
     if (node->accepts) {
       serialized_node |= KWG_NODE_ACCEPTS_FLAG;
@@ -396,6 +373,26 @@ void kwg_write_words(const KWG *kwg, int node_index, DictionaryWordList *words,
   write_words_aux(kwg, node_index, prefix, 0, false, words, nodes_reached);
 }
 
+int get_letters_in_common(const DictionaryWord *word, uint8_t *last_word,
+                          int *last_word_length) {
+  const int length = dictionary_word_get_length(word);
+  int min_length = length;
+  if (*last_word_length < min_length) {
+    min_length = *last_word_length;
+  }
+  int letters_in_common = 0;
+  for (int k = 0; k < min_length; k++) {
+    if (dictionary_word_get_word(word)[k] == last_word[k]) {
+      letters_in_common++;
+    } else {
+      break;
+    }
+  }
+  *last_word_length = length;
+  memory_copy(last_word, dictionary_word_get_word(word), length);
+  return letters_in_common;
+}
+
 KWG *make_kwg_from_words(const DictionaryWordList *words,
                          kwg_maker_output_t output, kwg_maker_merge_t merging) {
   const bool output_dawg = (output == KWG_MAKER_OUTPUT_DAWG) ||
@@ -404,43 +401,46 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
                              (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
   MutableNodeList *nodes = mutable_node_list_create();
   const int dawg_root_node_index = mutable_node_list_add_root(nodes);
+  // Size is one beyond the longest string because nodes are created for
+  // potential children at the max+1'th, though there are none.
+  int cached_node_indices[MAX_KWG_STRING_LENGTH + 1];
+  uint8_t last_word[MAX_KWG_STRING_LENGTH];
+  int last_word_length = 0;
+  for (int i = 0; i < MAX_KWG_STRING_LENGTH; i++) {
+    last_word[i] = 0;
+  }
   if (output_dawg) {
+    cached_node_indices[0] = dawg_root_node_index;
     for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
       const DictionaryWord *word = dictionary_word_list_get_word(words, i);
-      /*
-            printf("i: %d word: ", i);
-            for (int k = 0; k < dictionary_word_get_length(word); k++) {
-              printf("%c", 'A' + dictionary_word_get_word(word)[k] - 1);
-            }
-            printf("\n");
-      */
-      insert_suffix(dawg_root_node_index, nodes, word, 0);
+      const int letters_in_common =
+          get_letters_in_common(word, last_word, &last_word_length);
+      const int start_index = cached_node_indices[letters_in_common];
+      insert_suffix(start_index, nodes, word, letters_in_common,
+                    cached_node_indices);
     }
   }
 
   const int gaddag_root_node_index = mutable_node_list_add_root(nodes);
   if (output_gaddag) {
+    last_word_length = 0;
+    cached_node_indices[0] = gaddag_root_node_index;
     DictionaryWordList *gaddag_strings = dictionary_word_list_create();
     add_gaddag_strings(words, gaddag_strings);
     for (int i = 0; i < dictionary_word_list_get_count(gaddag_strings); i++) {
       const DictionaryWord *gaddag_string =
           dictionary_word_list_get_word(gaddag_strings, i);
-/*          
-      printf("i: %d gaddag_string: ", i);
-      for (int k = 0; k < dictionary_word_get_length(gaddag_string); k++) {
-        printf("%c", 'A' + dictionary_word_get_word(gaddag_string)[k] - 1);
-      }
-      printf("\n");
-*/      
-      insert_suffix(gaddag_root_node_index, nodes, gaddag_string, 0);
+      const int letters_in_common =
+          get_letters_in_common(gaddag_string, last_word, &last_word_length);
+      const int start_index = cached_node_indices[letters_in_common];
+      insert_suffix(start_index, nodes, gaddag_string, letters_in_common,
+                    cached_node_indices);
     }
   }
 
-  printf("nodes->count: %zu\n", nodes->count);
-
   if (merging == KWG_MAKER_MERGE_EXACT) {
     NodeHashTable table;
-    node_hash_table_initialize(&table, 758633);  // prime
+    node_hash_table_initialize(&table, KWG_HASH_NUMBER_OF_BUCKETS);
     for (size_t i = 0; i < nodes->count; i++) {
       if (!output_dawg && (i == 0)) {
         continue;
@@ -448,30 +448,15 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
       if (!output_gaddag && (i == 1)) {
         continue;
       }
-      // printf("finding or inserting node %zu\n", i);
       MutableNode *node = &nodes->nodes[i];
       MutableNode *match = node_hash_table_find_or_insert(&table, node, nodes);
       if (match == node) {
-        // printf("match is the node itself, we inserted something new\n");
         continue;
       }
       assert(match->merged_into == NULL);
       node->merged_into = match;
     }
-    int buckets_used = 0;
-    size_t max_bucket_size = 0;
-    for (size_t i = 0; i < table.bucket_count; i++) {
-      NodePointerList *bucket = &table.buckets[i];
-      if (bucket->count > 0) {
-        buckets_used++;
-      }
-      if (bucket->count > max_bucket_size) {
-        max_bucket_size = bucket->count;
-      }
-    }
     node_pointer_list_destroy(table.buckets);
-    printf("buckets_used: %d max_bucket_size: %zu\n", buckets_used,
-           max_bucket_size);
   }
 
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
@@ -489,15 +474,8 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     set_final_indices(gaddag_root, nodes, ordered_pointers);
   }
   const int final_node_count = ordered_pointers->count;
-  printf("final_node_count: %d\n", final_node_count);
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);
-  /*
-    for (int i = 0; i < final_node_count; i++) {
-      const uint32_t node = kwg_get_mutable_nodes(kwg)[i];
-      printf("%02x: %08x\n", i, node);
-    }
-    */
   return kwg;
 }
