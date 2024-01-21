@@ -34,6 +34,10 @@ void node_index_list_add(NodeIndexList *list, uint32_t index) {
   list->count++;
 }
 
+void node_index_list_destroy(NodeIndexList *list) {
+  free(list->indices);
+}
+
 typedef struct MutableNode {
   uint8_t ml;
   bool accepts;
@@ -97,6 +101,14 @@ int add_child(int node_index, MutableNodeList *nodes, uint8_t ml) {
   child->ml = ml;
   node_index_list_initialize(&child->children);
   return child_node_index;
+}
+
+void mutable_node_list_destroy(MutableNodeList *nodes) {
+  for (size_t i = 0; i < nodes->count; i++) {
+    node_index_list_destroy(&nodes->nodes[i].children);
+  }
+  free(nodes->nodes);
+  free(nodes);
 }
 
 uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
@@ -203,7 +215,6 @@ void node_pointer_list_add(NodePointerList *list, MutableNode *node) {
 
 void node_pointer_list_destroy(NodePointerList *list) {
   free(list->nodes);
-  free(list);
 }
 
 typedef struct NodeHashTable {
@@ -211,12 +222,19 @@ typedef struct NodeHashTable {
   size_t bucket_count;
 } NodeHashTable;
 
-void node_hash_table_initialize(NodeHashTable *table, size_t bucket_count) {
+void node_hash_table_create(NodeHashTable *table, size_t bucket_count) {
   table->bucket_count = bucket_count;
   table->buckets = malloc_or_die(sizeof(NodePointerList) * bucket_count);
   for (size_t i = 0; i < bucket_count; i++) {
     node_pointer_list_initialize(&table->buckets[i]);
   }
+}
+
+void node_hash_table_destroy_buckets(NodeHashTable *table) {
+  for (size_t i = 0; i < table->bucket_count; i++) {
+    node_pointer_list_destroy(&table->buckets[i]);
+  }
+  free(table->buckets);
 }
 
 MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
@@ -440,7 +458,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
 
   if (merging == KWG_MAKER_MERGE_EXACT) {
     NodeHashTable table;
-    node_hash_table_initialize(&table, KWG_HASH_NUMBER_OF_BUCKETS);
+    node_hash_table_create(&table, KWG_HASH_NUMBER_OF_BUCKETS);
     for (size_t i = 0; i < nodes->count; i++) {
       if (!output_dawg && (i == 0)) {
         continue;
@@ -456,7 +474,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
       assert(match->merged_into == NULL);
       node->merged_into = match;
     }
-    node_pointer_list_destroy(table.buckets);
+    node_hash_table_destroy_buckets(&table);
   }
 
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
@@ -477,5 +495,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);
+  mutable_node_list_destroy(nodes);
+  node_pointer_list_destroy(ordered_pointers);
   return kwg;
 }
