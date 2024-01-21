@@ -81,7 +81,6 @@ MutableNode *mutable_node_list_add(MutableNodeList *nodes) {
   node->merge_offset = 0;
   node->hash_with_just_children_computed = false;
   node->hash_with_node_computed = false;
-  // printf("adding nodes->nodes[%zu]\n", nodes->count);
   nodes->count++;
   return node;
 }
