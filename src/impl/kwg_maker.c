@@ -373,6 +373,8 @@ void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
     return;
   }
   for (int i = node_index;; i++) {
+    assert(i >= 2);
+    assert(i < kwg_get_number_of_nodes(kwg));
     if (nodes_reached != NULL) {
       nodes_reached[i] = true;
     }
@@ -423,13 +425,13 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     for (int i = 0; i < dictionary_word_list_get_count(gaddag_strings); i++) {
       const DictionaryWord *gaddag_string =
           dictionary_word_list_get_word(gaddag_strings, i);
-      /*
-            printf("i: %d gaddag_string: ", i);
-            for (int k = 0; k < dictionary_word_get_length(gaddag_string); k++)
-         { printf("%c", 'A' + dictionary_word_get_word(gaddag_string)[k] - 1);
-            }
-            printf("\n");
-      */
+/*          
+      printf("i: %d gaddag_string: ", i);
+      for (int k = 0; k < dictionary_word_get_length(gaddag_string); k++) {
+        printf("%c", 'A' + dictionary_word_get_word(gaddag_string)[k] - 1);
+      }
+      printf("\n");
+*/      
       insert_suffix(gaddag_root_node_index, nodes, gaddag_string, 0);
     }
   }
@@ -470,11 +472,12 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     node_pointer_list_destroy(table.buckets);
     printf("buckets_used: %d max_bucket_size: %zu\n", buckets_used,
            max_bucket_size);
-
   }
 
   MutableNode *dawg_root = &nodes->nodes[dawg_root_node_index];
+  dawg_root->is_end = true;
   MutableNode *gaddag_root = &nodes->nodes[gaddag_root_node_index];
+  gaddag_root->is_end = true;
   NodePointerList *ordered_pointers = node_pointer_list_create();
   node_pointer_list_add(ordered_pointers, dawg_root);
   node_pointer_list_add(ordered_pointers, gaddag_root);
