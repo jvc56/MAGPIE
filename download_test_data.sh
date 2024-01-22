@@ -2,7 +2,7 @@ SRC_PATH="https://github.com/jvc56/MAGPIE-DATA/raw/main"
 SRC_LEXICA_PATH="$SRC_PATH/lexica"
 DST_LEXICA_PATH="data/lexica"
 SRC_STRATEGY_PATH="$SRC_PATH/strategy"
-DST_STRATEGY_PATH="data/lexica"
+DST_STRATEGY_PATH="data/strategy"
 mkdir -p "$DST_LEXICA_PATH" &&
 mkdir -p "$DST_STRATEGY_PATH" &&
 
