@@ -3,8 +3,8 @@ SRC_LEXICA_PATH="$SRC_PATH/lexica"
 DST_LEXICA_PATH="data/lexica"
 SRC_STRATEGY_PATH="$SRC_PATH/strategy"
 DST_STRATEGY_PATH="data/lexica"
-mkdir -p $DST_LEXICA_PATH &&
-mkdir -p $DST_STRATEGY_PATH &&
+mkdir -p "$DST_LEXICA_PATH" &&
+mkdir -p "$DST_STRATEGY_PATH" &&
 
 lexicons=("CSW21" "NWL20" "DISC2" "FRA20" "OSPS49")
 data_types=("kwg" "klv2")
@@ -23,7 +23,7 @@ csw_leaves="CSW21.csv.gz"
 
 # Download the CSW leaves csv
 wget -O "$DST_LEXICA_PATH/$csw_leaves" "$SRC_LEXICA_PATH/$csw_leaves" 
-gunzip "$DST_LEXICA_PATH/$csw_leaves"
+yes | gunzip "$DST_LEXICA_PATH/$csw_leaves"
 
 # Download the win percentages
 
