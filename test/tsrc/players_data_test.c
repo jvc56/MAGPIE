@@ -108,8 +108,8 @@ void test_players_data() {
   const char *data_names[] = {
       "CSW21", "CSW21", "NWL20",  "NWL20", "CSW21",  "NWL20", "CSW21",
       "CSW21", "CSW21", "CSW21",  "CSW21", "NWL20",  "NWL20", "NWL20",
-      "CSW21", "NWL20", "NWL20",  "CSW21", "OSPS44", "DISC2", "DISC2",
-      "NWL20", "DISC2", "OSPS44", "CSW21", "DISC2",  "NWL20", "DISC2"};
+      "CSW21", "NWL20", "NWL20",  "CSW21", "OSPS49", "DISC2", "DISC2",
+      "NWL20", "DISC2", "OSPS49", "CSW21", "DISC2",  "NWL20", "DISC2"};
   int number_of_data_names = sizeof(data_names) / sizeof(data_names[0]);
   assert(number_of_data_names % 2 == 0);
   test_for_data_type(data_names, PLAYERS_DATA_TYPE_KWG, number_of_data_names);
