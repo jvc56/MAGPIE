@@ -154,11 +154,15 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
   uint64_t hash_with_node =
       hash_with_just_children * KWG_HASH_COMBINING_PRIME_2;
 
-  uint8_t ml = node->ml;
-  bool accepts = node->accepts;
+  const uint8_t ml = node->ml;
+  const bool accepts = node->accepts;
   hash_with_node ^= 1 + ml;
   if (accepts) {
-    hash_with_node ^= 1 << 6;
+    // Most Scrabble languages including English have <32 letters and fit in 5
+    // bits so this hash function is optimized for them. Polish has 33 including
+    // the blank and so this is not ideal for it, but it is still valid, and we
+    // can revist this to work better for large dictionaries if we choose to.
+    hash_with_node ^= 1 << (ENGLISH_ALPHABET_BITS_USED + 1);
   }
   node->hash_with_node = hash_with_node;
   node->hash_with_node_computed = true;

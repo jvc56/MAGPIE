@@ -56,6 +56,7 @@ uint32_t kwg_dawg_prefix_arc(const KWG *kwg, LetterDistribution *ld,
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
                                 string_length(human_readable_prefix));
   DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
+  dictionary_word_list_destroy(prefix_list);
   return kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg), prefix, 0);
 }
 
@@ -184,6 +185,7 @@ void test_careen_career_exact_merged_gaddag() {
   assert(kwg_gaddag_prefix_arc(kwg, ld, "RAC@EE") == c_aree);
   assert(kwg_gaddag_prefix_arc(kwg, ld, "ERAC@E") == c_aree);
   assert(kwg_gaddag_prefix_arc(kwg, ld, "EERAC@") == c_aree);
+
   dictionary_word_list_destroy(words);
   kwg_destroy(kwg);
   config_destroy(config);
