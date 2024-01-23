@@ -228,6 +228,7 @@ void node_pointer_list_add(NodePointerList *list, MutableNode *node) {
 
 void node_pointer_list_destroy(NodePointerList *list) {
   free(list->nodes);
+  free(list);
 }
 
 typedef struct NodeHashTable {
@@ -247,7 +248,6 @@ void node_hash_table_destroy_buckets(NodeHashTable *table) {
   for (size_t i = 0; i < table->bucket_count; i++) {
     node_pointer_list_destroy(&table->buckets[i]);
   }
-  free(table->buckets);
 }
 
 MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
