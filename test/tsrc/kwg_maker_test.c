@@ -230,6 +230,7 @@ void test_two_letter_trie() {
   DictionaryWordList *encoded_words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(two_letter_words);
 
   game_destroy(game);
@@ -269,6 +270,7 @@ void test_two_letter_merged_dawg() {
   DictionaryWordList *encoded_words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(two_letter_words);
 
   game_destroy(game);
@@ -308,12 +310,14 @@ void test_polish_gaddag() {
   DictionaryWordList *encoded_words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(ziet_words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(ziet_words);
 
   DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
                   NULL);
   assert_word_lists_are_equal(ziet_gaddag_strings, encoded_gaddag_strings);
+  dictionary_word_list_destroy(encoded_gaddag_strings);
   dictionary_word_list_destroy(ziet_gaddag_strings);
 
   game_destroy(game);
@@ -353,12 +357,14 @@ void test_large_gaddag() {
   DictionaryWordList *encoded_words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(q_words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(q_words);
 
   DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
                   NULL);
   assert_word_lists_are_equal(q_gaddag_strings, encoded_gaddag_strings);
+  dictionary_word_list_destroy(encoded_gaddag_strings);
   dictionary_word_list_destroy(q_gaddag_strings);
 
   game_destroy(game);
