@@ -386,12 +386,14 @@ void test_full_csw_gaddag() {
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words,
                   nodes_reached);
   assert_word_lists_are_equal(words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(words);
 
   DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
                   nodes_reached);
   assert_word_lists_are_equal(gaddag_strings, encoded_gaddag_strings);
+  dictionary_word_list_destroy(encoded_gaddag_strings);
   dictionary_word_list_destroy(gaddag_strings);
 
   // first two nodes point to the dawg root and gaddag
