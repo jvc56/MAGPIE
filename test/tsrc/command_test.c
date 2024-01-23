@@ -111,7 +111,7 @@ void block_for_search(ExecState *exec_state, int max_seconds) {
     if (search_is_finished) {
       break;
     } else {
-      sleep(1);
+      sleep(5);
     }
     seconds_elapsed++;
     if (seconds_elapsed >= max_seconds) {
@@ -127,7 +127,7 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
     if (get_process_args_finished(process_args)) {
       break;
     } else {
-      sleep(1);
+      sleep(5);
     }
     seconds_elapsed++;
     if (seconds_elapsed >= max_seconds) {
@@ -158,7 +158,7 @@ void assert_command_status_and_output(ExecState *exec_state,
 
   if (should_halt) {
     // If halting, let the search start
-    sleep(2);
+    sleep(5);
     char *status_string = command_search_status(exec_state, true);
     // For now, we do not care about the contents of of the status,
     // we just want to thread_control_halt the command.
@@ -473,25 +473,25 @@ void test_exec_ucgi_command() {
   FileHandler *input_writer = file_handler_create_from_filename(
       test_input_filename, FILE_HANDLER_MODE_WRITE);
 
-  sleep(1);
+  sleep(5);
   file_handler_write(input_writer,
                      "r1 best r2 best i 1 numplays 1 threads 1\n");
-  sleep(1);
+  sleep(5);
   file_handler_write(input_writer,
                      "go autoplay lex CSW21 s1 equity s2 equity\n");
-  sleep(1);
+  sleep(5);
   file_handler_write(input_writer,
                      "go autoplay lex CSW21 s1 equity s2 equity i 10000000\n");
   // Try to immediately start another command while the previous one
   // is still running. This should give a warning.
   file_handler_write(input_writer,
                      "go autoplay lex CSW21 s1 equity s2 equity i 1\n");
-  sleep(1);
+  sleep(5);
   // Interrupt the autoplay which won't finish in 1 second
   file_handler_write(input_writer, "stop\n");
-  sleep(1);
+  sleep(5);
   file_handler_write(input_writer, "quit\n");
-  sleep(1);
+  sleep(5);
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
