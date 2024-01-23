@@ -56,8 +56,8 @@ uint32_t kwg_dawg_prefix_arc(const KWG *kwg, LetterDistribution *ld,
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
                                 string_length(human_readable_prefix));
   DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
-  const uint32_t arc = kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg),
-                                    prefix, 0);
+  const uint32_t arc =
+      kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg), prefix, 0);
   dictionary_word_list_destroy(prefix_list);
   return arc;
 }
@@ -274,7 +274,7 @@ void test_two_letter_merged_dawg() {
 }
 
 void test_polish_gaddag() {
-  Config *config = create_config_or_die("setoptions lex OSPS44");
+  Config *config = create_config_or_die("setoptions lex OSPS49");
   Game *game = game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
   const Player *player = game_get_player(game, 0);
