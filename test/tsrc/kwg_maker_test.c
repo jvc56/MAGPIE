@@ -80,7 +80,10 @@ uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
                                 string_length(string_for_conversion));
   DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
-  return kwg_prefix_arc_aux(kwg, kwg_get_root_node_index(kwg), prefix, 0);
+  const uint32_t arc =
+      kwg_prefix_arc_aux(kwg, kwg_get_root_node_index(kwg), prefix, 0);
+  dictionary_word_list_destroy(prefix_list);
+  return arc;
 }
 
 void test_qi_xi_xu_word_trie() {

@@ -226,7 +226,9 @@ void node_pointer_list_add(NodePointerList *list, MutableNode *node) {
   list->count++;
 }
 
-void node_pointer_list_destroy(NodePointerList *list) { free(list->nodes); }
+void node_pointer_list_destroy(NodePointerList *list) {
+  free(list->nodes);
+}
 
 typedef struct NodeHashTable {
   NodePointerList *buckets;
