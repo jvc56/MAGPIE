@@ -86,11 +86,9 @@ move_validation_status_t validate_tiles_played(const LetterDistribution *ld,
                                                const Board *board, Move *move,
                                                const char *tiles_played,
                                                Rack *tiles_played_rack) {
-
   int machine_letters_size = string_length(tiles_played) + 1;
   uint8_t *machine_letters =
       malloc_or_die(sizeof(uint8_t) * machine_letters_size);
-  // FIXME: probably write directly to the move here
   int number_of_machine_letters = ld_str_to_mls(
       ld, tiles_played, false, machine_letters, machine_letters_size);
 
@@ -101,11 +99,8 @@ move_validation_status_t validate_tiles_played(const LetterDistribution *ld,
   } else if (number_of_machine_letters > BOARD_DIM) {
     status = MOVE_VALIDATION_STATUS_TILES_PLAYED_OVERFLOW;
   } else {
-    move_set_tiles_length(move, number_of_machine_letters);
-    for (int i = 0; i < number_of_machine_letters; i++) {
-      move_set_tile_at_index(move, machine_letters[i], i);
-    }
     // Calculate tiles played
+    move_set_tiles_length(move, number_of_machine_letters);
     int tiles_played = 0;
     int current_row = move_get_row_start(move);
     int current_col = move_get_col_start(move);
@@ -114,13 +109,16 @@ move_validation_status_t validate_tiles_played(const LetterDistribution *ld,
     for (int i = 0; i < number_of_machine_letters; i++) {
       uint8_t board_letter = board_get_letter(board, current_row, current_col);
       if (board_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+        move_set_tile(move, machine_letters[i], i);
         tiles_played++;
         rack_add_letter(tiles_played_rack, machine_letters[i]);
         if (!connected && !board_are_all_adjacent_squares_empty(
                               board, current_row, current_col)) {
           connected = true;
         }
-      } else if (board_letter != move_get_tile(move, i)) {
+      } else if (board_letter == move_get_tile(move, i)) {
+        move_set_tile(move, PLAYED_THROUGH_MARKER, i);
+      } else {
         status = MOVE_VALIDATION_STATUS_TILES_PLAYED_BOARD_MISMATCH;
         break;
       }
@@ -139,9 +137,8 @@ move_validation_status_t validate_tiles_played(const LetterDistribution *ld,
   return status;
 }
 
-move_validation_status_t validate_split_move(const Game *game,
-                                             const StringSplitter *split_move,
-                                             ValidatedMove *vm,
+move_validation_status_t validate_split_move(const StringSplitter *split_move,
+                                             Game *game, ValidatedMove *vm,
                                              int player_index,
                                              Rack *tiles_played_rack) {
   // This function handles the following UCGI move string types.
@@ -296,7 +293,7 @@ move_validation_status_t validate_split_move(const Game *game,
     return MOVE_VALIDATION_STATUS_EMPTY_CHALLENGE_POINTS;
   }
 
-  if (!is_all_digits_or_empty) {
+  if (!is_all_digits_or_empty(challenge_points)) {
     return MOVE_VALIDATION_STATUS_INVALID_CHALLENGE_POINTS;
   }
 
@@ -321,14 +318,14 @@ move_validation_status_t validate_split_move(const Game *game,
   return status;
 }
 
-move_validation_status_t validate_move(ValidatedMove *vm, const Game *game,
+move_validation_status_t validate_move(ValidatedMove *vm, Game *game,
                                        int player_index,
                                        const char *ucgi_move_string) {
   StringSplitter *split_move = split_string(ucgi_move_string, '.', false);
   Rack *tiles_played_rack = rack_create(ld_get_size(game_get_ld(game)));
 
   move_validation_status_t status = validate_split_move(
-      game, vm, split_move, player_index, tiles_played_rack);
+      split_move, game, vm, player_index, tiles_played_rack);
 
   string_splitter_destroy(split_move);
   rack_destroy(tiles_played_rack);
@@ -338,8 +335,8 @@ move_validation_status_t validate_move(ValidatedMove *vm, const Game *game,
 
 // this function assumes the word is always horizontal. If this isn't the case,
 // the board needs to be transposed ahead of time.
-int score_move(const Board *board, const LetterDistribution *ld,
-               const Move *move, int cross_set_index) {
+int score_move(const LetterDistribution *ld, const Move *move, Board *board,
+               int cross_set_index) {
   int ls;
   int main_word_score = 0;
   int cross_scores = 0;
@@ -349,14 +346,24 @@ int score_move(const Board *board, const LetterDistribution *ld,
   int tiles_length = move_get_tiles_length(move);
   int row_start = move_get_row_start(move);
   int col_start = move_get_col_start(move);
-  int cross_dir = 1 - move_get_dir(move);
+  int dir = move_get_dir(move);
+  int cross_dir = 1 - dir;
+
+  bool board_was_transposed = false;
+
+  if (!board_matches_dir(board, dir)) {
+    board_transpose(board);
+    board_was_transposed = true;
+    int ph = col_start;
+    col_start = row_start;
+    row_start = ph;
+  }
 
   if (tiles_played == RACK_SIZE) {
     bingo_bonus = DEFAULT_BINGO_BONUS;
   }
   int word_multiplier = 1;
   for (int idx = 0; idx < tiles_length; idx++) {
-    // FIXME: check if this indexing is correct
     uint8_t ml = move_get_tile(move, idx);
     uint8_t bonus_square =
         board_get_bonus_square(board, row_start, col_start + idx);
@@ -390,11 +397,16 @@ int score_move(const Board *board, const LetterDistribution *ld,
                       cs * this_word_multiplier;
     }
   }
+
+  if (board_was_transposed) {
+    board_transpose(board);
+  }
+
   return main_word_score * word_multiplier + cross_scores + bingo_bonus;
 }
 
-move_validation_status_t validated_move_load(ValidatedMove *vm,
-                                             const Game *game, int player_index,
+move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
+                                             int player_index,
                                              const char *ucgi_move_string,
                                              bool allow_phonies) {
   if (is_all_whitespace_or_empty(ucgi_move_string)) {
@@ -405,29 +417,26 @@ move_validation_status_t validated_move_load(ValidatedMove *vm,
   }
 
   move_validation_status_t status =
-      validate_move(game, vm, ucgi_move_string, player_index);
+      validate_move(vm, game, player_index, ucgi_move_string);
 
   if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
     return status;
   }
 
   if (move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    // FIXME: resolve direction
     move_set_score(
         vm->move,
-        score_move(game_get_board(game), game_get_ld(game), vm->move,
+        score_move(game_get_ld(game), vm->move, game_get_board(game),
                    board_get_cross_set_index(
                        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
                        player_index)));
 
-    // FIXME: resolve directions
     vm->formed_words = formed_words_create(game_get_board(game), vm->move);
-    // Assume that that kwg is shared
+
     formed_words_populate_validities(
         player_get_kwg(game_get_player(game, player_index)), vm->formed_words);
 
     if (!allow_phonies) {
-      bool phonies_present = false;
       for (int i = 0; i < formed_words_get_num_words(vm->formed_words); i++) {
         if (!formed_words_get_word_valid(vm->formed_words, i)) {
           return MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED;
@@ -439,7 +448,7 @@ move_validation_status_t validated_move_load(ValidatedMove *vm,
   return MOVE_VALIDATION_STATUS_SUCCESS;
 }
 
-ValidatedMove *validated_move_create(const Game *game, int player_index,
+ValidatedMove *validated_move_create(Game *game, int player_index,
                                      const char *ucgi_move_string,
                                      bool allow_phonies) {
   ValidatedMove *vm = malloc_or_die(sizeof(ValidatedMove));
@@ -460,7 +469,7 @@ void validated_move_destroy(ValidatedMove *vm) {
   free(vm);
 }
 
-ValidatedMoves *validated_moves_create(const Game *game, int player_index,
+ValidatedMoves *validated_moves_create(Game *game, int player_index,
                                        const char *ucgi_moves_string,
                                        bool allow_phonies) {
   ValidatedMoves *vms = malloc_or_die(sizeof(ValidatedMoves));
@@ -496,8 +505,16 @@ void validated_moves_destroy(ValidatedMoves *vms) {
   free(vms);
 }
 
-int validated_moves_get_moves(ValidatedMoves *vms) {
+int validated_moves_get_number_of_moves(ValidatedMoves *vms) {
   return vms->number_of_moves;
+}
+
+Move *validated_moves_get_move(ValidatedMoves *vms, int i) {
+  return vms->moves[i]->move;
+}
+
+FormedWords *validated_mvoes_get_formed_words(ValidatedMoves *vms, int i) {
+  return vms->moves[i]->formed_words;
 }
 
 // Returns success if all moves are valid or
@@ -513,7 +530,7 @@ validated_moves_get_validation_status(ValidatedMoves *vms) {
 }
 
 // This function takes ownership of vms2.
-bool validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2) {
+void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2) {
   if (vms2->number_of_moves == 0) {
     return;
   }

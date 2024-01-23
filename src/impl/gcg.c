@@ -361,7 +361,6 @@ void copy_cumulative_score_to_game_event(const GCGParser *gcg_parser,
   free(cumulative_score_string);
 }
 
-// FIXME: use move validation functions
 uint8_t *convert_tiles_string_to_machine_letters(
     const GCGParser *gcg_parser, const char *gcg_line, int group_index,
     bool allow_played_through_marker, int *number_of_machine_letters) {
@@ -386,7 +385,6 @@ uint8_t *convert_tiles_string_to_machine_letters(
   return machine_letters;
 }
 
-// FIXME: use move validation functions
 bool copy_played_tiles_to_game_event(const GCGParser *gcg_parser,
                                      GameEvent *game_event,
                                      const char *gcg_line, int group_index) {
@@ -400,7 +398,7 @@ bool copy_played_tiles_to_game_event(const GCGParser *gcg_parser,
     Move *move = game_event_get_move(game_event);
     move_set_tiles_length(move, number_of_machine_letters);
     for (int i = 0; i < number_of_machine_letters; i++) {
-      move_set_tile_at_index(move, played_tiles[i], i);
+      move_set_tile(move, played_tiles[i], i);
     }
     // Calculate tiles played
     int tiles_played = 0;
@@ -431,7 +429,7 @@ bool copy_exchanged_tiles_to_game_event(const GCGParser *gcg_parser,
     move_set_tiles_length(move, number_of_machine_letters);
     move_set_tiles_played(move, number_of_machine_letters);
     for (int i = 0; i < number_of_machine_letters; i++) {
-      move_set_tile_at_index(move, played_tiles[i], i);
+      move_set_tile(move, played_tiles[i], i);
     }
   }
 
@@ -459,7 +457,6 @@ Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
   return rack;
 }
 
-// FIXME: this should use the validated move function
 gcg_parse_status_t copy_position_to_game_event(const GCGParser *gcg_parser,
                                                GameEvent *game_event,
                                                const char *gcg_line,

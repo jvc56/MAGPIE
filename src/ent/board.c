@@ -315,6 +315,11 @@ void board_set_transposed(Board *board, bool transposed) {
   board->transposed = transposed;
 }
 
+bool board_matches_dir(const Board *board, int dir) {
+  return (board_is_dir_vertical(dir) && board_get_transposed(board)) ||
+         (!board_is_dir_vertical(dir) && !board_get_transposed(board));
+}
+
 int board_get_tiles_played(const Board *board) { return board->tiles_played; }
 
 void board_increment_tiles_played(Board *board, int tiles_played) {

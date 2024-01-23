@@ -165,7 +165,9 @@ void execute_command(ExecState *exec_state) {
     const char *moves = config_get_moves(config);
     if (moves) {
       Game *game = exec_state_get_game(exec_state);
-      ValidatedMoves *new_validated_moves = validated_moves_create(game, moves);
+      int player_on_turn_index = game_get_player_on_turn_index(game);
+      ValidatedMoves *new_validated_moves =
+          validated_moves_create(game, player_on_turn_index, moves, true);
       move_validation_status_t move_validation_status =
           validated_moves_get_validation_status(new_validated_moves);
       if (move_validation_status != MOVE_VALIDATION_STATUS_SUCCESS) {
@@ -174,6 +176,8 @@ void execute_command(ExecState *exec_state) {
                                   (int)move_validation_status);
         validated_moves_destroy(new_validated_moves);
         return;
+      } else {
+        // FIXME: warn about phony moves
       }
 
       validated_moves_combine(exec_state_get_validated_moves(exec_state),

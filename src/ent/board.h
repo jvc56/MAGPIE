@@ -21,6 +21,7 @@ bool board_are_all_adjacent_squares_empty(const Board *board, int row, int col);
 bool board_is_position_valid(int row, int col);
 int board_is_letter_allowed_in_cross_set(uint64_t cross_set, uint8_t letter);
 bool board_is_dir_vertical(int dir);
+bool board_matches_dir(const Board *board, int dir);
 
 bool board_get_anchor(const Board *board, int row, int col, int dir);
 uint8_t board_get_bonus_square(const Board *board, int row, int col);

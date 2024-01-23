@@ -26,14 +26,16 @@ struct FormedWords {
 };
 
 FormedWords *formed_words_create(Board *board, Move *move) {
-  int tiles_played = move_get_tiles_played(move);
   int tiles_length = move_get_tiles_length(move);
   int row_start = move_get_row_start(move);
   int col_start = move_get_col_start(move);
   int dir = move_get_dir(move);
 
-  if (board_is_dir_vertical(dir)) {
+  bool board_was_transposed = false;
+
+  if (!board_matches_dir(board, dir)) {
     board_transpose(board);
+    board_was_transposed = true;
     int ph = col_start;
     col_start = row_start;
     row_start = ph;
@@ -44,7 +46,6 @@ FormedWords *formed_words_create(Board *board, Move *move) {
   uint8_t main_word[BOARD_DIM];
   int main_word_idx = 0;
   for (int idx = 0; idx < tiles_length; idx++) {
-    // FIXME: check if this indexing is correct
     uint8_t ml = move_get_tile(move, idx);
     bool fresh_tile = false;
 
@@ -104,7 +105,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
   formed_words_idx++;
   ws->num_words = formed_words_idx;
 
-  if (dir) {
+  if (board_was_transposed) {
     board_transpose(board);
   }
 

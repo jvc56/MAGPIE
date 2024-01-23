@@ -95,7 +95,7 @@ void move_set_tiles_length(Move *move, int tiles_length) {
 
 void move_set_dir(Move *move, int dir) { move->dir = dir; }
 
-void move_set_tile_at_index(Move *move, uint8_t tile, int index) {
+void move_set_tile(Move *move, uint8_t tile, int index) {
   if (index >= 0 && index < BOARD_DIM) {
     move->tiles[index] = tile;
   }

@@ -7,6 +7,7 @@
 #include "game.h"
 #include "inference_results.h"
 #include "sim_results.h"
+#include "validated_move.h"
 
 typedef struct ExecState ExecState;
 
@@ -19,6 +20,7 @@ SimResults *exec_state_get_sim_results(const ExecState *exec_state);
 InferenceResults *exec_state_get_inference_results(const ExecState *exec_state);
 AutoplayResults *exec_state_get_autoplay_results(const ExecState *exec_state);
 ErrorStatus *exec_state_get_error_status(const ExecState *exec_state);
+ValidatedMoves *exec_state_get_validated_moves(const ExecState *exec_state);
 
 void exec_state_init_game(ExecState *exec_state);
 
