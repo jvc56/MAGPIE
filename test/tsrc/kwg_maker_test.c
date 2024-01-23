@@ -56,8 +56,10 @@ uint32_t kwg_dawg_prefix_arc(const KWG *kwg, LetterDistribution *ld,
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
                                 string_length(human_readable_prefix));
   DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
+  const uint32_t arc = kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg),
+                                    prefix, 0);
   dictionary_word_list_destroy(prefix_list);
-  return kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg), prefix, 0);
+  return arc;
 }
 
 uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
