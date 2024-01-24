@@ -142,6 +142,7 @@ char *file_handler_get_line_with_lock(FileHandler *fh) {
   size_t len = 0;
   ssize_t read;
 
+  errno = 0;
   read = getline(&line, &len, fh->file);
   if (read == -1) {
     int error_number = errno;
