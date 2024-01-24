@@ -231,7 +231,6 @@ void node_pointer_list_destroy(NodePointerList *list) {
   free(list);
 }
 
-// Hash table does not own the nodes
 typedef struct NodeHashTable {
   NodePointerList *buckets;
   size_t bucket_count;
@@ -246,6 +245,9 @@ void node_hash_table_create(NodeHashTable *table, size_t bucket_count) {
 }
 
 void node_hash_table_destroy_buckets(NodeHashTable *table) {
+  for (size_t i = 0; i < table->bucket_count; i++) {
+    free(table->buckets[i].nodes);
+  }
   free(table->buckets);
 }
 
