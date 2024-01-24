@@ -471,6 +471,7 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
       insert_suffix(start_index, nodes, gaddag_string, letters_in_common,
                     cached_node_indices);
     }
+    dictionary_word_list_destroy(gaddag_strings);
   }
 
   if (merging == KWG_MAKER_MERGE_EXACT) {
