@@ -245,11 +245,9 @@ void node_hash_table_create(NodeHashTable *table, size_t bucket_count) {
   }
 }
 
-// Frees the buckets but not the nodes within them.
 void node_hash_table_destroy_buckets(NodeHashTable *table) {
   for (int i = 0; i < table->bucket_count; i++) {
-    // Shallow, frees pointers to lists but not the nodes.
-    free(&table->buckets[i]);
+    free(&table->buckets[i].nodes);
   }
   free(table->buckets);
 }
