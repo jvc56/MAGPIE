@@ -31,7 +31,7 @@ typedef struct NodeIndexList {
 } NodeIndexList;
 
 void node_index_list_initialize(NodeIndexList *list) {
-  list->capacity = 5;
+  list->capacity = KWG_NODE_INDEX_LIST_INITIAL_CAPACITY;
   list->indices = malloc_or_die(sizeof(uint32_t) * list->capacity);
   list->count = 0;
 }
@@ -70,7 +70,7 @@ typedef struct MutableNodeList {
 
 MutableNodeList *mutable_node_list_create() {
   MutableNodeList *mutable_node_list = malloc_or_die(sizeof(MutableNodeList));
-  mutable_node_list->capacity = 1000000;
+  mutable_node_list->capacity = KWG_MUTABLE_NODE_LIST_INITIAL_CAPACITY;
   mutable_node_list->nodes =
       malloc_or_die(sizeof(MutableNode) * mutable_node_list->capacity);
   mutable_node_list->count = 0;
@@ -161,7 +161,7 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
     // Most Scrabble languages including English have <32 letters and fit in 5
     // bits so this hash function is optimized for them. Polish has 33 including
     // the blank and so this is not ideal for it, but it is still valid, and we
-    // can revist this to work better for large dictionaries if we choose to.
+    // can revisit this to work better for large dictionaries if we choose to.
     hash_with_node ^= 1 << (ENGLISH_ALPHABET_BITS_USED + 1);
   }
   node->hash_with_node = hash_with_node;
@@ -203,7 +203,7 @@ typedef struct NodePointerList {
 
 NodePointerList *node_pointer_list_create() {
   NodePointerList *node_pointer_list = malloc_or_die(sizeof(NodePointerList));
-  node_pointer_list->capacity = 1000000;
+  node_pointer_list->capacity = KWG_ORDERED_POINTER_LIST_INITIAL_CAPACITY;
   node_pointer_list->nodes =
       malloc_or_die(sizeof(MutableNode *) * node_pointer_list->capacity);
   node_pointer_list->count = 0;
@@ -211,7 +211,7 @@ NodePointerList *node_pointer_list_create() {
 }
 
 void node_pointer_list_initialize(NodePointerList *list) {
-  list->capacity = 2;
+  list->capacity = KWG_HASH_BUCKET_ITEMS_CAPACITY;
   list->nodes = malloc_or_die(sizeof(MutableNode *) * list->capacity);
   list->count = 0;
 }
