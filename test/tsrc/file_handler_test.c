@@ -117,7 +117,7 @@ void block_for_fifo_finish(bool *done_reading, bool *done_writing,
     if (*done_reading && done_writing) {
       break;
     } else {
-      sleep(5);
+      sleep(1);
     }
     seconds_elapsed++;
     if (seconds_elapsed >= max_seconds) {
