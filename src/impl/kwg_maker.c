@@ -246,9 +246,6 @@ void node_hash_table_create(NodeHashTable *table, size_t bucket_count) {
 }
 
 void node_hash_table_destroy_buckets(NodeHashTable *table) {
-  for (int i = 0; i < table->bucket_count; i++) {
-    free(&table->buckets[i].nodes);
-  }
   free(table->buckets);
 }
 
