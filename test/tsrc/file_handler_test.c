@@ -158,13 +158,13 @@ void *write_fifo_thread(void *uncasted_test_fifo_args) {
   FileHandler *fifo_writer =
       file_handler_create_from_filename(fifo_filename, FILE_HANDLER_MODE_WRITE);
 
-  sleep(5);
+  sleep(1);
   file_handler_write(fifo_writer, "a\n");
-  sleep(5);
+  sleep(1);
   file_handler_write(fifo_writer, "b\n");
-  sleep(5);
+  sleep(1);
   file_handler_write(fifo_writer, "c\n");
-  sleep(5);
+  sleep(1);
   file_handler_destroy(fifo_writer);
 
   test_fifo_args->done_writing = true;
