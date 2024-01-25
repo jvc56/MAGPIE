@@ -322,7 +322,7 @@ void test_command_execution() {
     assert_command_status_and_output(
         exec_state,
         "go autoplay s1 equity s2 equity "
-        "r1 best r2 best i 10 numplays 1 lex OSPS44",
+        "r1 best r2 best i 10 numplays 1 lex OSPS49",
         false, 30, 1, 0);
   }
   exec_state_destroy(exec_state);

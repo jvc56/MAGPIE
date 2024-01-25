@@ -32,7 +32,7 @@ void test_ld_str_to_mls() {
   const LetterDistribution *catalan_ld = config_get_ld(disc_config);
 
   Config *osps_config = create_config_or_die(
-      "setoptions lex OSPS44 s1 equity s2 equity r1 all r2 all numplays 1");
+      "setoptions lex OSPS49 s1 equity s2 equity r1 all r2 all numplays 1");
   const LetterDistribution *polish_ld = config_get_ld(osps_config);
 
   uint8_t mls[4];

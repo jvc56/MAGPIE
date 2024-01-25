@@ -27,6 +27,7 @@
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "wasm_api_test.h"
+#include "word_prune_test.h"
 #include "word_test.h"
 
 void run_all() {
@@ -59,6 +60,7 @@ void run_all() {
   test_autoplay();
   test_wasm_api();
   test_words();
+  test_word_prune();
   test_file_handler();
 }
 
@@ -111,6 +113,8 @@ void run_test(const char *subtest) {
     test_wasm_api();
   } else if (strings_equal(subtest, "words")) {
     test_words();
+  } else if (strings_equal(subtest, "wordprune")) {
+    test_word_prune();
   } else if (strings_equal(subtest, "fh")) {
     test_file_handler();
   } else {

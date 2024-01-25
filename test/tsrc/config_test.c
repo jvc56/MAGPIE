@@ -140,9 +140,9 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL);
   test_config_error(config, "go sim l1 CSW21 l2 DISC2",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "go sim l1 OSPS44 l2 DISC2",
+  test_config_error(config, "go sim l1 OSPS49 l2 DISC2",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "go sim l1 NWL20 l2 OSPS44",
+  test_config_error(config, "go sim l1 NWL20 l2 OSPS49",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
   test_config_error(config, "go sim l1 NWL20 l2 NWL20 k2 DISC2",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);

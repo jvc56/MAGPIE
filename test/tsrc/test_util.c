@@ -297,6 +297,7 @@ char *get_test_filename(const char *filename) {
 }
 
 void delete_file(const char *filename) {
+  errno = 0;
   int result = remove(filename);
   if (result != 0) {
     int error_number = errno;
@@ -311,6 +312,7 @@ void reset_file(const char *filename) { fclose(fopen(filename, "w")); }
 void create_fifo(const char *fifo_name) {
   int result;
 
+  errno = 0;
   result = mkfifo(fifo_name, 0666); // Read/write permissions for everyone
   if (result < 0) {
     int error_number = errno;
