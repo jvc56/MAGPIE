@@ -25,6 +25,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/validated_move.h"
 
 #include "../util/util.h"
 
@@ -234,26 +235,24 @@ void record_play(MoveGen *gen, int leftstrip, int rightstrip,
   }
 
   int score = 0;
-  uint8_t *strip = NULL;
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    score = board_score_move(
-        gen->board, gen->ld, gen->strip, leftstrip, rightstrip, start_row,
-        start_col, tiles_played, !board_is_dir_vertical(gen->dir),
+    move_list_set_spare_move(gen->move_list, gen->strip, leftstrip, rightstrip,
+                             score, row, col, tiles_played, gen->dir,
+                             move_type);
+    score = score_move(
+        gen->ld, move_list_get_spare_move(gen->move_list), gen->board,
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
-    strip = gen->strip;
+    move_set_score(move_list_get_spare_move(gen->move_list), score);
   } else if (move_type == GAME_EVENT_EXCHANGE) {
     // ignore the empty exchange case
     if (rightstrip == 0) {
       return;
     }
-    tiles_played = rightstrip;
-    strip = gen->exchange_strip;
+    move_list_set_spare_move(gen->move_list, gen->exchange_strip, leftstrip,
+                             rightstrip, score, row, col, rightstrip, gen->dir,
+                             move_type);
   }
-
-  // Set the move to more easily handle equity calculations
-  move_list_set_spare_move(gen->move_list, strip, leftstrip, rightstrip, score,
-                           row, col, tiles_played, gen->dir, move_type);
 
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     double equity;

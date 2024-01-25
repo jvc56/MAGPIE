@@ -31,5 +31,6 @@ void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2);
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
                                          ValidatedMoves *vms, int i);
-
+int score_move(const LetterDistribution *ld, const Move *move, Board *board,
+               int cross_set_index);
 #endif

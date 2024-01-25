@@ -47,7 +47,7 @@ void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
 }
 
 // tiles must contain 0 for play-through tiles!
-char *score_move(const char *cgpstr, const char *ucgi_move_str) {
+char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
   load_cgp_into_iso_exec_state(cgpstr, 1);
   Game *game = exec_state_get_game(iso_exec_state);
   Board *board = game_get_board(game);

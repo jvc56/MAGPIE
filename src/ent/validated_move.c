@@ -513,7 +513,7 @@ Move *validated_moves_get_move(ValidatedMoves *vms, int i) {
   return vms->moves[i]->move;
 }
 
-FormedWords *validated_mvoes_get_formed_words(ValidatedMoves *vms, int i) {
+FormedWords *validated_moves_get_formed_words(ValidatedMoves *vms, int i) {
   return vms->moves[i]->formed_words;
 }
 

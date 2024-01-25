@@ -1,11 +1,14 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include "../../src/def/validated_move_defs.h"
+
 #include "../../src/ent/board.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/kwg.h"
 #include "../../src/ent/player.h"
+#include "../../src/ent/validated_move.h"
 #include "../../src/ent/words.h"
 
 #include "../../src/util/string_util.h"
@@ -19,15 +22,13 @@ void test_words_played() {
   Game *game = game_create(config);
   game_load_cgp(game, VS_ED);
 
-  Board *board = game_get_board(game);
-  Player *player0 = game_get_player(game, 0);
-  const KWG *kwg = player_get_kwg(player0);
+  ValidatedMoves *vms_pent = validated_moves_create(game, 0, "N11.PeNT", false);
 
-  // Play PeNT vertically at N11 (col 14, row 11)
-  uint8_t PeNT[] = {16, 5 | 0x80, 14, 20};
-  // use 0-based indexing.
-  FormedWords *fw = formed_words_create(board, PeNT, 0, 3, 10, 13, 1);
-  formed_words_populate_validities(kwg, fw);
+  assert(validated_moves_get_validation_status(vms_pent) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+
+  FormedWords *fw = validated_moves_get_formed_words(vms_pent, 0);
+
   assert(formed_words_get_num_words(fw) == 4);
   // Should generate 4 words: PIP, ONE, HEN, and the main word PENT
   assert(formed_words_get_word_length(fw, 0) == 3);
@@ -46,12 +47,16 @@ void test_words_played() {
   assert(formed_words_get_word_valid(fw, 3) == 1);
   assert(memory_compare(formed_words_get_word(fw, 3),
                         (uint8_t[]){16, 5, 14, 20}, 4) == 0);
-  formed_words_destroy(fw);
+  validated_moves_destroy(vms_pent);
 
   // Play some random phoney making a lot of words 6G DI(PET)AZ
-  uint8_t DIPETAZ[] = {4, 9, 0, 0, 0, 1, 26};
-  fw = formed_words_create(board, DIPETAZ, 0, 6, 5, 6, 0);
-  formed_words_populate_validities(kwg, fw);
+  ValidatedMoves *vms_dipetaz =
+      validated_moves_create(game, 0, "6G.DIPETAZ", true);
+
+  assert(validated_moves_get_validation_status(vms_dipetaz) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+
+  fw = validated_moves_get_formed_words(vms_dipetaz, 0);
 
   assert(formed_words_get_num_words(fw) == 5);
   // should generate 5 "words":
@@ -77,12 +82,15 @@ void test_words_played() {
   assert(memory_compare(formed_words_get_word(fw, 4),
                         (uint8_t[]){4, 9, 16, 5, 20, 1, 26}, 7) == 0);
 
-  formed_words_destroy(fw);
+  validated_moves_destroy(vms_dipetaz);
 
   // play a single tile that makes two words. 9F (BOY)S
-  uint8_t BOYS[] = {0, 0, 0, 19};
-  fw = formed_words_create(board, BOYS, 0, 3, 8, 5, 0);
-  formed_words_populate_validities(kwg, fw);
+  ValidatedMoves *vms_boys = validated_moves_create(game, 0, "9F.BOYS", false);
+
+  assert(validated_moves_get_validation_status(vms_boys) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+
+  fw = validated_moves_get_formed_words(vms_boys, 0);
 
   assert(formed_words_get_num_words(fw) == 2);
   // generates SPAYS and BOYS
@@ -95,12 +103,16 @@ void test_words_played() {
   assert(memory_compare(formed_words_get_word(fw, 1),
                         (uint8_t[]){2, 15, 25, 19}, 4) == 0);
 
-  formed_words_destroy(fw);
+  validated_moves_destroy(vms_boys);
 
   // same as above but dir - I5 SPAY(S)
-  uint8_t SPAYS[] = {0, 0, 0, 0, 19};
-  fw = formed_words_create(board, SPAYS, 0, 4, 4, 8, 1);
-  formed_words_populate_validities(kwg, fw);
+  ValidatedMoves *vms_spays =
+      validated_moves_create(game, 0, "I5.SPAYS", false);
+
+  assert(validated_moves_get_validation_status(vms_spays) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+
+  fw = validated_moves_get_formed_words(vms_spays, 0);
 
   // generates BOYS and SPAYS
   assert(formed_words_get_word_length(fw, 0) == 4);
@@ -112,7 +124,8 @@ void test_words_played() {
   assert(memory_compare(formed_words_get_word(fw, 1),
                         (uint8_t[]){19, 16, 1, 25, 19}, 5) == 0);
 
-  formed_words_destroy(fw);
+  validated_moves_destroy(vms_spays);
+
   game_destroy(game);
   config_destroy(config);
 }
