@@ -7,8 +7,10 @@
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+
 #include "../util/string_util.h"
 #include "../util/util.h"
+
 #include "board.h"
 #include "letter_distribution.h"
 
