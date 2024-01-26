@@ -14,6 +14,15 @@ void *malloc_or_die(size_t size) {
   return uncasted_pointer;
 }
 
+void *calloc_or_die(size_t number_of_elements, size_t size_of_element) {
+  void *uncasted_pointer = calloc(number_of_elements, size_of_element);
+  if (!uncasted_pointer) {
+    log_fatal("failed to calloc %lu elements of size %lu.\n",
+              number_of_elements, size_of_element);
+  }
+  return uncasted_pointer;
+}
+
 void *realloc_or_die(void *realloc_target, size_t size) {
   void *realloc_result = realloc(realloc_target, size);
   if (!realloc_result) {

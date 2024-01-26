@@ -11,12 +11,12 @@
 
 #include "../def/kwg_defs.h"
 
-#include "letter_distribution.h"
-
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
+
+#include "letter_distribution.h"
 
 // The KWG data structure was originally
 // developed in wolges. For more details
@@ -24,6 +24,7 @@
 // https://github.com/andy-k/wolges/blob/main/details.txt
 struct KWG {
   uint32_t *nodes;
+  int number_of_nodes;
 };
 
 char *get_kwg_filepath(const char *kwg_name) {
@@ -37,7 +38,7 @@ char *get_kwg_filepath(const char *kwg_name) {
 
 void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
                                 FILE *stream) {
-  kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
+  kwg_allocate_nodes(kwg, number_of_nodes);                                  
   size_t result = fread(kwg->nodes, sizeof(uint32_t), number_of_nodes, stream);
   if (result != number_of_nodes) {
     log_fatal("kwg nodes fread failure: %zd != %zd", result, number_of_nodes);
@@ -45,7 +46,15 @@ void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
   for (uint32_t i = 0; i < number_of_nodes; i++) {
     kwg->nodes[i] = le32toh(kwg->nodes[i]);
   }
+  kwg->number_of_nodes = number_of_nodes;
 }
+
+void kwg_allocate_nodes(KWG *kwg, size_t number_of_nodes) {
+  kwg->nodes = (uint32_t *)malloc_or_die(number_of_nodes * sizeof(uint32_t));
+  kwg->number_of_nodes = number_of_nodes;
+}
+
+uint32_t *kwg_get_mutable_nodes(KWG *kwg) { return kwg->nodes; }
 
 void load_kwg(KWG *kwg, const char *kwg_name) {
   char *kwg_filename = get_kwg_filepath(kwg_name);
@@ -56,8 +65,8 @@ void load_kwg(KWG *kwg, const char *kwg_name) {
   }
   free(kwg_filename);
 
-  fseek(stream, 0, SEEK_END);        // seek to end of file
-  long int kwg_size = ftell(stream); // get current file pointer
+  fseek(stream, 0, SEEK_END);         // seek to end of file
+  long int kwg_size = ftell(stream);  // get current file pointer
   fseek(stream, 0, SEEK_SET);
 
   size_t number_of_nodes = kwg_size / sizeof(uint32_t);
@@ -87,19 +96,19 @@ void kwg_destroy(KWG *kwg) {
 }
 
 bool kwg_is_end(const KWG *kwg, int node_index) {
-  return (kwg->nodes[node_index] & 0x400000) != 0;
+  return (kwg->nodes[node_index] & KWG_NODE_IS_END_FLAG) != 0;
 }
 
 bool kwg_accepts(const KWG *kwg, int node_index) {
-  return (kwg->nodes[node_index] & 0x800000) != 0;
+  return (kwg->nodes[node_index] & KWG_NODE_ACCEPTS_FLAG) != 0;
 }
 
 int kwg_arc_index(const KWG *kwg, int node_index) {
-  return (kwg->nodes[node_index] & 0x3fffff);
+  return (kwg->nodes[node_index] & KWG_ARC_INDEX_MASK);
 }
 
 int kwg_tile(const KWG *kwg, int node_index) {
-  return kwg->nodes[node_index] >> 24;
+  return kwg->nodes[node_index] >> KWG_TILE_BIT_OFFSET;
 }
 
 int kwg_get_dawg_root_node_index(const KWG *kwg) {
@@ -150,3 +159,5 @@ uint64_t kwg_get_letter_set(const KWG *kwg, int node_index) {
   }
   return ls;
 }
+
+int kwg_get_number_of_nodes(const KWG *kwg) { return kwg->number_of_nodes; }
