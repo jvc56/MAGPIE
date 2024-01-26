@@ -384,13 +384,14 @@ void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
     if (nodes_reached != NULL) {
       nodes_reached[i] = true;
     }
-    const int ml = kwg_tile(kwg, i);
-    const int new_node_index = kwg_arc_index(kwg, i);
-    bool accepts = kwg_accepts(kwg, i);
+    const uint32_t node = kwg_node(kwg, i);
+    const int ml = kwg_node_tile(node);
+    const int new_node_index = kwg_node_arc_index(node);
+    bool accepts = kwg_node_accepts(node);
     prefix[prefix_length] = ml;
     write_words_aux(kwg, new_node_index, prefix, prefix_length + 1, accepts,
                     words, nodes_reached);
-    if (kwg_is_end(kwg, i)) {
+    if (kwg_node_is_end(node)) {
       break;
     }
   }

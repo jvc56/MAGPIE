@@ -10,15 +10,11 @@
 #include <stdlib.h>
 
 #include "../def/kwg_defs.h"
-<<<<<<< HEAD
-=======
 
->>>>>>> origin/main
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
-#include "letter_distribution.h"
 
 #include "letter_distribution.h"
 
