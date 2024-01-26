@@ -217,6 +217,7 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
     return MOVE_VALIDATION_STATUS_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED;
   }
 
+  // FIXME: The rack should be partially set with the played tiles.
   if (is_all_digits_or_empty(played_tiles_or_number_exchanged)) {
     if (move_get_type(vm->move) != GAME_EVENT_EXCHANGE) {
       return MOVE_VALIDATION_STATUS_NONEXCHANGE_NUMERIC_TILES;
@@ -333,8 +334,9 @@ move_validation_status_t validate_move(ValidatedMove *vm, Game *game,
   return status;
 }
 
-// this function assumes the word is always horizontal. If this isn't the case,
+// Assumes the word is always horizontal. If this isn't the case,
 // the board needs to be transposed ahead of time.
+// FIXME: make board const
 int score_move(const LetterDistribution *ld, const Move *move, Board *board,
                int cross_set_index) {
   int ls;
@@ -348,16 +350,6 @@ int score_move(const LetterDistribution *ld, const Move *move, Board *board,
   int col_start = move_get_col_start(move);
   int dir = move_get_dir(move);
   int cross_dir = 1 - dir;
-
-  bool board_was_transposed = false;
-
-  if (!board_matches_dir(board, dir)) {
-    board_transpose(board);
-    board_was_transposed = true;
-    int ph = col_start;
-    col_start = row_start;
-    row_start = ph;
-  }
 
   if (tiles_played == RACK_SIZE) {
     bingo_bonus = DEFAULT_BINGO_BONUS;
@@ -396,10 +388,6 @@ int score_move(const LetterDistribution *ld, const Move *move, Board *board,
       cross_scores += ls * letter_multiplier * this_word_multiplier +
                       cs * this_word_multiplier;
     }
-  }
-
-  if (board_was_transposed) {
-    board_transpose(board);
   }
 
   return main_word_score * word_multiplier + cross_scores + bingo_bonus;

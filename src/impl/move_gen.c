@@ -223,35 +223,38 @@ double get_spare_move_equity(const MoveGen *gen) {
 void record_play(MoveGen *gen, int leftstrip, int rightstrip,
                  game_event_t move_type) {
   int start_row = gen->current_row_index;
-  int tiles_played = gen->tiles_played;
   int start_col = leftstrip;
-  int row = start_row;
-  int col = start_col;
-
-  if (board_is_dir_vertical(gen->dir)) {
-    int temp = row;
-    row = col;
-    col = temp;
-  }
+  int tiles_played = gen->tiles_played;
 
   int score = 0;
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    move_list_set_spare_move(gen->move_list, gen->strip, leftstrip, rightstrip,
-                             score, row, col, tiles_played, gen->dir,
-                             move_type);
+    Move *spare_move = move_list_get_spare_move(gen->move_list);
+    // Set the spare move in preparation for scoring.
+    // The scoring function assumes that the move is always horizontal,
+    // so we always use start_row for row and start_col for col
+    // when setting the move before scoring. We then switch the
+    // row and col values after scoring if the board is in a vertical
+    // orientation.
+    move_set_all_except_equity(spare_move, gen->strip, leftstrip, rightstrip,
+                               score, start_row, start_col, tiles_played,
+                               gen->dir, move_type);
     score = score_move(
-        gen->ld, move_list_get_spare_move(gen->move_list), gen->board,
+        gen->ld, spare_move, gen->board,
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
-    move_set_score(move_list_get_spare_move(gen->move_list), score);
+    move_set_score(spare_move, score);
+    if (board_is_dir_vertical(gen->dir)) {
+      move_set_row_start(spare_move, start_col);
+      move_set_col_start(spare_move, start_row);
+    }
   } else if (move_type == GAME_EVENT_EXCHANGE) {
     // ignore the empty exchange case
     if (rightstrip == 0) {
       return;
     }
     move_list_set_spare_move(gen->move_list, gen->exchange_strip, leftstrip,
-                             rightstrip, score, row, col, rightstrip, gen->dir,
-                             move_type);
+                             rightstrip, score, start_row, start_col,
+                             rightstrip, gen->dir, move_type);
   }
 
   if (gen->move_record_type == MOVE_RECORD_ALL) {

@@ -1208,7 +1208,9 @@ void reset_transient_fields(Config *config) {
   config->command_set_exec_mode = false;
   config->seed = time(NULL);
   free(config->cgp);
+  config->cgp = NULL;
   free(config->moves);
+  config->moves = NULL;
 }
 
 config_load_status_t config_load(Config *config, const char *cmd) {
