@@ -136,7 +136,7 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg) {
   }
 
   int lidx = 0;
-  uint32_t node_idx = kwg_get_root_node_index(kwg);
+  uint32_t node_idx = kwg_get_dawg_root_node_index(kwg);
   uint32_t node = kwg_node(kwg, node_idx);
   do {
     if (lidx > w->word_length - 1) {
