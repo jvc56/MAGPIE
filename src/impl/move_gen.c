@@ -179,7 +179,7 @@ void load_is_cross_word_cache(MoveGen *gen, int row) {
   }
 }
 
-int get_anchorless_row_index(int row, int dir) { return dir * BOARD_DIM + row; }
+inline int get_anchorless_row_index(int row, int dir) { return dir * BOARD_DIM + row; }
 
 void load_is_anchor_cache(MoveGen *gen) {
   for (int dir = 0; dir < 2; dir++) {
@@ -199,11 +199,11 @@ void load_is_anchor_cache(MoveGen *gen) {
   }
 }
 
-bool get_is_anchor_cache(MoveGen *gen, int row, int col, int dir) {
+inline bool get_is_anchor_cache(MoveGen *gen, int row, int col, int dir) {
   return gen->is_anchor_cache[board_get_tindex_dir(gen->board, row, col, dir)];
 }
 
-bool cached_is_cross_word(MoveGen *gen, int col) {
+inline bool cached_is_cross_word(MoveGen *gen, int col) {
   return gen->is_cross_word_cache[col];
 }
 
@@ -213,7 +213,7 @@ void load_bonus_square_cache(MoveGen *gen, int row) {
   }
 }
 
-uint8_t get_bonus_square_cache(const MoveGen *gen, int col) {
+inline uint8_t get_bonus_square_cache(const MoveGen *gen, int col) {
   return gen->bonus_square_cache[col];
 }
 
@@ -225,7 +225,7 @@ void load_cross_set_cache(MoveGen *gen, int row, int cs_dir,
   }
 }
 
-uint64_t get_cross_set_cache(const MoveGen *gen, int col) {
+inline uint64_t get_cross_set_cache(const MoveGen *gen, int col) {
   return gen->cross_set_cache[col];
 }
 
@@ -237,9 +237,10 @@ void load_cross_score_cache(MoveGen *gen, int row, int cs_dir,
   }
 }
 
-uint8_t get_cross_score_cache(const MoveGen *gen, int col) {
+inline uint8_t get_cross_score_cache(const MoveGen *gen, int col) {
   return gen->cross_score_cache[col];
 }
+
 double shadow_endgame_adjustment(const MoveGen *gen) {
   if (gen->number_of_letters_on_rack > gen->tiles_played) {
     // This play is not going out. We should penalize it by our own score
@@ -349,7 +350,7 @@ void record_play(MoveGen *gen, int leftstrip, int rightstrip,
 
 void generate_exchange_moves(MoveGen *gen, uint8_t ml, int stripidx,
                              bool add_exchange) {
-  uint32_t ld_size = ld_get_size(gen->ld);
+  const uint32_t ld_size = ld_get_size(gen->ld);
   while (ml < ld_size && rack_get_letter(gen->player_rack, ml) == 0) {
     ml++;
   }
@@ -393,11 +394,11 @@ void load_row_letter_cache(MoveGen *gen, int row) {
   }
 }
 
-uint8_t get_letter_cache(const MoveGen *gen, int col) {
+inline uint8_t get_letter_cache(const MoveGen *gen, int col) {
   return gen->row_letter_cache[col];
 }
 
-int is_empty_cache(const MoveGen *gen, int col) {
+inline int is_empty_cache(const MoveGen *gen, int col) {
   return get_letter_cache(gen, col) == ALPHABET_EMPTY_SQUARE_MARKER;
 }
 

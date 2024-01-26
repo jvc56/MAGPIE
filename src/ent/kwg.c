@@ -22,10 +22,6 @@
 // developed in wolges. For more details
 // on how the KWG data structure works, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
-struct KWG {
-  uint32_t *nodes;
-  int number_of_nodes;
-};
 
 char *get_kwg_filepath(const char *kwg_name) {
   // Check for invalid inputs
@@ -93,36 +89,6 @@ void kwg_destroy(KWG *kwg) {
   }
   free(kwg->nodes);
   free(kwg);
-}
-
-uint32_t kwg_node(const KWG *kwg, int node_index) {
-  return kwg->nodes[node_index];
-}
-
-bool kwg_node_is_end(uint32_t node) {
-  return (node & KWG_NODE_IS_END_FLAG) != 0;
-}
-
-bool kwg_node_accepts(uint32_t node) {
-  return (node & KWG_NODE_ACCEPTS_FLAG) != 0;
-}
-
-uint32_t kwg_node_arc_index(uint32_t node) {
-  return (node & KWG_ARC_INDEX_MASK);
-}
-
-int kwg_node_tile(uint32_t node) {
-  return node >> KWG_TILE_BIT_OFFSET;
-}
-
-int kwg_get_dawg_root_node_index(const KWG *kwg) {
-  const uint32_t dawg_pointer_node = kwg_node(kwg, 0);
-  return kwg_node_arc_index(dawg_pointer_node);
-}
-
-int kwg_get_root_node_index(const KWG *kwg) {
-  const uint32_t gaddag_pointer_node = kwg_node(kwg, 1);
-  return kwg_node_arc_index(gaddag_pointer_node);
 }
 
 int kwg_get_next_node_index(const KWG *kwg, int node_index, int letter) {
