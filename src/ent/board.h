@@ -57,6 +57,7 @@ void board_set_letter(Board *board, int row, int col, uint8_t letter);
 void board_transpose(Board *board);
 void board_set_transposed(Board *board, bool transposed);
 
+int board_get_tindex_dir(const Board *board, int row, int col, int dir);
 void board_set_node_index(Board *board, uint32_t value);
 void board_set_path_is_valid(Board *board, bool value);
 void board_increment_tiles_played(Board *board, int tiles_played);

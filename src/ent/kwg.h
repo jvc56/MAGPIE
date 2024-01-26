@@ -12,10 +12,11 @@ KWG *kwg_create_empty();
 void kwg_destroy(KWG *kwg);
 void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes, FILE *stream);
 
-bool kwg_is_end(const KWG *kwg, int node_index);
-bool kwg_accepts(const KWG *kwg, int node_index);
-int kwg_arc_index(const KWG *kwg, int node_index);
-int kwg_tile(const KWG *kwg, int node_index);
+uint32_t kwg_node(const KWG *kwg, int node_index);
+bool kwg_node_is_end(uint32_t node);
+bool kwg_node_accepts(uint32_t node);
+uint32_t kwg_node_arc_index(uint32_t node);
+int kwg_node_tile(uint32_t node);
 int kwg_get_dawg_root_node_index(const KWG *kwg);
 int kwg_get_root_node_index(const KWG *kwg);
 int kwg_get_next_node_index(const KWG *kwg, int node_index, int letter);
