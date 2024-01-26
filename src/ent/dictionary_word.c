@@ -5,6 +5,7 @@
 
 #include "../def/kwg_defs.h"
 #include "../def/dictionary_word_defs.h"
+
 #include "../util/string_util.h"
 #include "../util/util.h"
 

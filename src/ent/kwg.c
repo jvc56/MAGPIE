@@ -10,10 +10,12 @@
 #include <stdlib.h>
 
 #include "../def/kwg_defs.h"
+
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
+
 #include "letter_distribution.h"
 
 // The KWG data structure was originally

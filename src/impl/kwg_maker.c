@@ -1,9 +1,9 @@
 #include "kwg_maker.h"
 
-#include <assert.h>
-
 #include "../def/cross_set_defs.h"
+
 #include "../ent/kwg.h"
+
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -169,8 +169,8 @@ uint64_t mutable_node_hash_value(MutableNode *node, MutableNodeList *nodes,
   return hash_with_node;
 }
 
-bool mutable_node_equals(MutableNode *node_a, MutableNode *node_b,
-                         MutableNodeList *nodes, bool check_node) {
+bool mutable_node_equals(const MutableNode *node_a, const MutableNode *node_b,
+                         const MutableNodeList *nodes, bool check_node) {
   // check_node is false at the root node of a the comparison, we are looking
   // for nodes with different prefixes, including the content of this node,
   // but with identical child subtries. So we only check the letters and accepts
@@ -186,8 +186,8 @@ bool mutable_node_equals(MutableNode *node_a, MutableNode *node_b,
     return false;
   }
   for (uint8_t i = 0; i < node_a->children.count; i++) {
-    MutableNode *child_a = &nodes->nodes[node_a->children.indices[i]];
-    MutableNode *child_b = &nodes->nodes[node_b->children.indices[i]];
+    const MutableNode *child_a = &nodes->nodes[node_a->children.indices[i]];
+    const MutableNode *child_b = &nodes->nodes[node_b->children.indices[i]];
     if (!mutable_node_equals(child_a, child_b, nodes, true)) {
       return false;
     }
@@ -304,7 +304,6 @@ void insert_suffix(uint32_t node_index, MutableNodeList *nodes,
     const int child_index = node->children.indices[i];
     const MutableNode *child = &nodes->nodes[node->children.indices[i]];
     if (child->ml == ml) {
-      assert(cached_node_indices[pos + 1] == child_index);
       insert_suffix(child_index, nodes, word, pos + 1, cached_node_indices);
       return;
     }
@@ -382,8 +381,6 @@ void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
     return;
   }
   for (int i = node_index;; i++) {
-    assert(i >= 2);
-    assert(i < kwg_get_number_of_nodes(kwg));
     if (nodes_reached != NULL) {
       nodes_reached[i] = true;
     }
@@ -486,7 +483,6 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
       if (match == node) {
         continue;
       }
-      assert(match->merged_into == NULL);
       node->merged_into = match;
     }
     node_hash_table_destroy_buckets(&table);

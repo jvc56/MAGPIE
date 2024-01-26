@@ -1,12 +1,15 @@
-#include "../../src/impl/kwg_maker.h"
-
 #include <assert.h>
 
 #include "../../src/def/kwg_defs.h"
+
 #include "../../src/ent/config.h"
 #include "../../src/ent/dictionary_word.h"
+
+#include "../../src/impl/kwg_maker.h"
+
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
+
 #include "test_util.h"
 
 void add_test_word(const LetterDistribution *ld, DictionaryWordList *words,
