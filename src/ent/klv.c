@@ -12,10 +12,12 @@
 #include <stdlib.h>
 
 #include "../def/klv_defs.h"
+
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
+
 #include "kwg.h"
 #include "rack.h"
 

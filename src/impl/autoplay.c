@@ -15,7 +15,6 @@
 #include "../ent/player.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
-#include "../str/game_string.h"
 
 #include "gameplay.h"
 #include "move_gen.h"

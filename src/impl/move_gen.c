@@ -13,6 +13,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -24,6 +25,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
