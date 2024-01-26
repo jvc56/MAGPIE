@@ -3,7 +3,6 @@ make clean
 # Run unit tests
 # Set $2 to run a specific test
 if [ "$1" == "u" ]; then
-make clean
 make magpie_test
 ./bin/magpie_test $2
 
