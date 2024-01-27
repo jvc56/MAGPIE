@@ -1,7 +1,5 @@
 #include "kwg_maker.h"
 
-#include <assert.h>
-
 #include "../def/cross_set_defs.h"
 #include "../ent/kwg.h"
 #include "../util/string_util.h"
@@ -18,11 +16,6 @@
 // one's subtries are a tail of the other's, with the node with fewer children
 // pointing midway into the the other's list of children, sharing an end but not
 // a beginning. This extra merging reduces KWG size roughly 3%.
-
-typedef enum {
-  KWG_MAKER_INDEX_ROOT,
-  KWG_MAKER_INDEX_REST,
-} kwg_maker_index_phase_t;
 
 typedef struct NodeIndexList {
   uint32_t *indices;
@@ -254,8 +247,8 @@ void node_hash_table_destroy_buckets(NodeHashTable *table) {
 MutableNode *node_hash_table_find_or_insert(NodeHashTable *table,
                                             MutableNode *node,
                                             MutableNodeList *nodes) {
-  uint64_t hash_value = mutable_node_hash_value(node, nodes, false);
-  size_t bucket_index = hash_value % table->bucket_count;
+  const uint64_t hash_value = mutable_node_hash_value(node, nodes, false);
+  const size_t bucket_index = hash_value % table->bucket_count;
   NodePointerList *bucket = &table->buckets[bucket_index];
   for (size_t i = 0; i < bucket->count; i++) {
     MutableNode *candidate = bucket->nodes[i];
@@ -329,8 +322,8 @@ void copy_nodes(NodePointerList *ordered_pointers, MutableNodeList *nodes,
       NodeIndexList *children = (node->merged_into == NULL)
                                     ? &node->children
                                     : &node->merged_into->children;
-      int original_child_index = children->indices[0];
-      uint32_t final_child_index =
+      const int original_child_index = children->indices[0];
+      const uint32_t final_child_index =
           nodes->nodes[original_child_index].final_index;
       serialized_node |= final_child_index;
     }
@@ -345,7 +338,7 @@ void add_gaddag_strings_for_word(const DictionaryWord *word,
   uint8_t gaddag_string[MAX_KWG_STRING_LENGTH];
   // First add the word reversed without the separator.
   for (int i = 0; i < length; i++) {
-    int source_index = length - i - 1;
+    const int source_index = length - i - 1;
     gaddag_string[i] = raw_word[source_index];
   }
   dictionary_word_list_add_word(gaddag_strings, gaddag_string, length);
@@ -386,8 +379,7 @@ void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
     }
     const int ml = kwg_tile(kwg, i);
     const int new_node_index = kwg_arc_index(kwg, i);
-    bool accepts = kwg_accepts(kwg, i);
-    assert(prefix_length < MAX_KWG_STRING_LENGTH);
+    const bool accepts = kwg_accepts(kwg, i);
     prefix[prefix_length] = ml;
     write_words_aux(kwg, new_node_index, prefix, prefix_length + 1, accepts,
                     words, nodes_reached);
