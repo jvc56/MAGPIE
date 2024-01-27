@@ -8,6 +8,8 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
+#include "../ent/rack.h"
+
 #include "../util/string_util.h"
 #include "../util/util.h"
 

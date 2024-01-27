@@ -171,7 +171,7 @@ double placement_adjustment(const MoveGen *gen, const Move *move) {
   return penalty;
 }
 
-void load_is_cross_word_cache(MoveGen *gen, int row) {
+static inline void load_is_cross_word_cache(MoveGen *gen, int row) {
   for (int col = 0; col < BOARD_DIM; col++) {
     gen->is_cross_word_cache[col] =
         (row > 0 && !board_is_empty(gen->board, row - 1, col)) ||
@@ -179,9 +179,11 @@ void load_is_cross_word_cache(MoveGen *gen, int row) {
   }
 }
 
-inline int get_anchorless_row_index(int row, int dir) { return dir * BOARD_DIM + row; }
+static inline int get_anchorless_row_index(int row, int dir) {
+  return dir * BOARD_DIM + row;
+}
 
-void load_is_anchor_cache(MoveGen *gen) {
+static inline void load_is_anchor_cache(MoveGen *gen) {
   for (int dir = 0; dir < 2; dir++) {
     for (int row = 0; row < BOARD_DIM; row++) {
       const int anchorless_row_index = get_anchorless_row_index(row, dir);
@@ -199,45 +201,46 @@ void load_is_anchor_cache(MoveGen *gen) {
   }
 }
 
-inline bool get_is_anchor_cache(MoveGen *gen, int row, int col, int dir) {
+static inline bool get_is_anchor_cache(MoveGen *gen, int row, int col,
+                                       int dir) {
   return gen->is_anchor_cache[board_get_tindex_dir(gen->board, row, col, dir)];
 }
 
-inline bool cached_is_cross_word(MoveGen *gen, int col) {
+static inline bool cached_is_cross_word(MoveGen *gen, int col) {
   return gen->is_cross_word_cache[col];
 }
 
-void load_bonus_square_cache(MoveGen *gen, int row) {
+static inline void load_bonus_square_cache(MoveGen *gen, int row) {
   for (int col = 0; col < BOARD_DIM; col++) {
     gen->bonus_square_cache[col] = board_get_bonus_square(gen->board, row, col);
   }
 }
 
-inline uint8_t get_bonus_square_cache(const MoveGen *gen, int col) {
+static inline uint8_t get_bonus_square_cache(const MoveGen *gen, int col) {
   return gen->bonus_square_cache[col];
 }
 
-void load_cross_set_cache(MoveGen *gen, int row, int cs_dir,
-                          int cross_set_index) {
+static inline void load_cross_set_cache(MoveGen *gen, int row, int cs_dir,
+                                        int cross_set_index) {
   for (int col = 0; col < BOARD_DIM; col++) {
     gen->cross_set_cache[col] =
         board_get_cross_set(gen->board, row, col, cs_dir, cross_set_index);
   }
 }
 
-inline uint64_t get_cross_set_cache(const MoveGen *gen, int col) {
+static inline uint64_t get_cross_set_cache(const MoveGen *gen, int col) {
   return gen->cross_set_cache[col];
 }
 
-void load_cross_score_cache(MoveGen *gen, int row, int cs_dir,
-                            int cross_set_index) {
+static inline void load_cross_score_cache(MoveGen *gen, int row, int cs_dir,
+                                          int cross_set_index) {
   for (int col = 0; col < BOARD_DIM; col++) {
     gen->cross_score_cache[col] =
         board_get_cross_score(gen->board, row, col, cs_dir, cross_set_index);
   }
 }
 
-inline uint8_t get_cross_score_cache(const MoveGen *gen, int col) {
+static inline uint8_t get_cross_score_cache(const MoveGen *gen, int col) {
   return gen->cross_score_cache[col];
 }
 
@@ -388,22 +391,22 @@ void generate_exchange_moves(MoveGen *gen, uint8_t ml, int stripidx,
   }
 }
 
-void load_row_letter_cache(MoveGen *gen, int row) {
+static inline void load_row_letter_cache(MoveGen *gen, int row) {
   for (int col = 0; col < BOARD_DIM; col++) {
     gen->row_letter_cache[col] = board_get_letter(gen->board, row, col);
   }
 }
 
-inline uint8_t get_letter_cache(const MoveGen *gen, int col) {
+static inline uint8_t get_letter_cache(const MoveGen *gen, int col) {
   return gen->row_letter_cache[col];
 }
 
-inline int is_empty_cache(const MoveGen *gen, int col) {
+static inline int is_empty_cache(const MoveGen *gen, int col) {
   return get_letter_cache(gen, col) == ALPHABET_EMPTY_SQUARE_MARKER;
 }
 
-bool better_play_has_been_found(const MoveGen *gen,
-                                double highest_possible_value) {
+static inline bool better_play_has_been_found(const MoveGen *gen,
+                                              double highest_possible_value) {
   Move *move = move_list_get_move(gen->move_list, 0);
   const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? move_get_equity(move)
@@ -539,7 +542,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-bool shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
+inline bool shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen,
+                                                        int col) {
   uint64_t cross_set = get_cross_set_cache(gen, col);
   // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
@@ -853,7 +857,7 @@ void shadow_by_orientation(MoveGen *gen, int dir) {
   }
 }
 
-void set_descending_tile_scores(MoveGen *gen) {
+inline void set_descending_tile_scores(MoveGen *gen) {
   int i = 0;
   for (int j = 0; j < (int)ld_get_size(gen->ld); j++) {
     int j_score_order = ld_get_score_order(gen->ld, j);

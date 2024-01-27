@@ -13,18 +13,6 @@
 #define MULTICHAR_START_DELIMITIER '['
 #define MULTICHAR_END_DELIMITIER ']'
 
-struct LetterDistribution {
-  int size;
-  int *distribution;
-  int *scores;
-  // machine letters sorted in descending
-  // score order
-  int *score_order;
-  bool *is_vowel;
-  int total_tiles;
-  int max_tile_length;
-  char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
-};
 
 char *get_ld_filepath(const char *ld_name) {
   // Check for invalid inputs
@@ -138,24 +126,6 @@ void ld_destroy(LetterDistribution *ld) {
   free(ld->is_vowel);
   free(ld->score_order);
   free(ld);
-}
-
-int ld_get_size(const LetterDistribution *ld) { return ld->size; }
-
-int ld_get_dist(const LetterDistribution *ld, uint8_t machine_letter) {
-  return ld->distribution[machine_letter];
-}
-
-int ld_get_score(const LetterDistribution *ld, uint8_t machine_letter) {
-  return ld->scores[machine_letter];
-}
-
-int ld_get_score_order(const LetterDistribution *ld, uint8_t machine_letter) {
-  return ld->score_order[machine_letter];
-}
-
-bool ld_get_is_vowel(const LetterDistribution *ld, uint8_t machine_letter) {
-  return ld->is_vowel[machine_letter];
 }
 
 int ld_get_total_tiles(const LetterDistribution *ld) { return ld->total_tiles; }
@@ -348,8 +318,3 @@ char *ld_get_default_name(const char *lexicon_name) {
   return ld_name;
 }
 
-uint8_t get_blanked_machine_letter(uint8_t ml) { return ml | BLANK_MASK; }
-
-uint8_t get_unblanked_machine_letter(uint8_t ml) { return ml & UNBLANK_MASK; }
-
-bool get_is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }

@@ -19,21 +19,21 @@ Rack *rack_duplicate(const Rack *rack);
 void rack_copy(Rack *dst, const Rack *src);
 void rack_reset(Rack *rack);
 
-inline int rack_get_dist_size(const Rack *rack) { return rack->array_size; }
+static inline int rack_get_dist_size(const Rack *rack) { return rack->array_size; }
 
-inline int rack_get_letter(const Rack *rack, uint8_t machine_letter) {
+static inline int rack_get_letter(const Rack *rack, uint8_t machine_letter) {
   return rack->array[machine_letter];
 }
 
-inline int rack_get_total_letters(const Rack *rack) {
+static inline int rack_get_total_letters(const Rack *rack) {
   return rack->number_of_letters;
 }
 
-inline bool rack_is_empty(const Rack *rack) { return rack->empty; }
+static inline bool rack_is_empty(const Rack *rack) { return rack->empty; }
 
 bool racks_are_equal(const Rack *rack1, const Rack *rack2);
 
-inline void rack_take_letter(Rack *rack, uint8_t letter) {
+static inline void rack_take_letter(Rack *rack, uint8_t letter) {
   rack->array[letter]--;
   rack->number_of_letters--;
   if (rack->number_of_letters == 0) {
@@ -41,7 +41,7 @@ inline void rack_take_letter(Rack *rack, uint8_t letter) {
   }
 }
 
-inline void rack_add_letter(Rack *rack, uint8_t letter) {
+static inline void rack_add_letter(Rack *rack, uint8_t letter) {
   rack->array[letter]++;
   rack->number_of_letters++;
   if (rack->empty == 1) {
