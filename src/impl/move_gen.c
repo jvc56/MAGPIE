@@ -13,6 +13,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -24,6 +25,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
@@ -179,7 +181,9 @@ static inline void load_is_cross_word_cache(MoveGen *gen, int row) {
   }
 }
 
-static inline int get_anchorless_row_index(int row, int dir) { return dir * BOARD_DIM + row; }
+static inline int get_anchorless_row_index(int row, int dir) {
+  return dir * BOARD_DIM + row;
+}
 
 static inline void load_is_anchor_cache(MoveGen *gen) {
   for (int dir = 0; dir < 2; dir++) {
@@ -540,8 +544,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-inline bool shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen,
-                                                        int col) {
+static inline bool shadow_board_is_letter_allowed_in_cross_set(
+    const MoveGen *gen, int col) {
   uint64_t cross_set = get_cross_set_cache(gen, col);
   // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
@@ -855,7 +859,7 @@ void shadow_by_orientation(MoveGen *gen, int dir) {
   }
 }
 
-inline void set_descending_tile_scores(MoveGen *gen) {
+static inline void set_descending_tile_scores(MoveGen *gen) {
   int i = 0;
   for (int j = 0; j < (int)ld_get_size(gen->ld); j++) {
     int j_score_order = ld_get_score_order(gen->ld, j);
