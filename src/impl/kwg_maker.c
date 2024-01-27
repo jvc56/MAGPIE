@@ -1,9 +1,9 @@
 #include "kwg_maker.h"
 
+#include <assert.h>
+
 #include "../def/cross_set_defs.h"
-
 #include "../ent/kwg.h"
-
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -387,6 +387,7 @@ void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
     const int ml = kwg_tile(kwg, i);
     const int new_node_index = kwg_arc_index(kwg, i);
     bool accepts = kwg_accepts(kwg, i);
+    assert(prefix_length < MAX_KWG_STRING_LENGTH);
     prefix[prefix_length] = ml;
     write_words_aux(kwg, new_node_index, prefix, prefix_length + 1, accepts,
                     words, nodes_reached);
