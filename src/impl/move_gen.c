@@ -179,9 +179,7 @@ static inline void load_is_cross_word_cache(MoveGen *gen, int row) {
   }
 }
 
-static inline int get_anchorless_row_index(int row, int dir) {
-  return dir * BOARD_DIM + row;
-}
+static inline int get_anchorless_row_index(int row, int dir) { return dir * BOARD_DIM + row; }
 
 static inline void load_is_anchor_cache(MoveGen *gen) {
   for (int dir = 0; dir < 2; dir++) {

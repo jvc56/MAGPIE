@@ -59,7 +59,7 @@ static inline void leave_map_take_letter_and_update_current_index(LeaveMap *leav
   leave_map_take_letter(leave_map, letter, rack_get_letter(rack, letter));
 }
 
-inline void leave_map_add_letter_and_update_current_index(LeaveMap *leave_map,
+static inline void leave_map_add_letter_and_update_current_index(LeaveMap *leave_map,
                                                           Rack *rack,
                                                           uint8_t letter) {
   rack_add_letter(rack, letter);
