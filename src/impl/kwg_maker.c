@@ -1,7 +1,9 @@
 #include "kwg_maker.h"
 
 #include "../def/cross_set_defs.h"
+
 #include "../ent/kwg.h"
+
 #include "../util/string_util.h"
 #include "../util/util.h"
 
