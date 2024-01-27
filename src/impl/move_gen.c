@@ -179,7 +179,7 @@ void load_is_cross_word_cache(MoveGen *gen, int row) {
   }
 }
 
-inline int get_anchorless_row_index(int row, int dir) { return dir * BOARD_DIM + row; }
+static inline int get_anchorless_row_index(int row, int dir) { return dir * BOARD_DIM + row; }
 
 void load_is_anchor_cache(MoveGen *gen) {
   for (int dir = 0; dir < 2; dir++) {
@@ -199,11 +199,11 @@ void load_is_anchor_cache(MoveGen *gen) {
   }
 }
 
-inline bool get_is_anchor_cache(MoveGen *gen, int row, int col, int dir) {
+static inline bool get_is_anchor_cache(MoveGen *gen, int row, int col, int dir) {
   return gen->is_anchor_cache[board_get_tindex_dir(gen->board, row, col, dir)];
 }
 
-inline bool cached_is_cross_word(MoveGen *gen, int col) {
+static inline bool cached_is_cross_word(MoveGen *gen, int col) {
   return gen->is_cross_word_cache[col];
 }
 
@@ -213,7 +213,7 @@ void load_bonus_square_cache(MoveGen *gen, int row) {
   }
 }
 
-inline uint8_t get_bonus_square_cache(const MoveGen *gen, int col) {
+static inline uint8_t get_bonus_square_cache(const MoveGen *gen, int col) {
   return gen->bonus_square_cache[col];
 }
 
@@ -225,7 +225,7 @@ void load_cross_set_cache(MoveGen *gen, int row, int cs_dir,
   }
 }
 
-inline uint64_t get_cross_set_cache(const MoveGen *gen, int col) {
+static inline uint64_t get_cross_set_cache(const MoveGen *gen, int col) {
   return gen->cross_set_cache[col];
 }
 
@@ -237,7 +237,7 @@ void load_cross_score_cache(MoveGen *gen, int row, int cs_dir,
   }
 }
 
-inline uint8_t get_cross_score_cache(const MoveGen *gen, int col) {
+static inline uint8_t get_cross_score_cache(const MoveGen *gen, int col) {
   return gen->cross_score_cache[col];
 }
 
@@ -394,11 +394,11 @@ void load_row_letter_cache(MoveGen *gen, int row) {
   }
 }
 
-inline uint8_t get_letter_cache(const MoveGen *gen, int col) {
+static inline uint8_t get_letter_cache(const MoveGen *gen, int col) {
   return gen->row_letter_cache[col];
 }
 
-inline int is_empty_cache(const MoveGen *gen, int col) {
+static inline int is_empty_cache(const MoveGen *gen, int col) {
   return get_letter_cache(gen, col) == ALPHABET_EMPTY_SQUARE_MARKER;
 }
 
