@@ -62,4 +62,7 @@ void autoplay_game_pairs_test() {
   config_destroy(csw_config);
 }
 
-void test_autoplay() { autoplay_game_pairs_test(); }
+void test_autoplay() {
+  // FIXME: test ALL vs TOP produce the same moves
+  autoplay_game_pairs_test();
+}

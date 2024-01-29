@@ -101,6 +101,8 @@ void move_set_tile(Move *move, uint8_t tile, int index) {
   }
 }
 
+void move_set_equity(Move *move, double equity) { move->equity = equity; }
+
 bool within_epsilon_for_equity(double a, double board) {
   return fabs(a - board) < COMPARE_MOVES_EPSILON;
 }
@@ -187,7 +189,8 @@ void move_copy(Move *dest_move, const Move *src_move) {
 }
 
 void move_set_as_pass(Move *move) {
-  move_set_all_except_equity(move, NULL, 0, 0, 0, 0, 0, 0, 0, GAME_EVENT_PASS);
+  move_set_all(move, NULL, 0, 0, 0, 0, 0, 0, 0, GAME_EVENT_PASS,
+               PASS_MOVE_EQUITY);
 }
 
 void create_moves_for_move_list(MoveList *ml, int capacity) {

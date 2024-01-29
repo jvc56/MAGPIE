@@ -133,6 +133,8 @@
 #define ZILLION_OPENING_CGP                                                    \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 IILLNOZ/ 0/4 0 lex "           \
   "CSW21;"
+#define ENTASIS_OPENING_CGP                                                    \
+  "15/15/15/15/15/15/15/2ENTASIS6/15/15/15/15/15/15/15 / 0/0 0 lex CSW21"
 #define UEY_CGP                                                                \
   "T2F3C7/O2O1BEHOWLING1/A1PI2ME4IO1/s1OD1NUR2AIDA1/T1L1NARTJIES3/I1E2NE1I6/"  \
   "E1A2N2B6/SAXONY1UEY5/2E5D6/15/15/15/15/15/15 ACEOOQV/?DEGPRS 271/283 0 "    \

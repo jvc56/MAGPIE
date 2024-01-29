@@ -1,6 +1,6 @@
 #include <assert.h>
 
-#include "../../src/def/move_gen_defs.h"
+#include "../../src/def/static_eval_defs.h"
 
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
@@ -9,6 +9,7 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
+#include "../../src/ent/static_eval.h"
 
 #include "../../src/impl/gameplay.h"
 

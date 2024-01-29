@@ -26,6 +26,7 @@
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
+#include "validated_move_test.h"
 #include "wasm_api_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
@@ -48,6 +49,7 @@ void run_all() {
   test_board();
   test_cross_set();
   test_game();
+  test_validated_move();
   test_shadow();
   test_move_gen();
   test_equity_adjustments();
@@ -89,6 +91,8 @@ void run_test(const char *subtest) {
     test_cross_set();
   } else if (strings_equal(subtest, "game")) {
     test_game();
+  } else if (strings_equal(subtest, "vm")) {
+    test_validated_move();
   } else if (strings_equal(subtest, "shadow")) {
     test_shadow();
   } else if (strings_equal(subtest, "movegen")) {

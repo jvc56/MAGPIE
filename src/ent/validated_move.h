@@ -23,6 +23,8 @@ int validated_moves_get_number_of_moves(ValidatedMoves *vms);
 Move *validated_moves_get_move(ValidatedMoves *vms, int i);
 // FIXME: formed words should probably be const
 FormedWords *validated_moves_get_formed_words(ValidatedMoves *vms, int i);
+Rack *validated_moves_get_rack(ValidatedMoves *vms, int i);
+bool validated_moves_get_unknown_exchange(ValidatedMoves *vms, int i);
 
 move_validation_status_t
 validated_moves_get_validation_status(ValidatedMoves *vms);
@@ -31,6 +33,10 @@ void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2);
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
                                          ValidatedMoves *vms, int i);
+
+int validated_moves_get_challenge_points(ValidatedMoves *vms, int i);
+bool validated_moves_get_challenge_turn_loss(ValidatedMoves *vms, int i);
+
 int score_move(const LetterDistribution *ld, const Move *move, Board *board,
                int cross_set_index);
 #endif
