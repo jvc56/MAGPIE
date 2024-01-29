@@ -8,11 +8,13 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
-#include "board.h"
-#include "letter_distribution.h"
+#include "../ent/rack.h"
 
 #include "../util/string_util.h"
 #include "../util/util.h"
+
+#include "board.h"
+#include "letter_distribution.h"
 
 typedef struct FormedWord {
   uint8_t word[BOARD_DIM];
@@ -22,13 +24,12 @@ typedef struct FormedWord {
 
 struct FormedWords {
   int num_words;
-  FormedWord words[RACK_SIZE + 1]; // max number of words we can form
+  FormedWord words[RACK_SIZE + 1];  // max number of words we can form
 };
 
 FormedWords *formed_words_create(Board *board, uint8_t word[],
                                  int word_start_index, int word_end_index,
                                  int row, int col, int dir) {
-
   if (board_is_dir_vertical(dir)) {
     board_transpose(board);
     int ph = col;
@@ -78,7 +79,7 @@ FormedWords *formed_words_create(Board *board, uint8_t word[],
       }
       int widx = 0;
       ws->words[formed_words_idx].word_length = rend - rbegin + 1;
-      ws->words[formed_words_idx].valid = false; // we don't know validity yet.
+      ws->words[formed_words_idx].valid = false;  // we don't know validity yet.
       for (int r = rbegin; r <= rend; r++) {
         if (r != row) {
           uint8_t lt = get_unblanked_machine_letter(
@@ -137,24 +138,27 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg) {
   }
 
   int lidx = 0;
-  int node_idx = kwg_arc_index(kwg, 0);
+  uint32_t node_idx = kwg_get_dawg_root_node_index(kwg);
+  uint32_t node = kwg_node(kwg, node_idx);
   do {
     if (lidx > w->word_length - 1) {
       // if we've gone too far the word is not found
       return false;
     }
     uint8_t ml = w->word[lidx];
-    if (kwg_tile(kwg, node_idx) == ml) {
+    if (kwg_node_tile(node) == ml) {
       if (lidx == w->word_length - 1) {
-        return kwg_accepts(kwg, node_idx);
+        return kwg_node_accepts(node);
       }
-      node_idx = kwg_arc_index(kwg, node_idx);
+      node_idx = kwg_node_arc_index(node);
+      node = kwg_node(kwg, node_idx);
       lidx++;
     } else {
-      if (kwg_is_end(kwg, node_idx)) {
+      if (kwg_node_is_end(node)) {
         return false;
       }
       node_idx++;
+      node = kwg_node(kwg, node_idx);
     }
   } while (1);
 }
