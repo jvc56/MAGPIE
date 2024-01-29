@@ -5,6 +5,7 @@
 
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
+#include "../def/rack_defs.h"
 
 #include "../ent/board.h"
 #include "../ent/exec_state.h"
@@ -15,6 +16,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/static_eval.h"
 #include "../ent/words.h"
 
 #include "exec.h"
@@ -66,6 +68,13 @@ char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
   // result <scored|error> valid <true|false> invalid_words FU,BARZ
   // eq 123.45 sc 100 currmove f3.FU etc
 
+  move_validation_status_t status = validated_moves_get_validation_status(vms);
+
+  if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
+    return get_formatted_string(
+        "wasm api move validation failed with code %d\n", status);
+  }
+
   Move *move = validated_moves_get_move(vms, 0);
   char *phonies_string = validated_moves_get_phonies_string(ld, vms, 0);
 
@@ -73,7 +82,6 @@ char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
   StringBuilder *move_string_builder = string_builder_create();
 
   string_builder_add_ucgi_move(move, board, ld, move_string_builder);
-  move_destroy(move);
 
   string_builder_add_formatted_string(return_string_builder, "currmove %s",
                                       string_builder_peek(move_string_builder));
@@ -84,10 +92,16 @@ char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
     string_builder_add_formatted_string(return_string_builder,
                                         " invalid_words %s", phonies_string);
   }
-  string_builder_add_formatted_string(return_string_builder, " sc %d eq %.3f",
-                                      move_get_score(move),
-                                      move_get_equity(move));
 
+  string_builder_add_formatted_string(
+      return_string_builder, " sc %d eq %.3f", move_get_score(move),
+      static_eval_get_move_equity(
+          ld, player_get_klv(game_get_player(game, player_on_turn_index)), move,
+          board, validated_moves_get_leave(vms, 0),
+          player_get_rack(game_get_player(game, 1 - player_on_turn_index)),
+          bag_get_tiles(game_get_bag(game))));
+
+  validated_moves_destroy(vms);
   free(phonies_string);
   string_builder_destroy(move_string_builder);
   char *return_string = string_builder_dump(return_string_builder, NULL);

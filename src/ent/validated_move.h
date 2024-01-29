@@ -24,6 +24,7 @@ Move *validated_moves_get_move(ValidatedMoves *vms, int i);
 // FIXME: formed words should probably be const
 FormedWords *validated_moves_get_formed_words(ValidatedMoves *vms, int i);
 Rack *validated_moves_get_rack(ValidatedMoves *vms, int i);
+Rack *validated_moves_get_leave(ValidatedMoves *vms, int i);
 bool validated_moves_get_unknown_exchange(ValidatedMoves *vms, int i);
 
 move_validation_status_t

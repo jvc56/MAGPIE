@@ -8,6 +8,9 @@
 #include "move.h"
 #include "words.h"
 
+// FIXME: remove this
+#include "../str/move_string.h"
+
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -15,6 +18,7 @@ typedef struct ValidatedMove {
   Move *move;
   FormedWords *formed_words;
   Rack *rack;
+  Rack *leave;
   int challenge_points;
   bool challenge_turn_loss;
   bool unknown_exchange;
@@ -52,22 +56,28 @@ move_validation_status_t validate_coordinates(Move *move,
   bool started_col_parse = false;
   for (int i = 0; i < coords_string_length; i++) {
     char position_char = coords_string[i];
-    if (is_number(position_char) && !started_row_parse) {
+    if (is_number(position_char)) {
       if (i == 0) {
         move_set_dir(move, BOARD_HORIZONTAL_DIRECTION);
-      } else if (is_letter(coords_string[i - 1]) && started_row_parse) {
-        return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
+        started_row_parse = true;
+      } else if (is_letter(coords_string[i - 1])) {
+        if (started_row_parse) {
+          return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
+        }
+        started_row_parse = true;
       }
-      started_row_parse = true;
       // Build the 1-indexed row_start
       row_start = row_start * 10 + (position_char - '0');
-    } else if (is_letter(position_char) && !started_col_parse) {
+    } else if (is_letter(position_char)) {
       if (i == 0) {
         move_set_dir(move, BOARD_VERTICAL_DIRECTION);
-      } else if (is_number(coords_string[i - 1]) && started_col_parse) {
-        return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
+        started_col_parse = true;
+      } else if (is_number(coords_string[i - 1])) {
+        if (started_col_parse) {
+          return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
+        }
+        started_col_parse = true;
       }
-      started_col_parse = true;
       col_start = get_letter_coords(position_char);
     } else {
       return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
@@ -321,18 +331,16 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
     }
   }
 
-  Rack *leave = rack_duplicate(vm->rack);
+  vm->leave = rack_duplicate(vm->rack);
 
   // Check if the play is in the rack and
   // set the leave value if it is.
-  if (!rack_subtract(leave, tiles_played_rack)) {
+  if (!rack_subtract(vm->leave, tiles_played_rack)) {
     status = MOVE_VALIDATION_STATUS_TILES_PLAYED_NOT_IN_RACK;
   } else {
     vm->leave_value = klv_get_leave_value(
-        player_get_klv(game_get_player(game, player_index)), leave);
+        player_get_klv(game_get_player(game, player_index)), vm->leave);
   }
-
-  rack_destroy(leave);
 
   if (status != MOVE_VALIDATION_STATUS_SUCCESS || number_of_fields == 3) {
     return status;
@@ -406,10 +414,13 @@ int score_move(const LetterDistribution *ld, const Move *move, Board *board,
   bool board_was_transposed = false;
   if (!board_matches_dir(board, move_dir)) {
     board_transpose(board);
+    board_was_transposed = true;
+  }
+
+  if (move_dir == BOARD_VERTICAL_DIRECTION) {
     int tmp_start = row_start;
     row_start = col_start;
     col_start = tmp_start;
-    board_was_transposed = true;
   }
 
   if (tiles_played == RACK_SIZE) {
@@ -509,6 +520,7 @@ ValidatedMove *validated_move_create(Game *game, int player_index,
   ValidatedMove *vm = malloc_or_die(sizeof(ValidatedMove));
   vm->formed_words = NULL;
   vm->rack = NULL;
+  vm->leave = NULL;
   vm->challenge_points = 0;
   vm->challenge_turn_loss = false;
   vm->leave_value = 0;
@@ -526,6 +538,7 @@ void validated_move_destroy(ValidatedMove *vm) {
   move_destroy(vm->move);
   formed_words_destroy(vm->formed_words);
   rack_destroy(vm->rack);
+  rack_destroy(vm->leave);
   free(vm);
 }
 
@@ -602,6 +615,11 @@ FormedWords *validated_moves_get_formed_words(ValidatedMoves *vms, int i) {
 // FIXME: should be const
 Rack *validated_moves_get_rack(ValidatedMoves *vms, int i) {
   return vms->moves[i]->rack;
+}
+
+// FIXME: should be const
+Rack *validated_moves_get_leave(ValidatedMoves *vms, int i) {
+  return vms->moves[i]->leave;
 }
 
 bool validated_moves_get_unknown_exchange(ValidatedMoves *vms, int i) {

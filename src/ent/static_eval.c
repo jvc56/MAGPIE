@@ -62,11 +62,13 @@ double shadow_endgame_adjustment(const LetterDistribution *ld,
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
-double shadow_equity(const LetterDistribution *ld, const Rack *opp_rack,
-                     const double *best_leaves,
-                     const int *descending_tile_scores,
-                     int number_of_tiles_in_bag, int number_of_letters_on_rack,
-                     int tiles_played) {
+double static_eval_get_shadow_equity(const LetterDistribution *ld,
+                                     const Rack *opp_rack,
+                                     const double *best_leaves,
+                                     const int *descending_tile_scores,
+                                     int number_of_tiles_in_bag,
+                                     int number_of_letters_on_rack,
+                                     int tiles_played) {
   double equity = 0;
   if (number_of_tiles_in_bag > 0) {
     // Bag is not empty: use leave values
@@ -136,7 +138,11 @@ double static_eval_get_move_equity(const LetterDistribution *ld, const KLV *klv,
                                    const Rack *player_leave,
                                    const Rack *opp_rack,
                                    int number_of_tiles_in_bag) {
+  double leave_equity = 0;
+  if (player_leave && !rack_is_empty(player_leave)) {
+    leave_equity = klv_get_leave_value(klv, player_leave);
+  }
   return static_eval_get_move_equity_with_leave_value(
       ld, move, board, player_leave, opp_rack, number_of_tiles_in_bag,
-      klv_get_leave_value(klv, player_leave));
+      leave_equity);
 }

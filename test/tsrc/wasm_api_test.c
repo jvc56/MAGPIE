@@ -16,7 +16,7 @@ const char *cgp1 = "4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/"
 
 void test_wasm_api() {
   // play a phony 6G DI(PET)AZ keeping ERS.
-  char *retstr = score_move_from_strings(VS_ED, "6G.DIPETAZ");
+  char *retstr = score_move_from_strings(VS_ED, "6G.DIPETAZ.ADEIRSZ");
 
   // score is 57
   // equity of ERS is 15.497
@@ -27,15 +27,17 @@ void test_wasm_api() {
   free(retstr);
 
   // Score an exchange keeping AEINR (equity is 12.277)
-  retstr = score_move_from_strings(VS_ED, "ex.QW.QWAEINR");
+  retstr = score_move_from_strings(VS_ED, "ex.QV.QVAEINR");
   assert(strings_equal(
-      retstr, "currmove ex.QW result scored valid true sc 0 eq 12.277"));
+      retstr, "currmove ex.QV result scored valid true sc 0 eq 12.277"));
   free(retstr);
 
   // Score another play
+  // No leave specified so leave equity is 0
+  // FIXME: resolve UCGI leave versus CGP leave discrepancy
   retstr = score_move_from_strings(cgp1, "2b.THUMP");
   assert(strings_equal(
-      retstr, "currmove 2b.THUMP result scored valid true sc 50 eq 54.356"));
+      retstr, "currmove 2b.THUMP result scored valid true sc 50 eq 50.000"));
   free(retstr);
 
   destroy_wasm_exec_states();

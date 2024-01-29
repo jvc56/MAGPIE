@@ -444,7 +444,7 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity +=
-        shadow_equity(gen->ld, gen->opponent_rack, gen->best_leaves,
+        static_eval_get_shadow_equity(gen->ld, gen->opponent_rack, gen->best_leaves,
                       gen->descending_tile_scores, gen->number_of_tiles_in_bag,
                       gen->number_of_letters_on_rack, gen->tiles_played);
   }

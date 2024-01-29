@@ -13,6 +13,7 @@ char *validated_moves_get_phonies_string(const LetterDistribution *ld,
   FormedWords *fw = validated_moves_get_formed_words(vms, i);
   game_event_t move_type = move_get_type(move);
   StringBuilder *phonies_string_builder = string_builder_create();
+  bool phonies_formed = false;
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     int number_of_words = formed_words_get_num_words(fw);
     for (int i = 0; i < number_of_words; i++) {
@@ -25,11 +26,14 @@ char *validated_moves_get_phonies_string(const LetterDistribution *ld,
         if (i < number_of_words - 1) {
           string_builder_add_string(phonies_string_builder, ",");
         }
+        phonies_formed = true;
       }
     }
-    formed_words_destroy(fw);
   }
-  char *phonies_string = string_builder_dump(phonies_string_builder, 0);
+  char *phonies_string = NULL;
+  if (phonies_formed) {
+    phonies_string = string_builder_dump(phonies_string_builder, 0);
+  }
   string_builder_destroy(phonies_string_builder);
   return phonies_string;
 }

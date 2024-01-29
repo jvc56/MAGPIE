@@ -18,6 +18,7 @@ struct GameEvent {
   game_event_t event_type;
   int player_index;
   int cumulative_score;
+  // FIXME: this should be a validated move
   Rack *rack;
   Move *move;
   char *note;
