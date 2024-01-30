@@ -8,9 +8,7 @@
 #include "move.h"
 #include "words.h"
 
-// FIXME: remove this
-#include "../str/move_string.h"
-
+#include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -473,6 +471,7 @@ move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
                                              int player_index,
                                              const char *ucgi_move_string,
                                              bool allow_phonies) {
+
   if (is_all_whitespace_or_empty(ucgi_move_string)) {
     return MOVE_VALIDATION_STATUS_EMPTY_MOVE;
   }
@@ -526,8 +525,13 @@ ValidatedMove *validated_move_create(Game *game, int player_index,
   vm->leave_value = 0;
   vm->unknown_exchange = false;
   vm->move = move_create();
-  vm->status = validated_move_load(vm, game, player_index, ucgi_move_string,
-                                   allow_phonies);
+
+  char *trimmed_ucgi_move_string = string_duplicate(ucgi_move_string);
+  trim_whitespace(trimmed_ucgi_move_string);
+
+  vm->status = validated_move_load(vm, game, player_index,
+                                   trimmed_ucgi_move_string, allow_phonies);
+  free(trimmed_ucgi_move_string);
   return vm;
 }
 
@@ -641,22 +645,21 @@ validated_moves_get_validation_status(ValidatedMoves *vms) {
   return vms->final_status;
 }
 
-// This function takes ownership of vms2.
+// vms1 takes ownership of the memory allocated in vms2.
 void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2) {
   if (vms2->number_of_moves == 0) {
-    return;
+    log_fatal("validated moves to add is unexpectedly empty");
   }
   if (vms1->number_of_moves == 0) {
-    vms1->moves = vms2->moves;
-    vms1->number_of_moves = vms2->number_of_moves;
-    free(vms2);
-    return;
+    log_fatal("validated moves to update is unexpectedly empty");
   }
 
   // Moves already exist, so we need to resize
   // the existing ValidatedMove array in vms1 to accommodate
   // the new moves.
-  realloc_or_die(vms1->moves, vms1->number_of_moves + vms2->number_of_moves);
+  vms1->moves = realloc_or_die(
+      vms1->moves, sizeof(ValidatedMove *) *
+                       (vms1->number_of_moves + vms2->number_of_moves));
   for (int i = 0; i < vms2->number_of_moves; i++) {
     vms1->moves[i + vms1->number_of_moves] = vms2->moves[i];
   }

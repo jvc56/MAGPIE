@@ -9,6 +9,8 @@
 #include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
 
+#include "../../src/impl/gameplay.h"
+
 #include "../../src/str/move_string.h"
 
 #include "test_constants.h"
@@ -261,33 +263,282 @@ void test_validated_move_success() {
   assert(validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
-  // horizontal, full rack unknown. No challenge pts, no challenge turn loss
-  // h4.HADJI.ADHIJ.0.0
+  vms = assert_validated_move_success(game, EMPTY_CGP, "8d.JIHAD", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 1);
+  move = validated_moves_get_move(vms, 0);
+  assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_tiles_length(move) == 5);
+  assert(move_get_tiles_played(move) == 5);
+  assert(move_get_row_start(move) == 7);
+  assert(move_get_col_start(move) == 3);
+  assert(move_get_dir(move) == BOARD_HORIZONTAL_DIRECTION);
+  assert(move_get_score(move) == 48);
+  assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "J"));
+  assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "I"));
+  assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "H"));
+  assert(move_get_tile(move, 3) == ld_hl_to_ml(ld, "A"));
+  assert(move_get_tile(move, 4) == ld_hl_to_ml(ld, "D"));
+  assert(!validated_moves_get_rack(vms, 0));
+  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert(!validated_moves_get_challenge_turn_loss(vms, 0));
+  validated_moves_destroy(vms);
 
-  // same as above
-  // h4.HADJI
+  rack_set_to_string(ld, rack, "AEFFGIR");
+  vms = assert_validated_move_success(game, ION_OPENING_CGP,
+                                      "H2.FIREFANG.AEFFGIR.0.1", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 1);
+  move = validated_moves_get_move(vms, 0);
+  assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_tiles_length(move) == 8);
+  assert(move_get_tiles_played(move) == 7);
+  assert(move_get_row_start(move) == 1);
+  assert(move_get_col_start(move) == 7);
+  assert(move_get_dir(move) == BOARD_VERTICAL_DIRECTION);
+  assert(move_get_score(move) == 66);
+  assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "F"));
+  assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "I"));
+  assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "R"));
+  assert(move_get_tile(move, 3) == ld_hl_to_ml(ld, "E"));
+  assert(move_get_tile(move, 4) == ld_hl_to_ml(ld, "F"));
+  assert(move_get_tile(move, 5) == ld_hl_to_ml(ld, "A"));
+  assert(move_get_tile(move, 6) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 7) == ld_hl_to_ml(ld, "G"));
+  assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
+  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert(validated_moves_get_challenge_turn_loss(vms, 0));
+  validated_moves_destroy(vms);
 
-  // vertical play, through a letter;
-  // letter will need to be determined by the history
-  // firefang was wrongly challenged and so the opponent loses their turn
-  // 11d.FIREFANG.AEFGINR.0.1
+  vms = assert_validated_move_success(game, VS_ED, "N11.PeNT", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 1);
+  move = validated_moves_get_move(vms, 0);
+  assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_tiles_length(move) == 4);
+  assert(move_get_tiles_played(move) == 4);
+  assert(move_get_row_start(move) == 10);
+  assert(move_get_col_start(move) == 13);
+  assert(move_get_dir(move) == BOARD_VERTICAL_DIRECTION);
+  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert(!validated_moves_get_challenge_turn_loss(vms, 0));
+  validated_moves_destroy(vms);
 
-  // chthonic was played with a blank O, through
-  // some letter. It gets an extra 5-pt bonus.
-  // 3m.CHTHoNIC.CCHIN?T.5.0
+  rack_set_to_string(ld, rack, "DDESW??");
+  vms = assert_validated_move_success(game, VS_JEREMY,
+                                      "14B.hEaDWORDS.DDESW??.0.0", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 1);
+  move = validated_moves_get_move(vms, 0);
+  assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_tiles_length(move) == 9);
+  assert(move_get_tiles_played(move) == 7);
+  assert(move_get_row_start(move) == 13);
+  assert(move_get_col_start(move) == 1);
+  assert(move_get_dir(move) == BOARD_HORIZONTAL_DIRECTION);
+  assert(move_get_score(move) == 106);
+  assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "h"));
+  assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "E"));
+  assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "a"));
+  assert(move_get_tile(move, 3) == ld_hl_to_ml(ld, "D"));
+  assert(move_get_tile(move, 4) == ld_hl_to_ml(ld, "W"));
+  assert(move_get_tile(move, 5) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 6) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 7) == ld_hl_to_ml(ld, "D"));
+  assert(move_get_tile(move, 8) == ld_hl_to_ml(ld, "S"));
+  assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
+  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert(!validated_moves_get_challenge_turn_loss(vms, 0));
+  validated_moves_destroy(vms);
+
+  rack_set_to_string(ld, rack, "ABEOPXZ");
+  vms = assert_validated_move_success(
+      game, VS_OXY, "A1.OXYPHENBUTAZONE.ABEOPXZ.0.0", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 1);
+  move = validated_moves_get_move(vms, 0);
+  assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_tiles_length(move) == 15);
+  assert(move_get_tiles_played(move) == 7);
+  assert(move_get_row_start(move) == 0);
+  assert(move_get_col_start(move) == 0);
+  assert(move_get_dir(move) == BOARD_VERTICAL_DIRECTION);
+  assert(move_get_score(move) == 1780);
+  assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "O"));
+  assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "X"));
+  assert(move_get_tile(move, 2) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 3) == ld_hl_to_ml(ld, "P"));
+  assert(move_get_tile(move, 4) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 5) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 6) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 7) == ld_hl_to_ml(ld, "B"));
+  assert(move_get_tile(move, 8) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 9) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 10) == ld_hl_to_ml(ld, "A"));
+  assert(move_get_tile(move, 11) == ld_hl_to_ml(ld, "Z"));
+  assert(move_get_tile(move, 12) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 13) == PLAYED_THROUGH_MARKER);
+  assert(move_get_tile(move, 14) == ld_hl_to_ml(ld, "E"));
+  assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
+  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert(!validated_moves_get_challenge_turn_loss(vms, 0));
+  validated_moves_destroy(vms);
+
+  // Form a bunch of phonies which we will allow.
+  vms = assert_validated_move_success(game, ENTASIS_OPENING_CGP, "7C.VRRUWIW",
+                                      0, true);
+  validated_moves_destroy(vms);
 
   rack_destroy(rack);
   game_destroy(game);
   config_destroy(config);
 }
 
+void test_validated_move_distinct_kwg() {
+  Config *config =
+      create_config_or_die("setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity "
+                           "r1 best r2 best numplays 1");
+  Game *game = game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  MoveList *move_list = move_list_create(1);
+
+  Player *player0 = game_get_player(game, 0);
+  Player *player1 = game_get_player(game, 1);
+  Rack *player0_rack = player_get_rack(player0);
+  Rack *player1_rack = player_get_rack(player1);
+
+  // Play SPORK, better than best NWL move of PORKS
+  ValidatedMoves *vms = validated_moves_create(game, 0, "8H.SPORK", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  validated_moves_destroy(vms);
+
+  rack_set_to_string(ld, player0_rack, "KOPRRSS");
+  generate_moves_for_game(game, 0, move_list);
+  assert_move(game, move_list, NULL, 0, "8H SPORK 32");
+  play_move(move_list_get_move(move_list, 0), game);
+
+  // Play SCHIZIER, better than best CSW word of SCHERZI
+  vms = validated_moves_create(game, 1, "H8.SCHIZIER", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  validated_moves_destroy(vms);
+
+  vms = validated_moves_create(game, 1, "M8.SCHERZI", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+  validated_moves_destroy(vms);
+
+  rack_set_to_string(ld, player1_rack, "CEHIIRZ");
+  generate_moves_for_game(game, 0, move_list);
+  assert_move(game, move_list, NULL, 0, "H8 (S)CHIZIER 146");
+  play_move(move_list_get_move(move_list, 0), game);
+
+  // Play WIGGLY, not GOLLYWOG because that's NWL only
+  vms = validated_moves_create(game, 0, "11G.WIGGLY", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  validated_moves_destroy(vms);
+
+  vms = validated_moves_create(game, 0, "J2.GOLLYWOG", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+  validated_moves_destroy(vms);
+
+  rack_set_to_string(ld, player0_rack, "GGLLOWY");
+  generate_moves_for_game(game, 0, move_list);
+  assert_move(game, move_list, NULL, 0, "11G W(I)GGLY 28");
+  play_move(move_list_get_move(move_list, 0), game);
+
+  // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
+  vms = validated_moves_create(game, 1, "13C.QUEASIER", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  validated_moves_destroy(vms);
+
+  vms = validated_moves_create(game, 1, "L3.SQUEAKERY", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+  validated_moves_destroy(vms);
+
+  rack_set_to_string(ld, player1_rack, "AEEQRSU");
+  generate_moves_for_game(game, 0, move_list);
+  assert_move(game, move_list, NULL, 0, "13C QUEAS(I)ER 88");
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void test_validated_move_many() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+
+  ValidatedMoves *vms = assert_validated_move_success(
+      game, EMPTY_CGP, "  pass ,  ex.4  ,  ex.ABC,  8d.JIHAD , h8.QIS ", 0,
+      false);
+  assert(validated_moves_get_number_of_moves(vms) == 5);
+  assert(move_get_type(validated_moves_get_move(vms, 0)) == GAME_EVENT_PASS);
+  assert(move_get_type(validated_moves_get_move(vms, 1)) ==
+         GAME_EVENT_EXCHANGE);
+  assert(move_get_type(validated_moves_get_move(vms, 2)) ==
+         GAME_EVENT_EXCHANGE);
+  assert(move_get_type(validated_moves_get_move(vms, 3)) ==
+         GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_type(validated_moves_get_move(vms, 4)) ==
+         GAME_EVENT_TILE_PLACEMENT_MOVE);
+  validated_moves_destroy(vms);
+
+  vms =
+      validated_moves_create(game, 0, "pass.ABC,ex.4,ex.ABC.DEF,8h.VVU", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_EXCESS_PASS_FIELDS);
+  validated_moves_destroy(vms);
+
+  vms = validated_moves_create(game, 0, "pass,ex.4,ex.ABC.DEF,8h.VVU", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_TILES_PLAYED_NOT_IN_RACK);
+  validated_moves_destroy(vms);
+
+  vms =
+      validated_moves_create(game, 0, "pass,ex.4,ex.ABC.ABCDEF,8h.VVU", false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+  validated_moves_destroy(vms);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void test_validated_move_combine() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+
+  ValidatedMoves *vms1 = assert_validated_move_success(
+      game, EMPTY_CGP, "pass,ex.4,8d.JIHAD,", 0, false);
+
+  ValidatedMoves *vms2 = assert_validated_move_success(
+      game, EMPTY_CGP, "8G.VAV,ex.VQ.QVRITES", 0, false);
+
+  validated_moves_combine(vms1, vms2);
+
+  assert(validated_moves_get_number_of_moves(vms1) == 5);
+  assert(move_get_type(validated_moves_get_move(vms1, 0)) == GAME_EVENT_PASS);
+  assert(move_get_type(validated_moves_get_move(vms1, 1)) ==
+         GAME_EVENT_EXCHANGE);
+  assert(move_get_type(validated_moves_get_move(vms1, 2)) ==
+         GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_type(validated_moves_get_move(vms1, 3)) ==
+         GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_type(validated_moves_get_move(vms1, 4)) ==
+         GAME_EVENT_EXCHANGE);
+  validated_moves_destroy(vms1);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_validated_move() {
-  // Test:
-  // all success cases in validate_split_move
-  // player index kwg
-  // multiple moves
-  // combining moves
-  // FIXME: check opening square validation
   test_validated_move_errors();
   test_validated_move_success();
+  test_validated_move_distinct_kwg();
+  test_validated_move_many();
+  test_validated_move_combine();
 }
