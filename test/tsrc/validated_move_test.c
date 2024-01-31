@@ -181,14 +181,19 @@ void test_validated_move_success() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
+  Player *player0 = game_get_player(game, 0);
+  const KLV *player_0_klv = player_get_klv(player0);
   ValidatedMoves *vms = NULL;
   Move *move = NULL;
   Rack *rack = rack_create(ld_get_size(ld));
+  Rack *leave = rack_create(ld_get_size(ld));
 
   vms = assert_validated_move_success(game, EMPTY_CGP, "pass", 0, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_PASS);
+  assert(move_get_score(move) == 0);
+  assert(within_epsilon(move_get_equity(move), PASS_MOVE_EQUITY));
   assert(validated_moves_get_challenge_points(vms, 0) == 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
@@ -201,6 +206,8 @@ void test_validated_move_success() {
   assert(move_get_tiles_length(move) == 3);
   assert(move_get_tiles_played(move) == 3);
   assert(move_get_score(move) == 0);
+  // Rack is empty, so equity should be zero
+  assert(within_epsilon(move_get_equity(move), 0));
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "A"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "B"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "C"));
@@ -216,6 +223,7 @@ void test_validated_move_success() {
   assert(move_get_tiles_length(move) == 4);
   assert(move_get_tiles_played(move) == 4);
   assert(move_get_score(move) == 0);
+  assert(within_epsilon(move_get_equity(move), 0));
   assert(validated_moves_get_challenge_points(vms, 0) == 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
@@ -230,6 +238,9 @@ void test_validated_move_success() {
   assert(move_get_tiles_length(move) == 3);
   assert(move_get_tiles_played(move) == 3);
   assert(move_get_score(move) == 0);
+  rack_set_to_string(ld, leave, "DEFG");
+  assert(within_epsilon(move_get_equity(move),
+                        klv_get_leave_value(player_0_klv, leave)));
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "A"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "B"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "C"));
@@ -250,6 +261,7 @@ void test_validated_move_success() {
   assert(move_get_col_start(move) == 7);
   assert(move_get_dir(move) == BOARD_VERTICAL_DIRECTION);
   assert(move_get_score(move) == 74);
+  assert(within_epsilon(move_get_equity(move), 74));
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "A"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "e"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "R"));
@@ -295,6 +307,7 @@ void test_validated_move_success() {
   assert(move_get_col_start(move) == 7);
   assert(move_get_dir(move) == BOARD_VERTICAL_DIRECTION);
   assert(move_get_score(move) == 66);
+  assert(within_epsilon(move_get_equity(move), 66));
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "F"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "I"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "R"));
@@ -384,7 +397,27 @@ void test_validated_move_success() {
                                       0, true);
   validated_moves_destroy(vms);
 
+  // Test equity
+  player_set_move_sort_type(player0, MOVE_SORT_EQUITY);
+  vms = assert_validated_move_success(game, ION_OPENING_CGP, "9G.NON.NONAIER",
+                                      0, false);
+  move = validated_moves_get_move(vms, 0);
+  assert(move_get_score(move) == 10);
+  rack_set_to_string(ld, leave, "AEIR");
+  assert(within_epsilon(move_get_equity(move),
+                        10 + klv_get_leave_value(player_0_klv, leave)));
+  validated_moves_destroy(vms);
+
+  player_set_move_sort_type(player0, MOVE_SORT_SCORE);
+  vms = assert_validated_move_success(game, ION_OPENING_CGP, "9g.NON.NONAIER",
+                                      0, false);
+  move = validated_moves_get_move(vms, 0);
+  assert(move_get_score(move) == 10);
+  assert(within_epsilon(move_get_equity(move), 10));
+  validated_moves_destroy(vms);
+
   rack_destroy(rack);
+  rack_destroy(leave);
   game_destroy(game);
   config_destroy(config);
 }
@@ -529,7 +562,23 @@ void test_validated_move_combine() {
          GAME_EVENT_TILE_PLACEMENT_MOVE);
   assert(move_get_type(validated_moves_get_move(vms1, 4)) ==
          GAME_EVENT_EXCHANGE);
-  validated_moves_destroy(vms1);
+
+  ValidatedMoves *vms3 = validated_moves_create_empty();
+
+  validated_moves_combine(vms3, vms1);
+
+  assert(validated_moves_get_number_of_moves(vms3) == 5);
+  assert(move_get_type(validated_moves_get_move(vms3, 0)) == GAME_EVENT_PASS);
+  assert(move_get_type(validated_moves_get_move(vms3, 1)) ==
+         GAME_EVENT_EXCHANGE);
+  assert(move_get_type(validated_moves_get_move(vms3, 2)) ==
+         GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_type(validated_moves_get_move(vms3, 3)) ==
+         GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_type(validated_moves_get_move(vms3, 4)) ==
+         GAME_EVENT_EXCHANGE);
+
+  validated_moves_destroy(vms3);
 
   game_destroy(game);
   config_destroy(config);
@@ -542,6 +591,4 @@ void test_validated_move() {
   test_validated_move_distinct_kwg();
   test_validated_move_many();
   test_validated_move_combine();
-  // FIXME: test move validation sort equity and sort score
-  // FIXME: test adding to empty moves
 }

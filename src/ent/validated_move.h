@@ -18,25 +18,25 @@ ValidatedMoves *validated_moves_create(Game *game, int player_index,
 ValidatedMoves *validated_moves_create_empty();
 void validated_moves_destroy(ValidatedMoves *vms);
 
-int validated_moves_get_number_of_moves(ValidatedMoves *vms);
+int validated_moves_get_number_of_moves(const ValidatedMoves *vms);
 // FIXME: move should probably be const
-Move *validated_moves_get_move(ValidatedMoves *vms, int i);
+Move *validated_moves_get_move(const ValidatedMoves *vms, int i);
 // FIXME: formed words should probably be const
-FormedWords *validated_moves_get_formed_words(ValidatedMoves *vms, int i);
-Rack *validated_moves_get_rack(ValidatedMoves *vms, int i);
-Rack *validated_moves_get_leave(ValidatedMoves *vms, int i);
-bool validated_moves_get_unknown_exchange(ValidatedMoves *vms, int i);
+FormedWords *validated_moves_get_formed_words(const ValidatedMoves *vms, int i);
+Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i);
+Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i);
+bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i);
 
 move_validation_status_t
-validated_moves_get_validation_status(ValidatedMoves *vms);
+validated_moves_get_validation_status(const ValidatedMoves *vms);
 
 void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2);
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
                                          ValidatedMoves *vms, int i);
 
-int validated_moves_get_challenge_points(ValidatedMoves *vms, int i);
-bool validated_moves_get_challenge_turn_loss(ValidatedMoves *vms, int i);
+int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i);
+bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i);
 
 int score_move(const LetterDistribution *ld, const Move *move, Board *board,
                int cross_set_index);

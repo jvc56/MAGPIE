@@ -83,7 +83,7 @@ void test_sim_single_iteration() {
   SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1 cond none");
-  sim_status_t status = simulate(config, game, sim_results);
+  sim_status_t status = simulate(config, game, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
@@ -109,7 +109,7 @@ void test_more_iterations() {
   SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 400 cond none");
-  sim_status_t status = simulate(config, game, sim_results);
+  sim_status_t status = simulate(config, game, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
@@ -148,7 +148,7 @@ void perf_test_multithread_sim() {
   SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " plies 2 threads 1 numplays 15 i 1000 cond none");
-  sim_status_t status = simulate(config, game, sim_results);
+  sim_status_t status = simulate(config, game, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
@@ -186,7 +186,7 @@ void test_play_similarity() {
   load_config_or_die(config,
                      "setoptions rack " EMPTY_RACK_STRING
                      " plies 2 threads 1 numplays 4 i 1200 cond none check 50");
-  sim_status_t status = simulate(config, game, sim_results);
+  sim_status_t status = simulate(config, game, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);

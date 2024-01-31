@@ -247,12 +247,13 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
   }
 
   if (strings_equal(move_type_or_coords, UCGI_PASS_MOVE)) {
-    // This will also set the equity
     move_set_as_pass(vm->move);
   } else if (strings_equal(move_type_or_coords, UCGI_EXCHANGE_MOVE)) {
+    // Equity is set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_EXCHANGE);
     move_set_score(vm->move, 0);
   } else {
+    // Score and equity are set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_TILE_PLACEMENT_MOVE);
     status = validate_coordinates(vm->move, move_type_or_coords);
   }
@@ -415,31 +416,21 @@ move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
     return status;
   }
 
-  if (move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    const LetterDistribution *ld = game_get_ld(game);
-    const Player *player = game_get_player(game, player_index);
-    const KLV *klv = player_get_klv(player);
-    const KWG *kwg = player_get_kwg(player);
-    Board *board = game_get_board(game);
+  game_event_t move_type = move_get_type(vm->move);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, player_index);
+  const KLV *klv = player_get_klv(player);
+  Board *board = game_get_board(game);
+  int score = 0;
 
-    int score =
-        score_move(game_get_ld(game), vm->move, board,
-                   board_get_cross_set_index(
-                       game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
-                       player_index));
+  if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    const KWG *kwg = player_get_kwg(player);
+    score = score_move(game_get_ld(game), vm->move, board,
+                       board_get_cross_set_index(
+                           game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+                           player_index));
 
     move_set_score(vm->move, score);
-
-    if (player_get_move_sort_type(player) == MOVE_SORT_EQUITY) {
-      move_set_equity(
-          vm->move,
-          static_eval_get_move_equity(
-              ld, klv, vm->move, board, vm->leave,
-              player_get_rack(game_get_player(game, 1 - player_index)),
-              bag_get_tiles(game_get_bag(game))));
-    } else {
-      move_set_equity(vm->move, score);
-    }
 
     vm->formed_words = formed_words_create(board, vm->move);
 
@@ -451,6 +442,19 @@ move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
           return MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED;
         }
       }
+    }
+  }
+
+  if (move_type != GAME_EVENT_PASS) {
+    if (player_get_move_sort_type(player) == MOVE_SORT_EQUITY) {
+      move_set_equity(
+          vm->move,
+          static_eval_get_move_equity(
+              ld, klv, vm->move, board, vm->leave,
+              player_get_rack(game_get_player(game, 1 - player_index)),
+              bag_get_tiles(game_get_bag(game))));
+    } else {
+      move_set_equity(vm->move, score);
     }
   }
 
@@ -546,46 +550,47 @@ void validated_moves_destroy(ValidatedMoves *vms) {
   free(vms);
 }
 
-int validated_moves_get_number_of_moves(ValidatedMoves *vms) {
+int validated_moves_get_number_of_moves(const ValidatedMoves *vms) {
   return vms->number_of_moves;
 }
 
 // FIXME: should be const
-Move *validated_moves_get_move(ValidatedMoves *vms, int i) {
+Move *validated_moves_get_move(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->move;
 }
 
 // FIXME: should be const
-FormedWords *validated_moves_get_formed_words(ValidatedMoves *vms, int i) {
+FormedWords *validated_moves_get_formed_words(const ValidatedMoves *vms,
+                                              int i) {
   return vms->moves[i]->formed_words;
 }
 
 // FIXME: should be const
-Rack *validated_moves_get_rack(ValidatedMoves *vms, int i) {
+Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->rack;
 }
 
 // FIXME: should be const
-Rack *validated_moves_get_leave(ValidatedMoves *vms, int i) {
+Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->leave;
 }
 
-bool validated_moves_get_unknown_exchange(ValidatedMoves *vms, int i) {
+bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->unknown_exchange;
 }
 
-int validated_moves_get_challenge_points(ValidatedMoves *vms, int i) {
+int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->challenge_points;
 }
 
-bool validated_moves_get_challenge_turn_loss(ValidatedMoves *vms, int i) {
+bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->challenge_turn_loss;
 }
 
 // Returns success if all moves are valid or
 // the first occurrence of a nonsuccess status if not.
 move_validation_status_t
-validated_moves_get_validation_status(ValidatedMoves *vms) {
+validated_moves_get_validation_status(const ValidatedMoves *vms) {
   return vms->final_status;
 }
 
@@ -625,6 +630,6 @@ void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
   for (int i = 0; i < vms->number_of_moves; i++) {
     Move *spare_move = move_list_get_spare_move(ml);
     move_copy(spare_move, vms->moves[i]->move);
-    move_list_insert_spare_move(spare_move, move_get_equity(vms->moves[i]));
+    move_list_insert_spare_move(ml, move_get_equity(vms->moves[i]->move));
   }
 }
