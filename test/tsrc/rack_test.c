@@ -13,6 +13,7 @@ void test_rack_main() {
   LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
   Rack *rack = rack_create(ld_size);
+  Rack *rack_sub = rack_create(ld_size);
 
   // Test score on rack
   rack_set_to_string(ld, rack, "ABCDEFG");
@@ -27,6 +28,34 @@ void test_rack_main() {
   assert(rack_get_score(ld, rack) == 7);
   rack_set_to_string(ld, rack, "AABBEWW");
   assert(rack_get_score(ld, rack) == 17);
+
+  // Test subtraction
+  rack_set_to_string(ld, rack, "ABCDEFG");
+  rack_set_to_string(ld, rack_sub, "ABC");
+  assert(rack_subtract(rack, rack_sub));
+
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "D")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "E")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "F")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "G")) == 1);
+  assert(!rack_is_empty(rack));
+  assert(rack_get_total_letters(rack) == 4);
+
+  rack_set_to_string(ld, rack_sub, "DEFG");
+  assert(rack_subtract(rack, rack_sub));
+  assert(rack_is_empty(rack));
+  assert(rack_get_total_letters(rack) == 0);
+
+  rack_set_to_string(ld, rack, "AAAABBB");
+  rack_set_to_string(ld, rack_sub, "AABB");
+  assert(rack_subtract(rack, rack_sub));
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "A")) == 2);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "B")) == 1);
+  assert(!rack_is_empty(rack));
+  assert(rack_get_total_letters(rack) == 3);
+
+  rack_set_to_string(ld, rack_sub, "AAAA");
+  assert(!rack_subtract(rack, rack_sub));
 
   rack_set_to_string(ld, rack, "AENPPSW");
 
@@ -80,6 +109,7 @@ void test_rack_main() {
   assert(rack_get_total_letters(rack) == 2);
 
   rack_destroy(rack);
+  rack_destroy(rack_sub);
   config_destroy(config);
 }
 
