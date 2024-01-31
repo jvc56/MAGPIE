@@ -40,4 +40,6 @@ bool validated_moves_get_challenge_turn_loss(ValidatedMoves *vms, int i);
 
 int score_move(const LetterDistribution *ld, const Move *move, Board *board,
                int cross_set_index);
+void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml);
+
 #endif

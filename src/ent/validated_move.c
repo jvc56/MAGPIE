@@ -6,6 +6,7 @@
 
 #include "game.h"
 #include "move.h"
+#include "static_eval.h"
 #include "words.h"
 
 #include "../util/log.h"
@@ -395,78 +396,6 @@ move_validation_status_t validate_move(ValidatedMove *vm, Game *game,
   return status;
 }
 
-int score_move(const LetterDistribution *ld, const Move *move, Board *board,
-               int cross_set_index) {
-  int ls;
-  int main_word_score = 0;
-  int cross_scores = 0;
-  int bingo_bonus = 0;
-
-  int tiles_played = move_get_tiles_played(move);
-  int tiles_length = move_get_tiles_length(move);
-  int row_start = move_get_row_start(move);
-  int col_start = move_get_col_start(move);
-  int move_dir = move_get_dir(move);
-  int cross_dir = 1 - move_dir;
-
-  bool board_was_transposed = false;
-  if (!board_matches_dir(board, move_dir)) {
-    board_transpose(board);
-    board_was_transposed = true;
-  }
-
-  if (move_dir == BOARD_VERTICAL_DIRECTION) {
-    int tmp_start = row_start;
-    row_start = col_start;
-    col_start = tmp_start;
-  }
-
-  if (tiles_played == RACK_SIZE) {
-    bingo_bonus = DEFAULT_BINGO_BONUS;
-  }
-  int word_multiplier = 1;
-  for (int idx = 0; idx < tiles_length; idx++) {
-    uint8_t ml = move_get_tile(move, idx);
-    uint8_t bonus_square =
-        board_get_bonus_square(board, row_start, col_start + idx);
-    int letter_multiplier = 1;
-    int this_word_multiplier = 1;
-    bool fresh_tile = false;
-    if (ml == PLAYED_THROUGH_MARKER) {
-      ml = board_get_letter(board, row_start, col_start + idx);
-    } else {
-      fresh_tile = true;
-      this_word_multiplier = bonus_square >> 4;
-      letter_multiplier = bonus_square & 0x0F;
-      word_multiplier *= this_word_multiplier;
-    }
-    int cs = board_get_cross_score(board, row_start, col_start + idx, cross_dir,
-                                   cross_set_index);
-    if (get_is_blanked(ml)) {
-      ls = 0;
-    } else {
-      ls = ld_get_score(ld, ml);
-    }
-
-    main_word_score += ls * letter_multiplier;
-    bool actual_cross_word =
-        (row_start > 0 &&
-         !board_is_empty(board, row_start - 1, col_start + idx)) ||
-        ((row_start < BOARD_DIM - 1) &&
-         !board_is_empty(board, row_start + 1, col_start + idx));
-    if (fresh_tile && actual_cross_word) {
-      cross_scores += ls * letter_multiplier * this_word_multiplier +
-                      cs * this_word_multiplier;
-    }
-  }
-
-  if (board_was_transposed) {
-    board_transpose(board);
-  }
-
-  return main_word_score * word_multiplier + cross_scores + bingo_bonus;
-}
-
 move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
                                              int player_index,
                                              const char *ucgi_move_string,
@@ -487,19 +416,34 @@ move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
   }
 
   if (move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    move_set_score(
-        vm->move,
-        score_move(game_get_ld(game), vm->move, game_get_board(game),
+    const LetterDistribution *ld = game_get_ld(game);
+    const Player *player = game_get_player(game, player_index);
+    const KLV *klv = player_get_klv(player);
+    const KWG *kwg = player_get_kwg(player);
+    Board *board = game_get_board(game);
+
+    int score =
+        score_move(game_get_ld(game), vm->move, board,
                    board_get_cross_set_index(
                        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
-                       player_index)));
+                       player_index));
 
-    // FIXME: set the equity here somewhere
+    move_set_score(vm->move, score);
 
-    vm->formed_words = formed_words_create(game_get_board(game), vm->move);
+    if (player_get_move_sort_type(player) == MOVE_SORT_EQUITY) {
+      move_set_equity(
+          vm->move,
+          static_eval_get_move_equity(
+              ld, klv, vm->move, board, vm->leave,
+              player_get_rack(game_get_player(game, 1 - player_index)),
+              bag_get_tiles(game_get_bag(game))));
+    } else {
+      move_set_equity(vm->move, score);
+    }
 
-    formed_words_populate_validities(
-        player_get_kwg(game_get_player(game, player_index)), vm->formed_words);
+    vm->formed_words = formed_words_create(board, vm->move);
+
+    formed_words_populate_validities(kwg, vm->formed_words);
 
     if (!allow_phonies) {
       for (int i = 0; i < formed_words_get_num_words(vm->formed_words); i++) {
@@ -651,11 +595,13 @@ void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2) {
     log_fatal("validated moves to add is unexpectedly empty");
   }
   if (vms1->number_of_moves == 0) {
-    log_fatal("validated moves to update is unexpectedly empty");
+    vms1->moves = vms2->moves;
+    vms1->number_of_moves = vms2->number_of_moves;
+    free(vms2);
+    return;
   }
 
-  // Moves already exist, so we need to resize
-  // the existing ValidatedMove array in vms1 to accommodate
+  // We need to resize the existing ValidatedMove array in vms1 to accommodate
   // the new moves.
   vms1->moves = realloc_or_die(
       vms1->moves, sizeof(ValidatedMove *) *
@@ -670,4 +616,15 @@ void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2) {
   // are now owned by vms1.
   free(vms2->moves);
   free(vms2);
+}
+
+void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
+  if (!vms) {
+    return;
+  }
+  for (int i = 0; i < vms->number_of_moves; i++) {
+    Move *spare_move = move_list_get_spare_move(ml);
+    move_copy(spare_move, vms->moves[i]->move);
+    move_list_insert_spare_move(spare_move, move_get_equity(vms->moves[i]));
+  }
 }

@@ -25,7 +25,6 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
-#include "../ent/validated_move.h"
 
 #include "../util/util.h"
 
@@ -443,10 +442,10 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
               perpendicular_additional_score + bingo_bonus;
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-    equity +=
-        static_eval_get_shadow_equity(gen->ld, gen->opponent_rack, gen->best_leaves,
-                      gen->descending_tile_scores, gen->number_of_tiles_in_bag,
-                      gen->number_of_letters_on_rack, gen->tiles_played);
+    equity += static_eval_get_shadow_equity(
+        gen->ld, gen->opponent_rack, gen->best_leaves,
+        gen->descending_tile_scores, gen->number_of_tiles_in_bag,
+        gen->number_of_letters_on_rack, gen->tiles_played);
   }
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;

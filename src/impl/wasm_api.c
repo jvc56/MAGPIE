@@ -93,13 +93,9 @@ char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
                                         " invalid_words %s", phonies_string);
   }
 
-  string_builder_add_formatted_string(
-      return_string_builder, " sc %d eq %.3f", move_get_score(move),
-      static_eval_get_move_equity(
-          ld, player_get_klv(game_get_player(game, player_on_turn_index)), move,
-          board, validated_moves_get_leave(vms, 0),
-          player_get_rack(game_get_player(game, 1 - player_on_turn_index)),
-          bag_get_tiles(game_get_bag(game))));
+  string_builder_add_formatted_string(return_string_builder, " sc %d eq %.3f",
+                                      move_get_score(move),
+                                      move_get_equity(move));
 
   validated_moves_destroy(vms);
   free(phonies_string);

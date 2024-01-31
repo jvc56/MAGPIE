@@ -27,6 +27,7 @@
 #include "move_gen.h"
 #include "simmer.h"
 
+#include "../str/move_string.h"
 #include "../str/sim_string.h"
 
 #include "../util/fileproxy.h"
@@ -101,6 +102,7 @@ void set_or_clear_error_status(ErrorStatus *error_status,
 
 void execute_sim(const Config *config, ExecState *exec_state) {
   sim_status_t status = simulate(config, exec_state_get_game(exec_state),
+                                 exec_state_get_validated_moves(exec_state),
                                  exec_state_get_sim_results(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_SIM, (int)status);
@@ -160,6 +162,9 @@ void execute_command(ExecState *exec_state) {
       }
     }
 
+    // FIXME: if the game state has changed, we need to clear
+    // the current validated moves
+
     // Update the validated move list
     // with new moves, if specified
     const char *moves = config_get_moves(config);
@@ -177,7 +182,27 @@ void execute_command(ExecState *exec_state) {
         validated_moves_destroy(new_validated_moves);
         return;
       } else {
-        // FIXME: warn about phony moves
+        const LetterDistribution *ld = game_get_ld(game);
+        const Board *board = game_get_board(game);
+        StringBuilder *phonies_sb = string_builder_create();
+        for (int i = 0;
+             i < validated_moves_get_number_of_moves(new_validated_moves);
+             i++) {
+          char *phonies_formed = validated_moves_get_phonies_string(
+              game_get_ld(game), new_validated_moves, i);
+          if (phonies_formed) {
+            string_builder_clear(phonies_sb);
+            string_builder_add_string(phonies_sb, "Phonies formed from ");
+            string_builder_add_move(
+                board, validated_moves_get_move(new_validated_moves, i), ld,
+                phonies_sb);
+            string_builder_add_string(phonies_sb, ": ");
+            string_builder_add_string(phonies_sb, phonies_formed);
+            log_warn(string_builder_peek(phonies_sb));
+          }
+          free(phonies_formed);
+        }
+        string_builder_destroy(phonies_sb);
       }
 
       validated_moves_combine(exec_state_get_validated_moves(exec_state),

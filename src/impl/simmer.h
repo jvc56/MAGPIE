@@ -6,8 +6,9 @@
 #include "../ent/config.h"
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
+#include "../ent/validated_move.h"
 
 sim_status_t simulate(const Config *config, const Game *game,
-                      SimResults *sim_results);
+                      const ValidatedMoves *vms, SimResults *sim_results);
 
 #endif

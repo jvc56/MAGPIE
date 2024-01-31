@@ -225,4 +225,5 @@ void test_sim() {
   test_more_iterations();
   test_play_similarity();
   perf_test_multithread_sim();
+  // FIXME: test with validated moves
 }
