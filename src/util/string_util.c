@@ -286,7 +286,7 @@ struct StringBuilder {
   size_t len;
 };
 
-StringBuilder *string_builder_create() {
+StringBuilder *create_string_builder() {
   StringBuilder *string_builder = malloc_or_die(sizeof(StringBuilder));
   string_builder->string = malloc_or_die(string_builder_min_size);
   *string_builder->string = '\0';
@@ -296,7 +296,7 @@ StringBuilder *string_builder_create() {
   return string_builder;
 }
 
-void string_builder_destroy(StringBuilder *string_builder) {
+void destroy_string_builder(StringBuilder *string_builder) {
   if (!string_builder) {
     return;
   }
@@ -446,7 +446,7 @@ StringSplitter *create_string_splitter() {
   return string_splitter;
 }
 
-void string_splitter_destroy(StringSplitter *string_splitter) {
+void destroy_string_splitter(StringSplitter *string_splitter) {
   if (!string_splitter) {
     return;
   }
@@ -512,7 +512,7 @@ char *string_splitter_join(const StringSplitter *string_splitter,
     log_fatal("invalid bounds for join: %d, %d, %d\n", start_index, end_index,
               number_of_items);
   }
-  StringBuilder *joined_string_builder = string_builder_create();
+  StringBuilder *joined_string_builder = create_string_builder();
   for (int i = start_index; i < end_index; i++) {
     string_builder_add_string(joined_string_builder,
                               string_splitter_get_item(string_splitter, i));
@@ -521,7 +521,7 @@ char *string_splitter_join(const StringSplitter *string_splitter,
     }
   }
   char *joined_string = string_builder_dump(joined_string_builder, NULL);
-  string_builder_destroy(joined_string_builder);
+  destroy_string_builder(joined_string_builder);
   return joined_string;
 }
 

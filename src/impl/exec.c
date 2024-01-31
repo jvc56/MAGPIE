@@ -184,7 +184,7 @@ void execute_command(ExecState *exec_state) {
       } else {
         const LetterDistribution *ld = game_get_ld(game);
         const Board *board = game_get_board(game);
-        StringBuilder *phonies_sb = string_builder_create();
+        StringBuilder *phonies_sb = create_string_builder();
         for (int i = 0;
              i < validated_moves_get_number_of_moves(new_validated_moves);
              i++) {
@@ -202,7 +202,7 @@ void execute_command(ExecState *exec_state) {
           }
           free(phonies_formed);
         }
-        string_builder_destroy(phonies_sb);
+        destroy_string_builder(phonies_sb);
       }
 
       validated_moves_combine(exec_state_get_validated_moves(exec_state),
@@ -371,12 +371,12 @@ void command_scan_loop(ExecState *exec_state,
 }
 
 char *create_command_from_args(int argc, char *argv[]) {
-  StringBuilder *command_string_builder = string_builder_create();
+  StringBuilder *command_string_builder = create_string_builder();
   for (int i = 1; i < argc; i++) {
     string_builder_add_formatted_string(command_string_builder, "%s ", argv[i]);
   }
   char *command_string = string_builder_dump(command_string_builder, NULL);
-  string_builder_destroy(command_string_builder);
+  destroy_string_builder(command_string_builder);
   return command_string;
 }
 

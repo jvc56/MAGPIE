@@ -106,30 +106,30 @@ void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
 
 void print_move_list(const Board *board, const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length) {
-  StringBuilder *move_list_string = string_builder_create();
+  StringBuilder *move_list_string = create_string_builder();
   for (int i = 0; i < move_list_length; i++) {
     string_builder_add_move(board, sml->moves[i], ld, move_list_string);
     string_builder_add_string(move_list_string, "\n");
   }
   printf("%s\n", string_builder_peek(move_list_string));
-  string_builder_destroy(move_list_string);
+  destroy_string_builder(move_list_string);
 }
 
 void print_game(Game *game, MoveList *move_list) {
-  StringBuilder *game_string = string_builder_create();
+  StringBuilder *game_string = create_string_builder();
   string_builder_add_game(game, move_list, game_string);
   printf("%s\n", string_builder_peek(game_string));
-  string_builder_destroy(game_string);
+  destroy_string_builder(game_string);
 }
 
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,
                      InferenceResults *inference_results) {
-  StringBuilder *inference_string = string_builder_create();
+  StringBuilder *inference_string = create_string_builder();
   string_builder_add_inference(ld, inference_results, target_played_tiles,
                                inference_string);
   printf("%s\n", string_builder_peek(inference_string));
-  string_builder_destroy(inference_string);
+  destroy_string_builder(inference_string);
 }
 
 void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
@@ -276,7 +276,7 @@ void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
-  StringBuilder *move_string = string_builder_create();
+  StringBuilder *move_string = create_string_builder();
   Move *move;
   if (sml) {
     move = sml->moves[move_index];
@@ -289,7 +289,7 @@ void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
             string_builder_peek(move_string), expected_move_string);
     assert(0);
   }
-  string_builder_destroy(move_string);
+  destroy_string_builder(move_string);
 }
 
 char *get_test_filename(const char *filename) {

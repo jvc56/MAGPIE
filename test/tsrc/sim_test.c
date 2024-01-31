@@ -33,7 +33,7 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
   sim_results_sort_plays_by_win_rate(sim_results);
   const LetterDistribution *ld = game_get_ld(game);
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
-  StringBuilder *move_description = string_builder_create();
+  StringBuilder *move_description = create_string_builder();
   for (int i = 0; i < sim_results_get_number_of_plays(sim_results); i++) {
     const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
     Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
@@ -57,7 +57,7 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
     free(eq);
   }
   printf("Iterations: %d\n", sim_results_get_iteration_count(sim_results));
-  string_builder_destroy(move_description);
+  destroy_string_builder(move_description);
 }
 
 void test_win_pct() {
@@ -116,7 +116,7 @@ void test_more_iterations() {
   sim_results_sort_plays_by_win_rate(sim_results);
 
   SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
-  StringBuilder *move_string_builder = string_builder_create();
+  StringBuilder *move_string_builder = create_string_builder();
   string_builder_add_move_description(simmed_play_get_move(play), ld,
                                       move_string_builder);
 
@@ -125,7 +125,7 @@ void test_more_iterations() {
   game_destroy(game);
   config_destroy(config);
   sim_results_destroy(sim_results);
-  string_builder_destroy(move_string_builder);
+  destroy_string_builder(move_string_builder);
 }
 
 void perf_test_multithread_sim() {
@@ -157,13 +157,13 @@ void perf_test_multithread_sim() {
   sim_results_sort_plays_by_win_rate(sim_results);
 
   SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
-  StringBuilder *move_string_builder = string_builder_create();
+  StringBuilder *move_string_builder = create_string_builder();
   string_builder_add_move_description(simmed_play_get_move(play), ld,
                                       move_string_builder);
 
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
-  string_builder_destroy(move_string_builder);
+  destroy_string_builder(move_string_builder);
   game_destroy(game);
   config_destroy(config);
   sim_results_destroy(sim_results);
@@ -197,7 +197,7 @@ void test_play_similarity() {
   // others should not be ignored, since the stopping condition
   // is NONE.
 
-  StringBuilder *p1_string_builder = string_builder_create();
+  StringBuilder *p1_string_builder = create_string_builder();
   bool found_ignored_play = false;
   for (int i = 0; i < 4; i++) {
     SimmedPlay *play_i = sim_results_get_simmed_play(sim_results, i);
@@ -213,7 +213,7 @@ void test_play_similarity() {
       found_ignored_play = true;
     }
   }
-  string_builder_destroy(p1_string_builder);
+  destroy_string_builder(p1_string_builder);
   game_destroy(game);
   config_destroy(config);
   sim_results_destroy(sim_results);

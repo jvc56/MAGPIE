@@ -585,7 +585,6 @@ void test_validated_move_combine() {
 }
 
 void test_validated_move() {
-  // FIXME: undo string_builder_destroy and make new issue in Github
   test_validated_move_errors();
   test_validated_move_success();
   test_validated_move_distinct_kwg();

@@ -1235,7 +1235,7 @@ config_load_status_t config_load(Config *config, const char *cmd) {
   }
 
   destroy_parsed_args(parsed_args);
-  string_splitter_destroy(cmd_split_string);
+  destroy_string_splitter(cmd_split_string);
 
   return config_load_status;
 }

@@ -307,7 +307,7 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
 cgp_parse_status_t parse_cgp_board_row(Game *game, const char *cgp_board_row,
                                        int row_index) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
-  StringBuilder *tile_string_builder = string_builder_create();
+  StringBuilder *tile_string_builder = create_string_builder();
   int row_length = string_length(cgp_board_row);
 
   int current_row_number_of_spaces = 0;
@@ -342,7 +342,7 @@ cgp_parse_status_t parse_cgp_board_row(Game *game, const char *cgp_board_row,
   } else {
     current_column_index += current_row_number_of_spaces;
   }
-  string_builder_destroy(tile_string_builder);
+  destroy_string_builder(tile_string_builder);
 
   if (current_column_index != BOARD_DIM &&
       cgp_parse_status == CGP_PARSE_STATUS_SUCCESS) {
@@ -367,7 +367,7 @@ cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
       }
     }
   }
-  string_splitter_destroy(board_rows);
+  destroy_string_splitter(board_rows);
   return cgp_parse_status;
 }
 
@@ -412,7 +412,7 @@ cgp_parse_status_t parse_cgp_racks(Game *game, const char *cgp_racks) {
   } else {
     cgp_parse_status = parse_cgp_racks_with_string_splitter(player_racks, game);
   }
-  string_splitter_destroy(player_racks);
+  destroy_string_splitter(player_racks);
   return cgp_parse_status;
 }
 
@@ -432,7 +432,7 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
     player_set_score(game->players[1],
                      string_to_int(string_splitter_get_item(player_scores, 1)));
   }
-  string_splitter_destroy(player_scores);
+  destroy_string_splitter(player_scores);
   return cgp_parse_status;
 }
 
@@ -481,7 +481,7 @@ cgp_parse_status_t parse_cgp(Game *game, const char *cgp) {
   } else {
     cgp_parse_status = parse_cgp_with_cgp_fields(cgp_fields, game);
   }
-  string_splitter_destroy(cgp_fields);
+  destroy_string_splitter(cgp_fields);
   return cgp_parse_status;
 }
 

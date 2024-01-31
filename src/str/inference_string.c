@@ -366,7 +366,7 @@ void print_ucgi_inference(const LetterDistribution *ld,
   // Create a transient stat to use the stat functions
   Stat *letter_stat = stat_create();
 
-  StringBuilder *ucgi_string_builder = string_builder_create();
+  StringBuilder *ucgi_string_builder = create_string_builder();
   string_builder_ucgi_add_inference_record(
       inference_results, INFERENCE_TYPE_LEAVE, ld,
       inference_results_get_target_known_unplayed_tiles(inference_results),
@@ -409,5 +409,5 @@ void print_ucgi_inference(const LetterDistribution *ld,
   }
   thread_control_print(thread_control,
                        string_builder_peek(ucgi_string_builder));
-  string_builder_destroy(ucgi_string_builder);
+  destroy_string_builder(ucgi_string_builder);
 }

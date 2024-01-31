@@ -78,8 +78,8 @@ char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
   Move *move = validated_moves_get_move(vms, 0);
   char *phonies_string = validated_moves_get_phonies_string(ld, vms, 0);
 
-  StringBuilder *return_string_builder = string_builder_create();
-  StringBuilder *move_string_builder = string_builder_create();
+  StringBuilder *return_string_builder = create_string_builder();
+  StringBuilder *move_string_builder = create_string_builder();
 
   string_builder_add_ucgi_move(move, board, ld, move_string_builder);
 
@@ -99,9 +99,9 @@ char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
 
   validated_moves_destroy(vms);
   free(phonies_string);
-  string_builder_destroy(move_string_builder);
+  destroy_string_builder(move_string_builder);
   char *return_string = string_builder_dump(return_string_builder, NULL);
-  string_builder_destroy(return_string_builder);
+  destroy_string_builder(return_string_builder);
   // Caller can use UTF8ToString on the returned pointer but it MUST FREE
   // this string after it's done with it!
   return return_string;

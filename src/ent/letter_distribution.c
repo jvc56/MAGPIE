@@ -113,10 +113,10 @@ void load_ld(LetterDistribution *ld, const char *ld_name) {
           get_blanked_machine_letter(machine_letter);
       string_copy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter);
     }
-    string_splitter_destroy(single_letter_info);
+    destroy_string_splitter(single_letter_info);
     machine_letter++;
   }
-  string_splitter_destroy(ld_lines);
+  destroy_string_splitter(ld_lines);
 
   sort_score_order(ld);
 
