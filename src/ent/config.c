@@ -36,6 +36,7 @@
 #define ARG_CGP "cgp"
 #define ARG_MOVES "m"
 #define ARG_GO "go"
+#define ARG_GEN "gen"
 #define ARG_SIM "sim"
 #define ARG_INFER "infer"
 #define ARG_AUTOPLAY "autoplay"
@@ -135,6 +136,7 @@ typedef enum {
   ARG_TOKEN_CGP,
   ARG_TOKEN_MOVES,
   ARG_TOKEN_GO,
+  ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_AUTOPLAY,
@@ -202,6 +204,7 @@ const struct {
     // The valid sequences
     // The NUMBER_OF_ARG_TOKENS denotes the end of the given sequence
     {COMMAND_TYPE_LOAD_CGP, {ARG_TOKEN_POSITION, NUMBER_OF_ARG_TOKENS}},
+    {COMMAND_TYPE_GEN, {ARG_TOKEN_GO, ARG_TOKEN_GEN, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_SIM, {ARG_TOKEN_GO, ARG_TOKEN_SIM, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_INFER, {ARG_TOKEN_GO, ARG_TOKEN_INFER, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_AUTOPLAY,
@@ -353,6 +356,7 @@ ParsedArgs *create_parsed_args() {
   set_single_arg(parsed_args, index++, ARG_TOKEN_MOVES, ARG_MOVES, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_GO, ARG_GO, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_SIM, ARG_SIM, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_GEN, ARG_GEN, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_INFER, ARG_INFER, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_AUTOPLAY, ARG_AUTOPLAY, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_SET_OPTIONS, ARG_SET_OPTIONS,
@@ -1034,6 +1038,7 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
     switch (arg_token) {
     case ARG_TOKEN_POSITION:
     case ARG_TOKEN_GO:
+    case ARG_TOKEN_GEN:
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_AUTOPLAY:

@@ -103,3 +103,15 @@ void exec_state_init_game(ExecState *exec_state) {
     game_update(exec_state->config, exec_state->game);
   }
 }
+
+void exec_state_init_move_list(ExecState *exec_state) {
+  int capacity = config_get_num_plays(exec_state->config);
+
+  if (exec_state->move_list &&
+      move_list_get_capacity(exec_state->move_list) == capacity) {
+    return;
+  }
+
+  move_list_destroy(exec_state->move_list);
+  exec_state->move_list = move_list_create(capacity);
+}

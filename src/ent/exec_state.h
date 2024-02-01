@@ -23,5 +23,6 @@ ErrorStatus *exec_state_get_error_status(const ExecState *exec_state);
 MoveList *exec_state_get_move_list(const ExecState *exec_state);
 
 void exec_state_init_game(ExecState *exec_state);
+void exec_state_init_move_list(ExecState *exec_state);
 
 #endif
