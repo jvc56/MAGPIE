@@ -26,6 +26,6 @@ double static_eval_get_move_equity(const LetterDistribution *ld, const KLV *klv,
                                    const Rack *opp_rack,
                                    int number_of_tiles_in_bag);
 
-int score_move(const LetterDistribution *ld, const Move *move, Board *board,
+int static_eval_get_move_score(const LetterDistribution *ld, const Move *move, Board *board,
                int cross_set_index);
 #endif

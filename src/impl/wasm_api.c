@@ -17,6 +17,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
+#include "../ent/validated_move.h"
 #include "../ent/words.h"
 
 #include "exec.h"
@@ -38,7 +39,7 @@ void destroy_wasm_exec_states() {
 
 void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
   // Use a separate command vars to get
-  // a game for score_move and static_evaluation
+  // a game for static_eval_get_move_score and static_evaluation
   if (!iso_exec_state) {
     iso_exec_state = exec_state_create();
   }
@@ -56,8 +57,8 @@ char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
   const LetterDistribution *ld = game_get_ld(game);
   const int player_on_turn_index = game_get_player_on_turn_index(game);
 
-  ValidatedMoves *vms =
-      validated_moves_create(game, player_on_turn_index, ucgi_move_str, true);
+  ValidatedMoves *vms = validated_moves_create(game, player_on_turn_index,
+                                               ucgi_move_str, true, false);
 
   if (validated_moves_get_number_of_moves(vms) > 1) {
     validated_moves_destroy(vms);

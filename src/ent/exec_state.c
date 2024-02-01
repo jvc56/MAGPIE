@@ -16,7 +16,7 @@
 struct ExecState {
   Config *config;
   Game *game;
-  ValidatedMoves *validated_moves;
+  MoveList *move_list;
   SimResults *sim_results;
   InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
@@ -27,7 +27,7 @@ ExecState *exec_state_create() {
   ExecState *exec_state = malloc_or_die(sizeof(ExecState));
   exec_state->config = config_create_default();
   exec_state->game = NULL;
-  exec_state->validated_moves = validated_moves_create_empty();
+  exec_state->move_list = NULL;
   exec_state->sim_results = sim_results_create();
   exec_state->inference_results = inference_results_create();
   exec_state->autoplay_results = autoplay_results_create();
@@ -41,7 +41,7 @@ void exec_state_destroy(ExecState *exec_state) {
   }
   config_destroy(exec_state->config);
   game_destroy(exec_state->game);
-  validated_moves_destroy(exec_state->validated_moves);
+  move_list_destroy(exec_state->move_list);
   sim_results_destroy(exec_state->sim_results);
   inference_results_destroy(exec_state->inference_results);
   autoplay_results_destroy(exec_state->autoplay_results);
@@ -57,8 +57,8 @@ Game *exec_state_get_game(const ExecState *exec_state) {
   return exec_state->game;
 }
 
-ValidatedMoves *exec_state_get_validated_moves(const ExecState *exec_state) {
-  return exec_state->validated_moves;
+MoveList *exec_state_get_move_list(const ExecState *exec_state) {
+  return exec_state->move_list;
 }
 
 SimResults *exec_state_get_sim_results(const ExecState *exec_state) {

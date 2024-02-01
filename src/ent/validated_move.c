@@ -198,7 +198,8 @@ move_validation_status_t validate_tiles_played(const LetterDistribution *ld,
 move_validation_status_t validate_split_move(const StringSplitter *split_move,
                                              Game *game, ValidatedMove *vm,
                                              int player_index,
-                                             Rack *tiles_played_rack) {
+                                             Rack *tiles_played_rack,
+                                             bool allow_unknown_exchanges) {
   // This function handles the following UCGI move string types.
   // Any strings not conforming to the UCGI standard will result
   // in an error status.
@@ -288,6 +289,9 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
     int number_exchanged = string_to_int(played_tiles_or_number_exchanged);
     if (number_exchanged < 1 || number_exchanged > (RACK_SIZE)) {
       return MOVE_VALIDATION_STATUS_INVALID_NUMBER_EXCHANGED;
+    }
+    if (!allow_unknown_exchanges) {
+      return MOVE_VALIDATION_STATUS_UNKNOWN_EXCHANGE_DISALLOWED;
     }
     move_set_tiles_played(vm->move, number_exchanged);
     move_set_tiles_length(vm->move, number_exchanged);
@@ -384,12 +388,14 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
 
 move_validation_status_t validate_move(ValidatedMove *vm, Game *game,
                                        int player_index,
-                                       const char *ucgi_move_string) {
+                                       const char *ucgi_move_string,
+                                       bool allow_unknown_exchanges) {
   StringSplitter *split_move = split_string(ucgi_move_string, '.', false);
   Rack *tiles_played_rack = rack_create(ld_get_size(game_get_ld(game)));
 
-  move_validation_status_t status = validate_split_move(
-      split_move, game, vm, player_index, tiles_played_rack);
+  move_validation_status_t status =
+      validate_split_move(split_move, game, vm, player_index, tiles_played_rack,
+                          allow_unknown_exchanges);
 
   destroy_string_splitter(split_move);
   rack_destroy(tiles_played_rack);
@@ -400,7 +406,8 @@ move_validation_status_t validate_move(ValidatedMove *vm, Game *game,
 move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
                                              int player_index,
                                              const char *ucgi_move_string,
-                                             bool allow_phonies) {
+                                             bool allow_phonies,
+                                             bool allow_unknown_exchanges) {
 
   if (is_all_whitespace_or_empty(ucgi_move_string)) {
     return MOVE_VALIDATION_STATUS_EMPTY_MOVE;
@@ -409,8 +416,8 @@ move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
     return MOVE_VALIDATION_STATUS_INVALID_PLAYER_INDEX;
   }
 
-  move_validation_status_t status =
-      validate_move(vm, game, player_index, ucgi_move_string);
+  move_validation_status_t status = validate_move(
+      vm, game, player_index, ucgi_move_string, allow_unknown_exchanges);
 
   if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
     return status;
@@ -425,10 +432,11 @@ move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     const KWG *kwg = player_get_kwg(player);
-    score = score_move(game_get_ld(game), vm->move, board,
-                       board_get_cross_set_index(
-                           game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
-                           player_index));
+    score = static_eval_get_move_score(
+        game_get_ld(game), vm->move, board,
+        board_get_cross_set_index(
+            game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+            player_index));
 
     move_set_score(vm->move, score);
 
@@ -463,7 +471,8 @@ move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
 
 ValidatedMove *validated_move_create(Game *game, int player_index,
                                      const char *ucgi_move_string,
-                                     bool allow_phonies) {
+                                     bool allow_phonies,
+                                     bool allow_unknown_exchanges) {
   ValidatedMove *vm = malloc_or_die(sizeof(ValidatedMove));
   vm->formed_words = NULL;
   vm->rack = NULL;
@@ -477,8 +486,9 @@ ValidatedMove *validated_move_create(Game *game, int player_index,
   char *trimmed_ucgi_move_string = string_duplicate(ucgi_move_string);
   trim_whitespace(trimmed_ucgi_move_string);
 
-  vm->status = validated_move_load(vm, game, player_index,
-                                   trimmed_ucgi_move_string, allow_phonies);
+  vm->status =
+      validated_move_load(vm, game, player_index, trimmed_ucgi_move_string,
+                          allow_phonies, allow_unknown_exchanges);
   free(trimmed_ucgi_move_string);
   return vm;
 }
@@ -496,7 +506,8 @@ void validated_move_destroy(ValidatedMove *vm) {
 
 ValidatedMoves *validated_moves_create(Game *game, int player_index,
                                        const char *ucgi_moves_string,
-                                       bool allow_phonies) {
+                                       bool allow_phonies,
+                                       bool allow_unknown_exchanges) {
   ValidatedMoves *vms = malloc_or_die(sizeof(ValidatedMoves));
   vms->moves = NULL;
   vms->number_of_moves = 0;
@@ -515,7 +526,7 @@ ValidatedMoves *validated_moves_create(Game *game, int player_index,
     for (int i = 0; i < vms->number_of_moves; i++) {
       vms->moves[i] = validated_move_create(
           game, player_index, string_splitter_get_item(split_moves, i),
-          allow_phonies);
+          allow_phonies, allow_unknown_exchanges);
 
       // For now, just set the final status to the first nonsuccess
       // status of the moves. Later we can implement more thorough
@@ -624,9 +635,6 @@ void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2) {
 }
 
 void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
-  if (!vms) {
-    return;
-  }
   for (int i = 0; i < vms->number_of_moves; i++) {
     Move *spare_move = move_list_get_spare_move(ml);
     move_copy(spare_move, vms->moves[i]->move);

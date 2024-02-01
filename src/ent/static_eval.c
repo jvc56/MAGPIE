@@ -28,7 +28,6 @@ double placement_adjustment(const LetterDistribution *ld, const Move *move) {
     if (get_is_blanked(tile)) {
       tile = get_unblanked_machine_letter(tile);
     }
-    // FIXME: refactor when board size becomes variable
     if (ld_get_is_vowel(ld, tile) && (j == 2 || j == 6 || j == 8 || j == 12)) {
       penalty += v_penalty;
     }
@@ -148,9 +147,8 @@ double static_eval_get_move_equity(const LetterDistribution *ld, const KLV *klv,
       leave_equity);
 }
 
-// FIXME: maybe make name consistent?
-int score_move(const LetterDistribution *ld, const Move *move, Board *board,
-               int cross_set_index) {
+int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
+                               Board *board, int cross_set_index) {
   int tiles_played = move_get_tiles_played(move);
   int tiles_length = move_get_tiles_length(move);
   int row_start = move_get_row_start(move);

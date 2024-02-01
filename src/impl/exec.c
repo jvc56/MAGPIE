@@ -102,7 +102,7 @@ void set_or_clear_error_status(ErrorStatus *error_status,
 
 void execute_sim(const Config *config, ExecState *exec_state) {
   sim_status_t status = simulate(config, exec_state_get_game(exec_state),
-                                 exec_state_get_validated_moves(exec_state),
+                                 exec_state_get_move_list(exec_state),
                                  exec_state_get_sim_results(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_SIM, (int)status);
@@ -121,6 +121,47 @@ void execute_infer(const Config *config, ExecState *exec_state) {
             exec_state_get_inference_results(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_INFER, (int)status);
+}
+
+move_validation_status_t update_move_list(const ExecState *exec_state,
+                                          const char *moves) {
+  Game *game = exec_state_get_game(exec_state);
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+
+  ValidatedMoves *new_validated_moves =
+      validated_moves_create(game, player_on_turn_index, moves, true, false);
+
+  move_validation_status_t move_validation_status =
+      validated_moves_get_validation_status(new_validated_moves);
+
+  if (move_validation_status == MOVE_VALIDATION_STATUS_SUCCESS) {
+    const LetterDistribution *ld = game_get_ld(game);
+    const Board *board = game_get_board(game);
+    StringBuilder *phonies_sb = create_string_builder();
+    for (int i = 0;
+         i < validated_moves_get_number_of_moves(new_validated_moves); i++) {
+      char *phonies_formed = validated_moves_get_phonies_string(
+          game_get_ld(game), new_validated_moves, i);
+      if (phonies_formed) {
+        string_builder_clear(phonies_sb);
+        string_builder_add_string(phonies_sb, "Phonies formed from ");
+        string_builder_add_move(
+            board, validated_moves_get_move(new_validated_moves, i), ld,
+            phonies_sb);
+        string_builder_add_string(phonies_sb, ": ");
+        string_builder_add_string(phonies_sb, phonies_formed);
+        log_warn(string_builder_peek(phonies_sb));
+      }
+      free(phonies_formed);
+    }
+    destroy_string_builder(phonies_sb);
+    validated_moves_add_to_move_list(new_validated_moves,
+                                     exec_state_get_move_list(exec_state));
+  }
+
+  validated_moves_destroy(new_validated_moves);
+
+  return move_validation_status;
 }
 
 void execute_command(ExecState *exec_state) {
@@ -169,44 +210,15 @@ void execute_command(ExecState *exec_state) {
     // with new moves, if specified
     const char *moves = config_get_moves(config);
     if (moves) {
-      Game *game = exec_state_get_game(exec_state);
-      int player_on_turn_index = game_get_player_on_turn_index(game);
-      ValidatedMoves *new_validated_moves =
-          validated_moves_create(game, player_on_turn_index, moves, true);
       move_validation_status_t move_validation_status =
-          validated_moves_get_validation_status(new_validated_moves);
+          update_move_list(exec_state, moves);
+
       if (move_validation_status != MOVE_VALIDATION_STATUS_SUCCESS) {
         set_or_clear_error_status(exec_state_get_error_status(exec_state),
                                   ERROR_STATUS_TYPE_MOVE_VALIDATION,
                                   (int)move_validation_status);
-        validated_moves_destroy(new_validated_moves);
         return;
-      } else {
-        const LetterDistribution *ld = game_get_ld(game);
-        const Board *board = game_get_board(game);
-        StringBuilder *phonies_sb = create_string_builder();
-        for (int i = 0;
-             i < validated_moves_get_number_of_moves(new_validated_moves);
-             i++) {
-          char *phonies_formed = validated_moves_get_phonies_string(
-              game_get_ld(game), new_validated_moves, i);
-          if (phonies_formed) {
-            string_builder_clear(phonies_sb);
-            string_builder_add_string(phonies_sb, "Phonies formed from ");
-            string_builder_add_move(
-                board, validated_moves_get_move(new_validated_moves, i), ld,
-                phonies_sb);
-            string_builder_add_string(phonies_sb, ": ");
-            string_builder_add_string(phonies_sb, phonies_formed);
-            log_warn(string_builder_peek(phonies_sb));
-          }
-          free(phonies_formed);
-        }
-        destroy_string_builder(phonies_sb);
       }
-
-      validated_moves_combine(exec_state_get_validated_moves(exec_state),
-                              new_validated_moves);
     }
   }
 

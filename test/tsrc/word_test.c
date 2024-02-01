@@ -22,7 +22,8 @@ void test_words_played() {
   Game *game = game_create(config);
   game_load_cgp(game, VS_ED);
 
-  ValidatedMoves *vms_pent = validated_moves_create(game, 0, "N11.PeNT", false);
+  ValidatedMoves *vms_pent =
+      validated_moves_create(game, 0, "N11.PeNT", false, true);
 
   assert(validated_moves_get_validation_status(vms_pent) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
@@ -51,7 +52,7 @@ void test_words_played() {
 
   // Play some random phoney making a lot of words 6G DI(PET)AZ
   ValidatedMoves *vms_dipetaz =
-      validated_moves_create(game, 0, "6G.DIPETAZ", true);
+      validated_moves_create(game, 0, "6G.DIPETAZ", true, true);
 
   assert(validated_moves_get_validation_status(vms_dipetaz) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
@@ -85,7 +86,8 @@ void test_words_played() {
   validated_moves_destroy(vms_dipetaz);
 
   // play a single tile that makes two words. 9F (BOY)S
-  ValidatedMoves *vms_boys = validated_moves_create(game, 0, "9F.BOYS", false);
+  ValidatedMoves *vms_boys =
+      validated_moves_create(game, 0, "9F.BOYS", false, true);
 
   assert(validated_moves_get_validation_status(vms_boys) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
@@ -107,7 +109,7 @@ void test_words_played() {
 
   // same as above but dir - I5 SPAY(S)
   ValidatedMoves *vms_spays =
-      validated_moves_create(game, 0, "I5.SPAYS", false);
+      validated_moves_create(game, 0, "I5.SPAYS", false, true);
 
   assert(validated_moves_get_validation_status(vms_spays) ==
          MOVE_VALIDATION_STATUS_SUCCESS);

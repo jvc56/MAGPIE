@@ -147,7 +147,7 @@ void record_play(MoveGen *gen, int leftstrip, int rightstrip,
       move_set_row_start(spare_move, start_col);
       move_set_col_start(spare_move, start_row);
     }
-    score = score_move(
+    score = static_eval_get_move_score(
         gen->ld, spare_move, gen->board,
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
     move_set_score(spare_move, score);

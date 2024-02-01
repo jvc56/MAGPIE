@@ -13,8 +13,9 @@ typedef struct ValidatedMoves ValidatedMoves;
 
 // FIXME: game should probably be const
 ValidatedMoves *validated_moves_create(Game *game, int player_index,
-                                       const char *ucgi_move_string,
-                                       bool allow_phonies);
+                                       const char *ucgi_moves_string,
+                                       bool allow_phonies,
+                                       bool allow_unknown_exchanges);
 ValidatedMoves *validated_moves_create_empty();
 void validated_moves_destroy(ValidatedMoves *vms);
 
@@ -38,8 +39,8 @@ char *validated_moves_get_phonies_string(const LetterDistribution *ld,
 int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i);
 bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i);
 
-int score_move(const LetterDistribution *ld, const Move *move, Board *board,
-               int cross_set_index);
+int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
+                               Board *board, int cross_set_index);
 void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml);
 
 #endif

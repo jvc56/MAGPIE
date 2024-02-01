@@ -21,6 +21,7 @@
 #include "../../src/ent/thread_control.h"
 #include "../../src/ent/win_pct.h"
 
+#include "../../src/impl/move_gen.h"
 #include "../../src/impl/simmer.h"
 
 #include "../../src/str/move_string.h"
@@ -62,7 +63,7 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
 
 void test_win_pct() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all");
   assert(within_epsilon(win_pct_get(config_get_win_pcts(config), 118, 90),
                         0.844430));
   config_destroy(config);
@@ -70,7 +71,7 @@ void test_win_pct() {
 
 void test_sim_single_iteration() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
   Game *game = game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
@@ -80,16 +81,20 @@ void test_sim_single_iteration() {
   ThreadControl *thread_control = config_get_thread_control(config);
 
   draw_rack_to_string(ld, bag, player0_rack, "AAADERW", 0);
+
+  MoveList *move_list = move_list_create(15);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+
   SimResults *sim_results = sim_results_create();
-  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-                             " plies 2 threads 1 numplays 15 i 1 cond none");
-  sim_status_t status = simulate(config, game, NULL, sim_results);
+  load_config_or_die(config, "setoptions plies 2 threads 1 i 1 cond none");
+  sim_status_t status = simulate(config, game, move_list, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
 
   assert(board_get_tiles_played(board) == 0);
 
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
   sim_results_destroy(sim_results);
@@ -97,7 +102,7 @@ void test_sim_single_iteration() {
 
 void test_more_iterations() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
   Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -106,10 +111,12 @@ void test_more_iterations() {
   ThreadControl *thread_control = config_get_thread_control(config);
 
   draw_rack_to_string(ld, bag, player0_rack, "AEIQRST", 0);
+  MoveList *move_list = move_list_create(15);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+
   SimResults *sim_results = sim_results_create();
-  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-                             " plies 2 threads 1 numplays 15 i 400 cond none");
-  sim_status_t status = simulate(config, game, NULL, sim_results);
+  load_config_or_die(config, "setoptions plies 2 threads 1 i 400 cond none");
+  sim_status_t status = simulate(config, game, move_list, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
@@ -122,6 +129,7 @@ void test_more_iterations() {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "8G QI"));
 
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
   sim_results_destroy(sim_results);
@@ -130,7 +138,7 @@ void test_more_iterations() {
 
 void perf_test_multithread_sim() {
   Config *config = create_config_or_die(
-      "setoptions s1 score s2 score r1 all r2 all numplays 1000000 "
+      "setoptions s1 score s2 score r1 all r2 all "
       "threads 4 "
       "cgp "
       "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"
@@ -145,10 +153,13 @@ void perf_test_multithread_sim() {
   int num_threads = thread_control_get_threads(thread_control);
   printf("Using %d threads\n", num_threads);
   game_load_cgp(game, config_get_cgp(config));
+
+  MoveList *move_list = move_list_create(15);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+
   SimResults *sim_results = sim_results_create();
-  load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
-                             " plies 2 threads 1 numplays 15 i 1000 cond none");
-  sim_status_t status = simulate(config, game, NULL, sim_results);
+  load_config_or_die(config, "setoptions plies 2 threads 1 i 1000 cond none");
+  sim_status_t status = simulate(config, game, move_list, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
@@ -163,6 +174,7 @@ void perf_test_multithread_sim() {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
+  move_list_destroy(move_list);
   destroy_string_builder(move_string_builder);
   game_destroy(game);
   config_destroy(config);
@@ -171,7 +183,7 @@ void perf_test_multithread_sim() {
 
 void test_play_similarity() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
   Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -182,11 +194,14 @@ void test_play_similarity() {
   Rack *player0_rack = player_get_rack(player0);
 
   draw_rack_to_string(ld, bag, player0_rack, "ACEIRST", 0);
+
+  MoveList *move_list = move_list_create(15);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+
   SimResults *sim_results = sim_results_create();
   load_config_or_die(config,
-                     "setoptions rack " EMPTY_RACK_STRING
-                     " plies 2 threads 1 numplays 4 i 1200 cond none check 50");
-  sim_status_t status = simulate(config, game, NULL, sim_results);
+                     "setoptions plies 2 threads 1 i 1200 cond none check 50");
+  sim_status_t status = simulate(config, game, move_list, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
@@ -213,6 +228,8 @@ void test_play_similarity() {
       found_ignored_play = true;
     }
   }
+
+  move_list_destroy(move_list);
   destroy_string_builder(p1_string_builder);
   game_destroy(game);
   config_destroy(config);
@@ -225,5 +242,4 @@ void test_sim() {
   test_more_iterations();
   test_play_similarity();
   perf_test_multithread_sim();
-  // FIXME: test with validated moves
 }

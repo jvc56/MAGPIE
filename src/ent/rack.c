@@ -92,7 +92,6 @@ void rack_add_letter(Rack *rack, uint8_t letter) {
 // Returns true if rack_to_update contains value_to_sub
 // and subtracts value_to_sub from rack_to_update
 // on success.
-// FIXME: test rack subtract
 bool rack_subtract(Rack *rack_to_update, Rack *value_to_sub) {
   for (int i = 0; i < rack_to_update->array_size; i++) {
     if (rack_to_update->array[i] < value_to_sub->array[i]) {
