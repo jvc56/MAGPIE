@@ -107,7 +107,13 @@ bool within_epsilon_for_equity(double a, double board) {
   return fabs(a - board) < COMPARE_MOVES_EPSILON;
 }
 
-int compare_moves(const Move *move_1, const Move *move_2) {
+// Returns 1 if move_1 is "better" than move_2
+// Returns 0 if move_2 is "better" than move_1
+// Returns -1 if the moves are equivalent
+// Dies if moves are equivalent and duplicates
+// are not allowed
+int compare_moves(const Move *move_1, const Move *move_2,
+                  bool allow_duplicates) {
   if (!within_epsilon_for_equity(move_1->equity, move_2->equity)) {
     return move_1->equity > move_2->equity;
   }
@@ -137,17 +143,10 @@ int compare_moves(const Move *move_1, const Move *move_2) {
       return move_1->tiles[i] < move_2->tiles[i];
     }
   }
-  return 0;
-}
-
-// Enforce arbitrary order to keep
-// move order deterministic
-int compare_moves_die_if_same(const Move *move_1, const Move *move_2) {
-  int result = compare_moves(move_1, move_2);
-  if (result == 0) {
+  if (!allow_duplicates) {
     log_fatal("duplicate move in move list detected: %d\n", move_1->move_type);
   }
-  return result;
+  return -1;
 }
 
 void move_set_all_except_equity(Move *move, uint8_t strip[], int leftstrip,
@@ -224,6 +223,17 @@ MoveList *move_list_create(int capacity) {
   return ml;
 }
 
+MoveList *move_list_duplicate(const MoveList *ml) {
+  MoveList *new_ml = malloc_or_die(sizeof(MoveList));
+  new_ml->count = ml->count;
+  new_ml->spare_move = move_create();
+  create_moves_for_move_list(new_ml, ml->capacity - 1);
+  for (int i = 0; i < new_ml->capacity; i++) {
+    move_copy(new_ml->moves[i], ml->moves[i]);
+  }
+  return new_ml;
+}
+
 void move_list_destroy(MoveList *ml) {
   if (!ml) {
     return;
@@ -243,7 +253,7 @@ void up_heapify(MoveList *ml, int index) {
   int parent_node = (index - 1) / 2;
 
   if (index > 0 &&
-      compare_moves_die_if_same(ml->moves[parent_node], ml->moves[index])) {
+      compare_moves(ml->moves[parent_node], ml->moves[index], false)) {
     temp = ml->moves[parent_node];
     ml->moves[parent_node] = ml->moves[index];
     ml->moves[index] = temp;
@@ -263,12 +273,11 @@ void down_heapify(MoveList *ml, int parent_node) {
     right = -1;
 
   if (left != -1 &&
-      compare_moves_die_if_same(ml->moves[parent_node], ml->moves[left]))
+      compare_moves(ml->moves[parent_node], ml->moves[left], false))
     min = left;
   else
     min = parent_node;
-  if (right != -1 &&
-      compare_moves_die_if_same(ml->moves[min], ml->moves[right]))
+  if (right != -1 && compare_moves(ml->moves[min], ml->moves[right], false))
     min = right;
 
   if (min != parent_node) {
@@ -309,7 +318,7 @@ void move_list_insert_spare_move(MoveList *ml, double equity) {
 
 void move_list_insert_spare_move_top_equity(MoveList *ml, double equity) {
   ml->spare_move->equity = equity;
-  if (compare_moves_die_if_same(ml->spare_move, ml->moves[0])) {
+  if (compare_moves(ml->spare_move, ml->moves[0], false)) {
     Move *swap = ml->moves[0];
     ml->moves[0] = ml->spare_move;
     ml->spare_move = swap;
@@ -348,6 +357,7 @@ void move_list_sort_moves(MoveList *ml) {
   ml->count = number_of_moves;
 }
 
+// FIXME: test this plz
 void move_list_resize(MoveList *ml, int new_capacity) {
   if (new_capacity == ml->capacity) {
     return;
@@ -360,8 +370,8 @@ void move_list_resize(MoveList *ml, int new_capacity) {
 }
 
 bool move_list_move_exists(MoveList *ml, Move *m) {
-  for (int i = 1; i < ml->count; i++) {
-    if (compare_moves(ml->moves[i], m) == 0) {
+  for (int i = 0; i < ml->count; i++) {
+    if (compare_moves(ml->moves[i], m, true) == -1) {
       return true;
     }
   }

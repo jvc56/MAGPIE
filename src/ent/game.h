@@ -20,8 +20,8 @@ void game_update(const Config *config, Game *game);
 Game *game_duplicate(const Game *game);
 void game_reset(Game *game);
 
-Board *game_get_board(Game *game);
-Bag *game_get_bag(Game *game);
+Board *game_get_board(const Game *game);
+Bag *game_get_bag(const Game *game);
 const LetterDistribution *game_get_ld(const Game *game);
 Player *game_get_player(Game *game, int player_index);
 int game_get_player_on_turn_index(const Game *game);

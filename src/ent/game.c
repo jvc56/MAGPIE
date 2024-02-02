@@ -62,9 +62,9 @@ struct Game {
   bool backups_preallocated;
 };
 
-Board *game_get_board(Game *game) { return game->board; }
+Board *game_get_board(const Game *game) { return game->board; }
 
-Bag *game_get_bag(Game *game) { return game->bag; }
+Bag *game_get_bag(const Game *game) { return game->bag; }
 
 const LetterDistribution *game_get_ld(const Game *game) { return game->ld; }
 

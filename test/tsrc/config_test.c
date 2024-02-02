@@ -90,6 +90,8 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
   test_config_error(config, "go sim i -6",
                     CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
+  test_config_error(config, "go sim i 0",
+                    CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
   test_config_error(config, "go sim cond 96",
                     CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
   test_config_error(config, "go sim cond -95",
@@ -193,7 +195,7 @@ void test_config_success() {
       "setoptions ld %s bb %d var %s l1 %s l2 %s s1 %s r1 "
       "%s s2 %s r2 %s rack %s pindex %d score %d exch %d eq %0.2f numplays %d "
       "plies %d i "
-      "%d cond %d rs %d threads %d info %d check %d static gp p1 %s p2 %s",
+      "%d cond %d rs %d threads %d info %d check %d gp p1 %s p2 %s",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, rack, pindex,
       score, number_exch, equity_margin, num_plays, plies, max_iterations,
       stopping_cond, seed, number_of_threads, print_info, check_stop, p1, p2);
@@ -228,7 +230,6 @@ void test_config_success() {
              config_get_thread_control(config)) == print_info);
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
-  assert(config_get_static_search_only(config));
   assert(config_get_use_game_pairs(config));
 
   assert_strings_equal(p1, player_get_name(game_get_player(game, 0)));
@@ -287,7 +288,7 @@ void test_config_success() {
       "setoptions ld %s bb %d l1 %s l2 %s  s1 "
       "%s r1 %s s2 %s r2 %s rack %s exch %d plies %d i %d "
       "threads %d "
-      "info %d nostatic nogp",
+      "info %d nogp",
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, rack, number_exch, plies,
       max_iterations, number_of_threads, print_info);
 
@@ -319,7 +320,6 @@ void test_config_success() {
              config_get_thread_control(config)) == print_info);
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
-  assert(!config_get_static_search_only(config));
   assert(!config_get_use_game_pairs(config));
 
   assert(strings_equal(config_get_ld_name(config), ld_name));

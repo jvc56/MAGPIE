@@ -43,6 +43,7 @@ void move_copy(Move *dest_move, const Move *src_move);
 typedef struct MoveList MoveList;
 
 MoveList *move_list_create(int capacity);
+MoveList *move_list_duplicate(const MoveList *ml);
 void move_list_destroy(MoveList *ml);
 
 Move *move_list_get_spare_move(const MoveList *ml);

@@ -449,13 +449,8 @@ sim_status_t simulate_internal(const Config *config, Game *game,
 
   int num_simmed_plays = move_list_get_count(move_list);
 
-  if (config_get_static_search_only(config)) {
-    print_ucgi_static_moves(game, move_list, thread_control);
-    return SIM_STATUS_SUCCESS;
-  }
-
   if (num_simmed_plays == 0) {
-    return SIM_STATUS_SUCCESS;
+    return SIM_STATUS_NO_MOVES;
   }
 
   Simmer *simmer =

@@ -62,8 +62,6 @@
 #define ARG_NUMBER_OF_PLAYS "numplays"
 #define ARG_MAX_ITERATIONS "i"
 #define ARG_STOPPING_CONDITION "cond"
-#define ARG_STATIC_SEARCH_ON "static"
-#define ARG_STATIC_SEARCH_OFF "nostatic"
 #define ARG_TARGET_INDEX "pindex"
 #define ARG_SCORE "score"
 #define ARG_EQUITY_MARGIN "eq"
@@ -120,7 +118,6 @@ struct Config {
   int plies;
   int max_iterations;
   sim_stopping_condition_t stopping_condition;
-  bool static_search_only;
   // Autoplay
   bool use_game_pairs;
   uint64_t seed;
@@ -166,8 +163,6 @@ typedef enum {
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
   ARG_TOKEN_STOPPING_CONDITION,
-  ARG_TOKEN_STATIC_SEARCH_ON,
-  ARG_TOKEN_STATIC_SEARCH_OFF,
   // Infer
   // Rack is shared with sim
   ARG_TOKEN_target_index,
@@ -200,7 +195,7 @@ const struct {
   command_t command_type;
   // The sequence of tokens associated with this command type
   arg_token_t arg_token_sequence[3];
-} VALID_COMMAND_SEQUENCES[7] = {
+} VALID_COMMAND_SEQUENCES[] = {
     // The valid sequences
     // The NUMBER_OF_ARG_TOKENS denotes the end of the given sequence
     {COMMAND_TYPE_LOAD_CGP, {ARG_TOKEN_POSITION, NUMBER_OF_ARG_TOKENS}},
@@ -292,10 +287,6 @@ int config_get_max_iterations(const Config *config) {
 
 sim_stopping_condition_t config_get_stopping_condition(const Config *config) {
   return config->stopping_condition;
-}
-
-bool config_get_static_search_only(const Config *config) {
-  return config->static_search_only;
 }
 
 bool config_get_use_game_pairs(const Config *config) {
@@ -403,10 +394,6 @@ ParsedArgs *create_parsed_args() {
                  ARG_MAX_ITERATIONS, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_STOPPING_CONDITION,
                  ARG_STOPPING_CONDITION, 1);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_STATIC_SEARCH_ON,
-                 ARG_STATIC_SEARCH_ON, 0);
-  set_single_arg(parsed_args, index++, ARG_TOKEN_STATIC_SEARCH_OFF,
-                 ARG_STATIC_SEARCH_OFF, 0);
 
   // Inference args
   // rack is KNOWN_OPP_RACK shared with sim
@@ -629,7 +616,11 @@ load_max_iterations_for_config(Config *config, const char *max_iterations) {
   if (!is_all_digits_or_empty(max_iterations)) {
     return CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS;
   }
-  config->max_iterations = string_to_int(max_iterations);
+  int mi = string_to_int(max_iterations);
+  if (mi < 1) {
+    return CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS;
+  }
+  config->max_iterations = mi;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -647,12 +638,6 @@ load_stopping_condition_for_config(Config *config,
   } else {
     return CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION;
   }
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t
-load_static_search_only_for_config(Config *config, bool static_search_only) {
-  config->static_search_only = static_search_only;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -1123,12 +1108,6 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
       config_load_status =
           load_stopping_condition_for_config(config, arg_values[0]);
       break;
-    case ARG_TOKEN_STATIC_SEARCH_ON:
-      config_load_status = load_static_search_only_for_config(config, true);
-      break;
-    case ARG_TOKEN_STATIC_SEARCH_OFF:
-      config_load_status = load_static_search_only_for_config(config, false);
-      break;
     case ARG_TOKEN_target_index:
       config_load_status = load_target_index_for_config(config, arg_values[0]);
       break;
@@ -1270,7 +1249,6 @@ Config *config_create_default() {
   config->plies = 2;
   config->max_iterations = 0;
   config->stopping_condition = DEFAULT_SIMMING_STOPPING_CONDITION;
-  config->static_search_only = false;
   config->use_game_pairs = false;
   // The seed is set to a random value by default for each
   // load in reset_transient_fields.

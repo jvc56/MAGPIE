@@ -639,9 +639,7 @@ void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
   Move **moves = malloc_or_die(sizeof(Move *) * vms->number_of_moves);
   int number_of_new_moves = 0;
   for (int i = 0; i < vms->number_of_moves; i++) {
-    Move *spare_move = move_list_get_spare_move(ml);
-    move_copy(spare_move, vms->moves[i]->move);
-    if (!move_list_move_exists(ml, spare_move)) {
+    if (!move_list_move_exists(ml, vms->moves[i]->move)) {
       moves[number_of_new_moves++] = vms->moves[i]->move;
     }
   }

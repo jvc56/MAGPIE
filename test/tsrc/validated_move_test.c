@@ -605,4 +605,5 @@ void test_validated_move() {
   test_validated_move_distinct_kwg();
   test_validated_move_many();
   test_validated_move_combine();
+  // FIXME: test adding to move_list
 }

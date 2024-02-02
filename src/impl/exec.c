@@ -29,6 +29,7 @@
 #include "move_gen.h"
 #include "simmer.h"
 
+#include "../str/game_string.h"
 #include "../str/move_string.h"
 #include "../str/sim_string.h"
 
@@ -105,11 +106,13 @@ void set_or_clear_error_status(ErrorStatus *error_status,
   }
 }
 
-void execute_gen(ExecState *exec_state) {
+void execute_gen(const Config *config, ExecState *exec_state) {
   exec_state_recreate_move_list(
       exec_state, config_get_num_plays(exec_state_get_config(exec_state)));
-  generate_moves_for_game(exec_state_get_game(exec_state), 0,
-                          exec_state_get_move_list(exec_state));
+  Game *game = exec_state_get_game(exec_state);
+  MoveList *ml = exec_state_get_move_list(exec_state);
+  generate_moves_for_game(game, 0, ml);
+  print_ucgi_static_moves(game, ml, config_get_thread_control(config));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_SIM, (int)GEN_STATUS_SUCCESS);
 }
@@ -246,7 +249,7 @@ void execute_command(ExecState *exec_state) {
     // above. No further processing is necessary.
     break;
   case COMMAND_TYPE_GEN:
-    execute_gen(exec_state);
+    execute_gen(config, exec_state);
     break;
   case COMMAND_TYPE_SIM:
     execute_sim(config, exec_state);
