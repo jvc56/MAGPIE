@@ -107,8 +107,6 @@ bool within_epsilon_for_equity(double a, double board) {
   return fabs(a - board) < COMPARE_MOVES_EPSILON;
 }
 
-// Enforce arbitrary order to keep
-// move order deterministic
 int compare_moves(const Move *move_1, const Move *move_2) {
   if (!within_epsilon_for_equity(move_1->equity, move_2->equity)) {
     return move_1->equity > move_2->equity;
@@ -139,8 +137,17 @@ int compare_moves(const Move *move_1, const Move *move_2) {
       return move_1->tiles[i] < move_2->tiles[i];
     }
   }
-  log_fatal("duplicate move in move list detected: %d\n", move_1->move_type);
   return 0;
+}
+
+// Enforce arbitrary order to keep
+// move order deterministic
+int compare_moves_die_if_same(const Move *move_1, const Move *move_2) {
+  int result = compare_moves(move_1, move_2);
+  if (result == 0) {
+    log_fatal("duplicate move in move list detected: %d\n", move_1->move_type);
+  }
+  return result;
 }
 
 void move_set_all_except_equity(Move *move, uint8_t strip[], int leftstrip,
@@ -235,7 +242,8 @@ void up_heapify(MoveList *ml, int index) {
   Move *temp;
   int parent_node = (index - 1) / 2;
 
-  if (index > 0 && compare_moves(ml->moves[parent_node], ml->moves[index])) {
+  if (index > 0 &&
+      compare_moves_die_if_same(ml->moves[parent_node], ml->moves[index])) {
     temp = ml->moves[parent_node];
     ml->moves[parent_node] = ml->moves[index];
     ml->moves[index] = temp;
@@ -254,11 +262,13 @@ void down_heapify(MoveList *ml, int parent_node) {
   if (right >= ml->count || right < 0)
     right = -1;
 
-  if (left != -1 && compare_moves(ml->moves[parent_node], ml->moves[left]))
+  if (left != -1 &&
+      compare_moves_die_if_same(ml->moves[parent_node], ml->moves[left]))
     min = left;
   else
     min = parent_node;
-  if (right != -1 && compare_moves(ml->moves[min], ml->moves[right]))
+  if (right != -1 &&
+      compare_moves_die_if_same(ml->moves[min], ml->moves[right]))
     min = right;
 
   if (min != parent_node) {
@@ -299,7 +309,7 @@ void move_list_insert_spare_move(MoveList *ml, double equity) {
 
 void move_list_insert_spare_move_top_equity(MoveList *ml, double equity) {
   ml->spare_move->equity = equity;
-  if (compare_moves(ml->spare_move, ml->moves[0])) {
+  if (compare_moves_die_if_same(ml->spare_move, ml->moves[0])) {
     Move *swap = ml->moves[0];
     ml->moves[0] = ml->spare_move;
     ml->spare_move = swap;
@@ -336,4 +346,24 @@ void move_list_sort_moves(MoveList *ml) {
   }
   // Reset the count
   ml->count = number_of_moves;
+}
+
+void move_list_resize(MoveList *ml, int new_capacity) {
+  if (new_capacity == ml->capacity) {
+    return;
+  }
+  ml->moves = realloc_or_die(ml->moves, sizeof(Move *) * new_capacity);
+  for (int i = ml->capacity; i < new_capacity; i++) {
+    ml->moves[i] = move_create();
+  }
+  ml->capacity = new_capacity;
+}
+
+bool move_list_move_exists(MoveList *ml, Move *m) {
+  for (int i = 1; i < ml->count; i++) {
+    if (compare_moves(ml->moves[i], m) == 0) {
+      return true;
+    }
+  }
+  return false;
 }

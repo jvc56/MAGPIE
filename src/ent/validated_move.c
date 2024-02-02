@@ -634,10 +634,30 @@ void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2) {
   free(vms2);
 }
 
+// Adds moves in vms to ml that do not already exist in ml
 void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
+  Move **moves = malloc_or_die(sizeof(Move *) * vms->number_of_moves);
+  int number_of_new_moves = 0;
   for (int i = 0; i < vms->number_of_moves; i++) {
     Move *spare_move = move_list_get_spare_move(ml);
     move_copy(spare_move, vms->moves[i]->move);
-    move_list_insert_spare_move(ml, move_get_equity(vms->moves[i]->move));
+    if (!move_list_move_exists(ml, spare_move)) {
+      moves[number_of_new_moves++] = vms->moves[i]->move;
+    }
   }
+
+  int current_capacity = move_list_get_capacity(ml);
+  int current_number_of_moves = move_list_get_count(ml);
+  int new_capacity = current_number_of_moves + number_of_new_moves;
+  if (new_capacity > current_capacity) {
+    move_list_resize(ml, new_capacity);
+  }
+
+  for (int i = 0; i < number_of_new_moves; i++) {
+    Move *spare_move = move_list_get_spare_move(ml);
+    move_copy(spare_move, moves[i]);
+    move_list_insert_spare_move(ml, move_get_equity(spare_move));
+  }
+
+  free(moves);
 }

@@ -104,14 +104,18 @@ void exec_state_init_game(ExecState *exec_state) {
   }
 }
 
-void exec_state_init_move_list(ExecState *exec_state) {
-  int capacity = config_get_num_plays(exec_state->config);
-
-  if (exec_state->move_list &&
-      move_list_get_capacity(exec_state->move_list) == capacity) {
-    return;
+void exec_state_init_move_list(ExecState *exec_state, int capacity) {
+  if (!exec_state->move_list) {
+    exec_state->move_list = move_list_create(capacity);
   }
+}
 
-  move_list_destroy(exec_state->move_list);
-  exec_state->move_list = move_list_create(capacity);
+void exec_state_recreate_move_list(ExecState *exec_state, int capacity) {
+  exec_state_init_move_list(exec_state, capacity);
+  if (move_list_get_capacity(exec_state->move_list) == capacity) {
+    move_list_reset(exec_state->move_list);
+  } else {
+    move_list_destroy(exec_state->move_list);
+    exec_state->move_list = move_list_create(capacity);
+  }
 }

@@ -76,6 +76,9 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
     status_string = ucgi_sim_stats(exec_state_get_game(exec_state), sim_results,
                                    thread_control, true);
     break;
+  case COMMAND_TYPE_GEN:
+    status_string = string_duplicate("movegen status unimplemented");
+    break;
   case COMMAND_TYPE_AUTOPLAY:
     status_string = string_duplicate("autoplay status unimplemented");
     break;
@@ -102,8 +105,9 @@ void set_or_clear_error_status(ErrorStatus *error_status,
   }
 }
 
-void execute_gen(const Config *config, ExecState *exec_state) {
-  exec_state_init_move_list(exec_state);
+void execute_gen(ExecState *exec_state) {
+  exec_state_recreate_move_list(
+      exec_state, config_get_num_plays(exec_state_get_config(exec_state)));
   generate_moves_for_game(exec_state_get_game(exec_state), 0,
                           exec_state_get_move_list(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
@@ -133,7 +137,7 @@ void execute_infer(const Config *config, ExecState *exec_state) {
                             ERROR_STATUS_TYPE_INFER, (int)status);
 }
 
-move_validation_status_t update_move_list(const ExecState *exec_state,
+move_validation_status_t update_move_list(ExecState *exec_state,
                                           const char *moves) {
   Game *game = exec_state_get_game(exec_state);
   int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -148,8 +152,9 @@ move_validation_status_t update_move_list(const ExecState *exec_state,
     const LetterDistribution *ld = game_get_ld(game);
     const Board *board = game_get_board(game);
     StringBuilder *phonies_sb = create_string_builder();
-    for (int i = 0;
-         i < validated_moves_get_number_of_moves(new_validated_moves); i++) {
+    int number_of_new_moves =
+        validated_moves_get_number_of_moves(new_validated_moves);
+    for (int i = 0; i < number_of_new_moves; i++) {
       char *phonies_formed = validated_moves_get_phonies_string(
           game_get_ld(game), new_validated_moves, i);
       if (phonies_formed) {
@@ -165,6 +170,7 @@ move_validation_status_t update_move_list(const ExecState *exec_state,
       free(phonies_formed);
     }
     destroy_string_builder(phonies_sb);
+    exec_state_init_move_list(exec_state, number_of_new_moves);
     validated_moves_add_to_move_list(new_validated_moves,
                                      exec_state_get_move_list(exec_state));
   }
@@ -213,9 +219,6 @@ void execute_command(ExecState *exec_state) {
       }
     }
 
-    // FIXME: if the game state has changed, we need to clear
-    // the current validated moves
-
     // Update the validated move list
     // with new moves, if specified
     const char *moves = config_get_moves(config);
@@ -243,7 +246,7 @@ void execute_command(ExecState *exec_state) {
     // above. No further processing is necessary.
     break;
   case COMMAND_TYPE_GEN:
-    execute_gen(config, exec_state);
+    execute_gen(exec_state);
     break;
   case COMMAND_TYPE_SIM:
     execute_sim(config, exec_state);

@@ -200,7 +200,7 @@ const struct {
   command_t command_type;
   // The sequence of tokens associated with this command type
   arg_token_t arg_token_sequence[3];
-} VALID_COMMAND_SEQUENCES[6] = {
+} VALID_COMMAND_SEQUENCES[7] = {
     // The valid sequences
     // The NUMBER_OF_ARG_TOKENS denotes the end of the given sequence
     {COMMAND_TYPE_LOAD_CGP, {ARG_TOKEN_POSITION, NUMBER_OF_ARG_TOKENS}},

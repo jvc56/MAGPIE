@@ -1,6 +1,7 @@
 #ifndef MOVE_H
 #define MOVE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "../def/game_history_defs.h"
@@ -60,5 +61,7 @@ void move_list_insert_spare_move_top_equity(MoveList *ml, double equity);
 Move *move_list_pop_move(MoveList *ml);
 void move_list_sort_moves(MoveList *ml);
 void move_list_reset(MoveList *ml);
+bool move_list_move_exists(MoveList *ml, Move *m);
+void move_list_resize(MoveList *ml, int new_capacity);
 
 #endif

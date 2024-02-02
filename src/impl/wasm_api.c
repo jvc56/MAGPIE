@@ -32,7 +32,7 @@
 static ExecState *wasm_exec_state = NULL;
 static ExecState *iso_exec_state = NULL;
 
-void destroy_wasm_exec_states() {
+void wasm_destroy_exec_states() {
   exec_state_destroy(wasm_exec_state);
   exec_state_destroy(iso_exec_state);
 }
@@ -50,7 +50,7 @@ void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
 }
 
 // tiles must contain 0 for play-through tiles!
-char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
+char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   load_cgp_into_iso_exec_state(cgpstr, 1);
   Game *game = exec_state_get_game(iso_exec_state);
   Board *board = game_get_board(game);
@@ -72,6 +72,7 @@ char *score_move_from_strings(const char *cgpstr, const char *ucgi_move_str) {
   move_validation_status_t status = validated_moves_get_validation_status(vms);
 
   if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
+    validated_moves_destroy(vms);
     return get_formatted_string(
         "wasm api move validation failed with code %d\n", status);
   }
