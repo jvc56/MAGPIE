@@ -444,7 +444,8 @@ void *simmer_worker(void *uncasted_simmer_worker) {
 }
 
 sim_status_t simulate_internal(const Config *config, Game *game,
-                               MoveList *move_list, SimResults *sim_results) {
+                               const MoveList *move_list,
+                               SimResults *sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
   int num_simmed_plays = move_list_get_count(move_list);
@@ -483,9 +484,8 @@ sim_status_t simulate_internal(const Config *config, Game *game,
   return SIM_STATUS_SUCCESS;
 }
 
-// FIXME: movelist should be const
 sim_status_t simulate(const Config *config, const Game *input_game,
-                      MoveList *move_list, SimResults *sim_results) {
+                      const MoveList *move_list, SimResults *sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
   thread_control_unhalt(thread_control);
 

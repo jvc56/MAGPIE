@@ -972,7 +972,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
       string_builder_add_formatted_string(gcg_parser->note_builder, "%s ",
                                           gcg_line);
 
-    } else if (!is_all_whitespace_or_empty(gcg_line)) {
+    } else if (!is_string_empty_or_whitespace(gcg_line)) {
       return GCG_PARSE_STATUS_NO_MATCHING_TOKEN;
     }
     break;
@@ -1016,7 +1016,7 @@ gcg_parse_status_t parse_gcg_with_parser(GCGParser *gcg_parser,
 gcg_parse_status_t parse_gcg_string(const char *gcg_string,
                                     GameHistory *game_history) {
 
-  if (is_string_empty(gcg_string)) {
+  if (is_string_empty_or_whitespace(gcg_string)) {
     return GCG_PARSE_STATUS_GCG_EMPTY;
   }
   GCGParser *gcg_parser = create_gcg_parser(game_history);

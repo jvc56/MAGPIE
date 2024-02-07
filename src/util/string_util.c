@@ -25,7 +25,11 @@ bool has_prefix(const char *pre, const char *str) {
   return strncmp(pre, str, string_length(pre)) == 0;
 }
 
-bool is_all_whitespace_or_empty(const char *str) {
+// Raises a fatal error if str is null
+bool is_string_empty_or_whitespace(const char *str) {
+  if (!str) {
+    log_fatal("unexpected null string when checking for whitespace or empty");
+  }
   while (*str != '\0') {
     if (!isspace((unsigned char)*str)) {
       return false;
@@ -33,6 +37,13 @@ bool is_all_whitespace_or_empty(const char *str) {
     str++;
   }
   return true;
+}
+
+bool is_string_empty_or_null(const char *str) {
+  if (!str) {
+    return true;
+  }
+  return strings_equal(str, "");
 }
 
 // Returns false for negative numbers
@@ -65,15 +76,6 @@ bool strings_iequal(const char *str1, const char *str2) {
     return false;
   }
   return strcasecmp(str1, str2) == 0;
-}
-
-bool is_string_empty(const char *str) { return strings_equal(str, ""); }
-
-bool is_string_empty_or_null(const char *str) {
-  if (!str) {
-    return true;
-  }
-  return strings_equal(str, "");
 }
 
 char *string_duplicate(const char *str) {

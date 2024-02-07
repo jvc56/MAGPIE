@@ -28,7 +28,7 @@ void test_words_played() {
   assert(validated_moves_get_validation_status(vms_pent) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
 
-  FormedWords *fw = validated_moves_get_formed_words(vms_pent, 0);
+  const FormedWords *fw = validated_moves_get_formed_words(vms_pent, 0);
 
   assert(formed_words_get_num_words(fw) == 4);
   // Should generate 4 words: PIP, ONE, HEN, and the main word PENT

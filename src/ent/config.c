@@ -1201,7 +1201,7 @@ config_load_status_t config_load(Config *config, const char *cmd) {
   reset_transient_fields(config);
   // If the command is empty, consider this a set options
   // command where zero options are set and return without error.
-  if (is_all_whitespace_or_empty(cmd)) {
+  if (is_string_empty_or_whitespace(cmd)) {
     config->command_type = COMMAND_TYPE_SET_OPTIONS;
     return CONFIG_LOAD_STATUS_SUCCESS;
   }

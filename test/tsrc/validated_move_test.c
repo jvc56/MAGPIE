@@ -46,8 +46,6 @@ void test_validated_move_errors() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
 
-  assert_validated_move_error(game, EMPTY_CGP, NULL, 0, false, true,
-                              MOVE_VALIDATION_STATUS_EMPTY_MOVE);
   assert_validated_move_error(game, EMPTY_CGP, "", 0, false, true,
                               MOVE_VALIDATION_STATUS_EMPTY_MOVE);
   assert_validated_move_error(game, EMPTY_CGP, "          \n  ", 0, false, true,
@@ -197,7 +195,7 @@ void test_validated_move_success() {
   Player *player0 = game_get_player(game, 0);
   const KLV *player_0_klv = player_get_klv(player0);
   ValidatedMoves *vms = NULL;
-  Move *move = NULL;
+  const Move *move = NULL;
   Rack *rack = rack_create(ld_get_size(ld));
   Rack *leave = rack_create(ld_get_size(ld));
 

@@ -439,7 +439,6 @@ void test_exec_file_commands() {
 
   // Separate into distinct lines to prove
   // the command file is being read.
-  // FIXME: test adding phonies
   const char *commands_file_content =
       "i 200\n"
       "info 60\n"
@@ -467,6 +466,37 @@ void test_exec_file_commands() {
 
   delete_file(commands_filename);
   free(iter_error_substr);
+  free(commands_filename);
+  free(commands_file_invocation);
+}
+
+void test_exec_add_phony_words() {
+  // Add 5 moves, 3 of which are phony (3 output)
+  // run autoplay in CSW (1 output)
+  // total output = 1
+  // total error = 3
+
+  // Separate into distinct lines to prove
+  // the command file is being read.
+  const char *commands_file_content =
+      "lex CSW21 s1 equity s2 equity\n"
+      "cgp " OPENING_CGP "\n"
+      "m 8g.ABC,8g.CAB,8f.GAF,8D.FADGE,8H.BACED\n"
+      "cgp " ION_OPENING_CGP "\n"
+      "m 7d.GED,7f.IEE,H7.AN,7H.AI\n"
+      "go autoplay i 10 ";
+
+  char *commands_filename = get_test_filename("test_commands");
+
+  write_string_to_file(commands_filename, "w", commands_file_content);
+
+  char *commands_file_invocation =
+      get_formatted_string("infile %s", commands_filename);
+
+  test_process_command(commands_file_invocation, 1, "autoplay 10", 4,
+                       "Phonies formed from 7F IEE 11: II,EO,IEE");
+
+  delete_file(commands_filename);
   free(commands_filename);
   free(commands_file_invocation);
 }
@@ -578,6 +608,7 @@ void test_exec_console_command() {
 void test_command() {
   test_command_execution();
   test_exec_single_command();
+  test_exec_add_phony_words();
   test_exec_file_commands();
   test_exec_ucgi_command();
   test_exec_console_command();

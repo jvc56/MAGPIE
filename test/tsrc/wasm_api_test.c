@@ -34,7 +34,6 @@ void test_wasm_api() {
 
   // Score another play
   // No leave specified so leave equity is 0
-  // FIXME: resolve UCGI leave versus CGP leave discrepancy
   retstr = wasm_score_move(cgp1, "2b.THUMP");
   assert(strings_equal(
       retstr, "currmove 2b.THUMP result scored valid true sc 50 eq 50.000"));

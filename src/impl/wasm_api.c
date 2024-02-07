@@ -77,7 +77,7 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
         "wasm api move validation failed with code %d\n", status);
   }
 
-  Move *move = validated_moves_get_move(vms, 0);
+  const Move *move = validated_moves_get_move(vms, 0);
   char *phonies_string = validated_moves_get_phonies_string(ld, vms, 0);
 
   StringBuilder *return_string_builder = create_string_builder();

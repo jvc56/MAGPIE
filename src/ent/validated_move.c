@@ -1,5 +1,7 @@
 #include "validated_move.h"
 
+#include <ctype.h>
+
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/validated_move_defs.h"
@@ -31,16 +33,8 @@ struct ValidatedMoves {
   move_validation_status_t final_status;
 };
 
-// FIXME: use is_digit
-bool is_number(const char c) { return c >= '0' && c <= '9'; }
-
-// FIXME: use some string util function
-bool is_letter(const char c) {
-  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
-}
-
 int get_letter_coords(const char c) {
-  if (c >= 'A' && c <= 'Z') {
+  if (isupper(c)) {
     return c - 'A';
   }
   return c - 'a';
@@ -55,11 +49,11 @@ move_validation_status_t validate_coordinates(Move *move,
   bool started_col_parse = false;
   for (int i = 0; i < coords_string_length; i++) {
     char position_char = coords_string[i];
-    if (is_number(position_char)) {
+    if (isdigit(position_char)) {
       if (i == 0) {
         move_set_dir(move, BOARD_HORIZONTAL_DIRECTION);
         started_row_parse = true;
-      } else if (is_letter(coords_string[i - 1])) {
+      } else if (isalpha(coords_string[i - 1])) {
         if (started_row_parse) {
           return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
         }
@@ -67,11 +61,11 @@ move_validation_status_t validate_coordinates(Move *move,
       }
       // Build the 1-indexed row_start
       row_start = row_start * 10 + (position_char - '0');
-    } else if (is_letter(position_char)) {
+    } else if (isalpha(position_char)) {
       if (i == 0) {
         move_set_dir(move, BOARD_VERTICAL_DIRECTION);
         started_col_parse = true;
-      } else if (is_number(coords_string[i - 1])) {
+      } else if (isdigit(coords_string[i - 1])) {
         if (started_col_parse) {
           return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
         }
@@ -195,11 +189,10 @@ move_validation_status_t validate_tiles_played(const LetterDistribution *ld,
   return status;
 }
 
-move_validation_status_t validate_split_move(const StringSplitter *split_move,
-                                             Game *game, ValidatedMove *vm,
-                                             int player_index,
-                                             Rack *tiles_played_rack,
-                                             bool allow_unknown_exchanges) {
+move_validation_status_t
+validate_split_move(const StringSplitter *split_move, const Game *game,
+                    ValidatedMove *vm, int player_index,
+                    Rack *tiles_played_rack, bool allow_unknown_exchanges) {
   // This function handles the following UCGI move string types.
   // Any strings not conforming to the UCGI standard will result
   // in an error status.
@@ -243,7 +236,7 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
   // Validate move position
   const char *move_type_or_coords = string_splitter_get_item(split_move, 0);
 
-  if (is_all_whitespace_or_empty(move_type_or_coords)) {
+  if (is_string_empty_or_whitespace(move_type_or_coords)) {
     return MOVE_VALIDATION_STATUS_EMPTY_MOVE_TYPE_OR_POSITION;
   }
 
@@ -277,11 +270,10 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
   const char *played_tiles_or_number_exchanged =
       string_splitter_get_item(split_move, 1);
 
-  if (is_all_whitespace_or_empty(played_tiles_or_number_exchanged)) {
+  if (is_string_empty_or_whitespace(played_tiles_or_number_exchanged)) {
     return MOVE_VALIDATION_STATUS_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED;
   }
 
-  // FIXME: The rack should be partially set with the played tiles.
   if (is_all_digits_or_empty(played_tiles_or_number_exchanged)) {
     if (move_get_type(vm->move) != GAME_EVENT_EXCHANGE) {
       return MOVE_VALIDATION_STATUS_NONEXCHANGE_NUMERIC_TILES;
@@ -309,7 +301,7 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
   // Validate rack
   const char *rack_string = string_splitter_get_item(split_move, 2);
 
-  if (is_all_whitespace_or_empty(rack_string)) {
+  if (is_string_empty_or_whitespace(rack_string)) {
     return MOVE_VALIDATION_STATUS_EMPTY_RACK;
   }
 
@@ -357,7 +349,7 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
   // Validate challenge points
   const char *challenge_points = string_splitter_get_item(split_move, 3);
 
-  if (is_all_whitespace_or_empty(challenge_points)) {
+  if (is_string_empty_or_whitespace(challenge_points)) {
     return MOVE_VALIDATION_STATUS_EMPTY_CHALLENGE_POINTS;
   }
 
@@ -371,7 +363,7 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
 
   const char *challenge_turn_loss = string_splitter_get_item(split_move, 4);
 
-  if (is_all_whitespace_or_empty(challenge_turn_loss)) {
+  if (is_string_empty_or_whitespace(challenge_turn_loss)) {
     return MOVE_VALIDATION_STATUS_EMPTY_CHALLENGE_TURN_LOSS;
   }
 
@@ -386,7 +378,7 @@ move_validation_status_t validate_split_move(const StringSplitter *split_move,
   return status;
 }
 
-move_validation_status_t validate_move(ValidatedMove *vm, Game *game,
+move_validation_status_t validate_move(ValidatedMove *vm, const Game *game,
                                        int player_index,
                                        const char *ucgi_move_string,
                                        bool allow_unknown_exchanges) {
@@ -403,13 +395,13 @@ move_validation_status_t validate_move(ValidatedMove *vm, Game *game,
   return status;
 }
 
-move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
-                                             int player_index,
+move_validation_status_t validated_move_load(ValidatedMove *vm,
+                                             const Game *game, int player_index,
                                              const char *ucgi_move_string,
                                              bool allow_phonies,
                                              bool allow_unknown_exchanges) {
 
-  if (is_all_whitespace_or_empty(ucgi_move_string)) {
+  if (is_string_empty_or_whitespace(ucgi_move_string)) {
     return MOVE_VALIDATION_STATUS_EMPTY_MOVE;
   }
   if (player_index != 0 && player_index != 1) {
@@ -469,7 +461,7 @@ move_validation_status_t validated_move_load(ValidatedMove *vm, Game *game,
   return MOVE_VALIDATION_STATUS_SUCCESS;
 }
 
-ValidatedMove *validated_move_create(Game *game, int player_index,
+ValidatedMove *validated_move_create(const Game *game, int player_index,
                                      const char *ucgi_move_string,
                                      bool allow_phonies,
                                      bool allow_unknown_exchanges) {
@@ -504,7 +496,7 @@ void validated_move_destroy(ValidatedMove *vm) {
   free(vm);
 }
 
-ValidatedMoves *validated_moves_create(Game *game, int player_index,
+ValidatedMoves *validated_moves_create(const Game *game, int player_index,
                                        const char *ucgi_moves_string,
                                        bool allow_phonies,
                                        bool allow_unknown_exchanges) {
@@ -513,9 +505,7 @@ ValidatedMoves *validated_moves_create(Game *game, int player_index,
   vms->number_of_moves = 0;
   vms->final_status = MOVE_VALIDATION_STATUS_SUCCESS;
 
-  // FIXME: maybe make empty, null, or whitespace check in string util
-  if (is_string_empty_or_null(ucgi_moves_string) ||
-      is_all_whitespace_or_empty(ucgi_moves_string)) {
+  if (is_string_empty_or_whitespace(ucgi_moves_string)) {
     vms->final_status = MOVE_VALIDATION_STATUS_EMPTY_MOVE;
   } else {
     StringSplitter *split_moves = split_string(ucgi_moves_string, ',', true);
@@ -565,24 +555,20 @@ int validated_moves_get_number_of_moves(const ValidatedMoves *vms) {
   return vms->number_of_moves;
 }
 
-// FIXME: should be const
-Move *validated_moves_get_move(const ValidatedMoves *vms, int i) {
+const Move *validated_moves_get_move(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->move;
 }
 
-// FIXME: should be const
-FormedWords *validated_moves_get_formed_words(const ValidatedMoves *vms,
-                                              int i) {
+const FormedWords *validated_moves_get_formed_words(const ValidatedMoves *vms,
+                                                    int i) {
   return vms->moves[i]->formed_words;
 }
 
-// FIXME: should be const
-Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i) {
+const Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->rack;
 }
 
-// FIXME: should be const
-Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i) {
+const Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->leave;
 }
 

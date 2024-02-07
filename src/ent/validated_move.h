@@ -11,8 +11,7 @@
 
 typedef struct ValidatedMoves ValidatedMoves;
 
-// FIXME: game should probably be const
-ValidatedMoves *validated_moves_create(Game *game, int player_index,
+ValidatedMoves *validated_moves_create(const Game *game, int player_index,
                                        const char *ucgi_moves_string,
                                        bool allow_phonies,
                                        bool allow_unknown_exchanges);
@@ -20,12 +19,11 @@ ValidatedMoves *validated_moves_create_empty();
 void validated_moves_destroy(ValidatedMoves *vms);
 
 int validated_moves_get_number_of_moves(const ValidatedMoves *vms);
-// FIXME: move should probably be const
-Move *validated_moves_get_move(const ValidatedMoves *vms, int i);
-// FIXME: formed words should probably be const
-FormedWords *validated_moves_get_formed_words(const ValidatedMoves *vms, int i);
-Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i);
-Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i);
+const Move *validated_moves_get_move(const ValidatedMoves *vms, int i);
+const FormedWords *validated_moves_get_formed_words(const ValidatedMoves *vms,
+                                                    int i);
+const Rack *validated_moves_get_rack(const ValidatedMoves *vms, int i);
+const Rack *validated_moves_get_leave(const ValidatedMoves *vms, int i);
 bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i);
 
 move_validation_status_t

@@ -68,7 +68,7 @@ Bag *game_get_bag(const Game *game) { return game->bag; }
 
 const LetterDistribution *game_get_ld(const Game *game) { return game->ld; }
 
-Player *game_get_player(Game *game, int player_index) {
+Player *game_get_player(const Game *game, int player_index) {
   return game->players[player_index];
 }
 
