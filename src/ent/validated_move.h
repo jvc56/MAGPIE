@@ -31,8 +31,6 @@ bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i);
 move_validation_status_t
 validated_moves_get_validation_status(const ValidatedMoves *vms);
 
-void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2);
-
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
                                          ValidatedMoves *vms, int i);
 

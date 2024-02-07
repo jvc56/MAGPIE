@@ -20,6 +20,7 @@
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
 #include "move_gen_test.h"
+#include "move_test.h"
 #include "players_data_test.h"
 #include "rack_test.h"
 #include "shadow_test.h"
@@ -48,6 +49,7 @@ void run_all() {
   test_rack();
   test_board();
   test_cross_set();
+  test_move();
   test_game();
   test_validated_move();
   test_shadow();
@@ -89,6 +91,8 @@ void run_test(const char *subtest) {
     test_board();
   } else if (strings_equal(subtest, "crossset")) {
     test_cross_set();
+  } else if (strings_equal(subtest, "move")) {
+    test_move();
   } else if (strings_equal(subtest, "game")) {
     test_game();
   } else if (strings_equal(subtest, "vm")) {

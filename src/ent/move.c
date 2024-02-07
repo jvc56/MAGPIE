@@ -357,7 +357,6 @@ void move_list_sort_moves(MoveList *ml) {
   ml->count = number_of_moves;
 }
 
-// FIXME: test this plz
 void move_list_resize(MoveList *ml, int new_capacity) {
   if (new_capacity == ml->capacity) {
     return;

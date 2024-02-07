@@ -554,56 +554,9 @@ void test_validated_move_many() {
   config_destroy(config);
 }
 
-void test_validated_move_combine() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
-
-  ValidatedMoves *vms1 = assert_validated_move_success(
-      game, EMPTY_CGP, "pass,ex.4,8d.JIHAD,", 0, false);
-
-  ValidatedMoves *vms2 = assert_validated_move_success(
-      game, EMPTY_CGP, "8G.VAV,ex.VQ.QVRITES", 0, false);
-
-  validated_moves_combine(vms1, vms2);
-
-  assert(validated_moves_get_number_of_moves(vms1) == 5);
-  assert(move_get_type(validated_moves_get_move(vms1, 0)) == GAME_EVENT_PASS);
-  assert(move_get_type(validated_moves_get_move(vms1, 1)) ==
-         GAME_EVENT_EXCHANGE);
-  assert(move_get_type(validated_moves_get_move(vms1, 2)) ==
-         GAME_EVENT_TILE_PLACEMENT_MOVE);
-  assert(move_get_type(validated_moves_get_move(vms1, 3)) ==
-         GAME_EVENT_TILE_PLACEMENT_MOVE);
-  assert(move_get_type(validated_moves_get_move(vms1, 4)) ==
-         GAME_EVENT_EXCHANGE);
-
-  ValidatedMoves *vms3 = validated_moves_create_empty();
-
-  validated_moves_combine(vms3, vms1);
-
-  assert(validated_moves_get_number_of_moves(vms3) == 5);
-  assert(move_get_type(validated_moves_get_move(vms3, 0)) == GAME_EVENT_PASS);
-  assert(move_get_type(validated_moves_get_move(vms3, 1)) ==
-         GAME_EVENT_EXCHANGE);
-  assert(move_get_type(validated_moves_get_move(vms3, 2)) ==
-         GAME_EVENT_TILE_PLACEMENT_MOVE);
-  assert(move_get_type(validated_moves_get_move(vms3, 3)) ==
-         GAME_EVENT_TILE_PLACEMENT_MOVE);
-  assert(move_get_type(validated_moves_get_move(vms3, 4)) ==
-         GAME_EVENT_EXCHANGE);
-
-  validated_moves_destroy(vms3);
-
-  game_destroy(game);
-  config_destroy(config);
-}
-
 void test_validated_move() {
   test_validated_move_errors();
   test_validated_move_success();
   test_validated_move_distinct_kwg();
   test_validated_move_many();
-  test_validated_move_combine();
-  // FIXME: test adding to move_list
 }

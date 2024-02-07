@@ -605,35 +605,6 @@ validated_moves_get_validation_status(const ValidatedMoves *vms) {
   return vms->final_status;
 }
 
-// vms1 takes ownership of the memory allocated in vms2.
-void validated_moves_combine(ValidatedMoves *vms1, ValidatedMoves *vms2) {
-  if (vms2->number_of_moves == 0) {
-    log_fatal("validated moves to add is unexpectedly empty");
-  }
-  if (vms1->number_of_moves == 0) {
-    vms1->moves = vms2->moves;
-    vms1->number_of_moves = vms2->number_of_moves;
-    free(vms2);
-    return;
-  }
-
-  // We need to resize the existing ValidatedMove array in vms1 to accommodate
-  // the new moves.
-  vms1->moves = realloc_or_die(
-      vms1->moves, sizeof(ValidatedMove *) *
-                       (vms1->number_of_moves + vms2->number_of_moves));
-  for (int i = 0; i < vms2->number_of_moves; i++) {
-    vms1->moves[i + vms1->number_of_moves] = vms2->moves[i];
-  }
-  vms1->number_of_moves += vms2->number_of_moves;
-
-  // Free the container structure of validated moves that were added
-  // but do not free the underlying ValidatedMove structs, as they
-  // are now owned by vms1.
-  free(vms2->moves);
-  free(vms2);
-}
-
 // Adds moves in vms to ml that do not already exist in ml
 void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml) {
   Move **moves = malloc_or_die(sizeof(Move *) * vms->number_of_moves);
