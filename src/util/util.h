@@ -7,6 +7,7 @@
 
 bool has_prefix(const char *pre, const char *str);
 void *malloc_or_die(size_t size);
+void *calloc_or_die(size_t num, size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);
 int char_to_int(char c);
 int string_to_int(const char *str);

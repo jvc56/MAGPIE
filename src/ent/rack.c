@@ -10,13 +10,6 @@
 
 #include "../util/util.h"
 
-struct Rack {
-  int array_size;
-  int *array;
-  bool empty;
-  int number_of_letters;
-};
-
 void rack_reset(Rack *rack) {
   for (int i = 0; i < (rack->array_size); i++) {
     rack->array[i] = 0;
@@ -55,55 +48,12 @@ void rack_destroy(Rack *rack) {
   free(rack);
 }
 
-int rack_get_dist_size(const Rack *rack) { return rack->array_size; }
-
-int rack_get_letter(const Rack *rack, uint8_t machine_letter) {
-  return rack->array[machine_letter];
-}
-
-int rack_get_total_letters(const Rack *rack) { return rack->number_of_letters; }
-
-bool rack_is_empty(const Rack *rack) { return rack->empty; }
-
 int rack_get_score(const LetterDistribution *ld, const Rack *rack) {
   int sum = 0;
   for (int i = 0; i < rack_get_dist_size(rack); i++) {
     sum += rack_get_letter(rack, i) * ld_get_score(ld, i);
   }
   return sum;
-}
-
-void rack_take_letter(Rack *rack, uint8_t letter) {
-  rack->array[letter]--;
-  rack->number_of_letters--;
-  if (rack->number_of_letters == 0) {
-    rack->empty = true;
-  }
-}
-
-void rack_add_letter(Rack *rack, uint8_t letter) {
-  rack->array[letter]++;
-  rack->number_of_letters++;
-  if (rack->empty == 1) {
-    rack->empty = false;
-  }
-}
-
-// Returns true if rack_to_update contains value_to_sub
-// and subtracts value_to_sub from rack_to_update
-// on success.
-bool rack_subtract(Rack *rack_to_update, Rack *value_to_sub) {
-  for (int i = 0; i < rack_to_update->array_size; i++) {
-    if (rack_to_update->array[i] < value_to_sub->array[i]) {
-      return false;
-    }
-    rack_to_update->array[i] -= value_to_sub->array[i];
-    rack_to_update->number_of_letters -= value_to_sub->array[i];
-    if (rack_to_update->number_of_letters == 0) {
-      rack_to_update->empty = true;
-    }
-  }
-  return true;
 }
 
 int rack_set_to_string(const LetterDistribution *ld, Rack *rack,

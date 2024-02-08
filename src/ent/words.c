@@ -8,11 +8,13 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
-#include "board.h"
-#include "letter_distribution.h"
+#include "../ent/rack.h"
 
 #include "../util/string_util.h"
 #include "../util/util.h"
+
+#include "board.h"
+#include "letter_distribution.h"
 
 typedef struct FormedWord {
   uint8_t word[BOARD_DIM];
@@ -25,15 +27,10 @@ struct FormedWords {
   FormedWord words[RACK_SIZE + 1]; // max number of words we can form
 };
 
-FormedWords *formed_words_create(Board *board, Move *move) {
-  int tiles_length = move_get_tiles_length(move);
-  int row_start = move_get_row_start(move);
-  int col_start = move_get_col_start(move);
-  int dir = move_get_dir(move);
-
-  bool board_was_transposed = false;
-
-  if (!board_matches_dir(board, dir)) {
+FormedWords *formed_words_create(Board *board, uint8_t word[],
+                                 int word_start_index, int word_end_index,
+                                 int row, int col, int dir) {
+  if (board_is_dir_vertical(dir)) {
     board_transpose(board);
     board_was_transposed = true;
     int ph = col_start;
@@ -144,24 +141,27 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg) {
   }
 
   int lidx = 0;
-  int node_idx = kwg_arc_index(kwg, 0);
+  uint32_t node_idx = kwg_get_dawg_root_node_index(kwg);
+  uint32_t node = kwg_node(kwg, node_idx);
   do {
     if (lidx > w->word_length - 1) {
       // if we've gone too far the word is not found
       return false;
     }
     uint8_t ml = w->word[lidx];
-    if (kwg_tile(kwg, node_idx) == ml) {
+    if (kwg_node_tile(node) == ml) {
       if (lidx == w->word_length - 1) {
-        return kwg_accepts(kwg, node_idx);
+        return kwg_node_accepts(node);
       }
-      node_idx = kwg_arc_index(kwg, node_idx);
+      node_idx = kwg_node_arc_index(node);
+      node = kwg_node(kwg, node_idx);
       lidx++;
     } else {
-      if (kwg_is_end(kwg, node_idx)) {
+      if (kwg_node_is_end(node)) {
         return false;
       }
       node_idx++;
+      node = kwg_node(kwg, node_idx);
     }
   } while (1);
 }
