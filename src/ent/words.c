@@ -27,10 +27,15 @@ struct FormedWords {
   FormedWord words[RACK_SIZE + 1]; // max number of words we can form
 };
 
-FormedWords *formed_words_create(Board *board, uint8_t word[],
-                                 int word_start_index, int word_end_index,
-                                 int row, int col, int dir) {
-  if (board_is_dir_vertical(dir)) {
+FormedWords *formed_words_create(Board *board, Move *move) {
+  int tiles_length = move_get_tiles_length(move);
+  int row_start = move_get_row_start(move);
+  int col_start = move_get_col_start(move);
+  int dir = move_get_dir(move);
+
+  bool board_was_transposed = false;
+
+  if (!board_matches_dir(board, dir)) {
     board_transpose(board);
     board_was_transposed = true;
     int ph = col_start;
@@ -108,7 +113,6 @@ FormedWords *formed_words_create(Board *board, uint8_t word[],
 
   return ws;
 }
-
 void formed_words_destroy(FormedWords *fw) {
   if (!fw) {
     return;

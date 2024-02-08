@@ -169,6 +169,18 @@ static inline bool board_are_left_and_right_empty(const Board *board, int row,
             !board_is_empty(board, row, col + 1)));
 }
 
+static inline bool board_are_all_adjacent_squares_empty(const Board *board,
+                                                        int row, int col) {
+  return !((board_is_position_valid(row, col - 1) &&
+            !board_is_empty(board, row, col - 1)) ||
+           (board_is_position_valid(row, col + 1) &&
+            !board_is_empty(board, row, col + 1)) ||
+           (board_is_position_valid(row - 1, col) &&
+            !board_is_empty(board, row - 1, col)) ||
+           (board_is_position_valid(row + 1, col) &&
+            !board_is_empty(board, row + 1, col)));
+}
+
 static inline int board_get_word_edge(const Board *board, int row, int col,
                                       int dir) {
   while (board_is_position_valid(row, col) &&
@@ -207,6 +219,11 @@ static inline void board_transpose(Board *board) {
 
 static inline void board_set_transposed(Board *board, bool transposed) {
   board->transposed = transposed;
+}
+
+static inline bool board_matches_dir(const Board *board, int dir) {
+  return (board_is_dir_vertical(dir) && board_get_transposed(board)) ||
+         (!board_is_dir_vertical(dir) && !board_get_transposed(board));
 }
 
 static inline int board_get_tiles_played(const Board *board) {
