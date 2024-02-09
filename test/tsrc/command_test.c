@@ -172,8 +172,8 @@ void assert_command_status_and_output(ExecState *exec_state,
   char *test_output = get_string_from_file(test_output_filename);
   int newlines_in_output = count_newlines(test_output);
   if (newlines_in_output != expected_output_line_count) {
-    printf("output counts do not match %d != %d\n", newlines_in_output,
-           expected_output_line_count);
+    printf("%s\noutput counts do not match %d != %d\n", command_without_io,
+           newlines_in_output, expected_output_line_count);
     printf("got:\n%s", test_output);
     assert(0);
   }
@@ -221,11 +221,21 @@ void test_command_execution() {
       "go sim plies 2 cond 95 threads 8 i 100000 check 300 info 500", false, 60,
       5, 0);
 
+  MoveList *ml = exec_state_get_move_list(exec_state);
+  assert(move_list_get_count(ml) == 3);
+
+  assert_command_status_and_output(exec_state, "cgp " ZILLION_OPENING_CGP,
+                                   false, 5, 0, 0);
+  // Confirm that loading a cgp resets the movelist
+  assert(move_list_get_count(ml) == 0);
+
+  // Add moves before generating to confirm that the gen command
+  // resets the movelist
   assert_command_status_and_output(
       exec_state, "m 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
 
   // Sim a single iterations
-  // Get 18 moves from move gen
+  // Get 18 moves from move gen and confirm movelist was reset.
   assert_command_status_and_output(
       exec_state, "go gen numplays 18 cgp " ZILLION_OPENING_CGP, false, 5, 19,
       0);
@@ -237,7 +247,7 @@ void test_command_execution() {
       exec_state, "m 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
   assert_command_status_and_output(
       exec_state, "go sim plies 2 cond 95 threads 8 i 1 check 300 info 70",
-      false, 60, 21, 0);
+      false, 60, 22, 0);
 
   // Sim finishes with max iterations
   // Add user input moves that will be
@@ -311,10 +321,9 @@ void test_command_execution() {
         exec_state, "position cgp " DELDAR_VS_HARSHAN_CGP, false, 5, 0, 0);
     assert_command_status_and_output(
         exec_state, "go gen r1 all r2 all numplays 15", false, 5, 16, 0);
-    assert_command_status_and_output(
-        exec_state,
-        "go sim plies 2 threads 10 i 200 info 60 cgp " DELDAR_VS_HARSHAN_CGP,
-        false, 60, 68, 0);
+    assert_command_status_and_output(exec_state,
+                                     "go sim plies 2 threads 10 i 200 info 60 ",
+                                     false, 60, 68, 0);
 
     assert_command_status_and_output(
         exec_state,
@@ -333,9 +342,9 @@ void test_command_execution() {
                                      false, 5, 0, 0);
     assert_command_status_and_output(
         exec_state, "go gen r1 all r2 all numplays 15", false, 5, 16, 0);
-    assert_command_status_and_output(
-        exec_state, "go sim plies 2 threads 10 i 200 info 60 cgp " POLISH_CGP,
-        false, 60, 68, 0);
+    assert_command_status_and_output(exec_state,
+                                     "go sim plies 2 threads 10 i 200 info 60 ",
+                                     false, 60, 68, 0);
 
     assert_command_status_and_output(
         exec_state,

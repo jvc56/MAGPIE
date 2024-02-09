@@ -69,6 +69,32 @@ void test_win_pct() {
   config_destroy(config);
 }
 
+void test_sim_error_cases() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
+  Game *game = game_create(config);
+  Board *board = game_get_board(game);
+  Bag *bag = game_get_bag(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player0 = game_get_player(game, 0);
+  Rack *player0_rack = player_get_rack(player0);
+
+  MoveList *move_list = move_list_create(15);
+
+  // No moves to simulate
+  draw_rack_to_string(ld, bag, player0_rack, "AAADERW", 0);
+  SimResults *sim_results = sim_results_create();
+  load_config_or_die(config, "setoptions plies 2 threads 1 i 1 cond none");
+  sim_status_t status = simulate(config, game, move_list, sim_results);
+  assert(status == SIM_STATUS_NO_MOVES);
+  assert(board_get_tiles_played(board) == 0);
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+  sim_results_destroy(sim_results);
+}
+
 void test_sim_single_iteration() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
@@ -238,6 +264,7 @@ void test_play_similarity() {
 
 void test_sim() {
   test_win_pct();
+  test_sim_error_cases();
   test_sim_single_iteration();
   test_more_iterations();
   test_play_similarity();

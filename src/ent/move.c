@@ -28,6 +28,7 @@ struct Move {
 struct MoveList {
   int count;
   int capacity;
+  int moves_size;
   Move *spare_move;
   Move **moves;
 };
@@ -200,15 +201,20 @@ void move_set_as_pass(Move *move) {
 }
 
 void create_moves_for_move_list(MoveList *ml, int capacity) {
-  ml->capacity = capacity + 1;
-  ml->moves = malloc_or_die(sizeof(Move *) * ml->capacity);
-  for (int i = 0; i < ml->capacity; i++) {
+  ml->capacity = capacity;
+  // We need to use +1 here so that the
+  // move list can temporarily hold the
+  // the extra move to determine which
+  // move to pop.
+  ml->moves_size = ml->capacity + 1;
+  ml->moves = malloc_or_die(sizeof(Move *) * ml->moves_size);
+  for (int i = 0; i < ml->moves_size; i++) {
     ml->moves[i] = move_create();
   }
 }
 
 void destroy_moves_for_move_list(MoveList *ml) {
-  for (int i = 0; i < ml->capacity; i++) {
+  for (int i = 0; i < ml->moves_size; i++) {
     move_destroy(ml->moves[i]);
   }
   free(ml->moves);
@@ -227,8 +233,8 @@ MoveList *move_list_duplicate(const MoveList *ml) {
   MoveList *new_ml = malloc_or_die(sizeof(MoveList));
   new_ml->count = ml->count;
   new_ml->spare_move = move_create();
-  create_moves_for_move_list(new_ml, ml->capacity - 1);
-  for (int i = 0; i < new_ml->capacity; i++) {
+  create_moves_for_move_list(new_ml, ml->capacity);
+  for (int i = 0; i < new_ml->moves_size; i++) {
     move_copy(new_ml->moves[i], ml->moves[i]);
   }
   return new_ml;
@@ -311,7 +317,7 @@ void move_list_insert_spare_move(MoveList *ml, double equity) {
   up_heapify(ml, ml->count);
   ml->count++;
 
-  if (ml->count == ml->capacity) {
+  if (ml->count == ml->capacity + 1) {
     move_list_pop_move(ml);
   }
 }
@@ -361,11 +367,13 @@ void move_list_resize(MoveList *ml, int new_capacity) {
   if (new_capacity == ml->capacity) {
     return;
   }
-  ml->moves = realloc_or_die(ml->moves, sizeof(Move *) * new_capacity);
-  for (int i = ml->capacity; i < new_capacity; i++) {
+  int old_moves_size = ml->moves_size;
+  ml->capacity = new_capacity;
+  ml->moves_size = new_capacity + 1;
+  ml->moves = realloc_or_die(ml->moves, sizeof(Move *) * ml->moves_size);
+  for (int i = old_moves_size; i < ml->moves_size; i++) {
     ml->moves[i] = move_create();
   }
-  ml->capacity = new_capacity;
 }
 
 bool move_list_move_exists(MoveList *ml, Move *m) {

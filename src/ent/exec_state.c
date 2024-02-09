@@ -104,6 +104,12 @@ void exec_state_init_game(ExecState *exec_state) {
   }
 }
 
+void exec_state_reset_move_list(ExecState *exec_state) {
+  if (exec_state->move_list) {
+    move_list_reset(exec_state->move_list);
+  }
+}
+
 void exec_state_init_move_list(ExecState *exec_state, int capacity) {
   if (!exec_state->move_list) {
     exec_state->move_list = move_list_create(capacity);

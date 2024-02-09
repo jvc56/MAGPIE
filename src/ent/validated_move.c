@@ -533,13 +533,6 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
   return vms;
 }
 
-ValidatedMoves *validated_moves_create_empty() {
-  ValidatedMoves *vms = malloc_or_die(sizeof(ValidatedMoves));
-  vms->moves = NULL;
-  vms->number_of_moves = 0;
-  return vms;
-}
-
 void validated_moves_destroy(ValidatedMoves *vms) {
   if (!vms) {
     return;

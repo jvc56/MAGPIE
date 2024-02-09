@@ -220,6 +220,7 @@ void execute_command(ExecState *exec_state) {
           log_fatal("unexpected cgp load failure for: %s", cgp);
         }
       }
+      exec_state_reset_move_list(exec_state);
     }
 
     // Update the validated move list

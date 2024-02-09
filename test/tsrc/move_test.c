@@ -8,6 +8,9 @@
 
 void test_move_resize() {
   MoveList *ml = move_list_create(3);
+
+  assert(move_list_get_capacity(ml) == 3);
+
   Move *m1 = move_list_get_move(ml, 0);
   Move *m2 = move_list_get_move(ml, 1);
   Move *m3 = move_list_get_move(ml, 2);
