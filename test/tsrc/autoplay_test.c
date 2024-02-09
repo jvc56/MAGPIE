@@ -16,16 +16,6 @@
 
 #include "test_util.h"
 
-struct AutoplayResults {
-  int total_games;
-  int p1_wins;
-  int p1_losses;
-  int p1_ties;
-  int p1_firsts;
-  Stat *p1_score;
-  Stat *p2_score;
-};
-
 void assert_stats_are_equal(Stat *s1, Stat *s2) {
   assert(stat_get_weight(s1) == stat_get_weight(s2));
   assert(stat_get_cardinality(s1) == stat_get_cardinality(s2));
