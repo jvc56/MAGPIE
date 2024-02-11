@@ -32,6 +32,7 @@ static inline int rack_get_total_letters(const Rack *rack) {
 static inline bool rack_is_empty(const Rack *rack) { return rack->empty; }
 
 bool racks_are_equal(const Rack *rack1, const Rack *rack2);
+bool rack_subtract(Rack *rack, Rack *subrack);
 
 static inline void rack_take_letter(Rack *rack, uint8_t letter) {
   rack->array[letter]--;

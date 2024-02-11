@@ -127,13 +127,19 @@ void string_builder_add_game(Game *game, MoveList *move_list,
   string_builder_add_string(game_string, "   ------------------------------\n");
 }
 
-char *ucgi_static_moves(Game *game, MoveList *move_list) {
+char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
+  if (move_list_get_count(move_list) == 0) {
+    return string_duplicate("no moves to print\n");
+  }
   StringBuilder *moves_string_builder = create_string_builder();
   const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
 
-  for (int i = 0; i < move_list_get_count(move_list); i++) {
-    Move *move = move_list_get_move(move_list, i);
+  MoveList *sorted_move_list = move_list_duplicate(move_list);
+  move_list_sort_moves(sorted_move_list);
+
+  for (int i = 0; i < move_list_get_count(sorted_move_list); i++) {
+    Move *move = move_list_get_move(sorted_move_list, i);
     string_builder_add_string(moves_string_builder, "info currmove ");
     string_builder_add_ucgi_move(move, board, ld, moves_string_builder);
 
@@ -142,12 +148,13 @@ char *ucgi_static_moves(Game *game, MoveList *move_list) {
         move_get_equity(move));
   }
   string_builder_add_string(moves_string_builder, "bestmove ");
-  string_builder_add_ucgi_move(move_list_get_move(move_list, 0), board, ld,
-                               moves_string_builder);
+  string_builder_add_ucgi_move(move_list_get_move(sorted_move_list, 0), board,
+                               ld, moves_string_builder);
   string_builder_add_string(moves_string_builder, "\n");
   char *ucgi_static_moves_string =
       string_builder_dump(moves_string_builder, NULL);
   destroy_string_builder(moves_string_builder);
+  move_list_destroy(sorted_move_list);
   return ucgi_static_moves_string;
 }
 

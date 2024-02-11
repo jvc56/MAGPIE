@@ -9,7 +9,7 @@
 void string_builder_add_game(Game *game, MoveList *move_list,
                              StringBuilder *game_string);
 
-char *ucgi_static_moves(Game *game, MoveList *move_list);
+char *ucgi_static_moves(const Game *game, const MoveList *move_list);
 
 void print_ucgi_static_moves(Game *game, MoveList *move_list,
                              ThreadControl *thread_control);

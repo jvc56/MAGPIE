@@ -9,7 +9,6 @@
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
-#include "../def/move_gen_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
@@ -25,6 +24,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/static_eval.h"
 
 #include "../util/util.h"
 
@@ -57,7 +57,6 @@ typedef struct MoveGen {
 
   uint8_t strip[(BOARD_DIM)];
   uint8_t *exchange_strip;
-  double preendgame_adjustment_values[PREENDGAME_ADJUSTMENT_VALUES_LENGTH];
   LeaveMap *leave_map;
   // Shadow plays
   int current_left_col;
@@ -91,19 +90,6 @@ typedef struct MoveGen {
 // only called once per command.
 static MoveGen *cached_gens[MAX_THREADS];
 
-void load_quackle_preendgame_adjustment_values(MoveGen *gen) {
-  double values[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
-  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
-    gen->preendgame_adjustment_values[i] = values[i];
-  }
-}
-
-void load_zero_preendgame_adjustment_values(MoveGen *gen) {
-  for (int i = 0; i < PREENDGAME_ADJUSTMENT_VALUES_LENGTH; i++) {
-    gen->preendgame_adjustment_values[i] = 0;
-  }
-}
-
 MoveGen *create_generator(int ld_size) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
   generator->anchor_list = anchor_list_create();
@@ -112,9 +98,6 @@ MoveGen *create_generator(int ld_size) {
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
   generator->exchange_strip =
       (uint8_t *)malloc_or_die(ld_size * sizeof(uint8_t));
-  // Just load the zero values for now
-  load_zero_preendgame_adjustment_values(generator);
-
   return generator;
 }
 
@@ -149,28 +132,6 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 // in the move_gen_pi.h header in the test directory.
 AnchorList *gen_get_anchor_list(int thread_index) {
   return cached_gens[thread_index]->anchor_list;
-}
-
-double placement_adjustment(const MoveGen *gen, const Move *move) {
-  int start = move_get_col_start(move);
-  int end = start + move_get_tiles_played(move);
-
-  int j = start;
-  double penalty = 0;
-  double v_penalty = OPENING_HOTSPOT_PENALTY;
-
-  while (j < end) {
-    int tile = move_get_tile(move, j - start);
-    if (get_is_blanked(tile)) {
-      tile = get_unblanked_machine_letter(tile);
-    }
-    if (ld_get_is_vowel(gen->ld, tile) &&
-        (j == 2 || j == 6 || j == 8 || j == 12)) {
-      penalty += v_penalty;
-    }
-    j++;
-  }
-  return penalty;
 }
 
 static inline void load_is_cross_word_cache(MoveGen *gen, int row) {
@@ -246,110 +207,56 @@ static inline uint8_t get_cross_score_cache(const MoveGen *gen, int col) {
   return gen->cross_score_cache[col];
 }
 
-double shadow_endgame_adjustment(const MoveGen *gen) {
-  if (gen->number_of_letters_on_rack > gen->tiles_played) {
-    // This play is not going out. We should penalize it by our own score
-    // plus some constant.
-    // However, we don't yet know the score of our own remaining tiles yet,
-    // so we need to assume it is as small as possible for this anchor's
-    // highest_possible_equity to be valid.
-    int lowest_possible_rack_score = 0;
-    for (int i = gen->tiles_played; i < gen->number_of_letters_on_rack; i++) {
-      lowest_possible_rack_score += gen->descending_tile_scores[i];
-    }
-    return ((-(double)lowest_possible_rack_score) *
-            NON_OUTPLAY_LEAVE_SCORE_MULTIPLIER_PENALTY) -
-           NON_OUTPLAY_CONSTANT_PENALTY;
-  }
-  return 2 * ((double)rack_get_score(gen->ld, gen->opponent_rack));
-}
-
-double endgame_adjustment(const MoveGen *gen, const Rack *rack,
-                          const Rack *opp_rack) {
-  if (!rack_is_empty(rack)) {
-    // This play is not going out. We should penalize it by our own score
-    // plus some constant.
-    return ((-(double)rack_get_score(gen->ld, rack)) *
-            NON_OUTPLAY_LEAVE_SCORE_MULTIPLIER_PENALTY) -
-           NON_OUTPLAY_CONSTANT_PENALTY;
-  }
-  return 2 * ((double)rack_get_score(gen->ld, opp_rack));
-}
-
-double get_spare_move_equity(const MoveGen *gen) {
-  double leave_adjustment = 0;
-  double other_adjustments = 0;
-
-  Move *spare_move = move_list_get_spare_move(gen->move_list);
-  if (board_get_tiles_played(gen->board) == 0 &&
-      move_get_type(spare_move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    other_adjustments = placement_adjustment(gen, spare_move);
-  }
-
-  if (gen->number_of_tiles_in_bag > 0) {
-    leave_adjustment = leave_map_get_current_value(gen->leave_map);
-    int bag_plus_rack_size = gen->number_of_tiles_in_bag -
-                             move_get_tiles_played(spare_move) + RACK_SIZE;
-    if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
-      other_adjustments +=
-          gen->preendgame_adjustment_values[bag_plus_rack_size];
-    }
-  } else {
-    other_adjustments +=
-        endgame_adjustment(gen, gen->player_rack, gen->opponent_rack);
-  }
-
-  return ((double)move_get_score(spare_move)) + leave_adjustment +
-         other_adjustments;
+double get_static_equity(MoveGen *gen) {
+  return static_eval_get_move_equity_with_leave_value(
+      gen->ld, move_list_get_spare_move(gen->move_list), gen->board,
+      gen->player_rack, gen->opponent_rack, gen->number_of_tiles_in_bag,
+      leave_map_get_current_value(gen->leave_map));
 }
 
 void record_play(MoveGen *gen, int leftstrip, int rightstrip,
                  game_event_t move_type) {
   int start_row = gen->current_row_index;
-  int tiles_played = gen->tiles_played;
   int start_col = leftstrip;
-  int row = start_row;
-  int col = start_col;
-
-  if (board_is_dir_vertical(gen->dir)) {
-    int temp = row;
-    row = col;
-    col = temp;
-  }
+  int tiles_played = gen->tiles_played;
 
   int score = 0;
-  uint8_t *strip = NULL;
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    score = board_score_move(
-        gen->board, gen->ld, gen->strip, leftstrip, rightstrip, start_row,
-        start_col, tiles_played, !board_is_dir_vertical(gen->dir),
+    Move *spare_move = move_list_get_spare_move(gen->move_list);
+    move_set_all_except_equity(spare_move, gen->strip, leftstrip, rightstrip, 0,
+                               start_row, start_col, tiles_played, gen->dir,
+                               move_type);
+    if (board_is_dir_vertical(gen->dir)) {
+      move_set_row_start(spare_move, start_col);
+      move_set_col_start(spare_move, start_row);
+    }
+    score = static_eval_get_move_score(
+        gen->ld, spare_move, gen->board,
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
-    strip = gen->strip;
+    move_set_score(spare_move, score);
+
   } else if (move_type == GAME_EVENT_EXCHANGE) {
     // ignore the empty exchange case
     if (rightstrip == 0) {
       return;
     }
-    tiles_played = rightstrip;
-    strip = gen->exchange_strip;
+    move_list_set_spare_move(gen->move_list, gen->exchange_strip, leftstrip,
+                             rightstrip, score, start_row, start_col,
+                             rightstrip, gen->dir, move_type);
   }
-
-  // Set the move to more easily handle equity calculations
-  move_list_set_spare_move(gen->move_list, strip, leftstrip, rightstrip, score,
-                           row, col, tiles_played, gen->dir, move_type);
 
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     double equity;
     if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-      equity = get_spare_move_equity(gen);
+      equity = get_static_equity(gen);
     } else {
       equity = score;
     }
     move_list_insert_spare_move(gen->move_list, equity);
   } else {
     move_list_insert_spare_move_top_equity(gen->move_list,
-                                           get_spare_move_equity(gen));
+                                           get_static_equity(gen));
   }
 }
 
@@ -544,8 +451,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool shadow_board_is_letter_allowed_in_cross_set(
-    const MoveGen *gen, int col) {
+static inline bool
+shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
   uint64_t cross_set = get_cross_set_cache(gen, col);
   // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
@@ -600,23 +507,10 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
               perpendicular_additional_score + bingo_bonus;
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-    if (gen->number_of_tiles_in_bag > 0) {
-      // Bag is not empty: use leave values
-      equity +=
-          gen->best_leaves[gen->number_of_letters_on_rack - gen->tiles_played];
-      // Apply preendgame heuristic if this play would empty the bag or leave
-      // few enough tiles remaining.
-      int bag_plus_rack_size =
-          gen->number_of_tiles_in_bag - gen->tiles_played + RACK_SIZE;
-      if (bag_plus_rack_size < PREENDGAME_ADJUSTMENT_VALUES_LENGTH) {
-        equity += gen->preendgame_adjustment_values[bag_plus_rack_size];
-      }
-    } else {
-      // Bag is empty: add double opponent's rack if playing out, otherwise
-      // deduct a penalty based on the score of our tiles left after this
-      // play.
-      equity += shadow_endgame_adjustment(gen);
-    }
+    equity += static_eval_get_shadow_equity(
+        gen->ld, gen->opponent_rack, gen->best_leaves,
+        gen->descending_tile_scores, gen->number_of_tiles_in_bag,
+        gen->number_of_letters_on_rack, gen->tiles_played);
   }
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;

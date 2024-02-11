@@ -7,15 +7,14 @@
 #include <stdint.h>
 
 bool has_prefix(const char *pre, const char *str);
-bool is_all_whitespace_or_empty(const char *str);
+bool is_string_empty_or_whitespace(const char *str);
+bool is_string_empty_or_null(const char *str);
 bool is_all_digits_or_empty(const char *str);
 char *get_formatted_string(const char *format, ...);
 bool strings_equal(const char *str1, const char *str2);
 bool strings_iequal(const char *str1, const char *str2);
 char *string_duplicate(const char *str);
 char *string_copy(char *dest, const char *src);
-bool is_string_empty(const char *str1);
-bool is_string_empty_or_null(const char *str);
 void remove_first_newline(char *str);
 size_t string_length(const char *str);
 void trim_whitespace(char *str);

@@ -29,6 +29,7 @@ struct Bag {
   XoshiroPRNG *prng;
 };
 
+// Returns the number of tiles in the bag
 int bag_get_tiles(const Bag *bag) {
   return bag->end_tile_index - bag->start_tile_index;
 }

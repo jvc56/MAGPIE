@@ -26,7 +26,7 @@ struct PlayersData {
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
-#define DEFAULT_MOVE_RECORD_TYPE MOVE_RECORD_BEST
+#define DEFAULT_MOVE_RECORD_TYPE MOVE_RECORD_ALL
 
 int players_data_get_player_data_index(players_data_t players_data_type,
                                        int player_index) {

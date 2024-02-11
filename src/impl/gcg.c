@@ -398,7 +398,7 @@ bool copy_played_tiles_to_game_event(const GCGParser *gcg_parser,
     Move *move = game_event_get_move(game_event);
     move_set_tiles_length(move, number_of_machine_letters);
     for (int i = 0; i < number_of_machine_letters; i++) {
-      move_set_tile_at_index(move, played_tiles[i], i);
+      move_set_tile(move, played_tiles[i], i);
     }
     // Calculate tiles played
     int tiles_played = 0;
@@ -429,7 +429,7 @@ bool copy_exchanged_tiles_to_game_event(const GCGParser *gcg_parser,
     move_set_tiles_length(move, number_of_machine_letters);
     move_set_tiles_played(move, number_of_machine_letters);
     for (int i = 0; i < number_of_machine_letters; i++) {
-      move_set_tile_at_index(move, played_tiles[i], i);
+      move_set_tile(move, played_tiles[i], i);
     }
   }
 
@@ -972,7 +972,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
       string_builder_add_formatted_string(gcg_parser->note_builder, "%s ",
                                           gcg_line);
 
-    } else if (!is_all_whitespace_or_empty(gcg_line)) {
+    } else if (!is_string_empty_or_whitespace(gcg_line)) {
       return GCG_PARSE_STATUS_NO_MATCHING_TOKEN;
     }
     break;
@@ -1016,7 +1016,7 @@ gcg_parse_status_t parse_gcg_with_parser(GCGParser *gcg_parser,
 gcg_parse_status_t parse_gcg_string(const char *gcg_string,
                                     GameHistory *game_history) {
 
-  if (is_string_empty(gcg_string)) {
+  if (is_string_empty_or_whitespace(gcg_string)) {
     return GCG_PARSE_STATUS_GCG_EMPTY;
   }
   GCGParser *gcg_parser = create_gcg_parser(game_history);
