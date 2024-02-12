@@ -23,7 +23,8 @@ void test_macondo_opening_equity_adjustments() {
   Rack *rack = player_get_rack(player0);
   const KLV *klv = player_get_klv(player0);
   const LetterDistribution *ld = game_get_ld(game);
-  MoveList *move_list = move_list_create(1);
+  MoveList *move_list =
+      move_list_create(1, board_get_max_side_length(game_get_board(game)));
   rack_set_to_string(ld, rack, "EORSTVX");
   generate_moves_for_game(game, 0, move_list);
 
@@ -97,7 +98,8 @@ void test_macondo_endgame_equity_adjustments() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
-  MoveList *move_list = move_list_create(6);
+  MoveList *move_list =
+      move_list_create(6, board_get_max_side_length(game_get_board(game)));
 
   game_load_cgp(
       game,

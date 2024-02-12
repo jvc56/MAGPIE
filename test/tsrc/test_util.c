@@ -43,7 +43,7 @@ void set_row(Game *game, int row, const char *row_content) {
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
-  for (int i = 0; i < BOARD_DIM; i++) {
+  for (int i = 0; i < board_get_number_of_cols(board); i++) {
     board_set_letter(board, row, i, ALPHABET_EMPTY_SQUARE_MARKER);
   }
   char letter[2];
@@ -140,7 +140,8 @@ void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
 }
 
 void play_top_n_equity_move(Game *game, int n) {
-  MoveList *move_list = move_list_create(n + 1);
+  MoveList *move_list =
+      move_list_create(n + 1, board_get_max_side_length(game_get_board(game)));
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
   SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
   play_move(sorted_move_list->moves[n], game);
@@ -250,10 +251,14 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
 // Assumes b1 and b2 use the same lexicon and therefore
 // does not compare the cross set index of 1.
 void assert_boards_are_equal(const Board *b1, const Board *b2) {
+  int number_of_rows = board_get_number_of_rows(b1);
+  assert(number_of_rows == board_get_number_of_rows(b2));
+  int number_of_cols = board_get_number_of_rows(b1);
+  assert(number_of_cols == board_get_number_of_rows(b2));
   assert(board_get_transposed(b1) == board_get_transposed(b2));
   assert(board_get_tiles_played(b1) == board_get_tiles_played(b2));
-  for (int row = 0; row < BOARD_DIM; row++) {
-    for (int col = 0; col < BOARD_DIM; col++) {
+  for (int row = 0; row < number_of_rows; row++) {
+    for (int col = 0; col < number_of_cols; col++) {
       assert(board_get_letter(b1, row, col) == board_get_letter(b2, row, col));
       assert(board_get_bonus_square(b1, row, col) ==
              board_get_bonus_square(b2, row, col));

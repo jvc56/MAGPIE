@@ -57,11 +57,12 @@ void string_builder_add_board_row(const LetterDistribution *ld,
                                   const Board *board,
                                   StringBuilder *game_string, int row) {
   string_builder_add_formatted_string(game_string, "%2d|", row + 1);
-  for (int i = 0; i < BOARD_DIM; i++) {
+  for (int i = 0; i < board_get_number_of_rows(board); i++) {
     uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-      string_builder_add_char(game_string,
-                              CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i]);
+      string_builder_add_char(
+          game_string,
+          CROSSWORD_GAME_BOARD[(row * board_get_number_of_cols(board)) + i]);
     } else {
       string_builder_add_user_visible_letter(ld, game_string, current_letter);
     }
@@ -105,7 +106,7 @@ void string_builder_add_game(Game *game, MoveList *move_list,
                                 player_on_turn_index == 1);
   string_builder_add_string(game_string, "\n");
 
-  for (int i = 0; i < BOARD_DIM; i++) {
+  for (int i = 0; i < board_get_number_of_rows(board); i++) {
     string_builder_add_board_row(ld, board, game_string, i);
     if (i == 0) {
       string_builder_add_string(

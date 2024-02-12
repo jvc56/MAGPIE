@@ -90,7 +90,8 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   ThreadControl *thread_control = config_get_thread_control(config);
   Game *game = game_create(config);
   Bag *bag = game_get_bag(game);
-  MoveList *move_list = move_list_create(1);
+  MoveList *move_list =
+      move_list_create(1, board_get_max_side_length(game_get_board(game)));
 
   // Declare local vars for autoplay_worker fields for convenience
   bool use_game_pairs = config_get_use_game_pairs(autoplay_worker->config);

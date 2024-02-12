@@ -88,7 +88,6 @@ const char *lexicon_name_regex = "#lexicon (.+)";
 const char *character_encoding_regex = "#character-encoding ([[:graph:]]+)";
 const char *game_type_regex = "#game-type (.*)";
 const char *tile_set_regex = "#tile-set (.*)";
-const char *game_board_regex = "#game-board (.*)";
 const char *board_layout_regex = "#board-layout (.*)";
 const char *tile_distribution_name_regex = "#tile-distribution (.*)";
 const char *continuation_regex = "#- (.*)";
@@ -392,8 +391,11 @@ bool copy_played_tiles_to_game_event(const GCGParser *gcg_parser,
   uint8_t *played_tiles = convert_tiles_string_to_machine_letters(
       gcg_parser, gcg_line, group_index, true, &number_of_machine_letters);
 
+  const Board *board = game_history_get_board(gcg_parser->game_history);
+
   bool success =
-      number_of_machine_letters <= BOARD_DIM && number_of_machine_letters > 0;
+      number_of_machine_letters <= board_get_max_side_length(board) &&
+      number_of_machine_letters > 0;
   if (success) {
     Move *move = game_event_get_move(game_event);
     move_set_tiles_length(move, number_of_machine_letters);
@@ -486,8 +488,9 @@ gcg_parse_status_t copy_position_to_game_event(const GCGParser *gcg_parser,
   // Convert the 1-index row start into 0-indexed row start
   row_start--;
 
-  if (col_start < 0 || col_start > BOARD_DIM || row_start < 0 ||
-      row_start > BOARD_DIM) {
+  const Board *board = game_history_get_board(gcg_parser->game_history);
+  if (col_start < 0 || col_start >= board_get_number_of_cols(board) ||
+      row_start < 0 || row_start >= board_get_number_of_rows(board)) {
     return GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION;
   }
 
@@ -550,18 +553,21 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
         game_history_set_ld_name(game_history, default_ld_name);
         free(default_ld_name);
       }
-      if (game_history_get_board_layout(game_history) == BOARD_LAYOUT_UNKNOWN) {
-        game_history_set_board_layout(game_history,
-                                      BOARD_LAYOUT_CROSSWORD_GAME);
-      }
       if (game_history_get_game_variant(game_history) == GAME_VARIANT_UNKNOWN) {
         game_history_set_game_variant(game_history, GAME_VARIANT_CLASSIC);
       }
       game_history_set_ld(game_history,
                           ld_create(game_history_get_ld_name(game_history)));
     }
+
+    if (!game_history_get_board(game_history)) {
+      // FIXME: create a default board here.
+      Board *board = board_create();
+      game_history_set_board(game_history, board);
+    }
   }
 
+  const Board *board = game_history_get_board(gcg_parser->game_history);
   GameEvent *game_event = NULL;
   Rack *player_last_known_rack = NULL;
   Rack *game_event_rack = NULL;
@@ -669,7 +675,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     // Write the move rack
     game_event_set_type(game_event, GAME_EVENT_TILE_PLACEMENT_MOVE);
 
-    move = move_create();
+    move = move_create(board_get_max_side_length(board));
     game_event_set_move(game_event, move);
 
     move_set_type(move, GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -700,8 +706,10 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     int row_start = move_get_row_start(move);
     int col_start = move_get_col_start(move);
     int tiles_length = move_get_tiles_length(move);
-    if ((is_vertical && row_start + tiles_length > BOARD_DIM) ||
-        (!is_vertical && col_start + tiles_length > BOARD_DIM)) {
+    if ((is_vertical &&
+         row_start + tiles_length > board_get_number_of_rows(board)) ||
+        (!is_vertical &&
+         col_start + tiles_length > board_get_number_of_cols(board))) {
       return GCG_PARSE_STATUS_PLAY_OUT_OF_BOUNDS;
     }
 
@@ -758,13 +766,15 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    if (game_history_get_board_layout(game_history) != BOARD_LAYOUT_UNKNOWN) {
+    if (game_history_get_board(game_history) != NULL) {
       return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
     char *board_layout_string =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    game_history_set_board_layout(
-        game_history, board_layout_string_to_board_layout(board_layout_string));
+
+    // FIXME: use the board_layout_string to create a custom board
+    // here.
+    game_history_set_board(game_history, board_create());
     free(board_layout_string);
     break;
   case GCG_TILE_DISTRIBUTION_NAME_TOKEN:
@@ -892,7 +902,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     }
     game_event_set_rack(game_event, game_event_rack);
     copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 3);
-    move = move_create();
+    move = move_create(board_get_max_side_length(board));
     game_event_set_move(game_event, move);
     move_set_as_pass(move);
     break;
@@ -928,8 +938,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
     game_event = game_history_create_and_add_game_event(game_history);
-
-    move = move_create();
+    move = move_create(board_get_max_side_length(board));
     game_event_set_move(game_event, move);
 
     move_set_type(move, GAME_EVENT_EXCHANGE);

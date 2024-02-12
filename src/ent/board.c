@@ -45,10 +45,10 @@ void board_update_anchors(Board *board, int row, int col, int dir) {
   if (col > 0) {
     tile_left = !board_is_empty(board, row, col - 1);
   }
-  if (row < BOARD_DIM - 1) {
+  if (row < board->number_of_rows - 1) {
     tile_below = !board_is_empty(board, row + 1, col);
   }
-  if (col < BOARD_DIM - 1) {
+  if (col < board->number_of_cols - 1) {
     tile_right = !board_is_empty(board, row, col + 1);
   }
   tile_here = !board_is_empty(board, row, col);
@@ -71,20 +71,22 @@ void board_update_anchors(Board *board, int row, int col, int dir) {
 
 void board_update_all_anchors(Board *board) {
   if (board->tiles_played > 0) {
-    for (int i = 0; i < BOARD_DIM; i++) {
-      for (int j = 0; j < BOARD_DIM; j++) {
+    for (int i = 0; i < board->number_of_rows; i++) {
+      for (int j = 0; j < board->number_of_cols; j++) {
         board_update_anchors(board, i, j, 0);
       }
     }
   } else {
-    for (int i = 0; i < BOARD_DIM; i++) {
-      for (int j = 0; j < BOARD_DIM; j++) {
+    for (int i = 0; i < board->number_of_rows; i++) {
+      for (int j = 0; j < board->number_of_cols; j++) {
         board_reset_anchor(board, i, j, 0);
         board_reset_anchor(board, i, j, 1);
       }
     }
-    int rc = BOARD_DIM / 2;
-    board_set_anchor(board, rc, rc, 0);
+    // FIXME: In later updates we will get the
+    // start square from input args.
+    board_set_anchor(board, board->number_of_rows / 2,
+                     board->number_of_cols / 2, 0);
   }
 }
 
@@ -94,8 +96,8 @@ void board_reset(Board *board) {
   board->tiles_played = 0;
   board->transposed = false;
 
-  for (int i = 0; i < BOARD_DIM; i++) {
-    for (int j = 0; j < BOARD_DIM; j++) {
+  for (int i = 0; i < board->number_of_rows; i++) {
+    for (int j = 0; j < board->number_of_cols; j++) {
       board_set_letter(board, i, j, ALPHABET_EMPTY_SQUARE_MARKER);
     }
   }
@@ -106,7 +108,10 @@ void board_reset(Board *board) {
 }
 
 void board_set_bonus_squares(Board *board) {
-  for (int i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
+  // FIXME: this will need to be updated
+  // to take arguments to set bonus squares
+  // instead of constants.
+  for (int i = 0; i < board->number_of_rows * board->number_of_cols; i++) {
     uint8_t bonus_value;
     char bonus_square = CROSSWORD_GAME_BOARD[i];
     if (bonus_square == BONUS_TRIPLE_WORD_SCORE) {
@@ -136,9 +141,38 @@ void board_set_bonus_squares(Board *board) {
 
 Board *board_create() {
   Board *board = malloc_or_die(sizeof(Board));
+
+  // FIXME: Hard code these values to 15 for now. In later
+  // updates height and width will be given as arguments.
+  board->number_of_rows = 15;
+  board->number_of_cols = 15;
+
+  int area = board_get_area(board);
+
+  // See the .h for more details on these allocations
+  board->letters = malloc_or_die(sizeof(uint8_t) * area);
+  board->bonus_squares = malloc_or_die(sizeof(uint8_t) * area);
+  board->cross_sets = malloc_or_die(sizeof(uint8_t) * area * 4);
+  board->cross_scores = malloc_or_die(sizeof(uint8_t) * area * 4);
+  board->anchors = malloc_or_die(sizeof(uint8_t) * area * 2);
+
   board_reset(board);
   board_set_bonus_squares(board);
   return board;
+}
+
+void board_destroy(Board *board) {
+  if (!board) {
+    return;
+  }
+
+  free(board->letters);
+  free(board->bonus_squares);
+  free(board->cross_sets);
+  free(board->cross_scores);
+  free(board->anchors);
+
+  free(board);
 }
 
 Board *board_duplicate(const Board *board) {
@@ -153,14 +187,15 @@ Board *board_duplicate(const Board *board) {
 // from src to dst. Does not copy bonus squares
 // since it is assumed that src and dst have the
 // same bonus squares.
+// Assumes that the boards have the same dimensions.
 void board_copy(Board *dst, const Board *src) {
   // Transposed must be set before copying
   // since the get and set methods use board_transpose
   // for access.
   dst->transposed = src->transposed;
   dst->tiles_played = src->tiles_played;
-  for (int row = 0; row < BOARD_DIM; row++) {
-    for (int col = 0; col < BOARD_DIM; col++) {
+  for (int row = 0; row < src->number_of_rows; row++) {
+    for (int col = 0; col < src->number_of_cols; col++) {
       board_set_letter(dst, row, col, board_get_letter(src, row, col));
       for (int dir = 0; dir < 2; dir++) {
         if (board_get_anchor(src, row, col, dir)) {
@@ -181,11 +216,4 @@ void board_copy(Board *dst, const Board *src) {
       }
     }
   }
-}
-
-void board_destroy(Board *board) {
-  if (!board) {
-    return;
-  }
-  free(board);
 }

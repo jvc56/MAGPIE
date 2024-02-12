@@ -17,7 +17,7 @@
 #include "letter_distribution.h"
 
 typedef struct FormedWord {
-  uint8_t word[BOARD_DIM];
+  uint8_t *word;
   int word_length;
   bool valid;
 } FormedWord;
@@ -34,6 +34,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
   int dir = move_get_dir(move);
 
   bool board_was_transposed = false;
+  int number_of_rows = board_get_number_of_rows(board);
 
   if (!board_matches_dir(board, dir)) {
     board_transpose(board);
@@ -41,11 +42,19 @@ FormedWords *formed_words_create(Board *board, Move *move) {
     int ph = col_start;
     col_start = row_start;
     row_start = ph;
+    number_of_rows = board_get_number_of_cols(board);
   }
 
+  int max_side_length = board_get_max_side_length(board);
+
   FormedWords *ws = malloc_or_die(sizeof(FormedWords));
+
+  for (int i = 0; i < RACK_SIZE + 1; i++) {
+    ws->words[i].word = malloc_or_die(sizeof(uint8_t) * max_side_length);
+  }
+
   int formed_words_idx = 0;
-  uint8_t main_word[BOARD_DIM];
+  uint8_t *main_word = malloc_or_die(sizeof(uint8_t) * max_side_length);
   int main_word_idx = 0;
   for (int idx = 0; idx < tiles_length; idx++) {
     uint8_t ml = move_get_tile(move, idx);
@@ -63,7 +72,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
     bool actual_cross_word =
         (row_start > 0 &&
          !board_is_empty(board, row_start - 1, col_start + idx)) ||
-        ((row_start < BOARD_DIM - 1) &&
+        ((row_start < number_of_rows - 1) &&
          !board_is_empty(board, row_start + 1, col_start + idx));
 
     if (fresh_tile && actual_cross_word) {
@@ -79,7 +88,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
         rbegin = 0;
       }
 
-      for (rend = rbegin; rend < BOARD_DIM; rend++) {
+      for (rend = rbegin; rend < number_of_rows; rend++) {
         if (rend != row_start && board_is_empty(board, rend, col_start + idx)) {
           rend--;
           break;
@@ -116,6 +125,9 @@ FormedWords *formed_words_create(Board *board, Move *move) {
 void formed_words_destroy(FormedWords *fw) {
   if (!fw) {
     return;
+  }
+  for (int i = 0; i < RACK_SIZE + 1; i++) {
+    free(fw->words[i].word);
   }
   free(fw);
 }

@@ -79,7 +79,8 @@ void test_sim_error_cases() {
   Player *player0 = game_get_player(game, 0);
   Rack *player0_rack = player_get_rack(player0);
 
-  MoveList *move_list = move_list_create(15);
+  MoveList *move_list =
+      move_list_create(15, board_get_max_side_length(game_get_board(game)));
 
   // No moves to simulate
   draw_rack_to_string(ld, bag, player0_rack, "AAADERW", 0);
@@ -108,7 +109,8 @@ void test_sim_single_iteration() {
 
   draw_rack_to_string(ld, bag, player0_rack, "AAADERW", 0);
 
-  MoveList *move_list = move_list_create(15);
+  MoveList *move_list =
+      move_list_create(15, board_get_max_side_length(game_get_board(game)));
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
   SimResults *sim_results = sim_results_create();
@@ -137,7 +139,8 @@ void test_more_iterations() {
   ThreadControl *thread_control = config_get_thread_control(config);
 
   draw_rack_to_string(ld, bag, player0_rack, "AEIQRST", 0);
-  MoveList *move_list = move_list_create(15);
+  MoveList *move_list =
+      move_list_create(15, board_get_max_side_length(game_get_board(game)));
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
   SimResults *sim_results = sim_results_create();
@@ -180,7 +183,8 @@ void perf_test_multithread_sim() {
   printf("Using %d threads\n", num_threads);
   game_load_cgp(game, config_get_cgp(config));
 
-  MoveList *move_list = move_list_create(15);
+  MoveList *move_list =
+      move_list_create(15, board_get_max_side_length(game_get_board(game)));
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
   SimResults *sim_results = sim_results_create();
@@ -221,7 +225,8 @@ void test_play_similarity() {
 
   draw_rack_to_string(ld, bag, player0_rack, "ACEIRST", 0);
 
-  MoveList *move_list = move_list_create(15);
+  MoveList *move_list =
+      move_list_create(15, board_get_max_side_length(game_get_board(game)));
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
   SimResults *sim_results = sim_results_create();

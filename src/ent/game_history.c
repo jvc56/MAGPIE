@@ -6,6 +6,7 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 
+#include "board.h"
 #include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
@@ -154,7 +155,7 @@ struct GameHistory {
   char *lexicon_name;
   char *ld_name;
   game_variant_t game_variant;
-  board_layout_t board_layout;
+  Board *board;
   GameHistoryPlayer *players[2];
   int number_of_events;
   LetterDistribution *ld;
@@ -226,13 +227,12 @@ game_variant_t game_history_get_game_variant(const GameHistory *history) {
   return history->game_variant;
 }
 
-void game_history_set_board_layout(GameHistory *history,
-                                   board_layout_t board_layout) {
-  history->board_layout = board_layout;
+void game_history_set_board(GameHistory *history, Board *board) {
+  history->board = board;
 }
 
-board_layout_t game_history_get_board_layout(const GameHistory *history) {
-  return history->board_layout;
+const Board *game_history_get_board(const GameHistory *history) {
+  return history->board;
 }
 
 void game_history_set_player(GameHistory *history, int player_index,
@@ -270,7 +270,7 @@ GameHistory *game_history_create() {
   game_history->lexicon_name = NULL;
   game_history->ld_name = NULL;
   game_history->game_variant = GAME_VARIANT_UNKNOWN;
-  game_history->board_layout = BOARD_LAYOUT_UNKNOWN;
+  game_history->board = NULL;
   game_history->players[0] = NULL;
   game_history->players[1] = NULL;
   game_history->ld = NULL;

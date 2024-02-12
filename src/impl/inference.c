@@ -288,7 +288,8 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
                                ThreadControl *thread_control) {
   Inference *new_inference = malloc_or_die(sizeof(Inference));
   new_inference->game = game_duplicate(inference->game);
-  new_inference->move_list = move_list_create(1);
+  new_inference->move_list = move_list_create(
+      1, board_get_max_side_length(game_get_board(new_inference->game)));
   new_inference->klv = player_get_klv(
       game_get_player(new_inference->game, inference->target_index));
 

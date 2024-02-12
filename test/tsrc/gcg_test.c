@@ -224,8 +224,6 @@ void test_success_standard() {
   assert(strings_equal(game_history_get_lexicon_name(game_history), "CSW21"));
   assert(strings_equal(game_history_get_ld_name(game_history), "english"));
   assert(game_history_get_game_variant(game_history) == GAME_VARIANT_CLASSIC);
-  assert(game_history_get_board_layout(game_history) ==
-         BOARD_LAYOUT_CROSSWORD_GAME);
   assert(strings_equal(game_history_player_get_nickname(player0), "HastyBot"));
   assert(game_history_player_get_score(player0) == 516);
   assert(!game_history_player_get_last_known_rack(player0));

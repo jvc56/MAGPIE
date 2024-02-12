@@ -25,6 +25,7 @@ typedef struct Anchor {
 
 typedef struct AnchorList {
   int count;
+  int capacity;
   Anchor **anchors;
 } AnchorList;
 

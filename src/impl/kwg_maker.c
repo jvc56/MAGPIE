@@ -337,7 +337,9 @@ void add_gaddag_strings_for_word(const DictionaryWord *word,
                                  DictionaryWordList *gaddag_strings) {
   const uint8_t *raw_word = dictionary_word_get_word(word);
   const int length = dictionary_word_get_length(word);
-  uint8_t gaddag_string[MAX_KWG_STRING_LENGTH];
+  uint8_t *gaddag_string =
+      malloc_or_die(sizeof(uint8_t) *
+                    dictionary_word_list_get_max_word_length(gaddag_strings));
   // First add the word reversed without the separator.
   for (int i = 0; i < length; i++) {
     const int source_index = length - i - 1;
@@ -355,6 +357,7 @@ void add_gaddag_strings_for_word(const DictionaryWord *word,
     gaddag_string[separator_pos + 1] = raw_word[separator_pos];
     dictionary_word_list_add_word(gaddag_strings, gaddag_string, length + 1);
   }
+  free(gaddag_string);
 }
 
 void add_gaddag_strings(const DictionaryWordList *words,
@@ -394,8 +397,10 @@ void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
 
 void kwg_write_words(const KWG *kwg, int node_index, DictionaryWordList *words,
                      bool *nodes_reached) {
-  uint8_t prefix[MAX_KWG_STRING_LENGTH];
+  uint8_t *prefix = malloc_or_die(
+      sizeof(uint8_t) * dictionary_word_list_get_max_word_length(words));
   write_words_aux(kwg, node_index, prefix, 0, false, words, nodes_reached);
+  free(prefix);
 }
 
 int get_letters_in_common(const DictionaryWord *word, uint8_t *last_word,
@@ -428,10 +433,13 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   const int dawg_root_node_index = mutable_node_list_add_root(nodes);
   // Size is one beyond the longest string because nodes are created for
   // potential children at the max+1'th, though there are none.
-  int cached_node_indices[MAX_KWG_STRING_LENGTH + 1];
-  uint8_t last_word[MAX_KWG_STRING_LENGTH];
+  int max_word_length = dictionary_word_list_get_max_word_length(words);
+  int *cached_node_indices = malloc_or_die(sizeof(int) * (max_word_length + 1));
+
+  uint8_t *last_word = malloc_or_die(sizeof(uint8_t) * max_word_length);
+
   int last_word_length = 0;
-  for (int i = 0; i < MAX_KWG_STRING_LENGTH; i++) {
+  for (int i = 0; i < max_word_length; i++) {
     last_word[i] = 0;
   }
   if (output_dawg) {

@@ -8,7 +8,7 @@
 
 typedef struct Move Move;
 
-Move *move_create();
+Move *move_create(int max_move_size);
 void move_destroy(Move *move);
 
 game_event_t move_get_type(const Move *move);
@@ -42,7 +42,7 @@ void move_copy(Move *dest_move, const Move *src_move);
 
 typedef struct MoveList MoveList;
 
-MoveList *move_list_create(int capacity);
+MoveList *move_list_create(int capacity, int max_move_size);
 MoveList *move_list_duplicate(const MoveList *ml);
 void move_list_destroy(MoveList *ml);
 

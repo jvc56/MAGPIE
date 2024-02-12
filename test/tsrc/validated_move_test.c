@@ -439,7 +439,8 @@ void test_validated_move_distinct_kwg() {
                            "r1 best r2 best numplays 1");
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
-  MoveList *move_list = move_list_create(1);
+  MoveList *move_list =
+      move_list_create(1, board_get_max_side_length(game_get_board(game)));
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);

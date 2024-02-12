@@ -112,7 +112,9 @@ void exec_state_reset_move_list(ExecState *exec_state) {
 
 void exec_state_init_move_list(ExecState *exec_state, int capacity) {
   if (!exec_state->move_list) {
-    exec_state->move_list = move_list_create(capacity);
+    const Board *board = game_get_board(exec_state_get_game(exec_state));
+    exec_state->move_list =
+        move_list_create(capacity, board_get_max_side_length(board));
   }
 }
 
@@ -122,6 +124,9 @@ void exec_state_recreate_move_list(ExecState *exec_state, int capacity) {
     move_list_reset(exec_state->move_list);
   } else {
     move_list_destroy(exec_state->move_list);
-    exec_state->move_list = move_list_create(capacity);
+    // FIXME: board might not exist, I guess
+    const Board *board = game_get_board(exec_state_get_game(exec_state));
+    exec_state->move_list =
+        move_list_create(capacity, board_get_max_side_length(board));
   }
 }

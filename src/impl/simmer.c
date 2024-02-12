@@ -114,7 +114,8 @@ Simmer *create_simmer(const Config *config, const MoveList *move_list,
   simmer->thread_control = thread_control;
 
   sim_results_reset(move_list, sim_results, num_simmed_plays,
-                    config_get_plies(config));
+                    config_get_plies(config),
+                    board_get_max_side_length(game_get_board(game)));
 
   simmer->sim_results = sim_results;
 
@@ -145,7 +146,8 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
                       worker_index);
 
   // MoveList
-  simmer_worker->move_list = move_list_create(1);
+  simmer_worker->move_list = move_list_create(
+      1, board_get_max_side_length(game_get_board(simmer_worker->game)));
 
   int ld_size = ld_get_size(game_get_ld(simmer_worker->game));
 

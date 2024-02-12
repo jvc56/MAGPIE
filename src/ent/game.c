@@ -121,7 +121,7 @@ int traverse_backwards_for_score(const Board *board,
                                  const LetterDistribution *ld, int row,
                                  int col) {
   int score = 0;
-  while (board_is_position_valid(row, col)) {
+  while (board_is_position_valid(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
@@ -139,7 +139,7 @@ int traverse_backwards_for_score(const Board *board,
 void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
                         uint32_t node_index, bool check_letter_set,
                         int left_most_col) {
-  while (board_is_position_valid(row, col)) {
+  while (board_is_position_valid(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
@@ -174,13 +174,13 @@ void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
 
 void game_gen_cross_set(Game *game, int row, int col, int dir,
                         int cross_set_index) {
-  if (!board_is_position_valid(row, col)) {
+  Board *board = game_get_board(game);
+  if (!board_is_position_valid(board, row, col)) {
     return;
   }
 
   const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
   const LetterDistribution *ld = game_get_ld(game);
-  Board *board = game_get_board(game);
 
   if (!board_is_empty(board, row, col)) {
     board_set_cross_set(board, row, col, 0, dir, cross_set_index);
@@ -257,8 +257,8 @@ void game_gen_all_cross_sets(Game *game) {
   Board *board = game_get_board(game);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
-  for (int i = 0; i < BOARD_DIM; i++) {
-    for (int j = 0; j < BOARD_DIM; j++) {
+  for (int i = 0; i < board_get_number_of_rows(board); i++) {
+    for (int j = 0; j < board_get_number_of_cols(board); j++) {
       game_gen_cross_set(game, i, j, 0, 0);
       if (!kwgs_are_shared) {
         game_gen_cross_set(game, i, j, 0, 1);
@@ -266,8 +266,8 @@ void game_gen_all_cross_sets(Game *game) {
     }
   }
   board_transpose(board);
-  for (int i = 0; i < BOARD_DIM; i++) {
-    for (int j = 0; j < BOARD_DIM; j++) {
+  for (int i = 0; i < board_get_number_of_rows(board); i++) {
+    for (int j = 0; j < board_get_number_of_cols(board); j++) {
       game_gen_cross_set(game, i, j, 1, 0);
       if (!kwgs_are_shared) {
         game_gen_cross_set(game, i, j, 1, 1);
@@ -345,7 +345,7 @@ cgp_parse_status_t parse_cgp_board_row(Game *game, const char *cgp_board_row,
   }
   destroy_string_builder(tile_string_builder);
 
-  if (current_column_index != BOARD_DIM &&
+  if (current_column_index != board_get_number_of_cols(game_get_board(game)) &&
       cgp_parse_status == CGP_PARSE_STATUS_SUCCESS) {
     cgp_parse_status = CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_COLUMNS;
   }
@@ -357,10 +357,13 @@ cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   StringSplitter *board_rows = split_string(cgp_board, '/', true);
 
-  if (string_splitter_get_number_of_items(board_rows) != BOARD_DIM) {
+  int required_number_of_rows = board_get_number_of_rows(game_get_board(game));
+
+  if (string_splitter_get_number_of_items(board_rows) !=
+      required_number_of_rows) {
     cgp_parse_status = CGP_PARSE_STATUS_INVALID_NUMBER_OF_BOARD_ROWS;
   } else {
-    for (int i = 0; i < BOARD_DIM; i++) {
+    for (int i = 0; i < required_number_of_rows; i++) {
       cgp_parse_status =
           parse_cgp_board_row(game, string_splitter_get_item(board_rows, i), i);
       if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {

@@ -35,13 +35,14 @@ struct SimResults {
 };
 
 SimmedPlay **simmed_plays_create(const MoveList *move_list,
-                                 int num_simmed_plays, int max_plies) {
+                                 int num_simmed_plays, int max_plies,
+                                 int max_move_length) {
   SimmedPlay **simmed_plays =
       malloc_or_die((sizeof(SimmedPlay)) * num_simmed_plays);
 
   for (int i = 0; i < num_simmed_plays; i++) {
     SimmedPlay *sp = malloc_or_die(sizeof(SimmedPlay));
-    sp->move = move_create();
+    sp->move = move_create(max_move_length);
     move_copy(sp->move, move_list_get_move(move_list, i));
 
     sp->score_stat = malloc_or_die(sizeof(Stat *) * max_plies);
@@ -101,11 +102,12 @@ void sim_results_destroy(SimResults *sim_results) {
 }
 
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_simmed_plays, int max_plies) {
+                       int num_simmed_plays, int max_plies,
+                       int max_move_length) {
   sim_results_destroy_internal(sim_results);
 
-  sim_results->simmed_plays =
-      simmed_plays_create(move_list, num_simmed_plays, max_plies);
+  sim_results->simmed_plays = simmed_plays_create(move_list, num_simmed_plays,
+                                                  max_plies, max_move_length);
 
   sim_results->num_simmed_plays = num_simmed_plays;
   sim_results->max_plies = max_plies;

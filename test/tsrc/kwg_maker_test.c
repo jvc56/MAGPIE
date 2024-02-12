@@ -12,6 +12,8 @@
 
 #include "test_util.h"
 
+#define MAX_KWG_STRING_LENGTH 100
+
 void add_test_word(const LetterDistribution *ld, DictionaryWordList *words,
                    const char *human_readable_word) {
   int length = string_length(human_readable_word);

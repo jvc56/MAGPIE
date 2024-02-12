@@ -54,13 +54,16 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
                          int *move_indexes, const char **move_strings) {
   if (row_string) {
     StringBuilder *cgp_builder = create_string_builder();
-    for (int i = 0; i < BOARD_DIM; i++) {
+    const Board *board = game_get_board(game);
+    int number_of_rows = board_get_number_of_rows(board);
+    int number_of_cols = board_get_number_of_cols(board);
+    for (int i = 0; i < number_of_rows; i++) {
       if (i == row) {
         string_builder_add_string(cgp_builder, row_string);
       } else {
-        string_builder_add_int(cgp_builder, BOARD_DIM);
+        string_builder_add_int(cgp_builder, number_of_cols);
       }
-      if (i != BOARD_DIM - 1) {
+      if (i != board_get_number_of_rows(board) - 1) {
         string_builder_add_string(cgp_builder, "/");
       }
     }
@@ -122,7 +125,8 @@ void macondo_tests() {
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = move_list_create(10000);
+  MoveList *move_list =
+      move_list_create(10000, board_get_max_side_length(board));
 
   // TestSimpleRowGen
   assert_move_gen_row(game, move_list, "P", "5REGNANT3", 2, 8, 1, NULL, NULL);
@@ -316,7 +320,8 @@ void leave_lookup_test() {
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   const KLV *klv = player_get_klv(game_get_player(game, 0));
-  MoveList *move_list = move_list_create(1000);
+  MoveList *move_list =
+      move_list_create(1000, board_get_max_side_length(game_get_board(game)));
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
@@ -351,7 +356,8 @@ void exchange_tests() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
-  MoveList *move_list = move_list_create(10);
+  MoveList *move_list =
+      move_list_create(10, board_get_max_side_length(game_get_board(game)));
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
                   "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
@@ -392,7 +398,8 @@ void many_moves_tests() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
-  MoveList *move_list = move_list_create(239000);
+  MoveList *move_list =
+      move_list_create(239000, board_get_max_side_length(game_get_board(game)));
 
   game_load_cgp(game, MANY_MOVES);
   generate_moves_for_game(game, 0, move_list);
@@ -412,7 +419,8 @@ void equity_test() {
   int ld_size = ld_get_size(ld);
 
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = move_list_create(300);
+  MoveList *move_list =
+      move_list_create(300, board_get_max_side_length(game_get_board(game)));
 
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
 
@@ -458,7 +466,8 @@ void top_equity_play_recorder_test() {
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = move_list_create(1);
+  MoveList *move_list =
+      move_list_create(1, board_get_max_side_length(game_get_board(game)));
   player_set_move_record_type(player, MOVE_RECORD_BEST);
 
   game_load_cgp(game, VS_JEREMY);
@@ -486,7 +495,8 @@ void distinct_lexica_test() {
                            "r1 best r2 best numplays 1");
   Game *game = game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
-  MoveList *move_list = move_list_create(1);
+  MoveList *move_list =
+      move_list_create(1, board_get_max_side_length(game_get_board(game)));
 
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
@@ -539,7 +549,8 @@ void distinct_lexica_test() {
 
   const LetterDistribution *ld2 = game_get_ld(game2);
   ld = game_get_ld(game2);
-  MoveList *move_list2 = move_list_create(1);
+  MoveList *move_list2 =
+      move_list_create(1, board_get_max_side_length(game_get_board(game)));
 
   player0 = game_get_player(game2, 0);
   player1 = game_get_player(game2, 1);

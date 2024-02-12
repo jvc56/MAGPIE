@@ -40,7 +40,8 @@ void test_shadow_score() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = move_list_create(1000);
+  MoveList *move_list =
+      move_list_create(1000, board_get_max_side_length(game_get_board(game)));
 
   // This test checks scores only, so set the player move sorting
   // to sort by score.
@@ -494,7 +495,8 @@ void test_shadow_top_move() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
   Player *player = game_get_player(game, 0);
-  MoveList *move_list = move_list_create(1);
+  MoveList *move_list =
+      move_list_create(1, board_get_max_side_length(game_get_board(game)));
 
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
   player_set_move_record_type(player, MOVE_RECORD_BEST);

@@ -70,14 +70,14 @@ void play_move_on_board(const Move *move, Game *game) {
     if (row > 0) {
       board_update_anchors(board, row - 1, i, move_get_dir(move));
     }
-    if (row < BOARD_DIM - 1) {
+    if (row < board_get_number_of_rows(board) - 1) {
       board_update_anchors(board, row + 1, i, move_get_dir(move));
     }
   }
   if (col - 1 >= 0) {
     board_update_anchors(board, row, col - 1, move_get_dir(move));
   }
-  if (move_get_tiles_length(move) + col < BOARD_DIM) {
+  if (move_get_tiles_length(move) + col < board_get_number_of_cols(board)) {
     board_update_anchors(board, row, move_get_tiles_length(move) + col,
                          move_get_dir(move));
   }

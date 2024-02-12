@@ -6,8 +6,10 @@
 
 #include "../../src/ent/move.h"
 
+#include "../../src/util/util.h"
+
 void test_move_resize() {
-  MoveList *ml = move_list_create(3);
+  MoveList *ml = move_list_create(3, 15);
 
   assert(move_list_get_capacity(ml) == 3);
 
@@ -39,8 +41,9 @@ void test_move_resize() {
 }
 
 void test_move_compare() {
+  int max_move_length = 15;
 
-  MoveList *ml = move_list_create(1);
+  MoveList *ml = move_list_create(1, max_move_length);
 
   int leftstrip = 2;
   int rightstrip = 9;
@@ -54,13 +57,13 @@ void test_move_compare() {
 
   int tiles_length = rightstrip - leftstrip + 1;
 
-  uint8_t tiles[BOARD_DIM];
+  uint8_t *tiles = malloc_or_die(sizeof(uint8_t) * max_move_length);
 
   for (int i = 0; i < tiles_length; i++) {
     tiles[i] = i + 10;
   }
 
-  Move *m = move_create();
+  Move *m = move_create(max_move_length);
   move_set_all_except_equity(m, tiles, leftstrip, rightstrip, score, row_start,
                              col_start, tiles_played, dir, mtype);
   move_set_equity(m, equity);

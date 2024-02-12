@@ -35,7 +35,8 @@ typedef struct SimResults SimResults;
 
 SimResults *sim_results_create();
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_simmed_plays, int max_plies);
+                       int num_simmed_plays, int max_plies,
+                       int max_move_length);
 void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);

@@ -41,7 +41,9 @@ int get_letter_coords(const char c) {
 }
 
 move_validation_status_t validate_coordinates(Move *move,
-                                              const char *coords_string) {
+                                              const char *coords_string,
+                                              int number_of_rows,
+                                              int number_of_cols) {
   int row_start = 0;
   int col_start = 0;
   int coords_string_length = string_length(coords_string);
@@ -79,8 +81,8 @@ move_validation_status_t validate_coordinates(Move *move,
   // Convert the 1-index row start into 0-indexed row start
   row_start--;
 
-  if (col_start < 0 || col_start >= BOARD_DIM || row_start < 0 ||
-      row_start >= BOARD_DIM || !started_row_parse || !started_col_parse) {
+  if (col_start < 0 || col_start >= number_of_cols || row_start < 0 ||
+      row_start >= number_of_rows || !started_row_parse || !started_col_parse) {
     return MOVE_VALIDATION_STATUS_INVALID_TILE_PLACEMENT_POSITION;
   }
 
@@ -126,7 +128,7 @@ move_validation_status_t validate_tiles_played_with_mls(
     int move_dir = move_get_dir(move);
     bool connected = false;
     for (int i = 0; i < number_of_machine_letters; i++) {
-      if (!board_is_position_valid(current_row, current_col)) {
+      if (!board_is_position_valid(board, current_row, current_col)) {
         return MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS;
       }
       uint8_t board_letter = board_get_letter(board, current_row, current_col);
@@ -172,11 +174,13 @@ move_validation_status_t validate_tiles_played(const LetterDistribution *ld,
   int number_of_machine_letters = ld_str_to_mls(
       ld, tiles_played, false, machine_letters, machine_letters_size);
 
+  int max_move_length = board_get_max_side_length(board);
+
   move_validation_status_t status = MOVE_VALIDATION_STATUS_SUCCESS;
 
   if (number_of_machine_letters < 1) {
     status = MOVE_VALIDATION_STATUS_INVALID_TILES_PLAYED;
-  } else if (number_of_machine_letters > BOARD_DIM) {
+  } else if (number_of_machine_letters > max_move_length) {
     status = MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS;
   } else {
     status = validate_tiles_played_with_mls(board, machine_letters,
@@ -249,7 +253,10 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   } else {
     // Score and equity are set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_TILE_PLACEMENT_MOVE);
-    status = validate_coordinates(vm->move, move_type_or_coords);
+    const Board *board = game_get_board(game);
+    status = validate_coordinates(vm->move, move_type_or_coords,
+                                  board_get_number_of_rows(board),
+                                  board_get_number_of_cols(board));
   }
 
   if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
@@ -473,7 +480,7 @@ ValidatedMove *validated_move_create(const Game *game, int player_index,
   vm->challenge_turn_loss = false;
   vm->leave_value = 0;
   vm->unknown_exchange = false;
-  vm->move = move_create();
+  vm->move = move_create(board_get_max_side_length(game_get_board(game)));
 
   char *trimmed_ucgi_move_string = string_duplicate(ucgi_move_string);
   trim_whitespace(trimmed_ucgi_move_string);

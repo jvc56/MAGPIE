@@ -162,10 +162,13 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
     board_was_transposed = true;
   }
 
+  int number_of_rows = board_get_number_of_rows(board);
+
   if (move_dir == BOARD_VERTICAL_DIRECTION) {
     int tmp_start = row_start;
     row_start = col_start;
     col_start = tmp_start;
+    number_of_rows = board_get_number_of_cols(board);
   }
 
   int ls;
@@ -205,7 +208,7 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
     bool actual_cross_word =
         (row_start > 0 &&
          !board_is_empty(board, row_start - 1, col_start + idx)) ||
-        ((row_start < BOARD_DIM - 1) &&
+        ((row_start < number_of_rows - 1) &&
          !board_is_empty(board, row_start + 1, col_start + idx));
     if (fresh_tile && actual_cross_word) {
       cross_scores += ls * letter_multiplier * this_word_multiplier +

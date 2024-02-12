@@ -5,6 +5,7 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 
+#include "board.h"
 #include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
@@ -82,9 +83,8 @@ void game_history_set_game_variant(GameHistory *history,
                                    game_variant_t game_variant);
 game_variant_t game_history_get_game_variant(const GameHistory *history);
 
-void game_history_set_board_layout(GameHistory *history,
-                                   board_layout_t board_layout);
-board_layout_t game_history_get_board_layout(const GameHistory *history);
+void game_history_set_board(GameHistory *history, Board *board);
+const Board *game_history_get_board(const GameHistory *history);
 
 void game_history_set_player(GameHistory *history, int player_index,
                              GameHistoryPlayer *player);

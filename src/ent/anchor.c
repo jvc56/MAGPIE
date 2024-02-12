@@ -6,14 +6,14 @@
 
 #include "../util/util.h"
 
-
 Anchor *anchor_create() { return malloc_or_die(sizeof(Anchor)); }
 
-AnchorList *anchor_list_create() {
+AnchorList *anchor_list_create(int board_area) {
   AnchorList *al = malloc_or_die(sizeof(AnchorList));
   al->count = 0;
-  al->anchors = malloc_or_die((sizeof(Anchor *)) * ((BOARD_DIM) * (BOARD_DIM)));
-  for (int i = 0; i < ((BOARD_DIM) * (BOARD_DIM)); i++) {
+  al->capacity = board_area;
+  al->anchors = malloc_or_die((sizeof(Anchor *)) * al->capacity);
+  for (int i = 0; i < al->capacity; i++) {
     al->anchors[i] = anchor_create();
   }
   return al;
@@ -30,7 +30,7 @@ void anchor_list_destroy(AnchorList *al) {
   if (!al) {
     return;
   }
-  for (int i = 0; i < ((BOARD_DIM) * (BOARD_DIM)); i++) {
+  for (int i = 0; i < al->capacity; i++) {
     anchor_destroy(al->anchors[i]);
   }
   free(al->anchors);

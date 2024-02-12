@@ -22,7 +22,8 @@ struct Move {
   int tiles_length;
   double equity;
   int dir;
-  uint8_t tiles[BOARD_DIM];
+  int tiles_size;
+  uint8_t *tiles;
 };
 
 struct MoveList {
@@ -33,12 +34,18 @@ struct MoveList {
   Move **moves;
 };
 
-Move *move_create() { return malloc_or_die(sizeof(Move)); }
+Move *move_create(int max_move_size) {
+  Move *m = malloc_or_die(sizeof(Move));
+  m->tiles_size = max_move_size;
+  m->tiles = malloc_or_die(sizeof(uint8_t) * m->tiles_size);
+  return m;
+}
 
 void move_destroy(Move *move) {
   if (!move) {
     return;
   }
+  free(move->tiles);
   free(move);
 }
 
@@ -97,7 +104,7 @@ void move_set_tiles_length(Move *move, int tiles_length) {
 void move_set_dir(Move *move, int dir) { move->dir = dir; }
 
 void move_set_tile(Move *move, uint8_t tile, int index) {
-  if (index >= 0 && index < BOARD_DIM) {
+  if (index >= 0 && index < move->tiles_size) {
     move->tiles[index] = tile;
   }
 }
@@ -182,7 +189,7 @@ void move_set_all(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
 }
 
 void move_copy(Move *dest_move, const Move *src_move) {
-  for (int i = 0; i < (BOARD_DIM); i++) {
+  for (int i = 0; i < src_move->tiles_size; i++) {
     dest_move->tiles[i] = src_move->tiles[i];
   }
   dest_move->score = src_move->score;
@@ -200,7 +207,7 @@ void move_set_as_pass(Move *move) {
                PASS_MOVE_EQUITY);
 }
 
-void create_moves_for_move_list(MoveList *ml, int capacity) {
+void create_moves_for_move_list(MoveList *ml, int capacity, int max_move_size) {
   ml->capacity = capacity;
   // We need to use +1 here so that the
   // move list can temporarily hold the
@@ -209,7 +216,7 @@ void create_moves_for_move_list(MoveList *ml, int capacity) {
   ml->moves_size = ml->capacity + 1;
   ml->moves = malloc_or_die(sizeof(Move *) * ml->moves_size);
   for (int i = 0; i < ml->moves_size; i++) {
-    ml->moves[i] = move_create();
+    ml->moves[i] = move_create(max_move_size);
   }
 }
 
@@ -220,11 +227,11 @@ void destroy_moves_for_move_list(MoveList *ml) {
   free(ml->moves);
 }
 
-MoveList *move_list_create(int capacity) {
+MoveList *move_list_create(int capacity, int max_move_size) {
   MoveList *ml = malloc_or_die(sizeof(MoveList));
   ml->count = 0;
-  ml->spare_move = move_create();
-  create_moves_for_move_list(ml, capacity);
+  ml->spare_move = move_create(max_move_size);
+  create_moves_for_move_list(ml, capacity, max_move_size);
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
   return ml;
 }
@@ -232,8 +239,8 @@ MoveList *move_list_create(int capacity) {
 MoveList *move_list_duplicate(const MoveList *ml) {
   MoveList *new_ml = malloc_or_die(sizeof(MoveList));
   new_ml->count = ml->count;
-  new_ml->spare_move = move_create();
-  create_moves_for_move_list(new_ml, ml->capacity);
+  new_ml->spare_move = move_create(ml->spare_move->tiles_size);
+  create_moves_for_move_list(new_ml, ml->capacity, ml->spare_move->tiles_size);
   for (int i = 0; i < new_ml->moves_size; i++) {
     move_copy(new_ml->moves[i], ml->moves[i]);
   }
@@ -372,7 +379,7 @@ void move_list_resize(MoveList *ml, int new_capacity) {
   ml->moves_size = new_capacity + 1;
   ml->moves = realloc_or_die(ml->moves, sizeof(Move *) * ml->moves_size);
   for (int i = old_moves_size; i < ml->moves_size; i++) {
-    ml->moves[i] = move_create();
+    ml->moves[i] = move_create(ml->spare_move->tiles_size);
   }
 }
 
