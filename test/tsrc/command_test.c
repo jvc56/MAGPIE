@@ -171,19 +171,21 @@ void assert_command_status_and_output(ExecState *exec_state,
 
   char *test_output = get_string_from_file(test_output_filename);
   int newlines_in_output = count_newlines(test_output);
+  char *test_outerror = get_string_from_file(test_outerror_filename);
+  int newlines_in_outerror = count_newlines(test_outerror);
   if (newlines_in_output != expected_output_line_count) {
     printf("%s\noutput counts do not match %d != %d\n", command_without_io,
            newlines_in_output, expected_output_line_count);
-    printf("got:\n%s", test_output);
+    printf("got (output):\n%s", test_output);
+    printf("got (error):\n%s", test_outerror);
     assert(0);
   }
 
-  char *test_outerror = get_string_from_file(test_outerror_filename);
-  int newlines_in_outerror = count_newlines(test_outerror);
   if (newlines_in_outerror != expected_outerror_line_count) {
     printf("error counts do not match %d != %d\n", newlines_in_outerror,
            expected_outerror_line_count);
-    printf("got:\n%s", test_outerror);
+    printf("got (output):\n%s", test_output);
+    printf("got (error):\n%s", test_outerror);
     assert(0);
   }
 
@@ -398,7 +400,8 @@ void test_process_command(const char *arg_string,
   if (newlines_in_output != expected_output_line_count) {
     printf("counts do not match %d != %d\n", newlines_in_output,
            expected_output_line_count);
-    printf("got:\n%s\n", test_output);
+    printf("got (output):\n>%s<\n", test_output);
+    printf("got (error):\n>%s<\n", test_outerror);
     assert(0);
   }
 
@@ -539,25 +542,25 @@ void test_exec_ucgi_command() {
   FileHandler *input_writer = file_handler_create_from_filename(
       test_input_filename, FILE_HANDLER_MODE_WRITE);
 
-  sleep(1);
+  sleep(3);
   file_handler_write(input_writer,
                      "r1 best r2 best i 1 numplays 1 threads 1\n");
-  sleep(1);
+  sleep(3);
   file_handler_write(input_writer,
                      "go autoplay lex CSW21 s1 equity s2 equity\n");
-  sleep(1);
+  sleep(3);
   file_handler_write(input_writer,
                      "go autoplay lex CSW21 s1 equity s2 equity i 10000000\n");
   // Try to immediately start another command while the previous one
   // is still running. This should give a warning.
   file_handler_write(input_writer,
                      "go autoplay lex CSW21 s1 equity s2 equity i 1\n");
-  sleep(1);
+  sleep(3);
   // Interrupt the autoplay which won't finish in 1 second
   file_handler_write(input_writer, "stop\n");
-  sleep(1);
+  sleep(3);
   file_handler_write(input_writer, "quit\n");
-  sleep(1);
+  sleep(3);
 
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);

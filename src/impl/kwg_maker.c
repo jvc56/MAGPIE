@@ -458,7 +458,8 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   if (output_gaddag) {
     last_word_length = 0;
     cached_node_indices[0] = gaddag_root_node_index;
-    DictionaryWordList *gaddag_strings = dictionary_word_list_create();
+    DictionaryWordList *gaddag_strings =
+        dictionary_word_list_create(max_word_length);
     add_gaddag_strings(words, gaddag_strings);
     for (int i = 0; i < dictionary_word_list_get_count(gaddag_strings); i++) {
       const DictionaryWord *gaddag_string =

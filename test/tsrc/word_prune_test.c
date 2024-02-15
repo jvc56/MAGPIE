@@ -33,7 +33,9 @@ void test_possible_words() {
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   // empty board
   Game *game = game_create(config);
-  DictionaryWordList *possible_word_list = dictionary_word_list_create();
+  const Board *board = game_get_board(game);
+  DictionaryWordList *possible_word_list =
+      dictionary_word_list_create(board_get_max_side_length(board));
   generate_possible_words(game, NULL, possible_word_list);
 
   // all words except unplayable (PIZZAZZ, etc.)

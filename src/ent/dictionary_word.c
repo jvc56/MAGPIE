@@ -15,7 +15,7 @@ struct DictionaryWord {
 };
 
 struct DictionaryWordList {
-  DictionaryWord **dictionary_words;
+  DictionaryWord *dictionary_words;
   int count;
   int capacity;
   int max_word_length;
@@ -29,15 +29,9 @@ uint8_t dictionary_word_get_length(const DictionaryWord *dictionary_word) {
   return dictionary_word->length;
 }
 
-DictionaryWord *dictionary_word_create(int max_word_length) {
-  DictionaryWord *dw = malloc_or_die(sizeof(DictionaryWord));
-  dw->word = malloc_or_die(sizeof(uint8_t) * max_word_length);
-  return dw;
-}
-
-void dictionary_word_destroy(DictionaryWord *dw) {
-  free(dw->word);
-  free(dw);
+int dictionary_word_list_get_max_word_length(
+    const DictionaryWordList *dictionary_word_list) {
+  return dictionary_word_list->max_word_length;
 }
 
 DictionaryWordList *dictionary_word_list_create(int max_word_length) {
@@ -48,9 +42,10 @@ DictionaryWordList *dictionary_word_list_create(int max_word_length) {
       malloc_or_die(sizeof(DictionaryWord) * dictionary_word_list->capacity);
 
   for (int i = 0; i < dictionary_word_list->capacity; i++) {
-    dictionary_word_list->dictionary_words[i] =
-        dictionary_word_create(max_word_length);
+    dictionary_word_list->dictionary_words[i].word =
+        malloc_or_die(sizeof(uint8_t) * max_word_length);
   }
+  dictionary_word_list->max_word_length = max_word_length;
 
   dictionary_word_list->count = 0;
   return dictionary_word_list;
@@ -68,8 +63,15 @@ void dictionary_word_list_add_word(DictionaryWordList *dictionary_word_list,
         sizeof(DictionaryWord) * dictionary_word_list->capacity * 2);
     dictionary_word_list->capacity *= 2;
   }
+
+  for (int i = dictionary_word_list->capacity / 2;
+       i < dictionary_word_list->capacity; i++) {
+    dictionary_word_list->dictionary_words[i].word =
+        malloc_or_die(sizeof(uint8_t) * dictionary_word_list->max_word_length);
+  }
+
   DictionaryWord *dictionary_word =
-      dictionary_word_list->dictionary_words[dictionary_word_list->count];
+      &dictionary_word_list->dictionary_words[dictionary_word_list->count];
   memory_copy(dictionary_word->word, word, word_length);
   dictionary_word->length = word_length;
   dictionary_word_list->count++;
@@ -80,15 +82,10 @@ int dictionary_word_list_get_count(
   return dictionary_word_list->count;
 }
 
-int dictionary_word_list_get_max_word_length(
-    const DictionaryWordList *dictionary_word_list) {
-  return dictionary_word_list->max_word_length;
-}
-
 DictionaryWord *
 dictionary_word_list_get_word(const DictionaryWordList *dictionary_word_list,
                               int index) {
-  return dictionary_word_list->dictionary_words[index];
+  return &dictionary_word_list->dictionary_words[index];
 }
 
 int dictionary_word_compare(const void *a, const void *b) {
@@ -130,15 +127,15 @@ void dictionary_word_list_unique(DictionaryWordList *sorted,
     if (i == 0 ||
         dictionary_word_compare(&sorted->dictionary_words[i],
                                 &sorted->dictionary_words[i - 1]) != 0) {
-      dictionary_word_list_add_word(unique, sorted->dictionary_words[i]->word,
-                                    sorted->dictionary_words[i]->length);
+      dictionary_word_list_add_word(unique, sorted->dictionary_words[i].word,
+                                    sorted->dictionary_words[i].length);
     }
   }
 }
 
 void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list) {
   for (int i = 0; i < dictionary_word_list->capacity; i++) {
-    dictionary_word_destroy(dictionary_word_list->dictionary_words[i]);
+    free(dictionary_word_list->dictionary_words[i].word);
   }
   free(dictionary_word_list->dictionary_words);
   free(dictionary_word_list);

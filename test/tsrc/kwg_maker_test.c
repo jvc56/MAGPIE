@@ -13,6 +13,7 @@
 #include "test_util.h"
 
 #define MAX_KWG_STRING_LENGTH 100
+#define DEFAULT_MAX_WORD_LENGTH 15
 
 void add_test_word(const LetterDistribution *ld, DictionaryWordList *words,
                    const char *human_readable_word) {
@@ -54,7 +55,8 @@ uint32_t kwg_dawg_prefix_arc(const KWG *kwg, LetterDistribution *ld,
                              const char *human_readable_prefix) {
   // Make a list with one word in it just because I don't have a handy function
   // to create a DictionaryWord by itself.
-  DictionaryWordList *prefix_list = dictionary_word_list_create();
+  DictionaryWordList *prefix_list =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   uint8_t prefix_bytes[MAX_KWG_STRING_LENGTH];
   ld_str_to_mls(ld, human_readable_prefix, false, prefix_bytes,
                 string_length(human_readable_prefix));
@@ -78,7 +80,8 @@ uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
   }
   // Make a list with one word in it just because I don't have a handy function
   // to create a DictionaryWord by itself.
-  DictionaryWordList *prefix_list = dictionary_word_list_create();
+  DictionaryWordList *prefix_list =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   uint8_t prefix_bytes[MAX_KWG_STRING_LENGTH];
   ld_str_to_mls(ld, string_for_conversion, false, prefix_bytes,
                 string_length(string_for_conversion));
@@ -94,7 +97,8 @@ uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
 void test_qi_xi_xu_word_trie() {
   Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
-  DictionaryWordList *words = dictionary_word_list_create();
+  DictionaryWordList *words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   add_test_word(ld, words, "QI");
   add_test_word(ld, words, "XI");
   add_test_word(ld, words, "XU");
@@ -115,7 +119,8 @@ void test_qi_xi_xu_word_trie() {
          kwg_dawg_prefix_arc(kwg, ld, "X"));
   assert(kwg_dawg_prefix_arc(kwg, ld, "Z") == 0);
 
-  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  DictionaryWordList *encoded_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
 
   assert_word_lists_are_equal(words, encoded_words);
@@ -129,7 +134,8 @@ void test_qi_xi_xu_word_trie() {
 void test_egg_unmerged_gaddag() {
   Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
-  DictionaryWordList *words = dictionary_word_list_create();
+  DictionaryWordList *words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   add_test_word(ld, words, "EGG");
 
   KWG *kwg =
@@ -146,7 +152,8 @@ void test_egg_unmerged_gaddag() {
 void test_careen_career_unmerged_gaddag() {
   Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
-  DictionaryWordList *words = dictionary_word_list_create();
+  DictionaryWordList *words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   add_test_word(ld, words, "CAREEN");
   add_test_word(ld, words, "CAREER");
 
@@ -174,7 +181,8 @@ void test_careen_career_unmerged_gaddag() {
 void test_careen_career_exact_merged_gaddag() {
   Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
-  DictionaryWordList *words = dictionary_word_list_create();
+  DictionaryWordList *words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   add_test_word(ld, words, "CAREEN");
   add_test_word(ld, words, "CAREER");
 
@@ -207,10 +215,12 @@ void test_two_letter_trie() {
   Game *game = game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
-  DictionaryWordList *words = dictionary_word_list_create();
+  DictionaryWordList *words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
-  DictionaryWordList *two_letter_words = dictionary_word_list_create();
+  DictionaryWordList *two_letter_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     DictionaryWord *word = dictionary_word_list_get_word(words, i);
     if (dictionary_word_get_length(word) == 2) {
@@ -232,7 +242,8 @@ void test_two_letter_trie() {
   assert(kwg_dawg_prefix_arc(kwg, ld, "P") !=
          kwg_dawg_prefix_arc(kwg, ld, "T"));
 
-  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  DictionaryWordList *encoded_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
   dictionary_word_list_destroy(encoded_words);
@@ -249,10 +260,12 @@ void test_two_letter_merged_dawg() {
   Game *game = game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
-  DictionaryWordList *words = dictionary_word_list_create();
+  DictionaryWordList *words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
-  DictionaryWordList *two_letter_words = dictionary_word_list_create();
+  DictionaryWordList *two_letter_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     DictionaryWord *word = dictionary_word_list_get_word(words, i);
     if (dictionary_word_get_length(word) == 2) {
@@ -272,7 +285,8 @@ void test_two_letter_merged_dawg() {
   assert(kwg_dawg_prefix_arc(kwg, ld, "D") ==
          kwg_dawg_prefix_arc(kwg, ld, "T"));
 
-  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  DictionaryWordList *encoded_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
   dictionary_word_list_destroy(encoded_words);
@@ -289,10 +303,12 @@ void test_polish_gaddag() {
   const LetterDistribution *ld = config_get_ld(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
-  DictionaryWordList *words = dictionary_word_list_create();
+  DictionaryWordList *words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
-  DictionaryWordList *ziet_words = dictionary_word_list_create();
+  DictionaryWordList *ziet_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   const uint8_t ziet = ld_hl_to_ml(ld, "Ź");
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
@@ -306,19 +322,22 @@ void test_polish_gaddag() {
     }
   }
   dictionary_word_list_destroy(words);
-  DictionaryWordList *ziet_gaddag_strings = dictionary_word_list_create();
+  DictionaryWordList *ziet_gaddag_strings =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   add_gaddag_strings(ziet_words, ziet_gaddag_strings);
 
   KWG *kwg = make_kwg_from_words(ziet_words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                  KWG_MAKER_MERGE_EXACT);
 
-  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  DictionaryWordList *encoded_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(ziet_words, encoded_words);
   dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(ziet_words);
 
-  DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
+  DictionaryWordList *encoded_gaddag_strings =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
                   NULL);
   assert_word_lists_are_equal(ziet_gaddag_strings, encoded_gaddag_strings);
@@ -336,10 +355,12 @@ void test_large_gaddag() {
   const LetterDistribution *ld = config_get_ld(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
-  DictionaryWordList *words = dictionary_word_list_create();
+  DictionaryWordList *words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
-  DictionaryWordList *q_words = dictionary_word_list_create();
+  DictionaryWordList *q_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   const uint8_t q = ld_hl_to_ml(ld, "Q");
   for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, i);
@@ -353,19 +374,22 @@ void test_large_gaddag() {
     }
   }
   dictionary_word_list_destroy(words);
-  DictionaryWordList *q_gaddag_strings = dictionary_word_list_create();
+  DictionaryWordList *q_gaddag_strings =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   add_gaddag_strings(q_words, q_gaddag_strings);
 
   KWG *kwg = make_kwg_from_words(q_words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                  KWG_MAKER_MERGE_EXACT);
 
-  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  DictionaryWordList *encoded_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(q_words, encoded_words);
   dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(q_words);
 
-  DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
+  DictionaryWordList *encoded_gaddag_strings =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
                   NULL);
   assert_word_lists_are_equal(q_gaddag_strings, encoded_gaddag_strings);
@@ -382,10 +406,12 @@ void test_full_csw_gaddag() {
   Game *game = game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
-  DictionaryWordList *words = dictionary_word_list_create();
+  DictionaryWordList *words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
-  DictionaryWordList *gaddag_strings = dictionary_word_list_create();
+  DictionaryWordList *gaddag_strings =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   add_gaddag_strings(words, gaddag_strings);
 
   KWG *kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
@@ -393,14 +419,16 @@ void test_full_csw_gaddag() {
 
   bool *nodes_reached =
       calloc_or_die(kwg_get_number_of_nodes(kwg), sizeof(bool));
-  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  DictionaryWordList *encoded_words =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words,
                   nodes_reached);
   assert_word_lists_are_equal(words, encoded_words);
   dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(words);
 
-  DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
+  DictionaryWordList *encoded_gaddag_strings =
+      dictionary_word_list_create(DEFAULT_MAX_WORD_LENGTH);
   kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
                   nodes_reached);
   assert_word_lists_are_equal(gaddag_strings, encoded_gaddag_strings);

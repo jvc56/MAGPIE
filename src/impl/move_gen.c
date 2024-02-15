@@ -100,6 +100,7 @@ MoveGen *create_generator(const Board *board, int ld_size) {
       (uint8_t *)malloc_or_die(ld_size * sizeof(uint8_t));
 
   int max_side_length = board_get_max_side_length(board);
+  int area = board_get_area(board);
 
   generator->number_of_rows = board_get_number_of_rows(board);
   generator->number_of_cols = board_get_number_of_cols(board);
@@ -115,10 +116,10 @@ MoveGen *create_generator(const Board *board, int ld_size) {
   // FIXME: why is this uint8_t?
   generator->cross_score_cache =
       malloc_or_die(sizeof(uint8_t) * max_side_length);
-  generator->is_anchorless_row_cache =
-      malloc_or_die(sizeof(bool) * max_side_length);
-  generator->is_anchor_cache = malloc_or_die(sizeof(bool) * max_side_length);
   generator->strip = malloc_or_die(sizeof(uint8_t) * max_side_length);
+  generator->is_anchorless_row_cache = malloc_or_die(
+      sizeof(bool) * (generator->number_of_rows + generator->number_of_cols));
+  generator->is_anchor_cache = malloc_or_die(sizeof(bool) * area * 2);
 
   return generator;
 }

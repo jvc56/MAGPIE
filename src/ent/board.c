@@ -139,22 +139,25 @@ void board_set_bonus_squares(Board *board) {
   }
 }
 
+// Assumes the number_of_rows and number_of_cols has been set.
+void board_alloc(Board *board, int number_of_rows, int number_of_cols) {
+  board->number_of_rows = number_of_rows;
+  board->number_of_cols = number_of_cols;
+  int area = board_get_area(board);
+  // See the .h for more details on these allocations
+  board->letters = malloc_or_die(sizeof(uint8_t) * area);
+  board->bonus_squares = malloc_or_die(sizeof(uint8_t) * area);
+  board->cross_sets = malloc_or_die(sizeof(uint64_t) * area * 4);
+  board->cross_scores = malloc_or_die(sizeof(int) * area * 4);
+  board->anchors = malloc_or_die(sizeof(bool) * area * 2);
+}
+
 Board *board_create() {
   Board *board = malloc_or_die(sizeof(Board));
 
   // FIXME: Hard code these values to 15 for now. In later
   // updates height and width will be given as arguments.
-  board->number_of_rows = 15;
-  board->number_of_cols = 15;
-
-  int area = board_get_area(board);
-
-  // See the .h for more details on these allocations
-  board->letters = malloc_or_die(sizeof(uint8_t) * area);
-  board->bonus_squares = malloc_or_die(sizeof(uint8_t) * area);
-  board->cross_sets = malloc_or_die(sizeof(uint8_t) * area * 4);
-  board->cross_scores = malloc_or_die(sizeof(uint8_t) * area * 4);
-  board->anchors = malloc_or_die(sizeof(uint8_t) * area * 2);
+  board_alloc(board, 15, 15);
 
   board_reset(board);
   board_set_bonus_squares(board);
@@ -177,6 +180,8 @@ void board_destroy(Board *board) {
 
 Board *board_duplicate(const Board *board) {
   Board *new_board = malloc_or_die(sizeof(Board));
+  board_alloc(new_board, board_get_number_of_rows(board),
+              board_get_number_of_cols(board));
   board_copy(new_board, board);
   board_set_bonus_squares(new_board);
   return new_board;

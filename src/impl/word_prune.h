@@ -11,7 +11,7 @@ typedef struct BoardRow {
 } BoardRow;
 
 typedef struct BoardRows {
-  BoardRow **rows;
+  BoardRow *rows;
   int num_rows;
 } BoardRows;
 

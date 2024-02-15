@@ -11,7 +11,8 @@
 int compare_board_rows(const void *a, const void *b) {
   const BoardRow *row_a = (const BoardRow *)a;
   const BoardRow *row_b = (const BoardRow *)b;
-  // We assume row_a and row_b have the same length
+  // Assumes row_a and row_b have the same number
+  // of letters
   for (int i = 0; i < row_a->num_cols; i++) {
     if (row_a->letters[i] < row_b->letters[i]) {
       return -1;
@@ -44,54 +45,40 @@ BoardRows *create_board_rows(Game *game) {
   BoardRows *container = malloc_or_die(sizeof(BoardRows));
 
   const Board *board = game_get_board(game);
-  int board_number_of_rows = board_get_number_of_rows(board);
-  int board_number_of_cols = board_get_number_of_cols(board);
-  container->num_rows = board_number_of_rows + board_number_of_cols;
-  container->rows = malloc_or_die(sizeof(BoardRows *) * container->num_rows);
+  int number_of_rows = board_get_number_of_rows(board);
+  int number_of_cols = board_get_number_of_cols(board);
 
-  for (int i = 0; i < board_number_of_rows; i++) {
-    BoardRow *board_row = malloc_or_die(sizeof(BoardRow *));
-    board_row->num_cols = board_number_of_cols;
-    board_row->letters = malloc_or_die(sizeof(uint8_t) * board_row->num_cols);
-    container->rows[i] = board_row;
-  }
+  int number_of_container_rows = number_of_rows + number_of_cols;
 
-  for (int i = 0; i < board_number_of_cols; i++) {
-    BoardRow *board_row = malloc_or_die(sizeof(BoardRow *));
-    board_row->num_cols = board_number_of_rows;
-    board_row->letters = malloc_or_die(sizeof(uint8_t) * board_row->num_cols);
-    container->rows[board_number_of_rows + i] = board_row;
-  }
+  container->rows = malloc_or_die(sizeof(BoardRow) * number_of_container_rows);
 
-  BoardRow **rows = container->rows;
-  for (int row_index = 0; row_index < board_number_of_rows; row_index++) {
-    for (int col_index = 0; col_index < board_number_of_cols; col_index++) {
-      uint8_t letter =
-          board_get_letter(game_get_board(game), row_index, col_index);
+  BoardRow *rows = container->rows;
+  for (int row = 0; row < number_of_rows; row++) {
+    rows[row].num_cols = number_of_cols;
+    rows[row].letters = malloc_or_die(sizeof(uint8_t) * number_of_cols);
+    for (int col = 0; col < number_of_cols; col++) {
+      uint8_t letter = board_get_letter(game_get_board(game), row, col);
       uint8_t unblanked = get_unblanked_machine_letter(letter);
-      rows[row_index]->letters[col_index] = unblanked;
+      rows[row].letters[col] = unblanked;
     }
   }
-  for (int col_index = 0; col_index < board_number_of_cols; col_index++) {
-    for (int row_index = 0; row_index < board_number_of_rows; row_index++) {
-      uint8_t letter =
-          board_get_letter(game_get_board(game), row_index, col_index);
+  for (int col = 0; col < number_of_cols; col++) {
+    rows[number_of_rows + col].num_cols = number_of_rows;
+    rows[number_of_rows + col].letters =
+        malloc_or_die(sizeof(uint8_t) * number_of_rows);
+    for (int row = 0; row < number_of_rows; row++) {
+      uint8_t letter = board_get_letter(game_get_board(game), row, col);
       uint8_t unblanked = get_unblanked_machine_letter(letter);
-      rows[board_number_of_rows + col_index]->letters[row_index] = unblanked;
+      rows[number_of_rows + col].letters[row] = unblanked;
     }
   }
+  container->num_rows = number_of_container_rows;
   qsort(rows, container->num_rows, sizeof(BoardRow), compare_board_rows);
   container->num_rows = unique_rows(container);
   return container;
 }
 
-void destroy_board_rows(BoardRows *board_rows) {
-  for (int i = 0; i < board_rows->num_rows; i++) {
-    free(board_rows->rows[i]->letters);
-    free(board_rows->rows[i]);
-  }
-  free(board_rows);
-}
+void destroy_board_rows(BoardRows *board_rows) { free(board_rows); }
 
 // max consecutive empty spaces not touching a tile
 int max_nonplaythrough_spaces_in_row(BoardRow *board_row) {
@@ -352,7 +339,9 @@ void generate_possible_words(Game *game, const KWG *override_kwg,
   }
   // Accumulates words, then gets sorted. After pushing unique words to
   // possible_word_list, this is destroyed.
-  DictionaryWordList *temp_list = dictionary_word_list_create();
+  int max_word_length =
+      dictionary_word_list_get_max_word_length(possible_word_list);
+  DictionaryWordList *temp_list = dictionary_word_list_create(max_word_length);
 
   const int ld_size = ld_get_size(game_get_ld(game));
   Rack *unplayed_as_rack = rack_create(ld_size);
@@ -377,7 +366,7 @@ void generate_possible_words(Game *game, const KWG *override_kwg,
   int max_nonplaythrough_spaces = 0;
   for (int i = 0; i < board_rows->num_rows; i++) {
     int nonplaythrough_spaces =
-        max_nonplaythrough_spaces_in_row(board_rows->rows[i]);
+        max_nonplaythrough_spaces_in_row(&board_rows->rows[i]);
     if (nonplaythrough_spaces > max_nonplaythrough_spaces) {
       max_nonplaythrough_spaces = nonplaythrough_spaces;
     }
@@ -389,12 +378,12 @@ void generate_possible_words(Game *game, const KWG *override_kwg,
   add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
                                 unplayed_as_rack, max_nonplaythrough_spaces,
                                 word, 0, false, temp_list);
+  free(word);
   for (int i = 0; i < board_rows->num_rows; i++) {
-    add_playthrough_words_from_row(board_rows->rows[i], kwg, unplayed_as_rack,
+    add_playthrough_words_from_row(&board_rows->rows[i], kwg, unplayed_as_rack,
                                    temp_list);
   }
 
-  free(word);
   rack_destroy(unplayed_as_rack);
   destroy_board_rows(board_rows);
 

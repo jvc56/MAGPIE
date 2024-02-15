@@ -550,7 +550,7 @@ void distinct_lexica_test() {
   const LetterDistribution *ld2 = game_get_ld(game2);
   ld = game_get_ld(game2);
   MoveList *move_list2 =
-      move_list_create(1, board_get_max_side_length(game_get_board(game)));
+      move_list_create(1, board_get_max_side_length(game_get_board(game2)));
 
   player0 = game_get_player(game2, 0);
   player1 = game_get_player(game2, 1);
