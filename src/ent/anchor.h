@@ -29,7 +29,8 @@ typedef struct AnchorList {
   Anchor **anchors;
 } AnchorList;
 
-AnchorList *anchor_list_create();
+AnchorList *anchor_list_create(int board_area);
+
 void anchor_list_destroy(AnchorList *al);
 
 static inline int anchor_get_col(const AnchorList *al, int index) {

@@ -92,7 +92,7 @@ static MoveGen *cached_gens[MAX_THREADS];
 
 MoveGen *create_generator(const Board *board, int ld_size) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  generator->anchor_list = anchor_list_create();
+  generator->anchor_list = anchor_list_create(board_get_area(board));
   generator->leave_map = leave_map_create(ld_size);
   generator->tiles_played = 0;
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
