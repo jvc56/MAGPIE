@@ -120,6 +120,7 @@ void test_move_compare() {
   move_set_tile(m, 17, 5);
   assert(move_list_move_exists(ml, m));
 
+  free(tiles);
   move_list_destroy(ml);
   move_destroy(m);
 }

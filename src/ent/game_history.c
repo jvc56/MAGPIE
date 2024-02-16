@@ -291,6 +291,7 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history->ld_name);
 
   ld_destroy(game_history->ld);
+  board_destroy(game_history->board);
 
   for (int i = 0; i < 2; i++) {
     game_history_player_destroy(game_history->players[i]);

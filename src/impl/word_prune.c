@@ -30,11 +30,15 @@ int unique_rows(BoardRows *board_rows) {
                                        &board_rows->rows[row - 1]) != 0) {
       unique_rows++;
     } else {
-      // copy rows to replace duplicate
-      for (int row_to_move = row + 1; row_to_move < board_rows->num_rows;
-           row_to_move++) {
-        memory_copy(&board_rows->rows[row_to_move - 1],
-                    &board_rows->rows[row_to_move], sizeof(BoardRow));
+      // Delete the non-unique row by moving
+      // it to the end of the list, keeping in mind
+      // that we have to free the malloc'ed letters.
+      int row_to_move = row + 1;
+      free(board_rows->rows[row_to_move - 1].letters);
+      for (; row_to_move < board_rows->num_rows; row_to_move++) {
+        // Assume num_cols is the same between rows
+        board_rows->rows[row_to_move - 1].letters =
+            board_rows->rows[row_to_move].letters;
       }
     }
   }
@@ -73,12 +77,18 @@ BoardRows *create_board_rows(Game *game) {
     }
   }
   container->num_rows = number_of_container_rows;
-  qsort(rows, container->num_rows, sizeof(BoardRow), compare_board_rows);
+  qsort(rows, number_of_container_rows, sizeof(BoardRow), compare_board_rows);
   container->num_rows = unique_rows(container);
   return container;
 }
 
-void destroy_board_rows(BoardRows *board_rows) { free(board_rows); }
+void destroy_board_rows(BoardRows *board_rows) {
+  for (int i = 0; i < board_rows->num_rows; i++) {
+    free(board_rows->rows[i].letters);
+  }
+  free(board_rows->rows);
+  free(board_rows);
+}
 
 // max consecutive empty spaces not touching a tile
 int max_nonplaythrough_spaces_in_row(BoardRow *board_row) {

@@ -61,13 +61,12 @@ void dictionary_word_list_add_word(DictionaryWordList *dictionary_word_list,
     dictionary_word_list->dictionary_words = realloc_or_die(
         dictionary_word_list->dictionary_words,
         sizeof(DictionaryWord) * dictionary_word_list->capacity * 2);
+    for (int i = dictionary_word_list->capacity;
+         i < dictionary_word_list->capacity * 2; i++) {
+      dictionary_word_list->dictionary_words[i].word = malloc_or_die(
+          sizeof(uint8_t) * dictionary_word_list->max_word_length);
+    }
     dictionary_word_list->capacity *= 2;
-  }
-
-  for (int i = dictionary_word_list->capacity / 2;
-       i < dictionary_word_list->capacity; i++) {
-    dictionary_word_list->dictionary_words[i].word =
-        malloc_or_die(sizeof(uint8_t) * dictionary_word_list->max_word_length);
   }
 
   DictionaryWord *dictionary_word =
