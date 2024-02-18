@@ -49,6 +49,7 @@ typedef struct MoveGen {
   bool *is_cross_word_cache;
   uint8_t *bonus_square_cache;
   uint64_t *cross_set_cache;
+  uint64_t *horizontal_cross_set_cache;
   uint8_t *cross_score_cache;
   bool *is_anchorless_row_cache;
   bool *is_anchor_cache;
@@ -113,6 +114,8 @@ MoveGen *create_generator(const Board *board, int ld_size) {
       malloc_or_die(sizeof(uint8_t) * max_side_length);
   generator->cross_set_cache =
       malloc_or_die(sizeof(uint64_t) * max_side_length);
+  generator->horizontal_cross_set_cache =
+      malloc_or_die(sizeof(uint64_t) * max_side_length);
   // FIXME: why is this uint8_t?
   generator->cross_score_cache =
       malloc_or_die(sizeof(uint8_t) * max_side_length);
@@ -135,6 +138,7 @@ void destroy_generator(MoveGen *gen) {
   free(gen->is_cross_word_cache);
   free(gen->bonus_square_cache);
   free(gen->cross_set_cache);
+  free(gen->horizontal_cross_set_cache);
   free(gen->cross_score_cache);
   free(gen->is_anchorless_row_cache);
   free(gen->is_anchor_cache);
@@ -240,6 +244,19 @@ static inline void load_cross_set_cache(MoveGen *gen, int row, int cs_dir,
 
 static inline uint64_t get_cross_set_cache(const MoveGen *gen, int col) {
   return gen->cross_set_cache[col];
+}
+
+static inline void load_horizontal_cross_set_cache(MoveGen *gen, int row,
+                                                   int cross_set_index) {
+  for (int col = 0; col < movegen_get_number_of_cols(gen); col++) {
+    gen->horizontal_cross_set_cache[col] = board_get_cross_set(
+        gen->board, row, col, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+  }
+}
+
+static inline uint64_t get_horizontal_cross_set_cache(const MoveGen *gen,
+                                                      int col) {
+  return gen->horizontal_cross_set_cache[col];
 }
 
 static inline void load_cross_score_cache(MoveGen *gen, int row, int cs_dir,
@@ -438,8 +455,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
       gen->strip[current_col] = PLAYED_THROUGH_MARKER;
     } else {
       gen->strip[current_col] = L;
-      if (gen->dir &&
-          (get_cross_set_cache(gen, current_col) == TRIVIAL_CROSS_SET)) {
+      if (board_is_dir_vertical(gen->dir) &&
+          get_cross_set_cache(gen, current_col) == TRIVIAL_CROSS_SET) {
         unique_play = true;
       }
     }
@@ -474,11 +491,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     } else {
       gen->strip[current_col] = L;
       if (board_is_dir_vertical(gen->dir) &&
-          (board_get_cross_set(gen->board, gen->current_row_index, current_col,
-                               BOARD_HORIZONTAL_DIRECTION,
-                               board_get_cross_set_index(gen->kwgs_are_shared,
-                                                         gen->player_index)) ==
-           TRIVIAL_CROSS_SET)) {
+          get_horizontal_cross_set_cache(gen, current_col) ==
+              TRIVIAL_CROSS_SET) {
         unique_play = true;
       }
     }
@@ -784,6 +798,9 @@ void shadow_by_orientation(MoveGen *gen, int dir) {
     load_cross_set_cache(
         gen, gen->current_row_index, !board_is_dir_vertical(gen->dir),
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
+    load_horizontal_cross_set_cache(
+        gen, gen->current_row_index,
+        board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
     load_cross_score_cache(
         gen, gen->current_row_index, !board_is_dir_vertical(gen->dir),
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
@@ -898,6 +915,9 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
     load_row_letter_cache(gen, gen->current_row_index);
     load_cross_set_cache(
         gen, gen->current_row_index, !board_is_dir_vertical(gen->dir),
+        board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
+    load_horizontal_cross_set_cache(
+        gen, gen->current_row_index,
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
                   gen->current_anchor_col, gen->current_anchor_col,
