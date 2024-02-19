@@ -53,6 +53,13 @@ typedef struct MoveGen {
   bool is_anchorless_row_cache[(BOARD_DIM) * 2];
   bool is_anchor_cache[(BOARD_DIM) * (BOARD_DIM) * 2];
 
+  // Incremental scoring stacks
+  // Using BOARD_DIM + 1 to store a starting stack value
+  int word_score_stack_index;
+  int main_word_score_stack[(BOARD_DIM) + 1];
+  int cross_score_stack[(BOARD_DIM) + 1];
+  int word_multiplier_stack[(BOARD_DIM) + 1];
+
   int bag_tiles_remaining;
 
   uint8_t strip[(BOARD_DIM)];
@@ -98,6 +105,18 @@ MoveGen *create_generator(int ld_size) {
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
   generator->exchange_strip =
       (uint8_t *)malloc_or_die(ld_size * sizeof(uint8_t));
+
+  // We can initialize score cache initial values
+  // here since they will never change.
+  generator->main_word_score_stack[0] = 0;
+  generator->cross_score_stack[0] = 0;
+  generator->word_multiplier_stack[0] = 1;
+
+  // We can set the initial stack index here
+  // since for every call to recursive gen
+  // it will start and end at the same value.
+  generator->word_score_stack_index = 0;
+
   return generator;
 }
 
@@ -125,8 +144,9 @@ void gen_destroy_cache() {
   }
 }
 
-void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
-           bool accepts, int leftstrip, int rightstrip, bool unique_play);
+void increment_score_and_go_on(MoveGen *gen, int current_col, uint8_t L,
+                               uint32_t new_node_index, bool accepts,
+                               int leftstrip, int rightstrip, bool unique_play);
 
 // This function is only used for testing and is exposed
 // in the move_gen_pi.h header in the test directory.
@@ -223,19 +243,24 @@ void record_play(MoveGen *gen, int leftstrip, int rightstrip,
   int score = 0;
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+
+    int bingo_bonus = 0;
+    if (tiles_played == RACK_SIZE) {
+      bingo_bonus = DEFAULT_BINGO_BONUS;
+    }
+
+    score = gen->main_word_score_stack[gen->word_score_stack_index] *
+                gen->word_multiplier_stack[gen->word_score_stack_index] +
+            gen->cross_score_stack[gen->word_score_stack_index] + bingo_bonus;
+
     Move *spare_move = move_list_get_spare_move(gen->move_list);
-    move_set_all_except_equity(spare_move, gen->strip, leftstrip, rightstrip, 0,
-                               start_row, start_col, tiles_played, gen->dir,
-                               move_type);
+    move_set_all_except_equity(spare_move, gen->strip, leftstrip, rightstrip,
+                               score, start_row, start_col, tiles_played,
+                               gen->dir, move_type);
     if (board_is_dir_vertical(gen->dir)) {
       move_set_row_start(spare_move, start_col);
       move_set_col_start(spare_move, start_row);
     }
-    score = static_eval_get_move_score(
-        gen->ld, spare_move, gen->board,
-        board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
-    move_set_score(spare_move, score);
-
   } else if (move_type == GAME_EVENT_EXCHANGE) {
     // ignore the empty exchange case
     if (rightstrip == 0) {
@@ -280,6 +305,8 @@ void generate_exchange_moves(MoveGen *gen, uint8_t ml, int stripidx,
         gen->best_leaves[number_of_letters_on_rack] = current_value;
       }
       if (add_exchange) {
+        // The current column argument to record_play is irrelevant
+        // for exchanges.
         record_play(gen, 0, stripidx, GAME_EVENT_EXCHANGE);
       }
     }
@@ -342,8 +369,8 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
         break;
       }
     }
-    go_on(gen, col, current_letter, next_node_index, accepts, leftstrip,
-          rightstrip, unique_play);
+    increment_score_and_go_on(gen, col, current_letter, next_node_index,
+                              accepts, leftstrip, rightstrip, unique_play);
   } else if (!rack_is_empty(gen->player_rack)) {
     for (int i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
@@ -359,8 +386,8 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           leave_map_take_letter_and_update_current_index(gen->leave_map,
                                                          gen->player_rack, ml);
           gen->tiles_played++;
-          go_on(gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
-                unique_play);
+          increment_score_and_go_on(gen, col, ml, next_node_index, accepts,
+                                    leftstrip, rightstrip, unique_play);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(gen->leave_map,
                                                         gen->player_rack, ml);
@@ -370,8 +397,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           leave_map_take_letter_and_update_current_index(
               gen->leave_map, gen->player_rack, BLANK_MACHINE_LETTER);
           gen->tiles_played++;
-          go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
-                accepts, leftstrip, rightstrip, unique_play);
+          increment_score_and_go_on(gen, col, get_blanked_machine_letter(ml),
+                                    next_node_index, accepts, leftstrip,
+                                    rightstrip, unique_play);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(
               gen->leave_map, gen->player_rack, BLANK_MACHINE_LETTER);
@@ -384,8 +412,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   }
 }
 
-void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
-           bool accepts, int leftstrip, int rightstrip, bool unique_play) {
+static inline void go_on(MoveGen *gen, int current_col, uint8_t L,
+                         uint32_t new_node_index, bool accepts, int leftstrip,
+                         int rightstrip, bool unique_play) {
   if (current_col <= gen->current_anchor_col) {
     if (!is_empty_cache(gen, current_col)) {
       gen->strip[current_col] = PLAYED_THROUGH_MARKER;
@@ -449,6 +478,66 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
                     unique_play);
     }
   }
+}
+
+void increment_score_and_go_on(MoveGen *gen, int current_col, uint8_t L,
+                               uint32_t new_node_index, bool accepts,
+                               int leftstrip, int rightstrip,
+                               bool unique_play) {
+
+  // FIXME: inefficient, fix once code is proven to be correct.
+  if (!is_empty_cache(gen, current_col)) {
+    gen->strip[current_col] = PLAYED_THROUGH_MARKER;
+  } else {
+    gen->strip[current_col] = L;
+  }
+
+  // Handle incremental scoring
+  uint8_t ml = gen->strip[current_col];
+  uint8_t bonus_square = gen->bonus_square_cache[current_col];
+  int letter_multiplier = 1;
+  int this_word_multiplier = 1;
+  bool fresh_tile = false;
+  // FIXME: this is inefficient, plz fix
+  if (ml == PLAYED_THROUGH_MARKER) {
+    ml = gen->row_letter_cache[current_col];
+  } else {
+    fresh_tile = true;
+    this_word_multiplier = bonus_square >> 4;
+    letter_multiplier = bonus_square & 0x0F;
+  }
+  int inc_word_multiplier =
+      this_word_multiplier *
+      gen->word_multiplier_stack[gen->word_score_stack_index];
+  int this_cross_score = gen->cross_score_cache[current_col];
+
+  int ls = 0;
+
+  if (!get_is_blanked(ml)) {
+    ls = ld_get_score(gen->ld, ml);
+  }
+
+  int inc_main_word_score =
+      ls * letter_multiplier +
+      gen->main_word_score_stack[gen->word_score_stack_index];
+
+  int inc_cross_scores = gen->cross_score_stack[gen->word_score_stack_index];
+
+  if (fresh_tile && gen->is_cross_word_cache[current_col]) {
+    inc_cross_scores += ls * letter_multiplier * this_word_multiplier +
+                        this_cross_score * this_word_multiplier;
+  }
+
+  gen->word_score_stack_index++;
+  gen->main_word_score_stack[gen->word_score_stack_index] = inc_main_word_score;
+  gen->cross_score_stack[gen->word_score_stack_index] = inc_cross_scores;
+  gen->word_multiplier_stack[gen->word_score_stack_index] = inc_word_multiplier;
+
+  go_on(gen, current_col, L, new_node_index, accepts, leftstrip, rightstrip,
+        unique_play);
+
+  // Decrement the scoring index
+  gen->word_score_stack_index--;
 }
 
 static inline bool
@@ -846,6 +935,11 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
     gen->dir = anchor_get_dir(anchor_list, i);
     board_set_transposed(gen->board, anchor_get_transposed(anchor_list, i));
     load_row_letter_cache(gen, gen->current_row_index);
+    load_bonus_square_cache(gen, gen->current_row_index);
+    load_is_cross_word_cache(gen, gen->current_row_index);
+    load_cross_score_cache(
+        gen, gen->current_row_index, !board_is_dir_vertical(gen->dir),
+        board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
     load_cross_set_cache(
         gen, gen->current_row_index, !board_is_dir_vertical(gen->dir),
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
