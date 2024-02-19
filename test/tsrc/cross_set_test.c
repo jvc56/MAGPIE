@@ -39,6 +39,7 @@ void set_col(Game *game, int col, const char *col_content) {
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
+  // Assumes the board is not transposed.
   for (int i = 0; i < board_get_number_of_rows(board); i++) {
     board_set_letter(board, i, col, ALPHABET_EMPTY_SQUARE_MARKER);
   }

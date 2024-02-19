@@ -41,11 +41,21 @@ Board *board_duplicate(const Board *board);
 void board_copy(Board *dst, const Board *src);
 void board_destroy(Board *board);
 
+static inline bool board_get_transposed(const Board *board) {
+  return board->transposed;
+}
+
 static inline int board_get_number_of_rows(const Board *board) {
+  if (board_get_transposed(board)) {
+    return board->number_of_cols;
+  }
   return board->number_of_rows;
 }
 
 static inline int board_get_number_of_cols(const Board *board) {
+  if (board_get_transposed(board)) {
+    return board->number_of_rows;
+  }
   return board->number_of_cols;
 }
 
@@ -231,10 +241,6 @@ void board_reset(Board *board);
 static inline void board_set_letter(Board *board, int row, int col,
                                     uint8_t letter) {
   board->letters[board_get_tindex(board, row, col)] = letter;
-}
-
-static inline bool board_get_transposed(const Board *board) {
-  return board->transposed;
 }
 
 static inline void board_transpose(Board *board) {

@@ -45,6 +45,7 @@ int unique_rows(BoardRows *board_rows) {
   return unique_rows;
 }
 
+// Assumes the board is not transposed.
 BoardRows *create_board_rows(Game *game) {
   BoardRows *container = malloc_or_die(sizeof(BoardRows));
 

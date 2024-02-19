@@ -47,7 +47,8 @@ int count_nonscoring_plays(const MoveList *ml) {
 }
 
 // Use -1 for row if setting with CGP
-// Use NULL for rack_string if setting with CGP
+// Use NULL for rack_string if setting with CGP.
+// Assumes the board is not transposed.
 void assert_move_gen_row(Game *game, MoveList *move_list,
                          const char *rack_string, const char *row_string,
                          int row, int min_length, int expected_plays,

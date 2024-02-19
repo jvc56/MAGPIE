@@ -42,7 +42,6 @@ FormedWords *formed_words_create(Board *board, Move *move) {
     int ph = col_start;
     col_start = row_start;
     row_start = ph;
-    number_of_rows = board_get_number_of_cols(board);
   }
 
   int max_side_length = board_get_max_side_length(board);

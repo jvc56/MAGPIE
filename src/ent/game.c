@@ -353,6 +353,7 @@ cgp_parse_status_t parse_cgp_board_row(Game *game, const char *cgp_board_row,
   return cgp_parse_status;
 }
 
+// Assumes the game board is not transposed.
 cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   StringSplitter *board_rows = split_string(cgp_board, '/', true);

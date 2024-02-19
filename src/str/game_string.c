@@ -53,6 +53,7 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   free(display_player_name);
 }
 
+// Assumes the board is not transposed.
 void string_builder_add_board_row(const LetterDistribution *ld,
                                   const Board *board,
                                   StringBuilder *game_string, int row) {
@@ -84,6 +85,7 @@ void string_builder_add_move_with_rank_and_equity(Game *game,
                                       move_get_equity(move));
 }
 
+// Assumes the board is not transposed.
 void string_builder_add_game(Game *game, MoveList *move_list,
                              StringBuilder *game_string) {
   Board *board = game_get_board(game);

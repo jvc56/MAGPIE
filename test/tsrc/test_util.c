@@ -250,6 +250,7 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
 
 // Assumes b1 and b2 use the same lexicon and therefore
 // does not compare the cross set index of 1.
+// Assumes the boards are not transposed.
 void assert_boards_are_equal(const Board *b1, const Board *b2) {
   int number_of_rows = board_get_number_of_rows(b1);
   assert(number_of_rows == board_get_number_of_rows(b2));

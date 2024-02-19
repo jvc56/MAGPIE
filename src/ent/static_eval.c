@@ -168,7 +168,6 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
     int tmp_start = row_start;
     row_start = col_start;
     col_start = tmp_start;
-    number_of_rows = board_get_number_of_cols(board);
   }
 
   int ls;

@@ -178,6 +178,7 @@ void board_destroy(Board *board) {
   free(board);
 }
 
+// Assumes the board is not transposed.
 Board *board_duplicate(const Board *board) {
   Board *new_board = malloc_or_die(sizeof(Board));
   board_alloc(new_board, board_get_number_of_rows(board),

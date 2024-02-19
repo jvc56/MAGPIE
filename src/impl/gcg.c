@@ -459,6 +459,7 @@ Rack *get_rack_from_matching(const GCGParser *gcg_parser, const char *gcg_line,
   return rack;
 }
 
+// Assumes the board is not transposed.
 gcg_parse_status_t copy_position_to_game_event(const GCGParser *gcg_parser,
                                                GameEvent *game_event,
                                                const char *gcg_line,

@@ -254,6 +254,7 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
     // Score and equity are set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_TILE_PLACEMENT_MOVE);
     const Board *board = game_get_board(game);
+    // Assumes the board is not transposed.
     status = validate_coordinates(vm->move, move_type_or_coords,
                                   board_get_number_of_rows(board),
                                   board_get_number_of_cols(board));
