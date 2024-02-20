@@ -409,12 +409,12 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play,
            int main_word_score, int word_multiplier, int cross_score) {
   // Handle incremental scoring
-  uint8_t bonus_square = gen->bonus_square_cache[current_col];
+  const uint8_t bonus_square = gen->bonus_square_cache[current_col];
   int letter_multiplier = 1;
   int this_word_multiplier = 1;
   bool fresh_tile = false;
 
-  bool square_is_empty = is_empty_cache(gen, current_col);
+  const bool square_is_empty = is_empty_cache(gen, current_col);
   uint8_t ml;
   if (!square_is_empty) {
     gen->strip[current_col] = PLAYED_THROUGH_MARKER;
@@ -429,20 +429,19 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 
   int inc_word_multiplier = this_word_multiplier * word_multiplier;
 
-  int ls = 0;
+  int lsm = 0;
 
   if (!get_is_blanked(ml)) {
-    ls = ld_get_score(gen->ld, ml);
+    lsm = ld_get_score(gen->ld, ml) * letter_multiplier;
   }
 
-  int inc_main_word_score = ls * letter_multiplier + main_word_score;
+  int inc_main_word_score = lsm + main_word_score;
 
   int inc_cross_scores = cross_score;
 
   if (fresh_tile && gen->is_cross_word_cache[current_col]) {
     inc_cross_scores +=
-        ls * letter_multiplier * this_word_multiplier +
-        gen->cross_score_cache[current_col] * this_word_multiplier;
+        (lsm + gen->cross_score_cache[current_col]) * this_word_multiplier;
   }
 
   if (current_col <= gen->current_anchor_col) {
