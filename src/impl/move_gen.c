@@ -49,6 +49,7 @@ typedef struct MoveGen {
   bool is_cross_word_cache[(BOARD_DIM)];
   uint8_t bonus_square_cache[(BOARD_DIM)];
   uint64_t cross_set_cache[(BOARD_DIM)];
+  uint64_t hz_cross_set_cache[(BOARD_DIM)];
   uint8_t cross_score_cache[(BOARD_DIM)];
   bool is_anchorless_row_cache[(BOARD_DIM) * 2];
   bool is_anchor_cache[(BOARD_DIM) * (BOARD_DIM) * 2];
@@ -213,6 +214,18 @@ static inline void load_cross_set_cache(MoveGen *gen, int row, int cs_dir,
 
 static inline uint64_t get_cross_set_cache(const MoveGen *gen, int col) {
   return gen->cross_set_cache[col];
+}
+
+static inline void load_hz_cross_set_cache(MoveGen *gen, int row,
+                                           int cross_set_index) {
+  for (int col = 0; col < BOARD_DIM; col++) {
+    gen->hz_cross_set_cache[col] = board_get_cross_set(
+        gen->board, row, col, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+  }
+}
+
+static inline uint64_t get_hz_cross_set_cache(const MoveGen *gen, int col) {
+  return gen->hz_cross_set_cache[col];
 }
 
 static inline void load_cross_score_cache(MoveGen *gen, int row, int cs_dir,
@@ -455,12 +468,8 @@ static inline void go_on(MoveGen *gen, int current_col, uint8_t L,
       gen->strip[current_col] = PLAYED_THROUGH_MARKER;
     } else {
       gen->strip[current_col] = L;
-      if (board_is_dir_vertical(gen->dir) &&
-          (board_get_cross_set(gen->board, gen->current_row_index, current_col,
-                               BOARD_HORIZONTAL_DIRECTION,
-                               board_get_cross_set_index(gen->kwgs_are_shared,
-                                                         gen->player_index)) ==
-           TRIVIAL_CROSS_SET)) {
+      if (gen->dir &&
+          (get_hz_cross_set_cache(gen, current_col) == TRIVIAL_CROSS_SET)) {
         unique_play = true;
       }
     }
@@ -942,6 +951,9 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
     load_cross_set_cache(
         gen, gen->current_row_index, !board_is_dir_vertical(gen->dir),
+        board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
+    load_hz_cross_set_cache(
+        gen, gen->current_row_index,
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index));
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
                   gen->current_anchor_col, gen->current_anchor_col,
