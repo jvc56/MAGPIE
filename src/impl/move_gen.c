@@ -425,18 +425,13 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   }
 }
 
-static inline void go_on(MoveGen *gen, int current_col, uint8_t L,
-                         uint32_t new_node_index, bool accepts, int leftstrip,
-                         int rightstrip, bool unique_play) {
+static inline void go_on(MoveGen *gen, int current_col, uint32_t new_node_index,
+                         bool accepts, int leftstrip, int rightstrip,
+                         bool unique_play) {
   if (current_col <= gen->current_anchor_col) {
-    if (!is_empty_cache(gen, current_col)) {
-      gen->strip[current_col] = PLAYED_THROUGH_MARKER;
-    } else {
-      gen->strip[current_col] = L;
-      if (gen->dir &&
-          (get_cross_set_cache(gen, current_col) == TRIVIAL_CROSS_SET)) {
-        unique_play = true;
-      }
+    if (is_empty_cache(gen, current_col) && gen->dir &&
+        get_cross_set_cache(gen, current_col) == TRIVIAL_CROSS_SET) {
+      unique_play = true;
     }
     leftstrip = current_col;
     bool no_letter_directly_left =
@@ -464,14 +459,9 @@ static inline void go_on(MoveGen *gen, int current_col, uint8_t L,
                     leftstrip, rightstrip, unique_play);
     }
   } else {
-    if (!is_empty_cache(gen, current_col)) {
-      gen->strip[current_col] = PLAYED_THROUGH_MARKER;
-    } else {
-      gen->strip[current_col] = L;
-      if (gen->dir &&
-          (get_hz_cross_set_cache(gen, current_col) == TRIVIAL_CROSS_SET)) {
-        unique_play = true;
-      }
+    if (is_empty_cache(gen, current_col) && gen->dir &&
+        get_hz_cross_set_cache(gen, current_col) == TRIVIAL_CROSS_SET) {
+      unique_play = true;
     }
     rightstrip = current_col;
     bool no_letter_directly_right =
@@ -493,28 +483,24 @@ void increment_score_and_go_on(MoveGen *gen, int current_col, uint8_t L,
                                uint32_t new_node_index, bool accepts,
                                int leftstrip, int rightstrip,
                                bool unique_play) {
-
-  // FIXME: inefficient, fix once code is proven to be correct.
-  if (!is_empty_cache(gen, current_col)) {
-    gen->strip[current_col] = PLAYED_THROUGH_MARKER;
-  } else {
-    gen->strip[current_col] = L;
-  }
-
   // Handle incremental scoring
-  uint8_t ml = gen->strip[current_col];
   uint8_t bonus_square = gen->bonus_square_cache[current_col];
   int letter_multiplier = 1;
   int this_word_multiplier = 1;
   bool fresh_tile = false;
-  // FIXME: this is inefficient, plz fix
-  if (ml == PLAYED_THROUGH_MARKER) {
+
+  uint8_t ml;
+  if (!is_empty_cache(gen, current_col)) {
+    gen->strip[current_col] = PLAYED_THROUGH_MARKER;
     ml = gen->row_letter_cache[current_col];
   } else {
+    gen->strip[current_col] = L;
+    ml = L;
     fresh_tile = true;
     this_word_multiplier = bonus_square >> 4;
     letter_multiplier = bonus_square & 0x0F;
   }
+
   int inc_word_multiplier =
       this_word_multiplier *
       gen->word_multiplier_stack[gen->word_score_stack_index];
@@ -542,7 +528,7 @@ void increment_score_and_go_on(MoveGen *gen, int current_col, uint8_t L,
   gen->cross_score_stack[gen->word_score_stack_index] = inc_cross_scores;
   gen->word_multiplier_stack[gen->word_score_stack_index] = inc_word_multiplier;
 
-  go_on(gen, current_col, L, new_node_index, accepts, leftstrip, rightstrip,
+  go_on(gen, current_col, new_node_index, accepts, leftstrip, rightstrip,
         unique_play);
 
   // Decrement the scoring index
