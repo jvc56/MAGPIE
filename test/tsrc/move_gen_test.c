@@ -267,6 +267,24 @@ void macondo_tests() {
   destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
   rack_reset(player_get_rack(player));
 
+  // Check that GONOPORE is the best play
+  game_load_cgp(game, FRAWZEY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "GONOPOR");
+  generate_moves_for_game(game, 0, move_list);
+
+  SortedMoveList *test_generate_gonopore = create_sorted_move_list(move_list);
+
+  move = test_generate_gonopore->moves[0];
+  assert(move_get_score(move) == 86);
+  assert(move_get_tiles_played(move) == 7);
+  assert(move_get_tiles_length(move) == 8);
+  assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_row_start(move) == 14);
+  assert(move_get_col_start(move) == 0);
+
+  destroy_sorted_move_list(test_generate_gonopore);
+  rack_reset(player_get_rack(player));
+
   // TestGenerateNoPlays
   game_load_cgp(game, VS_JEREMY);
   rack_set_to_string(ld, player_get_rack(player), "V");

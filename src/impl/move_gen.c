@@ -459,7 +459,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     if (accepts && no_letter_directly_left && gen->tiles_played > 0 &&
         (unique_play || gen->tiles_played > 1)) {
       record_play(gen, leftstrip, rightstrip, GAME_EVENT_TILE_PLACEMENT_MOVE,
-                  inc_main_word_score, word_multiplier, inc_cross_scores);
+                  inc_main_word_score, inc_word_multiplier, inc_cross_scores);
     }
 
     if (new_node_index == 0) {
