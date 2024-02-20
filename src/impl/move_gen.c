@@ -298,8 +298,6 @@ void generate_exchange_moves(MoveGen *gen, uint8_t ml, int stripidx,
         gen->best_leaves[number_of_letters_on_rack] = current_value;
       }
       if (add_exchange) {
-        // The current column argument to record_play is irrelevant
-        // for exchanges.
         record_play(gen, 0, stripidx, GAME_EVENT_EXCHANGE, 0, 0, 0);
       }
     }
@@ -430,7 +428,6 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 
   int inc_word_multiplier = this_word_multiplier * word_multiplier;
-  int this_cross_score = gen->cross_score_cache[current_col];
 
   int ls = 0;
 
@@ -443,8 +440,9 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   int inc_cross_scores = cross_score;
 
   if (fresh_tile && gen->is_cross_word_cache[current_col]) {
-    inc_cross_scores += ls * letter_multiplier * this_word_multiplier +
-                        this_cross_score * this_word_multiplier;
+    inc_cross_scores +=
+        ls * letter_multiplier * this_word_multiplier +
+        gen->cross_score_cache[current_col] * this_word_multiplier;
   }
 
   if (current_col <= gen->current_anchor_col) {
@@ -456,8 +454,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     bool no_letter_directly_left =
         (current_col == 0) || is_empty_cache(gen, current_col - 1);
 
-    if (accepts && no_letter_directly_left && gen->tiles_played > 0 &&
-        (unique_play || gen->tiles_played > 1)) {
+    if (accepts && no_letter_directly_left &&
+        gen->tiles_played > !unique_play) {
       record_play(gen, leftstrip, rightstrip, GAME_EVENT_TILE_PLACEMENT_MOVE,
                   inc_main_word_score, inc_word_multiplier, inc_cross_scores);
     }
@@ -481,7 +479,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
                     inc_word_multiplier, inc_cross_scores);
     }
   } else {
-    if (square_is_empty && gen->dir &&
+    if (square_is_empty && !unique_play && gen->dir &&
         get_hz_cross_set_cache(gen, current_col) == TRIVIAL_CROSS_SET) {
       unique_play = true;
     }
@@ -489,8 +487,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     bool no_letter_directly_right =
         (current_col == BOARD_DIM - 1) || is_empty_cache(gen, current_col + 1);
 
-    if (accepts && no_letter_directly_right && gen->tiles_played > 0 &&
-        (unique_play || gen->tiles_played > 1)) {
+    if (accepts && no_letter_directly_right &&
+        gen->tiles_played > !unique_play) {
       record_play(gen, leftstrip, rightstrip, GAME_EVENT_TILE_PLACEMENT_MOVE,
                   inc_main_word_score, inc_word_multiplier, inc_cross_scores);
     }

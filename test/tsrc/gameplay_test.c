@@ -40,7 +40,6 @@ void assert_players_are_equal(const Player *p1, const Player *p2,
                               bool check_scores) {
   // For games ending in consecutive zeros, scores are checked elsewhere
   if (check_scores) {
-    printf("%d, %d\n", player_get_score(p1), player_get_score(p2));
     assert(player_get_score(p1) == player_get_score(p2));
   }
 }
@@ -64,7 +63,6 @@ void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
   const Player *g2_player_not_on_turn =
       game_get_player(g2, 1 - g2_player_on_turn_index);
 
-  printf("check players\n");
   assert_players_are_equal(g1_player_on_turn, g2_player_on_turn, check_scores);
   assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn,
                            check_scores);
@@ -128,9 +126,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
       player1_score_before_last_move = player_get_score(player1);
     }
 
-    print_game(actual_game, NULL);
     play_top_n_equity_move(actual_game, 0);
-    print_game(actual_game, NULL);
 
     if (i == array_length - 1) {
       player0_last_score_on_rack = rack_get_score(ld, player0_rack);
