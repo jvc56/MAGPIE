@@ -1,3 +1,5 @@
+#include "../../src/impl/autoplay.h"
+
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -5,15 +7,10 @@
 #include <time.h>
 
 #include "../../src/def/autoplay_defs.h"
-
 #include "../../src/ent/autoplay_results.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/stats.h"
-
-#include "../../src/impl/autoplay.h"
-
 #include "../../src/util/string_util.h"
-
 #include "test_util.h"
 
 void autoplay_game_pairs_test() {
@@ -23,7 +20,7 @@ void autoplay_game_pairs_test() {
   uint64_t seed = time(NULL);
 
   char *options_string =
-      get_formatted_string("setoptions i 1000 gp threads 11 rs %ld", seed);
+      get_formatted_string("setoptions rounds 1000 gp threads 11 rs %ld", seed);
 
   load_config_or_die(csw_config, options_string);
 
@@ -35,9 +32,9 @@ void autoplay_game_pairs_test() {
 
   autoplay_status_t status = autoplay(csw_config, autoplay_results);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
-  int max_iterations = config_get_max_iterations(csw_config);
-  assert(autoplay_results_get_games(autoplay_results) == max_iterations * 2);
-  assert(autoplay_results_get_p1_firsts(autoplay_results) == max_iterations);
+  int rounds = config_get_num_autoplay_rounds(csw_config);
+  assert(autoplay_results_get_games(autoplay_results) == rounds * 2);
+  assert(autoplay_results_get_p1_firsts(autoplay_results) == rounds);
   assert(stat_get_weight(autoplay_results_get_p1_score(autoplay_results)) ==
          stat_get_weight(autoplay_results_get_p2_score(autoplay_results)));
   assert(
@@ -50,13 +47,13 @@ void autoplay_game_pairs_test() {
       stat_get_stdev(autoplay_results_get_p1_score(autoplay_results)),
       stat_get_stdev(autoplay_results_get_p2_score(autoplay_results))));
 
-  load_config_or_die(csw_config, "setoptions i 7 nogp threads 2");
-  max_iterations = config_get_max_iterations(csw_config);
+  load_config_or_die(csw_config, "setoptions rounds 7 nogp threads 2");
+  rounds = config_get_num_autoplay_rounds(csw_config);
 
   // Autoplay should reset the stats
   status = autoplay(csw_config, autoplay_results);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
-  assert(autoplay_results_get_games(autoplay_results) == max_iterations);
+  assert(autoplay_results_get_games(autoplay_results) == rounds);
 
   autoplay_results_destroy(autoplay_results);
   config_destroy(csw_config);

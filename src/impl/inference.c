@@ -556,9 +556,12 @@ inference_status_t infer(const Config *config, const Game *input_game,
   }
 
   Game *game = game_duplicate(input_game);
+  const int player_index = game_get_player_on_turn_index(game);
+  const PlayersData *players_data = config_get_players_data(config);
+  const int num_plays = players_data_get_num_plays(players_data, player_index);
 
   Inference *inference = inference_create(
-      config_target_played_tiles, game, config_get_num_plays(config),
+      config_target_played_tiles, game, num_plays,
       config_get_target_index(config), config_get_target_score(config),
       config_get_target_number_of_tiles_exchanged(config),
       config_get_equity_margin(config), results);

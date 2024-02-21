@@ -137,10 +137,10 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   return NULL;
 }
 
-int get_number_of_games_for_worker(int max_iterations, int number_of_threads,
+int get_number_of_games_for_worker(int rounds, int number_of_threads,
                                    int thread_index) {
-  int number_of_games_for_worker = (max_iterations / number_of_threads);
-  if (max_iterations % number_of_threads > thread_index) {
+  int number_of_games_for_worker = (rounds / number_of_threads);
+  if (rounds % number_of_threads > thread_index) {
     number_of_games_for_worker++;
   }
   return number_of_games_for_worker;
@@ -160,7 +160,7 @@ autoplay_status_t autoplay(const Config *config,
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
 
     int number_of_games_for_worker = get_number_of_games_for_worker(
-        config_get_max_iterations(config), number_of_threads, thread_index);
+        config_get_num_autoplay_rounds(config), number_of_threads, thread_index);
 
     autoplay_workers[thread_index] =
         create_autoplay_worker(config, number_of_games_for_worker, thread_index,

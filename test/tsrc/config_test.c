@@ -180,7 +180,7 @@ void test_config_success() {
   double equity_margin = 4.6;
   int num_plays = 10;
   int plies = 4;
-  int max_iterations = 400;
+  int num_autoplay_rounds = 400;
   int stopping_cond = 98;
   int seed = 101;
   int number_of_threads = 6;
@@ -195,7 +195,7 @@ void test_config_success() {
       "plies %d i "
       "%d cond %d rs %d threads %d info %d check %d static gp p1 %s p2 %s",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, rack, pindex,
-      score, number_exch, equity_margin, num_plays, plies, max_iterations,
+      score, number_exch, equity_margin, num_plays, plies, num_autoplay_rounds,
       stopping_cond, seed, number_of_threads, print_info, check_stop, p1, p2);
 
   load_config_or_fail(config, string_builder_peek(test_string_builder));
@@ -217,10 +217,7 @@ void test_config_success() {
   assert(config_get_target_score(config) == score);
   assert(config_get_target_number_of_tiles_exchanged(config) == number_exch);
   assert(within_epsilon(config_get_equity_margin(config), equity_margin));
-  assert(config_get_num_plays(config) == num_plays);
-  assert(config_get_plies(config) == plies);
-  assert(config_get_max_iterations(config) == max_iterations);
-  assert(config_get_stopping_condition(config) == SIM_STOPPING_CONDITION_98PCT);
+  assert(config_get_num_autoplay_rounds(config) == num_autoplay_rounds);
   assert(config_get_seed(config) == (uint64_t)seed);
   assert(thread_control_get_threads(config_get_thread_control(config)) ==
          number_of_threads);
@@ -277,7 +274,7 @@ void test_config_success() {
   rack = "-";
   number_exch = 2;
   plies = 123;
-  max_iterations = 6;
+  num_autoplay_rounds = 6;
   number_of_threads = 9;
   print_info = 850;
 
@@ -289,7 +286,7 @@ void test_config_success() {
       "threads %d "
       "info %d nostatic nogp",
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, rack, number_exch, plies,
-      max_iterations, number_of_threads, print_info);
+      num_autoplay_rounds, number_of_threads, print_info);
 
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
@@ -309,10 +306,6 @@ void test_config_success() {
   assert(config_get_target_score(config) == score);
   assert(config_get_target_number_of_tiles_exchanged(config) == number_exch);
   assert(within_epsilon(config_get_equity_margin(config), equity_margin));
-  assert(config_get_num_plays(config) == num_plays);
-  assert(config_get_plies(config) == plies);
-  assert(config_get_max_iterations(config) == max_iterations);
-  assert(config_get_stopping_condition(config) == SIM_STOPPING_CONDITION_98PCT);
   assert(thread_control_get_threads(config_get_thread_control(config)) ==
          number_of_threads);
   assert(thread_control_get_print_info_interval(

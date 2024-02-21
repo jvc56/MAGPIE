@@ -7,7 +7,6 @@
 #include "../../src/def/simmer_defs.h"
 #include "../../src/def/stats_defs.h"
 #include "../../src/def/thread_control_defs.h"
-
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
 #include "../../src/ent/config.h"
@@ -20,13 +19,9 @@
 #include "../../src/ent/stats.h"
 #include "../../src/ent/thread_control.h"
 #include "../../src/ent/win_pct.h"
-
 #include "../../src/impl/simmer.h"
-
 #include "../../src/str/move_string.h"
-
 #include "../../src/util/string_util.h"
-
 #include "test_util.h"
 
 void print_sim_stats(Game *game, SimResults *sim_results) {
@@ -63,8 +58,13 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
 void test_win_pct() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  assert(within_epsilon(win_pct_get(config_get_win_pcts(config), 118, 90),
-                        0.844430));
+  const PlayersData *players_data = config_get_players_data(config);
+  assert(within_epsilon(
+      win_pct_get(players_data_get_win_pcts(players_data, 0), 118, 90),
+      0.844430));
+  assert(within_epsilon(
+      win_pct_get(players_data_get_win_pcts(players_data, 1), 118, 90),
+      0.844430));
   config_destroy(config);
 }
 

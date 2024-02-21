@@ -7,33 +7,29 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
-#include "../def/simmer_defs.h"
-#include "../def/thread_control_defs.h"
-
 #include "../def/rack_defs.h"
+#include "../def/simmer_defs.h"
 #include "../def/stats_defs.h"
-
+#include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/config.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
+#include "../ent/players_data.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/timer.h"
 #include "../ent/win_pct.h"
-
-#include "gameplay.h"
-#include "move_gen.h"
-
 #include "../str/game_string.h"
 #include "../str/sim_string.h"
-
 #include "../util/log.h"
 #include "../util/util.h"
+#include "gameplay.h"
+#include "move_gen.h"
 
 #define MAX_STOPPING_ITERATION_CT 4000
 #define PER_PLY_STOPPING_SCALING 1250
@@ -69,6 +65,7 @@ typedef struct SimmerWorker {
 Simmer *create_simmer(const Config *config, const MoveList *move_list,
                       Game *game, int num_simmed_plays,
                       SimResults *sim_results) {
+  const PlayersData *players_data = config_get_players_data(config);
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
   ThreadControl *thread_control = config_get_thread_control(config);
   int ld_size = ld_get_size(config_get_ld(config));
@@ -79,8 +76,10 @@ Simmer *create_simmer(const Config *config, const MoveList *move_list,
 
   simmer->initial_spread =
       player_get_score(player) - player_get_score(opponent);
-  simmer->max_iterations = config_get_max_iterations(config);
-  simmer->stopping_condition = config_get_stopping_condition(config);
+  simmer->max_iterations =
+      players_data_get_max_iterations(players_data, simmer->initial_player);
+  simmer->stopping_condition =
+      players_data_get_stopping_condition(players_data, simmer->initial_player);
   simmer->threads = thread_control_get_threads(thread_control);
   simmer->seed = config_get_seed(config);
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
@@ -108,12 +107,14 @@ Simmer *create_simmer(const Config *config, const MoveList *move_list,
     }
   }
 
-  simmer->win_pcts = config_get_win_pcts(config);
+  simmer->win_pcts =
+      players_data_get_win_pcts(players_data, simmer->initial_player);
 
   simmer->thread_control = thread_control;
 
-  sim_results_reset(move_list, sim_results, num_simmed_plays,
-                    config_get_plies(config));
+  sim_results_reset(
+      move_list, sim_results, num_simmed_plays,
+      players_data_get_plies(players_data, simmer->initial_player));
 
   simmer->sim_results = sim_results;
 
@@ -203,7 +204,6 @@ bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
   if (!(move_get_dir(m1_move) == move_get_dir(m2_move) &&
         move_get_col_start(m1_move) == move_get_col_start(m2_move) &&
         move_get_row_start(m1_move) == move_get_row_start(m2_move))) {
-
     simmer->play_similarity_cache[cache_index1] = PLAYS_NOT_SIMILAR;
     simmer->play_similarity_cache[cache_index2] = PLAYS_NOT_SIMILAR;
     return false;
@@ -261,18 +261,18 @@ bool handle_potential_stopping_condition(Simmer *simmer) {
   double zval = 0;
   bool use_stopping_cond = true;
   switch (simmer->stopping_condition) {
-  case SIM_STOPPING_CONDITION_NONE:
-    use_stopping_cond = false;
-    break;
-  case SIM_STOPPING_CONDITION_95PCT:
-    zval = STATS_Z95;
-    break;
-  case SIM_STOPPING_CONDITION_98PCT:
-    zval = STATS_Z98;
-    break;
-  case SIM_STOPPING_CONDITION_99PCT:
-    zval = STATS_Z99;
-    break;
+    case SIM_STOPPING_CONDITION_NONE:
+      use_stopping_cond = false;
+      break;
+    case SIM_STOPPING_CONDITION_95PCT:
+      zval = STATS_Z95;
+      break;
+    case SIM_STOPPING_CONDITION_98PCT:
+      zval = STATS_Z98;
+      break;
+    case SIM_STOPPING_CONDITION_99PCT:
+      zval = STATS_Z99;
+      break;
   }
 
   SimResults *sim_results = simmer->sim_results;
@@ -507,7 +507,9 @@ sim_status_t simulate(const Config *config, const Game *input_game,
 
   Game *game = game_duplicate(input_game);
 
-  int num_simmed_plays = config_get_num_plays(config);
+  int player_index = game_get_player_on_turn_index(game);
+  PlayersData *players_data = config_get_players_data(config);
+  int num_simmed_plays = players_data_get_num_plays(players_data, player_index);
   MoveList *move_list = move_list_create(num_simmed_plays);
 
   sim_status_t sim_status =

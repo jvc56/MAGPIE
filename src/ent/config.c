@@ -15,17 +15,15 @@
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/win_pct_defs.h"
-
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 #include "board.h"
 #include "letter_distribution.h"
 #include "players_data.h"
 #include "rack.h"
 #include "thread_control.h"
 #include "win_pct.h"
-
-#include "../util/log.h"
-#include "../util/string_util.h"
-#include "../util/util.h"
 
 #define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
 #define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC
@@ -49,6 +47,17 @@
 #define ARG_P1_LEAVES "k1"
 #define ARG_P1_MOVE_SORT_TYPE "s1"
 #define ARG_P1_MOVE_RECORD_TYPE "r1"
+#define ARG_P1_WIN_PCT "wp1"
+#define ARG_P1_PLIES "plies1"
+#define ARG_P1_NUMBER_OF_PLAYS "np1"
+#define ARG_P1_MAX_ITERATIONS "mi1"
+#define ARG_P1_STOPPING_CONDITION "cond1"
+#define ARG_P2_WIN_PCT "wp2"
+#define ARG_P2_PLIES "plies2"
+#define ARG_P2_NUMBER_OF_PLAYS "np2"
+#define ARG_P2_MAX_ITERATIONS "mi2"
+#define ARG_P2_STOPPING_CONDITION "cond2"
+#define ARG_P2_MAX_ITERATIONS "mi2"
 #define ARG_P2_NAME "p2"
 #define ARG_P2_LEXICON "l2"
 #define ARG_P2_LEAVES "k2"
@@ -66,6 +75,7 @@
 #define ARG_SCORE "score"
 #define ARG_EQUITY_MARGIN "eq"
 #define ARG_TARGET_NUMBER_OF_TILES_EXCHANGED "exch"
+#define ARG_NUMBER_OF_AUTOPLAY_ROUNDS "rounds"
 #define ARG_GAME_PAIRS_ON "gp"
 #define ARG_GAME_PAIRS_OFF "nogp"
 #define ARG_RANDOM_SEED "rs"
@@ -112,14 +122,9 @@ struct Config {
   int target_number_of_tiles_exchanged;
   double equity_margin;
   // Sim
-  WinPct *win_pcts;
-  char *win_pct_name;
-  int num_plays;
-  int plies;
-  int max_iterations;
-  sim_stopping_condition_t stopping_condition;
   bool static_search_only;
   // Autoplay
+  int num_autoplay_rounds;
   bool use_game_pairs;
   uint64_t seed;
   // Thread Control
@@ -155,6 +160,17 @@ typedef enum {
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
+  // Sim (separate configs per player)
+  ARG_TOKEN_P1_WIN_PCT,
+  ARG_TOKEN_P1_PLIES,
+  ARG_TOKEN_P1_NUMBER_OF_PLAYS,
+  ARG_TOKEN_P1_MAX_ITERATIONS,
+  ARG_TOKEN_P1_STOPPING_CONDITION,
+  ARG_TOKEN_P2_WIN_PCT,
+  ARG_TOKEN_P2_PLIES,
+  ARG_TOKEN_P2_NUMBER_OF_PLAYS,
+  ARG_TOKEN_P2_MAX_ITERATIONS,
+  ARG_TOKEN_P2_STOPPING_CONDITION,
   // Sim
   ARG_TOKEN_KNOWN_OPP_RACK,
   ARG_TOKEN_WIN_PCT,
@@ -171,6 +187,7 @@ typedef enum {
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_target_number_of_tiles_exchanged,
   // Autoplay
+  ARG_TOKEN_NUMBER_OF_AUTOPLAY_ROUNDS,
   ARG_TOKEN_GAME_PAIRS_ON,
   ARG_TOKEN_GAME_PAIRS_OFF,
   ARG_TOKEN_RANDOM_SEED,
@@ -277,22 +294,12 @@ double config_get_equity_margin(const Config *config) {
   return config->equity_margin;
 }
 
-WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
-
-int config_get_num_plays(const Config *config) { return config->num_plays; }
-
-int config_get_plies(const Config *config) { return config->plies; }
-
-int config_get_max_iterations(const Config *config) {
-  return config->max_iterations;
-}
-
-sim_stopping_condition_t config_get_stopping_condition(const Config *config) {
-  return config->stopping_condition;
-}
-
 bool config_get_static_search_only(const Config *config) {
   return config->static_search_only;
+}
+
+int config_get_num_autoplay_rounds(const Config *config) {
+  return config->num_autoplay_rounds;
 }
 
 bool config_get_use_game_pairs(const Config *config) {
@@ -377,6 +384,14 @@ ParsedArgs *create_parsed_args() {
                  ARG_P1_MOVE_SORT_TYPE, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_P1_MOVE_RECORD_TYPE,
                  ARG_P1_MOVE_RECORD_TYPE, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_WIN_PCT, ARG_P1_WIN_PCT, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_PLIES, ARG_P1_PLIES, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_NUMBER_OF_PLAYS,
+                 ARG_P1_NUMBER_OF_PLAYS, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P1_MAX_ITERATIONS,
+                 ARG_P1_MAX_ITERATIONS, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_STOPPING_CONDITION,
+                 ARG_P1_STOPPING_CONDITION, 1);
 
   // Player 2
   set_single_arg(parsed_args, index++, ARG_TOKEN_P2_NAME, ARG_P2_NAME, 1);
@@ -386,6 +401,14 @@ ParsedArgs *create_parsed_args() {
                  ARG_P2_MOVE_SORT_TYPE, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_P2_MOVE_RECORD_TYPE,
                  ARG_P2_MOVE_RECORD_TYPE, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_WIN_PCT, ARG_P2_WIN_PCT, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_PLIES, ARG_P2_PLIES, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_NUMBER_OF_PLAYS,
+                 ARG_P2_NUMBER_OF_PLAYS, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_P2_MAX_ITERATIONS,
+                 ARG_P2_MAX_ITERATIONS, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_STOPPING_CONDITION,
+                 ARG_P2_STOPPING_CONDITION, 1);
 
   // Sim args
   set_single_arg(parsed_args, index++, ARG_TOKEN_KNOWN_OPP_RACK,
@@ -414,6 +437,8 @@ ParsedArgs *create_parsed_args() {
                  ARG_TOKEN_target_number_of_tiles_exchanged,
                  ARG_TARGET_NUMBER_OF_TILES_EXCHANGED, 1);
   // Autoplay
+  set_single_arg(parsed_args, index++, ARG_TOKEN_NUMBER_OF_AUTOPLAY_ROUNDS,
+                 ARG_NUMBER_OF_AUTOPLAY_ROUNDS, 1);
   set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_PAIRS_ON,
                  ARG_GAME_PAIRS_ON, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_GAME_PAIRS_OFF,
@@ -579,74 +604,8 @@ config_load_status_t load_move_record_type_for_config(
   return config_load_status;
 }
 
-config_load_status_t load_win_pct_for_config(Config *config,
-                                             const char *input_win_pct_name) {
-
-  const char *win_pct_name = NULL;
-  if (is_string_empty_or_null(input_win_pct_name)) {
-    win_pct_name = DEFAULT_WIN_PCT;
-  } else {
-    win_pct_name = input_win_pct_name;
-  }
-
-  if (strings_equal(config->win_pct_name, win_pct_name)) {
-    return CONFIG_LOAD_STATUS_SUCCESS;
-  }
-
-  WinPct *new_win_pcts = win_pct_create(win_pct_name);
-  win_pct_destroy(config->win_pcts);
-  config->win_pcts = new_win_pcts;
-
-  free(config->win_pct_name);
-  config->win_pct_name = string_duplicate(win_pct_name);
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t load_num_plays_for_config(Config *config,
-                                               const char *num_plays) {
-  if (!is_all_digits_or_empty(num_plays)) {
-    return CONFIG_LOAD_STATUS_MALFORMED_NUM_PLAYS;
-  }
-  config->num_plays = string_to_int(num_plays);
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t load_plies_for_config(Config *config, const char *plies) {
-  if (!is_all_digits_or_empty(plies)) {
-    return CONFIG_LOAD_STATUS_MALFORMED_PLIES;
-  }
-  config->plies = string_to_int(plies);
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t
-load_max_iterations_for_config(Config *config, const char *max_iterations) {
-  if (!is_all_digits_or_empty(max_iterations)) {
-    return CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS;
-  }
-  config->max_iterations = string_to_int(max_iterations);
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t
-load_stopping_condition_for_config(Config *config,
-                                   const char *stopping_condition) {
-  if (strings_equal(stopping_condition, "none")) {
-    config->stopping_condition = SIM_STOPPING_CONDITION_NONE;
-  } else if (strings_equal(stopping_condition, "95")) {
-    config->stopping_condition = SIM_STOPPING_CONDITION_95PCT;
-  } else if (strings_equal(stopping_condition, "98")) {
-    config->stopping_condition = SIM_STOPPING_CONDITION_98PCT;
-  } else if (strings_equal(stopping_condition, "99")) {
-    config->stopping_condition = SIM_STOPPING_CONDITION_99PCT;
-  } else {
-    return CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION;
-  }
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t
-load_static_search_only_for_config(Config *config, bool static_search_only) {
+config_load_status_t load_static_search_only_for_config(
+    Config *config, bool static_search_only) {
   config->static_search_only = static_search_only;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
@@ -671,9 +630,8 @@ config_load_status_t load_score_for_config(Config *config, const char *score) {
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_equity_margin_for_config(Config *config,
-                              const char *equity_margin_string) {
+config_load_status_t load_equity_margin_for_config(
+    Config *config, const char *equity_margin_string) {
   if (!is_decimal_number(equity_margin_string)) {
     return CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN;
   }
@@ -694,6 +652,19 @@ config_load_status_t load_target_number_of_tiles_exchanged_for_config(
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
+config_load_status_t
+load_num_autoplay_rounds_for_config(Config *config, const char *num_autoplay_rounds) {
+  if (!is_all_digits_or_empty(num_autoplay_rounds)) {
+    return CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS;
+  }
+  int rounds = string_to_int(num_autoplay_rounds);
+  if (rounds < 1) {
+    return CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS;
+  }
+  config->num_autoplay_rounds = rounds;
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
 config_load_status_t load_use_game_pairs_for_config(Config *config,
                                                     bool use_game_pairs) {
   config->use_game_pairs = use_game_pairs;
@@ -709,9 +680,8 @@ config_load_status_t load_random_seed_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_number_of_threads_for_config(Config *config,
-                                  const char *number_of_threads_string) {
+config_load_status_t load_number_of_threads_for_config(
+    Config *config, const char *number_of_threads_string) {
   if (!is_all_digits_or_empty(number_of_threads_string)) {
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
   }
@@ -726,9 +696,8 @@ load_number_of_threads_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_print_info_interval_for_config(Config *config,
-                                    const char *print_info_interval) {
+config_load_status_t load_print_info_interval_for_config(
+    Config *config, const char *print_info_interval) {
   if (!is_all_digits_or_empty(print_info_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL;
   }
@@ -737,9 +706,8 @@ load_print_info_interval_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_check_stop_interval_for_config(Config *config,
-                                    const char *check_stop_interval) {
+config_load_status_t load_check_stop_interval_for_config(
+    Config *config, const char *check_stop_interval) {
   if (!is_all_digits_or_empty(check_stop_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL;
   }
@@ -858,7 +826,6 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     const char *new_p2_lexicon_name, const char *new_p1_leaves_name,
     const char *new_p2_leaves_name, const char *new_ld_name,
     const char *new_rack) {
-
   // Load lexicons first
   const char *existing_p1_lexicon_name = players_data_get_data_name(
       config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
@@ -999,9 +966,8 @@ config_load_status_t load_lexicon_dependent_data_for_config(
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
-
+config_load_status_t load_config_with_parsed_args(
+    Config *config, const ParsedArgs *parsed_args) {
   int args_start_index = set_command_type_for_config(config, parsed_args);
 
   // Set the names using the args
@@ -1012,7 +978,8 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
   const char *new_p2_lexicon_name = NULL;
   const char *new_p2_leaves_name = NULL;
   const char *new_ld_name = NULL;
-  const char *new_win_pct_name = NULL;
+  const char *new_p1_win_pct_name = NULL;
+  const char *new_p2_win_pct_name = NULL;
   const char *new_rack = NULL;
   const char *outfile = NULL;
   const char *infile = NULL;
@@ -1025,153 +992,211 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
     arg_token_t arg_token = single_arg->token;
     char **arg_values = single_arg->values;
     switch (arg_token) {
-    case ARG_TOKEN_POSITION:
-    case ARG_TOKEN_GO:
-    case ARG_TOKEN_SIM:
-    case ARG_TOKEN_INFER:
-    case ARG_TOKEN_AUTOPLAY:
-    case ARG_TOKEN_SET_OPTIONS:
-      config_load_status = CONFIG_LOAD_STATUS_MISPLACED_COMMAND;
-      break;
-    case ARG_TOKEN_CGP:
-      config_load_status = set_cgp_string_for_config(config, single_arg);
-      break;
-    case ARG_TOKEN_BINGO_BONUS:
-      config_load_status = load_bingo_bonus_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_BOARD_LAYOUT:
-      config_load_status = load_board_layout_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_GAME_VARIANT:
-      config_load_status = load_game_variant_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_LETTER_DISTRIBUTION:
-      new_ld_name = arg_values[0];
-      break;
-    case ARG_TOKEN_LEXICON:
-      new_p1_lexicon_name = arg_values[0];
-      new_p2_lexicon_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P1_NAME:
-      config_load_status =
-          load_player_name_for_config(config, 0, arg_values[0]);
-      break;
-    case ARG_TOKEN_P1_LEXICON:
-      new_p1_lexicon_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P1_LEAVES:
-      new_p1_leaves_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P1_MOVE_SORT_TYPE:
-      config_load_status =
-          load_move_sort_type_for_config(config, arg_values[0], 0);
-      break;
-    case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
-      config_load_status =
-          load_move_record_type_for_config(config, arg_values[0], 0);
-      break;
-    case ARG_TOKEN_P2_NAME:
-      config_load_status =
-          load_player_name_for_config(config, 1, arg_values[0]);
-      break;
-    case ARG_TOKEN_P2_LEXICON:
-      new_p2_lexicon_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P2_LEAVES:
-      new_p2_leaves_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P2_MOVE_SORT_TYPE:
-      config_load_status =
-          load_move_sort_type_for_config(config, arg_values[0], 1);
-      break;
-    case ARG_TOKEN_P2_MOVE_RECORD_TYPE:
-      config_load_status =
-          load_move_record_type_for_config(config, arg_values[0], 1);
-      break;
-    case ARG_TOKEN_KNOWN_OPP_RACK:
-      new_rack = arg_values[0];
-      break;
-    case ARG_TOKEN_WIN_PCT:
-      new_win_pct_name = arg_values[0];
-      break;
-    case ARG_TOKEN_NUMBER_OF_PLAYS:
-      config_load_status = load_num_plays_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_PLIES:
-      config_load_status = load_plies_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_MAX_ITERATIONS:
-      config_load_status =
-          load_max_iterations_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_STOPPING_CONDITION:
-      config_load_status =
-          load_stopping_condition_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_STATIC_SEARCH_ON:
-      config_load_status = load_static_search_only_for_config(config, true);
-      break;
-    case ARG_TOKEN_STATIC_SEARCH_OFF:
-      config_load_status = load_static_search_only_for_config(config, false);
-      break;
-    case ARG_TOKEN_target_index:
-      config_load_status = load_target_index_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_SCORE:
-      config_load_status = load_score_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_EQUITY_MARGIN:
-      config_load_status = load_equity_margin_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_target_number_of_tiles_exchanged:
-      config_load_status = load_target_number_of_tiles_exchanged_for_config(
-          config, arg_values[0]);
-      break;
-    case ARG_TOKEN_GAME_PAIRS_ON:
-      config_load_status = load_use_game_pairs_for_config(config, true);
-      break;
-    case ARG_TOKEN_GAME_PAIRS_OFF:
-      config_load_status = load_use_game_pairs_for_config(config, false);
-      break;
-    case ARG_TOKEN_RANDOM_SEED:
-      config_load_status = load_random_seed_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_NUMBER_OF_THREADS:
-      config_load_status =
-          load_number_of_threads_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_PRINT_INFO_INTERVAL:
-      config_load_status =
-          load_print_info_interval_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_CHECK_STOP_INTERVAL:
-      config_load_status =
-          load_check_stop_interval_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_INFILE:
-      config->command_set_infile = true;
-      infile = arg_values[0];
-      break;
-    case ARG_TOKEN_OUTFILE:
-      outfile = arg_values[0];
-      break;
-    case ARG_TOKEN_CONSOLE_MODE:
-      if (config->command_set_exec_mode) {
-        config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
-      } else {
-        config_load_status = load_mode_for_config(config, EXEC_MODE_CONSOLE);
-      }
-      break;
-    case ARG_TOKEN_UCGI_MODE:
-      if (config->command_set_exec_mode) {
-        config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
-      } else {
-        config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI);
-      }
-      break;
-    case NUMBER_OF_ARG_TOKENS:
-      log_fatal("invalid token found in args\n");
-      break;
+      case ARG_TOKEN_POSITION:
+      case ARG_TOKEN_GO:
+      case ARG_TOKEN_SIM:
+      case ARG_TOKEN_INFER:
+      case ARG_TOKEN_AUTOPLAY:
+      case ARG_TOKEN_SET_OPTIONS:
+        config_load_status = CONFIG_LOAD_STATUS_MISPLACED_COMMAND;
+        break;
+      case ARG_TOKEN_CGP:
+        config_load_status = set_cgp_string_for_config(config, single_arg);
+        break;
+      case ARG_TOKEN_BINGO_BONUS:
+        config_load_status = load_bingo_bonus_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_BOARD_LAYOUT:
+        config_load_status =
+            load_board_layout_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_GAME_VARIANT:
+        config_load_status =
+            load_game_variant_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_LETTER_DISTRIBUTION:
+        new_ld_name = arg_values[0];
+        break;
+      case ARG_TOKEN_LEXICON:
+        new_p1_lexicon_name = arg_values[0];
+        new_p2_lexicon_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P1_NAME:
+        config_load_status =
+            load_player_name_for_config(config, 0, arg_values[0]);
+        break;
+      case ARG_TOKEN_P1_LEXICON:
+        new_p1_lexicon_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P1_LEAVES:
+        new_p1_leaves_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P1_MOVE_SORT_TYPE:
+        config_load_status =
+            load_move_sort_type_for_config(config, arg_values[0], 0);
+        break;
+      case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
+        config_load_status =
+            load_move_record_type_for_config(config, arg_values[0], 0);
+        break;
+      case ARG_TOKEN_P2_NAME:
+        config_load_status =
+            load_player_name_for_config(config, 1, arg_values[0]);
+        break;
+      case ARG_TOKEN_P2_LEXICON:
+        new_p2_lexicon_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P2_LEAVES:
+        new_p2_leaves_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P2_MOVE_SORT_TYPE:
+        config_load_status =
+            load_move_sort_type_for_config(config, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_P2_MOVE_RECORD_TYPE:
+        config_load_status =
+            load_move_record_type_for_config(config, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_KNOWN_OPP_RACK:
+        new_rack = arg_values[0];
+        break;
+      case ARG_TOKEN_WIN_PCT:
+        new_p1_win_pct_name = arg_values[0];
+        new_p2_win_pct_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P1_WIN_PCT:
+        new_p1_win_pct_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P2_WIN_PCT:
+        new_p2_win_pct_name = arg_values[0];
+        break;
+      case ARG_TOKEN_NUMBER_OF_PLAYS:
+        config_load_status =
+            players_data_load_num_plays(config->players_data, arg_values[0], 0);
+        config_load_status =
+            players_data_load_num_plays(config->players_data, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_P1_NUMBER_OF_PLAYS:
+        config_load_status =
+            players_data_load_num_plays(config->players_data, arg_values[0], 0);
+        break;
+      case ARG_TOKEN_P2_NUMBER_OF_PLAYS:
+        config_load_status =
+            players_data_load_num_plays(config->players_data, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_PLIES:
+        config_load_status =
+            players_data_load_plies(config->players_data, arg_values[0], 0);
+        config_load_status =
+            players_data_load_plies(config->players_data, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_P1_PLIES:
+        config_load_status =
+            players_data_load_plies(config->players_data, arg_values[0], 0);
+        break;
+      case ARG_TOKEN_P2_PLIES:
+        config_load_status =
+            players_data_load_plies(config->players_data, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_NUMBER_OF_AUTOPLAY_ROUNDS:
+        config_load_status =
+            load_num_autoplay_rounds_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_MAX_ITERATIONS:
+        config_load_status =
+            load_num_autoplay_rounds_for_config(config, arg_values[0]);
+        config_load_status =
+            players_data_load_max_iterations(config->players_data, arg_values[0], 0);
+        config_load_status =    
+            players_data_load_max_iterations(config->players_data, arg_values[0], 1);            
+        break;
+      case ARG_TOKEN_P1_MAX_ITERATIONS:
+        config_load_status =
+            players_data_load_max_iterations(config->players_data, arg_values[0], 0);
+        break;
+      case ARG_TOKEN_P2_MAX_ITERATIONS:
+        config_load_status =
+            players_data_load_max_iterations(config->players_data, arg_values[0], 1);
+        break;  
+      case ARG_TOKEN_STOPPING_CONDITION:
+        config_load_status =
+            players_data_load_stopping_condition(config->players_data, arg_values[0], 0);
+            players_data_load_stopping_condition(config->players_data, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_P1_STOPPING_CONDITION:
+        config_load_status =
+            players_data_load_stopping_condition(config->players_data, arg_values[0], 0);
+        break;
+      case ARG_TOKEN_P2_STOPPING_CONDITION:
+        config_load_status =
+            players_data_load_stopping_condition(config->players_data, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_STATIC_SEARCH_ON:
+        config_load_status = load_static_search_only_for_config(config, true);
+        break;
+      case ARG_TOKEN_STATIC_SEARCH_OFF:
+        config_load_status = load_static_search_only_for_config(config, false);
+        break;
+      case ARG_TOKEN_target_index:
+        config_load_status =
+            load_target_index_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_SCORE:
+        config_load_status = load_score_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_EQUITY_MARGIN:
+        config_load_status =
+            load_equity_margin_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_target_number_of_tiles_exchanged:
+        config_load_status = load_target_number_of_tiles_exchanged_for_config(
+            config, arg_values[0]);
+        break;
+      case ARG_TOKEN_GAME_PAIRS_ON:
+        config_load_status = load_use_game_pairs_for_config(config, true);
+        break;
+      case ARG_TOKEN_GAME_PAIRS_OFF:
+        config_load_status = load_use_game_pairs_for_config(config, false);
+        break;
+      case ARG_TOKEN_RANDOM_SEED:
+        config_load_status = load_random_seed_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_NUMBER_OF_THREADS:
+        config_load_status =
+            load_number_of_threads_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_PRINT_INFO_INTERVAL:
+        config_load_status =
+            load_print_info_interval_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_CHECK_STOP_INTERVAL:
+        config_load_status =
+            load_check_stop_interval_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_INFILE:
+        config->command_set_infile = true;
+        infile = arg_values[0];
+        break;
+      case ARG_TOKEN_OUTFILE:
+        outfile = arg_values[0];
+        break;
+      case ARG_TOKEN_CONSOLE_MODE:
+        if (config->command_set_exec_mode) {
+          config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
+        } else {
+          config_load_status = load_mode_for_config(config, EXEC_MODE_CONSOLE);
+        }
+        break;
+      case ARG_TOKEN_UCGI_MODE:
+        if (config->command_set_exec_mode) {
+          config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
+        } else {
+          config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI);
+        }
+        break;
+      case NUMBER_OF_ARG_TOKENS:
+        log_fatal("invalid token found in args\n");
+        break;
     }
     if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
       return config_load_status;
@@ -1190,7 +1215,13 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
     return config_load_status;
   }
 
-  return load_win_pct_for_config(config, new_win_pct_name);
+  if (players_data_load_win_pct(config->players_data, new_p1_win_pct_name, 0) !=
+      CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
+  return players_data_load_win_pct(config->players_data, new_p2_win_pct_name,
+                                   1);
 }
 
 void reset_transient_fields(Config *config) {
@@ -1246,13 +1277,8 @@ Config *config_create_default() {
   config->target_score = 0;
   config->target_number_of_tiles_exchanged = 0;
   config->equity_margin = 0;
-  config->win_pcts = NULL;
-  config->win_pct_name = NULL;
-  config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
-  config->plies = 2;
-  config->max_iterations = 0;
-  config->stopping_condition = DEFAULT_SIMMING_STOPPING_CONDITION;
   config->static_search_only = false;
+  config->num_autoplay_rounds = 0;
   config->use_game_pairs = false;
   // The seed is set to a random value by default for each
   // load in reset_transient_fields.
@@ -1268,10 +1294,8 @@ void config_destroy(Config *config) {
   }
   ld_destroy(config->ld);
   rack_destroy(config->rack);
-  win_pct_destroy(config->win_pcts);
   free(config->ld_name);
   free(config->cgp);
-  free(config->win_pct_name);
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);
   free(config);
