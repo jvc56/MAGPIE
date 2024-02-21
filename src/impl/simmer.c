@@ -494,14 +494,6 @@ sim_status_t simulate(const Config *config, const Game *input_game,
 
   Game *game = game_duplicate(input_game);
 
-<<<<<<< HEAD
-  int player_index = game_get_player_on_turn_index(game);
-  PlayersData *players_data = config_get_players_data(config);
-  int num_simmed_plays = players_data_get_num_plays(players_data, player_index);
-  MoveList *move_list = move_list_create(num_simmed_plays);
-
-=======
->>>>>>> origin/main
   sim_status_t sim_status =
       simulate_internal(config, game, move_list, sim_results);
 

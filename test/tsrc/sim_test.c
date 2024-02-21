@@ -149,7 +149,7 @@ void test_more_iterations() {
   sim_results_sort_plays_by_win_rate(sim_results);
 
   SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
-  StringBuilder *move_string_builder = create+string_builder();
+  StringBuilder *move_string_builder = create_string_builder();
   string_builder_add_move_description(simmed_play_get_move(play), ld,
                                       move_string_builder);
 

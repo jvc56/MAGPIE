@@ -62,7 +62,7 @@ void autoplay_game_pairs_test() {
   assert(status == AUTOPLAY_STATUS_SUCCESS);
 
   int rounds = config_get_num_autoplay_rounds(csw_config);
-  assert(autoplay_results_get_games(autoplay_results) == rounds * 2);
+  assert(autoplay_results_get_games(ar1) == rounds * 2);
   assert(autoplay_results_get_p1_firsts(ar1) == rounds);
   assert_stats_are_equal(autoplay_results_get_p1_score(ar1),
                          autoplay_results_get_p2_score(ar1));
@@ -83,7 +83,7 @@ void autoplay_game_pairs_test() {
   assert(status == AUTOPLAY_STATUS_SUCCESS);
   rounds = config_get_num_autoplay_rounds(csw_config);
   assert(autoplay_results_get_games(ar2) == rounds * 2);
-  assert(autoplay_results_get_p1_firsts(ar2) == roundss);
+  assert(autoplay_results_get_p1_firsts(ar2) == rounds);
   assert_stats_are_equal(autoplay_results_get_p1_score(ar2),
                          autoplay_results_get_p2_score(ar2));
 
@@ -95,9 +95,9 @@ void autoplay_game_pairs_test() {
   rounds = config_get_num_autoplay_rounds(csw_config);
 
   // Autoplay should reset the stats
-  status = autoplay(csw_config, ar1);
+  status = autoplay(csw_config, ar2);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
-  assert(autoplay_results_get_games(autoplay_results) == rounds);
+  assert(autoplay_results_get_games(ar2) == rounds);
 
   autoplay_results_destroy(ar1);
   autoplay_results_destroy(ar2);

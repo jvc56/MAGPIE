@@ -107,9 +107,11 @@ void set_or_clear_error_status(ErrorStatus *error_status,
 }
 
 void execute_gen(const Config *config, ExecState *exec_state) {
-  exec_state_recreate_move_list(
-      exec_state, config_get_num_plays(exec_state_get_config(exec_state)));
   Game *game = exec_state_get_game(exec_state);
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  const PlayersData *players_data = config_get_players_data(config);
+  exec_state_recreate_move_list(
+      exec_state, players_data_get_num_plays(players_data, player_on_turn_index));
   MoveList *ml = exec_state_get_move_list(exec_state);
   generate_moves_for_game(game, 0, ml);
   print_ucgi_static_moves(game, ml, config_get_thread_control(config));
