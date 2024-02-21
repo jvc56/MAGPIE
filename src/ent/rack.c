@@ -56,6 +56,25 @@ int rack_get_score(const LetterDistribution *ld, const Rack *rack) {
   return sum;
 }
 
+// Returns true if rack_to_update contains value_to_sub
+// and subtracts value_to_sub from rack_to_update
+// on success.
+// This function is not in the critical path, so
+// we can leave it in the .c file unlike other rack functions.
+bool rack_subtract(Rack *rack_to_update, Rack *value_to_sub) {
+  for (int i = 0; i < rack_to_update->array_size; i++) {
+    if (rack_to_update->array[i] < value_to_sub->array[i]) {
+      return false;
+    }
+    rack_to_update->array[i] -= value_to_sub->array[i];
+    rack_to_update->number_of_letters -= value_to_sub->array[i];
+    if (rack_to_update->number_of_letters == 0) {
+      rack_to_update->empty = true;
+    }
+  }
+  return true;
+}
+
 int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
                        const char *rack_string) {
   rack_reset(rack);

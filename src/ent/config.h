@@ -24,7 +24,8 @@ command_t config_get_command_type(const Config *config);
 LetterDistribution *config_get_ld(const Config *config);
 char *config_get_ld_name(const Config *config);
 bool config_get_ld_name_changed(const Config *config);
-char *config_get_cgp(const Config *config);
+const char *config_get_cgp(const Config *config);
+const char *config_get_moves(const Config *config);
 int config_get_bingo_bonus(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
@@ -39,7 +40,6 @@ bool config_get_use_game_pairs(const Config *config);
 uint64_t config_get_seed(const Config *config);
 ThreadControl *config_get_thread_control(const Config *config);
 exec_mode_t config_get_exec_mode(const Config *config);
-bool config_get_command_set_cgp(const Config *config);
 bool config_get_command_set_infile(const Config *config);
 bool config_get_command_set_exec_mode(const Config *config);
 

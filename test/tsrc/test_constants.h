@@ -133,6 +133,8 @@
 #define ZILLION_OPENING_CGP                                                    \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 IILLNOZ/ 0/4 0 lex "           \
   "CSW21;"
+#define ENTASIS_OPENING_CGP                                                    \
+  "15/15/15/15/15/15/15/2ENTASIS6/15/15/15/15/15/15/15 / 0/0 0 lex CSW21"
 #define UEY_CGP                                                                \
   "T2F3C7/O2O1BEHOWLING1/A1PI2ME4IO1/s1OD1NUR2AIDA1/T1L1NARTJIES3/I1E2NE1I6/"  \
   "E1A2N2B6/SAXONY1UEY5/2E5D6/15/15/15/15/15/15 ACEOOQV/?DEGPRS 271/283 0 "    \
@@ -151,4 +153,7 @@
   "15/15/11FiŚ1/11LI2/9CŁA3/9Z1N3/8HOI4/6STĘPIĆ3/5AUR1Y5/4SAMY2G4/2CLE4JA1K2/" \
   "2LARWO1SAMBIE1/2I1WENTO1O1IW1/E6END3Y1/ZDZIAŁaJ1Y5 ACNNPRW/AHIKPZŻ "          \
   "240/200 0 lex OSPS49;"
+#define FRAWZEY_CGP                                                            \
+  "15/15/15/14Q/14U/14I/14N/7FRAWZEYS/7O7/7A7/7M7/7L7/7I7/7K7/7E7 /  150/224 " \
+  "0 lex CSW21;"
 #endif

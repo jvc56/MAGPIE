@@ -10,17 +10,18 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 
-#include "../ent/letter_distribution.h"
-#include "../ent/player.h"
-
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
 #include "../ent/rack.h"
 
 #include "move_gen.h"
+
+#include "../util/string_util.h"
 
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
@@ -183,6 +184,7 @@ void draw_starting_racks(Game *game) {
                        RACK_SIZE, game_get_player_draw_index(game, 1));
 }
 
+// Assumes the move has been validated
 void play_move(const Move *move, Game *game) {
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
     game_backup(game);

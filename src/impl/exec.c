@@ -8,9 +8,11 @@
 #include "../def/exec_defs.h"
 #include "../def/file_handler_defs.h"
 #include "../def/game_defs.h"
+#include "../def/gen_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../def/validated_move_defs.h"
 
 #include "../ent/config.h"
 #include "../ent/error_status.h"
@@ -19,12 +21,16 @@
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/validated_move.h"
 
 #include "autoplay.h"
+#include "gameplay.h"
 #include "inference.h"
 #include "move_gen.h"
 #include "simmer.h"
 
+#include "../str/game_string.h"
+#include "../str/move_string.h"
 #include "../str/sim_string.h"
 
 #include "../util/fileproxy.h"
@@ -71,6 +77,9 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
     status_string = ucgi_sim_stats(exec_state_get_game(exec_state), sim_results,
                                    thread_control, true);
     break;
+  case COMMAND_TYPE_GEN:
+    status_string = string_duplicate("movegen status unimplemented");
+    break;
   case COMMAND_TYPE_AUTOPLAY:
     status_string = string_duplicate("autoplay status unimplemented");
     break;
@@ -97,8 +106,20 @@ void set_or_clear_error_status(ErrorStatus *error_status,
   }
 }
 
+void execute_gen(const Config *config, ExecState *exec_state) {
+  exec_state_recreate_move_list(
+      exec_state, config_get_num_plays(exec_state_get_config(exec_state)));
+  Game *game = exec_state_get_game(exec_state);
+  MoveList *ml = exec_state_get_move_list(exec_state);
+  generate_moves_for_game(game, 0, ml);
+  print_ucgi_static_moves(game, ml, config_get_thread_control(config));
+  set_or_clear_error_status(exec_state_get_error_status(exec_state),
+                            ERROR_STATUS_TYPE_SIM, (int)GEN_STATUS_SUCCESS);
+}
+
 void execute_sim(const Config *config, ExecState *exec_state) {
   sim_status_t status = simulate(config, exec_state_get_game(exec_state),
+                                 exec_state_get_move_list(exec_state),
                                  exec_state_get_sim_results(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_SIM, (int)status);
@@ -119,6 +140,49 @@ void execute_infer(const Config *config, ExecState *exec_state) {
                             ERROR_STATUS_TYPE_INFER, (int)status);
 }
 
+move_validation_status_t update_move_list(ExecState *exec_state,
+                                          const char *moves) {
+  Game *game = exec_state_get_game(exec_state);
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+
+  ValidatedMoves *new_validated_moves =
+      validated_moves_create(game, player_on_turn_index, moves, true, false);
+
+  move_validation_status_t move_validation_status =
+      validated_moves_get_validation_status(new_validated_moves);
+
+  if (move_validation_status == MOVE_VALIDATION_STATUS_SUCCESS) {
+    const LetterDistribution *ld = game_get_ld(game);
+    const Board *board = game_get_board(game);
+    StringBuilder *phonies_sb = create_string_builder();
+    int number_of_new_moves =
+        validated_moves_get_number_of_moves(new_validated_moves);
+    for (int i = 0; i < number_of_new_moves; i++) {
+      char *phonies_formed = validated_moves_get_phonies_string(
+          game_get_ld(game), new_validated_moves, i);
+      if (phonies_formed) {
+        string_builder_clear(phonies_sb);
+        string_builder_add_string(phonies_sb, "Phonies formed from ");
+        string_builder_add_move(
+            board, validated_moves_get_move(new_validated_moves, i), ld,
+            phonies_sb);
+        string_builder_add_string(phonies_sb, ": ");
+        string_builder_add_string(phonies_sb, phonies_formed);
+        log_warn(string_builder_peek(phonies_sb));
+      }
+      free(phonies_formed);
+    }
+    destroy_string_builder(phonies_sb);
+    exec_state_init_move_list(exec_state, number_of_new_moves);
+    validated_moves_add_to_move_list(new_validated_moves,
+                                     exec_state_get_move_list(exec_state));
+  }
+
+  validated_moves_destroy(new_validated_moves);
+
+  return move_validation_status;
+}
+
 void execute_command(ExecState *exec_state) {
   // This function assumes that the config
   // is already loaded
@@ -129,13 +193,47 @@ void execute_command(ExecState *exec_state) {
 
   if (config_get_ld(config)) {
     exec_state_init_game(exec_state);
-    if (config_get_command_set_cgp(config)) {
-      cgp_parse_status_t cgp_parse_status = game_load_cgp(
-          exec_state_get_game(exec_state), config_get_cgp(config));
+
+    // Update the game with the cgp, if
+    // it was specified in the config
+    const char *cgp = config_get_cgp(config);
+    if (cgp) {
+      Game *game = exec_state_get_game(exec_state);
+      // First duplicate the game so that potential
+      // cgp parse failures don't corrupt it.
+      Game *game_dupe = game_duplicate(game);
+      cgp_parse_status_t dupe_cgp_parse_status = game_load_cgp(game_dupe, cgp);
       set_or_clear_error_status(exec_state_get_error_status(exec_state),
                                 ERROR_STATUS_TYPE_CGP_LOAD,
-                                (int)cgp_parse_status);
-      if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+                                (int)dupe_cgp_parse_status);
+      game_destroy(game_dupe);
+      if (dupe_cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+        return;
+      } else {
+        // Now that the duplicate game has been successfully loaded
+        // with the cgp, load the actual game. A cgp parse failure
+        // here should be impossible (since the duplicated game
+        // was parsed without error) and is treated as a
+        // catastrophic error.
+        cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
+        if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
+          log_fatal("unexpected cgp load failure for: %s", cgp);
+        }
+      }
+      exec_state_reset_move_list(exec_state);
+    }
+
+    // Update the validated move list
+    // with new moves, if specified
+    const char *moves = config_get_moves(config);
+    if (moves) {
+      move_validation_status_t move_validation_status =
+          update_move_list(exec_state, moves);
+
+      if (move_validation_status != MOVE_VALIDATION_STATUS_SUCCESS) {
+        set_or_clear_error_status(exec_state_get_error_status(exec_state),
+                                  ERROR_STATUS_TYPE_MOVE_VALIDATION,
+                                  (int)move_validation_status);
         return;
       }
     }
@@ -150,6 +248,9 @@ void execute_command(ExecState *exec_state) {
     // Any command can potentially load
     // a CGP, so it is handled generically
     // above. No further processing is necessary.
+    break;
+  case COMMAND_TYPE_GEN:
+    execute_gen(config, exec_state);
     break;
   case COMMAND_TYPE_SIM:
     execute_sim(config, exec_state);
