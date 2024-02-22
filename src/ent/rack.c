@@ -21,7 +21,6 @@ void rack_reset(Rack *rack) {
 Rack *rack_create(int array_size) {
   Rack *rack = malloc_or_die(sizeof(Rack));
   rack->array_size = array_size;
-  rack->array = (int *)malloc_or_die(rack->array_size * sizeof(int));
   rack_reset(rack);
   return rack;
 }
@@ -44,7 +43,6 @@ void rack_destroy(Rack *rack) {
   if (!rack) {
     return;
   }
-  free(rack->array);
   free(rack);
 }
 

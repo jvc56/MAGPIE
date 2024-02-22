@@ -4,11 +4,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "../def/rack_defs.h"
 #include "letter_distribution.h"
 
 typedef struct Rack {
   int array_size;
-  int *array;
+  uint8_t array[MAX_ALPHABET_SIZE+1];
   bool empty;
   int number_of_letters;
 } Rack;
