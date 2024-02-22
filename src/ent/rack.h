@@ -4,22 +4,23 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "../def/rack_defs.h"
 #include "letter_distribution.h"
 
 typedef struct Rack {
-  int array_size;
-  int *array;
+  int dist_size;
+  int array[MAX_ALPHABET_SIZE];
   bool empty;
   int number_of_letters;
 } Rack;
 
-Rack *rack_create(int array_size);
+Rack *rack_create(int dist_size);
 void rack_destroy(Rack *rack);
 Rack *rack_duplicate(const Rack *rack);
 void rack_copy(Rack *dst, const Rack *src);
 void rack_reset(Rack *rack);
 
-static inline int rack_get_dist_size(const Rack *rack) { return rack->array_size; }
+static inline int rack_get_dist_size(const Rack *rack) { return rack->dist_size; }
 
 static inline int rack_get_letter(const Rack *rack, uint8_t machine_letter) {
   return rack->array[machine_letter];
