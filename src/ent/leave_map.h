@@ -15,8 +15,8 @@
 // one tile at a time in the LeaveMap.
 typedef struct LeaveMap {
   int rack_array_size;
-  double *leave_values;
-  int *letter_base_index_map;
+  double leave_values[1 << RACK_SIZE];
+  int letter_base_index_map[MAX_ALPHABET_SIZE];
   int current_index;
 } LeaveMap;
 

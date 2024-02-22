@@ -10,13 +10,8 @@
 #include "../util/util.h"
 
 LeaveMap *leave_map_create(int rack_array_size) {
-  int number_of_values = 1 << RACK_SIZE;
   LeaveMap *leave_map = malloc_or_die(sizeof(LeaveMap));
   leave_map->rack_array_size = rack_array_size;
-  leave_map->leave_values =
-      (double *)malloc_or_die(number_of_values * sizeof(double));
-  leave_map->letter_base_index_map =
-      (int *)malloc_or_die(leave_map->rack_array_size * sizeof(int));
   return leave_map;
 }
 
@@ -24,8 +19,6 @@ void leave_map_destroy(LeaveMap *leave_map) {
   if (!leave_map) {
     return;
   }
-  free(leave_map->leave_values);
-  free(leave_map->letter_base_index_map);
   free(leave_map);
 }
 
