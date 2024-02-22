@@ -11,28 +11,28 @@
 #include "../util/util.h"
 
 void rack_reset(Rack *rack) {
-  for (int i = 0; i < (rack->array_size); i++) {
+  for (int i = 0; i < rack->dist_size; i++) {
     rack->array[i] = 0;
   }
   rack->empty = true;
   rack->number_of_letters = 0;
 }
 
-Rack *rack_create(int array_size) {
+Rack *rack_create(int dist_size) {
   Rack *rack = malloc_or_die(sizeof(Rack));
-  rack->array_size = array_size;
+  rack->dist_size = dist_size;
   rack_reset(rack);
   return rack;
 }
 
 Rack *rack_duplicate(const Rack *rack) {
-  Rack *new_rack = rack_create(rack->array_size);
+  Rack *new_rack = rack_create(rack->dist_size);
   rack_copy(new_rack, rack);
   return new_rack;
 }
 
 void rack_copy(Rack *dst, const Rack *src) {
-  for (int i = 0; i < src->array_size; i++) {
+  for (int i = 0; i < src->dist_size; i++) {
     dst->array[i] = src->array[i];
   }
   dst->number_of_letters = src->number_of_letters;
@@ -60,7 +60,7 @@ int rack_get_score(const LetterDistribution *ld, const Rack *rack) {
 // This function is not in the critical path, so
 // we can leave it in the .c file unlike other rack functions.
 bool rack_subtract(Rack *rack_to_update, Rack *value_to_sub) {
-  for (int i = 0; i < rack_to_update->array_size; i++) {
+  for (int i = 0; i < rack_to_update->dist_size; i++) {
     if (rack_to_update->array[i] < value_to_sub->array[i]) {
       return false;
     }
@@ -89,11 +89,11 @@ bool racks_are_equal(const Rack *rack1, const Rack *rack2) {
   if (!rack1 && !rack2) {
     return true;
   }
-  if (!rack1 || !rack2 || rack1->array_size != rack2->array_size ||
+  if (!rack1 || !rack2 || rack1->dist_size != rack2->dist_size ||
       rack1->empty != rack2->empty) {
     return false;
   }
-  for (int i = 0; i < rack1->array_size; i++) {
+  for (int i = 0; i < rack1->dist_size; i++) {
     if (rack1->array[i] != rack2->array[i]) {
       return false;
     }
