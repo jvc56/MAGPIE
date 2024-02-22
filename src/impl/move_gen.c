@@ -813,10 +813,9 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
   }
 }
 
-void generate_moves(const Game *input_game, move_record_t move_record_type,
+void generate_moves(Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
                     MoveList *move_list) {
-  Game *game = game_duplicate(input_game);
   const LetterDistribution *ld = game_get_ld(game);
   MoveGen *gen = get_movegen(thread_index, ld_get_size(ld));
   int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -836,6 +835,8 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;
   gen->move_list = move_list;
+
+  bool initial_transposed_state = board_get_transposed(gen->board);
 
   // Reset the move list
   move_list_reset(gen->move_list);
@@ -924,5 +925,5 @@ void generate_moves(const Game *input_game, move_record_t move_record_type,
     move_list_set_spare_move_as_pass(gen->move_list);
     move_list_insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
   }
-  game_destroy(game);
+  board_set_transposed(gen->board, initial_transposed_state);
 }
