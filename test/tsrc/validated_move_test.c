@@ -433,6 +433,61 @@ void test_validated_move_success() {
   config_destroy(config);
 }
 
+void test_validated_move_score() {
+  // The validated move scoring uses different
+  // code than move generation, so it must be tested
+  // separately.
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+  ValidatedMoves *vms = NULL;
+
+  vms = assert_validated_move_success(game, VS_ED, "5B.AIRGLOWS,5c.REGLOWS", 0,
+                                      false);
+  assert(validated_moves_get_number_of_moves(vms) == 2);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 12);
+  assert(move_get_score(validated_moves_get_move(vms, 1)) == 11);
+  validated_moves_destroy(vms);
+
+  vms = assert_validated_move_success(game, VS_MATT,
+                                      "15c.AVENGED,1L.FA,K9.TAEL,b10.BEHEAD,K9."
+                                      "TAE,K11.ED,K10.AE,K11.ETA,B9.BATHED",
+                                      0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 9);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 12);
+  assert(move_get_score(validated_moves_get_move(vms, 1)) == 5);
+  assert(move_get_score(validated_moves_get_move(vms, 2)) == 38);
+  assert(move_get_score(validated_moves_get_move(vms, 3)) == 36);
+  assert(move_get_score(validated_moves_get_move(vms, 4)) == 34);
+  assert(move_get_score(validated_moves_get_move(vms, 5)) == 33);
+  assert(move_get_score(validated_moves_get_move(vms, 6)) == 30);
+  assert(move_get_score(validated_moves_get_move(vms, 7)) == 34);
+  assert(move_get_score(validated_moves_get_move(vms, 8)) == 28);
+  validated_moves_destroy(vms);
+
+  vms = assert_validated_move_success(game, VS_JEREMY,
+                                      "14B.hEaDWORDS,14B.hEaDWORD", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 2);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 106);
+  assert(move_get_score(validated_moves_get_move(vms, 1)) == 38);
+  validated_moves_destroy(vms);
+
+  vms = assert_validated_move_success(game, VS_OXY,
+                                      "A1.OXYPHENBUTAZONE,A12.ZONE", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 2);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 1780);
+  assert(move_get_score(validated_moves_get_move(vms, 1)) == 160);
+  validated_moves_destroy(vms);
+
+  vms = assert_validated_move_success(game, EMPTY_CGP, "8C.OVERDOG", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 1);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 82);
+  validated_moves_destroy(vms);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_validated_move_distinct_kwg() {
   Config *config =
       create_config_or_die("setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity "
@@ -556,6 +611,7 @@ void test_validated_move_many() {
 void test_validated_move() {
   test_validated_move_errors();
   test_validated_move_success();
+  test_validated_move_score();
   test_validated_move_distinct_kwg();
   test_validated_move_many();
 }
