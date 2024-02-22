@@ -255,30 +255,12 @@ void generate_exchange_moves(Generator *gen, Player *player, Rack *leave,
          player->rack->array[ml] == 0) {
     ml++;
   }
-  // printf("ml: %d\n", ml);
-  // printf("current_index: %d, player->rack->number_of_letters: %d\n",
-  //       gen->leave_map->current_index, player->rack->number_of_letters);
   if (ml == (gen->letter_distribution->size)) {
-    /*
-        StringBuilder *s1 = create_string_builder();
-        string_builder_add_rack(player->rack, gen->letter_distribution, s1);
-        StringBuilder *s2 = create_string_builder();
-        string_builder_add_rack(leave, gen->letter_distribution, s2);
-        printf("exchanged: %s leave: %s\n", string_builder_peek(s1),
-               string_builder_peek(s2));
-        destroy_string_builder(s1);
-        destroy_string_builder(s2);
-    */
     if (player->rack->number_of_letters > 0) {
-      // printf("  gen->leave_map->current_index: %d\n",
-      //        gen->leave_map->current_index);
       double value = 0.0;
       if (word_index > 0) {
         value = player->strategy_params->klv->leave_values[word_index - 1];
       }
-      // printf("  incremental value: %f\n", value);
-      //   value = get_leave_value(player->strategy_params->klv, player->rack);
-      //   printf("value from root: %f\n", value);
       set_current_value(gen->leave_map, value);
       if (value > gen->best_leaves[leave->number_of_letters]) {
         gen->best_leaves[leave->number_of_letters] = value;
@@ -293,15 +275,11 @@ void generate_exchange_moves(Generator *gen, Player *player, Rack *leave,
     int num_this = player->rack->array[ml];
     for (int i = 0; i < num_this; i++) {
       add_letter_to_rack(leave, ml);
-      // add_letter_and_update_current_index(gen->leave_map, player->rack, ml);
-      take_letter_and_update_complement_index(gen->leave_map, player->rack,
-                                              leave, ml);
+      take_letter_and_update_complement_index(gen->leave_map, player->rack, ml);
       int32_t next_word_index;
       int32_t next_node_index =
           increment_node_to_ml(player->strategy_params->klv, node_index,
                                word_index, &next_word_index, ml);
-      // printf("next_word_index: %d next_node_index: %d\n", next_word_index,
-      //        next_node_index);
       node_index = next_node_index;
       word_index = next_word_index;
       {
@@ -309,8 +287,6 @@ void generate_exchange_moves(Generator *gen, Player *player, Rack *leave,
         int32_t next_node_index =
             follow_arc(player->strategy_params->klv, node_index, word_index,
                        &next_word_index);
-        // printf("next_word_index: %d next_node_index: %d\n", next_word_index,
-        //        next_node_index);
         node_index = next_node_index;
         word_index = next_word_index;
       }
@@ -320,9 +296,7 @@ void generate_exchange_moves(Generator *gen, Player *player, Rack *leave,
 
     for (int i = 0; i < num_this; i++) {
       take_letter_from_rack(leave, ml);
-      // take_letter_and_update_current_index(gen->leave_map, player->rack, ml);
-      add_letter_and_update_complement_index(gen->leave_map, player->rack,
-                                             leave, ml);
+      add_letter_and_update_complement_index(gen->leave_map, player->rack, ml);
     }
   }
 }

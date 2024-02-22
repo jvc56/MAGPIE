@@ -41,24 +41,22 @@ void add_letter_and_update_current_index(LeaveMap *leave_map, Rack *rack,
 }
 
 void take_letter_and_update_complement_index(LeaveMap *leave_map, Rack *rack,
-                                             Rack *leave, uint8_t letter) {
+                                             uint8_t letter) {
   take_letter_from_rack(rack, letter);
   int base_index = leave_map->letter_base_index_map[letter];
   int offset = rack->array[letter];
   int bit_index = base_index + offset;
   int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
-  //printf("setting bit %d\n", leave_map->reversed_letter_bit_map[bit_index]);
   leave_map->current_index |= reversed_bit;
 }
 
 void add_letter_and_update_complement_index(LeaveMap *leave_map, Rack *rack,
-                                            Rack *leave, uint8_t letter) {
+                                            uint8_t letter) {
   add_letter_to_rack(rack, letter);
   int base_index = leave_map->letter_base_index_map[letter];
   int offset = rack->array[letter] - 1;
   int bit_index = base_index + offset;
   int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
-  //printf("unsetting bit %d\n", leave_map->reversed_letter_bit_map[bit_index]);
   leave_map->current_index &= ~reversed_bit;
 }
 
