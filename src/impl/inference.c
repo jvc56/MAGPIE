@@ -33,7 +33,7 @@ typedef struct Inference {
   // The following fields are owned by the caller
 
   // Game used by the inference to generate moves
-  Game *game;
+  const Game *game;
   // KLV used to evaluate leaves to determine
   // which moves are top equity. This should be
   // the KLV of the target.
@@ -90,7 +90,6 @@ void destroy_inference(Inference *inference) {
 }
 
 void destroy_inference_copy(Inference *inference) {
-  game_destroy(inference->game);
   inference_results_destroy(inference->results);
   destroy_inference(inference);
 }
@@ -213,7 +212,7 @@ void decrement_letter_for_inference(Inference *inference, uint8_t letter) {
   rack_take_letter(inference->current_target_leave, letter);
 }
 
-Inference *inference_create(const Rack *target_played_tiles, Game *game,
+Inference *inference_create(const Rack *target_played_tiles, const Game *game,
                             int move_capacity, int target_index,
                             int target_score,
                             int target_number_of_tiles_exchanged,
@@ -287,7 +286,7 @@ Inference *inference_create(const Rack *target_played_tiles, Game *game,
 Inference *inference_duplicate(const Inference *inference, int thread_index,
                                ThreadControl *thread_control) {
   Inference *new_inference = malloc_or_die(sizeof(Inference));
-  new_inference->game = game_duplicate(inference->game);
+  new_inference->game = inference->game;
   new_inference->move_list = move_list_create(1);
   new_inference->klv = player_get_klv(
       game_get_player(new_inference->game, inference->target_index));
@@ -543,7 +542,7 @@ inference_status_t verify_inference(const Inference *inference) {
   return INFERENCE_STATUS_SUCCESS;
 }
 
-inference_status_t infer(const Config *config, const Game *input_game,
+inference_status_t infer(const Config *config, const Game *game,
                          InferenceResults *results) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
@@ -554,8 +553,6 @@ inference_status_t infer(const Config *config, const Game *input_game,
   if (!config_target_played_tiles) {
     return INFERENCE_STATUS_NO_TILES_PLAYED;
   }
-
-  Game *game = game_duplicate(input_game);
 
   Inference *inference = inference_create(
       config_target_played_tiles, game, config_get_num_plays(config),
@@ -591,7 +588,6 @@ inference_status_t infer(const Config *config, const Game *input_game,
     }
   }
 
-  game_destroy(game);
   destroy_inference(inference);
   gen_destroy_cache();
 

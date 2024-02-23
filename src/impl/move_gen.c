@@ -44,6 +44,7 @@ typedef struct MoveGen {
   int number_of_tiles_in_bag;
   int player_index;
   bool kwgs_are_shared;
+  bool transposed;
 
   uint8_t row_letter_cache[(BOARD_DIM)];
   bool is_cross_word_cache[(BOARD_DIM)];
@@ -68,17 +69,16 @@ typedef struct MoveGen {
   int descending_tile_scores[(RACK_SIZE)];
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
+  uint8_t tile_scores[(MAX_ALPHABET_SIZE)];
 
   // Owned by the caller
   const LetterDistribution *ld;
-  uint8_t tile_scores[(MAX_ALPHABET_SIZE)];
   const KLV *klv;
   const KWG *kwg;
   const Rack *opponent_rack;
+  const Board *board;
   // Player rack is modified when generating exchanges
   Rack *player_rack;
-  // Board is transposed during move generation
-  Board *board;
   // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
@@ -95,6 +95,7 @@ MoveGen *create_generator(int ld_size) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
   generator->anchor_list = anchor_list_create();
   generator->leave_map = leave_map_create(ld_size);
+  generator->player_rack = rack_create(ld_size);
   generator->tiles_played = 0;
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
   generator->exchange_strip =
@@ -108,6 +109,7 @@ void destroy_generator(MoveGen *gen) {
   }
   anchor_list_destroy(gen->anchor_list);
   leave_map_destroy(gen->leave_map);
+  rack_destroy(gen->player_rack);
   free(gen->exchange_strip);
   free(gen);
 }
@@ -139,8 +141,10 @@ AnchorList *gen_get_anchor_list(int thread_index) {
 static inline void load_is_cross_word_cache(MoveGen *gen, int row) {
   for (int col = 0; col < BOARD_DIM; col++) {
     gen->is_cross_word_cache[col] =
-        (row > 0 && !board_is_empty(gen->board, row - 1, col)) ||
-        ((row < BOARD_DIM - 1) && !board_is_empty(gen->board, row + 1, col));
+        (row > 0 &&
+         !board_is_empty(gen->board, row - 1, col, gen->transposed)) ||
+        ((row < BOARD_DIM - 1) &&
+         !board_is_empty(gen->board, row + 1, col, gen->transposed));
   }
 }
 
@@ -154,21 +158,23 @@ static inline void load_is_anchor_cache(MoveGen *gen) {
       const int anchorless_row_index = get_anchorless_row_index(row, dir);
       gen->is_anchorless_row_cache[anchorless_row_index] = true;
       for (int col = 0; col < BOARD_DIM; col++) {
-        const bool is_anchor = board_get_anchor(gen->board, row, col, dir);
-        gen->is_anchor_cache[board_get_tindex_dir(gen->board, row, col, dir)] =
-            is_anchor;
+        const bool is_anchor =
+            board_get_anchor(gen->board, row, col, dir, gen->transposed);
+        gen->is_anchor_cache[board_get_tindex_dir(row, col, dir,
+                                                  gen->transposed)] = is_anchor;
         if (is_anchor) {
           gen->is_anchorless_row_cache[anchorless_row_index] = false;
         }
       }
     }
-    board_transpose(gen->board);
+    gen->transposed = !gen->transposed;
   }
 }
 
 static inline bool get_is_anchor_cache(MoveGen *gen, int row, int col,
                                        int dir) {
-  return gen->is_anchor_cache[board_get_tindex_dir(gen->board, row, col, dir)];
+  return gen
+      ->is_anchor_cache[board_get_tindex_dir(row, col, dir, gen->transposed)];
 }
 
 static inline bool cached_is_cross_word(MoveGen *gen, int col) {
@@ -177,7 +183,8 @@ static inline bool cached_is_cross_word(MoveGen *gen, int col) {
 
 static inline void load_bonus_square_cache(MoveGen *gen, int row) {
   for (int col = 0; col < BOARD_DIM; col++) {
-    gen->bonus_square_cache[col] = board_get_bonus_square(gen->board, row, col);
+    gen->bonus_square_cache[col] =
+        board_get_bonus_square(gen->board, row, col, gen->transposed);
   }
 }
 
@@ -188,8 +195,8 @@ static inline uint8_t get_bonus_square_cache(const MoveGen *gen, int col) {
 static inline void load_cross_set_cache(MoveGen *gen, int row, int cs_dir,
                                         int cross_set_index) {
   for (int col = 0; col < BOARD_DIM; col++) {
-    gen->cross_set_cache[col] =
-        board_get_cross_set(gen->board, row, col, cs_dir, cross_set_index);
+    gen->cross_set_cache[col] = board_get_cross_set(
+        gen->board, row, col, cs_dir, cross_set_index, gen->transposed);
   }
 }
 
@@ -200,8 +207,9 @@ static inline uint64_t get_cross_set_cache(const MoveGen *gen, int col) {
 static inline void load_hz_cross_set_cache(MoveGen *gen, int row,
                                            int cross_set_index) {
   for (int col = 0; col < BOARD_DIM; col++) {
-    gen->hz_cross_set_cache[col] = board_get_cross_set(
-        gen->board, row, col, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+    gen->hz_cross_set_cache[col] =
+        board_get_cross_set(gen->board, row, col, BOARD_HORIZONTAL_DIRECTION,
+                            cross_set_index, gen->transposed);
   }
 }
 
@@ -212,8 +220,8 @@ static inline uint64_t get_hz_cross_set_cache(const MoveGen *gen, int col) {
 static inline void load_cross_score_cache(MoveGen *gen, int row, int cs_dir,
                                           int cross_set_index) {
   for (int col = 0; col < BOARD_DIM; col++) {
-    gen->cross_score_cache[col] =
-        board_get_cross_score(gen->board, row, col, cs_dir, cross_set_index);
+    gen->cross_score_cache[col] = board_get_cross_score(
+        gen->board, row, col, cs_dir, cross_set_index, gen->transposed);
   }
 }
 
@@ -320,7 +328,8 @@ void generate_exchange_moves(MoveGen *gen, uint8_t ml, int stripidx,
 
 static inline void load_row_letter_cache(MoveGen *gen, int row) {
   for (int col = 0; col < BOARD_DIM; col++) {
-    gen->row_letter_cache[col] = board_get_letter(gen->board, row, col);
+    gen->row_letter_cache[col] =
+        board_get_letter(gen->board, row, col, gen->transposed);
   }
 }
 
@@ -765,7 +774,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
   anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
-                         gen->last_anchor_col, board_get_transposed(gen->board),
+                         gen->last_anchor_col, gen->transposed,
                          board_is_dir_vertical(gen->dir),
                          gen->highest_shadow_equity);
 }
@@ -813,14 +822,14 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
   }
 }
 
-void generate_moves(Game *game, move_record_t move_record_type,
+void generate_moves(const Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
                     MoveList *move_list) {
   const LetterDistribution *ld = game_get_ld(game);
   MoveGen *gen = get_movegen(thread_index, ld_get_size(ld));
   int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+  const Player *player = game_get_player(game, player_on_turn_index);
+  const Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
   gen->ld = ld;
   gen->kwg = player_get_kwg(player);
@@ -828,15 +837,14 @@ void generate_moves(Game *game, move_record_t move_record_type,
   gen->opponent_rack = player_get_rack(opponent);
   gen->board = game_get_board(game);
   gen->player_index = player_on_turn_index;
-  gen->player_rack = player_get_rack(player);
+  rack_copy(gen->player_rack, player_get_rack(player));
 
   gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_sort_type = move_sort_type;
   gen->move_record_type = move_record_type;
   gen->move_list = move_list;
-
-  bool initial_transposed_state = board_get_transposed(gen->board);
+  gen->transposed = false;
 
   // Reset the move list
   move_list_reset(gen->move_list);
@@ -874,7 +882,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir % 2 != 0;
     shadow_by_orientation(gen, dir);
-    board_transpose(gen->board);
+    gen->transposed = !gen->transposed;
   }
 
   // Reset the reused generator fields
@@ -894,7 +902,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->current_row_index = anchor_get_row(anchor_list, i);
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
-    board_set_transposed(gen->board, anchor_get_transposed(anchor_list, i));
+    gen->transposed = anchor_get_transposed(anchor_list, i);
     load_row_letter_cache(gen, gen->current_row_index);
     load_bonus_square_cache(gen, gen->current_row_index);
     load_is_cross_word_cache(gen, gen->current_row_index);
@@ -925,5 +933,4 @@ void generate_moves(Game *game, move_record_t move_record_type,
     move_list_set_spare_move_as_pass(gen->move_list);
     move_list_insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
   }
-  board_set_transposed(gen->board, initial_transposed_state);
 }

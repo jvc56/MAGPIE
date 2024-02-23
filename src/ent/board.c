@@ -31,8 +31,8 @@ void board_update_anchors(Board *board, int row, int col, int dir) {
     col = temp;
   }
 
-  board_reset_anchor(board, row, col, 0);
-  board_reset_anchor(board, row, col, 1);
+  board_reset_anchor(board, row, col, 0, false);
+  board_reset_anchor(board, row, col, 1, false);
   bool tile_above = false;
   bool tile_below = false;
   bool tile_left = false;
@@ -40,31 +40,31 @@ void board_update_anchors(Board *board, int row, int col, int dir) {
   bool tile_here = false;
 
   if (row > 0) {
-    tile_above = !board_is_empty(board, row - 1, col);
+    tile_above = !board_is_empty(board, row - 1, col, false);
   }
   if (col > 0) {
-    tile_left = !board_is_empty(board, row, col - 1);
+    tile_left = !board_is_empty(board, row, col - 1, false);
   }
   if (row < BOARD_DIM - 1) {
-    tile_below = !board_is_empty(board, row + 1, col);
+    tile_below = !board_is_empty(board, row + 1, col, false);
   }
   if (col < BOARD_DIM - 1) {
-    tile_right = !board_is_empty(board, row, col + 1);
+    tile_right = !board_is_empty(board, row, col + 1, false);
   }
-  tile_here = !board_is_empty(board, row, col);
+  tile_here = !board_is_empty(board, row, col, false);
   if (tile_here) {
     if (!tile_right) {
-      board_set_anchor(board, row, col, 0);
+      board_set_anchor(board, row, col, 0, false);
     }
     if (!tile_below) {
-      board_set_anchor(board, row, col, 1);
+      board_set_anchor(board, row, col, 1, false);
     }
   } else {
     if (!tile_left && !tile_right && (tile_above || tile_below)) {
-      board_set_anchor(board, row, col, 0);
+      board_set_anchor(board, row, col, 0, false);
     }
     if (!tile_above && !tile_below && (tile_left || tile_right)) {
-      board_set_anchor(board, row, col, 1);
+      board_set_anchor(board, row, col, 1, false);
     }
   }
 }
@@ -79,12 +79,12 @@ void board_update_all_anchors(Board *board) {
   } else {
     for (int i = 0; i < BOARD_DIM; i++) {
       for (int j = 0; j < BOARD_DIM; j++) {
-        board_reset_anchor(board, i, j, 0);
-        board_reset_anchor(board, i, j, 1);
+        board_reset_anchor(board, i, j, 0, false);
+        board_reset_anchor(board, i, j, 1, false);
       }
     }
     int rc = BOARD_DIM / 2;
-    board_set_anchor(board, rc, rc, 0);
+    board_set_anchor(board, rc, rc, 0, false);
   }
 }
 
@@ -92,11 +92,10 @@ void board_reset(Board *board) {
   // The transposed field must be set to 0 here because
   // it is used to calculate the index for board_set_letter.
   board->tiles_played = 0;
-  board->transposed = false;
 
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
-      board_set_letter(board, i, j, ALPHABET_EMPTY_SQUARE_MARKER);
+      board_set_letter(board, i, j, ALPHABET_EMPTY_SQUARE_MARKER, false);
     }
   }
 
@@ -149,34 +148,31 @@ Board *board_duplicate(const Board *board) {
 }
 
 // Copies the letters, cross sets, anchors,
-// transposed state, and number of tiles played
+// and number of tiles played
 // from src to dst. Does not copy bonus squares
 // since it is assumed that src and dst have the
 // same bonus squares.
 void board_copy(Board *dst, const Board *src) {
-  // Transposed must be set before copying
-  // since the get and set methods use board_transpose
-  // for access.
-  dst->transposed = src->transposed;
   dst->tiles_played = src->tiles_played;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      board_set_letter(dst, row, col, board_get_letter(src, row, col));
+      board_set_letter(dst, row, col, board_get_letter(src, row, col, false),
+                       false);
       for (int dir = 0; dir < 2; dir++) {
-        if (board_get_anchor(src, row, col, dir)) {
-          board_set_anchor(dst, row, col, dir);
+        if (board_get_anchor(src, row, col, dir, false)) {
+          board_set_anchor(dst, row, col, dir, false);
         } else {
-          board_reset_anchor(dst, row, col, dir);
+          board_reset_anchor(dst, row, col, dir, false);
         }
         for (int cross_set_index = 0; cross_set_index < 2; cross_set_index++) {
           board_set_cross_set(
               dst, row, col,
-              board_get_cross_set(src, row, col, dir, cross_set_index), dir,
-              cross_set_index);
+              board_get_cross_set(src, row, col, dir, cross_set_index, false),
+              dir, cross_set_index, false);
           board_set_cross_score(
               dst, row, col,
-              board_get_cross_score(src, row, col, dir, cross_set_index), dir,
-              cross_set_index);
+              board_get_cross_score(src, row, col, dir, cross_set_index, false),
+              dir, cross_set_index, false);
         }
       }
     }

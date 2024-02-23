@@ -118,11 +118,11 @@ void game_start_next_player_turn(Game *game) {
 }
 
 int traverse_backwards_for_score(const Board *board,
-                                 const LetterDistribution *ld, int row,
-                                 int col) {
+                                 const LetterDistribution *ld, int row, int col,
+                                 bool transposed) {
   int score = 0;
   while (board_is_position_valid(row, col)) {
-    uint8_t ml = board_get_letter(board, row, col);
+    uint8_t ml = board_get_letter(board, row, col, transposed);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
     }
@@ -138,9 +138,9 @@ int traverse_backwards_for_score(const Board *board,
 
 void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
                         uint32_t node_index, bool check_letter_set,
-                        int left_most_col) {
+                        int left_most_col, bool transposed) {
   while (board_is_position_valid(row, col)) {
-    uint8_t ml = board_get_letter(board, row, col);
+    uint8_t ml = board_get_letter(board, row, col, transposed);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
     }
@@ -173,7 +173,7 @@ void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
 }
 
 void game_gen_cross_set(Game *game, int row, int col, int dir,
-                        int cross_set_index) {
+                        int cross_set_index, bool transposed) {
   if (!board_is_position_valid(row, col)) {
     return;
   }
@@ -182,57 +182,63 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
   const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
 
-  if (!board_is_empty(board, row, col)) {
-    board_set_cross_set(board, row, col, 0, dir, cross_set_index);
-    board_set_cross_score(board, row, col, 0, dir, cross_set_index);
+  if (!board_is_empty(board, row, col, transposed)) {
+    board_set_cross_set(board, row, col, 0, dir, cross_set_index, transposed);
+    board_set_cross_score(board, row, col, 0, dir, cross_set_index, transposed);
     return;
   }
-  if (board_are_left_and_right_empty(board, row, col)) {
+  if (board_are_left_and_right_empty(board, row, col, transposed)) {
     board_set_cross_set(board, row, col, TRIVIAL_CROSS_SET, dir,
-                        cross_set_index);
-    board_set_cross_score(board, row, col, 0, dir, cross_set_index);
+                        cross_set_index, transposed);
+    board_set_cross_score(board, row, col, 0, dir, cross_set_index, transposed);
     return;
   }
 
-  int right_col =
-      board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
+  int right_col = board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT,
+                                      transposed);
   if (right_col == col) {
     traverse_backwards(kwg, board, row, col - 1, kwg_get_root_node_index(kwg),
-                       false, 0);
+                       false, 0, transposed);
     uint32_t lnode_index = board_get_node_index(board);
     int lpath_is_valid = board_get_path_is_valid(board);
-    int score = traverse_backwards_for_score(board, ld, row, col - 1);
-    board_set_cross_score(board, row, col, score, dir, cross_set_index);
+    int score =
+        traverse_backwards_for_score(board, ld, row, col - 1, transposed);
+    board_set_cross_score(board, row, col, score, dir, cross_set_index,
+                          transposed);
 
     if (!lpath_is_valid) {
-      board_set_cross_set(board, row, col, 0, dir, cross_set_index);
+      board_set_cross_set(board, row, col, 0, dir, cross_set_index, transposed);
       return;
     }
     uint32_t s_index =
         kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
     uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
-    board_set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+    board_set_cross_set(board, row, col, letter_set, dir, cross_set_index,
+                        transposed);
   } else {
-    int left_col =
-        board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
+    int left_col = board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT,
+                                       transposed);
     traverse_backwards(kwg, board, row, right_col, kwg_get_root_node_index(kwg),
-                       false, 0);
+                       false, 0, transposed);
     uint32_t lnode_index = board_get_node_index(board);
     int lpath_is_valid = board_get_path_is_valid(board);
-    int score_r = traverse_backwards_for_score(board, ld, row, right_col);
-    int score_l = traverse_backwards_for_score(board, ld, row, col - 1);
+    int score_r =
+        traverse_backwards_for_score(board, ld, row, right_col, transposed);
+    int score_l =
+        traverse_backwards_for_score(board, ld, row, col - 1, transposed);
     board_set_cross_score(board, row, col, score_r + score_l, dir,
-                          cross_set_index);
+                          cross_set_index, transposed);
     if (!lpath_is_valid) {
-      board_set_cross_set(board, row, col, 0, dir, cross_set_index);
+      board_set_cross_set(board, row, col, 0, dir, cross_set_index, transposed);
       return;
     }
     if (left_col == col) {
       uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
-      board_set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+      board_set_cross_set(board, row, col, letter_set, dir, cross_set_index,
+                          transposed);
     } else {
-      uint64_t *cross_set =
-          board_get_cross_set_pointer(board, row, col, dir, cross_set_index);
+      uint64_t *cross_set = board_get_cross_set_pointer(
+          board, row, col, dir, cross_set_index, transposed);
       *cross_set = 0;
       for (int i = lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
@@ -240,7 +246,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
         if (t != 0) {
           int next_node_index = kwg_node_arc_index(node);
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
-                             left_col);
+                             left_col, transposed);
           if (board_get_path_is_valid(board)) {
             board_set_cross_set_letter(cross_set, t);
           }
@@ -254,27 +260,23 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
 }
 
 void game_gen_all_cross_sets(Game *game) {
-  Board *board = game_get_board(game);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
-      game_gen_cross_set(game, i, j, 0, 0);
+      game_gen_cross_set(game, i, j, 0, 0, false);
       if (!kwgs_are_shared) {
-        game_gen_cross_set(game, i, j, 0, 1);
+        game_gen_cross_set(game, i, j, 0, 1, false);
       }
     }
   }
-  board_transpose(board);
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
-      game_gen_cross_set(game, i, j, 1, 0);
+      game_gen_cross_set(game, i, j, 1, 0, true);
       if (!kwgs_are_shared) {
-        game_gen_cross_set(game, i, j, 1, 1);
+        game_gen_cross_set(game, i, j, 1, 1, true);
       }
     }
   }
-  board_transpose(board);
 }
 
 cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
@@ -292,7 +294,7 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
   } else {
     for (int i = 0; i < number_of_machine_letters; i++) {
       board_set_letter(game->board, row_start, col_start + i,
-                       machine_letters[i]);
+                       machine_letters[i], false);
       // When placing letters on the board, we
       // assume that player 0 placed all of the tiles
       // for convenience.

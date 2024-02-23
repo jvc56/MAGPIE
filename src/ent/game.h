@@ -44,7 +44,7 @@ void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);
 void game_gen_all_cross_sets(Game *game);
 void game_gen_cross_set(Game *game, int row, int col, int dir,
-                        int cross_set_index);
+                        int cross_set_index, bool transposed);
 cgp_parse_status_t game_load_cgp(Game *game, const char *cgp);
 
 #endif

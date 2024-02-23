@@ -35,7 +35,7 @@ int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i);
 bool validated_moves_get_challenge_turn_loss(const ValidatedMoves *vms, int i);
 
 int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
-                               Board *board, int cross_set_index);
+                               const Board *board, int cross_set_index);
 void validated_moves_add_to_move_list(const ValidatedMoves *vms, MoveList *ml);
 
 #endif

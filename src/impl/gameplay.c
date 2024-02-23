@@ -44,9 +44,10 @@ void play_move_on_board(const Move *move, Game *game) {
     if (letter == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    board_set_letter(
-        board, move_get_row_start(move) + move_get_dir(move) * idx,
-        move_get_col_start(move) + ((1 - move_get_dir(move)) * idx), letter);
+    board_set_letter(board, move_get_row_start(move) + move_get_dir(move) * idx,
+                     move_get_col_start(move) +
+                         ((1 - move_get_dir(move)) * idx),
+                     letter, false);
     if (get_is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
     }
@@ -84,7 +85,7 @@ void play_move_on_board(const Move *move, Game *game) {
 }
 
 void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
-                     int csd) {
+                     int csd, bool transposed) {
   for (int row = row_start; row < move_get_tiles_length(move) + row_start;
        row++) {
     if (move_get_tile(move, row - row_start) == PLAYED_THROUGH_MARKER) {
@@ -93,51 +94,47 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
 
     Board *board = game_get_board(game);
     bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-    int right_col =
-        board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
-    int left_col =
-        board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
-    game_gen_cross_set(game, row, right_col + 1, csd, 0);
-    game_gen_cross_set(game, row, left_col - 1, csd, 0);
-    game_gen_cross_set(game, row, col_start, csd, 0);
+    int right_col = board_get_word_edge(board, row, col_start,
+                                        WORD_DIRECTION_RIGHT, transposed);
+    int left_col = board_get_word_edge(board, row, col_start,
+                                       WORD_DIRECTION_LEFT, transposed);
+    game_gen_cross_set(game, row, right_col + 1, csd, 0, transposed);
+    game_gen_cross_set(game, row, left_col - 1, csd, 0, transposed);
+    game_gen_cross_set(game, row, col_start, csd, 0, transposed);
     if (!kwgs_are_shared) {
-      game_gen_cross_set(game, row, right_col + 1, csd, 1);
-      game_gen_cross_set(game, row, left_col - 1, csd, 1);
-      game_gen_cross_set(game, row, col_start, csd, 1);
+      game_gen_cross_set(game, row, right_col + 1, csd, 1, transposed);
+      game_gen_cross_set(game, row, left_col - 1, csd, 1, transposed);
+      game_gen_cross_set(game, row, col_start, csd, 1, transposed);
     }
   }
 }
 
 void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
-                   int csd) {
+                   int csd, bool transposed) {
   for (int col = col_start - 1; col <= col_start + move_get_tiles_length(move);
        col++) {
-    game_gen_cross_set(game, row_start, col, csd, 0);
+    game_gen_cross_set(game, row_start, col, csd, 0, transposed);
   }
   if (!game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
     for (int col = col_start - 1;
          col <= col_start + move_get_tiles_length(move); col++) {
-      game_gen_cross_set(game, row_start, col, csd, 1);
+      game_gen_cross_set(game, row_start, col, csd, 1, transposed);
     }
   }
 }
 
 void update_cross_set_for_move(const Move *move, Game *game) {
-  Board *board = game_get_board(game);
   if (board_is_dir_vertical(move_get_dir(move))) {
     calc_for_across(move, game, move_get_row_start(move),
-                    move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION);
-    board_transpose(board);
+                    move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION,
+                    false);
     calc_for_self(move, game, move_get_col_start(move),
-                  move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
+                  move_get_row_start(move), BOARD_VERTICAL_DIRECTION, true);
   } else {
     calc_for_self(move, game, move_get_row_start(move),
-                  move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION);
-    board_transpose(board);
+                  move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION, false);
     calc_for_across(move, game, move_get_col_start(move),
-                    move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
+                    move_get_row_start(move), BOARD_VERTICAL_DIRECTION, true);
   }
 }
 
@@ -228,7 +225,7 @@ void play_move(const Move *move, Game *game) {
   }
 }
 
-void generate_moves_for_game(Game *game, int thread_index,
+void generate_moves_for_game(const Game *game, int thread_index,
                              MoveList *move_list) {
   Player *player_on_turn =
       game_get_player(game, game_get_player_on_turn_index(game));
@@ -237,7 +234,8 @@ void generate_moves_for_game(Game *game, int thread_index,
                  move_list);
 }
 
-Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
+Move *get_top_equity_move(const Game *game, int thread_index,
+                          MoveList *move_list) {
   generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, thread_index,
                  move_list);
   return move_list_get_move(move_list, 0);

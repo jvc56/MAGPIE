@@ -91,10 +91,11 @@ move_validation_status_t validate_coordinates(Move *move,
 }
 
 bool play_connects(const Board *board, int row, int col) {
-  return !board_are_all_adjacent_squares_empty(board, row, col) ||
+  return !board_are_all_adjacent_squares_empty(board, row, col, false) ||
          (board_get_tiles_played(board) == 0 &&
-          (board_get_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION) ||
-           board_get_anchor(board, row, col, BOARD_VERTICAL_DIRECTION)));
+          (board_get_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION,
+                            false) ||
+           board_get_anchor(board, row, col, BOARD_VERTICAL_DIRECTION, false)));
 }
 
 move_validation_status_t validate_tiles_played_with_mls(
@@ -129,7 +130,8 @@ move_validation_status_t validate_tiles_played_with_mls(
       if (!board_is_position_valid(current_row, current_col)) {
         return MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS;
       }
-      uint8_t board_letter = board_get_letter(board, current_row, current_col);
+      uint8_t board_letter =
+          board_get_letter(board, current_row, current_col, false);
       uint8_t ml = machine_letters[i];
       if (board_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         move_set_tile(move, ml, i);
@@ -419,7 +421,7 @@ move_validation_status_t validated_move_load(ValidatedMove *vm,
   const LetterDistribution *ld = game_get_ld(game);
   const Player *player = game_get_player(game, player_index);
   const KLV *klv = player_get_klv(player);
-  Board *board = game_get_board(game);
+  const Board *board = game_get_board(game);
   int score = 0;
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {

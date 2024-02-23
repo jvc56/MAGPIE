@@ -16,22 +16,22 @@ void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
   Board *board = game_get_board(game);
 
   board_clear_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
-                        cross_set_index);
+                        cross_set_index, false);
   board_set_cross_set_letter(
       board_get_cross_set_pointer(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
-                                  cross_set_index),
+                                  cross_set_index, false),
       13);
   assert(board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
-                             cross_set_index) == 8192);
+                             cross_set_index, false) == 8192);
   board_set_cross_set_letter(
       board_get_cross_set_pointer(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
-                                  cross_set_index),
+                                  cross_set_index, false),
       0);
   assert(board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
-                             cross_set_index) == 8193);
+                             cross_set_index, false) == 8193);
 
   uint64_t cs = board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
-                                    cross_set_index);
+                                    cross_set_index, false);
   assert(!board_is_letter_allowed_in_cross_set(cs, 1));
   assert(board_is_letter_allowed_in_cross_set(cs, 0));
   assert(!board_is_letter_allowed_in_cross_set(cs, 14));
@@ -47,11 +47,12 @@ void test_board() {
 
   game_load_cgp(game, VS_ED);
 
-  assert(!board_get_anchor(board, 3, 3, 0) &&
-         !board_get_anchor(board, 3, 3, 1));
-  assert(board_get_anchor(board, 12, 12, 0) &&
-         board_get_anchor(board, 12, 12, 1));
-  assert(board_get_anchor(board, 4, 3, 1) && !board_get_anchor(board, 4, 3, 0));
+  assert(!board_get_anchor(board, 3, 3, 0, false) &&
+         !board_get_anchor(board, 3, 3, 1, false));
+  assert(board_get_anchor(board, 12, 12, 0, false) &&
+         board_get_anchor(board, 12, 12, 1, false));
+  assert(board_get_anchor(board, 4, 3, 1, false) &&
+         !board_get_anchor(board, 4, 3, 0, false));
 
   test_board_cross_set_for_cross_set_index(game, 0);
   test_board_cross_set_for_cross_set_index(game, 1);

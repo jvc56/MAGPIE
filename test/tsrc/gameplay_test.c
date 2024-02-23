@@ -442,11 +442,11 @@ void test_playmove() {
   assert(player_get_score(player1) == 0);
   assert(!rack_is_empty(player0_rack));
   assert(rack_get_total_letters(player0_rack) == 7);
-  assert(board_get_letter(board, 7, 3) == ld_hl_to_ml(ld, "K"));
-  assert(board_get_letter(board, 7, 4) == ld_hl_to_ml(ld, "Y"));
-  assert(board_get_letter(board, 7, 5) == ld_hl_to_ml(ld, "N"));
-  assert(board_get_letter(board, 7, 6) == ld_hl_to_ml(ld, "D"));
-  assert(board_get_letter(board, 7, 7) == ld_hl_to_ml(ld, "E"));
+  assert(board_get_letter(board, 7, 3, false) == ld_hl_to_ml(ld, "K"));
+  assert(board_get_letter(board, 7, 4, false) == ld_hl_to_ml(ld, "Y"));
+  assert(board_get_letter(board, 7, 5, false) == ld_hl_to_ml(ld, "N"));
+  assert(board_get_letter(board, 7, 6, false) == ld_hl_to_ml(ld, "D"));
+  assert(board_get_letter(board, 7, 7, false) == ld_hl_to_ml(ld, "E"));
   assert(game_get_player_on_turn_index(game) == 1);
   assert(bag_get_tiles(bag) == 88);
   assert(board_get_tiles_played(board) == 5);
@@ -588,7 +588,7 @@ void test_backups() {
 
   assert(player_get_score(player0) == 36);
   assert(player_get_score(player1) == 131);
-  assert(board_get_letter(board, 0, 7) == ld_hl_to_ml(ld, "Q"));
+  assert(board_get_letter(board, 0, 7, false) == ld_hl_to_ml(ld, "Q"));
   // let's unplay QUATORZE
   game_unplay_last_move(game);
   assert(player_get_score(player0) == 36);
@@ -602,7 +602,7 @@ void test_backups() {
   assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "U")) == 1);
   assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "Z")) == 1);
 
-  assert(board_get_letter(board, 0, 7) == 0);
+  assert(board_get_letter(board, 0, 7, false) == 0);
   // was 85 after drawing racks for both players, then was 80 after KYNDE
   // and drawing 5 replacement tiles, then 73 after QUATORZ(E) and 7 replacement
   // tiles, then back to 80 after unplay.

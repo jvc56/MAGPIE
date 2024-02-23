@@ -82,7 +82,7 @@ void string_builder_add_move(const Board *board, const Move *move,
     uint8_t print_tile = tile;
     if (tile == PLAYED_THROUGH_MARKER) {
       if (board) {
-        print_tile = board_get_letter(board, current_row, current_col);
+        print_tile = board_get_letter(board, current_row, current_col, false);
       }
       if (i == 0 && board) {
         string_builder_add_string(string_builder, "(");
@@ -154,7 +154,7 @@ void string_builder_add_ucgi_move(const Move *move, const Board *board,
           move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
         int r = move_get_row_start(move) + (ri * i);
         int c = move_get_col_start(move) + (ci * i);
-        letter = board_get_letter(board, r, c);
+        letter = board_get_letter(board, r, c, false);
       }
       string_builder_add_user_visible_letter(ld, move_string_builder, letter);
     }

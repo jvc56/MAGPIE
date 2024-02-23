@@ -52,8 +52,8 @@ void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
 // tiles must contain 0 for play-through tiles!
 char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   load_cgp_into_iso_exec_state(cgpstr, 1);
-  Game *game = exec_state_get_game(iso_exec_state);
-  Board *board = game_get_board(game);
+  const Game *game = exec_state_get_game(iso_exec_state);
+  const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   const int player_on_turn_index = game_get_player_on_turn_index(game);
 

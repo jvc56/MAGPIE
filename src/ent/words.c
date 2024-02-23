@@ -27,17 +27,16 @@ struct FormedWords {
   FormedWord words[RACK_SIZE + 1]; // max number of words we can form
 };
 
-FormedWords *formed_words_create(Board *board, Move *move) {
+FormedWords *formed_words_create(const Board *board, const Move *move) {
   int tiles_length = move_get_tiles_length(move);
   int row_start = move_get_row_start(move);
   int col_start = move_get_col_start(move);
-  int dir = move_get_dir(move);
+  int move_dir = move_get_dir(move);
 
-  bool board_was_transposed = false;
+  bool transposed = false;
 
-  if (!board_matches_dir(board, dir)) {
-    board_transpose(board);
-    board_was_transposed = true;
+  if (board_is_dir_vertical(move_dir)) {
+    transposed = true;
     int ph = col_start;
     col_start = row_start;
     row_start = ph;
@@ -52,7 +51,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
     bool fresh_tile = false;
 
     if (ml == PLAYED_THROUGH_MARKER) {
-      ml = board_get_letter(board, row_start, col_start + idx);
+      ml = board_get_letter(board, row_start, col_start + idx, transposed);
     } else {
       fresh_tile = true;
     }
@@ -62,15 +61,15 @@ FormedWords *formed_words_create(Board *board, Move *move) {
 
     bool actual_cross_word =
         (row_start > 0 &&
-         !board_is_empty(board, row_start - 1, col_start + idx)) ||
+         !board_is_empty(board, row_start - 1, col_start + idx, transposed)) ||
         ((row_start < BOARD_DIM - 1) &&
-         !board_is_empty(board, row_start + 1, col_start + idx));
+         !board_is_empty(board, row_start + 1, col_start + idx, transposed));
 
     if (fresh_tile && actual_cross_word) {
       // Search for a word
       int rbegin, rend;
       for (rbegin = row_start - 1; rbegin >= 0; rbegin--) {
-        if (board_is_empty(board, rbegin, col_start + idx)) {
+        if (board_is_empty(board, rbegin, col_start + idx, transposed)) {
           rbegin++;
           break;
         }
@@ -80,7 +79,8 @@ FormedWords *formed_words_create(Board *board, Move *move) {
       }
 
       for (rend = rbegin; rend < BOARD_DIM; rend++) {
-        if (rend != row_start && board_is_empty(board, rend, col_start + idx)) {
+        if (rend != row_start &&
+            board_is_empty(board, rend, col_start + idx, transposed)) {
           rend--;
           break;
         }
@@ -91,7 +91,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
       for (int r = rbegin; r <= rend; r++) {
         if (r != row_start) {
           uint8_t lt = get_unblanked_machine_letter(
-              board_get_letter(board, r, col_start + idx));
+              board_get_letter(board, r, col_start + idx, transposed));
           ws->words[formed_words_idx].word[widx] = lt;
         } else {
           ws->words[formed_words_idx].word[widx] = ml;
@@ -106,10 +106,6 @@ FormedWords *formed_words_create(Board *board, Move *move) {
   memory_copy(ws->words[formed_words_idx].word, main_word, main_word_idx);
   formed_words_idx++;
   ws->num_words = formed_words_idx;
-
-  if (board_was_transposed) {
-    board_transpose(board);
-  }
 
   return ws;
 }

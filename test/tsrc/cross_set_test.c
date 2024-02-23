@@ -40,7 +40,7 @@ void set_col(Game *game, int col, const char *col_content) {
   const LetterDistribution *ld = game_get_ld(game);
 
   for (int i = 0; i < BOARD_DIM; i++) {
-    board_set_letter(board, i, col, ALPHABET_EMPTY_SQUARE_MARKER);
+    board_set_letter(board, i, col, ALPHABET_EMPTY_SQUARE_MARKER, false);
   }
 
   char letter[2];
@@ -49,7 +49,7 @@ void set_col(Game *game, int col, const char *col_content) {
   for (size_t i = 0; i < string_length(col_content); i++) {
     if (col_content[i] != ' ') {
       letter[0] = col_content[i];
-      board_set_letter(board, i, col, ld_hl_to_ml(ld, letter));
+      board_set_letter(board, i, col, ld_hl_to_ml(ld, letter), false);
       board_increment_tiles_played(board, 1);
     }
   }
@@ -63,14 +63,14 @@ void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
 
   int cross_set_index = board_get_cross_set_index(false, player_index);
   if (run_gcs) {
-    game_gen_cross_set(game, row, col, dir, cross_set_index);
+    game_gen_cross_set(game, row, col, dir, cross_set_index, false);
   }
   uint64_t expected_cross_set = cross_set_from_string(ld, letters);
   uint64_t actual_cross_set =
-      board_get_cross_set(board, row, col, dir, cross_set_index);
+      board_get_cross_set(board, row, col, dir, cross_set_index, false);
   assert(expected_cross_set == actual_cross_set);
   int actual_cross_score =
-      board_get_cross_score(board, row, col, dir, cross_set_index);
+      board_get_cross_score(board, row, col, dir, cross_set_index, false);
   assert(expected_cross_score == actual_cross_score);
 }
 
@@ -169,16 +169,16 @@ void test_cross_set() {
   // TestUpdateSinglecross_set
   Board *board = game_get_board(game);
   game_load_cgp(game, VS_MATT);
-  board_set_letter(board, 8, 10, 19);
-  board_set_letter(board, 9, 10, 0);
-  board_set_letter(board, 10, 10, 4);
-  board_set_letter(board, 11, 10, 11);
-  game_gen_cross_set(game, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0);
-  board_transpose(board);
-  game_gen_cross_set(game, 10, 7, BOARD_VERTICAL_DIRECTION, 0);
-  board_transpose(board);
-  assert(board_get_cross_set(board, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0) == 0);
-  assert(board_get_cross_set(board, 7, 10, BOARD_VERTICAL_DIRECTION, 0) == 0);
+  board_set_letter(board, 8, 10, 19, false);
+  board_set_letter(board, 9, 10, 0, false);
+  board_set_letter(board, 10, 10, 4, false);
+  board_set_letter(board, 11, 10, 11, false);
+  game_gen_cross_set(game, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0, false);
+  game_gen_cross_set(game, 10, 7, BOARD_VERTICAL_DIRECTION, 0, true);
+  assert(board_get_cross_set(board, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0,
+                             false) == 0);
+  assert(board_get_cross_set(board, 7, 10, BOARD_VERTICAL_DIRECTION, 0,
+                             false) == 0);
 
   game_destroy(game);
   config_destroy(config);

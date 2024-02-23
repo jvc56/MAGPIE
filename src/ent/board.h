@@ -26,7 +26,6 @@ typedef struct Board {
   // to account for
   //   - vertical and horizontal board directions
   bool anchors[BOARD_DIM * BOARD_DIM * 2];
-  bool transposed;
   int tiles_played;
   // Scratch pad for return values used by
   // traverse backwards for score
@@ -42,32 +41,35 @@ void board_destroy(Board *board);
 // Current index
 // depends on tranposition of the board
 
-static inline int board_get_tindex(const Board *board, int row, int col) {
-  if (!board->transposed) {
+static inline int board_get_tindex(int row, int col, bool transposed) {
+  if (!transposed) {
     return (row * BOARD_DIM) + col;
   } else {
     return (col * BOARD_DIM) + row;
   }
 }
 
-static inline int board_get_tindex_dir(const Board *board, int row, int col,
-                                       int dir) {
-  return board_get_tindex(board, row, col) * 2 + dir;
+static inline int board_get_tindex_dir(int row, int col, int dir,
+                                       bool transposed) {
+  return board_get_tindex(row, col, transposed) * 2 + dir;
 }
 
-static inline int board_get_tindex_player_cross(const Board *board, int row,
-                                                int col, int dir,
-                                                int cross_set_index) {
-  return board_get_tindex_dir(board, row, col, dir) +
+static inline int board_get_tindex_player_cross(int row, int col, int dir,
+                                                int cross_set_index,
+                                                bool transposed) {
+  return board_get_tindex_dir(row, col, dir, transposed) +
          (BOARD_DIM * BOARD_DIM * 2) * cross_set_index;
 }
 
-static inline uint8_t board_get_letter(const Board *board, int row, int col) {
-  return board->letters[board_get_tindex(board, row, col)];
+static inline uint8_t board_get_letter(const Board *board, int row, int col,
+                                       bool transposed) {
+  return board->letters[board_get_tindex(row, col, transposed)];
 }
 
-static inline bool board_is_empty(const Board *board, int row, int col) {
-  return board_get_letter(board, row, col) == ALPHABET_EMPTY_SQUARE_MARKER;
+static inline bool board_is_empty(const Board *board, int row, int col,
+                                  bool transposed) {
+  return board_get_letter(board, row, col, transposed) ==
+         ALPHABET_EMPTY_SQUARE_MARKER;
 }
 
 static inline bool board_is_letter_allowed_in_cross_set(uint64_t cross_set,
@@ -82,49 +84,54 @@ static inline bool board_is_dir_vertical(int dir) {
 // Anchors
 
 static inline bool board_get_anchor(const Board *board, int row, int col,
-                                    int dir) {
-  return board->anchors[board_get_tindex_dir(board, row, col, dir)];
+                                    int dir, bool transposed) {
+  return board->anchors[board_get_tindex_dir(row, col, dir, transposed)];
 }
 
-static inline void board_set_anchor(Board *board, int row, int col, int dir) {
-  board->anchors[board_get_tindex_dir(board, row, col, dir)] = true;
+static inline void board_set_anchor(Board *board, int row, int col, int dir,
+                                    bool transposed) {
+  board->anchors[board_get_tindex_dir(row, col, dir, transposed)] = true;
 }
 
-static inline void board_reset_anchor(Board *board, int row, int col, int dir) {
-  board->anchors[board_get_tindex_dir(board, row, col, dir)] = false;
+static inline void board_reset_anchor(Board *board, int row, int col, int dir,
+                                      bool transposed) {
+  board->anchors[board_get_tindex_dir(row, col, dir, transposed)] = false;
 }
 
 // Cross sets and scores
 
 static inline uint64_t *board_get_cross_set_pointer(Board *board, int row,
                                                     int col, int dir,
-                                                    int cross_set_index) {
-  return &board->cross_sets[board_get_tindex_player_cross(board, row, col, dir,
-                                                          cross_set_index)];
+                                                    int cross_set_index,
+                                                    bool transposed) {
+  return &board->cross_sets[board_get_tindex_player_cross(
+      row, col, dir, cross_set_index, transposed)];
 }
 
 static inline uint64_t board_get_cross_set(const Board *board, int row, int col,
-                                           int dir, int cross_set_index) {
-  return board->cross_sets[board_get_tindex_player_cross(board, row, col, dir,
-                                                         cross_set_index)];
+                                           int dir, int cross_set_index,
+                                           bool transposed) {
+  return board->cross_sets[board_get_tindex_player_cross(
+      row, col, dir, cross_set_index, transposed)];
 }
 
 static inline void board_set_cross_score(Board *board, int row, int col,
                                          int score, int dir,
-                                         int cross_set_index) {
-  board->cross_scores[board_get_tindex_player_cross(board, row, col, dir,
-                                                    cross_set_index)] = score;
+                                         int cross_set_index, bool transposed) {
+  board->cross_scores[board_get_tindex_player_cross(
+      row, col, dir, cross_set_index, transposed)] = score;
 }
 
 static inline int board_get_cross_score(const Board *board, int row, int col,
-                                        int dir, int cross_set_index) {
-  return board->cross_scores[board_get_tindex_player_cross(board, row, col, dir,
-                                                           cross_set_index)];
+                                        int dir, int cross_set_index,
+                                        bool transposed) {
+  return board->cross_scores[board_get_tindex_player_cross(
+      row, col, dir, cross_set_index, transposed)];
 }
 
 static inline uint8_t board_get_bonus_square(const Board *board, int row,
-                                             int col) {
-  return board->bonus_squares[board_get_tindex(board, row, col)];
+                                             int col, bool transposed) {
+  return board->bonus_squares[board_get_tindex(row, col, transposed)];
 }
 
 static inline void board_set_cross_set_letter(uint64_t *cross_set,
@@ -134,15 +141,16 @@ static inline void board_set_cross_set_letter(uint64_t *cross_set,
 
 static inline void board_set_cross_set(Board *board, int row, int col,
                                        uint64_t letter, int dir,
-                                       int cross_set_index) {
-  board->cross_sets[board_get_tindex_player_cross(board, row, col, dir,
-                                                  cross_set_index)] = letter;
+                                       int cross_set_index, bool transposed) {
+  board->cross_sets[board_get_tindex_player_cross(
+      row, col, dir, cross_set_index, transposed)] = letter;
 }
 
 static inline void board_clear_cross_set(Board *board, int row, int col,
-                                         int dir, int cross_set_index) {
-  board->cross_sets[board_get_tindex_player_cross(board, row, col, dir,
-                                                  cross_set_index)] = 0;
+                                         int dir, int cross_set_index,
+                                         bool transposed) {
+  board->cross_sets[board_get_tindex_player_cross(
+      row, col, dir, cross_set_index, transposed)] = 0;
 }
 
 static inline void board_set_all_crosses(Board *board) {
@@ -162,29 +170,30 @@ static inline bool board_is_position_valid(int row, int col) {
 }
 
 static inline bool board_are_left_and_right_empty(const Board *board, int row,
-                                                  int col) {
+                                                  int col, bool transposed) {
   return !((board_is_position_valid(row, col - 1) &&
-            !board_is_empty(board, row, col - 1)) ||
+            !board_is_empty(board, row, col - 1, transposed)) ||
            (board_is_position_valid(row, col + 1) &&
-            !board_is_empty(board, row, col + 1)));
+            !board_is_empty(board, row, col + 1, transposed)));
 }
 
 static inline bool board_are_all_adjacent_squares_empty(const Board *board,
-                                                        int row, int col) {
+                                                        int row, int col,
+                                                        bool transposed) {
   return !((board_is_position_valid(row, col - 1) &&
-            !board_is_empty(board, row, col - 1)) ||
+            !board_is_empty(board, row, col - 1, transposed)) ||
            (board_is_position_valid(row, col + 1) &&
-            !board_is_empty(board, row, col + 1)) ||
+            !board_is_empty(board, row, col + 1, transposed)) ||
            (board_is_position_valid(row - 1, col) &&
-            !board_is_empty(board, row - 1, col)) ||
+            !board_is_empty(board, row - 1, col, transposed)) ||
            (board_is_position_valid(row + 1, col) &&
-            !board_is_empty(board, row + 1, col)));
+            !board_is_empty(board, row + 1, col, transposed)));
 }
 
 static inline int board_get_word_edge(const Board *board, int row, int col,
-                                      int dir) {
+                                      int dir, bool transposed) {
   while (board_is_position_valid(row, col) &&
-         !board_is_empty(board, row, col)) {
+         !board_is_empty(board, row, col, transposed)) {
     col += dir;
   }
   return col - dir;
@@ -205,25 +214,13 @@ static inline int board_get_cross_set_index(bool kwgs_are_shared,
 void board_reset(Board *board);
 
 static inline void board_set_letter(Board *board, int row, int col,
-                                    uint8_t letter) {
-  board->letters[board_get_tindex(board, row, col)] = letter;
+                                    uint8_t letter, bool transposed) {
+  board->letters[board_get_tindex(row, col, transposed)] = letter;
 }
 
-static inline bool board_get_transposed(const Board *board) {
-  return board->transposed;
-}
-
-static inline void board_transpose(Board *board) {
-  board->transposed = !board->transposed;
-}
-
-static inline void board_set_transposed(Board *board, bool transposed) {
-  board->transposed = transposed;
-}
-
-static inline bool board_matches_dir(const Board *board, int dir) {
-  return (board_is_dir_vertical(dir) && board_get_transposed(board)) ||
-         (!board_is_dir_vertical(dir) && !board_get_transposed(board));
+static inline bool board_matches_dir(int dir, bool transposed) {
+  return (board_is_dir_vertical(dir) && transposed) ||
+         (!board_is_dir_vertical(dir) && !transposed);
 }
 
 static inline int board_get_tiles_played(const Board *board) {
