@@ -39,7 +39,7 @@ int unique_rows(BoardRows *board_rows) {
   return unique_rows;
 }
 
-BoardRows *create_board_rows(Game *game) {
+BoardRows *create_board_rows(const Game *game) {
   BoardRows *container = malloc_or_die(sizeof(BoardRows));
   BoardRow *rows = container->rows;
   for (int row = 0; row < BOARD_DIM; row++) {
@@ -312,7 +312,7 @@ void add_playthrough_words_from_row(const BoardRow *board_row, const KWG *kwg,
   }
 }
 
-void generate_possible_words(Game *game, const KWG *override_kwg,
+void generate_possible_words(const Game *game, const KWG *override_kwg,
                              DictionaryWordList *possible_word_list) {
   const KWG *kwg = override_kwg;
   if (kwg == NULL) {

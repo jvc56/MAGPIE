@@ -112,7 +112,7 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
 // a synchronous function to return a static eval of a position.
 char *static_evaluation(const char *cgpstr, int num_plays) {
   load_cgp_into_iso_exec_state(cgpstr, num_plays);
-  Game *game = exec_state_get_game(iso_exec_state);
+  const Game *game = exec_state_get_game(iso_exec_state);
   MoveList *move_list = NULL;
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
