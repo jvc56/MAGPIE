@@ -379,7 +379,8 @@ void exchange_tests() {
   // so exchanges should not be possible.
   play_top_n_equity_move(game, 0);
 
-  generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, 0,
+                 player_get_rack(game_get_player(game, 0)), move_list);
   SortedMoveList *test_not_an_exchange_sorted_move_list =
       create_sorted_move_list(move_list);
   assert(move_get_type(test_not_an_exchange_sorted_move_list->moves[0]) ==

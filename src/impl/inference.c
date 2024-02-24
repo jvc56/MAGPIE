@@ -84,6 +84,7 @@ void destroy_inference(Inference *inference) {
   }
   rack_destroy(inference->current_target_leave);
   rack_destroy(inference->current_target_exchanged);
+  rack_destroy(inference->current_target_rack);
   rack_destroy(inference->bag_as_rack);
   move_list_destroy(inference->move_list);
   free(inference);
@@ -140,8 +141,9 @@ void evaluate_possible_leave(Inference *inference) {
         klv_get_leave_value(inference->klv, inference->current_target_leave);
   }
 
-  const Move *top_move = get_top_equity_move(
-      inference->game, inference->thread_index, inference->move_list);
+  const Move *top_move =
+      get_top_equity_move(inference->game, inference->thread_index,
+                          inference->current_target_rack, inference->move_list);
   bool is_within_equity_margin = inference->target_score + current_leave_value +
                                      inference->equity_margin +
                                      (INFERENCE_EQUITY_EPSILON) >=
@@ -245,7 +247,7 @@ Inference *inference_create(const Rack *target_played_tiles, const Game *game,
   inference->current_target_leave = rack_create(inference->ld_size);
   inference->current_target_exchanged = rack_create(inference->ld_size);
   inference->current_target_rack =
-      player_get_rack(game_get_player(game, target_index));
+      rack_duplicate(player_get_rack(game_get_player(game, target_index)));
   inference->bag_as_rack = rack_create(inference->ld_size);
 
   inference_results_reset(results, inference->move_capacity,
@@ -305,8 +307,8 @@ Inference *inference_duplicate(const Inference *inference, int thread_index,
       rack_duplicate(inference->current_target_leave);
   new_inference->current_target_exchanged =
       rack_duplicate(inference->current_target_exchanged);
-  new_inference->current_target_rack = player_get_rack(
-      game_get_player(new_inference->game, new_inference->target_index));
+  new_inference->current_target_rack =
+      rack_duplicate(inference->current_target_rack);
   new_inference->bag_as_rack = rack_duplicate(inference->bag_as_rack);
 
   new_inference->results = inference_results_create();

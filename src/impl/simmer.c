@@ -355,7 +355,8 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
       }
 
       const Move *best_play = get_top_equity_move(
-          game, simmer_worker->thread_index, simmer_worker->move_list);
+          game, simmer_worker->thread_index, player_get_rack(player_on_turn),
+          simmer_worker->move_list);
       rack_copy(rack_placeholder, player_get_rack(player_on_turn));
       play_move(best_play, game);
       sim_results_increment_node_count(sim_results);

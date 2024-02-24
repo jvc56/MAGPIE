@@ -95,7 +95,6 @@ MoveGen *create_generator(int ld_size) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
   generator->anchor_list = anchor_list_create();
   generator->leave_map = leave_map_create(ld_size);
-  generator->player_rack = rack_create(ld_size);
   generator->tiles_played = 0;
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
   generator->exchange_strip =
@@ -109,7 +108,6 @@ void destroy_generator(MoveGen *gen) {
   }
   anchor_list_destroy(gen->anchor_list);
   leave_map_destroy(gen->leave_map);
-  rack_destroy(gen->player_rack);
   free(gen->exchange_strip);
   free(gen);
 }
@@ -822,9 +820,13 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
   }
 }
 
+// The player rack is modified during movegen to find exchanges. When
+// running multithreaded commands executing movegen on the same game
+// pointer, the player racks should be distinct pointers for each
+// thread.
 void generate_moves(const Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
-                    MoveList *move_list) {
+                    Rack *player_rack, MoveList *move_list) {
   const LetterDistribution *ld = game_get_ld(game);
   MoveGen *gen = get_movegen(thread_index, ld_get_size(ld));
   int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -837,7 +839,7 @@ void generate_moves(const Game *game, move_record_t move_record_type,
   gen->opponent_rack = player_get_rack(opponent);
   gen->board = game_get_board(game);
   gen->player_index = player_on_turn_index;
-  rack_copy(gen->player_rack, player_get_rack(player));
+  gen->player_rack = player_rack;
 
   gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);

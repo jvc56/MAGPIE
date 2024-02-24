@@ -231,13 +231,13 @@ void generate_moves_for_game(const Game *game, int thread_index,
       game_get_player(game, game_get_player_on_turn_index(game));
   generate_moves(game, player_get_move_record_type(player_on_turn),
                  player_get_move_sort_type(player_on_turn), thread_index,
-                 move_list);
+                 player_get_rack(player_on_turn), move_list);
 }
 
-Move *get_top_equity_move(const Game *game, int thread_index,
+Move *get_top_equity_move(const Game *game, int thread_index, Rack *player_rack,
                           MoveList *move_list) {
   generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, thread_index,
-                 move_list);
+                 player_rack, move_list);
   return move_list_get_move(move_list, 0);
 }
 

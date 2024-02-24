@@ -109,7 +109,8 @@ void test_sim_single_iteration() {
   draw_rack_to_string(ld, bag, player0_rack, "AAADERW", 0);
 
   MoveList *move_list = move_list_create(15);
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, player0_rack,
+                 move_list);
 
   SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions plies 2 threads 1 i 1 cond none");
@@ -138,7 +139,8 @@ void test_more_iterations() {
 
   draw_rack_to_string(ld, bag, player0_rack, "AEIQRST", 0);
   MoveList *move_list = move_list_create(15);
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, player0_rack,
+                 move_list);
 
   SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions plies 2 threads 1 i 400 cond none");
@@ -181,7 +183,8 @@ void perf_test_multithread_sim() {
   game_load_cgp(game, config_get_cgp(config));
 
   MoveList *move_list = move_list_create(15);
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0,
+                 player_get_rack(game_get_player(game, 0)), move_list);
 
   SimResults *sim_results = sim_results_create();
   load_config_or_die(config, "setoptions plies 2 threads 1 i 1000 cond none");
@@ -222,7 +225,8 @@ void test_play_similarity() {
   draw_rack_to_string(ld, bag, player0_rack, "ACEIRST", 0);
 
   MoveList *move_list = move_list_create(15);
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, player0_rack,
+                 move_list);
 
   SimResults *sim_results = sim_results_create();
   load_config_or_die(config,
