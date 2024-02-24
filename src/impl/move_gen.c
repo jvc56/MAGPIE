@@ -148,6 +148,11 @@ static inline int get_anchorless_row_index(int row, int dir) {
   return dir * BOARD_DIM + row;
 }
 
+static inline int get_is_anchor_index(const Board *board, int row, int col,
+                                      int dir) {
+  return board_get_tindex(board, row, col) * 2 + dir;
+}
+
 static inline void load_is_anchor_cache(MoveGen *gen) {
   for (int dir = 0; dir < 2; dir++) {
     for (int row = 0; row < BOARD_DIM; row++) {
@@ -155,7 +160,7 @@ static inline void load_is_anchor_cache(MoveGen *gen) {
       gen->is_anchorless_row_cache[anchorless_row_index] = true;
       for (int col = 0; col < BOARD_DIM; col++) {
         const bool is_anchor = board_get_anchor(gen->board, row, col, dir);
-        gen->is_anchor_cache[board_get_tindex_dir(gen->board, row, col, dir)] =
+        gen->is_anchor_cache[get_is_anchor_index(gen->board, row, col, dir)] =
             is_anchor;
         if (is_anchor) {
           gen->is_anchorless_row_cache[anchorless_row_index] = false;
@@ -168,7 +173,7 @@ static inline void load_is_anchor_cache(MoveGen *gen) {
 
 static inline bool get_is_anchor_cache(MoveGen *gen, int row, int col,
                                        int dir) {
-  return gen->is_anchor_cache[board_get_tindex_dir(gen->board, row, col, dir)];
+  return gen->is_anchor_cache[get_is_anchor_index(gen->board, row, col, dir)];
 }
 
 static inline bool cached_is_cross_word(MoveGen *gen, int col) {

@@ -130,7 +130,7 @@ void board_set_bonus_squares(Board *board) {
       bonus_value = bonus_value << 4;
       bonus_value += 1;
     }
-    board->bonus_squares[i] = bonus_value;
+    board->squares[i].bonus_square = bonus_value;
   }
 }
 
