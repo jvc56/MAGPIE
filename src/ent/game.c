@@ -12,6 +12,7 @@
 
 #include "bag.h"
 #include "board.h"
+#include "board_pair.h"
 #include "kwg.h"
 #include "player.h"
 #include "players_data.h"
@@ -22,7 +23,7 @@
 #include "../util/util.h"
 
 typedef struct MinimalGameBackup {
-  Board *board;
+  BoardPair *board_pair;
   Bag *bag;
   Rack *p0rack;
   Rack *p1rack;
@@ -46,7 +47,7 @@ struct Game {
   int consecutive_scoreless_turns;
   game_end_reason_t game_end_reason;
   bool data_is_shared[NUMBER_OF_DATA];
-  Board *board;
+  BoardPair *board_pair;
   Bag *bag;
   // Some data in the Player objects
   // are owned by the caller. See Player
@@ -62,7 +63,11 @@ struct Game {
   bool backups_preallocated;
 };
 
-Board *game_get_board(const Game *game) { return game->board; }
+BoardPair *game_get_board_pair(const Game *game) { return game->board_pair; }
+
+Board *game_get_board(const Game *game, int board_index) {
+  return board_pair_get_board(game->board_pair, board_index);
+}
 
 Bag *game_get_bag(const Game *game) { return game->bag; }
 
@@ -180,17 +185,21 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
 
   const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
   const LetterDistribution *ld = game_get_ld(game);
-  Board *board = game_get_board(game);
+  BoardPair *bp = game->board_pair;
+
+  // Use the nontransposed board for access
+  // and the board pair for writes.
+  Board *board = game_get_board(game, 0);
 
   if (!board_is_empty(board, row, col)) {
-    board_set_cross_set(board, row, col, 0, dir, cross_set_index);
-    board_set_cross_score(board, row, col, 0, dir, cross_set_index);
+    board_pair_set_cross_set(bp, row, col, 0, dir, cross_set_index);
+    board_pair_set_cross_score(bp, row, col, 0, dir, cross_set_index);
     return;
   }
   if (board_are_left_and_right_empty(board, row, col)) {
-    board_set_cross_set(board, row, col, TRIVIAL_CROSS_SET, dir,
-                        cross_set_index);
-    board_set_cross_score(board, row, col, 0, dir, cross_set_index);
+    board_pair_set_cross_set(bp, row, col, TRIVIAL_CROSS_SET, dir,
+                             cross_set_index);
+    board_pair_set_cross_score(bp, row, col, 0, dir, cross_set_index);
     return;
   }
 
@@ -202,16 +211,16 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     uint32_t lnode_index = board_get_node_index(board);
     int lpath_is_valid = board_get_path_is_valid(board);
     int score = traverse_backwards_for_score(board, ld, row, col - 1);
-    board_set_cross_score(board, row, col, score, dir, cross_set_index);
+    board_pair_set_cross_score(bp, row, col, score, dir, cross_set_index);
 
     if (!lpath_is_valid) {
-      board_set_cross_set(board, row, col, 0, dir, cross_set_index);
+      board_pair_set_cross_set(bp, row, col, 0, dir, cross_set_index);
       return;
     }
     uint32_t s_index =
         kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
     uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
-    board_set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+    board_pair_set_cross_set(bp, row, col, letter_set, dir, cross_set_index);
   } else {
     int left_col =
         board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
@@ -221,19 +230,26 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     int lpath_is_valid = board_get_path_is_valid(board);
     int score_r = traverse_backwards_for_score(board, ld, row, right_col);
     int score_l = traverse_backwards_for_score(board, ld, row, col - 1);
-    board_set_cross_score(board, row, col, score_r + score_l, dir,
-                          cross_set_index);
+    board_pair_set_cross_score(bp, row, col, score_r + score_l, dir,
+                               cross_set_index);
     if (!lpath_is_valid) {
-      board_set_cross_set(board, row, col, 0, dir, cross_set_index);
+      board_pair_set_cross_set(bp, row, col, 0, dir, cross_set_index);
       return;
     }
     if (left_col == col) {
       uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
-      board_set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+      board_pair_set_cross_set(bp, row, col, letter_set, dir, cross_set_index);
     } else {
+      // Here we bypass the board pair methods since this is the only
+      // place where we need to get and set a cross set pointer.
       uint64_t *cross_set =
           board_get_cross_set_pointer(board, row, col, dir, cross_set_index);
       *cross_set = 0;
+      // When accessing the transposed board, we have to switch the row, col
+      // and direction.
+      uint64_t *transposed_board_cross_set = board_get_cross_set_pointer(
+          game_get_board(game, 1), col, row, 1 - dir, cross_set_index);
+      *transposed_board_cross_set = 0;
       for (int i = lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         int t = kwg_node_tile(node);
@@ -243,6 +259,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
                              left_col);
           if (board_get_path_is_valid(board)) {
             board_set_cross_set_letter(cross_set, t);
+            board_set_cross_set_letter(transposed_board_cross_set, t);
           }
         }
         if (kwg_node_is_end(node)) {
@@ -254,7 +271,6 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
 }
 
 void game_gen_all_cross_sets(Game *game) {
-  Board *board = game_get_board(game);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
   for (int i = 0; i < BOARD_DIM; i++) {
@@ -265,7 +281,7 @@ void game_gen_all_cross_sets(Game *game) {
       }
     }
   }
-  board_transpose(board);
+  board_pair_transpose(game->board_pair);
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
       game_gen_cross_set(game, i, j, 1, 0);
@@ -274,7 +290,7 @@ void game_gen_all_cross_sets(Game *game) {
       }
     }
   }
-  board_transpose(board);
+  board_pair_transpose(game->board_pair);
 }
 
 cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
@@ -291,13 +307,13 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
     cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_BOARD_LETTERS;
   } else {
     for (int i = 0; i < number_of_machine_letters; i++) {
-      board_set_letter(game->board, row_start, col_start + i,
-                       machine_letters[i]);
+      board_pair_set_letter(game->board_pair, row_start, col_start + i,
+                            machine_letters[i]);
       // When placing letters on the board, we
       // assume that player 0 placed all of the tiles
       // for convenience.
       bag_draw_letter(game->bag, machine_letters[i], 0);
-      board_increment_tiles_played(game->board, 1);
+      board_pair_increment_tiles_played(game->board_pair, 1);
     }
     *current_column_index = *current_column_index + number_of_machine_letters;
   }
@@ -499,7 +515,7 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
   Player *player1 = game->players[1];
 
   game_gen_all_cross_sets(game);
-  board_update_all_anchors(game->board);
+  board_pair_update_all_anchors(game->board_pair);
 
   if (game->consecutive_scoreless_turns >= MAX_SCORELESS_TURNS) {
     game->game_end_reason = GAME_END_REASON_CONSECUTIVE_ZEROS;
@@ -514,7 +530,7 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
 }
 
 void game_reset(Game *game) {
-  board_reset(game->board);
+  board_pair_reset(game->board_pair);
   bag_reset(game->ld, game->bag);
   player_reset(game->players[0]);
   player_reset(game->players[1]);
@@ -538,7 +554,7 @@ void pre_allocate_backups(Game *game) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
     game->game_backups[i]->bag = bag_create(ld);
-    game->game_backups[i]->board = board_create();
+    game->game_backups[i]->board_pair = board_pair_create();
     game->game_backups[i]->p0rack = rack_create(ld_size);
     game->game_backups[i]->p1rack = rack_create(ld_size);
   }
@@ -568,7 +584,7 @@ Game *game_create(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
   game->ld = config_get_ld(config);
   game->bag = bag_create(game->ld);
-  game->board = board_create();
+  game->board_pair = board_pair_create();
   for (int player_index = 0; player_index < 2; player_index++) {
     game->players[player_index] = player_create(config, player_index);
   }
@@ -594,7 +610,7 @@ Game *game_create(const Config *config) {
 Game *game_duplicate(const Game *game) {
   Game *new_game = malloc_or_die(sizeof(Game));
   new_game->bag = bag_duplicate(game->bag);
-  new_game->board = board_duplicate(game->board);
+  new_game->board_pair = board_pair_duplicate(game->board_pair);
   new_game->ld = game->ld;
 
   for (int j = 0; j < 2; j++) {
@@ -626,7 +642,7 @@ void game_backup(Game *game) {
   }
   if (game->backup_mode == BACKUP_MODE_SIMULATION) {
     MinimalGameBackup *state = game->game_backups[game->backup_cursor];
-    board_copy(state->board, game->board);
+    board_pair_copy(state->board_pair, game->board_pair);
     bag_copy(state->bag, game->bag);
     state->game_end_reason = game->game_end_reason;
     state->player_on_turn_index = game->player_on_turn_index;
@@ -663,7 +679,7 @@ void game_unplay_last_move(Game *game) {
   rack_copy(player_get_rack(player0), state->p0rack);
   rack_copy(player_get_rack(player1), state->p1rack);
   bag_copy(game->bag, state->bag);
-  board_copy(game->board, state->board);
+  board_pair_copy(game->board_pair, state->board_pair);
 }
 
 void destroy_backups(Game *game) {
@@ -671,7 +687,7 @@ void destroy_backups(Game *game) {
     rack_destroy(game->game_backups[i]->p0rack);
     rack_destroy(game->game_backups[i]->p1rack);
     bag_destroy(game->game_backups[i]->bag);
-    board_destroy(game->game_backups[i]->board);
+    board_pair_destroy(game->game_backups[i]->board_pair);
     free(game->game_backups[i]);
   }
 }
@@ -682,7 +698,7 @@ void game_destroy(Game *game) {
   if (!game) {
     return;
   }
-  board_destroy(game->board);
+  board_pair_destroy(game->board_pair);
   bag_destroy(game->bag);
   player_destroy(game->players[0]);
   player_destroy(game->players[1]);

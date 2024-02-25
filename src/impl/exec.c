@@ -153,7 +153,7 @@ move_validation_status_t update_move_list(ExecState *exec_state,
 
   if (move_validation_status == MOVE_VALIDATION_STATUS_SUCCESS) {
     const LetterDistribution *ld = game_get_ld(game);
-    const Board *board = game_get_board(game);
+    const Board *board = game_get_board(game, 0);
     StringBuilder *phonies_sb = create_string_builder();
     int number_of_new_moves =
         validated_moves_get_number_of_moves(new_validated_moves);

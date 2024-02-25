@@ -73,7 +73,7 @@ void test_sim_error_cases() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
   Game *game = game_create(config);
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
@@ -99,7 +99,7 @@ void test_sim_single_iteration() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
   Game *game = game_create(config);
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);

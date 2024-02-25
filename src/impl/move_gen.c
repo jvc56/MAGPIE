@@ -831,7 +831,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   gen->kwg = player_get_kwg(player);
   gen->klv = player_get_klv(player);
   gen->opponent_rack = player_get_rack(opponent);
-  gen->board = game_get_board(game);
+  gen->board = game_get_board(game, 0);
   gen->player_index = player_on_turn_index;
   gen->player_rack = player_get_rack(player);
 

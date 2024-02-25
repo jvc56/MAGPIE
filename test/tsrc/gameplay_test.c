@@ -67,13 +67,16 @@ void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
   assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn,
                            check_scores);
 
-  Board *board1 = game_get_board(g1);
-  Board *board2 = game_get_board(g2);
-
   Bag *bag1 = game_get_bag(g1);
   Bag *bag2 = game_get_bag(g2);
 
-  assert_boards_are_equal(board1, board2);
+  assert_boards_are_equal(game_get_board(g1, 0), game_get_board(g2, 0));
+  assert_transposed_boards_are_equal(game_get_board(g1, 0),
+                                     game_get_board(g1, 1));
+  assert_boards_are_equal(game_get_board(g1, 1), game_get_board(g2, 1));
+  assert_transposed_boards_are_equal(game_get_board(g2, 0),
+                                     game_get_board(g2, 1));
+
   assert_bags_are_equal(bag1, bag2, ld_get_size(game_get_ld(g1)));
 }
 
@@ -135,7 +138,16 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
       player1_final_score = player_get_score(player1);
     }
 
+    printf("%d, %d, %d: %d != %d\n", 7, 7, 0,
+           board_get_anchor(game_get_board(expected_game, 1), 7, 7, 0),
+           board_get_anchor(game_get_board(actual_game, 1), 7, 7, 0));
+
     game_load_cgp(expected_game, cgps[i]);
+
+    printf("%d, %d, %d: %d != %d\n", 7, 7, 0,
+           board_get_anchor(game_get_board(expected_game, 1), 7, 7, 0),
+           board_get_anchor(game_get_board(actual_game, 1), 7, 7, 0));
+
     // If the game is still ongoing,
     // return the racks to the bag so that
     // the bag from the expected game and
@@ -151,6 +163,9 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
                                      GAME_END_REASON_CONSECUTIVE_ZEROS) {
       return_racks_to_bag(actual_game);
     }
+    printf("cgp: %s\n", cgps[i]);
+    print_game(expected_game, NULL);
+    print_game(actual_game, NULL);
     assert_games_are_equal(expected_game, actual_game, i != array_length - 1);
   }
 
@@ -422,7 +437,7 @@ void test_playmove() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
 
@@ -564,7 +579,7 @@ void test_backups() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
 

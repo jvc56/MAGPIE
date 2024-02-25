@@ -8,6 +8,7 @@
 
 #include "bag.h"
 #include "board.h"
+#include "board_pair.h"
 #include "config.h"
 #include "letter_distribution.h"
 #include "player.h"
@@ -20,7 +21,8 @@ void game_update(const Config *config, Game *game);
 Game *game_duplicate(const Game *game);
 void game_reset(Game *game);
 
-Board *game_get_board(const Game *game);
+BoardPair *game_get_board_pair(const Game *game);
+Board *game_get_board(const Game *game, int board_index);
 Bag *game_get_bag(const Game *game);
 const LetterDistribution *game_get_ld(const Game *game);
 Player *game_get_player(const Game *game, int player_index);

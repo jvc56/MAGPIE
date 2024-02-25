@@ -225,7 +225,7 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   // pass
 
   const LetterDistribution *ld = game_get_ld(game);
-  const Board *board = game_get_board(game);
+  const Board *board = game_get_board(game, 0);
   move_validation_status_t status = MOVE_VALIDATION_STATUS_SUCCESS;
   int number_of_fields = string_splitter_get_number_of_items(split_move);
 
@@ -419,7 +419,7 @@ move_validation_status_t validated_move_load(ValidatedMove *vm,
   const LetterDistribution *ld = game_get_ld(game);
   const Player *player = game_get_player(game, player_index);
   const KLV *klv = player_get_klv(player);
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   int score = 0;
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {

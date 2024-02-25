@@ -119,7 +119,7 @@ void macondo_tests() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = game_create(config);
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(10000);
@@ -303,12 +303,12 @@ void macondo_tests() {
   game_load_cgp(game, TEST_DUPE);
 
   Game *game_two = game_create(config);
-  Board *board_two = game_get_board(game_two);
+  Board *board_two = game_get_board(game_two, 0);
 
   set_row(game_two, 7, " INCITES");
   set_row(game_two, 8, "IS");
   set_row(game_two, 9, "T");
-  board_update_all_anchors(board_two);
+  board_pair_update_all_anchors(game_get_board_pair(game_two));
   game_gen_all_cross_sets(game_two);
 
   assert_boards_are_equal(board, board_two);

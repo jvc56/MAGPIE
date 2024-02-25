@@ -74,7 +74,7 @@ void string_builder_add_move_with_rank_and_equity(Game *game,
                                                   MoveList *move_list,
                                                   StringBuilder *game_string,
                                                   int move_index) {
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   Move *move = move_list_get_move(move_list, move_index);
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
@@ -85,7 +85,7 @@ void string_builder_add_move_with_rank_and_equity(Game *game,
 
 void string_builder_add_game(Game *game, MoveList *move_list,
                              StringBuilder *game_string) {
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   Bag *bag = game_get_bag(game);
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
@@ -133,7 +133,7 @@ char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
   }
   StringBuilder *moves_string_builder = create_string_builder();
   const LetterDistribution *ld = game_get_ld(game);
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
 
   MoveList *sorted_move_list = move_list_duplicate(move_list);
   move_list_sort_moves(sorted_move_list);

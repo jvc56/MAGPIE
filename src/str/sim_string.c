@@ -44,7 +44,7 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
   // (error), eq(e) - equity (error) scm - mean of score, scd - stdev of
   // score, bp - bingo perc ig - this play has been cut-off
   const LetterDistribution *ld = game_get_ld(game);
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   StringBuilder *sim_stats_string_builder = create_string_builder();
   int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
   for (int i = 0; i < number_of_simmed_plays; i++) {

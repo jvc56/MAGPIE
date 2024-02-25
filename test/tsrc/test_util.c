@@ -40,7 +40,7 @@ bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
 // This test function only works for single-char alphabets
 void set_row(Game *game, int row, const char *row_content) {
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   const LetterDistribution *ld = game_get_ld(game);
 
   for (int i = 0; i < BOARD_DIM; i++) {
@@ -258,6 +258,9 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
       assert(board_get_bonus_square(b1, row, col) ==
              board_get_bonus_square(b2, row, col));
       for (int dir = 0; dir < 2; dir++) {
+        printf("%d, %d, %d: %d != %d\n", row, col, dir,
+               board_get_anchor(b1, row, col, dir),
+               board_get_anchor(b2, row, col, dir));
         assert(board_get_anchor(b1, row, col, dir) ==
                board_get_anchor(b2, row, col, dir));
         // For now, assume all boards tested in this method
@@ -271,9 +274,32 @@ void assert_boards_are_equal(const Board *b1, const Board *b2) {
   }
 }
 
+// Assumes both boards have the same transposed state.
+void assert_transposed_boards_are_equal(const Board *b1, const Board *b2) {
+  assert(board_get_transposed(b1) == board_get_transposed(b2));
+  assert(board_get_tiles_played(b1) == board_get_tiles_played(b2));
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      assert(board_get_letter(b1, row, col) == board_get_letter(b2, col, row));
+      assert(board_get_bonus_square(b1, row, col) ==
+             board_get_bonus_square(b2, col, row));
+      for (int dir = 0; dir < 2; dir++) {
+        assert(board_get_anchor(b1, row, col, dir) ==
+               board_get_anchor(b2, col, row, 1 - dir));
+        // For now, assume all boards tested in this method
+        // share the same lexicon
+        assert(board_get_cross_set(b1, row, col, dir, 0) ==
+               board_get_cross_set(b2, col, row, 1 - dir, 0));
+        assert(board_get_cross_score(b1, row, col, dir, 0) ==
+               board_get_cross_score(b2, col, row, 1 - dir, 0));
+      }
+    }
+  }
+}
+
 void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
                  int move_index, const char *expected_move_string) {
-  Board *board = game_get_board(game);
+  Board *board = game_get_board(game, 0);
   const LetterDistribution *ld = game_get_ld(game);
 
   StringBuilder *move_string = create_string_builder();

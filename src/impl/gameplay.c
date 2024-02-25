@@ -12,6 +12,7 @@
 
 #include "../ent/bag.h"
 #include "../ent/board.h"
+#include "../ent/board_pair.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
@@ -38,14 +39,14 @@ double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
 
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
-  Board *board = game_get_board(game);
+  BoardPair *bp = game_get_board_pair(game);
   for (int idx = 0; idx < move_get_tiles_length(move); idx++) {
     uint8_t letter = move_get_tile(move, idx);
     if (letter == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    board_set_letter(
-        board, move_get_row_start(move) + move_get_dir(move) * idx,
+    board_pair_set_letter(
+        bp, move_get_row_start(move) + move_get_dir(move) * idx,
         move_get_col_start(move) + ((1 - move_get_dir(move)) * idx), letter);
     if (get_is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
@@ -55,7 +56,7 @@ void play_move_on_board(const Move *move, Game *game) {
                      letter);
   }
 
-  board_increment_tiles_played(board, move_get_tiles_played(move));
+  board_pair_increment_tiles_played(bp, move_get_tiles_played(move));
 
   // updateAnchorsForMove
   int row = move_get_row_start(move);
@@ -66,20 +67,20 @@ void play_move_on_board(const Move *move, Game *game) {
   }
 
   for (int i = col; i < move_get_tiles_length(move) + col; i++) {
-    board_update_anchors(board, row, i, move_get_dir(move));
+    board_pair_update_anchors(bp, row, i, move_get_dir(move));
     if (row > 0) {
-      board_update_anchors(board, row - 1, i, move_get_dir(move));
+      board_pair_update_anchors(bp, row - 1, i, move_get_dir(move));
     }
     if (row < BOARD_DIM - 1) {
-      board_update_anchors(board, row + 1, i, move_get_dir(move));
+      board_pair_update_anchors(bp, row + 1, i, move_get_dir(move));
     }
   }
   if (col - 1 >= 0) {
-    board_update_anchors(board, row, col - 1, move_get_dir(move));
+    board_pair_update_anchors(bp, row, col - 1, move_get_dir(move));
   }
   if (move_get_tiles_length(move) + col < BOARD_DIM) {
-    board_update_anchors(board, row, move_get_tiles_length(move) + col,
-                         move_get_dir(move));
+    board_pair_update_anchors(bp, row, move_get_tiles_length(move) + col,
+                              move_get_dir(move));
   }
 }
 
@@ -91,7 +92,7 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
       continue;
     }
 
-    Board *board = game_get_board(game);
+    Board *board = game_get_board(game, 0);
     bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
     int right_col =
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
@@ -123,21 +124,21 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
 }
 
 void update_cross_set_for_move(const Move *move, Game *game) {
-  Board *board = game_get_board(game);
+  BoardPair *bp = game_get_board_pair(game);
   if (board_is_dir_vertical(move_get_dir(move))) {
     calc_for_across(move, game, move_get_row_start(move),
                     move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION);
-    board_transpose(board);
+    board_pair_transpose(bp);
     calc_for_self(move, game, move_get_col_start(move),
                   move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
+    board_pair_transpose(bp);
   } else {
     calc_for_self(move, game, move_get_row_start(move),
                   move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION);
-    board_transpose(board);
+    board_pair_transpose(bp);
     calc_for_across(move, game, move_get_col_start(move),
                     move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
+    board_pair_transpose(bp);
   }
 }
 
