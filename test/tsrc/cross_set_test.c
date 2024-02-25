@@ -29,7 +29,7 @@ uint64_t cross_set_from_string(const LetterDistribution *ld,
 
   for (size_t i = 0; i < string_length(letters); i++) {
     letter[0] = letters[i];
-    board_set_cross_set_letter(&c, ld_hl_to_ml(ld, letter));
+    c = get_cross_set_letter(c, ld_hl_to_ml(ld, letter));
   }
   return c;
 }

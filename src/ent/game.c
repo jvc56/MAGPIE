@@ -231,9 +231,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
       uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
       board_set_cross_set(board, row, col, letter_set, dir, cross_set_index);
     } else {
-      uint64_t *cross_set =
-          board_get_cross_set_pointer(board, row, col, dir, cross_set_index);
-      *cross_set = 0;
+      board_set_cross_set(board, row, col, 0, dir, cross_set_index);
       for (int i = lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         int t = kwg_node_tile(node);
@@ -242,7 +240,8 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
                              left_col);
           if (board_get_path_is_valid(board)) {
-            board_set_cross_set_letter(cross_set, t);
+            board_set_cross_set_letter(board, row, col, t, dir,
+                                       cross_set_index);
           }
         }
         if (kwg_node_is_end(node)) {

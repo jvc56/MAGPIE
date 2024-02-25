@@ -17,16 +17,12 @@ void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
 
   board_clear_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
                         cross_set_index);
-  board_set_cross_set_letter(
-      board_get_cross_set_pointer(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
-                                  cross_set_index),
-      13);
+  board_set_cross_set_letter(board, 0, 0, 13, BOARD_HORIZONTAL_DIRECTION,
+                             cross_set_index);
   assert(board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
                              cross_set_index) == 8192);
-  board_set_cross_set_letter(
-      board_get_cross_set_pointer(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
-                                  cross_set_index),
-      0);
+  board_set_cross_set_letter(board, 0, 0, 0, BOARD_HORIZONTAL_DIRECTION,
+                             cross_set_index);
   assert(board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
                              cross_set_index) == 8193);
 

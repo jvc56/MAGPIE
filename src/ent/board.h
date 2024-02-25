@@ -128,9 +128,17 @@ static inline uint8_t board_get_bonus_square(const Board *board, int row,
   return board->bonus_squares[board_get_tindex(board, row, col)];
 }
 
-static inline void board_set_cross_set_letter(uint64_t *cross_set,
-                                              uint8_t letter) {
-  *cross_set = *cross_set | ((uint64_t)1 << letter);
+static inline uint64_t get_cross_set_letter(uint64_t cs, uint8_t letter) {
+  return cs | ((uint64_t)1 << letter);
+}
+
+static inline void board_set_cross_set_letter(Board *board, int row, int col,
+                                              uint8_t letter, int dir,
+                                              int cross_set_index) {
+  int final_index =
+      board_get_tindex_player_cross(board, row, col, dir, cross_set_index);
+  board->cross_sets[final_index] =
+      get_cross_set_letter(board->cross_sets[final_index], letter);
 }
 
 static inline void board_set_cross_set(Board *board, int row, int col,
