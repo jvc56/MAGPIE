@@ -713,8 +713,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
   anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
-                         gen->last_anchor_col, board_get_transposed(gen->board),
-                         board_is_dir_vertical(gen->dir),
+                         gen->last_anchor_col, gen->dir,
                          gen->highest_shadow_equity);
 }
 
@@ -777,8 +776,6 @@ void generate_moves(Game *game, move_record_t move_record_type,
   gen->move_record_type = move_record_type;
   gen->move_list = move_list;
 
-  bool initial_transposed_state = board_get_transposed(gen->board);
-
   // Reset the move list
   move_list_reset(gen->move_list);
 
@@ -816,7 +813,6 @@ void generate_moves(Game *game, move_record_t move_record_type,
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
     shadow_by_orientation(gen);
-    board_transpose(gen->board);
   }
 
   // Reset the reused generator fields
@@ -841,8 +837,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
     // gen->row_cache =
     //     board_get_const_grid(gen->board, anchor_transposed)->squares +
     //     gen->current_row_index * BOARD_DIM * sizeof(Square);
-    board_load_row_cache(gen->board, gen->current_row_index,
-                         anchor_get_transposed(anchor_list, i), gen->row_cache);
+    board_load_row_cache(gen->board, gen->current_row_index, gen->dir,
+                         gen->row_cache);
 
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
                   gen->current_anchor_col, gen->current_anchor_col,
@@ -862,5 +858,4 @@ void generate_moves(Game *game, move_record_t move_record_type,
     move_list_set_spare_move_as_pass(gen->move_list);
     move_list_insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
   }
-  board_set_transposed(gen->board, initial_transposed_state);
 }
