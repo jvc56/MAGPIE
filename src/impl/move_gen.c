@@ -45,7 +45,7 @@ typedef struct MoveGen {
   int player_index;
   bool kwgs_are_shared;
 
-  const Square *row_cache;
+  Square row_cache[BOARD_DIM];
   int row_number_of_anchors_cache[(BOARD_DIM) * 2];
   int cross_index;
 
@@ -73,7 +73,7 @@ typedef struct MoveGen {
   // Player rack is modified when generating exchanges
   Rack *player_rack;
   // Board is transposed during move generation
-  Board *board;
+  const Board *board;
   // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
@@ -146,7 +146,11 @@ static inline uint8_t gen_cache_get_bonus_square(const MoveGen *gen, int col) {
 }
 
 static inline uint64_t gen_cache_get_cross_set(const MoveGen *gen, int col) {
-  return square_get_cross_set(&gen->row_cache[col], gen->dir, gen->cross_index);
+  // Always use the vertical direction to get the cross set since
+  // word building is done row-wise and the direction switches with
+  // transposition.
+  return square_get_cross_set(&gen->row_cache[col], BOARD_VERTICAL_DIRECTION,
+                              gen->cross_index);
 }
 
 static inline uint64_t gen_cache_get_hz_cross_set(const MoveGen *gen, int col) {
@@ -155,7 +159,10 @@ static inline uint64_t gen_cache_get_hz_cross_set(const MoveGen *gen, int col) {
 }
 
 static inline uint8_t gen_cache_get_cross_score(const MoveGen *gen, int col) {
-  return square_get_cross_score(&gen->row_cache[col], gen->dir,
+  // Always use the vertical direction to get the cross score since
+  // scoring is done row-wise and the direction switches with
+  // transposition.
+  return square_get_cross_score(&gen->row_cache[col], BOARD_VERTICAL_DIRECTION,
                                 gen->cross_index);
 }
 
@@ -829,11 +836,14 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->current_row_index = anchor_get_row(anchor_list, i);
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
-    bool anchor_transposed = anchor_get_transposed(anchor_list, i);
     // FIXME: compare setting pointer vs memory copy.
-    gen->row_cache =
-        board_get_const_grid(gen->board, anchor_transposed)->squares +
-        gen->current_row_index * BOARD_DIM * sizeof(Square);
+    // FIXME: pointer set is wrong
+    // gen->row_cache =
+    //     board_get_const_grid(gen->board, anchor_transposed)->squares +
+    //     gen->current_row_index * BOARD_DIM * sizeof(Square);
+    board_load_row_cache(gen->board, gen->current_row_index,
+                         anchor_get_transposed(anchor_list, i), gen->row_cache);
+
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
                   gen->current_anchor_col, gen->current_anchor_col,
                   gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);

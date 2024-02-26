@@ -154,7 +154,6 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
   int row_start = move_get_row_start(move);
   int col_start = move_get_col_start(move);
   int move_dir = move_get_dir(move);
-  int cross_dir = 1 - move_dir;
 
   bool board_was_transposed = false;
   if (!board_matches_dir(board, move_dir)) {
@@ -193,8 +192,14 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
       letter_multiplier = bonus_square & 0x0F;
       word_multiplier *= this_word_multiplier;
     }
-    int cs = board_get_cross_score(board, row_start, col_start + idx, cross_dir,
-                                   cross_set_index);
+
+    // Always use the vertical direction to get the cross score since
+    // scoring is done row-wise and the direction switches with
+    // transposition. The conditional transposition at the
+    // start of this function ensures that the indexing
+    // board_get_cross_score function is correct.
+    int cs = board_get_cross_score(board, row_start, col_start + idx,
+                                   BOARD_VERTICAL_DIRECTION, cross_set_index);
     if (get_is_blanked(ml)) {
       ls = 0;
     } else {
