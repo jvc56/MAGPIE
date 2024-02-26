@@ -726,7 +726,8 @@ void shadow_by_orientation(MoveGen *gen) {
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
     gen->cross_index =
         board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index);
-
+    board_load_row_cache(gen->board, gen->current_row_index, gen->dir,
+                         gen->row_cache);
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col, gen->dir)) {
         shadow_play_for_anchor(gen, col);
