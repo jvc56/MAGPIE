@@ -229,12 +229,21 @@ static inline void grid_set_anchor(Grid *g, int row, int col, int dir,
   bool current_anchor = square_get_anchor(s, dir);
   // FIXME: Maybe use this instead?
   // g->number_of_row_anchors[row] += (int)anchor - (int)current_anchor;
+  // The compiler should make short work of this anyway
   if (current_anchor && !anchor) {
     g->number_of_row_anchors[row]--;
   } else if (!current_anchor && anchor) {
     g->number_of_row_anchors[row]++;
   }
   square_set_anchor(s, dir, anchor);
+}
+
+static inline void grid_reset_anchor(Grid *g, int row, int col, int dir) {
+  square_set_anchor(grid_get_mutable_square(g, row, col), dir, false);
+}
+
+static inline int grid_get_anchors_at_row(const Grid *g, int row) {
+  return g->number_of_row_anchors[row];
 }
 
 // Grid: is cross word
@@ -332,6 +341,21 @@ static inline void board_set_anchor(Board *b, int row, int col, int dir,
                   1 - dir, anchor);
 }
 
+static inline void board_reset_anchor(Board *b, int row, int col, int dir) {
+  grid_reset_anchor(board_get_mutable_grid(b, b->transposed), row, col, dir);
+  grid_reset_anchor(board_get_mutable_grid(b, 1 - b->transposed), col, row,
+                    1 - dir);
+}
+
+static inline void board_reset_number_of_anchor_rows(Board *b) {
+  for (int i = 0; i < 2; i++) {
+    Grid *g = board_get_mutable_grid(b, i);
+    for (int i = 0; i < BOARD_DIM; i++) {
+      g->number_of_row_anchors[i] = 0;
+    }
+  }
+}
+
 // Board: is cross word
 
 static inline bool board_get_is_cross_word(const Board *b, int row, int col) {
@@ -406,10 +430,6 @@ static inline bool board_is_letter_allowed_in_cross_set(uint64_t cross_set,
 
 static inline bool board_is_dir_vertical(int dir) {
   return dir == BOARD_VERTICAL_DIRECTION;
-}
-
-static inline void board_reset_anchor(Board *board, int row, int col, int dir) {
-  board_set_anchor(board, row, col, dir, false);
 }
 
 static inline void board_clear_cross_set(Board *board, int row, int col,
@@ -500,8 +520,8 @@ static inline void board_update_anchors(Board *board, int row, int col,
     col = temp;
   }
 
-  board_reset_anchor(board, row, col, 0);
-  board_reset_anchor(board, row, col, 1);
+  board_reset_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION);
+  board_reset_anchor(board, row, col, BOARD_VERTICAL_DIRECTION);
   bool tile_above = false;
   bool tile_below = false;
   bool tile_left = false;
@@ -523,17 +543,17 @@ static inline void board_update_anchors(Board *board, int row, int col,
   tile_here = !board_is_empty(board, row, col);
   if (tile_here) {
     if (!tile_right) {
-      board_set_anchor(board, row, col, dir, 0);
+      board_set_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION, true);
     }
     if (!tile_below) {
-      board_set_anchor(board, row, col, dir, 1);
+      board_set_anchor(board, row, col, BOARD_VERTICAL_DIRECTION, true);
     }
   } else {
     if (!tile_left && !tile_right && (tile_above || tile_below)) {
-      board_set_anchor(board, row, col, dir, 0);
+      board_set_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION, true);
     }
     if (!tile_above && !tile_below && (tile_left || tile_right)) {
-      board_set_anchor(board, row, col, dir, 1);
+      board_set_anchor(board, row, col, BOARD_VERTICAL_DIRECTION, true);
     }
   }
 }
@@ -552,8 +572,8 @@ static inline void board_update_all_anchors(Board *board) {
         board_reset_anchor(board, i, j, 1);
       }
     }
-    int rc = BOARD_DIM / 2;
-    board_set_anchor(board, rc, rc, 0, true);
+    board_reset_number_of_anchor_rows(board);
+    board_set_anchor(board, BOARD_DIM / 2, BOARD_DIM / 2, 0, true);
   }
 }
 
@@ -568,7 +588,7 @@ static inline void board_reset(Board *board) {
 
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      board_set_letter(board, row, row, ALPHABET_EMPTY_SQUARE_MARKER);
+      board_set_letter(board, row, col, ALPHABET_EMPTY_SQUARE_MARKER);
       board_reset_is_cross_word(board, row, col);
     }
   }
@@ -580,36 +600,26 @@ static inline void board_reset(Board *board) {
 
 static inline void board_set_bonus_squares(Board *b) {
   int i = 0;
-  for (int row = 0; row < BOARD_DIM * BOARD_DIM; row++) {
-    for (int col = 0; col < BOARD_DIM * BOARD_DIM; col++) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
       uint8_t bonus_value;
       char bonus_square = CROSSWORD_GAME_BOARD[i++];
       if (bonus_square == BONUS_TRIPLE_WORD_SCORE) {
-        bonus_value = 3;
-        bonus_value = bonus_value << 4;
-        bonus_value += 1;
+        bonus_value = 0x31;
       } else if (bonus_square == BONUS_DOUBLE_WORD_SCORE) {
-        bonus_value = 2;
-        bonus_value = bonus_value << 4;
-        bonus_value += 1;
+        bonus_value = 0x21;
       } else if (bonus_square == BONUS_DOUBLE_LETTER_SCORE) {
-        bonus_value = 1;
-        bonus_value = bonus_value << 4;
-        bonus_value += 2;
+        bonus_value = 0x12;
       } else if (bonus_square == BONUS_TRIPLE_LETTER_SCORE) {
-        bonus_value = 1;
-        bonus_value = bonus_value << 4;
-        bonus_value += 3;
+        bonus_value = 0x13;
       } else {
-        bonus_value = 1;
-        bonus_value = bonus_value << 4;
-        bonus_value += 1;
+        bonus_value = 0x11;
       }
       // Don't transpose the row and col when setting bonus squares
       grid_set_bonus_square(board_get_mutable_grid(b, 0), row, col,
-                            bonus_square);
+                            bonus_value);
       grid_set_bonus_square(board_get_mutable_grid(b, 1), row, col,
-                            bonus_square);
+                            bonus_value);
     }
   }
 }
@@ -645,19 +655,17 @@ static inline void board_load_number_of_row_anchors_cache(const Board *b,
   memory_copy(cache,
               board_get_const_grid(b, b->transposed)->number_of_row_anchors,
               rows_size);
-  memory_copy(cache + rows_size,
+  memory_copy(cache + BOARD_DIM,
               board_get_const_grid(b, 1 - b->transposed)->number_of_row_anchors,
               rows_size);
 }
 
+// FIXME: remove if pointer assignment is faster
 static inline void board_load_row_cache(const Board *b, int row,
                                         bool transposed, Square *squares) {
-  const size_t square_size = sizeof(Square);
-  const size_t row_size = square_size * BOARD_DIM;
-  const size_t target_row_offset = row * row_size;
   memory_copy(squares,
-              board_get_const_grid(b, transposed)->squares + target_row_offset,
-              row_size);
+              board_get_const_grid(b, transposed)->squares + row * BOARD_DIM,
+              sizeof(Square) * BOARD_DIM);
 }
 
 #endif

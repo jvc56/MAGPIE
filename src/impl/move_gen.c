@@ -45,7 +45,7 @@ typedef struct MoveGen {
   int player_index;
   bool kwgs_are_shared;
 
-  Square row_cache[(BOARD_DIM)];
+  const Square *row_cache;
   int row_number_of_anchors_cache[(BOARD_DIM) * 2];
   int cross_index;
 
@@ -830,8 +830,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
     bool anchor_transposed = anchor_get_transposed(anchor_list, i);
-    board_load_row_cache(gen->board, gen->current_row_index, anchor_transposed,
-                         gen->row_cache);
+    gen->row_cache =
+        board_get_const_grid(gen->board, anchor_transposed)->squares +
+        gen->current_row_index * BOARD_DIM * sizeof(Square);
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
                   gen->current_anchor_col, gen->current_anchor_col,
                   gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
