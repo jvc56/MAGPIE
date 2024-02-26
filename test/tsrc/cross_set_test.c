@@ -29,7 +29,7 @@ uint64_t cross_set_from_string(const LetterDistribution *ld,
 
   for (size_t i = 0; i < string_length(letters); i++) {
     letter[0] = letters[i];
-    c = c | ld_hl_to_ml(ld, letter);
+    c |= get_cross_set_bit(ld_hl_to_ml(ld, letter));
   }
   return c;
 }
@@ -175,7 +175,7 @@ void test_cross_set() {
   board_set_letter(board, 11, 10, 11);
   game_gen_cross_set(game, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0);
   board_transpose(board);
-  game_gen_cross_set(game, 10, 7, BOARD_VERTICAL_DIRECTION, 0);
+  game_gen_cross_set(game, 10, 7, BOARD_HORIZONTAL_DIRECTION, 0);
   board_transpose(board);
   assert(board_get_cross_set(board, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0) == 0);
   assert(board_get_cross_set(board, 7, 10, BOARD_VERTICAL_DIRECTION, 0) == 0);

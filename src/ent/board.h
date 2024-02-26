@@ -94,12 +94,15 @@ static inline void square_set_cross_set(Square *s, int dir, int cross_index,
   s->cross_sets[square_get_dir_cross_index(dir, cross_index)] = cross_set;
 }
 
+static inline uint64_t get_cross_set_bit(uint8_t letter) {
+  return (uint64_t)1 << letter;
+}
+
 static inline void square_set_cross_set_letter(Square *s, int dir,
                                                int cross_index,
                                                uint8_t letter) {
   int dir_cross_index = square_get_dir_cross_index(dir, cross_index);
-  s->cross_sets[dir_cross_index] =
-      s->cross_sets[dir_cross_index] | ((uint64_t)1 << letter);
+  s->cross_sets[dir_cross_index] |= get_cross_set_bit(letter);
 }
 
 // Square: Cross scores

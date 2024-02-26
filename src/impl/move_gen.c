@@ -830,6 +830,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
     bool anchor_transposed = anchor_get_transposed(anchor_list, i);
+    // FIXME: compare setting pointer vs memory copy.
     gen->row_cache =
         board_get_const_grid(gen->board, anchor_transposed)->squares +
         gen->current_row_index * BOARD_DIM * sizeof(Square);
