@@ -358,8 +358,8 @@ static inline void board_reset_anchor(Board *b, int row, int col, int dir) {
 static inline void board_reset_number_of_anchor_rows(Board *b) {
   for (int i = 0; i < 2; i++) {
     Grid *g = board_get_mutable_grid(b, i);
-    for (int i = 0; i < BOARD_DIM; i++) {
-      g->number_of_row_anchors[i] = 0;
+    for (int j = 0; j < BOARD_DIM; j++) {
+      g->number_of_row_anchors[j] = 0;
     }
   }
 }
