@@ -442,6 +442,13 @@ void test_validated_move_score() {
   Game *game = game_create(config);
   ValidatedMoves *vms = NULL;
 
+  vms = assert_validated_move_success(game, THERMOS_CGP,
+                                      "3B.HITHERMOST,3B.NETHERMOST", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 2);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 36);
+  assert(move_get_score(validated_moves_get_move(vms, 1)) == 30);
+  validated_moves_destroy(vms);
+
   vms = assert_validated_move_success(game, VS_ED, "5B.AIRGLOWS,5c.REGLOWS", 0,
                                       false);
   assert(validated_moves_get_number_of_moves(vms) == 2);

@@ -129,12 +129,12 @@ AnchorList *gen_get_anchor_list(int thread_index) {
 
 // Cache getter functions
 
-static inline bool gen_cache_get_letter(MoveGen *gen, int col) {
+static inline uint8_t gen_cache_get_letter(MoveGen *gen, int col) {
   return square_get_letter(&gen->row_cache[col]);
 }
 
-static inline bool gen_cache_get_is_anchor(MoveGen *gen, int col, int dir) {
-  return square_get_anchor(&gen->row_cache[col], dir);
+static inline bool gen_cache_get_is_anchor(MoveGen *gen, int col) {
+  return square_get_anchor(&gen->row_cache[col], BOARD_HORIZONTAL_DIRECTION);
 }
 
 static inline bool gen_cache_get_is_cross_word(MoveGen *gen, int col) {
@@ -154,8 +154,7 @@ static inline uint64_t gen_cache_get_cross_set(const MoveGen *gen, int col) {
 }
 
 static inline uint64_t gen_cache_get_hz_cross_set(const MoveGen *gen, int col) {
-  return square_get_cross_set(&gen->row_cache[col], BOARD_HORIZONTAL_DIRECTION,
-                              gen->cross_index);
+  return square_get_cross_set(&gen->row_cache[col], gen->dir, gen->cross_index);
 }
 
 static inline uint8_t gen_cache_get_cross_score(const MoveGen *gen, int col) {
@@ -729,7 +728,7 @@ void shadow_by_orientation(MoveGen *gen) {
     board_load_row_cache(gen->board, gen->current_row_index, gen->dir,
                          gen->row_cache);
     for (int col = 0; col < BOARD_DIM; col++) {
-      if (gen_cache_get_is_anchor(gen, col, gen->dir)) {
+      if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor(gen, col);
         gen->last_anchor_col = col;
         // The next anchor to search after a playthrough tile should

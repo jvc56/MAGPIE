@@ -36,6 +36,7 @@ double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   return klv_get_leave_value(klv, rack);
 }
 
+// FIXME: save some move fields at the start
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
   Board *board = game_get_board(game);
@@ -129,14 +130,14 @@ void update_cross_set_for_move(const Move *move, Game *game) {
                     move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION);
     board_transpose(board);
     calc_for_self(move, game, move_get_col_start(move),
-                  move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
+                  move_get_row_start(move), BOARD_HORIZONTAL_DIRECTION);
     board_transpose(board);
   } else {
     calc_for_self(move, game, move_get_row_start(move),
                   move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION);
     board_transpose(board);
     calc_for_across(move, game, move_get_col_start(move),
-                    move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
+                    move_get_row_start(move), BOARD_HORIZONTAL_DIRECTION);
     board_transpose(board);
   }
 }

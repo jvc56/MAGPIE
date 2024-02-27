@@ -241,6 +241,8 @@ static inline void grid_set_anchor(Grid *g, int row, int col, int dir,
   square_set_anchor(s, dir, anchor);
 }
 
+// This bypasses the modification of the number of row anchors and
+// should only be used when resetting the grid.
 static inline void grid_reset_anchor(Grid *g, int row, int col, int dir) {
   square_set_anchor(grid_get_mutable_square(g, row, col), dir, false);
 }
@@ -344,6 +346,9 @@ static inline void board_set_anchor(Board *b, int row, int col, int dir,
                   1 - dir, anchor);
 }
 
+// This bypasses the modification of the number of row anchors and
+// should only be used when resetting the board. Do not use this when
+// updating the board after a play.
 static inline void board_reset_anchor(Board *b, int row, int col, int dir) {
   grid_reset_anchor(board_get_mutable_grid(b, b->transposed), row, col, dir);
   grid_reset_anchor(board_get_mutable_grid(b, 1 - b->transposed), col, row,
@@ -523,8 +528,8 @@ static inline void board_update_anchors(Board *board, int row, int col,
     col = temp;
   }
 
-  board_reset_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION);
-  board_reset_anchor(board, row, col, BOARD_VERTICAL_DIRECTION);
+  board_set_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION, false);
+  board_set_anchor(board, row, col, BOARD_VERTICAL_DIRECTION, false);
   bool tile_above = false;
   bool tile_below = false;
   bool tile_left = false;

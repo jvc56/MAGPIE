@@ -371,6 +371,15 @@ void test_board_everything() {
 
   Square squares[BOARD_DIM];
 
+  board_load_number_of_row_anchors_cache(board, number_of_anchors_cache);
+  for (int i = 0; i < BOARD_DIM * 2; i++) {
+    int expected_number_of_anchors = 0;
+    if (i == 7 || i == 22) {
+      expected_number_of_anchors = 1;
+    }
+    assert(number_of_anchors_cache[i] == expected_number_of_anchors);
+  }
+
   int row_index = 9;
   for (int i = 0; i < BOARD_DIM; i++) {
     board_set_letter(board, row_index, i, i + 2);
