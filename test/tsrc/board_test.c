@@ -64,21 +64,6 @@ void test_board_reset(Board *board) {
   }
 }
 
-void print_board(Board *board) {
-  for (int grid_index = 0; grid_index < 2; grid_index++) {
-    const Grid *g = board_get_const_grid(board, grid_index);
-    printf("GRID %d\n", grid_index);
-    for (int row = 0; row < BOARD_DIM; row++) {
-      for (int col = 0; col < BOARD_DIM; col++) {
-        const Square *s = grid_get_const_square(g, row, col);
-        printf("(%d, %d): %d, %d, %d, %d\n", row, col, square_get_letter(s),
-               square_get_bonus_square(s), square_get_anchor(s, 0),
-               square_get_anchor(s, 1));
-      }
-    }
-  }
-}
-
 void test_board_everything() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
