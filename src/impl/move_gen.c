@@ -7,12 +7,12 @@
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/klv_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -25,7 +25,6 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
-
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
@@ -57,8 +56,8 @@ typedef struct MoveGen {
   int bag_tiles_remaining;
 
   uint8_t strip[(BOARD_DIM)];
-  uint8_t *exchange_strip;
-  LeaveMap *leave_map;
+  uint8_t exchange_strip[(BOARD_DIM)];
+  LeaveMap leave_map;
   // Shadow plays
   int current_left_col;
   int current_right_col;
@@ -91,14 +90,11 @@ typedef struct MoveGen {
 // only called once per command.
 static MoveGen *cached_gens[MAX_THREADS];
 
-MoveGen *create_generator(int ld_size) {
+MoveGen *create_generator() {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
   generator->anchor_list = anchor_list_create();
-  generator->leave_map = leave_map_create(ld_size);
   generator->tiles_played = 0;
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
-  generator->exchange_strip =
-      (uint8_t *)malloc_or_die(ld_size * sizeof(uint8_t));
   return generator;
 }
 
@@ -107,14 +103,12 @@ void destroy_generator(MoveGen *gen) {
     return;
   }
   anchor_list_destroy(gen->anchor_list);
-  leave_map_destroy(gen->leave_map);
-  free(gen->exchange_strip);
   free(gen);
 }
 
-MoveGen *get_movegen(int thread_index, int ld_size) {
+MoveGen *get_movegen(int thread_index) {
   if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = create_generator(ld_size);
+    cached_gens[thread_index] = create_generator();
   }
   return cached_gens[thread_index];
 }
@@ -225,43 +219,32 @@ double get_static_equity(MoveGen *gen) {
   return static_eval_get_move_equity_with_leave_value(
       gen->ld, move_list_get_spare_move(gen->move_list), gen->board,
       gen->player_rack, gen->opponent_rack, gen->number_of_tiles_in_bag,
-      leave_map_get_current_value(gen->leave_map));
+      leave_map_get_current_value(&gen->leave_map));
 }
 
-void record_play(MoveGen *gen, int leftstrip, int rightstrip,
-                 game_event_t move_type, int main_word_score,
-                 int word_multiplier, int cross_score) {
+static inline void record_play(MoveGen *gen, int leftstrip, int rightstrip,
+                               game_event_t move_type, int main_word_score,
+                               int word_multiplier, int cross_score) {
   int start_row = gen->current_row_index;
   int start_col = leftstrip;
   int tiles_played = gen->tiles_played;
 
   int score = 0;
 
-  if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  int bingo_bonus = 0;
+  if (tiles_played == RACK_SIZE) {
+    bingo_bonus = DEFAULT_BINGO_BONUS;
+  }
 
-    int bingo_bonus = 0;
-    if (tiles_played == RACK_SIZE) {
-      bingo_bonus = DEFAULT_BINGO_BONUS;
-    }
+  score = main_word_score * word_multiplier + cross_score + bingo_bonus;
 
-    score = main_word_score * word_multiplier + cross_score + bingo_bonus;
-
-    Move *spare_move = move_list_get_spare_move(gen->move_list);
-    move_set_all_except_equity(spare_move, gen->strip, leftstrip, rightstrip,
-                               score, start_row, start_col, tiles_played,
-                               gen->dir, move_type);
-    if (board_is_dir_vertical(gen->dir)) {
-      move_set_row_start(spare_move, start_col);
-      move_set_col_start(spare_move, start_row);
-    }
-  } else if (move_type == GAME_EVENT_EXCHANGE) {
-    // ignore the empty exchange case
-    if (rightstrip == 0) {
-      return;
-    }
-    move_list_set_spare_move(gen->move_list, gen->exchange_strip, leftstrip,
-                             rightstrip, score, start_row, start_col,
-                             rightstrip, gen->dir, move_type);
+  Move *spare_move = move_list_get_spare_move(gen->move_list);
+  move_set_all_except_equity(spare_move, gen->strip, leftstrip, rightstrip,
+                             score, start_row, start_col, tiles_played,
+                             gen->dir, move_type);
+  if (board_is_dir_vertical(gen->dir)) {
+    move_set_row_start(spare_move, start_col);
+    move_set_col_start(spare_move, start_row);
   }
 
   if (gen->move_record_type == MOVE_RECORD_ALL) {
@@ -278,42 +261,107 @@ void record_play(MoveGen *gen, int leftstrip, int rightstrip,
   }
 }
 
-void generate_exchange_moves(MoveGen *gen, uint8_t ml, int stripidx,
+static inline bool better_play_has_been_found(const MoveGen *gen,
+                                              double highest_possible_value) {
+  Move *move = move_list_get_move(gen->move_list, 0);
+  const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
+                                      ? move_get_equity(move)
+                                      : move_get_score(move);
+  return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
+}
+
+static inline void record_exchange(MoveGen *gen) {
+  if ((gen->move_record_type == MOVE_RECORD_BEST) &&
+      (gen->move_sort_type == MOVE_SORT_EQUITY)) {
+    const double leave_value = leave_map_get_current_value(&gen->leave_map);
+    if (better_play_has_been_found(gen, leave_value)) {
+      return;
+    }
+  }
+
+  int tiles_exchanged = 0;
+  uint8_t *strip = NULL;
+
+  strip = gen->exchange_strip;
+  for (uint8_t ml = 0; ml < gen->player_rack->dist_size; ml++) {
+    int num_this = rack_get_letter(gen->player_rack, ml);
+    for (int i = 0; i < num_this; i++) {
+      strip[tiles_exchanged] = ml;
+      tiles_exchanged++;
+    }
+  }
+  Move *spare_move = move_list_get_spare_move(gen->move_list);
+  move_set_all_except_equity(spare_move, strip, 0, tiles_exchanged, 0, 0, 0,
+                             tiles_exchanged, BOARD_HORIZONTAL_DIRECTION,
+                             GAME_EVENT_EXCHANGE);
+  if (gen->move_record_type == MOVE_RECORD_ALL) {
+    double equity;
+    if (gen->move_sort_type == MOVE_SORT_EQUITY) {
+      equity = get_static_equity(gen);
+    } else {
+      equity = 0;
+    }
+    move_list_insert_spare_move(gen->move_list, equity);
+  } else {
+    move_list_insert_spare_move_top_equity(gen->move_list,
+                                           get_static_equity(gen));
+  }
+}
+
+// Look up leave values for all subsets of the player's rack and if add_exchange
+// is true, record exchange moves for them. KLV indices are retained to speed up
+// lookup of leaves with common lexicographical "prefixes".
+void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
+                             uint32_t word_index, uint8_t ml,
+                             bool add_exchange);
+
+void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
+                             uint32_t word_index, uint8_t ml,
                              bool add_exchange) {
   const uint32_t ld_size = ld_get_size(gen->ld);
   while (ml < ld_size && rack_get_letter(gen->player_rack, ml) == 0) {
     ml++;
   }
   if (ml == ld_size) {
-    // The recording of an exchange should never require
-    // the opponent's rack.
-
-    // Ignore the empty exchange case for full racks
-    // to avoid out of bounds errors for the best_leaves array
-    int number_of_letters_on_rack = rack_get_total_letters(gen->player_rack);
-    if (number_of_letters_on_rack < RACK_SIZE) {
-      double current_value = klv_get_leave_value(gen->klv, gen->player_rack);
-      leave_map_set_current_value(gen->leave_map, current_value);
-      if (current_value > gen->best_leaves[number_of_letters_on_rack]) {
-        gen->best_leaves[number_of_letters_on_rack] = current_value;
+    const int number_of_letters_on_rack =
+        rack_get_total_letters(gen->player_rack);
+    if (number_of_letters_on_rack > 0) {
+      double value = 0.0;
+      if (word_index != KLV_UNFOUND_INDEX) {
+        value = klv_get_indexed_leave_value(gen->klv, word_index - 1);
+        leave_map_set_current_value(&gen->leave_map, value);
+      }
+      if (value > gen->best_leaves[leave->number_of_letters]) {
+        gen->best_leaves[leave->number_of_letters] = value;
       }
       if (add_exchange) {
-        record_play(gen, 0, stripidx, GAME_EVENT_EXCHANGE, 0, 0, 0);
+        record_exchange(gen);
       }
     }
   } else {
-    generate_exchange_moves(gen, ml + 1, stripidx, add_exchange);
-    int num_this = rack_get_letter(gen->player_rack, ml);
+    generate_exchange_moves(gen, leave, node_index, word_index, ml + 1,
+                            add_exchange);
+    const int num_this = rack_get_letter(gen->player_rack, ml);
     for (int i = 0; i < num_this; i++) {
-      gen->exchange_strip[stripidx] = ml;
-      stripidx += 1;
-      leave_map_take_letter_and_update_current_index(gen->leave_map,
-                                                     gen->player_rack, ml);
-      generate_exchange_moves(gen, ml + 1, stripidx, add_exchange);
+      rack_add_letter(leave, ml);
+      leave_map_take_letter_and_update_complement_index(&gen->leave_map,
+                                                        gen->player_rack, ml);
+      uint32_t sibling_word_index;
+      node_index = increment_node_to_ml(
+          gen->klv, node_index, word_index, &sibling_word_index, ml);
+      word_index = sibling_word_index;
+      uint32_t child_word_index;
+      node_index =
+          follow_arc(gen->klv, node_index, word_index, &child_word_index);
+      word_index = child_word_index;
+      generate_exchange_moves(gen, leave, node_index, word_index, ml + 1,
+                              add_exchange);
     }
+
     for (int i = 0; i < num_this; i++) {
-      leave_map_add_letter_and_update_current_index(gen->leave_map,
-                                                    gen->player_rack, ml);
+      rack_take_letter(leave, ml);
+      leave_map_add_letter_and_update_complement_index(&gen->leave_map,
+                                                       gen->player_rack, ml);
     }
   }
 }
@@ -332,22 +380,13 @@ static inline int is_empty_cache(const MoveGen *gen, int col) {
   return get_letter_cache(gen, col) == ALPHABET_EMPTY_SQUARE_MARKER;
 }
 
-static inline bool better_play_has_been_found(const MoveGen *gen,
-                                              double highest_possible_value) {
-  Move *move = move_list_get_move(gen->move_list, 0);
-  const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
-                                      ? move_get_equity(move)
-                                      : move_get_score(move);
-  return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
-}
-
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
                    int word_multiplier, int cross_score) {
   const uint8_t current_letter = get_letter_cache(gen, col);
   const uint64_t cross_set = get_cross_set_cache(gen, col);
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-    int raw = get_unblanked_machine_letter(current_letter);
+    uint8_t raw = get_unblanked_machine_letter(current_letter);
     int next_node_index = 0;
     bool accepts = false;
     for (int i = node_index;; i++) {
@@ -367,7 +406,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   } else if (!rack_is_empty(gen->player_rack)) {
     for (int i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
-      int ml = kwg_node_tile(node);
+      uint8_t ml = kwg_node_tile(node);
       int number_of_ml = rack_get_letter(gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||
@@ -376,26 +415,26 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
         int next_node_index = kwg_node_arc_index(node);
         bool accepts = kwg_node_accepts(node);
         if (number_of_ml > 0) {
-          leave_map_take_letter_and_update_current_index(gen->leave_map,
+          leave_map_take_letter_and_update_current_index(&gen->leave_map,
                                                          gen->player_rack, ml);
           gen->tiles_played++;
           go_on(gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
                 unique_play, main_word_score, word_multiplier, cross_score);
           gen->tiles_played--;
-          leave_map_add_letter_and_update_current_index(gen->leave_map,
+          leave_map_add_letter_and_update_current_index(&gen->leave_map,
                                                         gen->player_rack, ml);
         }
         // check blank
         if (rack_get_letter(gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
           leave_map_take_letter_and_update_current_index(
-              gen->leave_map, gen->player_rack, BLANK_MACHINE_LETTER);
+              &gen->leave_map, gen->player_rack, BLANK_MACHINE_LETTER);
           gen->tiles_played++;
           go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
                 accepts, leftstrip, rightstrip, unique_play, main_word_score,
                 word_multiplier, cross_score);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(
-              gen->leave_map, gen->player_rack, BLANK_MACHINE_LETTER);
+              &gen->leave_map, gen->player_rack, BLANK_MACHINE_LETTER);
         }
       }
       if (kwg_node_is_end(node)) {
@@ -500,8 +539,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool
-shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
+static inline bool shadow_board_is_letter_allowed_in_cross_set(
+    const MoveGen *gen, int col) {
   uint64_t cross_set = get_cross_set_cache(gen, col);
   // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
@@ -817,7 +856,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
                     MoveList *move_list) {
   const LetterDistribution *ld = game_get_ld(game);
-  MoveGen *gen = get_movegen(thread_index, ld_get_size(ld));
+  MoveGen *gen = get_movegen(thread_index);
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player = game_get_player(game, player_on_turn_index);
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
@@ -841,21 +880,35 @@ void generate_moves(Game *game, move_record_t move_record_type,
   // Reset the move list
   move_list_reset(gen->move_list);
 
-  leave_map_init(gen->player_rack, gen->leave_map);
+  leave_map_init(gen->player_rack, &gen->leave_map);
   if (rack_get_total_letters(gen->player_rack) < RACK_SIZE) {
     leave_map_set_current_value(
-        gen->leave_map, klv_get_leave_value(gen->klv, gen->player_rack));
+        &gen->leave_map, klv_get_leave_value(gen->klv, gen->player_rack));
   } else {
-    leave_map_set_current_value(gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
+    leave_map_set_current_value(&gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
 
   for (int i = 0; i < (RACK_SIZE); i++) {
     gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
   }
 
-  // Set the best leaves and maybe add exchanges.
-  generate_exchange_moves(gen, 0, 0, gen->number_of_tiles_in_bag >= RACK_SIZE);
-
+  if (gen->number_of_tiles_in_bag > 0) {
+    // Set the best leaves and maybe add exchanges.
+    // gen->leave_map.current_index moves differently when filling leave_values
+    // than when reading from it to generate plays. Start at 0, which represents
+    // using (exchanging) gen->olayer_rack->number_of_letters tiles and keeping
+    // 0 tiles.
+    leave_map_set_current_index(&gen->leave_map, 0);
+    uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
+    Rack *leave = rack_create(gen->player_rack->dist_size);
+    generate_exchange_moves(gen, leave, node_index, 0, 0,
+                            gen->number_of_tiles_in_bag >= RACK_SIZE);
+    rack_destroy(leave);
+  }
+  // Set the leave_map index to 2^number_of_letters - 1, which represents using
+  // (playing) zero tiles and keeping gen->player_rack->number_of_letters tiles.
+  leave_map_set_current_index(&gen->leave_map,
+                              (1 << gen->player_rack->number_of_letters) - 1);
   anchor_list_reset(gen->anchor_list);
 
   // Set rack cross set and cache ld's tile scores
