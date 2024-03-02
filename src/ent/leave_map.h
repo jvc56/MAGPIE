@@ -94,7 +94,7 @@ static inline void leave_map_take_letter_and_update_complement_index(
   const int offset = rack->array[letter];
   const int bit_index = base_index + offset;
   const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
-  const leave_map->current_index |= reversed_bit;
+  leave_map->current_index |= reversed_bit;
 }
 
 static inline void leave_map_add_letter_and_update_complement_index(
