@@ -7,6 +7,7 @@
 #include "../def/board_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
+
 #include "../util/util.h"
 
 Move *move_create() { return malloc_or_die(sizeof(Move)); }

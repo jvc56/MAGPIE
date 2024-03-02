@@ -12,10 +12,12 @@
 #include <stdlib.h>
 
 #include "../def/klv_defs.h"
+
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
+
 #include "kwg.h"
 #include "rack.h"
 
@@ -126,7 +128,7 @@ void klv_load(KLV *klv, const char *klv_name) {
 
   klv->leave_values =
       (double *)malloc_or_die(number_of_leaves * sizeof(double));
-  float *temp_floats  = (float *)malloc_or_die(number_of_leaves * sizeof(float));
+  float *temp_floats = (float *)malloc_or_die(number_of_leaves * sizeof(float));
   result = fread(temp_floats, sizeof(float), number_of_leaves, stream);
   if (result != number_of_leaves) {
     log_fatal("edges fread failure: %zd != %d\n", result, number_of_leaves);
@@ -139,7 +141,7 @@ void klv_load(KLV *klv, const char *klv_name) {
         (double)convert_little_endian_to_host(temp_floats[i]);
   }
   free(temp_floats);
-  
+
   klv->word_counts = malloc_or_die(kwg_size * sizeof(uint32_t));
   for (size_t i = 0; i < kwg_size; i++) {
     klv->word_counts[i] = 0;
@@ -215,7 +217,7 @@ double klv_get_leave_value(const KLV *klv, const Rack *leave) {
   if (!klv) {
     return 0.0;
   }
-  uint32_t index =
+  const uint32_t index =
       klv_get_word_index_of(klv, leave, kwg_get_dawg_root_node_index(klv->kwg));
   return klv_get_indexed_leave_value(klv, index);
 }

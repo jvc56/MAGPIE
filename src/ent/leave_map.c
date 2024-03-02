@@ -4,7 +4,9 @@
 #include <stdlib.h>
 
 #include "../def/rack_defs.h"
+
 #include "../util/util.h"
+
 #include "rack.h"
 
 LeaveMap *leave_map_create(int rack_array_size) {
@@ -28,8 +30,8 @@ void leave_map_init(const Rack *rack, LeaveMap *leave_map) {
     if (num_this > 0) {
       leave_map->letter_base_index_map[i] = current_base_index;
       for (int j = 0; j < num_this; j++) {
-        int bit_index = current_base_index + num_this - j - 1;
-        int bit = 1 << bit_index;
+        const int bit_index = current_base_index + num_this - j - 1;
+        const int bit = 1 << bit_index;
         leave_map->reversed_letter_bit_map[current_base_index + j] = bit;
       }
       current_base_index += num_this;
