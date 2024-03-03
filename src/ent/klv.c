@@ -21,16 +21,6 @@
 #include "kwg.h"
 #include "rack.h"
 
-// The KLV data structure was originally
-// developed in wolges. For more details
-// on how the KLV data structure works, see
-// https://github.com/andy-k/wolges/blob/main/details.txt
-struct KLV {
-  KWG *kwg;
-  int *word_counts;
-  float *leave_values;
-};
-
 char *klv_get_filepath(const char *klv_name) {
   // Check for invalid inputs
   if (!klv_name) {
@@ -71,15 +61,15 @@ float convert_little_endian_to_host(const float little_endian_float) {
   }
 }
 
-int klv_count_words_at(const KLV *klv, int node_index, int kwg_size) {
+int klv_count_words_at(const KLV *klv, uint32_t node_index, uint32_t kwg_size) {
   if (node_index >= kwg_size) {
     return 0;
   }
-  if (klv->word_counts[node_index] == -1) {
-    log_fatal("unexpected -1 at %d\n", node_index);
+  if (klv->word_counts[node_index] == KLV_UNFOUND_INDEX) {
+    log_fatal("unexpected KLV_EMPTY_NODE_WORD_COUNT at %d\n", node_index);
   }
   if (klv->word_counts[node_index] == 0) {
-    klv->word_counts[node_index] = -1;
+    klv->word_counts[node_index] = KLV_UNFOUND_INDEX;
 
     const uint32_t node = kwg_node(klv->kwg, node_index);
     int this_node_word_count = 0;
@@ -136,8 +126,10 @@ void klv_load(KLV *klv, const char *klv_name) {
   }
   number_of_leaves = le32toh(number_of_leaves);
 
-  klv->leave_values = (float *)malloc_or_die(number_of_leaves * sizeof(float));
-  result = fread(klv->leave_values, sizeof(float), number_of_leaves, stream);
+  klv->leave_values =
+      (double *)malloc_or_die(number_of_leaves * sizeof(double));
+  float *temp_floats = (float *)malloc_or_die(number_of_leaves * sizeof(float));
+  result = fread(temp_floats, sizeof(float), number_of_leaves, stream);
   if (result != number_of_leaves) {
     log_fatal("edges fread failure: %zd != %d\n", result, number_of_leaves);
   }
@@ -145,10 +137,12 @@ void klv_load(KLV *klv, const char *klv_name) {
   fclose(stream);
 
   for (uint32_t i = 0; i < number_of_leaves; i++) {
-    klv->leave_values[i] = convert_little_endian_to_host(klv->leave_values[i]);
+    klv->leave_values[i] =
+        (double)convert_little_endian_to_host(temp_floats[i]);
   }
+  free(temp_floats);
 
-  klv->word_counts = (int *)malloc_or_die(kwg_size * sizeof(int));
+  klv->word_counts = malloc_or_die(kwg_size * sizeof(uint32_t));
   for (size_t i = 0; i < kwg_size; i++) {
     klv->word_counts[i] = 0;
   }
@@ -172,8 +166,8 @@ void klv_destroy(KLV *klv) {
   free(klv);
 }
 
-int klv_get_word_index_of(const KLV *klv, const Rack *leave,
-                          uint32_t node_index) {
+uint32_t klv_get_word_index_of(const KLV *klv, const Rack *leave,
+                               uint32_t node_index) {
   int idx = 0;
   int lidx = 0;
   int lidx_letter_count = rack_get_letter(leave, lidx);
@@ -186,19 +180,13 @@ int klv_get_word_index_of(const KLV *klv, const Rack *leave,
   }
 
   while (node_index != 0) {
-    idx += klv->word_counts[node_index];
-    uint32_t node;
-    while (true) {
-      node = kwg_node(klv->kwg, node_index);
-      if (kwg_node_tile(node) == (uint8_t)lidx) {
-        break;
-      }
-      if (kwg_node_is_end(node)) {
-        return -1;
-      }
-      node_index++;
+    uint32_t next_word_index;
+    node_index =
+        increment_node_to_ml(klv, node_index, idx, &next_word_index, lidx);
+    if (node_index == KLV_UNFOUND_INDEX) {
+      return node_index;
     }
-    idx -= klv->word_counts[node_index];
+    idx = next_word_index;
 
     lidx_letter_count--;
     number_of_letters--;
@@ -206,24 +194,20 @@ int klv_get_word_index_of(const KLV *klv, const Rack *leave,
     // Advance lidx
     while (lidx_letter_count == 0) {
       lidx++;
-      if (lidx >= rack_get_dist_size(leave)) {
+      if (lidx >= leave->dist_size) {
         break;
       }
-      lidx_letter_count = rack_get_letter(leave, lidx);
+      lidx_letter_count = leave->array[lidx];
     }
 
     if (number_of_letters == 0) {
-      if (kwg_node_accepts(node)) {
-        return idx;
-      }
-      return -1;
+      return idx;
     }
-    if (kwg_node_accepts(node)) {
-      idx += 1;
-    }
-    node_index = kwg_node_arc_index(node);
+
+    node_index = follow_arc(klv, node_index, idx, &next_word_index);
+    idx = next_word_index;
   }
-  return -1;
+  return KLV_UNFOUND_INDEX;
 }
 
 double klv_get_leave_value(const KLV *klv, const Rack *leave) {
@@ -233,10 +217,7 @@ double klv_get_leave_value(const KLV *klv, const Rack *leave) {
   if (!klv) {
     return 0.0;
   }
-  int index =
+  const uint32_t index =
       klv_get_word_index_of(klv, leave, kwg_get_dawg_root_node_index(klv->kwg));
-  if (index != -1) {
-    return (double)klv->leave_values[index];
-  }
-  return 0.0;
+  return klv_get_indexed_leave_value(klv, index);
 }

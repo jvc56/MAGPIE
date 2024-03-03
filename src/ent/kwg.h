@@ -35,22 +35,22 @@ static inline uint32_t kwg_node_arc_index(uint32_t node) {
   return (node & KWG_ARC_INDEX_MASK);
 }
 
-static inline int kwg_node_tile(uint32_t node) {
+static inline uint32_t kwg_node_tile(uint32_t node) {
   return node >> KWG_TILE_BIT_OFFSET;
 }
 
-static inline int kwg_get_dawg_root_node_index(const KWG *kwg) {
+static inline uint32_t kwg_get_dawg_root_node_index(const KWG *kwg) {
   const uint32_t dawg_pointer_node = kwg_node(kwg, 0);
   return kwg_node_arc_index(dawg_pointer_node);
 }
 
-static inline int kwg_get_root_node_index(const KWG *kwg) {
+static inline uint32_t kwg_get_root_node_index(const KWG *kwg) {
   const uint32_t gaddag_pointer_node = kwg_node(kwg, 1);
   return kwg_node_arc_index(gaddag_pointer_node);
 }
 
 static inline uint32_t kwg_get_next_node_index(const KWG *kwg, int node_index,
-                                               int letter) {
+                                               uint8_t letter) {
   int i = node_index;
   while (1) {
     const uint32_t node = kwg_node(kwg, i);
@@ -64,8 +64,8 @@ static inline uint32_t kwg_get_next_node_index(const KWG *kwg, int node_index,
   }
 }
 
-bool kwg_in_letter_set(const KWG *kwg, int letter, int node_index);
-uint64_t kwg_get_letter_set(const KWG *kwg, int node_index);
+bool kwg_in_letter_set(const KWG *kwg, uint8_t letter, uint32_t node_index);
+uint64_t kwg_get_letter_set(const KWG *kwg, uint32_t node_index);
 int kwg_get_number_of_nodes(const KWG *kwg);
 
 #endif
