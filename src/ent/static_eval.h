@@ -61,13 +61,52 @@ static inline double standard_endgame_adjustment(const LetterDistribution *ld,
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
-double static_eval_get_shadow_equity(const LetterDistribution *ld,
+static inline double shadow_endgame_adjustment(const LetterDistribution *ld,
+                                 const Rack *opp_rack,
+                                 int number_of_letters_on_rack,
+                                 int tiles_played,
+                                 int lowest_possible_rack_score) {
+  if (number_of_letters_on_rack > tiles_played) {
+    // This play is not going out. We should penalize it by our own score
+    // plus some constant.
+    // However, we don't yet know the score of our own remaining tiles yet,
+    // so we need to assume it is as small as possible for this anchor's
+    // highest_possible_equity to be valid.
+    return endgame_nonoutplay_adjustment(lowest_possible_rack_score);
+  }
+  return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
+}
+
+static inline double static_eval_get_shadow_equity(const LetterDistribution *ld,
                                      const Rack *opp_rack,
                                      const double *best_leaves,
                                      const int *descending_tile_scores,
                                      int number_of_tiles_in_bag,
                                      int number_of_letters_on_rack,
-                                     int tiles_played);
+                                     int tiles_played) {
+  double equity = 0;
+  if (number_of_tiles_in_bag > 0) {
+    // Bag is not empty: use leave values
+    equity += best_leaves[number_of_letters_on_rack - tiles_played];
+    // Apply preendgame heuristic if this play would empty the bag or leave
+    // few enough tiles remaining.
+    int bag_plus_rack_size = number_of_tiles_in_bag - tiles_played + RACK_SIZE;
+    if (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) {
+      equity += peg_adjust_values[bag_plus_rack_size];
+    }
+  } else {
+    // Bag is empty: add double opponent's rack if playing out, otherwise
+    // deduct a penalty based on the score of our tiles left after this play.
+    int lowest_possible_rack_score = 0;
+    for (int i = tiles_played; i < number_of_letters_on_rack; i++) {
+      lowest_possible_rack_score += descending_tile_scores[i];
+    }
+    equity +=
+        shadow_endgame_adjustment(ld, opp_rack, number_of_letters_on_rack,
+                                  tiles_played, lowest_possible_rack_score);
+  }
+  return equity;
+}
 
 // Assumes all fields of the move are set except the equity.
 static inline double static_eval_get_move_equity_with_leave_value(
