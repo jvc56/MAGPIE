@@ -4,7 +4,6 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/static_eval_defs.h"
-
 #include "../ent/board.h"
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
@@ -19,7 +18,8 @@ static const double peg_adjust_values[] = {0, 0, 0, 0, 0, 0, 0,
 // static const double peg_adjust_values[] = {0, -8, 0, -0.5, -2, -3.5, -2,
 //                                            2, 10, 7, 4, -1, -2};
 
-static inline double placement_adjustment(const LetterDistribution *ld, const Move *move) {
+static inline double placement_adjustment(const LetterDistribution *ld,
+                                          const Move *move) {
   int start = move_get_col_start(move);
   int end = start + move_get_tiles_played(move);
 
@@ -51,8 +51,8 @@ static inline double endgame_outplay_adjustment(int opponent_rack_score) {
 }
 
 static inline double standard_endgame_adjustment(const LetterDistribution *ld,
-                                   const Rack *player_leave,
-                                   const Rack *opp_rack) {
+                                                 const Rack *player_leave,
+                                                 const Rack *opp_rack) {
   if (!rack_is_empty(player_leave)) {
     // This play is not going out. We should penalize it by our own score
     // plus some constant.
@@ -62,10 +62,10 @@ static inline double standard_endgame_adjustment(const LetterDistribution *ld,
 }
 
 static inline double shadow_endgame_adjustment(const LetterDistribution *ld,
-                                 const Rack *opp_rack,
-                                 int number_of_letters_on_rack,
-                                 int tiles_played,
-                                 int lowest_possible_rack_score) {
+                                               const Rack *opp_rack,
+                                               int number_of_letters_on_rack,
+                                               int tiles_played,
+                                               int lowest_possible_rack_score) {
   if (number_of_letters_on_rack > tiles_played) {
     // This play is not going out. We should penalize it by our own score
     // plus some constant.
@@ -77,13 +77,11 @@ static inline double shadow_endgame_adjustment(const LetterDistribution *ld,
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
-static inline double static_eval_get_shadow_equity(const LetterDistribution *ld,
-                                     const Rack *opp_rack,
-                                     const double *best_leaves,
-                                     const int *descending_tile_scores,
-                                     int number_of_tiles_in_bag,
-                                     int number_of_letters_on_rack,
-                                     int tiles_played) {
+static inline double static_eval_get_shadow_equity(
+    const LetterDistribution *ld, const Rack *opp_rack,
+    const double *best_leaves, const int *descending_tile_scores,
+    int number_of_tiles_in_bag, int number_of_letters_on_rack,
+    int tiles_played) {
   double equity = 0;
   if (number_of_tiles_in_bag > 0) {
     // Bag is not empty: use leave values
