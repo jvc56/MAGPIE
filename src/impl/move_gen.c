@@ -714,9 +714,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 void shadow_by_orientation(MoveGen *gen) {
   for (int row = 0; row < BOARD_DIM; row++) {
     gen->current_row_index = row;
-    // FIXME: remove the false &&
-    if (false &&
-        gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+    if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
       continue;
     }
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;

@@ -14,9 +14,6 @@ void take_set(const LetterDistribution *ld, LeaveMap *leave_map, Rack *rack,
   leave_map_take_letter_and_update_current_index(leave_map, rack,
                                                  ld_hl_to_ml(ld, letter));
   int current_index = leave_map_get_current_index(leave_map);
-  if (current_index != expected_take_index) {
-    printf("%d != %d\n", current_index, expected_take_index);
-  }
   assert(current_index == expected_take_index);
   leave_map_set_current_value(leave_map, value);
 }

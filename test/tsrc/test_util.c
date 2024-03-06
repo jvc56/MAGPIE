@@ -285,9 +285,6 @@ void assert_boards_are_equal(Board *b1, Board *b2) {
         assert(board_get_bonus_square(b1, row, col) ==
                board_get_bonus_square(b2, row, col));
         for (int dir = 0; dir < 2; dir++) {
-          printf("%d, %d, %d: %d = %d\n", row, col, dir,
-                 board_get_anchor(b1, row, col, dir),
-                 board_get_anchor(b2, row, col, dir));
           assert(board_get_anchor(b1, row, col, dir) ==
                  board_get_anchor(b2, row, col, dir));
           assert(board_get_is_cross_word(b1, row, col, dir) ==

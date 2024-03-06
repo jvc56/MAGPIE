@@ -23,8 +23,7 @@ typedef struct Square {
   uint64_t cross_set;
   int cross_score;
   bool anchor;
-  // FIXME: this should be a bool
-  int is_cross_word;
+  bool is_cross_word;
 } Square;
 
 // Board maintains four squares:
@@ -114,15 +113,11 @@ static inline void square_reset_anchor(Square *s) { s->anchor = false; }
 // Square: is cross word
 
 static inline bool square_get_is_cross_word(const Square *s) {
-  return s->is_cross_word != 0;
+  return s->is_cross_word;
 }
 
-static inline void square_increment_is_cross_word(Square *s) {
-  s->is_cross_word++;
-}
-
-static inline void square_reset_is_cross_word(Square *s) {
-  s->is_cross_word = 0;
+static inline void square_set_is_cross_word(Square *s, bool is_cross_word) {
+  s->is_cross_word = is_cross_word;
 }
 
 // Square getter helpers
@@ -193,12 +188,14 @@ static inline void board_set_letter(Board *b, int row, int col,
           inc_right = right_cw_col < BOARD_DIM;
         }
         if (inc_left) {
-          square_increment_is_cross_word(
-              board_get_writable_square(b, left_cw_row, left_cw_col, dir, ci));
+          square_set_is_cross_word(
+              board_get_writable_square(b, left_cw_row, left_cw_col, dir, ci),
+              true);
         }
         if (inc_right) {
-          square_increment_is_cross_word(board_get_writable_square(
-              b, right_cw_row, right_cw_col, dir, ci));
+          square_set_is_cross_word(
+              board_get_writable_square(b, right_cw_row, right_cw_col, dir, ci),
+              true);
         }
       }
     }
@@ -331,7 +328,8 @@ static inline bool board_get_is_cross_word(const Board *b, int row, int col,
 static inline void board_reset_is_cross_word(Board *b, int row, int col,
                                              int dir) {
   for (int ci = 0; ci < 2; ci++) {
-    square_reset_is_cross_word(board_get_writable_square(b, row, col, dir, ci));
+    square_set_is_cross_word(board_get_writable_square(b, row, col, dir, ci),
+                             false);
   }
 }
 
@@ -535,9 +533,6 @@ static inline void board_update_all_anchors(Board *board) {
   }
 }
 
-// FIXME: this can be faster, just do memset 0
-// then set the trivial cross sets but also account
-// for start square
 static inline void board_reset(Board *board) {
   // The transposed field must be set to 0 here because
   // it is used to calculate the index for board_set_letter.
@@ -603,7 +598,6 @@ static inline void board_destroy(Board *board) {
   free(board);
 }
 
-// FIXME: use movegen cache square
 static inline void board_load_number_of_row_anchors_cache(const Board *b,
                                                           int *cache) {
   if (b->transposed) {
@@ -617,7 +611,6 @@ static inline void board_load_row_cache(const Board *b, int row_or_col, int dir,
   if (b->transposed) {
     log_fatal("cannot load row cache while board is transposed\n");
   }
-  // FIXME: if this is commented out, board tests still pass, plz fix
   int row = row_or_col;
   int col = row_or_col;
   if (dir == BOARD_HORIZONTAL_DIRECTION) {
