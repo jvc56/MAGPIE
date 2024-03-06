@@ -40,14 +40,26 @@ double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
   Board *board = game_get_board(game);
-  for (int idx = 0; idx < move_get_tiles_length(move); idx++) {
+  int row_start = move_get_row_start(move);
+  int col_start = move_get_col_start(move);
+  int move_dir = move_get_dir(move);
+
+  bool board_was_transposed = false;
+  if (!board_matches_dir(board, move_dir)) {
+    board_transpose(board);
+    board_was_transposed = true;
+    row_start = move_get_col_start(move);
+    col_start = move_get_row_start(move);
+  }
+
+  int tiles_length = move_get_tiles_length(move);
+
+  for (int idx = 0; idx < tiles_length; idx++) {
     uint8_t letter = move_get_tile(move, idx);
     if (letter == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    board_set_letter(
-        board, move_get_row_start(move) + move_get_dir(move) * idx,
-        move_get_col_start(move) + ((1 - move_get_dir(move)) * idx), letter);
+    board_set_letter(board, row_start, col_start + idx, letter);
     if (get_is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
     }
@@ -58,29 +70,24 @@ void play_move_on_board(const Move *move, Game *game) {
 
   board_increment_tiles_played(board, move_get_tiles_played(move));
 
-  // updateAnchorsForMove
-  int row = move_get_row_start(move);
-  int col = move_get_col_start(move);
-  if (board_is_dir_vertical(move_get_dir(move))) {
-    row = move_get_col_start(move);
-    col = move_get_row_start(move);
+  for (int col = col_start; col < tiles_length + col_start; col++) {
+    board_update_anchors(board, row_start, col);
+    if (row_start > 0) {
+      board_update_anchors(board, row_start - 1, col);
+    }
+    if (row_start < BOARD_DIM - 1) {
+      board_update_anchors(board, row_start + 1, col);
+    }
+  }
+  if (col_start - 1 >= 0) {
+    board_update_anchors(board, row_start, col_start - 1);
+  }
+  if (tiles_length + col_start < BOARD_DIM) {
+    board_update_anchors(board, row_start, tiles_length + col_start);
   }
 
-  for (int i = col; i < move_get_tiles_length(move) + col; i++) {
-    board_update_anchors(board, row, i, move_get_dir(move));
-    if (row > 0) {
-      board_update_anchors(board, row - 1, i, move_get_dir(move));
-    }
-    if (row < BOARD_DIM - 1) {
-      board_update_anchors(board, row + 1, i, move_get_dir(move));
-    }
-  }
-  if (col - 1 >= 0) {
-    board_update_anchors(board, row, col - 1, move_get_dir(move));
-  }
-  if (move_get_tiles_length(move) + col < BOARD_DIM) {
-    board_update_anchors(board, row, move_get_tiles_length(move) + col,
-                         move_get_dir(move));
+  if (board_was_transposed) {
+    board_transpose(board);
   }
 }
 
@@ -126,18 +133,19 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
 void update_cross_set_for_move(const Move *move, Game *game) {
   Board *board = game_get_board(game);
   if (board_is_dir_vertical(move_get_dir(move))) {
+    // FIXME: plz explain why all directions are vertical
     calc_for_across(move, game, move_get_row_start(move),
-                    move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION);
+                    move_get_col_start(move), BOARD_VERTICAL_DIRECTION);
     board_transpose(board);
     calc_for_self(move, game, move_get_col_start(move),
-                  move_get_row_start(move), BOARD_HORIZONTAL_DIRECTION);
+                  move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
     board_transpose(board);
   } else {
     calc_for_self(move, game, move_get_row_start(move),
-                  move_get_col_start(move), BOARD_HORIZONTAL_DIRECTION);
+                  move_get_col_start(move), BOARD_VERTICAL_DIRECTION);
     board_transpose(board);
     calc_for_across(move, game, move_get_col_start(move),
-                    move_get_row_start(move), BOARD_HORIZONTAL_DIRECTION);
+                    move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
     board_transpose(board);
   }
 }

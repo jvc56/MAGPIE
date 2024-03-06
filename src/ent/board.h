@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
@@ -12,42 +13,37 @@
 
 #include "letter_distribution.h"
 
+#include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
 typedef struct Square {
   uint8_t letter;
-  // Bonus squares are set at board creation
-  // and should not be modified.
   uint8_t bonus_square;
+  uint64_t cross_set;
+  int cross_score;
+  bool anchor;
+  // FIXME: this should be a bool
+  int is_cross_word;
+} Square;
+
+// Board maintains four squares:
+// - One pair for each direction
+// - One pair for each cross index
+typedef struct Board {
   // We use (number of squares * 4) for cross sets
   // to account for
   //   - vertical and horizontal board directions
   //   - separate lexicons used by player 1 and player 2
-  uint64_t cross_sets[4];
+
   // We use (number of squares * 4) for cross scores
   // for reasons listed above.
-  int cross_scores[4];
+
   // We use (number of squares * 2) for cross sets
   // to account for
   //   - vertical and horizontal board directions
-  bool anchors[2];
-  // Nonzero if placing a tile on this square would
-  // form a cross word
-  int is_cross_word;
-} Square;
-
-typedef struct Grid {
-  Square squares[BOARD_DIM * BOARD_DIM];
-  int number_of_row_anchors[BOARD_DIM];
-} Grid;
-
-// Board maintains two grids, the grid at 1
-// being a transpose of the grid at 0. Accesses
-// to grid are control by the transposed state
-// and write are applied to both grids.
-typedef struct Board {
-  Grid grids[2];
+  Square squares[2 * 2 * BOARD_DIM * BOARD_DIM];
+  int number_of_row_anchors[BOARD_DIM * 2];
   int transposed;
   int tiles_played;
   // Scratch pad for return values used by
@@ -55,14 +51,6 @@ typedef struct Board {
   uint32_t node_index;
   bool path_is_valid;
 } Board;
-
-// Square: Index helpers
-
-static inline int square_get_dir_cross_index(int dir, int cross_index) {
-  return 2 * cross_index + dir;
-}
-
-static inline int square_get_dir_index(int dir) { return dir; }
 
 // Square: Letter
 
@@ -84,48 +72,44 @@ static inline void square_set_bonus_square(Square *s, uint8_t bonus_square) {
 
 // Square: Cross sets
 
-static inline uint64_t square_get_cross_set(const Square *s, int dir,
-                                            int cross_index) {
-  return s->cross_sets[square_get_dir_cross_index(dir, cross_index)];
+static inline uint64_t square_get_cross_set(const Square *s) {
+  return s->cross_set;
 }
 
-static inline void square_set_cross_set(Square *s, int dir, int cross_index,
-                                        uint64_t cross_set) {
-  s->cross_sets[square_get_dir_cross_index(dir, cross_index)] = cross_set;
+static inline void square_set_cross_set(Square *s, uint64_t cross_set) {
+  s->cross_set = cross_set;
 }
 
 static inline uint64_t get_cross_set_bit(uint8_t letter) {
   return (uint64_t)1 << letter;
 }
 
-static inline void square_set_cross_set_letter(Square *s, int dir,
-                                               int cross_index,
-                                               uint8_t letter) {
-  int dir_cross_index = square_get_dir_cross_index(dir, cross_index);
-  s->cross_sets[dir_cross_index] |= get_cross_set_bit(letter);
+static inline void square_set_cross_set_letter(Square *s, uint8_t letter) {
+  s->cross_set |= get_cross_set_bit(letter);
 }
 
 // Square: Cross scores
 
-static inline int square_get_cross_score(const Square *s, int dir,
-                                         int cross_index) {
-  return s->cross_scores[square_get_dir_cross_index(dir, cross_index)];
+static inline int square_get_cross_score(const Square *s) {
+  return s->cross_score;
 }
 
-static inline void square_set_cross_score(Square *s, int dir, int cross_index,
-                                          int score) {
-  s->cross_scores[square_get_dir_cross_index(dir, cross_index)] = score;
+static inline void square_set_cross_score(Square *s, int score) {
+  s->cross_score = score;
 }
 
 // Square: Anchors
 
-static inline bool square_get_anchor(const Square *s, int dir) {
-  return s->anchors[square_get_dir_index(dir)];
+static inline bool square_get_anchor(const Square *s) { return s->anchor; }
+
+// Returns the previous value of the anchor before it was set.
+static inline bool square_set_anchor(Square *s, bool anchor) {
+  bool old = s->anchor;
+  s->anchor = anchor;
+  return old;
 }
 
-static inline void square_set_anchor(Square *s, int dir, bool anchor) {
-  s->anchors[square_get_dir_index(dir)] = anchor;
-}
+static inline void square_reset_anchor(Square *s) { s->anchor = false; }
 
 // Square: is cross word
 
@@ -141,240 +125,292 @@ static inline void square_reset_is_cross_word(Square *s) {
   s->is_cross_word = 0;
 }
 
-// Grid: Index helpers
+// Square getter helpers
 
-static inline int grid_get_index(int row, int col) {
-  return (row * BOARD_DIM) + col;
+// Square getter helpers
+
+static inline int board_get_square_index(const Board *b, int row, int col,
+                                         int dir, int ci) {
+  const int cross_offset = ci * 2 * BOARD_DIM * BOARD_DIM;
+  const int adjusted_dir = (dir ^ b->transposed);
+  const int dir_offset = adjusted_dir * BOARD_DIM * BOARD_DIM;
+
+  int row_offset = 0;
+  int col_offset = 0;
+  int index = 0;
+  if (!dir) {
+    row_offset = row * BOARD_DIM;
+    col_offset = col;
+  } else {
+    row_offset = col * BOARD_DIM;
+    col_offset = row;
+  }
+  index = cross_offset + dir_offset + row_offset + col_offset;
+  // printf("bgsi: %d, %d, %d, %d: %d + %d + %d + %d = %d\n", row, col, dir, ci,
+  //        cross_offset, dir_offset, row_offset, col_offset, index);
+  return index;
 }
 
-static inline const Square *grid_get_const_square(const Grid *g, int row,
-                                                  int col) {
-  return &g->squares[grid_get_index(row, col)];
+static inline Square *board_get_writable_square(Board *b, int row, int col,
+                                                int dir, int ci) {
+  return &b->squares[board_get_square_index(b, row, col, dir, ci)];
 }
 
-static inline Square *grid_get_mutable_square(Grid *g, int row, int col) {
-  return &g->squares[grid_get_index(row, col)];
+static inline const Square *
+board_get_readonly_square(const Board *b, int row, int col, int dir, int ci) {
+  const int index = board_get_square_index(b, row, col, dir, ci);
+  // printf("sq idx: %p\n", &b->squares[index]);
+  return &b->squares[index];
 }
 
-// Grid: Letter
+static inline void print_square(const Square *s) {
+  uint8_t l = square_get_letter(s);
+  uint8_t bs = square_get_bonus_square(s);
+  int score = square_get_cross_score(s);
+  bool a = square_get_anchor(s);
+  int ic = square_get_is_cross_word(s);
+  uint64_t set = square_get_cross_set(s);
 
-static inline uint8_t grid_get_letter(const Grid *g, int row, int col) {
-  return square_get_letter(grid_get_const_square(g, row, col));
-}
+  const char *bs_string;
+  if (bs == 0x31) {
+    bs_string = "Triple Word";
+  } else if (bs == 0x21) {
+    bs_string = "Double Word";
+  } else if (bs == 0x12) {
+    bs_string = "Double Letter";
+  } else if (bs == 0x13) {
+    bs_string = "Triple Letter";
+  } else {
+    bs_string = "None";
+  }
 
-// Precondition: the square is empty
-static inline void grid_set_letter(Grid *g, int row, int col, uint8_t letter) {
-  square_set_letter(grid_get_mutable_square(g, row, col), letter);
-  if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-    if (row > 0) {
-      square_increment_is_cross_word(grid_get_mutable_square(g, row - 1, col));
+  printf(">%c,%s,%d,%d,%d,", 'A' + l - 1, bs_string, score, a, ic);
+  for (int i = 0; i < 27; i++) {
+    if ((set >> i) & 1) {
+      if (i == 0) {
+        printf("?");
+      } else {
+        printf("%c", 'A' + i - 1);
+      }
     }
-    if (row < BOARD_DIM - 1) {
-      square_increment_is_cross_word(grid_get_mutable_square(g, row + 1, col));
+  }
+  printf("<\n");
+}
+
+static inline void print_squares(const Board *b, int row, int col) {
+  printf("\n\n\nprinting the square\n\n\n");
+  for (int dir = 0; dir < 2; dir++) {
+    for (int ci = 0; ci < 2; ci++) {
+      printf("indexes for square: %d, %d, %d, %d\n", row, col, dir, ci);
+      print_square(board_get_readonly_square(b, row, col, dir, ci));
     }
   }
 }
 
-// Grid: Bonus square
-
-static inline uint8_t grid_get_bonus_square(const Grid *g, int row, int col) {
-  return square_get_bonus_square(grid_get_const_square(g, row, col));
-}
-
-static inline void grid_set_bonus_square(Grid *g, int row, int col,
-                                         uint8_t bonus_square) {
-  square_set_bonus_square(grid_get_mutable_square(g, row, col), bonus_square);
-}
-
-// Grid: Cross sets
-
-static inline uint64_t grid_get_cross_set(const Grid *g, int row, int col,
-                                          int dir, int cross_index) {
-  return square_get_cross_set(grid_get_const_square(g, row, col), dir,
-                              cross_index);
-}
-
-static inline void grid_set_cross_set(Grid *g, int row, int col, int dir,
-                                      int cross_index, uint64_t cross_set) {
-  square_set_cross_set(grid_get_mutable_square(g, row, col), dir, cross_index,
-                       cross_set);
-}
-
-static inline void grid_set_cross_set_letter(Grid *g, int row, int col, int dir,
-                                             int cross_index, uint8_t letter) {
-  square_set_cross_set_letter(grid_get_mutable_square(g, row, col), dir,
-                              cross_index, letter);
-}
-
-// Grid: Cross scores
-
-static inline int grid_get_cross_score(const Grid *g, int row, int col, int dir,
-                                       int cross_index) {
-  return square_get_cross_score(grid_get_const_square(g, row, col), dir,
-                                cross_index);
-}
-
-static inline void grid_set_cross_score(Grid *g, int row, int col, int dir,
-                                        int cross_index, int cross_score) {
-  square_set_cross_score(grid_get_mutable_square(g, row, col), dir, cross_index,
-                         cross_score);
-}
-
-// Grid: Anchors
-
-static inline bool grid_get_anchor(const Grid *g, int row, int col, int dir) {
-  return square_get_anchor(grid_get_const_square(g, row, col), dir);
-}
-
-static inline void grid_set_anchor(Grid *g, int row, int col, int dir,
-                                   bool anchor) {
-  Square *s = grid_get_mutable_square(g, row, col);
-  bool current_anchor = square_get_anchor(s, dir);
-  // FIXME: Maybe use this instead?
-  // g->number_of_row_anchors[row] += (int)anchor - (int)current_anchor;
-  // The compiler should make short work of this anyway
-  if (current_anchor && !anchor) {
-    g->number_of_row_anchors[row]--;
-  } else if (!current_anchor && anchor) {
-    g->number_of_row_anchors[row]++;
+static inline void print_board(const Board *b) {
+  printf("\n\n\nPB\n\n\n");
+  for (int ci = 0; ci < 2; ci++) {
+    for (int dir = 0; dir < 2; dir++) {
+      for (int row = 0; row < BOARD_DIM; row++) {
+        printf("\n\nsquares for %d, %d, %d:\n", ci, dir, row);
+        for (int col = 0; col < BOARD_DIM; col++) {
+          printf("\n\ncol %d:\n", col);
+          print_square(board_get_readonly_square(b, row, col, dir, ci));
+        }
+      }
+    }
   }
-  square_set_anchor(s, dir, anchor);
-}
-
-// This bypasses the modification of the number of row anchors and
-// should only be used when resetting the grid.
-static inline void grid_reset_anchor(Grid *g, int row, int col, int dir) {
-  square_set_anchor(grid_get_mutable_square(g, row, col), dir, false);
-}
-
-static inline int grid_get_anchors_at_row(const Grid *g, int row) {
-  return g->number_of_row_anchors[row];
-}
-
-// Grid: is cross word
-
-static inline bool grid_get_is_cross_word(const Grid *g, int row, int col) {
-  return square_get_is_cross_word(grid_get_const_square(g, row, col));
-}
-
-static inline void grid_reset_is_cross_word(Grid *g, int row, int col) {
-  square_reset_is_cross_word(grid_get_mutable_square(g, row, col));
-}
-
-// Board: Index helpers
-
-static inline const Grid *board_get_const_grid(const Board *b, int grid_index) {
-  return &b->grids[grid_index];
-}
-
-static inline Grid *board_get_mutable_grid(Board *b, int grid_index) {
-  return &b->grids[grid_index];
 }
 
 // Board: Letter
 
 static inline uint8_t board_get_letter(const Board *b, int row, int col) {
-  return grid_get_letter(board_get_const_grid(b, b->transposed), row, col);
+  // Cross index doesn't matter for letter reads.
+  return square_get_letter(board_get_readonly_square(b, row, col, 0, 0));
 }
 
 static inline void board_set_letter(Board *b, int row, int col,
                                     uint8_t letter) {
-  grid_set_letter(board_get_mutable_grid(b, b->transposed), row, col, letter);
-  grid_set_letter(board_get_mutable_grid(b, 1 - b->transposed), col, row,
-                  letter);
+  // Letter should be set on all 4 squares.
+  // printf("setting letter: %d, %d, %c\n", row, col, letter + 'A' - 1);
+  for (int ci = 0; ci < 2; ci++) {
+    for (int dir = 0; dir < 2; dir++) {
+      square_set_letter(board_get_writable_square(b, row, col, dir, ci),
+                        letter);
+      if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+        int left_cw_row = row;
+        int left_cw_col = col;
+        int right_cw_row = row;
+        int right_cw_col = col;
+        bool inc_left = true;
+        bool inc_right = true;
+        if (dir == BOARD_HORIZONTAL_DIRECTION) {
+          left_cw_row--;
+          right_cw_row++;
+          inc_left = left_cw_row >= 0;
+          inc_right = right_cw_row < BOARD_DIM;
+        } else {
+          left_cw_col--;
+          right_cw_col++;
+          inc_left = left_cw_col >= 0;
+          inc_right = right_cw_col < BOARD_DIM;
+        }
+        if (inc_left) {
+          // printf("inc cw: %d, %d, %d, %d\n", left_cw_row, left_cw_col, dir,
+          // ci);
+          square_increment_is_cross_word(
+              board_get_writable_square(b, left_cw_row, left_cw_col, dir, ci));
+        }
+        if (inc_right) {
+          // printf("inc cw: %d, %d, %d, %d\n", right_cw_row, right_cw_col, dir,
+          //        ci);
+          square_increment_is_cross_word(board_get_writable_square(
+              b, right_cw_row, right_cw_col, dir, ci));
+        }
+        // printf("done cw\n\n");
+      }
+    }
+  }
+  // printf("done setting letter\n");
 }
 
 // Board: Bonus square
 
 static inline uint8_t board_get_bonus_square(const Board *b, int row, int col) {
-  return grid_get_bonus_square(board_get_const_grid(b, b->transposed), row,
-                               col);
+  // Cross index doesn't matter for bonus square reads.
+  return square_get_bonus_square(board_get_readonly_square(b, row, col, 0, 0));
+}
+
+static inline void board_set_bonus_square(Board *b, int row, int col,
+                                          uint8_t bonus_square) {
+  // Bonus square should be set on all 4 squares.
+  for (int ci = 0; ci < 2; ci++) {
+    for (int dir = 0; dir < 2; dir++) {
+      square_set_bonus_square(board_get_writable_square(b, row, col, dir, ci),
+                              bonus_square);
+    }
+  }
 }
 
 // Board: Cross set
 
 static inline uint64_t board_get_cross_set(const Board *b, int row, int col,
-                                           int dir, int cross_index) {
-  return grid_get_cross_set(board_get_const_grid(b, b->transposed), row, col,
-                            dir, cross_index);
+                                           int dir, int ci) {
+  return square_get_cross_set(board_get_readonly_square(b, row, col, dir, ci));
 }
 
 static inline void board_set_cross_set(Board *b, int row, int col, int dir,
-                                       int cross_index, uint64_t cross_set) {
-  grid_set_cross_set(board_get_mutable_grid(b, b->transposed), row, col, dir,
-                     cross_index, cross_set);
-  grid_set_cross_set(board_get_mutable_grid(b, 1 - b->transposed), col, row,
-                     1 - dir, cross_index, cross_set);
+                                       int ci, uint64_t cross_set) {
+  square_set_cross_set(board_get_writable_square(b, row, col, dir, ci),
+                       cross_set);
+  // printf("set cross %d, %d, %d, %d: %ld\n", row, col, dir, ci,
+  //        square_get_cross_set(board_get_readonly_square(b, row, col, dir,
+  //        ci)));
 }
 
 static inline void board_set_cross_set_letter(Board *b, int row, int col,
-                                              int dir, int cross_index,
-                                              uint8_t letter) {
-  grid_set_cross_set_letter(board_get_mutable_grid(b, b->transposed), row, col,
-                            dir, cross_index, letter);
-  grid_set_cross_set_letter(board_get_mutable_grid(b, 1 - b->transposed), col,
-                            row, 1 - dir, cross_index, letter);
+                                              int dir, int ci, uint8_t letter) {
+  square_set_cross_set_letter(board_get_writable_square(b, row, col, dir, ci),
+                              letter);
+  // printf("set letter cross %d, %d, %d, %d, %d: %ld\n", row, col, dir, ci,
+  //        'A' + letter - 1,
+  //        square_get_cross_set(board_get_readonly_square(b, row, col, dir,
+  //        ci)));
 }
 
 // Board: Cross score
 
 static inline int board_get_cross_score(const Board *b, int row, int col,
-                                        int dir, int cross_index) {
-  return grid_get_cross_score(board_get_const_grid(b, b->transposed), row, col,
-                              dir, cross_index);
+                                        int dir, int ci) {
+  return square_get_cross_score(
+      board_get_readonly_square(b, row, col, dir, ci));
 }
 
 static inline void board_set_cross_score(Board *b, int row, int col, int dir,
-                                         int cross_index, int cross_score) {
-  grid_set_cross_score(board_get_mutable_grid(b, b->transposed), row, col, dir,
-                       cross_index, cross_score);
-  grid_set_cross_score(board_get_mutable_grid(b, 1 - b->transposed), col, row,
-                       1 - dir, cross_index, cross_score);
+                                         int ci, int cross_score) {
+  square_set_cross_score(board_get_writable_square(b, row, col, dir, ci),
+                         cross_score);
 }
 
 // Board: Anchors
 
+static inline int board_get_number_of_row_anchors_index(const Board *b, int row,
+                                                        int col, int dir) {
+  int index = BOARD_DIM * (dir ^ b->transposed);
+  if (dir == BOARD_HORIZONTAL_DIRECTION) {
+    index += row;
+  } else {
+    index += col;
+  }
+  return index;
+}
+
+static inline void update_number_of_row_anchors(Board *b, int row, int col,
+                                                int dir, bool old_anchor,
+                                                bool new_anchor) {
+  const int index = board_get_number_of_row_anchors_index(b, row, col, dir);
+  if (old_anchor && !new_anchor) {
+    b->number_of_row_anchors[index]--;
+  } else if (!old_anchor && new_anchor) {
+    b->number_of_row_anchors[index]++;
+  }
+}
+
+static inline int board_get_number_of_row_anchors(const Board *board,
+                                                  int row_or_col, int dir) {
+  if (board->transposed) {
+    log_fatal("cannot get number of row anchors for the transposed board\n");
+  }
+  return board->number_of_row_anchors[board_get_number_of_row_anchors_index(
+      board, row_or_col, row_or_col, dir)];
+}
+
 static inline bool board_get_anchor(const Board *b, int row, int col, int dir) {
-  return grid_get_anchor(board_get_const_grid(b, b->transposed), row, col, dir);
+  return square_get_anchor(board_get_readonly_square(b, row, col, dir, 0));
 }
 
 static inline void board_set_anchor(Board *b, int row, int col, int dir,
                                     bool anchor) {
-  grid_set_anchor(board_get_mutable_grid(b, b->transposed), row, col, dir,
-                  anchor);
-  grid_set_anchor(board_get_mutable_grid(b, 1 - b->transposed), col, row,
-                  1 - dir, anchor);
+  // Anchors should be set on all 4 squares.
+  for (int ci = 0; ci < 2; ci++) {
+    bool old_anchor = square_set_anchor(
+        board_get_writable_square(b, row, col, dir, ci), anchor);
+    if (ci == 0) {
+      update_number_of_row_anchors(b, row, col, dir, old_anchor, anchor);
+    }
+  }
 }
 
 // This bypasses the modification of the number of row anchors and
 // should only be used when resetting the board. Do not use this when
 // updating the board after a play.
 static inline void board_reset_anchor(Board *b, int row, int col, int dir) {
-  grid_reset_anchor(board_get_mutable_grid(b, b->transposed), row, col, dir);
-  grid_reset_anchor(board_get_mutable_grid(b, 1 - b->transposed), col, row,
-                    1 - dir);
+  for (int ci = 0; ci < 2; ci++) {
+    square_reset_anchor(board_get_writable_square(b, row, col, dir, ci));
+  }
 }
 
 static inline void board_reset_number_of_anchor_rows(Board *b) {
-  for (int i = 0; i < 2; i++) {
-    Grid *g = board_get_mutable_grid(b, i);
-    for (int j = 0; j < BOARD_DIM; j++) {
-      g->number_of_row_anchors[j] = 0;
-    }
+  for (int i = 0; i < BOARD_DIM * 2; i++) {
+    b->number_of_row_anchors[i] = 0;
   }
 }
 
 // Board: is cross word
 
-static inline bool board_get_is_cross_word(const Board *b, int row, int col) {
-  return grid_get_is_cross_word(board_get_const_grid(b, b->transposed), row,
-                                col);
+static inline bool board_get_is_cross_word(const Board *b, int row, int col,
+                                           int dir) {
+  // Cross index doesn't matter for is cross word
+  // printf("getting is cross word\n");
+  return square_get_is_cross_word(
+      board_get_readonly_square(b, row, col, dir, 0));
 }
 
-static inline void board_reset_is_cross_word(Board *b, int row, int col) {
-  grid_reset_is_cross_word(board_get_mutable_grid(b, b->transposed), row, col);
-  grid_reset_is_cross_word(board_get_mutable_grid(b, 1 - b->transposed), col,
-                           row);
+static inline void board_reset_is_cross_word(Board *b, int row, int col,
+                                             int dir) {
+  for (int ci = 0; ci < 2; ci++) {
+    square_reset_is_cross_word(board_get_writable_square(b, row, col, dir, ci));
+  }
 }
 
 // Board: Transposed
@@ -440,18 +476,22 @@ static inline bool board_is_dir_vertical(int dir) {
   return dir == BOARD_VERTICAL_DIRECTION;
 }
 
+static inline bool board_matches_dir(const Board *board, int dir) {
+  return (board_is_dir_vertical(dir) && board_get_transposed(board)) ||
+         (!board_is_dir_vertical(dir) && !board_get_transposed(board));
+}
+
 static inline void board_clear_cross_set(Board *board, int row, int col,
-                                         int dir, int cross_index) {
-  board_set_cross_set(board, row, col, dir, cross_index, 0);
+                                         int dir, int ci) {
+  board_set_cross_set(board, row, col, dir, ci, 0);
 }
 
 static inline void board_set_all_crosses(Board *board) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       for (int dir = 0; dir < 2; dir++) {
-        for (int cross_index = 0; cross_index < 2; cross_index++) {
-          board_set_cross_set(board, row, col, dir, cross_index,
-                              TRIVIAL_CROSS_SET);
+        for (int ci = 0; ci < 2; ci++) {
+          board_set_cross_set(board, row, col, dir, ci, TRIVIAL_CROSS_SET);
         }
       }
     }
@@ -462,8 +502,8 @@ static inline void board_reset_all_cross_scores(Board *board) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       for (int dir = 0; dir < 2; dir++) {
-        for (int cross_index = 0; cross_index < 2; cross_index++) {
-          board_set_cross_score(board, row, col, dir, cross_index, 0);
+        for (int ci = 0; ci < 2; ci++) {
+          board_set_cross_score(board, row, col, dir, ci, 0);
         }
       }
     }
@@ -495,17 +535,12 @@ static inline bool board_are_all_adjacent_squares_empty(const Board *board,
 }
 
 static inline int board_get_word_edge(const Board *board, int row, int col,
-                                      int dir) {
+                                      int word_dir) {
   while (board_is_position_valid(row, col) &&
          !board_is_empty(board, row, col)) {
-    col += dir;
+    col += word_dir;
   }
-  return col - dir;
-}
-
-static inline bool board_matches_dir(const Board *board, int dir) {
-  return (board_is_dir_vertical(dir) && board_get_transposed(board)) ||
-         (!board_is_dir_vertical(dir) && !board_get_transposed(board));
+  return col - word_dir;
 }
 
 static inline board_layout_t
@@ -520,14 +555,7 @@ board_layout_string_to_board_layout(const char *board_layout_string) {
   return BOARD_LAYOUT_UNKNOWN;
 }
 
-static inline void board_update_anchors(Board *board, int row, int col,
-                                        int dir) {
-  if (board_is_dir_vertical(dir)) {
-    int temp = row;
-    row = col;
-    col = temp;
-  }
-
+static inline void board_update_anchors(Board *board, int row, int col) {
   board_set_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION, false);
   board_set_anchor(board, row, col, BOARD_VERTICAL_DIRECTION, false);
   bool tile_above = false;
@@ -570,7 +598,7 @@ static inline void board_update_all_anchors(Board *board) {
   if (board->tiles_played > 0) {
     for (int i = 0; i < BOARD_DIM; i++) {
       for (int j = 0; j < BOARD_DIM; j++) {
-        board_update_anchors(board, i, j, 0);
+        board_update_anchors(board, i, j);
       }
     }
   } else {
@@ -592,12 +620,13 @@ static inline void board_reset(Board *board) {
   // The transposed field must be set to 0 here because
   // it is used to calculate the index for board_set_letter.
   board->tiles_played = 0;
-  board->transposed = false;
+  board->transposed = 0;
 
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       board_set_letter(board, row, col, ALPHABET_EMPTY_SQUARE_MARKER);
-      board_reset_is_cross_word(board, row, col);
+      board_reset_is_cross_word(board, row, col, BOARD_HORIZONTAL_DIRECTION);
+      board_reset_is_cross_word(board, row, col, BOARD_VERTICAL_DIRECTION);
     }
   }
 
@@ -606,7 +635,7 @@ static inline void board_reset(Board *board) {
   board_update_all_anchors(board);
 }
 
-static inline void board_set_bonus_squares(Board *b) {
+static inline void board_init_bonus_squares(Board *b) {
   int i = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
@@ -623,11 +652,7 @@ static inline void board_set_bonus_squares(Board *b) {
       } else {
         bonus_value = 0x11;
       }
-      // Don't transpose the row and col when setting bonus squares
-      grid_set_bonus_square(board_get_mutable_grid(b, 0), row, col,
-                            bonus_value);
-      grid_set_bonus_square(board_get_mutable_grid(b, 1), row, col,
-                            bonus_value);
+      board_set_bonus_square(b, row, col, bonus_value);
     }
   }
 }
@@ -635,7 +660,7 @@ static inline void board_set_bonus_squares(Board *b) {
 static inline Board *board_create() {
   Board *board = malloc_or_die(sizeof(Board));
   board_reset(board);
-  board_set_bonus_squares(board);
+  board_init_bonus_squares(board);
   return board;
 }
 
@@ -659,21 +684,37 @@ static inline void board_destroy(Board *board) {
 // FIXME: use movegen cache square
 static inline void board_load_number_of_row_anchors_cache(const Board *b,
                                                           int *cache) {
-  size_t rows_size = sizeof(int) * BOARD_DIM;
-  memory_copy(cache,
-              board_get_const_grid(b, b->transposed)->number_of_row_anchors,
-              rows_size);
-  memory_copy(cache + BOARD_DIM,
-              board_get_const_grid(b, 1 - b->transposed)->number_of_row_anchors,
-              rows_size);
+  if (b->transposed) {
+    log_fatal("cannot load row anchor cache while board is transposed\n");
+  }
+  memory_copy(cache, b->number_of_row_anchors, sizeof(int) * BOARD_DIM * 2);
 }
 
 // FIXME: remove if pointer assignment is faster
-static inline void board_load_row_cache(const Board *b, int row,
-                                        bool transposed, Square *squares) {
-  memory_copy(squares,
-              board_get_const_grid(b, transposed)->squares + row * BOARD_DIM,
+static inline void board_load_row_cache(const Board *b, int row_or_col, int dir,
+                                        int ci, Square *squares) {
+  if (b->transposed) {
+    log_fatal("cannot load row cache while board is transposed\n");
+  }
+  // FIXME: if this is commented out, board tests still pass, plz fix
+  int row = row_or_col;
+  int col = row_or_col;
+  if (dir == BOARD_HORIZONTAL_DIRECTION) {
+    col = 0;
+  } else {
+    row = 0;
+  }
+  // printf("\n\nlsf %d,%d,%d\n", row, col, dir);
+  memory_copy(squares, board_get_readonly_square(b, row, col, dir, ci),
               sizeof(Square) * BOARD_DIM);
+  // for (int i = 0; i < BOARD_DIM; i++) {
+  //   printf("\n\nsquare at %d\n", i);
+  //   print_squares(b, row_or_col, i);
+  //   printf("\ncol square\n");
+  //   print_squares(b, i, row_or_col);
+  //   printf("\nusing square: %p\n", &squares[i]);
+  //   print_square(&squares[i]);
+  // }
 }
 
 #endif

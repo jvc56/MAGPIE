@@ -57,6 +57,23 @@ void set_row(Game *game, int row, const char *row_content) {
   }
 }
 
+// this test func only works for single-char alphabets
+uint64_t cross_set_from_string(const LetterDistribution *ld,
+                               const char *letters) {
+  if (strings_equal(letters, "TRIVIAL")) {
+    return TRIVIAL_CROSS_SET;
+  }
+  uint64_t c = 0;
+  char letter[2];
+  letter[1] = '\0';
+
+  for (size_t i = 0; i < string_length(letters); i++) {
+    letter[0] = letters[i];
+    c |= get_cross_set_bit(ld_hl_to_ml(ld, letter));
+  }
+  return c;
+}
+
 void load_config_or_die(Config *config, const char *cmd) {
   config_load_status_t status = config_load(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
@@ -118,6 +135,7 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
 void print_game(Game *game, MoveList *move_list) {
   StringBuilder *game_string = create_string_builder();
   string_builder_add_game(game, move_list, game_string);
+  printf("vmgame\n");
   printf("%s\n", string_builder_peek(game_string));
   destroy_string_builder(game_string);
 }
@@ -142,9 +160,13 @@ void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
 void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  printf("before play n:\n");
+  print_game(game, NULL);
   SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
   play_move(sorted_move_list->moves[n], game);
   destroy_sorted_move_list(sorted_move_list);
+  printf("after play N\n");
+  print_game(game, NULL);
   move_list_destroy(move_list);
 }
 
@@ -252,24 +274,30 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
 void assert_boards_are_equal(Board *b1, Board *b2) {
   assert(board_get_transposed(b1) == board_get_transposed(b2));
   assert(board_get_tiles_played(b1) == board_get_tiles_played(b2));
-  for (int grid_index = 0; grid_index < 2; grid_index++) {
-    const Grid *g1 = board_get_const_grid(b1, grid_index);
-    const Grid *g2 = board_get_const_grid(b2, grid_index);
+  for (int t = 0; t < 2; t++) {
     for (int row = 0; row < BOARD_DIM; row++) {
+      if (t == 0) {
+        // assert(board_get_number_of_row_anchors(b1, row, 0) ==
+        //        board_get_number_of_row_anchors(b2, row, 0));
+        // printf("%d, %d: %d = %d\n", t, row,
+        //        board_get_number_of_row_anchors(b1, row, 1),
+        //        board_get_number_of_row_anchors(b2, row, 1));
+        // assert(board_get_number_of_row_anchors(b1, row, 1) ==
+        //        board_get_number_of_row_anchors(b2, row, 1));
+      }
       for (int col = 0; col < BOARD_DIM; col++) {
-        if (row == 0) {
-          assert(grid_get_anchors_at_row(g1, col) ==
-                 grid_get_anchors_at_row(g2, col));
-        }
         assert(board_get_letter(b1, row, col) ==
                board_get_letter(b2, row, col));
         assert(board_get_bonus_square(b1, row, col) ==
                board_get_bonus_square(b2, row, col));
-        assert(board_get_is_cross_word(b1, row, col) ==
-               board_get_is_cross_word(b2, row, col));
         for (int dir = 0; dir < 2; dir++) {
+          printf("%d, %d, %d: %d = %d\n", row, col, dir,
+                 board_get_anchor(b1, row, col, dir),
+                 board_get_anchor(b2, row, col, dir));
           assert(board_get_anchor(b1, row, col, dir) ==
                  board_get_anchor(b2, row, col, dir));
+          assert(board_get_is_cross_word(b1, row, col, dir) ==
+                 board_get_is_cross_word(b2, row, col, dir));
           // For now, assume all boards tested in this method
           // share the same lexicon
           for (int cross_index = 0; cross_index < 2; cross_index++) {

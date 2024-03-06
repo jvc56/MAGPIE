@@ -17,6 +17,8 @@ typedef struct SortedMoveList {
   Move **moves;
 } SortedMoveList;
 
+uint64_t cross_set_from_string(const LetterDistribution *ld,
+                               const char *letters);
 void draw_rack_to_string(const LetterDistribution *ld, Bag *bag, Rack *rack,
                          char *letters, int player_index);
 void play_top_n_equity_move(Game *game, int n);

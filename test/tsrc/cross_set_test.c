@@ -17,23 +17,6 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-// this test func only works for single-char alphabets
-uint64_t cross_set_from_string(const LetterDistribution *ld,
-                               const char *letters) {
-  if (strings_equal(letters, "TRIVIAL")) {
-    return TRIVIAL_CROSS_SET;
-  }
-  uint64_t c = 0;
-  char letter[2];
-  letter[1] = '\0';
-
-  for (size_t i = 0; i < string_length(letters); i++) {
-    letter[0] = letters[i];
-    c |= get_cross_set_bit(ld_hl_to_ml(ld, letter));
-  }
-  return c;
-}
-
 // This test function only works for single-char alphabets
 void set_col(Game *game, int col, const char *col_content) {
   Board *board = game_get_board(game);
@@ -55,6 +38,18 @@ void set_col(Game *game, int col, const char *col_content) {
   }
 }
 
+void print_cs(uint64_t cs) {
+  for (int i = 0; i < 27; i++) {
+    if ((cs >> i) & 1) {
+      if (i == 0) {
+        printf("?");
+      } else {
+        printf("%c", 'A' + i - 1);
+      }
+    }
+  }
+}
+
 void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
                         const char *letters, int expected_cross_score,
                         bool run_gcs) {
@@ -68,9 +63,14 @@ void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
   uint64_t expected_cross_set = cross_set_from_string(ld, letters);
   uint64_t actual_cross_set =
       board_get_cross_set(board, row, col, dir, cross_set_index);
+  print_cs(expected_cross_set);
+  printf("\n");
+  print_cs(actual_cross_set);
+  printf("\n");
   assert(expected_cross_set == actual_cross_set);
   int actual_cross_score =
       board_get_cross_score(board, row, col, dir, cross_set_index);
+  printf("%d = %d\n", expected_cross_score, actual_cross_score);
   assert(expected_cross_score == actual_cross_score);
 }
 
@@ -147,24 +147,25 @@ void test_cross_set() {
 
   // TestGenAllcross_sets
   game_load_cgp(game, VS_ED);
-  test_gen_cross_set(game, 8, 8, BOARD_HORIZONTAL_DIRECTION, 0, "OS", 8, false);
-  test_gen_cross_set(game, 8, 8, BOARD_VERTICAL_DIRECTION, 0, "S", 9, false);
-  test_gen_cross_set(game, 5, 11, BOARD_HORIZONTAL_DIRECTION, 0, "S", 5, false);
-  test_gen_cross_set(game, 5, 11, BOARD_VERTICAL_DIRECTION, 0, "AO", 2, false);
-  test_gen_cross_set(game, 8, 13, BOARD_HORIZONTAL_DIRECTION, 0, "AEOU", 1,
+  test_gen_cross_set(game, 8, 8, BOARD_VERTICAL_DIRECTION, 0, "OS", 8, false);
+  test_gen_cross_set(game, 8, 8, BOARD_HORIZONTAL_DIRECTION, 0, "S", 9, false);
+  test_gen_cross_set(game, 5, 11, BOARD_VERTICAL_DIRECTION, 0, "S", 5, false);
+  test_gen_cross_set(game, 5, 11, BOARD_HORIZONTAL_DIRECTION, 0, "AO", 2,
                      false);
-  test_gen_cross_set(game, 8, 13, BOARD_VERTICAL_DIRECTION, 0, "AEIMOUY", 3,
+  test_gen_cross_set(game, 8, 13, BOARD_VERTICAL_DIRECTION, 0, "AEOU", 1,
                      false);
-  test_gen_cross_set(game, 9, 13, BOARD_HORIZONTAL_DIRECTION, 0, "HMNPST", 1,
+  test_gen_cross_set(game, 8, 13, BOARD_HORIZONTAL_DIRECTION, 0, "AEIMOUY", 3,
                      false);
-  test_gen_cross_set(game, 9, 13, BOARD_VERTICAL_DIRECTION, 0, "TRIVIAL", 0,
+  test_gen_cross_set(game, 9, 13, BOARD_VERTICAL_DIRECTION, 0, "HMNPST", 1,
                      false);
-  test_gen_cross_set(game, 14, 14, BOARD_HORIZONTAL_DIRECTION, 0, "TRIVIAL", 0,
+  test_gen_cross_set(game, 9, 13, BOARD_HORIZONTAL_DIRECTION, 0, "TRIVIAL", 0,
                      false);
   test_gen_cross_set(game, 14, 14, BOARD_VERTICAL_DIRECTION, 0, "TRIVIAL", 0,
                      false);
-  test_gen_cross_set(game, 12, 12, BOARD_HORIZONTAL_DIRECTION, 0, "", 0, false);
+  test_gen_cross_set(game, 14, 14, BOARD_HORIZONTAL_DIRECTION, 0, "TRIVIAL", 0,
+                     false);
   test_gen_cross_set(game, 12, 12, BOARD_VERTICAL_DIRECTION, 0, "", 0, false);
+  test_gen_cross_set(game, 12, 12, BOARD_HORIZONTAL_DIRECTION, 0, "", 0, false);
 
   // TestUpdateSinglecross_set
   Board *board = game_get_board(game);
@@ -173,12 +174,12 @@ void test_cross_set() {
   board_set_letter(board, 9, 10, 0);
   board_set_letter(board, 10, 10, 4);
   board_set_letter(board, 11, 10, 11);
-  game_gen_cross_set(game, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0);
+  game_gen_cross_set(game, 7, 10, BOARD_VERTICAL_DIRECTION, 0);
   board_transpose(board);
-  game_gen_cross_set(game, 10, 7, BOARD_HORIZONTAL_DIRECTION, 0);
+  game_gen_cross_set(game, 10, 7, BOARD_VERTICAL_DIRECTION, 0);
   board_transpose(board);
-  assert(board_get_cross_set(board, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0) == 0);
   assert(board_get_cross_set(board, 7, 10, BOARD_VERTICAL_DIRECTION, 0) == 0);
+  assert(board_get_cross_set(board, 7, 10, BOARD_HORIZONTAL_DIRECTION, 0) == 0);
 
   game_destroy(game);
   config_destroy(config);

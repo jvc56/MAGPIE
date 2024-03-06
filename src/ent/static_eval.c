@@ -159,9 +159,6 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
   if (!board_matches_dir(board, move_dir)) {
     board_transpose(board);
     board_was_transposed = true;
-  }
-
-  if (move_dir == BOARD_VERTICAL_DIRECTION) {
     int tmp_start = row_start;
     row_start = col_start;
     col_start = tmp_start;
@@ -199,7 +196,7 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
     // start of this function ensures that the indexing
     // board_get_cross_score function is correct.
     int cs = board_get_cross_score(board, row_start, col_start + idx,
-                                   BOARD_VERTICAL_DIRECTION, cross_set_index);
+                                   BOARD_HORIZONTAL_DIRECTION, cross_set_index);
     if (get_is_blanked(ml)) {
       ls = 0;
     } else {
@@ -215,7 +212,14 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
     if (fresh_tile && actual_cross_word) {
       cross_scores += ls * letter_multiplier * this_word_multiplier +
                       cs * this_word_multiplier;
+      // printf("update cs for %d: %d = %d * %d * %d + %d * %d\n", idx,
+      //        cross_scores, ls, letter_multiplier, this_word_multiplier, cs,
+      //        this_word_multiplier);
+    } else {
+      // printf("NOde cs %d: %d\n", idx, cross_scores);
     }
+    // printf("scors %d: %d, %d, %d\n", idx, main_word_score, word_multiplier,
+    //        cross_scores);
   }
 
   if (board_was_transposed) {

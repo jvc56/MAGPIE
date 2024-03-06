@@ -424,6 +424,7 @@ move_validation_status_t validated_move_load(ValidatedMove *vm,
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     const KWG *kwg = player_get_kwg(player);
+    // printf("scoring %s\n", ucgi_move_string);
     score = static_eval_get_move_score(
         game_get_ld(game), vm->move, board,
         board_get_cross_set_index(

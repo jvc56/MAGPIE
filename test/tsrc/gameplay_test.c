@@ -136,6 +136,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     }
 
     game_load_cgp(expected_game, cgps[i]);
+    printf("loaded %s\n", cgps[i]);
     // If the game is still ongoing,
     // return the racks to the bag so that
     // the bag from the expected game and

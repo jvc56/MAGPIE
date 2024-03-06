@@ -262,18 +262,18 @@ void game_gen_all_cross_sets(Game *game) {
   // on the other grid. See board.h for more details.
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
-      game_gen_cross_set(game, i, j, BOARD_HORIZONTAL_DIRECTION, 0);
+      game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 0);
       if (!kwgs_are_shared) {
-        game_gen_cross_set(game, i, j, BOARD_HORIZONTAL_DIRECTION, 1);
+        game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 1);
       }
     }
   }
   board_transpose(board);
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
-      game_gen_cross_set(game, i, j, BOARD_HORIZONTAL_DIRECTION, 0);
+      game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 0);
       if (!kwgs_are_shared) {
-        game_gen_cross_set(game, i, j, BOARD_HORIZONTAL_DIRECTION, 1);
+        game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 1);
       }
     }
   }
