@@ -212,14 +212,7 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
     if (fresh_tile && actual_cross_word) {
       cross_scores += ls * letter_multiplier * this_word_multiplier +
                       cs * this_word_multiplier;
-      // printf("update cs for %d: %d = %d * %d * %d + %d * %d\n", idx,
-      //        cross_scores, ls, letter_multiplier, this_word_multiplier, cs,
-      //        this_word_multiplier);
-    } else {
-      // printf("NOde cs %d: %d\n", idx, cross_scores);
     }
-    // printf("scors %d: %d, %d, %d\n", idx, main_word_score, word_multiplier,
-    //        cross_scores);
   }
 
   if (board_was_transposed) {

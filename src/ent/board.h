@@ -146,8 +146,6 @@ static inline int board_get_square_index(const Board *b, int row, int col,
     col_offset = row;
   }
   index = cross_offset + dir_offset + row_offset + col_offset;
-  // printf("bgsi: %d, %d, %d, %d: %d + %d + %d + %d = %d\n", row, col, dir, ci,
-  //        cross_offset, dir_offset, row_offset, col_offset, index);
   return index;
 }
 
@@ -159,67 +157,7 @@ static inline Square *board_get_writable_square(Board *b, int row, int col,
 static inline const Square *
 board_get_readonly_square(const Board *b, int row, int col, int dir, int ci) {
   const int index = board_get_square_index(b, row, col, dir, ci);
-  // printf("sq idx: %p\n", &b->squares[index]);
   return &b->squares[index];
-}
-
-static inline void print_square(const Square *s) {
-  uint8_t l = square_get_letter(s);
-  uint8_t bs = square_get_bonus_square(s);
-  int score = square_get_cross_score(s);
-  bool a = square_get_anchor(s);
-  int ic = square_get_is_cross_word(s);
-  uint64_t set = square_get_cross_set(s);
-
-  const char *bs_string;
-  if (bs == 0x31) {
-    bs_string = "Triple Word";
-  } else if (bs == 0x21) {
-    bs_string = "Double Word";
-  } else if (bs == 0x12) {
-    bs_string = "Double Letter";
-  } else if (bs == 0x13) {
-    bs_string = "Triple Letter";
-  } else {
-    bs_string = "None";
-  }
-
-  printf(">%c,%s,%d,%d,%d,", 'A' + l - 1, bs_string, score, a, ic);
-  for (int i = 0; i < 27; i++) {
-    if ((set >> i) & 1) {
-      if (i == 0) {
-        printf("?");
-      } else {
-        printf("%c", 'A' + i - 1);
-      }
-    }
-  }
-  printf("<\n");
-}
-
-static inline void print_squares(const Board *b, int row, int col) {
-  printf("\n\n\nprinting the square\n\n\n");
-  for (int dir = 0; dir < 2; dir++) {
-    for (int ci = 0; ci < 2; ci++) {
-      printf("indexes for square: %d, %d, %d, %d\n", row, col, dir, ci);
-      print_square(board_get_readonly_square(b, row, col, dir, ci));
-    }
-  }
-}
-
-static inline void print_board(const Board *b) {
-  printf("\n\n\nPB\n\n\n");
-  for (int ci = 0; ci < 2; ci++) {
-    for (int dir = 0; dir < 2; dir++) {
-      for (int row = 0; row < BOARD_DIM; row++) {
-        printf("\n\nsquares for %d, %d, %d:\n", ci, dir, row);
-        for (int col = 0; col < BOARD_DIM; col++) {
-          printf("\n\ncol %d:\n", col);
-          print_square(board_get_readonly_square(b, row, col, dir, ci));
-        }
-      }
-    }
-  }
 }
 
 // Board: Letter
@@ -232,7 +170,6 @@ static inline uint8_t board_get_letter(const Board *b, int row, int col) {
 static inline void board_set_letter(Board *b, int row, int col,
                                     uint8_t letter) {
   // Letter should be set on all 4 squares.
-  // printf("setting letter: %d, %d, %c\n", row, col, letter + 'A' - 1);
   for (int ci = 0; ci < 2; ci++) {
     for (int dir = 0; dir < 2; dir++) {
       square_set_letter(board_get_writable_square(b, row, col, dir, ci),
@@ -256,22 +193,16 @@ static inline void board_set_letter(Board *b, int row, int col,
           inc_right = right_cw_col < BOARD_DIM;
         }
         if (inc_left) {
-          // printf("inc cw: %d, %d, %d, %d\n", left_cw_row, left_cw_col, dir,
-          // ci);
           square_increment_is_cross_word(
               board_get_writable_square(b, left_cw_row, left_cw_col, dir, ci));
         }
         if (inc_right) {
-          // printf("inc cw: %d, %d, %d, %d\n", right_cw_row, right_cw_col, dir,
-          //        ci);
           square_increment_is_cross_word(board_get_writable_square(
               b, right_cw_row, right_cw_col, dir, ci));
         }
-        // printf("done cw\n\n");
       }
     }
   }
-  // printf("done setting letter\n");
 }
 
 // Board: Bonus square
@@ -303,19 +234,12 @@ static inline void board_set_cross_set(Board *b, int row, int col, int dir,
                                        int ci, uint64_t cross_set) {
   square_set_cross_set(board_get_writable_square(b, row, col, dir, ci),
                        cross_set);
-  // printf("set cross %d, %d, %d, %d: %ld\n", row, col, dir, ci,
-  //        square_get_cross_set(board_get_readonly_square(b, row, col, dir,
-  //        ci)));
 }
 
 static inline void board_set_cross_set_letter(Board *b, int row, int col,
                                               int dir, int ci, uint8_t letter) {
   square_set_cross_set_letter(board_get_writable_square(b, row, col, dir, ci),
                               letter);
-  // printf("set letter cross %d, %d, %d, %d, %d: %ld\n", row, col, dir, ci,
-  //        'A' + letter - 1,
-  //        square_get_cross_set(board_get_readonly_square(b, row, col, dir,
-  //        ci)));
 }
 
 // Board: Cross score
@@ -400,8 +324,6 @@ static inline void board_reset_number_of_anchor_rows(Board *b) {
 
 static inline bool board_get_is_cross_word(const Board *b, int row, int col,
                                            int dir) {
-  // Cross index doesn't matter for is cross word
-  // printf("getting is cross word\n");
   return square_get_is_cross_word(
       board_get_readonly_square(b, row, col, dir, 0));
 }
@@ -690,7 +612,6 @@ static inline void board_load_number_of_row_anchors_cache(const Board *b,
   memory_copy(cache, b->number_of_row_anchors, sizeof(int) * BOARD_DIM * 2);
 }
 
-// FIXME: remove if pointer assignment is faster
 static inline void board_load_row_cache(const Board *b, int row_or_col, int dir,
                                         int ci, Square *squares) {
   if (b->transposed) {
@@ -704,17 +625,8 @@ static inline void board_load_row_cache(const Board *b, int row_or_col, int dir,
   } else {
     row = 0;
   }
-  // printf("\n\nlsf %d,%d,%d\n", row, col, dir);
   memory_copy(squares, board_get_readonly_square(b, row, col, dir, ci),
               sizeof(Square) * BOARD_DIM);
-  // for (int i = 0; i < BOARD_DIM; i++) {
-  //   printf("\n\nsquare at %d\n", i);
-  //   print_squares(b, row_or_col, i);
-  //   printf("\ncol square\n");
-  //   print_squares(b, i, row_or_col);
-  //   printf("\nusing square: %p\n", &squares[i]);
-  //   print_square(&squares[i]);
-  // }
 }
 
 #endif

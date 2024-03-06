@@ -119,7 +119,6 @@ void test_board_everything() {
 
   game_reset(game);
 
-  // FIXME: test this equivalent for load cgp
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
   ValidatedMoves *vms =
       validated_moves_create(game, 0, "8H.SPORK", false, true);
@@ -128,12 +127,6 @@ void test_board_everything() {
   play_move(validated_moves_get_move(vms, 0), game);
   validated_moves_destroy(vms);
 
-  // print_game(game, NULL);
-
-  // print_squares(board, 8, 8);
-  // assert(board_get_cross_set(board, 8, 8, 0, 0) ==
-  //        cross_set_from_string(ld, "AEIO"));
-
   // Play SCHIZIER, better than best CSW word of SCHERZI
   rack_set_to_string(ld, player1_rack, "CAURING");
   vms = validated_moves_create(game, 1, "H8.SCAURING", false, true);
@@ -141,12 +134,6 @@ void test_board_everything() {
          MOVE_VALIDATION_STATUS_SUCCESS);
   play_move(validated_moves_get_move(vms, 0), game);
   validated_moves_destroy(vms);
-
-  // print_game(game, NULL);
-
-  // print_squares(board, 8, 8);
-  // assert(board_get_cross_set(board, 8, 8, 0, 0) ==
-  //        cross_set_from_string(ld, "AEIO"));
 
   game_load_cgp(game, VS_ED);
 
@@ -221,7 +208,6 @@ void test_board_everything() {
     assert(board_get_cross_score(board, 6, 3, 0, 0) == 0);
   }
 
-  // FIXME: need better tests
   for (int i = 0; i < 2; i++) {
     test_board_reset(board);
     board_set_letter(board, 10, 4, 23);
@@ -464,10 +450,8 @@ void test_board_everything() {
     assert(number_of_anchors_cache[i] == expected_number_of_anchors);
   }
 
-  // FIXME: test with transposed
   int row_index = 9;
   for (int t = 0; t < 2; t++) {
-
     if (t == 1) {
       board_transpose(board);
     }

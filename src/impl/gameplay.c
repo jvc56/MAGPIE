@@ -36,7 +36,6 @@ double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   return klv_get_leave_value(klv, rack);
 }
 
-// FIXME: save some move fields at the start
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
   Board *board = game_get_board(game);

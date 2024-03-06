@@ -38,18 +38,6 @@ void set_col(Game *game, int col, const char *col_content) {
   }
 }
 
-void print_cs(uint64_t cs) {
-  for (int i = 0; i < 27; i++) {
-    if ((cs >> i) & 1) {
-      if (i == 0) {
-        printf("?");
-      } else {
-        printf("%c", 'A' + i - 1);
-      }
-    }
-  }
-}
-
 void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
                         const char *letters, int expected_cross_score,
                         bool run_gcs) {
@@ -63,14 +51,9 @@ void test_gen_cross_set(Game *game, int row, int col, int dir, int player_index,
   uint64_t expected_cross_set = cross_set_from_string(ld, letters);
   uint64_t actual_cross_set =
       board_get_cross_set(board, row, col, dir, cross_set_index);
-  print_cs(expected_cross_set);
-  printf("\n");
-  print_cs(actual_cross_set);
-  printf("\n");
   assert(expected_cross_set == actual_cross_set);
   int actual_cross_score =
       board_get_cross_score(board, row, col, dir, cross_set_index);
-  printf("%d = %d\n", expected_cross_score, actual_cross_score);
   assert(expected_cross_score == actual_cross_score);
 }
 

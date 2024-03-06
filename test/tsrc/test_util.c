@@ -135,7 +135,6 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
 void print_game(Game *game, MoveList *move_list) {
   StringBuilder *game_string = create_string_builder();
   string_builder_add_game(game, move_list, game_string);
-  printf("vmgame\n");
   printf("%s\n", string_builder_peek(game_string));
   destroy_string_builder(game_string);
 }
@@ -160,12 +159,10 @@ void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
 void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
-  printf("before play n:\n");
   print_game(game, NULL);
   SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
   play_move(sorted_move_list->moves[n], game);
   destroy_sorted_move_list(sorted_move_list);
-  printf("after play N\n");
   print_game(game, NULL);
   move_list_destroy(move_list);
 }
@@ -277,13 +274,10 @@ void assert_boards_are_equal(Board *b1, Board *b2) {
   for (int t = 0; t < 2; t++) {
     for (int row = 0; row < BOARD_DIM; row++) {
       if (t == 0) {
-        // assert(board_get_number_of_row_anchors(b1, row, 0) ==
-        //        board_get_number_of_row_anchors(b2, row, 0));
-        // printf("%d, %d: %d = %d\n", t, row,
-        //        board_get_number_of_row_anchors(b1, row, 1),
-        //        board_get_number_of_row_anchors(b2, row, 1));
-        // assert(board_get_number_of_row_anchors(b1, row, 1) ==
-        //        board_get_number_of_row_anchors(b2, row, 1));
+        assert(board_get_number_of_row_anchors(b1, row, 0) ==
+               board_get_number_of_row_anchors(b2, row, 0));
+        assert(board_get_number_of_row_anchors(b1, row, 1) ==
+               board_get_number_of_row_anchors(b2, row, 1));
       }
       for (int col = 0; col < BOARD_DIM; col++) {
         assert(board_get_letter(b1, row, col) ==
