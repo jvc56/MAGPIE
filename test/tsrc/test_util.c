@@ -60,7 +60,7 @@ void set_row(Game *game, int row, const char *row_content) {
 // this test func only works for single-char alphabets
 uint64_t cross_set_from_string(const LetterDistribution *ld,
                                const char *letters) {
-  if (strings_equal(letters, "TRIVIAL")) {
+  if (strings_equal(letters, TRIVIAL_CROSS_SET_STRING)) {
     return TRIVIAL_CROSS_SET;
   }
   uint64_t c = 0;

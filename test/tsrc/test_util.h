@@ -12,6 +12,8 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
 
+#define TRIVIAL_CROSS_SET_STRING "trivial"
+
 typedef struct SortedMoveList {
   int count;
   Move **moves;
