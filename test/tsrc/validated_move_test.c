@@ -556,7 +556,6 @@ void test_validated_move_distinct_kwg() {
   // print_board(game_get_board(game));
   rack_set_to_string(ld, player0_rack, "GGLLOWY");
   generate_moves_for_game(game, 0, move_list);
-  // print_game(game, move_list);
   assert_move(game, move_list, NULL, 0, "11G W(I)GGLY 28");
   play_move(move_list_get_move(move_list, 0), game);
 
