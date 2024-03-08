@@ -302,15 +302,6 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   }
 }
 
-static inline bool better_play_has_been_found(const MoveGen *gen,
-                                              double highest_possible_value) {
-  Move *move = move_list_get_move(gen->move_list, 0);
-  const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
-                                      ? move_get_equity(move)
-                                      : move_get_score(move);
-  return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
-}
-
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play,
            int main_word_score, int word_multiplier, int cross_score);
