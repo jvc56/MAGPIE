@@ -3,7 +3,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
@@ -26,21 +25,10 @@ typedef struct Square {
   bool is_cross_word;
 } Square;
 
-// Board maintains four squares:
-// - One pair for each direction
-// - One pair for each cross index
 typedef struct Board {
-  // We use (number of squares * 4) for cross sets
-  // to account for
-  //   - vertical and horizontal board directions
-  //   - separate lexicons used by player 1 and player 2
-
-  // We use (number of squares * 4) for cross scores
-  // for reasons listed above.
-
-  // We use (number of squares * 2) for cross sets
-  // to account for
-  //   - vertical and horizontal board directions
+  // The Board struct maintains four "sub-boards":
+  // - One pair for each direction
+  // - One pair for each cross index
   Square squares[2 * 2 * BOARD_DIM * BOARD_DIM];
   int number_of_row_anchors[BOARD_DIM * 2];
   int transposed;
@@ -122,17 +110,25 @@ static inline void square_set_is_cross_word(Square *s, bool is_cross_word) {
 
 // Square getter helpers
 
-// Square getter helpers
-
 static inline int get_square_index(int transposed, int row, int col, int dir,
                                    int ci) {
+  // Cross index offset is the first "index" into the board squares
+  // since whole separate BOARD_DIM * 2 chunks of lanes occupying
+  // continuous memory need to be loaded into movegen.
   const int cross_offset = ci * 2 * BOARD_DIM * BOARD_DIM;
+  // The adjusted direction determines which "board direction" to
+  // access.
   const int adjusted_dir = (dir ^ transposed);
   const int dir_offset = adjusted_dir * BOARD_DIM * BOARD_DIM;
 
   int row_offset = 0;
   int col_offset = 0;
-  if (!dir) {
+  // If the direction is vertical, we need to switch the
+  // row and col so that the cols in the vertical board
+  // are stored in continuous memory, which allows the
+  // movegen to access those columns in a memory-compact
+  // way.
+  if (dir == BOARD_HORIZONTAL_DIRECTION) {
     row_offset = row * BOARD_DIM;
     col_offset = col;
   } else {
@@ -159,6 +155,10 @@ board_get_readonly_square(const Board *b, int row, int col, int dir, int ci) {
 }
 
 // Board: Letter
+
+// Board letters are written to all 4 "boards" in the squares array
+// and can be read with a cross index of 0 since letters do not change
+// across cross indexes.
 
 static inline uint8_t board_get_letter(const Board *b, int row, int col) {
   // Cross index doesn't matter for letter reads.
@@ -207,6 +207,10 @@ static inline void board_set_letter(Board *b, int row, int col,
 
 // Board: Bonus square
 
+// Bonus squares are written to all 4 "boards" in the squares array
+// and can be read with a cross index of 0 since bonus squares do not change
+// across cross indexes.
+
 static inline uint8_t board_get_bonus_square(const Board *b, int row, int col) {
   // Cross index doesn't matter for bonus square reads.
   return square_get_bonus_square(board_get_readonly_square(b, row, col, 0, 0));
@@ -224,6 +228,10 @@ static inline void board_set_bonus_square(Board *b, int row, int col,
 }
 
 // Board: Cross set
+
+// Cross sets and cross scores are written to a single board among
+// all 4 "boards" in the squares array since they represent a certain
+// direction and cross index.
 
 static inline uint64_t board_get_cross_set(const Board *b, int row, int col,
                                            int dir, int ci) {
@@ -258,8 +266,14 @@ static inline void board_set_cross_score(Board *b, int row, int col, int dir,
 
 // Board: Anchors
 
+// Anchors are written to 2 "boards" since they have a specific direction
+// but are the same across cross indexes.
+
 static inline int board_get_number_of_row_anchors_index(const Board *b, int row,
                                                         int col, int dir) {
+  // There are only BOARD_DIM * 2 values to access, with each int storing
+  // the number of anchors for that lane. We offset by BOARD_DIM when
+  // accessing the vertical direction.
   int index = BOARD_DIM * (dir ^ b->transposed);
   if (dir == BOARD_HORIZONTAL_DIRECTION) {
     index += row;
@@ -295,7 +309,6 @@ static inline bool board_get_anchor(const Board *b, int row, int col, int dir) {
 
 static inline void board_set_anchor(Board *b, int row, int col, int dir,
                                     bool anchor) {
-  // Anchors should be set on all 4 squares.
   for (int ci = 0; ci < 2; ci++) {
     bool old_anchor = square_set_anchor(
         board_get_writable_square(b, row, col, dir, ci), anchor);
@@ -324,6 +337,8 @@ static inline void board_reset_number_of_anchor_rows(Board *b) {
 
 static inline bool board_get_is_cross_word(const Board *b, int row, int col,
                                            int dir) {
+  // We can use 0 for cross index for access since cross words are the same
+  // across cross indexes.
   return square_get_is_cross_word(
       board_get_readonly_square(b, row, col, dir, 0));
 }
@@ -630,6 +645,8 @@ static inline void board_load_lanes_cache(const Board *b, int ci,
   if (b->transposed) {
     log_fatal("cannot load row cache while board is transposed\n");
   }
+  // Use 0 for row, col, and dir to get the "start" of the block
+  // of memory representing that cross index.
   memory_copy(lanes_cache, board_get_readonly_square(b, 0, 0, 0, ci),
               sizeof(Square) * 2 * BOARD_DIM * BOARD_DIM);
 }

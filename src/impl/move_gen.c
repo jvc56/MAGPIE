@@ -71,10 +71,9 @@ typedef struct MoveGen {
   const KLV *klv;
   const KWG *kwg;
   const Rack *opponent_rack;
+  const Board *board;
   // Player rack is modified when generating exchanges
   Rack *player_rack;
-  // Board is transposed during move generation
-  const Board *board;
   // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
@@ -151,20 +150,10 @@ static inline uint8_t gen_cache_get_bonus_square(const MoveGen *gen, int col) {
 }
 
 static inline uint64_t gen_cache_get_cross_set(const MoveGen *gen, int col) {
-  // Always use the vertical direction to get the cross set since
-  // word building is done row-wise and the direction switches with
-  // transposition.
-  return square_get_cross_set(&gen->row_cache[col]);
-}
-
-static inline uint64_t gen_cache_get_hz_cross_set(const MoveGen *gen, int col) {
   return square_get_cross_set(&gen->row_cache[col]);
 }
 
 static inline uint8_t gen_cache_get_cross_score(const MoveGen *gen, int col) {
-  // Always use the vertical direction to get the cross score since
-  // scoring is done row-wise and the direction switches with
-  // transposition.
   return square_get_cross_score(&gen->row_cache[col]);
 }
 
@@ -416,7 +405,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     }
   } else {
     if (square_is_empty && !unique_play && gen->dir &&
-        gen_cache_get_hz_cross_set(gen, current_col) == TRIVIAL_CROSS_SET) {
+        gen_cache_get_cross_set(gen, current_col) == TRIVIAL_CROSS_SET) {
       unique_play = true;
     }
     rightstrip = current_col;

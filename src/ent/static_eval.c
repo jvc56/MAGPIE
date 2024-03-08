@@ -190,7 +190,7 @@ int static_eval_get_move_score(const LetterDistribution *ld, const Move *move,
       word_multiplier *= this_word_multiplier;
     }
 
-    // Always use the vertical direction to get the cross score since
+    // Always use the horizontal direction to get the cross score since
     // scoring is done row-wise and the direction switches with
     // transposition. The conditional transposition at the
     // start of this function ensures that the indexing

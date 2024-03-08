@@ -256,7 +256,7 @@ void game_gen_all_cross_sets(Game *game) {
   Board *board = game_get_board(game);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
-  // We only use the horizontal direction here since the board
+  // We only use the vertical direction here since the board
   // direction changes with transposition. Each cross set write
   // will make the corresponding write in the opposite direction
   // on the other grid. See board.h for more details.
