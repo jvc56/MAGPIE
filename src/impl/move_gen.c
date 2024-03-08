@@ -135,7 +135,7 @@ static inline int gen_cache_is_empty(const MoveGen *gen, int col) {
   return gen_cache_get_letter(gen, col) == ALPHABET_EMPTY_SQUARE_MARKER;
 }
 
-static inline bool gen_cache_get_is_cross_word(MoveGen *gen, int col) {
+static inline bool gen_cache_get_is_cross_word(const MoveGen *gen, int col) {
   return square_get_is_cross_word(&gen->row_cache[col]);
 }
 
