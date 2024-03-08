@@ -132,7 +132,6 @@ void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
 void update_cross_set_for_move(const Move *move, Game *game) {
   Board *board = game_get_board(game);
   if (board_is_dir_vertical(move_get_dir(move))) {
-    // FIXME: plz explain why all directions are vertical
     calc_for_across(move, game, move_get_row_start(move),
                     move_get_col_start(move), BOARD_VERTICAL_DIRECTION);
     board_transpose(board);

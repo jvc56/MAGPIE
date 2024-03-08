@@ -124,15 +124,14 @@ static inline void square_set_is_cross_word(Square *s, bool is_cross_word) {
 
 // Square getter helpers
 
-static inline int board_get_square_index(const Board *b, int row, int col,
-                                         int dir, int ci) {
+static inline int get_square_index(int transposed, int row, int col, int dir,
+                                   int ci) {
   const int cross_offset = ci * 2 * BOARD_DIM * BOARD_DIM;
-  const int adjusted_dir = (dir ^ b->transposed);
+  const int adjusted_dir = (dir ^ transposed);
   const int dir_offset = adjusted_dir * BOARD_DIM * BOARD_DIM;
 
   int row_offset = 0;
   int col_offset = 0;
-  int index = 0;
   if (!dir) {
     row_offset = row * BOARD_DIM;
     col_offset = col;
@@ -140,8 +139,12 @@ static inline int board_get_square_index(const Board *b, int row, int col,
     row_offset = col * BOARD_DIM;
     col_offset = row;
   }
-  index = cross_offset + dir_offset + row_offset + col_offset;
-  return index;
+  return cross_offset + dir_offset + row_offset + col_offset;
+}
+
+static inline int board_get_square_index(const Board *b, int row, int col,
+                                         int dir, int ci) {
+  return get_square_index(b->transposed, row, col, dir, ci);
 }
 
 static inline Square *board_get_writable_square(Board *b, int row, int col,
@@ -606,11 +609,8 @@ static inline void board_load_number_of_row_anchors_cache(const Board *b,
   memory_copy(cache, b->number_of_row_anchors, sizeof(int) * BOARD_DIM * 2);
 }
 
-static inline void board_load_row_cache(const Board *b, int row_or_col, int dir,
-                                        int ci, Square *squares) {
-  if (b->transposed) {
-    log_fatal("cannot load row cache while board is transposed\n");
-  }
+static inline const Square *board_get_row_cache(const Square *lanes_cache,
+                                                int row_or_col, int dir) {
   int row = row_or_col;
   int col = row_or_col;
   if (dir == BOARD_HORIZONTAL_DIRECTION) {
@@ -618,8 +618,20 @@ static inline void board_load_row_cache(const Board *b, int row_or_col, int dir,
   } else {
     row = 0;
   }
-  memory_copy(squares, board_get_readonly_square(b, row, col, dir, ci),
-              sizeof(Square) * BOARD_DIM);
+
+  // Assume the board is not transposed
+  // Always use 0 for cross index since the lanes_cache
+  // is already loaded for a specific cross index
+  return &lanes_cache[get_square_index(0, row, col, dir, 0)];
+}
+
+static inline void board_load_lanes_cache(const Board *b, int ci,
+                                          Square *lanes_cache) {
+  if (b->transposed) {
+    log_fatal("cannot load row cache while board is transposed\n");
+  }
+  memory_copy(lanes_cache, board_get_readonly_square(b, 0, 0, 0, ci),
+              sizeof(Square) * 2 * BOARD_DIM * BOARD_DIM);
 }
 
 #endif

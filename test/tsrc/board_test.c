@@ -439,7 +439,8 @@ void test_board_everything() {
 
   test_board_reset(board);
 
-  Square squares[BOARD_DIM];
+  Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
+  const Square *row_cache;
 
   board_load_number_of_row_anchors_cache(board, number_of_anchors_cache);
   for (int i = 0; i < BOARD_DIM * 2; i++) {
@@ -466,15 +467,16 @@ void test_board_everything() {
       board_transpose(board);
     }
 
-    board_load_row_cache(board, row_index, 0, 0, squares);
+    board_load_lanes_cache(board, 0, lanes_cache);
+    row_cache = board_get_row_cache(lanes_cache, row_index, 0);
 
     for (int i = 0; i < BOARD_DIM; i++) {
       assert(board_get_letter(board, row_index, i) ==
-             square_get_letter(&squares[i]));
+             square_get_letter(&row_cache[i]));
       assert(board_get_anchor(board, row_index, i, 0) ==
-             square_get_anchor(&squares[i]));
+             square_get_anchor(&row_cache[i]));
       assert(board_get_cross_set(board, row_index, i, 0, 0) ==
-             square_get_cross_set(&squares[i]));
+             square_get_cross_set(&row_cache[i]));
     }
     test_board_reset(board);
   }
@@ -494,15 +496,17 @@ void test_board_everything() {
     if (t == 1) {
       board_transpose(board);
     }
-    board_load_row_cache(board, col_index, 1, 0, squares);
+
+    board_load_lanes_cache(board, 0, lanes_cache);
+    row_cache = board_get_row_cache(lanes_cache, col_index, 1);
 
     for (int i = 0; i < BOARD_DIM; i++) {
       assert(board_get_letter(board, i, col_index) ==
-             square_get_letter(&squares[i]));
+             square_get_letter(&row_cache[i]));
       assert(board_get_anchor(board, i, col_index, 1) ==
-             square_get_anchor(&squares[i]));
+             square_get_anchor(&row_cache[i]));
       assert(board_get_cross_set(board, i, col_index, 1, 0) ==
-             square_get_cross_set(&squares[i]));
+             square_get_cross_set(&row_cache[i]));
     }
     test_board_reset(board);
   }
