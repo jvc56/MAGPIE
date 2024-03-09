@@ -183,14 +183,14 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
   Board *board = game_get_board(game);
 
   if (!board_is_empty(board, row, col)) {
-    board_set_cross_set(board, row, col, 0, dir, cross_set_index);
-    board_set_cross_score(board, row, col, 0, dir, cross_set_index);
+    board_set_cross_set(board, row, col, dir, cross_set_index, 0);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
     return;
   }
   if (board_are_left_and_right_empty(board, row, col)) {
-    board_set_cross_set(board, row, col, TRIVIAL_CROSS_SET, dir,
-                        cross_set_index);
-    board_set_cross_score(board, row, col, 0, dir, cross_set_index);
+    board_set_cross_set(board, row, col, dir, cross_set_index,
+                        TRIVIAL_CROSS_SET);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
     return;
   }
 
@@ -202,16 +202,16 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     uint32_t lnode_index = board_get_node_index(board);
     int lpath_is_valid = board_get_path_is_valid(board);
     int score = traverse_backwards_for_score(board, ld, row, col - 1);
-    board_set_cross_score(board, row, col, score, dir, cross_set_index);
+    board_set_cross_score(board, row, col, dir, cross_set_index, score);
 
     if (!lpath_is_valid) {
-      board_set_cross_set(board, row, col, 0, dir, cross_set_index);
+      board_set_cross_set(board, row, col, dir, cross_set_index, 0);
       return;
     }
     uint32_t s_index =
         kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
     uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
-    board_set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+    board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
   } else {
     int left_col =
         board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
@@ -221,19 +221,17 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     int lpath_is_valid = board_get_path_is_valid(board);
     int score_r = traverse_backwards_for_score(board, ld, row, right_col);
     int score_l = traverse_backwards_for_score(board, ld, row, col - 1);
-    board_set_cross_score(board, row, col, score_r + score_l, dir,
-                          cross_set_index);
+    board_set_cross_score(board, row, col, dir, cross_set_index,
+                          score_r + score_l);
     if (!lpath_is_valid) {
-      board_set_cross_set(board, row, col, 0, dir, cross_set_index);
+      board_set_cross_set(board, row, col, dir, cross_set_index, 0);
       return;
     }
     if (left_col == col) {
       uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
-      board_set_cross_set(board, row, col, letter_set, dir, cross_set_index);
+      board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
     } else {
-      uint64_t *cross_set =
-          board_get_cross_set_pointer(board, row, col, dir, cross_set_index);
-      *cross_set = 0;
+      board_set_cross_set(board, row, col, dir, cross_set_index, 0);
       for (int i = lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         int t = kwg_node_tile(node);
@@ -242,7 +240,8 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
                              left_col);
           if (board_get_path_is_valid(board)) {
-            board_set_cross_set_letter(cross_set, t);
+            board_set_cross_set_letter(board, row, col, dir, cross_set_index,
+                                       t);
           }
         }
         if (kwg_node_is_end(node)) {
@@ -257,20 +256,24 @@ void game_gen_all_cross_sets(Game *game) {
   Board *board = game_get_board(game);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
+  // We only use the vertical direction here since the board
+  // direction changes with transposition. Each cross set write
+  // will make the corresponding write in the opposite direction
+  // on the other grid. See board.h for more details.
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
-      game_gen_cross_set(game, i, j, 0, 0);
+      game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 0);
       if (!kwgs_are_shared) {
-        game_gen_cross_set(game, i, j, 0, 1);
+        game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 1);
       }
     }
   }
   board_transpose(board);
   for (int i = 0; i < BOARD_DIM; i++) {
     for (int j = 0; j < BOARD_DIM; j++) {
-      game_gen_cross_set(game, i, j, 1, 0);
+      game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 0);
       if (!kwgs_are_shared) {
-        game_gen_cross_set(game, i, j, 1, 1);
+        game_gen_cross_set(game, i, j, BOARD_VERTICAL_DIRECTION, 1);
       }
     }
   }

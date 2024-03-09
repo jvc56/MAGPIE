@@ -113,6 +113,7 @@ FormedWords *formed_words_create(Board *board, Move *move) {
 
   return ws;
 }
+
 void formed_words_destroy(FormedWords *fw) {
   if (!fw) {
     return;

@@ -57,6 +57,23 @@ void set_row(Game *game, int row, const char *row_content) {
   }
 }
 
+// this test func only works for single-char alphabets
+uint64_t cross_set_from_string(const LetterDistribution *ld,
+                               const char *letters) {
+  if (strings_equal(letters, TRIVIAL_CROSS_SET_STRING)) {
+    return TRIVIAL_CROSS_SET;
+  }
+  uint64_t c = 0;
+  char letter[2];
+  letter[1] = '\0';
+
+  for (size_t i = 0; i < string_length(letters); i++) {
+    letter[0] = letters[i];
+    c |= get_cross_set_bit(ld_hl_to_ml(ld, letter));
+  }
+  return c;
+}
+
 void load_config_or_die(Config *config, const char *cmd) {
   config_load_status_t status = config_load(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
@@ -249,25 +266,40 @@ void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
 
 // Assumes b1 and b2 use the same lexicon and therefore
 // does not compare the cross set index of 1.
-void assert_boards_are_equal(const Board *b1, const Board *b2) {
+void assert_boards_are_equal(Board *b1, Board *b2) {
   assert(board_get_transposed(b1) == board_get_transposed(b2));
   assert(board_get_tiles_played(b1) == board_get_tiles_played(b2));
-  for (int row = 0; row < BOARD_DIM; row++) {
-    for (int col = 0; col < BOARD_DIM; col++) {
-      assert(board_get_letter(b1, row, col) == board_get_letter(b2, row, col));
-      assert(board_get_bonus_square(b1, row, col) ==
-             board_get_bonus_square(b2, row, col));
-      for (int dir = 0; dir < 2; dir++) {
-        assert(board_get_anchor(b1, row, col, dir) ==
-               board_get_anchor(b2, row, col, dir));
-        // For now, assume all boards tested in this method
-        // share the same lexicon
-        assert(board_get_cross_set(b1, row, col, dir, 0) ==
-               board_get_cross_set(b2, row, col, dir, 0));
-        assert(board_get_cross_score(b1, row, col, dir, 0) ==
-               board_get_cross_score(b2, row, col, dir, 0));
+  for (int t = 0; t < 2; t++) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (t == 0) {
+        assert(board_get_number_of_row_anchors(b1, row, 0) ==
+               board_get_number_of_row_anchors(b2, row, 0));
+        assert(board_get_number_of_row_anchors(b1, row, 1) ==
+               board_get_number_of_row_anchors(b2, row, 1));
+      }
+      for (int col = 0; col < BOARD_DIM; col++) {
+        assert(board_get_letter(b1, row, col) ==
+               board_get_letter(b2, row, col));
+        assert(board_get_bonus_square(b1, row, col) ==
+               board_get_bonus_square(b2, row, col));
+        for (int dir = 0; dir < 2; dir++) {
+          assert(board_get_anchor(b1, row, col, dir) ==
+                 board_get_anchor(b2, row, col, dir));
+          assert(board_get_is_cross_word(b1, row, col, dir) ==
+                 board_get_is_cross_word(b2, row, col, dir));
+          // For now, assume all boards tested in this method
+          // share the same lexicon
+          for (int cross_index = 0; cross_index < 2; cross_index++) {
+            assert(board_get_cross_set(b1, row, col, dir, cross_index) ==
+                   board_get_cross_set(b2, row, col, dir, cross_index));
+            assert(board_get_cross_score(b1, row, col, dir, cross_index) ==
+                   board_get_cross_score(b2, row, col, dir, cross_index));
+          }
+        }
       }
     }
+    board_transpose(b1);
+    board_transpose(b2);
   }
 }
 

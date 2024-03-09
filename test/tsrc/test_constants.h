@@ -156,4 +156,7 @@
 #define FRAWZEY_CGP                                                            \
   "15/15/15/14Q/14U/14I/14N/7FRAWZEYS/7O7/7A7/7M7/7L7/7I7/7K7/7E7 /  150/224 " \
   "0 lex CSW21;"
+#define THERMOS_CGP                                                            \
+  "15/15/3THERMOS2A2/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;"
+
 #endif

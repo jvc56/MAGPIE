@@ -442,6 +442,18 @@ void test_validated_move_score() {
   Game *game = game_create(config);
   ValidatedMoves *vms = NULL;
 
+  vms = assert_validated_move_success(game, ION_OPENING_CGP, "7f.IEE", 0, true);
+  assert(validated_moves_get_number_of_moves(vms) == 1);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 11);
+  validated_moves_destroy(vms);
+
+  vms = assert_validated_move_success(game, THERMOS_CGP,
+                                      "3B.HITHERMOST,3B.NETHERMOST", 0, false);
+  assert(validated_moves_get_number_of_moves(vms) == 2);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 36);
+  assert(move_get_score(validated_moves_get_move(vms, 1)) == 30);
+  validated_moves_destroy(vms);
+
   vms = assert_validated_move_success(game, VS_ED, "5B.AIRGLOWS,5c.REGLOWS", 0,
                                       false);
   assert(validated_moves_get_number_of_moves(vms) == 2);
@@ -517,6 +529,7 @@ void test_validated_move_distinct_kwg() {
   vms = validated_moves_create(game, 1, "H8.SCHIZIER", false, true);
   assert(validated_moves_get_validation_status(vms) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 146);
   validated_moves_destroy(vms);
 
   vms = validated_moves_create(game, 1, "M8.SCHERZI", false, true);
@@ -540,6 +553,7 @@ void test_validated_move_distinct_kwg() {
          MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
   validated_moves_destroy(vms);
 
+  // print_board(game_get_board(game));
   rack_set_to_string(ld, player0_rack, "GGLLOWY");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "11G W(I)GGLY 28");

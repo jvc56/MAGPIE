@@ -13,10 +13,6 @@
 
 // Misc string functions
 
-void *memory_copy(void *dest, const void *src, size_t n) {
-  return memcpy(dest, src, n);
-}
-
 int memory_compare(const void *s1, const void *s2, size_t n) {
   return memcmp(s1, s2, n);
 }
