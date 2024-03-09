@@ -45,7 +45,7 @@ typedef struct MoveGen {
   bool kwgs_are_shared;
 
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
-  const Square *row_cache;
+  Square row_cache[BOARD_DIM];
   int row_number_of_anchors_cache[(BOARD_DIM) * 2];
   int cross_index;
 
@@ -747,8 +747,8 @@ void shadow_by_orientation(MoveGen *gen) {
       continue;
     }
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
-    gen->row_cache =
-        board_get_row_cache(gen->lanes_cache, gen->current_row_index, gen->dir);
+    board_copy_row_cache(gen->lanes_cache, gen->row_cache,
+                         gen->current_row_index, gen->dir);
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor(gen, col);
@@ -873,8 +873,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->current_row_index = anchor_get_row(anchor_list, i);
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
-    gen->row_cache =
-        board_get_row_cache(gen->lanes_cache, gen->current_row_index, gen->dir);
+    board_copy_row_cache(gen->lanes_cache, gen->row_cache,
+                         gen->current_row_index, gen->dir);
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
                   gen->current_anchor_col, gen->current_anchor_col,
                   gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);

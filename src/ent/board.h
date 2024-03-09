@@ -651,4 +651,11 @@ static inline void board_load_lanes_cache(const Board *b, int ci,
               sizeof(Square) * 2 * BOARD_DIM * BOARD_DIM);
 }
 
+static inline void board_copy_row_cache(const Square *lanes_cache,
+                                        Square *row_cache, int row_or_col,
+                                        int dir) {
+  const Square *source_row = board_get_row_cache(lanes_cache, row_or_col, dir);
+  memory_copy(row_cache, source_row, sizeof(Square) * BOARD_DIM);
+}
+
 #endif
