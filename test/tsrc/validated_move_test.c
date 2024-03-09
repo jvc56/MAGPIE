@@ -622,10 +622,9 @@ void test_validated_move_many() {
 }
 
 void test_validated_move() {
-  test_validated_move_distinct_kwg();
-  return;
   test_validated_move_errors();
   test_validated_move_success();
   test_validated_move_score();
+  test_validated_move_distinct_kwg();
   test_validated_move_many();
 }
