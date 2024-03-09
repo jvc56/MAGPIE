@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 bool has_prefix(const char *pre, const char *str);
 bool is_string_empty_or_whitespace(const char *str);
@@ -24,7 +25,9 @@ char *get_string_from_file(const char *filename);
 void write_string_to_file(const char *filename, const char *mode,
                           const char *string);
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
-void *memory_copy(void *dest, const void *src, size_t n);
+static inline void *memory_copy(void *dest, const void *src, size_t n) {
+  return memcpy(dest, src, n);
+}
 int memory_compare(const void *s1, const void *s2, size_t n);
 
 char *get_substring(const char *input_string, int start_index, int end_index);
