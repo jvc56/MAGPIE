@@ -330,8 +330,17 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           rightstrip, unique_play, main_word_score, word_multiplier,
           cross_score);
   } else if (!rack_is_empty(gen->player_rack)) {
+    uint32_t kwg_nodes[MAX_ALPHABET_SIZE];
+    int number_of_kwg_nodes = 0;
     for (int i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
+      kwg_nodes[number_of_kwg_nodes++] = node;
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+    for (int i = 0; i < number_of_kwg_nodes; i++) {
+      const uint32_t node = kwg_nodes[i];
       uint8_t ml = kwg_node_tile(node);
       int number_of_ml = rack_get_letter(gen->player_rack, ml);
       if (ml != 0 &&
@@ -362,9 +371,6 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           leave_map_add_letter_and_update_current_index(
               &gen->leave_map, gen->player_rack, BLANK_MACHINE_LETTER);
         }
-      }
-      if (kwg_node_is_end(node)) {
-        break;
       }
     }
   }
