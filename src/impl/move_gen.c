@@ -60,7 +60,7 @@ typedef struct MoveGen {
   double highest_shadow_equity;
   uint64_t rack_cross_set;
   int number_of_letters_on_rack;
-  int descending_tile_scores[(RACK_SIZE)];
+  uint16_t descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
 
@@ -478,16 +478,18 @@ shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
 void shadow_record(MoveGen *gen, int left_col, int right_col,
                    int main_played_through_score,
                    int perpendicular_additional_score, int word_multiplier) {
-  int sorted_effective_letter_multipliers[(RACK_SIZE)];
+  uint16_t sorted_effective_letter_multipliers[WORD_ALIGNING_RACK_SIZE];
+  memset(sorted_effective_letter_multipliers, 0,
+         sizeof(sorted_effective_letter_multipliers));
   int current_tiles_played = 0;
   for (int current_col = left_col; current_col <= right_col; current_col++) {
     const uint8_t current_letter = gen_cache_get_letter(gen, current_col);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
-      int this_word_multiplier = bonus_square >> 4;
-      int letter_multiplier = bonus_square & 0x0F;
+      uint16_t this_word_multiplier = bonus_square >> 4;
+      uint16_t letter_multiplier = bonus_square & 0x0F;
       bool is_cross_word = gen_cache_get_is_cross_word(gen, current_col);
-      int effective_letter_multiplier =
+      uint16_t effective_letter_multiplier =
           letter_multiplier *
           ((this_word_multiplier * is_cross_word) + word_multiplier);
       // Insert the effective multiplier.
@@ -505,8 +507,8 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
     }
   }
 
-  int tiles_played_score = 0;
-  for (int i = 0; i < current_tiles_played; i++) {
+  uint16_t tiles_played_score = 0;
+  for (int i = 0; i < RACK_SIZE; i++) {
     tiles_played_score +=
         gen->descending_tile_scores[i] * sorted_effective_letter_multipliers[i];
   }
@@ -516,9 +518,9 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
     bingo_bonus = DEFAULT_BINGO_BONUS;
   }
 
-  int score = tiles_played_score +
-              (main_played_through_score * word_multiplier) +
-              perpendicular_additional_score + bingo_bonus;
+  const int score = tiles_played_score +
+                    (main_played_through_score * word_multiplier) +
+                    perpendicular_additional_score + bingo_bonus;
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity += static_eval_get_shadow_equity(

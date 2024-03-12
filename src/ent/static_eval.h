@@ -79,7 +79,7 @@ static inline double shadow_endgame_adjustment(const LetterDistribution *ld,
 
 static inline double static_eval_get_shadow_equity(
     const LetterDistribution *ld, const Rack *opp_rack,
-    const double *best_leaves, const int *descending_tile_scores,
+    const double *best_leaves, const uint16_t *descending_tile_scores,
     int number_of_tiles_in_bag, int number_of_letters_on_rack,
     int tiles_played) {
   double equity = 0;
