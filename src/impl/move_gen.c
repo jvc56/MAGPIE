@@ -550,10 +550,8 @@ static inline void shadow_play_right(MoveGen *gen,
 
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_right_col);
-    if (cross_set == 0) {
-      break;
-    }
-    if (!blank_in_rack && (cross_set & gen->rack_cross_set) == 0) {
+    if ((cross_set == 0) ||
+        (!blank_in_rack && (cross_set & gen->rack_cross_set) == 0)) {
       break;
     }
     const uint8_t bonus_square =
@@ -608,10 +606,8 @@ void shadow_play_left(MoveGen *gen, int main_played_through_score,
     gen->tiles_played++;
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_left_col);
-    if (cross_set == 0) {
-      return;
-    }
-    if ((cross_set & gen->rack_cross_set) == 0 && !blank_in_rack) {
+    if ((cross_set == 0) ||
+        (!blank_in_rack && (cross_set & gen->rack_cross_set) == 0)) {
       return;
     }
     const uint8_t bonus_square =
