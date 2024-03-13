@@ -465,8 +465,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool shadow_board_is_letter_allowed_in_cross_set(
-    const MoveGen *gen, int col) {
+static inline bool
+shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
   uint64_t cross_set = gen_cache_get_cross_set(gen, col);
   // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
