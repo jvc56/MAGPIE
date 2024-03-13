@@ -542,7 +542,7 @@ static inline void shadow_play_right(MoveGen *gen,
                                      int word_multiplier, bool is_unique) {
   int original_current_right_col = gen->current_right_col;
   int original_tiles_played = gen->tiles_played;
-
+  const bool blank_in_rack = (gen->rack_cross_set & 1) != 0;
   while (gen->current_right_col < (BOARD_DIM - 1) &&
          gen->tiles_played < gen->number_of_letters_on_rack) {
     gen->current_right_col++;
@@ -550,11 +550,8 @@ static inline void shadow_play_right(MoveGen *gen,
 
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_right_col);
-    if (cross_set == 0) {
-      break;
-    }
-    bool blank_in_rack = (gen->rack_cross_set & 1) != 0;
-    if ((cross_set & gen->rack_cross_set) == 0 && !blank_in_rack) {
+    if ((cross_set == 0) ||
+        (!blank_in_rack && (cross_set & gen->rack_cross_set) == 0)) {
       break;
     }
     const uint8_t bonus_square =
@@ -594,6 +591,7 @@ static inline void shadow_play_right(MoveGen *gen,
 void shadow_play_left(MoveGen *gen, int main_played_through_score,
                       int perpendicular_additional_score, int word_multiplier,
                       bool is_unique) {
+  const bool blank_in_rack = (gen->rack_cross_set & 1) != 0;
   for (;;) {
     shadow_play_right(gen, main_played_through_score,
                       perpendicular_additional_score, word_multiplier,
@@ -608,11 +606,8 @@ void shadow_play_left(MoveGen *gen, int main_played_through_score,
     gen->tiles_played++;
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_left_col);
-    if (cross_set == 0) {
-      return;
-    }
-    bool blank_in_rack = (gen->rack_cross_set & 1) != 0;
-    if ((cross_set & gen->rack_cross_set) == 0 && !blank_in_rack) {
+    if ((cross_set == 0) ||
+        (!blank_in_rack && (cross_set & gen->rack_cross_set) == 0)) {
       return;
     }
     const uint8_t bonus_square =
