@@ -43,7 +43,8 @@ typedef struct MoveGen {
   int number_of_tiles_in_bag;
   int player_index;
   bool kwgs_are_shared;
-
+  Rack player_rack;
+  Rack opponent_rack;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
   int row_number_of_anchors_cache[(BOARD_DIM) * 2];
@@ -69,10 +70,7 @@ typedef struct MoveGen {
   uint8_t tile_scores[(MAX_ALPHABET_SIZE)];
   const KLV *klv;
   const KWG *kwg;
-  const Rack *opponent_rack;
   const Board *board;
-  // Player rack is modified when generating exchanges
-  Rack *player_rack;
   // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
@@ -154,7 +152,7 @@ static inline uint8_t gen_cache_get_cross_score(const MoveGen *gen, int col) {
 double get_static_equity(MoveGen *gen) {
   return static_eval_get_move_equity_with_leave_value(
       gen->ld, move_list_get_spare_move(gen->move_list), gen->board,
-      gen->player_rack, gen->opponent_rack, gen->number_of_tiles_in_bag,
+      &gen->player_rack, &gen->opponent_rack, gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
 }
 
@@ -219,8 +217,8 @@ static inline void record_exchange(MoveGen *gen) {
   uint8_t *strip = NULL;
 
   strip = gen->exchange_strip;
-  for (uint8_t ml = 0; ml < gen->player_rack->dist_size; ml++) {
-    int num_this = rack_get_letter(gen->player_rack, ml);
+  for (uint8_t ml = 0; ml < rack_get_dist_size(&gen->player_rack); ml++) {
+    int num_this = rack_get_letter(&gen->player_rack, ml);
     for (int i = 0; i < num_this; i++) {
       strip[tiles_exchanged] = ml;
       tiles_exchanged++;
@@ -255,12 +253,12 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
                              uint32_t word_index, uint8_t ml,
                              bool add_exchange) {
   const uint32_t ld_size = ld_get_size(gen->ld);
-  while (ml < ld_size && rack_get_letter(gen->player_rack, ml) == 0) {
+  while (ml < ld_size && rack_get_letter(&gen->player_rack, ml) == 0) {
     ml++;
   }
   if (ml == ld_size) {
     const int number_of_letters_on_rack =
-        rack_get_total_letters(gen->player_rack);
+        rack_get_total_letters(&gen->player_rack);
     if (number_of_letters_on_rack > 0) {
       double value = 0.0;
       if (word_index != KLV_UNFOUND_INDEX) {
@@ -277,11 +275,11 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   } else {
     generate_exchange_moves(gen, leave, node_index, word_index, ml + 1,
                             add_exchange);
-    const int num_this = rack_get_letter(gen->player_rack, ml);
+    const int num_this = rack_get_letter(&gen->player_rack, ml);
     for (int i = 0; i < num_this; i++) {
       rack_add_letter(leave, ml);
       leave_map_take_letter_and_update_complement_index(&gen->leave_map,
-                                                        gen->player_rack, ml);
+                                                        &gen->player_rack, ml);
       uint32_t sibling_word_index;
       node_index = increment_node_to_ml(gen->klv, node_index, word_index,
                                         &sibling_word_index, ml);
@@ -297,7 +295,7 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
     for (int i = 0; i < num_this; i++) {
       rack_take_letter(leave, ml);
       leave_map_add_letter_and_update_complement_index(&gen->leave_map,
-                                                       gen->player_rack, ml);
+                                                       &gen->player_rack, ml);
     }
   }
 }
@@ -329,38 +327,38 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     go_on(gen, col, current_letter, next_node_index, accepts, leftstrip,
           rightstrip, unique_play, main_word_score, word_multiplier,
           cross_score);
-  } else if (!rack_is_empty(gen->player_rack)) {
+  } else if (!rack_is_empty(&gen->player_rack)) {
     for (int i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
       uint8_t ml = kwg_node_tile(node);
-      int number_of_ml = rack_get_letter(gen->player_rack, ml);
+      int number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||
-           rack_get_letter(gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
+           rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
           board_is_letter_allowed_in_cross_set(cross_set, ml)) {
         int next_node_index = kwg_node_arc_index(node);
         bool accepts = kwg_node_accepts(node);
         if (number_of_ml > 0) {
           leave_map_take_letter_and_update_current_index(&gen->leave_map,
-                                                         gen->player_rack, ml);
+                                                         &gen->player_rack, ml);
           gen->tiles_played++;
           go_on(gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
                 unique_play, main_word_score, word_multiplier, cross_score);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(&gen->leave_map,
-                                                        gen->player_rack, ml);
+                                                        &gen->player_rack, ml);
         }
         // check blank
-        if (rack_get_letter(gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
+        if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
           leave_map_take_letter_and_update_current_index(
-              &gen->leave_map, gen->player_rack, BLANK_MACHINE_LETTER);
+              &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
           gen->tiles_played++;
           go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
                 accepts, leftstrip, rightstrip, unique_play, main_word_score,
                 word_multiplier, cross_score);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(
-              &gen->leave_map, gen->player_rack, BLANK_MACHINE_LETTER);
+              &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
         }
       }
       if (kwg_node_is_end(node)) {
@@ -524,7 +522,7 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity += static_eval_get_shadow_equity(
-        gen->ld, gen->opponent_rack, gen->best_leaves,
+        gen->ld, &gen->opponent_rack, gen->best_leaves,
         gen->descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
@@ -699,7 +697,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->highest_shadow_equity = 0;
 
   // Set the number of letters
-  gen->number_of_letters_on_rack = rack_get_total_letters(gen->player_rack);
+  gen->number_of_letters_on_rack = rack_get_total_letters(&gen->player_rack);
 
   // Set the current anchor column
   gen->current_anchor_col = col;
@@ -747,7 +745,8 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
   int i = 0;
   for (int j = 0; j < (int)ld_get_size(gen->ld); j++) {
     int j_score_order = ld_get_score_order(gen->ld, j);
-    for (int k = 0; k < rack_get_letter(gen->player_rack, j_score_order); k++) {
+    for (int k = 0; k < rack_get_letter(&gen->player_rack, j_score_order);
+         k++) {
       gen->descending_tile_scores[i] = gen->tile_scores[j_score_order];
       i++;
     }
@@ -766,10 +765,10 @@ void generate_moves(Game *game, move_record_t move_record_type,
   gen->ld = ld;
   gen->kwg = player_get_kwg(player);
   gen->klv = player_get_klv(player);
-  gen->opponent_rack = player_get_rack(opponent);
   gen->board = game_get_board(game);
   gen->player_index = player_on_turn_index;
-  gen->player_rack = player_get_rack(player);
+  rack_copy(&gen->opponent_rack, player_get_rack(opponent));
+  rack_copy(&gen->player_rack, player_get_rack(player));
 
   gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
@@ -782,10 +781,10 @@ void generate_moves(Game *game, move_record_t move_record_type,
   // Reset the move list
   move_list_reset(gen->move_list);
 
-  leave_map_init(gen->player_rack, &gen->leave_map);
-  if (rack_get_total_letters(gen->player_rack) < RACK_SIZE) {
+  leave_map_init(&gen->player_rack, &gen->leave_map);
+  if (rack_get_total_letters(&gen->player_rack) < RACK_SIZE) {
     leave_map_set_current_value(
-        &gen->leave_map, klv_get_leave_value(gen->klv, gen->player_rack));
+        &gen->leave_map, klv_get_leave_value(gen->klv, &gen->player_rack));
   } else {
     leave_map_set_current_value(&gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
   }
@@ -802,21 +801,21 @@ void generate_moves(Game *game, move_record_t move_record_type,
     // 0 tiles.
     leave_map_set_current_index(&gen->leave_map, 0);
     uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
-    Rack *leave = rack_create(gen->player_rack->dist_size);
+    Rack *leave = rack_create(rack_get_dist_size(&gen->player_rack));
     generate_exchange_moves(gen, leave, node_index, 0, 0,
                             gen->number_of_tiles_in_bag >= RACK_SIZE);
     rack_destroy(leave);
   }
   // Set the leave_map index to 2^number_of_letters - 1, which represents using
   // (playing) zero tiles and keeping gen->player_rack->number_of_letters tiles.
-  leave_map_set_current_index(&gen->leave_map,
-                              (1 << gen->player_rack->number_of_letters) - 1);
+  leave_map_set_current_index(
+      &gen->leave_map, (1 << rack_get_total_letters(&gen->player_rack)) - 1);
   anchor_list_reset(gen->anchor_list);
 
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
   for (int i = 0; i < ld_get_size(gen->ld); i++) {
-    if (rack_get_letter(gen->player_rack, i) > 0) {
+    if (rack_get_letter(&gen->player_rack, i) > 0) {
       gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
     }
     gen->tile_scores[i] = ld_get_score(gen->ld, i);
