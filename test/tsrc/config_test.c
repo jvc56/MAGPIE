@@ -59,7 +59,7 @@ void test_config_error_cases() {
   test_config_error(config, "position cgp 1 2 3",
                     CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
   test_config_error(config, "go sim bdn Scrimbool",
-                    CONFIG_LOAD_STATUS_UNKNOWN_BOARD_LAYOUT);
+                    CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
   test_config_error(config, "go sim var Lonify",
                     CONFIG_LOAD_STATUS_UNKNOWN_GAME_VARIANT);
   test_config_error(config, "go sim bb 3b4",
