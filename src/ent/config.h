@@ -9,6 +9,7 @@
 #include "../def/game_defs.h"
 #include "../def/simmer_defs.h"
 
+#include "board_layout.h"
 #include "letter_distribution.h"
 #include "players_data.h"
 #include "rack.h"
@@ -27,6 +28,7 @@ bool config_get_ld_name_changed(const Config *config);
 const char *config_get_cgp(const Config *config);
 const char *config_get_moves(const Config *config);
 int config_get_bingo_bonus(const Config *config);
+const BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
 Rack *config_get_rack(const Config *config);

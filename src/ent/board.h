@@ -10,6 +10,8 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
+#include "board_layout.h"
+
 #include "letter_distribution.h"
 
 #include "../util/log.h"
@@ -481,18 +483,6 @@ static inline int board_get_word_edge(const Board *board, int row, int col,
   return col - word_dir;
 }
 
-static inline board_layout_t
-board_layout_string_to_board_layout(const char *board_layout_string) {
-  if (strings_equal(board_layout_string, BOARD_LAYOUT_CROSSWORD_GAME_NAME)) {
-    return BOARD_LAYOUT_CROSSWORD_GAME;
-  }
-  if (strings_equal(board_layout_string,
-                    BOARD_LAYOUT_SUPER_CROSSWORD_GAME_NAME)) {
-    return BOARD_LAYOUT_SUPER_CROSSWORD_GAME;
-  }
-  return BOARD_LAYOUT_UNKNOWN;
-}
-
 static inline void board_update_anchors(Board *board, int row, int col) {
   board_set_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION, false);
   board_set_anchor(board, row, col, BOARD_VERTICAL_DIRECTION, false);
@@ -570,32 +560,15 @@ static inline void board_reset(Board *board) {
   board_update_all_anchors(board);
 }
 
-static inline void board_init_bonus_squares(Board *b) {
-  int i = 0;
-  for (int row = 0; row < BOARD_DIM; row++) {
-    for (int col = 0; col < BOARD_DIM; col++) {
-      uint8_t bonus_value;
-      char bonus_square = CROSSWORD_GAME_BOARD[i++];
-      if (bonus_square == BONUS_TRIPLE_WORD_SCORE) {
-        bonus_value = 0x31;
-      } else if (bonus_square == BONUS_DOUBLE_WORD_SCORE) {
-        bonus_value = 0x21;
-      } else if (bonus_square == BONUS_DOUBLE_LETTER_SCORE) {
-        bonus_value = 0x12;
-      } else if (bonus_square == BONUS_TRIPLE_LETTER_SCORE) {
-        bonus_value = 0x13;
-      } else {
-        bonus_value = 0x11;
-      }
-      board_set_bonus_square(b, row, col, bonus_value);
-    }
-  }
+static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
+  abort();
+  printf("%p %p", bl, board);
 }
 
-static inline Board *board_create() {
+static inline Board *board_create(const BoardLayout *bl) {
   Board *board = malloc_or_die(sizeof(Board));
   board_reset(board);
-  board_init_bonus_squares(board);
+  board_apply_layout(bl, board);
   return board;
 }
 

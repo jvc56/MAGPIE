@@ -53,6 +53,29 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   free(display_player_name);
 }
 
+char bonus_square_to_char(uint8_t bonus_square) {
+  char c;
+  switch (bonus_square) {
+  case 0x12:
+    c = '\'';
+    break;
+  case 0x21:
+    c = '-';
+    break;
+  case 0x13:
+    c = '"';
+    break;
+  case 0x31:
+    c = '=';
+    break;
+  default:
+    log_fatal("unexpected bonus square value: %d", bonus_square);
+    break;
+  }
+
+  return c;
+}
+
 void string_builder_add_board_row(const LetterDistribution *ld,
                                   const Board *board,
                                   StringBuilder *game_string, int row) {
@@ -60,8 +83,9 @@ void string_builder_add_board_row(const LetterDistribution *ld,
   for (int i = 0; i < BOARD_DIM; i++) {
     uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-      string_builder_add_char(game_string,
-                              CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i]);
+      string_builder_add_char(
+          game_string,
+          bonus_square_to_char(board_get_bonus_square(board, row, i)));
     } else {
       string_builder_add_user_visible_letter(ld, game_string, current_letter);
     }

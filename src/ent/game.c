@@ -541,7 +541,7 @@ void pre_allocate_backups(Game *game) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
     game->game_backups[i]->bag = bag_create(ld);
-    game->game_backups[i]->board = board_create();
+    game->game_backups[i]->board = board_duplicate(game_get_board(game));
     game->game_backups[i]->p0rack = rack_create(ld_size);
     game->game_backups[i]->p1rack = rack_create(ld_size);
   }
@@ -571,7 +571,7 @@ Game *game_create(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
   game->ld = config_get_ld(config);
   game->bag = bag_create(game->ld);
-  game->board = board_create();
+  game->board = board_create(config_get_board_layout(config));
   for (int player_index = 0; player_index < 2; player_index++) {
     game->players[player_index] = player_create(config, player_index);
   }
