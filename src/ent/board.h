@@ -561,8 +561,19 @@ static inline void board_reset(Board *board) {
 }
 
 static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
-  abort();
-  printf("%p %p", bl, board);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      uint8_t board_layout_bonus_value =
+          board_layout_get_bonus_square(bl, row, col);
+      for (int dir = 0; dir < 2; dir++) {
+        for (int ci = 0; ci < 2; ci++) {
+          int board_index =
+              get_square_index(board->transposed, row, col, dir, ci);
+          board->squares[board_index].bonus_square = board_layout_bonus_value;
+        }
+      }
+    }
+  }
 }
 
 static inline Board *board_create(const BoardLayout *bl) {

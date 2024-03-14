@@ -4,7 +4,7 @@
 #lexicon CSW21
 #game-type classic
 #title test game
-#board-layout classic
+#board-layout standard15
 #tile-set english set
 #tile-distribution english
 #player1 HastyBot HastyBot
