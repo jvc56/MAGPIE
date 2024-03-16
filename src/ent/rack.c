@@ -37,6 +37,7 @@ void rack_copy(Rack *dst, const Rack *src) {
   }
   dst->number_of_letters = src->number_of_letters;
   dst->empty = src->empty;
+  dst->dist_size = src->dist_size;
 }
 
 void rack_destroy(Rack *rack) {

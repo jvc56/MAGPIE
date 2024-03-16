@@ -177,7 +177,8 @@ void game_reset_anchor_node_indices(Game *game) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       for (int dir = 0; dir < 2; dir++) {
-        board_set_anchor_kwg_node_index(board, row, col, dir, 0, root_node_index);
+        board_set_anchor_kwg_node_index(board, row, col, dir, 0,
+                                        root_node_index);
       }
     }
   }
@@ -189,7 +190,8 @@ void game_reset_anchor_node_indices(Game *game) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       for (int dir = 0; dir < 2; dir++) {
-        board_set_anchor_kwg_node_index(board, row, col, dir, 1, root_node_index);
+        board_set_anchor_kwg_node_index(board, row, col, dir, 1,
+                                        root_node_index);
       }
     }
   }
@@ -239,9 +241,10 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     uint64_t right_extension_set = 0;
     uint64_t letter_set =
         kwg_get_letter_sets(kwg, s_index, &right_extension_set);
-    board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
-    board_set_right_extension_set(board, row, col - 1, through_dir,
-                                  cross_set_index, right_extension_set);
+    board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                   letter_set);
+    board_set_right_extension_set_with_blank(
+        board, row, col - 1, through_dir, cross_set_index, right_extension_set);
   } else {
     int left_col =
         board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
@@ -261,13 +264,15 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
       uint64_t left_extension_set = 0;
       uint64_t letter_set =
           kwg_get_letter_sets(kwg, lnode_index, &left_extension_set);
-      board_set_left_extension_set(board, row, right_col, through_dir,
-                                   cross_set_index, left_extension_set);
-      //board_set_anchor_kwg_node_index(board, row, col, dir, cross_set_index,
-      //                                lnode_index);
-      board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
+      board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                     letter_set);
+      board_set_left_extension_set_with_blank(board, row, right_col,
+                                              through_dir, cross_set_index,
+                                              left_extension_set);
+      // board_set_anchor_kwg_node_index(board, row, col, dir, cross_set_index,
+      //                                 lnode_index);
     } else {
-      board_set_cross_set(board, row, col, dir, cross_set_index, 0);
+      uint64_t letter_set = 0;
       for (int i = lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         int t = kwg_node_tile(node);
@@ -276,14 +281,15 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
                              left_col);
           if (board_get_path_is_valid(board)) {
-            board_set_cross_set_letter(board, row, col, dir, cross_set_index,
-                                       t);
+            letter_set |= get_cross_set_bit(t);
           }
         }
         if (kwg_node_is_end(node)) {
           break;
         }
       }
+      board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                     letter_set);
     }
   }
 }

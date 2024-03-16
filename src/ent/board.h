@@ -273,6 +273,15 @@ static inline void board_set_cross_set(Board *b, int row, int col, int dir,
                        cross_set);
 }
 
+static inline void board_set_cross_set_with_blank(Board *b, int row, int col,
+                                                  int dir, int ci,
+                                                  uint64_t cross_set) {
+  // If any letter's bits are set, the blank bit should be set.
+  const uint64_t cross_set_with_blank = (cross_set == 0) ? 0 : (cross_set | 1);
+  square_set_cross_set(board_get_writable_square(b, row, col, dir, ci),
+                       cross_set_with_blank);
+}
+
 static inline void board_set_cross_set_letter(Board *b, int row, int col,
                                               int dir, int ci, uint8_t letter) {
   square_set_cross_set_letter(board_get_writable_square(b, row, col, dir, ci),
@@ -355,9 +364,9 @@ static inline void board_set_anchor_kwg_node_index(Board *b, int row, int col,
 }
 
 static inline uint32_t board_get_anchor_kwg_node_index(const Board *b, int row,
-                                                       int col, int dir) {
+                                                       int col, int dir, int ci) {
   return square_get_anchor_kwg_node_index(
-      board_get_readonly_square(b, row, col, dir, 0));
+      board_get_readonly_square(b, row, col, dir, ci));
 }
 
 static inline void board_set_left_extension_set(Board *b, int row, int col,
@@ -367,11 +376,30 @@ static inline void board_set_left_extension_set(Board *b, int row, int col,
       board_get_writable_square(b, row, col, dir, csi), left_extension_set);
 }
 
+static inline void board_set_left_extension_set_with_blank(
+    Board *b, int row, int col, int dir, int csi, uint64_t left_extension_set) {
+  const uint64_t left_extension_set_with_blank =
+      (left_extension_set == 0) ? 0 : (left_extension_set | 1);
+  square_set_left_extension_set(
+      board_get_writable_square(b, row, col, dir, csi),
+      left_extension_set_with_blank);
+}
+
 static inline void board_set_right_extension_set(Board *b, int row, int col,
                                                  int dir, int csi,
                                                  uint64_t right_extension_set) {
   square_set_right_extension_set(
       board_get_writable_square(b, row, col, dir, csi), right_extension_set);
+}
+
+static inline void board_set_right_extension_set_with_blank(
+    Board *b, int row, int col, int dir, int csi,
+    uint64_t right_extension_set) {
+  const uint64_t right_extension_set_with_blank =
+      (right_extension_set == 0) ? 0 : (right_extension_set | 1);
+  square_set_right_extension_set(
+      board_get_writable_square(b, row, col, dir, csi),
+      right_extension_set_with_blank);
 }
 
 // This bypasses the modification of the number of row anchors and
