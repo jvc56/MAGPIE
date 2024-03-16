@@ -9,7 +9,6 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
@@ -18,10 +17,9 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
-
-#include "move_gen.h"
-
+#include "../str/move_string.h"
 #include "../util/string_util.h"
+#include "move_gen.h"
 
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
@@ -90,8 +88,26 @@ void play_move_on_board(const Move *move, Game *game) {
   }
 }
 
+void debug_cross_set(uint64_t cross_set) {
+  if (cross_set == TRIVIAL_CROSS_SET) {
+    printf("TRIVIAL_CROSS_SET");
+    return;
+  }
+  for (int i = 0; i < 64; i++) {
+    if (cross_set & (1ULL << i)) {
+      printf("%c", 'A' + i - 1);
+    }
+  }
+}
 void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
                      int csd) {
+/*                      
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_move(game_get_board(game), move, game_get_ld(game), sb);
+  printf("calc_for_across for move %s, row_start: %i, col_start: %i, csd: %i\n",
+         string_builder_peek(sb), row_start, col_start, csd);
+  destroy_string_builder(sb);
+*/  
   for (int row = row_start; row < move_get_tiles_length(move) + row_start;
        row++) {
     if (move_get_tile(move, row - row_start) == PLAYED_THROUGH_MARKER) {
@@ -105,8 +121,29 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
     int left_col =
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
     game_gen_cross_set(game, row, right_col + 1, csd, 0);
+    if (board_is_position_valid(row, right_col + 1)) {
+      //const Square *sq =
+      //    board_get_readonly_square(board, row, right_col + 1, csd, 0);
+      //printf("cross set for row %i, col %i, csd %i, is [", row, right_col + 1, csd);
+      //debug_cross_set(sq->cross_set);
+      //printf("]\n");
+    }
     game_gen_cross_set(game, row, left_col - 1, csd, 0);
+    if (board_is_position_valid(row, left_col - 1)) {
+      //const Square *sq =
+      //    board_get_readonly_square(board, row, left_col - 1, csd, 0);
+      //printf("cross set for row %i, col %i, csd %i, is [", row, left_col - 1, csd);
+      //debug_cross_set(sq->cross_set);
+      //printf("]\n");
+    }
     game_gen_cross_set(game, row, col_start, csd, 0);
+    if (board_is_position_valid(row, col_start)) {
+      //const Square *sq =
+      //    board_get_readonly_square(board, row, col_start, csd, 0);
+      //printf("cross set for row %i, col %i, csd %i, is [", row, col_start, csd);
+      //debug_cross_set(sq->cross_set);
+      //printf("]\n");
+    }
     if (!kwgs_are_shared) {
       game_gen_cross_set(game, row, right_col + 1, csd, 1);
       game_gen_cross_set(game, row, left_col - 1, csd, 1);
@@ -117,9 +154,23 @@ void calc_for_across(const Move *move, Game *game, int row_start, int col_start,
 
 void calc_for_self(const Move *move, Game *game, int row_start, int col_start,
                    int csd) {
+/*                    
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_move(game_get_board(game), move, game_get_ld(game), sb);
+  printf("calc_for_self for move %s, row_start: %i, col_start: %i, csd: %i\n",
+         string_builder_peek(sb), row_start, col_start, csd);
+  destroy_string_builder(sb);
+*/  
   for (int col = col_start - 1; col <= col_start + move_get_tiles_length(move);
        col++) {
     game_gen_cross_set(game, row_start, col, csd, 0);
+    if (board_is_position_valid(row_start, col)) {
+      //const Square *sq = board_get_readonly_square(game_get_board(game),
+      //                                             row_start, col, csd, 0);
+      //printf("cross set for row %i, col %i, csd %i, is [", row_start, col, csd);
+      //debug_cross_set(sq->cross_set);
+      //printf("]\n");
+    }
   }
   if (!game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
     for (int col = col_start - 1;

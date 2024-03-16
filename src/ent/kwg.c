@@ -10,12 +10,10 @@
 #include <stdlib.h>
 
 #include "../def/kwg_defs.h"
-
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
-
 #include "letter_distribution.h"
 
 // The KWG data structure was originally
@@ -34,7 +32,7 @@ char *get_kwg_filepath(const char *kwg_name) {
 
 void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
                                 FILE *stream) {
-  kwg_allocate_nodes(kwg, number_of_nodes);                                  
+  kwg_allocate_nodes(kwg, number_of_nodes);
   size_t result = fread(kwg->nodes, sizeof(uint32_t), number_of_nodes, stream);
   if (result != number_of_nodes) {
     log_fatal("kwg nodes fread failure: %zd != %zd", result, number_of_nodes);
@@ -106,14 +104,20 @@ bool kwg_in_letter_set(const KWG *kwg, uint8_t letter, uint32_t node_index) {
   }
 }
 
-uint64_t kwg_get_letter_set(const KWG *kwg, uint32_t node_index) {
+/*
+uint64_t kwg_get_letter_sets(const KWG *kwg, uint32_t node_index,
+                             uint64_t *extension_set) {
   uint64_t ls = 0;
   uint32_t i = node_index;
   for (;;) {
     const uint32_t node = kwg_node(kwg, i);
-    uint32_t t = kwg_node_tile(node);
-    if (kwg_node_accepts(node)) {
-      ls |= ((uint64_t)1 << t);
+    const uint32_t t = kwg_node_tile(node);
+    if (t > 0) {
+      const uint64_t bit = ((uint64_t)1 << t);
+      *extension_set |= bit;
+      if (kwg_node_accepts(node)) {
+        ls |= bit;
+      }
     }
     if (kwg_node_is_end(node)) {
       break;
@@ -122,5 +126,6 @@ uint64_t kwg_get_letter_set(const KWG *kwg, uint32_t node_index) {
   }
   return ls;
 }
+*/
 
 int kwg_get_number_of_nodes(const KWG *kwg) { return kwg->number_of_nodes; }

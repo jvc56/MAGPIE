@@ -9,18 +9,19 @@
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
-
-#include "letter_distribution.h"
-
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
+#include "letter_distribution.h"
 
 typedef struct Square {
+  uint64_t cross_set;
+  uint64_t left_extension_set;
+  uint64_t right_extension_set;
+  uint32_t anchor_kwg_node_index;
+  uint16_t cross_score;
   uint8_t letter;
   uint8_t bonus_square;
-  uint64_t cross_set;
-  int cross_score;
   bool anchor;
   bool is_cross_word;
 } Square;
@@ -96,6 +97,33 @@ static inline bool square_set_anchor(Square *s, bool anchor) {
   return old;
 }
 
+static inline uint32_t square_get_anchor_kwg_node_index(const Square *s) {
+  return s->anchor_kwg_node_index;
+}
+
+static inline void square_set_anchor_kwg_node_index(Square *s,
+                                                    uint32_t node_index) {
+  s->anchor_kwg_node_index = node_index;
+}
+
+static inline uint64_t square_get_left_extension_set(const Square *s) {
+  return s->left_extension_set;
+}
+
+static inline void square_set_left_extension_set(Square *s,
+                                                 uint64_t left_extension_set) {
+  s->left_extension_set = left_extension_set;
+}
+
+static inline uint64_t square_get_right_extension_set(const Square *s) {
+  return s->right_extension_set;
+}
+
+static inline void square_set_right_extension_set(
+    Square *s, uint64_t right_extension_set) {
+  s->right_extension_set = right_extension_set;
+}
+
 static inline void square_reset_anchor(Square *s) { s->anchor = false; }
 
 // Square: is cross word
@@ -148,8 +176,9 @@ static inline Square *board_get_writable_square(Board *b, int row, int col,
   return &b->squares[board_get_square_index(b, row, col, dir, ci)];
 }
 
-static inline const Square *
-board_get_readonly_square(const Board *b, int row, int col, int dir, int ci) {
+static inline const Square *board_get_readonly_square(const Board *b, int row,
+                                                      int col, int dir,
+                                                      int ci) {
   const int index = board_get_square_index(b, row, col, dir, ci);
   return &b->squares[index];
 }
@@ -318,6 +347,33 @@ static inline void board_set_anchor(Board *b, int row, int col, int dir,
   }
 }
 
+static inline void board_set_anchor_kwg_node_index(Board *b, int row, int col,
+                                                   int dir, int ci,
+                                                   uint32_t node_index) {
+  square_set_anchor_kwg_node_index(
+      board_get_writable_square(b, row, col, dir, ci), node_index);
+}
+
+static inline uint32_t board_get_anchor_kwg_node_index(const Board *b, int row,
+                                                       int col, int dir) {
+  return square_get_anchor_kwg_node_index(
+      board_get_readonly_square(b, row, col, dir, 0));
+}
+
+static inline void board_set_left_extension_set(Board *b, int row, int col,
+                                                int dir, int csi,
+                                                uint64_t left_extension_set) {
+  square_set_left_extension_set(
+      board_get_writable_square(b, row, col, dir, csi), left_extension_set);
+}
+
+static inline void board_set_right_extension_set(Board *b, int row, int col,
+                                                 int dir, int csi,
+                                                 uint64_t right_extension_set) {
+  square_set_right_extension_set(
+      board_get_writable_square(b, row, col, dir, csi), right_extension_set);
+}
+
 // This bypasses the modification of the number of row anchors and
 // should only be used when resetting the board. Do not use this when
 // updating the board after a play.
@@ -430,6 +486,10 @@ static inline void board_set_all_crosses(Board *board) {
       for (int dir = 0; dir < 2; dir++) {
         for (int ci = 0; ci < 2; ci++) {
           board_set_cross_set(board, row, col, dir, ci, TRIVIAL_CROSS_SET);
+          board_set_left_extension_set(board, row, col, dir, ci,
+                                       TRIVIAL_CROSS_SET);
+          board_set_right_extension_set(board, row, col, dir, ci,
+                                        TRIVIAL_CROSS_SET);
         }
       }
     }
@@ -481,8 +541,8 @@ static inline int board_get_word_edge(const Board *board, int row, int col,
   return col - word_dir;
 }
 
-static inline board_layout_t
-board_layout_string_to_board_layout(const char *board_layout_string) {
+static inline board_layout_t board_layout_string_to_board_layout(
+    const char *board_layout_string) {
   if (strings_equal(board_layout_string, BOARD_LAYOUT_CROSSWORD_GAME_NAME)) {
     return BOARD_LAYOUT_CROSSWORD_GAME;
   }

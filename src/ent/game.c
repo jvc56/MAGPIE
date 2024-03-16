@@ -9,17 +9,15 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
-
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 #include "bag.h"
 #include "board.h"
 #include "kwg.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
-
-#include "../util/log.h"
-#include "../util/string_util.h"
-#include "../util/util.h"
 
 typedef struct MinimalGameBackup {
   Board *board;
@@ -172,6 +170,31 @@ void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
   board_set_path_is_valid(board, true);
 }
 
+void game_reset_anchor_node_indices(Game *game) {
+  const KWG *kwg = player_get_kwg(game_get_player(game, 0));
+  Board *board = game_get_board(game);
+  uint32_t root_node_index = kwg_get_root_node_index(kwg);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      for (int dir = 0; dir < 2; dir++) {
+        board_set_anchor_kwg_node_index(board, row, col, dir, 0, root_node_index);
+      }
+    }
+  }
+  if (game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
+    return;
+  }
+  kwg = player_get_kwg(game_get_player(game, 1));
+  root_node_index = kwg_get_root_node_index(kwg);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      for (int dir = 0; dir < 2; dir++) {
+        board_set_anchor_kwg_node_index(board, row, col, dir, 1, root_node_index);
+      }
+    }
+  }
+}
+
 void game_gen_cross_set(Game *game, int row, int col, int dir,
                         int cross_set_index) {
   if (!board_is_position_valid(row, col)) {
@@ -194,7 +217,10 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     return;
   }
 
-  int right_col =
+  const int through_dir = dir == BOARD_VERTICAL_DIRECTION
+                              ? BOARD_HORIZONTAL_DIRECTION
+                              : BOARD_VERTICAL_DIRECTION;
+  const int right_col =
       board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
   if (right_col == col) {
     traverse_backwards(kwg, board, row, col - 1, kwg_get_root_node_index(kwg),
@@ -210,8 +236,12 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     }
     uint32_t s_index =
         kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
-    uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
+    uint64_t right_extension_set = 0;
+    uint64_t letter_set =
+        kwg_get_letter_sets(kwg, s_index, &right_extension_set);
     board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
+    board_set_right_extension_set(board, row, col - 1, through_dir,
+                                  cross_set_index, right_extension_set);
   } else {
     int left_col =
         board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
@@ -228,7 +258,13 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
       return;
     }
     if (left_col == col) {
-      uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
+      uint64_t left_extension_set = 0;
+      uint64_t letter_set =
+          kwg_get_letter_sets(kwg, lnode_index, &left_extension_set);
+      board_set_left_extension_set(board, row, right_col, through_dir,
+                                   cross_set_index, left_extension_set);
+      //board_set_anchor_kwg_node_index(board, row, col, dir, cross_set_index,
+      //                                lnode_index);
       board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
     } else {
       board_set_cross_set(board, row, col, dir, cross_set_index, 0);
@@ -386,9 +422,8 @@ int draw_rack_from_bag(const LetterDistribution *ld, Bag *bag, Rack *rack,
   return number_of_letters_set;
 }
 
-cgp_parse_status_t
-parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
-                                     Game *game) {
+cgp_parse_status_t parse_cgp_racks_with_string_splitter(
+    const StringSplitter *player_racks, Game *game) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   int number_of_letters_added =
       draw_rack_from_bag(game->ld, game->bag, player_get_rack(game->players[0]),
@@ -440,9 +475,8 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
   return cgp_parse_status;
 }
 
-cgp_parse_status_t
-parse_cgp_consecutive_zeros(Game *game, const char *cgp_consecutive_zeros) {
-
+cgp_parse_status_t parse_cgp_consecutive_zeros(
+    Game *game, const char *cgp_consecutive_zeros) {
   if (!is_all_digits_or_empty(cgp_consecutive_zeros)) {
     return CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS;
   }
@@ -518,6 +552,7 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
 
 void game_reset(Game *game) {
   board_reset(game->board);
+  game_reset_anchor_node_indices(game);
   bag_reset(game->ld, game->bag);
   player_reset(game->players[0]);
   player_reset(game->players[1]);

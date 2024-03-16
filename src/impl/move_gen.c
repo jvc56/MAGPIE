@@ -33,6 +33,8 @@ typedef struct MoveGen {
   // Owned by this MoveGen struct
   int current_row_index;
   int current_anchor_col;
+  uint64_t anchor_left_extension_set;
+  uint64_t anchor_right_extension_set;
   int last_anchor_col;
   int dir;
   int max_tiles_to_play;
@@ -149,6 +151,21 @@ static inline uint64_t gen_cache_get_cross_set(const MoveGen *gen, int col) {
 
 static inline uint8_t gen_cache_get_cross_score(const MoveGen *gen, int col) {
   return square_get_cross_score(&gen->row_cache[col]);
+}
+
+static inline uint32_t gen_cache_get_anchor_node_index(const MoveGen *gen,
+                                                       int col) {
+  return square_get_anchor_kwg_node_index(&gen->row_cache[col]);
+}
+
+static inline uint64_t gen_cache_get_left_extension_set(const MoveGen *gen,
+                                                        int col) {
+  return square_get_left_extension_set(&gen->row_cache[col]);
+}
+
+static inline uint64_t gen_cache_get_right_extension_set(const MoveGen *gen,
+                                                         int col) {
+  return square_get_right_extension_set(&gen->row_cache[col]);
 }
 
 double get_static_equity(MoveGen *gen) {
@@ -465,8 +482,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool
-shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
+static inline bool shadow_board_is_letter_allowed_in_cross_set(
+    const MoveGen *gen, int col) {
   uint64_t cross_set = gen_cache_get_cross_set(gen, col);
   // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
@@ -593,9 +610,26 @@ void shadow_play_left(MoveGen *gen, int main_played_through_score,
                       bool is_unique) {
   const bool blank_in_rack = (gen->rack_cross_set & 1) != 0;
   for (;;) {
-    shadow_play_right(gen, main_played_through_score,
-                      perpendicular_additional_score, word_multiplier,
-                      is_unique);
+    if ((gen->player_index == -1) || (gen->tiles_played > 0)) {
+      shadow_play_right(gen, main_played_through_score,
+                        perpendicular_additional_score, word_multiplier,
+                        is_unique);
+    } else if (gen->anchor_right_extension_set != 0) {
+      if (blank_in_rack ||
+          (gen->rack_cross_set & gen->anchor_right_extension_set) != 0) {
+        shadow_play_right(gen, main_played_through_score,
+                          perpendicular_additional_score, word_multiplier,
+                          is_unique);
+      }
+    }
+
+    uint64_t square_possible_letters = (gen->tiles_played == 0)
+                                           ? gen->anchor_left_extension_set
+                                           : TRIVIAL_CROSS_SET;
+    if ((square_possible_letters == 0) ||
+        (!blank_in_rack && (square_possible_letters == 0))) {
+      return;
+    }
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
@@ -632,6 +666,13 @@ void shadow_play_left(MoveGen *gen, int main_played_through_score,
 }
 
 void shadow_start(MoveGen *gen) {
+  bool blank_in_rack = (gen->rack_cross_set & 1) != 0;
+  uint64_t any_extension_set =
+      gen->anchor_left_extension_set | gen->anchor_right_extension_set;
+  if ((any_extension_set == 0) ||
+      (!blank_in_rack && (gen->rack_cross_set & any_extension_set) == 0)) {
+    return;
+  }
   int main_played_through_score = 0;
   int perpendicular_additional_score = 0;
   int word_multiplier = 1;
@@ -686,11 +727,36 @@ void shadow_start(MoveGen *gen) {
                    !board_is_dir_vertical(gen->dir));
 }
 
+void debug_cross_set2(uint64_t cross_set) {
+  if (cross_set == TRIVIAL_CROSS_SET) {
+    printf("TRIVIAL_CROSS_SET");
+    return;
+  }
+  for (int i = 0; i < 64; i++) {
+    if (cross_set & (1ULL << i)) {
+      printf("%c", 'A' + i - 1);
+    }
+  }
+}
 // The algorithm used in this file for
 // shadow playing was originally developed in wolges.
 // For more details about the shadow playing algorithm, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
 void shadow_play_for_anchor(MoveGen *gen, int col) {
+  // printf("shadow_play_for_anchor row: %i, col: %i, dir: %i, leftx: [",
+  //        gen->current_row_index, col, gen->dir);
+  const uint64_t leftx = gen_cache_get_left_extension_set(gen, col);
+  const uint64_t rightx = gen_cache_get_right_extension_set(gen, col);
+  // debug_cross_set2(leftx);
+  // printf("], rightx: [");
+  // debug_cross_set2(rightx);
+  // printf("]\n");
+
+  // gen->anchor_left_extension_set = TRIVIAL_CROSS_SET;
+  // gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+  gen->anchor_left_extension_set = leftx;
+  gen->anchor_right_extension_set = rightx;
+
   // set cols
   gen->current_left_col = col;
   gen->current_right_col = col;
@@ -765,6 +831,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
   gen->ld = ld;
   gen->kwg = player_get_kwg(player);
+  // KWG* nonconst_kwg = (KWG*)gen->kwg; // DO NOT MERGE
+  // nonconst_kwg->number_of_reads = 0;
   gen->klv = player_get_klv(player);
   gen->opponent_rack = player_get_rack(opponent);
   gen->board = game_get_board(game);
@@ -839,12 +907,13 @@ void generate_moves(Game *game, move_record_t move_record_type,
   anchor_list_sort(gen->anchor_list);
   const AnchorList *anchor_list = gen->anchor_list;
 
-  const int kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
     double anchor_highest_possible_equity =
         anchor_get_highest_possible_equity(anchor_list, i);
     if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(gen, anchor_highest_possible_equity)) {
+      // printf("searched %i anchors out of %i\n", i+1,
+      //         anchor_list_get_count(anchor_list));
       break;
     }
     gen->current_anchor_col = anchor_get_col(anchor_list, i);
@@ -853,7 +922,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->dir = anchor_get_dir(anchor_list, i);
     board_copy_row_cache(gen->lanes_cache, gen->row_cache,
                          gen->current_row_index, gen->dir);
-    recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
+    const uint32_t anchor_node_index =
+        gen_cache_get_anchor_node_index(gen, gen->current_anchor_col);
+    recursive_gen(gen, gen->current_anchor_col, anchor_node_index,
                   gen->current_anchor_col, gen->current_anchor_col,
                   gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
 
@@ -863,7 +934,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
       assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
     }
   }
-
+  // printf("number of kwg reads: %i\n", gen->kwg->number_of_reads);
   Move *top_move = move_list_get_move(gen->move_list, 0);
   // Add the pass move
   if (gen->move_record_type == MOVE_RECORD_ALL ||
