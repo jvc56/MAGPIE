@@ -64,10 +64,14 @@ typedef struct MoveGen {
   uint16_t descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
+  
+  // Include blank letters as zeroes so their scores can be added without
+  // checking whether tiles are blanked.
+  uint8_t tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
+
 
   // Owned by the caller
   const LetterDistribution *ld;
-  uint8_t tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
   const KLV *klv;
   const KWG *kwg;
   const Board *board;
@@ -459,8 +463,9 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool shadow_board_is_letter_allowed_in_cross_set(
-    const MoveGen *gen, int col) {
+
+static inline bool
+shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
   uint64_t cross_set = gen_cache_get_cross_set(gen, col);
   // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
