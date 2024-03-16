@@ -2,14 +2,11 @@
 
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
-
 #include "../ent/board.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-
-#include "letter_distribution_string.h"
-
 #include "../util/string_util.h"
+#include "letter_distribution_string.h"
 
 void string_builder_add_move_description(const Move *move,
                                          const LetterDistribution *ld,
@@ -82,7 +79,9 @@ void string_builder_add_move(const Board *board, const Move *move,
     uint8_t print_tile = tile;
     if (tile == PLAYED_THROUGH_MARKER) {
       if (board) {
-        print_tile = board_get_letter(board, current_row, current_col);
+        print_tile = board_get_transposed(board)
+            ? board_get_letter(board, current_col, current_row)
+            : board_get_letter(board, current_row, current_col);
       }
       if (i == 0 && board) {
         string_builder_add_string(string_builder, "(");
@@ -122,7 +121,6 @@ void string_builder_add_move(const Board *board, const Move *move,
 void string_builder_add_ucgi_move(const Move *move, const Board *board,
                                   const LetterDistribution *ld,
                                   StringBuilder *move_string_builder) {
-
   if (move_get_type(move) != GAME_EVENT_PASS) {
     if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       if (board_is_dir_vertical(move_get_dir(move))) {
