@@ -466,11 +466,11 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 static inline bool
 shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
   uint64_t cross_set = gen_cache_get_cross_set(gen, col);
-  // board_is_letter_allowed_in_cross_set if
-  // there is a letter on the rack in the cross set or,
-  // there is anything in the cross set and the rack has a blank.
-  return (cross_set & gen->rack_cross_set) != 0 ||
-         ((gen->rack_cross_set & 1) && cross_set);
+  // cross_set is 0 if unhookable, otherwise it will include the 0th bit,
+  // representing the blank. gen->rack_cross_set also has the 0th bit set if
+  // the rack contains a blank, so we can place a rack letter here if these
+  // values intersect bitwise.
+  return (cross_set & gen->rack_cross_set) != 0;
 }
 
 void shadow_record(MoveGen *gen, int left_col, int right_col,
@@ -540,7 +540,6 @@ static inline void shadow_play_right(MoveGen *gen,
                                      int word_multiplier, bool is_unique) {
   int original_current_right_col = gen->current_right_col;
   int original_tiles_played = gen->tiles_played;
-  const bool blank_in_rack = (gen->rack_cross_set & 1) != 0;
   while (gen->current_right_col < (BOARD_DIM - 1) &&
          gen->tiles_played < gen->number_of_letters_on_rack) {
     gen->current_right_col++;
@@ -548,8 +547,7 @@ static inline void shadow_play_right(MoveGen *gen,
 
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_right_col);
-    if ((cross_set == 0) ||
-        (!blank_in_rack && (cross_set & gen->rack_cross_set) == 0)) {
+    if ((cross_set & gen->rack_cross_set) == 0) {
       break;
     }
     const uint8_t bonus_square =
@@ -564,7 +562,7 @@ static inline void shadow_play_right(MoveGen *gen,
       is_unique = true;
     }
     while (gen->current_right_col + 1 < BOARD_DIM) {
-      uint8_t next_letter =
+      const uint8_t next_letter =
           gen_cache_get_letter(gen, gen->current_right_col + 1);
       if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         break;
@@ -614,7 +612,6 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
                                                 int main_played_through_score,
                                                 int word_multiplier,
                                                 bool is_unique) {
-  const bool blank_in_rack = (gen->rack_cross_set & 1) != 0;
   int perpendicular_additional_score = 0;
   for (;;) {
     shadow_play_right(gen, main_played_through_score,
@@ -630,15 +627,14 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
     gen->tiles_played++;
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_left_col);
-    if ((cross_set == 0) ||
-        (!blank_in_rack && (cross_set & gen->rack_cross_set) == 0)) {
+    if ((cross_set & gen->rack_cross_set) == 0) {
       return;
     }
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
     const int cross_score =
         gen_cache_get_cross_score(gen, gen->current_left_col);
-    int this_word_multiplier = bonus_square >> 4;
+    const int this_word_multiplier = bonus_square >> 4;
     perpendicular_additional_score += cross_score * this_word_multiplier;
     word_multiplier *= this_word_multiplier;
 

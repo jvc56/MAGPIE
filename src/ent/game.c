@@ -211,7 +211,8 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     uint32_t s_index =
         kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
     uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
-    board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
+    board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                   letter_set);
   } else {
     int left_col =
         board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
@@ -229,9 +230,10 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     }
     if (left_col == col) {
       uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
-      board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
+      board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                     letter_set);
     } else {
-      board_set_cross_set(board, row, col, dir, cross_set_index, 0);
+      uint64_t letter_set = 0;
       for (int i = lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         int t = kwg_node_tile(node);
@@ -240,14 +242,15 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
                              left_col);
           if (board_get_path_is_valid(board)) {
-            board_set_cross_set_letter(board, row, col, dir, cross_set_index,
-                                       t);
+            letter_set |= get_cross_set_bit(t);
           }
         }
         if (kwg_node_is_end(node)) {
           break;
         }
       }
+      board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                     letter_set);
     }
   }
 }
@@ -442,7 +445,6 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
 
 cgp_parse_status_t
 parse_cgp_consecutive_zeros(Game *game, const char *cgp_consecutive_zeros) {
-
   if (!is_all_digits_or_empty(cgp_consecutive_zeros)) {
     return CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS;
   }
