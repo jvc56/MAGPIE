@@ -463,8 +463,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool
-shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
+static inline bool shadow_board_is_letter_allowed_in_cross_set(
+    const MoveGen *gen, int col) {
   uint64_t cross_set = gen_cache_get_cross_set(gen, col);
   // board_is_letter_allowed_in_cross_set if
   // there is a letter on the rack in the cross set or,
@@ -586,10 +586,37 @@ static inline void shadow_play_right(MoveGen *gen,
   gen->tiles_played = original_tiles_played;
 }
 
-void shadow_play_left(MoveGen *gen, int main_played_through_score,
-                      int perpendicular_additional_score, int word_multiplier,
-                      bool is_unique) {
+static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
+                                     int main_played_through_score,
+                                     int perpendicular_additional_score,
+                                     int word_multiplier, bool is_unique) {
+  for (;;) {
+    shadow_play_right(gen, main_played_through_score,
+                      perpendicular_additional_score, word_multiplier,
+                      is_unique);
+    if (gen->current_left_col == 0 ||
+        gen->current_left_col == gen->last_anchor_col + 1 ||
+        gen->tiles_played >= gen->number_of_letters_on_rack) {
+      return;
+    }
+
+    gen->current_left_col--;
+    gen->tiles_played++;
+    const uint8_t bonus_square =
+        gen_cache_get_bonus_square(gen, gen->current_left_col);
+    int this_word_multiplier = bonus_square >> 4;
+    word_multiplier *= this_word_multiplier;
+
+    shadow_record(gen, gen->current_left_col, gen->current_right_col,
+                  main_played_through_score, perpendicular_additional_score,
+                  word_multiplier);
+  }
+}
+
+static inline void playthrough_shadow_play_left(MoveGen *gen, int main_played_through_score,
+                                  int word_multiplier, bool is_unique) {
   const bool blank_in_rack = (gen->rack_cross_set & 1) != 0;
+  int perpendicular_additional_score = 0;
   for (;;) {
     shadow_play_right(gen, main_played_through_score,
                       perpendicular_additional_score, word_multiplier,
@@ -629,59 +656,63 @@ void shadow_play_left(MoveGen *gen, int main_played_through_score,
   }
 }
 
-void shadow_start(MoveGen *gen) {
+static inline void shadow_start_nonplaythrough(MoveGen *gen) {
+  // Only play a letter if a letter from the rack fits in the cross set
+  if (!shadow_board_is_letter_allowed_in_cross_set(gen,
+                                                   gen->current_left_col)) {
+    return;
+  }
+
+  // Play tile on empty anchor square and set scoring parameters
+  const uint8_t bonus_square =
+      gen_cache_get_bonus_square(gen, gen->current_left_col);
+  const uint8_t cross_score = gen_cache_get_cross_score(gen, gen->current_left_col);
+  const int this_word_multiplier = bonus_square >> 4;
+  const int perpendicular_additional_score = cross_score * this_word_multiplier;
+  gen->tiles_played++;
+  if (!board_is_dir_vertical(gen->dir)) {
+    // word_multiplier is always hard-coded as 0 since we are recording a
+    // single tile
+    shadow_record(gen, gen->current_left_col, gen->current_right_col, 0,
+                  perpendicular_additional_score, 0);
+  }
+  nonplaythrough_shadow_play_left(gen, 0, perpendicular_additional_score,
+                                  this_word_multiplier,
+                                  !board_is_dir_vertical(gen->dir));
+}
+
+static inline void shadow_start_playthrough(MoveGen *gen,
+                                            uint8_t current_letter) {
+  // Traverse the full length of the tiles on the board until hitting an
+  // empty square
   int main_played_through_score = 0;
-  int perpendicular_additional_score = 0;
-  int word_multiplier = 1;
-  uint8_t current_letter = gen_cache_get_letter(gen, gen->current_left_col);
-
-  if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-    // Only play a letter if a letter from the rack fits in the cross set
-    if (shadow_board_is_letter_allowed_in_cross_set(gen,
-                                                    gen->current_left_col)) {
-      // Play tile and update scoring parameters
-
-      const uint8_t bonus_square =
-          gen_cache_get_bonus_square(gen, gen->current_left_col);
-      const int cross_score =
-          gen_cache_get_cross_score(gen, gen->current_left_col);
-      int this_word_multiplier = bonus_square >> 4;
-      perpendicular_additional_score += (cross_score * this_word_multiplier);
-      word_multiplier = this_word_multiplier;
-      gen->tiles_played++;
-      if (!board_is_dir_vertical(gen->dir)) {
-        // word_multiplier is always hard-coded as 0 since we are recording a
-        // single tile
-        shadow_record(gen, gen->current_left_col, gen->current_right_col,
-                      main_played_through_score, perpendicular_additional_score,
-                      0);
-      }
-    } else {
-      // Nothing hooks here, return
-      return;
+  for (;;) {
+    if (!get_is_blanked(current_letter)) {
+      main_played_through_score += gen->tile_scores[current_letter];
     }
-  } else {
-    // Traverse the full length of the tiles on the board until hitting an
-    // empty square
-    while (1) {
-      if (!get_is_blanked(current_letter)) {
-        main_played_through_score += gen->tile_scores[current_letter];
-      }
-      if (gen->current_left_col == 0 ||
-          gen->current_left_col == gen->last_anchor_col + 1) {
-        break;
-      }
-      gen->current_left_col--;
-      current_letter = gen_cache_get_letter(gen, gen->current_left_col);
-      if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-        gen->current_left_col++;
-        break;
-      }
+    if (gen->current_left_col == 0 ||
+        gen->current_left_col == gen->last_anchor_col + 1) {
+      break;
+    }
+    gen->current_left_col--;
+    current_letter = gen_cache_get_letter(gen, gen->current_left_col);
+    if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+      gen->current_left_col++;
+      break;
     }
   }
-  shadow_play_left(gen, main_played_through_score,
-                   perpendicular_additional_score, word_multiplier,
-                   !board_is_dir_vertical(gen->dir));
+  playthrough_shadow_play_left(gen, main_played_through_score, 1,
+                               !board_is_dir_vertical(gen->dir));
+}
+
+static inline void shadow_start(MoveGen *gen) {
+  const uint8_t current_letter =
+      gen_cache_get_letter(gen, gen->current_left_col);
+  if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+    shadow_start_nonplaythrough(gen);
+  } else {
+    shadow_start_playthrough(gen, current_letter);
+  }
 }
 
 // The algorithm used in this file for
