@@ -9,17 +9,15 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
-
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 #include "bag.h"
 #include "board.h"
 #include "kwg.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
-
-#include "../util/log.h"
-#include "../util/string_util.h"
-#include "../util/util.h"
 
 typedef struct MinimalGameBackup {
   Board *board;
@@ -211,7 +209,8 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     uint32_t s_index =
         kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
     uint64_t letter_set = kwg_get_letter_set(kwg, s_index);
-    board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
+    board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                   letter_set);
   } else {
     int left_col =
         board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
@@ -229,9 +228,10 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     }
     if (left_col == col) {
       uint64_t letter_set = kwg_get_letter_set(kwg, lnode_index);
-      board_set_cross_set(board, row, col, dir, cross_set_index, letter_set);
+      board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                     letter_set);
     } else {
-      board_set_cross_set(board, row, col, dir, cross_set_index, 0);
+      uint64_t letter_set = 0;
       for (int i = lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         int t = kwg_node_tile(node);
@@ -240,14 +240,15 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,
                              left_col);
           if (board_get_path_is_valid(board)) {
-            board_set_cross_set_letter(board, row, col, dir, cross_set_index,
-                                       t);
+            letter_set |= 1 << t;
           }
         }
         if (kwg_node_is_end(node)) {
           break;
         }
       }
+      board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                     letter_set);
     }
   }
 }
@@ -386,9 +387,8 @@ int draw_rack_from_bag(const LetterDistribution *ld, Bag *bag, Rack *rack,
   return number_of_letters_set;
 }
 
-cgp_parse_status_t
-parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
-                                     Game *game) {
+cgp_parse_status_t parse_cgp_racks_with_string_splitter(
+    const StringSplitter *player_racks, Game *game) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   int number_of_letters_added =
       draw_rack_from_bag(game->ld, game->bag, player_get_rack(game->players[0]),
@@ -440,9 +440,8 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
   return cgp_parse_status;
 }
 
-cgp_parse_status_t
-parse_cgp_consecutive_zeros(Game *game, const char *cgp_consecutive_zeros) {
-
+cgp_parse_status_t parse_cgp_consecutive_zeros(
+    Game *game, const char *cgp_consecutive_zeros) {
   if (!is_all_digits_or_empty(cgp_consecutive_zeros)) {
     return CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS;
   }

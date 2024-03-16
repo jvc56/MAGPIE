@@ -244,6 +244,15 @@ static inline void board_set_cross_set(Board *b, int row, int col, int dir,
                        cross_set);
 }
 
+static inline void board_set_cross_set_with_blank(Board *b, int row, int col,
+                                                  int dir, int ci,
+                                                  uint64_t cross_set) {
+  // If any letter's bits are set, the blank bit should be set.
+  const uint64_t cross_set_with_blank = (cross_set == 0) ? 0 : (cross_set | 1);
+  square_set_cross_set(board_get_writable_square(b, row, col, dir, ci),
+                       cross_set_with_blank);
+}
+
 static inline void board_set_cross_set_letter(Board *b, int row, int col,
                                               int dir, int ci, uint8_t letter) {
   square_set_cross_set_letter(board_get_writable_square(b, row, col, dir, ci),
@@ -481,8 +490,8 @@ static inline int board_get_word_edge(const Board *board, int row, int col,
   return col - word_dir;
 }
 
-static inline board_layout_t
-board_layout_string_to_board_layout(const char *board_layout_string) {
+static inline board_layout_t board_layout_string_to_board_layout(
+    const char *board_layout_string) {
   if (strings_equal(board_layout_string, BOARD_LAYOUT_CROSSWORD_GAME_NAME)) {
     return BOARD_LAYOUT_CROSSWORD_GAME;
   }

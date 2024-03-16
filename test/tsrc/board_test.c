@@ -36,6 +36,20 @@ void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
   assert(!board_is_letter_allowed_in_cross_set(cs, 14));
   assert(board_is_letter_allowed_in_cross_set(cs, 13));
   assert(!board_is_letter_allowed_in_cross_set(cs, 12));
+
+  board_set_cross_set_with_blank(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
+                                 cross_set_index, 0);
+  cs = board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
+                           cross_set_index);
+  assert(!board_is_letter_allowed_in_cross_set(cs, 0));                                                            
+  assert(!board_is_letter_allowed_in_cross_set(cs, 1));
+  
+  board_set_cross_set_with_blank(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
+                                 cross_set_index, 1ULL << 20);
+  cs = board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+  assert(board_is_letter_allowed_in_cross_set(cs, 0));
+  assert(!board_is_letter_allowed_in_cross_set(cs, 1));
+  assert(board_is_letter_allowed_in_cross_set(cs, 20));
 }
 
 void test_board_reset(Board *board) {
