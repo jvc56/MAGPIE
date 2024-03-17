@@ -33,6 +33,8 @@ typedef struct MoveGen {
   // Owned by this MoveGen struct
   int current_row_index;
   int current_anchor_col;
+  uint64_t anchor_left_extension_set;
+  uint64_t anchor_right_extension_set;
   int last_anchor_col;
   int dir;
   int max_tiles_to_play;
@@ -64,11 +66,10 @@ typedef struct MoveGen {
   uint16_t descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
-  
+
   // Include blank letters as zeroes so their scores can be added without
   // checking whether tiles are blanked.
   uint8_t tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
-
 
   // Owned by the caller
   const LetterDistribution *ld;
@@ -151,6 +152,16 @@ static inline uint64_t gen_cache_get_cross_set(const MoveGen *gen, int col) {
 
 static inline uint8_t gen_cache_get_cross_score(const MoveGen *gen, int col) {
   return square_get_cross_score(&gen->row_cache[col]);
+}
+
+static inline uint64_t gen_cache_get_left_extension_set(const MoveGen *gen,
+                                                        int col) {
+  return square_get_left_extension_set(&gen->row_cache[col]);
+}
+
+static inline uint64_t gen_cache_get_right_extension_set(const MoveGen *gen,
+                                                         int col) {
+  return square_get_right_extension_set(&gen->row_cache[col]);
 }
 
 double get_static_equity(MoveGen *gen) {
@@ -463,8 +474,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool
-shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
+static inline bool shadow_board_is_letter_allowed_in_cross_set(
+    const MoveGen *gen, int col) {
   uint64_t cross_set = gen_cache_get_cross_set(gen, col);
   // cross_set is 0 if unhookable, otherwise it will include the 0th bit,
   // representing the blank. gen->rack_cross_set also has the 0th bit set if
@@ -586,15 +597,21 @@ static inline void nonplaythrough_shadow_play_left(
     MoveGen *gen, int main_played_through_score,
     int perpendicular_additional_score, int word_multiplier, bool is_unique) {
   for (;;) {
-    shadow_play_right(gen, main_played_through_score,
-                      perpendicular_additional_score, word_multiplier,
-                      is_unique);
+    if ((gen->tiles_played > 0) ||
+        ((gen->anchor_right_extension_set & gen->rack_cross_set) != 0)) {
+      shadow_play_right(gen, main_played_through_score,
+                        perpendicular_additional_score, word_multiplier,
+                        is_unique);
+    }
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
       return;
     }
-
+    if ((gen->tiles_played == 0) &&
+        (gen->anchor_left_extension_set & gen->rack_cross_set) == 0) {
+      return;
+    }
     gen->current_left_col--;
     gen->tiles_played++;
     const uint8_t bonus_square =
@@ -614,15 +631,21 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
                                                 bool is_unique) {
   int perpendicular_additional_score = 0;
   for (;;) {
-    shadow_play_right(gen, main_played_through_score,
-                      perpendicular_additional_score, word_multiplier,
-                      is_unique);
+    if ((gen->tiles_played > 0) ||
+        ((gen->anchor_right_extension_set & gen->rack_cross_set) != 0)) {
+      shadow_play_right(gen, main_played_through_score,
+                        perpendicular_additional_score, word_multiplier,
+                        is_unique);
+    }
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
       return;
     }
-
+    if ((gen->tiles_played == 0) &&
+        (gen->anchor_left_extension_set & gen->rack_cross_set) == 0) {
+      return;
+    }
     gen->current_left_col--;
     gen->tiles_played++;
     const uint64_t cross_set =
@@ -700,12 +723,29 @@ static inline void shadow_start_playthrough(MoveGen *gen,
 }
 
 static inline void shadow_start(MoveGen *gen) {
+  const uint64_t any_extension_set =
+      gen->anchor_left_extension_set | gen->anchor_right_extension_set;
+  if (any_extension_set == 0) {
+    return;
+  }
   const uint8_t current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
     shadow_start_nonplaythrough(gen);
   } else {
     shadow_start_playthrough(gen, current_letter);
+  }
+}
+
+void debug_cross_set(uint64_t cross_set) {  // DO NOT MERGE
+  if (cross_set == TRIVIAL_CROSS_SET) {
+    printf("TRIVIAL_CROSS_SET");
+    return;
+  }
+  for (int i = 0; i < 64; i++) {
+    if (cross_set & (1ULL << i)) {
+      printf("%c", 'A' + i - 1);
+    }
   }
 }
 
@@ -718,6 +758,16 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->current_left_col = col;
   gen->current_right_col = col;
 
+  gen->anchor_left_extension_set = gen_cache_get_left_extension_set(gen, col);
+  gen->anchor_right_extension_set = gen_cache_get_right_extension_set(gen, col);
+/*  
+  printf("spfa %d %d %s left:[", gen->current_row_index, col,
+         (gen->dir ? "V" : "H"));
+  debug_cross_set(gen->anchor_left_extension_set);
+  printf("] right:[");
+  debug_cross_set(gen->anchor_right_extension_set);
+  printf("]\n");
+*/  
   // Reset shadow score
   gen->highest_shadow_equity = 0;
 

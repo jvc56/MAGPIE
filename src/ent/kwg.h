@@ -65,7 +65,24 @@ static inline uint32_t kwg_get_next_node_index(const KWG *kwg, int node_index,
 }
 
 bool kwg_in_letter_set(const KWG *kwg, uint8_t letter, uint32_t node_index);
-uint64_t kwg_get_letter_set(const KWG *kwg, uint32_t node_index);
+
+static inline uint64_t kwg_get_letter_sets(const KWG *kwg, uint32_t node_index,
+                                           uint64_t *extension_set) {
+  uint64_t ls = 0, es = 0;
+  for (uint32_t i = node_index;; ++i) {
+    const uint32_t node = kwg_node(kwg, i);
+    const uint32_t t = kwg_node_tile(node);
+    const uint64_t bit = ((uint64_t)1 << t) ^ !t;
+    es |= bit;
+    ls |= bit & (uint64_t) - (int64_t)kwg_node_accepts(node);
+    if (kwg_node_is_end(node)) {
+      break;
+    }
+  }
+  *extension_set = es;
+  return ls;
+}
+
 int kwg_get_number_of_nodes(const KWG *kwg);
 
 #endif

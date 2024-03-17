@@ -1,7 +1,6 @@
 #include <assert.h>
 
 #include "../../src/def/move_defs.h"
-
 #include "../../src/ent/anchor.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
@@ -9,11 +8,9 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
-
 #include "../../src/impl/gameplay.h"
-
+#include "../../src/str/game_string.h"
 #include "../pi/move_gen_pi.h"
-
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -23,6 +20,7 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
   Rack *player_rack = player_get_rack(player);
 
   game_load_cgp(game, cgp);
+
   rack_set_to_string(ld, player_rack, rack);
   generate_moves_for_game(game, 0, move_list);
   AnchorList *anchor_list = gen_get_anchor_list(0);
@@ -230,49 +228,61 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 102));
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "Q");
+  // WINDY is not extendable, so there is no 22 for WINDYQ.
+  // The highest anchor is through the W in WINDY, recording 14 for QW, as W is
+  // extendable with a Q to the left for Q(W)ERTY. Note there is no 22 for DQ
+  // or 14 for YQ despite HINDQUARTER and TRIPTYQUE. Since no on the rack
+  // extends D or Y to the left, the right_extension_set is applied, filtering
+  // these anchors because no words _begin_ with DQ or YQ.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 22));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 14));
+  // The next highest anchor is through the I in WINDY: 11 for QI.
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 11));
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BD");
+  // WINDY is not extendable, so there is no 17 for WINDYBD.
+  // The highest anchor is 14 for 7H BD.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 17));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 14));
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BOH");
+  // WINDY is not extendable, so there is no 60 for BOHWINDY.
+  // The highest anchor is 31 for 9f BHO.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 60));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 31));
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BOHGX");
+  // WINDY is not extendable, so there is no 90 for BOHWINDYGX.
+  // The highest anchor is 64 for 9D BOHXG.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 90));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 64));
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BOHGXZ");
+  // WINDY is not extendable, so there is no 120 for BOHWINDYGXZ.
+  // The highest anchor is 116 for the 2x2 E5 BOH(I)GXZ.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 120));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 116));
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BOHGXZQ");
+  // WINDY is not extendable, so there is no 230 for BOHWINDYGXZQ.
+  // The highest anchor is 206 for the 2x2 E5 BOH(I)GXZQ.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 230));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 206));
 
   load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "A");
 
-  // WINDYA
-  assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 13));
-  // PROTEANA
-  assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 11));
-  // ANY horizontally
-  // ANY vertically
-  // A(P) vertically
-  // A(OW) vertically
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 6));
+  // WINDY is not extendable, so there is no 13 for WINDYA.
+  // H6 A(NY) vertical
+  // H6 A(NY) horizontal
+  // B6 A(P)
+  // D6 A(OW)
+  // F6 A(EN)
+
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 6));
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 6));
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 6));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 6));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 6));
-  // A(EN)
-  // AD(A)
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 6), 5));
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 7), 5));
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 5));
 
   load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "Z");
   // Z(P) vertically
@@ -284,9 +294,9 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 32));
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 32));
-  // (PROTEAN)Z
+  // (AD)Z
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 29));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 23));
 
   load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "ZLW");
   // ZEN, ZW, WAD
@@ -312,12 +322,12 @@ void test_shadow_score() {
 
   load_and_generate(game, move_list, player, TRIPLE_DOUBLE_CGP, "K");
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 23));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 13));
 
   load_and_generate(game, move_list, player, TRIPLE_DOUBLE_CGP, "KT");
   // KPAVT
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 26));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 20));
 
   load_and_generate(game, move_list, player, TRIPLE_DOUBLE_CGP, "KT?");
   // The blank makes PAVE, board_is_letter_allowed_in_cross_set all letters in
@@ -350,17 +360,18 @@ void test_shadow_score() {
 
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "Z");
-  // (L)Z and (R)Z
-  assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 31));
-  assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 31));
-  // (LATER)Z
-  assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 30));
   // Z(T)
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 21));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 21));
+  // (A)Z      
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 11));
+  // Z(E)
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 11));
+  // Z(A)
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 11));
 
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "ZL");
@@ -393,9 +404,20 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 212));
 
   load_and_generate(game, move_list, player, VS_OXY, "A");
-  // APACIFYING
+  // No APACIFYING: PACIFYING not extendable with an A.
+  // A(WAKEnERS)/(UT)A
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 18));
+
+  load_and_generate(game, move_list, player, VS_OXY, "O");
+  // O(PACIFYING)
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 63));
+
+  load_and_generate(game, move_list, player, VS_OXY, "E");
+  // E(JACULATING)/(ON)E > E(PACIFYING)
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 72));
 
   load_and_generate(game, move_list, player, VS_OXY, "PB");
   assert(
@@ -411,9 +433,10 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 174));
 
   load_and_generate(game, move_list, player, VS_OXY, "Z");
-  // ZPACIFYING
+  // No ZPACIFYING
+  // TZ/ZA
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 90));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 42));
 
   load_and_generate(game, move_list, player, VS_OXY, "ZE");
   // ZONE
@@ -467,7 +490,7 @@ void test_shadow_score() {
   // 7h FURTIDE 69
   // h10 DUFTIE 45
   // f10 FURIDE 35
-  assert(anchor_list_get_count(al) == 9);
+  assert(anchor_list_get_count(al) == 8);
   assert(within_epsilon(anchor_get_highest_possible_equity(al, 0), 128));
   assert(anchor_get_row(al, 0) == 7);
   assert(anchor_get_col(al, 0) == 7);
