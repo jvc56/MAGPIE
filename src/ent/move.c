@@ -152,8 +152,10 @@ void down_heapify(MoveList *ml, int parent_node) {
   int min;
   Move *temp;
 
-  if (left >= ml->count || left < 0) left = -1;
-  if (right >= ml->count || right < 0) right = -1;
+  if (left >= ml->count || left < 0)
+    left = -1;
+  if (right >= ml->count || right < 0)
+    right = -1;
 
   if (left != -1 &&
       compare_moves(ml->moves[parent_node], ml->moves[left], false))

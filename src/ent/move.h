@@ -75,7 +75,7 @@ void move_set_tiles_length(Move *move, int tiles_length);
 void move_set_dir(Move *move, int dir);
 void move_set_tile(Move *move, uint8_t tile, int index);
 void move_set_equity(Move *move, double equity);
-static inline void move_set_all_except_equity(Move *move, uint8_t strip[],
+static inline void move_set_all_except_equity(Move *move, const uint8_t strip[],
                                               int leftstrip, int rightstrip,
                                               int score, int row_start,
                                               int col_start, int tiles_played,
@@ -146,7 +146,7 @@ static inline bool within_epsilon_for_equity(double a, double b) {
 // Dies if moves are equivalent and duplicates
 // are not allowed
 static inline int compare_moves(const Move *move_1, const Move *move_2,
-                  bool allow_duplicates) {
+                                bool allow_duplicates) {
   if (!within_epsilon_for_equity(move_1->equity, move_2->equity)) {
     return move_1->equity > move_2->equity;
   }

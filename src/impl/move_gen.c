@@ -27,6 +27,9 @@
 #include "../ent/static_eval.h"
 #include "../util/util.h"
 
+// FIXME: remove
+#include "../str/move_string.h"
+
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 typedef struct MoveGen {
@@ -49,6 +52,8 @@ typedef struct MoveGen {
   Square row_cache[BOARD_DIM];
   int row_number_of_anchors_cache[(BOARD_DIM) * 2];
   int cross_index;
+  Move best_and_current_moves[2];
+  int best_move_index;
 
   int bag_tiles_remaining;
 
@@ -149,19 +154,74 @@ static inline uint8_t gen_cache_get_cross_score(const MoveGen *gen, int col) {
   return square_get_cross_score(&gen->row_cache[col]);
 }
 
-double get_static_equity(MoveGen *gen) {
+static inline double get_static_equity(const MoveGen *gen, const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
-      gen->ld, move_list_get_spare_move(gen->move_list), gen->board,
-      &gen->player_rack, &gen->opponent_rack, gen->number_of_tiles_in_bag,
+      gen->ld, move, gen->board, &gen->player_rack, &gen->opponent_rack,
+      gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
 }
 
+static inline void set_play_for_record(Move *move, game_event_t move_type,
+                                       int leftstrip, int rightstrip, int score,
+                                       int start_row, int start_col,
+                                       int tiles_played, int dir,
+                                       uint8_t strip[]) {
+  move_set_all_except_equity(move, strip, leftstrip, rightstrip, score,
+                             start_row, start_col, tiles_played, dir,
+                             move_type);
+  if (board_is_dir_vertical(dir)) {
+    move_set_row_start(move, start_col);
+    move_set_col_start(move, start_row);
+  }
+}
+
+static inline double
+get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, int score) {
+  if (gen->move_sort_type == MOVE_SORT_EQUITY) {
+    return get_static_equity(gen, move);
+  }
+  return score;
+}
+
+static inline void
+write_to_bestmove_or_movelist(MoveGen *gen, int leftstrip, int rightstrip,
+                              game_event_t move_type, int score, int start_row,
+                              int start_col, int tiles_played, int dir,
+                              uint8_t strip[]) {
+  if (gen->move_record_type == MOVE_RECORD_ALL) {
+    Move *move = move_list_get_spare_move(gen->move_list);
+    set_play_for_record(move, move_type, leftstrip, rightstrip, score,
+                        start_row, start_col, tiles_played, dir, strip);
+    // StringBuilder *mb = create_string_builder();
+    // string_builder_add_move(NULL, move, gen->ld, mb);
+    // printf("\n%d, %d, %d, %d, %d, %d, %d\n", move_type, leftstrip,
+    // rightstrip,
+    //        score, start_row, start_col, tiles_played);
+    // printf("inserting move: %s\n", string_builder_peek(mb));
+    // destroy_string_builder(mb);
+    move_list_insert_spare_move(
+        gen->move_list, get_move_equity_for_sort_type(gen, move, score));
+    // printf("done inserting, now have %d moves\n",
+    //        move_list_get_count(gen->move_list));
+  } else {
+    Move *current_move = &gen->best_and_current_moves[1 - gen->best_move_index];
+    set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
+                        start_row, start_col, tiles_played, dir, strip);
+    double equity = get_move_equity_for_sort_type(gen, current_move, score);
+    if (equity >
+        move_get_equity(&gen->best_and_current_moves[gen->best_move_index])) {
+      move_set_equity(current_move, equity);
+      gen->best_move_index = 1 - gen->best_move_index;
+    }
+  }
+}
+
 static inline void record_play(MoveGen *gen, int leftstrip, int rightstrip,
-                               game_event_t move_type, int main_word_score,
-                               int word_multiplier, int cross_score) {
+                               int main_word_score, int word_multiplier,
+                               int cross_score) {
   int start_row = gen->current_row_index;
   int start_col = leftstrip;
-  int tiles_played = gen->tiles_played;
+  const int tiles_played = gen->tiles_played;
 
   int score = 0;
 
@@ -172,27 +232,9 @@ static inline void record_play(MoveGen *gen, int leftstrip, int rightstrip,
 
   score = main_word_score * word_multiplier + cross_score + bingo_bonus;
 
-  Move *spare_move = move_list_get_spare_move(gen->move_list);
-  move_set_all_except_equity(spare_move, gen->strip, leftstrip, rightstrip,
-                             score, start_row, start_col, tiles_played,
-                             gen->dir, move_type);
-  if (board_is_dir_vertical(gen->dir)) {
-    move_set_row_start(spare_move, start_col);
-    move_set_col_start(spare_move, start_row);
-  }
-
-  if (gen->move_record_type == MOVE_RECORD_ALL) {
-    double equity;
-    if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-      equity = get_static_equity(gen);
-    } else {
-      equity = score;
-    }
-    move_list_insert_spare_move(gen->move_list, equity);
-  } else {
-    move_list_insert_spare_move_top_equity(gen->move_list,
-                                           get_static_equity(gen));
-  }
+  write_to_bestmove_or_movelist(
+      gen, leftstrip, rightstrip, GAME_EVENT_TILE_PLACEMENT_MOVE, score,
+      start_row, start_col, tiles_played, gen->dir, gen->strip);
 }
 
 static inline bool better_play_has_been_found(const MoveGen *gen,
@@ -214,32 +256,18 @@ static inline void record_exchange(MoveGen *gen) {
   }
 
   int tiles_exchanged = 0;
-  uint8_t *strip = NULL;
 
-  strip = gen->exchange_strip;
   for (uint8_t ml = 0; ml < rack_get_dist_size(&gen->player_rack); ml++) {
     int num_this = rack_get_letter(&gen->player_rack, ml);
     for (int i = 0; i < num_this; i++) {
-      strip[tiles_exchanged] = ml;
+      gen->exchange_strip[tiles_exchanged] = ml;
       tiles_exchanged++;
     }
   }
-  Move *spare_move = move_list_get_spare_move(gen->move_list);
-  move_set_all_except_equity(spare_move, strip, 0, tiles_exchanged, 0, 0, 0,
-                             tiles_exchanged, BOARD_HORIZONTAL_DIRECTION,
-                             GAME_EVENT_EXCHANGE);
-  if (gen->move_record_type == MOVE_RECORD_ALL) {
-    double equity;
-    if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-      equity = get_static_equity(gen);
-    } else {
-      equity = 0;
-    }
-    move_list_insert_spare_move(gen->move_list, equity);
-  } else {
-    move_list_insert_spare_move_top_equity(gen->move_list,
-                                           get_static_equity(gen));
-  }
+
+  write_to_bestmove_or_movelist(gen, 0, tiles_exchanged, GAME_EVENT_EXCHANGE, 0,
+                                0, 0, tiles_exchanged, gen->dir,
+                                gen->exchange_strip);
 }
 
 // Look up leave values for all subsets of the player's rack and if add_exchange
@@ -418,8 +446,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 
     if (accepts && no_letter_directly_left &&
         gen->tiles_played > !unique_play) {
-      record_play(gen, leftstrip, rightstrip, GAME_EVENT_TILE_PLACEMENT_MOVE,
-                  inc_main_word_score, inc_word_multiplier, inc_cross_scores);
+      record_play(gen, leftstrip, rightstrip, inc_main_word_score,
+                  inc_word_multiplier, inc_cross_scores);
     }
 
     if (new_node_index == 0) {
@@ -451,8 +479,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 
     if (accepts && no_letter_directly_right &&
         gen->tiles_played > !unique_play) {
-      record_play(gen, leftstrip, rightstrip, GAME_EVENT_TILE_PLACEMENT_MOVE,
-                  inc_main_word_score, inc_word_multiplier, inc_cross_scores);
+      record_play(gen, leftstrip, rightstrip, inc_main_word_score,
+                  inc_word_multiplier, inc_cross_scores);
     }
 
     if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
@@ -781,6 +809,11 @@ void generate_moves(Game *game, move_record_t move_record_type,
   // Reset the move list
   move_list_reset(gen->move_list);
 
+  // Reset the best and current moves
+  gen->best_move_index = 0;
+  move_set_equity(&gen->best_and_current_moves[gen->best_move_index],
+                  INITIAL_TOP_MOVE_EQUITY);
+
   leave_map_init(&gen->player_rack, &gen->leave_map);
   if (rack_get_total_letters(&gen->player_rack) < RACK_SIZE) {
     leave_map_set_current_value(
@@ -863,11 +896,18 @@ void generate_moves(Game *game, move_record_t move_record_type,
     }
   }
 
-  Move *top_move = move_list_get_move(gen->move_list, 0);
-  // Add the pass move
-  if (gen->move_record_type == MOVE_RECORD_ALL ||
-      move_get_equity(top_move) < PASS_MOVE_EQUITY) {
+  if (gen->move_record_type == MOVE_RECORD_ALL) {
     move_list_set_spare_move_as_pass(gen->move_list);
     move_list_insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
+  } else {
+    Move *top_move = &gen->best_and_current_moves[gen->best_move_index];
+    Move *spare_move = move_list_get_spare_move(gen->move_list);
+    if (move_get_equity(top_move) < PASS_MOVE_EQUITY) {
+      move_list_set_spare_move_as_pass(gen->move_list);
+    } else {
+      move_copy(spare_move, top_move);
+    }
+    move_list_insert_spare_move_top_equity(gen->move_list,
+                                           move_get_equity(spare_move));
   }
 }
