@@ -406,8 +406,9 @@ int draw_rack_from_bag(const LetterDistribution *ld, Bag *bag, Rack *rack,
   return number_of_letters_set;
 }
 
-cgp_parse_status_t parse_cgp_racks_with_string_splitter(
-    const StringSplitter *player_racks, Game *game) {
+cgp_parse_status_t
+parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
+                                     Game *game) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   int number_of_letters_added =
       draw_rack_from_bag(game->ld, game->bag, player_get_rack(game->players[0]),
@@ -459,8 +460,9 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
   return cgp_parse_status;
 }
 
-cgp_parse_status_t parse_cgp_consecutive_zeros(
-    Game *game, const char *cgp_consecutive_zeros) {
+
+cgp_parse_status_t
+parse_cgp_consecutive_zeros(Game *game, const char *cgp_consecutive_zeros) {
   if (!is_all_digits_or_empty(cgp_consecutive_zeros)) {
     return CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS;
   }

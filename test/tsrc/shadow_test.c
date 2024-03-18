@@ -1,6 +1,7 @@
 #include <assert.h>
 
 #include "../../src/def/move_defs.h"
+
 #include "../../src/ent/anchor.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
@@ -8,9 +9,11 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
+
 #include "../../src/impl/gameplay.h"
-#include "../../src/str/game_string.h"
+
 #include "../pi/move_gen_pi.h"
+
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -20,7 +23,6 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
   Rack *player_rack = player_get_rack(player);
 
   game_load_cgp(game, cgp);
-
   rack_set_to_string(ld, player_rack, rack);
   generate_moves_for_game(game, 0, move_list);
   AnchorList *anchor_list = gen_get_anchor_list(0);

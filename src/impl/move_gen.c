@@ -474,8 +474,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool shadow_board_is_letter_allowed_in_cross_set(
-    const MoveGen *gen, int col) {
+static inline bool
+shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
   uint64_t cross_set = gen_cache_get_cross_set(gen, col);
   // cross_set is 0 if unhookable, otherwise it will include the 0th bit,
   // representing the blank. gen->rack_cross_set also has the 0th bit set if
