@@ -737,18 +737,6 @@ static inline void shadow_start(MoveGen *gen) {
   }
 }
 
-void debug_cross_set(uint64_t cross_set) {  // DO NOT MERGE
-  if (cross_set == TRIVIAL_CROSS_SET) {
-    printf("TRIVIAL_CROSS_SET");
-    return;
-  }
-  for (int i = 0; i < 64; i++) {
-    if (cross_set & (1ULL << i)) {
-      printf("%c", 'A' + i - 1);
-    }
-  }
-}
-
 // The algorithm used in this file for
 // shadow playing was originally developed in wolges.
 // For more details about the shadow playing algorithm, see
@@ -760,14 +748,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 
   gen->anchor_left_extension_set = gen_cache_get_left_extension_set(gen, col);
   gen->anchor_right_extension_set = gen_cache_get_right_extension_set(gen, col);
-/*  
-  printf("spfa %d %d %s left:[", gen->current_row_index, col,
-         (gen->dir ? "V" : "H"));
-  debug_cross_set(gen->anchor_left_extension_set);
-  printf("] right:[");
-  debug_cross_set(gen->anchor_right_extension_set);
-  printf("]\n");
-*/  
+
   // Reset shadow score
   gen->highest_shadow_equity = 0;
 
