@@ -222,9 +222,9 @@ static inline void update_best_move_or_insert_into_movelist(
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
-    double equity = get_move_equity_for_sort_type(gen, current_move, score);
-    if (equity > move_get_equity(gen_get_best_move(gen))) {
-      move_set_equity(current_move, equity);
+    move_set_equity(current_move,
+                    get_move_equity_for_sort_type(gen, current_move, score));
+    if (compare_moves(current_move, gen_get_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
     }
   }
