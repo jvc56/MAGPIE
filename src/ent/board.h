@@ -268,7 +268,12 @@ static inline void board_set_cross_set_with_blank(Board *b, int row, int col,
                                                   int dir, int ci,
                                                   uint64_t cross_set) {
   // If any letter's bits are set, the blank bit should be set.
-  const uint64_t cross_set_with_blank = (cross_set == 0) ? 0 : (cross_set | 1);
+  //
+  // It is assumed that the 0th bit is unseen in cross_set: it is a set of
+  // nonblank letters. Given that, this is equivalent logic to this more
+  // readable version:
+  // const uint64_t cross_set_with_blank ? cross_set | 1 : 0;
+  const uint64_t cross_set_with_blank = cross_set + !!cross_set;
   square_set_cross_set(board_get_writable_square(b, row, col, dir, ci),
                        cross_set_with_blank);
 }
@@ -356,8 +361,12 @@ static inline void board_set_left_extension_set(Board *b, int row, int col,
 
 static inline void board_set_left_extension_set_with_blank(
     Board *b, int row, int col, int dir, int csi, uint64_t left_extension_set) {
+  // It is assumed that the 0th bit is unseen in left_extension_set: it is a
+  // set of nonblank letters. Given that, this is equivalent logic to this more
+  // readable version:
+  // const uint64_t left_extension_set_with_blank ? left_extension_set | 1 : 0;
   const uint64_t left_extension_set_with_blank =
-      (left_extension_set == 0) ? 0 : (left_extension_set | 1);
+      left_extension_set + !!left_extension_set;
   square_set_left_extension_set(
       board_get_writable_square(b, row, col, dir, csi),
       left_extension_set_with_blank);
@@ -373,8 +382,9 @@ static inline void board_set_right_extension_set(Board *b, int row, int col,
 static inline void board_set_right_extension_set_with_blank(
     Board *b, int row, int col, int dir, int csi,
     uint64_t right_extension_set) {
+  // See comment in board_set_left_extension_set_with_blank.      
   const uint64_t right_extension_set_with_blank =
-      (right_extension_set == 0) ? 0 : (right_extension_set | 1);
+      right_extension_set + !!right_extension_set;
   square_set_right_extension_set(
       board_get_writable_square(b, row, col, dir, csi),
       right_extension_set_with_blank);
@@ -722,6 +732,13 @@ static inline void board_copy_row_cache(const Square *lanes_cache,
                                         int dir) {
   const Square *source_row = board_get_row_cache(lanes_cache, row_or_col, dir);
   memory_copy(row_cache, source_row, sizeof(Square) * BOARD_DIM);
+}
+
+static inline int board_toggle_dir(int dir) {
+  // This is equivalent to the more readable version:
+  // return (dir == BOARD_VERTICAL_DIRECTION) ? BOARD_HORIZONTAL_DIRECTION
+  //                                          : BOARD_VERTICAL_DIRECTION;
+  return dir ^ (BOARD_VERTICAL_DIRECTION | BOARD_HORIZONTAL_DIRECTION);
 }
 
 #endif

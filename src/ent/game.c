@@ -190,9 +190,8 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     return;
   }
 
-  const int through_dir = dir == BOARD_VERTICAL_DIRECTION
-                              ? BOARD_HORIZONTAL_DIRECTION
-                              : BOARD_VERTICAL_DIRECTION;
+  const int through_dir = board_toggle_dir(dir);
+  
   int right_col =
       board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
   if (right_col == col) {

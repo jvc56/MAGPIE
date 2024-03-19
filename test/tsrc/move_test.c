@@ -4,6 +4,7 @@
 #include "../../src/def/board_defs.h"
 #include "../../src/def/game_history_defs.h"
 
+#include "../../src/ent/board.h"
 #include "../../src/ent/move.h"
 
 void test_move_resize() {
@@ -96,7 +97,7 @@ void test_move_compare() {
   assert(!move_list_move_exists(ml, m));
 
   move_set_tiles_length(m, tiles_length);
-  move_set_dir(m, 1 - dir);
+  move_set_dir(m, board_toggle_dir(dir));
   assert(!move_list_move_exists(ml, m));
 
   move_set_dir(m, dir);
