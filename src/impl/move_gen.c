@@ -255,7 +255,7 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
 
 static inline bool better_play_has_been_found(const MoveGen *gen,
                                               double highest_possible_value) {
-  Move *move = move_list_get_move(gen->move_list, 0);
+  Move *move = gen_get_best_move(gen);
   const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? move_get_equity(move)
                                       : move_get_score(move);
