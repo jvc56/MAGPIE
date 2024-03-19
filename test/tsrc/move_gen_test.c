@@ -593,14 +593,13 @@ void consistent_tiebreaking_test() {
   Rack *player0_rack = player_get_rack(player0);
   Rack *player1_rack = player_get_rack(player1);
 
-  // Play SPORK, better than best NWL move of PORKS
   rack_set_to_string(ld, player0_rack, "EEEFVRR");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "8D FEVER 30");
 
   play_move(move_list_get_move(move_list, 0), game);
 
-  // Play SCHIZIER, better than best CSW word of SCHERZI
+  // Should be NUNcLES instead of NoNFUELS
   rack_set_to_string(ld, player1_rack, "ELNNSU?");
   generate_moves_for_game(game, 0, move_list);
 
