@@ -382,7 +382,7 @@ static inline void board_set_right_extension_set(Board *b, int row, int col,
 static inline void board_set_right_extension_set_with_blank(
     Board *b, int row, int col, int dir, int csi,
     uint64_t right_extension_set) {
-  // See comment in board_set_left_extension_set_with_blank.      
+  // See comment in board_set_left_extension_set_with_blank.
   const uint64_t right_extension_set_with_blank =
       right_extension_set + !!right_extension_set;
   square_set_right_extension_set(
