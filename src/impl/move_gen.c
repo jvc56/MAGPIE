@@ -174,6 +174,10 @@ static inline double gen_get_static_equity(const MoveGen *gen,
       leave_map_get_current_value(&gen->leave_map));
 }
 
+static inline const Move *gen_get_readonly_best_move(const MoveGen *gen) {
+  return &gen->best_move_and_current_move[gen->best_move_index];
+}
+
 static inline Move *gen_get_best_move(MoveGen *gen) {
   return &gen->best_move_and_current_move[gen->best_move_index];
 }
@@ -224,7 +228,7 @@ static inline void update_best_move_or_insert_into_movelist(
                         start_row, start_col, tiles_played, dir, strip);
     move_set_equity(current_move,
                     get_move_equity_for_sort_type(gen, current_move, score));
-    if (compare_moves(current_move, gen_get_best_move(gen), false)) {
+    if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
     }
   }
@@ -255,7 +259,7 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
 
 static inline bool better_play_has_been_found(const MoveGen *gen,
                                               double highest_possible_value) {
-  Move *move = gen_get_best_move(gen);
+  const Move *move = gen_get_readonly_best_move(gen);
   const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? move_get_equity(move)
                                       : move_get_score(move);
@@ -960,7 +964,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
     move_list_set_spare_move_as_pass(gen->move_list);
     move_list_insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
   } else {
-    Move *top_move = gen_get_best_move(gen);
+    const Move *top_move = gen_get_readonly_best_move(gen);
     Move *spare_move = move_list_get_spare_move(gen->move_list);
     if (move_get_equity(top_move) < PASS_MOVE_EQUITY) {
       move_list_set_spare_move_as_pass(gen->move_list);
