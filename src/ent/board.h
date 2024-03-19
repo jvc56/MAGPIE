@@ -9,10 +9,12 @@
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+
+#include "letter_distribution.h"
+
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
-#include "letter_distribution.h"
 
 typedef struct Square {
   uint8_t letter;
@@ -166,9 +168,8 @@ static inline Square *board_get_writable_square(Board *b, int row, int col,
   return &b->squares[board_get_square_index(b, row, col, dir, ci)];
 }
 
-static inline const Square *board_get_readonly_square(const Board *b, int row,
-                                                      int col, int dir,
-                                                      int ci) {
+static inline const Square *
+board_get_readonly_square(const Board *b, int row, int col, int dir, int ci) {
   const int index = board_get_square_index(b, row, col, dir, ci);
   return &b->squares[index];
 }
