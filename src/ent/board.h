@@ -9,12 +9,10 @@
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
-
-#include "letter_distribution.h"
-
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
+#include "letter_distribution.h"
 
 typedef struct Square {
   uint8_t letter;
@@ -168,8 +166,9 @@ static inline Square *board_get_writable_square(Board *b, int row, int col,
   return &b->squares[board_get_square_index(b, row, col, dir, ci)];
 }
 
-static inline const Square *
-board_get_readonly_square(const Board *b, int row, int col, int dir, int ci) {
+static inline const Square *board_get_readonly_square(const Board *b, int row,
+                                                      int col, int dir,
+                                                      int ci) {
   const int index = board_get_square_index(b, row, col, dir, ci);
   return &b->squares[index];
 }
@@ -272,7 +271,8 @@ static inline void board_set_cross_set_with_blank(Board *b, int row, int col,
   // It is assumed that the 0th bit is unseen in cross_set: it is a set of
   // nonblank letters. Given that, this is equivalent logic to this more
   // readable version:
-  // const uint64_t cross_set_with_blank ? cross_set | 1 : 0;
+  // const uint64_t cross_set_with_blank =
+  //    (cross_set == 0) ? 0 : cross_set | 1;
   const uint64_t cross_set_with_blank = cross_set + !!cross_set;
   square_set_cross_set(board_get_writable_square(b, row, col, dir, ci),
                        cross_set_with_blank);
@@ -364,7 +364,8 @@ static inline void board_set_left_extension_set_with_blank(
   // It is assumed that the 0th bit is unseen in left_extension_set: it is a
   // set of nonblank letters. Given that, this is equivalent logic to this more
   // readable version:
-  // const uint64_t left_extension_set_with_blank ? left_extension_set | 1 : 0;
+  // const uint64_t left_extension_set_with_blank =
+  //     (left_extension_set == 0) ? 0 : cross_set | 1;
   const uint64_t left_extension_set_with_blank =
       left_extension_set + !!left_extension_set;
   square_set_left_extension_set(
@@ -557,8 +558,8 @@ static inline int board_get_word_edge(const Board *board, int row, int col,
   return col - word_dir;
 }
 
-static inline board_layout_t
-board_layout_string_to_board_layout(const char *board_layout_string) {
+static inline board_layout_t board_layout_string_to_board_layout(
+    const char *board_layout_string) {
   if (strings_equal(board_layout_string, BOARD_LAYOUT_CROSSWORD_GAME_NAME)) {
     return BOARD_LAYOUT_CROSSWORD_GAME;
   }
