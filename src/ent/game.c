@@ -250,7 +250,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
       uint64_t letter_set = 0;
       for (int i = lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
-        const int t = kwg_node_tile(node);
+        const uint32_t t = kwg_node_tile(node);
         if (t != 0) {
           const uint32_t next_node_index = kwg_node_arc_index(node);
           traverse_backwards(kwg, board, row, col - 1, next_node_index, true,

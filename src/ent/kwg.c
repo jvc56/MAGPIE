@@ -93,7 +93,7 @@ void kwg_destroy(KWG *kwg) {
 
 bool kwg_in_letter_set(const KWG *kwg, uint8_t letter, uint32_t node_index) {
   letter = get_unblanked_machine_letter(letter);
-  int i = node_index;
+  uint32_t i = node_index;
   for (;;) {
     const uint32_t node = kwg_node(kwg, i);
     if (kwg_node_tile(node) == letter) {

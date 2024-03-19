@@ -373,13 +373,13 @@ void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
   if (node_index == 0) {
     return;
   }
-  for (int i = node_index;; i++) {
+  for (uint32_t i = node_index;; i++) {
     if (nodes_reached != NULL) {
       nodes_reached[i] = true;
     }
     const uint32_t node = kwg_node(kwg, i);
-    const int ml = kwg_node_tile(node);
-    const int new_node_index = kwg_node_arc_index(node);
+    const uint8_t ml = kwg_node_tile(node);
+    const uint32_t new_node_index = kwg_node_arc_index(node);
     const bool accepts = kwg_node_accepts(node);
     prefix[prefix_length] = ml;
     write_words_aux(kwg, new_node_index, prefix, prefix_length + 1, accepts,

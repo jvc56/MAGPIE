@@ -325,10 +325,10 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   const uint8_t current_letter = gen_cache_get_letter(gen, col);
   const uint64_t cross_set = gen_cache_get_cross_set(gen, col);
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-    uint8_t raw = get_unblanked_machine_letter(current_letter);
+    const uint8_t raw = get_unblanked_machine_letter(current_letter);
     uint32_t next_node_index = 0;
     bool accepts = false;
-    for (int i = node_index;; i++) {
+    for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
       if (kwg_node_tile(node) == raw) {
         next_node_index = kwg_node_arc_index(node);
@@ -343,9 +343,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           rightstrip, unique_play, main_word_score, word_multiplier,
           cross_score);
   } else if (!rack_is_empty(&gen->player_rack)) {
-    for (int i = node_index;; i++) {
+    for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
-      uint8_t ml = kwg_node_tile(node);
+      const uint8_t ml = kwg_node_tile(node);
       int number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||

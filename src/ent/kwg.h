@@ -52,7 +52,7 @@ static inline uint32_t kwg_get_root_node_index(const KWG *kwg) {
 static inline uint32_t kwg_get_next_node_index(const KWG *kwg,
                                                uint32_t node_index,
                                                uint8_t letter) {
-  int i = node_index;
+  uint32_t i = node_index;
   while (1) {
     const uint32_t node = kwg_node(kwg, i);
     if (kwg_node_tile(node) == letter) {

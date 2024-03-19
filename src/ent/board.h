@@ -559,8 +559,8 @@ static inline int board_get_word_edge(const Board *board, int row, int col,
   return col - word_dir;
 }
 
-static inline board_layout_t board_layout_string_to_board_layout(
-    const char *board_layout_string) {
+static inline board_layout_t
+board_layout_string_to_board_layout(const char *board_layout_string) {
   if (strings_equal(board_layout_string, BOARD_LAYOUT_CROSSWORD_GAME_NAME)) {
     return BOARD_LAYOUT_CROSSWORD_GAME;
   }
