@@ -156,7 +156,7 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
   const uint8_t current_letter = board_row->letters[col];
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     const uint8_t ml = current_letter;  // already unblanked
-    int next_node_index = 0;
+    uint32_t next_node_index = 0;
     bool accepts = false;
     for (int i = node_index;; i++) {
       const uint32_t node = kwg_node(kwg, i);
@@ -289,7 +289,7 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
       }
       current_letter = board_row->letters[col];
       const uint8_t ml = current_letter;  // already unblanked
-      int next_node_index = 0;
+      uint32_t next_node_index = 0;
       bool accepts = false;
       for (int i = gaddag_root;; i++) {
         const uint32_t node = kwg_node(kwg, i);

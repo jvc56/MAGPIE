@@ -19,7 +19,7 @@ void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes, FILE *stream);
 void kwg_allocate_nodes(KWG *kwg, size_t number_of_nodes);
 uint32_t *kwg_get_mutable_nodes(KWG *kwg);
 
-static inline uint32_t kwg_node(const KWG *kwg, int node_index) {
+static inline uint32_t kwg_node(const KWG *kwg, uint32_t node_index) {
   return kwg->nodes[node_index];
 }
 
@@ -49,7 +49,8 @@ static inline uint32_t kwg_get_root_node_index(const KWG *kwg) {
   return kwg_node_arc_index(gaddag_pointer_node);
 }
 
-static inline uint32_t kwg_get_next_node_index(const KWG *kwg, int node_index,
+static inline uint32_t kwg_get_next_node_index(const KWG *kwg,
+                                               uint32_t node_index,
                                                uint8_t letter) {
   int i = node_index;
   while (1) {

@@ -326,7 +326,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   const uint64_t cross_set = gen_cache_get_cross_set(gen, col);
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     uint8_t raw = get_unblanked_machine_letter(current_letter);
-    int next_node_index = 0;
+    uint32_t next_node_index = 0;
     bool accepts = false;
     for (int i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
@@ -351,7 +351,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
           board_is_letter_allowed_in_cross_set(cross_set, ml)) {
-        int next_node_index = kwg_node_arc_index(node);
+        const uint32_t next_node_index = kwg_node_arc_index(node);
         bool accepts = kwg_node_accepts(node);
         if (number_of_ml > 0) {
           leave_map_take_letter_and_update_current_index(&gen->leave_map,

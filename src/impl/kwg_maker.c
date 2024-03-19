@@ -1,9 +1,7 @@
 #include "kwg_maker.h"
 
 #include "../def/cross_set_defs.h"
-
 #include "../ent/kwg.h"
-
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -97,7 +95,7 @@ int mutable_node_list_add_root(MutableNodeList *nodes) {
   return root_node_index;
 }
 
-int add_child(int node_index, MutableNodeList *nodes, uint8_t ml) {
+int add_child(uint32_t node_index, MutableNodeList *nodes, uint8_t ml) {
   int child_node_index = nodes->count;
   MutableNode *node = &nodes->nodes[node_index];
   node_index_list_add(&node->children, child_node_index);
@@ -366,7 +364,7 @@ void add_gaddag_strings(const DictionaryWordList *words,
   dictionary_word_list_sort(gaddag_strings);
 }
 
-void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
+void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
                      int prefix_length, bool accepts, DictionaryWordList *words,
                      bool *nodes_reached) {
   if (accepts) {
@@ -392,8 +390,8 @@ void write_words_aux(const KWG *kwg, int node_index, uint8_t *prefix,
   }
 }
 
-void kwg_write_words(const KWG *kwg, int node_index, DictionaryWordList *words,
-                     bool *nodes_reached) {
+void kwg_write_words(const KWG *kwg, uint32_t node_index,
+                     DictionaryWordList *words, bool *nodes_reached) {
   uint8_t prefix[MAX_KWG_STRING_LENGTH];
   write_words_aux(kwg, node_index, prefix, 0, false, words, nodes_reached);
 }
