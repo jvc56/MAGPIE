@@ -366,7 +366,7 @@ static inline void board_set_left_extension_set_with_blank(
   // set of nonblank letters. Given that, this is equivalent logic to this more
   // readable version:
   // const uint64_t left_extension_set_with_blank =
-  //     (left_extension_set == 0) ? 0 : cross_set | 1;
+  //     (left_extension_set == 0) ? 0 : left_extension_set | 1;
   const uint64_t left_extension_set_with_blank =
       left_extension_set + !!left_extension_set;
   square_set_left_extension_set(
