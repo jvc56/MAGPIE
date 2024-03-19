@@ -46,6 +46,8 @@ typedef struct MoveGen {
   int player_index;
   bool kwgs_are_shared;
   Rack player_rack;
+  Rack player_rack_shadow_right_copy;
+  Rack player_rack_shadow_left_copy;
   Rack opponent_rack;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
@@ -474,8 +476,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool
-shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
+static inline bool shadow_board_is_letter_allowed_in_cross_set(
+    const MoveGen *gen, int col) {
   uint64_t cross_set = gen_cache_get_cross_set(gen, col);
   // cross_set is 0 if unhookable, otherwise it will include the 0th bit,
   // representing the blank. gen->rack_cross_set also has the 0th bit set if
@@ -545,12 +547,22 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
   }
 }
 
+static inline bool is_single_bit_set(uint64_t bitset) {
+  return bitset && !(bitset & (bitset - 1));
+}
+
+static inline int get_single_bit_index(uint64_t bitset) {
+  return __builtin_ctzll(bitset);
+}
+
 static inline void shadow_play_right(MoveGen *gen,
                                      int main_played_through_score,
                                      int perpendicular_additional_score,
                                      int word_multiplier, bool is_unique) {
   int original_current_right_col = gen->current_right_col;
   int original_tiles_played = gen->tiles_played;
+  rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+  const uint64_t original_rack_cross_set = gen->rack_cross_set;
   while (gen->current_right_col < (BOARD_DIM - 1) &&
          gen->tiles_played < gen->number_of_letters_on_rack) {
     gen->current_right_col++;
@@ -558,9 +570,23 @@ static inline void shadow_play_right(MoveGen *gen,
 
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_right_col);
-    if ((cross_set & gen->rack_cross_set) == 0) {
+    //    const uint64_t possible_letters_here =
+    //        cross_set & gen->anchor_right_extension_set & gen->rack_cross_set;
+    const uint64_t possible_letters_here = cross_set & gen->rack_cross_set;
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+    if (possible_letters_here == 0) {
       break;
     }
+
+    if (is_single_bit_set(possible_letters_here)) {
+      const uint64_t single_bit_index =
+          get_single_bit_index(possible_letters_here);
+      rack_take_letter(&gen->player_rack, single_bit_index);
+      if (rack_get_letter(&gen->player_rack, single_bit_index) == 0) {
+        gen->rack_cross_set &= ~possible_letters_here;
+      }
+    }
+
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_right_col);
     const int cross_score =
@@ -589,6 +615,8 @@ static inline void shadow_play_right(MoveGen *gen,
     }
   }
 
+  rack_copy(&gen->player_rack, &gen->player_rack_shadow_right_copy);
+  gen->rack_cross_set = original_rack_cross_set;
   gen->current_right_col = original_current_right_col;
   gen->tiles_played = original_tiles_played;
 }
@@ -597,12 +625,13 @@ static inline void nonplaythrough_shadow_play_left(
     MoveGen *gen, int main_played_through_score,
     int perpendicular_additional_score, int word_multiplier, bool is_unique) {
   for (;;) {
-    if ((gen->tiles_played > 0) ||
-        ((gen->anchor_right_extension_set & gen->rack_cross_set) != 0)) {
+    if (gen->anchor_right_extension_set != 0) {
       shadow_play_right(gen, main_played_through_score,
                         perpendicular_additional_score, word_multiplier,
                         is_unique);
     }
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
@@ -631,28 +660,53 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
                                                 bool is_unique) {
   int perpendicular_additional_score = 0;
   for (;;) {
-    if ((gen->tiles_played > 0) ||
-        ((gen->anchor_right_extension_set & gen->rack_cross_set) != 0)) {
+    const uint64_t possible_tiles_for_shadow_right =
+        gen->anchor_right_extension_set & gen->rack_cross_set;
+    if (possible_tiles_for_shadow_right != 0) {
       shadow_play_right(gen, main_played_through_score,
                         perpendicular_additional_score, word_multiplier,
                         is_unique);
     }
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+
+    uint64_t possible_tiles_for_shadow_left =
+        gen->anchor_left_extension_set & gen->rack_cross_set;
+    gen->anchor_left_extension_set = TRIVIAL_CROSS_SET;
+
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
       return;
     }
-    if ((gen->tiles_played == 0) &&
-        (gen->anchor_left_extension_set & gen->rack_cross_set) == 0) {
+    if (possible_tiles_for_shadow_left == 0) {
       return;
     }
+
     gen->current_left_col--;
     gen->tiles_played++;
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_left_col);
-    if ((cross_set & gen->rack_cross_set) == 0) {
+    possible_tiles_for_shadow_left &= cross_set;
+    if (possible_tiles_for_shadow_left == 0) {
       return;
     }
+
+    if (is_single_bit_set(possible_tiles_for_shadow_left)) {
+      const uint64_t single_bit_index =
+          get_single_bit_index(possible_tiles_for_shadow_left);
+      rack_take_letter(&gen->player_rack, single_bit_index);
+/*      
+      This is causing invalid shadow bounds, don't know why
+   965 	      // If a better play has been found than should have been possible for
+   966 	      // this anchor, highest_possible_equity was invalid.
+-> 967 	      assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
+
+      if (rack_get_letter(&gen->player_rack, single_bit_index) == 0) {
+        gen->rack_cross_set &= ~possible_tiles_for_shadow_left;
+      }
+*/      
+    }
+
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
     const int cross_score =
@@ -728,6 +782,7 @@ static inline void shadow_start(MoveGen *gen) {
   if (any_extension_set == 0) {
     return;
   }
+  rack_copy(&gen->player_rack_shadow_left_copy, &gen->player_rack);
   const uint8_t current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -735,6 +790,7 @@ static inline void shadow_start(MoveGen *gen) {
   } else {
     shadow_start_playthrough(gen, current_letter);
   }
+  rack_copy(&gen->player_rack, &gen->player_rack_shadow_left_copy);
 }
 
 // The algorithm used in this file for
