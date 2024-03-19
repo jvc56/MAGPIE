@@ -20,6 +20,8 @@ typedef struct Square {
   uint8_t letter;
   uint8_t bonus_square;
   uint64_t cross_set;
+  uint64_t left_extension_set;
+  uint64_t right_extension_set;
   int cross_score;
   bool anchor;
   bool is_cross_word;
@@ -94,6 +96,24 @@ static inline bool square_set_anchor(Square *s, bool anchor) {
   bool old = s->anchor;
   s->anchor = anchor;
   return old;
+}
+
+static inline uint64_t square_get_left_extension_set(const Square *s) {
+  return s->left_extension_set;
+}
+
+static inline void square_set_left_extension_set(Square *s,
+                                                 uint64_t left_extension_set) {
+  s->left_extension_set = left_extension_set;
+}
+
+static inline uint64_t square_get_right_extension_set(const Square *s) {
+  return s->right_extension_set;
+}
+
+static inline void square_set_right_extension_set(
+    Square *s, uint64_t right_extension_set) {
+  s->right_extension_set = right_extension_set;
 }
 
 static inline void square_reset_anchor(Square *s) { s->anchor = false; }
@@ -248,7 +268,13 @@ static inline void board_set_cross_set_with_blank(Board *b, int row, int col,
                                                   int dir, int ci,
                                                   uint64_t cross_set) {
   // If any letter's bits are set, the blank bit should be set.
-  const uint64_t cross_set_with_blank = (cross_set == 0) ? 0 : (cross_set | 1);
+  //
+  // It is assumed that the 0th bit is never set in cross_set: it is a set of
+  // nonblank letters. Given that, this is equivalent logic to this more
+  // readable version:
+  // const uint64_t cross_set_with_blank =
+  //    (cross_set == 0) ? 0 : cross_set | 1;
+  const uint64_t cross_set_with_blank = cross_set + !!cross_set;
   square_set_cross_set(board_get_writable_square(b, row, col, dir, ci),
                        cross_set_with_blank);
 }
@@ -325,6 +351,45 @@ static inline void board_set_anchor(Board *b, int row, int col, int dir,
       update_number_of_row_anchors(b, row, col, dir, old_anchor, anchor);
     }
   }
+}
+
+static inline void board_set_left_extension_set(Board *b, int row, int col,
+                                                int dir, int csi,
+                                                uint64_t left_extension_set) {
+  square_set_left_extension_set(
+      board_get_writable_square(b, row, col, dir, csi), left_extension_set);
+}
+
+static inline void board_set_left_extension_set_with_blank(
+    Board *b, int row, int col, int dir, int csi, uint64_t left_extension_set) {
+  // It is assumed that the 0th bit is never set in left_extension_set: it is a
+  // set of nonblank letters. Given that, this is equivalent logic to this more
+  // readable version:
+  // const uint64_t left_extension_set_with_blank =
+  //     (left_extension_set == 0) ? 0 : left_extension_set | 1;
+  const uint64_t left_extension_set_with_blank =
+      left_extension_set + !!left_extension_set;
+  square_set_left_extension_set(
+      board_get_writable_square(b, row, col, dir, csi),
+      left_extension_set_with_blank);
+}
+
+static inline void board_set_right_extension_set(Board *b, int row, int col,
+                                                 int dir, int csi,
+                                                 uint64_t right_extension_set) {
+  square_set_right_extension_set(
+      board_get_writable_square(b, row, col, dir, csi), right_extension_set);
+}
+
+static inline void board_set_right_extension_set_with_blank(
+    Board *b, int row, int col, int dir, int csi,
+    uint64_t right_extension_set) {
+  // See comment in board_set_left_extension_set_with_blank.
+  const uint64_t right_extension_set_with_blank =
+      right_extension_set + !!right_extension_set;
+  square_set_right_extension_set(
+      board_get_writable_square(b, row, col, dir, csi),
+      right_extension_set_with_blank);
 }
 
 // This bypasses the modification of the number of row anchors and
@@ -439,6 +504,10 @@ static inline void board_set_all_crosses(Board *board) {
       for (int dir = 0; dir < 2; dir++) {
         for (int ci = 0; ci < 2; ci++) {
           board_set_cross_set(board, row, col, dir, ci, TRIVIAL_CROSS_SET);
+          board_set_left_extension_set(board, row, col, dir, ci,
+                                       TRIVIAL_CROSS_SET);
+          board_set_right_extension_set(board, row, col, dir, ci,
+                                        TRIVIAL_CROSS_SET);
         }
       }
     }
@@ -665,6 +734,13 @@ static inline void board_copy_row_cache(const Square *lanes_cache,
                                         int dir) {
   const Square *source_row = board_get_row_cache(lanes_cache, row_or_col, dir);
   memory_copy(row_cache, source_row, sizeof(Square) * BOARD_DIM);
+}
+
+static inline int board_toggle_dir(int dir) {
+  // This is equivalent to the more readable version:
+  // return (dir == BOARD_VERTICAL_DIRECTION) ? BOARD_HORIZONTAL_DIRECTION
+  //                                          : BOARD_VERTICAL_DIRECTION;
+  return dir ^ (BOARD_VERTICAL_DIRECTION | BOARD_HORIZONTAL_DIRECTION);
 }
 
 #endif
