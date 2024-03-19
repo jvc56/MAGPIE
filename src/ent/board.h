@@ -269,7 +269,7 @@ static inline void board_set_cross_set_with_blank(Board *b, int row, int col,
                                                   uint64_t cross_set) {
   // If any letter's bits are set, the blank bit should be set.
   //
-  // It is assumed that the 0th bit is unseen in cross_set: it is a set of
+  // It is assumed that the 0th bit is never set in cross_set: it is a set of
   // nonblank letters. Given that, this is equivalent logic to this more
   // readable version:
   // const uint64_t cross_set_with_blank =
@@ -362,7 +362,7 @@ static inline void board_set_left_extension_set(Board *b, int row, int col,
 
 static inline void board_set_left_extension_set_with_blank(
     Board *b, int row, int col, int dir, int csi, uint64_t left_extension_set) {
-  // It is assumed that the 0th bit is unseen in left_extension_set: it is a
+  // It is assumed that the 0th bit is never set in left_extension_set: it is a
   // set of nonblank letters. Given that, this is equivalent logic to this more
   // readable version:
   // const uint64_t left_extension_set_with_blank =
