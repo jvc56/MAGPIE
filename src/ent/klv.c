@@ -77,7 +77,7 @@ int klv_count_words_at(const KLV *klv, uint32_t node_index, uint32_t kwg_size) {
       this_node_word_count = 1;
     }
     int child_word_count = 0;
-    const int next_node_index = kwg_node_arc_index(node);
+    const uint32_t next_node_index = kwg_node_arc_index(node);
     if (next_node_index != 0) {
       child_word_count = klv_count_words_at(klv, next_node_index, kwg_size);
     }

@@ -93,7 +93,7 @@ void kwg_destroy(KWG *kwg) {
 
 bool kwg_in_letter_set(const KWG *kwg, uint8_t letter, uint32_t node_index) {
   letter = get_unblanked_machine_letter(letter);
-  int i = node_index;
+  uint32_t i = node_index;
   for (;;) {
     const uint32_t node = kwg_node(kwg, i);
     if (kwg_node_tile(node) == letter) {
@@ -104,23 +104,6 @@ bool kwg_in_letter_set(const KWG *kwg, uint8_t letter, uint32_t node_index) {
     }
     i++;
   }
-}
-
-uint64_t kwg_get_letter_set(const KWG *kwg, uint32_t node_index) {
-  uint64_t ls = 0;
-  uint32_t i = node_index;
-  for (;;) {
-    const uint32_t node = kwg_node(kwg, i);
-    uint32_t t = kwg_node_tile(node);
-    if (kwg_node_accepts(node)) {
-      ls |= ((uint64_t)1 << t);
-    }
-    if (kwg_node_is_end(node)) {
-      break;
-    }
-    i++;
-  }
-  return ls;
 }
 
 int kwg_get_number_of_nodes(const KWG *kwg) { return kwg->number_of_nodes; }
