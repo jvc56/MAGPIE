@@ -67,7 +67,7 @@ typedef struct MoveGen {
   int number_of_letters_on_rack;
   uint16_t descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
   double best_leaves[(RACK_SIZE)];
-  AnchorList *anchor_list;
+  AnchorList anchor_list;
 
   // Include blank letters as zeroes so their scores can be added without
   // checking whether tiles are blanked.
@@ -92,7 +92,6 @@ static MoveGen *cached_gens[MAX_THREADS];
 
 MoveGen *create_generator() {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  generator->anchor_list = anchor_list_create();
   generator->tiles_played = 0;
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
   return generator;
@@ -102,7 +101,6 @@ void destroy_generator(MoveGen *gen) {
   if (!gen) {
     return;
   }
-  anchor_list_destroy(gen->anchor_list);
   free(gen);
 }
 
@@ -123,7 +121,7 @@ void gen_destroy_cache() {
 // This function is only used for testing and is exposed
 // in the move_gen_pi.h header in the test directory.
 AnchorList *gen_get_anchor_list(int thread_index) {
-  return cached_gens[thread_index]->anchor_list;
+  return &cached_gens[thread_index]->anchor_list;
 }
 
 // Cache getter functions
@@ -803,7 +801,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
 
-  anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
+  anchor_list_add_anchor(&gen->anchor_list, gen->current_row_index, col,
                          gen->last_anchor_col, gen->dir,
                          gen->highest_shadow_equity);
 }
@@ -906,7 +904,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   // (playing) zero tiles and keeping gen->player_rack->number_of_letters tiles.
   leave_map_set_current_index(
       &gen->leave_map, (1 << rack_get_total_letters(&gen->player_rack)) - 1);
-  anchor_list_reset(gen->anchor_list);
+  anchor_list_reset(&gen->anchor_list);
 
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
@@ -932,8 +930,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
-  anchor_list_sort(gen->anchor_list);
-  const AnchorList *anchor_list = gen->anchor_list;
+  anchor_list_sort(&gen->anchor_list);
+  const AnchorList *anchor_list = &gen->anchor_list;
 
   const int kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
