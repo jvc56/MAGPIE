@@ -52,7 +52,7 @@ typedef struct MoveGen {
   // Used to reset the arrays after finishing shadow_play_right, which may have
   // rearranged the ordering of the multipliiers used while shadowing left.
   MovableMultiplier desc_xw_muls_copy[WORD_ALIGNING_RACK_SIZE];
-  uint16_t desc_eff_lettter_muls_copy[WORD_ALIGNING_RACK_SIZE];
+  uint16_t desc_eff_letter_muls_copy[WORD_ALIGNING_RACK_SIZE];
 
   int last_anchor_col;
   int dir;
@@ -538,8 +538,9 @@ shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
   return (cross_set & gen->rack_cross_set) != 0;
 }
 
-void shadow_record(MoveGen *gen, int main_played_through_score,
-                   int perpendicular_additional_score, int word_multiplier) {
+static inline void shadow_record(MoveGen *gen, int main_played_through_score,
+                                 int perpendicular_additional_score,
+                                 int word_multiplier) {
   uint16_t tiles_played_score = 0;
   for (int i = 0; i < RACK_SIZE; i++) {
     tiles_played_score += gen->descending_tile_scores[i] *
@@ -654,7 +655,7 @@ static inline void shadow_play_right(MoveGen *gen,
   const int original_num_movable_multipliers = gen->num_movable_multipliers;
   memory_copy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
               sizeof(gen->descending_cross_word_multipliers));
-  memory_copy(gen->desc_eff_lettter_muls_copy,
+  memory_copy(gen->desc_eff_letter_muls_copy,
               gen->descending_effective_letter_multipliers,
               sizeof(gen->descending_effective_letter_multipliers));
   const int original_current_right_col = gen->current_right_col;
@@ -707,7 +708,7 @@ static inline void shadow_play_right(MoveGen *gen,
   memory_copy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
               sizeof(gen->descending_cross_word_multipliers));
   memory_copy(gen->descending_effective_letter_multipliers,
-              gen->desc_eff_lettter_muls_copy,
+              gen->desc_eff_letter_muls_copy,
               sizeof(gen->descending_effective_letter_multipliers));
   gen->current_right_col = original_current_right_col;
   gen->tiles_played = original_tiles_played;
