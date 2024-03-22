@@ -1,7 +1,6 @@
 #include <assert.h>
 
 #include "../../src/def/move_defs.h"
-
 #include "../../src/ent/anchor.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
@@ -9,11 +8,9 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
-
 #include "../../src/impl/gameplay.h"
-
+#include "../../src/str/game_string.h"
 #include "../pi/move_gen_pi.h"
-
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -24,6 +21,10 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
 
   game_load_cgp(game, cgp);
   rack_set_to_string(ld, player_rack, rack);
+  //StringBuilder *sb = create_string_builder();
+  //string_builder_add_game(game, move_list, sb);
+  //printf("%s\n", string_builder_peek(sb));
+  //destroy_string_builder(sb);
   generate_moves_for_game(game, 0, move_list);
   AnchorList *anchor_list = gen_get_anchor_list(0);
   double previous_equity = 10000000;
@@ -148,16 +149,16 @@ void test_shadow_score() {
   // The rest are prevented by invalid cross sets
 
   load_and_generate(game, move_list, player, KA_OPENING_CGP, "E?");
-  // oK, oE, EA
+  // 7G oE
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 10));
-  // KA, aE, AE
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 8));
+  // 9G aE
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 10));
-  // KAe, Ee
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 8));
+  // I7 Ee
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 8));
-  // EKA, Ea
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 8));
+  // F7 Es (only the blank can hook to the left with sKA or aKA or oKA)
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 7));
   // KAEe
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 7));
   // E(K)e
@@ -194,9 +195,9 @@ void test_shadow_score() {
   // JAF with J and F doubled
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 25));
-  // FAA is in cross set, so JAA and JF are used to score.
+  // F7 JF (only F can hook AA)
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 22));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 18));
   // AAJF
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 14));
@@ -250,15 +251,18 @@ void test_shadow_score() {
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BOH");
   // WINDY is not extendable, so there is no 60 for BOHWINDY.
-  // The highest anchor is 31 for 9f BHO.
+  // The highest anchor is 24 for 7G OBH.
+  //   only B can hook Y for BY
+  //   only O can hook D for OD
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 31));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 24));
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BOHGX");
   // WINDY is not extendable, so there is no 90 for BOHWINDYGX.
-  // The highest anchor is 64 for 9D BOHXG.
+  // The highest anchor is 44 for D8 (W)BOHXG.
+  //   using restricted hooks the highest horizontal plays are at 7A for 36.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 64));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 44));
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BOHGXZ");
   // WINDY is not extendable, so there is no 120 for BOHWINDYGXZ.
@@ -312,10 +316,9 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 40));
 
   load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "ZLW?");
-  // The blank makes all cross sets valid
-  // LZW(WINDY)s
+  // 6F ZWaL
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 99));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 79));
 
   load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "QZLW");
   // ZQ, ZEN, QAD (L and W are in the AD cross set, but scored using the Q)
@@ -332,10 +335,9 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 20));
 
   load_and_generate(game, move_list, player, TRIPLE_DOUBLE_CGP, "KT?");
-  // The blank makes PAVE, board_is_letter_allowed_in_cross_set all letters in
-  // the cross set PAVK, KT?
+  // 10A TsPAVK. only the blank can left-extend PAV.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 39));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 24));
 
   load_and_generate(game, move_list, player, BOTTOM_LEFT_RE_CGP, "M");
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 8));
@@ -365,7 +367,7 @@ void test_shadow_score() {
   // Z(T)
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 21));
-  // (A)Z      
+  // (A)Z
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 11));
   // Z(E)
@@ -392,8 +394,9 @@ void test_shadow_score() {
 
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "ZLIER");
+  // 5D ZE(LATER)RIL (not 6F ZLERI: there's no TLS Z hotspots)
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 77));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 76));
 
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "ZLIERA");
@@ -426,9 +429,11 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 156));
 
   load_and_generate(game, move_list, player, VS_OXY, "PA");
-  // Forms DORMPWOOAJ because the A fits in the cross set of T and N.
+  // No B6 DORMPWOOAJ for 76. Only the A fits in the cross sets of T and N,
+  // and it can't be in both of those squares.
+  // Best is A3 (Y)P(HEN) hooking P(REQUALIFIED) for 50
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 76));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 50));
 
   load_and_generate(game, move_list, player, VS_OXY, "PBA");
   assert(
@@ -461,21 +466,32 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 604));
 
   load_and_generate(game, move_list, player, VS_OXY, "AZEBPX");
-  // A2 A(Y)X(HEN)P(UT)EZ(ON)B
+  // No A2 A(Y)X(HEN)P(UT)EZ(ON)B for 740
+  //  only P hooks REQUALIFIED
+  //  only B hooks RAINWASHING
+  //  only A hooks WAKENERS
+  //  only Z hooks ONETIME
+  //  only E hooks JACULATING
+  // Best is A2 X(Y)P(HEN)B(UT)AZ(ON)E for 686
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 740));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 686));
 
   load_and_generate(game, move_list, player, VS_OXY, "AZEBPXO");
-  // A1 OA(Y)X(HEN)P(UT)EZ(ON)B
+  // No A1 OA(Y)X(HEN)P(UT)EZ(ON)B for 1924
+  //  only O hooks PACIFYING
+  //  only P hooks REQUALIFIED
+  //  only B hooks RAINWASHING
+  //  only A hooks WAKENERS
+  //  only Z hooks ONETIME
+  //  only E hooks JACULATING
+  // Best is A1 OX(Y)P(HEN)B(UT)AZ(ON)E for 1780
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 1924));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 1780));
 
   load_and_generate(game, move_list, player, VS_OXY, "AZEBPQO");
-  // A1 OA(Y)Q(HEN)P(UT)EZ(ON)B
-  // Only the letters AZEBPO are required to form acceptable
-  // plays in all cross sets
+  // A1 OQ(Y)P(HEN)B(UT)AZ(ON)E
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 2036));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 1836));
 
   game_reset(game);
   char qi_qis[300] =

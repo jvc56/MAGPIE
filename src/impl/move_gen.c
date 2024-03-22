@@ -25,9 +25,15 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
+#include "../str/move_string.h"
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
+
+typedef struct RestrictedHook {
+  uint8_t col;
+  uint8_t ml;
+} RestrictedHook;
 
 typedef struct MoveGen {
   // Owned by this MoveGen struct
@@ -45,7 +51,15 @@ typedef struct MoveGen {
   int number_of_tiles_in_bag;
   int player_index;
   bool kwgs_are_shared;
+  Rack full_player_rack;
   Rack player_rack;
+  Rack player_rack_shadow_right_copy;
+  Rack player_rack_shadow_left_copy;
+  RestrictedHook restricted_hooks[RACK_SIZE];
+  bool row_restricted_hooks[BOARD_DIM];
+  uint8_t row_restricted_hook_tiles[BOARD_DIM];
+  int num_restricted_hooks;
+
   Rack opponent_rack;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
@@ -66,12 +80,15 @@ typedef struct MoveGen {
   uint64_t rack_cross_set;
   int number_of_letters_on_rack;
   uint16_t descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
+  uint8_t rack_score_order[RACK_SIZE];
+  uint8_t rack_cardinality;
+  uint16_t descending_movable_tile_scores[WORD_ALIGNING_RACK_SIZE];
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
 
   // Include blank letters as zeroes so their scores can be added without
   // checking whether tiles are blanked.
-  uint8_t tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
+  uint16_t tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
 
   // Owned by the caller
   const LetterDistribution *ld;
@@ -509,35 +526,89 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool
-shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
-  uint64_t cross_set = gen_cache_get_cross_set(gen, col);
-  // cross_set is 0 if unhookable, otherwise it will include the 0th bit,
-  // representing the blank. gen->rack_cross_set also has the 0th bit set if
-  // the rack contains a blank, so we can place a rack letter here if these
-  // values intersect bitwise.
-  return (cross_set & gen->rack_cross_set) != 0;
+__attribute__((noinline)) void set_row_restricted_hooks(MoveGen *gen) {
+  // static inline void set_row_restricted_hooks(MoveGen *gen) {
+  memset(gen->row_restricted_hooks, false, sizeof(gen->row_restricted_hooks));
+  int i = 0;
+  for (; i < gen->num_restricted_hooks; i++) {
+    gen->row_restricted_hooks[gen->restricted_hooks[i].col] = true;
+    gen->row_restricted_hook_tiles[gen->restricted_hooks[i].col] =
+        gen->restricted_hooks[i].ml;
+  }
+  i = 0;
+  for (uint8_t j = 0; j < gen->rack_cardinality; j++) {
+    const uint8_t j_score_order = gen->rack_score_order[j];
+    const int num_this = rack_get_letter(&gen->player_rack, j_score_order);
+    for (int k = 0; k < num_this; k++) {
+      gen->descending_movable_tile_scores[i++] =
+          gen->tile_scores[j_score_order];
+    }
+  }
+  /*
+    printf("descending_movable_tile_scores: ");
+    for (int i = 0; i < RACK_SIZE; i++) {
+      printf("%i ", gen->descending_movable_tile_scores[i]);
+    }
+    printf("\n");
+    printf("row restricted hooks....\n ");
+    for (int i = 0; i < BOARD_DIM; i++) {
+      if (gen->row_restricted_hooks[i]) {
+        printf(" ");
+        char c = '?';
+        if (gen->row_restricted_hook_tiles[i] != 0) {
+          c = gen->row_restricted_hook_tiles[i] + 'A' - 1;
+        }
+        printf("%c", c);
+      } else {
+        printf(".");
+      }
+    }
+    printf("\n");
+  */
 }
 
-void shadow_record(MoveGen *gen, int left_col, int right_col,
-                   int main_played_through_score,
-                   int perpendicular_additional_score, int word_multiplier) {
+__attribute__((noinline)) void shadow_record(
+    MoveGen *gen,
+    // void shadow_record(MoveGen *gen, int left_col, int right_col,
+    int main_played_through_score, int perpendicular_additional_score,
+    int word_multiplier) {
+  /*
+    printf(
+        "shadow_record left_col: %d, right_col: %d, main_played_through_score: "
+        "%d, perpendicular_additional_score: %d, word_multiplier: %d\n",
+        left_col, right_col, main_played_through_score,
+        perpendicular_additional_score, word_multiplier);
+    printf(" num_restricted_hooks: %d\n", gen->num_restricted_hooks);
+  */
   uint16_t sorted_effective_letter_multipliers[WORD_ALIGNING_RACK_SIZE];
   memset(sorted_effective_letter_multipliers, 0,
          sizeof(sorted_effective_letter_multipliers));
-  int current_tiles_played = 0;
-  for (int current_col = left_col; current_col <= right_col; current_col++) {
+  uint16_t tiles_played_score = 0;
+  set_row_restricted_hooks(gen);
+  int movable_tiles_played = 0;
+  for (int current_col = gen->current_left_col;
+       current_col <= gen->current_right_col; current_col++) {
     const uint8_t current_letter = gen_cache_get_letter(gen, current_col);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
-      uint16_t this_word_multiplier = bonus_square >> 4;
-      uint16_t letter_multiplier = bonus_square & 0x0F;
-      bool is_cross_word = gen_cache_get_is_cross_word(gen, current_col);
-      uint16_t effective_letter_multiplier =
+      const uint16_t this_word_multiplier = bonus_square >> 4;
+      const uint16_t letter_multiplier = bonus_square & 0x0F;
+      const bool is_cross_word = gen_cache_get_is_cross_word(gen, current_col);
+      const uint16_t effective_letter_multiplier =
           letter_multiplier *
           ((this_word_multiplier * is_cross_word) + word_multiplier);
+      if (gen->row_restricted_hooks[current_col]) {
+        const uint16_t tile_score =
+            gen->tile_scores[gen->row_restricted_hook_tiles[current_col]];
+        // printf(" adding fixed %i * %i at %i\n", tile_score,
+        //        effective_letter_multiplier, current_col);
+        tiles_played_score += tile_score * effective_letter_multiplier;
+        continue;
+      }
       // Insert the effective multiplier.
-      int insert_index = current_tiles_played;
+      int insert_index = movable_tiles_played;
+      // printf(" inserting multiplier %i at %i in list\n",
+      //        effective_letter_multiplier, insert_index);
       for (; insert_index > 0 &&
              sorted_effective_letter_multipliers[insert_index - 1] <
                  effective_letter_multiplier;
@@ -547,15 +618,18 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
       }
       sorted_effective_letter_multipliers[insert_index] =
           effective_letter_multiplier;
-      current_tiles_played++;
+      movable_tiles_played++;
     }
   }
 
-  uint16_t tiles_played_score = 0;
+  // printf("(restricted) tiles_played_score: %d\n", tiles_played_score);
   for (int i = 0; i < RACK_SIZE; i++) {
-    tiles_played_score +=
-        gen->descending_tile_scores[i] * sorted_effective_letter_multipliers[i];
+    // printf(" adding %i * %i at %i\n", gen->descending_movable_tile_scores[i],
+    //        sorted_effective_letter_multipliers[i], i);
+    tiles_played_score += gen->descending_movable_tile_scores[i] *
+                          sorted_effective_letter_multipliers[i];
   }
+  // printf("(total) tiles_played_score: %d\n", tiles_played_score);
 
   int bingo_bonus = 0;
   if (gen->tiles_played == RACK_SIZE) {
@@ -565,6 +639,7 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
   const int score = tiles_played_score +
                     (main_played_through_score * word_multiplier) +
                     perpendicular_additional_score + bingo_bonus;
+  // printf("   max score: %d\n", score);
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity += static_eval_get_shadow_equity(
@@ -572,6 +647,7 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
         gen->descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
+  // printf("   equity: %f\n", equity);
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
   }
@@ -580,12 +656,47 @@ void shadow_record(MoveGen *gen, int left_col, int right_col,
   }
 }
 
+static inline bool is_single_bit_set(uint64_t bitset) {
+  return bitset && !(bitset & (bitset - 1));
+}
+
+static inline int get_single_bit_index(uint64_t bitset) {
+  return __builtin_ctzll(bitset);
+}
+
+void debug_cross_set(uint64_t cross_set) {
+  if (cross_set == TRIVIAL_CROSS_SET) {
+    printf("[TRIVIAL_CROSS_SET]");
+    return;
+  }
+  printf("[");
+  for (int i = 0; i < 64; i++) {
+    if (cross_set & (1ULL << i)) {
+      if (i == 0) {
+        printf("?");
+      } else {
+        printf("%c", i + 'A' - 1);
+      }
+    }
+  }
+  printf("]");
+}
+
+static inline void add_restricted_hook(MoveGen *gen, int col, int ml) {
+  gen->restricted_hooks[gen->num_restricted_hooks].col = col;
+  gen->restricted_hooks[gen->num_restricted_hooks].ml = ml;
+  gen->num_restricted_hooks++;
+}
+
 static inline void shadow_play_right(MoveGen *gen,
                                      int main_played_through_score,
                                      int perpendicular_additional_score,
                                      int word_multiplier, bool is_unique) {
   int original_current_right_col = gen->current_right_col;
   int original_tiles_played = gen->tiles_played;
+  rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+  const uint64_t original_rack_cross_set = gen->rack_cross_set;
+  const int original_num_restricted_hooks = gen->num_restricted_hooks;
   while (gen->current_right_col < (BOARD_DIM - 1) &&
          gen->tiles_played < gen->number_of_letters_on_rack) {
     gen->current_right_col++;
@@ -593,9 +704,32 @@ static inline void shadow_play_right(MoveGen *gen,
 
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_right_col);
-    if ((cross_set & gen->rack_cross_set) == 0) {
+    const uint64_t possible_letters_here =
+        cross_set & gen->anchor_right_extension_set & gen->rack_cross_set;
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+    // printf("shadow_play_right possible_letters_here: ");
+    // debug_cross_set(possible_letters_here);
+    // printf("\n");
+
+    if (possible_letters_here == 0) {
       break;
     }
+
+    if (is_single_bit_set(possible_letters_here)) {
+      const uint64_t single_bit_index =
+          get_single_bit_index(possible_letters_here);
+      rack_take_letter(&gen->player_rack, single_bit_index);
+      add_restricted_hook(gen, gen->current_right_col, single_bit_index);
+      if (rack_get_letter(&gen->player_rack, single_bit_index) == 0) {
+        gen->rack_cross_set &= ~possible_letters_here;
+        // printf("spr removed letter ");
+        // debug_cross_set(possible_letters_here);
+        // printf(" from rack_cross_set, now ");
+        // debug_cross_set(gen->rack_cross_set);
+        // printf("\n");
+      }
+    }
+
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_right_col);
     const int cross_score =
@@ -618,12 +752,15 @@ static inline void shadow_play_right(MoveGen *gen,
     }
 
     if (gen->tiles_played + is_unique >= 2) {
-      shadow_record(gen, gen->current_left_col, gen->current_right_col,
+      shadow_record(gen, 
                     main_played_through_score, perpendicular_additional_score,
                     word_multiplier);
     }
   }
 
+  rack_copy(&gen->player_rack, &gen->player_rack_shadow_right_copy);
+  gen->rack_cross_set = original_rack_cross_set;
+  gen->num_restricted_hooks = original_num_restricted_hooks;
   gen->current_right_col = original_current_right_col;
   gen->tiles_played = original_tiles_played;
 }
@@ -633,12 +770,13 @@ nonplaythrough_shadow_play_left(MoveGen *gen, int main_played_through_score,
                                 int perpendicular_additional_score,
                                 int word_multiplier, bool is_unique) {
   for (;;) {
-    if ((gen->tiles_played > 0) ||
-        ((gen->anchor_right_extension_set & gen->rack_cross_set) != 0)) {
+    if (gen->anchor_right_extension_set != 0) {
       shadow_play_right(gen, main_played_through_score,
                         perpendicular_additional_score, word_multiplier,
                         is_unique);
     }
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
@@ -655,7 +793,7 @@ nonplaythrough_shadow_play_left(MoveGen *gen, int main_played_through_score,
     int this_word_multiplier = bonus_square >> 4;
     word_multiplier *= this_word_multiplier;
 
-    shadow_record(gen, gen->current_left_col, gen->current_right_col,
+    shadow_record(gen, 
                   main_played_through_score, perpendicular_additional_score,
                   word_multiplier);
   }
@@ -665,30 +803,70 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
                                                 int main_played_through_score,
                                                 int word_multiplier,
                                                 bool is_unique) {
+  // printf(
+  //     "playthrough_shadow_play_left main_played_through_score: %d, "
+  //     "word_multiplier: %d, is_unique: %d\n",
+  //    main_played_through_score, word_multiplier, is_unique);
+  // rack_copy(&gen->player_rack_shadow_left_copy, &gen->player_rack);
+  // uint64_t original_rack_cross_set = gen->rack_cross_set;
   int perpendicular_additional_score = 0;
   for (;;) {
-    if ((gen->tiles_played > 0) ||
-        ((gen->anchor_right_extension_set & gen->rack_cross_set) != 0)) {
+    // printf(" rightx: ");
+    // debug_cross_set(gen->anchor_right_extension_set);
+    // printf(" rack_cross_set: ");
+    // debug_cross_set(gen->rack_cross_set);
+    const uint64_t possible_tiles_for_shadow_right =
+        gen->anchor_right_extension_set & gen->rack_cross_set;
+    // printf(" possible_tiles_for_shadow_right: ");
+    // debug_cross_set(possible_tiles_for_shadow_right);
+    // printf("\n");
+    if (possible_tiles_for_shadow_right != 0) {
       shadow_play_right(gen, main_played_through_score,
                         perpendicular_additional_score, word_multiplier,
                         is_unique);
     }
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+
+    uint64_t possible_tiles_for_shadow_left =
+        gen->anchor_left_extension_set & gen->rack_cross_set;
+    gen->anchor_left_extension_set = TRIVIAL_CROSS_SET;
+
+    // printf("playthrough_shadow_play_left possible_tiles_for_shadow_left: ");
+    // debug_cross_set(possible_tiles_for_shadow_left);
+    // printf("\n");
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
-      return;
+      break;
     }
-    if ((gen->tiles_played == 0) &&
-        (gen->anchor_left_extension_set & gen->rack_cross_set) == 0) {
-      return;
+    if (possible_tiles_for_shadow_left == 0) {
+      break;
     }
+
     gen->current_left_col--;
     gen->tiles_played++;
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_left_col);
-    if ((cross_set & gen->rack_cross_set) == 0) {
-      return;
+    possible_tiles_for_shadow_left &= cross_set;
+    if (possible_tiles_for_shadow_left == 0) {
+      break;
     }
+
+    if (is_single_bit_set(possible_tiles_for_shadow_left)) {
+      const uint64_t single_bit_index =
+          get_single_bit_index(possible_tiles_for_shadow_left);
+      rack_take_letter(&gen->player_rack, single_bit_index);
+      add_restricted_hook(gen, gen->current_left_col, single_bit_index);
+      if (rack_get_letter(&gen->player_rack, single_bit_index) == 0) {
+        gen->rack_cross_set &= ~possible_tiles_for_shadow_left;
+        // printf("pspl removed letter ");
+        // debug_cross_set(possible_tiles_for_shadow_left);
+        // printf(" from rack_cross_set, now ");
+        // debug_cross_set(gen->rack_cross_set);
+        // printf("\n");
+      }
+    }
+
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
     const int cross_score =
@@ -703,7 +881,7 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
     }
 
     if (gen->tiles_played + is_unique >= 2) {
-      shadow_record(gen, gen->current_left_col, gen->current_right_col,
+      shadow_record(gen,
                     main_played_through_score, perpendicular_additional_score,
                     word_multiplier);
     }
@@ -711,12 +889,30 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
 }
 
 static inline void shadow_start_nonplaythrough(MoveGen *gen) {
+  const uint64_t cross_set =
+      gen_cache_get_cross_set(gen, gen->current_left_col);
+  const uint64_t possible_letters_here = cross_set & gen->rack_cross_set;
   // Only play a letter if a letter from the rack fits in the cross set
-  if (!shadow_board_is_letter_allowed_in_cross_set(gen,
-                                                   gen->current_left_col)) {
+  if (possible_letters_here == 0) {
     return;
   }
-
+  rack_copy(&gen->player_rack_shadow_left_copy, &gen->player_rack);
+  const uint64_t original_rack_cross_set = gen->rack_cross_set;
+  const int original_num_restricted_hooks = gen->num_restricted_hooks;
+  if (is_single_bit_set(possible_letters_here)) {
+    const uint64_t single_bit_index =
+        get_single_bit_index(possible_letters_here);
+    rack_take_letter(&gen->player_rack, single_bit_index);
+    add_restricted_hook(gen, gen->current_left_col, single_bit_index);
+    if (rack_get_letter(&gen->player_rack, single_bit_index) == 0) {
+      gen->rack_cross_set &= ~possible_letters_here;
+      // printf("ssnp removed letter ");
+      // debug_cross_set(possible_letters_here);
+      // printf(" from rack_cross_set, now ");
+      // debug_cross_set(gen->rack_cross_set);
+      // printf("\n");
+    }
+  }
   // Play tile on empty anchor square and set scoring parameters
   const uint8_t bonus_square =
       gen_cache_get_bonus_square(gen, gen->current_left_col);
@@ -728,12 +924,15 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   if (!board_is_dir_vertical(gen->dir)) {
     // word_multiplier is always hard-coded as 0 since we are recording a
     // single tile
-    shadow_record(gen, gen->current_left_col, gen->current_right_col, 0,
+    shadow_record(gen, 0,
                   perpendicular_additional_score, 0);
   }
   nonplaythrough_shadow_play_left(gen, 0, perpendicular_additional_score,
                                   this_word_multiplier,
                                   !board_is_dir_vertical(gen->dir));
+  rack_copy(&gen->player_rack, &gen->player_rack_shadow_left_copy);
+  gen->rack_cross_set = original_rack_cross_set;
+  gen->num_restricted_hooks = original_num_restricted_hooks;
 }
 
 static inline void shadow_start_playthrough(MoveGen *gen,
@@ -764,6 +963,9 @@ static inline void shadow_start(MoveGen *gen) {
   if (any_extension_set == 0) {
     return;
   }
+  const uint64_t original_rack_cross_set = gen->rack_cross_set;
+  rack_copy(&gen->player_rack_shadow_left_copy, &gen->player_rack);
+  const int original_num_restricted_hooks = gen->num_restricted_hooks;
   const uint8_t current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -771,6 +973,9 @@ static inline void shadow_start(MoveGen *gen) {
   } else {
     shadow_start_playthrough(gen, current_letter);
   }
+  gen->rack_cross_set = original_rack_cross_set;
+  rack_copy(&gen->player_rack, &gen->player_rack_shadow_left_copy);
+  gen->num_restricted_hooks = original_num_restricted_hooks;
 }
 
 // The algorithm used in this file for
@@ -785,6 +990,17 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->anchor_left_extension_set = gen_cache_get_left_extension_set(gen, col);
   gen->anchor_right_extension_set = gen_cache_get_right_extension_set(gen, col);
 
+  /*
+    printf("shadow_play_for_anchor row: %d, col: %d, dir: %d leftx: ",
+           gen->current_row_index, col, gen->dir);
+    debug_cross_set(gen->anchor_left_extension_set);
+    printf(" rightx: ");
+    debug_cross_set(gen->anchor_right_extension_set);
+    printf(" rack_cross_set: ");
+    debug_cross_set(gen->rack_cross_set);
+    printf("\n");
+  */
+
   // Reset shadow score
   gen->highest_shadow_equity = 0;
 
@@ -797,6 +1013,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   // Reset tiles played
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
+
+  // Allow all permutations of rack tiles until restrictions are found.
+  gen->num_restricted_hooks = 0;
 
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
@@ -834,13 +1053,18 @@ void shadow_by_orientation(MoveGen *gen) {
 }
 
 static inline void set_descending_tile_scores(MoveGen *gen) {
+  gen->rack_cardinality = 0;
   int i = 0;
   for (int j = 0; j < (int)ld_get_size(gen->ld); j++) {
-    int j_score_order = ld_get_score_order(gen->ld, j);
-    for (int k = 0; k < rack_get_letter(&gen->player_rack, j_score_order);
-         k++) {
+    const int j_score_order = ld_get_score_order(gen->ld, j);
+    const int num_this = rack_get_letter(&gen->player_rack, j_score_order);
+    for (int k = 0; k < num_this; k++) {
       gen->descending_tile_scores[i] = gen->tile_scores[j_score_order];
       i++;
+    }
+    if (num_this > 0) {
+      gen->rack_score_order[gen->rack_cardinality] = j_score_order;
+      gen->rack_cardinality++;
     }
   }
 }
@@ -861,7 +1085,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   gen->player_index = player_on_turn_index;
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
-
+  rack_copy(&gen->full_player_rack, &gen->player_rack);
   gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_sort_type = move_sort_type;
@@ -947,6 +1171,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->current_row_index = anchor_get_row(anchor_list, i);
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
+    // printf("anchor: %d, %d, %d, %d\n", gen->current_row_index,
+    //        gen->current_anchor_col, gen->last_anchor_col, gen->dir);
     board_copy_row_cache(gen->lanes_cache, gen->row_cache,
                          gen->current_row_index, gen->dir);
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
@@ -956,6 +1182,19 @@ void generate_moves(Game *game, move_record_t move_record_type,
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for
       // this anchor, highest_possible_equity was invalid.
+      if (better_play_has_been_found(gen, anchor_highest_possible_equity)) {
+        StringBuilder *sb = create_string_builder();
+        string_builder_add_move(gen->board, gen->move_list->moves[0], gen->ld,
+                                sb);
+        printf("highest_possible_equity was invalid. value: %f\n",
+               anchor_highest_possible_equity);
+        printf(
+            "Better play has been found than should have been possible for "
+            "this anchor, highest_possible_equity was invalid. Move: %s has "
+            "equity %f\n",
+            string_builder_peek(sb), move_get_equity(gen->move_list->moves[0]));
+        destroy_string_builder(sb);
+      }
       assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
     }
   }
