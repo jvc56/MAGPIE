@@ -6,6 +6,7 @@
 
 #include "../def/rack_defs.h"
 #include "letter_distribution.h"
+#include "../util/string_util.h"
 
 typedef struct Rack {
   int dist_size;
@@ -17,7 +18,9 @@ typedef struct Rack {
 Rack *rack_create(int dist_size);
 void rack_destroy(Rack *rack);
 Rack *rack_duplicate(const Rack *rack);
-void rack_copy(Rack *dst, const Rack *src);
+static inline void rack_copy(Rack *dst, const Rack *src) {
+  memory_copy(dst, src, sizeof(Rack));
+}
 void rack_reset(Rack *rack);
 
 static inline int rack_get_dist_size(const Rack *rack) { return rack->dist_size; }

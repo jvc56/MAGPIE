@@ -508,6 +508,7 @@ cgp_parse_status_t parse_cgp(Game *game, const char *cgp) {
 cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
   game_reset(game);
   cgp_parse_status_t cgp_parse_status = parse_cgp(game, cgp);
+  //printf("cgp_parse_status: %d\n", cgp_parse_status);
   if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
     return cgp_parse_status;
   }

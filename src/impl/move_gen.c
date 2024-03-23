@@ -25,6 +25,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
+#include "../str/move_string.h"
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
@@ -66,6 +67,8 @@ typedef struct MoveGen {
   int player_index;
   bool kwgs_are_shared;
   Rack player_rack;
+  Rack player_rack_shadow_right_copy;
+  Rack player_rack_shadow_left_copy;
   Rack opponent_rack;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
@@ -224,8 +227,9 @@ static inline void set_play_for_record(Move *move, game_event_t move_type,
   }
 }
 
-static inline double
-get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, int score) {
+static inline double get_move_equity_for_sort_type(const MoveGen *gen,
+                                                   const Move *move,
+                                                   int score) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return gen_get_static_equity(gen, move);
   }
@@ -242,6 +246,11 @@ static inline void update_best_move_or_insert_into_movelist(
                         start_row, start_col, tiles_played, dir, strip);
     move_list_insert_spare_move(
         gen->move_list, get_move_equity_for_sort_type(gen, move, score));
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_move(gen->board, move, gen->ld, sb);
+    printf(" recording move %s %f\n", string_builder_peek(sb),
+           move_get_equity(move));
+    destroy_string_builder(sb);
   } else {
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
@@ -529,24 +538,24 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
-static inline bool
-shadow_board_is_letter_allowed_in_cross_set(const MoveGen *gen, int col) {
-  uint64_t cross_set = gen_cache_get_cross_set(gen, col);
-  // cross_set is 0 if unhookable, otherwise it will include the 0th bit,
-  // representing the blank. gen->rack_cross_set also has the 0th bit set if
-  // the rack contains a blank, so we can place a rack letter here if these
-  // values intersect bitwise.
-  return (cross_set & gen->rack_cross_set) != 0;
-}
-
 static inline void shadow_record(MoveGen *gen, int main_played_through_score,
                                  int perpendicular_additional_score,
                                  int word_multiplier) {
+  printf(
+      "shadow_record main_played_through_score %d "
+      "perpendicular_additional_score %d word_multiplier %d\n",
+      main_played_through_score, perpendicular_additional_score,
+      word_multiplier);
+
   uint16_t tiles_played_score = 0;
+  printf("adding tile scores:");
   for (int i = 0; i < RACK_SIZE; i++) {
+    printf(" %d*%d", gen->descending_tile_scores[i],
+           gen->descending_effective_letter_multipliers[i]);
     tiles_played_score += gen->descending_tile_scores[i] *
                           gen->descending_effective_letter_multipliers[i];
   }
+  printf("\n");
 
   int bingo_bonus = 0;
   if (gen->tiles_played == RACK_SIZE) {
@@ -556,6 +565,8 @@ static inline void shadow_record(MoveGen *gen, int main_played_through_score,
   const int score = tiles_played_score +
                     (main_played_through_score * word_multiplier) +
                     perpendicular_additional_score + bingo_bonus;
+  printf("  shadow_record score %d\n", score);
+
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity += static_eval_get_shadow_equity(
@@ -621,11 +632,21 @@ static inline void recalculate_effective_multipliers(MoveGen *gen,
         gen, effective_letter_multiplier);
     gen->num_unrestricted_multipliers++;
   }
+  printf("recalculate_effective_multipliers (%d)",
+         gen->num_unrestricted_multipliers);
+  for (int i = 0; i < gen->num_unrestricted_multipliers; i++) {
+    printf(" %d", gen->descending_effective_letter_multipliers[i]);
+  }
+  printf("\n");
 }
 
 static inline void insert_unrestricted_multipliers(MoveGen *gen, int col,
                                                    int old_word_multiplier,
                                                    int word_multiplier) {
+  printf(
+      "insert_unrestricted_multipliers col %d old_word_multiplier %d "
+      "word_multiplier %d\n",
+      col, old_word_multiplier, word_multiplier);
   // If the current square changes the word multiplier, previously-inserted
   // multipliers have changed, and their ordering might have also changed.
   if (old_word_multiplier != word_multiplier) {
@@ -633,23 +654,58 @@ static inline void insert_unrestricted_multipliers(MoveGen *gen, int col,
   }
 
   const bool is_cross_word = gen_cache_get_is_cross_word(gen, col);
+  printf("  is_cross_word %d\n", is_cross_word);
   const uint8_t bonus_square = gen_cache_get_bonus_square(gen, col);
   const uint8_t letter_multiplier = bonus_square & 0x0F;
   const uint8_t this_word_multiplier = bonus_square >> 4;
   const uint8_t effective_cross_word_multiplier =
       letter_multiplier * this_word_multiplier * is_cross_word;
+  printf("  effective_cross_word_multiplier %d\n",
+         effective_cross_word_multiplier);
   insert_unrestricted_cross_word_multiplier(
       gen, effective_cross_word_multiplier, col);
   const uint8_t main_word_multiplier = word_multiplier * letter_multiplier;
+  printf(
+      "  main_word_multiplier %d "
+      "effective_cross_word_multiplier %d\n",
+      main_word_multiplier, effective_cross_word_multiplier);
   insert_unrestricted_effective_letter_multiplier(
       gen, main_word_multiplier + effective_cross_word_multiplier);
   gen->num_unrestricted_multipliers++;
+}
+
+static inline bool is_single_bit_set(uint64_t bitset) {
+#if __has_builtin(__builtin_popcountll)
+  return __builtin_popcountll(bitset) == 1;
+#else
+  return bitset && !(bitset & (bitset - 1));
+#endif
+}
+
+static inline int get_single_bit_index(uint64_t bitset) {
+#if __has_builtin(__builtin_ctzll)
+  return __builtin_ctzll(bitset);
+#else
+  // Probably not the fastest fallback but it does well because it often
+  // finds the blank's bit the first time through the loop.
+  int index = 0;
+  while ((bitset & 1) == 0) {
+    bitset >>= 1;
+    index++;
+  }
+  return index;
+#endif
 }
 
 static inline void shadow_play_right(MoveGen *gen,
                                      int main_played_through_score,
                                      int perpendicular_additional_score,
                                      int word_multiplier, bool is_unique) {
+  // Save the rack with the tiles available before beginning shadow right. Any
+  // tiles restricted by unique hooks will be returned to the rack after
+  // exhausting rightward shadow.
+  rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+  const uint64_t original_rack_cross_set = gen->rack_cross_set;
   // Save the state of the unrestricted multiplier arrays so they can be
   // restored after exhausting the rightward shadow plays. Shadowing right
   // changes the values of multipliers found while shadowing left. We need to
@@ -670,24 +726,43 @@ static inline void shadow_play_right(MoveGen *gen,
 
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_right_col);
-    if ((cross_set & gen->rack_cross_set) == 0) {
+    const uint64_t possible_letters_here = cross_set & gen->rack_cross_set;
+    if (possible_letters_here == 0) {
       break;
     }
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_right_col);
     const int cross_score =
         gen_cache_get_cross_score(gen, gen->current_right_col);
-    int this_word_multiplier = bonus_square >> 4;
+    const int letter_multiplier = bonus_square & 0x0F;
+    const int this_word_multiplier = bonus_square >> 4;
     perpendicular_additional_score += cross_score * this_word_multiplier;
-    // If this is only the second tile played, the previous word multiplier as
-    // used for computing effective letter multipliers might have actually been
-    // zero. By showing a changed word multiplier, we force a recalculation of
-    // all effective letter multipliers to correct them.
     const int old_word_multiplier =
-        (gen->tiles_played > 2) ? word_multiplier : 0;
-    word_multiplier *= this_word_multiplier;
-    insert_unrestricted_multipliers(gen, gen->current_right_col,
-                                    old_word_multiplier, word_multiplier);
+        (gen->num_unrestricted_multipliers > 2) ? word_multiplier : 0;
+
+    const bool restricted = is_single_bit_set(possible_letters_here);
+    if (restricted) {
+      const uint8_t ml = get_single_bit_index(possible_letters_here);
+      rack_take_letter(&gen->player_rack, ml);
+      if (rack_get_letter(&gen->player_rack, ml) == 0) {
+        gen->rack_cross_set &= ~possible_letters_here;
+      }
+      const bool is_cross_word =
+          gen_cache_get_is_cross_word(gen, gen->current_right_col);
+      main_played_through_score += gen->tile_scores[ml] * letter_multiplier;
+      perpendicular_additional_score += is_cross_word * gen->tile_scores[ml] *
+                                        letter_multiplier *
+                                        this_word_multiplier;
+      word_multiplier *= this_word_multiplier;
+    } else {
+      // If this is only the second unrestricted tile played, the previous word
+      // multiplier as used for computing effective letter multipliers might
+      // have actually been zero. By showing a changed word multiplier, we force
+      // a recalculation of all effective letter multipliers to correct them.
+      word_multiplier *= this_word_multiplier;
+      insert_unrestricted_multipliers(gen, gen->current_right_col,
+                                      old_word_multiplier, word_multiplier);
+    }
     if (cross_set == TRIVIAL_CROSS_SET) {
       is_unique = true;
     }
@@ -702,25 +777,37 @@ static inline void shadow_play_right(MoveGen *gen,
     }
 
     if (gen->tiles_played + is_unique >= 2) {
+      // We might have a single zero here for the other-direction hack
+      // in shadow_start_nonplaythrough. This puts it to be the correct
+      // multiplier.
+      if (old_word_multiplier != word_multiplier) {
+        recalculate_effective_multipliers(gen, word_multiplier);
+      }
       shadow_record(gen, main_played_through_score,
                     perpendicular_additional_score, word_multiplier);
     }
   }
 
+  // Restore state for restricted squares
+  rack_copy(&gen->player_rack, &gen->player_rack_shadow_right_copy);
+  gen->rack_cross_set = original_rack_cross_set;
+
+  // Restore state for unrestricted squares
   gen->num_unrestricted_multipliers = original_num_unrestricted_multipliers;
   memory_copy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
               sizeof(gen->descending_cross_word_multipliers));
   memory_copy(gen->descending_effective_letter_multipliers,
               gen->desc_eff_letter_muls_copy,
               sizeof(gen->descending_effective_letter_multipliers));
+
+  // Restore state to undo other shadow progress
   gen->current_right_col = original_current_right_col;
   gen->tiles_played = original_tiles_played;
 }
 
-static inline void
-nonplaythrough_shadow_play_left(MoveGen *gen, int main_played_through_score,
-                                int perpendicular_additional_score,
-                                int word_multiplier, bool is_unique) {
+static inline void nonplaythrough_shadow_play_left(
+    MoveGen *gen, int main_played_through_score,
+    int perpendicular_additional_score, int word_multiplier, bool is_unique) {
   for (;;) {
     if ((gen->tiles_played > 0) ||
         ((gen->anchor_right_extension_set & gen->rack_cross_set) != 0)) {
@@ -728,6 +815,7 @@ nonplaythrough_shadow_play_left(MoveGen *gen, int main_played_through_score,
                         perpendicular_additional_score, word_multiplier,
                         is_unique);
     }
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
@@ -759,27 +847,35 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
                                                 bool is_unique) {
   int perpendicular_additional_score = 0;
   for (;;) {
-    if ((gen->tiles_played > 0) ||
-        ((gen->anchor_right_extension_set & gen->rack_cross_set) != 0)) {
+    const uint64_t possible_tiles_for_shadow_right =
+        gen->anchor_right_extension_set & gen->rack_cross_set;
+    if (possible_tiles_for_shadow_right != 0) {
       shadow_play_right(gen, main_played_through_score,
                         perpendicular_additional_score, word_multiplier,
                         is_unique);
     }
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+
+    uint64_t possible_tiles_for_shadow_left =
+        gen->anchor_left_extension_set & gen->rack_cross_set;
+    gen->anchor_left_extension_set = TRIVIAL_CROSS_SET;
+
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
-      return;
+      break;
     }
     if ((gen->tiles_played == 0) &&
         (gen->anchor_left_extension_set & gen->rack_cross_set) == 0) {
-      return;
+      break;
     }
     gen->current_left_col--;
     gen->tiles_played++;
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_left_col);
-    if ((cross_set & gen->rack_cross_set) == 0) {
-      return;
+    possible_tiles_for_shadow_left &= cross_set;
+    if (possible_tiles_for_shadow_left == 0) {
+      break;
     }
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
@@ -787,6 +883,16 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
         gen_cache_get_cross_score(gen, gen->current_left_col);
     const int this_word_multiplier = bonus_square >> 4;
     perpendicular_additional_score += cross_score * this_word_multiplier;
+
+    const bool restricted = is_single_bit_set(possible_tiles_for_shadow_left);
+    if (restricted) {
+      const uint8_t ml = get_single_bit_index(possible_tiles_for_shadow_left);
+      rack_take_letter(&gen->player_rack, ml);
+      if (rack_get_letter(&gen->player_rack, ml) == 0) {
+        gen->rack_cross_set &= ~possible_tiles_for_shadow_left;
+      }
+    }
+
     const int old_word_multiplier = word_multiplier;
     word_multiplier *= this_word_multiplier;
     insert_unrestricted_multipliers(gen, gen->current_left_col,
@@ -805,11 +911,16 @@ static inline void playthrough_shadow_play_left(MoveGen *gen,
 }
 
 static inline void shadow_start_nonplaythrough(MoveGen *gen) {
+  const uint64_t cross_set =
+      gen_cache_get_cross_set(gen, gen->current_left_col);
+  const uint64_t possible_letters_here = cross_set & gen->rack_cross_set;
   // Only play a letter if a letter from the rack fits in the cross set
-  if (!shadow_board_is_letter_allowed_in_cross_set(gen,
-                                                   gen->current_left_col)) {
+  if (possible_letters_here == 0) {
     return;
   }
+
+  rack_copy(&gen->player_rack_shadow_left_copy, &gen->player_rack);
+  const uint64_t original_rack_cross_set = gen->rack_cross_set;
 
   // Play tile on empty anchor square and set scoring parameters
   const uint8_t bonus_square =
@@ -818,6 +929,15 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
       gen_cache_get_cross_score(gen, gen->current_left_col);
   const int this_word_multiplier = bonus_square >> 4;
   const int perpendicular_additional_score = cross_score * this_word_multiplier;
+
+  const bool restricted = is_single_bit_set(possible_letters_here);
+  if (restricted) {
+    const uint8_t ml = get_single_bit_index(possible_letters_here);
+    rack_take_letter(&gen->player_rack, ml);
+    if (rack_get_letter(&gen->player_rack, ml) == 0) {
+      gen->rack_cross_set &= ~possible_letters_here;
+    }
+  }
   insert_unrestricted_multipliers(gen, gen->current_left_col, 0, 0);
   gen->tiles_played++;
   if (!board_is_dir_vertical(gen->dir)) {
@@ -828,6 +948,9 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   nonplaythrough_shadow_play_left(gen, 0, perpendicular_additional_score,
                                   this_word_multiplier,
                                   !board_is_dir_vertical(gen->dir));
+
+  rack_copy(&gen->player_rack, &gen->player_rack_shadow_left_copy);
+  gen->rack_cross_set = original_rack_cross_set;
 }
 
 static inline void shadow_start_playthrough(MoveGen *gen,
@@ -858,6 +981,10 @@ static inline void shadow_start(MoveGen *gen) {
   if (any_extension_set == 0) {
     return;
   }
+
+  const uint64_t original_rack_cross_set = gen->rack_cross_set;
+  rack_copy(&gen->player_rack_shadow_left_copy, &gen->player_rack);
+
   const uint8_t current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -865,6 +992,9 @@ static inline void shadow_start(MoveGen *gen) {
   } else {
     shadow_start_playthrough(gen, current_letter);
   }
+
+  gen->rack_cross_set = original_rack_cross_set;
+  rack_copy(&gen->player_rack, &gen->player_rack_shadow_left_copy);
 }
 
 // The algorithm used in this file for
@@ -897,6 +1027,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   // Reset tiles played
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
+
+  printf("shadow_play_for_anchor: row %d, col %d, dir %d\n",
+         gen->current_row_index, col, gen->dir);
 
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
@@ -991,10 +1124,10 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
   if (gen->number_of_tiles_in_bag > 0) {
     // Set the best leaves and maybe add exchanges.
-    // gen->leave_map.current_index moves differently when filling leave_values
-    // than when reading from it to generate plays. Start at 0, which represents
-    // using (exchanging) gen->olayer_rack->number_of_letters tiles and keeping
-    // 0 tiles.
+    // gen->leave_map.current_index moves differently when filling
+    // leave_values than when reading from it to generate plays. Start at 0,
+    // which represents using (exchanging) gen->olayer_rack->number_of_letters
+    // tiles and keeping 0 tiles.
     leave_map_set_current_index(&gen->leave_map, 0);
     uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
     Rack *leave = rack_create(rack_get_dist_size(&gen->player_rack));
@@ -1002,8 +1135,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
                             gen->number_of_tiles_in_bag >= RACK_SIZE);
     rack_destroy(leave);
   }
-  // Set the leave_map index to 2^number_of_letters - 1, which represents using
-  // (playing) zero tiles and keeping gen->player_rack->number_of_letters tiles.
+  // Set the leave_map index to 2^number_of_letters - 1, which represents
+  // using (playing) zero tiles and keeping
+  // gen->player_rack->number_of_letters tiles.
   leave_map_set_current_index(
       &gen->leave_map, (1 << rack_get_total_letters(&gen->player_rack)) - 1);
   anchor_list_reset(gen->anchor_list);
@@ -1047,6 +1181,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->current_row_index = anchor_get_row(anchor_list, i);
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
+    printf("generating for anchor %d %d %d %d (max %f)\n",
+           gen->current_anchor_col, gen->current_row_index,
+           gen->last_anchor_col, gen->dir, anchor_highest_possible_equity);
     board_copy_row_cache(gen->lanes_cache, gen->row_cache,
                          gen->current_row_index, gen->dir);
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
@@ -1056,6 +1193,19 @@ void generate_moves(Game *game, move_record_t move_record_type,
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for
       // this anchor, highest_possible_equity was invalid.
+      if (better_play_has_been_found(gen, anchor_highest_possible_equity)) {
+        StringBuilder *sb = create_string_builder();
+        const Move *best_move = gen_get_readonly_best_move(gen);
+        string_builder_add_move(gen->board, best_move, gen->ld, sb);
+        printf("highest_possible_equity was invalid. value: %f\n",
+               anchor_highest_possible_equity);
+        printf(
+            "Better play has been found than should have been possible for "
+            "this anchor, highest_possible_equity was invalid. Move: %s has "
+            "equity %f\n",
+            string_builder_peek(sb), move_get_equity(best_move));
+        destroy_string_builder(sb);
+      }
       assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
     }
   }
