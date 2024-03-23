@@ -553,22 +553,19 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 }
 
 static inline void shadow_record(MoveGen *gen) {
-/*  
   printf(
       "shadow_record main_played_through_score %d "
       "perpendicular_additional_score %d word_multiplier %d\n",
       gen->shadow_main_played_through_score,
       gen->shadow_perpendicular_additional_score, gen->shadow_word_multiplier);
-*/
   uint16_t tiles_played_score = 0;
-  //printf("adding tile scores:");
   for (int i = 0; i < RACK_SIZE; i++) {
-    //printf(" %d*%d", gen->descending_tile_scores[i],
-    //       gen->descending_effective_letter_multipliers[i]);
+    printf(" %d*%d", gen->descending_tile_scores[i],
+           gen->descending_effective_letter_multipliers[i]);
     tiles_played_score += gen->descending_tile_scores[i] *
                           gen->descending_effective_letter_multipliers[i];
   }
-  //printf("\n");
+  printf("\n");
 
   int bingo_bonus = 0;
   if (gen->tiles_played == RACK_SIZE) {
@@ -627,7 +624,12 @@ static inline void insert_unrestricted_effective_letter_multiplier(
 // Recalculate and reinsert all unrestricted effective letter multipliers,
 // triggered by a change in the word multiplier.
 static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
+  printf("maybe_recalculate_effective_multipliers last_word_multiplier %d "
+         "shadow_word_multiplier %d\n",
+         gen->last_word_multiplier, gen->shadow_word_multiplier);
   if (gen->last_word_multiplier == gen->shadow_word_multiplier) {
+    printf("  no change, %d == %d\n", gen->last_word_multiplier,
+           gen->shadow_word_multiplier);
     return;
   }
   gen->last_word_multiplier = gen->shadow_word_multiplier;
@@ -644,20 +646,21 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
     const uint8_t col = gen->descending_cross_word_multipliers[i].column;
     const uint8_t bonus_square = gen_cache_get_bonus_square(gen, col);
     const uint8_t letter_multiplier = bonus_square & 0x0F;
+    printf("  recalculate_effective_multipliers i %d col %d xw_multiplier %d "
+           "letter_multiplier %d\n",
+           i, col, xw_multiplier, letter_multiplier);
     const uint8_t effective_letter_multiplier =
         gen->shadow_word_multiplier * letter_multiplier + xw_multiplier;
     insert_unrestricted_effective_letter_multiplier(
         gen, effective_letter_multiplier);
     gen->num_unrestricted_multipliers++;
   }
-  /*
-  printf("recalculate_effective_multipliers (%d)",
+  printf("recalculated_effective_multipliers (%d)",
          gen->num_unrestricted_multipliers);
   for (int i = 0; i < gen->num_unrestricted_multipliers; i++) {
     printf(" %d", gen->descending_effective_letter_multipliers[i]);
   }
   printf("\n");
-  */
 }
 
 static inline void insert_unrestricted_multipliers(MoveGen *gen, int col) {
@@ -991,6 +994,7 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
     shadow_record(gen);
   }
   gen->shadow_word_multiplier = this_word_multiplier;
+  maybe_recalculate_effective_multipliers(gen);
 
   nonplaythrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
 
@@ -1094,7 +1098,6 @@ void shadow_by_orientation(MoveGen *gen) {
   for (int row = 0; row < BOARD_DIM; row++) {
     gen->current_row_index = row;
     if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
-      printf("skipping row %d\n", row);
       continue;
     }
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
@@ -1231,9 +1234,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->current_row_index = anchor_get_row(anchor_list, i);
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
-    //printf("generating for anchor %d %d %d %d (max %f)\n",
-    //       gen->current_anchor_col, gen->current_row_index,
-    //       gen->last_anchor_col, gen->dir, anchor_highest_possible_equity);
+    printf("generating for anchor %d %d %d %d (max %f)\n",
+           gen->current_anchor_col, gen->current_row_index,
+           gen->last_anchor_col, gen->dir, anchor_highest_possible_equity);
     board_copy_row_cache(gen->lanes_cache, gen->row_cache,
                          gen->current_row_index, gen->dir);
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
