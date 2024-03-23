@@ -564,7 +564,19 @@ void test_shadow_score() {
            move_get_equity(move_list_get_move(move_list, i)));
     destroy_string_builder(sb);
   }
-  assert(anchor_list_get_count(anchor_list) == 8);
+
+  // M3 B(U)I 25
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 25));
+
+  // This should actually be 12K II(AI) 14, but currently hooks are only being
+  // restricted when shadowing right. The multiplier at 12K is unrestricted
+  // right now because it's added in shadow_start_nonplaythrough, which is still
+  // inserting all its multipliers into the unrestricted list.
+  // 12K BI(AI) 20
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 20));
+
   game_destroy(game);
   move_list_destroy(move_list);
   config_destroy(config);
