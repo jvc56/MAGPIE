@@ -550,6 +550,8 @@ void test_shadow_score() {
       "1RAVIoLI2G3Q/1EXON1IN2E1P1A/1C1L3GEM2AHI/BEMUD2SHUTTlED/1D1E8AI1/"
       "YET9IS1/ODA9ST1/W1JOLLER7 BII/EO 477/388 0 lex CSW21";
   load_and_generate(game, move_list, player, shuttled_ravioli, "BII");
+  printf("anchor count: %d\n", anchor_list_get_count(anchor_list));
+
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
     printf("%d %d %d %f\n", anchor_get_row(anchor_list, i),
            anchor_get_col(anchor_list, i), anchor_get_dir(anchor_list, i),
@@ -577,6 +579,30 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 20));
 
+  game_reset(game);
+  char toeless[300] =
+      "15/15/15/15/15/15/5Q2J6/5UVAE6/5I2U6/5Z9/15/15/15/15/15 TOELESS/EEGIPRW "
+      "42/38 0 lex CSW21";
+  load_and_generate(game, move_list, player, toeless, "TOELESS");
+  printf("anchor count: %d\n", anchor_list_get_count(anchor_list));
+  for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
+    printf("%d %d %d %f\n", anchor_get_row(anchor_list, i),
+           anchor_get_col(anchor_list, i), anchor_get_dir(anchor_list, i),
+           anchor_get_highest_possible_equity(anchor_list, i));
+  }
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_move(game_get_board(game),
+                            move_list_get_move(move_list, i), game_get_ld(game),
+                            sb);
+    printf("%s %f\n", string_builder_peek(sb),
+           move_get_equity(move_list_get_move(move_list, i)));
+    destroy_string_builder(sb);
+  }
+
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 86));
+      
   game_destroy(game);
   move_list_destroy(move_list);
   config_destroy(config);
@@ -603,5 +629,7 @@ void test_shadow_top_move() {
 
 void test_shadow() {
   test_shadow_score();
-  test_shadow_top_move();
+  // test_shadow_top_move(); DO NOT MERGE
+  StringBuilder *sb = create_string_builder();
+  // force leak on github ci to make tests fail so i don't forget to revert
 }

@@ -1077,8 +1077,8 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
 
-  //printf("shadow_play_for_anchor: row %d, col %d, dir %d\n",
-  //       gen->current_row_index, col, gen->dir);
+  printf("shadow_play_for_anchor: row %d, col %d, dir %d\n",
+         gen->current_row_index, col, gen->dir);
 
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
@@ -1094,6 +1094,7 @@ void shadow_by_orientation(MoveGen *gen) {
   for (int row = 0; row < BOARD_DIM; row++) {
     gen->current_row_index = row;
     if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+      printf("skipping row %d\n", row);
       continue;
     }
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
