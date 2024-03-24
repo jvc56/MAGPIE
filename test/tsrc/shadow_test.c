@@ -571,13 +571,37 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 25));
 
-  // This should actually be 12K II(AI) 14, but currently hooks are only being
-  // restricted when shadowing right. The multiplier at 12K is unrestricted
-  // right now because it's added in shadow_start_nonplaythrough, which is still
-  // inserting all its multipliers into the unrestricted list.
-  // 12K BI(AI) 20
+  // 9B (EXON)B(IN) 19
+  // This should actually be 15 for (EXON)I(IN). The I being in the rightx set
+  // for EXON is the reason shadow_right records a play here, but only the cross
+  // set is being used to restrict the letter played in this position. If we
+  // &'ed rightx with the cross set, we'd do better. That's a TODO after
+  // finishing restricting using just cross sets.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 20));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 19));
+
+  // 4H (N)B(ARGUFY) 17
+  // Likewise you could say his should actually be 15 for (N)I(ARGUFY).
+  // But actually since ARGUFY has empty leftx, we should be able to avoid
+  // recording here at all. TODO to add that pruning also.
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 17));
+
+  // 7J I(A)IB(R) 16
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 16));
+
+  // C4 BII(RAX) 15
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 15));
+
+  // J10 (MU)IIB 15
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 15));
+
+  // 12K II(AI) 14
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 6), 14));
 
   game_reset(game);
   char toeless[300] =
@@ -627,7 +651,32 @@ void test_shadow_score() {
 
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 12), 70));
-      
+
+/*
+  game_reset(game);
+  char ultraist[300] =
+      "7W6T/7ON5O/7XU5U/1QURSH2N5Z/4C1FAcIA3I/4E2ELONGATE/4L3E5R/3FEVERS6/4r10/"
+      "4A10/4T10/DONGS10/15/15/15 ILRSTTU/AAEEEII 195/266 0 lex CSW21";
+  load_and_generate(game, move_list, player, ultraist, "ILRSTTU");
+  printf("anchor count: %d\n", anchor_list_get_count(anchor_list));
+  for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
+    printf("%d %d %d %f\n", anchor_get_row(anchor_list, i),
+           anchor_get_col(anchor_list, i), anchor_get_dir(anchor_list, i),
+           anchor_get_highest_possible_equity(anchor_list, i));
+  }
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_move(game_get_board(game),
+                            move_list_get_move(move_list, i), game_get_ld(game),
+                            sb);
+    printf("%s %f\n", string_builder_peek(sb),
+           move_get_equity(move_list_get_move(move_list, i)));
+    destroy_string_builder(sb);
+  }
+
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 62));
+*/
   game_destroy(game);
   move_list_destroy(move_list);
   config_destroy(config);
