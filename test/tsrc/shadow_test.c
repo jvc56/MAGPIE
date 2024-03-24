@@ -22,9 +22,6 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
 
   game_load_cgp(game, cgp);
   rack_set_to_string(ld, player_rack, rack);
-  StringBuilder *sb = create_string_builder();
-  string_builder_add_game(game, NULL, sb);
-  printf("%s\n", string_builder_peek(sb));
 
   generate_moves_for_game(game, 0, move_list);
 
@@ -553,29 +550,13 @@ void test_shadow_score() {
   assert(anchor_get_row(al, 2) == 5);
   assert(anchor_get_col(al, 2) == 8);
   assert(anchor_get_dir(al, 2) == BOARD_VERTICAL_DIRECTION);
-  
+
   game_reset(game);
   char shuttled_ravioli[300] =
       "14Z/5V7NA/5R4P2AN/5O1N1ARGUFY/5TOO2I2F1/4T1COWKS2E1/2REE1UN2A2R1/"
       "1RAVIoLI2G3Q/1EXON1IN2E1P1A/1C1L3GEM2AHI/BEMUD2SHUTTlED/1D1E8AI1/"
       "YET9IS1/ODA9ST1/W1JOLLER7 BII/EO 477/388 0 lex CSW21";
   load_and_generate(game, move_list, player, shuttled_ravioli, "BII");
-  printf("anchor count: %d\n", anchor_list_get_count(anchor_list));
-
-  for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
-    printf("%d %d %d %f\n", anchor_get_row(anchor_list, i),
-           anchor_get_col(anchor_list, i), anchor_get_dir(anchor_list, i),
-           anchor_get_highest_possible_equity(anchor_list, i));
-  }
-  for (int i = 0; i < move_list_get_count(move_list); i++) {
-    StringBuilder *sb = create_string_builder();
-    string_builder_add_move(game_get_board(game),
-                            move_list_get_move(move_list, i), game_get_ld(game),
-                            sb);
-    printf("%s %f\n", string_builder_peek(sb),
-           move_get_equity(move_list_get_move(move_list, i)));
-    destroy_string_builder(sb);
-  }
 
   // M3 B(U)I 25
   assert(
@@ -618,21 +599,6 @@ void test_shadow_score() {
       "15/15/15/15/15/15/5Q2J6/5UVAE6/5I2U6/5Z9/15/15/15/15/15 TOELESS/EEGIPRW "
       "42/38 0 lex CSW21";
   load_and_generate(game, move_list, player, toeless, "TOELESS");
-  printf("anchor count: %d\n", anchor_list_get_count(anchor_list));
-  for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
-    printf("%d %d %d %f\n", anchor_get_row(anchor_list, i),
-           anchor_get_col(anchor_list, i), anchor_get_dir(anchor_list, i),
-           anchor_get_highest_possible_equity(anchor_list, i));
-  }
-  for (int i = 0; i < move_list_get_count(move_list); i++) {
-    StringBuilder *sb = create_string_builder();
-    string_builder_add_move(game_get_board(game),
-                            move_list_get_move(move_list, i), game_get_ld(game),
-                            sb);
-    printf("%s %f\n", string_builder_peek(sb),
-           move_get_equity(move_list_get_move(move_list, i)));
-    destroy_string_builder(sb);
-  }
 
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 86));
@@ -643,21 +609,6 @@ void test_shadow_score() {
       "10T4/8R1IT3/7QI1CHEZ1/7UM2AXED/7O3W1KO/7PONGY2C AEIIRST/AAEEILW 299/312 "
       "0 lex CSW21";
   load_and_generate(game, move_list, player, satirise, "AEIIRST");
-  printf("anchor count: %d\n", anchor_list_get_count(anchor_list));
-  for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
-    printf("%d %d %d %f\n", anchor_get_row(anchor_list, i),
-           anchor_get_col(anchor_list, i), anchor_get_dir(anchor_list, i),
-           anchor_get_highest_possible_equity(anchor_list, i));
-  }
-  for (int i = 0; i < move_list_get_count(move_list); i++) {
-    StringBuilder *sb = create_string_builder();
-    string_builder_add_move(game_get_board(game),
-                            move_list_get_move(move_list, i), game_get_ld(game),
-                            sb);
-    printf("%s %f\n", string_builder_peek(sb),
-           move_get_equity(move_list_get_move(move_list, i)));
-    destroy_string_builder(sb);
-  }
 
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 12), 70));
@@ -688,7 +639,5 @@ void test_shadow_top_move() {
 
 void test_shadow() {
   test_shadow_score();
-  // test_shadow_top_move(); DO NOT MERGE
-  StringBuilder *sb = create_string_builder();
-  // force leak on github ci to make tests fail so i don't forget to revert
+  test_shadow_top_move();
 }
