@@ -29,7 +29,6 @@
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
-#define INITIAL_LAST_WORD_MULTIPLIER 255
 
 typedef struct UnrestrictedMultiplier {
   uint8_t multiplier;
