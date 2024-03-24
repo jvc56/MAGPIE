@@ -555,9 +555,12 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 static inline void shadow_record(MoveGen *gen) {
   printf(
       "shadow_record main_played_through_score %d "
-      "perpendicular_additional_score %d word_multiplier %d\n",
+      "perpendicular_additional_score %d word_multiplier %d "
+      "left_col %d right_col %d\n",
       gen->shadow_main_played_through_score,
-      gen->shadow_perpendicular_additional_score, gen->shadow_word_multiplier);
+      gen->shadow_perpendicular_additional_score, gen->shadow_word_multiplier,
+      gen->current_left_col, gen->current_right_col);
+    
   uint16_t tiles_played_score = 0;
   for (int i = 0; i < RACK_SIZE; i++) {
     printf(" %d*%d", gen->descending_tile_scores[i],
@@ -565,7 +568,6 @@ static inline void shadow_record(MoveGen *gen) {
     tiles_played_score += gen->descending_tile_scores[i] *
                           gen->descending_effective_letter_multipliers[i];
   }
-  printf("\n");
 
   int bingo_bonus = 0;
   if (gen->tiles_played == RACK_SIZE) {
@@ -576,7 +578,7 @@ static inline void shadow_record(MoveGen *gen) {
       tiles_played_score +
       (gen->shadow_main_played_through_score * gen->shadow_word_multiplier) +
       gen->shadow_perpendicular_additional_score + bingo_bonus;
-  //printf("  shadow_record score %d\n", score);
+  printf("  shadow_record score %d\n", score);
 
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
@@ -646,9 +648,9 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
     const uint8_t col = gen->descending_cross_word_multipliers[i].column;
     const uint8_t bonus_square = gen_cache_get_bonus_square(gen, col);
     const uint8_t letter_multiplier = bonus_square & 0x0F;
-    printf("  recalculate_effective_multipliers i %d col %d xw_multiplier %d "
-           "letter_multiplier %d\n",
-           i, col, xw_multiplier, letter_multiplier);
+    //printf("  recalculate_effective_multipliers i %d col %d xw_multiplier %d "
+    //       "letter_multiplier %d\n",
+    //       i, col, xw_multiplier, letter_multiplier);
     const uint8_t effective_letter_multiplier =
         gen->shadow_word_multiplier * letter_multiplier + xw_multiplier;
     insert_unrestricted_effective_letter_multiplier(
@@ -664,12 +666,10 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
 }
 
 static inline void insert_unrestricted_multipliers(MoveGen *gen, int col) {
-/*  
   printf(
       "insert_unrestricted_multipliers col %d last_word_multiplier %d "
       "word_multiplier %d\n",
       col, gen->last_word_multiplier, gen->shadow_word_multiplier);
-*/      
   // If the current square changes the word multiplier, previously-inserted
   // multipliers have changed, and their ordering might have also changed.
   maybe_recalculate_effective_multipliers(gen);
@@ -865,6 +865,8 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // Restore state to undo other shadow progress
   gen->current_right_col = original_current_right_col;
   gen->tiles_played = original_tiles_played;
+
+  maybe_recalculate_effective_multipliers(gen);
 }
 
 static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
@@ -1234,9 +1236,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->current_row_index = anchor_get_row(anchor_list, i);
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
-    printf("generating for anchor %d %d %d %d (max %f)\n",
-           gen->current_anchor_col, gen->current_row_index,
-           gen->last_anchor_col, gen->dir, anchor_highest_possible_equity);
+    //printf("generating for anchor %d %d %d %d (max %f)\n",
+    //       gen->current_anchor_col, gen->current_row_index,
+    //       gen->last_anchor_col, gen->dir, anchor_highest_possible_equity);
     board_copy_row_cache(gen->lanes_cache, gen->row_cache,
                          gen->current_row_index, gen->dir);
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,

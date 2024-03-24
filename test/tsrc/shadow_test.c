@@ -602,7 +602,32 @@ void test_shadow_score() {
 
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 86));
-      
+
+  game_reset(game);
+  char satirise[300] =
+      "11FAVA/11E3/11UG2/11DO2/10A1U2/8B1R1R2/1ABSOLVER1T1D2/7LIPIDe2/8G1S1S2/"
+      "10T4/8R1IT3/7QI1CHEZ1/7UM2AXED/7O3W1KO/7PONGY2C AEIIRST/AAEEILW 299/312 "
+      "0 lex CSW21";
+  load_and_generate(game, move_list, player, satirise, "AEIIRST");      
+  printf("anchor count: %d\n", anchor_list_get_count(anchor_list));
+  for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
+    printf("%d %d %d %f\n", anchor_get_row(anchor_list, i),
+           anchor_get_col(anchor_list, i), anchor_get_dir(anchor_list, i),
+           anchor_get_highest_possible_equity(anchor_list, i));
+  }
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_move(game_get_board(game),
+                            move_list_get_move(move_list, i), game_get_ld(game),
+                            sb);
+    printf("%s %f\n", string_builder_peek(sb),
+           move_get_equity(move_list_get_move(move_list, i)));
+    destroy_string_builder(sb);
+  }
+
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 12), 70));
+
   game_destroy(game);
   move_list_destroy(move_list);
   config_destroy(config);
