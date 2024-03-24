@@ -46,6 +46,12 @@ static inline void rack_take_letter(Rack *rack, uint8_t letter) {
   }
 }
 
+// Sloppy, fast version of rack_take_letter, does not update number_of_letters
+// or empty.
+static inline void rack_take_letter_from_array(Rack *rack, uint8_t letter) {
+  rack->array[letter]--;
+}
+
 static inline void rack_add_letter(Rack *rack, uint8_t letter) {
   rack->array[letter]++;
   rack->number_of_letters++;
