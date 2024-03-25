@@ -9,8 +9,9 @@
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
 #include "../../src/impl/gameplay.h"
-#include "../../src/str/game_string.h"
+
 #include "../pi/move_gen_pi.h"
+
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -21,11 +22,6 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
 
   game_load_cgp(game, cgp);
   rack_set_to_string(ld, player_rack, rack);
-
-  StringBuilder *sb = create_string_builder();
-  string_builder_add_game(game, NULL, sb);
-  printf("%s\n", string_builder_peek(sb));
-
   generate_moves_for_game(game, 0, move_list);
   AnchorList *anchor_list = gen_get_anchor_list(0);
   double previous_equity = 10000000;
