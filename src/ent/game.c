@@ -252,7 +252,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
       for (int i = right_lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         const uint32_t ml = kwg_node_tile(node);
-        // Only try letters that possible in right extensions from the left
+        // Only try letters that are possible in right extensions from the left
         // side of the empty square.
         if (board_is_letter_allowed_in_cross_set(leftside_rightx_set, ml)) {
           const uint32_t next_node_index = kwg_node_arc_index(node);
