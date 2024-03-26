@@ -557,7 +557,6 @@ void test_shadow_score() {
   assert(anchor_get_dir(al, 2) == BOARD_VERTICAL_DIRECTION);
 
   game_reset(game);
-<<<<<<< HEAD
   char shuttled_ravioli[300] =
       "14Z/5V7NA/5R4P2AN/5O1N1ARGUFY/5TOO2I2F1/4T1COWKS2E1/2REE1UN2A2R1/"
       "1RAVIoLI2G3Q/1EXON1IN2E1P1A/1C1L3GEM2AHI/BEMUD2SHUTTlED/1D1E8AI1/"
