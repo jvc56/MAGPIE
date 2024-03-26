@@ -20,7 +20,6 @@
 #include "move_gen.h"
 
 #include "../str/autoplay_string.h"
-#include "../str/game_string.h"
 
 #include "../util/util.h"
 

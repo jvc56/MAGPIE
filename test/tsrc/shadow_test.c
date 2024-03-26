@@ -8,6 +8,7 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
+
 #include "../../src/impl/gameplay.h"
 
 #include "../pi/move_gen_pi.h"
