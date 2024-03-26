@@ -20,7 +20,6 @@
 #include "move_gen.h"
 
 #include "../str/autoplay_string.h"
-#include "../str/game_string.h"
 
 #include "../util/util.h"
 
@@ -80,9 +79,6 @@ void play_autoplay_game(Game *game, MoveList *move_list,
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    //StringBuilder *sb = create_string_builder();
-    //string_builder_add_game(game, NULL, sb);
-    //printf("%s\n", string_builder_peek(sb));
     play_move(get_top_equity_move(game, thread_index, move_list), game);
   }
   record_results(game, autoplay_results, starting_player_index);

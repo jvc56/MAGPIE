@@ -5,7 +5,9 @@
 #include <stdint.h>
 
 #include "../def/rack_defs.h"
+
 #include "letter_distribution.h"
+
 #include "../util/string_util.h"
 
 typedef struct Rack {
