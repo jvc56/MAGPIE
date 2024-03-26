@@ -365,7 +365,7 @@ void test_shadow_score() {
   // Z(T)
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 21));
-  // (A)Z      
+  // (A)Z
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 11));
   // Z(E)
@@ -509,6 +509,17 @@ void test_shadow_score() {
   assert(anchor_get_col(al, 2) == 8);
   assert(anchor_get_dir(al, 2) == BOARD_VERTICAL_DIRECTION);
 
+  game_reset(game);
+  char rad_exfil[300] =
+      "15/15/15/15/OW1RAD1EXFIL1T1/15/15/15/15/15/15/15/15/15/15 L/I 0/0 0 "
+      "lex ";
+  load_and_generate(game, move_list, player, rad_exfil, "L");
+  
+  // Not (RAD)L(EXFIL) 20. RAD is not right-extendable with an L.
+  // (EXFIL)L(T) 17. EXFIL is right-extendable with an L for (EXFILLED).
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 17));
+  
   game_destroy(game);
   move_list_destroy(move_list);
   config_destroy(config);
