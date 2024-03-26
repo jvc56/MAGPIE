@@ -8,6 +8,7 @@
 typedef struct BoardLayout BoardLayout;
 
 BoardLayout *board_layout_create();
+char *board_layout_get_filepath(const char *layout_name);
 board_layout_load_status_t board_layout_load(BoardLayout *bl,
                                              const char *layout_filename);
 char *board_layout_get_default_name();

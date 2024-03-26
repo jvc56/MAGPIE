@@ -519,8 +519,10 @@ config_load_status_t load_bingo_bonus_for_config(Config *config,
 
 config_load_status_t
 load_board_layout_for_config(Config *config, const char *board_layout_name) {
+  char *board_layout_filepath = board_layout_get_filepath(board_layout_name);
   board_layout_load_status_t board_layout_load_status =
-      board_layout_load(config->board_layout, board_layout_name);
+      board_layout_load(config->board_layout, board_layout_filepath);
+  free(board_layout_filepath);
   if (board_layout_load_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
     return CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR;
   }

@@ -588,7 +588,38 @@ void test_board_layout_success() {
   config_destroy(config);
 }
 
+void assert_board_layout_error(const char *board_layout_filename,
+                               board_layout_load_status_t expected_status) {
+  BoardLayout *bl = board_layout_create();
+  char *board_layout_filepath =
+      get_formatted_string("test/testdata/%s", board_layout_filename);
+  board_layout_load_status_t actual_status =
+      board_layout_load(bl, board_layout_filepath);
+  board_layout_destroy(bl);
+  free(board_layout_filepath);
+  if (actual_status != expected_status) {
+    printf("board layout load statuses do not match: %d != %d", expected_status,
+           actual_status);
+  }
+  assert(actual_status == expected_status);
+}
+
+void test_board_layout_error() {
+  assert_board_layout_error("malformed_start_coords15.txt",
+                            BOARD_LAYOUT_LOAD_STATUS_MALFORMED_START_COORDS);
+  assert_board_layout_error(
+      "out_of_bounds_start_coords15.txt",
+      BOARD_LAYOUT_LOAD_STATUS_OUT_OF_BOUNDS_START_COORDS);
+  assert_board_layout_error("invalid_number_of_rows15.txt",
+                            BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS);
+  assert_board_layout_error("invalid_number_of_cols15.txt",
+                            BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_COLS);
+  assert_board_layout_error("invalid_bonus_square15.txt",
+                            BOARD_LAYOUT_LOAD_STATUS_INVALID_BONUS_SQUARE);
+}
+
 void test_board() {
   test_board_layout_success();
+  test_board_layout_error();
   test_board_all();
 }
