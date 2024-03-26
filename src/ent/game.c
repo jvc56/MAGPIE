@@ -247,6 +247,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
                                              cross_set_index,
                                              rightside_rightx_set);
   }
+  
   if (nonempty_to_left && nonempty_to_right) {
     uint64_t letter_set = 0;
     if (left_lpath_is_valid && right_lpath_is_valid) {
