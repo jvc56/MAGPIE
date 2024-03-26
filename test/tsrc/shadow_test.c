@@ -1,6 +1,7 @@
 #include <assert.h>
 
 #include "../../src/def/move_defs.h"
+
 #include "../../src/ent/anchor.h"
 #include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
