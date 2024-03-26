@@ -25,7 +25,6 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
-#include "../str/move_string.h"
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
@@ -84,7 +83,7 @@ typedef struct MoveGen {
   uint8_t last_word_multiplier;
 
   // Used to reset the arrays after finishing shadow_play_right, which may have
-  // rearranged the ordering of the multipliiers used while shadowing left.
+  // rearranged the ordering of the multipliers used while shadowing left.
   UnrestrictedMultiplier desc_xw_muls_copy[WORD_ALIGNING_RACK_SIZE];
   uint16_t desc_eff_letter_muls_copy[WORD_ALIGNING_RACK_SIZE];
 
@@ -571,7 +570,7 @@ static inline void shadow_record(MoveGen *gen) {
       tiles_played_score +
       (gen->shadow_mainword_restricted_score * gen->shadow_word_multiplier) +
       gen->shadow_perpendicular_additional_score + bingo_bonus;
-  
+
   double equity = (double)score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity += static_eval_get_shadow_equity(
@@ -693,7 +692,7 @@ static inline void remove_score_from_descending_tile_scores(MoveGen *gen,
   // The tile has already been removed from the rack, so num_available_tiles
   // is actually the desired new size we want to be in sync with.
   const int num_available_tiles = rack_get_total_letters(&gen->player_rack);
-  for (int i = num_available_tiles; i >= 0; i--) {
+  for (int i = num_available_tiles; i-- > 0;) {
     if (gen->descending_tile_scores[i] == score) {
       for (int j = i; j < num_available_tiles; j++) {
         gen->descending_tile_scores[j] = gen->descending_tile_scores[j + 1];
@@ -719,12 +718,12 @@ static inline bool try_restrict_tile_and_accumulate_score(
     gen->rack_cross_set &= ~possible_letters_here;
   }
   const bool is_cross_word = gen_cache_get_is_cross_word(gen, col);
-  uint16_t tile_score = gen->tile_scores[ml];
+  const uint16_t tile_score = gen->tile_scores[ml];
   remove_score_from_descending_tile_scores(gen, tile_score);
   const int lsm = tile_score * letter_multiplier;
   gen->shadow_mainword_restricted_score += lsm;
   gen->shadow_perpendicular_additional_score +=
-      is_cross_word * lsm * this_word_multiplier;
+      (lsm * this_word_multiplier) & -is_cross_word;
   return true;
 }
 
@@ -839,6 +838,8 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   gen->current_right_col = original_current_right_col;
   gen->tiles_played = original_tiles_played;
 
+  // The change of shadow_word_multiplier necessitates recalculating effective
+  // multipliers.
   maybe_recalculate_effective_multipliers(gen);
 }
 
@@ -1159,7 +1160,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
     // Set the best leaves and maybe add exchanges.
     // gen->leave_map.current_index moves differently when filling
     // leave_values than when reading from it to generate plays. Start at 0,
-    // which represents using (exchanging) gen->olayer_rack->number_of_letters
+    // which represents using (exchanging) gen->player_rack->number_of_letters
     // tiles and keeping 0 tiles.
     leave_map_set_current_index(&gen->leave_map, 0);
     uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
@@ -1223,19 +1224,6 @@ void generate_moves(Game *game, move_record_t move_record_type,
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for
       // this anchor, highest_possible_equity was invalid.
-      if (better_play_has_been_found(gen, anchor_highest_possible_equity)) {
-        StringBuilder *sb = create_string_builder();
-        const Move *best_move = gen_get_readonly_best_move(gen);
-        string_builder_add_move(gen->board, best_move, gen->ld, sb);
-        printf("highest_possible_equity was invalid. value: %f\n",
-               anchor_highest_possible_equity);
-        printf(
-            "Better play has been found than should have been possible for "
-            "this anchor, highest_possible_equity was invalid. Move: %s has "
-            "equity %f\n",
-            string_builder_peek(sb), move_get_equity(best_move));
-        destroy_string_builder(sb);
-      }
       assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
     }
   }
