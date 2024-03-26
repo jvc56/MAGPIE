@@ -23,6 +23,11 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
   game_load_cgp(game, cgp);
   rack_set_to_string(ld, player_rack, rack);
 
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_game(game, NULL, sb);
+  printf("%s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+
   generate_moves_for_game(game, 0, move_list);
 
   AnchorList *anchor_list = gen_get_anchor_list(0);
@@ -562,6 +567,7 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 25));
 
+/*
   // 9B (EXON)B(IN) 19
   // This should actually be 15 for (EXON)I(IN). The I being in the rightx set
   // for EXON is the reason shadow_right records a play here, but only the cross
@@ -572,15 +578,24 @@ void test_shadow_score() {
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 19));
 
   // 4H (N)B(ARGUFY) 17
-  // Likewise you could say his should actually be 15 for (N)I(ARGUFY).
+  // Likewise you could say this should actually be 15 for (N)I(ARGUFY).
   // But actually since ARGUFY has empty leftx, we should be able to avoid
   // recording here at all. TODO to add that pruning also.
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 17));
+*/
 
   // 7J I(A)IB(R) 16
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 16));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 16));
+
+  // 9B (EXON)I(IN) 15
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 15));
+
+  // 4H (N)I(ARGUFY) 17
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 15));
 
   // C4 BII(RAX) 15
   assert(
@@ -612,6 +627,31 @@ void test_shadow_score() {
 
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 12), 70));
+
+  game_reset(game);
+  char addle[300] =
+      "5E1p7/1A1C1G1E5S1/1JIZ1G1R3V1P1/HO1APE1A3U1I1/OW1RAD1EXFIL1T1/"
+      "MA2W2OI2G1T1/IN2K2N2MOBE1/E2FYRDS2o1ANS/3O6V1N1H/3U6ADD1E/3S6BOO1E/"
+      "3T6LOR1L/INCITANT1AYRE2/3E5U5/3REQUITE5 L/I 467/473 0 lex CSW21";
+  load_and_generate(game, move_list, player, addle, "L");
+
+  // 15D (REQUITE)L 
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 17));
+
+  // 5H (EXFIL)L(T)
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 17));
+
+  // 3L (V)I(P)
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 16));
+
+  // F13 (A)L(Q)
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 14));
+
+  // 5A (OW)L(RAD)
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 10));
+
+  // 10K (ADD)L(E)
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 9));
 
   game_destroy(game);
   move_list_destroy(move_list);

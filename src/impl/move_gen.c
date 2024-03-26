@@ -117,6 +117,24 @@ typedef struct MoveGen {
   MoveList *move_list;
 } MoveGen;
 
+void debug_print_bitset(uint64_t bitset) {
+  if (bitset == TRIVIAL_CROSS_SET) {
+    printf("{TRIVIAL_CROSS_SET}");
+  } else {
+    printf("{");
+    for (int i = 0; i < BOARD_DIM; i++) {
+      if (bitset & (1ULL << i)) {
+        if (i == 0) {
+          printf("?");
+        } else {
+          printf("%c", 'A' + i - 1);
+        }
+      }
+    }
+    printf("}");
+  }
+}
+
 // Cache move generators since destroying
 // and recreating a movegen for
 // every request to generate moves would
@@ -753,8 +771,8 @@ static inline bool try_restrict_tile_and_accumulate_score(
     return false;
   }
   const uint8_t ml = get_single_bit_index(possible_letters_here);
-  // char printable_letter = ml ? 'A' + ml - 1 : '?';
-  // printf("col %d must be %c\n", col, printable_letter);
+  //char printable_letter = ml ? 'A' + ml - 1 : '?';
+  //printf("col %d must be %c\n", col, printable_letter);
   rack_take_letter(&gen->player_rack, ml);
   if (rack_get_letter(&gen->player_rack, ml) == 0) {
     gen->rack_cross_set &= ~possible_letters_here;
@@ -808,8 +826,20 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
 
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_right_col);
+/*        
+    printf("shadow_play_right: cross_set ");
+    debug_print_bitset(cross_set);
+    printf(", rack_cross_set ");
+    debug_print_bitset(gen->rack_cross_set);
+    printf(", anchor_right_extension_set ");
+    debug_print_bitset(gen->anchor_right_extension_set);
+    printf("\n");
+*/    
     const uint64_t possible_letters_here =
         cross_set & gen->rack_cross_set & gen->anchor_right_extension_set;
+    //printf("shadow_play_right: possible_letters_here ");
+    //debug_print_bitset(possible_letters_here);
+    //printf("\n");        
     gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
     if (possible_letters_here == 0) {
       break;
@@ -922,8 +952,14 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
 
 static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
   for (;;) {
+    //printf("anchor_right_extension_set: ");
+    //debug_print_bitset(gen->anchor_right_extension_set);
+    //printf("\n");
     const uint64_t possible_tiles_for_shadow_right =
         gen->anchor_right_extension_set & gen->rack_cross_set;
+    //printf("playthrough_shadow_play_left: possible_tiles_for_shadow_right ");
+    //debug_print_bitset(possible_tiles_for_shadow_right);
+    //printf("\n");
     if (possible_tiles_for_shadow_right != 0) {
       shadow_play_right(gen, is_unique);
     }
@@ -1043,6 +1079,9 @@ static inline void shadow_start_playthrough(MoveGen *gen,
 static inline void shadow_start(MoveGen *gen) {
   const uint64_t any_extension_set =
       gen->anchor_left_extension_set | gen->anchor_right_extension_set;
+  //printf("shadow_start: any_extension_set ");
+  //debug_print_bitset(any_extension_set);
+  //printf("\n");
   if (any_extension_set == 0) {
     return;
   }
@@ -1103,8 +1142,14 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
 
-  // printf("shadow_play_for_anchor: row %d, col %d, dir %d\n",
-  //        gen->current_row_index, col, gen->dir);
+/*
+  printf("shadow_play_for_anchor: row %d, col %d, dir %d leftx ",
+          gen->current_row_index, col, gen->dir);
+  debug_print_bitset(gen->anchor_left_extension_set);
+  printf(", rightx ");
+  debug_print_bitset(gen->anchor_right_extension_set);
+  printf("\n");
+*/
 
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
