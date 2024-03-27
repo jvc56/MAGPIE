@@ -540,8 +540,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 
     // rightx only tells you which tiles can go to the right of a string which
     // begins a word. So it can only filter here if no tiles have been played
-    // so far. If gen->tiles_played is 0, this recursive_gen call would placing
-    // the first tile of a play and continuing to the right.
+    // so far. If gen->tiles_played is 0, this recursive_gen call would be
+    // placing the first tile of a play and continuing to the right.
     if ((gen->tiles_played != 0) ||
         (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
       uint32_t separation_node_index = kwg_get_next_node_index(
