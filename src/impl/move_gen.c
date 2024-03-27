@@ -53,7 +53,7 @@ typedef struct MoveGen {
   bool kwgs_are_shared;
   Rack player_rack;
   Rack player_rack_shadow_right_copy;
-  Rack player_rack_shadow_left_copy;
+  Rack full_player_rack;
   Rack opponent_rack;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
@@ -752,33 +752,33 @@ static inline bool try_restrict_tile_and_accumulate_score(
 
 static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // Save the score totals to be reset after shadowing right.
-  const int original_shadow_main_played_through_score =
-      gen->shadow_mainword_restricted_score;
-  const int original_shadow_perpendicular_additional_score =
-      gen->shadow_perpendicular_additional_score;
-  const int shadow_word_multiplier = gen->shadow_word_multiplier;
+  const int orig_main_restricted_score = gen->shadow_mainword_restricted_score;
+  const int orig_perp_score = gen->shadow_perpendicular_additional_score;
+  const int orig_wordmul = gen->shadow_word_multiplier;
 
   // Save the rack with the tiles available before beginning shadow right. Any
   // tiles restricted by unique hooks will be returned to the rack after
   // exhausting rightward shadow.
   rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
-  const uint64_t original_rack_cross_set = gen->rack_cross_set;
+  const uint64_t orig_rack_cross_set = gen->rack_cross_set;
   memory_copy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
               sizeof(gen->descending_tile_scores));
   // Only recopy the originals if a restriction modified the arrays above.
-  bool restricted_any = false;
+  bool restricted_any_tiles = false;
 
   // Save the state of the unrestricted multiplier arrays so they can be
   // restored after exhausting the rightward shadow plays. Shadowing right
   // changes the values of multipliers found while shadowing left. We need to
   // restore them to how they were before looking further left.
-  const int original_num_unrestricted_multipliers =
+  const int orig_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
   memory_copy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
               sizeof(gen->descending_cross_word_multipliers));
   memory_copy(gen->desc_eff_letter_muls_copy,
               gen->descending_effective_letter_multipliers,
               sizeof(gen->descending_effective_letter_multipliers));
+  bool changed_any_restricted_multipliers = false;
+
   const int original_current_right_col = gen->current_right_col;
   const int original_tiles_played = gen->tiles_played;
 
@@ -814,9 +814,10 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
     if (try_restrict_tile_and_accumulate_score(
             gen, possible_letters_here, letter_multiplier, this_word_multiplier,
             gen->current_right_col)) {
-      restricted_any = true;
+      restricted_any_tiles = true;
     } else {
       insert_unrestricted_multipliers(gen, gen->current_right_col);
+      changed_any_restricted_multipliers = true;
     }
     if (cross_set == TRIVIAL_CROSS_SET) {
       is_unique = true;
@@ -841,27 +842,27 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   }
 
   // Restore state for score totals
-  gen->shadow_mainword_restricted_score =
-      original_shadow_main_played_through_score;
-  gen->shadow_perpendicular_additional_score =
-      original_shadow_perpendicular_additional_score;
-  gen->shadow_word_multiplier = shadow_word_multiplier;
+  gen->shadow_mainword_restricted_score = orig_main_restricted_score;
+  gen->shadow_perpendicular_additional_score = orig_perp_score;
+  gen->shadow_word_multiplier = orig_wordmul;
 
   // Restore state for restricted squares
-  if (restricted_any) {
+  if (restricted_any_tiles) {
     rack_copy(&gen->player_rack, &gen->player_rack_shadow_right_copy);
-    gen->rack_cross_set = original_rack_cross_set;
+    gen->rack_cross_set = orig_rack_cross_set;
     memory_copy(gen->descending_tile_scores, gen->descending_tile_scores_copy,
                 sizeof(gen->descending_tile_scores));
   }
 
   // Restore state for unrestricted squares
-  gen->num_unrestricted_multipliers = original_num_unrestricted_multipliers;
-  memory_copy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
-              sizeof(gen->descending_cross_word_multipliers));
-  memory_copy(gen->descending_effective_letter_multipliers,
-              gen->desc_eff_letter_muls_copy,
-              sizeof(gen->descending_effective_letter_multipliers));
+  if (changed_any_restricted_multipliers) {
+    gen->num_unrestricted_multipliers = orig_num_unrestricted_multipliers;
+    memory_copy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
+                sizeof(gen->descending_cross_word_multipliers));
+    memory_copy(gen->descending_effective_letter_multipliers,
+                gen->desc_eff_letter_muls_copy,
+                sizeof(gen->descending_effective_letter_multipliers));
+  }
 
   // Restore state to undo other shadow progress
   gen->current_right_col = original_current_right_col;
@@ -974,9 +975,6 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
     return;
   }
 
-  rack_copy(&gen->player_rack_shadow_left_copy, &gen->player_rack);
-  const uint64_t original_rack_cross_set = gen->rack_cross_set;
-
   // Play tile on empty anchor square and set scoring parameters
   const uint8_t bonus_square =
       gen_cache_get_bonus_square(gen, gen->current_left_col);
@@ -1004,9 +1002,6 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   maybe_recalculate_effective_multipliers(gen);
 
   nonplaythrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
-
-  rack_copy(&gen->player_rack, &gen->player_rack_shadow_left_copy);
-  gen->rack_cross_set = original_rack_cross_set;
 }
 
 static inline void shadow_start_playthrough(MoveGen *gen,
@@ -1037,7 +1032,7 @@ static inline void shadow_start(MoveGen *gen) {
   }
 
   const uint64_t original_rack_cross_set = gen->rack_cross_set;
-  rack_copy(&gen->player_rack_shadow_left_copy, &gen->player_rack);
+  rack_copy(&gen->full_player_rack, &gen->player_rack);
 
   const uint8_t current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
@@ -1048,7 +1043,7 @@ static inline void shadow_start(MoveGen *gen) {
   }
 
   gen->rack_cross_set = original_rack_cross_set;
-  rack_copy(&gen->player_rack, &gen->player_rack_shadow_left_copy);
+  rack_copy(&gen->player_rack, &gen->full_player_rack);
 }
 
 // The algorithm used in this file for
