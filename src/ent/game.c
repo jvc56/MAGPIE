@@ -222,6 +222,14 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
         board, row, col - 1, through_dir, cross_set_index, leftside_leftx_set);
     board_set_right_extension_set_with_blank(
         board, row, col - 1, through_dir, cross_set_index, leftside_rightx_set);
+    // Mark the empty square left of the leftside played tiles with the leftx
+    // set for this sequence of tiles. Move generation can use this to avoid
+    // trying to play through tiles we can prove to be dead ends.
+    if (left_col > 0) {
+      board_set_left_extension_set_with_blank(board, row, left_col - 1,
+                                              through_dir, cross_set_index,
+                                              leftside_leftx_set);
+    }
   }
 
   const bool nonempty_to_right = right_col > col;
@@ -246,6 +254,9 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     board_set_right_extension_set_with_blank(board, row, right_col, through_dir,
                                              cross_set_index,
                                              rightside_rightx_set);
+    // Mark this empty square with the leftx set for rightside played tiles.
+    board_set_left_extension_set_with_blank(
+        board, row, col, through_dir, cross_set_index, rightside_leftx_set);
   }
 
   if (nonempty_to_left && nonempty_to_right) {

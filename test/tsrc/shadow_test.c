@@ -576,15 +576,15 @@ void test_shadow_score() {
 
   // C4 BII(RAX) 15
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 15));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 15));
 
   // J10 (MU)IIB 15
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 15));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 15));
 
   // 12K II(AI) 14
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 6), 14));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 14));
 
   game_reset(game);
   char toeless[300] =
@@ -619,6 +619,17 @@ void test_shadow_score() {
 
   // 10K (ADD)L(E)
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 9));
+
+  game_reset(game);
+  char magpies[300] =
+      "15/15/15/15/15/15/15/MAGPIE2LUMBAGO/15/15/15/15/15/15/15 SS/Q "
+      "0/0 0 lex CSW21";
+  load_and_generate(game, move_list, player, magpies, "SS");
+
+  // G7 SS hooking MAGPIES for 15, not (MAGPIES)SS(LUMBAGO) for 50.
+  // LUMBAGO is not left-extendable with an S.
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 15));
 
   game_destroy(game);
   move_list_destroy(move_list);
