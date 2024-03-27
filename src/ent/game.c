@@ -9,7 +9,6 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
-
 #include "bag.h"
 #include "board.h"
 #include "kwg.h"
@@ -222,6 +221,14 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
         board, row, col - 1, through_dir, cross_set_index, leftside_leftx_set);
     board_set_right_extension_set_with_blank(
         board, row, col - 1, through_dir, cross_set_index, leftside_rightx_set);
+    // Mark the empty square left of the leftside played tiles with the leftx
+    // set for this sequence of tiles. Move generation can use this to avoid
+    // trying to play through tiles we can prove to be dead ends.
+    if (left_col > 0) {
+      board_set_left_extension_set_with_blank(board, row, left_col - 1,
+                                              through_dir, cross_set_index,
+                                              leftside_leftx_set);
+    }
   }
 
   const bool nonempty_to_right = right_col > col;
@@ -246,6 +253,9 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     board_set_right_extension_set_with_blank(board, row, right_col, through_dir,
                                              cross_set_index,
                                              rightside_rightx_set);
+    // Mark this empty square with the leftx set for rightside played tiles.
+    board_set_left_extension_set_with_blank(
+        board, row, col, through_dir, cross_set_index, rightside_leftx_set);
   }
 
   if (nonempty_to_left && nonempty_to_right) {
@@ -415,9 +425,8 @@ int draw_rack_from_bag(const LetterDistribution *ld, Bag *bag, Rack *rack,
   return number_of_letters_set;
 }
 
-cgp_parse_status_t
-parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
-                                     Game *game) {
+cgp_parse_status_t parse_cgp_racks_with_string_splitter(
+    const StringSplitter *player_racks, Game *game) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   int number_of_letters_added =
       draw_rack_from_bag(game->ld, game->bag, player_get_rack(game->players[0]),
@@ -469,8 +478,8 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
   return cgp_parse_status;
 }
 
-cgp_parse_status_t
-parse_cgp_consecutive_zeros(Game *game, const char *cgp_consecutive_zeros) {
+cgp_parse_status_t parse_cgp_consecutive_zeros(
+    Game *game, const char *cgp_consecutive_zeros) {
   if (!is_all_digits_or_empty(cgp_consecutive_zeros)) {
     return CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS;
   }
