@@ -93,6 +93,9 @@ void test_board_all() {
 
   game_load_cgp(game, VS_OXY);
 
+  assert(board_are_bonus_squares_symmetric_by_transposition(board));
+  assert(board_are_bonus_squares_symmetric_by_transposition(board2));
+
   assert(board_get_is_cross_word(board, 0, 0, 1));
   assert(board_get_is_cross_word(board, 1, 0, 1));
   assert(board_get_is_cross_word(board, 3, 0, 1));

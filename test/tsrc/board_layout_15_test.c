@@ -2,6 +2,8 @@
 
 void test_board_layout_15() {
   // TODO:
+  // Symmetric board one anchor opening
+  // Asymmetric board two anchors opening
   // Opening with quadruple word
   // next play with quadruple letter
   // Oxyphenbutazone with quadruple word and letter
@@ -13,4 +15,5 @@ void test_board_layout_15() {
   // Maze
 
   // Validate play over block
+  // Validate play for symmetric and asymmetric board
 }

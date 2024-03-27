@@ -29,6 +29,10 @@ uint8_t board_layout_get_bonus_square(const BoardLayout *bl, int row, int col) {
   return bl->bonus_squares[board_layout_get_index(row, col)];
 }
 
+int board_layout_get_start_coord(const BoardLayout *bl, int index) {
+  return bl->start_coords[index];
+}
+
 BoardLayout *board_layout_create() {
   return malloc_or_die(sizeof(BoardLayout));
 }

@@ -39,6 +39,8 @@ typedef struct Board {
   // traverse backwards for score
   uint32_t node_index;
   bool path_is_valid;
+  // Start coordinates used to reset the board
+  int start_coords[2];
 } Board;
 
 // Square: Letter
@@ -535,6 +537,19 @@ static inline void board_update_anchors(Board *board, int row, int col) {
   }
 }
 
+static inline bool
+board_are_bonus_squares_symmetric_by_transposition(const Board *board) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = row + 1; col < BOARD_DIM; col++) {
+      if (board_get_bonus_square(board, row, col) !=
+          board_get_bonus_square(board, col, row)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 static inline void board_update_all_anchors(Board *board) {
   if (board->tiles_played > 0) {
     for (int i = 0; i < BOARD_DIM; i++) {
@@ -550,7 +565,12 @@ static inline void board_update_all_anchors(Board *board) {
       }
     }
     board_reset_number_of_anchor_rows(board);
-    board_set_anchor(board, BOARD_DIM / 2, BOARD_DIM / 2, 0, true);
+    board_set_anchor(board, board->start_coords[0], board->start_coords[1],
+                     BOARD_HORIZONTAL_DIRECTION, true);
+    if (!board_are_bonus_squares_symmetric_by_transposition(board)) {
+      board_set_anchor(board, board->start_coords[0], board->start_coords[1],
+                       BOARD_VERTICAL_DIRECTION, true);
+    }
   }
 }
 
@@ -574,6 +594,9 @@ static inline void board_reset(Board *board) {
 }
 
 static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
+  for (int i = 0; i < 2; i++) {
+    board->start_coords[i] = board_layout_get_start_coord(bl, i);
+  }
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       uint8_t board_layout_bonus_value =
@@ -591,8 +614,8 @@ static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
 
 static inline Board *board_create(const BoardLayout *bl) {
   Board *board = malloc_or_die(sizeof(Board));
-  board_reset(board);
   board_apply_layout(bl, board);
+  board_reset(board);
   return board;
 }
 
