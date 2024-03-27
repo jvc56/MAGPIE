@@ -405,7 +405,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   // immediately left of the current block of played tiles.
   //
   // If current_letter is empty, leftx is the set of letters that could
-  // immediately left of the block of tiles to the right of this square.
+  // go immediately left of the block of tiles to the right of this square.
   //
   // In either case, it is a mask applied to the tile that could be placed by
   // this function.
