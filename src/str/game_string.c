@@ -60,8 +60,9 @@ void string_builder_add_board_row(const LetterDistribution *ld,
   for (int i = 0; i < BOARD_DIM; i++) {
     uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-      string_builder_add_char(game_string,
-                              CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i]);
+      string_builder_add_char(
+          game_string,
+          bonus_square_value_to_char(board_get_bonus_square(board, row, i)));
     } else {
       string_builder_add_user_visible_letter(ld, game_string, current_letter);
     }

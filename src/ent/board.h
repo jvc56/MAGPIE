@@ -10,6 +10,8 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
+#include "board_layout.h"
+
 #include "letter_distribution.h"
 
 #include "../util/log.h"
@@ -39,6 +41,8 @@ typedef struct Board {
   // traverse backwards for score
   uint32_t node_index;
   bool path_is_valid;
+  // Start coordinates used to reset the board
+  int start_coords[2];
 } Board;
 
 // Square: Letter
@@ -57,6 +61,12 @@ static inline uint8_t square_get_bonus_square(const Square *s) {
 
 static inline void square_set_bonus_square(Square *s, uint8_t bonus_square) {
   s->bonus_square = bonus_square;
+}
+
+// Square: is brick
+
+static inline bool square_get_is_brick(const Square *s) {
+  return s->bonus_square == BRICK_VALUE;
 }
 
 // Square: Cross sets
@@ -234,6 +244,11 @@ static inline void board_set_letter(Board *b, int row, int col,
 static inline uint8_t board_get_bonus_square(const Board *b, int row, int col) {
   // Cross index doesn't matter for bonus square reads.
   return square_get_bonus_square(board_get_readonly_square(b, row, col, 0, 0));
+}
+
+static inline uint8_t board_get_is_brick(const Board *b, int row, int col) {
+  // Cross index doesn't matter for bonus square reads.
+  return square_get_is_brick(board_get_readonly_square(b, row, col, 0, 0));
 }
 
 static inline void board_set_bonus_square(Board *b, int row, int col,
@@ -526,49 +541,39 @@ static inline void board_reset_all_cross_scores(Board *board) {
   }
 }
 
-static inline bool board_is_position_valid(int row, int col) {
-  return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM;
+static inline bool board_is_position_valid(const Board *board, int row,
+                                           int col) {
+  return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM &&
+         !board_get_is_brick(board, row, col);
 }
 
 static inline bool board_are_left_and_right_empty(const Board *board, int row,
                                                   int col) {
-  return !((board_is_position_valid(row, col - 1) &&
+  return !((board_is_position_valid(board, row, col - 1) &&
             !board_is_empty(board, row, col - 1)) ||
-           (board_is_position_valid(row, col + 1) &&
+           (board_is_position_valid(board, row, col + 1) &&
             !board_is_empty(board, row, col + 1)));
 }
 
 static inline bool board_are_all_adjacent_squares_empty(const Board *board,
                                                         int row, int col) {
-  return !((board_is_position_valid(row, col - 1) &&
+  return !((board_is_position_valid(board, row, col - 1) &&
             !board_is_empty(board, row, col - 1)) ||
-           (board_is_position_valid(row, col + 1) &&
+           (board_is_position_valid(board, row, col + 1) &&
             !board_is_empty(board, row, col + 1)) ||
-           (board_is_position_valid(row - 1, col) &&
+           (board_is_position_valid(board, row - 1, col) &&
             !board_is_empty(board, row - 1, col)) ||
-           (board_is_position_valid(row + 1, col) &&
+           (board_is_position_valid(board, row + 1, col) &&
             !board_is_empty(board, row + 1, col)));
 }
 
 static inline int board_get_word_edge(const Board *board, int row, int col,
                                       int word_dir) {
-  while (board_is_position_valid(row, col) &&
+  while (board_is_position_valid(board, row, col) &&
          !board_is_empty(board, row, col)) {
     col += word_dir;
   }
   return col - word_dir;
-}
-
-static inline board_layout_t
-board_layout_string_to_board_layout(const char *board_layout_string) {
-  if (strings_equal(board_layout_string, BOARD_LAYOUT_CROSSWORD_GAME_NAME)) {
-    return BOARD_LAYOUT_CROSSWORD_GAME;
-  }
-  if (strings_equal(board_layout_string,
-                    BOARD_LAYOUT_SUPER_CROSSWORD_GAME_NAME)) {
-    return BOARD_LAYOUT_SUPER_CROSSWORD_GAME;
-  }
-  return BOARD_LAYOUT_UNKNOWN;
 }
 
 static inline void board_update_anchors(Board *board, int row, int col) {
@@ -610,6 +615,19 @@ static inline void board_update_anchors(Board *board, int row, int col) {
   }
 }
 
+static inline bool
+board_are_bonus_squares_symmetric_by_transposition(const Board *board) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = row + 1; col < BOARD_DIM; col++) {
+      if (board_get_bonus_square(board, row, col) !=
+          board_get_bonus_square(board, col, row)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 static inline void board_update_all_anchors(Board *board) {
   if (board->tiles_played > 0) {
     for (int i = 0; i < BOARD_DIM; i++) {
@@ -625,7 +643,12 @@ static inline void board_update_all_anchors(Board *board) {
       }
     }
     board_reset_number_of_anchor_rows(board);
-    board_set_anchor(board, BOARD_DIM / 2, BOARD_DIM / 2, 0, true);
+    board_set_anchor(board, board->start_coords[0], board->start_coords[1],
+                     BOARD_HORIZONTAL_DIRECTION, true);
+    if (!board_are_bonus_squares_symmetric_by_transposition(board)) {
+      board_set_anchor(board, board->start_coords[0], board->start_coords[1],
+                       BOARD_VERTICAL_DIRECTION, true);
+    }
   }
 }
 
@@ -648,32 +671,29 @@ static inline void board_reset(Board *board) {
   board_update_all_anchors(board);
 }
 
-static inline void board_init_bonus_squares(Board *b) {
-  int i = 0;
+static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
+  for (int i = 0; i < 2; i++) {
+    board->start_coords[i] = board_layout_get_start_coord(bl, i);
+  }
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      uint8_t bonus_value;
-      char bonus_square = CROSSWORD_GAME_BOARD[i++];
-      if (bonus_square == BONUS_TRIPLE_WORD_SCORE) {
-        bonus_value = 0x31;
-      } else if (bonus_square == BONUS_DOUBLE_WORD_SCORE) {
-        bonus_value = 0x21;
-      } else if (bonus_square == BONUS_DOUBLE_LETTER_SCORE) {
-        bonus_value = 0x12;
-      } else if (bonus_square == BONUS_TRIPLE_LETTER_SCORE) {
-        bonus_value = 0x13;
-      } else {
-        bonus_value = 0x11;
+      uint8_t board_layout_bonus_value =
+          board_layout_get_bonus_square(bl, row, col);
+      for (int dir = 0; dir < 2; dir++) {
+        for (int ci = 0; ci < 2; ci++) {
+          int board_index =
+              get_square_index(board->transposed, row, col, dir, ci);
+          board->squares[board_index].bonus_square = board_layout_bonus_value;
+        }
       }
-      board_set_bonus_square(b, row, col, bonus_value);
     }
   }
 }
 
-static inline Board *board_create() {
+static inline Board *board_create(const BoardLayout *bl) {
   Board *board = malloc_or_die(sizeof(Board));
+  board_apply_layout(bl, board);
   board_reset(board);
-  board_init_bonus_squares(board);
   return board;
 }
 

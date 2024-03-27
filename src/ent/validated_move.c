@@ -126,7 +126,7 @@ move_validation_status_t validate_tiles_played_with_mls(
     int move_dir = move_get_dir(move);
     bool connected = false;
     for (int i = 0; i < number_of_machine_letters; i++) {
-      if (!board_is_position_valid(current_row, current_col)) {
+      if (!board_is_position_valid(board, current_row, current_col)) {
         return MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS;
       }
       uint8_t board_letter = board_get_letter(board, current_row, current_col);

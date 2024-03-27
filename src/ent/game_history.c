@@ -153,8 +153,8 @@ struct GameHistory {
   char *uid;
   char *lexicon_name;
   char *ld_name;
+  char *board_layout_name;
   game_variant_t game_variant;
-  board_layout_t board_layout;
   GameHistoryPlayer *players[2];
   int number_of_events;
   LetterDistribution *ld;
@@ -226,13 +226,14 @@ game_variant_t game_history_get_game_variant(const GameHistory *history) {
   return history->game_variant;
 }
 
-void game_history_set_board_layout(GameHistory *history,
-                                   board_layout_t board_layout) {
-  history->board_layout = board_layout;
+void game_history_set_board_layout_name(GameHistory *history,
+                                        const char *board_layout_name) {
+  free(history->board_layout_name);
+  history->board_layout_name = string_duplicate(board_layout_name);
 }
 
-board_layout_t game_history_get_board_layout(const GameHistory *history) {
-  return history->board_layout;
+const char *game_history_get_board_layout_name(const GameHistory *history) {
+  return history->board_layout_name;
 }
 
 void game_history_set_player(GameHistory *history, int player_index,
@@ -270,7 +271,7 @@ GameHistory *game_history_create() {
   game_history->lexicon_name = NULL;
   game_history->ld_name = NULL;
   game_history->game_variant = GAME_VARIANT_UNKNOWN;
-  game_history->board_layout = BOARD_LAYOUT_UNKNOWN;
+  game_history->board_layout_name = NULL;
   game_history->players[0] = NULL;
   game_history->players[1] = NULL;
   game_history->ld = NULL;
@@ -289,6 +290,7 @@ void game_history_destroy(GameHistory *game_history) {
   free(game_history->uid);
   free(game_history->lexicon_name);
   free(game_history->ld_name);
+  free(game_history->board_layout_name);
 
   ld_destroy(game_history->ld);
 

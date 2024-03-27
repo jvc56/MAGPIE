@@ -3,8 +3,11 @@ SRC_LEXICA_PATH="$SRC_PATH/lexica"
 DST_LEXICA_PATH="data/lexica"
 SRC_STRATEGY_PATH="$SRC_PATH/strategy"
 DST_STRATEGY_PATH="data/strategy"
+SRC_LAYOUTS_PATH="$SRC_PATH/layouts"
+DST_LAYOUTS_PATH="data/layouts"
 mkdir -p "$DST_LEXICA_PATH" &&
 mkdir -p "$DST_STRATEGY_PATH" &&
+mkdir -p "$DST_LAYOUTS_PATH" &&
 
 lexicons=("CSW21" "NWL20" "DISC2" "FRA20" "OSPS49")
 data_types=("kwg" "klv2")
@@ -28,3 +31,7 @@ yes | gunzip "$DST_LEXICA_PATH/$csw_leaves"
 # Download the win percentages
 
 wget -O "$DST_STRATEGY_PATH/winpct.csv" "$SRC_STRATEGY_PATH/winpct.csv" 
+
+# Download the standard layouts
+
+wget -O "$DST_LAYOUTS_PATH/standard15.txt" "$SRC_LAYOUTS_PATH/standard15.txt" 

@@ -117,7 +117,7 @@ int traverse_backwards_for_score(const Board *board,
                                  const LetterDistribution *ld, int row,
                                  int col) {
   int score = 0;
-  while (board_is_position_valid(row, col)) {
+  while (board_is_position_valid(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
@@ -135,7 +135,7 @@ int traverse_backwards_for_score(const Board *board,
 void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
                         uint32_t node_index, bool check_letter_set,
                         int left_most_col) {
-  while (board_is_position_valid(row, col)) {
+  while (board_is_position_valid(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
@@ -170,13 +170,14 @@ void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
 
 void game_gen_cross_set(Game *game, int row, int col, int dir,
                         int cross_set_index) {
-  if (!board_is_position_valid(row, col)) {
+  Board *board = game_get_board(game);
+
+  if (!board_is_position_valid(board, row, col)) {
     return;
   }
 
   const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
   const LetterDistribution *ld = game_get_ld(game);
-  Board *board = game_get_board(game);
 
   if (!board_is_empty(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index, 0);
@@ -580,7 +581,7 @@ void pre_allocate_backups(Game *game) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
     game->game_backups[i]->bag = bag_create(ld);
-    game->game_backups[i]->board = board_create();
+    game->game_backups[i]->board = board_duplicate(game_get_board(game));
     game->game_backups[i]->p0rack = rack_create(ld_size);
     game->game_backups[i]->p1rack = rack_create(ld_size);
   }
@@ -610,7 +611,7 @@ Game *game_create(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
   game->ld = config_get_ld(config);
   game->bag = bag_create(game->ld);
-  game->board = board_create();
+  game->board = board_create(config_get_board_layout(config));
   for (int player_index = 0; player_index < 2; player_index++) {
     game->players[player_index] = player_create(config, player_index);
   }
