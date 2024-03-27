@@ -6,6 +6,7 @@
 #include "alphabet_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
+#include "board_layout_15_test.h"
 #include "board_test.h"
 #include "command_test.h"
 #include "config_test.h"
@@ -49,6 +50,7 @@ void run_all() {
   test_bag();
   test_rack();
   test_board();
+  test_board_layout_15();
   test_cross_set();
   test_move();
   test_game();

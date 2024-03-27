@@ -11,12 +11,12 @@
 #include "../util/util.h"
 
 static const uint8_t bonus_square_chars_to_values_map[256] = {
-    [' '] = 0x11, ['\''] = 0x12, ['-'] = 0x21, ['"'] = 0x13, ['='] = 0x31,
-};
+    [' '] = 0x11, ['\''] = 0x12, ['-'] = 0x21, ['"'] = 0x13,
+    ['='] = 0x31, ['*'] = 0x14,  ['~'] = 0x41, [BRICK_CHAR] = BRICK_VALUE};
 
 static const char bonus_square_values_to_chars_map[256] = {
-    [0x11] = ' ', [0x12] = '\'', [0x21] = '-', [0x13] = '"', [0x31] = '=',
-};
+    [0x11] = ' ', [0x12] = '\'', [0x21] = '-', [0x13] = '"',
+    [0x31] = '=', [0x14] = '*',  [0x41] = '~', [BRICK_VALUE] = BRICK_CHAR};
 
 struct BoardLayout {
   int start_coords[2];

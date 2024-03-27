@@ -59,6 +59,12 @@ static inline void square_set_bonus_square(Square *s, uint8_t bonus_square) {
   s->bonus_square = bonus_square;
 }
 
+// Square: is brick
+
+static inline bool square_get_is_brick(const Square *s) {
+  return s->bonus_square == BRICK_VALUE;
+}
+
 // Square: Cross sets
 
 static inline uint64_t square_get_cross_set(const Square *s) {
@@ -216,6 +222,11 @@ static inline void board_set_letter(Board *b, int row, int col,
 static inline uint8_t board_get_bonus_square(const Board *b, int row, int col) {
   // Cross index doesn't matter for bonus square reads.
   return square_get_bonus_square(board_get_readonly_square(b, row, col, 0, 0));
+}
+
+static inline uint8_t board_get_is_brick(const Board *b, int row, int col) {
+  // Cross index doesn't matter for bonus square reads.
+  return square_get_is_brick(board_get_readonly_square(b, row, col, 0, 0));
 }
 
 static inline void board_set_bonus_square(Board *b, int row, int col,
@@ -450,33 +461,35 @@ static inline void board_reset_all_cross_scores(Board *board) {
   }
 }
 
-static inline bool board_is_position_valid(int row, int col) {
-  return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM;
+static inline bool board_is_position_valid(const Board *board, int row,
+                                           int col) {
+  return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM &&
+         !board_get_is_brick(board, row, col);
 }
 
 static inline bool board_are_left_and_right_empty(const Board *board, int row,
                                                   int col) {
-  return !((board_is_position_valid(row, col - 1) &&
+  return !((board_is_position_valid(board, row, col - 1) &&
             !board_is_empty(board, row, col - 1)) ||
-           (board_is_position_valid(row, col + 1) &&
+           (board_is_position_valid(board, row, col + 1) &&
             !board_is_empty(board, row, col + 1)));
 }
 
 static inline bool board_are_all_adjacent_squares_empty(const Board *board,
                                                         int row, int col) {
-  return !((board_is_position_valid(row, col - 1) &&
+  return !((board_is_position_valid(board, row, col - 1) &&
             !board_is_empty(board, row, col - 1)) ||
-           (board_is_position_valid(row, col + 1) &&
+           (board_is_position_valid(board, row, col + 1) &&
             !board_is_empty(board, row, col + 1)) ||
-           (board_is_position_valid(row - 1, col) &&
+           (board_is_position_valid(board, row - 1, col) &&
             !board_is_empty(board, row - 1, col)) ||
-           (board_is_position_valid(row + 1, col) &&
+           (board_is_position_valid(board, row + 1, col) &&
             !board_is_empty(board, row + 1, col)));
 }
 
 static inline int board_get_word_edge(const Board *board, int row, int col,
                                       int word_dir) {
-  while (board_is_position_valid(row, col) &&
+  while (board_is_position_valid(board, row, col) &&
          !board_is_empty(board, row, col)) {
     col += word_dir;
   }

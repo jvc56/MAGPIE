@@ -121,7 +121,7 @@ int traverse_backwards_for_score(const Board *board,
                                  const LetterDistribution *ld, int row,
                                  int col) {
   int score = 0;
-  while (board_is_position_valid(row, col)) {
+  while (board_is_position_valid(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
@@ -139,7 +139,7 @@ int traverse_backwards_for_score(const Board *board,
 void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
                         uint32_t node_index, bool check_letter_set,
                         int left_most_col) {
-  while (board_is_position_valid(row, col)) {
+  while (board_is_position_valid(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
@@ -174,13 +174,14 @@ void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
 
 void game_gen_cross_set(Game *game, int row, int col, int dir,
                         int cross_set_index) {
-  if (!board_is_position_valid(row, col)) {
+  Board *board = game_get_board(game);
+
+  if (!board_is_position_valid(board, row, col)) {
     return;
   }
 
   const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
   const LetterDistribution *ld = game_get_ld(game);
-  Board *board = game_get_board(game);
 
   if (!board_is_empty(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index, 0);
