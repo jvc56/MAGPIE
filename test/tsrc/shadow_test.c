@@ -570,7 +570,7 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 15));
 
-  // 4H (N)I(ARGUFY) 17
+  // 4H (N)I(ARGUFY) 15
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 15));
 
