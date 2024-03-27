@@ -401,11 +401,19 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
                    int word_multiplier, int cross_score) {
   const uint8_t current_letter = gen_cache_get_letter(gen, col);
+  // If current_letter is nonempty, leftx is the set of letters that could go
+  // immediately left of the current block of played tiles.
+  //
+  // If current_letter is empty, leftx is the set of letters that could
+  // immediately left of the block of tiles to the right of this square.
+  //
+  // In either case, it is a mask applied to the tile that could be placed by
+  // this function.
   uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col) &
                                    gen_cache_get_left_extension_set(gen, col);
   if ((gen->tiles_played == 0) && (col == gen->current_anchor_col + 1)) {
     possible_letters_here &= gen->anchor_right_extension_set;
-  }                              
+  }
   if (possible_letters_here == 1) {
     possible_letters_here = 0;
   }
@@ -530,6 +538,10 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
                     inc_cross_scores);
     }
 
+    // rightx only tells you which tiles can go to the right of a string which
+    // begins a word. So it can only filter here if no tiles have been played
+    // so far. If gen->tiles_played is 0, this recursive_gen call would placing
+    // the first tile of a play and continuing to the right.
     if ((gen->tiles_played != 0) ||
         (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
       uint32_t separation_node_index = kwg_get_next_node_index(
