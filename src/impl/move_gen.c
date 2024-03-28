@@ -143,6 +143,10 @@ static inline uint8_t gen_cache_get_bonus_square(const MoveGen *gen, int col) {
   return square_get_bonus_square(&gen->row_cache[col]);
 }
 
+static inline uint8_t gen_cache_get_is_bricked(const MoveGen *gen, int col) {
+  return square_get_bonus_square(&gen->row_cache[col]) == BRICK_VALUE;
+}
+
 static inline uint64_t gen_cache_get_cross_set(const MoveGen *gen, int col) {
   return square_get_cross_set(&gen->row_cache[col]);
 }
@@ -428,7 +432,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
       return;
     }
 
-    if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
+    if (current_col > 0 && current_col - 1 != gen->last_anchor_col &&
+        !gen_cache_get_is_bricked(gen, current_col - 1)) {
       recursive_gen(gen, current_col - 1, new_node_index, leftstrip, rightstrip,
                     unique_play, inc_main_word_score, inc_word_multiplier,
                     inc_cross_scores);
@@ -437,7 +442,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     uint32_t separation_node_index = kwg_get_next_node_index(
         gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
     if (separation_node_index != 0 && no_letter_directly_left &&
-        gen->current_anchor_col < BOARD_DIM - 1) {
+        gen->current_anchor_col < BOARD_DIM - 1 &&
+        !gen_cache_get_is_bricked(gen, gen->current_anchor_col + 1)) {
       recursive_gen(gen, gen->current_anchor_col + 1, separation_node_index,
                     leftstrip, rightstrip, unique_play, inc_main_word_score,
                     inc_word_multiplier, inc_cross_scores);

@@ -93,6 +93,8 @@ void run_test(const char *subtest) {
     test_rack();
   } else if (strings_equal(subtest, "board")) {
     test_board();
+  } else if (strings_equal(subtest, "layout")) {
+    test_board_layout_15();
   } else if (strings_equal(subtest, "crossset")) {
     test_cross_set();
   } else if (strings_equal(subtest, "move")) {

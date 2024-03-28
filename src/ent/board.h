@@ -463,6 +463,8 @@ static inline void board_reset_all_cross_scores(Board *board) {
   }
 }
 
+// FIXME: might not need to check for brick here since maybe we
+// only need the check in move_gen and move validation.
 static inline bool board_is_position_valid(const Board *board, int row,
                                            int col) {
   return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM &&
@@ -501,6 +503,9 @@ static inline int board_get_word_edge(const Board *board, int row, int col,
 static inline void board_update_anchors(Board *board, int row, int col) {
   board_set_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION, false);
   board_set_anchor(board, row, col, BOARD_VERTICAL_DIRECTION, false);
+  if (board_get_is_brick(board, row, col)) {
+    return;
+  }
   bool tile_above = false;
   bool tile_below = false;
   bool tile_left = false;
@@ -565,11 +570,17 @@ static inline void board_update_all_anchors(Board *board) {
       }
     }
     board_reset_number_of_anchor_rows(board);
-    board_set_anchor(board, board->start_coords[0], board->start_coords[1],
-                     BOARD_HORIZONTAL_DIRECTION, true);
-    if (!board_are_bonus_squares_symmetric_by_transposition(board)) {
-      board_set_anchor(board, board->start_coords[0], board->start_coords[1],
-                       BOARD_VERTICAL_DIRECTION, true);
+
+    int start_row = board->start_coords[0];
+    int start_col = board->start_coords[1];
+    if (!board_get_is_brick(board, start_row, start_col)) {
+      board_set_anchor(board, start_row, start_col, BOARD_HORIZONTAL_DIRECTION,
+                       true);
+      if (start_row != start_col ||
+          !board_are_bonus_squares_symmetric_by_transposition(board)) {
+        board_set_anchor(board, start_row, start_col, BOARD_VERTICAL_DIRECTION,
+                         true);
+      }
     }
   }
 }
@@ -610,12 +621,12 @@ static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
       }
     }
   }
+  board_reset(board);
 }
 
 static inline Board *board_create(const BoardLayout *bl) {
   Board *board = malloc_or_die(sizeof(Board));
   board_apply_layout(bl, board);
-  board_reset(board);
   return board;
 }
 
