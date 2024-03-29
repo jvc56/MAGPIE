@@ -49,8 +49,6 @@ void move_set_tile(Move *move, uint8_t tile, int index) {
   }
 }
 
-void move_set_equity(Move *move, double equity) { move->equity = equity; }
-
 void move_set_all(Move *move, uint8_t strip[], int leftstrip, int rightstrip,
                   int score, int row_start, int col_start, int tiles_played,
                   int dir, game_event_t move_type, double leave_value) {
@@ -152,8 +150,10 @@ void down_heapify(MoveList *ml, int parent_node) {
   int min;
   Move *temp;
 
-  if (left >= ml->count || left < 0) left = -1;
-  if (right >= ml->count || right < 0) right = -1;
+  if (left >= ml->count || left < 0)
+    left = -1;
+  if (right >= ml->count || right < 0)
+    right = -1;
 
   if (left != -1 &&
       compare_moves(ml->moves[parent_node], ml->moves[left], false))

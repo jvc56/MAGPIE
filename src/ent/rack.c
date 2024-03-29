@@ -31,14 +31,6 @@ Rack *rack_duplicate(const Rack *rack) {
   return new_rack;
 }
 
-void rack_copy(Rack *dst, const Rack *src) {
-  for (int i = 0; i < src->dist_size; i++) {
-    dst->array[i] = src->array[i];
-  }
-  dst->number_of_letters = src->number_of_letters;
-  dst->empty = src->empty;
-}
-
 void rack_destroy(Rack *rack) {
   if (!rack) {
     return;
