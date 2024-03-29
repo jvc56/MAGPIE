@@ -463,8 +463,6 @@ static inline void board_reset_all_cross_scores(Board *board) {
   }
 }
 
-// FIXME: might not need to check for brick here since maybe we
-// only need the check in move_gen and move validation.
 static inline bool board_is_position_valid(const Board *board, int row,
                                            int col) {
   return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM &&
