@@ -523,16 +523,9 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
     set_final_indices(gaddag_root, nodes, ordered_pointers);
   }
   const int final_node_count = ordered_pointers->count;
-  printf("final_node_count: %d\n", final_node_count);
   KWG *kwg = kwg_create_empty();
   kwg_allocate_nodes(kwg, final_node_count);
   copy_nodes(ordered_pointers, nodes, kwg);
-  /*
-    for (int i = 0; i < final_node_count; i++) {
-      const uint32_t node = kwg_get_mutable_nodes(kwg)[i];
-      printf("%02x: %08x\n", i, node);
-    }
-    */
   return kwg;
 }
 
