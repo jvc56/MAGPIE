@@ -48,6 +48,7 @@ void exec_state_destroy(ExecState *exec_state) {
   sim_results_destroy(exec_state->sim_results);
   inference_results_destroy(exec_state->inference_results);
   autoplay_results_destroy(exec_state->autoplay_results);
+  conversion_results_destroy(exec_state->conversion_results);
   error_status_destroy(exec_state->error_status);
   free(exec_state);
 }
