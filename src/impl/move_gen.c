@@ -463,7 +463,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
                   inc_main_word_score, inc_word_multiplier, inc_cross_scores);
     }
 
-    if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
+    if (new_node_index != 0 && current_col < BOARD_DIM - 1 &&
+        !gen_cache_get_is_bricked(gen, current_col + 1)) {
       recursive_gen(gen, current_col + 1, new_node_index, leftstrip, rightstrip,
                     unique_play, inc_main_word_score, inc_word_multiplier,
                     inc_cross_scores);
