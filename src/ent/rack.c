@@ -10,60 +10,33 @@
 
 #include "../util/util.h"
 
-struct Rack {
-  int array_size;
-  int *array;
-  bool empty;
-  int number_of_letters;
-};
-
 void rack_reset(Rack *rack) {
-  for (int i = 0; i < (rack->array_size); i++) {
+  for (int i = 0; i < rack->dist_size; i++) {
     rack->array[i] = 0;
   }
   rack->empty = true;
   rack->number_of_letters = 0;
 }
 
-Rack *rack_create(int array_size) {
+Rack *rack_create(int dist_size) {
   Rack *rack = malloc_or_die(sizeof(Rack));
-  rack->array_size = array_size;
-  rack->array = (int *)malloc_or_die(rack->array_size * sizeof(int));
+  rack->dist_size = dist_size;
   rack_reset(rack);
   return rack;
 }
 
 Rack *rack_duplicate(const Rack *rack) {
-  Rack *new_rack = rack_create(rack->array_size);
+  Rack *new_rack = rack_create(rack->dist_size);
   rack_copy(new_rack, rack);
   return new_rack;
-}
-
-void rack_copy(Rack *dst, const Rack *src) {
-  for (int i = 0; i < src->array_size; i++) {
-    dst->array[i] = src->array[i];
-  }
-  dst->number_of_letters = src->number_of_letters;
-  dst->empty = src->empty;
 }
 
 void rack_destroy(Rack *rack) {
   if (!rack) {
     return;
   }
-  free(rack->array);
   free(rack);
 }
-
-int rack_get_dist_size(const Rack *rack) { return rack->array_size; }
-
-int rack_get_letter(const Rack *rack, uint8_t machine_letter) {
-  return rack->array[machine_letter];
-}
-
-int rack_get_total_letters(const Rack *rack) { return rack->number_of_letters; }
-
-bool rack_is_empty(const Rack *rack) { return rack->empty; }
 
 int rack_get_score(const LetterDistribution *ld, const Rack *rack) {
   int sum = 0;
@@ -73,20 +46,23 @@ int rack_get_score(const LetterDistribution *ld, const Rack *rack) {
   return sum;
 }
 
-void rack_take_letter(Rack *rack, uint8_t letter) {
-  rack->array[letter]--;
-  rack->number_of_letters--;
-  if (rack->number_of_letters == 0) {
-    rack->empty = true;
+// Returns true if rack_to_update contains value_to_sub
+// and subtracts value_to_sub from rack_to_update
+// on success.
+// This function is not in the critical path, so
+// we can leave it in the .c file unlike other rack functions.
+bool rack_subtract(Rack *rack_to_update, Rack *value_to_sub) {
+  for (int i = 0; i < rack_to_update->dist_size; i++) {
+    if (rack_to_update->array[i] < value_to_sub->array[i]) {
+      return false;
+    }
+    rack_to_update->array[i] -= value_to_sub->array[i];
+    rack_to_update->number_of_letters -= value_to_sub->array[i];
+    if (rack_to_update->number_of_letters == 0) {
+      rack_to_update->empty = true;
+    }
   }
-}
-
-void rack_add_letter(Rack *rack, uint8_t letter) {
-  rack->array[letter]++;
-  rack->number_of_letters++;
-  if (rack->empty == 1) {
-    rack->empty = false;
-  }
+  return true;
 }
 
 int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
@@ -105,11 +81,11 @@ bool racks_are_equal(const Rack *rack1, const Rack *rack2) {
   if (!rack1 && !rack2) {
     return true;
   }
-  if (!rack1 || !rack2 || rack1->array_size != rack2->array_size ||
+  if (!rack1 || !rack2 || rack1->dist_size != rack2->dist_size ||
       rack1->empty != rack2->empty) {
     return false;
   }
-  for (int i = 0; i < rack1->array_size; i++) {
+  for (int i = 0; i < rack1->dist_size; i++) {
     if (rack1->array[i] != rack2->array[i]) {
       return false;
     }

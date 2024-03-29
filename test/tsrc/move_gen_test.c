@@ -267,6 +267,24 @@ void macondo_tests() {
   destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
   rack_reset(player_get_rack(player));
 
+  // Check that GONOPORE is the best play
+  game_load_cgp(game, FRAWZEY_CGP);
+  rack_set_to_string(ld, player_get_rack(player), "GONOPOR");
+  generate_moves_for_game(game, 0, move_list);
+
+  SortedMoveList *test_generate_gonopore = create_sorted_move_list(move_list);
+
+  move = test_generate_gonopore->moves[0];
+  assert(move_get_score(move) == 86);
+  assert(move_get_tiles_played(move) == 7);
+  assert(move_get_tiles_length(move) == 8);
+  assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_get_row_start(move) == 14);
+  assert(move_get_col_start(move) == 0);
+
+  destroy_sorted_move_list(test_generate_gonopore);
+  rack_reset(player_get_rack(player));
+
   // TestGenerateNoPlays
   game_load_cgp(game, VS_JEREMY);
   rack_set_to_string(ld, player_get_rack(player), "V");
@@ -562,6 +580,36 @@ void distinct_lexica_test() {
   config_destroy(config);
 }
 
+void consistent_tiebreaking_test() {
+  Config *config =
+      create_config_or_die("setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity "
+                           "r1 best r2 best numplays 1");
+  Game *game = game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  MoveList *move_list = move_list_create(1);
+
+  Player *player0 = game_get_player(game, 0);
+  Player *player1 = game_get_player(game, 1);
+  Rack *player0_rack = player_get_rack(player0);
+  Rack *player1_rack = player_get_rack(player1);
+
+  rack_set_to_string(ld, player0_rack, "EEEFVRR");
+  generate_moves_for_game(game, 0, move_list);
+  assert_move(game, move_list, NULL, 0, "8D FEVER 30");
+
+  play_move(move_list_get_move(move_list, 0), game);
+
+  // Should be NUNcLES instead of NoNFUELS
+  rack_set_to_string(ld, player1_rack, "ELNNSU?");
+  generate_moves_for_game(game, 0, move_list);
+
+  assert_move(game, move_list, NULL, 0, "I2 NUNcLES 70");
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen() {
   leave_lookup_test();
   macondo_tests();
@@ -569,4 +617,5 @@ void test_move_gen() {
   equity_test();
   top_equity_play_recorder_test();
   distinct_lexica_test();
+  consistent_tiebreaking_test();
 }

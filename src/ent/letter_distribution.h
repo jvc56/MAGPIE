@@ -5,16 +5,46 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct LetterDistribution LetterDistribution;
+#include "../def/letter_distribution_defs.h"
+
+typedef struct LetterDistribution {
+  int size;
+  int *distribution;
+  int *scores;
+  // machine letters sorted in descending
+  // score order
+  int *score_order;
+  bool *is_vowel;
+  int total_tiles;
+  int max_tile_length;
+  char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
+} LetterDistribution;
 
 LetterDistribution *ld_create(const char *ld_name);
 void ld_destroy(LetterDistribution *ld);
 
-int ld_get_size(const LetterDistribution *ld);
-int ld_get_dist(const LetterDistribution *ld, uint8_t machine_letter);
-int ld_get_score(const LetterDistribution *ld, uint8_t machine_letter);
-int ld_get_score_order(const LetterDistribution *ld, uint8_t machine_letter);
-bool ld_get_is_vowel(const LetterDistribution *ld, uint8_t machine_letter);
+static inline int ld_get_size(const LetterDistribution *ld) { return ld->size; }
+
+static inline int ld_get_dist(const LetterDistribution *ld,
+                              uint8_t machine_letter) {
+  return ld->distribution[machine_letter];
+}
+
+static inline int ld_get_score(const LetterDistribution *ld,
+                               uint8_t machine_letter) {
+  return ld->scores[machine_letter];
+}
+
+static inline int ld_get_score_order(const LetterDistribution *ld,
+                                     uint8_t machine_letter) {
+  return ld->score_order[machine_letter];
+}
+
+static inline bool ld_get_is_vowel(const LetterDistribution *ld,
+                                   uint8_t machine_letter) {
+  return ld->is_vowel[machine_letter];
+}
+
 int ld_get_total_tiles(const LetterDistribution *ld);
 int ld_get_max_tile_length(const LetterDistribution *ld);
 char *ld_get_default_name(const char *lexicon_name);
@@ -26,8 +56,14 @@ int ld_str_to_mls(const LetterDistribution *ld, const char *str,
                   bool allow_played_through_marker, uint8_t *mls,
                   size_t mls_size);
 
-uint8_t get_blanked_machine_letter(uint8_t ml);
-uint8_t get_unblanked_machine_letter(uint8_t ml);
-bool get_is_blanked(uint8_t ml);
+static inline uint8_t get_blanked_machine_letter(uint8_t ml) {
+  return ml | BLANK_MASK;
+}
+
+static inline uint8_t get_unblanked_machine_letter(uint8_t ml) {
+  return ml & UNBLANK_MASK;
+}
+
+static inline bool get_is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
 
 #endif

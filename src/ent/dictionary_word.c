@@ -5,6 +5,7 @@
 
 #include "../def/kwg_defs.h"
 #include "../def/dictionary_word_defs.h"
+
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -95,7 +96,6 @@ int dictionary_word_compare(const void* a, const void* b) {
 }
 
 void dictionary_word_list_sort(DictionaryWordList* dictionary_word_list) {
-  printf("sorting %d words\n", dictionary_word_list->count);
   qsort(dictionary_word_list->dictionary_words, dictionary_word_list->count,
         sizeof(DictionaryWord), dictionary_word_compare);
 }

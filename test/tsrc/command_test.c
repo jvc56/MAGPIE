@@ -156,9 +156,10 @@ void assert_command_status_and_output(ExecState *exec_state,
 
   execute_command_async(exec_state, command);
 
+  // Let the async command start up
+  sleep(1);
+
   if (should_halt) {
-    // If halting, let the search start
-    sleep(2);
     char *status_string = command_search_status(exec_state, true);
     // For now, we do not care about the contents of of the status,
     // we just want to thread_control_halt the command.
@@ -171,8 +172,8 @@ void assert_command_status_and_output(ExecState *exec_state,
   char *test_output = get_string_from_file(test_output_filename);
   int newlines_in_output = count_newlines(test_output);
   if (newlines_in_output != expected_output_line_count) {
-    printf("output counts do not match %d != %d\n", newlines_in_output,
-           expected_output_line_count);
+    printf("%s\noutput counts do not match %d != %d\n", command_without_io,
+           newlines_in_output, expected_output_line_count);
     printf("got:\n%s", test_output);
     assert(0);
   }
@@ -210,32 +211,63 @@ void test_command_execution() {
                                    false, 5, 0, 0);
 
   // Sim finishing probabilistically
+  // Get moves from just user input
+  assert_command_status_and_output(exec_state, "cgp " ZILLION_OPENING_CGP,
+                                   false, 5, 0, 0);
+  assert_command_status_and_output(exec_state, "m 8F.LIN,8D.ZILLION,8F.ZILLION",
+                                   false, 5, 0, 0);
   assert_command_status_and_output(
       exec_state,
-      "go sim plies 2 cond 95 threads 8 numplays 3 i 100000 check 300 "
-      "info 500 cgp " ZILLION_OPENING_CGP,
-      false, 60, 5, 0);
+      "go sim plies 2 cond 95 threads 8 i 100000 check 300 info 500", false, 60,
+      5, 0);
 
-  // Sim statically
+  MoveList *ml = exec_state_get_move_list(exec_state);
+  assert(move_list_get_count(ml) == 3);
+
+  assert_command_status_and_output(exec_state, "cgp " ZILLION_OPENING_CGP,
+                                   false, 5, 0, 0);
+  // Confirm that loading a cgp resets the movelist
+  assert(move_list_get_count(ml) == 0);
+
+  // Add moves before generating to confirm that the gen command
+  // resets the movelist
   assert_command_status_and_output(
-      exec_state,
-      "go sim plies 2 cond 95 threads 8 numplays 20 i 100000 check 300 "
-      "info 70 static cgp " ZILLION_OPENING_CGP,
-      false, 60, 21, 0);
+      exec_state, "m 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
+
+  // Sim a single iterations
+  // Get 18 moves from move gen and confirm movelist was reset.
+  assert_command_status_and_output(
+      exec_state, "go gen numplays 18 cgp " ZILLION_OPENING_CGP, false, 5, 19,
+      0);
+  // Add 4 more moves:
+  // 2 already exist
+  // 2 are new
+  // To get 20 total moves
+  assert_command_status_and_output(
+      exec_state, "m 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
+  assert_command_status_and_output(
+      exec_state, "go sim plies 2 cond 95 threads 8 i 1 check 300 info 70",
+      false, 60, 22, 0);
 
   // Sim finishes with max iterations
+  // Add user input moves that will be
+  // cleared by the subsequent movegen command.
+  assert_command_status_and_output(exec_state, "m ex.SOI,ex.IO,ex.S", false, 5,
+                                   0, 0);
+  // Get all moves through move gen
   assert_command_status_and_output(
-      exec_state,
-      "go sim plies 2 threads 10 numplays 15 i "
-      "200 info 60 nostatic cgp " DELDAR_VS_HARSHAN_CGP,
-      false, 60, 68, 0);
+      exec_state, "go gen numplays 15 cgp " DELDAR_VS_HARSHAN_CGP, false, 5, 16,
+      0);
+  assert_command_status_and_output(
+      exec_state, "go sim plies 2 threads 10 i 200 info 60", false, 60, 68, 0);
 
   // Sim interrupted by user
   assert_command_status_and_output(
-      exec_state,
-      "go sim plies 2 threads 10 numplays 15 i "
-      "1000000 info 1000000 cgp " DELDAR_VS_HARSHAN_CGP,
-      true, 5, 17, 0);
+      exec_state, "go gen numplays 15 cgp " DELDAR_VS_HARSHAN_CGP, false, 5, 16,
+      0);
+  assert_command_status_and_output(
+      exec_state, "go sim plies 2 threads 10 i 1000000 info 1000000", true, 5,
+      17, 0);
 
   // Infer finishes normally
   assert_command_status_and_output(
@@ -268,9 +300,10 @@ void test_command_execution() {
     // Catalan
     assert_command_status_and_output(exec_state, "position cgp " CATALAN_CGP,
                                      false, 5, 0, 0);
+    assert_command_status_and_output(
+        exec_state, "go gen r1 all r2 all numplays 15", false, 5, 16, 0);
     assert_command_status_and_output(exec_state,
-                                     "go sim plies 2 threads 10 numplays 15 i "
-                                     "200 info 60 cgp " CATALAN_CGP,
+                                     "go sim plies 2 threads 10 i 200 info 60",
                                      false, 60, 68, 0);
     assert_command_status_and_output(
         exec_state,
@@ -285,11 +318,11 @@ void test_command_execution() {
         false, 30, 1, 0);
     // CSW
     assert_command_status_and_output(
-        exec_state, "position cgp " ION_OPENING_CGP, false, 5, 0, 0);
-
+        exec_state, "position cgp " DELDAR_VS_HARSHAN_CGP, false, 5, 0, 0);
+    assert_command_status_and_output(
+        exec_state, "go gen r1 all r2 all numplays 15", false, 5, 16, 0);
     assert_command_status_and_output(exec_state,
-                                     "go sim plies 2 threads 10 numplays 15 i "
-                                     "200 info 60 cgp " DELDAR_VS_HARSHAN_CGP,
+                                     "go sim plies 2 threads 10 i 200 info 60 ",
                                      false, 60, 68, 0);
 
     assert_command_status_and_output(
@@ -307,10 +340,10 @@ void test_command_execution() {
     // Polish
     assert_command_status_and_output(exec_state, "position cgp " POLISH_CGP,
                                      false, 5, 0, 0);
-
+    assert_command_status_and_output(
+        exec_state, "go gen r1 all r2 all numplays 15", false, 5, 16, 0);
     assert_command_status_and_output(exec_state,
-                                     "go sim plies 2 threads 10 numplays 15 i "
-                                     "200 info 60 cgp " POLISH_CGP,
+                                     "go sim plies 2 threads 10 i 200 info 60 ",
                                      false, 60, 68, 0);
 
     assert_command_status_and_output(
@@ -322,7 +355,7 @@ void test_command_execution() {
     assert_command_status_and_output(
         exec_state,
         "go autoplay s1 equity s2 equity "
-        "r1 best r2 best i 10 numplays 1 lex OSPS44",
+        "r1 best r2 best i 10 numplays 1 lex OSPS49",
         false, 30, 1, 0);
   }
   exec_state_destroy(exec_state);
@@ -404,12 +437,13 @@ void test_exec_single_command() {
 }
 
 void test_exec_file_commands() {
+  // Generate moves for the position (16 output)
   // Run a sim in CSW, then (68 output)
   // run the same sim with no parameters, then (68 output)
   // run a sim that exits with a warning, then (1 warning)
   // run an inference in Polish, then (58 output)
   // run autoplay in CSW (1 output)
-  // total output = 195
+  // total output = 211
   // total error = 1
 
   // Separate into distinct lines to prove
@@ -417,7 +451,8 @@ void test_exec_file_commands() {
   const char *commands_file_content =
       "i 200\n"
       "info 60\n"
-      "cgp " DELDAR_VS_HARSHAN_CGP "\ngo sim plies 2 threads 10 numplays 15\n"
+      "cgp " DELDAR_VS_HARSHAN_CGP "\ngo gen numplays 15"
+      "\ngo sim plies 2 threads 10\n"
       "go sim\n"
       "go sim lex CSW21 i 10h00\n"
       "pindex 0 score 20 exch 0\n"
@@ -435,11 +470,42 @@ void test_exec_file_commands() {
   char *iter_error_substr = get_formatted_string(
       "code %d", CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
 
-  test_process_command(commands_file_invocation, 195,
+  test_process_command(commands_file_invocation, 211,
                        "info infertotalracks 6145", 1, iter_error_substr);
 
   delete_file(commands_filename);
   free(iter_error_substr);
+  free(commands_filename);
+  free(commands_file_invocation);
+}
+
+void test_exec_add_phony_words() {
+  // Add 5 moves, 3 of which are phony (3 output)
+  // run autoplay in CSW (1 output)
+  // total output = 1
+  // total error = 3
+
+  // Separate into distinct lines to prove
+  // the command file is being read.
+  const char *commands_file_content =
+      "lex CSW21 s1 equity s2 equity\n"
+      "cgp " OPENING_CGP "\n"
+      "m 8g.ABC,8g.CAB,8f.GAF,8D.FADGE,8H.BACED\n"
+      "cgp " ION_OPENING_CGP "\n"
+      "m 7d.GED,7f.IEE,H7.AN,7H.AI\n"
+      "go autoplay i 10 ";
+
+  char *commands_filename = get_test_filename("test_commands");
+
+  write_string_to_file(commands_filename, "w", commands_file_content);
+
+  char *commands_file_invocation =
+      get_formatted_string("infile %s", commands_filename);
+
+  test_process_command(commands_file_invocation, 1, "autoplay 10", 4,
+                       "Phonies formed from 7F IEE 11: II,EO,IEE");
+
+  delete_file(commands_filename);
   free(commands_filename);
   free(commands_file_invocation);
 }
@@ -551,6 +617,7 @@ void test_exec_console_command() {
 void test_command() {
   test_command_execution();
   test_exec_single_command();
+  test_exec_add_phony_words();
   test_exec_file_commands();
   test_exec_ucgi_command();
   test_exec_console_command();

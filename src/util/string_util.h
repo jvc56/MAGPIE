@@ -5,17 +5,17 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 bool has_prefix(const char *pre, const char *str);
-bool is_all_whitespace_or_empty(const char *str);
+bool is_string_empty_or_whitespace(const char *str);
+bool is_string_empty_or_null(const char *str);
 bool is_all_digits_or_empty(const char *str);
 char *get_formatted_string(const char *format, ...);
 bool strings_equal(const char *str1, const char *str2);
 bool strings_iequal(const char *str1, const char *str2);
 char *string_duplicate(const char *str);
 char *string_copy(char *dest, const char *src);
-bool is_string_empty(const char *str1);
-bool is_string_empty_or_null(const char *str);
 void remove_first_newline(char *str);
 size_t string_length(const char *str);
 void trim_whitespace(char *str);
@@ -25,7 +25,9 @@ char *get_string_from_file(const char *filename);
 void write_string_to_file(const char *filename, const char *mode,
                           const char *string);
 char *iso_8859_1_to_utf8(const char *iso_8859_1_string);
-void *memory_copy(void *dest, const void *src, size_t n);
+static inline void *memory_copy(void *dest, const void *src, size_t n) {
+  return memcpy(dest, src, n);
+}
 int memory_compare(const void *s1, const void *s2, size_t n);
 
 char *get_substring(const char *input_string, int start_index, int end_index);

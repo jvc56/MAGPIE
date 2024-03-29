@@ -24,6 +24,7 @@
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/timer.h"
+#include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
 
 #include "gameplay.h"
@@ -443,28 +444,14 @@ void *simmer_worker(void *uncasted_simmer_worker) {
 }
 
 sim_status_t simulate_internal(const Config *config, Game *game,
-                               MoveList *move_list, SimResults *sim_results) {
+                               const MoveList *move_list,
+                               SimResults *sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
-  int num_simmed_plays = move_list_get_capacity(move_list);
-
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
-
-  move_list_sort_moves(move_list);
-
-  int number_of_moves_generated = move_list_get_count(move_list);
-
-  if (config_get_static_search_only(config)) {
-    print_ucgi_static_moves(game, move_list, thread_control);
-    return SIM_STATUS_SUCCESS;
-  }
-
-  if (number_of_moves_generated < num_simmed_plays) {
-    num_simmed_plays = number_of_moves_generated;
-  }
+  int num_simmed_plays = move_list_get_count(move_list);
 
   if (num_simmed_plays == 0) {
-    return SIM_STATUS_SUCCESS;
+    return SIM_STATUS_NO_MOVES;
   }
 
   Simmer *simmer =
@@ -498,7 +485,7 @@ sim_status_t simulate_internal(const Config *config, Game *game,
 }
 
 sim_status_t simulate(const Config *config, const Game *input_game,
-                      SimResults *sim_results) {
+                      const MoveList *move_list, SimResults *sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
   thread_control_unhalt(thread_control);
 
@@ -507,13 +494,9 @@ sim_status_t simulate(const Config *config, const Game *input_game,
 
   Game *game = game_duplicate(input_game);
 
-  int num_simmed_plays = config_get_num_plays(config);
-  MoveList *move_list = move_list_create(num_simmed_plays);
-
   sim_status_t sim_status =
       simulate_internal(config, game, move_list, sim_results);
 
-  move_list_destroy(move_list);
   game_destroy(game);
   gen_destroy_cache();
 

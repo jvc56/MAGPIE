@@ -12,11 +12,15 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
 
+#define TRIVIAL_CROSS_SET_STRING "trivial"
+
 typedef struct SortedMoveList {
   int count;
   Move **moves;
 } SortedMoveList;
 
+uint64_t cross_set_from_string(const LetterDistribution *ld,
+                               const char *letters);
 void draw_rack_to_string(const LetterDistribution *ld, Bag *bag, Rack *rack,
                          char *letters, int player_index);
 void play_top_n_equity_move(Game *game, int n);
@@ -34,7 +38,7 @@ void assert_strings_equal(const char *str1, const char *str2);
 void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
                  int move_index, const char *expected_move_string);
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
-void assert_boards_are_equal(const Board *b1, const Board *b2);
+void assert_boards_are_equal(Board *b1, Board *b2);
 void print_game(Game *game, MoveList *move_list);
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,

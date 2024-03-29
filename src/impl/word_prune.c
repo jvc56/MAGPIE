@@ -111,12 +111,13 @@ void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
   if (node_index == 0) {
     return;
   }
-  for (int i = node_index;; i++) {
-    const int ml = kwg_tile(kwg, i);
-    const int new_node_index = kwg_arc_index(kwg, i);
+  for (uint32_t i = node_index;; i++) {
+    const uint32_t node = kwg_node(kwg, i);
+    const uint8_t ml = kwg_node_tile(node);
+    const int new_node_index = kwg_node_arc_index(node);
     if ((rack_get_letter(rack, ml) > 0) ||
         (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0)) {
-      int accepts = kwg_accepts(kwg, i);
+      int accepts = kwg_node_accepts(node);
       if (rack_get_letter(rack, ml) > 0) {
         rack_take_letter(rack, ml);
         word[tiles_played] = ml;
@@ -133,7 +134,7 @@ void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
         rack_add_letter(rack, BLANK_MACHINE_LETTER);
       }
     }
-    if (kwg_is_end(kwg, i)) {
+    if (kwg_node_is_end(node)) {
       break;
     }
   }
@@ -155,15 +156,16 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
   const uint8_t current_letter = board_row->letters[col];
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     const uint8_t ml = current_letter;  // already unblanked
-    int next_node_index = 0;
+    uint32_t next_node_index = 0;
     bool accepts = false;
-    for (int i = node_index;; i++) {
-      if (kwg_tile(kwg, i) == ml) {
-        next_node_index = kwg_arc_index(kwg, i);
-        accepts = kwg_accepts(kwg, i);
+    for (uint32_t i = node_index;; i++) {
+      const uint32_t node = kwg_node(kwg, i);
+      if (kwg_node_tile(node) == ml) {
+        next_node_index = kwg_node_arc_index(node);
+        accepts = kwg_node_accepts(node);
         break;
       }
-      if (kwg_is_end(kwg, i)) {
+      if (kwg_node_is_end(node)) {
         break;
       }
     }
@@ -172,12 +174,13 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
                             rightstrip, leftmost_col, tiles_played, strip,
                             possible_word_list);
   } else if (!rack_is_empty(rack)) {
-    for (int i = node_index;; i++) {
-      const uint8_t ml = kwg_tile(kwg, i);
+    for (uint32_t i = node_index;; i++) {
+      const uint32_t node = kwg_node(kwg, i);
+      const uint8_t ml = kwg_node_tile(node);
       if (ml != SEPARATION_MACHINE_LETTER) {
         if (rack_get_letter(rack, ml) > 0) {
-          const uint32_t next_node_index = kwg_arc_index(kwg, i);
-          const bool accepts = kwg_accepts(kwg, i);
+          const uint32_t next_node_index = kwg_node_arc_index(node);
+          const bool accepts = kwg_node_accepts(node);
           rack_take_letter(rack, ml);
           playthrough_words_go_on(board_row, kwg, rack, col, anchor_col, ml,
                                   next_node_index, accepts, leftstrip,
@@ -185,8 +188,8 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
                                   strip, possible_word_list);
           rack_add_letter(rack, ml);
         } else if (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0) {
-          const uint32_t next_node_index = kwg_arc_index(kwg, i);
-          const bool accepts = kwg_accepts(kwg, i);
+          const uint32_t next_node_index = kwg_node_arc_index(node);
+          const bool accepts = kwg_node_accepts(node);
           rack_take_letter(rack, BLANK_MACHINE_LETTER);
           playthrough_words_go_on(board_row, kwg, rack, col, anchor_col, ml,
                                   next_node_index, accepts, leftstrip,
@@ -195,7 +198,7 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
           rack_add_letter(rack, BLANK_MACHINE_LETTER);
         }
       }
-      if (kwg_is_end(kwg, i)) {
+      if (kwg_node_is_end(node)) {
         break;
       }
     }
@@ -286,14 +289,15 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
       }
       current_letter = board_row->letters[col];
       const uint8_t ml = current_letter;  // already unblanked
-      int next_node_index = 0;
+      uint32_t next_node_index = 0;
       bool accepts = false;
       for (int i = gaddag_root;; i++) {
-        if (kwg_tile(kwg, i) == ml) {
-          next_node_index = kwg_arc_index(kwg, i);
+        const uint32_t node = kwg_node(kwg, i);
+        if (kwg_node_tile(node) == ml) {
+          next_node_index = kwg_node_arc_index(node);
           break;
         }
-        if (kwg_is_end(kwg, i)) {
+        if (kwg_node_is_end(node)) {
           break;
         }
       }
