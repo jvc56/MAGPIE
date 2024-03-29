@@ -84,7 +84,6 @@ KWG *kwg_create_empty() {
 }
 
 bool kwg_write_to_file(const KWG *kwg, const char* filename) {
-  printf("kwg_write_to_file filename: %s\n", filename);
   FILE *stream = fopen(filename, "wb");
   if (!stream) {
     printf("could not open stream\n");

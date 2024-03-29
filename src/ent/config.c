@@ -1099,6 +1099,7 @@ config_load_status_t load_config_with_parsed_args(
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_AUTOPLAY:
+    case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_SET_OPTIONS:
       config_load_status = CONFIG_LOAD_STATUS_MISPLACED_COMMAND;
       break;
