@@ -537,8 +537,6 @@ conversion_status_t convert(const Config *config,
     if (!input_file) {
       return CONVERT_STATUS_INPUT_FILE_ERROR;
     }
-    struct timespec start_time;
-    clock_gettime(CLOCK_MONOTONIC, &start_time);
     while (fgets(line, BOARD_DIM + 2, input_file)) {
       const int word_length = string_length(line) - 1;
       line[word_length] = '\0';

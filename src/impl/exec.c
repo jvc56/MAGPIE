@@ -26,20 +26,17 @@
 #include "autoplay.h"
 #include "gameplay.h"
 #include "inference.h"
+#include "kwg_maker.h"
 #include "move_gen.h"
 #include "simmer.h"
 
 #include "../str/game_string.h"
 #include "../str/move_string.h"
 #include "../str/sim_string.h"
+
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
-#include "autoplay.h"
-#include "inference.h"
-#include "kwg_maker.h"
-#include "move_gen.h"
-#include "simmer.h"
 
 #define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"
@@ -152,6 +149,7 @@ void execute_convert(const Config *config, ExecState *exec_state) {
       convert(config, exec_state_get_conversion_results(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_CONVERT, (int)status);
+}
 
 move_validation_status_t update_move_list(ExecState *exec_state,
                                           const char *moves) {
@@ -407,12 +405,12 @@ void command_scan_loop(ExecState *exec_state,
     }
 
     switch (exec_mode) {
-      case EXEC_MODE_CONSOLE:
-        execute_command_sync(exec_state, input);
-        break;
-      case EXEC_MODE_UCGI:
-        process_ucgi_command(exec_state, input);
-        break;
+    case EXEC_MODE_CONSOLE:
+      execute_command_sync(exec_state, input);
+      break;
+    case EXEC_MODE_UCGI:
+      process_ucgi_command(exec_state, input);
+      break;
     }
   }
   free(input);
