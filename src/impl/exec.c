@@ -11,7 +11,6 @@
 #include "../def/inference_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/config.h"
 #include "../ent/error_status.h"
 #include "../ent/exec_state.h"
@@ -19,17 +18,15 @@
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-
-#include "autoplay.h"
-#include "inference.h"
-#include "move_gen.h"
-#include "simmer.h"
-
 #include "../str/sim_string.h"
-
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
+#include "autoplay.h"
+#include "inference.h"
+#include "kwg_maker.h"
+#include "move_gen.h"
+#include "simmer.h"
 
 #define UCGI_COMMAND_STRING "ucgi"
 #define QUIT_COMMAND_STRING "quit"
@@ -62,27 +59,30 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
   SimResults *sim_results = NULL;
 
   switch (config_get_command_type(exec_state_get_config(exec_state))) {
-  case COMMAND_TYPE_SIM:
-    sim_results = exec_state_get_sim_results(exec_state);
-    if (!sim_results) {
-      log_warn("Simmer has not been initialized.");
-      return NULL;
-    }
-    status_string = ucgi_sim_stats(exec_state_get_game(exec_state), sim_results,
-                                   thread_control, true);
-    break;
-  case COMMAND_TYPE_AUTOPLAY:
-    status_string = string_duplicate("autoplay status unimplemented");
-    break;
-  case COMMAND_TYPE_LOAD_CGP:
-    status_string = string_duplicate("no status available for load cgp");
-    break;
-  case COMMAND_TYPE_SET_OPTIONS:
-    status_string = string_duplicate("no status available for set options");
-    break;
-  case COMMAND_TYPE_INFER:
-    status_string = string_duplicate("infer status unimplemented");
-    break;
+    case COMMAND_TYPE_SIM:
+      sim_results = exec_state_get_sim_results(exec_state);
+      if (!sim_results) {
+        log_warn("Simmer has not been initialized.");
+        return NULL;
+      }
+      status_string = ucgi_sim_stats(exec_state_get_game(exec_state),
+                                     sim_results, thread_control, true);
+      break;
+    case COMMAND_TYPE_AUTOPLAY:
+      status_string = string_duplicate("autoplay status unimplemented");
+      break;
+    case COMMAND_TYPE_CONVERT:
+      status_string = string_duplicate("convert status unimplemented");
+      break;
+    case COMMAND_TYPE_LOAD_CGP:
+      status_string = string_duplicate("no status available for load cgp");
+      break;
+    case COMMAND_TYPE_SET_OPTIONS:
+      status_string = string_duplicate("no status available for set options");
+      break;
+    case COMMAND_TYPE_INFER:
+      status_string = string_duplicate("infer status unimplemented");
+      break;
   }
   return status_string;
 }
@@ -119,6 +119,13 @@ void execute_infer(const Config *config, ExecState *exec_state) {
                             ERROR_STATUS_TYPE_INFER, (int)status);
 }
 
+void execute_convert(const Config *config, ExecState *exec_state) {
+  conversion_status_t status =
+      convert(config, exec_state_get_conversion_results(exec_state));
+  set_or_clear_error_status(exec_state_get_error_status(exec_state),
+                            ERROR_STATUS_TYPE_CONVERT, (int)status);
+}
+
 void execute_command(ExecState *exec_state) {
   // This function assumes that the config
   // is already loaded
@@ -142,24 +149,27 @@ void execute_command(ExecState *exec_state) {
   }
 
   switch (config_get_command_type(config)) {
-  case COMMAND_TYPE_SET_OPTIONS:
-    // this operation is just for loading the config
-    // so the execution is a no-op
-    break;
-  case COMMAND_TYPE_LOAD_CGP:
-    // Any command can potentially load
-    // a CGP, so it is handled generically
-    // above. No further processing is necessary.
-    break;
-  case COMMAND_TYPE_SIM:
-    execute_sim(config, exec_state);
-    break;
-  case COMMAND_TYPE_AUTOPLAY:
-    execute_autoplay(config, exec_state);
-    break;
-  case COMMAND_TYPE_INFER:
-    execute_infer(config, exec_state);
-    break;
+    case COMMAND_TYPE_SET_OPTIONS:
+      // this operation is just for loading the config
+      // so the execution is a no-op
+      break;
+    case COMMAND_TYPE_LOAD_CGP:
+      // Any command can potentially load
+      // a CGP, so it is handled generically
+      // above. No further processing is necessary.
+      break;
+    case COMMAND_TYPE_SIM:
+      execute_sim(config, exec_state);
+      break;
+    case COMMAND_TYPE_AUTOPLAY:
+      execute_autoplay(config, exec_state);
+      break;
+    case COMMAND_TYPE_INFER:
+      execute_infer(config, exec_state);
+      break;
+    case COMMAND_TYPE_CONVERT:
+      execute_convert(config, exec_state);
+      break;
   }
 }
 
@@ -290,12 +300,12 @@ void command_scan_loop(ExecState *exec_state,
     }
 
     switch (exec_mode) {
-    case EXEC_MODE_CONSOLE:
-      execute_command_sync(exec_state, input);
-      break;
-    case EXEC_MODE_UCGI:
-      process_ucgi_command(exec_state, input);
-      break;
+      case EXEC_MODE_CONSOLE:
+        execute_command_sync(exec_state, input);
+        break;
+      case EXEC_MODE_UCGI:
+        process_ucgi_command(exec_state, input);
+        break;
     }
   }
   free(input);

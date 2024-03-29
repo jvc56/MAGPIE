@@ -9,23 +9,22 @@
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/win_pct_defs.h"
-
+#include "../util/log.h"
+#include "../util/string_util.h"
+#include "../util/util.h"
 #include "board.h"
 #include "letter_distribution.h"
 #include "players_data.h"
 #include "rack.h"
 #include "thread_control.h"
 #include "win_pct.h"
-
-#include "../util/log.h"
-#include "../util/string_util.h"
-#include "../util/util.h"
 
 #define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
 #define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC
@@ -38,6 +37,7 @@
 #define ARG_SIM "sim"
 #define ARG_INFER "infer"
 #define ARG_AUTOPLAY "autoplay"
+#define ARG_CONVERT "convert"
 #define ARG_SET_OPTIONS "setoptions"
 #define ARG_BINGO_BONUS "bb"
 #define ARG_BOARD_LAYOUT "bdn"
@@ -76,6 +76,9 @@
 #define ARG_OUTFILE "outfile"
 #define ARG_CONSOLE_MODE "console"
 #define ARG_UCGI_MODE "ucgi"
+#define ARG_CONVERSION_TYPE "convtype"
+#define ARG_INPUT_FILENAME "input"
+#define ARG_OUTPUT_FILENAME "output"
 
 #define ARG_VAL_MOVE_SORT_EQUITY "equity"
 #define ARG_VAL_MOVE_SORT_SCORE "score"
@@ -83,6 +86,13 @@
 #define ARG_VAL_MOVE_RECORD_BEST "best"
 #define ARG_VAL_MOVE_RECORD_ALL "all"
 
+#define ARG_VAL_CONVERSION_TYPE_TEXT2DAWG "text2dawg"
+#define ARG_VAL_CONVERSION_TYPE_TEXT2GADDAG "text2gaddag"
+#define ARG_VAL_CONVERSION_TYPE_TEXT2KWG "text2kwg"
+#define ARG_VAL_CONVERSION_TYPE_DAWG2TEXT "dawg2text"
+#define ARG_VAL_CONVERSION_TYPE_GADDAG2TEXT "gaddag2text"
+#define ARG_VAL_CONVERSION_TYPE_CSV2KLV "csv2klv"
+#define ARG_VAL_CONVERSION_TYPE_KLV2CSV "klv2csv"
 struct Config {
   // Transient fields
   // these fields are reset
@@ -122,6 +132,10 @@ struct Config {
   // Autoplay
   bool use_game_pairs;
   uint64_t seed;
+  // Convert Data
+  conversion_type_t conversion_type;
+  char *input_filename;
+  char *output_filename;
   // Thread Control
   ThreadControl *thread_control;
   // Config mode and command file execution
@@ -136,6 +150,7 @@ typedef enum {
   ARG_TOKEN_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_AUTOPLAY,
+  ARG_TOKEN_CONVERT,
   ARG_TOKEN_SET_OPTIONS,
   // Game
   // shared between players
@@ -181,6 +196,13 @@ typedef enum {
   ARG_TOKEN_CHECK_STOP_INTERVAL,
   ARG_TOKEN_INFILE,
   ARG_TOKEN_OUTFILE,
+  // Convert Data
+  ARG_TOKEN_CONVERSION_TYPE,
+  ARG_TOKEN_INPUT_FILENAME,
+  ARG_TOKEN_OUTPUT_FILENAME,
+  // paths to files on disk for conversion, distinct from ARG_TOKEN_INFILE and
+  // ARG_TOKEN_OUTFILE which are for input and output for commands and their
+  // results
 
   ARG_TOKEN_CONSOLE_MODE,
   ARG_TOKEN_UCGI_MODE,
@@ -196,7 +218,7 @@ const struct {
   command_t command_type;
   // The sequence of tokens associated with this command type
   arg_token_t arg_token_sequence[3];
-} VALID_COMMAND_SEQUENCES[6] = {
+} VALID_COMMAND_SEQUENCES[7] = {
     // The valid sequences
     // The NUMBER_OF_ARG_TOKENS denotes the end of the given sequence
     {COMMAND_TYPE_LOAD_CGP, {ARG_TOKEN_POSITION, NUMBER_OF_ARG_TOKENS}},
@@ -204,6 +226,7 @@ const struct {
     {COMMAND_TYPE_INFER, {ARG_TOKEN_GO, ARG_TOKEN_INFER, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_AUTOPLAY,
      {ARG_TOKEN_GO, ARG_TOKEN_AUTOPLAY, NUMBER_OF_ARG_TOKENS}},
+    {COMMAND_TYPE_CONVERT, {ARG_TOKEN_CONVERT, NUMBER_OF_ARG_TOKENS}},
     {COMMAND_TYPE_SET_OPTIONS, {ARG_TOKEN_SET_OPTIONS, NUMBER_OF_ARG_TOKENS}},
     // A sequence with just NUMBER_OF_ARG_TOKENS denotes the end of the
     // sequences
@@ -309,6 +332,18 @@ exec_mode_t config_get_exec_mode(const Config *config) {
   return config->exec_mode;
 }
 
+conversion_type_t config_get_conversion_type(const Config *config) {
+  return config->conversion_type;
+}
+
+char *config_get_input_filename(const Config *config) {
+  return config->input_filename;
+}
+
+char *config_get_output_filename(const Config *config) {
+  return config->output_filename;
+}
+
 SingleArg *create_single_arg() {
   SingleArg *single_arg = malloc_or_die(sizeof(SingleArg));
   return single_arg;
@@ -354,6 +389,7 @@ ParsedArgs *create_parsed_args() {
   set_single_arg(parsed_args, index++, ARG_TOKEN_SIM, ARG_SIM, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_INFER, ARG_INFER, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_AUTOPLAY, ARG_AUTOPLAY, 0);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_CONVERT, ARG_CONVERT, 0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_SET_OPTIONS, ARG_SET_OPTIONS,
                  0);
 
@@ -436,6 +472,13 @@ ParsedArgs *create_parsed_args() {
                  0);
   set_single_arg(parsed_args, index++, ARG_TOKEN_UCGI_MODE, ARG_UCGI_MODE, 0);
 
+  // Build Data
+  set_single_arg(parsed_args, index++, ARG_TOKEN_CONVERSION_TYPE,
+                 ARG_CONVERSION_TYPE, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_INPUT_FILENAME,
+                 ARG_INPUT_FILENAME, 1);
+  set_single_arg(parsed_args, index++, ARG_TOKEN_OUTPUT_FILENAME,
+                 ARG_OUTPUT_FILENAME, 1);
   assert(index == NUMBER_OF_ARG_TOKENS);
 
   return parsed_args;
@@ -549,6 +592,43 @@ config_load_status_t load_game_variant_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
+conversion_type_t get_conversion_type_from_string(
+    const char *conversion_type_string) {
+  conversion_type_t conversion_type = CONVERT_UNKNOWN;
+  if (strings_equal(conversion_type_string,
+                    ARG_VAL_CONVERSION_TYPE_TEXT2DAWG)) {
+    conversion_type = CONVERT_TEXT2DAWG;
+  } else if (strings_equal(conversion_type_string,
+                           ARG_VAL_CONVERSION_TYPE_TEXT2GADDAG)) {
+    conversion_type = CONVERT_TEXT2GADDAG;
+  } else if (strings_equal(conversion_type_string,
+                           ARG_VAL_CONVERSION_TYPE_TEXT2KWG)) {
+    conversion_type = CONVERT_TEXT2KWG;
+  } else if (strings_equal(conversion_type_string,
+                           ARG_VAL_CONVERSION_TYPE_DAWG2TEXT)) {
+    conversion_type = CONVERT_DAWG2TEXT;
+  } else if (strings_equal(conversion_type_string,
+                           ARG_VAL_CONVERSION_TYPE_GADDAG2TEXT)) {
+    conversion_type = CONVERT_GADDAG2TEXT;
+  } else if (strings_equal(conversion_type_string,
+                           ARG_VAL_CONVERSION_TYPE_CSV2KLV)) {
+    conversion_type = CONVERT_CSV2KLV;
+  } else if (strings_equal(conversion_type_string,
+                           ARG_VAL_CONVERSION_TYPE_KLV2CSV)) {
+    conversion_type = CONVERT_KLV2CSV;
+  }
+  return conversion_type;
+}
+
+config_load_status_t load_conversion_type_for_config(
+    Config *config, const char *conversion_type) {
+  config->conversion_type = get_conversion_type_from_string(conversion_type);
+  if (config->conversion_type == CONVERT_UNKNOWN) {
+    return CONFIG_LOAD_STATUS_MALFORMED_CONVERSION_TYPE;
+  }
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
 config_load_status_t load_move_sort_type_for_config(
     Config *config, const char *move_sort_type_string, int player_index) {
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
@@ -581,7 +661,6 @@ config_load_status_t load_move_record_type_for_config(
 
 config_load_status_t load_win_pct_for_config(Config *config,
                                              const char *input_win_pct_name) {
-
   const char *win_pct_name = NULL;
   if (is_string_empty_or_null(input_win_pct_name)) {
     win_pct_name = DEFAULT_WIN_PCT;
@@ -619,8 +698,8 @@ config_load_status_t load_plies_for_config(Config *config, const char *plies) {
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_max_iterations_for_config(Config *config, const char *max_iterations) {
+config_load_status_t load_max_iterations_for_config(
+    Config *config, const char *max_iterations) {
   if (!is_all_digits_or_empty(max_iterations)) {
     return CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS;
   }
@@ -628,9 +707,8 @@ load_max_iterations_for_config(Config *config, const char *max_iterations) {
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_stopping_condition_for_config(Config *config,
-                                   const char *stopping_condition) {
+config_load_status_t load_stopping_condition_for_config(
+    Config *config, const char *stopping_condition) {
   if (strings_equal(stopping_condition, "none")) {
     config->stopping_condition = SIM_STOPPING_CONDITION_NONE;
   } else if (strings_equal(stopping_condition, "95")) {
@@ -645,8 +723,8 @@ load_stopping_condition_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_static_search_only_for_config(Config *config, bool static_search_only) {
+config_load_status_t load_static_search_only_for_config(
+    Config *config, bool static_search_only) {
   config->static_search_only = static_search_only;
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
@@ -671,9 +749,8 @@ config_load_status_t load_score_for_config(Config *config, const char *score) {
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_equity_margin_for_config(Config *config,
-                              const char *equity_margin_string) {
+config_load_status_t load_equity_margin_for_config(
+    Config *config, const char *equity_margin_string) {
   if (!is_decimal_number(equity_margin_string)) {
     return CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN;
   }
@@ -709,9 +786,8 @@ config_load_status_t load_random_seed_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_number_of_threads_for_config(Config *config,
-                                  const char *number_of_threads_string) {
+config_load_status_t load_number_of_threads_for_config(
+    Config *config, const char *number_of_threads_string) {
   if (!is_all_digits_or_empty(number_of_threads_string)) {
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
   }
@@ -726,9 +802,8 @@ load_number_of_threads_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_print_info_interval_for_config(Config *config,
-                                    const char *print_info_interval) {
+config_load_status_t load_print_info_interval_for_config(
+    Config *config, const char *print_info_interval) {
   if (!is_all_digits_or_empty(print_info_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL;
   }
@@ -737,9 +812,8 @@ load_print_info_interval_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_check_stop_interval_for_config(Config *config,
-                                    const char *check_stop_interval) {
+config_load_status_t load_check_stop_interval_for_config(
+    Config *config, const char *check_stop_interval) {
   if (!is_all_digits_or_empty(check_stop_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL;
   }
@@ -858,7 +932,6 @@ config_load_status_t load_lexicon_dependent_data_for_config(
     const char *new_p2_lexicon_name, const char *new_p1_leaves_name,
     const char *new_p2_leaves_name, const char *new_ld_name,
     const char *new_rack) {
-
   // Load lexicons first
   const char *existing_p1_lexicon_name = players_data_get_data_name(
       config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
@@ -999,9 +1072,8 @@ config_load_status_t load_lexicon_dependent_data_for_config(
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t
-load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
-
+config_load_status_t load_config_with_parsed_args(
+    Config *config, const ParsedArgs *parsed_args) {
   int args_start_index = set_command_type_for_config(config, parsed_args);
 
   // Set the names using the args
@@ -1025,153 +1097,168 @@ load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
     arg_token_t arg_token = single_arg->token;
     char **arg_values = single_arg->values;
     switch (arg_token) {
-    case ARG_TOKEN_POSITION:
-    case ARG_TOKEN_GO:
-    case ARG_TOKEN_SIM:
-    case ARG_TOKEN_INFER:
-    case ARG_TOKEN_AUTOPLAY:
-    case ARG_TOKEN_SET_OPTIONS:
-      config_load_status = CONFIG_LOAD_STATUS_MISPLACED_COMMAND;
-      break;
-    case ARG_TOKEN_CGP:
-      config_load_status = set_cgp_string_for_config(config, single_arg);
-      break;
-    case ARG_TOKEN_BINGO_BONUS:
-      config_load_status = load_bingo_bonus_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_BOARD_LAYOUT:
-      config_load_status = load_board_layout_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_GAME_VARIANT:
-      config_load_status = load_game_variant_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_LETTER_DISTRIBUTION:
-      new_ld_name = arg_values[0];
-      break;
-    case ARG_TOKEN_LEXICON:
-      new_p1_lexicon_name = arg_values[0];
-      new_p2_lexicon_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P1_NAME:
-      config_load_status =
-          load_player_name_for_config(config, 0, arg_values[0]);
-      break;
-    case ARG_TOKEN_P1_LEXICON:
-      new_p1_lexicon_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P1_LEAVES:
-      new_p1_leaves_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P1_MOVE_SORT_TYPE:
-      config_load_status =
-          load_move_sort_type_for_config(config, arg_values[0], 0);
-      break;
-    case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
-      config_load_status =
-          load_move_record_type_for_config(config, arg_values[0], 0);
-      break;
-    case ARG_TOKEN_P2_NAME:
-      config_load_status =
-          load_player_name_for_config(config, 1, arg_values[0]);
-      break;
-    case ARG_TOKEN_P2_LEXICON:
-      new_p2_lexicon_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P2_LEAVES:
-      new_p2_leaves_name = arg_values[0];
-      break;
-    case ARG_TOKEN_P2_MOVE_SORT_TYPE:
-      config_load_status =
-          load_move_sort_type_for_config(config, arg_values[0], 1);
-      break;
-    case ARG_TOKEN_P2_MOVE_RECORD_TYPE:
-      config_load_status =
-          load_move_record_type_for_config(config, arg_values[0], 1);
-      break;
-    case ARG_TOKEN_KNOWN_OPP_RACK:
-      new_rack = arg_values[0];
-      break;
-    case ARG_TOKEN_WIN_PCT:
-      new_win_pct_name = arg_values[0];
-      break;
-    case ARG_TOKEN_NUMBER_OF_PLAYS:
-      config_load_status = load_num_plays_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_PLIES:
-      config_load_status = load_plies_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_MAX_ITERATIONS:
-      config_load_status =
-          load_max_iterations_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_STOPPING_CONDITION:
-      config_load_status =
-          load_stopping_condition_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_STATIC_SEARCH_ON:
-      config_load_status = load_static_search_only_for_config(config, true);
-      break;
-    case ARG_TOKEN_STATIC_SEARCH_OFF:
-      config_load_status = load_static_search_only_for_config(config, false);
-      break;
-    case ARG_TOKEN_target_index:
-      config_load_status = load_target_index_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_SCORE:
-      config_load_status = load_score_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_EQUITY_MARGIN:
-      config_load_status = load_equity_margin_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_target_number_of_tiles_exchanged:
-      config_load_status = load_target_number_of_tiles_exchanged_for_config(
-          config, arg_values[0]);
-      break;
-    case ARG_TOKEN_GAME_PAIRS_ON:
-      config_load_status = load_use_game_pairs_for_config(config, true);
-      break;
-    case ARG_TOKEN_GAME_PAIRS_OFF:
-      config_load_status = load_use_game_pairs_for_config(config, false);
-      break;
-    case ARG_TOKEN_RANDOM_SEED:
-      config_load_status = load_random_seed_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_NUMBER_OF_THREADS:
-      config_load_status =
-          load_number_of_threads_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_PRINT_INFO_INTERVAL:
-      config_load_status =
-          load_print_info_interval_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_CHECK_STOP_INTERVAL:
-      config_load_status =
-          load_check_stop_interval_for_config(config, arg_values[0]);
-      break;
-    case ARG_TOKEN_INFILE:
-      config->command_set_infile = true;
-      infile = arg_values[0];
-      break;
-    case ARG_TOKEN_OUTFILE:
-      outfile = arg_values[0];
-      break;
-    case ARG_TOKEN_CONSOLE_MODE:
-      if (config->command_set_exec_mode) {
-        config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
-      } else {
-        config_load_status = load_mode_for_config(config, EXEC_MODE_CONSOLE);
-      }
-      break;
-    case ARG_TOKEN_UCGI_MODE:
-      if (config->command_set_exec_mode) {
-        config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
-      } else {
-        config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI);
-      }
-      break;
-    case NUMBER_OF_ARG_TOKENS:
-      log_fatal("invalid token found in args\n");
-      break;
+      case ARG_TOKEN_POSITION:
+      case ARG_TOKEN_GO:
+      case ARG_TOKEN_SIM:
+      case ARG_TOKEN_INFER:
+      case ARG_TOKEN_AUTOPLAY:
+      case ARG_TOKEN_CONVERT:
+      case ARG_TOKEN_SET_OPTIONS:
+        config_load_status = CONFIG_LOAD_STATUS_MISPLACED_COMMAND;
+        break;
+      case ARG_TOKEN_CGP:
+        config_load_status = set_cgp_string_for_config(config, single_arg);
+        break;
+      case ARG_TOKEN_BINGO_BONUS:
+        config_load_status = load_bingo_bonus_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_BOARD_LAYOUT:
+        config_load_status =
+            load_board_layout_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_GAME_VARIANT:
+        config_load_status =
+            load_game_variant_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_LETTER_DISTRIBUTION:
+        new_ld_name = arg_values[0];
+        break;
+      case ARG_TOKEN_LEXICON:
+        new_p1_lexicon_name = arg_values[0];
+        new_p2_lexicon_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P1_NAME:
+        config_load_status =
+            load_player_name_for_config(config, 0, arg_values[0]);
+        break;
+      case ARG_TOKEN_P1_LEXICON:
+        new_p1_lexicon_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P1_LEAVES:
+        new_p1_leaves_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P1_MOVE_SORT_TYPE:
+        config_load_status =
+            load_move_sort_type_for_config(config, arg_values[0], 0);
+        break;
+      case ARG_TOKEN_P1_MOVE_RECORD_TYPE:
+        config_load_status =
+            load_move_record_type_for_config(config, arg_values[0], 0);
+        break;
+      case ARG_TOKEN_P2_NAME:
+        config_load_status =
+            load_player_name_for_config(config, 1, arg_values[0]);
+        break;
+      case ARG_TOKEN_P2_LEXICON:
+        new_p2_lexicon_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P2_LEAVES:
+        new_p2_leaves_name = arg_values[0];
+        break;
+      case ARG_TOKEN_P2_MOVE_SORT_TYPE:
+        config_load_status =
+            load_move_sort_type_for_config(config, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_P2_MOVE_RECORD_TYPE:
+        config_load_status =
+            load_move_record_type_for_config(config, arg_values[0], 1);
+        break;
+      case ARG_TOKEN_KNOWN_OPP_RACK:
+        new_rack = arg_values[0];
+        break;
+      case ARG_TOKEN_WIN_PCT:
+        new_win_pct_name = arg_values[0];
+        break;
+      case ARG_TOKEN_NUMBER_OF_PLAYS:
+        config_load_status = load_num_plays_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_PLIES:
+        config_load_status = load_plies_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_MAX_ITERATIONS:
+        config_load_status =
+            load_max_iterations_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_STOPPING_CONDITION:
+        config_load_status =
+            load_stopping_condition_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_STATIC_SEARCH_ON:
+        config_load_status = load_static_search_only_for_config(config, true);
+        break;
+      case ARG_TOKEN_STATIC_SEARCH_OFF:
+        config_load_status = load_static_search_only_for_config(config, false);
+        break;
+      case ARG_TOKEN_target_index:
+        config_load_status =
+            load_target_index_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_SCORE:
+        config_load_status = load_score_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_EQUITY_MARGIN:
+        config_load_status =
+            load_equity_margin_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_target_number_of_tiles_exchanged:
+        config_load_status = load_target_number_of_tiles_exchanged_for_config(
+            config, arg_values[0]);
+        break;
+      case ARG_TOKEN_GAME_PAIRS_ON:
+        config_load_status = load_use_game_pairs_for_config(config, true);
+        break;
+      case ARG_TOKEN_GAME_PAIRS_OFF:
+        config_load_status = load_use_game_pairs_for_config(config, false);
+        break;
+      case ARG_TOKEN_RANDOM_SEED:
+        config_load_status = load_random_seed_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_NUMBER_OF_THREADS:
+        config_load_status =
+            load_number_of_threads_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_PRINT_INFO_INTERVAL:
+        config_load_status =
+            load_print_info_interval_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_CHECK_STOP_INTERVAL:
+        config_load_status =
+            load_check_stop_interval_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_INFILE:
+        config->command_set_infile = true;
+        infile = arg_values[0];
+        break;
+      case ARG_TOKEN_OUTFILE:
+        outfile = arg_values[0];
+        break;
+      case ARG_TOKEN_CONVERSION_TYPE:
+        config_load_status =
+            load_conversion_type_for_config(config, arg_values[0]);
+        break;
+      case ARG_TOKEN_INPUT_FILENAME:
+        config->input_filename = string_duplicate(arg_values[0]);
+        break;
+      case ARG_TOKEN_OUTPUT_FILENAME:
+        config->output_filename = string_duplicate(arg_values[0]);
+        break;
+      case ARG_TOKEN_CONSOLE_MODE:
+        if (config->command_set_exec_mode) {
+          config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
+        } else {
+          config_load_status = load_mode_for_config(config, EXEC_MODE_CONSOLE);
+        }
+        break;
+      case ARG_TOKEN_UCGI_MODE:
+        if (config->command_set_exec_mode) {
+          config_load_status = CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES;
+        } else {
+          config_load_status = load_mode_for_config(config, EXEC_MODE_UCGI);
+        }
+        break;
+      case NUMBER_OF_ARG_TOKENS:
+        log_fatal("invalid token found in args\n");
+        break;
     }
     if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
       return config_load_status;
@@ -1232,6 +1319,8 @@ Config *config_create_default() {
   config->command_set_cgp = false;
   config->command_set_infile = false;
   config->command_set_exec_mode = false;
+  config->input_filename = NULL;
+  config->output_filename = NULL;
   config->command_type = COMMAND_TYPE_SET_OPTIONS;
   config->ld = NULL;
   config->ld_name = NULL;
@@ -1272,6 +1361,8 @@ void config_destroy(Config *config) {
   free(config->ld_name);
   free(config->cgp);
   free(config->win_pct_name);
+  free(config->input_filename);
+  free(config->output_filename);
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);
   free(config);

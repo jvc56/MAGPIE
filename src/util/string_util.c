@@ -151,6 +151,37 @@ bool has_substring(const char *str, const char *pattern) {
   return (ptr != NULL);
 }
 
+char *safe_get_string_from_file(const char *filename) {
+  FILE *file_handle = fopen(filename, "r");
+  if (!file_handle) {
+    return NULL;
+  }
+
+  // Get the file size by seeking to the end and then back to the beginning
+  fseek(file_handle, 0, SEEK_END);
+  long file_size = ftell(file_handle);
+  fseek(file_handle, 0, SEEK_SET);
+
+  char *result_string =
+      (char *)malloc_or_die(file_size + 1); // +1 for null terminator
+  if (!result_string) {
+    fclose(file_handle);
+    return NULL;
+  }
+
+  size_t bytes_read = fread(result_string, 1, file_size, file_handle);
+  if (bytes_read != (size_t)file_size) {
+    fclose(file_handle);
+    free(result_string);
+    return NULL;
+  }
+
+  result_string[file_size] = '\0';
+  fclose(file_handle);
+
+  return result_string;
+}
+
 char *get_string_from_file(const char *filename) {
   FILE *file_handle = fopen(filename, "r");
   if (!file_handle) {
@@ -615,6 +646,17 @@ StringSplitter *split_string(const char *input_string, const char delimiter,
                              bool ignore_empty) {
   return split_string_by_range(input_string, delimiter, delimiter,
                                ignore_empty);
+}
+
+StringSplitter *safe_split_file_by_newline(const char *filename) {
+  char *file_content = safe_get_string_from_file(filename);
+  if (!file_content) {
+    return NULL;
+  }
+  StringSplitter *file_content_split_by_newline =
+      split_string(file_content, '\n', true);
+  free(file_content);
+  return file_content_split_by_newline;
 }
 
 StringSplitter *split_file_by_newline(const char *filename) {

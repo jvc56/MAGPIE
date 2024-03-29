@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "autoplay_results.h"
+#include "conversion_results.h"
 #include "config.h"
 #include "error_status.h"
 #include "game.h"
@@ -18,6 +19,7 @@ struct ExecState {
   SimResults *sim_results;
   InferenceResults *inference_results;
   AutoplayResults *autoplay_results;
+  ConversionResults *conversion_results;
   ErrorStatus *error_status;
 };
 
@@ -28,6 +30,7 @@ ExecState *exec_state_create() {
   exec_state->sim_results = sim_results_create();
   exec_state->inference_results = inference_results_create();
   exec_state->autoplay_results = autoplay_results_create();
+  exec_state->conversion_results = conversion_results_create();
   exec_state->error_status = error_status_create();
   return exec_state;
 }
@@ -65,6 +68,11 @@ exec_state_get_inference_results(const ExecState *exec_state) {
 AutoplayResults *exec_state_get_autoplay_results(const ExecState *exec_state) {
   return exec_state->autoplay_results;
 }
+
+ConversionResults *exec_state_get_conversion_results(
+    const ExecState *exec_state) {
+      return exec_state->conversion_results;
+} 
 
 ErrorStatus *exec_state_get_error_status(const ExecState *exec_state) {
   return exec_state->error_status;

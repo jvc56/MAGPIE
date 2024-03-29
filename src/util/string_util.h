@@ -46,6 +46,7 @@ StringSplitter *split_string(const char *input_string, const char delimiter,
 void destroy_string_splitter(StringSplitter *string_splitter);
 StringSplitter *split_string_by_newline(const char *input_string,
                                         bool ignore_empty);
+StringSplitter *safe_split_file_by_newline(const char *filename);
 StringSplitter *split_file_by_newline(const char *filename);
 
 typedef struct StringBuilder StringBuilder;

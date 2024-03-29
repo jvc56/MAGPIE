@@ -8,6 +8,7 @@ typedef enum {
   ERROR_STATUS_TYPE_SIM,
   ERROR_STATUS_TYPE_INFER,
   ERROR_STATUS_TYPE_AUTOPLAY,
+  ERROR_STATUS_TYPE_CONVERT,
 } error_status_t;
 
 #endif

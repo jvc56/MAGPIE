@@ -85,6 +85,28 @@ KWG *kwg_create_empty() {
   return kwg;
 }
 
+bool kwg_write_to_file(const KWG *kwg, const char* filename) {
+  printf("kwg_write_to_file filename: %s\n", filename);
+  FILE *stream = fopen(filename, "wb");
+  if (!stream) {
+    printf("could not open stream\n");
+    return false;
+  }
+  for (int i = 0; i < kwg->number_of_nodes; i++) {
+    const uint32_t node = htole32(kwg->nodes[i]);
+    const size_t result = fwrite(&node, sizeof(uint32_t), 1, stream);
+    if (result < 1) {
+      printf("could not write to stream, result: %zu\n", result);
+      return false;
+    }
+  }
+  if (fclose(stream)) {
+    printf("could not close stream\n");
+    return false;
+  }
+  return true;
+}
+
 void kwg_destroy(KWG *kwg) {
   if (!kwg) {
     return;
