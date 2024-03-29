@@ -1,13 +1,15 @@
-#include "../../src/impl/kwg_maker.h"
-
 #include <assert.h>
 
 #include "../../src/def/kwg_defs.h"
+
 #include "../../src/ent/config.h"
 #include "../../src/ent/dictionary_word.h"
-#include "../../src/impl/word_prune.h"
+
+#include "../../src/impl/kwg_maker.h"
+
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
+
 #include "test_util.h"
 
 void add_test_word(const LetterDistribution *ld, DictionaryWordList *words,
@@ -57,7 +59,10 @@ uint32_t kwg_dawg_prefix_arc(const KWG *kwg, LetterDistribution *ld,
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
                                 string_length(human_readable_prefix));
   DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
-  return kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg), prefix, 0);
+  const uint32_t arc =
+      kwg_prefix_arc_aux(kwg, kwg_get_dawg_root_node_index(kwg), prefix, 0);
+  dictionary_word_list_destroy(prefix_list);
+  return arc;
 }
 
 uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
@@ -78,12 +83,14 @@ uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
   dictionary_word_list_add_word(prefix_list, prefix_bytes,
                                 string_length(string_for_conversion));
   DictionaryWord *prefix = dictionary_word_list_get_word(prefix_list, 0);
-  return kwg_prefix_arc_aux(kwg, kwg_get_root_node_index(kwg), prefix, 0);
+  const uint32_t arc =
+      kwg_prefix_arc_aux(kwg, kwg_get_root_node_index(kwg), prefix, 0);
+  dictionary_word_list_destroy(prefix_list);
+  return arc;
 }
 
 void test_qi_xi_xu_word_trie() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "QI");
@@ -118,8 +125,7 @@ void test_qi_xi_xu_word_trie() {
 }
 
 void test_egg_unmerged_gaddag() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "EGG");
@@ -136,8 +142,7 @@ void test_egg_unmerged_gaddag() {
 }
 
 void test_careen_career_unmerged_gaddag() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "CAREEN");
@@ -165,8 +170,7 @@ void test_careen_career_unmerged_gaddag() {
 }
 
 void test_careen_career_exact_merged_gaddag() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "CAREEN");
@@ -189,14 +193,14 @@ void test_careen_career_exact_merged_gaddag() {
   assert(kwg_gaddag_prefix_arc(kwg, ld, "RAC@EE") == c_aree);
   assert(kwg_gaddag_prefix_arc(kwg, ld, "ERAC@E") == c_aree);
   assert(kwg_gaddag_prefix_arc(kwg, ld, "EERAC@") == c_aree);
+
   dictionary_word_list_destroy(words);
   kwg_destroy(kwg);
   config_destroy(config);
 }
 
 void test_two_letter_trie() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   Game *game = game_create(config);
   const Player *player = game_get_player(game, 0);
@@ -229,6 +233,7 @@ void test_two_letter_trie() {
   DictionaryWordList *encoded_words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(two_letter_words);
 
   game_destroy(game);
@@ -237,8 +242,7 @@ void test_two_letter_trie() {
 }
 
 void test_two_letter_merged_dawg() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   Game *game = game_create(config);
   const Player *player = game_get_player(game, 0);
@@ -269,6 +273,7 @@ void test_two_letter_merged_dawg() {
   DictionaryWordList *encoded_words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
   assert_word_lists_are_equal(two_letter_words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
   dictionary_word_list_destroy(two_letter_words);
 
   game_destroy(game);
@@ -276,32 +281,55 @@ void test_two_letter_merged_dawg() {
   config_destroy(config);
 }
 
-void test_word_prune_dawg_and_gaddag() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-
+void test_polish_gaddag() {
+  Config *config = create_config_or_die("setoptions lex OSPS49");
   Game *game = game_create(config);
-  char taurine[300] =
-      "15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
-      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/WE3R1V7/"
-      "AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 lex NWL20;";
-
-  game_load_cgp(game, taurine);
-
+  const LetterDistribution *ld = config_get_ld(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
   DictionaryWordList *words = dictionary_word_list_create();
-  generate_possible_words(game, NULL, words);
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
 
-  KWG *kwg =
-      make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
+  DictionaryWordList *ziet_words = dictionary_word_list_create();
+  const uint8_t ziet = ld_hl_to_ml(ld, "Ź");
+  for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
+    const DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    const uint8_t length = dictionary_word_get_length(word);
+    for (int j = 0; j < length; j++) {
+      if (dictionary_word_get_word(word)[j] == ziet) {
+        dictionary_word_list_add_word(ziet_words,
+                                      dictionary_word_get_word(word), length);
+        break;
+      }
+    }
+  }
   dictionary_word_list_destroy(words);
+  DictionaryWordList *ziet_gaddag_strings = dictionary_word_list_create();
+  add_gaddag_strings(ziet_words, ziet_gaddag_strings);
+
+  KWG *kwg = make_kwg_from_words(ziet_words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
+                                 KWG_MAKER_MERGE_EXACT);
+
+  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
+  assert_word_lists_are_equal(ziet_words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
+  dictionary_word_list_destroy(ziet_words);
+
+  DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
+  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
+                  NULL);
+  assert_word_lists_are_equal(ziet_gaddag_strings, encoded_gaddag_strings);
+  dictionary_word_list_destroy(encoded_gaddag_strings);
+  dictionary_word_list_destroy(ziet_gaddag_strings);
+
   game_destroy(game);
   kwg_destroy(kwg);
   config_destroy(config);
 }
 
 void test_large_gaddag() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Config *config = create_config_or_die("setoptions lex CSW21");
   Game *game = game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
   const Player *player = game_get_player(game, 0);
@@ -329,18 +357,53 @@ void test_large_gaddag() {
   KWG *kwg = make_kwg_from_words(q_words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                  KWG_MAKER_MERGE_EXACT);
 
+  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words, NULL);
+  assert_word_lists_are_equal(q_words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
+  dictionary_word_list_destroy(q_words);
+
+  DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
+  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
+                  NULL);
+  assert_word_lists_are_equal(q_gaddag_strings, encoded_gaddag_strings);
+  dictionary_word_list_destroy(encoded_gaddag_strings);
+  dictionary_word_list_destroy(q_gaddag_strings);
+
+  game_destroy(game);
+  kwg_destroy(kwg);
+  config_destroy(config);
+}
+
+void test_full_csw_gaddag() {
+  Config *config = create_config_or_die("setoptions lex CSW21");
+  Game *game = game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+
+  DictionaryWordList *gaddag_strings = dictionary_word_list_create();
+  add_gaddag_strings(words, gaddag_strings);
+
+  KWG *kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
+                                 KWG_MAKER_MERGE_EXACT);
+
   bool *nodes_reached =
       calloc_or_die(kwg_get_number_of_nodes(kwg), sizeof(bool));
   DictionaryWordList *encoded_words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), encoded_words,
                   nodes_reached);
-  assert_word_lists_are_equal(q_words, encoded_words);
-  dictionary_word_list_destroy(q_words);
+  assert_word_lists_are_equal(words, encoded_words);
+  dictionary_word_list_destroy(encoded_words);
+  dictionary_word_list_destroy(words);
 
   DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
-  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings, nodes_reached);
-  assert_word_lists_are_equal(q_gaddag_strings, encoded_gaddag_strings);
-  dictionary_word_list_destroy(q_gaddag_strings);
+  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
+                  nodes_reached);
+  assert_word_lists_are_equal(gaddag_strings, encoded_gaddag_strings);
+  dictionary_word_list_destroy(encoded_gaddag_strings);
+  dictionary_word_list_destroy(gaddag_strings);
 
   // first two nodes point to the dawg root and gaddag
   for (int i = 2; i < kwg_get_number_of_nodes(kwg); i++) {
@@ -360,5 +423,7 @@ void test_kwg_maker() {
   test_careen_career_exact_merged_gaddag();
   test_two_letter_trie();
   test_two_letter_merged_dawg();
+  test_polish_gaddag();
   test_large_gaddag();
+  test_full_csw_gaddag();
 }

@@ -87,6 +87,8 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
   test_config_error(config, "go sim i -6",
                     CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
+  test_config_error(config, "go sim i 0",
+                    CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
   test_config_error(config, "go sim cond 96",
                     CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
   test_config_error(config, "go sim cond -95",
@@ -137,9 +139,9 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL);
   test_config_error(config, "go sim l1 CSW21 l2 DISC2",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "go sim l1 OSPS44 l2 DISC2",
+  test_config_error(config, "go sim l1 OSPS49 l2 DISC2",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "go sim l1 NWL20 l2 OSPS44",
+  test_config_error(config, "go sim l1 NWL20 l2 OSPS49",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
   test_config_error(config, "go sim l1 NWL20 l2 NWL20 k2 DISC2",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
@@ -192,7 +194,7 @@ void test_config_success() {
       "setoptions ld %s bb %d var %s l1 %s l2 %s s1 %s r1 "
       "%s s2 %s r2 %s rack %s pindex %d score %d exch %d eq %0.2f numplays %d "
       "plies %d i "
-      "%d cond %d rs %d threads %d info %d check %d static gp p1 %s p2 %s",
+      "%d cond %d rs %d threads %d info %d check %d gp p1 %s p2 %s",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, rack, pindex,
       score, number_exch, equity_margin, num_plays, plies, max_iterations,
       stopping_cond, seed, number_of_threads, print_info, check_stop, p1, p2);
@@ -201,7 +203,7 @@ void test_config_success() {
   game = game_create(config);
 
   assert(config_get_command_type(config) == COMMAND_TYPE_SET_OPTIONS);
-  assert(!config_get_command_set_cgp(config));
+  assert(!config_get_cgp(config));
   assert(config_get_game_variant(config) == GAME_VARIANT_WORDSMOG);
   assert(players_data_get_move_sort_type(config_get_players_data(config), 0) ==
          MOVE_SORT_SCORE);
@@ -227,7 +229,6 @@ void test_config_success() {
              config_get_thread_control(config)) == print_info);
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
-  assert(config_get_static_search_only(config));
   assert(config_get_use_game_pairs(config));
 
   assert_strings_equal(p1, player_get_name(game_get_player(game, 0)));
@@ -286,14 +287,14 @@ void test_config_success() {
       "setoptions ld %s bb %d l1 %s l2 %s  s1 "
       "%s r1 %s s2 %s r2 %s rack %s exch %d plies %d i %d "
       "threads %d "
-      "info %d nostatic nogp",
+      "info %d nogp",
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, rack, number_exch, plies,
       max_iterations, number_of_threads, print_info);
 
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
   assert(config_get_command_type(config) == COMMAND_TYPE_SET_OPTIONS);
-  assert(!config_get_command_set_cgp(config));
+  assert(!config_get_cgp(config));
   assert(config_get_game_variant(config) == GAME_VARIANT_WORDSMOG);
   assert(players_data_get_move_sort_type(config_get_players_data(config), 0) ==
          MOVE_SORT_EQUITY);
@@ -318,7 +319,6 @@ void test_config_success() {
              config_get_thread_control(config)) == print_info);
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
-  assert(!config_get_static_search_only(config));
   assert(!config_get_use_game_pairs(config));
 
   assert(strings_equal(config_get_ld_name(config), ld_name));
@@ -362,7 +362,7 @@ void test_config_success() {
                                       DOUG_V_EMELY_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert(config_get_command_type(config) == COMMAND_TYPE_LOAD_CGP);
-  assert(config_get_command_set_cgp(config));
+  assert(config_get_cgp(config));
   assert_strings_equal(config_get_cgp(config),
                        "15/15/15/15/15/15/15/3WINDY7/15/15/15/15/"
                        "15/15/15 ADEEGIL/AEILOUY 0/32 0");
@@ -374,7 +374,7 @@ void test_config_success() {
                                       NOAH_VS_MISHU_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert(config_get_command_type(config) == COMMAND_TYPE_SIM);
-  assert(config_get_command_set_cgp(config));
+  assert(config_get_cgp(config));
   assert_strings_equal(
       config_get_cgp(config),
       "15/15/15/15/15/15/12BOA/6VOX1ATONY/7FIVER3/11E3/8MOANED1/"
@@ -385,7 +385,7 @@ void test_config_success() {
                                       NOAH_VS_PETER_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert(config_get_command_type(config) == COMMAND_TYPE_INFER);
-  assert(config_get_command_set_cgp(config));
+  assert(config_get_cgp(config));
   assert_strings_equal(
       config_get_cgp(config),
       "15/9O5/7GIP5/7H1E3T1/7E5E1/5CUTTY3EF/7T6O/7OR4UP/7SEMINAL1/4AX2S4V1/"
@@ -397,7 +397,7 @@ void test_config_success() {
                                       SOME_ISC_GAME_CGP);
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert(config_get_command_type(config) == COMMAND_TYPE_AUTOPLAY);
-  assert(config_get_command_set_cgp(config));
+  assert(config_get_cgp(config));
   assert_strings_equal(
       config_get_cgp(config),
       "15/1V13/1O13/1D12P/1U12O/1NA2C7FE/2N2R7AM/OUTFLYING2AHIS/"

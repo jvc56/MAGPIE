@@ -8,11 +8,13 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 
-#include "board.h"
-#include "letter_distribution.h"
+#include "../ent/rack.h"
 
 #include "../util/string_util.h"
 #include "../util/util.h"
+
+#include "board.h"
+#include "letter_distribution.h"
 
 typedef struct FormedWord {
   uint8_t word[BOARD_DIM];
@@ -25,27 +27,32 @@ struct FormedWords {
   FormedWord words[RACK_SIZE + 1]; // max number of words we can form
 };
 
-FormedWords *formed_words_create(Board *board, uint8_t word[],
-                                 int word_start_index, int word_end_index,
-                                 int row, int col, int dir) {
+FormedWords *formed_words_create(Board *board, Move *move) {
+  int tiles_length = move_get_tiles_length(move);
+  int row_start = move_get_row_start(move);
+  int col_start = move_get_col_start(move);
+  int dir = move_get_dir(move);
 
-  if (board_is_dir_vertical(dir)) {
+  bool board_was_transposed = false;
+
+  if (!board_matches_dir(board, dir)) {
     board_transpose(board);
-    int ph = col;
-    col = row;
-    row = ph;
+    board_was_transposed = true;
+    int ph = col_start;
+    col_start = row_start;
+    row_start = ph;
   }
 
   FormedWords *ws = malloc_or_die(sizeof(FormedWords));
   int formed_words_idx = 0;
   uint8_t main_word[BOARD_DIM];
   int main_word_idx = 0;
-  for (int idx = 0; idx < word_end_index - word_start_index + 1; idx++) {
-    uint8_t ml = word[idx + word_start_index];
+  for (int idx = 0; idx < tiles_length; idx++) {
+    uint8_t ml = move_get_tile(move, idx);
     bool fresh_tile = false;
 
     if (ml == PLAYED_THROUGH_MARKER) {
-      ml = board_get_letter(board, row, col + idx);
+      ml = board_get_letter(board, row_start, col_start + idx);
     } else {
       fresh_tile = true;
     }
@@ -54,14 +61,16 @@ FormedWords *formed_words_create(Board *board, uint8_t word[],
     main_word_idx++;
 
     bool actual_cross_word =
-        (row > 0 && !board_is_empty(board, row - 1, col + idx)) ||
-        ((row < BOARD_DIM - 1) && !board_is_empty(board, row + 1, col + idx));
+        (row_start > 0 &&
+         !board_is_empty(board, row_start - 1, col_start + idx)) ||
+        ((row_start < BOARD_DIM - 1) &&
+         !board_is_empty(board, row_start + 1, col_start + idx));
 
     if (fresh_tile && actual_cross_word) {
       // Search for a word
       int rbegin, rend;
-      for (rbegin = row - 1; rbegin >= 0; rbegin--) {
-        if (board_is_empty(board, rbegin, col + idx)) {
+      for (rbegin = row_start - 1; rbegin >= 0; rbegin--) {
+        if (board_is_empty(board, rbegin, col_start + idx)) {
           rbegin++;
           break;
         }
@@ -71,7 +80,7 @@ FormedWords *formed_words_create(Board *board, uint8_t word[],
       }
 
       for (rend = rbegin; rend < BOARD_DIM; rend++) {
-        if (rend != row && board_is_empty(board, rend, col + idx)) {
+        if (rend != row_start && board_is_empty(board, rend, col_start + idx)) {
           rend--;
           break;
         }
@@ -80,9 +89,9 @@ FormedWords *formed_words_create(Board *board, uint8_t word[],
       ws->words[formed_words_idx].word_length = rend - rbegin + 1;
       ws->words[formed_words_idx].valid = false; // we don't know validity yet.
       for (int r = rbegin; r <= rend; r++) {
-        if (r != row) {
+        if (r != row_start) {
           uint8_t lt = get_unblanked_machine_letter(
-              board_get_letter(board, r, col + idx));
+              board_get_letter(board, r, col_start + idx));
           ws->words[formed_words_idx].word[widx] = lt;
         } else {
           ws->words[formed_words_idx].word[widx] = ml;
@@ -98,7 +107,7 @@ FormedWords *formed_words_create(Board *board, uint8_t word[],
   formed_words_idx++;
   ws->num_words = formed_words_idx;
 
-  if (dir) {
+  if (board_was_transposed) {
     board_transpose(board);
   }
 
@@ -137,24 +146,27 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg) {
   }
 
   int lidx = 0;
-  int node_idx = kwg_arc_index(kwg, 0);
+  uint32_t node_idx = kwg_get_dawg_root_node_index(kwg);
+  uint32_t node = kwg_node(kwg, node_idx);
   do {
     if (lidx > w->word_length - 1) {
       // if we've gone too far the word is not found
       return false;
     }
     uint8_t ml = w->word[lidx];
-    if (kwg_tile(kwg, node_idx) == ml) {
+    if (kwg_node_tile(node) == ml) {
       if (lidx == w->word_length - 1) {
-        return kwg_accepts(kwg, node_idx);
+        return kwg_node_accepts(node);
       }
-      node_idx = kwg_arc_index(kwg, node_idx);
+      node_idx = kwg_node_arc_index(node);
+      node = kwg_node(kwg, node_idx);
       lidx++;
     } else {
-      if (kwg_is_end(kwg, node_idx)) {
+      if (kwg_node_is_end(node)) {
         return false;
       }
       node_idx++;
+      node = kwg_node(kwg, node_idx);
     }
   } while (1);
 }

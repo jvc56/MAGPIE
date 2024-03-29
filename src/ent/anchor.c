@@ -6,30 +6,6 @@
 
 #include "../util/util.h"
 
-typedef struct Anchor {
-  // The row of the board for this anchor
-  int row;
-  // The column of the board for this anchor
-  int col;
-  // The the previous anchor column of the
-  // move generator for the row.
-  int last_anchor_col;
-  // The transposed state of the board
-  // for this anchor column.
-  bool transposed;
-  // The direction of the board for
-  // this anchor column.
-  int dir;
-  // The highest possibly equity
-  // that can be achieved from this
-  // anchor column.
-  double highest_possible_equity;
-} Anchor;
-
-struct AnchorList {
-  int count;
-  Anchor **anchors;
-};
 
 Anchor *anchor_create() { return malloc_or_die(sizeof(Anchor)); }
 
@@ -60,47 +36,6 @@ void anchor_list_destroy(AnchorList *al) {
   free(al->anchors);
   free(al);
 }
-
-int anchor_get_col(const AnchorList *al, int index) {
-  return al->anchors[index]->col;
-}
-
-int anchor_get_dir(const AnchorList *al, int index) {
-  return al->anchors[index]->dir;
-}
-
-double anchor_get_highest_possible_equity(const AnchorList *al, int index) {
-  return al->anchors[index]->highest_possible_equity;
-}
-
-int anchor_get_last_anchor_col(const AnchorList *al, int index) {
-  return al->anchors[index]->last_anchor_col;
-}
-
-int anchor_get_row(const AnchorList *al, int index) {
-  return al->anchors[index]->row;
-}
-
-bool anchor_get_transposed(const AnchorList *al, int index) {
-  return al->anchors[index]->transposed;
-}
-
-int anchor_list_get_count(const AnchorList *al) { return al->count; }
-
-void anchor_list_add_anchor(AnchorList *al, int row, int col,
-                            int last_anchor_col, bool transposed, int dir,
-                            double highest_possible_equity) {
-  int i = al->count;
-  al->anchors[i]->row = row;
-  al->anchors[i]->col = col;
-  al->anchors[i]->last_anchor_col = last_anchor_col;
-  al->anchors[i]->transposed = transposed;
-  al->anchors[i]->dir = dir;
-  al->anchors[i]->highest_possible_equity = highest_possible_equity;
-  al->count++;
-}
-
-void anchor_list_reset(AnchorList *al) { al->count = 0; }
 
 int anchor_compare(const void *a, const void *b) {
   const Anchor *anchor_a = *(const Anchor **)a;

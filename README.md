@@ -231,10 +231,6 @@ Specifies the number of simulations or the number of games or game pairs.
 
 Specifies the stopping condition of the simulation. Valid options are `95`, `98`, and `99`.
 
-#### static, nostatic
-
-Specifies whether the sim command should generate static moves.
-
 #### pindex
 
 Specifies the player index to infer for the inference command.

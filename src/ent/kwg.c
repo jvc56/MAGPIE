@@ -10,20 +10,18 @@
 #include <stdlib.h>
 
 #include "../def/kwg_defs.h"
+
 #include "../util/fileproxy.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
+
 #include "letter_distribution.h"
 
 // The KWG data structure was originally
 // developed in wolges. For more details
 // on how the KWG data structure works, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
-struct KWG {
-  uint32_t *nodes;
-  int number_of_nodes;
-};
 
 char *get_kwg_filepath(const char *kwg_name) {
   // Check for invalid inputs
@@ -115,69 +113,19 @@ void kwg_destroy(KWG *kwg) {
   free(kwg);
 }
 
-bool kwg_is_end(const KWG *kwg, int node_index) {
-  return (kwg->nodes[node_index] & KWG_NODE_IS_END_FLAG) != 0;
-}
-
-bool kwg_accepts(const KWG *kwg, int node_index) {
-  return (kwg->nodes[node_index] & KWG_NODE_ACCEPTS_FLAG) != 0;
-}
-
-int kwg_arc_index(const KWG *kwg, int node_index) {
-  return (kwg->nodes[node_index] & KWG_ARC_INDEX_MASK);
-}
-
-int kwg_tile(const KWG *kwg, int node_index) {
-  return kwg->nodes[node_index] >> KWG_TILE_BIT_OFFSET;
-}
-
-int kwg_get_dawg_root_node_index(const KWG *kwg) {
-  return kwg_arc_index(kwg, 0);
-}
-
-int kwg_get_root_node_index(const KWG *kwg) { return kwg_arc_index(kwg, 1); }
-
-int kwg_get_next_node_index(const KWG *kwg, int node_index, int letter) {
-  int i = node_index;
-  while (1) {
-    if (kwg_tile(kwg, i) == letter) {
-      return kwg_arc_index(kwg, i);
-    }
-    if (kwg_is_end(kwg, i)) {
-      return 0;
-    }
-    i++;
-  }
-}
-
-bool kwg_in_letter_set(const KWG *kwg, int letter, int node_index) {
+bool kwg_in_letter_set(const KWG *kwg, uint8_t letter, uint32_t node_index) {
   letter = get_unblanked_machine_letter(letter);
-  int i = node_index;
-  while (1) {
-    if (kwg_tile(kwg, i) == letter) {
-      return kwg_accepts(kwg, i);
+  uint32_t i = node_index;
+  for (;;) {
+    const uint32_t node = kwg_node(kwg, i);
+    if (kwg_node_tile(node) == letter) {
+      return kwg_node_accepts(node);
     }
-    if (kwg_is_end(kwg, i)) {
+    if (kwg_node_is_end(node)) {
       return false;
     }
     i++;
   }
-}
-
-uint64_t kwg_get_letter_set(const KWG *kwg, int node_index) {
-  uint64_t ls = 0;
-  int i = node_index;
-  while (1) {
-    int t = kwg_tile(kwg, i);
-    if (kwg_accepts(kwg, i)) {
-      ls |= ((uint64_t)1 << t);
-    }
-    if (kwg_is_end(kwg, i)) {
-      break;
-    }
-    i++;
-  }
-  return ls;
 }
 
 int kwg_get_number_of_nodes(const KWG *kwg) { return kwg->number_of_nodes; }

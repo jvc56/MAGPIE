@@ -30,7 +30,7 @@ endif
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra $(FSAN_ARG)
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
-cflags.release := -O3 -march=native -Wall -Wno-trigraphs
+cflags.release := -O3 -flto -funroll-loops -march=native -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
 

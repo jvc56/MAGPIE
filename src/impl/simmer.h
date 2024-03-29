@@ -5,9 +5,10 @@
 
 #include "../ent/config.h"
 #include "../ent/game.h"
+#include "../ent/move.h"
 #include "../ent/sim_results.h"
 
 sim_status_t simulate(const Config *config, const Game *game,
-                      SimResults *sim_results);
+                      const MoveList *move_list, SimResults *sim_results);
 
 #endif
