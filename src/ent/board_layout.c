@@ -10,13 +10,37 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-static const uint8_t bonus_square_chars_to_values_map[256] = {
-    [' '] = 0x11, ['\''] = 0x12, ['-'] = 0x21, ['"'] = 0x13,
-    ['='] = 0x31, ['*'] = 0x14,  ['~'] = 0x41, [BRICK_CHAR] = BRICK_VALUE};
+#define BONUS_SQUARE_MAP_SIZE 256
 
-static const char bonus_square_values_to_chars_map[256] = {
-    [0x11] = ' ', [0x12] = '\'', [0x21] = '-', [0x13] = '"',
-    [0x31] = '=', [0x14] = '*',  [0x41] = '~', [BRICK_VALUE] = BRICK_CHAR};
+#define BONUS_SQUARE_CHAR_NONE ' '
+#define BONUS_SQUARE_CHAR_DOUBLE_LETTER '\''
+#define BONUS_SQUARE_CHAR_DOUBLE_WORD '-'
+#define BONUS_SQUARE_CHAR_TRIPLE_LETTER '"'
+#define BONUS_SQUARE_CHAR_TRIPLE_WORD '='
+#define BONUS_SQUARE_CHAR_QUADRUPLE_LETTER '^'
+#define BONUS_SQUARE_CHAR_QUADRUPLE_WORD '~'
+
+static const uint8_t bonus_square_chars_to_values_map[BONUS_SQUARE_MAP_SIZE] = {
+    [BONUS_SQUARE_CHAR_NONE] = 0x11,
+    [BONUS_SQUARE_CHAR_DOUBLE_LETTER] = 0x12,
+    [BONUS_SQUARE_CHAR_DOUBLE_WORD] = 0x21,
+    [BONUS_SQUARE_CHAR_TRIPLE_LETTER] = 0x13,
+    [BONUS_SQUARE_CHAR_TRIPLE_WORD] = 0x31,
+    [BONUS_SQUARE_CHAR_QUADRUPLE_LETTER] = 0x14,
+    [BONUS_SQUARE_CHAR_QUADRUPLE_WORD] = 0x41,
+    [BRICK_CHAR] = BRICK_VALUE,
+};
+
+static const char bonus_square_values_to_chars_map[BONUS_SQUARE_MAP_SIZE] = {
+    [0x11] = BONUS_SQUARE_CHAR_NONE,
+    [0x12] = BONUS_SQUARE_CHAR_DOUBLE_LETTER,
+    [0x21] = BONUS_SQUARE_CHAR_DOUBLE_WORD,
+    [0x13] = BONUS_SQUARE_CHAR_TRIPLE_LETTER,
+    [0x31] = BONUS_SQUARE_CHAR_TRIPLE_WORD,
+    [0x14] = BONUS_SQUARE_CHAR_QUADRUPLE_LETTER,
+    [0x41] = BONUS_SQUARE_CHAR_QUADRUPLE_WORD,
+    [BRICK_VALUE] = BRICK_CHAR,
+};
 
 struct BoardLayout {
   int start_coords[2];
