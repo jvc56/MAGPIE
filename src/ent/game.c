@@ -9,14 +9,13 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
+#include "assert.h"
 #include "bag.h"
 #include "board.h"
 #include "kwg.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
-
-#include "assert.h"
 typedef struct MinimalGameBackup {
   Board *board;
   Bag *bag;
@@ -132,9 +131,10 @@ int traverse_backwards_for_score(const Board *board,
   return score;
 }
 
-static inline uint32_t traverse_backwards(const KWG *kwg, Board *board, int row, int col,
-                            uint32_t node_index, bool check_letter_set,
-                            int left_most_col) {
+static inline uint32_t traverse_backwards(const KWG *kwg, Board *board, int row,
+                                          int col, uint32_t node_index,
+                                          bool check_letter_set,
+                                          int left_most_col) {
   while (board_is_position_valid(row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -149,13 +149,11 @@ static inline uint32_t traverse_backwards(const KWG *kwg, Board *board, int row,
       if (kwg_in_letter_set(kwg, ml, node_index)) {
         return node_index;
       }
-
       return 0;
     }
 
     node_index = kwg_get_next_node_index(kwg, node_index,
                                          get_unblanked_machine_letter(ml));
-
     col--;
   }
 
@@ -422,8 +420,9 @@ int draw_rack_from_bag(const LetterDistribution *ld, Bag *bag, Rack *rack,
   return number_of_letters_set;
 }
 
-cgp_parse_status_t parse_cgp_racks_with_string_splitter(
-    const StringSplitter *player_racks, Game *game) {
+cgp_parse_status_t
+parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
+                                     Game *game) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   int number_of_letters_added =
       draw_rack_from_bag(game->ld, game->bag, player_get_rack(game->players[0]),
@@ -475,8 +474,8 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
   return cgp_parse_status;
 }
 
-cgp_parse_status_t parse_cgp_consecutive_zeros(
-    Game *game, const char *cgp_consecutive_zeros) {
+cgp_parse_status_t
+parse_cgp_consecutive_zeros(Game *game, const char *cgp_consecutive_zeros) {
   if (!is_all_digits_or_empty(cgp_consecutive_zeros)) {
     return CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS;
   }
