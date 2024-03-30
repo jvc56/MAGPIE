@@ -121,8 +121,8 @@ static inline uint64_t square_get_right_extension_set(const Square *s) {
   return s->right_extension_set;
 }
 
-static inline void square_set_right_extension_set(
-    Square *s, uint64_t right_extension_set) {
+static inline void
+square_set_right_extension_set(Square *s, uint64_t right_extension_set) {
   s->right_extension_set = right_extension_set;
 }
 
@@ -375,8 +375,9 @@ static inline void board_set_left_extension_set(Board *b, int row, int col,
       board_get_writable_square(b, row, col, dir, csi), left_extension_set);
 }
 
-static inline void board_set_left_extension_set_with_blank(
-    Board *b, int row, int col, int dir, int csi, uint64_t left_extension_set) {
+static inline void
+board_set_left_extension_set_with_blank(Board *b, int row, int col, int dir,
+                                        int csi, uint64_t left_extension_set) {
   // It is assumed that the 0th bit is never set in left_extension_set: it is a
   // set of nonblank letters. Given that, this is equivalent logic to this more
   // readable version:
@@ -396,9 +397,10 @@ static inline void board_set_right_extension_set(Board *b, int row, int col,
       board_get_writable_square(b, row, col, dir, csi), right_extension_set);
 }
 
-static inline void board_set_right_extension_set_with_blank(
-    Board *b, int row, int col, int dir, int csi,
-    uint64_t right_extension_set) {
+static inline void
+board_set_right_extension_set_with_blank(Board *b, int row, int col, int dir,
+                                         int csi,
+                                         uint64_t right_extension_set) {
   // See comment in board_set_left_extension_set_with_blank.
   const uint64_t right_extension_set_with_blank =
       right_extension_set + !!right_extension_set;
@@ -684,6 +686,9 @@ static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
   for (int i = 0; i < 2; i++) {
     board->start_coords[i] = board_layout_get_start_coord(bl, i);
   }
+  // The get_square_index function uses the board transposed
+  // state so we must reset it here.
+  board->transposed = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       uint8_t board_layout_bonus_value =
