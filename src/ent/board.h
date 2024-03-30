@@ -121,8 +121,8 @@ static inline uint64_t square_get_right_extension_set(const Square *s) {
   return s->right_extension_set;
 }
 
-static inline void square_set_right_extension_set(
-    Square *s, uint64_t right_extension_set) {
+static inline void
+square_set_right_extension_set(Square *s, uint64_t right_extension_set) {
   s->right_extension_set = right_extension_set;
 }
 
@@ -375,8 +375,9 @@ static inline void board_set_left_extension_set(Board *b, int row, int col,
       board_get_writable_square(b, row, col, dir, csi), left_extension_set);
 }
 
-static inline void board_set_left_extension_set_with_blank(
-    Board *b, int row, int col, int dir, int csi, uint64_t left_extension_set) {
+static inline void
+board_set_left_extension_set_with_blank(Board *b, int row, int col, int dir,
+                                        int csi, uint64_t left_extension_set) {
   // It is assumed that the 0th bit is never set in left_extension_set: it is a
   // set of nonblank letters. Given that, this is equivalent logic to this more
   // readable version:
@@ -396,9 +397,10 @@ static inline void board_set_right_extension_set(Board *b, int row, int col,
       board_get_writable_square(b, row, col, dir, csi), right_extension_set);
 }
 
-static inline void board_set_right_extension_set_with_blank(
-    Board *b, int row, int col, int dir, int csi,
-    uint64_t right_extension_set) {
+static inline void
+board_set_right_extension_set_with_blank(Board *b, int row, int col, int dir,
+                                         int csi,
+                                         uint64_t right_extension_set) {
   // See comment in board_set_left_extension_set_with_blank.
   const uint64_t right_extension_set_with_blank =
       right_extension_set + !!right_extension_set;
@@ -494,6 +496,24 @@ static inline bool board_is_empty(const Board *board, int row, int col) {
   return board_get_letter(board, row, col) == ALPHABET_EMPTY_SQUARE_MARKER;
 }
 
+static inline bool board_is_nonempty_or_bricked(const Board *board, int row,
+                                                int col) {
+  // Board emptiness and brickedness are consistent across direction
+  // and cross index, so we can just use 0 for both here.
+  const Square *s = board_get_readonly_square(board, row, col, 0, 0);
+  return square_get_letter(s) != ALPHABET_EMPTY_SQUARE_MARKER ||
+         square_get_is_brick(s);
+}
+
+static inline bool board_is_empty_or_bricked(const Board *board, int row,
+                                             int col) {
+  // Board emptiness and brickedness are consistent across direction
+  // and cross index, so we can just use 0 for both here.
+  const Square *s = board_get_readonly_square(board, row, col, 0, 0);
+  return square_get_letter(s) == ALPHABET_EMPTY_SQUARE_MARKER ||
+         square_get_is_brick(s);
+}
+
 static inline bool board_is_letter_allowed_in_cross_set(uint64_t cross_set,
                                                         uint8_t letter) {
   return (cross_set & ((uint64_t)1 << letter)) != 0;
@@ -516,9 +536,13 @@ static inline void board_clear_cross_set(Board *board, int row, int col,
 static inline void board_set_all_crosses(Board *board) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
+      uint64_t cross_set = TRIVIAL_CROSS_SET;
+      if (board_get_is_brick(board, row, col)) {
+        cross_set = 0;
+      }
       for (int dir = 0; dir < 2; dir++) {
         for (int ci = 0; ci < 2; ci++) {
-          board_set_cross_set(board, row, col, dir, ci, TRIVIAL_CROSS_SET);
+          board_set_cross_set(board, row, col, dir, ci, cross_set);
           board_set_left_extension_set(board, row, col, dir, ci,
                                        TRIVIAL_CROSS_SET);
           board_set_right_extension_set(board, row, col, dir, ci,
@@ -541,36 +565,45 @@ static inline void board_reset_all_cross_scores(Board *board) {
   }
 }
 
-static inline bool board_is_position_valid(const Board *board, int row,
-                                           int col) {
-  return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM &&
+static inline bool board_is_position_in_bounds(int row, int col) {
+  return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM;
+}
+
+// Returns true if
+// - The position is in bounds
+// - The position is not bricked
+// returns false otherwise.
+static inline bool
+board_is_position_in_bounds_and_not_bricked(const Board *board, int row,
+                                            int col) {
+  return board_is_position_in_bounds(row, col) &&
          !board_get_is_brick(board, row, col);
 }
 
 static inline bool board_are_left_and_right_empty(const Board *board, int row,
                                                   int col) {
-  return !((board_is_position_valid(board, row, col - 1) &&
-            !board_is_empty(board, row, col - 1)) ||
-           (board_is_position_valid(board, row, col + 1) &&
-            !board_is_empty(board, row, col + 1)));
+  return (!board_is_position_in_bounds(row, col - 1) ||
+          board_is_empty_or_bricked(board, row, col - 1)) &&
+         (!board_is_position_in_bounds(row, col + 1) ||
+          board_is_empty_or_bricked(board, row, col + 1));
 }
 
 static inline bool board_are_all_adjacent_squares_empty(const Board *board,
                                                         int row, int col) {
-  return !((board_is_position_valid(board, row, col - 1) &&
-            !board_is_empty(board, row, col - 1)) ||
-           (board_is_position_valid(board, row, col + 1) &&
-            !board_is_empty(board, row, col + 1)) ||
-           (board_is_position_valid(board, row - 1, col) &&
-            !board_is_empty(board, row - 1, col)) ||
-           (board_is_position_valid(board, row + 1, col) &&
-            !board_is_empty(board, row + 1, col)));
+  return (!board_is_position_in_bounds(row, col - 1) ||
+          board_is_empty_or_bricked(board, row, col - 1)) &&
+         (!board_is_position_in_bounds(row, col + 1) ||
+          board_is_empty_or_bricked(board, row, col + 1)) &&
+         (!board_is_position_in_bounds(row - 1, col) ||
+          board_is_empty_or_bricked(board, row - 1, col)) &&
+         (!board_is_position_in_bounds(row + 1, col) ||
+          board_is_empty_or_bricked(board, row + 1, col));
 }
 
 static inline int board_get_word_edge(const Board *board, int row, int col,
                                       int word_dir) {
-  while (board_is_position_valid(board, row, col) &&
-         !board_is_empty(board, row, col)) {
+  while (board_is_position_in_bounds(row, col) &&
+         !board_is_nonempty_or_bricked(board, row, col)) {
     col += word_dir;
   }
   return col - word_dir;

@@ -27,6 +27,7 @@ BoardLayout *create_test_board_layout(const char *board_layout_filename) {
 }
 
 void load_game_with_test_board(Game *game, const char *board_layout_filename) {
+  printf("loading %s\n", board_layout_filename);
   game_reset(game);
   BoardLayout *bl = create_test_board_layout(board_layout_filename);
   board_apply_layout(bl, game_get_board(game));
