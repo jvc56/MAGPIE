@@ -135,6 +135,12 @@ int traverse_backwards_for_score(const Board *board,
 void traverse_backwards(const KWG *kwg, Board *board, int row, int col,
                         uint32_t node_index, bool check_letter_set,
                         int left_most_col) {
+  if (node_index == 0) {
+    board_set_node_index(board, node_index);
+    board_set_path_is_valid(board, false);
+    return;
+  }
+
   while (board_is_position_valid(row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -216,7 +222,9 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
       kwg_get_letter_sets(kwg, lnode_index, &leftside_leftx_set);
       const uint32_t s_index =
           kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
-      back_hook_set = kwg_get_letter_sets(kwg, s_index, &leftside_rightx_set);
+      if (s_index != 0) {
+        back_hook_set = kwg_get_letter_sets(kwg, s_index, &leftside_rightx_set);
+      }
     }
     board_set_left_extension_set_with_blank(
         board, row, col - 1, through_dir, cross_set_index, leftside_leftx_set);
@@ -246,7 +254,9 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
           kwg_get_letter_sets(kwg, right_lnode_index, &rightside_leftx_set);
       const uint32_t s_index = kwg_get_next_node_index(
           kwg, right_lnode_index, SEPARATION_MACHINE_LETTER);
-      kwg_get_letter_sets(kwg, s_index, &rightside_rightx_set);
+      if (s_index != 0) {
+        kwg_get_letter_sets(kwg, s_index, &rightside_rightx_set);
+      }
     }
     board_set_left_extension_set_with_blank(board, row, right_col, through_dir,
                                             cross_set_index,
