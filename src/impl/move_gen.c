@@ -410,10 +410,6 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   // this function.
   uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col) &
                                    gen_cache_get_left_extension_set(gen, col);
-  printf("letters for %d, %d: %ld, %ld\n", gen->current_row_index, col,
-         gen_cache_get_cross_set(gen, col),
-         board_get_cross_set(gen->board, gen->current_row_index, col,
-                             1 - gen->dir, 0));
   if ((gen->tiles_played == 0) && (col == gen->current_anchor_col + 1)) {
     possible_letters_here &= gen->anchor_right_extension_set;
   }
