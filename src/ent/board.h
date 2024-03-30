@@ -501,7 +501,7 @@ static inline bool board_is_nonempty_or_bricked(const Board *board, int row,
   // Board emptiness and brickedness are consistent across direction
   // and cross index, so we can just use 0 for both here.
   const Square *s = board_get_readonly_square(board, row, col, 0, 0);
-  return square_get_letter(s) != ALPHABET_EMPTY_SQUARE_MARKER ||
+  return (square_get_letter(s) != ALPHABET_EMPTY_SQUARE_MARKER) ||
          square_get_is_brick(s);
 }
 
@@ -603,7 +603,7 @@ static inline bool board_are_all_adjacent_squares_empty(const Board *board,
 static inline int board_get_word_edge(const Board *board, int row, int col,
                                       int word_dir) {
   while (board_is_position_in_bounds(row, col) &&
-         !board_is_nonempty_or_bricked(board, row, col)) {
+         !board_is_empty_or_bricked(board, row, col)) {
     col += word_dir;
   }
   return col - word_dir;
