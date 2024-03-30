@@ -9,13 +9,14 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
-#include "assert.h"
+
 #include "bag.h"
 #include "board.h"
 #include "kwg.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
+
 typedef struct MinimalGameBackup {
   Board *board;
   Bag *bag;
