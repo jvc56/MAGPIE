@@ -20,7 +20,8 @@ BoardLayout *create_test_board_layout(const char *board_layout_filename) {
       board_layout_load(bl, board_layout_filepath);
   free(board_layout_filepath);
   if (actual_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
-    printf("board layout load failure: %d", actual_status);
+    printf("board layout load failure for %s: %d\n", board_layout_filename,
+           actual_status);
   }
   assert(actual_status == BOARD_LAYOUT_LOAD_STATUS_SUCCESS);
   return bl;

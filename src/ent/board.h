@@ -717,6 +717,9 @@ static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
   for (int i = 0; i < 2; i++) {
     board->start_coords[i] = board_layout_get_start_coord(bl, i);
   }
+  // The get_square_index function uses the board transposed
+  // state so we must reset it here.
+  board->transposed = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       uint8_t board_layout_bonus_value =
