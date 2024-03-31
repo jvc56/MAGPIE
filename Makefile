@@ -40,6 +40,13 @@ ldflags.release := -Llib -pthread
 ldflags.cov := -Llib -pthread 
 
 CFLAGS := ${cflags.${BUILD}}
+
+ifndef BOARD_DIM
+BOARD_DIM = 15
+endif
+
+CFLAGS += -DBOARD_DIM=$(BOARD_DIM)
+
 LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
