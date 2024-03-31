@@ -424,7 +424,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
       if (kwg_node_tile(node) == raw) {
-        next_node_index = kwg_node_arc_index(node);
+        next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
         break;
       }
@@ -445,7 +445,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
           board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
-        const uint32_t next_node_index = kwg_node_arc_index(node);
+        const uint32_t next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         bool accepts = kwg_node_accepts(node);
         if (number_of_ml > 0) {
           leave_map_take_letter_and_update_current_index(&gen->leave_map,

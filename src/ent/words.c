@@ -158,7 +158,7 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg) {
       if (lidx == w->word_length - 1) {
         return kwg_node_accepts(node);
       }
-      node_idx = kwg_node_arc_index(node);
+      node_idx = kwg_node_arc_index_prefetch(node, kwg);
       node = kwg_node(kwg, node_idx);
       lidx++;
     } else {
