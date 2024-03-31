@@ -1,10 +1,9 @@
+#include "word_prune.h"
+
 #include <stdlib.h>
 
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
-
-#include "word_prune.h"
-
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -114,7 +113,7 @@ void add_words_without_playthrough(const KWG* kwg, uint32_t node_index,
   for (uint32_t i = node_index;; i++) {
     const uint32_t node = kwg_node(kwg, i);
     const uint8_t ml = kwg_node_tile(node);
-    const int new_node_index = kwg_node_arc_index(node);
+    const int new_node_index = kwg_node_arc_index_prefetch(node, kwg);
     if ((rack_get_letter(rack, ml) > 0) ||
         (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0)) {
       int accepts = kwg_node_accepts(node);
@@ -161,7 +160,7 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(kwg, i);
       if (kwg_node_tile(node) == ml) {
-        next_node_index = kwg_node_arc_index(node);
+        next_node_index = kwg_node_arc_index_prefetch(node, kwg);
         accepts = kwg_node_accepts(node);
         break;
       }
@@ -179,7 +178,8 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
       const uint8_t ml = kwg_node_tile(node);
       if (ml != SEPARATION_MACHINE_LETTER) {
         if (rack_get_letter(rack, ml) > 0) {
-          const uint32_t next_node_index = kwg_node_arc_index(node);
+          const uint32_t next_node_index =
+              kwg_node_arc_index_prefetch(node, kwg);
           const bool accepts = kwg_node_accepts(node);
           rack_take_letter(rack, ml);
           playthrough_words_go_on(board_row, kwg, rack, col, anchor_col, ml,
@@ -188,7 +188,8 @@ void playthrough_words_recursive_gen(const BoardRow* board_row, const KWG* kwg,
                                   strip, possible_word_list);
           rack_add_letter(rack, ml);
         } else if (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0) {
-          const uint32_t next_node_index = kwg_node_arc_index(node);
+          const uint32_t next_node_index =
+              kwg_node_arc_index_prefetch(node, kwg);
           const bool accepts = kwg_node_accepts(node);
           rack_take_letter(rack, BLANK_MACHINE_LETTER);
           playthrough_words_go_on(board_row, kwg, rack, col, anchor_col, ml,
@@ -294,7 +295,7 @@ void add_playthrough_words_from_row(const BoardRow* board_row, const KWG* kwg,
       for (int i = gaddag_root;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         if (kwg_node_tile(node) == ml) {
-          next_node_index = kwg_node_arc_index(node);
+          next_node_index = kwg_node_arc_index_prefetch(node, kwg);
           break;
         }
         if (kwg_node_is_end(node)) {

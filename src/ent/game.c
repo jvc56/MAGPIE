@@ -264,7 +264,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
         // Only try letters that are possible in right extensions from the left
         // side of the empty square.
         if (board_is_letter_allowed_in_cross_set(leftside_rightx_set, ml)) {
-          const uint32_t next_node_index = kwg_node_arc_index(node);
+          const uint32_t next_node_index = kwg_node_arc_index_prefetch(node, kwg);
           if (traverse_backwards(kwg, board, row, col - 1, next_node_index,
                                  true, left_col) != 0) {
             letter_set |= get_cross_set_bit(ml);
