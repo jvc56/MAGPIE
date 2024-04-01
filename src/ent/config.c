@@ -845,7 +845,17 @@ bool ld_is_compatible_with_lexicon(const char *lexicon_name,
 }
 
 char *get_default_klv_name(const char *lexicon_name) {
-  return string_duplicate(lexicon_name);
+  if (BOARD_DIM != DEFAULT_BOARD_DIM && BOARD_DIM != DEFAULT_SUPER_BOARD_DIM) {
+    log_fatal("Default klv not supported with a board "
+              "dimension of %d. Only %d and %d have "
+              "default values.",
+              BOARD_DIM, DEFAULT_BOARD_DIM, DEFAULT_SUPER_BOARD_DIM);
+  }
+  const char *klv_name_extension = "";
+  if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
+    klv_name_extension = "_" SUPER_LETTER_DISTRIBUTION_NAME_EXTENSION;
+  }
+  return get_formatted_string("%s%s", lexicon_name, klv_name_extension);
 }
 
 bool is_lexicon_required(const Config *config, const char *new_p1_leaves_name,

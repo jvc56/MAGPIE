@@ -12,88 +12,95 @@
 
 #include "test_util.h"
 
-BoardLayout *create_test_board_layout(const char *board_layout_filename) {
-  BoardLayout *bl = board_layout_create();
-  char *board_layout_filepath =
-      get_formatted_string("test/testdata/%s", board_layout_filename);
-  board_layout_load_status_t actual_status =
-      board_layout_load(bl, board_layout_filepath);
-  free(board_layout_filepath);
-  if (actual_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
-    printf("board layout load failure for %s: %d\n", board_layout_filename,
-           actual_status);
+void test_board_layout_success() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 score s2 score r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+
+  assert(bonus_square_value_to_char(0x12) == '\'');
+  assert(bonus_square_value_to_char(0x21) == '-');
+  assert(bonus_square_value_to_char(0x13) == '"');
+  assert(bonus_square_value_to_char(0x31) == '=');
+
+  assert(bonus_square_char_to_value('\'') == 0x12);
+  assert(bonus_square_char_to_value('-') == 0x21);
+  assert(bonus_square_char_to_value('"') == 0x13);
+  assert(bonus_square_char_to_value('=') == 0x31);
+
+  Board *board = game_get_board(game);
+
+  for (int i = 0; i < 2; i++) {
+    assert(board_get_bonus_square(board, 0, 1) == 0x11);
+    assert(board_get_bonus_square(board, 1, 0) == 0x11);
+    assert(board_get_bonus_square(board, 4, 3) == 0x11);
+    assert(board_get_bonus_square(board, 3, 4) == 0x11);
+    assert(board_get_bonus_square(board, 9, 4) == 0x11);
+    assert(board_get_bonus_square(board, 4, 9) == 0x11);
+    assert(board_get_bonus_square(board, 1, 14) == 0x11);
+    assert(board_get_bonus_square(board, 14, 1) == 0x11);
+    assert(board_get_bonus_square(board, 10, 13) == 0x11);
+    assert(board_get_bonus_square(board, 13, 10) == 0x11);
+
+    assert(board_get_bonus_square(board, 0, 0) == 0x31);
+    assert(board_get_bonus_square(board, 0, 7) == 0x31);
+    assert(board_get_bonus_square(board, 7, 0) == 0x31);
+    assert(board_get_bonus_square(board, 7, 14) == 0x31);
+    assert(board_get_bonus_square(board, 14, 7) == 0x31);
+    assert(board_get_bonus_square(board, 0, 14) == 0x31);
+    assert(board_get_bonus_square(board, 14, 0) == 0x31);
+    assert(board_get_bonus_square(board, 14, 14) == 0x31);
+
+    assert(board_get_bonus_square(board, 5, 1) == 0x13);
+    assert(board_get_bonus_square(board, 9, 1) == 0x13);
+    assert(board_get_bonus_square(board, 9, 5) == 0x13);
+    assert(board_get_bonus_square(board, 9, 9) == 0x13);
+    assert(board_get_bonus_square(board, 9, 13) == 0x13);
+
+    assert(board_get_bonus_square(board, 6, 2) == 0x12);
+    assert(board_get_bonus_square(board, 7, 3) == 0x12);
+    assert(board_get_bonus_square(board, 2, 8) == 0x12);
+    assert(board_get_bonus_square(board, 3, 14) == 0x12);
+    assert(board_get_bonus_square(board, 11, 14) == 0x12);
+    assert(board_get_bonus_square(board, 6, 6) == 0x12);
+    assert(board_get_bonus_square(board, 8, 8) == 0x12);
+
+    assert(board_get_bonus_square(board, 1, 1) == 0x21);
+    assert(board_get_bonus_square(board, 2, 2) == 0x21);
+    assert(board_get_bonus_square(board, 3, 3) == 0x21);
+    assert(board_get_bonus_square(board, 7, 7) == 0x21);
+    assert(board_get_bonus_square(board, 13, 1) == 0x21);
+    assert(board_get_bonus_square(board, 12, 2) == 0x21);
+    assert(board_get_bonus_square(board, 11, 3) == 0x21);
+    assert(board_get_bonus_square(board, 3, 11) == 0x21);
+    assert(board_get_bonus_square(board, 2, 12) == 0x21);
+    assert(board_get_bonus_square(board, 1, 13) == 0x21);
+    assert(board_get_bonus_square(board, 13, 13) == 0x21);
+    assert(board_get_bonus_square(board, 12, 12) == 0x21);
+    assert(board_get_bonus_square(board, 11, 11) == 0x21);
+    board_transpose(board);
   }
-  assert(actual_status == BOARD_LAYOUT_LOAD_STATUS_SUCCESS);
-  return bl;
+
+  game_destroy(game);
+  config_destroy(config);
 }
 
-void load_game_with_test_board(Game *game, const char *board_layout_filename) {
-  game_reset(game);
-  BoardLayout *bl = create_test_board_layout(board_layout_filename);
-  board_apply_layout(bl, game_get_board(game));
-  board_layout_destroy(bl);
+void test_board_layout_error() {
+  assert_board_layout_error("malformed_start_coords15.txt",
+                            BOARD_LAYOUT_LOAD_STATUS_MALFORMED_START_COORDS);
+  assert_board_layout_error(
+      "out_of_bounds_start_coords15.txt",
+      BOARD_LAYOUT_LOAD_STATUS_OUT_OF_BOUNDS_START_COORDS);
+  assert_board_layout_error("invalid_number_of_rows15.txt",
+                            BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS);
+  assert_board_layout_error("standard21.txt",
+                            BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS);
+  assert_board_layout_error("invalid_number_of_cols15.txt",
+                            BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_COLS);
+  assert_board_layout_error("invalid_bonus_square15.txt",
+                            BOARD_LAYOUT_LOAD_STATUS_INVALID_BONUS_SQUARE);
 }
 
-char *remove_parentheses(const char *input) {
-  int len = strlen(input);
-  char *result = (char *)malloc_or_die((len + 1) * sizeof(char));
-  int j = 0;
-  for (int i = 0; i < len; i++) {
-    if (input[i] != '(' && input[i] != ')') {
-      result[j++] = input[i];
-    }
-  }
-  result[j] = '\0';
-  return result;
-}
-
-void assert_validated_and_generated_moves(Game *game, const char *rack_string,
-                                          const char *move_position,
-                                          const char *move_tiles,
-                                          int move_score,
-                                          bool play_move_on_board) {
-  Player *player = game_get_player(game, game_get_player_on_turn_index(game));
-  Rack *player_rack = player_get_rack(player);
-  MoveList *move_list = move_list_create(1);
-
-  rack_set_to_string(game_get_ld(game), player_rack, rack_string);
-
-  generate_moves_for_game(game, 0, move_list);
-  char *gen_move_string;
-  if (strings_equal(move_position, "exch")) {
-    gen_move_string = get_formatted_string("(exch %s)", move_tiles);
-  } else {
-    gen_move_string =
-        get_formatted_string("%s %s %d", move_position, move_tiles, move_score);
-  }
-  assert_move(game, move_list, NULL, 0, gen_move_string);
-  free(gen_move_string);
-
-  char *move_tiles_no_parens = remove_parentheses(move_tiles);
-  char *vm_move_string;
-  if (strings_equal(move_position, "exch")) {
-    vm_move_string = get_formatted_string("ex.%s", move_tiles_no_parens);
-  } else {
-    vm_move_string =
-        get_formatted_string("%s.%s", move_position, move_tiles_no_parens);
-  }
-  free(move_tiles_no_parens);
-
-  ValidatedMoves *vms =
-      validated_moves_create(game, 0, vm_move_string, false, true);
-  free(vm_move_string);
-  assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
-
-  if (play_move_on_board) {
-    play_move(move_list_get_move(move_list, 0), game);
-  }
-
-  validated_moves_destroy(vms);
-  move_list_destroy(move_list);
-}
-
-void test_board_layout_15() {
+void test_board_layout_correctness() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
@@ -212,4 +219,10 @@ void test_board_layout_15() {
 
   game_destroy(game);
   config_destroy(config);
+}
+
+void test_board_layout_default() {
+  test_board_layout_success();
+  test_board_layout_error();
+  test_board_layout_correctness();
 }

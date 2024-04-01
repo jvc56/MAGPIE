@@ -32,6 +32,7 @@ static inline double placement_adjustment(const LetterDistribution *ld,
     if (get_is_blanked(tile)) {
       tile = get_unblanked_machine_letter(tile);
     }
+    // FIXME: update this for custom layouts
     if (ld_get_is_vowel(ld, tile) && (j == 2 || j == 6 || j == 8 || j == 12)) {
       penalty += v_penalty;
     }
@@ -77,11 +78,12 @@ static inline double shadow_endgame_adjustment(const LetterDistribution *ld,
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
-static inline double static_eval_get_shadow_equity(
-    const LetterDistribution *ld, const Rack *opp_rack,
-    const double *best_leaves, const uint16_t *descending_tile_scores,
-    int number_of_tiles_in_bag, int number_of_letters_on_rack,
-    int tiles_played) {
+static inline double
+static_eval_get_shadow_equity(const LetterDistribution *ld,
+                              const Rack *opp_rack, const double *best_leaves,
+                              const uint16_t *descending_tile_scores,
+                              int number_of_tiles_in_bag,
+                              int number_of_letters_on_rack, int tiles_played) {
   double equity = 0;
   if (number_of_tiles_in_bag > 0) {
     // Bag is not empty: use leave values

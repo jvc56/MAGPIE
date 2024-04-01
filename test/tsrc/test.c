@@ -6,7 +6,8 @@
 #include "alphabet_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
-#include "board_layout_15_test.h"
+#include "board_layout_default_test.h"
+#include "board_layout_super_test.h"
 #include "board_test.h"
 #include "command_test.h"
 #include "config_test.h"
@@ -50,7 +51,7 @@ void run_all() {
   test_bag();
   test_rack();
   test_board();
-  test_board_layout_15();
+  test_board_layout_default();
   test_cross_set();
   test_move();
   test_game();
@@ -94,7 +95,7 @@ void run_test(const char *subtest) {
   } else if (strings_equal(subtest, "board")) {
     test_board();
   } else if (strings_equal(subtest, "layout")) {
-    test_board_layout_15();
+    test_board_layout_default();
   } else if (strings_equal(subtest, "crossset")) {
     test_cross_set();
   } else if (strings_equal(subtest, "move")) {
@@ -138,14 +139,31 @@ void run_test(const char *subtest) {
   }
 }
 
+void run_all_super() { test_board_layout_super(); }
+
 int main(int argc, char *argv[]) {
   log_set_level(LOG_WARN);
-  if (argc == 1) {
-    run_all();
-  } else {
-    for (int i = 1; i < argc; i++) {
-      run_test(argv[i]);
+
+  if (BOARD_DIM == DEFAULT_BOARD_DIM) {
+    if (argc == 1) {
+      run_all();
+    } else {
+      for (int i = 1; i < argc; i++) {
+        run_test(argv[i]);
+      }
     }
+  } else if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
+    if (argc > 1) {
+      log_warn("Ignoring test argumentss when testing default super board "
+               "dimensions of %d.",
+               DEFAULT_SUPER_BOARD_DIM);
+    }
+    run_all_super();
+  } else {
+    log_fatal(
+        "Testing with unsupported board dimension of %d. Only %d and %d are "
+        "supported for testing.",
+        BOARD_DIM, DEFAULT_BOARD_DIM, DEFAULT_SUPER_BOARD_DIM);
   }
 
   destroy_caches();

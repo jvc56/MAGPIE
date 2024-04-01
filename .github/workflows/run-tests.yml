@@ -26,7 +26,7 @@ jobs:
           ./download_test_data.sh
 
       - name: Run unit tests
-        run: ./run u
+        run: ./run u && ./run u 21
 
       - name: Build release
         run: make clean && make magpie BUILD=release

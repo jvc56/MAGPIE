@@ -52,5 +52,12 @@ void create_fifo(const char *fifo_name);
 void delete_fifo(const char *fifo_name);
 Config *create_config_or_die(const char *cmd);
 void set_row(Game *game, int row, const char *row_content);
-
+void assert_board_layout_error(const char *board_layout_filename,
+                               board_layout_load_status_t expected_status);
+void load_game_with_test_board(Game *game, const char *board_layout_filename);
+void assert_validated_and_generated_moves(Game *game, const char *rack_string,
+                                          const char *move_position,
+                                          const char *move_tiles,
+                                          int move_score,
+                                          bool play_move_on_board);
 #endif

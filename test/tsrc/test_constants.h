@@ -159,4 +159,11 @@
 #define THERMOS_CGP                                                            \
   "15/15/3THERMOS2A2/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;"
 
+// 21 x 21 boards
+
+#define ANTHROPOMORPHISATIONS_CGP                                              \
+  "21/21/21/21/21/21/21/21/21/21/6POMORPHISATION1/21/21/21/21/21/21/21/21/21/" \
+  "21 / 0/0 0 "                                                                \
+  "lex CSW21;"
+
 #endif
