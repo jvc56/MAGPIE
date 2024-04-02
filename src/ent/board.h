@@ -9,6 +9,7 @@
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/static_eval_defs.h"
 
 #include "board_layout.h"
 
@@ -35,6 +36,11 @@ typedef struct Board {
   // - One pair for each cross index
   Square squares[2 * 2 * BOARD_DIM * BOARD_DIM];
   int number_of_row_anchors[BOARD_DIM * 2];
+  // Stores the penalties to be applied to
+  // the opening more for each square in both
+  // horizontal and vertical directions if the
+  // tile is a vowel.
+  double opening_move_penalties[BOARD_DIM * 2];
   int transposed;
   int tiles_played;
   // Scratch pad for return values used by
@@ -442,6 +448,13 @@ static inline void board_reset_is_cross_word(Board *b, int row, int col,
   }
 }
 
+// Board: opening penalties
+
+static inline const double *
+board_get_opening_move_penalties(const Board *board) {
+  return board->opening_move_penalties;
+}
+
 // Board: Transposed
 
 static inline bool board_get_transposed(const Board *board) {
@@ -713,6 +726,24 @@ static inline void board_reset(Board *board) {
   board_update_all_anchors(board);
 }
 
+static inline void update_opening_penalty(Board *board, int dir, int i,
+                                          int bonus_square_row,
+                                          int bonus_square_col) {
+  uint8_t bonus_square =
+      board_get_bonus_square(board, bonus_square_row, bonus_square_col);
+  if (bonus_square == BRICK_VALUE) {
+    return;
+  }
+  int word_multiplier = bonus_square >> 4;
+  int letter_multiplier = bonus_square & 0x0F;
+
+  // Very basic heuristic which will undoubtedly be greatly improved
+  // at a later time.
+  board->opening_move_penalties[dir * BOARD_DIM + i] +=
+      (OPENING_HOTSPOT_PENALTY / 2) * (word_multiplier - 1) +
+      (OPENING_HOTSPOT_PENALTY / 2) * (letter_multiplier - 1);
+}
+
 static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
   for (int i = 0; i < 2; i++) {
     board->start_coords[i] = board_layout_get_start_coord(bl, i);
@@ -733,6 +764,42 @@ static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
       }
     }
   }
+
+  memset(board->opening_move_penalties, 0,
+         sizeof(board->opening_move_penalties));
+
+  // Calculate opening penalties
+
+  const int row = board->start_coords[0];
+  const int col = board->start_coords[1];
+  if (row - 1 >= 0) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      update_opening_penalty(board, BOARD_HORIZONTAL_DIRECTION, col, row - 1,
+                             col);
+    }
+  }
+
+  if (row + 1 < BOARD_DIM) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      update_opening_penalty(board, BOARD_HORIZONTAL_DIRECTION, col, row + 1,
+                             col);
+    }
+  }
+
+  if (col - 1 >= 0) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      update_opening_penalty(board, BOARD_VERTICAL_DIRECTION, row, row,
+                             col - 1);
+    }
+  }
+
+  if (col + 1 < BOARD_DIM) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      update_opening_penalty(board, BOARD_VERTICAL_DIRECTION, row, row,
+                             col + 1);
+    }
+  }
+
   board_reset(board);
 }
 
@@ -799,6 +866,12 @@ static inline void board_copy_row_cache(const Square *lanes_cache,
                                         int dir) {
   const Square *source_row = board_get_row_cache(lanes_cache, row_or_col, dir);
   memory_copy(row_cache, source_row, sizeof(Square) * BOARD_DIM);
+}
+
+static inline void board_copy_opening_penalties(const Board *board,
+                                                double *opening_penalties) {
+  memory_copy(opening_penalties, board->opening_move_penalties,
+              sizeof(double) * 2 * BOARD_DIM);
 }
 
 static inline int board_toggle_dir(int dir) {

@@ -452,8 +452,10 @@ move_validation_status_t validated_move_load(ValidatedMove *vm,
       move_set_equity(
           vm->move,
           static_eval_get_move_equity(
-              ld, klv, vm->move, board, vm->leave,
+              ld, klv, vm->move, vm->leave,
               player_get_rack(game_get_player(game, 1 - player_index)),
+              board_get_opening_move_penalties(board),
+              board_get_tiles_played(board),
               bag_get_tiles(game_get_bag(game))));
     } else {
       move_set_equity(vm->move, score);
