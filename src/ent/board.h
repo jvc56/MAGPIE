@@ -37,7 +37,7 @@ typedef struct Board {
   Square squares[2 * 2 * BOARD_DIM * BOARD_DIM];
   int number_of_row_anchors[BOARD_DIM * 2];
   // Stores the penalties to be applied to
-  // the opening more for each square in both
+  // the opening move for each square in both
   // horizontal and vertical directions if the
   // tile is a vowel.
   double opening_move_penalties[BOARD_DIM * 2];
