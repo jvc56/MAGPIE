@@ -25,6 +25,8 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
+#include "../str/game_string.h"
+#include "../str/move_string.h"
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
@@ -212,6 +214,8 @@ static inline uint64_t gen_cache_get_right_extension_set(const MoveGen *gen,
 
 static inline double gen_get_static_equity(const MoveGen *gen,
                                            const Move *move) {
+  //printf("gen_get_static_equity, move->score = %d, current_value = %f\n",
+  //       move_get_score(move), leave_map_get_current_value(&gen->leave_map));
   return static_eval_get_move_equity_with_leave_value(
       gen->ld, move, gen->board, &gen->player_rack, &gen->opponent_rack,
       gen->number_of_tiles_in_bag,
@@ -248,8 +252,9 @@ static inline void set_play_for_record(Move *move, game_event_t move_type,
   }
 }
 
-static inline double
-get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, int score) {
+static inline double get_move_equity_for_sort_type(const MoveGen *gen,
+                                                   const Move *move,
+                                                   int score) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return gen_get_static_equity(gen, move);
   }
@@ -355,8 +360,8 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
       double value = 0.0;
       if (word_index != KLV_UNFOUND_INDEX) {
         value = klv_get_indexed_leave_value(gen->klv, word_index - 1);
-        leave_map_set_current_value(&gen->leave_map, value);
       }
+      leave_map_set_current_value(&gen->leave_map, value);
       if (value > gen->best_leaves[leave->number_of_letters]) {
         gen->best_leaves[leave->number_of_letters] = value;
       }
@@ -623,9 +628,8 @@ static inline void insert_unrestricted_cross_word_multiplier(MoveGen *gen,
   gen->descending_cross_word_multipliers[insert_index].column = col;
 }
 
-static inline void
-insert_unrestricted_effective_letter_multiplier(MoveGen *gen,
-                                                uint8_t multiplier) {
+static inline void insert_unrestricted_effective_letter_multiplier(
+    MoveGen *gen, uint8_t multiplier) {
   int insert_index = gen->num_unrestricted_multipliers;
   for (; insert_index > 0 &&
          gen->descending_effective_letter_multipliers[insert_index - 1] <
@@ -1139,6 +1143,12 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 void generate_moves(Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
                     MoveList *move_list) {
+/*                      
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_game(game, NULL, sb);
+  printf("%s\n", string_builder_peek(sb));
+  destroy_string_builder(sb);
+*/
   const LetterDistribution *ld = game_get_ld(game);
   MoveGen *gen = get_movegen(thread_index);
   int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -1248,6 +1258,20 @@ void generate_moves(Game *game, move_record_t move_record_type,
                   gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
 
     if (gen->move_record_type == MOVE_RECORD_BEST) {
+      if (better_play_has_been_found(gen, anchor_highest_possible_equity)) {
+        StringBuilder *sb = create_string_builder();
+        string_builder_add_game(game, NULL, sb);
+        printf("%s\n", string_builder_peek(sb));
+        destroy_string_builder(sb);
+        printf(
+            "Better play has been found than should have been possible for "
+            "this anchor.\n");
+        sb = create_string_builder();
+        const Move *move = gen_get_readonly_best_move(gen);
+        string_builder_add_move(gen->board, move, gen->ld, sb);
+        printf("%s has equity %f > %f\n", string_builder_peek(sb),
+               move_get_equity(move), anchor_highest_possible_equity);
+      }
       // If a better play has been found than should have been possible for
       // this anchor, highest_possible_equity was invalid.
       assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));

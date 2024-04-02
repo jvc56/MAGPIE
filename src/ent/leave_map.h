@@ -2,6 +2,7 @@
 #define LEAVE_MAP_H
 
 #include <stdint.h>
+#include <stdio.h>
 
 #include "rack.h"
 
@@ -33,9 +34,13 @@ static inline void leave_map_set_current_index(LeaveMap *leave_map,
 static inline void leave_map_set_current_value(LeaveMap *leave_map,
                                                double value) {
   leave_map->leave_values[leave_map->current_index] = value;
+  //printf("(set) leave_map->current_index: %d, leave_map->leave_values[leave_map->current_index]: %f\n",
+  //leave_map->current_index, leave_map->leave_values[leave_map->current_index]);
 }
 
 static inline double leave_map_get_current_value(const LeaveMap *leave_map) {
+  //printf("(get) leave_map->current_index: %d, leave_map->leave_values[leave_map->current_index]: %f\n",
+  //leave_map->current_index, leave_map->leave_values[leave_map->current_index]);
   return leave_map->leave_values[leave_map->current_index];
 }
 

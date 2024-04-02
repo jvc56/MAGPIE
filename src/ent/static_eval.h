@@ -86,6 +86,9 @@ static_eval_get_shadow_equity(const LetterDistribution *ld,
                               int number_of_letters_on_rack, int tiles_played) {
   double equity = 0;
   if (number_of_tiles_in_bag > 0) {
+    //printf("shadow equity, best_leaves[%d] = %f\n",
+    //       number_of_letters_on_rack - tiles_played,
+    //       best_leaves[number_of_letters_on_rack - tiles_played]);
     // Bag is not empty: use leave values
     equity += best_leaves[number_of_letters_on_rack - tiles_played];
     // Apply preendgame heuristic if this play would empty the bag or leave

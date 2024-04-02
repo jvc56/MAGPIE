@@ -125,7 +125,6 @@ void klv_load(KLV *klv, const char *klv_name) {
     log_fatal("number of leaves fread failure: %zd != %d\n", result, 1);
   }
   number_of_leaves = le32toh(number_of_leaves);
-
   klv->leave_values =
       (double *)malloc_or_die(number_of_leaves * sizeof(double));
   float *temp_floats = (float *)malloc_or_die(number_of_leaves * sizeof(float));
