@@ -100,6 +100,21 @@ void test_board_layout_error() {
                             BOARD_LAYOUT_LOAD_STATUS_INVALID_BONUS_SQUARE);
 }
 
+void assert_opening_penalties(Game *game, const char *layout,
+                              const char *rack_string, int score,
+                              double equity) {
+  load_game_with_test_board(game, layout);
+  Player *player = game_get_player(game, game_get_player_on_turn_index(game));
+  Rack *player_rack = player_get_rack(player);
+  MoveList *move_list = move_list_create(1);
+  rack_set_to_string(game_get_ld(game), player_rack, rack_string);
+  generate_moves_for_game(game, 0, move_list);
+  Move *move = move_list_get_move(move_list, 0);
+  assert(move_get_score(move) == score);
+  assert(within_epsilon_for_equity(move_get_equity(move), equity));
+  move_list_destroy(move_list);
+}
+
 void test_board_layout_correctness() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
@@ -207,6 +222,15 @@ void test_board_layout_correctness() {
   // The only legal play is extending KGOTLA to LEKGOTLA
   assert_validated_and_generated_moves(game, "RATLINE", "8B", "LE(KGOTLA)", 13,
                                        true);
+
+  // Assume players are using the same KLV
+  assert_opening_penalties(game, "standard15.txt", "QUIRKED", 112,
+                           112 + OPENING_HOTSPOT_PENALTY);
+  assert_opening_penalties(game, "no_bonus_squares_15.txt", "QUIRKED", 71, 71);
+  assert_opening_penalties(game, "no_bonus_squares_15.txt", "EUOUAES", 57, 57);
+  assert_opening_penalties(game, "many_opening_hotspots_15.txt", "EUOUAES", 66,
+                           66 + ((OPENING_HOTSPOT_PENALTY / 2) * 12));
+
   // Validate play over block
   load_game_with_test_board(game, "5_by_5_bricked_box_15.txt");
 
