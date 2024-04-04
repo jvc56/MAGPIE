@@ -340,10 +340,6 @@ static inline void record_exchange(MoveGen *gen) {
 // lookup of leaves with common lexicographical "prefixes".
 void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
                              uint32_t word_index, uint8_t ml,
-                             bool add_exchange);
-
-void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
-                             uint32_t word_index, uint8_t ml,
                              bool add_exchange) {
   const uint32_t ld_size = ld_get_size(gen->ld);
   while (ml < ld_size && rack_get_letter(&gen->player_rack, ml) == 0) {
