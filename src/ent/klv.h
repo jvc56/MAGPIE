@@ -2,7 +2,6 @@
 #define KLV_H
 
 #include "../def/klv_defs.h"
-
 #include "kwg.h"
 #include "rack.h"
 
@@ -41,19 +40,19 @@ static inline uint32_t increment_node_to_ml(const KLV *klv, uint32_t node_index,
   if (node_index == 0) {
     *next_word_index = KLV_UNFOUND_INDEX;
     return 0;
-  }                                              
-  *next_word_index = word_index;
+  }
+  uint32_t w_idx = word_index;
   for (;;) {
     const uint32_t node = kwg_node(klv->kwg, node_index);
     if (kwg_node_tile(node) == ml) {
+      *next_word_index = w_idx;
       return node_index;
     }
     if (kwg_node_is_end(node)) {
       *next_word_index = KLV_UNFOUND_INDEX;
       return 0;
     }
-    *next_word_index +=
-        klv->word_counts[node_index] - klv->word_counts[node_index + 1];
+    w_idx += klv->word_counts[node_index] - klv->word_counts[node_index + 1];
     node_index++;
   }
 }
