@@ -10,6 +10,7 @@
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
 
+#include "test_constants.h"
 #include "test_util.h"
 
 void test_board_layout_success() {
@@ -230,15 +231,62 @@ void test_board_layout_correctness() {
   assert_opening_penalties(game, "no_bonus_squares_15.txt", "EUOUAES", 57, 57);
   assert_opening_penalties(game, "many_opening_hotspots_15.txt", "EUOUAES", 66,
                            66 + ((OPENING_HOTSPOT_PENALTY / 2) * 12));
+  assert_opening_penalties(game, "many_opening_hotspots_vertical_15.txt",
+                           "EUOUAES", 66,
+                           66 + ((OPENING_HOTSPOT_PENALTY / 2) * 5));
+
+  double opening_penalties[BOARD_DIM * 2];
+  board_copy_opening_penalties(board, opening_penalties);
+  assert(within_epsilon_for_equity(opening_penalties[0], 0));
+  assert(within_epsilon_for_equity(opening_penalties[1], 0));
+  assert(within_epsilon_for_equity(opening_penalties[2],
+                                   OPENING_HOTSPOT_PENALTY * 3));
+  assert(within_epsilon_for_equity(opening_penalties[3],
+                                   OPENING_HOTSPOT_PENALTY * 3));
+  assert(within_epsilon_for_equity(opening_penalties[4],
+                                   OPENING_HOTSPOT_PENALTY * 3));
+  assert(within_epsilon_for_equity(opening_penalties[5],
+                                   OPENING_HOTSPOT_PENALTY * 3));
+  assert(within_epsilon_for_equity(opening_penalties[6],
+                                   OPENING_HOTSPOT_PENALTY * 3));
+  assert(within_epsilon_for_equity(opening_penalties[7], 0));
+  assert(within_epsilon_for_equity(opening_penalties[8],
+                                   OPENING_HOTSPOT_PENALTY * 1.5));
+  assert(within_epsilon_for_equity(opening_penalties[9],
+                                   OPENING_HOTSPOT_PENALTY * 1.5));
+  assert(within_epsilon_for_equity(opening_penalties[10],
+                                   OPENING_HOTSPOT_PENALTY * 1.5));
+  assert(within_epsilon_for_equity(opening_penalties[15],
+                                   OPENING_HOTSPOT_PENALTY * 3));
+  assert(within_epsilon_for_equity(opening_penalties[16],
+                                   OPENING_HOTSPOT_PENALTY * 3));
+  assert(within_epsilon_for_equity(opening_penalties[17],
+                                   OPENING_HOTSPOT_PENALTY * 3));
+  assert(within_epsilon_for_equity(opening_penalties[17],
+                                   OPENING_HOTSPOT_PENALTY * 3));
+  assert(within_epsilon_for_equity(opening_penalties[22], 0));
+  assert(within_epsilon_for_equity(opening_penalties[23],
+                                   OPENING_HOTSPOT_PENALTY * 1.5));
+  assert(within_epsilon_for_equity(opening_penalties[24], 0));
+
+  // Validate play out of bounds
+  load_game_with_test_board(game, "standard15.txt");
+
+  load_cgp_or_die(game, ENTASIS_OPENING_CGP);
+
+  ValidatedMoves *vms =
+      validated_moves_create(game, 0, "7J.FRAWZEY", false, false);
+  move_validation_status_t vms_error_status =
+      validated_moves_get_validation_status(vms);
+  assert(vms_error_status == MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS);
+  validated_moves_destroy(vms);
 
   // Validate play over block
   load_game_with_test_board(game, "5_by_5_bricked_box_15.txt");
 
-  ValidatedMoves *vms =
-      validated_moves_create(game, 0, "8H.FRAWZEY", false, false);
-  move_validation_status_t vms_error_status =
-      validated_moves_get_validation_status(vms);
-  assert(vms_error_status == MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS);
+  vms = validated_moves_create(game, 0, "8H.FRAWZEY", false, false);
+  vms_error_status = validated_moves_get_validation_status(vms);
+  assert(vms_error_status == MOVE_VALIDATION_STATUS_TILES_PLAYED_OVER_BRICK);
   validated_moves_destroy(vms);
 
   game_destroy(game);

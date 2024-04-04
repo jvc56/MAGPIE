@@ -126,10 +126,11 @@ move_validation_status_t validate_tiles_played_with_mls(
     int move_dir = move_get_dir(move);
     bool connected = false;
     for (int i = 0; i < number_of_machine_letters; i++) {
-      // FIXME: add another error for tiles placed over bricks
-      if (!board_is_position_in_bounds_and_not_bricked(board, current_row,
-                                                       current_col)) {
+      if (!board_is_position_in_bounds(current_row, current_col)) {
         return MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS;
+      }
+      if (board_get_is_brick(board, current_row, current_col)) {
+        return MOVE_VALIDATION_STATUS_TILES_PLAYED_OVER_BRICK;
       }
       uint8_t board_letter = board_get_letter(board, current_row, current_col);
       uint8_t ml = machine_letters[i];
