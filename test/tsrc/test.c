@@ -154,7 +154,7 @@ int main(int argc, char *argv[]) {
     }
   } else if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
     if (argc > 1) {
-      log_warn("Ignoring test argumentss when testing default super board "
+      log_warn("Ignoring test arguments when testing default super board "
                "dimensions of %d.",
                DEFAULT_SUPER_BOARD_DIM);
     }

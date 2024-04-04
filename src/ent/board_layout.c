@@ -78,7 +78,7 @@ board_layout_parse_split_start_coords(BoardLayout *bl,
   }
 
   for (int i = 0; i < 2; i++) {
-    int lane_start_value =
+    const int lane_start_value =
         string_to_int(string_splitter_get_item(starting_coords, i));
     if (lane_start_value < 0 || lane_start_value >= BOARD_DIM) {
       return BOARD_LAYOUT_LOAD_STATUS_OUT_OF_BOUNDS_START_COORDS;
@@ -99,7 +99,7 @@ uint8_t bonus_square_char_to_value(char bonus_square_char) {
 board_layout_load_status_t
 board_layout_parse_split_file(BoardLayout *bl,
                               const StringSplitter *file_lines) {
-  int number_of_rows = string_splitter_get_number_of_items(file_lines);
+  const int number_of_rows = string_splitter_get_number_of_items(file_lines);
 
   if (number_of_rows != BOARD_DIM + 1) {
     return BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS;
@@ -123,9 +123,9 @@ board_layout_parse_split_file(BoardLayout *bl,
       return BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_COLS;
     }
     for (int col = 0; col < BOARD_DIM; col++) {
-      char bonus_square_char = layout_row[col];
-      int index = board_layout_get_index(row, col);
-      uint8_t bonus_square_value =
+      const char bonus_square_char = layout_row[col];
+      const int index = board_layout_get_index(row, col);
+      const uint8_t bonus_square_value =
           bonus_square_char_to_value(bonus_square_char);
       if (bonus_square_value == 0) {
         return BOARD_LAYOUT_LOAD_STATUS_INVALID_BONUS_SQUARE;

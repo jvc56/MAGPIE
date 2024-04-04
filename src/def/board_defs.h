@@ -5,7 +5,7 @@
 #define DEFAULT_SUPER_BOARD_DIM 21
 
 // This should be defined in the Makefile
-// but is conditionally defined here so
+// but is conditionally defined here
 // as a fallback and so the IDE doesn't
 // complain about a missing definition.
 #ifndef BOARD_DIM
