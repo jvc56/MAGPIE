@@ -9,7 +9,7 @@ mkdir -p "$DST_LEXICA_PATH" &&
 mkdir -p "$DST_STRATEGY_PATH" &&
 mkdir -p "$DST_LAYOUTS_PATH" &&
 
-lexicons=("CSW21" "NWL20" "DISC2" "FRA20" "OSPS49")
+lexicons=("CSW21" "NWL20" "DISC2" "FRA20" "OSPS49" "CEL_super")
 data_types=("kwg" "klv2")
 
 for lexicon in "${lexicons[@]}"; do
@@ -35,3 +35,4 @@ wget -O "$DST_STRATEGY_PATH/winpct.csv" "$SRC_STRATEGY_PATH/winpct.csv"
 # Download the standard layouts
 
 wget -O "$DST_LAYOUTS_PATH/standard15.txt" "$SRC_LAYOUTS_PATH/standard15.txt" 
+wget -O "$DST_LAYOUTS_PATH/standard21.txt" "$SRC_LAYOUTS_PATH/standard21.txt" 
