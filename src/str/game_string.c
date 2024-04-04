@@ -60,8 +60,9 @@ void string_builder_add_board_row(const LetterDistribution *ld,
   for (int i = 0; i < BOARD_DIM; i++) {
     uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-      string_builder_add_char(game_string,
-                              CROSSWORD_GAME_BOARD[(row * BOARD_DIM) + i]);
+      string_builder_add_char(
+          game_string,
+          bonus_square_value_to_char(board_get_bonus_square(board, row, i)));
     } else {
       string_builder_add_user_visible_letter(ld, game_string, current_letter);
     }
@@ -96,11 +97,23 @@ void string_builder_add_game(Game *game, MoveList *move_list,
   }
   int player_on_turn_index = game_get_player_on_turn_index(game);
 
-  string_builder_add_string(game_string, "   A B C D E F G H I J K L M N O   ");
+  string_builder_add_string(game_string, "  ");
+
+  for (int i = 0; i < BOARD_DIM; i++) {
+    string_builder_add_formatted_string(game_string, " %c", i + 65);
+  }
+
+  string_builder_add_string(game_string, "   ");
+
   string_builder_add_player_row(ld, player0, game_string,
                                 player_on_turn_index == 0);
-  string_builder_add_string(game_string,
-                            "\n   ------------------------------  ");
+  string_builder_add_string(game_string, "\n   ");
+
+  for (int i = 0; i < BOARD_DIM; i++) {
+    string_builder_add_string(game_string, "--");
+  }
+
+  string_builder_add_string(game_string, "  ");
   string_builder_add_player_row(ld, player1, game_string,
                                 player_on_turn_index == 1);
   string_builder_add_string(game_string, "\n");
@@ -124,7 +137,13 @@ void string_builder_add_game(Game *game, MoveList *move_list,
     string_builder_add_string(game_string, "\n");
   }
 
-  string_builder_add_string(game_string, "   ------------------------------\n");
+  string_builder_add_string(game_string, "   ");
+
+  for (int i = 0; i < BOARD_DIM; i++) {
+    string_builder_add_string(game_string, "--");
+  }
+
+  string_builder_add_string(game_string, "\n");
 }
 
 char *ucgi_static_moves(const Game *game, const MoveList *move_list) {

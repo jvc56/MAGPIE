@@ -550,9 +550,10 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
         game_history_set_ld_name(game_history, default_ld_name);
         free(default_ld_name);
       }
-      if (game_history_get_board_layout(game_history) == BOARD_LAYOUT_UNKNOWN) {
-        game_history_set_board_layout(game_history,
-                                      BOARD_LAYOUT_CROSSWORD_GAME);
+      if (game_history_get_board_layout_name(game_history) == NULL) {
+        char *default_layout = board_layout_get_default_name();
+        game_history_set_board_layout_name(game_history, default_layout);
+        free(default_layout);
       }
       if (game_history_get_game_variant(game_history) == GAME_VARIANT_UNKNOWN) {
         game_history_set_game_variant(game_history, GAME_VARIANT_CLASSIC);
@@ -758,14 +759,13 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events > 0) {
       return GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT;
     }
-    if (game_history_get_board_layout(game_history) != BOARD_LAYOUT_UNKNOWN) {
+    if (game_history_get_board_layout_name(game_history) != NULL) {
       return GCG_PARSE_STATUS_REDUNDANT_PRAGMA;
     }
-    char *board_layout_string =
+    char *board_layout_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    game_history_set_board_layout(
-        game_history, board_layout_string_to_board_layout(board_layout_string));
-    free(board_layout_string);
+    game_history_set_board_layout_name(game_history, board_layout_name);
+    free(board_layout_name);
     break;
   case GCG_TILE_DISTRIBUTION_NAME_TOKEN:
     if (number_of_events > 0) {

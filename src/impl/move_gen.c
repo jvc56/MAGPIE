@@ -58,6 +58,8 @@ typedef struct MoveGen {
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
   int row_number_of_anchors_cache[(BOARD_DIM) * 2];
+  double opening_move_penalties[(BOARD_DIM) * 2];
+  int board_number_of_tiles_played;
   int cross_index;
   Move best_move_and_current_move[2];
   int best_move_index;
@@ -121,7 +123,6 @@ typedef struct MoveGen {
   const LetterDistribution *ld;
   const KLV *klv;
   const KWG *kwg;
-  const Board *board;
   // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
@@ -213,7 +214,8 @@ static inline uint64_t gen_cache_get_right_extension_set(const MoveGen *gen,
 static inline double gen_get_static_equity(const MoveGen *gen,
                                            const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
-      gen->ld, move, gen->board, &gen->player_rack, &gen->opponent_rack,
+      gen->ld, move, &gen->player_rack, &gen->opponent_rack,
+      gen->opening_move_penalties, gen->board_number_of_tiles_played,
       gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
 }
@@ -248,9 +250,8 @@ static inline void set_play_for_record(Move *move, game_event_t move_type,
   }
 }
 
-static inline double get_move_equity_for_sort_type(const MoveGen *gen,
-                                                   const Move *move,
-                                                   int score) {
+static inline double
+get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, int score) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return gen_get_static_equity(gen, move);
   }
@@ -624,8 +625,9 @@ static inline void insert_unrestricted_cross_word_multiplier(MoveGen *gen,
   gen->descending_cross_word_multipliers[insert_index].column = col;
 }
 
-static inline void insert_unrestricted_effective_letter_multiplier(
-    MoveGen *gen, uint8_t multiplier) {
+static inline void
+insert_unrestricted_effective_letter_multiplier(MoveGen *gen,
+                                                uint8_t multiplier) {
   int insert_index = gen->num_unrestricted_multipliers;
   for (; insert_index > 0 &&
          gen->descending_effective_letter_multipliers[insert_index - 1] <
@@ -1139,6 +1141,7 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 void generate_moves(Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
                     MoveList *move_list) {
+  const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   MoveGen *gen = get_movegen(thread_index);
   int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -1148,7 +1151,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   gen->ld = ld;
   gen->kwg = player_get_kwg(player);
   gen->klv = player_get_klv(player);
-  gen->board = game_get_board(game);
+  gen->board_number_of_tiles_played = board_get_tiles_played(board);
   gen->player_index = player_on_turn_index;
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
@@ -1212,9 +1215,11 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
   set_descending_tile_scores(gen);
 
-  board_load_number_of_row_anchors_cache(gen->board,
+  board_load_number_of_row_anchors_cache(board,
                                          gen->row_number_of_anchors_cache);
-  board_load_lanes_cache(gen->board, gen->cross_index, gen->lanes_cache);
+  board_load_lanes_cache(board, gen->cross_index, gen->lanes_cache);
+
+  board_copy_opening_penalties(board, gen->opening_move_penalties);
 
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;

@@ -117,7 +117,7 @@ int traverse_backwards_for_score(const Board *board,
                                  const LetterDistribution *ld, int row,
                                  int col) {
   int score = 0;
-  while (board_is_position_valid(row, col)) {
+  while (board_is_position_in_bounds_and_not_bricked(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
@@ -136,7 +136,7 @@ static inline uint32_t traverse_backwards(const KWG *kwg, Board *board, int row,
                                           int col, uint32_t node_index,
                                           bool check_letter_set,
                                           int left_most_col) {
-  while (board_is_position_valid(row, col)) {
+  while (board_is_position_in_bounds_and_not_bricked(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
@@ -163,16 +163,13 @@ static inline uint32_t traverse_backwards(const KWG *kwg, Board *board, int row,
 
 void game_gen_cross_set(Game *game, int row, int col, int dir,
                         int cross_set_index) {
-  if (!board_is_position_valid(row, col)) {
+  if (!board_is_position_in_bounds(row, col)) {
     return;
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
-  const uint32_t kwg_root = kwg_get_root_node_index(kwg);
-  const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
 
-  if (!board_is_empty(board, row, col)) {
+  if (board_is_nonempty_or_bricked(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index, 0);
     board_set_cross_score(board, row, col, dir, cross_set_index, 0);
     return;
@@ -183,6 +180,10 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     board_set_cross_score(board, row, col, dir, cross_set_index, 0);
     return;
   }
+
+  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const uint32_t kwg_root = kwg_get_root_node_index(kwg);
+  const LetterDistribution *ld = game_get_ld(game);
 
   const int through_dir = board_toggle_dir(dir);
 
@@ -261,10 +262,11 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
       for (int i = right_lnode_index;; i++) {
         const uint32_t node = kwg_node(kwg, i);
         const uint32_t ml = kwg_node_tile(node);
-        // Only try letters that are possible in right extensions from the left
-        // side of the empty square.
+        // Only try letters that are possible in right extensions from the
+        // left side of the empty square.
         if (board_is_letter_allowed_in_cross_set(leftside_rightx_set, ml)) {
-          const uint32_t next_node_index = kwg_node_arc_index_prefetch(node, kwg);
+          const uint32_t next_node_index =
+              kwg_node_arc_index_prefetch(node, kwg);
           if (traverse_backwards(kwg, board, row, col - 1, next_node_index,
                                  true, left_col) != 0) {
             letter_set |= get_cross_set_bit(ml);
@@ -575,7 +577,7 @@ void pre_allocate_backups(Game *game) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
     game->game_backups[i]->bag = bag_create(ld);
-    game->game_backups[i]->board = board_create();
+    game->game_backups[i]->board = board_duplicate(game_get_board(game));
     game->game_backups[i]->p0rack = rack_create(ld_size);
     game->game_backups[i]->p1rack = rack_create(ld_size);
   }
@@ -605,7 +607,7 @@ Game *game_create(const Config *config) {
   Game *game = malloc_or_die(sizeof(Game));
   game->ld = config_get_ld(config);
   game->bag = bag_create(game->ld);
-  game->board = board_create();
+  game->board = board_create(config_get_board_layout(config));
   for (int player_index = 0; player_index < 2; player_index++) {
     game->players[player_index] = player_create(config, player_index);
   }

@@ -286,25 +286,38 @@ void test_validated_move_success() {
   assert(validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
-  vms = assert_validated_move_success(game, EMPTY_CGP, "8d.JIHAD", 0, false);
-  assert(validated_moves_get_number_of_moves(vms) == 1);
-  move = validated_moves_get_move(vms, 0);
-  assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
-  assert(move_get_tiles_length(move) == 5);
-  assert(move_get_tiles_played(move) == 5);
-  assert(move_get_row_start(move) == 7);
-  assert(move_get_col_start(move) == 3);
-  assert(move_get_dir(move) == BOARD_HORIZONTAL_DIRECTION);
-  assert(move_get_score(move) == 48);
-  assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "J"));
-  assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "I"));
-  assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "H"));
-  assert(move_get_tile(move, 3) == ld_hl_to_ml(ld, "A"));
-  assert(move_get_tile(move, 4) == ld_hl_to_ml(ld, "D"));
-  assert(!validated_moves_get_rack(vms, 0));
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
-  assert(!validated_moves_get_challenge_turn_loss(vms, 0));
-  validated_moves_destroy(vms);
+  for (int dir = 0; dir < 2; dir++) {
+    if (dir == BOARD_HORIZONTAL_DIRECTION) {
+      vms =
+          assert_validated_move_success(game, EMPTY_CGP, "8d.JIHAD", 0, false);
+    } else {
+      vms =
+          assert_validated_move_success(game, EMPTY_CGP, "H4.JIHAD", 0, false);
+    }
+    assert(validated_moves_get_number_of_moves(vms) == 1);
+    move = validated_moves_get_move(vms, 0);
+    assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+    assert(move_get_tiles_length(move) == 5);
+    assert(move_get_tiles_played(move) == 5);
+    if (dir == BOARD_HORIZONTAL_DIRECTION) {
+      assert(move_get_row_start(move) == 7);
+      assert(move_get_col_start(move) == 3);
+    } else {
+      assert(move_get_row_start(move) == 3);
+      assert(move_get_col_start(move) == 7);
+    }
+    assert(move_get_dir(move) == dir);
+    assert(move_get_score(move) == 48);
+    assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "J"));
+    assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "I"));
+    assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "H"));
+    assert(move_get_tile(move, 3) == ld_hl_to_ml(ld, "A"));
+    assert(move_get_tile(move, 4) == ld_hl_to_ml(ld, "D"));
+    assert(!validated_moves_get_rack(vms, 0));
+    assert(validated_moves_get_challenge_points(vms, 0) == 0);
+    assert(!validated_moves_get_challenge_turn_loss(vms, 0));
+    validated_moves_destroy(vms);
+  }
 
   rack_set_to_string(ld, rack, "AEFFGIR");
   vms = assert_validated_move_success(game, ION_OPENING_CGP,

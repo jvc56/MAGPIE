@@ -17,6 +17,7 @@
 #include "../def/win_pct_defs.h"
 
 #include "board.h"
+#include "board_layout.h"
 #include "letter_distribution.h"
 #include "players_data.h"
 #include "rack.h"
@@ -27,7 +28,6 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-#define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
 #define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC
 #define DEFAULT_MOVE_LIST_CAPACITY 1
 #define DEFAULT_SIMMING_STOPPING_CONDITION SIM_STOPPING_CONDITION_NONE
@@ -102,7 +102,7 @@ struct Config {
   char *cgp;
   char *moves;
   int bingo_bonus;
-  board_layout_t board_layout;
+  BoardLayout *board_layout;
   game_variant_t game_variant;
   PlayersData *players_data;
   // Inference
@@ -248,6 +248,10 @@ const char *config_get_cgp(const Config *config) { return config->cgp; }
 const char *config_get_moves(const Config *config) { return config->moves; }
 
 int config_get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
+
+const BoardLayout *config_get_board_layout(const Config *config) {
+  return config->board_layout;
+}
 
 game_variant_t config_get_game_variant(const Config *config) {
   return config->game_variant;
@@ -513,11 +517,14 @@ config_load_status_t load_bingo_bonus_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_board_layout_for_config(Config *config,
-                                                  const char *board_layout) {
-  config->board_layout = board_layout_string_to_board_layout(board_layout);
-  if (config->board_layout == BOARD_LAYOUT_UNKNOWN) {
-    return CONFIG_LOAD_STATUS_UNKNOWN_BOARD_LAYOUT;
+config_load_status_t
+load_board_layout_for_config(Config *config, const char *board_layout_name) {
+  char *board_layout_filepath = board_layout_get_filepath(board_layout_name);
+  board_layout_load_status_t board_layout_load_status =
+      board_layout_load(config->board_layout, board_layout_filepath);
+  free(board_layout_filepath);
+  if (board_layout_load_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
+    return CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR;
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
@@ -1235,7 +1242,7 @@ Config *config_create_default() {
   config->ld_name_changed = false;
   config->cgp = NULL;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
-  config->board_layout = DEFAULT_BOARD_LAYOUT;
+  config->board_layout = board_layout_create_default();
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->players_data = players_data_create();
   config->rack = NULL;
@@ -1270,6 +1277,7 @@ void config_destroy(Config *config) {
   free(config->moves);
   free(config->win_pct_name);
   players_data_destroy(config->players_data);
+  board_layout_destroy(config->board_layout);
   thread_control_destroy(config->thread_control);
   free(config);
 }
