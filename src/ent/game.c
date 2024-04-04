@@ -167,9 +167,6 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
     return;
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
-  const uint32_t kwg_root = kwg_get_root_node_index(kwg);
-  const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
 
   if (board_is_nonempty_or_bricked(board, row, col)) {
@@ -185,6 +182,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
   }
 
   const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const uint32_t kwg_root = kwg_get_root_node_index(kwg);
   const LetterDistribution *ld = game_get_ld(game);
 
   const int through_dir = board_toggle_dir(dir);

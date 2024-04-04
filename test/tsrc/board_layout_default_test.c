@@ -235,6 +235,8 @@ void test_board_layout_correctness() {
                            "EUOUAES", 66,
                            66 + ((OPENING_HOTSPOT_PENALTY / 2) * 5));
 
+  load_game_with_test_board(game, "many_opening_hotspots_vertical_15.txt");
+
   double opening_penalties[BOARD_DIM * 2];
   board_copy_opening_penalties(board, opening_penalties);
   assert(within_epsilon_for_equity(opening_penalties[0], 0));

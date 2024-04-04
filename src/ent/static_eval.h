@@ -22,8 +22,14 @@ static inline double
 placement_adjustment(const LetterDistribution *ld, const Move *move,
                      const double *opening_move_penalties) {
   int start = move_get_col_start(move);
-  int end = start + move_get_tiles_played(move);
-  int dir = move_get_dir(move);
+  int offset = 0;
+
+  if (board_is_dir_vertical(move_get_dir(move))) {
+    start = move_get_row_start(move);
+    offset = BOARD_DIM;
+  }
+
+  const int end = start + move_get_tiles_played(move);
 
   int j = start;
   double penalty = 0;
@@ -33,8 +39,7 @@ placement_adjustment(const LetterDistribution *ld, const Move *move,
     if (get_is_blanked(tile)) {
       tile = get_unblanked_machine_letter(tile);
     }
-    penalty +=
-        ld_get_is_vowel(ld, tile) * opening_move_penalties[dir * BOARD_DIM + j];
+    penalty += ld_get_is_vowel(ld, tile) * opening_move_penalties[offset + j];
     j++;
   }
   return penalty;
