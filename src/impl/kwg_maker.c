@@ -379,7 +379,7 @@ void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
     }
     const uint32_t node = kwg_node(kwg, i);
     const uint8_t ml = kwg_node_tile(node);
-    const uint32_t new_node_index = kwg_node_arc_index(node);
+    const uint32_t new_node_index = kwg_node_arc_index_prefetch(node, kwg);
     const bool accepts = kwg_node_accepts(node);
     prefix[prefix_length] = ml;
     write_words_aux(kwg, new_node_index, prefix, prefix_length + 1, accepts,

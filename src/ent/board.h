@@ -43,10 +43,6 @@ typedef struct Board {
   double opening_move_penalties[BOARD_DIM * 2];
   int transposed;
   int tiles_played;
-  // Scratch pad for return values used by
-  // traverse backwards for score
-  uint32_t node_index;
-  bool path_is_valid;
   // Start coordinates used to reset the board
   int start_coords[2];
 } Board;
@@ -478,24 +474,6 @@ static inline int board_get_tiles_played(const Board *board) {
 static inline void board_increment_tiles_played(Board *board,
                                                 int tiles_played) {
   board->tiles_played += tiles_played;
-}
-
-// Board: traverse backwards return values
-
-static inline bool board_get_path_is_valid(const Board *board) {
-  return board->path_is_valid;
-}
-
-static inline void board_set_path_is_valid(Board *board, bool value) {
-  board->path_is_valid = value;
-}
-
-static inline uint32_t board_get_node_index(const Board *board) {
-  return board->node_index;
-}
-
-static inline void board_set_node_index(Board *board, uint32_t value) {
-  board->node_index = value;
 }
 
 // Board auxilllary functions
