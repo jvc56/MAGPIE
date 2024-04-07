@@ -22,7 +22,7 @@ void test_gen_cross_set(Game *game, int row, int col, const char *letters,
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
-  uint64_t expected_cross_set = cross_set_from_string(ld, letters);
+  uint64_t expected_cross_set = string_to_cross_set(ld, letters);
   uint64_t actual_cross_set =
       board_get_cross_set(board, row, col, BOARD_VERTICAL_DIRECTION, 0);
   assert(expected_cross_set == actual_cross_set);
@@ -71,7 +71,8 @@ void test_cross_set() {
   test_gen_cross_set_row(game, 4, 14, "           ZZZ ", "", 30);
   test_gen_cross_set_row(game, 4, 14, "       ZYZZYVA ", "?S", 43);
   test_gen_cross_set_row(game, 4, 14, "        ZYZZYV ", "?A", 42);
-  test_gen_cross_set_row(game, 4, 14, "       Z Z Y A ", "?ABDEGHILMNRSTWXY", 1);
+  test_gen_cross_set_row(game, 4, 14, "       Z Z Y A ", "?ABDEGHILMNRSTWXY",
+                         1);
   test_gen_cross_set_row(game, 4, 12, "       z z Y A ", "?E", 5);
   test_gen_cross_set_row(game, 4, 14, "OxYpHeNbUTAzON ", "?E", 15);
   test_gen_cross_set_row(game, 4, 6, "OXYPHE BUTAZONE", "?N", 40);
