@@ -341,10 +341,6 @@ static inline void record_exchange(MoveGen *gen) {
 // lookup of leaves with common lexicographical "prefixes".
 void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
                              uint32_t word_index, uint8_t ml,
-                             bool add_exchange);
-
-void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
-                             uint32_t word_index, uint8_t ml,
                              bool add_exchange) {
   const uint32_t ld_size = ld_get_size(gen->ld);
   while (ml < ld_size && rack_get_letter(&gen->player_rack, ml) == 0) {
@@ -386,8 +382,8 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
                               add_exchange);
     }
 
+    rack_take_letters(leave, ml, num_this);
     for (int i = 0; i < num_this; i++) {
-      rack_take_letter(leave, ml);
       leave_map_add_letter_and_update_complement_index(&gen->leave_map,
                                                        &gen->player_rack, ml);
     }
@@ -446,7 +442,8 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
           board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
-        const uint32_t next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
+        const uint32_t next_node_index =
+            kwg_node_arc_index_prefetch(node, gen->kwg);
         bool accepts = kwg_node_accepts(node);
         if (number_of_ml > 0) {
           leave_map_take_letter_and_update_current_index(&gen->leave_map,
@@ -625,9 +622,8 @@ static inline void insert_unrestricted_cross_word_multiplier(MoveGen *gen,
   gen->descending_cross_word_multipliers[insert_index].column = col;
 }
 
-static inline void
-insert_unrestricted_effective_letter_multiplier(MoveGen *gen,
-                                                uint8_t multiplier) {
+static inline void insert_unrestricted_effective_letter_multiplier(
+    MoveGen *gen, uint8_t multiplier) {
   int insert_index = gen->num_unrestricted_multipliers;
   for (; insert_index > 0 &&
          gen->descending_effective_letter_multipliers[insert_index - 1] <
