@@ -622,8 +622,9 @@ static inline void insert_unrestricted_cross_word_multiplier(MoveGen *gen,
   gen->descending_cross_word_multipliers[insert_index].column = col;
 }
 
-static inline void insert_unrestricted_effective_letter_multiplier(
-    MoveGen *gen, uint8_t multiplier) {
+static inline void
+insert_unrestricted_effective_letter_multiplier(MoveGen *gen,
+                                                uint8_t multiplier) {
   int insert_index = gen->num_unrestricted_multipliers;
   for (; insert_index > 0 &&
          gen->descending_effective_letter_multipliers[insert_index - 1] <
