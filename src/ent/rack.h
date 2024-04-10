@@ -5,8 +5,10 @@
 #include <stdint.h>
 
 #include "../def/rack_defs.h"
-#include "../util/string_util.h"
+
 #include "letter_distribution.h"
+
+#include "../util/string_util.h"
 
 typedef struct Rack {
   int dist_size;
