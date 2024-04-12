@@ -3,6 +3,10 @@
 #include "kwg.h"
 #include "rack.h"
 
+// These kwg alpha functions were originally
+// developed in wolges. For more details see
+// https://github.com/andy-k/wolges/blob/main/details.txt
+
 // FIXME: why are we using int instead of uint in this file?
 static inline int32_t kwg_seek(const KWG *kwg, int32_t node_index,
                                uint8_t tile) {

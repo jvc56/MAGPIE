@@ -36,3 +36,7 @@ wget -O "$DST_STRATEGY_PATH/winpct.csv" "$SRC_STRATEGY_PATH/winpct.csv"
 
 wget -O "$DST_LAYOUTS_PATH/standard15.txt" "$SRC_LAYOUTS_PATH/standard15.txt" 
 wget -O "$DST_LAYOUTS_PATH/standard21.txt" "$SRC_LAYOUTS_PATH/standard21.txt" 
+
+# Create symlinks
+
+ln -sf "$DST_LEXICA_PATH/CSW21.klv2" "$DST_LEXICA_PATH/CSW21_alpha.klv2"

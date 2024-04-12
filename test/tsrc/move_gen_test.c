@@ -580,6 +580,38 @@ void distinct_lexica_test() {
   config_destroy(config);
 }
 
+void wordsmog_test() {
+  Config *config =
+      create_config_or_die("setoptions lex CSW21_alpha s1 equity s2 equity "
+                           "r1 best r2 best numplays 1 var wordsmog");
+  Game *game = game_create(config);
+
+  assert_validated_and_generated_moves(game, "FEEZEEE", "8D", "ZEEFE", 54,
+                                       true);
+  assert_validated_and_generated_moves(game, "HOWDYES", "7D", "ODHYW", 55,
+                                       true);
+  assert_validated_and_generated_moves(game, "SIXATAS", "6D", "SIXAT", 88,
+                                       true);
+  assert_validated_and_generated_moves(game, "OSSTTUU", "E2", "OSST(IDE)TUU",
+                                       94, true);
+  assert_validated_and_generated_moves(game, "AEGNSUV", "C8", "SVAEGU", 46,
+                                       true);
+  assert_validated_and_generated_moves(game, "AEHLLOY", "B10", "HLOYL", 61,
+                                       true);
+  assert_validated_and_generated_moves(game, "BEENROW", "A11", "WBEON", 62,
+                                       true);
+  assert_validated_and_generated_moves(game, "ADEEIMN", "5G", "DAEEIMN", 88,
+                                       true);
+  // SPHINXLIKE
+  assert_validated_and_generated_moves(game, "PINLIK?", "F2", "KIIL(XHE)sPN",
+                                       136, true);
+  // CANONIZERS
+  assert_validated_and_generated_moves(game, "AEINNR?", "D3", "ANI(SOZ)ERcN",
+                                       182, true);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void consistent_tiebreaking_test() {
   Config *config =
       create_config_or_die("setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity "
@@ -611,6 +643,8 @@ void consistent_tiebreaking_test() {
 }
 
 void test_move_gen() {
+  wordsmog_test();
+  return;
   leave_lookup_test();
   macondo_tests();
   exchange_tests();

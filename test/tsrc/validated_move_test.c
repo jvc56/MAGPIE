@@ -592,6 +592,34 @@ void test_validated_move_distinct_kwg() {
   config_destroy(config);
 }
 
+void test_validated_move_wordsmog_phonies() {
+  Config *config =
+      create_config_or_die("setoptions lex CSW21_alpha s1 equity s2 equity "
+                           "r1 best r2 best numplays 1 var wordsmog");
+  Game *game = game_create(config);
+
+  ValidatedMoves *vms =
+      validated_moves_create(game, 0, "8H.TRONGLE", false, true);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+  validated_moves_destroy(vms);
+
+  load_cgp_or_die(game, ENTASIS_OPENING_CGP);
+
+  vms = validated_moves_create(game, 0, "7C.DUOGRNA", false, true);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
+  validated_moves_destroy(vms);
+
+  vms = validated_moves_create(game, 0, "7C.DUORENA", false, true);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  validated_moves_destroy(vms);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_validated_move_many() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
@@ -639,5 +667,6 @@ void test_validated_move() {
   test_validated_move_success();
   test_validated_move_score();
   test_validated_move_distinct_kwg();
+  test_validated_move_wordsmog_phonies();
   test_validated_move_many();
 }
