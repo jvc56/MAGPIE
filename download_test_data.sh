@@ -9,7 +9,7 @@ mkdir -p "$DST_LEXICA_PATH" &&
 mkdir -p "$DST_STRATEGY_PATH" &&
 mkdir -p "$DST_LAYOUTS_PATH" &&
 
-lexicons=("CSW21" "NWL20" "DISC2" "FRA20" "OSPS49" "CEL_super")
+lexicons=("CSW21" "NWL20" "DISC2" "FRA20" "OSPS49" "CEL_super" "CSW21_alpha")
 data_types=("kwg" "klv2")
 
 for lexicon in "${lexicons[@]}"; do
@@ -36,7 +36,3 @@ wget -O "$DST_STRATEGY_PATH/winpct.csv" "$SRC_STRATEGY_PATH/winpct.csv"
 
 wget -O "$DST_LAYOUTS_PATH/standard15.txt" "$SRC_LAYOUTS_PATH/standard15.txt" 
 wget -O "$DST_LAYOUTS_PATH/standard21.txt" "$SRC_LAYOUTS_PATH/standard21.txt" 
-
-# Create symlinks
-
-ln -sf "$DST_LEXICA_PATH/CSW21.klv2" "$DST_LEXICA_PATH/CSW21_alpha.klv2"
