@@ -84,8 +84,7 @@ void load_config_or_die(Config *config, const char *cmd) {
 
 char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
   StringBuilder *css_builder = create_string_builder();
-  // Start at 1 to skip the blank
-  for (int i = 1; i < MAX_ALPHABET_SIZE; ++i) {
+  for (int i = 0; i < MAX_ALPHABET_SIZE; ++i) {
     if (input & ((uint64_t)1 << i)) {
       string_builder_add_string(css_builder, ld_ml_to_hl(ld, i));
     }

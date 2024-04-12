@@ -100,7 +100,7 @@ void run_test(const char *subtest) {
     test_board();
   } else if (strings_equal(subtest, "layout")) {
     test_board_layout_default();
-  } else if (strings_equal(subtest, "crossset")) {
+  } else if (strings_equal(subtest, "cs")) {
     test_cross_set();
   } else if (strings_equal(subtest, "move")) {
     test_move();

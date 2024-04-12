@@ -20,6 +20,7 @@ void game_update(const Config *config, Game *game);
 Game *game_duplicate(const Game *game);
 void game_reset(Game *game);
 
+game_variant_t game_get_variant(const Game *game);
 Board *game_get_board(const Game *game);
 Bag *game_get_bag(const Game *game);
 const LetterDistribution *game_get_ld(const Game *game);

@@ -24,12 +24,11 @@ void assert_kwg_compute_alpha_cross_set(const KWG *kwg,
                                         const LetterDistribution *ld,
                                         const char *existing_letters,
                                         const char *expected_cross_set_string) {
-
   Rack *rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, rack, existing_letters);
   uint64_t actual_cross_set = kwg_compute_alpha_cross_set(kwg, rack);
   uint64_t expected_cross_set =
-      string_to_cross_set(ld, expected_cross_set_string) | 1;
+      string_to_cross_set(ld, expected_cross_set_string);
   bool assert_cond = actual_cross_set == expected_cross_set;
   if (!assert_cond) {
     char *actual_cross_set_string = cross_set_to_string(ld, actual_cross_set);
@@ -122,6 +121,9 @@ void test_kwg_compute_alpha_cross_set() {
   assert_kwg_compute_alpha_cross_set(kwg, ld, "ZZ", "IUZ");
   assert_kwg_compute_alpha_cross_set(kwg, ld, "ZZZ", "IS");
   assert_kwg_compute_alpha_cross_set(kwg, ld, "ZZZZ", "");
+
+  assert_kwg_compute_alpha_cross_set(kwg, ld, "ABHIKSU", "Z");
+  assert_kwg_compute_alpha_cross_set(kwg, ld, "ENZXONHPOEUYAB", "T");
 
   config_destroy(config);
 }

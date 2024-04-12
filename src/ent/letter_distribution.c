@@ -208,7 +208,7 @@ int ld_str_to_mls(const LetterDistribution *ld, const char *str,
       break;
     case MULTICHAR_END_DELIMITIER:
       // Return an error if
-      // - multichar is building
+      // - multichar is not being built
       // - multichar has fewer than two letters
       // - code point is being built
       if (!building_multichar_letter || number_of_letters_in_builder < 2 ||

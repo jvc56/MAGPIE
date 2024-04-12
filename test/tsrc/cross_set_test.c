@@ -17,18 +17,34 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void test_gen_cross_set(Game *game, int row, int col, const char *letters,
+void test_gen_cross_set(Game *game, int row, int col,
+                        const char *expected_cross_set_string,
                         int expected_cross_score) {
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
-  uint64_t expected_cross_set = string_to_cross_set(ld, letters);
+  uint64_t expected_cross_set =
+      string_to_cross_set(ld, expected_cross_set_string);
   uint64_t actual_cross_set =
       board_get_cross_set(board, row, col, BOARD_VERTICAL_DIRECTION, 0);
-  assert(expected_cross_set == actual_cross_set);
+  const bool cross_set_cond = expected_cross_set == actual_cross_set;
+  if (!cross_set_cond) {
+    char *actual_cross_set_string = cross_set_to_string(ld, actual_cross_set);
+    printf("cross set failed assertion:\n>%s<\n>%s<\nare not "
+           "equal\n",
+           actual_cross_set_string, expected_cross_set_string);
+    free(actual_cross_set_string);
+    abort();
+  }
   int actual_cross_score =
       board_get_cross_score(board, row, col, BOARD_VERTICAL_DIRECTION, 0);
-  assert(expected_cross_score == actual_cross_score);
+  const bool score_cond = expected_cross_score == actual_cross_score;
+  if (!score_cond) {
+    printf("cross score failed assertion:\n>%d<\n>%d<\nare not "
+           "equal\n",
+           actual_cross_score, expected_cross_score);
+    abort();
+  }
 }
 
 void test_gen_cross_set_row(Game *game, int row, int col,
@@ -39,7 +55,7 @@ void test_gen_cross_set_row(Game *game, int row, int col,
   test_gen_cross_set(game, row, col, letters, expected_cross_score);
 }
 
-void test_cross_set() {
+void test_classic_cross_set() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = game_create(config);
@@ -139,4 +155,86 @@ void test_cross_set() {
 
   game_destroy(game);
   config_destroy(config);
+}
+
+void test_alpha_cross_set() {
+  Config *config =
+      create_config_or_die("setoptions lex CSW21_alpha var wordsmog");
+  Game *game = game_create(config);
+  Board *board = game_get_board(game);
+
+  game_reset(game);
+  test_gen_cross_set_row(game, 4, 0, " A", "?ABDEFGHIJKLMNPRSTWXYZ", 1);
+  test_gen_cross_set_row(game, 4, 1, "A ", "?ABDEFGHIJKLMNPRSTWXYZ", 1);
+
+  test_gen_cross_set_row(game, 4, 0, " Q", "?I", 10);
+  test_gen_cross_set_row(game, 4, 1, "Q ", "?I", 10);
+
+  test_gen_cross_set_row(game, 4, 0, " V", "", 4);
+  test_gen_cross_set_row(game, 4, 1, "V ", "", 4);
+
+  test_gen_cross_set_row(game, 4, 0, " T", "?AEIOSU", 1);
+  test_gen_cross_set_row(game, 4, 1, "T ", "?AEIOSU", 1);
+
+  test_gen_cross_set_row(game, 4, 0, " ABCDE", "?BHKLRU", 10);
+  test_gen_cross_set_row(game, 4, 1, "A BCDE", "?BHKLRU", 10);
+  test_gen_cross_set_row(game, 4, 2, "AB CDE", "?BHKLRU", 10);
+  test_gen_cross_set_row(game, 4, 3, "ABC DE", "?BHKLRU", 10);
+  test_gen_cross_set_row(game, 4, 4, "ABCD E", "?BHKLRU", 10);
+  test_gen_cross_set_row(game, 4, 5, "ABCDE ", "?BHKLRU", 10);
+
+  test_gen_cross_set_row(game, 4, 0, " WORKBLUH", "?S", 20);
+  test_gen_cross_set_row(game, 4, 1, "W ORKBLUH", "?S", 20);
+  test_gen_cross_set_row(game, 4, 2, "WO RKBLUH", "?S", 20);
+  test_gen_cross_set_row(game, 4, 3, "WOR KBLUH", "?S", 20);
+  test_gen_cross_set_row(game, 4, 4, "WORK BLUH", "?S", 20);
+  test_gen_cross_set_row(game, 4, 5, "WORKB LUH", "?S", 20);
+  test_gen_cross_set_row(game, 4, 6, "WORKBL UH", "?S", 20);
+  test_gen_cross_set_row(game, 4, 7, "WORKBLU H", "?S", 20);
+  test_gen_cross_set_row(game, 4, 8, "WORKBLUH ", "?S", 20);
+
+  test_gen_cross_set_row(game, 4, 0, " WORKbLUh", "?S", 13);
+  test_gen_cross_set_row(game, 4, 1, "W ORKbLUh", "?S", 13);
+  test_gen_cross_set_row(game, 4, 2, "WO RKbLUh", "?S", 13);
+  test_gen_cross_set_row(game, 4, 3, "WOR KbLUh", "?S", 13);
+  test_gen_cross_set_row(game, 4, 4, "WORK bLUh", "?S", 13);
+  test_gen_cross_set_row(game, 4, 5, "WORKb LUh", "?S", 13);
+  test_gen_cross_set_row(game, 4, 6, "WORKbL Uh", "?S", 13);
+  test_gen_cross_set_row(game, 4, 7, "WORKbLU h", "?S", 13);
+  test_gen_cross_set_row(game, 4, 8, "WORKbLUh ", "?S", 13);
+
+  test_gen_cross_set_row(game, 4, 0, " TRONGLE", "", 8);
+  test_gen_cross_set_row(game, 4, 1, "T RONGLE", "", 8);
+  test_gen_cross_set_row(game, 4, 2, "TR ONGLE", "", 8);
+  test_gen_cross_set_row(game, 4, 3, "TRO NGLE", "", 8);
+  test_gen_cross_set_row(game, 4, 4, "TRON GLE", "", 8);
+  test_gen_cross_set_row(game, 4, 5, "TRONG LE", "", 8);
+  test_gen_cross_set_row(game, 4, 6, "TRONGL E", "", 8);
+  test_gen_cross_set_row(game, 4, 7, "TRONGLE ", "", 8);
+
+  test_gen_cross_set_row(game, 4, 14, "       ZYZZVAY ", "?S", 43);
+  test_gen_cross_set_row(game, 4, 14, "        ZYZZVY ", "?A", 42);
+
+  // TestGencross_setLoadedGame
+  game_load_cgp(game, VS_MATT);
+  test_gen_cross_set(game, 10, 10, "?EO", 11);
+  test_gen_cross_set(game, 2, 4, "?ADHKLORSTVWYZ", 9);
+  test_gen_cross_set(game, 8, 7, "?NS", 11);
+  test_gen_cross_set(game, 12, 8, "?DGLNRTX", 11);
+  test_gen_cross_set(game, 3, 1, "?AEHMLNOPRU", 10);
+  test_gen_cross_set(game, 6, 8, "?ABCDGIKLMNPST", 5);
+  test_gen_cross_set(game, 2, 10, "?AEFGKLMQSTVY", 2);
+  board_transpose(board);
+  test_gen_cross_set(game, 10, 10, TRIVIAL_CROSS_SET_STRING, 0);
+  test_gen_cross_set(game, 2, 4, "?AEHIOTU", 1);
+  test_gen_cross_set(game, 12, 8, TRIVIAL_CROSS_SET_STRING, 0);
+  board_transpose(board);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void test_cross_set() {
+  test_classic_cross_set();
+  test_alpha_cross_set();
 }

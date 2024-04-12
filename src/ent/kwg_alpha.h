@@ -3,6 +3,7 @@
 #include "kwg.h"
 #include "rack.h"
 
+// FIXME: why are we using int instead of uint in this file?
 static inline int32_t kwg_seek(const KWG *kwg, int32_t node_index,
                                uint8_t tile) {
   if (node_index >= 0) {
@@ -46,7 +47,8 @@ static inline bool kwg_accepts_alpha(const KWG *kwg, const Rack *rack) {
 
 static inline uint64_t kwg_compute_alpha_cross_set(const KWG *kwg,
                                                    const Rack *rack) {
-  uint64_t cross_set = 1;
+  // FIXME: this is set to 1 in wolges, find out why
+  uint64_t cross_set = 0;
   uint32_t node_index = kwg_get_dawg_root_node_index(kwg);
   if (node_index <= 0) {
     return cross_set;
