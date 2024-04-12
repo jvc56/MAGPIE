@@ -7,29 +7,26 @@
 // developed in wolges. For more details see
 // https://github.com/andy-k/wolges/blob/main/details.txt
 
-// FIXME: why are we using int instead of uint in this file?
-static inline int32_t kwg_seek(const KWG *kwg, int32_t node_index,
-                               uint8_t tile) {
-  if (node_index >= 0) {
-    node_index = kwg_node_arc_index(kwg_node(kwg, node_index));
-    if (node_index > 0) {
-      for (;;) {
-        uint32_t node = kwg_node(kwg, node_index);
-        if (kwg_node_tile(node) == tile) {
-          return node_index;
-        }
-        if (kwg_node_is_end(node)) {
-          return -1;
-        }
-        node_index++;
+static inline uint32_t kwg_seek(const KWG *kwg, uint32_t node_index,
+                                uint8_t tile) {
+  node_index = kwg_node_arc_index(kwg_node(kwg, node_index));
+  if (node_index > 0) {
+    for (;;) {
+      uint32_t node = kwg_node(kwg, node_index);
+      if (kwg_node_tile(node) == tile) {
+        return node_index;
       }
+      if (kwg_node_is_end(node)) {
+        return 0;
+      }
+      node_index++;
     }
   }
-  return -1;
+  return 0;
 }
 
 static inline bool kwg_completes_alpha_cross_set(const KWG *kwg,
-                                                 int32_t node_index,
+                                                 uint32_t node_index,
                                                  const Rack *rack,
                                                  const uint8_t next_letter) {
   const int dist_size = rack_get_dist_size(rack);
@@ -37,7 +34,7 @@ static inline bool kwg_completes_alpha_cross_set(const KWG *kwg,
     int num_letter = rack_get_letter(rack, letter);
     for (int k = 0; k < num_letter; k++) {
       node_index = kwg_seek(kwg, node_index, letter);
-      if (node_index <= 0) {
+      if (node_index == 0) {
         return false;
       }
     }
@@ -51,10 +48,9 @@ static inline bool kwg_accepts_alpha(const KWG *kwg, const Rack *rack) {
 
 static inline uint64_t kwg_compute_alpha_cross_set(const KWG *kwg,
                                                    const Rack *rack) {
-  // FIXME: this is set to 1 in wolges, find out why
   uint64_t cross_set = 0;
   uint32_t node_index = kwg_get_dawg_root_node_index(kwg);
-  if (node_index <= 0) {
+  if (node_index == 0) {
     return cross_set;
   }
   const int dist_size = rack_get_dist_size(rack);
@@ -77,7 +73,7 @@ static inline uint64_t kwg_compute_alpha_cross_set(const KWG *kwg,
           node_index++;
         } else {
           uint32_t next_node_index = kwg_node_arc_index(node);
-          if (next_node_index <= 0) {
+          if (next_node_index == 0) {
             return cross_set;
           }
           node_index = next_node_index;
