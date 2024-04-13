@@ -46,6 +46,25 @@ static inline bool kwg_accepts_alpha(const KWG *kwg, const Rack *rack) {
   return kwg_completes_alpha_cross_set(kwg, 0, rack, 1);
 }
 
+static inline bool kwg_accepts_alpha_with_blanks(const KWG *kwg,
+                                                 const Rack *rack) {
+  if (rack_get_letter(rack, 0) == 0) {
+    return kwg_accepts_alpha(kwg, rack);
+  }
+  const int dist_size = rack_get_dist_size(rack);
+  Rack designated_rack;
+  rack_copy(&designated_rack, rack);
+  rack_take_letter(&designated_rack, 0);
+  for (uint8_t letter = 1; letter < dist_size; letter++) {
+    rack_add_letter(&designated_rack, letter);
+    if (kwg_accepts_alpha_with_blanks(kwg, &designated_rack)) {
+      return true;
+    }
+    rack_take_letter(&designated_rack, letter);
+  }
+  return false;
+}
+
 static inline uint64_t kwg_compute_alpha_cross_set(const KWG *kwg,
                                                    const Rack *rack) {
   uint64_t cross_set = 0;

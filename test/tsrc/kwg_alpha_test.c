@@ -1,10 +1,10 @@
+#include "../../src/ent/kwg_alpha.h"
+
 #include <assert.h>
 
 #include "../../src/ent/config.h"
 #include "../../src/ent/kwg.h"
-#include "../../src/ent/kwg_alpha.h"
 #include "../../src/ent/rack.h"
-
 #include "test_util.h"
 
 void assert_kwg_accepts_alpha(const KWG *kwg, const LetterDistribution *ld,
@@ -15,6 +15,21 @@ void assert_kwg_accepts_alpha(const KWG *kwg, const LetterDistribution *ld,
   if (!assert_cond) {
     printf("kwg_accepts_alpha failed assertion for >%s< with %d\n", rack_string,
            assert_cond);
+    abort();
+  }
+  rack_destroy(rack);
+}
+
+void assert_kwg_accepts_alpha_with_blanks(const KWG *kwg,
+                                          const LetterDistribution *ld,
+                                          const char *rack_string,
+                                          bool accepts) {
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, rack_string);
+  bool assert_cond = kwg_accepts_alpha_with_blanks(kwg, rack) == accepts;
+  if (!assert_cond) {
+    printf("kwg_accepts_alpha_with_blanks failed assertion for >%s< with %d\n",
+           rack_string, assert_cond);
     abort();
   }
   rack_destroy(rack);
@@ -32,9 +47,10 @@ void assert_kwg_compute_alpha_cross_set(const KWG *kwg,
   bool assert_cond = actual_cross_set == expected_cross_set;
   if (!assert_cond) {
     char *actual_cross_set_string = cross_set_to_string(ld, actual_cross_set);
-    printf("kwg_compute_alpha_cross_set failed assertion:\n>%s<\n>%s<\nare not "
-           "equal",
-           actual_cross_set_string, expected_cross_set_string);
+    printf(
+        "kwg_compute_alpha_cross_set failed assertion:\n>%s<\n>%s<\nare not "
+        "equal",
+        actual_cross_set_string, expected_cross_set_string);
     free(actual_cross_set_string);
     abort();
   }
@@ -97,6 +113,12 @@ void test_kwg_accepts_alpha() {
   assert_kwg_accepts_alpha(kwg, ld, "OEUNPYABZXEHNOT", true);
   assert_kwg_accepts_alpha(kwg, ld, "ENZXONHPOEUYABT", true);
   assert_kwg_accepts_alpha(kwg, ld, "ENZXONHPOEUYABE", false);
+
+  assert_kwg_accepts_alpha_with_blanks(kwg, ld, "??", true);
+  assert_kwg_accepts_alpha_with_blanks(kwg, ld, "Z??", true);
+  assert_kwg_accepts_alpha_with_blanks(kwg, ld, "EARWIG??", true);
+  assert_kwg_accepts_alpha_with_blanks(kwg, ld, "TRONGLE?", false);
+  assert_kwg_accepts_alpha_with_blanks(kwg, ld, "QQ??", false);
 
   config_destroy(config);
 }
