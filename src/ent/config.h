@@ -7,6 +7,7 @@
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/simmer_defs.h"
 
 #include "board_layout.h"
@@ -30,6 +31,7 @@ const char *config_get_moves(const Config *config);
 int config_get_bingo_bonus(const Config *config);
 const BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
+
 PlayersData *config_get_players_data(const Config *config);
 Rack *config_get_rack(const Config *config);
 int config_get_target_index(const Config *config);
@@ -46,6 +48,9 @@ bool config_get_use_game_pairs(const Config *config);
 uint64_t config_get_seed(const Config *config);
 ThreadControl *config_get_thread_control(const Config *config);
 exec_mode_t config_get_exec_mode(const Config *config);
+conversion_type_t config_get_conversion_type(const Config *config);
+char *config_get_input_filename(const Config *config);
+char *config_get_output_filename(const Config *config);
 bool config_get_command_set_infile(const Config *config);
 bool config_get_command_set_exec_mode(const Config *config);
 

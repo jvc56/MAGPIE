@@ -2,6 +2,7 @@
 #define EXEC_STATE_H
 
 #include "autoplay_results.h"
+#include "conversion_results.h"
 #include "config.h"
 #include "error_status.h"
 #include "game.h"
@@ -19,6 +20,7 @@ Game *exec_state_get_game(const ExecState *exec_state);
 SimResults *exec_state_get_sim_results(const ExecState *exec_state);
 InferenceResults *exec_state_get_inference_results(const ExecState *exec_state);
 AutoplayResults *exec_state_get_autoplay_results(const ExecState *exec_state);
+ConversionResults *exec_state_get_conversion_results(const ExecState *exec_state);
 ErrorStatus *exec_state_get_error_status(const ExecState *exec_state);
 MoveList *exec_state_get_move_list(const ExecState *exec_state);
 

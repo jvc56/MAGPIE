@@ -1,3 +1,5 @@
+#include "../../src/ent/config.h"
+
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -9,18 +11,13 @@
 #include "../../src/def/move_defs.h"
 #include "../../src/def/players_data_defs.h"
 #include "../../src/def/simmer_defs.h"
-
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/kwg.h"
 #include "../../src/ent/players_data.h"
 #include "../../src/ent/rack.h"
 #include "../../src/ent/thread_control.h"
-
 #include "../../src/str/rack_string.h"
-
 #include "../../src/util/string_util.h"
-
 #include "config_test.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -167,6 +164,8 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
   test_config_error(config, "go sim l1 NWL20 l2 CSW21 ld german",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION);
+  test_config_error(config, "convert convtype kwg2exe",
+                    CONFIG_LOAD_STATUS_MALFORMED_CONVERSION_TYPE);
   test_config_error(config, "go sim ucgi console",
                     CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES);
   config_destroy(config);
@@ -468,6 +467,15 @@ void test_config_success() {
                                  PLAYERS_DATA_TYPE_KLV, 1),
       "FRA20");
   assert_strings_equal(config_get_ld_name(config), "french");
+
+  string_builder_clear(test_string_builder);
+  string_builder_add_string(test_string_builder,
+                            "convert convtype text2kwg input csw21.txt output csw21.kwg");
+  load_config_or_fail(config, string_builder_peek(test_string_builder));
+  assert(config_get_command_type(config) == COMMAND_TYPE_CONVERT);
+  assert(config_get_conversion_type(config) == CONVERT_TEXT2KWG);
+  assert_strings_equal(config_get_input_filename(config), "csw21.txt");
+  assert_strings_equal(config_get_output_filename(config), "csw21.kwg");
 
   destroy_string_builder(test_string_builder);
   game_destroy(game);

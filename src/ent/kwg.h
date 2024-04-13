@@ -14,6 +14,7 @@ typedef struct KWG {
 
 KWG *kwg_create(const char *kwg_name);
 KWG *kwg_create_empty();
+bool kwg_write_to_file(const KWG *kwg, const char *filename);
 void kwg_destroy(KWG *kwg);
 void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes, FILE *stream);
 void kwg_allocate_nodes(KWG *kwg, size_t number_of_nodes);

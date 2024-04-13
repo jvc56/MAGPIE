@@ -26,6 +26,7 @@
 #include "autoplay.h"
 #include "gameplay.h"
 #include "inference.h"
+#include "kwg_maker.h"
 #include "move_gen.h"
 #include "simmer.h"
 
@@ -83,6 +84,9 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
   case COMMAND_TYPE_AUTOPLAY:
     status_string = string_duplicate("autoplay status unimplemented");
     break;
+  case COMMAND_TYPE_CONVERT:
+    status_string = string_duplicate("convert status unimplemented");
+    break;      
   case COMMAND_TYPE_LOAD_CGP:
     status_string = string_duplicate("no status available for load cgp");
     break;
@@ -138,6 +142,13 @@ void execute_infer(const Config *config, ExecState *exec_state) {
             exec_state_get_inference_results(exec_state));
   set_or_clear_error_status(exec_state_get_error_status(exec_state),
                             ERROR_STATUS_TYPE_INFER, (int)status);
+}
+
+void execute_convert(const Config *config, ExecState *exec_state) {
+  conversion_status_t status =
+      convert(config, exec_state_get_conversion_results(exec_state));
+  set_or_clear_error_status(exec_state_get_error_status(exec_state),
+                            ERROR_STATUS_TYPE_CONVERT, (int)status);
 }
 
 move_validation_status_t update_move_list(ExecState *exec_state,
@@ -260,6 +271,9 @@ void execute_command(ExecState *exec_state) {
     break;
   case COMMAND_TYPE_INFER:
     execute_infer(config, exec_state);
+    break;
+  case COMMAND_TYPE_CONVERT:
+    execute_convert(config, exec_state);
     break;
   }
 }
