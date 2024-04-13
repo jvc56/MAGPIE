@@ -14,7 +14,6 @@ void rack_reset(Rack *rack) {
   for (int i = 0; i < rack->dist_size; i++) {
     rack->array[i] = 0;
   }
-  rack->empty = true;
   rack->number_of_letters = 0;
 }
 
@@ -58,9 +57,6 @@ bool rack_subtract(Rack *rack_to_update, Rack *value_to_sub) {
     }
     rack_to_update->array[i] -= value_to_sub->array[i];
     rack_to_update->number_of_letters -= value_to_sub->array[i];
-    if (rack_to_update->number_of_letters == 0) {
-      rack_to_update->empty = true;
-    }
   }
   return true;
 }
@@ -81,8 +77,7 @@ bool racks_are_equal(const Rack *rack1, const Rack *rack2) {
   if (!rack1 && !rack2) {
     return true;
   }
-  if (!rack1 || !rack2 || rack1->dist_size != rack2->dist_size ||
-      rack1->empty != rack2->empty) {
+  if (!rack1 || !rack2 || rack1->dist_size != rack2->dist_size) {
     return false;
   }
   for (int i = 0; i < rack1->dist_size; i++) {

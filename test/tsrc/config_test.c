@@ -3,6 +3,8 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "../../src/def/config_defs.h"
 #include "../../src/def/game_defs.h"
@@ -55,8 +57,23 @@ void test_config_error_cases() {
                     CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
   test_config_error(config, "position cgp 1 2 3",
                     CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
-  test_config_error(config, "go sim bdn Scrimbool",
-                    CONFIG_LOAD_STATUS_UNKNOWN_BOARD_LAYOUT);
+
+  const char *target = "../../test/testdata/invalid_number_of_rows15.txt";
+  const char *link_name = "data/layouts/invalid_number_of_rows15.txt";
+
+  if (symlink(target, link_name) != 0) {
+    perror("symlink");
+    log_fatal("Failed to create symlink: %s %s", target, link_name);
+  }
+
+  test_config_error(config, "go sim bdn invalid_number_of_rows15",
+                    CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
+
+  if (unlink(link_name) != 0) {
+    perror("unlink");
+    log_fatal("Failed to destroy symlink: %s %s", target, link_name);
+  }
+
   test_config_error(config, "go sim var Lonify",
                     CONFIG_LOAD_STATUS_UNKNOWN_GAME_VARIANT);
   test_config_error(config, "go sim bb 3b4",

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 
 #include "../util/log.h"
@@ -12,7 +13,6 @@
 #define INVALID_LETTER (0x80 - 1)
 #define MULTICHAR_START_DELIMITIER '['
 #define MULTICHAR_END_DELIMITIER ']'
-
 
 char *get_ld_filepath(const char *ld_name) {
   // Check for invalid inputs
@@ -296,25 +296,45 @@ int ld_str_to_mls(const LetterDistribution *ld, const char *str,
   return num_mls;
 }
 
+// Use the lexicon name in combination with the constant
+// BOARD_DIM to determine a default letter distribution name.
 char *ld_get_default_name(const char *lexicon_name) {
+  if (BOARD_DIM != DEFAULT_BOARD_DIM && BOARD_DIM != DEFAULT_SUPER_BOARD_DIM) {
+    log_fatal("Default letter distribution not supported with a board "
+              "dimension of %d. Only %d and %d have "
+              "default values.",
+              BOARD_DIM, DEFAULT_BOARD_DIM, DEFAULT_SUPER_BOARD_DIM);
+  }
+  const char *ld_name_extension = "";
+  if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
+    ld_name_extension = "_" SUPER_LETTER_DISTRIBUTION_NAME_EXTENSION;
+  }
+
   char *ld_name = NULL;
   if (has_prefix("CSW", lexicon_name) || has_prefix("NWL", lexicon_name) ||
-      has_prefix("TWL", lexicon_name) || has_prefix("America", lexicon_name)) {
-    ld_name = string_duplicate(ENGLISH_LETTER_DISTRIBUTION_NAME);
+      has_prefix("TWL", lexicon_name) || has_prefix("America", lexicon_name) ||
+      has_prefix("CEL", lexicon_name)) {
+    ld_name = get_formatted_string("%s%s", ENGLISH_LETTER_DISTRIBUTION_NAME,
+                                   ld_name_extension);
   } else if (has_prefix("RD", lexicon_name)) {
-    ld_name = string_duplicate(GERMAN_LETTER_DISTRIBUTION_NAME);
+    ld_name = get_formatted_string("%s%s", GERMAN_LETTER_DISTRIBUTION_NAME,
+                                   ld_name_extension);
   } else if (has_prefix("NSF", lexicon_name)) {
-    ld_name = string_duplicate(NORWEGIAN_LETTER_DISTRIBUTION_NAME);
+    ld_name = get_formatted_string("%s%s", NORWEGIAN_LETTER_DISTRIBUTION_NAME,
+                                   ld_name_extension);
   } else if (has_prefix("DISC", lexicon_name)) {
-    ld_name = string_duplicate(CATALAN_LETTER_DISTRIBUTION_NAME);
+    ld_name = get_formatted_string("%s%s", CATALAN_LETTER_DISTRIBUTION_NAME,
+                                   ld_name_extension);
   } else if (has_prefix("FRA", lexicon_name)) {
-    ld_name = string_duplicate(FRENCH_LETTER_DISTRIBUTION_NAME);
+    ld_name = get_formatted_string("%s%s", FRENCH_LETTER_DISTRIBUTION_NAME,
+                                   ld_name_extension);
   } else if (has_prefix("OSPS", lexicon_name)) {
-    ld_name = string_duplicate(POLISH_LETTER_DISTRIBUTION_NAME);
+    ld_name = get_formatted_string("%s%s", POLISH_LETTER_DISTRIBUTION_NAME,
+                                   ld_name_extension);
   } else {
-    log_fatal("default letter distribution not found for lexicon %s\n",
+    log_fatal("default letter distribution not found for lexicon %s.\n",
               lexicon_name);
   }
+
   return ld_name;
 }
-

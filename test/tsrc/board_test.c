@@ -41,12 +41,13 @@ void test_board_cross_set_for_cross_set_index(Game *game, int cross_set_index) {
                                  cross_set_index, 0);
   cs = board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
                            cross_set_index);
-  assert(!board_is_letter_allowed_in_cross_set(cs, 0));                                                            
+  assert(!board_is_letter_allowed_in_cross_set(cs, 0));
   assert(!board_is_letter_allowed_in_cross_set(cs, 1));
-  
+
   board_set_cross_set_with_blank(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
                                  cross_set_index, get_cross_set_bit(20));
-  cs = board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+  cs = board_get_cross_set(board, 0, 0, BOARD_HORIZONTAL_DIRECTION,
+                           cross_set_index);
   assert(board_is_letter_allowed_in_cross_set(cs, 0));
   assert(!board_is_letter_allowed_in_cross_set(cs, 1));
   assert(board_is_letter_allowed_in_cross_set(cs, 20));
@@ -93,7 +94,7 @@ void test_board_reset(Board *board) {
   }
 }
 
-void test_board_everything() {
+void test_board_all() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 score s2 score r1 all r2 all numplays 1");
   Game *game = game_create(config);
@@ -106,6 +107,9 @@ void test_board_everything() {
   Board *board2 = board_duplicate(board);
 
   game_load_cgp(game, VS_OXY);
+
+  assert(board_are_bonus_squares_symmetric_by_transposition(board));
+  assert(board_are_bonus_squares_symmetric_by_transposition(board2));
 
   assert(board_get_is_cross_word(board, 0, 0, 1));
   assert(board_get_is_cross_word(board, 1, 0, 1));
@@ -530,4 +534,4 @@ void test_board_everything() {
   config_destroy(config);
 }
 
-void test_board() { test_board_everything(); }
+void test_board() { test_board_all(); }

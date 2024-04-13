@@ -36,6 +36,17 @@ static inline uint32_t kwg_node_arc_index(uint32_t node) {
   return (node & KWG_ARC_INDEX_MASK);
 }
 
+static inline uint32_t kwg_node_arc_index_prefetch(uint32_t node,
+                                                   const KWG *kwg) {
+  const uint32_t next_node = (node & KWG_ARC_INDEX_MASK);
+#ifdef __has_builtin
+#if __has_builtin(__builtin_prefetch)  
+  __builtin_prefetch(&kwg->nodes[next_node]);
+#endif
+#endif
+  return next_node;
+}
+
 static inline uint32_t kwg_node_tile(uint32_t node) {
   return node >> KWG_TILE_BIT_OFFSET;
 }
@@ -57,7 +68,7 @@ static inline uint32_t kwg_get_next_node_index(const KWG *kwg,
   while (1) {
     const uint32_t node = kwg_node(kwg, i);
     if (kwg_node_tile(node) == letter) {
-      return kwg_node_arc_index(node);
+      return kwg_node_arc_index_prefetch(node, kwg);
     }
     if (kwg_node_is_end(node)) {
       return 0;

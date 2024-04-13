@@ -126,8 +126,11 @@ move_validation_status_t validate_tiles_played_with_mls(
     int move_dir = move_get_dir(move);
     bool connected = false;
     for (int i = 0; i < number_of_machine_letters; i++) {
-      if (!board_is_position_valid(current_row, current_col)) {
+      if (!board_is_position_in_bounds(current_row, current_col)) {
         return MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS;
+      }
+      if (board_get_is_brick(board, current_row, current_col)) {
+        return MOVE_VALIDATION_STATUS_TILES_PLAYED_OVER_BRICK;
       }
       uint8_t board_letter = board_get_letter(board, current_row, current_col);
       uint8_t ml = machine_letters[i];
@@ -450,8 +453,10 @@ move_validation_status_t validated_move_load(ValidatedMove *vm,
       move_set_equity(
           vm->move,
           static_eval_get_move_equity(
-              ld, klv, vm->move, board, vm->leave,
+              ld, klv, vm->move, vm->leave,
               player_get_rack(game_get_player(game, 1 - player_index)),
+              board_get_opening_move_penalties(board),
+              board_get_tiles_played(board),
               bag_get_tiles(game_get_bag(game))));
     } else {
       move_set_equity(vm->move, score);

@@ -9,6 +9,9 @@
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/static_eval_defs.h"
+
+#include "board_layout.h"
 
 #include "letter_distribution.h"
 
@@ -33,12 +36,15 @@ typedef struct Board {
   // - One pair for each cross index
   Square squares[2 * 2 * BOARD_DIM * BOARD_DIM];
   int number_of_row_anchors[BOARD_DIM * 2];
+  // Stores the penalties to be applied to
+  // the opening move for each square in both
+  // horizontal and vertical directions if the
+  // tile is a vowel.
+  double opening_move_penalties[BOARD_DIM * 2];
   int transposed;
   int tiles_played;
-  // Scratch pad for return values used by
-  // traverse backwards for score
-  uint32_t node_index;
-  bool path_is_valid;
+  // Start coordinates used to reset the board
+  int start_coords[2];
 } Board;
 
 // Square: Letter
@@ -57,6 +63,12 @@ static inline uint8_t square_get_bonus_square(const Square *s) {
 
 static inline void square_set_bonus_square(Square *s, uint8_t bonus_square) {
   s->bonus_square = bonus_square;
+}
+
+// Square: is brick
+
+static inline bool square_get_is_brick(const Square *s) {
+  return s->bonus_square == BRICK_VALUE;
 }
 
 // Square: Cross sets
@@ -111,8 +123,8 @@ static inline uint64_t square_get_right_extension_set(const Square *s) {
   return s->right_extension_set;
 }
 
-static inline void square_set_right_extension_set(
-    Square *s, uint64_t right_extension_set) {
+static inline void
+square_set_right_extension_set(Square *s, uint64_t right_extension_set) {
   s->right_extension_set = right_extension_set;
 }
 
@@ -234,6 +246,11 @@ static inline void board_set_letter(Board *b, int row, int col,
 static inline uint8_t board_get_bonus_square(const Board *b, int row, int col) {
   // Cross index doesn't matter for bonus square reads.
   return square_get_bonus_square(board_get_readonly_square(b, row, col, 0, 0));
+}
+
+static inline uint8_t board_get_is_brick(const Board *b, int row, int col) {
+  // Cross index doesn't matter for bonus square reads.
+  return square_get_is_brick(board_get_readonly_square(b, row, col, 0, 0));
 }
 
 static inline void board_set_bonus_square(Board *b, int row, int col,
@@ -360,8 +377,9 @@ static inline void board_set_left_extension_set(Board *b, int row, int col,
       board_get_writable_square(b, row, col, dir, csi), left_extension_set);
 }
 
-static inline void board_set_left_extension_set_with_blank(
-    Board *b, int row, int col, int dir, int csi, uint64_t left_extension_set) {
+static inline void
+board_set_left_extension_set_with_blank(Board *b, int row, int col, int dir,
+                                        int csi, uint64_t left_extension_set) {
   // It is assumed that the 0th bit is never set in left_extension_set: it is a
   // set of nonblank letters. Given that, this is equivalent logic to this more
   // readable version:
@@ -381,9 +399,10 @@ static inline void board_set_right_extension_set(Board *b, int row, int col,
       board_get_writable_square(b, row, col, dir, csi), right_extension_set);
 }
 
-static inline void board_set_right_extension_set_with_blank(
-    Board *b, int row, int col, int dir, int csi,
-    uint64_t right_extension_set) {
+static inline void
+board_set_right_extension_set_with_blank(Board *b, int row, int col, int dir,
+                                         int csi,
+                                         uint64_t right_extension_set) {
   // See comment in board_set_left_extension_set_with_blank.
   const uint64_t right_extension_set_with_blank =
       right_extension_set + !!right_extension_set;
@@ -425,6 +444,13 @@ static inline void board_reset_is_cross_word(Board *b, int row, int col,
   }
 }
 
+// Board: opening penalties
+
+static inline const double *
+board_get_opening_move_penalties(const Board *board) {
+  return board->opening_move_penalties;
+}
+
 // Board: Transposed
 
 static inline bool board_get_transposed(const Board *board) {
@@ -450,24 +476,6 @@ static inline void board_increment_tiles_played(Board *board,
   board->tiles_played += tiles_played;
 }
 
-// Board: traverse backwards return values
-
-static inline bool board_get_path_is_valid(const Board *board) {
-  return board->path_is_valid;
-}
-
-static inline void board_set_path_is_valid(Board *board, bool value) {
-  board->path_is_valid = value;
-}
-
-static inline uint32_t board_get_node_index(const Board *board) {
-  return board->node_index;
-}
-
-static inline void board_set_node_index(Board *board, uint32_t value) {
-  board->node_index = value;
-}
-
 // Board auxilllary functions
 
 static inline int board_get_cross_set_index(bool kwgs_are_shared,
@@ -477,6 +485,24 @@ static inline int board_get_cross_set_index(bool kwgs_are_shared,
 
 static inline bool board_is_empty(const Board *board, int row, int col) {
   return board_get_letter(board, row, col) == ALPHABET_EMPTY_SQUARE_MARKER;
+}
+
+static inline bool board_is_nonempty_or_bricked(const Board *board, int row,
+                                                int col) {
+  // Board emptiness and brickedness are consistent across direction
+  // and cross index, so we can just use 0 for both here.
+  const Square *s = board_get_readonly_square(board, row, col, 0, 0);
+  return (square_get_letter(s) != ALPHABET_EMPTY_SQUARE_MARKER) ||
+         square_get_is_brick(s);
+}
+
+static inline bool board_is_empty_or_bricked(const Board *board, int row,
+                                             int col) {
+  // Board emptiness and brickedness are consistent across direction
+  // and cross index, so we can just use 0 for both here.
+  const Square *s = board_get_readonly_square(board, row, col, 0, 0);
+  return square_get_letter(s) == ALPHABET_EMPTY_SQUARE_MARKER ||
+         square_get_is_brick(s);
 }
 
 static inline bool board_is_letter_allowed_in_cross_set(uint64_t cross_set,
@@ -501,9 +527,13 @@ static inline void board_clear_cross_set(Board *board, int row, int col,
 static inline void board_set_all_crosses(Board *board) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
+      uint64_t cross_set = TRIVIAL_CROSS_SET;
+      if (board_get_is_brick(board, row, col)) {
+        cross_set = 0;
+      }
       for (int dir = 0; dir < 2; dir++) {
         for (int ci = 0; ci < 2; ci++) {
-          board_set_cross_set(board, row, col, dir, ci, TRIVIAL_CROSS_SET);
+          board_set_cross_set(board, row, col, dir, ci, cross_set);
           board_set_left_extension_set(board, row, col, dir, ci,
                                        TRIVIAL_CROSS_SET);
           board_set_right_extension_set(board, row, col, dir, ci,
@@ -526,54 +556,56 @@ static inline void board_reset_all_cross_scores(Board *board) {
   }
 }
 
-static inline bool board_is_position_valid(int row, int col) {
+static inline bool board_is_position_in_bounds(int row, int col) {
   return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM;
+}
+
+// Returns true if
+// - The position is in bounds
+// - The position is not bricked
+// returns false otherwise.
+static inline bool
+board_is_position_in_bounds_and_not_bricked(const Board *board, int row,
+                                            int col) {
+  return board_is_position_in_bounds(row, col) &&
+         !board_get_is_brick(board, row, col);
 }
 
 static inline bool board_are_left_and_right_empty(const Board *board, int row,
                                                   int col) {
-  return !((board_is_position_valid(row, col - 1) &&
-            !board_is_empty(board, row, col - 1)) ||
-           (board_is_position_valid(row, col + 1) &&
-            !board_is_empty(board, row, col + 1)));
+  return (!board_is_position_in_bounds(row, col - 1) ||
+          board_is_empty_or_bricked(board, row, col - 1)) &&
+         (!board_is_position_in_bounds(row, col + 1) ||
+          board_is_empty_or_bricked(board, row, col + 1));
 }
 
 static inline bool board_are_all_adjacent_squares_empty(const Board *board,
                                                         int row, int col) {
-  return !((board_is_position_valid(row, col - 1) &&
-            !board_is_empty(board, row, col - 1)) ||
-           (board_is_position_valid(row, col + 1) &&
-            !board_is_empty(board, row, col + 1)) ||
-           (board_is_position_valid(row - 1, col) &&
-            !board_is_empty(board, row - 1, col)) ||
-           (board_is_position_valid(row + 1, col) &&
-            !board_is_empty(board, row + 1, col)));
+  return (!board_is_position_in_bounds(row, col - 1) ||
+          board_is_empty_or_bricked(board, row, col - 1)) &&
+         (!board_is_position_in_bounds(row, col + 1) ||
+          board_is_empty_or_bricked(board, row, col + 1)) &&
+         (!board_is_position_in_bounds(row - 1, col) ||
+          board_is_empty_or_bricked(board, row - 1, col)) &&
+         (!board_is_position_in_bounds(row + 1, col) ||
+          board_is_empty_or_bricked(board, row + 1, col));
 }
 
 static inline int board_get_word_edge(const Board *board, int row, int col,
                                       int word_dir) {
-  while (board_is_position_valid(row, col) &&
-         !board_is_empty(board, row, col)) {
+  while (board_is_position_in_bounds(row, col) &&
+         !board_is_empty_or_bricked(board, row, col)) {
     col += word_dir;
   }
   return col - word_dir;
 }
 
-static inline board_layout_t
-board_layout_string_to_board_layout(const char *board_layout_string) {
-  if (strings_equal(board_layout_string, BOARD_LAYOUT_CROSSWORD_GAME_NAME)) {
-    return BOARD_LAYOUT_CROSSWORD_GAME;
-  }
-  if (strings_equal(board_layout_string,
-                    BOARD_LAYOUT_SUPER_CROSSWORD_GAME_NAME)) {
-    return BOARD_LAYOUT_SUPER_CROSSWORD_GAME;
-  }
-  return BOARD_LAYOUT_UNKNOWN;
-}
-
 static inline void board_update_anchors(Board *board, int row, int col) {
   board_set_anchor(board, row, col, BOARD_HORIZONTAL_DIRECTION, false);
   board_set_anchor(board, row, col, BOARD_VERTICAL_DIRECTION, false);
+  if (board_get_is_brick(board, row, col)) {
+    return;
+  }
   bool tile_above = false;
   bool tile_below = false;
   bool tile_left = false;
@@ -610,6 +642,19 @@ static inline void board_update_anchors(Board *board, int row, int col) {
   }
 }
 
+static inline bool
+board_are_bonus_squares_symmetric_by_transposition(const Board *board) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = row + 1; col < BOARD_DIM; col++) {
+      if (board_get_bonus_square(board, row, col) !=
+          board_get_bonus_square(board, col, row)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 static inline void board_update_all_anchors(Board *board) {
   if (board->tiles_played > 0) {
     for (int i = 0; i < BOARD_DIM; i++) {
@@ -625,7 +670,18 @@ static inline void board_update_all_anchors(Board *board) {
       }
     }
     board_reset_number_of_anchor_rows(board);
-    board_set_anchor(board, BOARD_DIM / 2, BOARD_DIM / 2, 0, true);
+
+    int start_row = board->start_coords[0];
+    int start_col = board->start_coords[1];
+    if (!board_get_is_brick(board, start_row, start_col)) {
+      board_set_anchor(board, start_row, start_col, BOARD_HORIZONTAL_DIRECTION,
+                       true);
+      if (start_row != start_col ||
+          !board_are_bonus_squares_symmetric_by_transposition(board)) {
+        board_set_anchor(board, start_row, start_col, BOARD_VERTICAL_DIRECTION,
+                         true);
+      }
+    }
   }
 }
 
@@ -648,32 +704,86 @@ static inline void board_reset(Board *board) {
   board_update_all_anchors(board);
 }
 
-static inline void board_init_bonus_squares(Board *b) {
-  int i = 0;
-  for (int row = 0; row < BOARD_DIM; row++) {
-    for (int col = 0; col < BOARD_DIM; col++) {
-      uint8_t bonus_value;
-      char bonus_square = CROSSWORD_GAME_BOARD[i++];
-      if (bonus_square == BONUS_TRIPLE_WORD_SCORE) {
-        bonus_value = 0x31;
-      } else if (bonus_square == BONUS_DOUBLE_WORD_SCORE) {
-        bonus_value = 0x21;
-      } else if (bonus_square == BONUS_DOUBLE_LETTER_SCORE) {
-        bonus_value = 0x12;
-      } else if (bonus_square == BONUS_TRIPLE_LETTER_SCORE) {
-        bonus_value = 0x13;
-      } else {
-        bonus_value = 0x11;
-      }
-      board_set_bonus_square(b, row, col, bonus_value);
-    }
+static inline void update_opening_penalty(Board *board, int dir, int i,
+                                          int bonus_square_row,
+                                          int bonus_square_col) {
+  uint8_t bonus_square =
+      board_get_bonus_square(board, bonus_square_row, bonus_square_col);
+  if (bonus_square == BRICK_VALUE) {
+    return;
   }
+  int word_multiplier = bonus_square >> 4;
+  int letter_multiplier = bonus_square & 0x0F;
+
+  // Very basic heuristic which will undoubtedly be greatly improved
+  // at a later time.
+  board->opening_move_penalties[dir * BOARD_DIM + i] +=
+      (OPENING_HOTSPOT_PENALTY / 2) * (word_multiplier - 1) +
+      (OPENING_HOTSPOT_PENALTY / 2) * (letter_multiplier - 1);
 }
 
-static inline Board *board_create() {
-  Board *board = malloc_or_die(sizeof(Board));
+static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
+  for (int i = 0; i < 2; i++) {
+    board->start_coords[i] = board_layout_get_start_coord(bl, i);
+  }
+  // The get_square_index function uses the board transposed
+  // state so we must reset it here.
+  board->transposed = 0;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      uint8_t board_layout_bonus_value =
+          board_layout_get_bonus_square(bl, row, col);
+      for (int dir = 0; dir < 2; dir++) {
+        for (int ci = 0; ci < 2; ci++) {
+          int board_index =
+              get_square_index(board->transposed, row, col, dir, ci);
+          board->squares[board_index].bonus_square = board_layout_bonus_value;
+        }
+      }
+    }
+  }
+
+  memset(board->opening_move_penalties, 0,
+         sizeof(board->opening_move_penalties));
+
+  // Calculate opening penalties
+
+  const int row = board->start_coords[0];
+  const int col = board->start_coords[1];
+  if (row - 1 >= 0) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      update_opening_penalty(board, BOARD_HORIZONTAL_DIRECTION, col, row - 1,
+                             col);
+    }
+  }
+
+  if (row + 1 < BOARD_DIM) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      update_opening_penalty(board, BOARD_HORIZONTAL_DIRECTION, col, row + 1,
+                             col);
+    }
+  }
+
+  if (col - 1 >= 0) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      update_opening_penalty(board, BOARD_VERTICAL_DIRECTION, row, row,
+                             col - 1);
+    }
+  }
+
+  if (col + 1 < BOARD_DIM) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      update_opening_penalty(board, BOARD_VERTICAL_DIRECTION, row, row,
+                             col + 1);
+    }
+  }
+
   board_reset(board);
-  board_init_bonus_squares(board);
+}
+
+static inline Board *board_create(const BoardLayout *bl) {
+  Board *board = malloc_or_die(sizeof(Board));
+  board_apply_layout(bl, board);
   return board;
 }
 
@@ -734,6 +844,12 @@ static inline void board_copy_row_cache(const Square *lanes_cache,
                                         int dir) {
   const Square *source_row = board_get_row_cache(lanes_cache, row_or_col, dir);
   memory_copy(row_cache, source_row, sizeof(Square) * BOARD_DIM);
+}
+
+static inline void board_copy_opening_penalties(const Board *board,
+                                                double *opening_penalties) {
+  memory_copy(opening_penalties, board->opening_move_penalties,
+              sizeof(double) * 2 * BOARD_DIM);
 }
 
 static inline int board_toggle_dir(int dir) {
