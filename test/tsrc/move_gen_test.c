@@ -365,6 +365,31 @@ void leave_lookup_test() {
   config_destroy(config);
 }
 
+void unfound_leave_lookup_test() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+  MoveList *move_list = move_list_create(1);
+  Rack *rack = player_get_rack(game_get_player(game, 0));
+
+  char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 UNFOUND/UNFOUND 0/0 0 lex CSW21;";
+  game_load_cgp(game, cgp);
+
+  // CGP loader won't accept this impossible rack so we set it manually here.
+  rack_set_to_string(game_get_ld(game), rack, "PIZZAQQ");
+
+  generate_moves_for_game(game, 0, move_list);
+  Move *move = move_list_get_move(move_list, 0);
+
+  assert_move(game, move_list, NULL, 0, "8D PIZZA 56");
+  // Unfound leave of QQ gets 0.0 value.
+  assert(within_epsilon(move_get_equity(move), 56.0));
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void exchange_tests() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
@@ -612,6 +637,7 @@ void consistent_tiebreaking_test() {
 
 void test_move_gen() {
   leave_lookup_test();
+  unfound_leave_lookup_test();
   macondo_tests();
   exchange_tests();
   equity_test();

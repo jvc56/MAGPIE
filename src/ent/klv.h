@@ -2,7 +2,6 @@
 #define KLV_H
 
 #include "../def/klv_defs.h"
-
 #include "kwg.h"
 #include "rack.h"
 
@@ -38,26 +37,33 @@ static inline uint32_t increment_node_to_ml(const KLV *klv, uint32_t node_index,
                                             uint32_t word_index,
                                             uint32_t *next_word_index,
                                             uint8_t ml) {
-  *next_word_index = word_index;
+  if (node_index == 0) {
+    *next_word_index = KLV_UNFOUND_INDEX;
+    return 0;
+  }
+  uint32_t w_idx = word_index;
   for (;;) {
     const uint32_t node = kwg_node(klv->kwg, node_index);
     if (kwg_node_tile(node) == ml) {
-      break;
+      *next_word_index = w_idx;
+      return node_index;
     }
-    if (kwg_node_is_end(node_index)) {
-      break;
+    if (kwg_node_is_end(node)) {
+      *next_word_index = KLV_UNFOUND_INDEX;
+      return 0;
     }
-    *next_word_index +=
-        klv->word_counts[node_index] - klv->word_counts[node_index + 1];
+    w_idx += klv->word_counts[node_index] - klv->word_counts[node_index + 1];
     node_index++;
   }
-  return node_index;
 }
 
 static inline uint32_t follow_arc(const KLV *klv, uint32_t node_index,
                                   uint32_t word_index,
                                   uint32_t *next_word_index) {
   *next_word_index = word_index + 1;
+  if (node_index == 0) {
+    return 0;
+  }
   const uint32_t node = kwg_node(klv->kwg, node_index);
   return kwg_node_arc_index(node);
 }
