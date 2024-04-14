@@ -45,7 +45,11 @@ ifndef BOARD_DIM
 BOARD_DIM = 15
 endif
 
-CFLAGS += -DBOARD_DIM=$(BOARD_DIM)
+ifndef RACK_SIZE
+RACK_SIZE = 7
+endif
+
+CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
 
 LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}

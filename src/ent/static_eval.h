@@ -10,13 +10,13 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 
-// The length of this array should match PEG_ADJUST_VALUES_LENGTH
-static const double peg_adjust_values[] = {0, 0, 0, 0, 0, 0, 0,
-                                           0, 0, 0, 0, 0, 0};
+static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
 // These are quackle values, but we can probably come up with our
 // own at some point.
-// static const double peg_adjust_values[] = {0, -8, 0, -0.5, -2, -3.5, -2,
-//                                            2, 10, 7, 4, -1, -2};
+// static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
+//    0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
 
 static inline double
 placement_adjustment(const LetterDistribution *ld, const Move *move,

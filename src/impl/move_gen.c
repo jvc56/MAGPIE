@@ -66,8 +66,8 @@ typedef struct MoveGen {
 
   int bag_tiles_remaining;
 
-  uint8_t strip[(BOARD_DIM)];
-  uint8_t exchange_strip[(BOARD_DIM)];
+  uint8_t strip[(MOVE_MAX_TILES)];
+  uint8_t exchange_strip[(MOVE_MAX_TILES)];
   LeaveMap leave_map;
   // Shadow plays
   int current_left_col;
