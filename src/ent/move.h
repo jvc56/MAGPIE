@@ -22,7 +22,7 @@ typedef struct Move {
   int tiles_length;
   double equity;
   int dir;
-  uint8_t tiles[BOARD_DIM];
+  uint8_t tiles[MOVE_MAX_TILES];
 } Move;
 
 typedef struct MoveList {
