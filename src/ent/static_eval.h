@@ -10,13 +10,13 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 
-// The length of this array should match PEG_ADJUST_VALUES_LENGTH
-static const double peg_adjust_values[] = {0, 0, 0, 0, 0, 0, 0,
-                                           0, 0, 0, 0, 0, 0};
+static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
 // These are quackle values, but we can probably come up with our
 // own at some point.
-// static const double peg_adjust_values[] = {0, -8, 0, -0.5, -2, -3.5, -2,
-//                                            2, 10, 7, 4, -1, -2};
+// static const double qpeg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
+//    0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
 
 static inline double
 placement_adjustment(const LetterDistribution *ld, const Move *move,
@@ -82,12 +82,11 @@ static inline double shadow_endgame_adjustment(const LetterDistribution *ld,
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
-static inline double
-static_eval_get_shadow_equity(const LetterDistribution *ld,
-                              const Rack *opp_rack, const double *best_leaves,
-                              const uint16_t *descending_tile_scores,
-                              int number_of_tiles_in_bag,
-                              int number_of_letters_on_rack, int tiles_played) {
+static inline double static_eval_get_shadow_equity(
+    const LetterDistribution *ld, const Rack *opp_rack,
+    const double *best_leaves, const uint16_t *descending_tile_scores,
+    int number_of_tiles_in_bag, int number_of_letters_on_rack,
+    int tiles_played) {
   double equity = 0;
   if (number_of_tiles_in_bag > 0) {
     // Bag is not empty: use leave values
