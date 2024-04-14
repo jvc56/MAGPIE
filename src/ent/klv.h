@@ -60,10 +60,11 @@ static inline uint32_t increment_node_to_ml(const KLV *klv, uint32_t node_index,
 static inline uint32_t follow_arc(const KLV *klv, uint32_t node_index,
                                   uint32_t word_index,
                                   uint32_t *next_word_index) {
-  *next_word_index = word_index + 1;
   if (node_index == 0) {
+    *next_word_index = KLV_UNFOUND_INDEX;
     return 0;
   }
+  *next_word_index = word_index + 1;
   const uint32_t node = kwg_node(klv->kwg, node_index);
   return kwg_node_arc_index(node);
 }
