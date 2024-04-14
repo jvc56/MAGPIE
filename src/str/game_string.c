@@ -4,6 +4,7 @@
 
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
+
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
@@ -12,11 +13,13 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
-#include "../util/string_util.h"
+
 #include "bag_string.h"
 #include "letter_distribution_string.h"
 #include "move_string.h"
 #include "rack_string.h"
+
+#include "../util/string_util.h"
 
 void string_builder_add_player_row(const LetterDistribution *ld,
                                    const Player *player,
