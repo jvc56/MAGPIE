@@ -4,7 +4,6 @@
 
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
@@ -13,19 +12,16 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
-
+#include "../util/string_util.h"
 #include "bag_string.h"
 #include "letter_distribution_string.h"
 #include "move_string.h"
 #include "rack_string.h"
 
-#include "../util/string_util.h"
-
 void string_builder_add_player_row(const LetterDistribution *ld,
                                    const Player *player,
                                    StringBuilder *game_string,
                                    bool player_on_turn) {
-
   const char *player_on_turn_marker = "-> ";
   const char *player_off_turn_marker = "   ";
   const char *player_marker = player_on_turn_marker;
@@ -53,12 +49,37 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   free(display_player_name);
 }
 
+void string_builder_add_color_reset(StringBuilder *game_string) {
+  string_builder_add_string(game_string, "\x1b[0m");
+}
+
+void string_builder_add_color_bold(StringBuilder *game_string) {
+  string_builder_add_string(game_string, "\x1b[1m");
+}
+
+void string_builder_add_board_square_color(StringBuilder *game_string,
+                                           const Board *board, int row,
+                                           int col) {
+  const uint8_t current_letter = board_get_letter(board, row, col);
+  if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+    string_builder_add_string(game_string,
+                              bonus_square_value_to_color_code(
+                                  board_get_bonus_square(board, row, col)));
+  } else {
+    string_builder_add_color_reset(game_string);
+    string_builder_add_color_bold(game_string);
+  }
+}
+
 void string_builder_add_board_row(const LetterDistribution *ld,
                                   const Board *board,
                                   StringBuilder *game_string, int row) {
   string_builder_add_formatted_string(game_string, "%2d|", row + 1);
   for (int i = 0; i < BOARD_DIM; i++) {
-    uint8_t current_letter = board_get_letter(board, row, i);
+#if PRINT_COLOR_BOARDS == true
+    string_builder_add_board_square_color(game_string, board, row, i);
+#endif
+    const uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       string_builder_add_char(
           game_string,
@@ -67,6 +88,9 @@ void string_builder_add_board_row(const LetterDistribution *ld,
       string_builder_add_user_visible_letter(ld, game_string, current_letter);
     }
     string_builder_add_string(game_string, " ");
+#if PRINT_COLOR_BOARDS == true
+    string_builder_add_color_reset(game_string);
+#endif
   }
   string_builder_add_string(game_string, "|");
 }
