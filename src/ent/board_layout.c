@@ -45,12 +45,12 @@ static const char bonus_square_values_to_chars_map[BONUS_SQUARE_MAP_SIZE] = {
 static const char* bonus_square_values_to_color_codes[BONUS_SQUARE_MAP_SIZE] = {
     [0x11] = "\x1b[0m",     // none, reset
     [0x12] = "\x1b[1;36m",  // DLS, cyan
-    [0x21] = "\x1b[1;95m",  // DWS, bright magenta
-    [0x13] = "\x1b[1;94m",  // TLS, bright blue
-    [0x31] = "\x1b[1;91m",  // TWS, bright red
-    [0x14] = "\x1b[1;35m",  // QLS, magenta
-    [0x41] = "\x1b[1;31m",  // QWS, red
-    [BRICK_VALUE] = "\x1b[1;90m",  // brick gray
+    [0x21] = "\x1b[1;35m",  // DWS, magenta
+    [0x13] = "\x1b[1;34m",  // TLS, blue
+    [0x31] = "\x1b[1;31m",  // TWS, red
+    [0x14] = "\x1b[1;95m",  // QLS, bright magenta
+    [0x41] = "\x1b[1;33m",  // QWS, yellow
+    [BRICK_VALUE] = "\x1b[1;90m",  // brick, gray
 };
 
 struct BoardLayout {
