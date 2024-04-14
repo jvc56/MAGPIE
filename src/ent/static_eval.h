@@ -15,7 +15,7 @@ static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
 
 // These are quackle values, but we can probably come up with our
 // own at some point.
-// static const double qpeg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
+// static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
 //    0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
 
 static inline double
