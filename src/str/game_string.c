@@ -1,10 +1,11 @@
+#include "game_string.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
-
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
@@ -13,13 +14,11 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
-
+#include "../util/string_util.h"
 #include "bag_string.h"
 #include "letter_distribution_string.h"
 #include "move_string.h"
 #include "rack_string.h"
-
-#include "../util/string_util.h"
 
 void string_builder_add_player_row(const LetterDistribution *ld,
                                    const Player *player,
@@ -76,12 +75,13 @@ void string_builder_add_board_square_color(StringBuilder *game_string,
 
 void string_builder_add_board_row(const LetterDistribution *ld,
                                   const Board *board,
+                                  const GameStringOptions *game_string_options,
                                   StringBuilder *game_string, int row) {
   string_builder_add_formatted_string(game_string, "%2d|", row + 1);
   for (int i = 0; i < BOARD_DIM; i++) {
-#if PRINT_COLOR_BOARDS == true
-    string_builder_add_board_square_color(game_string, board, row, i);
-#endif
+    if (game_string_options->board_color == GAME_STRING_BOARD_COLOR_ANSI) {
+      string_builder_add_board_square_color(game_string, board, row, i);
+    }
     const uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
       string_builder_add_char(
@@ -91,15 +91,15 @@ void string_builder_add_board_row(const LetterDistribution *ld,
       string_builder_add_user_visible_letter(ld, game_string, current_letter);
     }
     string_builder_add_string(game_string, " ");
-#if PRINT_COLOR_BOARDS == true
-    string_builder_add_color_reset(game_string);
-#endif
+    if (game_string_options->board_color == GAME_STRING_BOARD_COLOR_ANSI) {
+      string_builder_add_color_reset(game_string);
+    }
   }
   string_builder_add_string(game_string, "|");
 }
 
 void string_builder_add_move_with_rank_and_equity(Game *game,
-                                                  MoveList *move_list,
+                                                  const MoveList *move_list,
                                                   StringBuilder *game_string,
                                                   int move_index) {
   Board *board = game_get_board(game);
@@ -111,7 +111,8 @@ void string_builder_add_move_with_rank_and_equity(Game *game,
                                       move_get_equity(move));
 }
 
-void string_builder_add_game(Game *game, MoveList *move_list,
+void string_builder_add_game(const Game *game, const MoveList *move_list,
+                             const GameStringOptions *game_string_options,
                              StringBuilder *game_string) {
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
@@ -146,7 +147,7 @@ void string_builder_add_game(Game *game, MoveList *move_list,
   string_builder_add_string(game_string, "\n");
 
   for (int i = 0; i < BOARD_DIM; i++) {
-    string_builder_add_board_row(ld, board, game_string, i);
+    string_builder_add_board_row(ld, board, game_string_options, game_string, i);
     if (i == 0) {
       string_builder_add_string(
           game_string, " --Tracking-----------------------------------");
@@ -209,4 +210,20 @@ void print_ucgi_static_moves(Game *game, MoveList *move_list,
   char *starting_moves_string_pointer = ucgi_static_moves(game, move_list);
   thread_control_print(thread_control, starting_moves_string_pointer);
   free(starting_moves_string_pointer);
+}
+
+GameStringOptions *game_string_options_create_default() {
+  GameStringOptions *gso = malloc_or_die(sizeof(GameStringOptions));
+  gso->board_color = GAME_STRING_BOARD_COLOR_NONE;
+  return gso;
+}
+
+GameStringOptions *game_string_options_create(game_string_board_color_t board_color) {
+  GameStringOptions *gso = game_string_options_create_default();
+  gso->board_color = board_color;
+  return gso;
+}
+
+void game_string_options_destroy(GameStringOptions *gso) {
+  free(gso);
 }

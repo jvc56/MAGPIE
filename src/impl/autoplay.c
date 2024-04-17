@@ -6,7 +6,6 @@
 #include "../def/autoplay_defs.h"
 #include "../def/game_defs.h"
 #include "../def/thread_control_defs.h"
-
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
 #include "../ent/config.h"
@@ -15,13 +14,11 @@
 #include "../ent/player.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
-
+#include "../str/autoplay_string.h"
+#include "../str/game_string.h"
+#include "../util/util.h"
 #include "gameplay.h"
 #include "move_gen.h"
-
-#include "../str/autoplay_string.h"
-
-#include "../util/util.h"
 
 typedef struct AutoplayWorker {
   const Config *config;
@@ -53,7 +50,6 @@ void destroy_autoplay_worker(AutoplayWorker *autoplay_worker) {
 
 void record_results(Game *game, AutoplayResults *autoplay_results,
                     int starting_player_index) {
-
   int p0_score = player_get_score(game_get_player(game, 0));
   int p1_score = player_get_score(game_get_player(game, 1));
 
@@ -78,9 +74,20 @@ void play_autoplay_game(Game *game, MoveList *move_list,
   game_reset(game);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
+  GameStringOptions *gso =
+      game_string_options_create(GAME_STRING_BOARD_COLOR_ANSI);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+    StringBuilder *sb = create_string_builder();
+    string_builder_add_game(game, NULL, gso, sb);
+    printf("\033[2J\033[H%s", string_builder_peek(sb));
+    destroy_string_builder(sb);
     play_move(get_top_equity_move(game, thread_index, move_list), game);
   }
+  StringBuilder *sb = create_string_builder();
+  string_builder_add_game(game, NULL, gso, sb);
+  printf("\033[2J\033[H%s", string_builder_peek(sb));
+  destroy_string_builder(sb);
+  game_string_options_destroy(gso);
   record_results(game, autoplay_results, starting_player_index);
 }
 
@@ -158,7 +165,6 @@ autoplay_status_t autoplay(const Config *config,
   pthread_t *worker_ids =
       malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-
     int number_of_games_for_worker = get_number_of_games_for_worker(
         config_get_max_iterations(config), number_of_threads, thread_index);
 

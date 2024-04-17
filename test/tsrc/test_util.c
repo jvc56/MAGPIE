@@ -135,8 +135,10 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
 
 void print_game(Game *game, MoveList *move_list) {
   StringBuilder *game_string = create_string_builder();
+  GameStringOptions *gso = game_string_options_create_default();
   string_builder_add_game(game, move_list, game_string);
   printf("%s\n", string_builder_peek(game_string));
+  game_string_options_destroy(gso);
   destroy_string_builder(game_string);
 }
 
