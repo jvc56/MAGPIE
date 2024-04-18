@@ -17,6 +17,7 @@ void board_layout_destroy(BoardLayout *bl);
 
 char bonus_square_value_to_char(uint8_t bonus_square_value);
 const char *bonus_square_value_to_color_code(uint8_t bonus_square_value);
+const char *bonus_square_value_to_alt_string(uint8_t bonus_square_value);
 uint8_t bonus_square_char_to_value(char bonus_square_char);
 int board_layout_get_index(int row, int col);
 uint8_t board_layout_get_bonus_square(const BoardLayout *bl, int row, int col);

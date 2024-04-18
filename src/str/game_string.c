@@ -103,10 +103,16 @@ void string_builder_add_board_row(const LetterDistribution *ld,
     }
     const uint8_t current_letter = board_get_letter(board, row, i);
     if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-      string_builder_add_char(
-          game_string,
-          bonus_square_value_to_char(board_get_bonus_square(board, row, i)));
-      string_builder_add_string(game_string, " ");
+      if (should_print_alt_tiles(game_string_options)) {
+        string_builder_add_string(game_string,
+                                  bonus_square_value_to_alt_string(
+                                      board_get_bonus_square(board, row, i)));
+      } else {
+        string_builder_add_char(
+            game_string,
+            bonus_square_value_to_char(board_get_bonus_square(board, row, i)));
+        string_builder_add_string(game_string, " ");
+      }
     } else {
       if (should_print_alt_tiles(game_string_options)) {
         string_builder_add_user_visible_alt_letter(ld, game_string,
