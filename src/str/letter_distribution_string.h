@@ -9,4 +9,8 @@ void string_builder_add_user_visible_letter(
     const LetterDistribution *ld,
     StringBuilder *string_builder, uint8_t ml);
 
+void string_builder_add_user_visible_alt_letter(
+    const LetterDistribution *ld,
+    StringBuilder *string_builder, uint8_t ml);
+
 #endif

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -73,13 +74,31 @@ void string_builder_add_board_square_color(StringBuilder *game_string,
   }
 }
 
+bool should_print_escape_codes(const GameStringOptions *game_string_options) {
+  if (game_string_options == NULL) {
+    return false;
+  }
+  if (game_string_options->board_color == GAME_STRING_BOARD_COLOR_NONE) {
+    return false;
+  }
+  return isatty(fileno(stdout));
+}
+
+bool should_print_alt_tiles(const GameStringOptions *game_string_options) {
+  if (game_string_options == NULL) {
+    return false;
+  }
+  return (game_string_options->board_tile_glyphs ==
+          GAME_STRING_BOARD_TILE_GLYPHS_ALT);
+}
+
 void string_builder_add_board_row(const LetterDistribution *ld,
                                   const Board *board,
                                   const GameStringOptions *game_string_options,
                                   StringBuilder *game_string, int row) {
   string_builder_add_formatted_string(game_string, "%2d|", row + 1);
   for (int i = 0; i < BOARD_DIM; i++) {
-    if (game_string_options->board_color == GAME_STRING_BOARD_COLOR_ANSI) {
+    if (should_print_escape_codes(game_string_options)) {
       string_builder_add_board_square_color(game_string, board, row, i);
     }
     const uint8_t current_letter = board_get_letter(board, row, i);
@@ -87,18 +106,24 @@ void string_builder_add_board_row(const LetterDistribution *ld,
       string_builder_add_char(
           game_string,
           bonus_square_value_to_char(board_get_bonus_square(board, row, i)));
+      string_builder_add_string(game_string, " ");
     } else {
-      string_builder_add_user_visible_letter(ld, game_string, current_letter);
+      if (should_print_alt_tiles(game_string_options)) {
+        string_builder_add_user_visible_alt_letter(ld, game_string,
+                                                   current_letter);
+      } else {
+        string_builder_add_user_visible_letter(ld, game_string, current_letter);
+        string_builder_add_string(game_string, " ");
+      }
     }
-    string_builder_add_string(game_string, " ");
-    if (game_string_options->board_color == GAME_STRING_BOARD_COLOR_ANSI) {
+    if (should_print_escape_codes(game_string_options)) {
       string_builder_add_color_reset(game_string);
     }
   }
   string_builder_add_string(game_string, "|");
 }
 
-void string_builder_add_move_with_rank_and_equity(Game *game,
+void string_builder_add_move_with_rank_and_equity(const Game *game,
                                                   const MoveList *move_list,
                                                   StringBuilder *game_string,
                                                   int move_index) {
@@ -147,7 +172,8 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
   string_builder_add_string(game_string, "\n");
 
   for (int i = 0; i < BOARD_DIM; i++) {
-    string_builder_add_board_row(ld, board, game_string_options, game_string, i);
+    string_builder_add_board_row(ld, board, game_string_options, game_string,
+                                 i);
     if (i == 0) {
       string_builder_add_string(
           game_string, " --Tracking-----------------------------------");
@@ -218,12 +244,13 @@ GameStringOptions *game_string_options_create_default() {
   return gso;
 }
 
-GameStringOptions *game_string_options_create(game_string_board_color_t board_color) {
+GameStringOptions *game_string_options_create(
+    game_string_board_color_t board_color,
+    game_string_board_tile_glyphs_t board_tile_glyphs) {
   GameStringOptions *gso = game_string_options_create_default();
   gso->board_color = board_color;
+  gso->board_tile_glyphs = board_tile_glyphs;
   return gso;
 }
 
-void game_string_options_destroy(GameStringOptions *gso) {
-  free(gso);
-}
+void game_string_options_destroy(GameStringOptions *gso) { free(gso); }

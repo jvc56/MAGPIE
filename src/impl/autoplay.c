@@ -74,18 +74,20 @@ void play_autoplay_game(Game *game, MoveList *move_list,
   game_reset(game);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
-  GameStringOptions *gso =
-      game_string_options_create(GAME_STRING_BOARD_COLOR_ANSI);
+  GameStringOptions *gso = game_string_options_create(
+      GAME_STRING_BOARD_COLOR_ANSI, GAME_STRING_BOARD_TILE_GLYPHS_ALT);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     StringBuilder *sb = create_string_builder();
     string_builder_add_game(game, NULL, gso, sb);
-    printf("\033[2J\033[H%s", string_builder_peek(sb));
+    //printf("\033[2J\033[H%s", string_builder_peek(sb));
+    printf("%s\n", string_builder_peek(sb));
     destroy_string_builder(sb);
     play_move(get_top_equity_move(game, thread_index, move_list), game);
   }
   StringBuilder *sb = create_string_builder();
   string_builder_add_game(game, NULL, gso, sb);
-  printf("\033[2J\033[H%s", string_builder_peek(sb));
+  //printf("\033[2J\033[H%s", string_builder_peek(sb));
+  printf("%s\n", string_builder_peek(sb));
   destroy_string_builder(sb);
   game_string_options_destroy(gso);
   record_results(game, autoplay_results, starting_player_index);

@@ -3,16 +3,23 @@
 
 #include "../ent/game.h"
 #include "../ent/move.h"
-
 #include "../util/string_util.h"
 
 typedef enum {
-    GAME_STRING_BOARD_COLOR_NONE,
-    GAME_STRING_BOARD_COLOR_ANSI,
+  GAME_STRING_BOARD_COLOR_NONE,
+  GAME_STRING_BOARD_COLOR_ANSI,
+  GAME_STRING_BOARD_COLOR_XTERM_256,
+  GAME_STRING_BOARD_COLOR_TRUECOLOR,
 } game_string_board_color_t;
+
+typedef enum {
+  GAME_STRING_BOARD_TILE_GLYPHS_PRIMARY,
+  GAME_STRING_BOARD_TILE_GLYPHS_ALT,
+} game_string_board_tile_glyphs_t;
 
 struct GameStringOptions {
   game_string_board_color_t board_color;
+  game_string_board_tile_glyphs_t board_tile_glyphs;
 };
 
 typedef struct GameStringOptions GameStringOptions;
@@ -28,7 +35,9 @@ void print_ucgi_static_moves(Game *game, MoveList *move_list,
 
 GameStringOptions *game_string_options_create_default();
 
-GameStringOptions *game_string_options_create(game_string_board_color_t board_color);
+GameStringOptions *game_string_options_create(
+    game_string_board_color_t board_color,
+    game_string_board_tile_glyphs_t board_tile_glyphs);
 
 void game_string_options_destroy(GameStringOptions *gso);
 

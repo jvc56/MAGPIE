@@ -18,6 +18,7 @@ typedef struct LetterDistribution {
   int total_tiles;
   int max_tile_length;
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
+  char ld_ml_to_alt_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
 LetterDistribution *ld_create(const char *ld_name);
@@ -50,6 +51,7 @@ int ld_get_max_tile_length(const LetterDistribution *ld);
 char *ld_get_default_name(const char *lexicon_name);
 
 char *ld_ml_to_hl(const LetterDistribution *ld, uint8_t ml);
+char *ld_ml_to_alt_hl(const LetterDistribution *ld, uint8_t ml);
 
 uint8_t ld_hl_to_ml(const LetterDistribution *ld, char *letter);
 int ld_str_to_mls(const LetterDistribution *ld, const char *str,
