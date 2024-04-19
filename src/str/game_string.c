@@ -92,11 +92,62 @@ bool should_print_alt_tiles(const GameStringOptions *game_string_options) {
           GAME_STRING_BOARD_TILE_GLYPHS_ALT);
 }
 
+void string_builder_add_board_top_border(
+    const GameStringOptions *game_string_options, StringBuilder *game_string) {
+  string_builder_add_string(game_string, "  ");
+  if ((game_string_options == NULL) ||
+      (game_string_options->board_border == GAME_STRING_BOARD_BORDER_ASCII)) {
+    string_builder_add_string(game_string, " ");
+    for (int i = 0; i < BOARD_DIM; i++) {
+      string_builder_add_string(game_string, "--");
+    }
+    string_builder_add_string(game_string, " ");
+  } else {
+    string_builder_add_string(game_string, "┏");
+    for (int i = 0; i < BOARD_DIM; i++) {
+      string_builder_add_string(game_string, "━━");
+    }
+    string_builder_add_string(game_string, "┓");
+  }
+  string_builder_add_string(game_string, " ");
+}
+
+void string_builder_add_board_bottom_border(
+    const GameStringOptions *game_string_options, StringBuilder *game_string) {
+  string_builder_add_string(game_string, "  ");
+  if ((game_string_options == NULL) ||
+      (game_string_options->board_border == GAME_STRING_BOARD_BORDER_ASCII)) {
+    string_builder_add_string(game_string, " ");
+    for (int i = 0; i < BOARD_DIM; i++) {
+      string_builder_add_string(game_string, "--");
+    }
+    string_builder_add_string(game_string, " ");
+  } else {
+    string_builder_add_string(game_string, "┗");
+    for (int i = 0; i < BOARD_DIM; i++) {
+      string_builder_add_string(game_string, "━━");
+    }
+    string_builder_add_string(game_string, "┛");
+  }
+  string_builder_add_string(game_string, " ");
+}
+
+void string_builder_add_board_side_border(
+    const GameStringOptions *game_string_options, StringBuilder *game_string) {
+  if ((game_string_options == NULL) ||
+      (game_string_options->board_border == GAME_STRING_BOARD_BORDER_ASCII)) {
+    string_builder_add_string(game_string, "|");
+  } else {
+    string_builder_add_string(game_string, "┃");
+  }
+}
+
 void string_builder_add_board_row(const LetterDistribution *ld,
                                   const Board *board,
                                   const GameStringOptions *game_string_options,
                                   StringBuilder *game_string, int row) {
-  string_builder_add_formatted_string(game_string, "%2d|", row + 1);
+  string_builder_add_formatted_string(game_string, "%2d", row + 1);
+  string_builder_add_board_side_border(game_string_options, game_string);
   for (int i = 0; i < BOARD_DIM; i++) {
     if (should_print_escape_codes(game_string_options)) {
       string_builder_add_board_square_color(game_string, board, row, i);
@@ -126,7 +177,7 @@ void string_builder_add_board_row(const LetterDistribution *ld,
       string_builder_add_color_reset(game_string);
     }
   }
-  string_builder_add_string(game_string, "|");
+  string_builder_add_board_side_border(game_string_options, game_string);
 }
 
 void string_builder_add_move_with_rank_and_equity(const Game *game,
@@ -166,13 +217,9 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
 
   string_builder_add_player_row(ld, player0, game_string,
                                 player_on_turn_index == 0);
-  string_builder_add_string(game_string, "\n   ");
+  string_builder_add_string(game_string, "\n");
 
-  for (int i = 0; i < BOARD_DIM; i++) {
-    string_builder_add_string(game_string, "--");
-  }
-
-  string_builder_add_string(game_string, "  ");
+  string_builder_add_board_top_border(game_string_options, game_string);
   string_builder_add_player_row(ld, player1, game_string,
                                 player_on_turn_index == 1);
   string_builder_add_string(game_string, "\n");
@@ -197,12 +244,7 @@ void string_builder_add_game(const Game *game, const MoveList *move_list,
     string_builder_add_string(game_string, "\n");
   }
 
-  string_builder_add_string(game_string, "   ");
-
-  for (int i = 0; i < BOARD_DIM; i++) {
-    string_builder_add_string(game_string, "--");
-  }
-
+  string_builder_add_board_bottom_border(game_string_options, game_string);
   string_builder_add_string(game_string, "\n");
 }
 
@@ -252,10 +294,12 @@ GameStringOptions *game_string_options_create_default() {
 
 GameStringOptions *game_string_options_create(
     game_string_board_color_t board_color,
-    game_string_board_tile_glyphs_t board_tile_glyphs) {
+    game_string_board_tile_glyphs_t board_tile_glyphs,
+    game_string_board_border_t board_border) {
   GameStringOptions *gso = game_string_options_create_default();
   gso->board_color = board_color;
   gso->board_tile_glyphs = board_tile_glyphs;
+  gso->board_border = board_border;
   return gso;
 }
 

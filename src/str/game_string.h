@@ -17,9 +17,15 @@ typedef enum {
   GAME_STRING_BOARD_TILE_GLYPHS_ALT,
 } game_string_board_tile_glyphs_t;
 
+typedef enum {
+  GAME_STRING_BOARD_BORDER_ASCII,
+  GAME_STRING_BOARD_BORDER_BOX_DRAWING,
+} game_string_board_border_t;
+
 struct GameStringOptions {
   game_string_board_color_t board_color;
   game_string_board_tile_glyphs_t board_tile_glyphs;
+  game_string_board_border_t board_border;
 };
 
 typedef struct GameStringOptions GameStringOptions;
@@ -37,7 +43,8 @@ GameStringOptions *game_string_options_create_default();
 
 GameStringOptions *game_string_options_create(
     game_string_board_color_t board_color,
-    game_string_board_tile_glyphs_t board_tile_glyphs);
+    game_string_board_tile_glyphs_t board_tile_glyphs,
+    game_string_board_border_t board_border);
 
 void game_string_options_destroy(GameStringOptions *gso);
 
