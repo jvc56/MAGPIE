@@ -14,6 +14,9 @@
 #define BOARD_DIM DEFAULT_BOARD_DIM
 #endif
 
+// In printed board, columns are labeled using A-Z
+#define BOARD_NUM_COLUMN_LABELS 26
+
 #define BOARD_HORIZONTAL_DIRECTION 0
 #define BOARD_VERTICAL_DIRECTION 1
 #define DEFAULT_BINGO_BONUS 50

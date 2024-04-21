@@ -76,7 +76,11 @@ void play_autoplay_game(Game *game, MoveList *move_list,
   draw_starting_racks(game);
   GameStringOptions *gso = game_string_options_create(
       GAME_STRING_BOARD_COLOR_ANSI, GAME_STRING_BOARD_TILE_GLYPHS_ALT,
-      GAME_STRING_BOARD_BORDER_BOX_DRAWING);
+      GAME_STRING_BOARD_BORDER_BOX_DRAWING,
+      GAME_STRING_BOARD_COLUMN_LABEL_FULLWIDTH,
+      GAME_STRING_ON_TURN_MARKER_ARROWHEAD,
+      GAME_STRING_ON_TURN_COLOR_ANSI_GREEN,
+      GAME_STRING_ON_TURN_SCORE_BOLD);
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     StringBuilder *sb = create_string_builder();
     string_builder_add_game(game, NULL, gso, sb);
