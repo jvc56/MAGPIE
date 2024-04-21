@@ -12,3 +12,11 @@ void string_builder_add_user_visible_letter(
   string_builder_add_string(string_builder, human_readable_letter);
   free(human_readable_letter);
 }
+
+void string_builder_add_user_visible_alt_letter(
+    const LetterDistribution *ld,
+    StringBuilder *string_builder, uint8_t ml) {
+  char *human_readable_letter = ld_ml_to_alt_hl(ld, ml);
+  string_builder_add_string(string_builder, human_readable_letter);
+  free(human_readable_letter);
+}

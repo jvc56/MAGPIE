@@ -42,6 +42,28 @@ static const char bonus_square_values_to_chars_map[BONUS_SQUARE_MAP_SIZE] = {
     [BRICK_VALUE] = BRICK_CHAR,
 };
 
+static const char* bonus_square_values_to_color_codes[BONUS_SQUARE_MAP_SIZE] = {
+    [0x11] = "\x1b[0m",     // none, reset
+    [0x12] = "\x1b[1;36m",  // DLS, cyan
+    [0x21] = "\x1b[1;35m",  // DWS, magenta
+    [0x13] = "\x1b[1;34m",  // TLS, blue
+    [0x31] = "\x1b[1;31m",  // TWS, red
+    [0x14] = "\x1b[1;95m",  // QLS, bright magenta
+    [0x41] = "\x1b[1;33m",  // QWS, yellow
+    [BRICK_VALUE] = "\x1b[1;90m",  // brick, gray
+};
+
+static const char* bonus_square_values_to_alt_strings[BONUS_SQUARE_MAP_SIZE] = {
+    [0x11] = "　",  // ideographic space
+    [0x12] = "＇",  // fullwidth apostrophe
+    [0x21] = "－",  // fullwidth hyphen-minus
+    [0x13] = "＂",  // fullwidth quotation mark
+    [0x31] = "＝",  // fullwidth equals sign
+    [0x14] = "＾",  // fullwidth circumflex accent
+    [0x41] = "～",  // fullwidth tilde
+    [BRICK_VALUE] = "＃",  // fullwidth number sign
+};
+
 struct BoardLayout {
   int start_coords[2];
   uint8_t bonus_squares[BOARD_DIM * BOARD_DIM];
@@ -90,6 +112,14 @@ board_layout_parse_split_start_coords(BoardLayout *bl,
 
 char bonus_square_value_to_char(uint8_t bonus_square_value) {
   return bonus_square_values_to_chars_map[bonus_square_value];
+}
+
+const char *bonus_square_value_to_color_code(uint8_t bonus_square_value) {
+  return bonus_square_values_to_color_codes[bonus_square_value];
+}
+
+const char *bonus_square_value_to_alt_string(uint8_t bonus_square_value) {
+  return bonus_square_values_to_alt_strings[bonus_square_value];
 }
 
 uint8_t bonus_square_char_to_value(char bonus_square_char) {

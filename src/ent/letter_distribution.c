@@ -5,7 +5,6 @@
 
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
-
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
@@ -70,11 +69,14 @@ void load_ld(LetterDistribution *ld, const char *ld_name) {
   for (int i = 0; i < number_of_lines; i++) {
     const char *line = string_splitter_get_item(ld_lines, i);
     StringSplitter *single_letter_info = split_string(line, ',', true);
-    if (string_splitter_get_number_of_items(single_letter_info) != 5) {
+    const int number_of_items =
+        string_splitter_get_number_of_items(single_letter_info);
+    // alt letter and alt lower case are optional
+    if ((number_of_items != 5) && (number_of_items != 7)) {
       log_fatal("invalid letter distribution line in %s:\n>%s<\n", ld_name,
                 line);
     }
-    // letter, lower case, dist, score, is_vowel
+    // letter, lower case, dist, score, is_vowel, alt letter, alt lower case
     const char *letter = string_splitter_get_item(single_letter_info, 0);
     const char *lower_case_letter =
         string_splitter_get_item(single_letter_info, 1);
@@ -83,6 +85,12 @@ void load_ld(LetterDistribution *ld, const char *ld_name) {
     int score = string_to_int(string_splitter_get_item(single_letter_info, 3));
     int is_vowel =
         string_to_int(string_splitter_get_item(single_letter_info, 4));
+    // if alt versions are not provided, store copies of regular letters
+    const bool have_alt_versions = number_of_items == 7;
+    const char *alt_letter =
+        string_splitter_get_item(single_letter_info, have_alt_versions ? 5 : 0);
+    const char *alt_lower_case_letter =
+        string_splitter_get_item(single_letter_info, have_alt_versions ? 6 : 1);
 
     int tile_length = string_length(letter);
     if (tile_length > max_tile_length) {
@@ -95,11 +103,14 @@ void load_ld(LetterDistribution *ld, const char *ld_name) {
     ld->is_vowel[machine_letter] = is_vowel == 1;
 
     string_copy(ld->ld_ml_to_hl[machine_letter], letter);
+    string_copy(ld->ld_ml_to_alt_hl[machine_letter], alt_letter);
 
     if (machine_letter > 0) {
       uint8_t blanked_machine_letter =
           get_blanked_machine_letter(machine_letter);
       string_copy(ld->ld_ml_to_hl[blanked_machine_letter], lower_case_letter);
+      string_copy(ld->ld_ml_to_alt_hl[blanked_machine_letter],
+                  alt_lower_case_letter);
     }
     destroy_string_splitter(single_letter_info);
     machine_letter++;
@@ -136,6 +147,10 @@ int ld_get_max_tile_length(const LetterDistribution *ld) {
 
 char *ld_ml_to_hl(const LetterDistribution *ld, uint8_t ml) {
   return string_duplicate(ld->ld_ml_to_hl[ml]);
+}
+
+char *ld_ml_to_alt_hl(const LetterDistribution *ld, uint8_t ml) {
+  return string_duplicate(ld->ld_ml_to_alt_hl[ml]);
 }
 
 // This is a linear search. This function should not be used for anything
@@ -183,7 +198,6 @@ int get_number_of_utf8_bytes_for_code_point(uint8_t byte) {
 int ld_str_to_mls(const LetterDistribution *ld, const char *str,
                   bool allow_played_through_marker, uint8_t *mls,
                   size_t mls_size) {
-
   int num_mls = 0;
   size_t num_bytes = string_length(str);
   // Use +1 for the null terminator
@@ -200,70 +214,71 @@ int ld_str_to_mls(const LetterDistribution *ld, const char *str,
   for (size_t i = 0; i < num_bytes; i++) {
     char current_char = str[i];
     switch (current_char) {
-    case MULTICHAR_START_DELIMITIER:
-      if (building_multichar_letter || current_code_point_bytes_remaining > 0) {
-        return -1;
-      }
-      building_multichar_letter = true;
-      break;
-    case MULTICHAR_END_DELIMITIER:
-      // Return an error if
-      // - multichar is building
-      // - multichar has fewer than two letters
-      // - code point is being built
-      if (!building_multichar_letter || number_of_letters_in_builder < 2 ||
-          current_code_point_bytes_remaining > 0) {
-        return -1;
-      }
-      building_multichar_letter = false;
-      break;
-    default:
-      if (current_letter_byte_index == MAX_LETTER_BYTE_LENGTH) {
-        // Exceeded max char length
-        return -1;
-      }
+      case MULTICHAR_START_DELIMITIER:
+        if (building_multichar_letter ||
+            current_code_point_bytes_remaining > 0) {
+          return -1;
+        }
+        building_multichar_letter = true;
+        break;
+      case MULTICHAR_END_DELIMITIER:
+        // Return an error if
+        // - multichar is building
+        // - multichar has fewer than two letters
+        // - code point is being built
+        if (!building_multichar_letter || number_of_letters_in_builder < 2 ||
+            current_code_point_bytes_remaining > 0) {
+          return -1;
+        }
+        building_multichar_letter = false;
+        break;
+      default:
+        if (current_letter_byte_index == MAX_LETTER_BYTE_LENGTH) {
+          // Exceeded max char length
+          return -1;
+        }
 
-      int number_of_bytes_for_code_point =
-          get_number_of_utf8_bytes_for_code_point(current_char);
+        int number_of_bytes_for_code_point =
+            get_number_of_utf8_bytes_for_code_point(current_char);
 
-      if (number_of_bytes_for_code_point < 0) {
-        // Return -1 for invalid UTF8 byte
-        return -1;
-      }
+        if (number_of_bytes_for_code_point < 0) {
+          // Return -1 for invalid UTF8 byte
+          return -1;
+        }
 
-      if (number_of_bytes_for_code_point > 0 &&
-          current_code_point_bytes_remaining > 0) {
-        // Invalid UTF8 start sequence
-        return -1;
-      }
+        if (number_of_bytes_for_code_point > 0 &&
+            current_code_point_bytes_remaining > 0) {
+          // Invalid UTF8 start sequence
+          return -1;
+        }
 
-      if (!building_multichar_letter && number_of_bytes_for_code_point > 0) {
-        // If we are building a multichar character
-        // with [ and ], we do not need to account for
-        // multibyte unicode code points since the batch
-        // processing for multiple bytes is already handled.
-        // This is the start of a multibyte code point
-        current_code_point_bytes_remaining = number_of_bytes_for_code_point;
-      } else if (number_of_bytes_for_code_point != 0) {
-        // If we are building a multichar letter, we do not
-        // allow single width chars such as [Ż], so we
-        // count how many chars we encounter while building
-        // a multichar and return an error if we finish with fewer than 2.
-        // If this byte is not a continuation of an existing
-        // unicode code point, then it is a new character.
-        number_of_letters_in_builder++;
-      }
+        if (!building_multichar_letter && number_of_bytes_for_code_point > 0) {
+          // If we are building a multichar character
+          // with [ and ], we do not need to account for
+          // multibyte unicode code points since the batch
+          // processing for multiple bytes is already handled.
+          // This is the start of a multibyte code point
+          current_code_point_bytes_remaining = number_of_bytes_for_code_point;
+        } else if (number_of_bytes_for_code_point != 0) {
+          // If we are building a multichar letter, we do not
+          // allow single width chars such as [Ż], so we
+          // count how many chars we encounter while building
+          // a multichar and return an error if we finish with fewer than 2.
+          // If this byte is not a continuation of an existing
+          // unicode code point, then it is a new character.
+          number_of_letters_in_builder++;
+        }
 
-      current_letter[current_letter_byte_index] = current_char;
-      current_letter_byte_index++;
-      current_letter[current_letter_byte_index] = '\0';
+        current_letter[current_letter_byte_index] = current_char;
+        current_letter_byte_index++;
+        current_letter[current_letter_byte_index] = '\0';
 
-      if (current_code_point_bytes_remaining > 0) {
-        // Another byte of the multibyte code point
-        // has been processed
-        current_code_point_bytes_remaining--;
-      }
-      break;
+        if (current_code_point_bytes_remaining > 0) {
+          // Another byte of the multibyte code point
+          // has been processed
+          current_code_point_bytes_remaining--;
+        }
+        break;
     }
 
     // Only write if
@@ -300,10 +315,11 @@ int ld_str_to_mls(const LetterDistribution *ld, const char *str,
 // BOARD_DIM to determine a default letter distribution name.
 char *ld_get_default_name(const char *lexicon_name) {
   if (BOARD_DIM != DEFAULT_BOARD_DIM && BOARD_DIM != DEFAULT_SUPER_BOARD_DIM) {
-    log_fatal("Default letter distribution not supported with a board "
-              "dimension of %d. Only %d and %d have "
-              "default values.",
-              BOARD_DIM, DEFAULT_BOARD_DIM, DEFAULT_SUPER_BOARD_DIM);
+    log_fatal(
+        "Default letter distribution not supported with a board "
+        "dimension of %d. Only %d and %d have "
+        "default values.",
+        BOARD_DIM, DEFAULT_BOARD_DIM, DEFAULT_SUPER_BOARD_DIM);
   }
   const char *ld_name_extension = "";
   if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
