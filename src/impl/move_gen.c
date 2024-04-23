@@ -257,16 +257,18 @@ static inline bool shadow_is_dead_end(MoveGen *gen, int tiles_remaining,
 }
 
 static inline bool gen_is_dead_end(MoveGen *gen, uint32_t node,
+                                   int current_left_col, int current_right_col,
                                    int tiles_remaining,
                                    bool tile_played_through) {
+
   return
       // No tiles have been played through
       !tile_played_through &&
       // Play through tiles are not reachable from the left
-      (gen->current_left_col - gen->nearest_left_playthrough_tile_col) - 1 >
+      (current_left_col - gen->nearest_left_playthrough_tile_col) - 1 >
           tiles_remaining &&
       // Play through tiles are not reachable from the right
-      (gen->nearest_right_playthrough_tile_col - gen->current_right_col) - 1 >
+      (gen->nearest_right_playthrough_tile_col - current_right_col) - 1 >
           tiles_remaining &&
       // This node is a dead end
       kwg_node_dead_end(node);
@@ -429,7 +431,7 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play,
            int main_word_score, int word_multiplier, int cross_score,
-           bool played_through_tile);
+           bool played_through_tile, bool is_dead_end);
 
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
@@ -469,7 +471,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     }
     go_on(gen, col, current_letter, next_node_index, accepts, leftstrip,
           rightstrip, unique_play, main_word_score, word_multiplier,
-          cross_score, true);
+          cross_score, true, false);
   } else if (!rack_is_empty(&gen->player_rack) &&
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
     for (uint32_t i = node_index;; i++) {
@@ -479,12 +481,13 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
       if (ml != 0 &&
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
-          board_is_letter_allowed_in_cross_set(possible_letters_here, ml) &&
-          // Use -1 for tiles remaining since we assume the current tile is
-          // played
-          !gen_is_dead_end(
-              gen, node, gen->number_of_letters_on_rack - gen->tiles_played - 1,
-              played_through_tile)) {
+          board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
+        // Use -1 for tiles remaining since we assume the current tile is
+        // played
+        const bool is_dead_end = gen_is_dead_end(
+            gen, node, leftstrip, rightstrip,
+            gen->number_of_letters_on_rack - gen->tiles_played - 1,
+            played_through_tile);
         const uint32_t next_node_index =
             kwg_node_arc_index_prefetch(node, gen->kwg);
         bool accepts = kwg_node_accepts(node);
@@ -494,7 +497,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           gen->tiles_played++;
           go_on(gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
                 unique_play, main_word_score, word_multiplier, cross_score,
-                played_through_tile);
+                played_through_tile, is_dead_end);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(&gen->leave_map,
                                                         &gen->player_rack, ml);
@@ -506,7 +509,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           gen->tiles_played++;
           go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
                 accepts, leftstrip, rightstrip, unique_play, main_word_score,
-                word_multiplier, cross_score, played_through_tile);
+                word_multiplier, cross_score, played_through_tile, is_dead_end);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(
               &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
@@ -522,7 +525,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play,
            int main_word_score, int word_multiplier, int cross_score,
-           bool played_through_tile) {
+           bool played_through_tile, bool is_dead_end) {
   // Handle incremental scoring
   const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
   int letter_multiplier = 1;
@@ -575,7 +578,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
       return;
     }
 
-    if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
+    if (current_col > 0 && current_col - 1 != gen->last_anchor_col &&
+        !is_dead_end) {
       recursive_gen(gen, current_col - 1, new_node_index, leftstrip, rightstrip,
                     unique_play, inc_main_word_score, inc_word_multiplier,
                     inc_cross_scores, played_through_tile);
@@ -585,8 +589,9 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     // begins a word. So it can only filter here if no tiles have been played
     // so far. If gen->tiles_played is 0, this recursive_gen call would be
     // placing the first tile of a play and continuing to the right.
-    if ((gen->tiles_played != 0) ||
-        (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
+    if (((gen->tiles_played != 0) ||
+         (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) &&
+        !is_dead_end) {
       uint32_t separation_node_index = kwg_get_next_node_index(
           gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
       if (separation_node_index != 0 && no_letter_directly_left &&
@@ -613,7 +618,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
                                  inc_cross_scores);
     }
 
-    if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
+    if (new_node_index != 0 && current_col < BOARD_DIM - 1 && !is_dead_end) {
       recursive_gen(gen, current_col + 1, new_node_index, leftstrip, rightstrip,
                     unique_play, inc_main_word_score, inc_word_multiplier,
                     inc_cross_scores, played_through_tile);

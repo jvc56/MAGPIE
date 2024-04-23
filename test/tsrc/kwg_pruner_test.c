@@ -86,6 +86,8 @@ void test_kwg_pruner() {
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "EEEEEEW", 4);
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "AFGBEUW", 4);
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "AFGBEUH", 5);
+  assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "KGOTLAT", 6);
+  assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "KGOTLET", 5);
 
   config_destroy(mutable_kwg_config);
   config_destroy(const_kwg_config);
