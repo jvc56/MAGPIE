@@ -24,28 +24,6 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-int count_scoring_plays(const MoveList *ml) {
-  int sum = 0;
-  for (int i = 0; i < move_list_get_count(ml); i++) {
-    if (move_get_type(move_list_get_move(ml, i)) ==
-        GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      sum++;
-    }
-  }
-  return sum;
-}
-
-int count_nonscoring_plays(const MoveList *ml) {
-  int sum = 0;
-  for (int i = 0; i < move_list_get_count(ml); i++) {
-    if (move_get_type(move_list_get_move(ml, i)) !=
-        GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      sum++;
-    }
-  }
-  return sum;
-}
-
 // Use -1 for row if setting with CGP
 // Use NULL for rack_string if setting with CGP
 void assert_move_gen_row(Game *game, MoveList *move_list,
@@ -372,7 +350,8 @@ void unfound_leave_lookup_test() {
   MoveList *move_list = move_list_create(1);
   Rack *rack = player_get_rack(game_get_player(game, 0));
 
-  char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 UNFOUND/UNFOUND 0/0 0 lex CSW21;";
+  char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
+                  "UNFOUND/UNFOUND 0/0 0 lex CSW21;";
   game_load_cgp(game, cgp);
 
   // CGP loader won't accept this impossible rack so we set it manually here.

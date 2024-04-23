@@ -14,6 +14,8 @@ typedef struct Anchor {
   // The direction of the board for
   // this anchor column.
   int dir;
+  int nearest_left_playthrough_tile_col;
+  int nearest_right_playthrough_tile_col;
   // The highest possibly equity
   // that can be achieved from this
   // anchor column.
@@ -49,18 +51,34 @@ static inline int anchor_get_row(const AnchorList *al, int index) {
   return al->anchors[index]->row;
 }
 
+static inline int
+anchor_get_nearest_left_playthrough_tile_col(const AnchorList *al, int index) {
+  return al->anchors[index]->nearest_left_playthrough_tile_col;
+}
+
+static inline int
+anchor_get_nearest_right_playthrough_tile_col(const AnchorList *al, int index) {
+  return al->anchors[index]->nearest_right_playthrough_tile_col;
+}
+
 static inline int anchor_list_get_count(const AnchorList *al) {
   return al->count;
 }
 
-static inline void anchor_list_add_anchor(AnchorList *al, int row, int col,
-                                          int last_anchor_col, int dir,
-                                          double highest_possible_equity) {
+static inline void
+anchor_list_add_anchor(AnchorList *al, int row, int col, int last_anchor_col,
+                       int dir, int nearest_left_playthrough_tile_col,
+                       int nearest_right_playthrough_tile_col,
+                       double highest_possible_equity) {
   int i = al->count;
   al->anchors[i]->row = row;
   al->anchors[i]->col = col;
   al->anchors[i]->last_anchor_col = last_anchor_col;
   al->anchors[i]->dir = dir;
+  al->anchors[i]->nearest_left_playthrough_tile_col =
+      nearest_left_playthrough_tile_col;
+  al->anchors[i]->nearest_right_playthrough_tile_col =
+      nearest_right_playthrough_tile_col;
   al->anchors[i]->highest_possible_equity = highest_possible_equity;
   al->count++;
 }

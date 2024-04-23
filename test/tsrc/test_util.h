@@ -60,4 +60,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_tiles,
                                           int move_score,
                                           bool play_move_on_board);
+int count_scoring_plays(const MoveList *ml);
+int count_nonscoring_plays(const MoveList *ml);
+
 #endif

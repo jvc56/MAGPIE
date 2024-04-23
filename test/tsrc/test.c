@@ -19,6 +19,7 @@
 #include "gcg_test.h"
 #include "infer_test.h"
 #include "kwg_maker_test.h"
+#include "kwg_pruner_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
@@ -55,6 +56,7 @@ void run_all() {
   test_cross_set();
   test_move();
   test_game();
+  test_kwg_pruner();
   test_validated_move();
   test_shadow();
   test_move_gen();
@@ -132,6 +134,8 @@ void run_test(const char *subtest) {
     test_word_prune();
   } else if (strings_equal(subtest, "kwgmaker")) {
     test_kwg_maker();
+  } else if (strings_equal(subtest, "kwgp")) {
+    test_kwg_pruner();
   } else if (strings_equal(subtest, "fh")) {
     test_file_handler();
   } else {

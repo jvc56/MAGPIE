@@ -455,3 +455,25 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   validated_moves_destroy(vms);
   move_list_destroy(move_list);
 }
+
+int count_scoring_plays(const MoveList *ml) {
+  int sum = 0;
+  for (int i = 0; i < move_list_get_count(ml); i++) {
+    if (move_get_type(move_list_get_move(ml, i)) ==
+        GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      sum++;
+    }
+  }
+  return sum;
+}
+
+int count_nonscoring_plays(const MoveList *ml) {
+  int sum = 0;
+  for (int i = 0; i < move_list_get_count(ml); i++) {
+    if (move_get_type(move_list_get_move(ml, i)) !=
+        GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      sum++;
+    }
+  }
+  return sum;
+}

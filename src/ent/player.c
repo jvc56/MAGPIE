@@ -21,7 +21,7 @@ struct Player {
   int score;
   move_sort_t move_sort_type;
   move_record_t move_record_type;
-  const KWG *kwg;
+  KWG *kwg;
   const KLV *klv;
 };
 
@@ -90,6 +90,8 @@ move_record_t player_get_move_record_type(const Player *player) {
 }
 
 const KWG *player_get_kwg(const Player *player) { return player->kwg; }
+
+KWG *player_get_mutable_kwg(const Player *player) { return player->kwg; }
 
 const KLV *player_get_klv(const Player *player) { return player->klv; }
 

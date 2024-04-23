@@ -19,6 +19,7 @@
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
+#include "../ent/kwg_pruner.h"
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -38,6 +39,8 @@ typedef struct MoveGen {
   // Owned by this MoveGen struct
   int current_row_index;
   int current_anchor_col;
+  int nearest_left_playthrough_tile_col;
+  int nearest_right_playthrough_tile_col;
   uint64_t anchor_left_extension_set;
   uint64_t anchor_right_extension_set;
 
@@ -109,6 +112,7 @@ typedef struct MoveGen {
   double highest_shadow_equity;
   uint64_t rack_cross_set;
   int number_of_letters_on_rack;
+  int max_nonplaythrough_tiles_played;
   uint16_t full_rack_descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
   uint16_t descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
   uint16_t descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
@@ -122,7 +126,7 @@ typedef struct MoveGen {
   // Owned by the caller
   const LetterDistribution *ld;
   const KLV *klv;
-  const KWG *kwg;
+  KWG *kwg;
   // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
@@ -234,6 +238,38 @@ static inline Move *gen_get_current_move(MoveGen *gen) {
 
 static inline void gen_switch_best_move_and_current_move(MoveGen *gen) {
   gen->best_move_index ^= 1;
+}
+
+// This should only be called for nonplaythrough shadow
+static inline bool shadow_is_dead_end(MoveGen *gen, int tiles_remaining,
+                                      bool tile_played_through) {
+  return
+      // No tiles have been played through
+      !tile_played_through &&
+      // Play through tiles are not reachable from the left
+      (gen->current_left_col - gen->nearest_left_playthrough_tile_col) - 1 >
+          tiles_remaining &&
+      // Play through tiles are not reachable from the right
+      (gen->nearest_right_playthrough_tile_col - gen->current_right_col) - 1 >
+          tiles_remaining &&
+      // We have played the max number of nonplaythrough tiles for this reach
+      gen->tiles_played >= gen->max_nonplaythrough_tiles_played;
+}
+
+static inline bool gen_is_dead_end(MoveGen *gen, uint32_t node,
+                                   int tiles_remaining,
+                                   bool tile_played_through) {
+  return
+      // No tiles have been played through
+      !tile_played_through &&
+      // Play through tiles are not reachable from the left
+      (gen->current_left_col - gen->nearest_left_playthrough_tile_col) - 1 >
+          tiles_remaining &&
+      // Play through tiles are not reachable from the right
+      (gen->nearest_right_playthrough_tile_col - gen->current_right_col) - 1 >
+          tiles_remaining &&
+      // This node is a dead end
+      kwg_node_dead_end(node);
 }
 
 static inline void set_play_for_record(Move *move, game_event_t move_type,
@@ -392,11 +428,13 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
 
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play,
-           int main_word_score, int word_multiplier, int cross_score);
+           int main_word_score, int word_multiplier, int cross_score,
+           bool played_through_tile);
 
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
-                   int word_multiplier, int cross_score) {
+                   int word_multiplier, int cross_score,
+                   bool played_through_tile) {
   const uint8_t current_letter = gen_cache_get_letter(gen, col);
   // If current_letter is nonempty, leftx is the set of letters that could go
   // immediately left of the current block of played tiles.
@@ -431,7 +469,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     }
     go_on(gen, col, current_letter, next_node_index, accepts, leftstrip,
           rightstrip, unique_play, main_word_score, word_multiplier,
-          cross_score);
+          cross_score, true);
   } else if (!rack_is_empty(&gen->player_rack) &&
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
     for (uint32_t i = node_index;; i++) {
@@ -441,7 +479,12 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
       if (ml != 0 &&
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
-          board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
+          board_is_letter_allowed_in_cross_set(possible_letters_here, ml) &&
+          // Use -1 for tiles remaining since we assume the current tile is
+          // played
+          !gen_is_dead_end(
+              gen, node, gen->number_of_letters_on_rack - gen->tiles_played - 1,
+              played_through_tile)) {
         const uint32_t next_node_index =
             kwg_node_arc_index_prefetch(node, gen->kwg);
         bool accepts = kwg_node_accepts(node);
@@ -450,7 +493,8 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                                                          &gen->player_rack, ml);
           gen->tiles_played++;
           go_on(gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
-                unique_play, main_word_score, word_multiplier, cross_score);
+                unique_play, main_word_score, word_multiplier, cross_score,
+                played_through_tile);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(&gen->leave_map,
                                                         &gen->player_rack, ml);
@@ -462,7 +506,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           gen->tiles_played++;
           go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
                 accepts, leftstrip, rightstrip, unique_play, main_word_score,
-                word_multiplier, cross_score);
+                word_multiplier, cross_score, played_through_tile);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(
               &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
@@ -477,7 +521,8 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
 
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play,
-           int main_word_score, int word_multiplier, int cross_score) {
+           int main_word_score, int word_multiplier, int cross_score,
+           bool played_through_tile) {
   // Handle incremental scoring
   const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
   int letter_multiplier = 1;
@@ -533,7 +578,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
       recursive_gen(gen, current_col - 1, new_node_index, leftstrip, rightstrip,
                     unique_play, inc_main_word_score, inc_word_multiplier,
-                    inc_cross_scores);
+                    inc_cross_scores, played_through_tile);
     }
 
     // rightx only tells you which tiles can go to the right of a string which
@@ -548,7 +593,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
           gen->current_anchor_col < BOARD_DIM - 1) {
         recursive_gen(gen, gen->current_anchor_col + 1, separation_node_index,
                       leftstrip, rightstrip, unique_play, inc_main_word_score,
-                      inc_word_multiplier, inc_cross_scores);
+                      inc_word_multiplier, inc_cross_scores,
+                      played_through_tile);
       }
     }
   } else {
@@ -570,7 +616,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
       recursive_gen(gen, current_col + 1, new_node_index, leftstrip, rightstrip,
                     unique_play, inc_main_word_score, inc_word_multiplier,
-                    inc_cross_scores);
+                    inc_cross_scores, played_through_tile);
     }
   }
 }
@@ -749,7 +795,8 @@ static inline bool try_restrict_tile_and_accumulate_score(
   return true;
 }
 
-static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
+static inline void shadow_play_right(MoveGen *gen, bool is_unique,
+                                     bool tile_played_through) {
   // Save the score totals to be reset after shadowing right.
   const int orig_main_restricted_score = gen->shadow_mainword_restricted_score;
   const int orig_perp_score = gen->shadow_perpendicular_additional_score;
@@ -785,6 +832,12 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
          gen->tiles_played < gen->number_of_letters_on_rack) {
     gen->current_right_col++;
     gen->tiles_played++;
+
+    if (shadow_is_dead_end(gen,
+                           gen->number_of_letters_on_rack - gen->tiles_played,
+                           tile_played_through)) {
+      return;
+    }
 
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_right_col);
@@ -826,6 +879,8 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
           gen_cache_get_letter(gen, gen->current_right_col + 1);
       if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         break;
+      } else {
+        tile_played_through = true;
       }
       gen->shadow_mainword_restricted_score += gen->tile_scores[next_letter];
       gen->current_right_col++;
@@ -878,7 +933,7 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
     const uint64_t possible_tiles_for_shadow_right =
         gen->anchor_right_extension_set & gen->rack_cross_set;
     if (possible_tiles_for_shadow_right != 0) {
-      shadow_play_right(gen, is_unique);
+      shadow_play_right(gen, is_unique, false);
     }
     gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
     if (gen->current_left_col == 0 ||
@@ -895,6 +950,12 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
 
     gen->current_left_col--;
     gen->tiles_played++;
+
+    if (shadow_is_dead_end(
+            gen, gen->number_of_letters_on_rack - gen->tiles_played, false)) {
+      return;
+    }
+
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
     int letter_multiplier = bonus_square & 0x0F;
@@ -914,7 +975,7 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
     const uint64_t possible_tiles_for_shadow_right =
         gen->anchor_right_extension_set & gen->rack_cross_set;
     if (possible_tiles_for_shadow_right != 0) {
-      shadow_play_right(gen, is_unique);
+      shadow_play_right(gen, is_unique, true);
     }
     gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
 
@@ -1033,9 +1094,30 @@ static inline void shadow_start(MoveGen *gen) {
   const uint64_t original_rack_cross_set = gen->rack_cross_set;
   rack_copy(&gen->full_player_rack, &gen->player_rack);
 
+  gen->nearest_left_playthrough_tile_col = gen->current_left_col;
+  gen->nearest_right_playthrough_tile_col = gen->current_left_col;
+
   const uint8_t current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+    gen->nearest_left_playthrough_tile_col--;
+    while (gen->nearest_left_playthrough_tile_col >= 0) {
+      if (gen_cache_get_letter(gen, gen->nearest_left_playthrough_tile_col) !=
+          ALPHABET_EMPTY_SQUARE_MARKER) {
+        break;
+      }
+      gen->nearest_left_playthrough_tile_col--;
+    }
+
+    gen->nearest_right_playthrough_tile_col++;
+    while (gen->nearest_right_playthrough_tile_col < BOARD_DIM) {
+      if (gen_cache_get_letter(gen, gen->nearest_right_playthrough_tile_col) !=
+          ALPHABET_EMPTY_SQUARE_MARKER) {
+        break;
+      }
+      gen->nearest_right_playthrough_tile_col++;
+    }
+
     shadow_start_nonplaythrough(gen);
   } else {
     shadow_start_playthrough(gen, current_letter);
@@ -1086,14 +1168,19 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
 
+  // Reset the nearest played through tiles
+  gen->nearest_left_playthrough_tile_col = -1;
+  gen->nearest_right_playthrough_tile_col = BOARD_DIM;
+
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
     return;
   }
 
-  anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
-                         gen->last_anchor_col, gen->dir,
-                         gen->highest_shadow_equity);
+  anchor_list_add_anchor(
+      gen->anchor_list, gen->current_row_index, col, gen->last_anchor_col,
+      gen->dir, gen->nearest_left_playthrough_tile_col,
+      gen->nearest_right_playthrough_tile_col, gen->highest_shadow_equity);
 }
 
 void shadow_by_orientation(MoveGen *gen) {
@@ -1146,7 +1233,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
   gen->ld = ld;
-  gen->kwg = player_get_kwg(player);
+  gen->kwg = player_get_mutable_kwg(player);
   gen->klv = player_get_klv(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(board);
   gen->player_index = player_on_turn_index;
@@ -1218,6 +1305,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
   board_copy_opening_penalties(board, gen->opening_move_penalties);
 
+  KWGPruner kwgp;
+  kwgp_prune(&kwgp, &gen->player_rack, gen->kwg);
+  gen->max_nonplaythrough_tiles_played = kwgp_get_max_tiles_played(&kwgp);
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
     shadow_by_orientation(gen);
@@ -1241,13 +1331,17 @@ void generate_moves(Game *game, move_record_t move_record_type,
     gen->current_row_index = anchor_get_row(anchor_list, i);
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
     gen->dir = anchor_get_dir(anchor_list, i);
+    gen->nearest_left_playthrough_tile_col =
+        anchor_get_nearest_left_playthrough_tile_col(anchor_list, i);
+    gen->nearest_right_playthrough_tile_col =
+        anchor_get_nearest_right_playthrough_tile_col(anchor_list, i);
     board_copy_row_cache(gen->lanes_cache, gen->row_cache,
                          gen->current_row_index, gen->dir);
     gen->anchor_right_extension_set =
         gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
     recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
                   gen->current_anchor_col, gen->current_anchor_col,
-                  gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+                  gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0, false);
 
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for
@@ -1255,6 +1349,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
       assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
     }
   }
+
+  kwgp_unprune(&kwgp, &gen->player_rack, gen->kwg);
 
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     move_list_set_spare_move_as_pass(gen->move_list);

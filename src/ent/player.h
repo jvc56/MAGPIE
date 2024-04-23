@@ -20,6 +20,7 @@ int player_get_score(const Player *player);
 move_sort_t player_get_move_sort_type(const Player *player);
 move_record_t player_get_move_record_type(const Player *player);
 const KWG *player_get_kwg(const Player *player);
+KWG *player_get_mutable_kwg(const Player *player);
 const KLV *player_get_klv(const Player *player);
 
 void player_set_score(Player *player, int score);
