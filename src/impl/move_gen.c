@@ -126,7 +126,7 @@ typedef struct MoveGen {
   // Owned by the caller
   const LetterDistribution *ld;
   const KLV *klv;
-  KWG *kwg;
+  const KWG *kwg;
   // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
@@ -428,10 +428,10 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   }
 }
 
-void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
-           bool accepts, int leftstrip, int rightstrip, bool unique_play,
-           int main_word_score, int word_multiplier, int cross_score,
-           bool played_through_tile, bool is_dead_end);
+void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t current_node,
+           uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
+           bool unique_play, int main_word_score, int word_multiplier,
+           int cross_score, bool played_through_tile);
 
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
@@ -458,8 +458,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     const uint8_t raw = get_unblanked_machine_letter(current_letter);
     uint32_t next_node_index = 0;
     bool accepts = false;
+    uint32_t node;
     for (uint32_t i = node_index;; i++) {
-      const uint32_t node = kwg_node(gen->kwg, i);
+      node = kwg_node(gen->kwg, i);
       if (kwg_node_tile(node) == raw) {
         next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
@@ -469,9 +470,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
         break;
       }
     }
-    go_on(gen, col, current_letter, next_node_index, accepts, leftstrip,
+    go_on(gen, col, current_letter, node, next_node_index, accepts, leftstrip,
           rightstrip, unique_play, main_word_score, word_multiplier,
-          cross_score, true, false);
+          cross_score, true);
   } else if (!rack_is_empty(&gen->player_rack) &&
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
     for (uint32_t i = node_index;; i++) {
@@ -482,12 +483,6 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
           board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
-        // Use -1 for tiles remaining since we assume the current tile is
-        // played
-        const bool is_dead_end = gen_is_dead_end(
-            gen, node, leftstrip, rightstrip,
-            gen->number_of_letters_on_rack - gen->tiles_played - 1,
-            played_through_tile);
         const uint32_t next_node_index =
             kwg_node_arc_index_prefetch(node, gen->kwg);
         bool accepts = kwg_node_accepts(node);
@@ -495,9 +490,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           leave_map_take_letter_and_update_current_index(&gen->leave_map,
                                                          &gen->player_rack, ml);
           gen->tiles_played++;
-          go_on(gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
-                unique_play, main_word_score, word_multiplier, cross_score,
-                played_through_tile, is_dead_end);
+          go_on(gen, col, ml, node, next_node_index, accepts, leftstrip,
+                rightstrip, unique_play, main_word_score, word_multiplier,
+                cross_score, played_through_tile);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(&gen->leave_map,
                                                         &gen->player_rack, ml);
@@ -507,9 +502,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           leave_map_take_letter_and_update_current_index(
               &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
           gen->tiles_played++;
-          go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
+          go_on(gen, col, get_blanked_machine_letter(ml), node, next_node_index,
                 accepts, leftstrip, rightstrip, unique_play, main_word_score,
-                word_multiplier, cross_score, played_through_tile, is_dead_end);
+                word_multiplier, cross_score, played_through_tile);
           gen->tiles_played--;
           leave_map_add_letter_and_update_current_index(
               &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
@@ -522,10 +517,10 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   }
 }
 
-void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
-           bool accepts, int leftstrip, int rightstrip, bool unique_play,
-           int main_word_score, int word_multiplier, int cross_score,
-           bool played_through_tile, bool is_dead_end) {
+void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t current_node,
+           uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
+           bool unique_play, int main_word_score, int word_multiplier,
+           int cross_score, bool played_through_tile) {
   // Handle incremental scoring
   const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
   int letter_multiplier = 1;
@@ -578,11 +573,20 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
       return;
     }
 
-    if (current_col > 0 && current_col - 1 != gen->last_anchor_col &&
-        !is_dead_end) {
-      recursive_gen(gen, current_col - 1, new_node_index, leftstrip, rightstrip,
-                    unique_play, inc_main_word_score, inc_word_multiplier,
-                    inc_cross_scores, played_through_tile);
+    bool is_dead_end = false;
+    bool dead_end_set = false;
+    if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
+      if (!gen_is_dead_end(gen, current_node, leftstrip, rightstrip,
+                           gen->number_of_letters_on_rack - gen->tiles_played,
+                           played_through_tile)) {
+        recursive_gen(gen, current_col - 1, new_node_index, leftstrip,
+                      rightstrip, unique_play, inc_main_word_score,
+                      inc_word_multiplier, inc_cross_scores,
+                      played_through_tile);
+      } else {
+        is_dead_end = true;
+      }
+      dead_end_set = true;
     }
 
     // rightx only tells you which tiles can go to the right of a string which
@@ -591,7 +595,14 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     // placing the first tile of a play and continuing to the right.
     if (((gen->tiles_played != 0) ||
          (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) &&
-        !is_dead_end) {
+        // If we have already checked for a dead end above and this is not
+        // a dead end, we can continue
+        ((dead_end_set && !is_dead_end) ||
+         // If we haven't already checked for a dead end, we check it now
+         (!dead_end_set &&
+          !gen_is_dead_end(gen, current_node, leftstrip, rightstrip,
+                           gen->number_of_letters_on_rack - gen->tiles_played,
+                           played_through_tile)))) {
       uint32_t separation_node_index = kwg_get_next_node_index(
           gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
       if (separation_node_index != 0 && no_letter_directly_left &&
@@ -618,7 +629,10 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
                                  inc_cross_scores);
     }
 
-    if (new_node_index != 0 && current_col < BOARD_DIM - 1 && !is_dead_end) {
+    if (new_node_index != 0 && current_col < BOARD_DIM - 1 &&
+        !gen_is_dead_end(gen, current_node, leftstrip, rightstrip,
+                         gen->number_of_letters_on_rack - gen->tiles_played,
+                         played_through_tile)) {
       recursive_gen(gen, current_col + 1, new_node_index, leftstrip, rightstrip,
                     unique_play, inc_main_word_score, inc_word_multiplier,
                     inc_cross_scores, played_through_tile);
@@ -1238,7 +1252,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
   gen->ld = ld;
-  gen->kwg = player_get_mutable_kwg(player);
+  gen->kwg = player_get_kwg(player);
   gen->klv = player_get_klv(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(board);
   gen->player_index = player_on_turn_index;
@@ -1311,7 +1325,11 @@ void generate_moves(Game *game, move_record_t move_record_type,
   board_copy_opening_penalties(board, gen->opening_move_penalties);
 
   KWGPruner kwgp;
-  kwgp_prune(&kwgp, &gen->player_rack, gen->kwg);
+  // This mutable_kwg points to the same KWG as gen->kwg. We use
+  // a mutable KWG here since the rest of MoveGen does not need
+  // to write to the KWG and should therefore use a const KWG.
+  KWG *mutable_kwg = player_get_mutable_kwg(player);
+  kwgp_prune(&kwgp, &gen->player_rack, mutable_kwg);
   gen->max_nonplaythrough_tiles_played = kwgp_get_max_tiles_played(&kwgp);
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
@@ -1355,7 +1373,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
     }
   }
 
-  kwgp_unprune(&kwgp, &gen->player_rack, gen->kwg);
+  kwgp_unprune(&kwgp, &gen->player_rack, mutable_kwg);
 
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     move_list_set_spare_move_as_pass(gen->move_list);
