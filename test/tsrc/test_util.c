@@ -415,6 +415,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_tiles,
                                           int move_score,
                                           bool play_move_on_board) {
+  printf("gen moves for %s\n", rack_string);
   Player *player = game_get_player(game, game_get_player_on_turn_index(game));
   Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(1);
@@ -476,4 +477,14 @@ int count_nonscoring_plays(const MoveList *ml) {
     }
   }
   return sum;
+}
+
+void assert_kwgs_are_equal(const KWG *kwg1, const KWG *kwg2) {
+  assert(kwg1->number_of_nodes == kwg2->number_of_nodes);
+  for (int i = 0; i < kwg1->number_of_nodes; i++) {
+    if (kwg1->nodes[i] != kwg2->nodes[i]) {
+      log_fatal("nodes at %d are not equal:\n%d\n%d\n", i, kwg1->nodes[i],
+                kwg2->nodes[i]);
+    }
+  }
 }

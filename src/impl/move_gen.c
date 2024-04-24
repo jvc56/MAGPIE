@@ -271,9 +271,9 @@ static inline bool gen_is_dead_end(MoveGen *gen, uint32_t node,
           tiles_remaining &&
       // This node is a dead end
       kwg_node_dead_end(node);
-  // if (ret_val) {
-  //   printf("dead end:%d\n", node_index);
-  // }
+  if (ret_val) {
+    printf("dead end:%d\n", node_index);
+  }
   return ret_val;
 }
 
@@ -463,7 +463,6 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     uint32_t next_node_index = 0;
     bool accepts = false;
     uint32_t node;
-    uint32_t node_index;
     for (uint32_t i = node_index;; i++) {
       node_index = i;
       node = kwg_node(gen->kwg, i);
@@ -476,6 +475,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
         break;
       }
     }
+    printf("nnn %d, %d, %d\n", node_index, node, next_node_index);
     go_on(gen, col, current_letter, node_index, node, next_node_index, accepts,
           leftstrip, rightstrip, unique_play, main_word_score, word_multiplier,
           cross_score, true);
@@ -496,6 +496,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           leave_map_take_letter_and_update_current_index(&gen->leave_map,
                                                          &gen->player_rack, ml);
           gen->tiles_played++;
+          printf("nnn %d, %d, %d\n", i, node, next_node_index);
           go_on(gen, col, ml, i, node, next_node_index, accepts, leftstrip,
                 rightstrip, unique_play, main_word_score, word_multiplier,
                 cross_score, played_through_tile);
@@ -508,6 +509,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           leave_map_take_letter_and_update_current_index(
               &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
           gen->tiles_played++;
+          printf("nnn %d, %d, %d\n", i, node, next_node_index);
           go_on(gen, col, get_blanked_machine_letter(ml), i, node,
                 next_node_index, accepts, leftstrip, rightstrip, unique_play,
                 main_word_score, word_multiplier, cross_score,
@@ -524,8 +526,8 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   }
 }
 
-void print_at_go_on(MoveGen *gen, int current_left_col, int current_right_col) {
-  return;
+void print_at_go_on(MoveGen *gen, int current_left_col, int current_right_col,
+                    uint32_t nni) {
   for (int i = 0; i < current_left_col; i++) {
     printf("#");
   }
@@ -538,7 +540,7 @@ void print_at_go_on(MoveGen *gen, int current_left_col, int current_right_col) {
     printf("#");
   }
 
-  printf("\n");
+  printf(" %d %d %d \n", current_left_col, current_right_col, nni);
 }
 
 void go_on(MoveGen *gen, int current_col, uint8_t L,
@@ -546,6 +548,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
            bool unique_play, int main_word_score, int word_multiplier,
            int cross_score, bool played_through_tile) {
+  printf("go_on: %d, %d, %d \n", current_col, L, new_node_index);
   // Handle incremental scoring
   const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
   int letter_multiplier = 1;
@@ -585,7 +588,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L,
     }
     leftstrip = current_col;
 
-    print_at_go_on(gen, leftstrip, rightstrip);
+    print_at_go_on(gen, leftstrip, rightstrip, new_node_index);
 
     bool no_letter_directly_left =
         (current_col == 0) || gen_cache_is_empty(gen, current_col - 1);
@@ -649,7 +652,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L,
       unique_play = true;
     }
     rightstrip = current_col;
-    print_at_go_on(gen, leftstrip, rightstrip);
+    print_at_go_on(gen, leftstrip, rightstrip, new_node_index);
     bool no_letter_directly_right = (current_col == BOARD_DIM - 1) ||
                                     gen_cache_is_empty(gen, current_col + 1);
 

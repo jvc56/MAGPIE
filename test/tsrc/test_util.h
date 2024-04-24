@@ -62,5 +62,6 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           bool play_move_on_board);
 int count_scoring_plays(const MoveList *ml);
 int count_nonscoring_plays(const MoveList *ml);
+void assert_kwgs_are_equal(const KWG *kwg1, const KWG *kwg2);
 
 #endif

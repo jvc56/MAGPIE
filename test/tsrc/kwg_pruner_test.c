@@ -9,16 +9,6 @@
 
 #include "test_util.h"
 
-void assert_kwgs_are_equal(const KWG *kwg1, const KWG *kwg2) {
-  assert(kwg1->number_of_nodes == kwg2->number_of_nodes);
-  for (int i = 0; i < kwg1->number_of_nodes; i++) {
-    if (kwg1->nodes[i] != kwg2->nodes[i]) {
-      log_fatal("nodes at %d are not equal:\n%d\n%d\n", i, kwg1->nodes[i],
-                kwg2->nodes[i]);
-    }
-  }
-}
-
 void assert_kwg_pruner_init(KWGPruner *kwgp, const LetterDistribution *ld,
                             const KWG *const_kwg, KWG *mutable_kwg,
                             const char *rack_str,
@@ -77,6 +67,7 @@ void test_kwg_pruner() {
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "AISERT?", 7);
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "AISER??", 7);
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "BUSUUTI", 7);
+  assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "KARATES", 7);
 
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "UUUVVWW", 0);
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "QZJKLMN", 0);

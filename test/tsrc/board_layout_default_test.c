@@ -204,7 +204,6 @@ void test_board_layout_correctness() {
   load_game_with_test_board(game, "5_by_5_bricked_box_15.txt");
 
   assert_validated_and_generated_moves(game, "FRAWZEY", "8F", "AWFY", 26, true);
-
   assert_validated_and_generated_moves(game, "BINGERS", "7F", "BEING", 31,
                                        true);
   assert_validated_and_generated_moves(game, "NARASES", "6F", "ANSA", 31, true);
