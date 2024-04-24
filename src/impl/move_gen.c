@@ -252,8 +252,9 @@ static inline bool shadow_is_dead_end(MoveGen *gen, int tiles_remaining,
       // Play through tiles are not reachable from the right
       (gen->nearest_right_playthrough_tile_col - gen->current_right_col) - 1 >
           tiles_remaining &&
-      // We have played the max number of nonplaythrough tiles for this reach
-      gen->tiles_played >= gen->max_nonplaythrough_tiles_played;
+      // We have played more than the max number of nonplaythrough tiles for
+      // this anchor
+      gen->tiles_played > gen->max_nonplaythrough_tiles_played;
 }
 
 static inline bool gen_is_dead_end(MoveGen *gen, uint32_t node,

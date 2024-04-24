@@ -64,15 +64,26 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 18));
 
+  // The letters BD cannot form any words, so this anchor's highest possible
+  // score is 0
   load_and_generate(game, move_list, player, EMPTY_CGP, "BD");
   assert(anchor_list_get_count(anchor_list) == 1);
-  assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 10));
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 0));
 
-  load_and_generate(game, move_list, player, EMPTY_CGP, "QK");
+  load_and_generate(game, move_list, player, EMPTY_CGP, "BY");
   assert(anchor_list_get_count(anchor_list) == 1);
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 30));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 14));
+
+  // QK does not form any words
+  load_and_generate(game, move_list, player, EMPTY_CGP, "QK");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 0));
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "IQ");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 22));
 
   load_and_generate(game, move_list, player, EMPTY_CGP, "AESR");
   assert(anchor_list_get_count(anchor_list) == 1);
@@ -80,10 +91,23 @@ void test_shadow_score() {
 
   load_and_generate(game, move_list, player, EMPTY_CGP, "TNCL");
   assert(anchor_list_get_count(anchor_list) == 1);
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 0));
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "TNCE");
+  assert(anchor_list_get_count(anchor_list) == 1);
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 12));
 
+  // The longest possible word with these letters has a length of 2
   load_and_generate(game, move_list, player, EMPTY_CGP, "AAAAA");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 4));
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "AAAAS");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 6));
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "AAANS");
   assert(anchor_list_get_count(anchor_list) == 1);
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 12));
@@ -91,27 +115,59 @@ void test_shadow_score() {
   load_and_generate(game, move_list, player, EMPTY_CGP, "CAAAA");
   assert(anchor_list_get_count(anchor_list) == 1);
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 20));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 10));
 
+  // The longest playable word with these tiles is ABACA, but the shadowing
+  // won't know that the B or C cannot reach the double letter, so this is still
+  // 24.
+  load_and_generate(game, move_list, player, EMPTY_CGP, "CAAAB");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 24));
+
+  //
   load_and_generate(game, move_list, player, EMPTY_CGP, "CAKAA");
   assert(anchor_list_get_count(anchor_list) == 1);
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 32));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 18));
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "CAKAH");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 38));
 
   load_and_generate(game, move_list, player, EMPTY_CGP, "AIERZ");
   assert(anchor_list_get_count(anchor_list) == 1);
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 48));
 
+  // The longest playable word with these tiles is AIZLE, but the shadowing
+  // won't know that the Z cannot reach the double letter, so this is still
+  // 48.
+  load_and_generate(game, move_list, player, EMPTY_CGP, "AIELZ");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 48));
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "AIILZ");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 26));
+
   load_and_generate(game, move_list, player, EMPTY_CGP, "AIERZN");
   assert(anchor_list_get_count(anchor_list) == 1);
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 50));
 
-  load_and_generate(game, move_list, player, EMPTY_CGP, "AIERZNL");
+  load_and_generate(game, move_list, player, EMPTY_CGP, "AIERZEL");
   assert(anchor_list_get_count(anchor_list) == 1);
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 102));
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "AIERZNL");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 50));
 
   load_and_generate(game, move_list, player, EMPTY_CGP, "?");
   assert(anchor_list_get_count(anchor_list) == 1);
@@ -180,47 +236,47 @@ void test_shadow_score() {
   // J(A) vertically
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 9));
 
+  // JF cannot form any words, so there is no vertical anchor at 7, 5
   load_and_generate(game, move_list, player, AA_OPENING_CGP, "JF");
+  assert(anchor_list_get_count(anchor_list) == 5);
+
+  load_and_generate(game, move_list, player, AA_OPENING_CGP, "OF");
   assert(anchor_list_get_count(anchor_list) == 6);
 
   // JF, JA, and FA
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 42));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 18));
   // JA and JF or FA and FJ
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 25));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 11));
   // JAF with J and F doubled
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 25));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 11));
   // F7 JF (only F can hook AA)
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 18));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 11));
   // AAJF
-  assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 14));
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 7));
   // AJF
-  assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 13));
+  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 6));
   // Remaining anchors are prevented by invalid cross sets
 
   // Makeing JA, FA, and JFU, doubling the U on the double letter
-  load_and_generate(game, move_list, player, AA_OPENING_CGP, "JFU");
+  load_and_generate(game, move_list, player, AA_OPENING_CGP, "JOY");
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 44));
 
-  // Making KAU (board_is_letter_allowed_in_cross_set by F in rack cross set)
-  // and JUF, doubling the F and J.
-  load_and_generate(game, move_list, player, KA_OPENING_CGP, "JFU");
+  load_and_generate(game, move_list, player, KA_OPENING_CGP, "JOW");
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 32));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 36));
 
   load_and_generate(game, move_list, player, AA_OPENING_CGP, "JFUG");
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 47));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 46));
 
-  load_and_generate(game, move_list, player, AA_OPENING_CGP, "JFUGX");
+  load_and_generate(game, move_list, player, AA_OPENING_CGP, "JFUAX");
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 61));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 59));
 
   // Reaches the triple word
   load_and_generate(game, move_list, player, AA_OPENING_CGP, "JFUGXL");
@@ -240,11 +296,11 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 11));
 
-  load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BD");
+  load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BE");
   // WINDY is not extendable, so there is no 17 for WINDYBD.
-  // The highest anchor is 14 for 7H BD.
+  // The highest anchor is 16 for 7G EB.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 14));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 16));
 
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BOH");
   // WINDY is not extendable, so there is no 60 for BOHWINDY.
@@ -301,29 +357,26 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 23));
 
-  load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "ZLW");
-  // ZEN, ZW, WAD
+  load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "ZLE");
+  // ZEN, ZE, EAD
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 73));
-  // ZENLW
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 67));
+  // ZEL, ADZ, NYE
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 45));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 52));
   // ZLWOW
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 40));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 51));
 
   load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "ZLW?");
-  // 6F ZWaL
+  // 6F ZWa
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 79));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 78));
 
   load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "QZLW");
-  // 6G ZQ making ZEN and QAD. Only L and W are in the AD cross set, but score
-  // it using the Q. This is a limitation of tile restriction in shadow. L and W
-  // give multiple possibilities for this square so we can't restrict it to a
-  // single tile.
+  // B6 Q(P)LWZ
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 85));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 68));
 
   load_and_generate(game, move_list, player, TRIPLE_DOUBLE_CGP, "K");
   assert(
@@ -342,7 +395,7 @@ void test_shadow_score() {
   load_and_generate(game, move_list, player, BOTTOM_LEFT_RE_CGP, "M");
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 8));
 
-  load_and_generate(game, move_list, player, BOTTOM_LEFT_RE_CGP, "MN");
+  load_and_generate(game, move_list, player, BOTTOM_LEFT_RE_CGP, "MI");
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 16));
 
@@ -354,7 +407,7 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 22));
 
-  load_and_generate(game, move_list, player, BOTTOM_LEFT_RE_CGP, "MNAUT");
+  load_and_generate(game, move_list, player, BOTTOM_LEFT_RE_CGP, "MNAET");
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 30));
 
@@ -602,20 +655,25 @@ void test_shadow_score() {
       "3T6LOR1L/INCITANT1AYRE2/3E5U5/3REQUITE5 L/I 467/473 0 lex CSW21";
   load_and_generate(game, move_list, player, addle, "L");
 
-  // 15D (REQUITE)L 
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 17));
+  // 15D (REQUITE)L
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 17));
 
   // 5H (EXFIL)L(T)
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 17));
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 17));
 
   // 3L (V)I(P)
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 16));
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 16));
 
   // F13 (A)L(Q)
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 14));
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 14));
 
   // 5A (OW)L(RAD)
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 10));
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 10));
 
   // 10K (ADD)L(E)
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 9));
@@ -624,12 +682,11 @@ void test_shadow_score() {
   char magpies[300] =
       "15/15/15/15/15/15/15/MAGPIE2LUMBAGO/15/15/15/15/15/15/15 SS/Q "
       "0/0 0 lex CSW21";
-  load_and_generate(game, move_list, player, magpies, "SS");
-
-  // G7 SS hooking MAGPIES for 15, not (MAGPIES)SS(LUMBAGO) for 50.
+  load_and_generate(game, move_list, player, magpies, "SSO");
+  // G7 SOS hooking MAGPIEO for 17, not (MAGPIES)SS(LUMBAGO) for 50.
   // LUMBAGO is not left-extendable with an S.
   assert(
-      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 15));
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 17));
 
   game_destroy(game);
   move_list_destroy(move_list);
