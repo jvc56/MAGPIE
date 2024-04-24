@@ -229,6 +229,9 @@ void macondo_tests() {
   game_reset(game);
   rack_set_to_string(ld, player_get_rack(player), "DEGORV?");
   generate_moves_for_game(game, 0, move_list);
+
+  sort_and_print_move_list(game_get_board(game), game_get_ld(game), move_list);
+
   assert(count_scoring_plays(move_list) == 3307);
   assert(count_nonscoring_plays(move_list) == 128);
 
@@ -614,7 +617,32 @@ void consistent_tiebreaking_test() {
   config_destroy(config);
 }
 
+void iso_test() {
+  Config *config = create_config_or_die(
+      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(10000);
+
+  game_reset(game);
+  rack_set_to_string(ld, player_get_rack(player), "DEGORV?");
+  generate_moves_for_game(game, 0, move_list);
+  // sort_and_print_move_list(game_get_board(game), game_get_ld(game),
+  // move_list);
+
+  printf("scm: %d\n", count_scoring_plays(move_list));
+  assert(count_scoring_plays(move_list) == 3307);
+  assert(count_nonscoring_plays(move_list) == 128);
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen() {
+  // iso_test();
+  // return;
   leave_lookup_test();
   unfound_leave_lookup_test();
   macondo_tests();

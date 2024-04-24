@@ -76,6 +76,7 @@ void test_kwg_pruner() {
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "AETRS?", 6);
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "AISERT?", 7);
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "AISER??", 7);
+  assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "BUSUUTI", 7);
 
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "UUUVVWW", 0);
   assert_kwg_pruner_init(&kwgp, ld, const_kwg, mutable_kwg, "QZJKLMN", 0);
