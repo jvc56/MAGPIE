@@ -28,6 +28,9 @@
 #include "../ent/static_eval.h"
 #include "../util/util.h"
 
+// FIXME: remove
+#include "../../test/tsrc/test_util.h"
+
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 typedef struct UnrestrictedMultiplier {
@@ -171,11 +174,24 @@ void gen_destroy_cache() {
   }
 }
 
-// This function is only used for testing and is exposed
+// These functions are only used for testing and are exposed
 // in the move_gen_pi.h header in the test directory.
+
+// **********************************************************
+// **********************************************************
+// **********************************************************
+
 AnchorList *gen_get_anchor_list(int thread_index) {
   return cached_gens[thread_index]->anchor_list;
 }
+
+KWGDeadEnds *gen_get_kwgde(int thread_index) {
+  return &cached_gens[thread_index]->kwgde;
+}
+
+// **********************************************************
+// **********************************************************
+// **********************************************************
 
 // Cache getter functions
 
@@ -245,6 +261,20 @@ static inline void gen_switch_best_move_and_current_move(MoveGen *gen) {
 // This should only be called for nonplaythrough shadow
 static inline bool shadow_is_dead_end(MoveGen *gen, int tiles_remaining,
                                       bool tile_played_through) {
+  // printf("eval shadow at %d, %d\n", gen->current_left_col,
+  //        gen->current_right_col);
+  // printf("tpt: %d\n", !tile_played_through);
+  // printf("rcl: %d - %d - %d > %d = %d\n", gen->current_left_col,
+  //        gen->nearest_left_tile_col, 1, tiles_remaining,
+  //        (gen->current_left_col - gen->nearest_left_tile_col) - 1 >
+  //            tiles_remaining);
+  // printf("rcr: %d - %d - %d > %d = %d\n", gen->nearest_right_tile_col,
+  //        gen->current_right_col, 1, tiles_remaining,
+  //        (gen->nearest_right_tile_col - gen->current_right_col) - 1 >
+  //            tiles_remaining);
+  // printf("max: %d > %d = %d\n", gen->tiles_played,
+  //        gen->max_nonplaythrough_tiles_played,
+  //        gen->tiles_played > gen->max_nonplaythrough_tiles_played);
   return
       // No tiles have been played through
       !tile_played_through &&
@@ -263,6 +293,8 @@ static inline bool gen_is_dead_end(MoveGen *gen, int current_left_col,
                                    int current_right_col, int tiles_remaining,
                                    bool tile_played_through,
                                    uint64_t tile_sequence) {
+  // printf("checking for dead end ");
+  // print_english_dead_end(&gen->kwgde, tile_sequence);
   if ( // No tiles have been played through
       !tile_played_through &&
       // Play through tiles are not reachable from the left
@@ -277,14 +309,24 @@ static inline bool gen_is_dead_end(MoveGen *gen, int current_left_col,
     // end.
     uint64_t last_checked_tile_sequence =
         kwgde_get_dead_end(&gen->kwgde, gen->last_checked_tile_sequence_index);
+    // printf("lcs: %d", gen->last_checked_tile_sequence_index);
+    // print_english_dead_end(&gen->kwgde, last_checked_tile_sequence);
     while (last_checked_tile_sequence < tile_sequence &&
            gen->last_checked_tile_sequence_index <
                kwgde_get_number_of_dead_ends(&gen->kwgde)) {
       last_checked_tile_sequence = kwgde_get_dead_end(
           &gen->kwgde, gen->last_checked_tile_sequence_index++);
+      // printf("lcs: %d", gen->last_checked_tile_sequence_index);
+      // print_english_dead_end(&gen->kwgde, last_checked_tile_sequence);
     }
+    // if (last_checked_tile_sequence == tile_sequence) {
+    //   printf("dead end hit!\n");
+    // } else {
+    //   printf("no de\n");
+    // }
     return last_checked_tile_sequence == tile_sequence;
   }
+  // printf("didn't pass if\n");
   return false;
 }
 
@@ -361,6 +403,7 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
   const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? move_get_equity(move)
                                       : move_get_score(move);
+  // printf("best value: %f\n", best_value_found);
   return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
 }
 
@@ -517,7 +560,12 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
         if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
           leave_map_take_letter_and_update_current_index(
               &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
+          // FIXME: the push and pop operations for go_on should
+          // be in a dedicated function.
           gen->tiles_played++;
+          // FIXME: consider using a MoveGen field for this or
+          // at least making this a bit neater by using functions
+          // to increment and decrement this value.
           gen->kwgde.dead_end_level++;
           go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
                 accepts, leftstrip, rightstrip, unique_play, main_word_score,
@@ -552,14 +600,14 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   if (!square_is_empty) {
     gen->strip[current_col] = PLAYED_THROUGH_MARKER;
     ml = gen_cache_get_letter(gen, current_col);
-    current_tile_sequence =
-        kwgde_get_next_sequence(&gen->kwgde, previous_tile_sequence, ml);
   } else {
     gen->strip[current_col] = L;
     ml = L;
     fresh_tile = true;
     this_word_multiplier = bonus_square >> 4;
     letter_multiplier = bonus_square & 0x0F;
+    current_tile_sequence = kwgde_get_next_sequence(
+        &gen->kwgde, previous_tile_sequence, get_unblanked_machine_letter(ml));
   }
 
   int inc_word_multiplier = this_word_multiplier * word_multiplier;
@@ -611,13 +659,6 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
       dead_end_set = true;
     }
 
-    if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
-      recursive_gen(gen, current_col - 1, new_node_index, leftstrip, rightstrip,
-                    unique_play, inc_main_word_score, inc_word_multiplier,
-                    inc_cross_scores, played_through_tile,
-                    current_tile_sequence);
-    }
-
     // rightx only tells you which tiles can go to the right of a string which
     // begins a word. So it can only filter here if no tiles have been played
     // so far. If gen->tiles_played is 0, this recursive_gen call would be
@@ -660,7 +701,10 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
                                  inc_cross_scores);
     }
 
-    if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
+    if (new_node_index != 0 && current_col < BOARD_DIM - 1 &&
+        !gen_is_dead_end(gen, leftstrip, rightstrip,
+                         gen->number_of_letters_on_rack - gen->tiles_played,
+                         played_through_tile, current_tile_sequence)) {
       recursive_gen(gen, current_col + 1, new_node_index, leftstrip, rightstrip,
                     unique_play, inc_main_word_score, inc_word_multiplier,
                     inc_cross_scores, played_through_tile,
@@ -883,7 +927,8 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique,
     if (shadow_is_dead_end(gen,
                            gen->number_of_letters_on_rack - gen->tiles_played,
                            tile_played_through)) {
-      return;
+      // printf("spr break\n");
+      break;
     }
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_right_col);
@@ -985,11 +1030,13 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1 ||
         gen->tiles_played >= gen->number_of_letters_on_rack) {
+      // printf("spl return 1\n");
       return;
     }
     const uint64_t possible_tiles_for_shadow_left =
         gen->anchor_left_extension_set & gen->rack_cross_set;
     if (possible_tiles_for_shadow_left == 0) {
+      // printf("spl return 2\n");
       return;
     }
     gen->anchor_left_extension_set = TRIVIAL_CROSS_SET;
@@ -999,6 +1046,7 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
 
     if (shadow_is_dead_end(
             gen, gen->number_of_letters_on_rack - gen->tiles_played, false)) {
+      // printf("spl return 3\n");
       return;
     }
 
@@ -1163,6 +1211,21 @@ static inline void shadow_start(MoveGen *gen) {
       }
       gen->nearest_right_tile_col++;
     }
+
+    // If there are no tiles in a certain direction, set the
+    // nearest tile to be 2 spaces beyond the outermost square
+    // so that shadow plays that hit the edge of the board do not
+    // touch the "nearest tile" at -1 on the left or BOARD_DIM
+    // on the right.
+
+    if (gen->nearest_left_tile_col == -1) {
+      gen->nearest_left_tile_col--;
+    }
+
+    if (gen->nearest_right_tile_col == BOARD_DIM) {
+      gen->nearest_right_tile_col++;
+    }
+
     shadow_start_nonplaythrough(gen);
   } else {
     shadow_start_playthrough(gen, current_letter);
@@ -1180,6 +1243,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   // Set cols
   gen->current_left_col = col;
   gen->current_right_col = col;
+
+  // printf("shadow playing for %d, %d, %d\n", gen->current_row_index, col,
+  //        gen->dir);
 
   // Set leftx/rightx
   gen->anchor_left_extension_set = gen_cache_get_left_extension_set(gen, col);
@@ -1212,10 +1278,6 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   // Reset tiles played
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
-
-  // Reset the nearest played through tiles
-  gen->nearest_left_tile_col = -1;
-  gen->nearest_right_tile_col = BOARD_DIM;
 
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
@@ -1270,6 +1332,7 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 void generate_moves(Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
                     MoveList *move_list) {
+  // print_game(game, NULL);
   const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   MoveGen *gen = get_movegen(thread_index);
@@ -1350,10 +1413,15 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
   board_copy_opening_penalties(board, gen->opening_move_penalties);
 
+  // printf("setting kwgde dead ends\n");
   kwgde_set_dead_ends(&gen->kwgde, gen->kwg, &gen->player_rack,
                       ld_get_size(ld));
+  // printf("done s kwgde dead ends: %d\n",
+  // kwgde_get_number_of_dead_ends(&gen->kwgde));
   gen->max_nonplaythrough_tiles_played =
       kwgde_get_max_tiles_played(&gen->kwgde);
+  // printf("max nonplaythrough: %d\n", gen->max_nonplaythrough_tiles_played);
+  gen->kwgde.dead_end_level = 0;
   // FIXME: maybe move this into kwgde
   gen->last_checked_tile_sequence_index = 0;
   for (int dir = 0; dir < 2; dir++) {
@@ -1366,6 +1434,18 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
   anchor_list_sort(gen->anchor_list);
   const AnchorList *anchor_list = gen->anchor_list;
+
+  // for (int i = 0; i < RACK_SIZE; i++) {
+  //   printf("bl %d: %f\n", i, gen->best_leaves[i]);
+  // }
+
+  // for (int i = 0; i < gen->anchor_list->count; i++) {
+  //   Anchor *anchor = anchor_list->anchors[i];
+  //   printf("bv %d, %d, %d, %d, l: %d, r: %d, %f\n", i, anchor->row,
+  //   anchor->col,
+  //          anchor->dir, anchor->nearest_left_tile_col,
+  //          anchor->nearest_right_tile_col, anchor->highest_possible_equity);
+  // }
 
   const int kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
@@ -1394,6 +1474,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for
       // this anchor, highest_possible_equity was invalid.
+      // printf("on anchor %d: %f\n", i,
+      //        anchor_list->anchors[i]->highest_possible_equity);
       assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
     }
   }

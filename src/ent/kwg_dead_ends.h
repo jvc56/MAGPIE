@@ -8,7 +8,8 @@
 #include "kwg.h"
 #include "rack.h"
 
-#define MAX_DEAD_ENDS 1000000
+// FIXME: figure out what to make this number
+#define MAX_DEAD_ENDS 100000
 
 typedef struct KWGDeadEnds {
   // Internal vars
@@ -24,6 +25,27 @@ typedef struct KWGDeadEnds {
   uint64_t dead_ends[MAX_DEAD_ENDS];
 } KWGDeadEnds;
 
+// FIXME: remove this print function
+static inline void print_english_dead_end(KWGDeadEnds *kwgde,
+                                          uint64_t dead_end) {
+  printf("%14lu: ", dead_end);
+  for (int i = 0; i < RACK_SIZE + 1; i++) {
+    int letter_val = dead_end / kwgde->dead_end_level_offsets[i];
+    dead_end = dead_end % kwgde->dead_end_level_offsets[i];
+    char c;
+    if (letter_val == kwgde->base_offset - 1) {
+      c = '^';
+    } else {
+      c = letter_val + 'A' - 1;
+    }
+    printf("%c", c);
+    if (dead_end == 0) {
+      break;
+    }
+  }
+  printf("\n");
+}
+
 static inline uint64_t kwgde_get_next_sequence(KWGDeadEnds *kwgde,
                                                uint64_t current_tile_sequence,
                                                uint8_t letter) {
@@ -35,12 +57,16 @@ static inline uint64_t kwgde_get_next_sequence(KWGDeadEnds *kwgde,
          kwgde->dead_end_level_offsets[kwgde->dead_end_level - 1] * letter_val;
 }
 
+// FIXME: handle oob
 static inline uint64_t kwgde_get_dead_end(KWGDeadEnds *kwgde,
                                           int tile_sequence_index) {
   return kwgde->dead_ends[tile_sequence_index];
 }
 
+// FIXME: handle oob
 static inline void set_dead_end(KWGDeadEnds *kwgde, uint64_t tile_sequence) {
+  // printf("setting dead end %d: %ld\n", kwgde->number_of_dead_ends,
+  //        tile_sequence);
   kwgde->dead_ends[kwgde->number_of_dead_ends++] = tile_sequence;
 }
 
@@ -60,8 +86,12 @@ static inline bool kwgde_go_on(KWGDeadEnds *kwgde, uint8_t current_letter,
 static inline bool kwgde_recursive_gen(KWGDeadEnds *kwgde, uint32_t node_index,
                                        bool already_switched_dir,
                                        uint64_t current_tile_sequence) {
+  // printf("kwgde rg %ld\n", current_tile_sequence);
+  // print_english_dead_end(kwgde, current_tile_sequence);
   bool acceptable_word_found = false;
   if (!rack_is_empty(&kwgde->rack)) {
+    // printf("kwgde rg rack not empty %ld\n", current_tile_sequence);
+    // print_english_dead_end(kwgde, current_tile_sequence);
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(kwgde->kwg, i);
       const uint8_t ml = kwg_node_tile(node);
@@ -108,7 +138,6 @@ static inline bool kwgde_go_on(KWGDeadEnds *kwgde, uint8_t current_letter,
                                uint32_t new_node_index, bool accepts,
                                bool already_switched_dir,
                                uint64_t previous_tile_sequence) {
-  bool acceptable_word_found = accepts;
 
   if (accepts && kwgde->tiles_played > kwgde->max_tiles_played) {
     kwgde->max_tiles_played = kwgde->tiles_played;
@@ -117,7 +146,12 @@ static inline bool kwgde_go_on(KWGDeadEnds *kwgde, uint8_t current_letter,
   uint64_t current_tile_sequence =
       kwgde_get_next_sequence(kwgde, previous_tile_sequence, current_letter);
 
+  // printf("kwgde go %ld\n", current_tile_sequence);
+  // print_english_dead_end(kwgde, current_tile_sequence);
+
   int current_number_of_dead_ends = kwgde->number_of_dead_ends;
+
+  bool acceptable_word_found = false;
 
   if (!already_switched_dir) {
     if (new_node_index == 0) {
@@ -166,6 +200,7 @@ static inline void kwgde_set_dead_ends(KWGDeadEnds *kwgde, const KWG *kwg,
   kwgde->kwg = kwg;
   rack_copy(&kwgde->rack, rack);
 
+  // printf("rack length is %d\n", rack_get_total_letters(rack));
   // Use +2 to account for:
   // 1) The separation letter, and
   // 2) The sequence terminator
@@ -179,6 +214,7 @@ static inline void kwgde_set_dead_ends(KWGDeadEnds *kwgde, const KWG *kwg,
   uint64_t current_offset = 1;
   for (int i = RACK_SIZE; i >= 0; i--) {
     kwgde->dead_end_level_offsets[i] = current_offset;
+    // printf("co %d: %ld\n", i, kwgde->dead_end_level_offsets[i]);
     current_offset *= kwgde->base_offset;
   }
 

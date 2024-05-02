@@ -115,6 +115,8 @@
 #define AA_OPENING_CGP                                                         \
   "15/15/15/15/15/15/15/6AA7/15/15/15/15/15/15/15 ADEEGIL/AEILOUY 0/4 0 lex "  \
   "CSW21;"
+#define QI_WITH_Q_ON_STAR_OPENING_CGP                                          \
+  "15/15/15/15/15/15/15/7QI6/15/15/15/15/15/15/15 / 0/22 0 lex CSW21;"
 #define TRIPLE_LETTERS_CGP                                                     \
   "15/15/15/15/15/15/1PROTEAN7/3WINDY7/15/15/15/15/15/15/15 ADEEGIL/AEILOUY "  \
   "0/32 0 lex CSW21;"
