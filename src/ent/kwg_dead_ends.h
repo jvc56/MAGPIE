@@ -118,9 +118,9 @@ static inline bool kwgde_recursive_gen(KWGDeadEnds *kwgde, uint32_t node_index,
           rack_take_letter(&kwgde->rack, BLANK_MACHINE_LETTER);
           kwgde->tiles_played++;
           kwgde->dead_end_level++;
-          acceptable_word_found |= kwgde_go_on(
-              kwgde, get_blanked_machine_letter(ml), next_node_index, accepts,
-              already_switched_dir, current_tile_sequence);
+          acceptable_word_found |=
+              kwgde_go_on(kwgde, ml, next_node_index, accepts,
+                          already_switched_dir, current_tile_sequence);
           kwgde->tiles_played--;
           kwgde->dead_end_level--;
           rack_add_letter(&kwgde->rack, BLANK_MACHINE_LETTER);
