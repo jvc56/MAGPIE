@@ -18,6 +18,7 @@
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "infer_test.h"
+#include "kwg_cache_test.h"
 #include "kwg_maker_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
@@ -57,6 +58,7 @@ void run_all() {
   test_game();
   test_validated_move();
   test_shadow();
+  test_kwg_cache();
   test_move_gen();
   test_equity_adjustments();
   test_gameplay();
@@ -132,6 +134,8 @@ void run_test(const char *subtest) {
     test_word_prune();
   } else if (strings_equal(subtest, "kwgmaker")) {
     test_kwg_maker();
+  } else if (strings_equal(subtest, "kwgc")) {
+    test_kwg_cache();
   } else if (strings_equal(subtest, "fh")) {
     test_file_handler();
   } else {

@@ -19,6 +19,7 @@
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
+#include "../ent/kwg_cache.h"
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -122,7 +123,8 @@ typedef struct MoveGen {
   // Owned by the caller
   const LetterDistribution *ld;
   const KLV *klv;
-  const KWG *kwg;
+  // The KWG inside the kwgc is owned by the caller
+  KWGCache kwgc;
   // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
@@ -419,9 +421,10 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     uint32_t next_node_index = 0;
     bool accepts = false;
     for (uint32_t i = node_index;; i++) {
-      const uint32_t node = kwg_node(gen->kwg, i);
+      const uint32_t node = kwgc_node(&gen->kwgc, i);
       if (kwg_node_tile(node) == raw) {
-        next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
+        next_node_index =
+            kwg_node_arc_index_prefetch(node, kwgc_get_kwg(&gen->kwgc));
         accepts = kwg_node_accepts(node);
         break;
       }
@@ -435,7 +438,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   } else if (!rack_is_empty(&gen->player_rack) &&
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
     for (uint32_t i = node_index;; i++) {
-      const uint32_t node = kwg_node(gen->kwg, i);
+      const uint32_t node = kwgc_node(&gen->kwgc, i);
       const uint8_t ml = kwg_node_tile(node);
       int number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
@@ -443,7 +446,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
           board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
         const uint32_t next_node_index =
-            kwg_node_arc_index_prefetch(node, gen->kwg);
+            kwg_node_arc_index_prefetch(node, kwgc_get_kwg(&gen->kwgc));
         bool accepts = kwg_node_accepts(node);
         if (number_of_ml > 0) {
           leave_map_take_letter_and_update_current_index(&gen->leave_map,
@@ -542,8 +545,8 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
     // placing the first tile of a play and continuing to the right.
     if ((gen->tiles_played != 0) ||
         (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
-      uint32_t separation_node_index = kwg_get_next_node_index(
-          gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
+      uint32_t separation_node_index = kwgc_get_next_node_index(
+          &gen->kwgc, new_node_index, SEPARATION_MACHINE_LETTER);
       if (separation_node_index != 0 && no_letter_directly_left &&
           gen->current_anchor_col < BOARD_DIM - 1) {
         recursive_gen(gen, gen->current_anchor_col + 1, separation_node_index,
@@ -1146,7 +1149,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
   gen->ld = ld;
-  gen->kwg = player_get_kwg(player);
+  kwgc_init(&gen->kwgc, player_get_kwg(player));
   gen->klv = player_get_klv(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(board);
   gen->player_index = player_on_turn_index;
@@ -1229,7 +1232,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   anchor_list_sort(gen->anchor_list);
   const AnchorList *anchor_list = gen->anchor_list;
 
-  const int kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+  const int kwg_root_node_index = kwgc_get_root_node_index(&gen->kwgc);
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
     double anchor_highest_possible_equity =
         anchor_get_highest_possible_equity(anchor_list, i);
