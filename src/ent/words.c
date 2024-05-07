@@ -14,6 +14,7 @@
 #include "../util/util.h"
 
 #include "board.h"
+#include "kwg_alpha.h"
 #include "letter_distribution.h"
 
 typedef struct FormedWord {
@@ -140,11 +141,7 @@ int formed_words_get_word_letter(const FormedWords *fw, int word_index,
   return fw->words[word_index].word[letter_index];
 }
 
-bool is_word_valid(const FormedWord *w, const KWG *kwg) {
-  if (w->word_length < 2) {
-    return false;
-  }
-
+bool is_word_valid_standard(const FormedWord *w, const KWG *kwg) {
   int lidx = 0;
   uint32_t node_idx = kwg_get_dawg_root_node_index(kwg);
   uint32_t node = kwg_node(kwg, node_idx);
@@ -171,8 +168,30 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg) {
   } while (1);
 }
 
-void formed_words_populate_validities(const KWG *kwg, FormedWords *ws) {
+bool is_word_valid_alpha(const FormedWord *w, const KWG *kwg) {
+  Rack *rack = rack_create(MAX_ALPHABET_SIZE);
+  for (int i = 0; i < w->word_length; i++) {
+    rack_add_letter(rack, w->word[i]);
+  }
+  bool is_valid = kwg_accepts_alpha(kwg, rack);
+  rack_destroy(rack);
+  return is_valid;
+}
+
+bool is_word_valid(const FormedWord *w, const KWG *kwg, bool is_wordsmog) {
+  if (w->word_length < 2) {
+    return false;
+  }
+  if (is_wordsmog) {
+    return is_word_valid_alpha(w, kwg);
+  } else {
+    return is_word_valid_standard(w, kwg);
+  }
+}
+
+void formed_words_populate_validities(const KWG *kwg, FormedWords *ws,
+                                      bool is_wordsmog) {
   for (int i = 0; i < ws->num_words; i++) {
-    ws->words[i].valid = is_word_valid(&ws->words[i], kwg);
+    ws->words[i].valid = is_word_valid(&ws->words[i], kwg, is_wordsmog);
   }
 }

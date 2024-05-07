@@ -9,7 +9,7 @@ mkdir -p "$DST_LEXICA_PATH" &&
 mkdir -p "$DST_STRATEGY_PATH" &&
 mkdir -p "$DST_LAYOUTS_PATH" &&
 
-lexicons=("CSW21" "NWL20" "DISC2" "FRA20" "OSPS49" "CEL_super")
+lexicons=("CSW21" "NWL20" "DISC2" "FRA20" "OSPS49" "CEL_super" "CSW21_alpha")
 data_types=("kwg" "klv2")
 
 for lexicon in "${lexicons[@]}"; do

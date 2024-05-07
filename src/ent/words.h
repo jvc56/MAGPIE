@@ -20,6 +20,7 @@ int formed_words_get_word_letter(const FormedWords *fw, int word_index,
                                  int letter_index);
 
 // populate the validity of the formed words passed in.
-void formed_words_populate_validities(const KWG *kwg, FormedWords *ws);
+void formed_words_populate_validities(const KWG *kwg, FormedWords *ws,
+                                      bool is_wordsmog);
 
 #endif

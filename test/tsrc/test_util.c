@@ -59,8 +59,8 @@ void set_row(Game *game, int row, const char *row_content) {
 }
 
 // this test func only works for single-char alphabets
-uint64_t cross_set_from_string(const LetterDistribution *ld,
-                               const char *letters) {
+uint64_t string_to_cross_set(const LetterDistribution *ld,
+                             const char *letters) {
   if (strings_equal(letters, TRIVIAL_CROSS_SET_STRING)) {
     return TRIVIAL_CROSS_SET;
   }
@@ -80,6 +80,18 @@ void load_config_or_die(Config *config, const char *cmd) {
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }
+}
+
+char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
+  StringBuilder *css_builder = create_string_builder();
+  for (int i = 0; i < MAX_ALPHABET_SIZE; ++i) {
+    if (input & ((uint64_t)1 << i)) {
+      string_builder_add_string(css_builder, ld_ml_to_hl(ld, i));
+    }
+  }
+  char *result = string_builder_dump(css_builder, NULL);
+  destroy_string_builder(css_builder);
+  return result;
 }
 
 Config *create_config_or_die(const char *cmd) {

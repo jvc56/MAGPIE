@@ -437,7 +437,8 @@ move_validation_status_t validated_move_load(ValidatedMove *vm,
 
     vm->formed_words = formed_words_create(board, vm->move);
 
-    formed_words_populate_validities(kwg, vm->formed_words);
+    formed_words_populate_validities(
+        kwg, vm->formed_words, game_get_variant(game) == GAME_VARIANT_WORDSMOG);
 
     if (!allow_phonies) {
       for (int i = 0; i < formed_words_get_num_words(vm->formed_words); i++) {

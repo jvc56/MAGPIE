@@ -19,6 +19,7 @@
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
+#include "../ent/kwg_alpha.h"
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -51,9 +52,15 @@ typedef struct MoveGen {
   int number_of_tiles_in_bag;
   int player_index;
   bool kwgs_are_shared;
+  bool is_wordsmog;
   Rack player_rack;
   Rack player_rack_shadow_right_copy;
+  // Using to save the player's full rack
+  // for shadow playing and then is later
+  // used for alpha generation
   Rack full_player_rack;
+  Rack bingo_alpha_rack;
+  Rack bingo_alpha_rack_shadow_right_copy;
   Rack opponent_rack;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
@@ -575,7 +582,163 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
   }
 }
 
+void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
+                 int rightstrip, bool unique_play, int main_word_score,
+                 int word_multiplier, int cross_score);
+
+void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
+                         bool unique_play, int main_word_score,
+                         int word_multiplier, int cross_score) {
+  const uint8_t current_letter = gen_cache_get_letter(gen, col);
+  uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
+  if (possible_letters_here == 1) {
+    possible_letters_here = 0;
+  }
+  if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+    const uint8_t raw = get_unblanked_machine_letter(current_letter);
+    rack_add_letter(&gen->full_player_rack, raw);
+    go_on_alpha(gen, col, current_letter, leftstrip, rightstrip, unique_play,
+                main_word_score, word_multiplier, cross_score);
+    rack_take_letter(&gen->full_player_rack, raw);
+  } else if (!rack_is_empty(&gen->player_rack) &&
+             ((possible_letters_here & gen->rack_cross_set) != 0)) {
+    const uint8_t ld_size = ld_get_size(gen->ld);
+    for (uint8_t ml = 1; ml < ld_size; ml++) {
+      int number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      if (ml != 0 &&
+          (number_of_ml != 0 ||
+           rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
+          board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
+        if (number_of_ml > 0) {
+          alpha_leave_map_take_letter_and_update_current_index(
+              &gen->leave_map, &gen->player_rack, &gen->full_player_rack, ml,
+              ml);
+          gen->tiles_played++;
+          go_on_alpha(gen, col, ml, leftstrip, rightstrip, unique_play,
+                      main_word_score, word_multiplier, cross_score);
+          gen->tiles_played--;
+          alpha_leave_map_add_letter_and_update_current_index(
+              &gen->leave_map, &gen->player_rack, &gen->full_player_rack, ml,
+              ml);
+        }
+        // check blank
+        if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
+          alpha_leave_map_take_letter_and_update_current_index(
+              &gen->leave_map, &gen->player_rack, &gen->full_player_rack,
+              BLANK_MACHINE_LETTER, ml);
+          gen->tiles_played++;
+          go_on_alpha(gen, col, get_blanked_machine_letter(ml), leftstrip,
+                      rightstrip, unique_play, main_word_score, word_multiplier,
+                      cross_score);
+          gen->tiles_played--;
+          alpha_leave_map_add_letter_and_update_current_index(
+              &gen->leave_map, &gen->player_rack, &gen->full_player_rack,
+              BLANK_MACHINE_LETTER, ml);
+        }
+      }
+    }
+  }
+}
+
+void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
+                 int rightstrip, bool unique_play, int main_word_score,
+                 int word_multiplier, int cross_score) {
+  // Handle incremental scoring
+  const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
+  int letter_multiplier = 1;
+  int this_word_multiplier = 1;
+  bool fresh_tile = false;
+
+  const bool square_is_empty = gen_cache_is_empty(gen, current_col);
+  uint8_t ml;
+  if (!square_is_empty) {
+    gen->strip[current_col] = PLAYED_THROUGH_MARKER;
+    ml = gen_cache_get_letter(gen, current_col);
+  } else {
+    gen->strip[current_col] = L;
+    ml = L;
+    fresh_tile = true;
+    this_word_multiplier = bonus_square >> 4;
+    letter_multiplier = bonus_square & 0x0F;
+  }
+
+  int inc_word_multiplier = this_word_multiplier * word_multiplier;
+
+  const int lsm = gen->tile_scores[ml] * letter_multiplier;
+
+  int inc_main_word_score = lsm + main_word_score;
+
+  int inc_cross_scores = cross_score;
+
+  if (fresh_tile && gen_cache_get_is_cross_word(gen, current_col)) {
+    inc_cross_scores += (lsm + gen_cache_get_cross_score(gen, current_col)) *
+                        this_word_multiplier;
+  }
+
+  const bool accepts = kwg_accepts_alpha(gen->kwg, &gen->full_player_rack);
+  if (current_col <= gen->current_anchor_col) {
+    if (square_is_empty && gen->dir &&
+        gen_cache_get_cross_set(gen, current_col) == TRIVIAL_CROSS_SET) {
+      unique_play = true;
+    }
+    leftstrip = current_col;
+    bool no_letter_directly_left =
+        (current_col == 0) || gen_cache_is_empty(gen, current_col - 1);
+
+    if (accepts && no_letter_directly_left &&
+        gen->tiles_played > !unique_play) {
+      record_tile_placement_move(gen, leftstrip, rightstrip,
+                                 inc_main_word_score, inc_word_multiplier,
+                                 inc_cross_scores);
+    }
+
+    if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
+      recursive_gen_alpha(gen, current_col - 1, leftstrip, rightstrip,
+                          unique_play, inc_main_word_score, inc_word_multiplier,
+                          inc_cross_scores);
+    }
+
+    // rightx only tells you which tiles can go to the right of a string which
+    // begins a word. So it can only filter here if no tiles have been played
+    // so far. If gen->tiles_played is 0, this recursive_gen call would be
+    // placing the first tile of a play and continuing to the right.
+    if ((gen->tiles_played != 0) ||
+        (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
+      if (no_letter_directly_left && gen->current_anchor_col < BOARD_DIM - 1) {
+        recursive_gen_alpha(gen, gen->current_anchor_col + 1, leftstrip,
+                            rightstrip, unique_play, inc_main_word_score,
+                            inc_word_multiplier, inc_cross_scores);
+      }
+    }
+  } else {
+    if (square_is_empty && !unique_play && gen->dir &&
+        gen_cache_get_cross_set(gen, current_col) == TRIVIAL_CROSS_SET) {
+      unique_play = true;
+    }
+    rightstrip = current_col;
+    bool no_letter_directly_right = (current_col == BOARD_DIM - 1) ||
+                                    gen_cache_is_empty(gen, current_col + 1);
+
+    if (accepts && no_letter_directly_right &&
+        gen->tiles_played > !unique_play) {
+      record_tile_placement_move(gen, leftstrip, rightstrip,
+                                 inc_main_word_score, inc_word_multiplier,
+                                 inc_cross_scores);
+    }
+
+    if (current_col < BOARD_DIM - 1) {
+      recursive_gen_alpha(gen, current_col + 1, leftstrip, rightstrip,
+                          unique_play, inc_main_word_score, inc_word_multiplier,
+                          inc_cross_scores);
+    }
+  }
+}
+
 static inline void shadow_record(MoveGen *gen) {
+  if (gen->is_wordsmog && (gen->tiles_played == RACK_SIZE) &&
+      !kwg_accepts_alpha_with_blanks(gen->kwg, &gen->bingo_alpha_rack)) {
+    return;
+  }
   uint16_t tiles_played_score = 0;
   for (int i = 0; i < RACK_SIZE; i++) {
     tiles_played_score += gen->descending_tile_scores[i] *
@@ -759,6 +922,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // tiles restricted by unique hooks will be returned to the rack after
   // exhausting rightward shadow.
   rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+  rack_copy(&gen->bingo_alpha_rack_shadow_right_copy, &gen->bingo_alpha_rack);
   const uint64_t orig_rack_cross_set = gen->rack_cross_set;
   memory_copy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
               sizeof(gen->descending_tile_scores));
@@ -827,6 +991,8 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         break;
       }
+      rack_add_letter(&gen->bingo_alpha_rack,
+                      get_unblanked_machine_letter(next_letter));
       gen->shadow_mainword_restricted_score += gen->tile_scores[next_letter];
       gen->current_right_col++;
     }
@@ -866,6 +1032,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // Restore state to undo other shadow progress
   gen->current_right_col = original_current_right_col;
   gen->tiles_played = original_tiles_played;
+  rack_copy(&gen->bingo_alpha_rack, &gen->bingo_alpha_rack_shadow_right_copy);
 
   // The change of shadow_word_multiplier necessitates recalculating effective
   // multipliers.
@@ -1008,6 +1175,7 @@ static inline void shadow_start_playthrough(MoveGen *gen,
   // Traverse the full length of the tiles on the board until hitting an
   // empty square
   for (;;) {
+    rack_add_letter(&gen->bingo_alpha_rack, get_unblanked_machine_letter(current_letter));
     gen->shadow_mainword_restricted_score += gen->tile_scores[current_letter];
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1) {
@@ -1032,6 +1200,7 @@ static inline void shadow_start(MoveGen *gen) {
 
   const uint64_t original_rack_cross_set = gen->rack_cross_set;
   rack_copy(&gen->full_player_rack, &gen->player_rack);
+  rack_copy(&gen->bingo_alpha_rack, &gen->player_rack);
 
   const uint8_t current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
@@ -1218,6 +1387,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
   board_copy_opening_penalties(board, gen->opening_move_penalties);
 
+  gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
+
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
     shadow_by_orientation(gen);
@@ -1230,6 +1401,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
   const AnchorList *anchor_list = gen->anchor_list;
 
   const int kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+  if (gen->is_wordsmog) {
+    rack_reset(&gen->full_player_rack);
+  }
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
     double anchor_highest_possible_equity =
         anchor_get_highest_possible_equity(anchor_list, i);
@@ -1245,9 +1419,15 @@ void generate_moves(Game *game, move_record_t move_record_type,
                          gen->current_row_index, gen->dir);
     gen->anchor_right_extension_set =
         gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
-    recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
-                  gen->current_anchor_col, gen->current_anchor_col,
-                  gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+    if (gen->is_wordsmog) {
+      recursive_gen_alpha(gen, gen->current_anchor_col, gen->current_anchor_col,
+                          gen->current_anchor_col,
+                          gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+    } else {
+      recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
+                    gen->current_anchor_col, gen->current_anchor_col,
+                    gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+    }
 
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for

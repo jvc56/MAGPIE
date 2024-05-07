@@ -18,6 +18,7 @@
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "infer_test.h"
+#include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
@@ -46,6 +47,7 @@ void run_all() {
   test_ld();
   test_leaves();
   test_leave_map();
+  test_kwg_alpha();
 
   // Now test the rest
   test_bag();
@@ -88,6 +90,8 @@ void run_test(const char *subtest) {
     test_leaves();
   } else if (strings_equal(subtest, "leavemap")) {
     test_leave_map();
+  } else if (strings_equal(subtest, "kwg")) {
+    test_kwg_alpha();
   } else if (strings_equal(subtest, "bag")) {
     test_bag();
   } else if (strings_equal(subtest, "rack")) {
@@ -96,7 +100,7 @@ void run_test(const char *subtest) {
     test_board();
   } else if (strings_equal(subtest, "layout")) {
     test_board_layout_default();
-  } else if (strings_equal(subtest, "crossset")) {
+  } else if (strings_equal(subtest, "cs")) {
     test_cross_set();
   } else if (strings_equal(subtest, "move")) {
     test_move();

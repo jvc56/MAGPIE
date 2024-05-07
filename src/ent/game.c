@@ -13,6 +13,7 @@
 #include "bag.h"
 #include "board.h"
 #include "kwg.h"
+#include "kwg_alpha.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
@@ -51,12 +52,17 @@ struct Game {
 
   // Owned by the caller
   LetterDistribution *ld;
+  // Used by cross set generation
+  Rack *cross_set_rack;
+  game_variant_t variant;
   // Backups
   MinimalGameBackup *game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
   int backup_mode;
   bool backups_preallocated;
 };
+
+game_variant_t game_get_variant(const Game *game) { return game->variant; }
 
 Board *game_get_board(const Game *game) { return game->board; }
 
@@ -132,8 +138,8 @@ int traverse_backwards_for_score(const Board *board,
   return score;
 }
 
-static inline uint32_t traverse_backwards(const KWG *kwg, Board *board, int row,
-                                          int col, uint32_t node_index,
+static inline uint32_t traverse_backwards(const KWG *kwg, const Board *board,
+                                          int row, int col, uint32_t node_index,
                                           bool check_letter_set,
                                           int left_most_col) {
   while (board_is_position_in_bounds_and_not_bricked(board, row, col)) {
@@ -161,8 +167,67 @@ static inline uint32_t traverse_backwards(const KWG *kwg, Board *board, int row,
   return node_index;
 }
 
-void game_gen_cross_set(Game *game, int row, int col, int dir,
-                        int cross_set_index) {
+static inline void traverse_backwards_add_to_rack(const Board *board, int row,
+                                                  int col, Rack *rack) {
+  while (board_is_position_in_bounds_and_not_bricked(board, row, col)) {
+    uint8_t ml = board_get_letter(board, row, col);
+    if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+      break;
+    }
+    rack_add_letter(rack, get_unblanked_machine_letter(ml));
+    col--;
+  }
+}
+
+static inline void game_gen_alpha_cross_set(Game *game, int row, int col,
+                                            int dir, int cross_set_index) {
+  if (!board_is_position_in_bounds(row, col)) {
+    return;
+  }
+
+  Board *board = game_get_board(game);
+
+  if (board_is_nonempty_or_bricked(board, row, col)) {
+    board_set_cross_set(board, row, col, dir, cross_set_index, 0);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    return;
+  }
+  if (board_are_left_and_right_empty(board, row, col)) {
+    board_set_cross_set(board, row, col, dir, cross_set_index,
+                        TRIVIAL_CROSS_SET);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    return;
+  }
+
+  const LetterDistribution *ld = game_get_ld(game);
+
+  const int left_col =
+      board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
+  const int right_col =
+      board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
+  int score = 0;
+
+  rack_reset(game->cross_set_rack);
+  if (left_col < col) {
+    traverse_backwards_add_to_rack(board, row, col - 1, game->cross_set_rack);
+    score += traverse_backwards_for_score(board, ld, row, col - 1);
+  }
+
+  if (right_col > col) {
+    traverse_backwards_add_to_rack(board, row, right_col, game->cross_set_rack);
+    score += traverse_backwards_for_score(board, ld, row, right_col);
+  }
+
+  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+
+  board_set_cross_set_with_blank(
+      board, row, col, dir, cross_set_index,
+      kwg_compute_alpha_cross_set(kwg, game->cross_set_rack));
+  board_set_cross_score(board, row, col, dir, cross_set_index, score);
+}
+
+static inline void game_gen_classic_cross_set(Game *game, int row, int col,
+                                              int dir, int cross_set_index) {
   if (!board_is_position_in_bounds(row, col)) {
     return;
   }
@@ -287,6 +352,15 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
                                    front_hook_set);
   }
   board_set_cross_score(board, row, col, dir, cross_set_index, score);
+}
+
+void game_gen_cross_set(Game *game, int row, int col, int dir,
+                        int cross_set_index) {
+  if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
+    game_gen_classic_cross_set(game, row, col, dir, cross_set_index);
+  } else {
+    game_gen_alpha_cross_set(game, row, col, dir, cross_set_index);
+  }
 }
 
 void game_gen_all_cross_sets(Game *game) {
@@ -619,6 +693,14 @@ Game *game_create(const Config *config) {
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
+
+  game->variant = config_get_game_variant(config);
+  if (game->variant == GAME_VARIANT_WORDSMOG) {
+    game->cross_set_rack = rack_create(ld_get_size(game->ld));
+  } else {
+    game->cross_set_rack = NULL;
+  }
+
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->game_backups[i] = NULL;
   }
@@ -646,6 +728,14 @@ Game *game_duplicate(const Game *game) {
   new_game->starting_player_index = game->starting_player_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
+
+  new_game->variant = game->variant;
+  if (new_game->variant == GAME_VARIANT_WORDSMOG) {
+    new_game->cross_set_rack = rack_create(ld_get_size(new_game->ld));
+  } else {
+    new_game->cross_set_rack = NULL;
+  }
+
   // note: game backups must be explicitly handled by the caller if they want
   // game copies to have backups.
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
@@ -725,6 +815,7 @@ void game_destroy(Game *game) {
   bag_destroy(game->bag);
   player_destroy(game->players[0]);
   player_destroy(game->players[1]);
+  rack_destroy(game->cross_set_rack);
   if (game->backups_preallocated) {
     destroy_backups(game);
   }
