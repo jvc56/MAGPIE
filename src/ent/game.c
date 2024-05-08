@@ -54,7 +54,7 @@ struct Game {
   // Backups
   MinimalGameBackup *game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
-  int backup_mode;
+  backup_mode_t backup_mode;
   bool backups_preallocated;
 };
 
@@ -583,7 +583,7 @@ void pre_allocate_backups(Game *game) {
   }
 }
 
-void game_set_backup_mode(Game *game, int backup_mode) {
+void game_set_backup_mode(Game *game, backup_mode_t backup_mode) {
   game->backup_mode = backup_mode;
   if (backup_mode == BACKUP_MODE_SIMULATION && !game->backups_preallocated) {
     game->backup_cursor = 0;
@@ -682,6 +682,7 @@ void game_backup(Game *game) {
   }
 }
 
+// FIXME: move this to gameplay, maybe
 void game_unplay_last_move(Game *game) {
   // restore from backup (pop the last element).
   if (game->backup_cursor == 0) {

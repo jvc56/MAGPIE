@@ -191,6 +191,15 @@ void draw_starting_racks(Game *game) {
                        RACK_SIZE, game_get_player_draw_index(game, 1));
 }
 
+// Used to add points for
+// - Challenge bonuses
+// - Time penalties
+void add_to_player_on_turn_score(Game *game, int bonus) {
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  player_increment_score(player_on_turn, bonus);
+}
+
 // Assumes the move has been validated
 void play_move(const Move *move, Game *game) {
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {

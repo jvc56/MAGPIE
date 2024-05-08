@@ -288,6 +288,60 @@ void test_success_five_point_challenge() {
   game_history_destroy(game_history);
 }
 
+void assert_game_history_matches_cgps(const char *gcg_filename,
+                                      const char **cgps) {
+  GameHistory *game_history = game_history_create();
+  gcg_parse_status_t gcg_parse_status =
+      test_parse_gcg(gcg_filename, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+
+  Config *config = config_create_default();
+
+  assert(load_config_with_game_history(game_history, config) ==
+         CONFIG_LOAD_STATUS_SUCCESS);
+
+  Game *game_history_game = game_create(config);
+  Game *cgp_game = game_create(config);
+  int index = 0;
+  const char *cgp = cgps[index];
+
+  while (cgp) {
+    play_game_history_to_turn(game_history, game_history_game, index++);
+    load_cgp_or_die(cgp_game, cgp);
+    assert_games_are_equal(game_history_game, cgp_game, true);
+  }
+  game_destroy(cgp_game);
+  game_destroy(game_history_game);
+}
+
+void test_play_to_error_cases() {
+  GameHistory *game_history = game_history_create();
+  gcg_parse_status_t gcg_parse_status =
+      test_parse_gcg("success_standard.gcg", game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+
+  Config *config = config_create_default();
+
+  assert(load_config_with_game_history(game_history, config) ==
+         CONFIG_LOAD_STATUS_SUCCESS);
+
+  Game *game = game_create(config);
+
+  assert(play_game_history_to_turn(game_history, game, 100) ==
+         GCG_PARSE_STATUS_CHALLENGE_BONUS_WITHOUT_PLAY);
+  assert(play_game_history_to_turn(game_history, game, 100) ==
+         GCG_PARSE_STATUS_GAME_EVENT_OFF_TURN);
+  assert(play_game_history_to_turn(game_history, game, 100) ==
+         GCG_PARSE_STATUS_GAME_EVENT_SCORING_ERROR);
+
+  game_destroy(game);
+}
+
+void test_play_to_turn_success() {
+  assert_game_history_matches_cgps("success_standard.gcg",
+                                   (const char *[]){EMPTY_CGP, NULL});
+}
+
 void test_gcg() {
   test_error_cases();
   test_parse_special_char();
@@ -296,4 +350,6 @@ void test_gcg() {
   test_parse_dos_mode();
   test_success_standard();
   test_success_five_point_challenge();
+  test_play_to_turn_error_cases();
+  test_play_to_turn_success();
 }

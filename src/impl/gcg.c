@@ -13,16 +13,22 @@
 
 #include "../ent/board.h"
 #include "../ent/config.h"
+#include "../ent/error_status.h"
+#include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
+
+#include "../impl/gameplay.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
 #define MAX_GROUPS 7
+
+#define DEFAULT_CHALLENGE_BONUS 5
 
 typedef enum {
   GCG_ENCODING_ISO_8859_1,
@@ -555,6 +561,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
         game_history_set_board_layout_name(game_history, default_layout);
         free(default_layout);
       }
+      // FIXME: through an error for an unknown variant
       if (game_history_get_game_variant(game_history) == GAME_VARIANT_UNKNOWN) {
         game_history_set_game_variant(game_history, GAME_VARIANT_CLASSIC);
       }
@@ -788,6 +795,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     }
     char *game_variant_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
+    // FIXME: through an error for an unknown variant
     game_history_set_game_variant(
         game_history, get_game_variant_type_from_name(game_variant_name));
     free(game_variant_name);
@@ -809,6 +817,8 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
     if (number_of_events == 0 || !previous_game_event ||
+        game_event_get_type(previous_game_event) !=
+            GAME_EVENT_TILE_PLACEMENT_MOVE ||
         game_event_get_player_index(previous_game_event) != player_index ||
         !racks_are_equal(game_event_rack,
                          game_event_get_rack(previous_game_event))) {
@@ -905,6 +915,15 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (number_of_events == MAX_GAME_EVENTS) {
       return GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW;
     }
+
+    if (number_of_events == 0 || !previous_game_event ||
+        game_event_get_type(previous_game_event) !=
+            GAME_EVENT_TILE_PLACEMENT_MOVE ||
+        game_event_get_player_index(previous_game_event) != player_index) {
+      // FIXME: test this
+      return GCG_PARSE_STATUS_CHALLENGE_BONUS_WITHOUT_PLAY;
+    }
+
     game_event = game_history_create_and_add_game_event(game_history);
     game_event_set_player_index(game_event, player_index);
     game_event_rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
@@ -1033,4 +1052,161 @@ gcg_parse_status_t parse_gcg(const char *gcg_filename,
       parse_gcg_string(gcg_string, game_history);
   free(gcg_string);
   return gcg_parse_status;
+}
+
+// FIXME: consider moving to another module
+
+config_load_status_t
+load_config_with_game_history(const GameHistory *game_history, Config *config) {
+  StringBuilder *cfg_load_cmd_builder = create_string_builder();
+  const char *lexicon = game_history_get_lexicon_name(game_history);
+  const char *ld_name = game_history_get_ld_name(game_history);
+  const char *board_layout_name =
+      game_history_get_board_layout_name(game_history);
+  const game_variant_t game_variant =
+      game_history_get_game_variant(game_history);
+  const char *player_nicknames[2] = {NULL, NULL};
+
+  const GameHistoryPlayer *game_history_players[2];
+  for (int i = 0; i < 2; i++) {
+    game_history_players[i] = game_history_get_player(game_history, i);
+  }
+  for (int i = 0; i < 2; i++) {
+    player_nicknames[i] =
+        game_history_player_get_nickname(game_history_players[i]);
+  }
+
+  if (lexicon) {
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "lex %s ",
+                                        lexicon);
+  }
+
+  if (ld_name) {
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "ld %s ",
+                                        ld_name);
+  }
+
+  if (board_layout_name) {
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "bdn %s ",
+                                        board_layout_name);
+  }
+
+  switch (game_variant) {
+  case GAME_VARIANT_CLASSIC:
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "var %s ",
+                                        GAME_VARIANT_CLASSIC_NAME);
+    break;
+  case GAME_VARIANT_WORDSMOG:
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "var %s ",
+                                        GAME_VARIANT_WORDSMOG_NAME);
+    break;
+  default:
+    log_fatal("game history has unknown game variant enum: %d\n", game_variant);
+  }
+
+  for (int i = 0; i < 2; i++) {
+    if (player_nicknames[i]) {
+      string_builder_add_formatted_string(cfg_load_cmd_builder, "p%d %s ",
+                                          i + 1, player_nicknames[i]);
+    }
+  }
+
+  char *cfg_load_cmd = string_builder_dump(cfg_load_cmd_builder, NULL);
+  config_load_status_t status = config_load(config, cfg_load_cmd);
+  if (status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return status;
+  }
+  free(cfg_load_cmd);
+}
+
+// Preconditions:
+//  - The game history was obtained with success
+//  - The config has been loaded with the game history
+//  - The game has been updated with the new config
+// FIXME: move errors into the history read
+gcg_parse_status_t play_game_history_to_turn(const GameHistory *game_history,
+                                             Game *game,
+                                             int final_turn_number) {
+  game_reset(game);
+  int current_turn_number = 0;
+  int game_event_index = 0;
+  int number_of_game_events = game_history_get_number_of_events(game_history);
+
+  // Turn on backup mode to undo phony plays which
+  // are challenged off.
+  game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
+  gcg_parse_status_t game_history_parse_status = GCG_PARSE_STATUS_SUCCESS;
+  while (current_turn_number < final_turn_number &&
+         game_event_index < number_of_game_events) {
+    GameEvent *game_event =
+        game_history_get_event(game_history, game_event_index++);
+    int player_on_turn_index = game_get_player_on_turn_index(game);
+    if (player_on_turn_index != game_event_get_player_index(game_event)) {
+      game_history_parse_status = GCG_PARSE_STATUS_GAME_EVENT_OFF_TURN;
+      break;
+    }
+    Move *game_event_move = game_event_get_move(game_event);
+    game_event_t game_event_type = game_event_get_type(game_event);
+    switch (game_event_type) {
+    case GAME_EVENT_TILE_PLACEMENT_MOVE:
+    case GAME_EVENT_EXCHANGE:
+    case GAME_EVENT_PASS:
+      play_move(game_event_move, game);
+      current_turn_number++;
+      break;
+    case GAME_EVENT_CHALLENGE_BONUS:
+      // FIXME: get the challenge bonus from the validated move
+      add_to_player_on_turn_score(game, DEFAULT_CHALLENGE_BONUS);
+      break;
+    case GAME_EVENT_PHONY_TILES_RETURNED:
+      // This event is guaranteed to immediately succeed
+      // a tile placement move.
+      game_unplay_last_move(game);
+      break;
+    case GAME_EVENT_TIME_PENALTY:
+      // FIXME: get the time penalty from the game event
+      add_to_player_on_turn_score(game, -10);
+      break;
+    case GAME_EVENT_END_RACK_PENALTY:
+    case GAME_EVENT_END_RACK_POINTS:
+      // The play_move function will have handled these cases
+      break;
+    default:
+      log_fatal("unhandled game event: %d\n", game_event_type);
+      break;
+    }
+
+    if (game_event_get_cumulative_score(game_event) !=
+        player_get_score(game_get_player(game, player_on_turn_index))) {
+      game_history_parse_status = GCG_PARSE_STATUS_GAME_EVENT_SCORING_ERROR;
+      break;
+    }
+  }
+
+  game_set_backup_mode(game, BACKUP_MODE_OFF);
+
+  if (game_history_parse_status != GCG_PARSE_STATUS_SUCCESS) {
+    return game_history_parse_status;
+  }
+
+  // Set the players' final racks
+  for (int player_index = 0; player_index < 2; player_index++) {
+    int last_rack_game_event_index = game_event_index;
+    bool used_game_event_rack = false;
+    Rack *player_rack = player_get_rack(game_get_player(game, player_index));
+    while (game_event_index < number_of_game_events) {
+      GameEvent *game_event =
+          game_history_get_event(game_history, last_rack_game_event_index++);
+      if (game_event_get_player_index(game_event) == player_index) {
+        rack_copy(player_rack, game_event_get_rack(game_event));
+        used_game_event_rack = true;
+        break;
+      }
+    }
+    if (!used_game_event_rack) {
+      rack_copy(player_rack,
+                game_history_player_get_last_known_rack(
+                    game_history_get_player(game_history, player_index)));
+    }
+  }
 }

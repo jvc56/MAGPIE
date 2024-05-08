@@ -44,39 +44,6 @@ void assert_players_are_equal(const Player *p1, const Player *p2,
   }
 }
 
-void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
-  assert(game_get_consecutive_scoreless_turns(g1) ==
-         game_get_consecutive_scoreless_turns(g2));
-  assert(game_get_game_end_reason(g1) == game_get_game_end_reason(g2));
-
-  int g1_player_on_turn_index = game_get_player_on_turn_index(g1);
-
-  const Player *g1_player_on_turn =
-      game_get_player(g1, g1_player_on_turn_index);
-  const Player *g1_player_not_on_turn =
-      game_get_player(g1, 1 - g1_player_on_turn_index);
-
-  int g2_player_on_turn_index = game_get_player_on_turn_index(g2);
-
-  const Player *g2_player_on_turn =
-      game_get_player(g2, g2_player_on_turn_index);
-  const Player *g2_player_not_on_turn =
-      game_get_player(g2, 1 - g2_player_on_turn_index);
-
-  assert_players_are_equal(g1_player_on_turn, g2_player_on_turn, check_scores);
-  assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn,
-                           check_scores);
-
-  Board *board1 = game_get_board(g1);
-  Board *board2 = game_get_board(g2);
-
-  Bag *bag1 = game_get_bag(g1);
-  Bag *bag2 = game_get_bag(g2);
-
-  assert_boards_are_equal(board1, board2);
-  assert_bags_are_equal(bag1, bag2, ld_get_size(game_get_ld(g1)));
-}
-
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
                            int array_length) {
   Game *actual_game = game_create(config);

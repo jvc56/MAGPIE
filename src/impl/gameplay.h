@@ -17,5 +17,6 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
                          int player_draw_index);
 void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index);
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
+void add_to_player_on_turn_score(Game *game, int bonus);
 
 #endif

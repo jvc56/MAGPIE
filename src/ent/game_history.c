@@ -14,6 +14,9 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+// FIXME: This should have a score field
+// for challenges and time penalties that
+// is independent of the move.
 struct GameEvent {
   game_event_t event_type;
   int player_index;
