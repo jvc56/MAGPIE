@@ -10,6 +10,7 @@
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
 
+#include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 
 #include "../pi/move_gen_pi.h"
@@ -602,20 +603,25 @@ void test_shadow_score() {
       "3T6LOR1L/INCITANT1AYRE2/3E5U5/3REQUITE5 L/I 467/473 0 lex CSW21";
   load_and_generate(game, move_list, player, addle, "L");
 
-  // 15D (REQUITE)L 
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 17));
+  // 15D (REQUITE)L
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 17));
 
   // 5H (EXFIL)L(T)
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 17));
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 1), 17));
 
   // 3L (V)I(P)
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 16));
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 2), 16));
 
   // F13 (A)L(Q)
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 14));
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 3), 14));
 
   // 5A (OW)L(RAD)
-  assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 10));
+  assert(
+      within_epsilon(anchor_get_highest_possible_equity(anchor_list, 4), 10));
 
   // 10K (ADD)L(E)
   assert(within_epsilon(anchor_get_highest_possible_equity(anchor_list, 5), 9));

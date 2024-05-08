@@ -8,6 +8,7 @@
 #include "../../src/ent/game.h"
 #include "../../src/ent/validated_move.h"
 
+#include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 
 #include "board_test.h"

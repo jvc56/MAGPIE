@@ -23,6 +23,7 @@
 #include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
 
+#include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
 

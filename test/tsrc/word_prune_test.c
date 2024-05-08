@@ -6,9 +6,11 @@
 #include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/player.h"
+#include "../../src/impl/cgp.h"
 #include "../../src/impl/word_prune.h"
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
+
 #include "test_util.h"
 
 void assert_word_count(const LetterDistribution *ld, DictionaryWordList *words,
@@ -40,10 +42,9 @@ void test_possible_words() {
   // 24 of the 279077 words in CSW21 are not playable using a standard English
   // tile set. 17 have >3 Z's, 2 have >3 K's, 5 have >6 S's.
   assert(dictionary_word_list_get_count(possible_word_list) == 279053);
-  char zonule[300] =
-      "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
-      "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
-      "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
+  char zonule[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
+                     "6AE1TOWIES/6I7E/1EnGUARD6D/NAOI2W8/6AT7/5PYE7/5L1L7/"
+                     "2COVE1L7/5X1E7/7N7 MOOORRT/BFQRTTV 340/419 0 lex CSW21;";
   game_load_cgp(game, zonule);
 
   dictionary_word_list_clear(possible_word_list);

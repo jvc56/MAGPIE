@@ -16,6 +16,7 @@
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
 
+#include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
 
@@ -372,7 +373,8 @@ void unfound_leave_lookup_test() {
   MoveList *move_list = move_list_create(1);
   Rack *rack = player_get_rack(game_get_player(game, 0));
 
-  char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 UNFOUND/UNFOUND 0/0 0 lex CSW21;";
+  char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
+                  "UNFOUND/UNFOUND 0/0 0 lex CSW21;";
   game_load_cgp(game, cgp);
 
   // CGP loader won't accept this impossible rack so we set it manually here.

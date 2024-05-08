@@ -24,6 +24,7 @@
 #include "../ent/validated_move.h"
 
 #include "autoplay.h"
+#include "cgp.h"
 #include "gameplay.h"
 #include "inference.h"
 #include "kwg_maker.h"
@@ -86,7 +87,7 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
     break;
   case COMMAND_TYPE_CONVERT:
     status_string = string_duplicate("convert status unimplemented");
-    break;      
+    break;
   case COMMAND_TYPE_LOAD_CGP:
     status_string = string_duplicate("no status available for load cgp");
     break;

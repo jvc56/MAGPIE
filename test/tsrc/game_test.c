@@ -8,6 +8,8 @@
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
 
+#include "../../src/impl/cgp.h"
+
 #include "game_test.h"
 #include "test_constants.h"
 #include "test_util.h"

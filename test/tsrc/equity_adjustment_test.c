@@ -11,6 +11,7 @@
 #include "../../src/ent/rack.h"
 #include "../../src/ent/static_eval.h"
 
+#include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 
 #include "test_util.h"
