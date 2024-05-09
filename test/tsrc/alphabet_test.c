@@ -69,7 +69,7 @@ void test_alphabet() {
 
   string_builder_add_user_visible_letter(catalan_ld, letter,
                                          get_blanked_machine_letter(13));
-  assert_strings_equal(string_builder_peek(letter), "l·l");
+  assert_strings_equal(string_builder_peek(letter), "[l·l]");
   string_builder_clear(letter);
 
   destroy_string_builder(letter);
