@@ -134,22 +134,6 @@ int ld_get_max_tile_length(const LetterDistribution *ld) {
   return ld->max_tile_length;
 }
 
-char *ld_ml_to_hl(const LetterDistribution *ld, uint8_t ml) {
-  return string_duplicate(ld->ld_ml_to_hl[ml]);
-}
-
-// This is a linear search. This function should not be used for anything
-// that is speed-critical. If we ever need to use this in anything
-// speed-critical, we should use a hash.
-uint8_t ld_hl_to_ml(const LetterDistribution *ld, char *letter) {
-  for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
-    if (strings_equal(ld->ld_ml_to_hl[i], letter)) {
-      return i;
-    }
-  }
-  return INVALID_LETTER;
-}
-
 // Returns:
 //  * the number of utf8 bytes for this code point for the first byte or
 //  * 0 for subsequent bytes in the code point or
@@ -173,6 +157,35 @@ int get_number_of_utf8_bytes_for_code_point(uint8_t byte) {
     number_of_bytes = 4;
   }
   return number_of_bytes;
+}
+
+bool is_human_readable_letter_multichar(const char *human_readable_letter) {
+  // If the number of bytes in the string is greater than the number of bytes
+  // in the first code point, there must be more than one code point and
+  // therefore the string must necessarily be a multichar string.
+  return (int)string_length(human_readable_letter) >
+         get_number_of_utf8_bytes_for_code_point(human_readable_letter[0]);
+}
+
+char *ld_ml_to_hl(const LetterDistribution *ld, uint8_t ml) {
+  const char *human_readable_letter = ld->ld_ml_to_hl[ml];
+  if (is_human_readable_letter_multichar(human_readable_letter)) {
+    return get_formatted_string("[%s]", human_readable_letter);
+  } else {
+    return string_duplicate(human_readable_letter);
+  }
+}
+
+// This is a linear search. This function should not be used for anything
+// that is speed-critical. If we ever need to use this in anything
+// speed-critical, we should use a hash.
+uint8_t ld_hl_to_ml(const LetterDistribution *ld, char *letter) {
+  for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
+    if (strings_equal(ld->ld_ml_to_hl[i], letter)) {
+      return i;
+    }
+  }
+  return INVALID_LETTER;
 }
 
 // Convert a string of arbitrary characters into an array of machine letters,

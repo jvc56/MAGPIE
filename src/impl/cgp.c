@@ -6,7 +6,9 @@
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 
-// CGP Read
+#include "../impl/gameplay.h"
+
+#include "../str/rack_string.h"
 
 cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
                                           int row_start,
@@ -103,17 +105,6 @@ cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
   }
   destroy_string_splitter(board_rows);
   return cgp_parse_status;
-}
-
-int draw_rack_from_bag(const LetterDistribution *ld, Bag *bag, Rack *rack,
-                       const char *rack_string, int player_draw_index) {
-  int number_of_letters_set = rack_set_to_string(ld, rack, rack_string);
-  for (int i = 0; i < rack_get_dist_size(rack); i++) {
-    for (int j = 0; j < rack_get_letter(rack, i); j++) {
-      bag_draw_letter(bag, i, player_draw_index);
-    }
-  }
-  return number_of_letters_set;
 }
 
 cgp_parse_status_t
@@ -245,4 +236,70 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
   return cgp_parse_status;
 }
 
-// CGP Read
+// Returns a CGP with only required args:
+// - Board
+// - Player racks
+// - Player scores
+// - Number of consecutive scoreless turns
+void string_builder_add_cgp(const Game *game, StringBuilder *cgp_builder) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    int consecutive_empty_squares = 0;
+    for (int col = 0; col < BOARD_DIM; col++) {
+      uint8_t ml = board_get_letter(board, row, col);
+      if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+        consecutive_empty_squares++;
+      } else {
+        if (consecutive_empty_squares > 0) {
+          string_builder_add_int(cgp_builder, consecutive_empty_squares);
+          consecutive_empty_squares = 0;
+        }
+        char *letter_str = ld_ml_to_hl(ld, ml);
+        string_builder_add_string(cgp_builder, letter_str);
+        free(letter_str);
+      }
+    }
+
+    if (consecutive_empty_squares > 0) {
+      string_builder_add_int(cgp_builder, consecutive_empty_squares);
+    }
+
+    if (row != BOARD_DIM - 1) {
+      string_builder_add_char(cgp_builder, '/');
+    }
+  }
+
+  string_builder_add_char(cgp_builder, ' ');
+
+  for (int player_index = 0; player_index < 2; player_index++) {
+    string_builder_add_rack(
+        player_get_rack(game_get_player(game, player_index)), ld, cgp_builder);
+    if (player_index == 0) {
+      string_builder_add_char(cgp_builder, '/');
+    }
+  }
+
+  string_builder_add_char(cgp_builder, ' ');
+
+  for (int player_index = 0; player_index < 2; player_index++) {
+    string_builder_add_int(
+        cgp_builder, player_get_score(game_get_player(game, player_index)));
+    if (player_index == 0) {
+      string_builder_add_char(cgp_builder, '/');
+    }
+  }
+
+  string_builder_add_char(cgp_builder, ' ');
+
+  string_builder_add_int(cgp_builder,
+                         game_get_consecutive_scoreless_turns(game));
+}
+
+char *game_get_cgp(const Game *game) {
+  StringBuilder *cgp_builder = create_string_builder();
+  string_builder_add_cgp(game, cgp_builder);
+  char *cgp = string_builder_dump(cgp_builder, NULL);
+  destroy_string_builder(cgp_builder);
+  return cgp;
+}
