@@ -24,6 +24,21 @@ void assert_game_matches_cgp(const Game *game, const char *expected_cgp) {
   free(expected_cgp_without_options);
 }
 
+void assert_game_matches_cgp_with_options(
+    const Config *config, const Game *game,
+    const char *expected_cgp_with_options) {
+  char *actual_cgp = game_get_cgp_with_options(config, game);
+
+  StringSplitter *split_cgp =
+      split_string_by_whitespace(expected_cgp_with_options, true);
+  char *expected_cgp_without_options = string_splitter_join(
+      split_cgp, 0, string_splitter_get_number_of_items(split_cgp), " ");
+  destroy_string_splitter(split_cgp);
+  assert_strings_equal(actual_cgp, expected_cgp_without_options);
+  free(actual_cgp);
+  free(expected_cgp_without_options);
+}
+
 void assert_cgp_load_and_write_are_equal(Game *game, const char *load_cgp) {
   game_load_cgp(game, load_cgp);
   assert_game_matches_cgp(game, load_cgp);
@@ -54,7 +69,7 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
   validated_moves_destroy(vms);
 }
 
-void test_cgp_consistency_english() {
+void test_cgp_english() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
@@ -131,7 +146,40 @@ void test_cgp_consistency_english() {
   config_destroy(config);
 }
 
-void test_cgp_consistency_catalan() {
+void test_cgp_english_with_options() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  Game *game = game_create(config);
+
+  assert_game_matches_cgp_with_options(config, game,
+                                       EMPTY_CGP_WITHOUT_OPTIONS " lex CSW21;");
+
+  load_config_or_die(config, "bb 27");
+  assert_game_matches_cgp_with_options(
+      config, game, EMPTY_CGP_WITHOUT_OPTIONS " lex CSW21; bb 27;");
+
+  load_config_or_die(config, "bdn single_row_15");
+  assert_game_matches_cgp_with_options(config, game,
+                                       EMPTY_CGP_WITHOUT_OPTIONS
+                                       " lex CSW21; bb 27; bdn single_row_15;");
+
+  load_config_or_die(config, "var wordsmog");
+  assert_game_matches_cgp_with_options(
+      config, game,
+      EMPTY_CGP_WITHOUT_OPTIONS
+      " lex CSW21; bb 27; bdn single_row_15; var wordsmog;");
+
+  load_config_or_die(config, "l1 NWL20 l2 CSW21");
+  assert_game_matches_cgp_with_options(
+      config, game,
+      EMPTY_CGP_WITHOUT_OPTIONS " l1 NWL20; l2 CSW21; bb 27; bdn "
+                                "single_row_15; ld english; var wordsmog;");
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void test_cgp_catalan() {
   Config *config = create_config_or_die(
       "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
@@ -143,7 +191,7 @@ void test_cgp_consistency_catalan() {
   config_destroy(config);
 }
 
-void test_cgp_consistency_polish() {
+void test_cgp_polish() {
   Config *config = create_config_or_die(
       "setoptions lex OSPS49 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = game_create(config);
@@ -156,7 +204,20 @@ void test_cgp_consistency_polish() {
 }
 
 void test_cgp() {
-  test_cgp_consistency_english();
-  test_cgp_consistency_catalan();
-  test_cgp_consistency_polish();
+  char *current_directory = get_current_directory();
+  char *src_path = get_formatted_string("%s/test/testdata/", current_directory);
+  char *dst_path = get_formatted_string("%s/data/layouts/", current_directory);
+  free(current_directory);
+
+  remove_links(dst_path, ".txt");
+  create_links(src_path, dst_path, ".txt");
+
+  test_cgp_english();
+  test_cgp_english_with_options();
+  test_cgp_catalan();
+  test_cgp_polish();
+
+  remove_links(dst_path, ".txt");
+  free(dst_path);
+  free(src_path);
 }

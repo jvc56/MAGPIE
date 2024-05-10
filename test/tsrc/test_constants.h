@@ -3,6 +3,8 @@
 
 #define TESTDATA_FILEPATH "test/testdata/"
 
+#define EMPTY_CGP_WITHOUT_OPTIONS                                              \
+  "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0"
 #define EMPTY_CGP                                                              \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;"
 #define EMPTY_CATALAN_CGP                                                      \

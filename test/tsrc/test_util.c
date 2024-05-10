@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <math.h>
 #include <stdint.h>
@@ -372,15 +373,12 @@ void delete_fifo(const char *fifo_name) { unlink(fifo_name); }
 
 // Board layout test helpers
 
-void assert_board_layout_error(const char *board_layout_filename,
+void assert_board_layout_error(const char *board_layout_name,
                                board_layout_load_status_t expected_status) {
   BoardLayout *bl = board_layout_create();
-  char *board_layout_filepath =
-      get_formatted_string("test/testdata/%s", board_layout_filename);
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, board_layout_filepath);
+      board_layout_load(bl, board_layout_name);
   board_layout_destroy(bl);
-  free(board_layout_filepath);
   if (actual_status != expected_status) {
     printf("board layout load statuses do not match: %d != %d", expected_status,
            actual_status);
@@ -388,24 +386,21 @@ void assert_board_layout_error(const char *board_layout_filename,
   assert(actual_status == expected_status);
 }
 
-BoardLayout *create_test_board_layout(const char *board_layout_filename) {
+BoardLayout *create_test_board_layout(const char *board_layout_name) {
   BoardLayout *bl = board_layout_create();
-  char *board_layout_filepath =
-      get_formatted_string("test/testdata/%s", board_layout_filename);
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, board_layout_filepath);
-  free(board_layout_filepath);
+      board_layout_load(bl, board_layout_name);
   if (actual_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
-    printf("board layout load failure for %s: %d\n", board_layout_filename,
+    printf("board layout load failure for %s: %d\n", board_layout_name,
            actual_status);
   }
   assert(actual_status == BOARD_LAYOUT_LOAD_STATUS_SUCCESS);
   return bl;
 }
 
-void load_game_with_test_board(Game *game, const char *board_layout_filename) {
+void load_game_with_test_board(Game *game, const char *board_layout_name) {
   game_reset(game);
-  BoardLayout *bl = create_test_board_layout(board_layout_filename);
+  BoardLayout *bl = create_test_board_layout(board_layout_name);
   board_apply_layout(bl, game_get_board(game));
   board_layout_destroy(bl);
 }
@@ -467,4 +462,79 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
 
   validated_moves_destroy(vms);
   move_list_destroy(move_list);
+}
+
+void create_links(const char *src_dir_name, const char *dest_dir_name,
+                  const char *substr) {
+  DIR *src_dir, *dest_dir;
+  struct dirent *src_entry;
+
+  src_dir = opendir(src_dir_name);
+  if (src_dir == NULL) {
+    log_fatal("failed to open %s\n", src_dir_name);
+  }
+
+  dest_dir = opendir(dest_dir_name);
+  if (dest_dir == NULL) {
+    log_fatal("failed to open %s\n", dest_dir_name);
+  }
+
+  while ((src_entry = readdir(src_dir)) != NULL) {
+    if (src_entry->d_type == DT_REG &&
+        has_substring(src_entry->d_name, substr)) {
+      char *src_path =
+          get_formatted_string("%s%s", src_dir_name, src_entry->d_name);
+      char *dest_path =
+          get_formatted_string("%s%s", dest_dir_name, src_entry->d_name);
+      if (symlink(src_path, dest_path) != 0) {
+        closedir(src_dir);
+        closedir(dest_dir);
+        log_fatal("failed to create symlink from %s to %s\n", src_path,
+                  dest_path);
+      }
+      printf("Created link: %s -> %s\n", src_path, dest_path);
+      free(src_path);
+      free(dest_path);
+    }
+  }
+
+  closedir(src_dir);
+  closedir(dest_dir);
+}
+
+void remove_links(const char *dir_name, const char *substr) {
+  DIR *dir;
+  struct dirent *entry;
+
+  dir = opendir(dir_name);
+  if (dir == NULL) {
+    log_fatal("failed to open %s\n", dir_name);
+  }
+
+  while ((entry = readdir(dir)) != NULL) {
+    if (entry->d_type == DT_LNK && has_substring(entry->d_name, substr)) {
+      // Very inefficient but convenient.
+      char *path = get_formatted_string("%s%s", dir_name, entry->d_name);
+      if (unlink(path) != 0) {
+        closedir(dir);
+        log_fatal("failed to unlink symlink from %s to %s\n", path);
+      }
+      printf("Removed link: %s\n", path);
+      free(path);
+    }
+  }
+
+  closedir(dir);
+}
+
+char *get_current_directory() {
+  char current_dir[1024];
+  char *ret_val;
+  if (getcwd(current_dir, sizeof(current_dir)) != NULL) {
+    printf("Current directory: %s\n", current_dir);
+    ret_val = string_duplicate(current_dir);
+  } else {
+    log_fatal("failed to current directory\n");
+  }
+  return ret_val;
 }

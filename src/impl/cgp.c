@@ -236,7 +236,7 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
   return cgp_parse_status;
 }
 
-// Returns a CGP with only required args:
+// Add a CGP to the string builder with only required args:
 // - Board
 // - Player racks
 // - Player scores
@@ -302,4 +302,77 @@ char *game_get_cgp(const Game *game) {
   char *cgp = string_builder_dump(cgp_builder, NULL);
   destroy_string_builder(cgp_builder);
   return cgp;
+}
+
+// Always adds the following options:
+//  - lexicon
+//
+// Adds the following options if they are not the default:
+//  - bingo bonus
+//  - board layout
+//  - letter distribution
+//  - variant
+void string_builder_add_cgp_options(const Config *config,
+                                    StringBuilder *cgp_options_builder) {
+  PlayersData *players_data = config_get_players_data(config);
+  bool kwgs_are_shared =
+      players_data_get_is_shared(players_data, PLAYERS_DATA_TYPE_KWG);
+  const char *lexicon_name = NULL;
+  if (kwgs_are_shared) {
+    lexicon_name =
+        players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG, 0);
+    string_builder_add_formatted_string(cgp_options_builder, " lex %s;",
+                                        lexicon_name);
+  } else {
+    string_builder_add_formatted_string(
+        cgp_options_builder, " l1 %s; l2 %s;",
+        players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG, 0),
+        players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG, 1));
+  }
+
+  int bingo_bonus = config_get_bingo_bonus(config);
+  if (bingo_bonus != DEFAULT_BINGO_BONUS) {
+    string_builder_add_formatted_string(cgp_options_builder, " bb %d;",
+                                        bingo_bonus);
+  }
+
+  const BoardLayout *board_layout = config_get_board_layout(config);
+  if (!board_layout_is_name_default(board_layout)) {
+    string_builder_add_formatted_string(cgp_options_builder, " bdn %s;",
+                                        board_layout_get_name(board_layout));
+  }
+
+  const char *ld_name = config_get_ld_name(config);
+  bool write_ld = false;
+  if (kwgs_are_shared) {
+    char *default_ld_name = ld_get_default_name(lexicon_name);
+    if (!strings_equal(ld_name, default_ld_name)) {
+      write_ld = true;
+    }
+    free(default_ld_name);
+  } else {
+    write_ld = true;
+  }
+
+  if (write_ld) {
+    string_builder_add_formatted_string(cgp_options_builder, " ld %s;",
+                                        ld_name);
+  }
+
+  game_variant_t game_variant = config_get_game_variant(config);
+  if (game_variant != GAME_VARIANT_CLASSIC) {
+    char *game_variant_name = get_game_variant_name_from_type(game_variant);
+    string_builder_add_formatted_string(cgp_options_builder, " var %s;",
+                                        game_variant_name);
+    free(game_variant_name);
+  }
+}
+
+char *game_get_cgp_with_options(const Config *config, const Game *game) {
+  StringBuilder *cgp_with_options_builder = create_string_builder();
+  string_builder_add_cgp(game, cgp_with_options_builder);
+  string_builder_add_cgp_options(config, cgp_with_options_builder);
+  char *cgp_with_options = string_builder_dump(cgp_with_options_builder, NULL);
+  destroy_string_builder(cgp_with_options_builder);
+  return cgp_with_options;
 }

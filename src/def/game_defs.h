@@ -1,6 +1,7 @@
 #ifndef GAME_DEFS_H
 #define GAME_DEFS_H
 
+#define GAME_VARIANT_UNKNOWN_NAME "unknown"
 #define GAME_VARIANT_CLASSIC_NAME "classic"
 #define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
 

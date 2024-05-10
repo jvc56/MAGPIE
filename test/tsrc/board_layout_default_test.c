@@ -86,18 +86,18 @@ void test_board_layout_success() {
 }
 
 void test_board_layout_error() {
-  assert_board_layout_error("malformed_start_coords15.txt",
+  assert_board_layout_error("malformed_start_coords15",
                             BOARD_LAYOUT_LOAD_STATUS_MALFORMED_START_COORDS);
   assert_board_layout_error(
-      "out_of_bounds_start_coords15.txt",
+      "out_of_bounds_start_coords15",
       BOARD_LAYOUT_LOAD_STATUS_OUT_OF_BOUNDS_START_COORDS);
-  assert_board_layout_error("invalid_number_of_rows15.txt",
+  assert_board_layout_error("invalid_number_of_rows15",
                             BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS);
-  assert_board_layout_error("standard21.txt",
+  assert_board_layout_error("standard21",
                             BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS);
-  assert_board_layout_error("invalid_number_of_cols15.txt",
+  assert_board_layout_error("invalid_number_of_cols15",
                             BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_COLS);
-  assert_board_layout_error("invalid_bonus_square15.txt",
+  assert_board_layout_error("invalid_bonus_square15",
                             BOARD_LAYOUT_LOAD_STATUS_INVALID_BONUS_SQUARE);
 }
 
@@ -125,64 +125,64 @@ void test_board_layout_correctness() {
   assert(board_get_anchor(board, 7, 7, BOARD_HORIZONTAL_DIRECTION));
   assert(!board_get_anchor(board, 7, 7, BOARD_VERTICAL_DIRECTION));
 
-  load_game_with_test_board(game, "asymmetric15.txt");
+  load_game_with_test_board(game, "asymmetric15");
 
   assert(board_get_anchor(board, 7, 7, BOARD_HORIZONTAL_DIRECTION));
   assert(board_get_anchor(board, 7, 7, BOARD_VERTICAL_DIRECTION));
 
-  load_game_with_test_board(game, "3_2_start_coords_15.txt");
+  load_game_with_test_board(game, "3_2_start_coords_15");
 
   assert(board_get_anchor(board, 3, 2, BOARD_HORIZONTAL_DIRECTION));
   assert(board_get_anchor(board, 3, 2, BOARD_VERTICAL_DIRECTION));
 
-  load_game_with_test_board(game, "quadruple_word_opening15.txt");
+  load_game_with_test_board(game, "quadruple_word_opening15");
 
   assert_validated_and_generated_moves(game, "QUONKES", "8D", "QUONK", 112,
                                        false);
 
-  load_game_with_test_board(game, "quadruple_letter_opening15.txt");
+  load_game_with_test_board(game, "quadruple_letter_opening15");
 
   assert_validated_and_generated_moves(game, "TALAQES", "8H", "TALAQ", 88,
                                        false);
 
-  load_game_with_test_board(game, "3_2_start_coords_15.txt");
+  load_game_with_test_board(game, "3_2_start_coords_15");
 
   assert_validated_and_generated_moves(game, "AGUIZED", "C3", "AGUIZED", 110,
                                        false);
 
-  load_game_with_test_board(game, "0_0_start_coords_15.txt");
+  load_game_with_test_board(game, "0_0_start_coords_15");
 
   assert_validated_and_generated_moves(game, "QUIZEST", "1A", "QUIZ", 96,
                                        false);
 
-  load_game_with_test_board(game, "0_14_start_coords_15.txt");
+  load_game_with_test_board(game, "0_14_start_coords_15");
 
   assert_validated_and_generated_moves(game, "PUCKEST", "O1", "PUCK", 51,
                                        false);
   assert_validated_and_generated_moves(game, "JOUKERS", "1L", "JOUK", 69,
                                        false);
 
-  load_game_with_test_board(game, "14_0_start_coords_15.txt");
+  load_game_with_test_board(game, "14_0_start_coords_15");
 
   assert_validated_and_generated_moves(game, "PUCKEST", "15A", "PUCK", 51,
                                        false);
   assert_validated_and_generated_moves(game, "JOUKERS", "A12", "JOUK", 69,
                                        false);
 
-  load_game_with_test_board(game, "14_14_start_coords_15.txt");
+  load_game_with_test_board(game, "14_14_start_coords_15");
 
   assert_validated_and_generated_moves(game, "PIGGIEI", "15J", "PIGGIE", 36,
                                        false);
 
   // Test bricks
-  load_game_with_test_board(game, "start_is_bricked_15.txt");
+  load_game_with_test_board(game, "start_is_bricked_15");
 
   // No tile placement moves have been generated since the start is bricked,
   // therefore no placement of BUSUUTI is valid in this position.
   assert_validated_and_generated_moves(game, "BUSUUTI", "exch", "BUUU", 0,
                                        false);
 
-  load_game_with_test_board(game, "8D_is_bricked_15.txt");
+  load_game_with_test_board(game, "8D_is_bricked_15");
 
   // Best move is at H4 because:
   // - the double letter square at 8D is bricked
@@ -191,7 +191,7 @@ void test_board_layout_correctness() {
   assert_validated_and_generated_moves(game, "QUONKES", "H4", "QUONK", 56,
                                        false);
 
-  load_game_with_test_board(game, "8G_and_7H_are_bricked_15.txt");
+  load_game_with_test_board(game, "8G_and_7H_are_bricked_15");
 
   // Best move is at 8H because:
   // - the square at 8G and 7H are bricked preventing access
@@ -201,7 +201,7 @@ void test_board_layout_correctness() {
   assert_validated_and_generated_moves(game, "QUONKES", "8H", "QUONK", 46,
                                        false);
 
-  load_game_with_test_board(game, "5_by_5_bricked_box_15.txt");
+  load_game_with_test_board(game, "5_by_5_bricked_box_15");
 
   assert_validated_and_generated_moves(game, "FRAWZEY", "8F", "AWFY", 26, true);
 
@@ -217,7 +217,7 @@ void test_board_layout_correctness() {
   // There are no more legal plays available other than exchanging.
   assert_validated_and_generated_moves(game, "AEINT??", "exch", "AT", 0, true);
 
-  load_game_with_test_board(game, "single_row_15.txt");
+  load_game_with_test_board(game, "single_row_15");
   assert_validated_and_generated_moves(game, "KGOTLAT", "8D", "KGOTLA", 32,
                                        true);
   // The only legal play is extending KGOTLA to LEKGOTLA
@@ -225,17 +225,16 @@ void test_board_layout_correctness() {
                                        true);
 
   // Assume players are using the same KLV
-  assert_opening_penalties(game, "standard15.txt", "QUIRKED", 112,
+  assert_opening_penalties(game, "standard15", "QUIRKED", 112,
                            112 + OPENING_HOTSPOT_PENALTY);
-  assert_opening_penalties(game, "no_bonus_squares_15.txt", "QUIRKED", 71, 71);
-  assert_opening_penalties(game, "no_bonus_squares_15.txt", "EUOUAES", 57, 57);
-  assert_opening_penalties(game, "many_opening_hotspots_15.txt", "EUOUAES", 66,
+  assert_opening_penalties(game, "no_bonus_squares_15", "QUIRKED", 71, 71);
+  assert_opening_penalties(game, "no_bonus_squares_15", "EUOUAES", 57, 57);
+  assert_opening_penalties(game, "many_opening_hotspots_15", "EUOUAES", 66,
                            66 + ((OPENING_HOTSPOT_PENALTY / 2) * 12));
-  assert_opening_penalties(game, "many_opening_hotspots_vertical_15.txt",
-                           "EUOUAES", 66,
-                           66 + ((OPENING_HOTSPOT_PENALTY / 2) * 5));
+  assert_opening_penalties(game, "many_opening_hotspots_vertical_15", "EUOUAES",
+                           66, 66 + ((OPENING_HOTSPOT_PENALTY / 2) * 5));
 
-  load_game_with_test_board(game, "many_opening_hotspots_vertical_15.txt");
+  load_game_with_test_board(game, "many_opening_hotspots_vertical_15");
 
   double opening_penalties[BOARD_DIM * 2];
   board_copy_opening_penalties(board, opening_penalties);
@@ -272,7 +271,7 @@ void test_board_layout_correctness() {
   assert(within_epsilon_for_equity(opening_penalties[24], 0));
 
   // Validate play out of bounds
-  load_game_with_test_board(game, "standard15.txt");
+  load_game_with_test_board(game, "standard15");
 
   load_cgp_or_die(game, ENTASIS_OPENING_CGP);
 
@@ -284,7 +283,7 @@ void test_board_layout_correctness() {
   validated_moves_destroy(vms);
 
   // Validate play over block
-  load_game_with_test_board(game, "5_by_5_bricked_box_15.txt");
+  load_game_with_test_board(game, "5_by_5_bricked_box_15");
 
   vms = validated_moves_create(game, 0, "8H.FRAWZEY", false, false);
   vms_error_status = validated_moves_get_validation_status(vms);
@@ -296,7 +295,16 @@ void test_board_layout_correctness() {
 }
 
 void test_board_layout_default() {
+  char *current_directory = get_current_directory();
+  char *src_path = get_formatted_string("%s/test/testdata/", current_directory);
+  char *dst_path = get_formatted_string("%s/data/layouts/", current_directory);
+  free(current_directory);
+  remove_links(dst_path, ".txt");
+  create_links(src_path, dst_path, ".txt");
   test_board_layout_success();
   test_board_layout_error();
   test_board_layout_correctness();
+  remove_links(dst_path, ".txt");
+  free(dst_path);
+  free(src_path);
 }

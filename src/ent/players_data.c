@@ -179,9 +179,9 @@ int get_index_of_existing_data(const PlayersData *players_data,
   return index;
 }
 
-char *players_data_get_data_name(const PlayersData *players_data,
-                                 players_data_t players_data_type,
-                                 int player_index) {
+const char *players_data_get_data_name(const PlayersData *players_data,
+                                       players_data_t players_data_type,
+                                       int player_index) {
   int data_name_index =
       players_data_get_player_data_index(players_data_type, player_index);
   return players_data->data_names[data_name_index];
