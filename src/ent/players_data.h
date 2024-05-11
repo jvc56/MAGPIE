@@ -20,9 +20,9 @@ move_sort_t players_data_get_move_sort_type(const PlayersData *players_data,
                                             int player_index);
 move_record_t players_data_get_move_record_type(const PlayersData *players_data,
                                                 int player_index);
-char *players_data_get_data_name(const PlayersData *players_data,
-                                 players_data_t players_data_type,
-                                 int player_index);
+const char *players_data_get_data_name(const PlayersData *players_data,
+                                       players_data_t players_data_type,
+                                       int player_index);
 KWG *players_data_get_kwg(const PlayersData *players_data, int player_index);
 KLV *players_data_get_klv(const PlayersData *players_data, int player_index);
 

@@ -1,6 +1,7 @@
 #ifndef BOARD_LAYOUT_H
 #define BOARD_LAYOUT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "../def/board_layout_defs.h"
@@ -10,8 +11,10 @@ typedef struct BoardLayout BoardLayout;
 BoardLayout *board_layout_create();
 char *board_layout_get_filepath(const char *layout_name);
 board_layout_load_status_t board_layout_load(BoardLayout *bl,
-                                             const char *layout_filename);
+                                             const char *board_layout_name);
 char *board_layout_get_default_name();
+const char *board_layout_get_name(const BoardLayout *bl);
+bool board_layout_is_name_default(const BoardLayout *bl);
 BoardLayout *board_layout_create_default();
 void board_layout_destroy(BoardLayout *bl);
 

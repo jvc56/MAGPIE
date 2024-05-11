@@ -13,18 +13,10 @@
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
 
+#include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 
 #include "test_util.h"
-
-void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
-  for (int i = 0; i < (rack_get_dist_size(rack)); i++) {
-    for (int j = 0; j < rack_get_letter(rack, i); j++) {
-      bag_add_letter(bag, i, player_draw_index);
-    }
-  }
-  rack_reset(rack);
-}
 
 void return_racks_to_bag(Game *game) {
   Bag *bag = game_get_bag(game);

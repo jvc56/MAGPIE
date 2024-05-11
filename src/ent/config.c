@@ -563,10 +563,8 @@ config_load_status_t load_bingo_bonus_for_config(Config *config,
 
 config_load_status_t
 load_board_layout_for_config(Config *config, const char *board_layout_name) {
-  char *board_layout_filepath = board_layout_get_filepath(board_layout_name);
   board_layout_load_status_t board_layout_load_status =
-      board_layout_load(config->board_layout, board_layout_filepath);
-  free(board_layout_filepath);
+      board_layout_load(config->board_layout, board_layout_name);
   if (board_layout_load_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
     return CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR;
   }
@@ -583,6 +581,22 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
   return game_variant;
 }
 
+char *get_game_variant_name_from_type(game_variant_t game_variant_type) {
+  char *game_variant_name;
+  switch (game_variant_type) {
+  case GAME_VARIANT_CLASSIC:
+    game_variant_name = GAME_VARIANT_CLASSIC_NAME;
+    break;
+  case GAME_VARIANT_WORDSMOG:
+    game_variant_name = GAME_VARIANT_WORDSMOG_NAME;
+    break;
+  default:
+    game_variant_name = GAME_VARIANT_UNKNOWN_NAME;
+    break;
+  }
+  return string_duplicate(game_variant_name);
+}
+
 config_load_status_t load_game_variant_for_config(Config *config,
                                                   const char *game_variant) {
   config->game_variant = get_game_variant_type_from_name(game_variant);
@@ -592,8 +606,8 @@ config_load_status_t load_game_variant_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-conversion_type_t get_conversion_type_from_string(
-    const char *conversion_type_string) {
+conversion_type_t
+get_conversion_type_from_string(const char *conversion_type_string) {
   conversion_type_t conversion_type = CONVERT_UNKNOWN;
   if (strings_equal(conversion_type_string,
                     ARG_VAL_CONVERSION_TYPE_TEXT2DAWG)) {
@@ -620,8 +634,8 @@ conversion_type_t get_conversion_type_from_string(
   return conversion_type;
 }
 
-config_load_status_t load_conversion_type_for_config(
-    Config *config, const char *conversion_type) {
+config_load_status_t
+load_conversion_type_for_config(Config *config, const char *conversion_type) {
   config->conversion_type = get_conversion_type_from_string(conversion_type);
   if (config->conversion_type == CONVERT_UNKNOWN) {
     return CONFIG_LOAD_STATUS_MALFORMED_CONVERSION_TYPE;
@@ -698,8 +712,8 @@ config_load_status_t load_plies_for_config(Config *config, const char *plies) {
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_max_iterations_for_config(
-    Config *config, const char *max_iterations) {
+config_load_status_t
+load_max_iterations_for_config(Config *config, const char *max_iterations) {
   if (!is_all_digits_or_empty(max_iterations)) {
     return CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS;
   }
@@ -711,8 +725,9 @@ config_load_status_t load_max_iterations_for_config(
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_stopping_condition_for_config(
-    Config *config, const char *stopping_condition) {
+config_load_status_t
+load_stopping_condition_for_config(Config *config,
+                                   const char *stopping_condition) {
   if (strings_equal(stopping_condition, "none")) {
     config->stopping_condition = SIM_STOPPING_CONDITION_NONE;
   } else if (strings_equal(stopping_condition, "95")) {
@@ -747,8 +762,9 @@ config_load_status_t load_score_for_config(Config *config, const char *score) {
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_equity_margin_for_config(
-    Config *config, const char *equity_margin_string) {
+config_load_status_t
+load_equity_margin_for_config(Config *config,
+                              const char *equity_margin_string) {
   if (!is_decimal_number(equity_margin_string)) {
     return CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN;
   }
@@ -784,8 +800,9 @@ config_load_status_t load_random_seed_for_config(Config *config,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_number_of_threads_for_config(
-    Config *config, const char *number_of_threads_string) {
+config_load_status_t
+load_number_of_threads_for_config(Config *config,
+                                  const char *number_of_threads_string) {
   if (!is_all_digits_or_empty(number_of_threads_string)) {
     return CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS;
   }
@@ -800,8 +817,9 @@ config_load_status_t load_number_of_threads_for_config(
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_print_info_interval_for_config(
-    Config *config, const char *print_info_interval) {
+config_load_status_t
+load_print_info_interval_for_config(Config *config,
+                                    const char *print_info_interval) {
   if (!is_all_digits_or_empty(print_info_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL;
   }
@@ -810,8 +828,9 @@ config_load_status_t load_print_info_interval_for_config(
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_check_stop_interval_for_config(
-    Config *config, const char *check_stop_interval) {
+config_load_status_t
+load_check_stop_interval_for_config(Config *config,
+                                    const char *check_stop_interval) {
   if (!is_all_digits_or_empty(check_stop_interval)) {
     return CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL;
   }
@@ -1076,8 +1095,8 @@ config_load_status_t load_lexicon_dependent_data_for_config(
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-config_load_status_t load_config_with_parsed_args(
-    Config *config, const ParsedArgs *parsed_args) {
+config_load_status_t
+load_config_with_parsed_args(Config *config, const ParsedArgs *parsed_args) {
   int args_start_index = set_command_type_for_config(config, parsed_args);
 
   // Set the names using the args

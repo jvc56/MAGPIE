@@ -9,6 +9,7 @@
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
 #include "board_test.h"
+#include "cgp_test.h"
 #include "command_test.h"
 #include "config_test.h"
 #include "cross_set_test.h"
@@ -56,6 +57,7 @@ void run_all() {
   test_board_layout_default();
   test_cross_set();
   test_move();
+  test_cgp();
   test_game();
   test_validated_move();
   test_shadow();
@@ -138,6 +140,8 @@ void run_test(const char *subtest) {
     test_kwg_maker();
   } else if (strings_equal(subtest, "fh")) {
     test_file_handler();
+  } else if (strings_equal(subtest, "cgp")) {
+    test_cgp();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

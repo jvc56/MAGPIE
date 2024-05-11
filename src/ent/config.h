@@ -57,5 +57,6 @@ bool config_get_command_set_exec_mode(const Config *config);
 config_load_status_t config_load(Config *config, const char *cmd);
 bool config_continue_on_coldstart(const Config *config);
 game_variant_t get_game_variant_type_from_name(const char *variant_name);
+char *get_game_variant_name_from_type(game_variant_t game_variant_type);
 
 #endif

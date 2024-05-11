@@ -43,6 +43,7 @@ static const char bonus_square_values_to_chars_map[BONUS_SQUARE_MAP_SIZE] = {
 };
 
 struct BoardLayout {
+  char *name;
   int start_coords[2];
   uint8_t bonus_squares[BOARD_DIM * BOARD_DIM];
 };
@@ -58,7 +59,9 @@ int board_layout_get_start_coord(const BoardLayout *bl, int index) {
 }
 
 BoardLayout *board_layout_create() {
-  return malloc_or_die(sizeof(BoardLayout));
+  BoardLayout *bl = malloc_or_die(sizeof(BoardLayout));
+  bl->name = NULL;
+  return bl;
 }
 
 char *board_layout_get_filepath(const char *layout_name) {
@@ -137,13 +140,17 @@ board_layout_parse_split_file(BoardLayout *bl,
 }
 
 board_layout_load_status_t board_layout_load(BoardLayout *bl,
-                                             const char *layout_filename) {
+                                             const char *board_layout_name) {
+  char *layout_filename = board_layout_get_filepath(board_layout_name);
   StringSplitter *layout_rows = split_file_by_newline(layout_filename);
-
+  free(layout_filename);
   board_layout_load_status_t status =
       board_layout_parse_split_file(bl, layout_rows);
 
   destroy_string_splitter(layout_rows);
+
+  free(bl->name);
+  bl->name = string_duplicate(board_layout_name);
 
   return status;
 }
@@ -152,19 +159,28 @@ char *board_layout_get_default_name() {
   return get_formatted_string("standard%d", BOARD_DIM);
 }
 
-BoardLayout *board_layout_create_default() {
-  BoardLayout *bl = malloc_or_die(sizeof(BoardLayout));
+const char *board_layout_get_name(const BoardLayout *bl) { return bl->name; }
+
+bool board_layout_is_name_default(const BoardLayout *bl) {
   char *default_layout_name = board_layout_get_default_name();
-  char *default_layout_filepath =
-      board_layout_get_filepath(default_layout_name);
-  board_layout_load_status_t status =
-      board_layout_load(bl, default_layout_filepath);
+  bool is_default = strings_equal(default_layout_name, bl->name);
   free(default_layout_name);
-  free(default_layout_filepath);
+  return is_default;
+}
+
+BoardLayout *board_layout_create_default() {
+  BoardLayout *bl = board_layout_create();
+  char *default_layout_name = board_layout_get_default_name();
+  board_layout_load_status_t status =
+      board_layout_load(bl, default_layout_name);
+  free(default_layout_name);
   if (status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
     log_fatal("standard board with dim %d failed to load", BOARD_DIM);
   }
   return bl;
 }
 
-void board_layout_destroy(BoardLayout *bl) { free(bl); }
+void board_layout_destroy(BoardLayout *bl) {
+  free(bl->name);
+  free(bl);
+}

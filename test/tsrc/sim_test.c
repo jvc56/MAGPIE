@@ -21,6 +21,7 @@
 #include "../../src/ent/thread_control.h"
 #include "../../src/ent/win_pct.h"
 
+#include "../../src/impl/cgp.h"
 #include "../../src/impl/move_gen.h"
 #include "../../src/impl/simmer.h"
 

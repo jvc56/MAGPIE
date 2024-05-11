@@ -15,6 +15,7 @@
 #include "../../src/ent/rack.h"
 #include "../../src/ent/stats.h"
 
+#include "../../src/impl/cgp.h"
 #include "../../src/impl/inference.h"
 
 #include "../../src/util/string_util.h"

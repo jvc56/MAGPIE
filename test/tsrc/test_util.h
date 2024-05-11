@@ -60,4 +60,9 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_tiles,
                                           int move_score,
                                           bool play_move_on_board);
+void create_links(const char *src_dir_name, const char *dest_dir_name,
+                  const char *substr);
+void remove_links(const char *dir_name, const char *substr);
+char *get_current_directory();
+
 #endif

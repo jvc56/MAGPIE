@@ -13,6 +13,8 @@
 
 #include "../../src/util/string_util.h"
 
+#include "../../src/impl/cgp.h"
+
 #include "test_constants.h"
 #include "test_util.h"
 

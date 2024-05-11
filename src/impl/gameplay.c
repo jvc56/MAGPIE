@@ -148,11 +148,38 @@ void update_cross_set_for_move(const Move *move, Game *game) {
   }
 }
 
+// Draws at most n random tiles from the bag to the rack.
 void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
   while (n > 0 && !bag_is_empty(bag)) {
     rack_add_letter(rack, bag_draw_random_letter(bag, player_draw_index));
     n--;
   }
+}
+
+// Draws a nonrandom set of letters specified by rack_string from the
+// bag to the rack.
+int draw_rack_from_bag(const LetterDistribution *ld, Bag *bag, Rack *rack,
+                       const char *rack_string, int player_draw_index) {
+  const int number_of_letters_set = rack_set_to_string(ld, rack, rack_string);
+  const int dist_size = rack_get_dist_size(rack);
+  for (int i = 0; i < dist_size; i++) {
+    const int rack_number_of_letter = rack_get_letter(rack, i);
+    for (int j = 0; j < rack_number_of_letter; j++) {
+      bag_draw_letter(bag, i, player_draw_index);
+    }
+  }
+  return number_of_letters_set;
+}
+
+void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
+  const int dist_size = rack_get_dist_size(rack);
+  for (int i = 0; i < dist_size; i++) {
+    const int rack_number_of_letter = rack_get_letter(rack, i);
+    for (int j = 0; j < rack_number_of_letter; j++) {
+      bag_add_letter(bag, i, player_draw_index);
+    }
+  }
+  rack_reset(rack);
 }
 
 void execute_exchange_move(const Move *move, Game *game) {

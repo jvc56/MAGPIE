@@ -12,6 +12,8 @@
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
 
+#include "../../src/impl/cgp.h"
+
 #include "../../src/util/string_util.h"
 
 #include "test_constants.h"
