@@ -20,5 +20,7 @@ int draw_rack_from_bag(const LetterDistribution *ld, Bag *bag, Rack *rack,
                        const char *rack_string, int player_draw_index);
 void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index);
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
+void add_to_player_on_turn_score(Game *game, int bonus);
+void remove_phony_play(Game *game);
 
 #endif

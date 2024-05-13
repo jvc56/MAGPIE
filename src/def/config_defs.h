@@ -2,6 +2,8 @@
 #define CONFIG_DEFS_H
 
 #define EMPTY_RACK_STRING "-"
+#define DEFAULT_BINGO_BONUS 50
+#define DEFAULT_CHALLENGE_BONUS 5
 
 typedef enum {
   CONFIG_LOAD_STATUS_SUCCESS,

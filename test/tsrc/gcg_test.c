@@ -26,111 +26,128 @@ char *get_gcg_filepath(const char *filename) {
   return get_formatted_string("%s%s", TESTDATA_FILEPATH, filename);
 }
 
-gcg_parse_status_t test_parse_gcg(const char *gcg_filename,
+gcg_parse_status_t test_parse_gcg(const char *gcg_filename, Config *config,
                                   GameHistory *game_history) {
   char *gcg_filepath = get_gcg_filepath(gcg_filename);
-  gcg_parse_status_t gcg_parse_status = parse_gcg(gcg_filepath, game_history);
+  gcg_parse_status_t gcg_parse_status =
+      parse_gcg(gcg_filepath, config, game_history);
   free(gcg_filepath);
   return gcg_parse_status;
 }
 
-void test_single_error_case(const char *gcg_filename,
+void test_single_error_case(const char *gcg_filename, Config *config,
                             gcg_parse_status_t expected_gcg_parse_status) {
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
-      test_parse_gcg(gcg_filename, game_history);
+      test_parse_gcg(gcg_filename, config, game_history);
   game_history_destroy(game_history);
   assert(gcg_parse_status == expected_gcg_parse_status);
 }
 
 void test_error_cases() {
-  test_single_error_case("empty.gcg", GCG_PARSE_STATUS_GCG_EMPTY);
-  test_single_error_case("lexicon_missing.gcg",
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+  test_single_error_case("empty.gcg", config, GCG_PARSE_STATUS_GCG_EMPTY);
+  test_single_error_case("lexicon_missing.gcg", config,
                          GCG_PARSE_STATUS_LEXICON_NOT_FOUND);
-  test_single_error_case("unsupported_character_encoding.gcg",
+  test_single_error_case("unsupported_character_encoding.gcg", config,
                          GCG_PARSE_STATUS_UNSUPPORTED_CHARACTER_ENCODING);
-  test_single_error_case("duplicate_nicknames.gcg",
+  test_single_error_case("duplicate_nicknames.gcg", config,
                          GCG_PARSE_STATUS_DUPLICATE_NICKNAMES);
-  test_single_error_case("duplicate_names.gcg",
+  test_single_error_case("duplicate_names.gcg", config,
                          GCG_PARSE_STATUS_DUPLICATE_NAMES);
-  test_single_error_case("description_after_events.gcg",
+  test_single_error_case("description_after_events.gcg", config,
                          GCG_PARSE_STATUS_PRAGMA_SUCCEEDED_EVENT);
-  test_single_error_case("move_before_player.gcg",
+  test_single_error_case("move_before_player.gcg", config,
                          GCG_PARSE_STATUS_MOVE_BEFORE_PLAYER);
-  test_single_error_case("player_number_redundant.gcg",
+  test_single_error_case("player_number_redundant.gcg", config,
                          GCG_PARSE_STATUS_PLAYER_NUMBER_REDUNDANT);
-  test_single_error_case("encoding_wrong_place.gcg",
+  test_single_error_case("encoding_wrong_place.gcg", config,
                          GCG_PARSE_STATUS_ENCODING_WRONG_PLACE);
-  test_single_error_case("player_does_not_exist.gcg",
+  test_single_error_case("player_does_not_exist.gcg", config,
                          GCG_PARSE_STATUS_PLAYER_DOES_NOT_EXIST);
-  test_single_error_case("note_before_events.gcg",
+  test_single_error_case("note_before_events.gcg", config,
                          GCG_PARSE_STATUS_NOTE_PRECEDENT_EVENT);
-  test_single_error_case("phony_tiles_returned_with_no_play.gcg",
+  test_single_error_case("phony_tiles_returned_with_no_play.gcg", config,
                          GCG_PARSE_STATUS_PHONY_TILES_RETURNED_WITHOUT_PLAY);
-  test_single_error_case("no_matching_token.gcg",
+  test_single_error_case("no_matching_token.gcg", config,
                          GCG_PARSE_STATUS_NO_MATCHING_TOKEN);
-  test_single_error_case("lowercase_tile_placement.gcg",
+  test_single_error_case("lowercase_tile_placement.gcg", config,
                          GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION);
-  test_single_error_case("invalid_tile_placement.gcg",
+  test_single_error_case("invalid_tile_placement.gcg", config,
                          GCG_PARSE_STATUS_INVALID_TILE_PLACEMENT_POSITION);
-  test_single_error_case("malformed_rack.gcg", GCG_PARSE_STATUS_RACK_MALFORMED);
-  test_single_error_case("six_pass_last_rack_malformed.gcg",
+  test_single_error_case("malformed_rack.gcg", config,
+                         GCG_PARSE_STATUS_RACK_MALFORMED);
+  test_single_error_case("six_pass_last_rack_malformed.gcg", config,
                          GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
-  test_single_error_case("exchange_not_in_rack.gcg",
+  test_single_error_case("exchange_not_in_rack.gcg", config,
                          GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
-  test_single_error_case("exchange_malformed.gcg",
+  test_single_error_case("exchange_malformed.gcg", config,
                          GCG_PARSE_STATUS_PLAY_MALFORMED);
-  test_single_error_case("malformed_play.gcg", GCG_PARSE_STATUS_PLAY_MALFORMED);
-  test_single_error_case("played_tile_not_in_rack.gcg",
+  test_single_error_case("malformed_play.gcg", config,
+                         GCG_PARSE_STATUS_PLAY_MALFORMED);
+  test_single_error_case("played_tile_not_in_rack.gcg", config,
                          GCG_PARSE_STATUS_PLAYED_LETTERS_NOT_IN_RACK);
-  test_single_error_case("play_out_of_bounds.gcg",
+  test_single_error_case("play_out_of_bounds.gcg", config,
                          GCG_PARSE_STATUS_PLAY_OUT_OF_BOUNDS);
-  test_single_error_case("redundant_pragma.gcg",
+  test_single_error_case("redundant_pragma.gcg", config,
                          GCG_PARSE_STATUS_REDUNDANT_PRAGMA);
-  test_single_error_case("game_events_overflow.gcg",
+  test_single_error_case("game_events_overflow.gcg", config,
                          GCG_PARSE_STATUS_GAME_EVENTS_OVERFLOW);
+  config_destroy(config);
 }
 
 void test_parse_special_char() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const char *gcg_filename = "name_iso8859-1.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
-      test_parse_gcg(gcg_filename, game_history);
+      test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
   assert_strings_equal(game_history_player_get_name(player0), "césar");
   assert_strings_equal(game_history_player_get_name(player1), "hércules");
   game_history_destroy(game_history);
+  config_destroy(config);
 }
 
 void test_parse_special_utf8_no_header() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const char *gcg_filename = "name_utf8_noheader.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
-      test_parse_gcg(gcg_filename, game_history);
+      test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   assert(strings_equal(game_history_player_get_name(player0), "cÃ©sar"));
   game_history_destroy(game_history);
+  config_destroy(config);
 }
 
 void test_parse_special_utf8_with_header() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const char *gcg_filename = "name_utf8_with_header.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
-      test_parse_gcg(gcg_filename, game_history);
+      test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   assert(strings_equal(game_history_player_get_name(player0), "césar"));
   game_history_destroy(game_history);
+  config_destroy(config);
 }
 
 void test_parse_dos_mode() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const char *gcg_filename = "utf8_dos.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
-      test_parse_gcg(gcg_filename, game_history);
+      test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
@@ -139,6 +156,7 @@ void test_parse_dos_mode() {
   assert(
       strings_equal(game_history_player_get_nickname(player1), "Michal_Josko"));
   game_history_destroy(game_history);
+  config_destroy(config);
 }
 
 void assert_game_event(const GameHistory *game_history, int event_index,
@@ -172,7 +190,11 @@ void assert_game_event(const GameHistory *game_history, int event_index,
          strings_equal(game_event_get_note(game_event), note));
 
   // Move assertions
-  const Move *move = game_event_get_move(game_event);
+  const ValidatedMoves *vms = game_event_get_vms(game_event);
+  const Move *move = NULL;
+  if (vms) {
+    move = validated_moves_get_move(vms, 0);
+  }
   if (move) {
 
     assert(move_get_type(move) == move_type);
@@ -182,10 +204,9 @@ void assert_game_event(const GameHistory *game_history, int event_index,
       assert(move_get_tiles_played(move) == tiles_played);
       assert(move_get_tiles_length(move) == tiles_length);
       uint8_t *machine_letters = malloc_or_die(sizeof(uint8_t) * tiles_length);
-      int number_of_machine_letters =
-          ld_str_to_mls(game_history_get_ld(game_history), tiles_string,
-                        move_type == GAME_EVENT_TILE_PLACEMENT_MOVE,
-                        machine_letters, tiles_length);
+      int number_of_machine_letters = ld_str_to_mls(
+          ld, tiles_string, move_type == GAME_EVENT_TILE_PLACEMENT_MOVE,
+          machine_letters, tiles_length);
       bool tiles_match = number_of_machine_letters == tiles_length;
       if (tiles_match) {
         for (int i = 0; i < tiles_length; i++) {
@@ -206,13 +227,15 @@ void assert_game_event(const GameHistory *game_history, int event_index,
 }
 
 void test_success_standard() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const char *gcg_filename = "success_standard.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
-      test_parse_gcg(gcg_filename, game_history);
+      test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
-  const LetterDistribution *ld = game_history_get_ld(game_history);
+  const LetterDistribution *ld = config_get_ld(config);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
 
@@ -267,15 +290,18 @@ void test_success_standard() {
   assert_game_event(game_history, 28, GAME_EVENT_TIME_PENALTY, 1, 358, "", "",
                     GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0, 0, "", ld);
   game_history_destroy(game_history);
+  config_destroy(config);
 }
 
 void test_success_five_point_challenge() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const char *gcg_filename = "success_five_point_challenge.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
-      test_parse_gcg(gcg_filename, game_history);
+      test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  const LetterDistribution *ld = game_history_get_ld(game_history);
+  const LetterDistribution *ld = config_get_ld(config);
   assert_game_event(game_history, 16, GAME_EVENT_CHALLENGE_BONUS, 1, 398,
                     "DEIINRR", "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0,
                     0, 0, "", ld);
@@ -286,6 +312,7 @@ void test_success_five_point_challenge() {
                     "", GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 0, 0, 0, 0, 0, "",
                     ld);
   game_history_destroy(game_history);
+  config_destroy(config);
 }
 
 void test_gcg() {

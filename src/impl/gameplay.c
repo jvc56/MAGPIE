@@ -198,6 +198,15 @@ void execute_exchange_move(const Move *move, Game *game) {
   }
 }
 
+// Used to add points for
+// - Challenge bonuses
+// - Time penalties
+void add_to_player_on_turn_score(Game *game, int bonus) {
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  player_increment_score(player_on_turn, bonus);
+}
+
 void standard_end_of_game_calculations(Game *game) {
   int player_on_turn_index = game_get_player_on_turn_index(game);
 
@@ -260,6 +269,11 @@ void play_move(const Move *move, Game *game) {
   if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     game_start_next_player_turn(game);
   }
+}
+
+void remove_phony_play(Game *game) {
+  game_unplay_last_move(game);
+  game_start_next_player_turn(game);
 }
 
 void generate_moves_for_game(Game *game, int thread_index,
