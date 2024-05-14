@@ -736,7 +736,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     destroy_string_builder(move_string_builder);
 
     vms = validated_moves_create(gcg_parser->game, player_index,
-                                 cgp_move_string, true, true);
+                                 cgp_move_string, true, true, true);
     free(cgp_move_string);
     // Set the validate move in the game event immediately so
     // that the game event can take ownership of the vms.
@@ -919,7 +919,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     destroy_string_builder(move_string_builder);
 
     vms = validated_moves_create(gcg_parser->game, player_index,
-                                 cgp_move_string, false, false);
+                                 cgp_move_string, false, false, false);
     game_event_set_vms(game_event, vms);
     copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 3);
     break;
@@ -985,7 +985,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     destroy_string_builder(move_string_builder);
 
     vms = validated_moves_create(gcg_parser->game, player_index,
-                                 cgp_move_string, true, true);
+                                 cgp_move_string, true, true, false);
     free(cgp_move_string);
     // Set the validate move in the game event immediately so
     // that the game event can take ownership of the vms.

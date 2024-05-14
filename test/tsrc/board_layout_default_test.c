@@ -276,7 +276,7 @@ void test_board_layout_correctness() {
   load_cgp_or_die(game, ENTASIS_OPENING_CGP);
 
   ValidatedMoves *vms =
-      validated_moves_create(game, 0, "7J.FRAWZEY", false, false);
+      validated_moves_create(game, 0, "7J.FRAWZEY", false, false, false);
   move_validation_status_t vms_error_status =
       validated_moves_get_validation_status(vms);
   assert(vms_error_status == MOVE_VALIDATION_STATUS_TILES_PLAYED_OUT_OF_BOUNDS);
@@ -285,7 +285,7 @@ void test_board_layout_correctness() {
   // Validate play over block
   load_game_with_test_board(game, "5_by_5_bricked_box_15");
 
-  vms = validated_moves_create(game, 0, "8H.FRAWZEY", false, false);
+  vms = validated_moves_create(game, 0, "8H.FRAWZEY", false, false, false);
   vms_error_status = validated_moves_get_validation_status(vms);
   assert(vms_error_status == MOVE_VALIDATION_STATUS_TILES_PLAYED_OVER_BRICK);
   validated_moves_destroy(vms);

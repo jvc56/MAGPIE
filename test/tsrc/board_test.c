@@ -140,7 +140,7 @@ void test_board_all() {
 
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
   ValidatedMoves *vms =
-      validated_moves_create(game, 0, "8H.SPORK", false, true);
+      validated_moves_create(game, 0, "8H.SPORK", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
   play_move(validated_moves_get_move(vms, 0), game);
@@ -148,7 +148,7 @@ void test_board_all() {
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
   rack_set_to_string(ld, player1_rack, "CAURING");
-  vms = validated_moves_create(game, 1, "H8.SCAURING", false, true);
+  vms = validated_moves_create(game, 1, "H8.SCAURING", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
   play_move(validated_moves_get_move(vms, 0), game);

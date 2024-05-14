@@ -14,7 +14,8 @@ typedef struct ValidatedMoves ValidatedMoves;
 ValidatedMoves *validated_moves_create(const Game *game, int player_index,
                                        const char *ucgi_moves_string,
                                        bool allow_phonies,
-                                       bool allow_unknown_exchanges);
+                                       bool allow_unknown_exchanges,
+                                       bool allow_playthrough);
 void validated_moves_destroy(ValidatedMoves *vms);
 
 int validated_moves_get_number_of_moves(const ValidatedMoves *vms);

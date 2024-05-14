@@ -157,8 +157,8 @@ move_validation_status_t update_move_list(ExecState *exec_state,
   Game *game = exec_state_get_game(exec_state);
   int player_on_turn_index = game_get_player_on_turn_index(game);
 
-  ValidatedMoves *new_validated_moves =
-      validated_moves_create(game, player_on_turn_index, moves, true, false);
+  ValidatedMoves *new_validated_moves = validated_moves_create(
+      game, player_on_turn_index, moves, true, false, false);
 
   move_validation_status_t move_validation_status =
       validated_moves_get_validation_status(new_validated_moves);

@@ -451,7 +451,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   free(move_tiles_no_parens);
 
   ValidatedMoves *vms =
-      validated_moves_create(game, 0, vm_move_string, false, true);
+      validated_moves_create(game, 0, vm_move_string, false, true, false);
   free(vm_move_string);
   assert(validated_moves_get_validation_status(vms) ==
          MOVE_VALIDATION_STATUS_SUCCESS);

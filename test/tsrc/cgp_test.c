@@ -47,8 +47,9 @@ void assert_cgp_load_and_write_are_equal(Game *game, const char *load_cgp) {
 void play_move_and_validate_cgp(Game *game, const char *move_string,
                                 const char *rack_string,
                                 const char *expected_cgp) {
-  ValidatedMoves *vms = validated_moves_create(
-      game, game_get_player_on_turn_index(game), move_string, false, false);
+  ValidatedMoves *vms =
+      validated_moves_create(game, game_get_player_on_turn_index(game),
+                             move_string, false, false, false);
   assert(validated_moves_get_validation_status(vms) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
   assert(validated_moves_get_number_of_moves(vms) == 1);

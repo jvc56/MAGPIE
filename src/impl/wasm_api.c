@@ -57,8 +57,8 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   const LetterDistribution *ld = game_get_ld(game);
   const int player_on_turn_index = game_get_player_on_turn_index(game);
 
-  ValidatedMoves *vms = validated_moves_create(game, player_on_turn_index,
-                                               ucgi_move_str, true, false);
+  ValidatedMoves *vms = validated_moves_create(
+      game, player_on_turn_index, ucgi_move_str, true, false, false);
 
   if (validated_moves_get_number_of_moves(vms) > 1) {
     validated_moves_destroy(vms);
