@@ -75,7 +75,7 @@ void test_config_error_cases() {
   }
 
   test_config_error(config, "go sim var Lonify",
-                    CONFIG_LOAD_STATUS_UNKNOWN_GAME_VARIANT);
+                    CONFIG_LOAD_STATUS_UNRECOGNIZED_GAME_VARIANT);
   test_config_error(config, "go sim bb 3b4",
                     CONFIG_LOAD_STATUS_MALFORMED_BINGO_BONUS);
   test_config_error(config, "go sim s1 random",
@@ -469,8 +469,9 @@ void test_config_success() {
   assert_strings_equal(config_get_ld_name(config), "french");
 
   string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder,
-                            "convert convtype text2kwg input csw21.txt output csw21.kwg");
+  string_builder_add_string(
+      test_string_builder,
+      "convert convtype text2kwg input csw21.txt output csw21.kwg");
   load_config_or_fail(config, string_builder_peek(test_string_builder));
   assert(config_get_command_type(config) == COMMAND_TYPE_CONVERT);
   assert(config_get_conversion_type(config) == CONVERT_TEXT2KWG);

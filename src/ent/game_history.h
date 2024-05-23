@@ -23,6 +23,15 @@ int game_event_get_player_index(const GameEvent *event);
 void game_event_set_cumulative_score(GameEvent *event, int cumulative_score);
 int game_event_get_cumulative_score(const GameEvent *event);
 
+void game_event_set_score_adjustment(GameEvent *event, int score_adjustment);
+int game_event_get_score_adjustment(const GameEvent *event);
+
+void game_event_set_move_score(GameEvent *event, int move_score);
+int game_event_get_move_score(const GameEvent *event);
+
+void game_event_set_cgp_move_string(GameEvent *event, char *cgp_move_string);
+const char *game_event_get_cgp_move_string(const GameEvent *event);
+
 void game_event_set_rack(GameEvent *event, Rack *rack);
 Rack *game_event_get_rack(const GameEvent *event);
 
@@ -31,6 +40,7 @@ ValidatedMoves *game_event_get_vms(const GameEvent *event);
 
 void game_event_set_note(GameEvent *event, const char *note);
 const char *game_event_get_note(const GameEvent *event);
+int game_event_get_turn_value(const GameEvent *event);
 
 typedef struct GameHistoryPlayer GameHistoryPlayer;
 
@@ -92,15 +102,12 @@ GameHistoryPlayer *game_history_get_player(const GameHistory *history,
 
 int game_history_get_number_of_events(const GameHistory *history);
 
-int game_history_get_number_of_turns(const GameHistory *history);
-
-const char *game_history_get_cgp_snapshot(const GameHistory *history,
-                                          int cgp_snapshot_index);
-void game_history_add_cgp_snapshot(GameHistory *history, char *cgp_snapshot);
-
 GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 
 void game_history_set_cumulative_scores(GameHistory *game_history);
 GameEvent *game_history_create_and_add_game_event(GameHistory *game_history);
+
+Game *game_history_get_game(const GameHistory *game_history);
+void game_history_set_game(GameHistory *game_history, Game *game);
 
 #endif

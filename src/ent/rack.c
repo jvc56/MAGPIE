@@ -37,6 +37,7 @@ void rack_destroy(Rack *rack) {
   free(rack);
 }
 
+// Get the sum of the tile values on the rack
 int rack_get_score(const LetterDistribution *ld, const Rack *rack) {
   int sum = 0;
   for (int i = 0; i < rack_get_dist_size(rack); i++) {

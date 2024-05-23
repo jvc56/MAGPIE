@@ -143,7 +143,7 @@ void test_board_all() {
       validated_moves_create(game, 0, "8H.SPORK", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
-  play_move(validated_moves_get_move(vms, 0), game);
+  play_move(validated_moves_get_move(vms, 0), game, NULL);
   validated_moves_destroy(vms);
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
@@ -151,7 +151,7 @@ void test_board_all() {
   vms = validated_moves_create(game, 1, "H8.SCAURING", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
-  play_move(validated_moves_get_move(vms, 0), game);
+  play_move(validated_moves_get_move(vms, 0), game, NULL);
   validated_moves_destroy(vms);
 
   game_load_cgp(game, VS_ED);

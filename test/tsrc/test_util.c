@@ -31,6 +31,7 @@
 #include "../../src/str/game_string.h"
 #include "../../src/str/inference_string.h"
 #include "../../src/str/move_string.h"
+#include "../../src/str/rack_string.h"
 
 #include "../../src/util/log.h"
 #include "../../src/util/string_util.h"
@@ -154,6 +155,23 @@ void print_game(Game *game, MoveList *move_list) {
   destroy_string_builder(game_string);
 }
 
+void print_cgp(const Game *game) {
+  char *cgp = game_get_cgp(game, true);
+  printf("%s\n", cgp);
+  free(cgp);
+}
+
+void print_rack(const Rack *rack, const LetterDistribution *ld) {
+  if (!rack) {
+    printf("(null)\n");
+    return;
+  }
+  StringBuilder *rack_sb = create_string_builder();
+  string_builder_add_rack(rack, ld, rack_sb);
+  printf("%s", string_builder_peek(rack_sb));
+  destroy_string_builder(rack_sb);
+}
+
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,
                      InferenceResults *inference_results) {
@@ -175,7 +193,7 @@ void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
   SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
-  play_move(sorted_move_list->moves[n], game);
+  play_move(sorted_move_list->moves[n], game, NULL);
   destroy_sorted_move_list(sorted_move_list);
   move_list_destroy(move_list);
 }
@@ -339,6 +357,47 @@ void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
   destroy_string_builder(move_string);
 }
 
+void assert_players_are_equal(const Player *p1, const Player *p2,
+                              bool check_scores) {
+  // For games ending in consecutive zeros, scores are checked elsewhere
+  if (check_scores) {
+    assert(player_get_score(p1) == player_get_score(p2));
+  }
+}
+
+void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
+  assert(game_get_consecutive_scoreless_turns(g1) ==
+         game_get_consecutive_scoreless_turns(g2));
+  assert(game_get_game_end_reason(g1) == game_get_game_end_reason(g2));
+
+  int g1_player_on_turn_index = game_get_player_on_turn_index(g1);
+
+  const Player *g1_player_on_turn =
+      game_get_player(g1, g1_player_on_turn_index);
+  const Player *g1_player_not_on_turn =
+      game_get_player(g1, 1 - g1_player_on_turn_index);
+
+  int g2_player_on_turn_index = game_get_player_on_turn_index(g2);
+
+  const Player *g2_player_on_turn =
+      game_get_player(g2, g2_player_on_turn_index);
+  const Player *g2_player_not_on_turn =
+      game_get_player(g2, 1 - g2_player_on_turn_index);
+
+  assert_players_are_equal(g1_player_on_turn, g2_player_on_turn, check_scores);
+  assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn,
+                           check_scores);
+
+  Board *board1 = game_get_board(g1);
+  Board *board2 = game_get_board(g2);
+
+  Bag *bag1 = game_get_bag(g1);
+  Bag *bag2 = game_get_bag(g2);
+
+  assert_boards_are_equal(board1, board2);
+  assert_bags_are_equal(bag1, bag2, ld_get_size(game_get_ld(g1)));
+}
+
 char *get_test_filename(const char *filename) {
   return get_formatted_string("%s%s", TESTDATA_FILEPATH, filename);
 }
@@ -457,7 +516,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
          MOVE_VALIDATION_STATUS_SUCCESS);
 
   if (play_move_on_board) {
-    play_move(move_list_get_move(move_list, 0), game);
+    play_move(move_list_get_move(move_list, 0), game, NULL);
   }
 
   validated_moves_destroy(vms);

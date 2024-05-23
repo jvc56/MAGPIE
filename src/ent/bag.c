@@ -119,7 +119,8 @@ uint8_t bag_draw_random_letter(Bag *bag, int player_draw_index) {
   return letter;
 }
 
-void bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
+// Returns false if the letters does not exist.
+bool bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   if (get_is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
@@ -131,7 +132,7 @@ void bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
     }
   }
   if (letter_index < 0) {
-    log_fatal("letter not found in bag: %d\n", letter);
+    return false;
   }
   if (player_draw_index == 0) {
     bag->end_tile_index--;
@@ -140,6 +141,7 @@ void bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
     bag->tiles[letter_index] = bag->tiles[bag->start_tile_index];
     bag->start_tile_index++;
   }
+  return true;
 }
 
 // The player index should be the player who drew the tile.

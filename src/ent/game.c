@@ -82,6 +82,10 @@ game_end_reason_t game_get_game_end_reason(const Game *game) {
   return game->game_end_reason;
 }
 
+bool game_over(const Game *game) {
+  return game->game_end_reason != GAME_END_REASON_NONE;
+}
+
 void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason) {
   game->game_end_reason = game_end_reason;
 }
@@ -407,6 +411,10 @@ void game_reset(Game *game) {
 void game_set_starting_player_index(Game *game, int starting_player_index) {
   game->starting_player_index = starting_player_index;
   game->player_on_turn_index = starting_player_index;
+}
+
+void game_set_player_on_turn_index(Game *game, int player_on_turn_index) {
+  game->player_on_turn_index = player_on_turn_index;
 }
 
 void pre_allocate_backups(Game *game) {

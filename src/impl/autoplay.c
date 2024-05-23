@@ -78,8 +78,8 @@ void play_autoplay_game(Game *game, MoveList *move_list,
   game_reset(game);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
-  while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    play_move(get_top_equity_move(game, thread_index, move_list), game);
+  while (!game_over(game)) {
+    play_move(get_top_equity_move(game, thread_index, move_list), game, NULL);
   }
   record_results(game, autoplay_results, starting_player_index);
 }

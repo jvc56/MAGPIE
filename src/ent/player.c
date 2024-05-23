@@ -95,13 +95,7 @@ const KLV *player_get_klv(const Player *player) { return player->klv; }
 
 void player_set_score(Player *player, int score) { player->score = score; }
 
-void player_increment_score(Player *player, int score) {
-  player->score += score;
-}
-
-void player_decrement_score(Player *player, int score) {
-  player->score -= score;
-}
+void player_add_to_score(Player *player, int score) { player->score += score; }
 
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type) {
   player->move_sort_type = move_sort_type;

@@ -120,6 +120,9 @@ void test_validated_move_errors() {
   assert_validated_move_error(game, EMPTY_CGP, "8H.PIZAZZ.AIPZZZ", 0, false,
                               true, false,
                               MOVE_VALIDATION_STATUS_RACK_NOT_IN_BAG);
+  assert_validated_move_error(game, EMPTY_CGP, "8H.BIBB.ABBBIII", 0, false,
+                              true, false,
+                              MOVE_VALIDATION_STATUS_RACK_NOT_IN_BAG);
   assert_validated_move_error(game, EMPTY_CGP, "h8.HADJI.BHAJI", 0, false, true,
                               false,
                               MOVE_VALIDATION_STATUS_TILES_PLAYED_NOT_IN_RACK);
@@ -180,7 +183,7 @@ void test_validated_move_errors() {
                               MOVE_VALIDATION_STATUS_MISSING_FIELDS);
   assert_validated_move_error(game, EMPTY_CGP, "h8", 0, false, true, false,
                               MOVE_VALIDATION_STATUS_MISSING_FIELDS);
-  assert_validated_move_error(game, EMPTY_CGP, "pass.ABC", 0, false, true,
+  assert_validated_move_error(game, EMPTY_CGP, "pass.ABC.AB", 0, false, true,
                               false, MOVE_VALIDATION_STATUS_EXCESS_PASS_FIELDS);
   assert_validated_move_error(game, EMPTY_CGP, "h8.WECH", 0, false, true, false,
                               MOVE_VALIDATION_STATUS_PHONY_WORD_FORMED);
@@ -223,6 +226,21 @@ void test_validated_move_success() {
   assert(within_epsilon(move_get_equity(move), PASS_MOVE_EQUITY));
   assert(validated_moves_get_challenge_points(vms, 0) == 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
+  validated_moves_destroy(vms);
+
+  rack_set_to_string(ld, rack, "ACEGIK");
+  rack_set_to_string(ld, leave, "ACEGIK");
+  vms = assert_validated_move_success(game, EMPTY_CGP, "pass.ACEGIK", 0, false,
+                                      false);
+  assert(validated_moves_get_number_of_moves(vms) == 1);
+  move = validated_moves_get_move(vms, 0);
+  assert(move_get_type(move) == GAME_EVENT_PASS);
+  assert(move_get_score(move) == 0);
+  assert(within_epsilon(move_get_equity(move), PASS_MOVE_EQUITY));
+  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert(!validated_moves_get_challenge_turn_loss(vms, 0));
+  assert(within_epsilon(move_get_equity(move), PASS_MOVE_EQUITY));
+  assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
   validated_moves_destroy(vms);
 
   vms =
@@ -569,7 +587,7 @@ void test_validated_move_distinct_kwg() {
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "8H SPORK 32");
-  play_move(move_list_get_move(move_list, 0), game);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
   vms = validated_moves_create(game, 1, "H8.SCHIZIER", false, true, false);
@@ -586,7 +604,7 @@ void test_validated_move_distinct_kwg() {
   rack_set_to_string(ld, player1_rack, "CEHIIRZ");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "H8 (S)CHIZIER 146");
-  play_move(move_list_get_move(move_list, 0), game);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Play WIGGLY, not GOLLYWOG because that's NWL only
   vms = validated_moves_create(game, 0, "11G.WIGGLY", false, true, false);
@@ -603,7 +621,7 @@ void test_validated_move_distinct_kwg() {
   rack_set_to_string(ld, player0_rack, "GGLLOWY");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "11G W(I)GGLY 28");
-  play_move(move_list_get_move(move_list, 0), game);
+  play_move(move_list_get_move(move_list, 0), game, NULL);
 
   // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
   vms = validated_moves_create(game, 1, "13C.QUEASIER", false, true, false);
@@ -673,7 +691,7 @@ void test_validated_move_many() {
          GAME_EVENT_TILE_PLACEMENT_MOVE);
   validated_moves_destroy(vms);
 
-  vms = validated_moves_create(game, 0, "pass.ABC,ex.4,ex.ABC.DEF,8h.VVU",
+  vms = validated_moves_create(game, 0, "pass.ABC.AB,ex.4,ex.ABC.DEF,8h.VVU",
                                false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
          MOVE_VALIDATION_STATUS_EXCESS_PASS_FIELDS);

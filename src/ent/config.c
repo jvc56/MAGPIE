@@ -27,11 +27,6 @@
 #include "thread_control.h"
 #include "win_pct.h"
 
-#define DEFAULT_BOARD_LAYOUT BOARD_LAYOUT_CROSSWORD_GAME
-#define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC
-#define DEFAULT_MOVE_LIST_CAPACITY 1
-#define DEFAULT_SIMMING_STOPPING_CONDITION SIM_STOPPING_CONDITION_NONE
-
 #define ARG_POSITION "position"
 #define ARG_CGP "cgp"
 #define ARG_MOVES "m"
@@ -601,7 +596,7 @@ config_load_status_t load_game_variant_for_config(Config *config,
                                                   const char *game_variant) {
   config->game_variant = get_game_variant_type_from_name(game_variant);
   if (config->game_variant == GAME_VARIANT_UNKNOWN) {
-    return CONFIG_LOAD_STATUS_UNKNOWN_GAME_VARIANT;
+    return CONFIG_LOAD_STATUS_UNRECOGNIZED_GAME_VARIANT;
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
 }

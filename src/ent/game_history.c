@@ -18,6 +18,14 @@ struct GameEvent {
   game_event_t event_type;
   int player_index;
   int cumulative_score;
+  char *cgp_move_string;
+  int move_score;
+  // Adjustment for
+  // - Challenge points
+  // - Time penalty
+  // - End rack points
+  // - End rack penalty
+  int score_adjustment;
   // Only one of rack and vms->rack will be
   // set for a game event.
   Rack *rack;
@@ -32,6 +40,9 @@ GameEvent *game_event_create() {
   game_event->event_type = GAME_EVENT_UNKNOWN;
   game_event->player_index = -1;
   game_event->cumulative_score = 0;
+  game_event->score_adjustment = 0;
+  game_event->cgp_move_string = NULL;
+  game_event->move_score = 0;
   game_event->vms = NULL;
   game_event->rack = NULL;
   game_event->note = NULL;
@@ -44,6 +55,7 @@ void game_event_destroy(GameEvent *game_event) {
   }
   validated_moves_destroy(game_event->vms);
   rack_destroy(game_event->rack);
+  free(game_event->cgp_move_string);
   free(game_event->note);
   free(game_event);
 }
@@ -72,6 +84,31 @@ int game_event_get_cumulative_score(const GameEvent *event) {
   return event->cumulative_score;
 }
 
+void game_event_set_move_score(GameEvent *event, int move_score) {
+  event->move_score = move_score;
+}
+
+int game_event_get_move_score(const GameEvent *event) {
+  return event->move_score;
+}
+
+// Takes ownership of the cgp_move_string
+void game_event_set_cgp_move_string(GameEvent *event, char *cgp_move_string) {
+  event->cgp_move_string = cgp_move_string;
+}
+
+const char *game_event_get_cgp_move_string(const GameEvent *event) {
+  return event->cgp_move_string;
+}
+
+void game_event_set_score_adjustment(GameEvent *event, int score_adjustment) {
+  event->score_adjustment = score_adjustment;
+}
+
+int game_event_get_score_adjustment(const GameEvent *event) {
+  return event->score_adjustment;
+}
+
 void game_event_set_rack(GameEvent *event, Rack *rack) { event->rack = rack; }
 
 Rack *game_event_get_rack(const GameEvent *event) { return event->rack; }
@@ -90,6 +127,18 @@ void game_event_set_note(GameEvent *event, const char *note) {
 }
 
 const char *game_event_get_note(const GameEvent *event) { return event->note; }
+
+// Returns 1 if the game event counts as a turn
+// Returns 0 otherwise
+int game_event_get_turn_value(const GameEvent *event) {
+  if (event->event_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+      event->event_type == GAME_EVENT_EXCHANGE ||
+      event->event_type == GAME_EVENT_PASS ||
+      event->event_type == GAME_EVENT_PHONY_TILES_RETURNED) {
+    return 1;
+  }
+  return 0;
+}
 
 struct GameHistoryPlayer {
   char *name;
@@ -170,8 +219,6 @@ struct GameHistory {
   GameHistoryPlayer *players[2];
   int number_of_events;
   GameEvent **events;
-  int number_of_cgp_snapshots;
-  char **cgp_snapshots;
 };
 
 void game_history_set_title(GameHistory *history, const char *title) {
@@ -263,21 +310,6 @@ int game_history_get_number_of_events(const GameHistory *history) {
   return history->number_of_events;
 }
 
-int game_history_get_number_of_turns(const GameHistory *history) {
-  return history->number_of_cgp_snapshots;
-}
-
-const char *game_history_get_cgp_snapshot(const GameHistory *history,
-                                          int cgp_snapshot_index) {
-  return history->cgp_snapshots[cgp_snapshot_index];
-}
-
-// Increments the number of snapshots and takes ownership of the
-// cgp_snapshot.
-void game_history_add_cgp_snapshot(GameHistory *history, char *cgp_snapshot) {
-  history->cgp_snapshots[history->number_of_cgp_snapshots++] = cgp_snapshot;
-}
-
 GameEvent *game_history_get_event(const GameHistory *history, int event_index) {
   return history->events[event_index];
 }
@@ -290,15 +322,12 @@ GameHistory *game_history_create() {
   game_history->uid = NULL;
   game_history->lexicon_name = NULL;
   game_history->ld_name = NULL;
-  game_history->game_variant = GAME_VARIANT_UNKNOWN;
-  game_history->board_layout_name = NULL;
+  game_history->game_variant = GAME_VARIANT_CLASSIC;
+  game_history->board_layout_name = board_layout_get_default_name();
   game_history->players[0] = NULL;
   game_history->players[1] = NULL;
   game_history->number_of_events = 0;
-  game_history->events = malloc_or_die(sizeof(GameEvent) * (MAX_GAME_EVENTS));
-  game_history->number_of_cgp_snapshots = 0;
-  game_history->cgp_snapshots =
-      malloc_or_die(sizeof(char *) * (MAX_GAME_EVENTS));
+  game_history->events = malloc_or_die(sizeof(GameEvent *) * (MAX_GAME_EVENTS));
   return game_history;
 }
 
@@ -321,10 +350,6 @@ void game_history_destroy(GameHistory *game_history) {
     game_event_destroy(game_history->events[i]);
   }
   free(game_history->events);
-  for (int i = 0; i < game_history->number_of_cgp_snapshots; i++) {
-    free(game_history->cgp_snapshots[i]);
-  }
-  free(game_history->cgp_snapshots);
   free(game_history);
 }
 

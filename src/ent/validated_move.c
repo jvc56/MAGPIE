@@ -270,29 +270,29 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
     return status;
   }
 
+  game_event_t move_type = move_get_type(vm->move);
+
   if (number_of_fields == 1) {
-    if (move_get_type(vm->move) != GAME_EVENT_PASS) {
-      return MOVE_VALIDATION_STATUS_MISSING_FIELDS;
-    } else {
+    if (move_type == GAME_EVENT_PASS) {
       return MOVE_VALIDATION_STATUS_SUCCESS;
+    } else {
+      return MOVE_VALIDATION_STATUS_MISSING_FIELDS;
     }
-  } else if (move_get_type(vm->move) == GAME_EVENT_PASS) {
-    return MOVE_VALIDATION_STATUS_EXCESS_PASS_FIELDS;
   }
 
   // Validate tiles played or number exchanged
-  const char *played_tiles_or_number_exchanged =
+  const char *tiles_or_exchange_or_pass_rack =
       string_splitter_get_item(split_move, 1);
 
-  if (is_string_empty_or_whitespace(played_tiles_or_number_exchanged)) {
+  if (is_string_empty_or_whitespace(tiles_or_exchange_or_pass_rack)) {
     return MOVE_VALIDATION_STATUS_EMPTY_TILES_PLAYED_OR_NUMBER_EXCHANGED;
   }
 
-  if (is_all_digits_or_empty(played_tiles_or_number_exchanged)) {
-    if (move_get_type(vm->move) != GAME_EVENT_EXCHANGE) {
+  if (is_all_digits_or_empty(tiles_or_exchange_or_pass_rack)) {
+    if (move_type != GAME_EVENT_EXCHANGE) {
       return MOVE_VALIDATION_STATUS_NONEXCHANGE_NUMERIC_TILES;
     }
-    int number_exchanged = string_to_int(played_tiles_or_number_exchanged);
+    int number_exchanged = string_to_int(tiles_or_exchange_or_pass_rack);
     if (number_exchanged < 1 || number_exchanged > (RACK_SIZE)) {
       return MOVE_VALIDATION_STATUS_INVALID_NUMBER_EXCHANGED;
     }
@@ -302,18 +302,30 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
     move_set_tiles_played(vm->move, number_exchanged);
     move_set_tiles_length(vm->move, number_exchanged);
     vm->unknown_exchange = true;
-  } else {
+  } else if (move_type != GAME_EVENT_PASS) {
     status = validate_tiles_played(ld, board, vm->move,
-                                   played_tiles_or_number_exchanged,
+                                   tiles_or_exchange_or_pass_rack,
                                    tiles_played_rack, allow_playthrough);
+  } else if (number_of_fields > 2) {
+    return MOVE_VALIDATION_STATUS_EXCESS_PASS_FIELDS;
   }
 
-  if (status != MOVE_VALIDATION_STATUS_SUCCESS || number_of_fields == 2) {
+  if (status != MOVE_VALIDATION_STATUS_SUCCESS) {
     return status;
   }
 
   // Validate rack
-  const char *rack_string = string_splitter_get_item(split_move, 2);
+  int rack_string_index = 2;
+  if (move_type == GAME_EVENT_PASS) {
+    rack_string_index = 1;
+  }
+
+  if (rack_string_index > number_of_fields - 1) {
+    return status;
+  }
+
+  const char *rack_string =
+      string_splitter_get_item(split_move, rack_string_index);
 
   if (is_string_empty_or_whitespace(rack_string)) {
     return MOVE_VALIDATION_STATUS_EMPTY_RACK;
@@ -335,8 +347,10 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
 
   // Check if the rack is in the bag
   Bag *bag = game_get_bag(game);
+  Rack *game_player_rack = player_get_rack(game_get_player(game, player_index));
   for (int i = 0; i < dist_size; i++) {
-    if (rack_get_letter(vm->rack, i) > bag_get_letter(bag, i)) {
+    if (rack_get_letter(vm->rack, i) >
+        bag_get_letter(bag, i) + rack_get_letter(game_player_rack, i)) {
       return MOVE_VALIDATION_STATUS_RACK_NOT_IN_BAG;
     }
   }
@@ -352,11 +366,11 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
         player_get_klv(game_get_player(game, player_index)), vm->leave);
   }
 
-  if (status != MOVE_VALIDATION_STATUS_SUCCESS || number_of_fields == 3) {
+  if (status != MOVE_VALIDATION_STATUS_SUCCESS || number_of_fields <= 3) {
     return status;
   }
 
-  if (move_get_type(vm->move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  if (move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     return MOVE_VALIDATION_STATUS_EXCESS_EXCHANGE_FIELDS;
   }
 
@@ -474,6 +488,8 @@ validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
     } else {
       move_set_equity(vm->move, score);
     }
+  } else {
+    move_set_equity(vm->move, PASS_MOVE_EQUITY);
   }
 
   return MOVE_VALIDATION_STATUS_SUCCESS;

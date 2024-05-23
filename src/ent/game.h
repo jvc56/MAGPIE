@@ -27,6 +27,7 @@ const LetterDistribution *game_get_ld(const Game *game);
 Player *game_get_player(const Game *game, int player_index);
 int game_get_player_on_turn_index(const Game *game);
 game_end_reason_t game_get_game_end_reason(const Game *game);
+bool game_over(const Game *game);
 backup_mode_t game_get_backup_mode(const Game *game);
 int game_get_consecutive_scoreless_turns(const Game *game);
 int game_get_player_draw_index(const Game *game, int player_index);
@@ -43,6 +44,7 @@ void game_set_backup_mode(Game *game, int backup_mode);
 void game_backup(Game *game);
 void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);
+void game_set_player_on_turn_index(Game *game, int player_on_turn_index);
 void game_gen_all_cross_sets(Game *game);
 void game_gen_cross_set(Game *game, int row, int col, int dir,
                         int cross_set_index);
