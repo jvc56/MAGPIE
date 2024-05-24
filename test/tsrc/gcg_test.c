@@ -42,8 +42,6 @@ void test_single_error_case(const char *gcg_filename, Config *config,
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
   game_history_destroy(game_history);
-  printf("actual, expected: %d == %d\n", gcg_parse_status,
-         expected_gcg_parse_status);
   assert(gcg_parse_status == expected_gcg_parse_status);
 }
 
@@ -220,24 +218,15 @@ void assert_game_event(const GameHistory *game_history, int event_index,
   if (string_length(rack_string) > 0) {
     expected_rack = rack_create(ld_size);
     rack_set_to_string(ld, expected_rack, rack_string);
-    print_rack(expected_rack, ld);
-    printf("\n");
-    print_rack(game_event_get_rack(game_event), ld);
-    printf("\n");
     racks_match =
         racks_are_equal(expected_rack, game_event_get_rack(game_event));
     rack_destroy(expected_rack);
   } else {
-    print_rack(expected_rack, ld);
-    printf("\n");
-    print_rack(game_event_get_rack(game_event), ld);
-    printf("\n");
     racks_match =
         racks_are_equal(expected_rack, game_event_get_rack(game_event));
   }
 
   assert(racks_match);
-  printf("note: >%s<\n", game_event_get_note(game_event));
   assert((!game_event_get_note(game_event) && string_length(note) == 0) ||
          strings_equal(game_event_get_note(game_event), note));
 
@@ -283,14 +272,8 @@ void assert_game_play_to_turn(GameHistory *game_history, Game *game1,
   int i = 0;
   const char *cgp = cgps[i];
   while (cgp) {
-    printf("\n\nNEXT CGP: %d\n", i);
     game_play_to_turn(game_history, game1, i);
-    printf("actual game:\n");
-    print_cgp(game1);
     load_cgp_or_die(game2, cgp);
-    printf("expected game:\n");
-    print_cgp(game2);
-    printf("test input cgp:\n%s\n", cgp);
     assert_games_are_equal(game1, game2, true);
     i++;
     cgp = cgps[i];
@@ -304,7 +287,6 @@ void test_success_standard() {
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  printf("actual: %d\n", gcg_parse_status);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
   Game *game1 = game_create(config);
@@ -333,10 +315,6 @@ void test_success_standard() {
                        "RightBehindYou"));
   assert(game_history_player_get_score(player1) == 358);
   rack_set_to_string(ld, rack, "");
-
-  printf("lnk: >");
-  print_rack(game_history_player_get_last_known_rack(player1), ld);
-  printf("<\n");
 
   assert(
       racks_are_equal(game_history_player_get_last_known_rack(player1), NULL));
@@ -473,7 +451,6 @@ void test_success_five_point_challenge() {
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  printf("5p: %d\n", gcg_parse_status);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
   Game *game1 = game_create(config);
@@ -550,7 +527,6 @@ void test_success_six_pass() {
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
-  printf("six pass: %d\n", gcg_parse_status);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
   Game *game1 = game_create(config);

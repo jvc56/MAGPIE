@@ -370,8 +370,6 @@ void copy_cumulative_score_to_game_event(const GCGParser *gcg_parser,
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
   game_event_set_cumulative_score(game_event,
                                   string_to_int(cumulative_score_string));
-  printf("copying %d from:\n%s\n", game_event_get_cumulative_score(game_event),
-         gcg_line);
   free(cumulative_score_string);
 }
 
@@ -438,9 +436,7 @@ int get_move_score_from_gcg_line(const GCGParser *gcg_parser,
                                  const char *gcg_line, int group_index) {
   char *move_score_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  printf("move score string: %s\nline:%s\n", move_score_string, gcg_line);
   int move_score = string_to_int(move_score_string);
-  printf("move score string: %d\nline:%s\n", move_score, gcg_line);
   free(move_score_string);
   return move_score;
 }
@@ -608,11 +604,9 @@ const Rack *get_player_next_rack(GameHistory *game_history,
       return NULL;
     }
     if (game_event_has_player_rack(game_event, player_index)) {
-      printf("found player rack at event %d\n", game_event_index);
       return game_event_get_rack(game_event);
     }
   }
-  printf("no player rack found\n");
   return NULL;
 }
 
@@ -626,11 +620,6 @@ gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
         game_history_get_event(game_history, game_event_index - 1);
   }
 
-  printf("\n\nPLAYING ANOTHER TURN: %d (type %d)\n", game_event_index,
-         game_event_get_type(game_event));
-  printf("game over: %d\n", game_over(game));
-  print_game(game, NULL);
-
   int game_player_on_turn_index = game_get_player_on_turn_index(game);
 
   if (validate) {
@@ -643,9 +632,7 @@ gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
   }
 
   int game_event_player_index = game_event_get_player_index(game_event);
-  printf("player index on turn: %d\n", game_get_player_on_turn_index(game));
   game_event_t game_event_type = game_event_get_type(game_event);
-  printf("game event: %d\n", game_event_type);
 
   ValidatedMoves *vms = NULL;
   const char *cgp_move_string = game_event_get_cgp_move_string(game_event);
@@ -655,13 +642,10 @@ gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
   case GAME_EVENT_TILE_PLACEMENT_MOVE:
   case GAME_EVENT_EXCHANGE:
   case GAME_EVENT_PASS:
-    printf("game event: %d\n", game_event_type);
-    printf("cgp move string: >%s<\n", cgp_move_string);
     game_event_is_move = true;
     if (validate) {
       vms = validated_moves_create(game, game_event_player_index,
                                    cgp_move_string, true, true, true);
-      printf("vms status: %d\n", validated_moves_get_validation_status(vms));
       // Set the validate move in the game event immediately so
       // that the game event can take ownership of the vms.
       game_event_set_vms(game_event, vms);
@@ -671,14 +655,8 @@ gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
         return GCG_PARSE_STATUS_MOVE_VALIDATION_ERROR;
       }
 
-      printf("vms play rack:\n");
-      print_rack(validated_moves_get_rack(vms, 0), game_get_ld(game));
-      printf("\n");
       // Confirm the score from the GCG matches the score from the validated
       // move
-      printf("move score: %d\n", move_score);
-      printf("vms score: %d\n",
-             move_get_score(validated_moves_get_move(vms, 0)));
       if (move_get_score(validated_moves_get_move(vms, 0)) != move_score) {
         return GCG_PARSE_STATUS_MOVE_SCORING_ERROR;
       }
@@ -734,8 +712,6 @@ gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
       (!game_over(game) || !game_event_is_move) &&
       (game_event_get_cumulative_score(game_event) !=
        player_get_score(game_get_player(game, game_event_player_index)))) {
-    printf("normal scoring error\n");
-    print_game(game, NULL);
     return GCG_PARSE_STATUS_CUMULATIVE_SCORING_ERROR;
   }
 
@@ -813,7 +789,6 @@ gcg_parse_status_t common_gcg_token_validation(GCGParser *gcg_parser,
 gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
   GameHistory *game_history = gcg_parser->game_history;
   gcg_token_t token = find_matching_gcg_token(gcg_parser, gcg_line);
-  printf("parsing token %d\n", token);
   gcg_token_t previous_token = gcg_parser->previous_token;
   if (token != GCG_UNKNOWN_TOKEN) {
     gcg_parser->previous_token = token;
@@ -903,7 +878,6 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
                           game_history_get_player(game_history, player_index)),
                       game_history_player_get_name(game_history_get_player(
                           game_history, 1 - player_index)))) {
-      printf("FOUND DUPLICATE NAMES\n\n");
       return GCG_PARSE_STATUS_DUPLICATE_NAMES;
     }
     if (game_history_get_player(game_history, 1 - player_index) &&
@@ -1112,7 +1086,6 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     }
 
     cgp_move_string = string_builder_dump(move_string_builder, NULL);
-    printf("pass token cgp move string: >%s<\n", cgp_move_string);
     destroy_string_builder(move_string_builder);
 
     copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 3);
@@ -1209,8 +1182,6 @@ gcg_parse_status_t draw_initial_racks(Game *game, GameHistory *game_history) {
   for (int player_index = 0; player_index < 2; player_index++) {
     const Rack *next_player_rack =
         get_player_next_rack(game_history, -1, player_index);
-    printf("next player rack: %p\n", next_player_rack);
-    print_rack(next_player_rack, game_get_ld(game));
     if (next_player_rack) {
       if (!draw_rack_from_bag(
               bag, player_get_rack(game_get_player(game, player_index)),
@@ -1219,9 +1190,6 @@ gcg_parse_status_t draw_initial_racks(Game *game, GameHistory *game_history) {
         return GCG_PARSE_STATUS_RACK_NOT_IN_BAG;
       }
     }
-    printf("init rack for player %d\n", player_index);
-    print_rack(player_get_rack(game_get_player(game, player_index)),
-               game_get_ld(game));
   }
   return GCG_PARSE_STATUS_SUCCESS;
 }
@@ -1243,12 +1211,9 @@ gcg_parse_status_t parse_gcg_with_parser(GCGParser *gcg_parser,
   int number_of_gcg_lines = string_splitter_get_number_of_items(gcg_lines);
   gcg_parse_status_t gcg_parse_status = GCG_PARSE_STATUS_SUCCESS;
   for (int i = 0; i < number_of_gcg_lines; i++) {
-    printf("parsing line %d\n", i);
     gcg_parse_status =
         parse_gcg_line(gcg_parser, string_splitter_get_item(gcg_lines, i));
-    printf("done parsing line: %d\n", i);
     if (gcg_parse_status != GCG_PARSE_STATUS_SUCCESS) {
-      printf("error: %d\n", gcg_parse_status);
       break;
     }
   }
