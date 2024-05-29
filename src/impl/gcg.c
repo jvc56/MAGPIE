@@ -28,10 +28,6 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-// FIXME: remove
-#include "../../test/tsrc/test_util.h"
-#include "../str/rack_string.h"
-
 #define MAX_GROUPS 7
 
 typedef enum {
@@ -594,6 +590,9 @@ bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
 const Rack *get_player_next_rack(GameHistory *game_history,
                                  int initial_game_event_index,
                                  int player_index) {
+  GameHistoryPlayer *gh_player =
+      game_history_get_player(game_history, player_index);
+  Rack *rack = NULL;
   int number_of_game_events = game_history_get_number_of_events(game_history);
   for (int game_event_index = initial_game_event_index + 1;
        game_event_index < number_of_game_events; game_event_index++) {
@@ -601,13 +600,16 @@ const Rack *get_player_next_rack(GameHistory *game_history,
         game_history_get_event(game_history, game_event_index);
     if (game_event_index == initial_game_event_index + 1 &&
         game_event_get_type(game_event) == GAME_EVENT_PHONY_TILES_RETURNED) {
+      game_history_player_set_next_rack_set(gh_player, true);
       return NULL;
     }
     if (game_event_has_player_rack(game_event, player_index)) {
+      game_history_player_set_next_rack_set(gh_player, true);
       return game_event_get_rack(game_event);
     }
   }
-  return NULL;
+  game_history_player_set_next_rack_set(gh_player, false);
+  return rack;
 }
 
 gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
@@ -646,7 +648,7 @@ gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
     if (validate) {
       vms = validated_moves_create(game, game_event_player_index,
                                    cgp_move_string, true, true, true);
-      // Set the validate move in the game event immediately so
+      // Set the validated move in the game event immediately so
       // that the game event can take ownership of the vms.
       game_event_set_vms(game_event, vms);
 
@@ -781,6 +783,13 @@ gcg_parse_status_t common_gcg_token_validation(GCGParser *gcg_parser,
   default:
     break;
   }
+  // The redundancy check for these tokens was performed above,
+  // so any errors here are necessarily other tokens appearing
+  // after the last rack token(s).
+  if (gcg_parser->gcg_token_count[GCG_RACK1_TOKEN] > 0 ||
+      gcg_parser->gcg_token_count[GCG_RACK2_TOKEN] > 0) {
+    return GCG_PARSE_STATUS_EVENT_AFTER_LAST_RACK;
+  }
   gcg_parser->gcg_token_count[token]++;
 
   return GCG_PARSE_STATUS_SUCCESS;
@@ -803,7 +812,8 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
   }
 
   if (token == GCG_MOVE_TOKEN || token == GCG_PASS_TOKEN ||
-      token == GCG_EXCHANGE_TOKEN) {
+      token == GCG_EXCHANGE_TOKEN || token == GCG_RACK1_TOKEN ||
+      token == GCG_RACK2_TOKEN) {
     GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
     GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
     if (!player0 || !player1) {
@@ -913,6 +923,16 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     }
     game_history_player_set_last_known_rack(
         game_history_get_player(game_history, 0), player_last_known_rack);
+    rack_destroy(player_last_known_rack);
+    player_last_known_rack = game_history_player_get_last_known_rack(
+        game_history_get_player(game_history, 0));
+    if (!draw_rack_from_bag(
+            game_get_bag(gcg_parser->game),
+            player_get_rack(game_get_player(gcg_parser->game, 0)),
+            player_last_known_rack,
+            game_get_player_draw_index(gcg_parser->game, 0))) {
+      return GCG_PARSE_STATUS_RACK_NOT_IN_BAG;
+    }
     break;
   case GCG_RACK2_TOKEN:
     player_last_known_rack = get_rack_from_matching(gcg_parser, gcg_line, 1);
@@ -921,6 +941,16 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     }
     game_history_player_set_last_known_rack(
         game_history_get_player(game_history, 1), player_last_known_rack);
+    rack_destroy(player_last_known_rack);
+    player_last_known_rack = game_history_player_get_last_known_rack(
+        game_history_get_player(game_history, 1));
+    if (!draw_rack_from_bag(
+            game_get_bag(gcg_parser->game),
+            player_get_rack(game_get_player(gcg_parser->game, 1)),
+            player_last_known_rack,
+            game_get_player_draw_index(gcg_parser->game, 1))) {
+      return GCG_PARSE_STATUS_RACK_NOT_IN_BAG;
+    }
     break;
   case GCG_ENCODING_TOKEN:
     return GCG_PARSE_STATUS_MISPLACED_ENCODING;
@@ -1178,6 +1208,9 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
 }
 
 gcg_parse_status_t draw_initial_racks(Game *game, GameHistory *game_history) {
+  if (game_history_get_number_of_events(game_history) == 0) {
+    return GCG_PARSE_STATUS_SUCCESS;
+  }
   Bag *bag = game_get_bag(game);
   for (int player_index = 0; player_index < 2; player_index++) {
     const Rack *next_player_rack =
@@ -1297,12 +1330,47 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index) {
     play_game_history_turn_or_die(game_history, game, game_event_index, false);
   }
 
+  bool player_has_last_rack[2];
+  for (int player_index = 0; player_index < 2; player_index++) {
+    Rack *player_last_known_rack = game_history_player_get_last_known_rack(
+        game_history_get_player(game_history, player_index));
+    if (player_last_known_rack) {
+      player_has_last_rack[player_index] = true;
+      Rack *player_rack = player_get_rack(game_get_player(game, player_index));
+      Bag *bag = game_get_bag(game);
+      int player_draw_index = game_get_player_draw_index(game, player_index);
+      return_rack_to_bag(player_rack, bag, player_draw_index);
+      if (!draw_rack_from_bag(bag, player_rack, player_last_known_rack,
+                              player_draw_index)) {
+        log_fatal("last rack not in bag when replaying game\n");
+      }
+    } else {
+      player_has_last_rack[player_index] = false;
+    }
+  }
+
   if (!game_over(game)) {
+    int player_on_turn_index = game_get_player_on_turn_index(game);
     // Only show the rack for the player on turn
-    int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
+    int player_off_turn_index = 1 - player_on_turn_index;
     return_rack_to_bag(
         player_get_rack(game_get_player(game, player_off_turn_index)),
         game_get_bag(game),
         game_get_player_draw_index(game, player_off_turn_index));
+    if (!player_has_last_rack[player_on_turn_index] &&
+        !game_history_player_get_next_rack_set(
+            game_history_get_player(game_history, player_on_turn_index))) {
+      // This rack will be a randomly draw rack by the gameplay module and not
+      // anything specified by the GCG, so we throw it back in the bag;
+      return_rack_to_bag(
+          player_get_rack(game_get_player(game, player_on_turn_index)),
+          game_get_bag(game),
+          game_get_player_draw_index(game, player_on_turn_index));
+    }
   }
+}
+
+void game_play_to_end(GameHistory *game_history, Game *game) {
+  game_play_to_turn(game_history, game,
+                    game_history_get_number_of_events(game_history));
 }

@@ -15,9 +15,6 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-// FIXME: remove
-#include "../str/rack_string.h"
-
 typedef struct ValidatedMove {
   Move *move;
   FormedWords *formed_words;

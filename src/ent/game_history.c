@@ -144,6 +144,7 @@ struct GameHistoryPlayer {
   char *name;
   char *nickname;
   int score;
+  bool next_rack_set;
   Rack *last_known_rack;
 };
 
@@ -153,6 +154,7 @@ GameHistoryPlayer *game_history_player_create(const char *name,
   player->name = string_duplicate(name);
   player->nickname = string_duplicate(nickname);
   player->score = 0;
+  player->next_rack_set = false;
   player->last_known_rack = NULL;
   return player;
 }
@@ -192,6 +194,15 @@ void game_history_player_set_score(GameHistoryPlayer *player, int score) {
 
 int game_history_player_get_score(const GameHistoryPlayer *player) {
   return player->score;
+}
+
+void game_history_player_set_next_rack_set(GameHistoryPlayer *player,
+                                           bool next_rack_set) {
+  player->next_rack_set = next_rack_set;
+}
+
+bool game_history_player_get_next_rack_set(const GameHistoryPlayer *player) {
+  return player->next_rack_set;
 }
 
 void game_history_player_set_last_known_rack(GameHistoryPlayer *player,

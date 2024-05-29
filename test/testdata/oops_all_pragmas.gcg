@@ -1,0 +1,11 @@
+#character-encoding UTF-8
+#description Created with Macondo
+#id io.woogles p6QRjJHG
+#lexicon CSW21
+#game-type classic
+#title test game
+#board-layout standard15
+#tile-set english set
+#tile-distribution english
+#player1 HastyBot HastyBot
+#player2 RightBehindYou RightBehindYou

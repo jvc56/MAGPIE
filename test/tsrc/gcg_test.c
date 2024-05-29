@@ -125,6 +125,12 @@ void test_error_cases() {
                          GCG_PARSE_STATUS_RACK_NOT_IN_BAG);
   test_single_error_case("midgame_rack_not_in_bag.gcg", config,
                          GCG_PARSE_STATUS_RACK_NOT_IN_BAG);
+  test_single_error_case("event_after_last_rack.gcg", config,
+                         GCG_PARSE_STATUS_EVENT_AFTER_LAST_RACK);
+  test_single_error_case("last_rack1_not_in_bag.gcg", config,
+                         GCG_PARSE_STATUS_RACK_NOT_IN_BAG);
+  test_single_error_case("last_rack2_not_in_bag.gcg", config,
+                         GCG_PARSE_STATUS_RACK_NOT_IN_BAG);
   config_destroy(config);
 
   Config *no_lexicon_config = create_config_or_die(
@@ -614,6 +620,150 @@ void test_success_six_pass() {
   config_destroy(config);
 }
 
+void test_success_incomplete() {
+  Config *config = create_config_or_die(
+      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+
+  Game *game1 = game_create(config);
+  Game *game2 = game_create(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  Rack *rack = rack_create(ld_get_size(ld));
+  const char *gcg_filename;
+  GameHistory *game_history;
+  gcg_parse_status_t gcg_parse_status;
+
+  gcg_filename = "oops_all_pragmas.gcg";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  game_play_to_end(game_history, game1);
+  load_cgp_or_die(game2,
+                  "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  assert_games_are_equal(game1, game2, true);
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 0))));
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 1))));
+  game_history_destroy(game_history);
+
+  gcg_filename = "success_just_last_rack.gcg";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  game_play_to_end(game_history, game1);
+  load_cgp_or_die(
+      game2, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DIIIILU/ 0/0 0");
+  assert_games_are_equal(game1, game2, true);
+  rack_set_to_string(ld, rack, "DIIIILU");
+  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 0))));
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 1))));
+  game_history_destroy(game_history);
+
+  gcg_filename = "incomplete_after_tile_placement.gcg";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  game_play_to_end(game_history, game1);
+  load_cgp_or_die(game2,
+                  "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/15/15 / "
+                  "22/79 0");
+  assert_games_are_equal(game1, game2, true);
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 0))));
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 1))));
+  game_history_destroy(game_history);
+
+  gcg_filename = "incomplete_with_last_rack_after_tile_placement.gcg";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  game_play_to_end(game_history, game1);
+  load_cgp_or_die(
+      game2, "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/15/15 AENNRST/ "
+             "22/79 0");
+  assert_games_are_equal(game1, game2, true);
+  rack_set_to_string(ld, rack, "AENNRST");
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 0))));
+  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 1))));
+  game_history_destroy(game_history);
+
+  gcg_filename = "incomplete_after_phony_returned.gcg";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  game_play_to_end(game_history, game1);
+  load_cgp_or_die(
+      game2,
+      "11T3/10NA3/10EN3/10UG3/10MO3/11i3/5TANNERS3/6ZA3T3/4CRoWDIE4/9FEEB2/"
+      "10LEA2/15/15/15/15 ADEEIRT/ 194/131 1");
+  assert_games_are_equal(game1, game2, true);
+  rack_set_to_string(ld, rack, "ADEEIRT");
+  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 0))));
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 1))));
+  game_history_destroy(game_history);
+
+  gcg_filename = "incomplete_after_pass.gcg";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  game_play_to_end(game_history, game1);
+  load_cgp_or_die(
+      game2, "11T3/10NAE2/10END2/2A7UG1G1/2B7MO1L1/1VODKA5i1O1/2R2TANNERS1R1/"
+             "2T3ZA3T1I1/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/15/15/15/15 "
+             "CDEEFGO/ 360/232 1");
+  assert_games_are_equal(game1, game2, true);
+  rack_set_to_string(ld, rack, "CDEEFGO");
+  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 0))));
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 1))));
+  game_history_destroy(game_history);
+
+  gcg_filename = "incomplete_after_five_point_challenge.gcg";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  game_play_to_end(game_history, game1);
+  load_cgp_or_die(
+      game2,
+      "15/15/8GENITAL/12AY1/4B4MINX2/2GRIZ2ION4/4N4WARP2/3BA1SUQ1N4/"
+      "2VETCH3E4/1K1DE1YOOFs4/1E1E6T4/1R1L3FIE5/1MELODIA7/1A13/1SCRAUcH7 "
+      "AEIOOST/ 245/398 0");
+  assert_games_are_equal(game1, game2, true);
+  rack_set_to_string(ld, rack, "AEIOOST");
+  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 0))));
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 1))));
+  game_history_destroy(game_history);
+
+  gcg_filename = "incomplete_after_exchange.gcg";
+  game_history = game_history_create();
+  gcg_parse_status = test_parse_gcg(gcg_filename, config, game_history);
+  assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
+  game_play_to_end(game_history, game1);
+  load_cgp_or_die(
+      game2, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AAENRSZ/ 0/0 1");
+  assert_games_are_equal(game1, game2, true);
+  rack_set_to_string(ld, rack, "AAENRSZ");
+  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 0))));
+  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
+                                   game_history_get_player(game_history, 1))));
+  game_history_destroy(game_history);
+  rack_destroy(rack);
+  game_destroy(game1);
+  game_destroy(game2);
+  config_destroy(config);
+}
+
 void test_gcg() {
   test_error_cases();
   test_parse_special_char();
@@ -623,4 +773,5 @@ void test_gcg() {
   test_success_standard();
   test_success_five_point_challenge();
   test_success_six_pass();
+  test_success_incomplete();
 }

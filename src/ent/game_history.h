@@ -58,6 +58,10 @@ const char *game_history_player_get_nickname(const GameHistoryPlayer *player);
 void game_history_player_set_score(GameHistoryPlayer *player, int score);
 int game_history_player_get_score(const GameHistoryPlayer *player);
 
+void game_history_player_set_next_rack_set(GameHistoryPlayer *player,
+                                           bool next_rack_set);
+bool game_history_player_get_next_rack_set(const GameHistoryPlayer *player);
+
 void game_history_player_set_last_known_rack(GameHistoryPlayer *player,
                                              const Rack *rack);
 Rack *game_history_player_get_last_known_rack(const GameHistoryPlayer *player);
