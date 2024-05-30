@@ -188,6 +188,10 @@ uint8_t ld_hl_to_ml(const LetterDistribution *ld, char *letter) {
   return INVALID_LETTER;
 }
 
+bool char_is_playthrough(const char c) {
+  return c == ASCII_PLAYED_THROUGH || c == ASCII_UCGI_PLAYED_THROUGH;
+}
+
 // Convert a string of arbitrary characters into an array of machine letters,
 // returning the number of machine letters. This function does not allocate
 // the ml array; it is the caller's responsibility to make this array big
@@ -290,7 +294,7 @@ int ld_str_to_mls(const LetterDistribution *ld, const char *str,
       uint8_t ml = ld_hl_to_ml(ld, current_letter);
       if (ml == INVALID_LETTER) {
         if (current_letter_byte_index == 1 && allow_played_through_marker &&
-            current_char == ASCII_PLAYED_THROUGH) {
+            char_is_playthrough(current_char)) {
           ml = PLAYED_THROUGH_MARKER;
         } else {
           // letter is invalid

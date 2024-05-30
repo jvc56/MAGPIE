@@ -6,8 +6,8 @@
 #include "../def/game_history_defs.h"
 
 #include "letter_distribution.h"
-#include "move.h"
 #include "rack.h"
+#include "validated_move.h"
 
 typedef struct GameEvent GameEvent;
 
@@ -23,16 +23,24 @@ int game_event_get_player_index(const GameEvent *event);
 void game_event_set_cumulative_score(GameEvent *event, int cumulative_score);
 int game_event_get_cumulative_score(const GameEvent *event);
 
+void game_event_set_score_adjustment(GameEvent *event, int score_adjustment);
+int game_event_get_score_adjustment(const GameEvent *event);
+
+void game_event_set_move_score(GameEvent *event, int move_score);
+int game_event_get_move_score(const GameEvent *event);
+
+void game_event_set_cgp_move_string(GameEvent *event, char *cgp_move_string);
+const char *game_event_get_cgp_move_string(const GameEvent *event);
+
 void game_event_set_rack(GameEvent *event, Rack *rack);
 Rack *game_event_get_rack(const GameEvent *event);
 
-void game_event_set_move(GameEvent *event, Move *move);
-Move *game_event_get_move(const GameEvent *event);
+void game_event_set_vms(GameEvent *event, ValidatedMoves *vms);
+ValidatedMoves *game_event_get_vms(const GameEvent *event);
 
 void game_event_set_note(GameEvent *event, const char *note);
 const char *game_event_get_note(const GameEvent *event);
-
-void game_event_set_score(GameEvent *event, int score);
+int game_event_get_turn_value(const GameEvent *event);
 
 typedef struct GameHistoryPlayer GameHistoryPlayer;
 
@@ -47,10 +55,15 @@ void game_history_player_set_nickname(GameHistoryPlayer *player,
                                       const char *nickname);
 const char *game_history_player_get_nickname(const GameHistoryPlayer *player);
 
+void game_history_player_set_score(GameHistoryPlayer *player, int score);
 int game_history_player_get_score(const GameHistoryPlayer *player);
 
+void game_history_player_set_next_rack_set(GameHistoryPlayer *player,
+                                           bool next_rack_set);
+bool game_history_player_get_next_rack_set(const GameHistoryPlayer *player);
+
 void game_history_player_set_last_known_rack(GameHistoryPlayer *player,
-                                             Rack *rack);
+                                             const Rack *rack);
 Rack *game_history_player_get_last_known_rack(const GameHistoryPlayer *player);
 
 typedef struct GameHistory GameHistory;
@@ -93,12 +106,12 @@ GameHistoryPlayer *game_history_get_player(const GameHistory *history,
 
 int game_history_get_number_of_events(const GameHistory *history);
 
-void game_history_set_ld(GameHistory *history, LetterDistribution *ld);
-LetterDistribution *game_history_get_ld(const GameHistory *history);
-
 GameEvent *game_history_get_event(const GameHistory *history, int event_index);
 
 void game_history_set_cumulative_scores(GameHistory *game_history);
 GameEvent *game_history_create_and_add_game_event(GameHistory *game_history);
+
+Game *game_history_get_game(const GameHistory *game_history);
+void game_history_set_game(GameHistory *game_history, Game *game);
 
 #endif

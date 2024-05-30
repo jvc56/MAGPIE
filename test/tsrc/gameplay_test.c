@@ -28,47 +28,6 @@ void return_racks_to_bag(Game *game) {
   return_rack_to_bag(player1_rack, bag, game_get_player_draw_index(game, 1));
 }
 
-void assert_players_are_equal(const Player *p1, const Player *p2,
-                              bool check_scores) {
-  // For games ending in consecutive zeros, scores are checked elsewhere
-  if (check_scores) {
-    assert(player_get_score(p1) == player_get_score(p2));
-  }
-}
-
-void assert_games_are_equal(Game *g1, Game *g2, bool check_scores) {
-  assert(game_get_consecutive_scoreless_turns(g1) ==
-         game_get_consecutive_scoreless_turns(g2));
-  assert(game_get_game_end_reason(g1) == game_get_game_end_reason(g2));
-
-  int g1_player_on_turn_index = game_get_player_on_turn_index(g1);
-
-  const Player *g1_player_on_turn =
-      game_get_player(g1, g1_player_on_turn_index);
-  const Player *g1_player_not_on_turn =
-      game_get_player(g1, 1 - g1_player_on_turn_index);
-
-  int g2_player_on_turn_index = game_get_player_on_turn_index(g2);
-
-  const Player *g2_player_on_turn =
-      game_get_player(g2, g2_player_on_turn_index);
-  const Player *g2_player_not_on_turn =
-      game_get_player(g2, 1 - g2_player_on_turn_index);
-
-  assert_players_are_equal(g1_player_on_turn, g2_player_on_turn, check_scores);
-  assert_players_are_equal(g1_player_not_on_turn, g2_player_not_on_turn,
-                           check_scores);
-
-  Board *board1 = game_get_board(g1);
-  Board *board2 = game_get_board(g2);
-
-  Bag *bag1 = game_get_bag(g1);
-  Bag *bag2 = game_get_bag(g2);
-
-  assert_boards_are_equal(board1, board2);
-  assert_bags_are_equal(bag1, bag2, ld_get_size(game_get_ld(g1)));
-}
-
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
                            int array_length) {
   Game *actual_game = game_create(config);
@@ -82,7 +41,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
   int player1_score_before_last_move = -1;
 
   for (int i = 0; i < array_length; i++) {
-    assert(game_get_game_end_reason(actual_game) == GAME_END_REASON_NONE);
+    assert(!game_over(actual_game));
     return_racks_to_bag(actual_game);
 
     const LetterDistribution *ld = game_get_ld(actual_game);
@@ -429,7 +388,7 @@ void test_playmove() {
   play_top_n_equity_move(game, 0);
 
   assert(game_get_consecutive_scoreless_turns(game) == 0);
-  assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
+  assert(!game_over(game));
   assert(player_get_score(player0) == 36);
   assert(player_get_score(player1) == 0);
   assert(!rack_is_empty(player0_rack));
@@ -449,7 +408,7 @@ void test_playmove() {
   play_top_n_equity_move(game, 0);
 
   assert(game_get_consecutive_scoreless_turns(game) == 1);
-  assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
+  assert(!game_over(game));
   assert(player_get_score(player0) == 0);
   assert(player_get_score(player1) == 0);
   assert(!rack_is_empty(player0_rack));
@@ -475,7 +434,7 @@ void test_playmove() {
   int player0_score = player_get_score(player0);
   int player1_score = player_get_score(player1);
   assert(game_get_consecutive_scoreless_turns(game) == 5);
-  assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
+  assert(!game_over(game));
   assert(player0_score == 517);
   assert(player1_score == 349);
   assert(!rack_is_empty(player0_rack));
@@ -496,7 +455,7 @@ void test_playmove() {
   assert(!rack_is_empty(player0_rack));
   assert(rack_get_total_letters(player0_rack) == 1);
   assert(rack_get_total_letters(player1_rack) == 1);
-  assert(game_get_player_on_turn_index(game) == 0);
+  assert(game_get_player_on_turn_index(game) == 1);
   assert(bag_is_empty(bag));
 
   game_destroy(game);

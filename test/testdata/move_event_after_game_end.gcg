@@ -1,0 +1,47 @@
+#character-encoding UTF-8
+#description Created with Macondo
+#id io.woogles p6QRjJHG
+#lexicon CSW21
+#game-type classic
+#title test game
+#board-layout standard15
+#tile-set english set
+#tile-distribution english
+#player1 HastyBot HastyBot
+#player2 RightBehindYou RightBehindYou
+>HastyBot: DIIIILU -IIILU +0 0
+>RightBehindYou: AAENRSZ 8G ZA +22 22
+>HastyBot: ?CDEIRW 9E CRoWDIE +79 79
+>RightBehindYou: AENNRST 7F TANNERS +77 99
+>HastyBot: ?AGNOTT L1 TANGOi.T +70 149
+>RightBehindYou: BEEFKOS 10J FEEB +32 131
+>HastyBot: EEIMNTU K2 NEUM +27 176
+>RightBehindYou: ADGKOSV - +0 131
+>HastyBot: AAEEILT 11K LEA +18 194
+>RightBehindYou: ADGKOSV 6B VOKDA +27 158
+>RightBehindYou: ADGKOSV -- -27 131
+>HastyBot: ADEEIRT M2 ED +17 211
+>RightBehindYou: ADGKOSV 6B VODKA +27 158
+>HastyBot: ABEIRTV C4 AB.RTIVE +65 276
+>RightBehindYou: AGILORS N4 GLORIAS +74 232
+>HastyBot: HILNSWY 11B N.WISHLY +84 360
+>RightBehindYou: HLMOORY - +0 232
+#note this
+is
+a
+multiline
+note
+>HastyBot: CDEEFGO O6 DEF +41 401
+>RightBehindYou: HLMOORY D1 HOMY +42 274
+>HastyBot: CEGIIOX 1C C.IGOE +36 437
+#note single line note
+>RightBehindYou: AILOORU 8A OU.A +15 289
+>HastyBot: AEEIJNX M10 ..NJAX +44 481
+>RightBehindYou: ILOOPQR 15H PROLI. +48 337
+>HastyBot: EEIIPRU O1 PERI +25 506
+>RightBehindYou: IOQSTTU 5F QUIT +25 362
+>HastyBot: EIU 13M .EU +10 516
+>RightBehindYou: OST D11 .OTS +14 376
+>HastyBot: I F2 .I +5 521
+>RightBehindYou: (I) +2 378
+>RightBehindYou:  (time) -20 358

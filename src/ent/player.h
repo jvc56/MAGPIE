@@ -26,8 +26,7 @@ void player_set_score(Player *player, int score);
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type);
 void player_set_move_record_type(Player *player,
                                  move_record_t move_record_type);
-void player_increment_score(Player *player, int score);
-void player_decrement_score(Player *player, int score);
+void player_add_to_score(Player *player, int score);
 
 void player_update(const Config *config, Player *player);
 Player *player_duplicate(const Player *player);

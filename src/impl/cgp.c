@@ -31,7 +31,11 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
       // When placing letters on the board, we
       // assume that player 0 placed all of the tiles
       // for convenience.
-      bag_draw_letter(bag, machine_letters[i], 0);
+      bool success = bag_draw_letter(bag, machine_letters[i], 0);
+      if (!success) {
+        cgp_parse_status = CGP_PARSE_STATUS_BOARD_LETTERS_NOT_IN_BAG;
+        break;
+      }
       board_increment_tiles_played(board, 1);
     }
     *current_column_index = *current_column_index + number_of_machine_letters;
@@ -110,24 +114,21 @@ cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
 cgp_parse_status_t
 parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
                                      Game *game) {
-  cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
   const LetterDistribution *ld = game_get_ld(game);
   Bag *bag = game_get_bag(game);
-  int number_of_letters_added =
-      draw_rack_from_bag(ld, bag, player_get_rack(game_get_player(game, 0)),
-                         string_splitter_get_item(player_racks, 0),
-                         game_get_player_draw_index(game, 0));
-  if (number_of_letters_added < 0) {
-    return CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    int number_of_letters_added = draw_rack_string_from_bag(
+        ld, bag, player_get_rack(game_get_player(game, player_index)),
+        string_splitter_get_item(player_racks, player_index),
+        game_get_player_draw_index(game, player_index));
+    if (number_of_letters_added == -1) {
+      return CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
+    }
+    if (number_of_letters_added == -2) {
+      return CGP_PARSE_STATUS_RACK_LETTERS_NOT_IN_BAG;
+    }
   }
-  number_of_letters_added =
-      draw_rack_from_bag(ld, bag, player_get_rack(game_get_player(game, 1)),
-                         string_splitter_get_item(player_racks, 1),
-                         game_get_player_draw_index(game, 1));
-  if (number_of_letters_added < 0) {
-    cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
-  }
-  return cgp_parse_status;
+  return CGP_PARSE_STATUS_SUCCESS;
 }
 
 cgp_parse_status_t parse_cgp_racks(Game *game, const char *cgp_racks) {
@@ -148,16 +149,16 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
   StringSplitter *player_scores = split_string(cgp_scores, '/', false);
   if (string_splitter_get_number_of_items(player_scores) != 2) {
     cgp_parse_status = CGP_PARSE_STATUS_INVALID_NUMBER_OF_PLAYER_SCORES;
-  } else if (!is_all_digits_or_empty(
-                 string_splitter_get_item(player_scores, 0)) ||
-             !is_all_digits_or_empty(
-                 string_splitter_get_item(player_scores, 1))) {
-    cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_SCORES;
   } else {
-    player_set_score(game_get_player(game, 0),
-                     string_to_int(string_splitter_get_item(player_scores, 0)));
-    player_set_score(game_get_player(game, 1),
-                     string_to_int(string_splitter_get_item(player_scores, 1)));
+    for (int player_index = 0; player_index < 2; player_index++) {
+      bool success = false;
+      int player_score = string_to_int_or_set_error(
+          string_splitter_get_item(player_scores, player_index), &success);
+      if (!success) {
+        cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_SCORES;
+      }
+      player_set_score(game_get_player(game, player_index), player_score);
+    }
   }
   destroy_string_splitter(player_scores);
   return cgp_parse_status;
@@ -241,7 +242,8 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
 // - Player racks
 // - Player scores
 // - Number of consecutive scoreless turns
-void string_builder_add_cgp(const Game *game, StringBuilder *cgp_builder) {
+void string_builder_add_cgp(const Game *game, StringBuilder *cgp_builder,
+                            bool write_player_on_turn_first) {
   const LetterDistribution *ld = game_get_ld(game);
   const Board *board = game_get_board(game);
   for (int row = 0; row < BOARD_DIM; row++) {
@@ -272,23 +274,23 @@ void string_builder_add_cgp(const Game *game, StringBuilder *cgp_builder) {
 
   string_builder_add_char(cgp_builder, ' ');
 
-  for (int player_index = 0; player_index < 2; player_index++) {
-    string_builder_add_rack(
-        player_get_rack(game_get_player(game, player_index)), ld, cgp_builder);
-    if (player_index == 0) {
-      string_builder_add_char(cgp_builder, '/');
-    }
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
+
+  if (write_player_on_turn_first && game_get_player_on_turn_index(game) == 1) {
+    player1 = game_get_player(game, 0);
+    player0 = game_get_player(game, 1);
   }
+
+  string_builder_add_rack(player_get_rack(player0), ld, cgp_builder);
+  string_builder_add_char(cgp_builder, '/');
+  string_builder_add_rack(player_get_rack(player1), ld, cgp_builder);
 
   string_builder_add_char(cgp_builder, ' ');
 
-  for (int player_index = 0; player_index < 2; player_index++) {
-    string_builder_add_int(
-        cgp_builder, player_get_score(game_get_player(game, player_index)));
-    if (player_index == 0) {
-      string_builder_add_char(cgp_builder, '/');
-    }
-  }
+  string_builder_add_int(cgp_builder, player_get_score(player0));
+  string_builder_add_char(cgp_builder, '/');
+  string_builder_add_int(cgp_builder, player_get_score(player1));
 
   string_builder_add_char(cgp_builder, ' ');
 
@@ -296,9 +298,9 @@ void string_builder_add_cgp(const Game *game, StringBuilder *cgp_builder) {
                          game_get_consecutive_scoreless_turns(game));
 }
 
-char *game_get_cgp(const Game *game) {
+char *game_get_cgp(const Game *game, bool write_player_on_turn_first) {
   StringBuilder *cgp_builder = create_string_builder();
-  string_builder_add_cgp(game, cgp_builder);
+  string_builder_add_cgp(game, cgp_builder, write_player_on_turn_first);
   char *cgp = string_builder_dump(cgp_builder, NULL);
   destroy_string_builder(cgp_builder);
   return cgp;
@@ -368,9 +370,11 @@ void string_builder_add_cgp_options(const Config *config,
   }
 }
 
-char *game_get_cgp_with_options(const Config *config, const Game *game) {
+char *game_get_cgp_with_options(const Config *config, const Game *game,
+                                bool write_player_on_turn_first) {
   StringBuilder *cgp_with_options_builder = create_string_builder();
-  string_builder_add_cgp(game, cgp_with_options_builder);
+  string_builder_add_cgp(game, cgp_with_options_builder,
+                         write_player_on_turn_first);
   string_builder_add_cgp_options(config, cgp_with_options_builder);
   char *cgp_with_options = string_builder_dump(cgp_with_options_builder, NULL);
   destroy_string_builder(cgp_with_options_builder);

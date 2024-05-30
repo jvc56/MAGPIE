@@ -5,6 +5,7 @@
 #include "../def/cross_set_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
@@ -13,6 +14,7 @@
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -157,18 +159,43 @@ void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
 }
 
 // Draws a nonrandom set of letters specified by rack_string from the
-// bag to the rack.
-int draw_rack_from_bag(const LetterDistribution *ld, Bag *bag, Rack *rack,
-                       const char *rack_string, int player_draw_index) {
+// bag to the rack. Assumes the rack is empty.
+// Returns number of letters drawn on success
+// Returns -1 if the string was malformed.
+// Returns -2 if the tiles were not in the bag.
+int draw_rack_string_from_bag(const LetterDistribution *ld, Bag *bag,
+                              Rack *rack, const char *rack_string,
+                              int player_draw_index) {
   const int number_of_letters_set = rack_set_to_string(ld, rack, rack_string);
   const int dist_size = rack_get_dist_size(rack);
   for (int i = 0; i < dist_size; i++) {
     const int rack_number_of_letter = rack_get_letter(rack, i);
     for (int j = 0; j < rack_number_of_letter; j++) {
-      bag_draw_letter(bag, i, player_draw_index);
+      if (!bag_draw_letter(bag, i, player_draw_index)) {
+        return -2;
+      }
     }
   }
   return number_of_letters_set;
+}
+
+// Draws a nonrandom set of letters specified by rack_to_draw from the
+// bag to the rack. Assumes the rack is empty.
+// Returns true on success.
+// Return false when the rack letters are not in the bag.
+bool draw_rack_from_bag(Bag *bag, Rack *rack, const Rack *rack_to_draw,
+                        int player_draw_index) {
+  rack_copy(rack, rack_to_draw);
+  const int dist_size = rack_get_dist_size(rack);
+  for (int i = 0; i < dist_size; i++) {
+    const int rack_number_of_letter = rack_get_letter(rack, i);
+    for (int j = 0; j < rack_number_of_letter; j++) {
+      if (!bag_draw_letter(bag, i, player_draw_index)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
@@ -205,8 +232,8 @@ void standard_end_of_game_calculations(Game *game) {
   const Player *opponent = game_get_player(game, 1 - player_on_turn_index);
   const LetterDistribution *ld = game_get_ld(game);
 
-  player_increment_score(player_on_turn,
-                         2 * rack_get_score(ld, player_get_rack(opponent)));
+  player_add_to_score(player_on_turn,
+                      2 * rack_get_score(ld, player_get_rack(opponent)));
   game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
 }
 
@@ -219,24 +246,25 @@ void draw_starting_racks(Game *game) {
 }
 
 // Assumes the move has been validated
-void play_move(const Move *move, Game *game) {
+play_move_status_t play_move(const Move *move, Game *game,
+                             const Rack *rack_to_draw) {
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
     game_backup(game);
   }
   const LetterDistribution *ld = game_get_ld(game);
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  Bag *bag = game_get_bag(game);
+  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
+  int player_on_turn_draw_index = game_get_player_on_turn_draw_index(game);
   if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     play_move_on_board(move, game);
     update_cross_set_for_move(move, game);
     game_set_consecutive_scoreless_turns(game, 0);
 
-    Player *player_on_turn =
-        game_get_player(game, game_get_player_on_turn_index(game));
-    Bag *bag = game_get_bag(game);
-    Rack *player_on_turn_rack = player_get_rack(player_on_turn);
-
-    player_increment_score(player_on_turn, move_get_score(move));
+    player_add_to_score(player_on_turn, move_get_score(move));
     draw_at_most_to_rack(bag, player_on_turn_rack, move_get_tiles_played(move),
-                         game_get_player_on_turn_draw_index(game));
+                         player_on_turn_draw_index);
     if (rack_is_empty(player_on_turn_rack)) {
       standard_end_of_game_calculations(game);
     }
@@ -247,19 +275,29 @@ void play_move(const Move *move, Game *game) {
     game_increment_consecutive_scoreless_turns(game);
   }
 
+  if (rack_to_draw) {
+    return_rack_to_bag(player_on_turn_rack, bag, player_on_turn_draw_index);
+    if (!draw_rack_from_bag(bag, player_on_turn_rack, rack_to_draw,
+                            player_on_turn_draw_index)) {
+      return PLAY_MOVE_STATUS_RACK_TO_DRAW_NOT_IN_BAG;
+    }
+  }
+
   if (game_get_consecutive_scoreless_turns(game) == MAX_SCORELESS_TURNS) {
     Player *player0 = game_get_player(game, 0);
     Player *player1 = game_get_player(game, 1);
-    player_decrement_score(player0,
-                           rack_get_score(ld, player_get_rack(player0)));
-    player_decrement_score(player1,
-                           rack_get_score(ld, player_get_rack(player1)));
+    player_add_to_score(player0, -rack_get_score(ld, player_get_rack(player0)));
+    player_add_to_score(player1, -rack_get_score(ld, player_get_rack(player1)));
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
+  game_start_next_player_turn(game);
+  return PLAY_MOVE_STATUS_SUCCESS;
+}
 
-  if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    game_start_next_player_turn(game);
-  }
+void return_phony_tiles(Game *game) {
+  game_unplay_last_move(game);
+  game_start_next_player_turn(game);
+  game_increment_consecutive_scoreless_turns(game);
 }
 
 void generate_moves_for_game(Game *game, int thread_index,

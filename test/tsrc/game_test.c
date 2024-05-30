@@ -150,6 +150,16 @@ void test_load_cgp() {
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDF/YXZ 0/0 H",
       CGP_PARSE_STATUS_MALFORMED_CONSECUTIVE_ZEROS);
 
+  // Board letters not in bag
+  reset_and_load_game_failure(
+      game, "15/15/15/15/15/15/15/15/6ZZZ6/15/15/15/15/15/15 / 0/0 0",
+      CGP_PARSE_STATUS_BOARD_LETTERS_NOT_IN_BAG);
+
+  // Rack letters not in bag
+  reset_and_load_game_failure(
+      game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 Z/ZZ 0/0 0",
+      CGP_PARSE_STATUS_RACK_LETTERS_NOT_IN_BAG);
+
   game_destroy(game);
   config_destroy(config);
 }
@@ -170,7 +180,7 @@ void test_game_main() {
   game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
   game_reset(game);
   assert(game_get_consecutive_scoreless_turns(game) == 0);
-  assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
+  assert(!game_over(game));
 
   // Test opening racks
   cgp_parse_status = game_load_cgp(game, OPENING_CGP);

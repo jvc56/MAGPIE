@@ -340,24 +340,22 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
     double leftover = 0.0;
     game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
     // play move
-    play_move(simmed_play_get_move(simmed_play), game);
+    play_move(simmed_play_get_move(simmed_play), game, NULL);
     sim_results_increment_node_count(sim_results);
     game_set_backup_mode(game, BACKUP_MODE_OFF);
     // further plies will NOT be backed up.
     for (int ply = 0; ply < plies; ply++) {
       int player_on_turn_index = game_get_player_on_turn_index(game);
       Player *player_on_turn = game_get_player(game, player_on_turn_index);
-      game_end_reason_t game_end_reason = game_get_game_end_reason(game);
 
-      if (game_end_reason != GAME_END_REASON_NONE) {
-        // game is over.
+      if (game_over(game)) {
         break;
       }
 
       const Move *best_play = get_top_equity_move(
           game, simmer_worker->thread_index, simmer_worker->move_list);
       rack_copy(rack_placeholder, player_get_rack(player_on_turn));
-      play_move(best_play, game);
+      play_move(best_play, game, NULL);
       sim_results_increment_node_count(sim_results);
       if (ply == plies - 2 || ply == plies - 1) {
         double this_leftover = get_leave_value_for_move(

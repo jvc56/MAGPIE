@@ -4,11 +4,14 @@
 
 #include "../def/gcg_defs.h"
 
+#include "../ent/config.h"
 #include "../ent/game_history.h"
 
-gcg_parse_status_t parse_gcg(const char *gcg_filename,
+gcg_parse_status_t parse_gcg(const char *gcg_filename, Config *config,
                              GameHistory *game_history);
 gcg_parse_status_t parse_gcg_string(const char *input_gcg_string,
-                                    GameHistory *game_history);
+                                    Config *config, GameHistory *game_history);
+void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index);
+void game_play_to_end(GameHistory *game_history, Game *game);
 
 #endif

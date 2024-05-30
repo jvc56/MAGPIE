@@ -59,11 +59,24 @@ bool is_decimal_number(const char *str) {
 
 int char_to_int(char c) { return c - '0'; }
 
+// Fatal if conversion fails
 int string_to_int(const char *str) {
   char *endptr;
   long int result = strtol(str, &endptr, 10);
   if (*endptr != '\0') {
     log_fatal("string to int conversion failed for >%s<\n", str);
+  }
+  return (int)result;
+}
+
+// Sets success to false if conversion fails
+int string_to_int_or_set_error(const char *str, bool *success) {
+  char *endptr;
+  long int result = strtol(str, &endptr, 10);
+  if (*endptr != '\0') {
+    *success = false;
+  } else {
+    *success = true;
   }
   return (int)result;
 }

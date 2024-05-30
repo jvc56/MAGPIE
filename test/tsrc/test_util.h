@@ -39,7 +39,10 @@ void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
                  int move_index, const char *expected_move_string);
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
 void assert_boards_are_equal(Board *b1, Board *b2);
+void assert_games_are_equal(Game *g1, Game *g2, bool check_scores);
 void print_game(Game *game, MoveList *move_list);
+void print_cgp(const Game *game);
+void print_rack(const Rack *rack, const LetterDistribution *ld);
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,
                      InferenceResults *inference_results);
