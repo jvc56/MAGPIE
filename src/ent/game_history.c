@@ -26,11 +26,7 @@ struct GameEvent {
   // - End rack points
   // - End rack penalty
   int score_adjustment;
-  // Only one of rack and vms->rack will be
-  // set for a game event.
   Rack *rack;
-  // Only one of rack and vms->rack will be
-  // set for a game event.
   ValidatedMoves *vms;
   char *note;
 };
