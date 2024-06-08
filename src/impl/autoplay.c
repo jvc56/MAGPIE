@@ -9,12 +9,12 @@
 
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
-#include "../ent/config.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
+#include "config.h"
 
 #include "gameplay.h"
 #include "move_gen.h"

@@ -177,8 +177,7 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set() {
   load_config_or_die(config, "setoptions rack " EMPTY_RACK_STRING
                              " pindex 0 score 3 exch 1 eq 0 threads 1");
   inference_status_t status = infer_for_test(config, game, inference_results);
-  assert(status ==
-         INFERENCE_STATUS_EXCHANGE_NOT_board_is_letter_allowed_in_cross_set);
+  assert(status == INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED);
 
   bag_add_letter(bag, BLANK_MACHINE_LETTER, 0);
   // There should now be 14 tiles in the bag

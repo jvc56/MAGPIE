@@ -3,12 +3,13 @@
 
 #include "../def/simmer_defs.h"
 
-#include "../ent/config.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/sim_results.h"
+#include "config.h"
 
-sim_status_t simulate(const Config *config, const Game *game,
-                      const MoveList *move_list, SimResults *sim_results);
+sim_status_t simulate(const Config *config, const Game *input_game,
+                      const MoveList *move_list, Rack *known_opp_rack,
+                      SimResults *sim_results);
 
 #endif

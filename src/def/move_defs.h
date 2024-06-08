@@ -4,7 +4,8 @@
 #include "board_defs.h"
 #include "rack_defs.h"
 
-// Passes and exchanges can exceed the board size when racks are bigger than the board dimension.
+// Passes and exchanges can exceed the board size when racks are bigger than the
+// board dimension.
 #define MOVE_MAX_TILES ((BOARD_DIM) > (RACK_SIZE) ? (BOARD_DIM) : (RACK_SIZE))
 
 #define PASS_MOVE_EQUITY -10000
@@ -20,5 +21,10 @@ typedef enum {
   MOVE_RECORD_ALL,
   MOVE_RECORD_BEST,
 } move_record_t;
+
+typedef enum {
+  MOVE_GEN_STATUS_SUCCESS,
+  MOVE_GEN_STATUS_NO_GAME_LOADED,
+} move_gen_status_t;
 
 #endif

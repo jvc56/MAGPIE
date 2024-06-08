@@ -40,13 +40,23 @@ void error_status_destroy(ErrorStatus *error_status) {
   free(error_status);
 }
 
+void set_or_clear_error_status(ErrorStatus *error_status,
+                               error_status_t error_status_type,
+                               int error_code) {
+  if (error_status_is_success(error_status_type, error_code)) {
+    error_status_set_type_and_code(error_status, ERROR_STATUS_TYPE_NONE, 0);
+  } else {
+    error_status_set_type_and_code(error_status, error_status_type, error_code);
+  }
+}
+
 bool error_status_is_success(error_status_t error_status_type, int error_code) {
   bool is_success = false;
   switch (error_status_type) {
   case ERROR_STATUS_TYPE_NONE:
     is_success = true;
     break;
-  case ERROR_STATUS_TYPE_GEN:
+  case ERROR_STATUS_TYPE_MOVE_GEN:
     is_success = error_code == (int)GEN_STATUS_SUCCESS;
     break;
   case ERROR_STATUS_TYPE_SIM:
@@ -82,7 +92,7 @@ void error_status_log_warn_if_failed(const ErrorStatus *error_status) {
   case ERROR_STATUS_TYPE_NONE:
     log_fatal("no error to warn");
     break;
-  case ERROR_STATUS_TYPE_GEN:
+  case ERROR_STATUS_TYPE_MOVE_GEN:
     error_type_string = "generate";
     break;
   case ERROR_STATUS_TYPE_SIM:

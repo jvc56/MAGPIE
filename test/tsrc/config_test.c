@@ -123,13 +123,13 @@ void test_config_error_cases() {
   test_config_error(config, "go sim score -11",
                     CONFIG_LOAD_STATUS_MALFORMED_SCORE);
   test_config_error(config, "go sim eq 23434.32433.4324",
-                    CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN);
+                    CONFIG_LOAD_STATUS_MALFORMED_FLOAT_ARG);
   test_config_error(config, "go sim eq -3",
-                    CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN);
+                    CONFIG_LOAD_STATUS_MALFORMED_FLOAT_ARG);
   test_config_error(config, "go sim eq -4.5",
-                    CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN);
+                    CONFIG_LOAD_STATUS_MALFORMED_FLOAT_ARG);
   test_config_error(config, "go sim eq none",
-                    CONFIG_LOAD_STATUS_MALFORMED_EQUITY_MARGIN);
+                    CONFIG_LOAD_STATUS_MALFORMED_FLOAT_ARG);
   test_config_error(config, "go sim exch five",
                     CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED);
   test_config_error(config, "go sim exch -4",

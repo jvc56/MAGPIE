@@ -4,8 +4,8 @@
 
 #include "../def/gcg_defs.h"
 
-#include "../ent/config.h"
 #include "../ent/game_history.h"
+#include "config.h"
 
 gcg_parse_status_t parse_gcg(const char *gcg_filename, Config *config,
                              GameHistory *game_history);

@@ -13,13 +13,13 @@
 #include "../def/rack_defs.h"
 
 #include "../ent/board.h"
-#include "../ent/config.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
+#include "config.h"
 
 #include "../impl/cgp.h"
 #include "../impl/gameplay.h"
@@ -1045,7 +1045,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     game_event = game_history_create_and_add_game_event(game_history);
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_TIME_PENALTY);
-    // Rack is board_is_letter_allowed_in_cross_set to be empty for time penalty
+    // Rack is allowed to be empty for time penalty
     if (get_matching_group_string_length(gcg_parser, 2) == 0) {
       game_event_rack = NULL;
     } else {

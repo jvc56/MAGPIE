@@ -363,10 +363,9 @@ void string_builder_add_cgp_options(const Config *config,
 
   game_variant_t game_variant = config_get_game_variant(config);
   if (game_variant != GAME_VARIANT_CLASSIC) {
-    char *game_variant_name = get_game_variant_name_from_type(game_variant);
-    string_builder_add_formatted_string(cgp_options_builder, " var %s;",
-                                        game_variant_name);
-    free(game_variant_name);
+    string_builder_add_string(cgp_options_builder, " var ");
+    string_builder_add_game_variant(cgp_options_builder, game_variant);
+    string_builder_add_string(cgp_options_builder, ";");
   }
 }
 

@@ -3,13 +3,14 @@
 
 #include "../def/move_defs.h"
 
-#include "config.h"
+#include "../impl/config.h"
 #include "klv.h"
 #include "kwg.h"
 #include "rack.h"
 
 typedef struct Player Player;
 
+// FIXME: this shouldn't need the whole config
 Player *player_create(const Config *config, int player_index);
 void player_destroy(Player *player);
 

@@ -1,12 +1,12 @@
 #include "kwg_maker.h"
 
 #include "../def/cross_set_defs.h"
-#include "../ent/config.h"
 #include "../ent/conversion_results.h"
 #include "../ent/kwg.h"
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
+#include "config.h"
 
 // The KWG data structure was originally
 // developed in wolges. For more details
@@ -514,21 +514,43 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   return kwg;
 }
 
+conversion_type_t
+get_conversion_type_from_string(const char *conversion_type_string) {
+  conversion_type_t conversion_type = CONVERT_UNKNOWN;
+  if (strings_equal(conversion_type_string, "text2dawg")) {
+    conversion_type = CONVERT_TEXT2DAWG;
+  } else if (strings_equal(conversion_type_string, "text2gaddag")) {
+    conversion_type = CONVERT_TEXT2GADDAG;
+  } else if (strings_equal(conversion_type_string, "text2kwg")) {
+    conversion_type = CONVERT_TEXT2KWG;
+  } else if (strings_equal(conversion_type_string, "dawg2text")) {
+    conversion_type = CONVERT_DAWG2TEXT;
+  } else if (strings_equal(conversion_type_string, "gaddag2text")) {
+    conversion_type = CONVERT_GADDAG2TEXT;
+  } else if (strings_equal(conversion_type_string, "csv2klv")) {
+    conversion_type = CONVERT_CSV2KLV;
+  } else if (strings_equal(conversion_type_string, "klv2csv")) {
+    conversion_type = CONVERT_KLV2CSV;
+  }
+  return conversion_type;
+}
+
 conversion_status_t convert(const Config *config,
+                            const char *conversion_type_string,
+                            const char *input_filename,
+                            const char *output_filename,
                             ConversionResults *conversion_results) {
   LetterDistribution *ld = config_get_ld(config);
-  const char *input_filename = config_get_input_filename(config);
-  const char *output_filename = config_get_output_filename(config);
-
   if (input_filename == NULL) {
     return CONVERT_STATUS_INPUT_FILE_ERROR;
   }
   if (output_filename == NULL) {
     return CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
   }
-  conversion_type_t conversion_type = config_get_conversion_type(config);
+  conversion_type_t conversion_type =
+      get_conversion_type_from_string(conversion_type_string);
   DictionaryWordList *strings = dictionary_word_list_create();
-  char line[BOARD_DIM + 2];  // +1 for \n, +1 for \0
+  char line[BOARD_DIM + 2]; // +1 for \n, +1 for \0
   uint8_t mls[BOARD_DIM];
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
@@ -558,7 +580,7 @@ conversion_status_t convert(const Config *config,
       output_type = KWG_MAKER_OUTPUT_DAWG;
     } else if (conversion_type == CONVERT_TEXT2GADDAG) {
       output_type = KWG_MAKER_OUTPUT_GADDAG;
-    } 
+    }
     KWG *kwg = make_kwg_from_words(strings, output_type, KWG_MAKER_MERGE_EXACT);
     if (!kwg_write_to_file(kwg, output_filename)) {
       printf("failed to write output file: %s\n", output_filename);

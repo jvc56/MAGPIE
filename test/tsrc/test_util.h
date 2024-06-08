@@ -5,12 +5,13 @@
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
+
+#include "../../src/impl/config.h"
 
 #define TRIVIAL_CROSS_SET_STRING "*"
 

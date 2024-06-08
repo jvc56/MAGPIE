@@ -142,7 +142,7 @@ void macondo_tests() {
   assert_move_gen_row(game, move_list, "TT", "2THERMOS1A4", 10, 2, 3, NULL,
                       NULL);
 
-  // TestGenThroughBothWaysboard_is_letter_allowed_in_cross_setLetters
+  // TestGenThroughBothWaysAllowedLetters
   assert_move_gen_row(
       game, move_list, "ABEHINT", "3THERMOS2A2", 2, 10, 2, (int[]){0, 1, -1},
       (const char *[]){"3B HI(THERMOS)T 36", "3B NE(THERMOS)T 30"});

@@ -6,14 +6,15 @@
 #include "../def/game_defs.h"
 #include "../def/players_data_defs.h"
 
+#include "../impl/config.h"
 #include "bag.h"
 #include "board.h"
-#include "config.h"
 #include "letter_distribution.h"
 #include "player.h"
 
 typedef struct Game Game;
 
+// FIXME: this shouldn't need the whole config
 Game *game_create(const Config *config);
 void game_destroy(Game *game);
 void game_update(const Config *config, Game *game);

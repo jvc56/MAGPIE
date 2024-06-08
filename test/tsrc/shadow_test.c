@@ -209,7 +209,7 @@ void test_shadow_score() {
   assert(
       within_epsilon(anchor_get_highest_possible_equity(anchor_list, 0), 44));
 
-  // Making KAU (board_is_letter_allowed_in_cross_set by F in rack cross set)
+  // Making KAU (allowed by F in rack cross set)
   // and JUF, doubling the F and J.
   load_and_generate(game, move_list, player, KA_OPENING_CGP, "JFU");
   assert(

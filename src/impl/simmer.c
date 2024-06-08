@@ -14,7 +14,6 @@
 #include "../def/stats_defs.h"
 
 #include "../ent/bag.h"
-#include "../ent/config.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -27,6 +26,7 @@
 #include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
 
+#include "config.h"
 #include "gameplay.h"
 #include "move_gen.h"
 
@@ -68,7 +68,7 @@ typedef struct SimmerWorker {
 } SimmerWorker;
 
 Simmer *create_simmer(const Config *config, const MoveList *move_list,
-                      Game *game, int num_simmed_plays,
+                      Game *game, int num_simmed_plays, Rack *known_opp_rack,
                       SimResults *sim_results) {
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -86,9 +86,8 @@ Simmer *create_simmer(const Config *config, const MoveList *move_list,
   simmer->seed = config_get_seed(config);
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
 
-  Rack *opponent_known_tiles = player_get_rack(opponent);
-  if (!rack_is_empty(opponent_known_tiles)) {
-    simmer->known_opp_rack = rack_duplicate(opponent_known_tiles);
+  if (!rack_is_empty(known_opp_rack)) {
+    simmer->known_opp_rack = rack_duplicate(known_opp_rack);
   } else {
     simmer->known_opp_rack = NULL;
   }
@@ -442,7 +441,7 @@ void *simmer_worker(void *uncasted_simmer_worker) {
 }
 
 sim_status_t simulate_internal(const Config *config, Game *game,
-                               const MoveList *move_list,
+                               const MoveList *move_list, Rack *known_opp_rack,
                                SimResults *sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
@@ -452,8 +451,8 @@ sim_status_t simulate_internal(const Config *config, Game *game,
     return SIM_STATUS_NO_MOVES;
   }
 
-  Simmer *simmer =
-      create_simmer(config, move_list, game, num_simmed_plays, sim_results);
+  Simmer *simmer = create_simmer(config, move_list, game, num_simmed_plays,
+                                 known_opp_rack, sim_results);
 
   SimmerWorker **simmer_workers =
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->threads));
@@ -482,8 +481,10 @@ sim_status_t simulate_internal(const Config *config, Game *game,
   return SIM_STATUS_SUCCESS;
 }
 
+// FIXME: rethink all command args including simulate
 sim_status_t simulate(const Config *config, const Game *input_game,
-                      const MoveList *move_list, SimResults *sim_results) {
+                      const MoveList *move_list, Rack *known_opp_rack,
+                      SimResults *sim_results) {
   ThreadControl *thread_control = config_get_thread_control(config);
   thread_control_unhalt(thread_control);
 
@@ -493,7 +494,7 @@ sim_status_t simulate(const Config *config, const Game *input_game,
   Game *game = game_duplicate(input_game);
 
   sim_status_t sim_status =
-      simulate_internal(config, game, move_list, sim_results);
+      simulate_internal(config, game, move_list, known_opp_rack, sim_results);
 
   game_destroy(game);
   gen_destroy_cache();

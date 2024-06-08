@@ -130,7 +130,7 @@ void test_ld_str_to_mls() {
   assert(ld_str_to_mls(english_ld, "2", true, imls, 40) == -1);
   assert(ld_str_to_mls(english_ld, "ABC9EFG", true, imls, 40) == -1);
 
-  // Play through not board_is_letter_allowed_in_cross_set
+  // Play through not allowed
   assert(ld_str_to_mls(english_ld, "AB.F", false, imls, 40) == -1);
   assert(ld_str_to_mls(english_ld, "BEHF.", false, imls, 40) == -1);
   assert(ld_str_to_mls(english_ld, ".BDEF", false, imls, 40) == -1);

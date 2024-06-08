@@ -10,7 +10,6 @@
 #include "../def/thread_control_defs.h"
 
 #include "../ent/bag.h"
-#include "../ent/config.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
@@ -20,6 +19,7 @@
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
+#include "config.h"
 
 #include "gameplay.h"
 #include "move_gen.h"
@@ -528,7 +528,7 @@ inference_status_t verify_inference(const Inference *inference) {
 
   if (inference->target_number_of_tiles_exchanged != 0 &&
       number_of_letters_in_bag < (RACK_SIZE) * 2) {
-    return INFERENCE_STATUS_EXCHANGE_NOT_board_is_letter_allowed_in_cross_set;
+    return INFERENCE_STATUS_EXCHANGE_NOT_ALLOWED;
   }
 
   if (inference->target_number_of_tiles_exchanged != 0 &&
@@ -544,24 +544,22 @@ inference_status_t verify_inference(const Inference *inference) {
 }
 
 inference_status_t infer(const Config *config, const Game *input_game,
+                         int target_index, Rack *target_played_tiles,
+                         int target_score, int target_num_exch,
                          InferenceResults *results) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
   thread_control_unhalt(thread_control);
 
-  const Rack *config_target_played_tiles = config_get_rack(config);
-
-  if (!config_target_played_tiles) {
+  if (!target_played_tiles) {
     return INFERENCE_STATUS_NO_TILES_PLAYED;
   }
 
   Game *game = game_duplicate(input_game);
 
   Inference *inference = inference_create(
-      config_target_played_tiles, game, config_get_num_plays(config),
-      config_get_target_index(config), config_get_target_score(config),
-      config_get_target_number_of_tiles_exchanged(config),
-      config_get_equity_margin(config), results);
+      target_played_tiles, game, config_get_num_plays(config), target_index,
+      target_score, target_num_exch, config_get_equity_margin(config), results);
 
   inference_status_t status = verify_inference(inference);
 
@@ -569,7 +567,7 @@ inference_status_t infer(const Config *config, const Game *input_game,
     infer_manager(thread_control, inference);
 
     inference_results_finalize(
-        config_target_played_tiles, inference->current_target_leave,
+        target_played_tiles, inference->current_target_leave,
         inference->bag_as_rack, inference->results, inference->target_score,
         inference->target_number_of_tiles_exchanged, inference->equity_margin);
 
@@ -584,8 +582,8 @@ inference_status_t infer(const Config *config, const Game *input_game,
 
     // Return the player to infer rack to it's original
     // state since the inference does not own that struct
-    for (int i = 0; i < rack_get_dist_size(config_target_played_tiles); i++) {
-      for (int j = 0; j < rack_get_letter(config_target_played_tiles, i); j++) {
+    for (int i = 0; i < rack_get_dist_size(target_played_tiles); i++) {
+      for (int j = 0; j < rack_get_letter(target_played_tiles, i); j++) {
         rack_take_letter(inference->current_target_rack, i);
       }
     }

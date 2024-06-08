@@ -8,7 +8,6 @@
 #include "../def/rack_defs.h"
 
 #include "../ent/board.h"
-#include "../ent/exec_state.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
@@ -29,30 +28,30 @@
 
 #include "../util/string_util.h"
 
-static ExecState *wasm_exec_state = NULL;
-static ExecState *iso_exec_state = NULL;
+static Config *wasm_config = NULL;
+static Config *iso_config = NULL;
 
-void wasm_destroy_exec_states() {
-  exec_state_destroy(wasm_exec_state);
-  exec_state_destroy(iso_exec_state);
+void wasm_destroy_configs() {
+  config_destroy(wasm_config);
+  config_destroy(iso_config);
 }
 
-void load_cgp_into_iso_exec_state(const char *cgp, int num_plays) {
+void load_cgp_into_iso_config(const char *cgp, int num_plays) {
   // Use a separate command vars to get
   // a game for static_eval_get_move_score and static_evaluation
-  if (!iso_exec_state) {
-    iso_exec_state = exec_state_create();
+  if (!iso_config) {
+    iso_config = config_create_default();
   }
   char *cgp_command =
       get_formatted_string("position cgp %s numplays %d", cgp, num_plays);
-  execute_command_sync(iso_exec_state, cgp_command);
+  execute_command_sync(iso_config, cgp_command);
   free(cgp_command);
 }
 
 // tiles must contain 0 for play-through tiles!
 char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
-  load_cgp_into_iso_exec_state(cgpstr, 1);
-  Game *game = exec_state_get_game(iso_exec_state);
+  load_cgp_into_iso_config(cgpstr, 1);
+  Game *game = config_get_game(iso_config);
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   const int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -111,8 +110,8 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
 
 // a synchronous function to return a static eval of a position.
 char *static_evaluation(const char *cgpstr, int num_plays) {
-  load_cgp_into_iso_exec_state(cgpstr, num_plays);
-  Game *game = exec_state_get_game(iso_exec_state);
+  load_cgp_into_iso_config(cgpstr, num_plays);
+  Game *game = config_get_game(iso_config);
   MoveList *move_list = NULL;
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
@@ -122,17 +121,17 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 }
 
 int process_command_wasm(const char *cmd) {
-  if (!wasm_exec_state) {
-    wasm_exec_state = exec_state_create();
+  if (!wasm_config) {
+    wasm_config = config_create();
   }
-  execute_command_async(wasm_exec_state, cmd);
+  execute_command_async(wasm_config, cmd);
   return 0;
 }
 
 char *get_search_status_wasm() {
-  return command_search_status(wasm_exec_state, false);
+  return command_search_status(wasm_config, false);
 }
 
 char *get_stop_search_wasm() {
-  return command_search_status(wasm_exec_state, true);
+  return command_search_status(wasm_config, true);
 }
