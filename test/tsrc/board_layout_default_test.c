@@ -2,10 +2,10 @@
 
 #include "../../src/ent/board.h"
 #include "../../src/ent/board_layout.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/validated_move.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
@@ -16,7 +16,7 @@
 void test_board_layout_success() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
 
   assert(bonus_square_value_to_char(0x12) == '\'');
   assert(bonus_square_value_to_char(0x21) == '-');
@@ -119,7 +119,7 @@ void assert_opening_penalties(Game *game, const char *layout,
 void test_board_layout_correctness() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   Board *board = game_get_board(game);
 
   assert(board_get_anchor(board, 7, 7, BOARD_HORIZONTAL_DIRECTION));

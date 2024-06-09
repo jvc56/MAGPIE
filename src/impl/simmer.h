@@ -8,8 +8,19 @@
 #include "../ent/sim_results.h"
 #include "config.h"
 
-sim_status_t simulate(const Config *config, const Game *input_game,
-                      const MoveList *move_list, Rack *known_opp_rack,
-                      SimResults *sim_results);
+typedef struct SimArgs {
+  int max_iterations;
+  int num_simmed_plays;
+  int num_plies;
+  double stop_cond_pct;
+  uint64_t seed;
+  const Game *game;
+  const MoveList *move_list;
+  Rack *known_opp_rack;
+  WinPct *win_pcts;
+  ThreadControl *thread_control;
+} SimArgs;
+
+sim_status_t simulate(const SimArgs *args, SimResults *sim_results);
 
 #endif

@@ -2,8 +2,8 @@
 
 #include "../../src/def/kwg_defs.h"
 
-#include "../../src/ent/config.h"
 #include "../../src/ent/dictionary_word.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/kwg_maker.h"
 
@@ -202,7 +202,7 @@ void test_careen_career_exact_merged_gaddag() {
 void test_two_letter_trie() {
   Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
   DictionaryWordList *words = dictionary_word_list_create();
@@ -244,7 +244,7 @@ void test_two_letter_trie() {
 void test_two_letter_merged_dawg() {
   Config *config = create_config_or_die("setoptions lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
   DictionaryWordList *words = dictionary_word_list_create();
@@ -283,7 +283,7 @@ void test_two_letter_merged_dawg() {
 
 void test_polish_gaddag() {
   Config *config = create_config_or_die("setoptions lex OSPS49");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
@@ -330,7 +330,7 @@ void test_polish_gaddag() {
 
 void test_large_gaddag() {
   Config *config = create_config_or_die("setoptions lex CSW21");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
@@ -377,7 +377,7 @@ void test_large_gaddag() {
 
 void test_full_csw_gaddag() {
   Config *config = create_config_or_die("setoptions lex CSW21");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
   DictionaryWordList *words = dictionary_word_list_create();

@@ -8,13 +8,13 @@
 #include "../../src/def/rack_defs.h"
 
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/klv.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
@@ -119,7 +119,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
 void macondo_tests() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
@@ -303,7 +303,7 @@ void macondo_tests() {
   // TestRowEquivalent
   game_load_cgp(game, TEST_DUPE);
 
-  Game *game_two = game_create(config);
+  Game *game_two = config_game_create(config);
   Board *board_two = game_get_board(game_two);
 
   set_row(game_two, 7, " INCITES");
@@ -332,7 +332,7 @@ void macondo_tests() {
 void leave_lookup_test() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   const KLV *klv = player_get_klv(game_get_player(game, 0));
   MoveList *move_list = move_list_create(1000);
@@ -369,7 +369,7 @@ void leave_lookup_test() {
 void unfound_leave_lookup_test() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(1);
   Rack *rack = player_get_rack(game_get_player(game, 0));
 
@@ -395,7 +395,7 @@ void unfound_leave_lookup_test() {
 void exchange_tests() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(10);
 
   char cgp[300] = "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/"
@@ -436,7 +436,7 @@ void exchange_tests() {
 void many_moves_tests() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(239000);
 
   game_load_cgp(game, MANY_MOVES);
@@ -452,7 +452,7 @@ void many_moves_tests() {
 void equity_test() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   int ld_size = ld_get_size(ld);
 
@@ -500,7 +500,7 @@ void equity_test() {
 void top_equity_play_recorder_test() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(1);
@@ -529,7 +529,7 @@ void distinct_lexica_test() {
   Config *config =
       create_config_or_die("setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity "
                            "r1 best r2 best numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
 
@@ -576,7 +576,7 @@ void distinct_lexica_test() {
       "r1 best r2 best numplays 1");
 
   // Ensure loading from CGP correctly sets the distinct cross sets
-  Game *game2 = game_create(config);
+  Game *game2 = config_game_create(config);
 
   load_cgp_or_die(
       game2,
@@ -611,7 +611,7 @@ void wordsmog_test() {
   Config *config =
       create_config_or_die("setoptions lex CSW21_alpha s1 equity s2 equity "
                            "r1 best r2 best numplays 1 var wordsmog");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
 
   assert_validated_and_generated_moves(game, "FEEZEEE", "8D", "ZEEFE", 54,
                                        true);
@@ -643,7 +643,7 @@ void consistent_tiebreaking_test() {
   Config *config =
       create_config_or_die("setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity "
                            "r1 best r2 best numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
 

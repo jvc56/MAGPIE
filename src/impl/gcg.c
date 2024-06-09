@@ -508,7 +508,7 @@ load_config_with_game_history(const GameHistory *game_history, Config *config) {
 
   char *cfg_load_cmd = string_builder_dump(cfg_load_cmd_builder, NULL);
   destroy_string_builder(cfg_load_cmd_builder);
-  config_load_status_t status = config_load(config, cfg_load_cmd);
+  config_load_status_t status = config_load_command(config, cfg_load_cmd);
   free(cfg_load_cmd);
   return status;
 }
@@ -848,7 +848,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
         return GCG_PARSE_STATUS_CONFIG_LOAD_ERROR;
       }
 
-      gcg_parser->game = game_create(gcg_parser->config);
+      gcg_parser->game = config_game_create(gcg_parser->config);
     }
   }
 

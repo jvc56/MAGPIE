@@ -295,8 +295,8 @@ void test_success_standard() {
       test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
-  Game *game1 = game_create(config);
-  Game *game2 = game_create(config);
+  Game *game1 = config_game_create(config);
+  Game *game2 = config_game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
   GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
   GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
@@ -459,8 +459,8 @@ void test_success_five_point_challenge() {
       test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
-  Game *game1 = game_create(config);
-  Game *game2 = game_create(config);
+  Game *game1 = config_game_create(config);
+  Game *game2 = config_game_create(config);
 
   const LetterDistribution *ld = config_get_ld(config);
   assert_game_event(game_history, 16, GAME_EVENT_CHALLENGE_BONUS, 1, 398,
@@ -535,8 +535,8 @@ void test_success_six_pass() {
       test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
 
-  Game *game1 = game_create(config);
-  Game *game2 = game_create(config);
+  Game *game1 = config_game_create(config);
+  Game *game2 = config_game_create(config);
 
   const LetterDistribution *ld = config_get_ld(config);
   assert_game_event(game_history, 0, GAME_EVENT_TILE_PLACEMENT_MOVE, 0, 80,
@@ -624,8 +624,8 @@ void test_success_incomplete() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
 
-  Game *game1 = game_create(config);
-  Game *game2 = game_create(config);
+  Game *game1 = config_game_create(config);
+  Game *game2 = config_game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
   Rack *rack = rack_create(ld_get_size(ld));
   const char *gcg_filename;

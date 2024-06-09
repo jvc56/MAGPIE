@@ -39,5 +39,5 @@ void test_wasm_api() {
       retstr, "currmove 2b.THUMP result scored valid true sc 50 eq 50.000"));
   free(retstr);
 
-  wasm_destroy_exec_states();
+  wasm_destroy_configs();
 }

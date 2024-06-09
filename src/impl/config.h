@@ -3,14 +3,20 @@
 
 #include <stdbool.h>
 
+#include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
+#include "../def/simmer_defs.h"
 
+#include "../ent/autoplay_results.h"
 #include "../ent/board_layout.h"
 #include "../ent/error_status.h"
 #include "../ent/game.h"
+#include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/move.h"
 #include "../ent/players_data.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 
@@ -26,23 +32,36 @@ bool config_continue_on_coldstart(const Config *config);
 int config_get_bingo_bonus(const Config *config);
 BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
-float config_get_equity_margin(const Config *config);
-WinPct *config_get_win_pct(const Config *config);
+double config_get_equity_margin(const Config *config);
+WinPct *config_get_win_pcts(const Config *config);
 int config_get_num_plays(const Config *config);
 int config_get_plies(const Config *config);
 int config_get_max_iterations(const Config *config);
-float config_get_stopping_condition(const Config *config);
+double config_get_stop_cond_pct(const Config *config);
 bool config_get_use_game_pairs(const Config *config);
 uint64_t config_get_seed(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
-LetterDistribution *config_get_letter_distribution(const Config *config);
+LetterDistribution *config_get_ld(const Config *config);
 ThreadControl *config_get_thread_control(const Config *config);
 ErrorStatus *config_get_error_status(const Config *config);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
+MoveList *config_get_move_list(const Config *config);
+const char *config_get_ld_name(const Config *config);
+const char *config_get_board_layout_name(const Config *config);
 
-// FIXME: see where this goes
-void string_builder_add_game_variant(StringBuilder *sb,
-                                     game_variant_t game_variant_type);
+// Entity creators
 
+Game *config_game_create(const Config *config);
+void config_game_update(const Config *config, Game *game);
+
+// Impl
+inference_status_t config_infer(const Config *config, int target_index,
+                                int target_score, int target_num_exch,
+                                Rack *target_played_tiles,
+                                InferenceResults *results);
+autoplay_status_t config_autoplay(const Config *config,
+                                  AutoplayResults *autoplay_results);
+sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
+                             SimResults *sim_results);
 #endif

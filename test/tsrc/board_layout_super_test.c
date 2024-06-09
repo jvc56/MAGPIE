@@ -6,10 +6,10 @@
 #include "../../src/ent/autoplay_results.h"
 #include "../../src/ent/board.h"
 #include "../../src/ent/board_layout.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/validated_move.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/autoplay.h"
 #include "../../src/impl/gameplay.h"
@@ -29,7 +29,7 @@ void test_board_layout_correctness_super() {
   // which we need to test here.
   Config *config = create_config_or_die(
       "setoptions lex CEL_super s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
 
   // Verify the opening play score
   assert_validated_and_generated_moves(game, "IONIZED", "11K", "IONIZED", 104,
@@ -56,7 +56,7 @@ void test_board_layout_correctness_super() {
 
   AutoplayResults *ar = autoplay_results_create();
 
-  autoplay_status_t status = autoplay(config, ar);
+  autoplay_status_t status = config_autoplay(config, ar);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
 
   autoplay_results_destroy(ar);

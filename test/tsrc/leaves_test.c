@@ -2,11 +2,11 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "../../src/ent/config.h"
 #include "../../src/ent/klv.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/players_data.h"
 #include "../../src/ent/rack.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/util/log.h"
 #include "../../src/util/string_util.h"

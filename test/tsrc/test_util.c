@@ -16,13 +16,13 @@
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
@@ -79,7 +79,7 @@ uint64_t string_to_cross_set(const LetterDistribution *ld,
 }
 
 void load_config_or_die(Config *config, const char *cmd) {
-  config_load_status_t status = config_load(config, cmd);
+  config_load_status_t status = config_load_command(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
   }

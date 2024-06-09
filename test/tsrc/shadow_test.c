@@ -3,12 +3,12 @@
 #include "../../src/def/move_defs.h"
 
 #include "../../src/ent/anchor.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
@@ -39,7 +39,7 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
 void test_shadow_score() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(1000);
 
@@ -645,7 +645,7 @@ void test_shadow_score() {
 void test_shadow_top_move() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);
   MoveList *move_list = move_list_create(1);
 

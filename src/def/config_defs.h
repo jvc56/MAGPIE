@@ -40,16 +40,6 @@ typedef enum {
 } config_load_status_t;
 
 typedef enum {
-  COMMAND_TYPE_LOAD_CGP,
-  COMMAND_TYPE_GEN,
-  COMMAND_TYPE_SIM,
-  COMMAND_TYPE_INFER,
-  COMMAND_TYPE_AUTOPLAY,
-  COMMAND_TYPE_CONVERT,
-  COMMAND_TYPE_SET_OPTIONS,
-} command_t;
-
-typedef enum {
   EXEC_MODE_UNKNOWN,
   EXEC_MODE_CONSOLE,
   EXEC_MODE_UCGI,

@@ -2,11 +2,11 @@
 
 #include "../../src/def/board_defs.h"
 #include "../../src/def/letter_distribution_defs.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/player.h"
 #include "../../src/impl/cgp.h"
+#include "../../src/impl/config.h"
 #include "../../src/impl/word_prune.h"
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
@@ -34,7 +34,7 @@ void test_possible_words() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   // empty board
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   DictionaryWordList *possible_word_list = dictionary_word_list_create();
   generate_possible_words(game, NULL, possible_word_list);
 

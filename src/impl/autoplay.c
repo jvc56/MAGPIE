@@ -1,3 +1,5 @@
+#include "autoplay.h"
+
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -14,8 +16,8 @@
 #include "../ent/player.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
-#include "config.h"
 
+#include "config.h"
 #include "gameplay.h"
 #include "move_gen.h"
 
@@ -24,21 +26,19 @@
 #include "../util/util.h"
 
 typedef struct AutoplayWorker {
-  const Config *config;
+  const AutoplayArgs *args;
   AutoplayResults *autoplay_results;
   int max_games_for_worker;
   int worker_index;
-  uint64_t seed;
 } AutoplayWorker;
 
-AutoplayWorker *create_autoplay_worker(const Config *config,
+AutoplayWorker *create_autoplay_worker(const AutoplayArgs *args,
                                        int max_games_for_worker,
-                                       int worker_index, uint64_t seed) {
+                                       int worker_index) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
-  autoplay_worker->config = config;
+  autoplay_worker->args = args;
   autoplay_worker->max_games_for_worker = max_games_for_worker;
   autoplay_worker->worker_index = worker_index;
-  autoplay_worker->seed = seed;
   autoplay_worker->autoplay_results = autoplay_results_create();
   return autoplay_worker;
 }
@@ -86,14 +86,16 @@ void play_autoplay_game(Game *game, MoveList *move_list,
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
-  const Config *config = autoplay_worker->config;
-  ThreadControl *thread_control = config_get_thread_control(config);
-  Game *game = game_create(config);
+
+  const AutoplayArgs *args = autoplay_worker->args;
+  ThreadControl *thread_control = args->thread_control;
+  Game *game = game_create(args->game_args);
   Bag *bag = game_get_bag(game);
   MoveList *move_list = move_list_create(1);
 
   // Declare local vars for autoplay_worker fields for convenience
-  bool use_game_pairs = config_get_use_game_pairs(autoplay_worker->config);
+  bool use_game_pairs = args->use_game_pairs;
+  int max_games_for_worker = autoplay_worker->max_games_for_worker;
   int worker_index = autoplay_worker->worker_index;
   int starting_player_for_thread = worker_index % 2;
 
@@ -105,9 +107,9 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
     // the first game of the pair is played.
     game_pair_bag = bag_create(game_get_ld(game));
   }
-  bag_seed_for_worker(bag, autoplay_worker->seed, worker_index);
+  bag_seed_for_worker(bag, args->seed, worker_index);
 
-  for (int i = 0; i < autoplay_worker->max_games_for_worker; i++) {
+  for (int i = 0; i < max_games_for_worker; i++) {
     if (thread_control_get_is_halted(thread_control)) {
       break;
     }
@@ -146,9 +148,11 @@ int get_number_of_games_for_worker(int max_iterations, int number_of_threads,
   return number_of_games_for_worker;
 }
 
-autoplay_status_t autoplay(const Config *config,
+autoplay_status_t autoplay(const AutoplayArgs *args,
                            AutoplayResults *autoplay_results) {
-  ThreadControl *thread_control = config_get_thread_control(config);
+  ThreadControl *thread_control = args->thread_control;
+  int max_iterations = args->max_iterations;
+
   thread_control_unhalt(thread_control);
   autoplay_results_reset(autoplay_results);
 
@@ -160,11 +164,10 @@ autoplay_status_t autoplay(const Config *config,
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
 
     int number_of_games_for_worker = get_number_of_games_for_worker(
-        config_get_max_iterations(config), number_of_threads, thread_index);
+        max_iterations, number_of_threads, thread_index);
 
     autoplay_workers[thread_index] =
-        create_autoplay_worker(config, number_of_games_for_worker, thread_index,
-                               config_get_seed(config));
+        create_autoplay_worker(args, number_of_games_for_worker, thread_index);
 
     pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
                    autoplay_workers[thread_index]);

@@ -4,12 +4,12 @@
 #include "../../src/def/validated_move_defs.h"
 
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/kwg.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/validated_move.h"
 #include "../../src/ent/words.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/util/string_util.h"
 
@@ -21,7 +21,7 @@
 void test_words_played() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   game_load_cgp(game, VS_ED);
 
   ValidatedMoves *vms_pent =

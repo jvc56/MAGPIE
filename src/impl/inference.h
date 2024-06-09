@@ -9,7 +9,17 @@
 
 #include "config.h"
 
-inference_status_t infer(const Config *config, const Game *input_game,
-                         int target_index, Rack *target_rack, int target_score,
-                         int target_num_exch, InferenceResults *results);
+typedef struct InferenceArgs {
+  int target_index;
+  int target_score;
+  int target_num_exch;
+  int move_capacity;
+  float equity_margin;
+  Rack *target_played_tiles;
+  const Game *game;
+  ThreadControl *thread_control;
+} InferenceArgs;
+
+inference_status_t infer(InferenceArgs *args, InferenceResults *results);
+
 #endif

@@ -2,9 +2,9 @@
 #include <stdint.h>
 
 #include "../../src/ent/bag.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/rack.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/str/bag_string.h"
 

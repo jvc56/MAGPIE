@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-void wasm_destroy_exec_states();
+void wasm_destroy_configs();
 
 // Some functions for our WASM API. Not all the WASM-accessible functions are
 // defined here. See the Makefile-wasm for exports.

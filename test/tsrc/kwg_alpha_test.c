@@ -2,9 +2,9 @@
 
 #include <assert.h>
 
-#include "../../src/ent/config.h"
 #include "../../src/ent/kwg.h"
 #include "../../src/ent/rack.h"
+#include "../../src/impl/config.h"
 #include "test_util.h"
 
 void assert_kwg_accepts_alpha(const KWG *kwg, const LetterDistribution *ld,
@@ -47,10 +47,9 @@ void assert_kwg_compute_alpha_cross_set(const KWG *kwg,
   bool assert_cond = actual_cross_set == expected_cross_set;
   if (!assert_cond) {
     char *actual_cross_set_string = cross_set_to_string(ld, actual_cross_set);
-    printf(
-        "kwg_compute_alpha_cross_set failed assertion:\n>%s<\n>%s<\nare not "
-        "equal",
-        actual_cross_set_string, expected_cross_set_string);
+    printf("kwg_compute_alpha_cross_set failed assertion:\n>%s<\n>%s<\nare not "
+           "equal",
+           actual_cross_set_string, expected_cross_set_string);
     free(actual_cross_set_string);
     abort();
   }

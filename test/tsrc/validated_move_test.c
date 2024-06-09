@@ -3,11 +3,11 @@
 #include "../../src/def/letter_distribution_defs.h"
 #include "../../src/def/validated_move_defs.h"
 
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/gameplay.h"
 
@@ -46,7 +46,7 @@ ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
 void test_validated_move_errors() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
 
   assert_validated_move_error(game, EMPTY_CGP, "", 0, false, true, false,
                               MOVE_VALIDATION_STATUS_EMPTY_MOVE);
@@ -209,7 +209,7 @@ void test_validated_move_errors() {
 void test_validated_move_success() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
   const KLV *player_0_klv = player_get_klv(player0);
@@ -501,7 +501,7 @@ void test_validated_move_score() {
   // separately.
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   ValidatedMoves *vms = NULL;
 
   vms = assert_validated_move_success(game, ION_OPENING_CGP, "7f.IEE", 0, true,
@@ -568,7 +568,7 @@ void test_validated_move_distinct_kwg() {
   Config *config =
       create_config_or_die("setoptions l1 CSW21 l2 NWL20 s1 equity s2 equity "
                            "r1 best r2 best numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
 
@@ -647,7 +647,7 @@ void test_validated_move_wordsmog_phonies() {
   Config *config =
       create_config_or_die("setoptions lex CSW21_alpha s1 equity s2 equity "
                            "r1 best r2 best numplays 1 var wordsmog");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
 
   ValidatedMoves *vms =
       validated_moves_create(game, 0, "8H.TRONGLE", false, true, false);
@@ -674,7 +674,7 @@ void test_validated_move_wordsmog_phonies() {
 void test_validated_move_many() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
 
   ValidatedMoves *vms = assert_validated_move_success(
       game, EMPTY_CGP, "  pass ,  ex.4  ,  ex.ABC,  8d.JIHAD , h8.QIS ", 0,

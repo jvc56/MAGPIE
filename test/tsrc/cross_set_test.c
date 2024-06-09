@@ -8,9 +8,9 @@
 #include "../../src/def/letter_distribution_defs.h"
 
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 
@@ -60,7 +60,7 @@ void test_gen_cross_set_row(Game *game, int row, int col,
 void test_classic_cross_set() {
   Config *config = create_config_or_die(
       "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   Board *board = game_get_board(game);
 
   // TestGencross_setLoadedGame
@@ -162,7 +162,7 @@ void test_classic_cross_set() {
 void test_alpha_cross_set() {
   Config *config =
       create_config_or_die("setoptions lex CSW21_alpha var wordsmog");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   Board *board = game_get_board(game);
 
   game_reset(game);

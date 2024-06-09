@@ -10,7 +10,6 @@
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
@@ -20,6 +19,7 @@
 #include "../../src/ent/stats.h"
 #include "../../src/ent/thread_control.h"
 #include "../../src/ent/win_pct.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/move_gen.h"
@@ -63,8 +63,8 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
 }
 
 void test_win_pct() {
-  Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all");
+  Config *config =
+      create_config_or_die("lex CSW21 s1 equity s2 equity r1 all r2 all");
   assert(within_epsilon(win_pct_get(config_get_win_pcts(config), 118, 90),
                         0.844430));
   config_destroy(config);
@@ -72,34 +72,30 @@ void test_win_pct() {
 
 void test_sim_error_cases() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
-  Game *game = game_create(config);
+      "lex NWL20 s1 score s2 score r1 all r2 all numplays 15");
+  Game *game = config_get_game(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
   Rack *player0_rack = player_get_rack(player0);
 
-  MoveList *move_list = move_list_create(15);
-
   // No moves to simulate
   draw_rack_to_string(ld, bag, player0_rack, "AAADERW", 0);
   SimResults *sim_results = sim_results_create();
-  load_config_or_die(config, "setoptions plies 2 threads 1 i 1 cond none");
-  sim_status_t status = simulate(config, game, move_list, sim_results);
+  load_config_or_die(config, "plies 2 threads 1 i 1 cond none");
+  sim_status_t status = config_simulate(config, NULL, sim_results);
   assert(status == SIM_STATUS_NO_MOVES);
   assert(board_get_tiles_played(board) == 0);
 
-  move_list_destroy(move_list);
-  game_destroy(game);
   config_destroy(config);
   sim_results_destroy(sim_results);
 }
 
 void test_sim_single_iteration() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
-  Game *game = game_create(config);
+      "lex NWL20 s1 score s2 score r1 all r2 all numplays 15");
+  Game *game = config_get_game(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -109,28 +105,26 @@ void test_sim_single_iteration() {
 
   draw_rack_to_string(ld, bag, player0_rack, "AAADERW", 0);
 
-  MoveList *move_list = move_list_create(15);
+  MoveList *move_list = config_get_move_list(config);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
   SimResults *sim_results = sim_results_create();
-  load_config_or_die(config, "setoptions plies 2 threads 1 i 1 cond none");
-  sim_status_t status = simulate(config, game, move_list, sim_results);
+  load_config_or_die(config, "plies 2 threads 1 i 1 cond 100");
+  sim_status_t status = config_simulate(config, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
 
   assert(board_get_tiles_played(board) == 0);
 
-  move_list_destroy(move_list);
-  game_destroy(game);
   config_destroy(config);
   sim_results_destroy(sim_results);
 }
 
 void test_more_iterations() {
-  Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
-  Game *game = game_create(config);
+  Config *config =
+      create_config_or_die("lex NWL20 s1 score s2 score r1 all r2 all");
+  Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);
@@ -142,8 +136,8 @@ void test_more_iterations() {
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
   SimResults *sim_results = sim_results_create();
-  load_config_or_die(config, "setoptions plies 2 threads 1 i 400 cond none");
-  sim_status_t status = simulate(config, game, move_list, sim_results);
+  load_config_or_die(config, "plies 2 threads 1 i 400 cond none");
+  sim_status_t status = config_simulate(config, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
@@ -156,37 +150,35 @@ void test_more_iterations() {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "8G QI"));
 
-  move_list_destroy(move_list);
-  game_destroy(game);
   config_destroy(config);
   sim_results_destroy(sim_results);
   destroy_string_builder(move_string_builder);
 }
 
 void perf_test_multithread_sim() {
-  Config *config = create_config_or_die(
-      "setoptions s1 score s2 score r1 all r2 all "
-      "threads 4 "
-      "cgp "
-      "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"
-      "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ "
-      "336/298 0 lex NWL20;");
+  Config *config = create_config_or_die("s1 score s2 score r1 all r2 all "
+                                        "threads 4 ");
 
-  Game *game = game_create(config);
+  Game *game = config_get_game(config);
 
   const LetterDistribution *ld = game_get_ld(game);
   ThreadControl *thread_control = config_get_thread_control(config);
 
   int num_threads = thread_control_get_threads(thread_control);
   printf("Using %d threads\n", num_threads);
-  game_load_cgp(game, config_get_cgp(config));
+  load_cgp_or_die(
+      game,
+      "cgp "
+      "C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/"
+      "7PEW2DOE/9EF1DOR/2KUNA1J1BEVELS/3TURRETs2S2/7A4T2/7N7/7S7 EEEIILZ/ "
+      "336/298 0 lex NWL20;");
 
-  MoveList *move_list = move_list_create(15);
+  MoveList *move_list = config_get_move_list(config);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
   SimResults *sim_results = sim_results_create();
-  load_config_or_die(config, "setoptions plies 2 threads 1 i 1000 cond none");
-  sim_status_t status = simulate(config, game, move_list, sim_results);
+  load_config_or_die(config, "plies 2 threads 1 i 1000 cond none");
+  sim_status_t status = config_simulate(config, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);
@@ -201,17 +193,15 @@ void perf_test_multithread_sim() {
 
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
-  move_list_destroy(move_list);
   destroy_string_builder(move_string_builder);
-  game_destroy(game);
   config_destroy(config);
   sim_results_destroy(sim_results);
 }
 
 void test_play_similarity() {
-  Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all");
-  Game *game = game_create(config);
+  Config *config =
+      create_config_or_die("lex NWL20 s1 score s2 score r1 all r2 all");
+  Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -222,13 +212,12 @@ void test_play_similarity() {
 
   draw_rack_to_string(ld, bag, player0_rack, "ACEIRST", 0);
 
-  MoveList *move_list = move_list_create(15);
+  MoveList *move_list = config_get_move_list(config);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
 
   SimResults *sim_results = sim_results_create();
-  load_config_or_die(config,
-                     "setoptions plies 2 threads 1 i 1200 cond none check 50");
-  sim_status_t status = simulate(config, game, move_list, sim_results);
+  load_config_or_die(config, "plies 2 threads 1 i 1200 cond none check 50");
+  sim_status_t status = config_simulate(config, NULL, sim_results);
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(thread_control) ==
          HALT_STATUS_MAX_ITERATIONS);

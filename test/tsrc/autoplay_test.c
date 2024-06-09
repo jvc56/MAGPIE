@@ -7,8 +7,8 @@
 #include "../../src/def/autoplay_defs.h"
 
 #include "../../src/ent/autoplay_results.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/stats.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/autoplay.h"
 
@@ -61,7 +61,7 @@ void autoplay_game_pairs_test() {
 
   AutoplayResults *ar1 = autoplay_results_create();
 
-  autoplay_status_t status = autoplay(csw_config, ar1);
+  autoplay_status_t status = config_autoplay(csw_config, ar1);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
   int max_iterations = config_get_max_iterations(csw_config);
   assert(autoplay_results_get_games(ar1) == max_iterations * 2);
@@ -81,7 +81,7 @@ void autoplay_game_pairs_test() {
 
   AutoplayResults *ar2 = autoplay_results_create();
 
-  status = autoplay(csw_config, ar2);
+  status = config_autoplay(csw_config, ar2);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
   max_iterations = config_get_max_iterations(csw_config);
   assert(autoplay_results_get_games(ar2) == max_iterations * 2);
@@ -97,7 +97,7 @@ void autoplay_game_pairs_test() {
   max_iterations = config_get_max_iterations(csw_config);
 
   // Autoplay should reset the stats
-  status = autoplay(csw_config, ar1);
+  status = config_autoplay(csw_config, ar1);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
   assert(autoplay_results_get_games(ar1) == max_iterations);
 

@@ -122,7 +122,7 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
 
 int process_command_wasm(const char *cmd) {
   if (!wasm_config) {
-    wasm_config = config_create();
+    wasm_config = config_create_default();
   }
   execute_command_async(wasm_config, cmd);
   return 0;

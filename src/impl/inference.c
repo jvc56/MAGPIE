@@ -1,3 +1,5 @@
+#include "inference.h"
+
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -19,7 +21,6 @@
 #include "../ent/rack.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
-#include "config.h"
 
 #include "gameplay.h"
 #include "move_gen.h"
@@ -543,47 +544,42 @@ inference_status_t verify_inference(const Inference *inference) {
   return INFERENCE_STATUS_SUCCESS;
 }
 
-inference_status_t infer(const Config *config, const Game *input_game,
-                         int target_index, Rack *target_played_tiles,
-                         int target_score, int target_num_exch,
-                         InferenceResults *results) {
-  ThreadControl *thread_control = config_get_thread_control(config);
+inference_status_t infer(InferenceArgs *args, InferenceResults *results) {
+  thread_control_unhalt(args->thread_control);
 
-  thread_control_unhalt(thread_control);
-
-  if (!target_played_tiles) {
+  if (!args->target_played_tiles) {
     return INFERENCE_STATUS_NO_TILES_PLAYED;
   }
 
-  Game *game = game_duplicate(input_game);
+  Game *game = game_duplicate(args->game);
 
   Inference *inference = inference_create(
-      target_played_tiles, game, config_get_num_plays(config), target_index,
-      target_score, target_num_exch, config_get_equity_margin(config), results);
+      args->target_played_tiles, game, args->move_capacity, args->target_index,
+      args->target_score, args->target_num_exch, args->equity_margin, results);
 
   inference_status_t status = verify_inference(inference);
 
   if (status == INFERENCE_STATUS_SUCCESS) {
-    infer_manager(thread_control, inference);
+    infer_manager(args->thread_control, inference);
 
     inference_results_finalize(
-        target_played_tiles, inference->current_target_leave,
+        args->target_played_tiles, inference->current_target_leave,
         inference->bag_as_rack, inference->results, inference->target_score,
         inference->target_number_of_tiles_exchanged, inference->equity_margin);
 
-    if (thread_control_get_halt_status(thread_control) ==
+    if (thread_control_get_halt_status(args->thread_control) ==
         HALT_STATUS_MAX_ITERATIONS) {
       // Only print if infer was able to finish normally.
       // If thread_control_halt status isn't max iterations, it was interrupted
       // by the user and the results will not be valid.
       print_ucgi_inference(game_get_ld(inference->game), inference->results,
-                           thread_control);
+                           args->thread_control);
     }
 
     // Return the player to infer rack to it's original
     // state since the inference does not own that struct
-    for (int i = 0; i < rack_get_dist_size(target_played_tiles); i++) {
-      for (int j = 0; j < rack_get_letter(target_played_tiles, i); j++) {
+    for (int i = 0; i < rack_get_dist_size(args->target_played_tiles); i++) {
+      for (int j = 0; j < rack_get_letter(args->target_played_tiles, i); j++) {
         rack_take_letter(inference->current_target_rack, i);
       }
     }

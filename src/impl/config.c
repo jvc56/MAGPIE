@@ -67,7 +67,7 @@ typedef enum {
   ARG_TOKEN_PLIES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
-  ARG_TOKEN_STOPPING_CONDITION,
+  ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_GAME_PAIRS,
   ARG_TOKEN_RANDOM_SEED,
@@ -102,7 +102,7 @@ typedef enum {
   CONFIG_FIELD_TOKEN_NUM_PLAYS,
   CONFIG_FIELD_TOKEN_PLIES,
   CONFIG_FIELD_TOKEN_MAX_ITERATIONS,
-  CONFIG_FIELD_TOKEN_STOPPING_CONDITION,
+  CONFIG_FIELD_TOKEN_STOP_COND_PCT,
   CONFIG_FIELD_TOKEN_USE_GAME_PAIRS,
   CONFIG_FIELD_TOKEN_SEED,
   CONFIG_FIELD_TOKEN_PLAYERS_DATA,
@@ -191,16 +191,21 @@ BoardLayout *config_get_board_layout(const Config *config) {
                                          CONFIG_FIELD_TOKEN_BOARD_LAYOUT);
 }
 
+const char *config_get_board_layout_name(const Config *config) {
+  return (const char *)config_field_get_name(config,
+                                             CONFIG_FIELD_TOKEN_BOARD_LAYOUT);
+}
+
 game_variant_t config_get_game_variant(const Config *config) {
   return *(game_variant_t *)config_field_get(config,
                                              CONFIG_FIELD_TOKEN_GAME_VARIANT);
 }
 
-float config_get_equity_margin(const Config *config) {
-  return *(float *)config_field_get(config, CONFIG_FIELD_TOKEN_EQUITY_MARGIN);
+double config_get_equity_margin(const Config *config) {
+  return *(double *)config_field_get(config, CONFIG_FIELD_TOKEN_EQUITY_MARGIN);
 }
 
-WinPct *config_get_win_pct(const Config *config) {
+WinPct *config_get_win_pcts(const Config *config) {
   return (WinPct *)config_field_get(config, CONFIG_FIELD_TOKEN_WIN_PCTS);
 }
 
@@ -216,9 +221,8 @@ int config_get_max_iterations(const Config *config) {
   return *(int *)config_field_get(config, CONFIG_FIELD_TOKEN_MAX_ITERATIONS);
 }
 
-float config_get_stopping_condition(const Config *config) {
-  return *(float *)config_field_get(config,
-                                    CONFIG_FIELD_TOKEN_STOPPING_CONDITION);
+double config_get_stop_cond_pct(const Config *config) {
+  return *(double *)config_field_get(config, CONFIG_FIELD_TOKEN_STOP_COND_PCT);
 }
 
 bool config_get_use_game_pairs(const Config *config) {
@@ -234,8 +238,13 @@ PlayersData *config_get_players_data(const Config *config) {
                                          CONFIG_FIELD_TOKEN_PLAYERS_DATA);
 }
 
-LetterDistribution *config_get_letter_distribution(const Config *config) {
+LetterDistribution *config_get_ld(const Config *config) {
   return (LetterDistribution *)config_field_get(
+      config, CONFIG_FIELD_TOKEN_LETTER_DISTRIBUTION);
+}
+
+const char *config_get_ld_name(const Config *config) {
+  return (const char *)config_field_get_name(
       config, CONFIG_FIELD_TOKEN_LETTER_DISTRIBUTION);
 }
 
@@ -254,12 +263,118 @@ exec_mode_t config_get_exec_mode(const Config *config) {
 
 Game *config_get_game(const Config *config) { return config->game; }
 
+MoveList *config_get_move_list(const Config *config) {
+  return config->move_list;
+}
+
 bool config_continue_on_coldstart(const Config *config) {
   ParsedArg *exec_parg = config->exec_parg;
   return !exec_parg || config->exec_parg_token == ARG_TOKEN_CGP ||
          config_get_parg_has_value(config, ARG_TOKEN_INFILE) ||
          config_get_parg_has_value(config, ARG_TOKEN_EXEC_MODE);
 }
+
+// Config entity creators
+
+// FIXME: fillers should also get the parg strings
+
+void config_fill_game_args(const Config *config, GameArgs *game_args) {
+  game_args->players_data = config_get_players_data(config);
+  game_args->board_layout = config_get_board_layout(config);
+  game_args->ld = config_get_ld(config);
+  game_args->game_variant = config_get_game_variant(config);
+}
+
+Game *config_game_create(const Config *config) {
+  GameArgs game_args;
+  config_fill_game_args(config, &game_args);
+  return game_create(&game_args);
+}
+
+void config_game_update(const Config *config, Game *game) {
+  GameArgs game_args;
+  config_fill_game_args(config, &game_args);
+  game_update(game, &game_args);
+}
+
+void config_fill_autoplay_args(const Config *config,
+                               AutoplayArgs *autoplay_args) {
+  autoplay_args->max_iterations = config_get_max_iterations(config);
+  autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
+  autoplay_args->seed = config_get_seed(config);
+  GameArgs game_args;
+  config_fill_game_args(config, &game_args);
+  autoplay_args->game_args = &game_args;
+  autoplay_args->thread_control = config_get_thread_control(config);
+}
+
+autoplay_status_t config_autoplay(const Config *config,
+                                  AutoplayResults *autoplay_results) {
+  AutoplayArgs args;
+  config_fill_autoplay_args(config, &args);
+  return autoplay(&args, autoplay_results);
+}
+
+void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
+                          SimArgs *sim_args) {
+  sim_args->max_iterations = config_get_max_iterations(config);
+  sim_args->num_simmed_plays = config_get_num_plays(config);
+  sim_args->num_plies = config_get_plies(config);
+  sim_args->stop_cond_pct = config_get_stop_cond_pct(config);
+  sim_args->seed = config_get_seed(config);
+  sim_args->game = config_get_game(config);
+  sim_args->move_list = config_get_move_list(config);
+  sim_args->known_opp_rack = known_opp_rack;
+  sim_args->win_pcts = config_get_win_pcts(config);
+  sim_args->thread_control = config_get_thread_control(config);
+}
+
+sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
+                             SimResults *sim_results) {
+  SimArgs args;
+  config_fill_sim_args(config, known_opp_rack, &args);
+  return simulate(&args, sim_results);
+}
+
+void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
+  args->conversion_type_string =
+      config_get_parg_value(config, ARG_TOKEN_EXEC_MODE, 0);
+  args->input_filename = config_get_parg_value(config, ARG_TOKEN_INFILE, 0);
+  args->output_filename = config_get_parg_value(config, ARG_TOKEN_OUTFILE, 0);
+  args->ld = config_get_ld(config);
+}
+
+conversion_status_t config_convert(const Config *config,
+                                   ConversionResults *results) {
+  ConversionArgs args;
+  config_fill_conversion_args(config, &args);
+  return convert(&args, results);
+}
+
+void config_fill_infer_args(const Config *config, int target_index,
+                            int target_score, int target_num_exch,
+                            Rack *target_played_tiles, InferenceArgs *args) {
+  args->target_index = target_index;
+  args->target_score = target_score;
+  args->target_num_exch = target_num_exch;
+  args->move_capacity = config_get_num_plays(config);
+  args->equity_margin = config_get_equity_margin(config);
+  args->target_played_tiles = target_played_tiles;
+  args->game = config_get_game(config);
+  args->thread_control = config_get_thread_control(config);
+}
+
+inference_status_t config_infer(const Config *config, int target_index,
+                                int target_score, int target_num_exch,
+                                Rack *target_played_tiles,
+                                InferenceResults *results) {
+  InferenceArgs args;
+  config_fill_infer_args(config, target_index, target_score, target_num_exch,
+                         target_played_tiles, &args);
+  return infer(&args, results);
+}
+
+//
 
 bool is_game_recreation_required(const Config *config) {
   // If the ld changes (bag and rack size)
@@ -281,9 +396,9 @@ void config_init_game(Config *config) {
   }
 
   if (!config->game) {
-    config->game = game_create(config);
+    config->game = config_game_create(config);
   } else {
-    game_update(config, config->game);
+    config_game_update(config, config->game);
   }
 }
 
@@ -487,8 +602,7 @@ void execute_sim(Config *config) {
     return;
   }
 
-  sim_status_t status = simulate(config, config->game, config->move_list, NULL,
-                                 config->sim_results);
+  sim_status_t status = config_simulate(config, NULL, config->sim_results);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_SIM,
                             (int)status);
 }
@@ -525,8 +639,8 @@ void execute_sim_with_known_opp_rack(Config *config) {
     return;
   }
 
-  sim_status_t status = simulate(config, config->game, config->move_list,
-                                 known_opp_rack, config->sim_results);
+  sim_status_t status =
+      config_simulate(config, known_opp_rack, config->sim_results);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_SIM,
                             (int)status);
   rack_destroy(known_opp_rack);
@@ -576,8 +690,8 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
   }
 
   inference_status_t status =
-      infer(config, config->game, target_index, target_played_tiles,
-            target_score, target_num_exch, config->inference_results);
+      config_infer(config, target_index, target_score, target_num_exch,
+                   target_played_tiles, config->inference_results);
 
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_INFER,
                             (int)status);
@@ -604,7 +718,7 @@ char *status_infer(Config __attribute__((unused)) * config) {
 // Autoplay
 
 void execute_autoplay(Config *config) {
-  autoplay_status_t status = autoplay(config, config->autoplay_results);
+  autoplay_status_t status = config_autoplay(config, config->autoplay_results);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)status);
 }
@@ -617,10 +731,7 @@ char *status_autoplay(Config __attribute__((unused)) * config) {
 
 void execute_convert(Config *config) {
   conversion_status_t status =
-      convert(config, config_get_parg_value(config, ARG_TOKEN_CONVERT, 0),
-              config_get_parg_value(config, ARG_TOKEN_CONVERT, 1),
-              config_get_parg_value(config, ARG_TOKEN_CONVERT, 2),
-              config->conversion_results);
+      config_convert(config, config->conversion_results);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_CONVERT,
                             (int)status);
 }
@@ -971,22 +1082,22 @@ config_field_set_uint64(Config *config, config_field_token_t config_field_token,
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
-// float
+// double
 
-void config_field_create_float(ConfigField *config_field) {
-  config_field->data = malloc_or_die(sizeof(float));
+void config_field_create_double(ConfigField *config_field) {
+  config_field->data = malloc_or_die(sizeof(double));
 }
 
 config_load_status_t
-config_field_set_float(Config *config, config_field_token_t config_field_token,
-                       arg_token_t arg_token) {
+config_field_set_double(Config *config, config_field_token_t config_field_token,
+                        arg_token_t arg_token) {
   const char *equity_margin_string =
       config_get_parg_value(config, arg_token, 0);
   if (equity_margin_string) {
     if (!is_decimal_number(equity_margin_string)) {
       return CONFIG_LOAD_STATUS_MALFORMED_FLOAT_ARG;
     }
-    *(float *)config->fields[config_field_token]->data =
+    *(double *)config->fields[config_field_token]->data =
         string_to_double(equity_margin_string);
   }
   return CONFIG_LOAD_STATUS_SUCCESS;
@@ -1044,31 +1155,6 @@ void config_field_destroy_board_layout(ConfigField *config_field) {
 }
 
 // game variant
-
-game_variant_t get_game_variant_type_from_name(const char *variant_name) {
-  game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
-  if (strings_iequal(variant_name, GAME_VARIANT_CLASSIC_NAME)) {
-    game_variant = GAME_VARIANT_CLASSIC;
-  } else if (strings_iequal(variant_name, GAME_VARIANT_WORDSMOG_NAME)) {
-    game_variant = GAME_VARIANT_WORDSMOG;
-  }
-  return game_variant;
-}
-
-void string_builder_add_game_variant(StringBuilder *sb,
-                                     game_variant_t game_variant_type) {
-  switch (game_variant_type) {
-  case GAME_VARIANT_CLASSIC:
-    string_builder_add_string(sb, GAME_VARIANT_CLASSIC_NAME);
-    break;
-  case GAME_VARIANT_WORDSMOG:
-    string_builder_add_string(sb, GAME_VARIANT_WORDSMOG_NAME);
-    break;
-  default:
-    string_builder_add_string(sb, GAME_VARIANT_UNKNOWN_NAME);
-    break;
-  }
-}
 
 config_load_status_t
 config_field_set_game_variant(Config *config,
@@ -1324,6 +1410,7 @@ void parsed_arg_destroy(ParsedArg *parsed_arg) {
 
 Config *config_create_default() {
   Config *config = malloc_or_die(sizeof(Config));
+  // FIXME: just use a single string for the args
   parsed_arg_create(config, ARG_TOKEN_CGP,
                     (const char **[]){(const char *[]){"cgp", NULL}, NULL}, 4,
                     execute_cgp_load, status_cgp_load);
@@ -1405,7 +1492,7 @@ Config *config_create_default() {
   parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS,
                     (const char **[]){(const char *[]){"i", NULL}, NULL}, 1,
                     execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_STOPPING_CONDITION,
+  parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT,
                     (const char **[]){(const char *[]){"cond", NULL}, NULL}, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN,
@@ -1450,8 +1537,8 @@ Config *config_create_default() {
                       ARG_TOKEN_GAME_VARIANT, config_field_create_uint64,
                       config_field_destroy, config_field_set_game_variant);
   config_field_create(config, CONFIG_FIELD_TOKEN_EQUITY_MARGIN,
-                      ARG_TOKEN_EQUITY_MARGIN, config_field_create_float,
-                      config_field_destroy, config_field_set_float);
+                      ARG_TOKEN_EQUITY_MARGIN, config_field_create_double,
+                      config_field_destroy, config_field_set_double);
   config_field_create(config, CONFIG_FIELD_TOKEN_WIN_PCTS, ARG_TOKEN_WIN_PCT,
                       config_field_create_win_pct, config_field_destroy_win_pct,
                       config_field_set_win_pct);
@@ -1464,9 +1551,9 @@ Config *config_create_default() {
   config_field_create(config, CONFIG_FIELD_TOKEN_MAX_ITERATIONS,
                       ARG_TOKEN_MAX_ITERATIONS, config_field_create_uint64,
                       config_field_destroy, config_field_set_uint64);
-  config_field_create(config, CONFIG_FIELD_TOKEN_STOPPING_CONDITION,
-                      ARG_TOKEN_STOPPING_CONDITION, config_field_create_float,
-                      config_field_destroy, config_field_set_float);
+  config_field_create(config, CONFIG_FIELD_TOKEN_STOP_COND_PCT,
+                      ARG_TOKEN_STOP_COND_PCT, config_field_create_double,
+                      config_field_destroy, config_field_set_double);
   config_field_create(config, CONFIG_FIELD_TOKEN_USE_GAME_PAIRS,
                       ARG_TOKEN_GAME_PAIRS, config_field_create_bool,
                       config_field_destroy, config_field_set_bool);

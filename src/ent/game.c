@@ -51,7 +51,7 @@ struct Game {
   Player *players[2];
 
   // Owned by the caller
-  LetterDistribution *ld;
+  const LetterDistribution *ld;
   // Used by cross set generation
   Rack *cross_set_rack;
   game_variant_t variant;
@@ -63,6 +63,16 @@ struct Game {
 };
 
 game_variant_t game_get_variant(const Game *game) { return game->variant; }
+
+game_variant_t get_game_variant_type_from_name(const char *variant_name) {
+  game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
+  if (strings_iequal(variant_name, GAME_VARIANT_CLASSIC_NAME)) {
+    game_variant = GAME_VARIANT_CLASSIC;
+  } else if (strings_iequal(variant_name, GAME_VARIANT_WORDSMOG_NAME)) {
+    game_variant = GAME_VARIANT_WORDSMOG;
+  }
+  return game_variant;
+}
 
 Board *game_get_board(const Game *game) { return game->board; }
 
@@ -439,35 +449,36 @@ void game_set_backup_mode(Game *game, int backup_mode) {
   }
 }
 
-void game_update(const Config *config, Game *game) {
-  game->ld = config_get_ld(config);
+void game_update(Game *game, const GameArgs *game_args) {
+  game->ld = game_args->ld;
   for (int player_index = 0; player_index < 2; player_index++) {
-    player_update(config, game->players[player_index]);
+    player_update(game_args->players_data, game->players[player_index]);
   }
   for (int i = 0; i < NUMBER_OF_DATA; i++) {
-    game->data_is_shared[i] = players_data_get_is_shared(
-        config_get_players_data(config), (players_data_t)i);
+    game->data_is_shared[i] =
+        players_data_get_is_shared(game_args->players_data, (players_data_t)i);
   }
 }
 
-Game *game_create(const Config *config) {
+Game *game_create(const GameArgs *game_args) {
   Game *game = malloc_or_die(sizeof(Game));
-  game->ld = config_get_ld(config);
+  game->ld = game_args->ld;
   game->bag = bag_create(game->ld);
-  game->board = board_create(config_get_board_layout(config));
+  game->board = board_create(game_args->board_layout);
   for (int player_index = 0; player_index < 2; player_index++) {
-    game->players[player_index] = player_create(config, player_index);
+    game->players[player_index] =
+        player_create(game_args->players_data, game_args->ld, player_index);
   }
   for (int i = 0; i < NUMBER_OF_DATA; i++) {
-    game->data_is_shared[i] = players_data_get_is_shared(
-        config_get_players_data(config), (players_data_t)i);
+    game->data_is_shared[i] =
+        players_data_get_is_shared(game_args->players_data, (players_data_t)i);
   }
   game->starting_player_index = 0;
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
   game->game_end_reason = GAME_END_REASON_NONE;
 
-  game->variant = config_get_game_variant(config);
+  game->variant = game_args->game_variant;
   if (game->variant == GAME_VARIANT_WORDSMOG) {
     game->cross_set_rack = rack_create(ld_get_size(game->ld));
   } else {

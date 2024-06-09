@@ -7,11 +7,11 @@
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
@@ -30,8 +30,8 @@ void return_racks_to_bag(Game *game) {
 
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
                            int array_length) {
-  Game *actual_game = game_create(config);
-  Game *expected_game = game_create(config);
+  Game *actual_game = config_game_create(config);
+  Game *expected_game = config_game_create(config);
 
   int player0_last_score_on_rack = -1;
   int player1_last_score_on_rack = -1;
@@ -372,7 +372,7 @@ void test_standard_game() {
 void test_playmove() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -465,7 +465,7 @@ void test_playmove() {
 void test_set_random_rack() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
 
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -514,7 +514,7 @@ void test_set_random_rack() {
 void test_backups() {
   Config *config = create_config_or_die(
       "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+  Game *game = config_game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);

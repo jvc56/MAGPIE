@@ -535,12 +535,13 @@ get_conversion_type_from_string(const char *conversion_type_string) {
   return conversion_type;
 }
 
-conversion_status_t convert(const Config *config,
-                            const char *conversion_type_string,
-                            const char *input_filename,
-                            const char *output_filename,
+conversion_status_t convert(ConversionArgs *args,
                             ConversionResults *conversion_results) {
-  LetterDistribution *ld = config_get_ld(config);
+  const LetterDistribution *ld = args->ld;
+  const char *conversion_type_string = args->conversion_type_string;
+  const char *input_filename = args->input_filename;
+  const char *output_filename = args->output_filename;
+
   if (input_filename == NULL) {
     return CONVERT_STATUS_INPUT_FILE_ERROR;
   }
