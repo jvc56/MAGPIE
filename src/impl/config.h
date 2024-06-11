@@ -47,8 +47,6 @@ ErrorStatus *config_get_error_status(const Config *config);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
 MoveList *config_get_move_list(const Config *config);
-const char *config_get_ld_name(const Config *config);
-const char *config_get_board_layout_name(const Config *config);
 
 // Entity creators
 

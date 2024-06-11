@@ -90,7 +90,7 @@ uint32_t kwg_gaddag_prefix_arc(const KWG *kwg, LetterDistribution *ld,
 }
 
 void test_qi_xi_xu_word_trie() {
-  Config *config = create_config_or_die("setoptions lex CSW21");
+  Config *config = create_config_or_die("lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "QI");
@@ -125,7 +125,7 @@ void test_qi_xi_xu_word_trie() {
 }
 
 void test_egg_unmerged_gaddag() {
-  Config *config = create_config_or_die("setoptions lex CSW21");
+  Config *config = create_config_or_die("lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "EGG");
@@ -142,7 +142,7 @@ void test_egg_unmerged_gaddag() {
 }
 
 void test_careen_career_unmerged_gaddag() {
-  Config *config = create_config_or_die("setoptions lex CSW21");
+  Config *config = create_config_or_die("lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "CAREEN");
@@ -170,7 +170,7 @@ void test_careen_career_unmerged_gaddag() {
 }
 
 void test_careen_career_exact_merged_gaddag() {
-  Config *config = create_config_or_die("setoptions lex CSW21");
+  Config *config = create_config_or_die("lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   DictionaryWordList *words = dictionary_word_list_create();
   add_test_word(ld, words, "CAREEN");
@@ -200,7 +200,7 @@ void test_careen_career_exact_merged_gaddag() {
 }
 
 void test_two_letter_trie() {
-  Config *config = create_config_or_die("setoptions lex CSW21");
+  Config *config = create_config_or_die("lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
@@ -242,7 +242,7 @@ void test_two_letter_trie() {
 }
 
 void test_two_letter_merged_dawg() {
-  Config *config = create_config_or_die("setoptions lex CSW21");
+  Config *config = create_config_or_die("lex CSW21");
   LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
@@ -282,7 +282,7 @@ void test_two_letter_merged_dawg() {
 }
 
 void test_polish_gaddag() {
-  Config *config = create_config_or_die("setoptions lex OSPS49");
+  Config *config = create_config_or_die("lex OSPS49");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
   const Player *player = game_get_player(game, 0);
@@ -329,7 +329,7 @@ void test_polish_gaddag() {
 }
 
 void test_large_gaddag() {
-  Config *config = create_config_or_die("setoptions lex CSW21");
+  Config *config = create_config_or_die("lex CSW21");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
   const Player *player = game_get_player(game, 0);
@@ -376,7 +376,7 @@ void test_large_gaddag() {
 }
 
 void test_full_csw_gaddag() {
-  Config *config = create_config_or_die("setoptions lex CSW21");
+  Config *config = create_config_or_die("lex CSW21");
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);

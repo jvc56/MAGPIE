@@ -30,7 +30,7 @@ int get_drawn_tile_index(int drawn_tiles, int player_index) {
 
 void test_bag() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
   Bag *bag = bag_create(ld);

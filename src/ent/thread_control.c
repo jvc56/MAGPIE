@@ -97,8 +97,8 @@ int thread_control_get_print_info_interval(
   return thread_control->print_info_interval;
 }
 
-void set_print_info_interval(ThreadControl *thread_control,
-                             int print_info_interval) {
+void thread_control_set_print_info_interval(ThreadControl *thread_control,
+                                            int print_info_interval) {
   thread_control->print_info_interval = print_info_interval;
 }
 

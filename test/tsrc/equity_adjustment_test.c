@@ -18,7 +18,7 @@
 
 void test_macondo_opening_equity_adjustments() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = config_game_create(config);
   Player *player0 = game_get_player(game, 0);
   Rack *rack = player_get_rack(player0);
@@ -96,7 +96,7 @@ void test_macondo_opening_equity_adjustments() {
 
 void test_macondo_endgame_equity_adjustments() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(6);
 

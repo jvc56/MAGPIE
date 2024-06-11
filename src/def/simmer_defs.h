@@ -1,13 +1,6 @@
 #ifndef SIMMER_DEFS_H
 #define SIMMER_DEFS_H
 
-typedef enum {
-  SIM_STOPPING_CONDITION_NONE,
-  SIM_STOPPING_CONDITION_95PCT,
-  SIM_STOPPING_CONDITION_98PCT,
-  SIM_STOPPING_CONDITION_99PCT,
-} sim_stopping_condition_t;
-
 // We use this status type stub for consistency across
 // commands. We might add more in the future.
 typedef enum {

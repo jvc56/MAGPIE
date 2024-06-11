@@ -24,8 +24,8 @@ bool thread_control_halt(ThreadControl *thread_control,
                          halt_status_t halt_status);
 bool thread_control_unhalt(ThreadControl *thread_control);
 halt_status_t thread_control_get_halt_status(ThreadControl *thread_control);
-void set_print_info_interval(ThreadControl *thread_control,
-                             int print_info_interval);
+void thread_control_set_print_info_interval(ThreadControl *thread_control,
+                                            int print_info_interval);
 void thread_control_set_check_stop_interval(
     ThreadControl *thread_control, int check_stopping_condition_interval);
 bool thread_control_set_mode_searching(ThreadControl *thread_control);

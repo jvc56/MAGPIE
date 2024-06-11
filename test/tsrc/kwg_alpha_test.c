@@ -57,8 +57,7 @@ void assert_kwg_compute_alpha_cross_set(const KWG *kwg,
 }
 
 void test_kwg_accepts_alpha() {
-  Config *config =
-      create_config_or_die("setoptions lex CSW21_alpha var wordsmog");
+  Config *config = create_config_or_die("lex CSW21_alpha var wordsmog");
   const LetterDistribution *ld = config_get_ld(config);
   const PlayersData *players_data = config_get_players_data(config);
   const KWG *kwg = players_data_get_kwg(players_data, 0);
@@ -123,8 +122,7 @@ void test_kwg_accepts_alpha() {
 }
 
 void test_kwg_compute_alpha_cross_set() {
-  Config *config =
-      create_config_or_die("setoptions lex CSW21_alpha var wordsmog");
+  Config *config = create_config_or_die("lex CSW21_alpha var wordsmog");
   const LetterDistribution *ld = config_get_ld(config);
   const PlayersData *players_data = config_get_players_data(config);
   const KWG *kwg = players_data_get_kwg(players_data, 0);

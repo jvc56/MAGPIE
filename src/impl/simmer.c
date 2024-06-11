@@ -86,7 +86,7 @@ Simmer *create_simmer(const SimArgs *args, Game *game,
   simmer->initial_spread =
       player_get_score(player) - player_get_score(opponent);
   simmer->max_iterations = args->max_iterations;
-  simmer->zval = percentile_to_z(args->stop_cond_pct);
+  simmer->zval = percentile_to_z(args->stop_cond_pct / 100.0);
   simmer->threads = thread_control_get_threads(thread_control);
   simmer->seed = args->seed;
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);

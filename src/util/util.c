@@ -81,6 +81,28 @@ int string_to_int_or_set_error(const char *str, bool *success) {
   return (int)result;
 }
 
+double string_to_double_or_set_error(const char *str, bool *success) {
+  char *endptr;
+  double result = strtod(str, &endptr);
+  if (*endptr != '\0') {
+    *success = false;
+  } else {
+    *success = true;
+  }
+  return result;
+}
+
+uint64_t string_to_uint64_or_set_error(const char *str, bool *success) {
+  char *endptr;
+  uint64_t result = strtoull(str, &endptr, 10);
+  if (*endptr != '\0') {
+    *success = false;
+  } else {
+    *success = true;
+  }
+  return result;
+}
+
 uint64_t string_to_uint64(const char *str) {
   char *endptr;
   uint64_t result = strtoull(str, &endptr, 10);
@@ -94,7 +116,7 @@ double string_to_double(const char *str) {
   if (!str) {
     log_fatal("called string_to_double on NULL string\n");
   }
-  return strtof(str, NULL);
+  return strtod(str, NULL);
 }
 
 uint64_t choose(uint64_t n, uint64_t k) {

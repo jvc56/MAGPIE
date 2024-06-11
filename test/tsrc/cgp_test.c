@@ -31,8 +31,9 @@ void assert_game_matches_cgp_with_options(const Config *config,
                                           bool write_player_on_turn_first) {
   PlayersData *players_data = config_get_players_data(config);
   int bingo_bonus = config_get_bingo_bonus(config);
-  const char *board_layout_name = config_get_board_layout_name(config);
-  const char *ld_name = config_get_ld_name(config);
+  const char *board_layout_name =
+      board_layout_get_name(config_get_board_layout(config));
+  const char *ld_name = ld_get_name(config_get_ld(config));
   game_variant_t game_variant = config_get_game_variant(config);
 
   char *actual_cgp = game_get_cgp_with_options(
@@ -84,7 +85,7 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
 
 void test_cgp_english() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = config_game_create(config);
 
   assert_cgp_load_and_write_are_equal(game, EMPTY_CGP);
@@ -192,7 +193,7 @@ void test_cgp_english() {
 
 void test_cgp_english_with_options() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = config_game_create(config);
 
   assert_game_matches_cgp_with_options(
@@ -227,7 +228,7 @@ void test_cgp_english_with_options() {
 
 void test_cgp_catalan() {
   Config *config = create_config_or_die(
-      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = config_game_create(config);
 
   assert_cgp_load_and_write_are_equal(game, EMPTY_CATALAN_CGP);
@@ -239,7 +240,7 @@ void test_cgp_catalan() {
 
 void test_cgp_polish() {
   Config *config = create_config_or_die(
-      "setoptions lex OSPS49 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex OSPS49 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = config_game_create(config);
 
   assert_cgp_load_and_write_are_equal(game, POLISH_CGP);

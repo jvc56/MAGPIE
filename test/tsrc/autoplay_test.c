@@ -46,12 +46,12 @@ void assert_autoplay_results_are_equal(AutoplayResults *ar1,
 
 void autoplay_game_pairs_test() {
   Config *csw_config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
 
   uint64_t seed = time(NULL);
 
   char *options_string =
-      get_formatted_string("setoptions i 500 gp threads 11 rs %ld", seed);
+      get_formatted_string("i 500 gp threads 11 rs %ld", seed);
 
   load_config_or_die(csw_config, options_string);
 
@@ -70,8 +70,7 @@ void autoplay_game_pairs_test() {
                          autoplay_results_get_p2_score(ar1));
 
   // Random seeds is a transient field, so it must be set again
-  options_string =
-      get_formatted_string("setoptions r1 best r2 best rs %ld", seed);
+  options_string = get_formatted_string("r1 best r2 best rs %ld", seed);
 
   load_config_or_die(csw_config, options_string);
 
@@ -93,7 +92,7 @@ void autoplay_game_pairs_test() {
   // as autoplay using the "all" move recorder.
   assert_autoplay_results_are_equal(ar1, ar2);
 
-  load_config_or_die(csw_config, "setoptions i 7 nogp threads 2");
+  load_config_or_die(csw_config, "i 7 nogp threads 2");
   max_iterations = config_get_max_iterations(csw_config);
 
   // Autoplay should reset the stats

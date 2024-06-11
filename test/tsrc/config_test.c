@@ -27,8 +27,8 @@ void test_config_error(Config *config, const char *cmd,
                        config_load_status_t expected_status) {
   config_load_status_t actual_status = config_load_command(config, cmd);
   if (actual_status != expected_status) {
-    printf("config status mismatched: %d != %d\n>%s<\n", expected_status,
-           actual_status, cmd);
+    printf("config status mismatched:\nexpected: %d\nactual: %d\n>%s<\n",
+           expected_status, actual_status, cmd);
     assert(0);
   }
 }
@@ -43,20 +43,19 @@ void load_config_or_fail(Config *config, const char *cmd) {
 
 void test_config_error_cases() {
   Config *config = config_create_default();
-  test_config_error(config, "position gcg",
+  test_config_error(config, "endgame", CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
+  test_config_error(config, "sim lex CSW21 iter 1000 plies 10 1",
                     CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
-  test_config_error(config, "go sim lex CSW21 i 1000 plies 10 1",
-                    CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
-  test_config_error(config, "go sim sim", CONFIG_LOAD_STATUS_DUPLICATE_ARG);
-  test_config_error(config, "go sim i 1000 infer",
+  test_config_error(config, "sim plies 3 plies 4",
+                    CONFIG_LOAD_STATUS_DUPLICATE_ARG);
+  test_config_error(config, "sim it 1000 infer",
                     CONFIG_LOAD_STATUS_MISPLACED_COMMAND);
-  test_config_error(config, "go sim i 1000",
+  test_config_error(config, "sim it 1000", CONFIG_LOAD_STATUS_LEXICON_MISSING);
+  test_config_error(config, "sim it 1000 l2 CSW21",
                     CONFIG_LOAD_STATUS_LEXICON_MISSING);
-  test_config_error(config, "go sim i 1000 l2 CSW21",
-                    CONFIG_LOAD_STATUS_LEXICON_MISSING);
-  test_config_error(config, "go sim lex CSW21 i 1000 plies",
+  test_config_error(config, "sim lex CSW21 it 1000 plies",
                     CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
-  test_config_error(config, "position cgp 1 2 3",
+  test_config_error(config, "cgp 1 2 3",
                     CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
 
   const char *target = "../../test/testdata/invalid_number_of_rows15.txt";
@@ -67,7 +66,7 @@ void test_config_error_cases() {
     log_fatal("Failed to create symlink: %s %s", target, link_name);
   }
 
-  test_config_error(config, "go sim bdn invalid_number_of_rows15",
+  test_config_error(config, "sim bdn invalid_number_of_rows15",
                     CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
 
   if (unlink(link_name) != 0) {
@@ -75,106 +74,77 @@ void test_config_error_cases() {
     log_fatal("Failed to destroy symlink: %s %s", target, link_name);
   }
 
-  test_config_error(config, "go sim var Lonify",
+  test_config_error(config, "sim var Lonify",
                     CONFIG_LOAD_STATUS_UNRECOGNIZED_GAME_VARIANT);
-  test_config_error(config, "go sim bb 3b4",
-                    CONFIG_LOAD_STATUS_MALFORMED_BINGO_BONUS);
-  test_config_error(config, "go sim s1 random",
+  test_config_error(config, "sim bb 3b4", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_error(config, "sim s1 random",
                     CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE);
-  test_config_error(config, "go sim s2 none",
+  test_config_error(config, "sim s2 none",
                     CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE);
-  test_config_error(config, "go sim r1 top",
+  test_config_error(config, "sim r1 top",
                     CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE);
-  test_config_error(config, "go sim r2 3",
+  test_config_error(config, "sim r2 3",
                     CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE);
-  test_config_error(config, "go sim lex CSW21 rack ABCD1EF",
-                    CONFIG_LOAD_STATUS_MALFORMED_RACK);
-  test_config_error(config, "go sim lex CSW21 rack 6",
-                    CONFIG_LOAD_STATUS_MALFORMED_RACK);
-  test_config_error(config, "go sim numplays three",
+  test_config_error(config, "sim numplays three",
                     CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "go sim numplays 123R456",
+  test_config_error(config, "sim numplays 123R456",
                     CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "go sim numplays -2",
+  test_config_error(config, "sim numplays -2",
+                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim plies two",
                     CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "go sim plies two",
-                    CONFIG_LOAD_STATUS_MALFORMED_PLIES);
-  test_config_error(config, "go sim plies -3",
-                    CONFIG_LOAD_STATUS_MALFORMED_PLIES);
-  test_config_error(config, "go sim i six",
-                    CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
-  test_config_error(config, "go sim i -6",
-                    CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
-  test_config_error(config, "go sim i 0",
-                    CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
-  test_config_error(config, "go sim cond 96",
-                    CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
-  test_config_error(config, "go sim cond -95",
-                    CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
-  test_config_error(config, "go sim cond NO",
-                    CONFIG_LOAD_STATUS_MALFORMED_STOPPING_CONDITION);
-  test_config_error(config, "go sim pindex 3",
-                    CONFIG_LOAD_STATUS_MALFORMED_PLAYER_INDEX);
-  test_config_error(config, "go sim pindex -1",
-                    CONFIG_LOAD_STATUS_MALFORMED_PLAYER_INDEX);
-  test_config_error(config, "go sim pindex one",
-                    CONFIG_LOAD_STATUS_MALFORMED_PLAYER_INDEX);
-  test_config_error(config, "go sim score over9000",
-                    CONFIG_LOAD_STATUS_MALFORMED_SCORE);
-  test_config_error(config, "go sim score -11",
-                    CONFIG_LOAD_STATUS_MALFORMED_SCORE);
-  test_config_error(config, "go sim eq 23434.32433.4324",
-                    CONFIG_LOAD_STATUS_MALFORMED_FLOAT_ARG);
-  test_config_error(config, "go sim eq -3",
-                    CONFIG_LOAD_STATUS_MALFORMED_FLOAT_ARG);
-  test_config_error(config, "go sim eq -4.5",
-                    CONFIG_LOAD_STATUS_MALFORMED_FLOAT_ARG);
-  test_config_error(config, "go sim eq none",
-                    CONFIG_LOAD_STATUS_MALFORMED_FLOAT_ARG);
-  test_config_error(config, "go sim exch five",
-                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED);
-  test_config_error(config, "go sim exch -4",
-                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_TILES_EXCHANGED);
-  test_config_error(config, "go sim rs zero",
-                    CONFIG_LOAD_STATUS_MALFORMED_RANDOM_SEED);
-  test_config_error(config, "go sim rs -4",
-                    CONFIG_LOAD_STATUS_MALFORMED_RANDOM_SEED);
-  test_config_error(config, "go sim threads many",
-                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS);
-  test_config_error(config, "go sim threads 0",
-                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS);
-  test_config_error(config, "go sim threads -100",
-                    CONFIG_LOAD_STATUS_MALFORMED_NUMBER_OF_THREADS);
-  test_config_error(config, "go sim threads 9001",
-                    CONFIG_LOAD_STATUS_EXCEEDED_MAX_NUMBER_OF_THREADS);
-  test_config_error(config, "go sim info x",
-                    CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL);
-  test_config_error(config, "go sim info -40",
-                    CONFIG_LOAD_STATUS_MALFORMED_PRINT_INFO_INTERVAL);
-  test_config_error(config, "go sim check z",
-                    CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL);
-  test_config_error(config, "go sim check -90",
-                    CONFIG_LOAD_STATUS_MALFORMED_CHECK_STOP_INTERVAL);
-  test_config_error(config, "go sim l1 CSW21 l2 DISC2",
+  test_config_error(config, "sim plies -3",
+                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim iter six",
+                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_error(config, "sim it -6",
+                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim it 0",
+                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim stop -95",
+                    CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim stop 102",
+                    CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim stop NO",
+                    CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
+  test_config_error(config, "sim eq 23434.32433.4324",
+                    CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
+  test_config_error(config, "sim eq -3",
+                    CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim eq -4.5",
+                    CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim eq none",
+                    CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
+  test_config_error(config, "sim seed zero",
+                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_error(config, "sim threads many",
+                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_error(config, "sim threads 0",
+                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim threads -100",
+                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim info x", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_error(config, "sim info -40",
+                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim check z",
+                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_error(config, "sim check -90",
+                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_error(config, "sim l1 CSW21 l2 DISC2",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "go sim l1 OSPS49 l2 DISC2",
+  test_config_error(config, "sim l1 OSPS49 l2 DISC2",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "go sim l1 NWL20 l2 OSPS49",
+  test_config_error(config, "sim l1 NWL20 l2 OSPS49",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "go sim l1 NWL20 l2 NWL20 k2 DISC2",
+  test_config_error(config, "sim l1 NWL20 l2 NWL20 k2 DISC2",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "go sim l1 NWL20 l2 CSW21 ld german",
+  test_config_error(config, "sim l1 NWL20 l2 CSW21 ld german",
                     CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION);
-  test_config_error(config, "convert convtype kwg2exe",
-                    CONFIG_LOAD_STATUS_MALFORMED_CONVERSION_TYPE);
-  test_config_error(config, "go sim ucgi console",
-                    CONFIG_LOAD_STATUS_MULTIPLE_EXEC_MODES);
   config_destroy(config);
 }
 
 void test_config_success() {
   Config *config = config_create_default();
-  Game *game = NULL;
 
   // Loading with whitespace should not fail
   load_config_or_fail(config, "           ");
@@ -205,14 +175,13 @@ void test_config_success() {
       test_string_builder,
       "ld %s bb %d var %s l1 %s l2 %s s1 %s r1 "
       "%s s2 %s r2 %s eq %0.2f numplays %d "
-      "plies %d i "
-      "%d cond %d rs %d threads %d info %d check %d gp p1 %s p2 %s",
+      "plies %d it "
+      "%d stop %d seed %d threads %d info %d check %d gp true p1 %s p2 %s",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, equity_margin,
       num_plays, plies, max_iterations, stopping_cond, seed, number_of_threads,
       print_info, check_stop, p1, p2);
 
   load_config_or_fail(config, string_builder_peek(test_string_builder));
-  game = config_get_game(config);
 
   assert(config_get_game_variant(config) == GAME_VARIANT_WORDSMOG);
   assert(players_data_get_move_sort_type(config_get_players_data(config), 0) ==
@@ -238,8 +207,10 @@ void test_config_success() {
              config_get_thread_control(config)) == check_stop);
   assert(config_get_use_game_pairs(config));
 
-  assert_strings_equal(p1, player_get_name(game_get_player(game, 0)));
-  assert_strings_equal(p2, player_get_name(game_get_player(game, 1)));
+  assert_strings_equal(
+      p1, players_data_get_name(config_get_players_data(config), 0));
+  assert_strings_equal(
+      p2, players_data_get_name(config_get_players_data(config), 1));
 
   assert(
       strings_equal(players_data_get_data_name(config_get_players_data(config),
@@ -282,10 +253,10 @@ void test_config_success() {
 
   string_builder_clear(test_string_builder);
   string_builder_add_formatted_string(test_string_builder,
-                                      "setoptions ld %s bb %d l1 %s l2 %s  s1 "
-                                      "%s r1 %s s2 %s r2 %s plies %d i %d "
+                                      "ld %s bb %d l1 %s l2 %s  s1 "
+                                      "%s r1 %s s2 %s r2 %s plies %d it %d "
                                       "threads %d "
-                                      "info %d nogp",
+                                      "info %d gp false ",
                                       ld_name, bingo_bonus, l1, l2, s1, r1, s2,
                                       r2, plies, max_iterations,
                                       number_of_threads, print_info);
@@ -347,16 +318,6 @@ void test_config_success() {
   string_builder_add_string(test_string_builder, "s1 score r1 all");
   load_config_or_fail(config, string_builder_peek(test_string_builder));
 
-  // CGP command
-  string_builder_clear(test_string_builder);
-  string_builder_add_formatted_string(test_string_builder, "cgp %s",
-                                      DOUG_V_EMELY_CGP);
-  load_config_or_fail(config, string_builder_peek(test_string_builder));
-  char *cgp = game_get_cgp(config_get_game(config), true);
-  assert_strings_equal(cgp, "15/15/15/15/15/15/15/3WINDY7/15/15/15/15/"
-                            "15/15/15 ADEEGIL/AEILOUY 0/32 0");
-  free(cgp);
-
   // English and French should be able to play each other
   // with either distribution
   string_builder_clear(test_string_builder);
@@ -412,6 +373,9 @@ void test_config_success() {
 }
 
 void test_config() {
+  // FIXME:
+  // - on/off for bool args
+  // - shortened args
   test_config_error_cases();
   test_config_success();
 }

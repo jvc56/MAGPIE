@@ -119,7 +119,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
 
 void test_draw_at_most_to_rack() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
   Bag *bag = bag_create(ld);
@@ -151,7 +151,7 @@ void test_draw_at_most_to_rack() {
 
 void test_six_exchanges_game() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
 
   char *racks[18] = {"UUUVVWW", "AEFRWYZ", "INOOQSU", "LUUUVVW", "EEEEEOO",
                      "AEIKLMO", "GNOOOPR", "EGIJLRS", "EEEOTTT", "EIILRSX",
@@ -200,7 +200,7 @@ void test_six_exchanges_game() {
 
 void test_six_passes_game() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
 
   char *racks[31] = {"AEGILPR", "ACELNTV", "DDEIOTY", "?ADIIUU", "?BEIINS",
                      "EEEKMNO", "AAEHINT", "CDEGORZ", "EGNOQRS", "AFIQRRT",
@@ -297,7 +297,7 @@ void test_six_passes_game() {
 
 void test_standard_game() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
 
   char *racks[23] = {"EGIILNO", "DRRTYYZ", "CEIOTTU", "AADEEMT", "AACDEKS",
                      "BEEIOOP", "DHLNORR", "BGIIJRV", "?DFMNPU", "EEEOQRW",
@@ -371,7 +371,7 @@ void test_standard_game() {
 
 void test_playmove() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
@@ -464,7 +464,7 @@ void test_playmove() {
 
 void test_set_random_rack() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = config_game_create(config);
 
   Bag *bag = game_get_bag(game);
@@ -513,7 +513,7 @@ void test_set_random_rack() {
 
 void test_backups() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);

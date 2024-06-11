@@ -253,6 +253,7 @@ void test_play_similarity() {
 }
 
 void test_sim() {
+  // FIXME: Make sure zvals work
   test_win_pct();
   test_sim_error_cases();
   test_sim_single_iteration();

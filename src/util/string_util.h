@@ -8,6 +8,7 @@
 #include <string.h>
 
 bool has_prefix(const char *pre, const char *str);
+bool has_iprefix(const char *pre, const char *str);
 bool is_string_empty_or_whitespace(const char *str);
 bool is_string_empty_or_null(const char *str);
 bool is_all_digits_or_empty(const char *str);

@@ -12,6 +12,8 @@ void *realloc_or_die(void *realloc_target, size_t size);
 int char_to_int(char c);
 int string_to_int(const char *str);
 int string_to_int_or_set_error(const char *str, bool *success);
+double string_to_double_or_set_error(const char *str, bool *success);
+uint64_t string_to_uint64_or_set_error(const char *str, bool *success);
 uint64_t string_to_uint64(const char *str);
 double string_to_double(const char *str);
 bool is_decimal_number(const char *str);

@@ -36,7 +36,7 @@ void take_set_add(const LetterDistribution *ld, LeaveMap *leave_map, Rack *rack,
 
 void test_leave_map() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
   Rack *rack = rack_create(ld_size);

@@ -13,7 +13,7 @@
 
 void test_alphabet() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
   LetterDistribution *ld = config_get_ld(config);
   // Test blank
   assert(get_blanked_machine_letter(1) == (1 | BLANK_MASK));
@@ -64,7 +64,7 @@ void test_alphabet() {
   string_builder_clear(letter);
 
   Config *catalan_config = create_config_or_die(
-      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
   LetterDistribution *catalan_ld = config_get_ld(catalan_config);
 
   string_builder_add_user_visible_letter(catalan_ld, letter,

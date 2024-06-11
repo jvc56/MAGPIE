@@ -16,7 +16,7 @@
 
 void test_leaves() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
   const KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
   const LetterDistribution *ld = config_get_ld(config);
   Rack *rack = rack_create(ld_get_size(ld));
