@@ -93,7 +93,7 @@ Simmer *create_simmer(const SimArgs *args, Game *game,
 
   Rack *known_opp_rack = args->known_opp_rack;
 
-  if (!rack_is_empty(known_opp_rack)) {
+  if (known_opp_rack && !rack_is_empty(known_opp_rack)) {
     simmer->known_opp_rack = rack_duplicate(known_opp_rack);
   } else {
     simmer->known_opp_rack = NULL;

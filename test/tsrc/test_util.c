@@ -85,6 +85,19 @@ void load_config_or_die(Config *config, const char *cmd) {
   }
 }
 
+void load_and_exec_config_or_die(Config *config, const char *cmd) {
+  config_load_status_t status = config_load_command(config, cmd);
+  if (status != CONFIG_LOAD_STATUS_SUCCESS) {
+    log_fatal("load config failed with status %d: %s\n", status, cmd);
+  }
+  config_execute_command(config);
+  ErrorStatus *error_status = config_get_error_status(config);
+  if (!error_status_get_success(error_status)) {
+    error_status_log_warn_if_failed(error_status);
+    abort();
+  }
+}
+
 char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
   StringBuilder *css_builder = create_string_builder();
   for (int i = 0; i < MAX_ALPHABET_SIZE; ++i) {

@@ -21,6 +21,14 @@ struct ErrorStatus {
   int code;
 };
 
+error_status_t error_status_get_type(ErrorStatus *error_status) {
+  return error_status->type;
+}
+
+int error_status_get_code(ErrorStatus *error_status) {
+  return error_status->code;
+}
+
 void error_status_set_type_and_code(ErrorStatus *error_status,
                                     error_status_t type, int code) {
   error_status->code = code;
@@ -81,6 +89,10 @@ bool error_status_is_success(error_status_t error_status_type, int error_code) {
     is_success = error_code == (int)MOVE_VALIDATION_STATUS_SUCCESS;
   }
   return is_success;
+}
+
+bool error_status_get_success(const ErrorStatus *error_status) {
+  return error_status_is_success(error_status->type, error_status->code);
 }
 
 void error_status_log_warn_if_failed(const ErrorStatus *error_status) {

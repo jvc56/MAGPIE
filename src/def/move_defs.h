@@ -24,7 +24,6 @@ typedef enum {
 
 typedef enum {
   MOVE_GEN_STATUS_SUCCESS,
-  MOVE_GEN_STATUS_NO_GAME_LOADED,
 } move_gen_status_t;
 
 #endif

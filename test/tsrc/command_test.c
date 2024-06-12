@@ -418,7 +418,7 @@ void test_process_command(const char *arg_string,
 
 void test_exec_single_command() {
   char *plies_error_substr =
-      get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_PLIES);
+      get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
   test_process_command("go sim lex CSW21 i 1000 plies 2h3", 0, NULL, 1,
                        plies_error_substr);
   free(plies_error_substr);
@@ -459,8 +459,8 @@ void test_exec_file_commands() {
   char *commands_file_invocation =
       get_formatted_string("infile %s", commands_filename);
 
-  char *iter_error_substr = get_formatted_string(
-      "code %d", CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
+  char *iter_error_substr =
+      get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
 
   test_process_command(commands_file_invocation, 211,
                        "info infertotalracks 6145", 1, iter_error_substr);
