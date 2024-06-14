@@ -18,8 +18,6 @@ void set_or_clear_error_status(ErrorStatus *error_status,
 void error_status_set_type_and_code(ErrorStatus *error_status,
                                     error_status_t type, int code);
 void error_status_log_warn_if_failed(const ErrorStatus *error_status);
-// FIXME: think of better names for these or get rid of one
-bool error_status_is_success(error_status_t error_status_type, int error_code);
 bool error_status_get_success(const ErrorStatus *error_status);
 
 #endif

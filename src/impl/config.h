@@ -22,13 +22,17 @@
 
 typedef struct Config Config;
 
+// Constructors and Destructors
 Config *config_create_default();
 void config_destroy(Config *config);
+
+// Loading commands and execution
 config_load_status_t config_load_command(Config *config, const char *cmd);
 void config_execute_command(Config *config);
 char *config_get_execute_status(Config *config);
 bool config_continue_on_coldstart(const Config *config);
 
+// Getters
 int config_get_bingo_bonus(const Config *config);
 BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
@@ -47,11 +51,11 @@ ErrorStatus *config_get_error_status(const Config *config);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
 MoveList *config_get_move_list(const Config *config);
+SimResults *config_get_sim_results(const Config *config);
 
 // Entity creators
 
 Game *config_game_create(const Config *config);
-void config_game_update(const Config *config, Game *game);
 
 // Impl
 inference_status_t config_infer(const Config *config, int target_index,

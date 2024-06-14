@@ -24,8 +24,8 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void test_config_error(Config *config, const char *cmd,
-                       config_load_status_t expected_status) {
+void test_config_load_error(Config *config, const char *cmd,
+                            config_load_status_t expected_status) {
   config_load_status_t actual_status = config_load_command(config, cmd);
   if (actual_status != expected_status) {
     printf("config status mismatched:\nexpected: %d\nactual: %d\n>%s<\n",
@@ -36,30 +36,30 @@ void test_config_error(Config *config, const char *cmd,
 
 void test_config_load_error_cases() {
   Config *config = config_create_default();
-  test_config_error(config, "endgame", CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
-  test_config_error(config, "sim -lex CSW21 -iter 1000 -plies 10 1",
-                    CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
-  test_config_error(config, "sim -plies 3 -plies 4",
-                    CONFIG_LOAD_STATUS_DUPLICATE_ARG);
-  test_config_error(config, "sim -it 1000 -infer",
-                    CONFIG_LOAD_STATUS_MISPLACED_COMMAND);
-  test_config_error(config, "sim -i 1000",
-                    CONFIG_LOAD_STATUS_AMBIGUOUS_COMMAND);
-  test_config_error(config, "sim -it 1000", CONFIG_LOAD_STATUS_LEXICON_MISSING);
-  test_config_error(config, "sim -it 1000 -l2 CSW21",
-                    CONFIG_LOAD_STATUS_LEXICON_MISSING);
-  test_config_error(config, "set -mode uci",
-                    CONFIG_LOAD_STATUS_UNRECOGNIZED_EXEC_MODE);
-  test_config_error(config, "set -gp on",
-                    CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
-  test_config_error(config, "set -gp off",
-                    CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
-  test_config_error(config, "set -seed -2",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -lex CSW21 -it 1000 -plies",
-                    CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
-  test_config_error(config, "cgp 1 2 3",
-                    CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
+  test_config_load_error(config, "endgame",
+                         CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
+  test_config_load_error(config, "sim -lex CSW21 -iter 1000 -plies 10 1",
+                         CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
+  test_config_load_error(config, "sim -plies 3 -plies 4",
+                         CONFIG_LOAD_STATUS_DUPLICATE_ARG);
+  test_config_load_error(config, "sim -it 1000 -infer",
+                         CONFIG_LOAD_STATUS_MISPLACED_COMMAND);
+  test_config_load_error(config, "sim -i 1000",
+                         CONFIG_LOAD_STATUS_AMBIGUOUS_COMMAND);
+  test_config_load_error(config, "sim -it 1000 -l2 CSW21",
+                         CONFIG_LOAD_STATUS_LEXICON_MISSING);
+  test_config_load_error(config, "set -mode uci",
+                         CONFIG_LOAD_STATUS_UNRECOGNIZED_EXEC_MODE);
+  test_config_load_error(config, "set -gp on",
+                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+  test_config_load_error(config, "set -gp off",
+                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+  test_config_load_error(config, "set -seed -2",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -lex CSW21 -it 1000 -plies",
+                         CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
+  test_config_load_error(config, "cgp 1 2 3",
+                         CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
 
   const char *target = "../../test/testdata/invalid_number_of_rows15.txt";
   const char *link_name = "data/layouts/invalid_number_of_rows15.txt";
@@ -69,82 +69,84 @@ void test_config_load_error_cases() {
     log_fatal("Failed to create symlink: %s %s", target, link_name);
   }
 
-  test_config_error(config, "sim -bdn invalid_number_of_rows15",
-                    CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
+  test_config_load_error(config, "sim -bdn invalid_number_of_rows15",
+                         CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
 
   if (unlink(link_name) != 0) {
     perror("unlink");
     log_fatal("Failed to destroy symlink: %s %s", target, link_name);
   }
 
-  test_config_error(config, "sim -var Lonify",
-                    CONFIG_LOAD_STATUS_UNRECOGNIZED_GAME_VARIANT);
-  test_config_error(config, "sim -bb 3b4",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -s1 random",
-                    CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE);
-  test_config_error(config, "sim -s2 none",
-                    CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE);
-  test_config_error(config, "sim -r1 top",
-                    CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE);
-  test_config_error(config, "sim -r2 3",
-                    CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE);
-  test_config_error(config, "sim -numplays three",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -numplays 123R456",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -numplays -2",
-                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -plies two",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -plies -3",
-                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -iter six",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -it -6",
-                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -it 0",
-                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -stop -95",
-                    CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -stop 102",
-                    CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -stop NO",
-                    CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
-  test_config_error(config, "sim -eq 23434.32433.4324",
-                    CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
-  test_config_error(config, "sim -eq -3",
-                    CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -eq -4.5",
-                    CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -eq none",
-                    CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
-  test_config_error(config, "sim -seed zero",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -threads many",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -threads 0",
-                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -threads -100",
-                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -info x",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -info -40",
-                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -check z",
-                    CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_error(config, "sim -check -90",
-                    CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_error(config, "sim -l1 CSW21 -l2 DISC2",
-                    CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "sim -l1 OSPS49 -l2 DISC2",
-                    CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "sim -l1 NWL20 -l2 OSPS49",
-                    CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "sim -l1 NWL20 -l2 NWL20 -k2 DISC2",
-                    CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
-  test_config_error(config, "sim -l1 NWL20 -l2 CSW21 -ld german",
-                    CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION);
+  test_config_load_error(config, "sim -var Lonify",
+                         CONFIG_LOAD_STATUS_UNRECOGNIZED_GAME_VARIANT);
+  test_config_load_error(config, "sim -bb 3b4",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -s1 random",
+                         CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE);
+  test_config_load_error(config, "sim -s2 none",
+                         CONFIG_LOAD_STATUS_MALFORMED_MOVE_SORT_TYPE);
+  test_config_load_error(config, "sim -r1 top",
+                         CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE);
+  test_config_load_error(config, "sim -r2 3",
+                         CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE);
+  test_config_load_error(config, "sim -numplays three",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -numplays 123R456",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -numplays -2",
+                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -plies two",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -plies -3",
+                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -iter six",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -it -6",
+                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -it 0",
+                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -stop -95",
+                         CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -stop 102",
+                         CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -stop NO",
+                         CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
+  test_config_load_error(config, "sim -eq 23434.32433.4324",
+                         CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
+  test_config_load_error(config, "sim -eq -3",
+                         CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -eq -4.5",
+                         CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -eq none",
+                         CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
+  test_config_load_error(config, "sim -seed zero",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -threads many",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -threads 0",
+                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -threads -100",
+                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -info x",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -info -40",
+                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -check z",
+                         CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_config_load_error(config, "sim -check -90",
+                         CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  test_config_load_error(config, "sim -l1 CSW21",
+                         CONFIG_LOAD_STATUS_LEXICON_MISSING);
+  test_config_load_error(config, "sim -l1 CSW21 -l2 DISC2",
+                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
+  test_config_load_error(config, "sim -l1 OSPS49 -l2 DISC2",
+                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
+  test_config_load_error(config, "sim -l1 NWL20 -l2 OSPS49",
+                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
+  test_config_load_error(config, "sim -l1 NWL20 -l2 NWL20 -k2 DISC2",
+                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS);
+  test_config_load_error(config, "sim -l1 NWL20 -l2 CSW21 -ld german",
+                         CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION);
   config_destroy(config);
 }
 
@@ -153,6 +155,37 @@ void test_config_load_success() {
 
   // Loading with whitespace should not fail
   load_config_or_die(config, "           ");
+
+  // Loading with no lexicon data should not fail
+  load_config_or_die(config, "set -plies 3");
+
+  // Ensure defaults are set when just the lexicon is set
+  load_config_or_die(config, "set -lex CSW21");
+
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KWG, 0),
+      "CSW21");
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KWG, 1),
+      "CSW21");
+  assert_strings_equal(ld_get_name(config_get_ld(config)),
+                       ENGLISH_LETTER_DISTRIBUTION_NAME);
+
+  // Ensure defaults are set when just the lexicon changes
+  load_config_or_die(config, "set -lex FRA20");
+
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KWG, 0),
+      "FRA20");
+  assert_strings_equal(
+      players_data_get_data_name(config_get_players_data(config),
+                                 PLAYERS_DATA_TYPE_KWG, 1),
+      "FRA20");
+  assert_strings_equal(ld_get_name(config_get_ld(config)),
+                       FRENCH_LETTER_DISTRIBUTION_NAME);
 
   const char *ld_name = "french";
   int bingo_bonus = 73;
@@ -416,6 +449,21 @@ void assert_config_exec_status(Config *config, const char *cmd,
 void test_config_exec_parse_args() {
   Config *config = config_create_default();
 
+  // Ensure all commands that require game data fail correctly
+  assert_config_exec_status(config, "cgp 1 2 3 4",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "addmoves 1", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "sim", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "infer 0 3", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+  assert_config_exec_status(config, "autoplay", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+
   // CGP
   assert_config_exec_status(
       config,
@@ -456,7 +504,10 @@ void test_config_exec_parse_args() {
                             INFERENCE_STATUS_MALFORMED_SCORE);
   assert_config_exec_status(config, "infer 0 -4", ERROR_STATUS_TYPE_INFER,
                             INFERENCE_STATUS_MALFORMED_RACK);
-
+  assert_config_exec_status(config, "infer 0 8", ERROR_STATUS_TYPE_INFER,
+                            INFERENCE_STATUS_MALFORMED_EXCHANGE);
+  assert_config_exec_status(config, "infer 0 ABC", ERROR_STATUS_TYPE_INFER,
+                            INFERENCE_STATUS_MISSING_SCORE);
   // Autoplay
   assert_config_exec_status(config,
                             "autoplay -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",

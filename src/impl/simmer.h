@@ -22,5 +22,6 @@ typedef struct SimArgs {
 } SimArgs;
 
 sim_status_t simulate(const SimArgs *args, SimResults *sim_results);
+double percentage_to_z(double percentile);
 
 #endif

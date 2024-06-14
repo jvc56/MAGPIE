@@ -36,6 +36,7 @@
 #include "../str/sim_string.h"
 
 #include "../util/log.h"
+#include "../util/math_util.h"
 #include "../util/util.h"
 
 #define MAX_STOPPING_ITERATION_CT 4000
@@ -69,10 +70,6 @@ typedef struct SimmerWorker {
   Simmer *simmer;
 } SimmerWorker;
 
-double percentile_to_z(double percentile) {
-  return (erf(sqrt(2) * (1 - 2 * percentile) / sqrt(M_PI)) + 1) / 2;
-}
-
 Simmer *create_simmer(const SimArgs *args, Game *game,
                       SimResults *sim_results) {
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
@@ -86,7 +83,7 @@ Simmer *create_simmer(const SimArgs *args, Game *game,
   simmer->initial_spread =
       player_get_score(player) - player_get_score(opponent);
   simmer->max_iterations = args->max_iterations;
-  simmer->zval = percentile_to_z(args->stop_cond_pct / 100.0);
+  simmer->zval = p_to_z(args->stop_cond_pct / 100.0);
   simmer->threads = thread_control_get_threads(thread_control);
   simmer->seed = args->seed;
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
@@ -436,6 +433,10 @@ void *simmer_worker(void *uncasted_simmer_worker) {
 sim_status_t simulate_internal(const SimArgs *args, Game *game,
                                SimResults *sim_results) {
   ThreadControl *thread_control = args->thread_control;
+
+  if (!args->move_list) {
+    return SIM_STATUS_NO_MOVES;
+  }
 
   int num_simmed_plays = move_list_get_count(args->move_list);
 

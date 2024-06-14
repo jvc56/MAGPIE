@@ -48,16 +48,6 @@ void error_status_destroy(ErrorStatus *error_status) {
   free(error_status);
 }
 
-void set_or_clear_error_status(ErrorStatus *error_status,
-                               error_status_t error_status_type,
-                               int error_code) {
-  if (error_status_is_success(error_status_type, error_code)) {
-    error_status_set_type_and_code(error_status, ERROR_STATUS_TYPE_NONE, 0);
-  } else {
-    error_status_set_type_and_code(error_status, error_status_type, error_code);
-  }
-}
-
 bool error_status_is_success(error_status_t error_status_type, int error_code) {
   bool is_success = false;
   switch (error_status_type) {
@@ -89,6 +79,16 @@ bool error_status_is_success(error_status_t error_status_type, int error_code) {
     is_success = error_code == (int)MOVE_VALIDATION_STATUS_SUCCESS;
   }
   return is_success;
+}
+
+void set_or_clear_error_status(ErrorStatus *error_status,
+                               error_status_t error_status_type,
+                               int error_code) {
+  if (error_status_is_success(error_status_type, error_code)) {
+    error_status_set_type_and_code(error_status, ERROR_STATUS_TYPE_NONE, 0);
+  } else {
+    error_status_set_type_and_code(error_status, error_status_type, error_code);
+  }
 }
 
 bool error_status_get_success(const ErrorStatus *error_status) {

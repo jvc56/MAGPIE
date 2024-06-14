@@ -36,8 +36,6 @@
 #include "../str/move_string.h"
 #include "../str/sim_string.h"
 
-// FIXME: order this whole mess properly
-
 typedef enum {
   ARG_TOKEN_SET,
   ARG_TOKEN_CGP,
@@ -121,6 +119,44 @@ struct Config {
   ErrorStatus *error_status;
 };
 
+void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
+                       int num_req_values, int num_values,
+                       command_exec_func_t command_exec_func,
+                       command_status_func_t command_status_func) {
+  ParsedArg *parsed_arg = malloc_or_die(sizeof(ParsedArg));
+  parsed_arg->num_req_values = num_req_values;
+  parsed_arg->num_values = num_values;
+  parsed_arg->values = malloc_or_die(sizeof(char *) * parsed_arg->num_values);
+  for (int i = 0; i < parsed_arg->num_values; i++) {
+    parsed_arg->values[i] = NULL;
+  }
+  parsed_arg->name = string_duplicate(name);
+  parsed_arg->num_set_values = 0;
+  parsed_arg->exec_func = command_exec_func;
+  parsed_arg->status_func = command_status_func;
+
+  config->pargs[arg_token] = parsed_arg;
+}
+
+void parsed_arg_destroy(ParsedArg *parsed_arg) {
+  if (!parsed_arg) {
+    return;
+  }
+
+  free(parsed_arg->name);
+
+  if (parsed_arg->values) {
+    for (int i = 0; i < parsed_arg->num_values; i++) {
+      free(parsed_arg->values[i]);
+    }
+    free(parsed_arg->values);
+  }
+
+  free(parsed_arg);
+}
+
+// Parsed arg getters
+
 ParsedArg *config_get_parg(const Config *config, arg_token_t arg_token) {
   return config->pargs[arg_token];
 }
@@ -135,6 +171,7 @@ command_status_func_t config_get_parg_status_func(const Config *config,
   return config_get_parg(config, arg_token)->status_func;
 }
 
+// Returns NULL if the value was not set in the most recent config load call.
 const char *config_get_parg_value(const Config *config, arg_token_t arg_token,
                                   int value_index) {
   ParsedArg *parg = config_get_parg(config, arg_token);
@@ -159,23 +196,13 @@ int config_get_parg_num_req_values(const Config *config,
   return config_get_parg(config, arg_token)->num_req_values;
 }
 
-// Config data getter functions
+// Config getters
+
+exec_mode_t config_get_exec_mode(const Config *config) {
+  return config->exec_mode;
+}
 
 int config_get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
-
-BoardLayout *config_get_board_layout(const Config *config) {
-  return config->board_layout;
-}
-
-game_variant_t config_get_game_variant(const Config *config) {
-  return config->game_variant;
-}
-
-double config_get_equity_margin(const Config *config) {
-  return config->equity_margin;
-}
-
-WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 
 int config_get_num_plays(const Config *config) { return config->num_plays; }
 
@@ -188,6 +215,20 @@ int config_get_max_iterations(const Config *config) {
 double config_get_stop_cond_pct(const Config *config) {
   return config->stop_cond_pct;
 }
+
+double config_get_equity_margin(const Config *config) {
+  return config->equity_margin;
+}
+
+BoardLayout *config_get_board_layout(const Config *config) {
+  return config->board_layout;
+}
+
+game_variant_t config_get_game_variant(const Config *config) {
+  return config->game_variant;
+}
+
+WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
@@ -209,14 +250,14 @@ ErrorStatus *config_get_error_status(const Config *config) {
   return config->error_status;
 }
 
-exec_mode_t config_get_exec_mode(const Config *config) {
-  return config->exec_mode;
-}
-
 Game *config_get_game(const Config *config) { return config->game; }
 
 MoveList *config_get_move_list(const Config *config) {
   return config->move_list;
+}
+
+SimResults *config_get_sim_results(const Config *config) {
+  return config->sim_results;
 }
 
 bool config_exec_parg_is_set(const Config *config) {
@@ -230,7 +271,15 @@ bool config_continue_on_coldstart(const Config *config) {
          config_get_parg_num_set_values(config, ARG_TOKEN_EXEC_MODE) > 0;
 }
 
-// Config entity creators
+// Config command execution helper functions
+
+bool is_game_recreation_required(const Config *config) {
+  // If the ld changes (bag and rack size)
+  // a recreation is required to resize the
+  // dynamically allocated fields.
+  return config_get_parg_num_set_values(config, ARG_TOKEN_LETTER_DISTRIBUTION) >
+         0;
+}
 
 void config_fill_game_args(const Config *config, GameArgs *game_args) {
   game_args->players_data = config->players_data;
@@ -249,91 +298,6 @@ void config_game_update(const Config *config, Game *game) {
   GameArgs game_args;
   config_fill_game_args(config, &game_args);
   game_update(game, &game_args);
-}
-
-void config_fill_autoplay_args(const Config *config,
-                               AutoplayArgs *autoplay_args) {
-  autoplay_args->max_iterations = config->max_iterations;
-  autoplay_args->use_game_pairs = config->use_game_pairs;
-  autoplay_args->seed = config->seed;
-  autoplay_args->thread_control = config->thread_control;
-  config_fill_game_args(config, autoplay_args->game_args);
-}
-
-autoplay_status_t config_autoplay(const Config *config,
-                                  AutoplayResults *autoplay_results) {
-  AutoplayArgs args;
-  GameArgs game_args;
-  args.game_args = &game_args;
-  config_fill_autoplay_args(config, &args);
-  return autoplay(&args, autoplay_results);
-}
-
-void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
-                          SimArgs *sim_args) {
-  sim_args->max_iterations = config->max_iterations;
-  sim_args->num_simmed_plays = config_get_num_plays(config);
-  sim_args->num_plies = config_get_plies(config);
-  sim_args->stop_cond_pct = config_get_stop_cond_pct(config);
-  sim_args->seed = config->seed;
-  sim_args->game = config_get_game(config);
-  sim_args->move_list = config_get_move_list(config);
-  sim_args->known_opp_rack = known_opp_rack;
-  sim_args->win_pcts = config_get_win_pcts(config);
-  sim_args->thread_control = config->thread_control;
-}
-
-sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
-                             SimResults *sim_results) {
-  SimArgs args;
-  config_fill_sim_args(config, known_opp_rack, &args);
-  return simulate(&args, sim_results);
-}
-
-void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
-  args->conversion_type_string =
-      config_get_parg_value(config, ARG_TOKEN_EXEC_MODE, 0);
-  args->input_filename = config_get_parg_value(config, ARG_TOKEN_INFILE, 0);
-  args->output_filename = config_get_parg_value(config, ARG_TOKEN_OUTFILE, 0);
-  args->ld = config->ld;
-}
-
-conversion_status_t config_convert(const Config *config,
-                                   ConversionResults *results) {
-  ConversionArgs args;
-  config_fill_conversion_args(config, &args);
-  return convert(&args, results);
-}
-
-void config_fill_infer_args(const Config *config, int target_index,
-                            int target_score, int target_num_exch,
-                            Rack *target_played_tiles, InferenceArgs *args) {
-  args->target_index = target_index;
-  args->target_score = target_score;
-  args->target_num_exch = target_num_exch;
-  args->move_capacity = config_get_num_plays(config);
-  args->equity_margin = config_get_equity_margin(config);
-  args->target_played_tiles = target_played_tiles;
-  args->game = config_get_game(config);
-  args->thread_control = config->thread_control;
-}
-
-inference_status_t config_infer(const Config *config, int target_index,
-                                int target_score, int target_num_exch,
-                                Rack *target_played_tiles,
-                                InferenceResults *results) {
-  InferenceArgs args;
-  config_fill_infer_args(config, target_index, target_score, target_num_exch,
-                         target_played_tiles, &args);
-  return infer(&args, results);
-}
-
-bool is_game_recreation_required(const Config *config) {
-  // If the ld changes (bag and rack size)
-  // a recreation is required to resize the
-  // dynamically allocated fields.
-  return config_get_parg_num_set_values(config, ARG_TOKEN_LETTER_DISTRIBUTION) >
-         0;
 }
 
 // Creates a game if none exists or recreates the game
@@ -377,8 +341,6 @@ void config_recreate_move_list(Config *config, int capacity) {
   }
 }
 
-// Exec helpers
-
 bool game_exists(const Game *game, ErrorStatus *error_status,
                  error_status_t error_status_type, int status) {
   bool exists = true;
@@ -415,9 +377,49 @@ bool load_rack_or_set_error_status(const char *rack_str,
   return success;
 }
 
-// Loading CGP
+// Returns true if the config has all of the required
+// data to create a game.
+bool config_has_game_data(const Config *config) {
+  // We use the letter distribution as a proxy for
+  // whether the game data has been loaded because
+  // the config load logic ensures that lexicons
+  // and leaves are guaranteed to be loaded successfully before
+  // the letter distribution.
+  return config->ld != NULL;
+}
+
+// Config execution functions
+
+// Generic execution and status functions
+
+// Used for pargs that are not commands.
+void execute_fatal(Config *config) {
+  log_fatal("attempted to execute nonexecutable argument (arg token %d)",
+            config->exec_parg_token);
+}
+
+// Used for commands that only update the config state
+void execute_noop(Config *config) {
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_NONE, 0);
+}
+
+// Used for pargs that are not commands.
+char *status_fatal(Config *config) {
+  log_fatal("attempted to get status of nonexecutable argument (arg token %d)",
+            config->exec_parg_token);
+  return NULL;
+}
+
+// Load CGP
 
 void execute_cgp_load(Config *config) {
+  if (!config_has_game_data(config)) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    return;
+  }
+
   config_init_game(config);
 
   StringBuilder *cgp_builder = create_string_builder();
@@ -462,6 +464,13 @@ char *status_cgp_load(Config __attribute__((unused)) * config) {
 // Adding moves
 
 void execute_add_moves(Config *config) {
+  if (!config_has_game_data(config)) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    return;
+  }
+
   config_init_game(config);
 
   const char *moves = config_get_parg_value(config, ARG_TOKEN_MOVES, 0);
@@ -514,6 +523,13 @@ char *status_add_moves(Config __attribute__((unused)) * config) {
 // Move generation
 
 void execute_move_gen(Config *config) {
+  if (!config_has_game_data(config)) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    return;
+  }
+
   config_init_game(config);
   config_recreate_move_list(config, config_get_num_plays(config));
   MoveList *ml = config->move_list;
@@ -527,9 +543,37 @@ char *status_move_gen(Config __attribute__((unused)) * config) {
   return get_formatted_string("no status available for move generation");
 }
 
-// Sim - no opponent known rack
+// Sim
+
+void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
+                          SimArgs *sim_args) {
+  sim_args->max_iterations = config->max_iterations;
+  sim_args->num_simmed_plays = config_get_num_plays(config);
+  sim_args->num_plies = config_get_plies(config);
+  sim_args->stop_cond_pct = config_get_stop_cond_pct(config);
+  sim_args->seed = config->seed;
+  sim_args->game = config_get_game(config);
+  sim_args->move_list = config_get_move_list(config);
+  sim_args->known_opp_rack = known_opp_rack;
+  sim_args->win_pcts = config_get_win_pcts(config);
+  sim_args->thread_control = config->thread_control;
+}
+
+sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
+                             SimResults *sim_results) {
+  SimArgs args;
+  config_fill_sim_args(config, known_opp_rack, &args);
+  return simulate(&args, sim_results);
+}
 
 void execute_sim(Config *config) {
+  if (!config_has_game_data(config)) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    return;
+  }
+
   config_init_game(config);
 
   ErrorStatus *error_status = config->error_status;
@@ -567,6 +611,29 @@ char *status_sim(Config *config) {
 }
 
 // Inference
+
+void config_fill_infer_args(const Config *config, int target_index,
+                            int target_score, int target_num_exch,
+                            Rack *target_played_tiles, InferenceArgs *args) {
+  args->target_index = target_index;
+  args->target_score = target_score;
+  args->target_num_exch = target_num_exch;
+  args->move_capacity = config_get_num_plays(config);
+  args->equity_margin = config_get_equity_margin(config);
+  args->target_played_tiles = target_played_tiles;
+  args->game = config_get_game(config);
+  args->thread_control = config->thread_control;
+}
+
+inference_status_t config_infer(const Config *config, int target_index,
+                                int target_score, int target_num_exch,
+                                Rack *target_played_tiles,
+                                InferenceResults *results) {
+  InferenceArgs args;
+  config_fill_infer_args(config, target_index, target_score, target_num_exch,
+                         target_played_tiles, &args);
+  return infer(&args, results);
+}
 
 void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
   ErrorStatus *error_status = config->error_status;
@@ -629,6 +696,13 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
 }
 
 void execute_infer(Config *config) {
+  if (!config_has_game_data(config)) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    return;
+  }
+
   config_init_game(config);
   Rack *target_played_tiles =
       rack_create(ld_get_size(game_get_ld(config->game)));
@@ -642,7 +716,31 @@ char *status_infer(Config __attribute__((unused)) * config) {
 
 // Autoplay
 
+void config_fill_autoplay_args(const Config *config,
+                               AutoplayArgs *autoplay_args) {
+  autoplay_args->max_iterations = config->max_iterations;
+  autoplay_args->use_game_pairs = config->use_game_pairs;
+  autoplay_args->seed = config->seed;
+  autoplay_args->thread_control = config->thread_control;
+  config_fill_game_args(config, autoplay_args->game_args);
+}
+
+autoplay_status_t config_autoplay(const Config *config,
+                                  AutoplayResults *autoplay_results) {
+  AutoplayArgs args;
+  GameArgs game_args;
+  args.game_args = &game_args;
+  config_fill_autoplay_args(config, &args);
+  return autoplay(&args, autoplay_results);
+}
+
 void execute_autoplay(Config *config) {
+  if (!config_has_game_data(config)) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    return;
+  }
   autoplay_status_t status = config_autoplay(config, config->autoplay_results);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)status);
@@ -652,7 +750,22 @@ char *status_autoplay(Config __attribute__((unused)) * config) {
   return string_duplicate("no status available for autoplay");
 }
 
-// Convert
+// Conversion
+
+void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
+  args->conversion_type_string =
+      config_get_parg_value(config, ARG_TOKEN_EXEC_MODE, 0);
+  args->input_filename = config_get_parg_value(config, ARG_TOKEN_INFILE, 0);
+  args->output_filename = config_get_parg_value(config, ARG_TOKEN_OUTFILE, 0);
+  args->ld = config->ld;
+}
+
+conversion_status_t config_convert(const Config *config,
+                                   ConversionResults *results) {
+  ConversionArgs args;
+  config_fill_conversion_args(config, &args);
+  return convert(&args, results);
+}
 
 void execute_convert(Config *config) {
   conversion_status_t status =
@@ -665,22 +778,7 @@ char *status_convert(Config __attribute__((unused)) * config) {
   return string_duplicate("no status available for convert");
 }
 
-// Fatal execution
-
-void execute_fatal(Config *config) {
-  log_fatal("attempted to execute nonexecutable argument (arg token %d)",
-            config->exec_parg_token);
-}
-
-void execute_noop(Config *config) {
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_NONE, 0);
-}
-
-char *status_fatal(Config *config) {
-  log_fatal("attempted to get status of nonexecutable argument (arg token %d)",
-            config->exec_parg_token);
-  return NULL;
-}
+// Config load helpers
 
 config_load_status_t config_load_parsed_args(Config *config,
                                              StringSplitter *cmd_split_string) {
@@ -763,164 +861,6 @@ config_load_status_t config_load_parsed_args(Config *config,
   }
 
   return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
-                       int num_req_values, int num_values,
-                       command_exec_func_t command_exec_func,
-                       command_status_func_t command_status_func) {
-  ParsedArg *parsed_arg = malloc_or_die(sizeof(ParsedArg));
-  parsed_arg->num_req_values = num_req_values;
-  parsed_arg->num_values = num_values;
-  parsed_arg->values = malloc_or_die(sizeof(char *) * parsed_arg->num_values);
-  for (int i = 0; i < parsed_arg->num_values; i++) {
-    parsed_arg->values[i] = NULL;
-  }
-  parsed_arg->name = string_duplicate(name);
-  parsed_arg->num_set_values = 0;
-  parsed_arg->exec_func = command_exec_func;
-  parsed_arg->status_func = command_status_func;
-
-  config->pargs[arg_token] = parsed_arg;
-}
-
-void parsed_arg_destroy(ParsedArg *parsed_arg) {
-  if (!parsed_arg) {
-    return;
-  }
-
-  free(parsed_arg->name);
-
-  if (parsed_arg->values) {
-    for (int i = 0; i < parsed_arg->num_values; i++) {
-      free(parsed_arg->values[i]);
-    }
-    free(parsed_arg->values);
-  }
-
-  free(parsed_arg);
-}
-
-Config *config_create_default() {
-  Config *config = malloc_or_die(sizeof(Config));
-  parsed_arg_create(config, ARG_TOKEN_SET, "set", 0, 0, execute_noop,
-                    status_cgp_load);
-  parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
-                    status_cgp_load);
-  parsed_arg_create(config, ARG_TOKEN_MOVES, "addmoves", 1, 1,
-                    execute_add_moves, status_add_moves);
-  parsed_arg_create(config, ARG_TOKEN_GEN, "generate", 0, 0, execute_move_gen,
-                    status_move_gen);
-  parsed_arg_create(config, ARG_TOKEN_SIM, "simulate", 0, 1, execute_sim,
-                    status_sim);
-  parsed_arg_create(config, ARG_TOKEN_INFER, "infer", 2, 3, execute_infer,
-                    status_infer);
-  parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 0, 0,
-                    execute_autoplay, status_autoplay);
-  parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
-                    status_convert);
-  parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_BOARD_LAYOUT, "bdn", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_GAME_VARIANT, "var", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_LEXICON, "lex", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P1_NAME, "p1", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P1_LEXICON, "l1", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P1_LEAVES, "k1", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P2_NAME, "p2", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P2_LEXICON, "l2", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P2_LEAVES, "k2", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_WIN_PCT, "winpct", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_PLIES, "plies", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "stopcondition", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_RANDOM_SEED, "seed", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "info", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_CHECK_STOP_INTERVAL, "check", 1, 1,
-                    execute_fatal, status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_INFILE, "infile", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_OUTFILE, "outfile", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
-                    status_fatal);
-
-  config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
-  config->exec_mode = EXEC_MODE_CONSOLE;
-  config->bingo_bonus = DEFAULT_BINGO_BONUS;
-  config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
-  config->plies = 2;
-  config->max_iterations = 0;
-  config->stop_cond_pct = 99;
-  config->equity_margin = 0;
-  config->use_game_pairs = true;
-  config->seed = 0;
-  config->game_variant = DEFAULT_GAME_VARIANT;
-  config->win_pcts = win_pct_create(DEFAULT_WIN_PCT);
-  config->board_layout = board_layout_create_default();
-  config->ld = NULL;
-  config->players_data = players_data_create();
-  config->thread_control = thread_control_create();
-  config->game = NULL;
-  config->move_list = NULL;
-  config->sim_results = sim_results_create();
-  config->inference_results = inference_results_create();
-  config->autoplay_results = autoplay_results_create();
-  config->conversion_results = conversion_results_create();
-  config->error_status = error_status_create();
-  return config;
-}
-
-void config_destroy(Config *config) {
-  for (int i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
-    parsed_arg_destroy(config->pargs[i]);
-  }
-  win_pct_destroy(config->win_pcts);
-  board_layout_destroy(config->board_layout);
-  ld_destroy(config->ld);
-  players_data_destroy(config->players_data);
-  thread_control_destroy(config->thread_control);
-  game_destroy(config->game);
-  move_list_destroy(config->move_list);
-  sim_results_destroy(config->sim_results);
-  inference_results_destroy(config->inference_results);
-  autoplay_results_destroy(config->autoplay_results);
-  conversion_results_destroy(config->conversion_results);
-  error_status_destroy(config->error_status);
-  free(config);
 }
 
 config_load_status_t config_load_int(Config *config, arg_token_t arg_token,
@@ -1021,15 +961,10 @@ config_load_status_t config_load_record_type(Config *config,
   return config_load_status;
 }
 
-// Lexical data helpers
-
-// Players data
-
-bool is_lexicon_required(const Config *config, const char *new_p1_leaves_name,
+bool is_lexicon_required(const char *new_p1_leaves_name,
                          const char *new_p2_leaves_name,
                          const char *new_ld_name) {
-  return config_exec_parg_is_set(config) || new_p1_leaves_name ||
-         new_p2_leaves_name || new_ld_name;
+  return new_p1_leaves_name || new_p2_leaves_name || new_ld_name;
 }
 
 bool lds_are_compatible(const char *ld_name_1, const char *ld_name_2) {
@@ -1128,9 +1063,9 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   // load any of the lexicon dependent data
   if (!updated_p1_lexicon_name && !updated_p2_lexicon_name) {
     // We can use the new_* variables here since if lexicons
-    // are null, it is guaranteed that there are no leaves, ld, or
-    // rack since they are all set after this if check.
-    if (is_lexicon_required(config, new_p1_leaves_name, new_p2_leaves_name,
+    // are null, it is guaranteed that there are no leaves, or ld
+    // since they are all set after this if check.
+    if (is_lexicon_required(new_p1_leaves_name, new_p2_leaves_name,
                             new_ld_name)) {
       return CONFIG_LOAD_STATUS_LEXICON_MISSING;
     } else {
@@ -1181,40 +1116,23 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
 
   // Load letter distribution
 
-  char *updated_ld_name;
+  char *updated_ld_name = NULL;
   const char *existing_ld_name = NULL;
   if (config->ld) {
-    ld_get_name(config->ld);
+    existing_ld_name = ld_get_name(config->ld);
   }
   if (!is_string_empty_or_null(new_ld_name)) {
-    // if the user specified letter distribution
-    // isn't compatible, return an error
     if (!ld_is_compatible_with_lexicon(updated_p1_lexicon_name, new_ld_name)) {
       return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
     }
     updated_ld_name = string_duplicate(new_ld_name);
-  } else if (is_string_empty_or_null(existing_ld_name)) {
-    // No letter distribution was specified and the current
-    // letter distribution is null, so load the default letter
-    // distribution based on player one's lexicon
+  } else if (new_p1_lexicon_name || new_p2_lexicon_name || !existing_ld_name) {
     updated_ld_name = ld_get_default_name(updated_p1_lexicon_name);
-  } else {
-    // If the existing letter distribution isn't compatible,
-    // just assume we want to use the default.
-    if (!ld_is_compatible_with_lexicon(updated_p1_lexicon_name,
-                                       existing_ld_name)) {
-      updated_ld_name = ld_get_default_name(updated_p1_lexicon_name);
-    } else {
-      updated_ld_name = string_duplicate(existing_ld_name);
-    }
   }
 
-  // Here we can assume that the lexicons are already
-  // compatible with each other, so we only need to
-  // check the letter distribution with 1 lexicon
-
   // If the letter distribution name has changed, update it
-  if (!strings_equal(existing_ld_name, updated_ld_name)) {
+
+  if (updated_ld_name && !strings_equal(updated_ld_name, existing_ld_name)) {
     ld_destroy(config->ld);
     config->ld = ld_create(updated_ld_name);
   }
@@ -1300,6 +1218,7 @@ config_load_status_t config_load_data(Config *config) {
 
   // Double values
 
+  // FIXME: have a none option for stop cond maybe
   config_load_status = config_load_double(config, ARG_TOKEN_STOP_COND_PCT, 0.0,
                                           100.0, &config->stop_cond_pct);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
@@ -1453,4 +1372,126 @@ char *config_get_execute_status(Config *config) {
         config_get_parg_status_func(config, config->exec_parg_token)(config);
   }
   return status;
+}
+
+Config *config_create_default() {
+  Config *config = malloc_or_die(sizeof(Config));
+  parsed_arg_create(config, ARG_TOKEN_SET, "set", 0, 0, execute_noop,
+                    status_cgp_load);
+  parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
+                    status_cgp_load);
+  parsed_arg_create(config, ARG_TOKEN_MOVES, "addmoves", 1, 1,
+                    execute_add_moves, status_add_moves);
+  parsed_arg_create(config, ARG_TOKEN_GEN, "generate", 0, 0, execute_move_gen,
+                    status_move_gen);
+  parsed_arg_create(config, ARG_TOKEN_SIM, "simulate", 0, 1, execute_sim,
+                    status_sim);
+  parsed_arg_create(config, ARG_TOKEN_INFER, "infer", 2, 3, execute_infer,
+                    status_infer);
+  parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 0, 0,
+                    execute_autoplay, status_autoplay);
+  parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
+                    status_convert);
+  parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_BOARD_LAYOUT, "bdn", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_GAME_VARIANT, "var", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_LEXICON, "lex", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P1_NAME, "p1", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P1_LEXICON, "l1", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P1_LEAVES, "k1", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P2_NAME, "p2", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P2_LEXICON, "l2", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P2_LEAVES, "k2", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_WIN_PCT, "winpct", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_PLIES, "plies", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "stopcondition", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_RANDOM_SEED, "seed", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "info", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_CHECK_STOP_INTERVAL, "check", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_INFILE, "infile", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_OUTFILE, "outfile", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
+                    status_fatal);
+
+  config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
+  config->exec_mode = EXEC_MODE_CONSOLE;
+  config->bingo_bonus = DEFAULT_BINGO_BONUS;
+  config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
+  config->plies = 2;
+  config->max_iterations = 0;
+  config->stop_cond_pct = 99;
+  config->equity_margin = 0;
+  config->use_game_pairs = true;
+  config->seed = 0;
+  config->game_variant = DEFAULT_GAME_VARIANT;
+  config->win_pcts = win_pct_create(DEFAULT_WIN_PCT);
+  config->board_layout = board_layout_create_default();
+  config->ld = NULL;
+  config->players_data = players_data_create();
+  config->thread_control = thread_control_create();
+  config->game = NULL;
+  config->move_list = NULL;
+  config->sim_results = sim_results_create();
+  config->inference_results = inference_results_create();
+  config->autoplay_results = autoplay_results_create();
+  config->conversion_results = conversion_results_create();
+  config->error_status = error_status_create();
+  return config;
+}
+
+void config_destroy(Config *config) {
+  for (int i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
+    parsed_arg_destroy(config->pargs[i]);
+  }
+  win_pct_destroy(config->win_pcts);
+  board_layout_destroy(config->board_layout);
+  ld_destroy(config->ld);
+  players_data_destroy(config->players_data);
+  thread_control_destroy(config->thread_control);
+  game_destroy(config->game);
+  move_list_destroy(config->move_list);
+  sim_results_destroy(config->sim_results);
+  inference_results_destroy(config->inference_results);
+  autoplay_results_destroy(config->autoplay_results);
+  conversion_results_destroy(config->conversion_results);
+  error_status_destroy(config->error_status);
+  free(config);
 }
