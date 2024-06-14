@@ -40,6 +40,7 @@ typedef enum {
   ARG_TOKEN_SET,
   ARG_TOKEN_CGP,
   ARG_TOKEN_MOVES,
+  ARG_TOKEN_RACK,
   ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
   ARG_TOKEN_INFER,
@@ -390,6 +391,74 @@ bool config_has_game_data(const Config *config) {
 
 // Config execution functions
 
+// Config loading for primitive types
+
+config_load_status_t config_load_int(Config *config, arg_token_t arg_token,
+                                     int min, int max, int *value) {
+  const char *int_str = config_get_parg_value(config, arg_token, 0);
+  if (int_str) {
+    bool success = false;
+    int new_value = string_to_int_or_set_error(int_str, &success);
+    if (!success) {
+      return CONFIG_LOAD_STATUS_MALFORMED_INT_ARG;
+    }
+    if (new_value < min || new_value > max) {
+      return CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS;
+    }
+    *value = new_value;
+  }
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+config_load_status_t config_load_double(Config *config, arg_token_t arg_token,
+                                        double min, double max, double *value) {
+  const char *double_str = config_get_parg_value(config, arg_token, 0);
+  if (double_str) {
+    bool success = false;
+    double new_value = string_to_double_or_set_error(double_str, &success);
+    if (!success) {
+      return CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG;
+    }
+    if (new_value < min || new_value > max) {
+      return CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS;
+    }
+    *value = new_value;
+  }
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+config_load_status_t config_load_bool(Config *config, arg_token_t arg_token,
+                                      bool *value) {
+  const char *bool_str = config_get_parg_value(config, arg_token, 0);
+  if (bool_str) {
+    if (has_iprefix(bool_str, "true")) {
+      *value = true;
+    } else if (has_iprefix(bool_str, "false")) {
+      *value = false;
+    } else {
+      return CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG;
+    }
+  }
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
+config_load_status_t config_load_uint64(Config *config, arg_token_t arg_token,
+                                        uint64_t *value) {
+  const char *int_str = config_get_parg_value(config, arg_token, 0);
+  if (int_str) {
+    if (!is_all_digits_or_empty(int_str)) {
+      return CONFIG_LOAD_STATUS_MALFORMED_INT_ARG;
+    }
+    bool success = false;
+    uint64_t new_value = string_to_uint64_or_set_error(int_str, &success);
+    if (!success) {
+      return CONFIG_LOAD_STATUS_MALFORMED_INT_ARG;
+    }
+    *value = new_value;
+  }
+  return CONFIG_LOAD_STATUS_SUCCESS;
+}
+
 // Generic execution and status functions
 
 // Used for pargs that are not commands.
@@ -399,9 +468,7 @@ void execute_fatal(Config *config) {
 }
 
 // Used for commands that only update the config state
-void execute_noop(Config *config) {
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_NONE, 0);
-}
+void execute_noop(Config __attribute__((unused)) * config) { return; }
 
 // Used for pargs that are not commands.
 char *status_fatal(Config *config) {
@@ -520,6 +587,63 @@ char *status_add_moves(Config __attribute__((unused)) * config) {
   return string_duplicate("no status available for adding moves");
 }
 
+// Setting player rack
+
+void execute_set_rack(Config *config) {
+  if (!config_has_game_data(config)) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    return;
+  }
+
+  config_init_game(config);
+
+  int player_index;
+  config_load_status_t config_load_status =
+      config_load_int(config, ARG_TOKEN_RACK, 1, 2, &player_index);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              (int)config_load_status);
+    return;
+  }
+  // Convert from 1-indexed user input to 0-indexed internal use
+  player_index--;
+
+  Rack *player_rack =
+      player_get_rack(game_get_player(config->game, player_index));
+  Rack *new_rack = rack_duplicate(player_rack);
+  rack_reset(new_rack);
+
+  load_rack_or_set_error_status(
+      config_get_parg_value(config, ARG_TOKEN_RACK, 1), config->ld,
+      config->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
+      CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG, new_rack);
+
+  if (error_status_get_success(config->error_status)) {
+    Bag *bag = game_get_bag(config->game);
+    if (rack_is_drawable(bag, player_rack, new_rack)) {
+      int player_draw_index =
+          game_get_player_draw_index(config->game, player_index);
+      return_rack_to_bag(player_rack, bag, player_draw_index);
+      if (!draw_rack_from_bag(bag, player_rack, new_rack, player_draw_index)) {
+        log_fatal("failed to draw rack from bag in set rack command");
+      }
+    } else {
+      set_or_clear_error_status(config->error_status,
+                                ERROR_STATUS_TYPE_CONFIG_LOAD,
+                                CONFIG_LOAD_STATUS_RACK_NOT_IN_BAG);
+    }
+  }
+
+  rack_destroy(new_rack);
+}
+
+char *status_set_rack(Config __attribute__((unused)) * config) {
+  return string_duplicate("no status available for setting player rack");
+}
+
 // Move generation
 
 void execute_move_gen(Config *config) {
@@ -535,8 +659,7 @@ void execute_move_gen(Config *config) {
   MoveList *ml = config->move_list;
   generate_moves_for_game(config->game, 0, ml);
   print_ucgi_static_moves(config->game, ml, config->thread_control);
-  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_SIM,
-                            (int)GEN_STATUS_SUCCESS);
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_NONE, 0);
 }
 
 char *status_move_gen(Config __attribute__((unused)) * config) {
@@ -586,8 +709,8 @@ void execute_sim(Config *config) {
     known_opp_rack = rack_create(ld_get_size(game_get_ld(config->game)));
     if (!load_rack_or_set_error_status(
             known_opp_rack_str, game_get_ld(config->game), error_status,
-            ERROR_STATUS_TYPE_SIM, SIM_STATUS_EXCHANGE_MALFORMED_RACK,
-            known_opp_rack)) {
+            ERROR_STATUS_TYPE_CONFIG_LOAD,
+            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG, known_opp_rack)) {
       rack_destroy(known_opp_rack);
       return;
     }
@@ -642,10 +765,12 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
       config_get_parg_value(config, ARG_TOKEN_INFER, 0);
   int target_index;
   if (!string_to_int_or_set_error_status(
-          target_index_str, 0, 1, error_status, ERROR_STATUS_TYPE_INFER,
-          INFERENCE_STATUS_MALFORMED_PLAYER_INDEX, &target_index)) {
+          target_index_str, 1, 2, error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_MALFORMED_INT_ARG, &target_index)) {
     return;
   }
+  // Convert from 1-indexed to 0-indexed
+  target_index--;
 
   const char *target_played_tiles_or_num_exch_str =
       config_get_parg_value(config, ARG_TOKEN_INFER, 1);
@@ -656,16 +781,16 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
   if (is_all_digits_or_empty(target_played_tiles_or_num_exch_str)) {
     if (!string_to_int_or_set_error_status(
             target_played_tiles_or_num_exch_str, 0, RACK_SIZE, error_status,
-            ERROR_STATUS_TYPE_INFER, INFERENCE_STATUS_MALFORMED_EXCHANGE,
+            ERROR_STATUS_TYPE_CONFIG_LOAD, CONFIG_LOAD_STATUS_MALFORMED_INT_ARG,
             &target_num_exch)) {
       return;
     }
   } else {
     const LetterDistribution *ld = game_get_ld(config->game);
-    if (!load_rack_or_set_error_status(target_played_tiles_or_num_exch_str, ld,
-                                       error_status, ERROR_STATUS_TYPE_INFER,
-                                       INFERENCE_STATUS_MALFORMED_RACK,
-                                       target_played_tiles)) {
+    if (!load_rack_or_set_error_status(
+            target_played_tiles_or_num_exch_str, ld, error_status,
+            ERROR_STATUS_TYPE_CONFIG_LOAD,
+            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG, target_played_tiles)) {
       return;
     }
     is_tile_placement_move = true;
@@ -675,15 +800,17 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
       config_get_parg_value(config, ARG_TOKEN_INFER, 2);
 
   if (is_tile_placement_move && !target_score_str) {
-    set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_INFER,
-                              INFERENCE_STATUS_MISSING_SCORE);
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_MISSING_ARG);
     return;
   }
 
   int target_score;
   if (!string_to_int_or_set_error_status(
-          target_score_str, 0, INT_MAX, error_status, ERROR_STATUS_TYPE_INFER,
-          INFERENCE_STATUS_MALFORMED_SCORE, &target_score)) {
+          target_score_str, 0, INT_MAX, error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD, CONFIG_LOAD_STATUS_MALFORMED_INT_ARG,
+          &target_score)) {
     return;
   }
 
@@ -860,72 +987,6 @@ config_load_status_t config_load_parsed_args(Config *config,
     current_parg = NULL;
   }
 
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t config_load_int(Config *config, arg_token_t arg_token,
-                                     int min, int max, int *value) {
-  const char *int_str = config_get_parg_value(config, arg_token, 0);
-  if (int_str) {
-    bool success = false;
-    int new_value = string_to_int_or_set_error(int_str, &success);
-    if (!success) {
-      return CONFIG_LOAD_STATUS_MALFORMED_INT_ARG;
-    }
-    if (new_value < min || new_value > max) {
-      return CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS;
-    }
-    *value = new_value;
-  }
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t config_load_double(Config *config, arg_token_t arg_token,
-                                        double min, double max, double *value) {
-  const char *double_str = config_get_parg_value(config, arg_token, 0);
-  if (double_str) {
-    bool success = false;
-    double new_value = string_to_double_or_set_error(double_str, &success);
-    if (!success) {
-      return CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG;
-    }
-    if (new_value < min || new_value > max) {
-      return CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS;
-    }
-    *value = new_value;
-  }
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t config_load_bool(Config *config, arg_token_t arg_token,
-                                      bool *value) {
-  const char *bool_str = config_get_parg_value(config, arg_token, 0);
-  if (bool_str) {
-    if (has_iprefix(bool_str, "true")) {
-      *value = true;
-    } else if (has_iprefix(bool_str, "false")) {
-      *value = false;
-    } else {
-      return CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG;
-    }
-  }
-  return CONFIG_LOAD_STATUS_SUCCESS;
-}
-
-config_load_status_t config_load_uint64(Config *config, arg_token_t arg_token,
-                                        uint64_t *value) {
-  const char *int_str = config_get_parg_value(config, arg_token, 0);
-  if (int_str) {
-    if (!is_all_digits_or_empty(int_str)) {
-      return CONFIG_LOAD_STATUS_MALFORMED_INT_ARG;
-    }
-    bool success = false;
-    uint64_t new_value = string_to_uint64_or_set_error(int_str, &success);
-    if (!success) {
-      return CONFIG_LOAD_STATUS_MALFORMED_INT_ARG;
-    }
-    *value = new_value;
-  }
   return CONFIG_LOAD_STATUS_SUCCESS;
 }
 
@@ -1361,6 +1422,7 @@ config_load_status_t config_load_command(Config *config, const char *cmd) {
 
 void config_execute_command(Config *config) {
   if (config_exec_parg_is_set(config)) {
+    set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_NONE, 0);
     config_get_parg_exec_func(config, config->exec_parg_token)(config);
   }
 }
@@ -1382,6 +1444,8 @@ Config *config_create_default() {
                     status_cgp_load);
   parsed_arg_create(config, ARG_TOKEN_MOVES, "addmoves", 1, 1,
                     execute_add_moves, status_add_moves);
+  parsed_arg_create(config, ARG_TOKEN_RACK, "rack", 2, 2, execute_set_rack,
+                    status_set_rack);
   parsed_arg_create(config, ARG_TOKEN_GEN, "generate", 0, 0, execute_move_gen,
                     status_move_gen);
   parsed_arg_create(config, ARG_TOKEN_SIM, "simulate", 0, 1, execute_sim,

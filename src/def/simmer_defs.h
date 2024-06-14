@@ -6,7 +6,6 @@
 typedef enum {
   SIM_STATUS_SUCCESS,
   SIM_STATUS_NO_MOVES,
-  SIM_STATUS_EXCHANGE_MALFORMED_RACK,
 } sim_status_t;
 
 typedef enum {

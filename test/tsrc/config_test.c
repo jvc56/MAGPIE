@@ -480,6 +480,27 @@ void test_config_exec_parse_args() {
   assert_config_exec_status(config, "add 8D.HADJI -lex CSW21",
                             ERROR_STATUS_TYPE_NONE, 0);
 
+  // Setting the rack
+  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_TYPE_NONE,
+                            0);
+  assert_config_exec_status(config, "rack 0 ABC", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  assert_config_exec_status(config, "rack 3 ABC", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+  assert_config_exec_status(config, "rack 1 AB3C",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rack 1 ABCZZZ",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_RACK_NOT_IN_BAG);
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_TYPE_NONE,
+                            0);
+  assert_config_exec_status(config, "rack 1 FF", ERROR_STATUS_TYPE_NONE, 0);
+  assert_config_exec_status(config, "rack 1 ZYYABCF", ERROR_STATUS_TYPE_NONE,
+                            0);
+  assert_config_exec_status(config, "rack 2 CC", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_RACK_NOT_IN_BAG);
+
   // Generating moves
   assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_TYPE_NONE,
                             0);
@@ -488,26 +509,35 @@ void test_config_exec_parse_args() {
   // Simulation
   assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_TYPE_NONE,
                             0);
-  assert_config_exec_status(config, "sim AEIN3R -it 1", ERROR_STATUS_TYPE_SIM,
-                            SIM_STATUS_EXCHANGE_MALFORMED_RACK);
+  assert_config_exec_status(config, "sim AEIN3R -it 1",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "sim -it 1", ERROR_STATUS_TYPE_NONE, 0);
   assert_config_exec_status(config, "sim AEINR -it 1", ERROR_STATUS_TYPE_NONE,
                             0);
 
+  // Inference
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_TYPE_NONE,
                             0);
-  assert_config_exec_status(config, "infer 2 ABC 14", ERROR_STATUS_TYPE_INFER,
-                            INFERENCE_STATUS_MALFORMED_PLAYER_INDEX);
-  assert_config_exec_status(config, "infer 0 AB3C 14", ERROR_STATUS_TYPE_INFER,
-                            INFERENCE_STATUS_MALFORMED_RACK);
-  assert_config_exec_status(config, "infer 0 ABC 1R4", ERROR_STATUS_TYPE_INFER,
-                            INFERENCE_STATUS_MALFORMED_SCORE);
-  assert_config_exec_status(config, "infer 0 -4", ERROR_STATUS_TYPE_INFER,
-                            INFERENCE_STATUS_MALFORMED_RACK);
-  assert_config_exec_status(config, "infer 0 8", ERROR_STATUS_TYPE_INFER,
-                            INFERENCE_STATUS_MALFORMED_EXCHANGE);
-  assert_config_exec_status(config, "infer 0 ABC", ERROR_STATUS_TYPE_INFER,
-                            INFERENCE_STATUS_MISSING_SCORE);
+  assert_config_exec_status(config, "infer 0 ABC 14",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  assert_config_exec_status(config, "infer 3 ABC 14",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  assert_config_exec_status(config, "infer 1 AB3C 14",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "infer 1 ABC 1R4",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  assert_config_exec_status(config, "infer 1 -4", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "infer 1 8", ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  assert_config_exec_status(config, "infer 1 ABC",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_MISSING_ARG);
   // Autoplay
   assert_config_exec_status(config,
                             "autoplay -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",

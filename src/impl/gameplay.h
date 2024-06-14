@@ -25,6 +25,8 @@ int draw_rack_string_from_bag(const LetterDistribution *ld, Bag *bag,
 bool draw_rack_from_bag(Bag *bag, Rack *rack, const Rack *rack_to_draw,
                         int player_draw_index);
 void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index);
+bool rack_is_drawable(const Bag *bag, const Rack *player_rack,
+                      const Rack *rack_to_draw);
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_tiles(Game *game);
 #endif
