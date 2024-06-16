@@ -535,12 +535,16 @@ get_conversion_type_from_string(const char *conversion_type_string) {
   return conversion_type;
 }
 
+// FIXME: write a test for convert
 conversion_status_t convert(ConversionArgs *args,
                             ConversionResults *conversion_results) {
   const LetterDistribution *ld = args->ld;
   const char *conversion_type_string = args->conversion_type_string;
   const char *input_filename = args->input_filename;
   const char *output_filename = args->output_filename;
+
+  printf("%s, %s, %s\n", conversion_type_string, input_filename,
+         output_filename);
 
   if (input_filename == NULL) {
     return CONVERT_STATUS_INPUT_FILE_ERROR;

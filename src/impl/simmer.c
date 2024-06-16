@@ -13,7 +13,6 @@
 #include "../def/thread_control_defs.h"
 
 #include "../def/rack_defs.h"
-#include "../def/stats_defs.h"
 
 #include "../ent/bag.h"
 #include "../ent/game.h"
@@ -70,7 +69,7 @@ typedef struct SimmerWorker {
   Simmer *simmer;
 } SimmerWorker;
 
-Simmer *create_simmer(const SimArgs *args, Game *game,
+Simmer *create_simmer(const SimArgs *args, Game *game, int num_simmed_plays,
                       SimResults *sim_results) {
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
   ThreadControl *thread_control = args->thread_control;
@@ -83,7 +82,7 @@ Simmer *create_simmer(const SimArgs *args, Game *game,
   simmer->initial_spread =
       player_get_score(player) - player_get_score(opponent);
   simmer->max_iterations = args->max_iterations;
-  simmer->zval = p_to_z(args->stop_cond_pct / 100.0);
+  simmer->zval = p_to_z(args->stop_cond_pct);
   simmer->threads = thread_control_get_threads(thread_control);
   simmer->seed = args->seed;
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
@@ -97,8 +96,6 @@ Simmer *create_simmer(const SimArgs *args, Game *game,
   }
 
   simmer->similar_plays_rack = rack_create(ld_size);
-
-  int num_simmed_plays = args->num_simmed_plays;
 
   simmer->play_similarity_cache =
       malloc_or_die(sizeof(int) * num_simmed_plays * num_simmed_plays);
@@ -119,7 +116,7 @@ Simmer *create_simmer(const SimArgs *args, Game *game,
   simmer->thread_control = thread_control;
 
   sim_results_reset(args->move_list, sim_results, num_simmed_plays,
-                    args->num_plies);
+                    args->num_plies, simmer->zval);
 
   simmer->sim_results = sim_results;
 
@@ -264,7 +261,8 @@ bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
 bool is_multithreaded(const Simmer *simmer) { return simmer->threads > 1; }
 
 bool handle_potential_stopping_condition(Simmer *simmer) {
-  bool use_stopping_cond = simmer->zval >= 100;
+  // FIXME: find a better way
+  bool use_stopping_cond = simmer->zval < 100;
   SimResults *sim_results = simmer->sim_results;
   int number_of_plays = sim_results_get_number_of_plays(sim_results);
   int total_ignored = 0;
@@ -432,19 +430,17 @@ void *simmer_worker(void *uncasted_simmer_worker) {
 
 sim_status_t simulate_internal(const SimArgs *args, Game *game,
                                SimResults *sim_results) {
-  ThreadControl *thread_control = args->thread_control;
-
   if (!args->move_list) {
     return SIM_STATUS_NO_MOVES;
   }
 
-  int num_simmed_plays = move_list_get_count(args->move_list);
+  int move_list_count = move_list_get_count(args->move_list);
 
-  if (num_simmed_plays == 0) {
+  if (move_list_count == 0) {
     return SIM_STATUS_NO_MOVES;
   }
 
-  Simmer *simmer = create_simmer(args, game, sim_results);
+  Simmer *simmer = create_simmer(args, game, move_list_count, sim_results);
 
   SimmerWorker **simmer_workers =
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->threads));
@@ -469,7 +465,7 @@ sim_status_t simulate_internal(const SimArgs *args, Game *game,
   destroy_simmer(simmer);
 
   // Print out the stats
-  print_ucgi_sim_stats(game, sim_results, thread_control, true);
+  print_ucgi_sim_stats(game, sim_results, args->thread_control, true);
   return SIM_STATUS_SUCCESS;
 }
 

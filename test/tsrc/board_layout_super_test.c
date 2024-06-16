@@ -28,7 +28,7 @@ void test_board_layout_correctness_super() {
   // Use the CEL lexicon since it can support words longer than 15
   // which we need to test here.
   Config *config = create_config_or_die(
-      "lex CEL_super s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CEL_super -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
   // Verify the opening play score
@@ -46,9 +46,9 @@ void test_board_layout_correctness_super() {
   uint64_t seed = time(NULL);
 
   char *options_string =
-      get_formatted_string("i 500 gp threads 11 rs %ld", seed);
+      get_formatted_string("set -it 500 -gp on -threads 11 -seed %ld", seed);
 
-  load_config_or_die(config, options_string);
+  load_and_exec_config_or_die(config, options_string);
 
   printf("running 21 autoplay with: %s\n", options_string);
 

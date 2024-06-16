@@ -97,7 +97,7 @@ void test_board_reset(Board *board) {
 
 void test_board_all() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 score s2 score r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player0 = game_get_player(game, 0);

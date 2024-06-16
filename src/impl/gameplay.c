@@ -197,7 +197,6 @@ bool rack_is_drawable(const Bag *bag, const Rack *player_rack,
 // bag to the rack. Assumes the rack is empty.
 // Returns true on success.
 // Return false when the rack letters are not in the bag.
-// FIXME: think about using rack_is_drawable before calling this function
 bool draw_rack_from_bag(Bag *bag, Rack *rack, const Rack *rack_to_draw,
                         int player_draw_index) {
   rack_copy(rack, rack_to_draw);

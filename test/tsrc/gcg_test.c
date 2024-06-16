@@ -47,7 +47,7 @@ void test_single_error_case(const char *gcg_filename, Config *config,
 
 void test_error_cases() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   test_single_error_case("empty.gcg", config, GCG_PARSE_STATUS_GCG_EMPTY);
   test_single_error_case("unsupported_character_encoding.gcg", config,
                          GCG_PARSE_STATUS_UNSUPPORTED_CHARACTER_ENCODING);
@@ -133,8 +133,8 @@ void test_error_cases() {
                          GCG_PARSE_STATUS_RACK_NOT_IN_BAG);
   config_destroy(config);
 
-  Config *no_lexicon_config =
-      create_config_or_die("s1 equity s2 equity r1 all r2 all numplays 1");
+  Config *no_lexicon_config = create_config_or_die(
+      "set -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
   test_single_error_case("lexicon_missing.gcg", no_lexicon_config,
                          GCG_PARSE_STATUS_LEXICON_NOT_SPECIFIED);
@@ -144,7 +144,7 @@ void test_error_cases() {
 
 void test_parse_special_char() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_iso8859-1.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
@@ -160,7 +160,7 @@ void test_parse_special_char() {
 
 void test_parse_special_utf8_no_header() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_utf8_noheader.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
@@ -174,7 +174,7 @@ void test_parse_special_utf8_no_header() {
 
 void test_parse_special_utf8_with_header() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_utf8_with_header.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
@@ -188,7 +188,7 @@ void test_parse_special_utf8_with_header() {
 
 void test_parse_dos_mode() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "utf8_dos.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
@@ -288,7 +288,7 @@ void assert_game_play_to_turn(GameHistory *game_history, Game *game1,
 
 void test_success_standard() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_standard.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
@@ -452,7 +452,7 @@ void test_success_standard() {
 
 void test_success_five_point_challenge() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_five_point_challenge.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
@@ -528,7 +528,7 @@ void test_success_five_point_challenge() {
 
 void test_success_six_pass() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_six_pass.gcg";
   GameHistory *game_history = game_history_create();
   gcg_parse_status_t gcg_parse_status =
@@ -622,7 +622,7 @@ void test_success_six_pass() {
 
 void test_success_incomplete() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
   Game *game1 = config_game_create(config);
   Game *game2 = config_game_create(config);

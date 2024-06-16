@@ -43,7 +43,7 @@ inference_status_t infer_for_test(const Config *config, int target_index,
 
 void test_trivial_random_probability() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
   Game *game = config_game_create(config);
@@ -89,10 +89,11 @@ void test_trivial_random_probability() {
 
 void test_infer_rack_overflow() {
   Config *config =
-      create_config_or_die("lex CSW21 s1 equity s2 equity r1 all r2 "
-                           "all numplays 1 threads 1");
-  const LetterDistribution *ld = config_get_ld(config);
+      create_config_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1 -threads 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
+  const LetterDistribution *ld = config_get_ld(config);
   InferenceResults *inference_results = inference_results_create();
 
   inference_status_t status =
@@ -110,7 +111,8 @@ void test_infer_rack_overflow() {
 
 void test_infer_no_tiles_played_rack_empty() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create();
   inference_status_t status =
@@ -123,7 +125,8 @@ void test_infer_no_tiles_played_rack_empty() {
 
 void test_infer_both_play_and_exchange() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create();
   inference_status_t status =
@@ -136,7 +139,8 @@ void test_infer_both_play_and_exchange() {
 
 void test_infer_exchange_score_not_zero() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create();
   inference_status_t status =
@@ -149,7 +153,8 @@ void test_infer_exchange_score_not_zero() {
 
 void test_infer_exchange_not_board_is_letter_allowed_in_cross_set() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
 
@@ -171,11 +176,11 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set() {
 
 void test_infer_tiles_played_not_in_bag() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create();
-  load_config_or_die(config,
-                     "rack ABCYEYY pindex 0 score 0 exch 1 eq 0 threads 1");
+  load_and_exec_config_or_die(config, "set -eq 0 -threads 1");
   inference_status_t status =
       infer_for_test(config, 0, 0, 1, "ACBYEYY", inference_results);
   assert(status == INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG);
@@ -185,11 +190,13 @@ void test_infer_tiles_played_not_in_bag() {
 }
 
 void test_infer_nonerror_cases(int number_of_threads) {
-  char *config_settings_str = get_formatted_string(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1 threads %d",
-      number_of_threads);
+  char *config_settings_str =
+      get_formatted_string("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1 -threads %d",
+                           number_of_threads);
   Config *config = create_config_or_die(config_settings_str);
   free(config_settings_str);
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   Game *game = config_get_game(config);
   Bag *bag = game_get_bag(game);
@@ -209,7 +216,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   inference_status_t status;
   LeaveRackList *lrl;
 
-  load_config_or_die(config, "numplays 20");
+  load_and_exec_config_or_die(config, "set -numplays 20");
   status = infer_for_test(config, 0, 52, 0, "MUZAKS", inference_results);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // With this rack, only keeping an S is possible, and
@@ -351,7 +358,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // the remaining tiles exactly. Since the played
   // tiles contain an E, the inferred leave should not
   // contain an E.
-  load_config_or_die(config, "rack E pindex 0 score 22 exch 0 eq 0");
+  load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 22, 0, "E", inference_results);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Refetch equity values because the underlying
@@ -386,7 +393,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   }
   game_reset(game);
 
-  load_config_or_die(config, "numplays 100");
+  load_and_exec_config_or_die(config, "set -numplays 100");
   status = infer_for_test(config, 0, 8, 0, "ENRT", inference_results);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // There are only 3 racks for which playing RENT for 8 on the opening is
@@ -514,7 +521,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // Z(OOPSYCHOLOGY) is over 100 points so keeping the Z will never be
   // inferred
   // for plays scoring 50.
-  load_config_or_die(config, "rack IIII pindex 0 score 50 exch 0 eq 0");
+  load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 50, 0, "IIII", inference_results);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // There are only 4 racks for which not playing Z(OOPSYCHOLOGY) is
@@ -635,7 +642,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   game_reset(game);
 
   // Check that the equity margin works
-  load_config_or_die(config, "eq 5");
+  load_and_exec_config_or_die(config, "set -eq 5");
   status = infer_for_test(config, 0, 58, 0, "MUZAKY", inference_results);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // Letters not possible with equity margin of 5:
@@ -673,7 +680,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // we have to remove it here.
   rack_set_to_string(ld, player0_rack, "?");
   bag_draw_letter(bag, ld_hl_to_ml(ld, "?"), 0);
-  load_config_or_die(config, "rack GRIND pindex 0 score 18 exch 0 eq 0");
+  load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 18, 0, "GRIND", inference_results);
   assert(status == INFERENCE_STATUS_SUCCESS);
   // If GRIND is played keeping ?, the only
@@ -705,7 +712,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   rack_set_to_string(ld, player0_rack, "H");
   bag_draw_letter(bag, ld_hl_to_ml(ld, "H"), 0);
-  load_config_or_die(config, "rack RIN pindex 0 score 6 exch 0 eq 0");
+  load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 6, 0, "RIN", inference_results);
   // If the player opens with RIN for 6 keeping an H, there are only 3
   // possible racks where this would be correct:
@@ -749,8 +756,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   bag_add_letter(bag, ld_hl_to_ml(ld, "V"), 0);
 
   rack_reset(rack);
-  load_config_or_die(config,
-                     "rack " EMPTY_RACK_STRING " pindex 0 score 0 exch 6 eq 0");
+  load_and_exec_config_or_die(config, "set -eq 0");
   status = infer_for_test(config, 0, 0, 6, "", inference_results);
 
   assert(status == INFERENCE_STATUS_SUCCESS);
@@ -799,7 +805,6 @@ void test_infer_nonerror_cases(int number_of_threads) {
   stat_destroy(letter_stat);
   rack_destroy(rack);
   inference_results_destroy(inference_results);
-  game_destroy(game);
   config_destroy(config);
 }
 

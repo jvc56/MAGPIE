@@ -4,7 +4,6 @@
 #include <stdlib.h>
 
 #include "../def/exec_defs.h"
-#include "../def/stats_defs.h"
 
 #include "../ent/board.h"
 #include "../ent/game.h"
@@ -47,15 +46,16 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
   Board *board = game_get_board(game);
   StringBuilder *sim_stats_string_builder = create_string_builder();
   int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
+  double zval = sim_results_get_zval(sim_results);
   for (int i = 0; i < number_of_simmed_plays; i++) {
     const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
     Stat *win_pct_stat = simmed_play_get_win_pct_stat(play);
     double wp_mean = stat_get_mean(win_pct_stat) * 100.0;
-    double wp_se = stat_get_stderr(win_pct_stat, STATS_Z99) * 100.0;
+    double wp_se = stat_get_stderr(win_pct_stat, zval) * 100.0;
 
     Stat *equity_stat = simmed_play_get_equity_stat(play);
     double eq_mean = stat_get_mean(equity_stat);
-    double eq_se = stat_get_stderr(equity_stat, STATS_Z99);
+    double eq_se = stat_get_stderr(equity_stat, zval);
     uint64_t niters = stat_get_cardinality(equity_stat);
 
     Move *move = simmed_play_get_move(play);

@@ -85,7 +85,7 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
 
 void test_cgp_english() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
   assert_cgp_load_and_write_are_equal(game, EMPTY_CGP);
@@ -193,29 +193,29 @@ void test_cgp_english() {
 
 void test_cgp_english_with_options() {
   Config *config = create_config_or_die(
-      "lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
   assert_game_matches_cgp_with_options(
       config, game, EMPTY_CGP_WITHOUT_OPTIONS " lex CSW21;", true);
 
-  load_config_or_die(config, "bb 27");
+  load_and_exec_config_or_die(config, "set -bb 27");
   assert_game_matches_cgp_with_options(
       config, game, EMPTY_CGP_WITHOUT_OPTIONS " lex CSW21; bb 27;", true);
 
-  load_config_or_die(config, "bdn single_row_15");
+  load_and_exec_config_or_die(config, "set -bdn single_row_15");
   assert_game_matches_cgp_with_options(
       config, game,
       EMPTY_CGP_WITHOUT_OPTIONS " lex CSW21; bb 27; bdn single_row_15;", true);
 
-  load_config_or_die(config, "var wordsmog");
+  load_and_exec_config_or_die(config, "set -var wordsmog");
   assert_game_matches_cgp_with_options(
       config, game,
       EMPTY_CGP_WITHOUT_OPTIONS
       " lex CSW21; bb 27; bdn single_row_15; var wordsmog;",
       true);
 
-  load_config_or_die(config, "l1 NWL20 l2 CSW21");
+  load_and_exec_config_or_die(config, "set -l1 NWL20 -l2 CSW21");
   assert_game_matches_cgp_with_options(
       config, game,
       EMPTY_CGP_WITHOUT_OPTIONS " l1 NWL20; l2 CSW21; bb 27; bdn "
@@ -228,7 +228,7 @@ void test_cgp_english_with_options() {
 
 void test_cgp_catalan() {
   Config *config = create_config_or_die(
-      "lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
   assert_cgp_load_and_write_are_equal(game, EMPTY_CATALAN_CGP);
@@ -240,7 +240,7 @@ void test_cgp_catalan() {
 
 void test_cgp_polish() {
   Config *config = create_config_or_die(
-      "lex OSPS49 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
   assert_cgp_load_and_write_are_equal(game, POLISH_CGP);

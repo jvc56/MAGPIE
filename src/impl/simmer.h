@@ -10,7 +10,6 @@
 
 typedef struct SimArgs {
   int max_iterations;
-  int num_simmed_plays;
   int num_plies;
   double stop_cond_pct;
   uint64_t seed;

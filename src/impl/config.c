@@ -96,6 +96,7 @@ typedef struct ParsedArg {
 struct Config {
   ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
   arg_token_t exec_parg_token;
+  bool ld_changed;
   exec_mode_t exec_mode;
   int bingo_bonus;
   int num_plays;
@@ -278,8 +279,7 @@ bool is_game_recreation_required(const Config *config) {
   // If the ld changes (bag and rack size)
   // a recreation is required to resize the
   // dynamically allocated fields.
-  return config_get_parg_num_set_values(config, ARG_TOKEN_LETTER_DISTRIBUTION) >
-         0;
+  return config->ld_changed;
 }
 
 void config_fill_game_args(const Config *config, GameArgs *game_args) {
@@ -671,7 +671,6 @@ char *status_move_gen(Config __attribute__((unused)) * config) {
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                           SimArgs *sim_args) {
   sim_args->max_iterations = config->max_iterations;
-  sim_args->num_simmed_plays = config_get_num_plays(config);
   sim_args->num_plies = config_get_plies(config);
   sim_args->stop_cond_pct = config_get_stop_cond_pct(config);
   sim_args->seed = config->seed;
@@ -796,22 +795,25 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
     is_tile_placement_move = true;
   }
 
-  const char *target_score_str =
-      config_get_parg_value(config, ARG_TOKEN_INFER, 2);
+  int target_score = 0;
 
-  if (is_tile_placement_move && !target_score_str) {
-    set_or_clear_error_status(config->error_status,
-                              ERROR_STATUS_TYPE_CONFIG_LOAD,
-                              CONFIG_LOAD_STATUS_MISSING_ARG);
-    return;
-  }
+  if (is_tile_placement_move) {
+    const char *target_score_str =
+        config_get_parg_value(config, ARG_TOKEN_INFER, 2);
 
-  int target_score;
-  if (!string_to_int_or_set_error_status(
-          target_score_str, 0, INT_MAX, error_status,
-          ERROR_STATUS_TYPE_CONFIG_LOAD, CONFIG_LOAD_STATUS_MALFORMED_INT_ARG,
-          &target_score)) {
-    return;
+    if (!target_score_str) {
+      set_or_clear_error_status(config->error_status,
+                                ERROR_STATUS_TYPE_CONFIG_LOAD,
+                                CONFIG_LOAD_STATUS_MISSING_ARG);
+      return;
+    }
+
+    if (!string_to_int_or_set_error_status(
+            target_score_str, 0, INT_MAX, error_status,
+            ERROR_STATUS_TYPE_CONFIG_LOAD, CONFIG_LOAD_STATUS_MALFORMED_INT_ARG,
+            &target_score)) {
+      return;
+    }
   }
 
   inference_status_t status =
@@ -881,9 +883,9 @@ char *status_autoplay(Config __attribute__((unused)) * config) {
 
 void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
   args->conversion_type_string =
-      config_get_parg_value(config, ARG_TOKEN_EXEC_MODE, 0);
-  args->input_filename = config_get_parg_value(config, ARG_TOKEN_INFILE, 0);
-  args->output_filename = config_get_parg_value(config, ARG_TOKEN_OUTFILE, 0);
+      config_get_parg_value(config, ARG_TOKEN_CONVERT, 0);
+  args->input_filename = config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
+  args->output_filename = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
   args->ld = config->ld;
 }
 
@@ -1192,10 +1194,11 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   }
 
   // If the letter distribution name has changed, update it
-
+  config->ld_changed = false;
   if (updated_ld_name && !strings_equal(updated_ld_name, existing_ld_name)) {
     ld_destroy(config->ld);
     config->ld = ld_create(updated_ld_name);
+    config->ld_changed = true;
   }
 
   free(updated_ld_name);
@@ -1438,7 +1441,7 @@ char *config_get_execute_status(Config *config) {
 
 Config *config_create_default() {
   Config *config = malloc_or_die(sizeof(Config));
-  parsed_arg_create(config, ARG_TOKEN_SET, "set", 0, 0, execute_noop,
+  parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
                     status_cgp_load);
   parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
                     status_cgp_load);
@@ -1494,6 +1497,7 @@ Config *config_create_default() {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
                     execute_fatal, status_fatal);
+  // FIXME: use a different name
   parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "stopcondition", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
@@ -1504,8 +1508,10 @@ Config *config_create_default() {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
                     execute_fatal, status_fatal);
+  // FIXME: use a different name
   parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "info", 1, 1,
                     execute_fatal, status_fatal);
+  // FIXME: use a different name
   parsed_arg_create(config, ARG_TOKEN_CHECK_STOP_INTERVAL, "check", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_INFILE, "infile", 1, 1, execute_fatal,
@@ -1516,6 +1522,7 @@ Config *config_create_default() {
                     status_fatal);
 
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
+  config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;

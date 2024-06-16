@@ -78,13 +78,6 @@ uint64_t string_to_cross_set(const LetterDistribution *ld,
   return c;
 }
 
-void load_config_or_die(Config *config, const char *cmd) {
-  config_load_status_t status = config_load_command(config, cmd);
-  if (status != CONFIG_LOAD_STATUS_SUCCESS) {
-    log_fatal("load config failed with status %d: %s\n", status, cmd);
-  }
-}
-
 void load_and_exec_config_or_die(Config *config, const char *cmd) {
   config_load_status_t status = config_load_command(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
@@ -112,7 +105,7 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
 
 Config *create_config_or_die(const char *cmd) {
   Config *config = config_create_default();
-  load_config_or_die(config, cmd);
+  load_and_exec_config_or_die(config, cmd);
   return config;
 }
 

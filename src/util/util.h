@@ -16,6 +16,7 @@ double string_to_double_or_set_error(const char *str, bool *success);
 uint64_t string_to_uint64_or_set_error(const char *str, bool *success);
 uint64_t string_to_uint64(const char *str);
 double string_to_double(const char *str);
+float string_to_float(const char *str);
 bool is_decimal_number(const char *str);
 uint64_t choose(uint64_t n, uint64_t k);
 

@@ -154,13 +154,13 @@ void test_config_load_success() {
   Config *config = config_create_default();
 
   // Loading with whitespace should not fail
-  load_config_or_die(config, "           ");
+  load_and_exec_config_or_die(config, "           ");
 
   // Loading with no lexicon data should not fail
-  load_config_or_die(config, "set -plies 3");
+  load_and_exec_config_or_die(config, "set -plies 3");
 
   // Ensure defaults are set when just the lexicon is set
-  load_config_or_die(config, "set -lex CSW21");
+  load_and_exec_config_or_die(config, "set -lex CSW21");
 
   assert_strings_equal(
       players_data_get_data_name(config_get_players_data(config),
@@ -174,7 +174,7 @@ void test_config_load_success() {
                        ENGLISH_LETTER_DISTRIBUTION_NAME);
 
   // Ensure defaults are set when just the lexicon changes
-  load_config_or_die(config, "set -lex FRA20");
+  load_and_exec_config_or_die(config, "set -lex FRA20");
 
   assert_strings_equal(
       players_data_get_data_name(config_get_players_data(config),
@@ -220,7 +220,7 @@ void test_config_load_success() {
       num_plays, plies, max_iterations, stopping_cond, seed, number_of_threads,
       print_info, check_stop, p1, p2);
 
-  load_config_or_die(config, string_builder_peek(test_string_builder));
+  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
   assert(config_get_game_variant(config) == GAME_VARIANT_WORDSMOG);
   assert(players_data_get_move_sort_type(config_get_players_data(config), 0) ==
@@ -300,7 +300,7 @@ void test_config_load_success() {
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, plies, max_iterations,
       number_of_threads, print_info);
 
-  load_config_or_die(config, string_builder_peek(test_string_builder));
+  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
   assert(config_get_game_variant(config) == GAME_VARIANT_WORDSMOG);
   assert(players_data_get_move_sort_type(config_get_players_data(config), 0) ==
@@ -355,23 +355,23 @@ void test_config_load_success() {
   // Test move sort/record key words
   string_builder_clear(test_string_builder);
   string_builder_add_string(test_string_builder, "set -s1 score -r1 all");
-  load_config_or_die(config, string_builder_peek(test_string_builder));
+  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
   // English and French should be able to play each other
   // with either distribution
   string_builder_clear(test_string_builder);
   string_builder_add_string(test_string_builder,
                             "set -ld english -l1 CSW21 -l2 FRA20");
-  load_config_or_die(config, string_builder_peek(test_string_builder));
+  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
   string_builder_clear(test_string_builder);
   string_builder_add_string(test_string_builder,
                             "set -ld french -l1 FRA20 -l2 CSW21");
-  load_config_or_die(config, string_builder_peek(test_string_builder));
+  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
   string_builder_clear(test_string_builder);
   string_builder_add_string(test_string_builder, "set -lex NWL20");
-  load_config_or_die(config, string_builder_peek(test_string_builder));
+  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
 
   assert_strings_equal(
       players_data_get_data_name(config_get_players_data(config),
@@ -385,7 +385,7 @@ void test_config_load_success() {
   // Correctly set leave and letter distribution defaults
   string_builder_clear(test_string_builder);
   string_builder_add_string(test_string_builder, "set -lex FRA20");
-  load_config_or_die(config, string_builder_peek(test_string_builder));
+  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
   assert_strings_equal(
       players_data_get_data_name(config_get_players_data(config),
                                  PLAYERS_DATA_TYPE_KWG, 0),
@@ -403,11 +403,6 @@ void test_config_load_success() {
                                  PLAYERS_DATA_TYPE_KLV, 1),
       "FRA20");
 
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder,
-                            "convert text2kwg csw21.txt csw21.kwg");
-  load_config_or_die(config, string_builder_peek(test_string_builder));
-
   destroy_string_builder(test_string_builder);
   config_destroy(config);
 }
@@ -415,7 +410,10 @@ void test_config_load_success() {
 void assert_config_exec_status(Config *config, const char *cmd,
                                error_status_t expected_error_status_type,
                                int expected_error_status_code) {
-  load_config_or_die(config, cmd);
+  config_load_status_t status = config_load_command(config, cmd);
+  if (status != CONFIG_LOAD_STATUS_SUCCESS) {
+    log_fatal("load config failed with status %d: %s\n", status, cmd);
+  }
 
   config_execute_command(config);
 
@@ -450,9 +448,9 @@ void test_config_exec_parse_args() {
   Config *config = config_create_default();
 
   // Ensure all commands that require game data fail correctly
-  assert_config_exec_status(config, "cgp 1 2 3 4",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+  assert_config_exec_status(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0",
+      ERROR_STATUS_TYPE_CONFIG_LOAD, CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
   assert_config_exec_status(config, "addmoves 1", ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
   assert_config_exec_status(config, "gen", ERROR_STATUS_TYPE_CONFIG_LOAD,

@@ -20,7 +20,7 @@
 
 void test_words_played() {
   Config *config = create_config_or_die(
-      "lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   game_load_cgp(game, VS_ED);
 

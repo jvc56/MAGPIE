@@ -9,7 +9,7 @@
 
 void test_ld_score_order() {
   Config *config = create_config_or_die(
-      "lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
 
@@ -24,15 +24,15 @@ void test_ld_score_order() {
 
 void test_ld_str_to_mls() {
   Config *nwl_config = create_config_or_die(
-      "lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *english_ld = config_get_ld(nwl_config);
 
   Config *disc_config = create_config_or_die(
-      "lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *catalan_ld = config_get_ld(disc_config);
 
   Config *osps_config = create_config_or_die(
-      "lex OSPS49 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *polish_ld = config_get_ld(osps_config);
 
   uint8_t mls[4];

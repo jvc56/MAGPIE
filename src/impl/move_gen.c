@@ -28,6 +28,9 @@
 #include "../ent/static_eval.h"
 #include "../util/util.h"
 
+// FIXME: move
+#include "../../test/tsrc/test_util.h"
+
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 typedef struct UnrestrictedMultiplier {
@@ -1175,7 +1178,8 @@ static inline void shadow_start_playthrough(MoveGen *gen,
   // Traverse the full length of the tiles on the board until hitting an
   // empty square
   for (;;) {
-    rack_add_letter(&gen->bingo_alpha_rack, get_unblanked_machine_letter(current_letter));
+    rack_add_letter(&gen->bingo_alpha_rack,
+                    get_unblanked_machine_letter(current_letter));
     gen->shadow_mainword_restricted_score += gen->tile_scores[current_letter];
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1) {

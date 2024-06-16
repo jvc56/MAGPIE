@@ -119,6 +119,13 @@ double string_to_double(const char *str) {
   return strtod(str, NULL);
 }
 
+float string_to_float(const char *str) {
+  if (!str) {
+    log_fatal("called string_to_float on NULL string\n");
+  }
+  return strtof(str, NULL);
+}
+
 uint64_t choose(uint64_t n, uint64_t k) {
   if (n < k) {
     return 0;
