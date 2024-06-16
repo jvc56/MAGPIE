@@ -46,7 +46,7 @@ void test_board_layout_correctness_super() {
   uint64_t seed = time(NULL);
 
   char *options_string =
-      get_formatted_string("set -it 500 -gp on -threads 11 -seed %ld", seed);
+      get_formatted_string("set -it 500 -gp true -threads 11 -seed %ld", seed);
 
   load_and_exec_config_or_die(config, options_string);
 

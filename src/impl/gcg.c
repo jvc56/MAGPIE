@@ -471,28 +471,36 @@ load_config_with_game_history(const GameHistory *game_history, Config *config) {
         game_history_player_get_nickname(game_history_players[i]);
   }
 
+  string_builder_add_string(cfg_load_cmd_builder, "set ");
+
   if (lexicon) {
-    string_builder_add_formatted_string(cfg_load_cmd_builder, "lex %s ",
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "-lex %s ",
                                         lexicon);
+  } else {
+    log_fatal("missing lexicon for game history\n");
   }
 
   if (ld_name) {
-    string_builder_add_formatted_string(cfg_load_cmd_builder, "ld %s ",
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "-ld %s ",
                                         ld_name);
+  } else {
+    log_fatal("missing letter distribution for game history\n");
   }
 
   if (board_layout_name) {
-    string_builder_add_formatted_string(cfg_load_cmd_builder, "bdn %s ",
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "-bdn %s ",
                                         board_layout_name);
+  } else {
+    log_fatal("missing board layout for game history\n");
   }
 
   switch (game_variant) {
   case GAME_VARIANT_CLASSIC:
-    string_builder_add_formatted_string(cfg_load_cmd_builder, "var %s ",
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "-var %s ",
                                         GAME_VARIANT_CLASSIC_NAME);
     break;
   case GAME_VARIANT_WORDSMOG:
-    string_builder_add_formatted_string(cfg_load_cmd_builder, "var %s ",
+    string_builder_add_formatted_string(cfg_load_cmd_builder, "-var %s ",
                                         GAME_VARIANT_WORDSMOG_NAME);
     break;
   default:
@@ -501,7 +509,7 @@ load_config_with_game_history(const GameHistory *game_history, Config *config) {
 
   for (int i = 0; i < 2; i++) {
     if (player_nicknames[i]) {
-      string_builder_add_formatted_string(cfg_load_cmd_builder, "p%d %s ",
+      string_builder_add_formatted_string(cfg_load_cmd_builder, "-p%d %s ",
                                           i + 1, player_nicknames[i]);
     }
   }
@@ -831,6 +839,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
         }
         lexicon_name =
             players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG, 0);
+        game_history_set_lexicon_name(game_history, lexicon_name);
       }
       if (!game_history_get_ld_name(game_history)) {
         char *default_ld_name = ld_get_default_name(lexicon_name);
@@ -869,7 +878,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
   int move_score = 0;
   switch (token) {
   case GCG_PLAYER_TOKEN:
-    // The value of player index is guaranteed to be either 0 or 1 by regex
+    // The value of player_index is guaranteed to be either 0 or 1 by regex
     // matching
     player_index = get_matching_group_as_int(gcg_parser, gcg_line, 1) - 1;
     if (game_history_get_player(game_history, player_index)) {

@@ -1549,6 +1549,9 @@ Config *config_create_default() {
 }
 
 void config_destroy(Config *config) {
+  if (!config) {
+    return;
+  }
   for (int i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
     parsed_arg_destroy(config->pargs[i]);
   }

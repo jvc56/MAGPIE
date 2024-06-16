@@ -43,7 +43,7 @@ void load_cgp_into_iso_config(const char *cgp, int num_plays) {
     iso_config = config_create_default();
   }
   char *cgp_command =
-      get_formatted_string("position cgp %s numplays %d", cgp, num_plays);
+      get_formatted_string("cgp %s -numplays %d", cgp, num_plays);
   execute_command_sync(iso_config, cgp_command);
   free(cgp_command);
 }
@@ -51,6 +51,14 @@ void load_cgp_into_iso_config(const char *cgp, int num_plays) {
 // tiles must contain 0 for play-through tiles!
 char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   load_cgp_into_iso_config(cgpstr, 1);
+
+  ErrorStatus *error_status = config_get_error_status(iso_config);
+  if (!error_status_get_success(error_status)) {
+    return get_formatted_string("wasm cgp load failed with type %d, code %d",
+                                error_status_get_type(error_status),
+                                error_status_get_code(error_status));
+  }
+
   Game *game = config_get_game(iso_config);
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
