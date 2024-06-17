@@ -105,11 +105,11 @@ void test_config_load_error_cases() {
                          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
   test_config_load_error(config, "sim -it 0",
                          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_load_error(config, "sim -stop -95",
+  test_config_load_error(config, "sim -scond -95",
                          CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
-  test_config_load_error(config, "sim -stop 102",
+  test_config_load_error(config, "sim -scond 102",
                          CONFIG_LOAD_STATUS_DOUBLE_ARG_OUT_OF_BOUNDS);
-  test_config_load_error(config, "sim -stop NO",
+  test_config_load_error(config, "sim -scond F",
                          CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
   test_config_load_error(config, "sim -eq 23434.32433.4324",
                          CONFIG_LOAD_STATUS_MALFORMED_DOUBLE_ARG);
@@ -127,13 +127,13 @@ void test_config_load_error_cases() {
                          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
   test_config_load_error(config, "sim -threads -100",
                          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_load_error(config, "sim -info x",
+  test_config_load_error(config, "sim -pfreq x",
                          CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_load_error(config, "sim -info -40",
+  test_config_load_error(config, "sim -pfreq -40",
                          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-  test_config_load_error(config, "sim -check z",
+  test_config_load_error(config, "sim -cfreq z",
                          CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
-  test_config_load_error(config, "sim -check -90",
+  test_config_load_error(config, "sim -cfreq -90",
                          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
   test_config_load_error(config, "sim -l1 CSW21",
                          CONFIG_LOAD_STATUS_LEXICON_MISSING);
@@ -214,7 +214,8 @@ void test_config_load_success() {
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
       "%s -s2 %s -r2 %s -eq %0.2f -numplays %d "
       "-plies %d -it "
-      "%d -stop %d -seed %d -threads %d -info %d -check %d -gp true -p1 %s -p2 "
+      "%d -scond %d -seed %d -threads %d -pfreq %d -cfreq %d -gp true -p1 %s "
+      "-p2 "
       "%s",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, equity_margin,
       num_plays, plies, max_iterations, stopping_cond, seed, number_of_threads,
@@ -296,7 +297,7 @@ void test_config_load_success() {
       "set -ld %s -bb %d -l1 %s -l2 %s  -s1 "
       "%s -r1 %s -s2 %s -r2 %s -plies %d -it %d "
       "-threads %d "
-      "-info %d -gp false ",
+      "-pfreq %d -gp false ",
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, plies, max_iterations,
       number_of_threads, print_info);
 

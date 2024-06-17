@@ -226,8 +226,8 @@ void test_command_execution() {
 
   assert_command_status_and_output(
       config,
-      "sim -plies 2 -stop 95 -threads 8 -it 100000 -check 300 -info 500", false,
-      60, 5, 0);
+      "sim -plies 2 -scond 95 -threads 8 -it 100000 -cfreq 300 -pfreq 500",
+      false, 60, 5, 0);
 
   assert(move_list_get_count(ml) == 3);
 
@@ -255,7 +255,7 @@ void test_command_execution() {
   assert_command_status_and_output(
       config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
   assert_command_status_and_output(
-      config, "sim -plies 2 -stop 95 -threads 8 -it 1 -check 300 -info 70",
+      config, "sim -plies 2 -scond 95 -threads 8 -it 1 -cfreq 300 -pfreq 70",
       false, 60, 22, 0);
 
   // Sim finishes with max iterations
@@ -268,15 +268,15 @@ void test_command_execution() {
   // Get all moves through move gen
   assert_command_status_and_output(config, "gen -numplays 15", false, 5, 16, 0);
   assert_command_status_and_output(
-      config, "sim -plies 2 -threads 10 -it 200 -info 60", false, 60, 68, 0);
+      config, "sim -plies 2 -threads 10 -it 200 -pfreq 60", false, 60, 68, 0);
 
   assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
                                    5, 0, 0);
   // Sim interrupted by user
   assert_command_status_and_output(config, "gen -numplays 15", false, 5, 16, 0);
   assert_command_status_and_output(
-      config, "sim -plies 2 -threads 10 -it 1000000 -info 1000000", true, 5, 17,
-      0);
+      config, "sim -plies 2 -threads 10 -it 1000000 -pfreq 1000000", true, 5,
+      17, 0);
 
   // Infer finishes normally
   assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0, 0);
@@ -308,12 +308,12 @@ void test_command_execution() {
     assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
                                      false, 5, 16, 0);
     assert_command_status_and_output(
-        config, "sim -plies 2 -threads 10 -it 200 -info 60", false, 60, 68, 0);
+        config, "sim -plies 2 -threads 10 -it 200 -pfreq 60", false, 60, 68, 0);
     assert_command_status_and_output(config, "cgp " EMPTY_CATALAN_CGP, false, 5,
                                      0, 0);
     assert_command_status_and_output(
-        config, "infer 1 AIMSX 52 -numplays 20 -threads 4 -info 1000000", false,
-        60, 52, 0);
+        config, "infer 1 AIMSX 52 -numplays 20 -threads 4 -pfreq 1000000",
+        false, 60, 52, 0);
 
     assert_command_status_and_output(
         config,
@@ -325,11 +325,12 @@ void test_command_execution() {
     assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
                                      false, 5, 16, 0);
     assert_command_status_and_output(
-        config, "sim -plies 2 -threads 10 -it 200 -info 60 ", false, 60, 68, 0);
+        config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 ", false, 60, 68,
+        0);
 
     assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0, 0);
     assert_command_status_and_output(
-        config, "infer 1 DGINR 18 -numplays 20 -threads 4 -info 1000000 ",
+        config, "infer 1 DGINR 18 -numplays 20 -threads 4 -pfreq 1000000 ",
         false, 60, 52, 0);
 
     assert_command_status_and_output(
@@ -342,12 +343,13 @@ void test_command_execution() {
     assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
                                      false, 5, 16, 0);
     assert_command_status_and_output(
-        config, "sim -plies 2 -threads 10 -it 200 -info 60 ", false, 60, 68, 0);
+        config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 ", false, 60, 68,
+        0);
 
     assert_command_status_and_output(config, "cgp " EMPTY_POLISH_CGP, false, 5,
                                      0, 0);
     assert_command_status_and_output(config,
-                                     "infer 1 HUJA 20 -numplays 20 -info "
+                                     "infer 1 HUJA 20 -numplays 20 -pfreq "
                                      "1000000 -threads 4",
                                      false, 60, 58, 0);
 
@@ -447,12 +449,12 @@ void test_exec_file_commands() {
   // the command file is being read.
   const char *commands_file_content =
       "set -it 200\n"
-      "set -info 60\n"
+      "set -pfreq 60\n"
       "cgp " DELDAR_VS_HARSHAN_CGP "\ngen -numplays 15"
       "\nsim -plies 2 -threads 10\n"
       "sim\n"
       "sim -lex CSW21 -it 10h00\n"
-      "set -numplays 20 -info 1000000\n"
+      "set -numplays 20 -pfreq 1000000\n"
       "set -threads 4\n"
       "cgp " EMPTY_POLISH_CGP "\ninfer 1 HUJA 20\n"
       "set -r1 best -r2 best -it 10 -numplays 1 -threads 3\n"
@@ -589,8 +591,8 @@ void test_exec_console_command() {
   FileHandler *input_writer = file_handler_create_from_filename(
       test_input_filename, FILE_HANDLER_MODE_WRITE);
 
-  file_handler_write(input_writer,
-                     "infer 1 DGINR 18 -numplays 7 -threads 4 -info 1000000\n");
+  file_handler_write(
+      input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
   file_handler_write(input_writer,
                      "set -r1 best -r2 best -it 100 -numplays 1 -threads 4\n");
   file_handler_write(input_writer,

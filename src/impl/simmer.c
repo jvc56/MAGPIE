@@ -261,7 +261,6 @@ bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
 bool is_multithreaded(const Simmer *simmer) { return simmer->threads > 1; }
 
 bool handle_potential_stopping_condition(Simmer *simmer) {
-  // FIXME: find a better way
   bool use_stopping_cond = simmer->zval < 100;
   SimResults *sim_results = simmer->sim_results;
   int number_of_plays = sim_results_get_number_of_plays(sim_results);

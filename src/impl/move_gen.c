@@ -28,9 +28,6 @@
 #include "../ent/static_eval.h"
 #include "../util/util.h"
 
-// FIXME: move
-#include "../../test/tsrc/test_util.h"
-
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 typedef struct UnrestrictedMultiplier {

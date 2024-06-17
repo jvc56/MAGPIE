@@ -81,7 +81,7 @@ void test_win_pct() {
 void test_sim_error_cases() {
   Config *config = create_config_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 1 -stop 100");
+      "2 -threads 1 -iter 1 -scond 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AAADERW");
   sim_status_t status =
@@ -93,7 +93,7 @@ void test_sim_error_cases() {
 void test_sim_single_iteration() {
   Config *config = create_config_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 1 -stop 100");
+      "2 -threads 1 -iter 1 -scond 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AAADERW");
   load_and_exec_config_or_die(config, "gen");
@@ -108,7 +108,7 @@ void test_sim_single_iteration() {
 void test_more_iterations() {
   Config *config = create_config_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 500 -stop 100");
+      "2 -threads 1 -iter 500 -scond 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AEIQRST");
   load_and_exec_config_or_die(config, "gen");
@@ -133,7 +133,7 @@ void test_more_iterations() {
 void perf_test_multithread_sim() {
   Config *config =
       create_config_or_die("set -s1 score -s2 score -r1 all -r2 all "
-                           "-threads 4 -plies 2 -it 1000 -stop 100");
+                           "-threads 4 -plies 2 -it 1000 -scond 100");
   load_and_exec_config_or_die(
       config,
       "cgp "
@@ -165,7 +165,7 @@ void perf_test_multithread_sim() {
 void test_play_similarity() {
   Config *config =
       create_config_or_die("set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
-                           "-plies 2 -threads 1 -it 1200 -stop 100 -check 50");
+                           "-plies 2 -threads 1 -it 1200 -scond 100 -cfreq 50");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 ACEIRST");
   load_and_exec_config_or_die(config, "gen");

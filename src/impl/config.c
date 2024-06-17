@@ -1282,11 +1282,16 @@ config_load_status_t config_load_data(Config *config) {
 
   // Double values
 
-  // FIXME: have a none option for stop cond maybe
-  config_load_status = config_load_double(config, ARG_TOKEN_STOP_COND_PCT, 0.0,
-                                          100.0, &config->stop_cond_pct);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
+  const char *new_stop_cond_str =
+      config_get_parg_value(config, ARG_TOKEN_STOP_COND_PCT, 0);
+  if (new_stop_cond_str && has_iprefix(new_stop_cond_str, "none")) {
+    config->stop_cond_pct = STOP_COND_NONE;
+  } else {
+    config_load_status = config_load_double(config, ARG_TOKEN_STOP_COND_PCT,
+                                            0.0, 100.0, &config->stop_cond_pct);
+    if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+      return config_load_status;
+    }
   }
 
   config_load_status = config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, 0,
@@ -1497,8 +1502,7 @@ Config *config_create_default() {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
                     execute_fatal, status_fatal);
-  // FIXME: use a different name
-  parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "stopcondition", 1, 1,
+  parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EQUITY_MARGIN, "equitymargin", 1, 1,
                     execute_fatal, status_fatal);
@@ -1508,11 +1512,9 @@ Config *config_create_default() {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
                     execute_fatal, status_fatal);
-  // FIXME: use a different name
-  parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "info", 1, 1,
+  parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1,
                     execute_fatal, status_fatal);
-  // FIXME: use a different name
-  parsed_arg_create(config, ARG_TOKEN_CHECK_STOP_INTERVAL, "check", 1, 1,
+  parsed_arg_create(config, ARG_TOKEN_CHECK_STOP_INTERVAL, "cfrequency", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_INFILE, "infile", 1, 1, execute_fatal,
                     status_fatal);

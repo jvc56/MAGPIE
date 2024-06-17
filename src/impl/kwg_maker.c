@@ -535,7 +535,6 @@ get_conversion_type_from_string(const char *conversion_type_string) {
   return conversion_type;
 }
 
-// FIXME: write a test for convert
 conversion_status_t convert(ConversionArgs *args,
                             ConversionResults *conversion_results) {
   const LetterDistribution *ld = args->ld;
