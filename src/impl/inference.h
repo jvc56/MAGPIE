@@ -6,8 +6,7 @@
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
-
-#include "config.h"
+#include "../ent/thread_control.h"
 
 typedef struct InferenceArgs {
   int target_index;

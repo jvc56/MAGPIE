@@ -19,6 +19,7 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
+
 #include "config.h"
 
 #include "../impl/cgp.h"

@@ -6,7 +6,7 @@
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/sim_results.h"
-#include "config.h"
+#include "../ent/thread_control.h"
 
 typedef struct SimArgs {
   int max_iterations;

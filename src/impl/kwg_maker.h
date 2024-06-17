@@ -5,7 +5,7 @@
 #include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
-#include "config.h"
+#include "../ent/letter_distribution.h"
 
 typedef struct ConversionArgs {
   const char *conversion_type_string;

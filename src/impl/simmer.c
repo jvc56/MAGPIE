@@ -27,7 +27,6 @@
 #include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
 
-#include "config.h"
 #include "gameplay.h"
 #include "move_gen.h"
 

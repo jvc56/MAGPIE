@@ -1,10 +1,13 @@
 #ifndef AUTOPLAY_H
 #define AUTOPLAY_H
 
+#include <stdbool.h>
+
 #include "../def/autoplay_defs.h"
 
 #include "../ent/autoplay_results.h"
-#include "config.h"
+#include "../ent/game.h"
+#include "../ent/thread_control.h"
 
 typedef struct AutoplayArgs {
   int max_iterations;
