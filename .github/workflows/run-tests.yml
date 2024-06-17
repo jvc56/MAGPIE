@@ -18,6 +18,7 @@ jobs:
           path: |
             data/lexica
             data/strategy
+            data/layouts
           # Increment this whenever the downloaded data changes
           key: downloaded-data-files-5
 
