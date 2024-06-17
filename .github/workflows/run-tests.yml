@@ -19,7 +19,7 @@ jobs:
             data/lexica
             data/strategy
           # Increment this whenever the downloaded data changes
-          key: downloaded-data-files-1
+          key: downloaded-data-files-5
 
       - name: Download data files
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
