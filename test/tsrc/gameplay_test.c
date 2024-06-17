@@ -149,6 +149,64 @@ void test_draw_at_most_to_rack() {
   config_destroy(config);
 }
 
+void test_rack_is_drawable() {
+  Config *config = create_config_or_die(
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
+  Bag *bag = bag_create(ld);
+  Bag *empty_bag = bag_duplicate(bag);
+
+  int number_of_letters = bag_get_tiles(empty_bag);
+  for (int i = 0; i < number_of_letters; i++) {
+    bag_draw_random_letter(empty_bag, 0);
+  }
+
+  Rack *rack = rack_create(ld_size);
+  Rack *rack_to_draw = rack_create(ld_size);
+
+  // Just bag nonempty
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
+  assert(rack_is_drawable(bag, rack, rack_to_draw));
+
+  rack_set_to_string(ld, rack_to_draw, "UUUZVVWZ");
+  assert(!rack_is_drawable(bag, rack, rack_to_draw));
+
+  // Just rack nonempty
+  rack_set_to_string(ld, rack, "UUUUVVWZ");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVWZ");
+  assert(rack_is_drawable(empty_bag, rack, rack_to_draw));
+
+  rack_set_to_string(ld, rack, "UUVVWZ");
+  rack_set_to_string(ld, rack_to_draw, "UUUZVVWZ");
+  assert(!rack_is_drawable(empty_bag, rack, rack_to_draw));
+
+  // Both rack and bag nonempty
+
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "V"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  rack_set_to_string(ld, rack, "UUVZ");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
+  assert(rack_is_drawable(bag, rack, rack_to_draw));
+
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "V"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  rack_set_to_string(ld, rack, "UUVZ");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
+  assert(!rack_is_drawable(bag, rack, rack_to_draw));
+
+  bag_destroy(bag);
+  bag_destroy(empty_bag);
+  rack_destroy(rack);
+  rack_destroy(rack_to_draw);
+  config_destroy(config);
+}
+
 void test_six_exchanges_game() {
   Config *config = create_config_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -564,6 +622,7 @@ void test_backups() {
 
 void test_gameplay() {
   test_draw_at_most_to_rack();
+  test_rack_is_drawable();
   test_playmove();
   test_six_exchanges_game();
   test_six_passes_game();
