@@ -594,7 +594,7 @@ void test_exec_console_command() {
   file_handler_write(
       input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
   file_handler_write(input_writer,
-                     "set -r1 best -r2 best -it 100 -numplays 1 -threads 4\n");
+                     "set -r1 best -r2 b -it 100 -nump 1 -thr 4\n");
   file_handler_write(input_writer,
                      "autoplay -lex CSW21 -s1 equity -s2 equity\n");
   // Stop should have no effect and appear as an error
