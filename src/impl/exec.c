@@ -14,9 +14,7 @@
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
-#include "../ent/config.h"
 #include "../ent/error_status.h"
-#include "../ent/exec_state.h"
 #include "../ent/file_handler.h"
 #include "../ent/game.h"
 #include "../ent/sim_results.h"
@@ -25,6 +23,7 @@
 
 #include "autoplay.h"
 #include "cgp.h"
+#include "config.h"
 #include "gameplay.h"
 #include "inference.h"
 #include "kwg_maker.h"
@@ -46,13 +45,12 @@
 
 // Returns NULL and prints a warning if a search is ongoing or some other error
 // occurred
-char *command_search_status(ExecState *exec_state, bool should_halt) {
-  if (!exec_state) {
+char *command_search_status(Config *config, bool should_halt) {
+  if (!config) {
     log_fatal("The command variables struct has not been initialized.");
   }
 
-  ThreadControl *thread_control =
-      config_get_thread_control(exec_state_get_config(exec_state));
+  ThreadControl *thread_control = config_get_thread_control(config);
 
   int mode = thread_control_get_mode(thread_control);
   if (mode != MODE_SEARCHING) {
@@ -66,236 +64,24 @@ char *command_search_status(ExecState *exec_state, bool should_halt) {
     thread_control_wait_for_mode_stopped(thread_control);
   }
 
-  char *status_string = NULL;
-  SimResults *sim_results = NULL;
-
-  switch (config_get_command_type(exec_state_get_config(exec_state))) {
-  case COMMAND_TYPE_SIM:
-    sim_results = exec_state_get_sim_results(exec_state);
-    if (!sim_results) {
-      log_warn("Simmer has not been initialized.");
-      return NULL;
-    }
-    status_string = ucgi_sim_stats(exec_state_get_game(exec_state), sim_results,
-                                   thread_control, true);
-    break;
-  case COMMAND_TYPE_GEN:
-    status_string = string_duplicate("movegen status unimplemented");
-    break;
-  case COMMAND_TYPE_AUTOPLAY:
-    status_string = string_duplicate("autoplay status unimplemented");
-    break;
-  case COMMAND_TYPE_CONVERT:
-    status_string = string_duplicate("convert status unimplemented");
-    break;
-  case COMMAND_TYPE_LOAD_CGP:
-    status_string = string_duplicate("no status available for load cgp");
-    break;
-  case COMMAND_TYPE_SET_OPTIONS:
-    status_string = string_duplicate("no status available for set options");
-    break;
-  case COMMAND_TYPE_INFER:
-    status_string = string_duplicate("infer status unimplemented");
-    break;
-  }
-  return status_string;
+  return config_get_execute_status(config);
 }
 
-void set_or_clear_error_status(ErrorStatus *error_status,
-                               error_status_t error_status_type,
-                               int error_code) {
-  if (error_status_is_success(error_status_type, error_code)) {
-    error_status_set_type_and_code(error_status, ERROR_STATUS_TYPE_NONE, 0);
-  } else {
-    error_status_set_type_and_code(error_status, error_status_type, error_code);
-  }
+void execute_command_and_set_mode_stopped(Config *config) {
+  config_execute_command(config);
+  error_status_log_warn_if_failed(config_get_error_status(config));
+  thread_control_set_mode_stopped(config_get_thread_control(config));
 }
 
-void execute_gen(const Config *config, ExecState *exec_state) {
-  exec_state_recreate_move_list(
-      exec_state, config_get_num_plays(exec_state_get_config(exec_state)));
-  Game *game = exec_state_get_game(exec_state);
-  MoveList *ml = exec_state_get_move_list(exec_state);
-  generate_moves_for_game(game, 0, ml);
-  print_ucgi_static_moves(game, ml, config_get_thread_control(config));
-  set_or_clear_error_status(exec_state_get_error_status(exec_state),
-                            ERROR_STATUS_TYPE_SIM, (int)GEN_STATUS_SUCCESS);
-}
-
-void execute_sim(const Config *config, ExecState *exec_state) {
-  sim_status_t status = simulate(config, exec_state_get_game(exec_state),
-                                 exec_state_get_move_list(exec_state),
-                                 exec_state_get_sim_results(exec_state));
-  set_or_clear_error_status(exec_state_get_error_status(exec_state),
-                            ERROR_STATUS_TYPE_SIM, (int)status);
-}
-
-void execute_autoplay(const Config *config, ExecState *exec_state) {
-  autoplay_status_t status =
-      autoplay(config, exec_state_get_autoplay_results(exec_state));
-  set_or_clear_error_status(exec_state_get_error_status(exec_state),
-                            ERROR_STATUS_TYPE_AUTOPLAY, (int)status);
-}
-
-void execute_infer(const Config *config, ExecState *exec_state) {
-  inference_status_t status =
-      infer(config, exec_state_get_game(exec_state),
-            exec_state_get_inference_results(exec_state));
-  set_or_clear_error_status(exec_state_get_error_status(exec_state),
-                            ERROR_STATUS_TYPE_INFER, (int)status);
-}
-
-void execute_convert(const Config *config, ExecState *exec_state) {
-  conversion_status_t status =
-      convert(config, exec_state_get_conversion_results(exec_state));
-  set_or_clear_error_status(exec_state_get_error_status(exec_state),
-                            ERROR_STATUS_TYPE_CONVERT, (int)status);
-}
-
-move_validation_status_t update_move_list(ExecState *exec_state,
-                                          const char *moves) {
-  Game *game = exec_state_get_game(exec_state);
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-
-  ValidatedMoves *new_validated_moves = validated_moves_create(
-      game, player_on_turn_index, moves, true, false, false);
-
-  move_validation_status_t move_validation_status =
-      validated_moves_get_validation_status(new_validated_moves);
-
-  if (move_validation_status == MOVE_VALIDATION_STATUS_SUCCESS) {
-    const LetterDistribution *ld = game_get_ld(game);
-    const Board *board = game_get_board(game);
-    StringBuilder *phonies_sb = create_string_builder();
-    int number_of_new_moves =
-        validated_moves_get_number_of_moves(new_validated_moves);
-    for (int i = 0; i < number_of_new_moves; i++) {
-      char *phonies_formed = validated_moves_get_phonies_string(
-          game_get_ld(game), new_validated_moves, i);
-      if (phonies_formed) {
-        string_builder_clear(phonies_sb);
-        string_builder_add_string(phonies_sb, "Phonies formed from ");
-        string_builder_add_move(
-            board, validated_moves_get_move(new_validated_moves, i), ld,
-            phonies_sb);
-        string_builder_add_string(phonies_sb, ": ");
-        string_builder_add_string(phonies_sb, phonies_formed);
-        log_warn(string_builder_peek(phonies_sb));
-      }
-      free(phonies_formed);
-    }
-    destroy_string_builder(phonies_sb);
-    exec_state_init_move_list(exec_state, number_of_new_moves);
-    validated_moves_add_to_move_list(new_validated_moves,
-                                     exec_state_get_move_list(exec_state));
-  }
-
-  validated_moves_destroy(new_validated_moves);
-
-  return move_validation_status;
-}
-
-void execute_command(ExecState *exec_state) {
-  // This function assumes that the config
-  // is already loaded
-
-  // Once the config is loaded, we should regard it as
-  // read-only. We create a new const pointer to enforce this.
-  const Config *config = exec_state_get_config(exec_state);
-
-  if (config_get_ld(config)) {
-    exec_state_init_game(exec_state);
-
-    // Update the game with the cgp, if
-    // it was specified in the config
-    const char *cgp = config_get_cgp(config);
-    if (cgp) {
-      Game *game = exec_state_get_game(exec_state);
-      // First duplicate the game so that potential
-      // cgp parse failures don't corrupt it.
-      Game *game_dupe = game_duplicate(game);
-      cgp_parse_status_t dupe_cgp_parse_status = game_load_cgp(game_dupe, cgp);
-      set_or_clear_error_status(exec_state_get_error_status(exec_state),
-                                ERROR_STATUS_TYPE_CGP_LOAD,
-                                (int)dupe_cgp_parse_status);
-      game_destroy(game_dupe);
-      if (dupe_cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
-        return;
-      } else {
-        // Now that the duplicate game has been successfully loaded
-        // with the cgp, load the actual game. A cgp parse failure
-        // here should be impossible (since the duplicated game
-        // was parsed without error) and is treated as a
-        // catastrophic error.
-        cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
-        if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
-          log_fatal("unexpected cgp load failure for: %s", cgp);
-        }
-      }
-      exec_state_reset_move_list(exec_state);
-    }
-
-    // Update the validated move list
-    // with new moves, if specified
-    const char *moves = config_get_moves(config);
-    if (moves) {
-      move_validation_status_t move_validation_status =
-          update_move_list(exec_state, moves);
-
-      if (move_validation_status != MOVE_VALIDATION_STATUS_SUCCESS) {
-        set_or_clear_error_status(exec_state_get_error_status(exec_state),
-                                  ERROR_STATUS_TYPE_MOVE_VALIDATION,
-                                  (int)move_validation_status);
-        return;
-      }
-    }
-  }
-
-  switch (config_get_command_type(config)) {
-  case COMMAND_TYPE_SET_OPTIONS:
-    // this operation is just for loading the config
-    // so the execution is a no-op
-    break;
-  case COMMAND_TYPE_LOAD_CGP:
-    // Any command can potentially load
-    // a CGP, so it is handled generically
-    // above. No further processing is necessary.
-    break;
-  case COMMAND_TYPE_GEN:
-    execute_gen(config, exec_state);
-    break;
-  case COMMAND_TYPE_SIM:
-    execute_sim(config, exec_state);
-    break;
-  case COMMAND_TYPE_AUTOPLAY:
-    execute_autoplay(config, exec_state);
-    break;
-  case COMMAND_TYPE_INFER:
-    execute_infer(config, exec_state);
-    break;
-  case COMMAND_TYPE_CONVERT:
-    execute_convert(config, exec_state);
-    break;
-  }
-}
-
-void execute_command_and_set_mode_stopped(ExecState *exec_state) {
-  execute_command(exec_state);
-  error_status_log_warn_if_failed(exec_state_get_error_status(exec_state));
-  thread_control_set_mode_stopped(
-      config_get_thread_control(exec_state_get_config(exec_state)));
-}
-
-void *execute_command_thread_worker(void *uncasted_exec_state) {
-  ExecState *exec_state = (ExecState *)uncasted_exec_state;
-  execute_command_and_set_mode_stopped(exec_state);
+void *execute_command_thread_worker(void *uncasted_config) {
+  Config *config = (Config *)uncasted_config;
+  execute_command_and_set_mode_stopped(config);
   return NULL;
 }
 
-void execute_command_sync_or_async(ExecState *exec_state, const char *command,
+void execute_command_sync_or_async(Config *config, const char *command,
                                    bool sync) {
-  ThreadControl *thread_control =
-      config_get_thread_control(exec_state_get_config(exec_state));
+  ThreadControl *thread_control = config_get_thread_control(config);
   if (!thread_control_set_mode_searching(thread_control)) {
     log_warn("still searching");
     return;
@@ -311,38 +97,37 @@ void execute_command_sync_or_async(ExecState *exec_state, const char *command,
   // Loading the config is relatively
   // fast so humans shouldn't notice anything
   config_load_status_t config_load_status =
-      config_load(exec_state_get_config(exec_state), command);
-  set_or_clear_error_status(exec_state_get_error_status(exec_state),
+      config_load_command(config, command);
+  set_or_clear_error_status(config_get_error_status(config),
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             (int)config_load_status);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    error_status_log_warn_if_failed(exec_state_get_error_status(exec_state));
+    error_status_log_warn_if_failed(config_get_error_status(config));
     thread_control_set_mode_stopped(thread_control);
     return;
   }
 
   if (sync) {
-    execute_command_and_set_mode_stopped(exec_state);
+    execute_command_and_set_mode_stopped(config);
   } else {
     pthread_t cmd_execution_thread;
     pthread_create(&cmd_execution_thread, NULL, execute_command_thread_worker,
-                   exec_state);
+                   config);
     pthread_detach(cmd_execution_thread);
   }
 }
 
-void execute_command_sync(ExecState *exec_state, const char *command) {
-  execute_command_sync_or_async(exec_state, command, true);
+void execute_command_sync(Config *config, const char *command) {
+  execute_command_sync_or_async(config, command, true);
 }
 
-void execute_command_async(ExecState *exec_state, const char *command) {
-  execute_command_sync_or_async(exec_state, command, false);
+void execute_command_async(Config *config, const char *command) {
+  execute_command_sync_or_async(config, command, false);
 }
 
-void process_ucgi_command(ExecState *exec_state, const char *command) {
+void process_ucgi_command(Config *config, const char *command) {
   // Assume cmd is already trimmed of whitespace
-  ThreadControl *thread_control =
-      config_get_thread_control(exec_state_get_config(exec_state));
+  ThreadControl *thread_control = config_get_thread_control(config);
   if (strings_equal(command, UCGI_COMMAND_STRING)) {
     // More of a formality to align with UCI
     thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
@@ -355,30 +140,19 @@ void process_ucgi_command(ExecState *exec_state, const char *command) {
       log_warn("There is no search to stop.");
     }
   } else {
-    execute_command_async(exec_state, command);
+    execute_command_async(config, command);
   }
 }
 
-bool config_continue_on_coldstart(const Config *config) {
-  command_t command_type = config_get_command_type(config);
-  return command_type == COMMAND_TYPE_SET_OPTIONS ||
-         command_type == COMMAND_TYPE_LOAD_CGP ||
-         config_get_command_set_infile(config) ||
-         config_get_command_set_exec_mode(config);
-}
-
-void command_scan_loop(ExecState *exec_state,
-                       const char *initial_command_string) {
-  execute_command_sync(exec_state, initial_command_string);
-  if (!config_continue_on_coldstart(exec_state_get_config(exec_state))) {
+void command_scan_loop(Config *config, const char *initial_command_string) {
+  execute_command_sync(config, initial_command_string);
+  if (!config_continue_on_coldstart(config)) {
     return;
   }
-  ThreadControl *thread_control =
-      config_get_thread_control(exec_state_get_config(exec_state));
+  ThreadControl *thread_control = config_get_thread_control(config);
   char *input = NULL;
   while (1) {
-    exec_mode_t exec_mode =
-        config_get_exec_mode(exec_state_get_config(exec_state));
+    exec_mode_t exec_mode = config_get_exec_mode(config);
 
     FileHandler *infile = thread_control_get_infile(thread_control);
 
@@ -407,10 +181,13 @@ void command_scan_loop(ExecState *exec_state,
 
     switch (exec_mode) {
     case EXEC_MODE_CONSOLE:
-      execute_command_sync(exec_state, input);
+      execute_command_sync(config, input);
       break;
     case EXEC_MODE_UCGI:
-      process_ucgi_command(exec_state, input);
+      process_ucgi_command(config, input);
+      break;
+    case EXEC_MODE_UNKNOWN:
+      log_fatal("attempted to execute command in unknown mode");
       break;
     }
   }
@@ -434,10 +211,10 @@ void destroy_caches() {
 
 void process_command(int argc, char *argv[]) {
   log_set_level(LOG_WARN);
-  ExecState *exec_state = exec_state_create();
+  Config *config = config_create_default();
   char *initial_command_string = create_command_from_args(argc, argv);
-  command_scan_loop(exec_state, initial_command_string);
+  command_scan_loop(config, initial_command_string);
   free(initial_command_string);
-  exec_state_destroy(exec_state);
+  config_destroy(config);
   destroy_caches();
 }

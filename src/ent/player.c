@@ -30,8 +30,7 @@ void player_reset(Player *player) {
   player->score = 0;
 }
 
-void player_update(const Config *config, Player *player) {
-  PlayersData *players_data = config_get_players_data(config);
+void player_update(const PlayersData *players_data, Player *player) {
   player->name = players_data_get_name(players_data, player->index);
   player->move_sort_type =
       players_data_get_move_sort_type(players_data, player->index);
@@ -41,13 +40,14 @@ void player_update(const Config *config, Player *player) {
   player->klv = players_data_get_klv(players_data, player->index);
 }
 
-Player *player_create(const Config *config, int player_index) {
+Player *player_create(const PlayersData *players_data,
+                      const LetterDistribution *ld, int player_index) {
   Player *player = malloc_or_die(sizeof(Player));
   player->index = player_index;
   player->score = 0;
-  player->rack = rack_create(ld_get_size(config_get_ld(config)));
+  player->rack = rack_create(ld_get_size(ld));
 
-  player_update(config, player);
+  player_update(players_data, player);
 
   return player;
 }

@@ -2,14 +2,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "../../src/ent/config.h"
 #include "../../src/ent/letter_distribution.h"
+#include "../../src/impl/config.h"
 
 #include "test_util.h"
 
 void test_ld_score_order() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
 
@@ -24,15 +24,15 @@ void test_ld_score_order() {
 
 void test_ld_str_to_mls() {
   Config *nwl_config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *english_ld = config_get_ld(nwl_config);
 
   Config *disc_config = create_config_or_die(
-      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *catalan_ld = config_get_ld(disc_config);
 
   Config *osps_config = create_config_or_die(
-      "setoptions lex OSPS49 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *polish_ld = config_get_ld(osps_config);
 
   uint8_t mls[4];
@@ -130,7 +130,7 @@ void test_ld_str_to_mls() {
   assert(ld_str_to_mls(english_ld, "2", true, imls, 40) == -1);
   assert(ld_str_to_mls(english_ld, "ABC9EFG", true, imls, 40) == -1);
 
-  // Play through not board_is_letter_allowed_in_cross_set
+  // Play through not allowed
   assert(ld_str_to_mls(english_ld, "AB.F", false, imls, 40) == -1);
   assert(ld_str_to_mls(english_ld, "BEHF.", false, imls, 40) == -1);
   assert(ld_str_to_mls(english_ld, ".BDEF", false, imls, 40) == -1);

@@ -3,14 +3,15 @@
 
 #include "../def/move_defs.h"
 
-#include "config.h"
 #include "klv.h"
 #include "kwg.h"
+#include "players_data.h"
 #include "rack.h"
 
 typedef struct Player Player;
 
-Player *player_create(const Config *config, int player_index);
+Player *player_create(const PlayersData *players_data,
+                      const LetterDistribution *ld, int player_index);
 void player_destroy(Player *player);
 
 int player_get_index(const Player *player);
@@ -28,7 +29,7 @@ void player_set_move_record_type(Player *player,
                                  move_record_t move_record_type);
 void player_add_to_score(Player *player, int score);
 
-void player_update(const Config *config, Player *player);
+void player_update(const PlayersData *players_data, Player *player);
 Player *player_duplicate(const Player *player);
 void player_reset(Player *player);
 

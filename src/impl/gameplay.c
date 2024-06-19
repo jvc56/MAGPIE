@@ -179,6 +179,20 @@ int draw_rack_string_from_bag(const LetterDistribution *ld, Bag *bag,
   return number_of_letters_set;
 }
 
+// Returns true if there are enough tiles in bag and player_rack
+// to draw rack_to_draw.
+bool rack_is_drawable(const Bag *bag, const Rack *player_rack,
+                      const Rack *rack_to_draw) {
+  const int dist_size = rack_get_dist_size(player_rack);
+  for (int i = 0; i < dist_size; i++) {
+    if (bag_get_letter(bag, i) + rack_get_letter(player_rack, i) <
+        rack_get_letter(rack_to_draw, i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Draws a nonrandom set of letters specified by rack_to_draw from the
 // bag to the rack. Assumes the rack is empty.
 // Returns true on success.

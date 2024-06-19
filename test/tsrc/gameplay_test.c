@@ -7,11 +7,11 @@
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
@@ -30,8 +30,8 @@ void return_racks_to_bag(Game *game) {
 
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
                            int array_length) {
-  Game *actual_game = game_create(config);
-  Game *expected_game = game_create(config);
+  Game *actual_game = config_game_create(config);
+  Game *expected_game = config_game_create(config);
 
   int player0_last_score_on_rack = -1;
   int player1_last_score_on_rack = -1;
@@ -119,7 +119,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
 
 void test_draw_at_most_to_rack() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
   Bag *bag = bag_create(ld);
@@ -149,9 +149,67 @@ void test_draw_at_most_to_rack() {
   config_destroy(config);
 }
 
+void test_rack_is_drawable() {
+  Config *config = create_config_or_die(
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
+  Bag *bag = bag_create(ld);
+  Bag *empty_bag = bag_duplicate(bag);
+
+  int number_of_letters = bag_get_tiles(empty_bag);
+  for (int i = 0; i < number_of_letters; i++) {
+    bag_draw_random_letter(empty_bag, 0);
+  }
+
+  Rack *rack = rack_create(ld_size);
+  Rack *rack_to_draw = rack_create(ld_size);
+
+  // Just bag nonempty
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
+  assert(rack_is_drawable(bag, rack, rack_to_draw));
+
+  rack_set_to_string(ld, rack_to_draw, "UUUZVVWZ");
+  assert(!rack_is_drawable(bag, rack, rack_to_draw));
+
+  // Just rack nonempty
+  rack_set_to_string(ld, rack, "UUUUVVWZ");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVWZ");
+  assert(rack_is_drawable(empty_bag, rack, rack_to_draw));
+
+  rack_set_to_string(ld, rack, "UUVVWZ");
+  rack_set_to_string(ld, rack_to_draw, "UUUZVVWZ");
+  assert(!rack_is_drawable(empty_bag, rack, rack_to_draw));
+
+  // Both rack and bag nonempty
+
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "V"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  rack_set_to_string(ld, rack, "UUVZ");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
+  assert(rack_is_drawable(bag, rack, rack_to_draw));
+
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "V"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  rack_set_to_string(ld, rack, "UUVZ");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
+  assert(!rack_is_drawable(bag, rack, rack_to_draw));
+
+  bag_destroy(bag);
+  bag_destroy(empty_bag);
+  rack_destroy(rack);
+  rack_destroy(rack_to_draw);
+  config_destroy(config);
+}
+
 void test_six_exchanges_game() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
   char *racks[18] = {"UUUVVWW", "AEFRWYZ", "INOOQSU", "LUUUVVW", "EEEEEOO",
                      "AEIKLMO", "GNOOOPR", "EGIJLRS", "EEEOTTT", "EIILRSX",
@@ -200,7 +258,7 @@ void test_six_exchanges_game() {
 
 void test_six_passes_game() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
   char *racks[31] = {"AEGILPR", "ACELNTV", "DDEIOTY", "?ADIIUU", "?BEIINS",
                      "EEEKMNO", "AAEHINT", "CDEGORZ", "EGNOQRS", "AFIQRRT",
@@ -297,7 +355,7 @@ void test_six_passes_game() {
 
 void test_standard_game() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
   char *racks[23] = {"EGIILNO", "DRRTYYZ", "CEIOTTU", "AADEEMT", "AACDEKS",
                      "BEEIOOP", "DHLNORR", "BGIIJRV", "?DFMNPU", "EEEOQRW",
@@ -371,8 +429,8 @@ void test_standard_game() {
 
 void test_playmove() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -464,8 +522,8 @@ void test_playmove() {
 
 void test_set_random_rack() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
 
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -513,8 +571,8 @@ void test_set_random_rack() {
 
 void test_backups() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -564,6 +622,7 @@ void test_backups() {
 
 void test_gameplay() {
   test_draw_at_most_to_rack();
+  test_rack_is_drawable();
   test_playmove();
   test_six_exchanges_game();
   test_six_passes_game();

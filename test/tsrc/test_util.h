@@ -5,12 +5,13 @@
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
+
+#include "../../src/impl/config.h"
 
 #define TRIVIAL_CROSS_SET_STRING "*"
 
@@ -46,8 +47,8 @@ void print_rack(const Rack *rack, const LetterDistribution *ld);
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,
                      InferenceResults *inference_results);
-void load_config_or_die(Config *config, const char *cmd);
 void load_cgp_or_die(Game *game, const char *cgp);
+void load_and_exec_config_or_die(Config *config, const char *cmd);
 char *get_test_filename(const char *filename);
 void delete_file(const char *filename);
 void reset_file(const char *filename);

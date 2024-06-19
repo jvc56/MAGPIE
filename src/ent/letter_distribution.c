@@ -42,9 +42,14 @@ void sort_score_order(LetterDistribution *ld) {
   }
 }
 
-void load_ld(LetterDistribution *ld, const char *ld_name) {
+LetterDistribution *ld_create(const char *ld_name) {
+  LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
+
   // This function call opens and closes the file, so
   // call it before the fopen to prevent a nested file read
+
+  ld->name = string_duplicate(ld_name);
+
   char *ld_filename = get_ld_filepath(ld_name);
 
   StringSplitter *ld_lines = split_file_by_newline(ld_filename);
@@ -109,11 +114,7 @@ void load_ld(LetterDistribution *ld, const char *ld_name) {
   sort_score_order(ld);
 
   ld->max_tile_length = max_tile_length;
-}
 
-LetterDistribution *ld_create(const char *ld_name) {
-  LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
-  load_ld(ld, ld_name);
   return ld;
 }
 
@@ -121,6 +122,7 @@ void ld_destroy(LetterDistribution *ld) {
   if (!ld) {
     return;
   }
+  free(ld->name);
   free(ld->distribution);
   free(ld->scores);
   free(ld->is_vowel);

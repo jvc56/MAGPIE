@@ -16,13 +16,13 @@
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
@@ -78,10 +78,16 @@ uint64_t string_to_cross_set(const LetterDistribution *ld,
   return c;
 }
 
-void load_config_or_die(Config *config, const char *cmd) {
-  config_load_status_t status = config_load(config, cmd);
+void load_and_exec_config_or_die(Config *config, const char *cmd) {
+  config_load_status_t status = config_load_command(config, cmd);
   if (status != CONFIG_LOAD_STATUS_SUCCESS) {
     log_fatal("load config failed with status %d: %s\n", status, cmd);
+  }
+  config_execute_command(config);
+  ErrorStatus *error_status = config_get_error_status(config);
+  if (!error_status_get_success(error_status)) {
+    error_status_log_warn_if_failed(error_status);
+    abort();
   }
 }
 
@@ -99,7 +105,7 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
 
 Config *create_config_or_die(const char *cmd) {
   Config *config = config_create_default();
-  load_config_or_die(config, cmd);
+  load_and_exec_config_or_die(config, cmd);
   return config;
 }
 

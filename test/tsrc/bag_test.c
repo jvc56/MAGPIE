@@ -2,9 +2,9 @@
 #include <stdint.h>
 
 #include "../../src/ent/bag.h"
-#include "../../src/ent/config.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/rack.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/str/bag_string.h"
 
@@ -30,7 +30,7 @@ int get_drawn_tile_index(int drawn_tiles, int player_index) {
 
 void test_bag() {
   Config *config = create_config_or_die(
-      "setoptions lex NWL20 s1 score s2 score r1 all r2 all numplays 1");
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
   Bag *bag = bag_create(ld);

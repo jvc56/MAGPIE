@@ -10,7 +10,6 @@
 #include "../../src/def/exec_defs.h"
 #include "../../src/def/file_handler_defs.h"
 
-#include "../../src/ent/exec_state.h"
 #include "../../src/ent/file_handler.h"
 
 #include "../../src/impl/exec.h"
@@ -100,11 +99,11 @@ void destroy_main_args(MainArgs *main_args) {
   free(main_args);
 }
 
-void block_for_search(ExecState *exec_state, int max_seconds) {
+void block_for_search(Config *config, int max_seconds) {
   // Poll for the end of the command
   int seconds_elapsed = 0;
   while (1) {
-    char *search_status = command_search_status(exec_state, false);
+    char *search_status = command_search_status(config, false);
     bool search_is_finished =
         strings_equal(search_status, SEARCH_STATUS_FINISHED);
     free(search_status);
@@ -115,7 +114,7 @@ void block_for_search(ExecState *exec_state, int max_seconds) {
     }
     seconds_elapsed++;
     if (seconds_elapsed >= max_seconds) {
-      log_fatal("Test aborted after searching for %d seconds\b", max_seconds);
+      log_fatal("Test aborted after searching for %d seconds\n", max_seconds);
     }
   }
 }
@@ -136,7 +135,7 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
   }
 }
 
-void assert_command_status_and_output(ExecState *exec_state,
+void assert_command_status_and_output(Config *config,
                                       const char *command_without_io,
                                       bool should_halt, int seconds_to_wait,
                                       int expected_output_line_count,
@@ -144,7 +143,7 @@ void assert_command_status_and_output(ExecState *exec_state,
   char *test_output_filename = get_test_filename("output");
   char *test_outerror_filename = get_test_filename("outerror");
 
-  char *command = get_formatted_string("%s outfile %s", command_without_io,
+  char *command = get_formatted_string("%s -outfile %s", command_without_io,
                                        test_output_filename);
 
   // Reset the contents of output
@@ -154,28 +153,29 @@ void assert_command_status_and_output(ExecState *exec_state,
 
   log_set_error_out(errorout_fh);
 
-  execute_command_async(exec_state, command);
+  execute_command_async(config, command);
 
   // Let the async command start up
   sleep(1);
 
   if (should_halt) {
-    char *status_string = command_search_status(exec_state, true);
+    char *status_string = command_search_status(config, true);
     // For now, we do not care about the contents of of the status,
     // we just want to thread_control_halt the command.
     free(status_string);
   }
-  block_for_search(exec_state, seconds_to_wait);
+  block_for_search(config, seconds_to_wait);
 
   fclose(errorout_fh);
 
   char *test_output = get_string_from_file(test_output_filename);
   int newlines_in_output = count_newlines(test_output);
+  bool fail_test = false;
   if (newlines_in_output != expected_output_line_count) {
     printf("%s\noutput counts do not match %d != %d\n", command_without_io,
            newlines_in_output, expected_output_line_count);
     printf("got:\n%s", test_output);
-    assert(0);
+    fail_test = true;
   }
 
   char *test_outerror = get_string_from_file(test_outerror_filename);
@@ -184,7 +184,11 @@ void assert_command_status_and_output(ExecState *exec_state,
     printf("error counts do not match %d != %d\n", newlines_in_outerror,
            expected_outerror_line_count);
     printf("got:\n%s", test_outerror);
-    assert(0);
+    fail_test = true;
+  }
+
+  if (fail_test) {
+    abort();
   }
 
   free(test_output);
@@ -195,170 +199,166 @@ void assert_command_status_and_output(ExecState *exec_state,
 }
 
 void test_command_execution() {
-  ExecState *exec_state = exec_state_create();
+  Config *config = config_create_default();
+
+  assert_command_status_and_output(config, "sim -lex CSW21 -it 1000 -plies 2h3",
+                                   false, 5, 0, 1);
 
   assert_command_status_and_output(
-      exec_state, "go sim lex CSW21 i 1000 plies 2h3", false, 5, 0, 1);
-
-  assert_command_status_and_output(
-      exec_state,
-      "position cgp 15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 "
-      "ABC5DF/YXZ 0/0 0 lex CSW21",
+      config,
+      "cgp 15/15/15/15/15/15/15/15/3ABCDEFG5/15/15/15/15/15/15 "
+      "ABC5DF/YXZ 0/0 0 -lex CSW21",
       false, 5, 0, 1);
 
   // Test load cgp
-  assert_command_status_and_output(exec_state, "position cgp " ION_OPENING_CGP,
-                                   false, 5, 0, 0);
+  assert_command_status_and_output(config, "cgp " ION_OPENING_CGP, false, 5, 0,
+                                   0);
 
   // Sim finishing probabilistically
   // Get moves from just user input
-  assert_command_status_and_output(exec_state, "cgp " ZILLION_OPENING_CGP,
-                                   false, 5, 0, 0);
-  assert_command_status_and_output(exec_state, "m 8F.LIN,8D.ZILLION,8F.ZILLION",
-                                   false, 5, 0, 0);
+  assert_command_status_and_output(config, "cgp " ZILLION_OPENING_CGP, false, 5,
+                                   0, 0);
   assert_command_status_and_output(
-      exec_state,
-      "go sim plies 2 cond 95 threads 8 i 100000 check 300 info 500", false, 60,
-      5, 0);
+      config, "addmoves 8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
 
-  MoveList *ml = exec_state_get_move_list(exec_state);
+  MoveList *ml = config_get_move_list(config);
   assert(move_list_get_count(ml) == 3);
 
-  assert_command_status_and_output(exec_state, "cgp " ZILLION_OPENING_CGP,
-                                   false, 5, 0, 0);
+  assert_command_status_and_output(
+      config,
+      "sim -plies 2 -scond 95 -threads 8 -it 100000 -cfreq 300 -pfreq 500",
+      false, 60, 5, 0);
+
+  assert(move_list_get_count(ml) == 3);
+
+  assert_command_status_and_output(config, "cgp " ZILLION_OPENING_CGP, false, 5,
+                                   0, 0);
   // Confirm that loading a cgp resets the movelist
   assert(move_list_get_count(ml) == 0);
 
   // Add moves before generating to confirm that the gen command
   // resets the movelist
   assert_command_status_and_output(
-      exec_state, "m 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
+      config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
+
+  assert_command_status_and_output(config, "cgp " ZILLION_OPENING_CGP, false, 5,
+                                   0, 0);
 
   // Sim a single iterations
   // Get 18 moves from move gen and confirm movelist was reset.
-  assert_command_status_and_output(
-      exec_state, "go gen numplays 18 cgp " ZILLION_OPENING_CGP, false, 5, 19,
-      0);
+  assert_command_status_and_output(config, "gen -numplays 18 ", false, 5, 19,
+                                   0);
   // Add 4 more moves:
   // 2 already exist
   // 2 are new
   // To get 20 total moves
   assert_command_status_and_output(
-      exec_state, "m 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
+      config, "addmoves 8f.NIL,8F.LIN,8D.ZILLION,8F.ZILLION", false, 5, 0, 0);
   assert_command_status_and_output(
-      exec_state, "go sim plies 2 cond 95 threads 8 i 1 check 300 info 70",
+      config, "sim -plies 2 -scond 95 -threads 8 -it 1 -cfreq 300 -pfreq 70",
       false, 60, 22, 0);
 
   // Sim finishes with max iterations
   // Add user input moves that will be
   // cleared by the subsequent movegen command.
-  assert_command_status_and_output(exec_state, "m ex.SOI,ex.IO,ex.S", false, 5,
-                                   0, 0);
+  assert_command_status_and_output(config, "addmoves ex.SOI,ex.IO,ex.S", false,
+                                   5, 0, 0);
+  assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
+                                   5, 0, 0);
   // Get all moves through move gen
+  assert_command_status_and_output(config, "gen -numplays 15", false, 5, 16, 0);
   assert_command_status_and_output(
-      exec_state, "go gen numplays 15 cgp " DELDAR_VS_HARSHAN_CGP, false, 5, 16,
-      0);
-  assert_command_status_and_output(
-      exec_state, "go sim plies 2 threads 10 i 200 info 60", false, 60, 68, 0);
+      config, "sim -plies 2 -threads 10 -it 200 -pfreq 60", false, 60, 68, 0);
 
+  assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP, false,
+                                   5, 0, 0);
   // Sim interrupted by user
+  assert_command_status_and_output(config, "gen -numplays 15", false, 5, 16, 0);
   assert_command_status_and_output(
-      exec_state, "go gen numplays 15 cgp " DELDAR_VS_HARSHAN_CGP, false, 5, 16,
-      0);
-  assert_command_status_and_output(
-      exec_state, "go sim plies 2 threads 10 i 1000000 info 1000000", true, 5,
+      config, "sim -plies 2 -threads 10 -it 1000000 -pfreq 1000000", true, 5,
       17, 0);
 
   // Infer finishes normally
+  assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0, 0);
   assert_command_status_and_output(
-      exec_state,
-      "go infer rack MUZAKY pindex 0 score 58 exch 0 numplays 20 threads 4 "
-      "cgp " EMPTY_CGP,
-      false, 60, 52, 0);
+      config, "infer 1 MUZAKY 58 -numplays 20 -threads 4 ", false, 60, 52, 0);
 
   // Infer interrupted
-  assert_command_status_and_output(
-      exec_state,
-      "go infer rack " EMPTY_RACK_STRING
-      " pindex 0 score 0 exch 3 numplays 20 threads 3 "
-      "cgp " EMPTY_CGP,
-      true, 5, 1, 0);
+  assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0, 0);
+  assert_command_status_and_output(config, "infer 1 3 -numplays 20 -threads 3 ",
+                                   true, 5, 1, 0);
 
   // Autoplay finishes normally
-  assert_command_status_and_output(exec_state,
-                                   "go autoplay lex CSW21 s1 equity s2 equity "
-                                   "r1 best r2 best i 10 numplays 1 threads 3",
-                                   false, 30, 1, 0);
+  assert_command_status_and_output(
+      config,
+      "autoplay -lex CSW21 -s1 equity -s2 equity "
+      "-r1 best -r2 best -it 10 -numplays 1 -threads 3",
+      false, 30, 1, 0);
 
   // Autoplay interrupted
-  assert_command_status_and_output(exec_state,
-                                   "go autoplay lex CSW21 s1 equity s2 equity "
-                                   "r1 best r2 best i 10000000 threads 5",
+  assert_command_status_and_output(config,
+                                   "autoplay -lex CSW21 -s1 equity -s2 equity "
+                                   "-r1 best -r2 best -it 10000000 -threads 5",
                                    true, 5, 1, 0);
 
   for (int i = 0; i < 3; i++) {
     // Catalan
-    assert_command_status_and_output(exec_state, "position cgp " CATALAN_CGP,
-                                     false, 5, 0, 0);
+    assert_command_status_and_output(config, "cgp " CATALAN_CGP, false, 5, 0,
+                                     0);
+    assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
+                                     false, 5, 16, 0);
     assert_command_status_and_output(
-        exec_state, "go gen r1 all r2 all numplays 15", false, 5, 16, 0);
-    assert_command_status_and_output(exec_state,
-                                     "go sim plies 2 threads 10 i 200 info 60",
-                                     false, 60, 68, 0);
+        config, "sim -plies 2 -threads 10 -it 200 -pfreq 60", false, 60, 68, 0);
+    assert_command_status_and_output(config, "cgp " EMPTY_CATALAN_CGP, false, 5,
+                                     0, 0);
     assert_command_status_and_output(
-        exec_state,
-        "go infer rack AIMSX pindex 0 score 52 exch "
-        "0 numplays 20 threads 4 info 1000000 cgp " EMPTY_CATALAN_CGP,
+        config, "infer 1 AIMSX 52 -numplays 20 -threads 4 -pfreq 1000000",
         false, 60, 52, 0);
 
     assert_command_status_and_output(
-        exec_state,
-        "go autoplay s1 equity s2 equity "
-        "r1 best r2 best i 10 numplays 1 cgp " CATALAN_CGP,
+        config,
+        "autoplay -s1 equity -s2 equity -r1 best -r2 best -it 10 -numplays 1 ",
         false, 30, 1, 0);
     // CSW
+    assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP,
+                                     false, 5, 0, 0);
+    assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
+                                     false, 5, 16, 0);
     assert_command_status_and_output(
-        exec_state, "position cgp " DELDAR_VS_HARSHAN_CGP, false, 5, 0, 0);
-    assert_command_status_and_output(
-        exec_state, "go gen r1 all r2 all numplays 15", false, 5, 16, 0);
-    assert_command_status_and_output(exec_state,
-                                     "go sim plies 2 threads 10 i 200 info 60 ",
-                                     false, 60, 68, 0);
+        config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 ", false, 60, 68,
+        0);
 
+    assert_command_status_and_output(config, "cgp " EMPTY_CGP, false, 5, 0, 0);
     assert_command_status_and_output(
-        exec_state,
-        "go infer rack DGINR pindex 0 score 18 exch 0 numplays 20 threads 4 "
-        "info 1000000 "
-        "cgp " EMPTY_CGP,
+        config, "infer 1 DGINR 18 -numplays 20 -threads 4 -pfreq 1000000 ",
         false, 60, 52, 0);
 
     assert_command_status_and_output(
-        exec_state,
-        "go autoplay lex CSW21 s1 equity s2 equity "
-        "r1 best r2 best i 10 numplays 1",
+        config,
+        "autoplay -lex CSW21 -s1 equity -s2 equity "
+        "-r1 best -r2 best -it 10 -numplays 1",
         false, 30, 1, 0);
     // Polish
-    assert_command_status_and_output(exec_state, "position cgp " POLISH_CGP,
-                                     false, 5, 0, 0);
+    assert_command_status_and_output(config, "cgp " POLISH_CGP, false, 5, 0, 0);
+    assert_command_status_and_output(config, "gen -r1 all -r2 all -numplays 15",
+                                     false, 5, 16, 0);
     assert_command_status_and_output(
-        exec_state, "go gen r1 all r2 all numplays 15", false, 5, 16, 0);
-    assert_command_status_and_output(exec_state,
-                                     "go sim plies 2 threads 10 i 200 info 60 ",
-                                     false, 60, 68, 0);
+        config, "sim -plies 2 -threads 10 -it 200 -pfreq 60 ", false, 60, 68,
+        0);
 
-    assert_command_status_and_output(
-        exec_state,
-        "go infer rack HUJA pindex 0 score 20 exch 0 "
-        "numplays 20 info 1000000  threads 4 cgp " EMPTY_POLISH_CGP,
-        false, 60, 58, 0);
+    assert_command_status_and_output(config, "cgp " EMPTY_POLISH_CGP, false, 5,
+                                     0, 0);
+    assert_command_status_and_output(config,
+                                     "infer 1 HUJA 20 -numplays 20 -pfreq "
+                                     "1000000 -threads 4",
+                                     false, 60, 58, 0);
 
-    assert_command_status_and_output(
-        exec_state,
-        "go autoplay s1 equity s2 equity "
-        "r1 best r2 best i 10 numplays 1 lex OSPS49",
-        false, 30, 1, 0);
+    assert_command_status_and_output(config,
+                                     "autoplay -s1 equity -s2 equity -r1 best "
+                                     "-r2 best -it 10 -numplays 1 -lex OSPS49",
+                                     false, 30, 1, 0);
   }
-  exec_state_destroy(exec_state);
+  config_destroy(config);
 }
 
 void test_process_command(const char *arg_string,
@@ -371,7 +371,7 @@ void test_process_command(const char *arg_string,
   char *test_outerror_filename = get_test_filename("outerror");
 
   char *arg_string_with_outfile = get_formatted_string(
-      "./bin/magpie %s outfile %s", arg_string, test_output_filename);
+      "./bin/magpie %s -outfile %s", arg_string, test_output_filename);
 
   // Reset the contents of output
   fclose(fopen(test_output_filename, "w"));
@@ -426,13 +426,12 @@ void test_process_command(const char *arg_string,
 
 void test_exec_single_command() {
   char *plies_error_substr =
-      get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_PLIES);
-  test_process_command("go sim lex CSW21 i 1000 plies 2h3", 0, NULL, 1,
+      get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
+  test_process_command("sim -lex CSW21 -it 1000 -plies 2h3", 0, NULL, 1,
                        plies_error_substr);
   free(plies_error_substr);
 
-  test_process_command("go infer rack MUZAKY pindex 0 score 58 exch 0 numplays "
-                       "20 threads 4 lex CSW21",
+  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21",
                        52, "infertile leave Z", 0, NULL);
 }
 
@@ -449,17 +448,17 @@ void test_exec_file_commands() {
   // Separate into distinct lines to prove
   // the command file is being read.
   const char *commands_file_content =
-      "i 200\n"
-      "info 60\n"
-      "cgp " DELDAR_VS_HARSHAN_CGP "\ngo gen numplays 15"
-      "\ngo sim plies 2 threads 10\n"
-      "go sim\n"
-      "go sim lex CSW21 i 10h00\n"
-      "pindex 0 score 20 exch 0\n"
-      "numplays 20 info 1000000\n"
-      " threads 4 cgp " EMPTY_POLISH_CGP "\ngo infer rack HUJA\n"
-      "r1 best r2 best i 10 numplays 1 threads 3\n"
-      "go autoplay lex CSW21 s1 equity s2 equity ";
+      "set -it 200\n"
+      "set -pfreq 60\n"
+      "cgp " DELDAR_VS_HARSHAN_CGP "\ngen -numplays 15"
+      "\nsim -plies 2 -threads 10\n"
+      "sim\n"
+      "sim -lex CSW21 -it 10h00\n"
+      "set -numplays 20 -pfreq 1000000\n"
+      "set -threads 4\n"
+      "cgp " EMPTY_POLISH_CGP "\ninfer 1 HUJA 20\n"
+      "set -r1 best -r2 best -it 10 -numplays 1 -threads 3\n"
+      "autoplay -lex CSW21 -s1 equity -s2 equity ";
   char *commands_filename = get_test_filename("test_commands");
 
   write_string_to_file(commands_filename, "w", commands_file_content);
@@ -467,8 +466,8 @@ void test_exec_file_commands() {
   char *commands_file_invocation =
       get_formatted_string("infile %s", commands_filename);
 
-  char *iter_error_substr = get_formatted_string(
-      "code %d", CONFIG_LOAD_STATUS_MALFORMED_MAX_ITERATIONS);
+  char *iter_error_substr =
+      get_formatted_string("code %d", CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
 
   test_process_command(commands_file_invocation, 211,
                        "info infertotalracks 6145", 1, iter_error_substr);
@@ -488,12 +487,12 @@ void test_exec_add_phony_words() {
   // Separate into distinct lines to prove
   // the command file is being read.
   const char *commands_file_content =
-      "lex CSW21 s1 equity s2 equity\n"
+      "set -lex CSW21 -s1 equity -s2 equity\n"
       "cgp " OPENING_CGP "\n"
-      "m 8g.ABC,8g.CAB,8f.GAF,8D.FADGE,8H.BACED\n"
+      "addmoves 8g.ABC,8g.CAB,8f.GAF,8D.FADGE,8H.BACED\n"
       "cgp " ION_OPENING_CGP "\n"
-      "m 7d.GED,7f.IEE,H7.AN,7H.AI\n"
-      "go autoplay i 10 ";
+      "addmoves 7d.GED,7f.IEE,H7.AN,7H.AI\n"
+      "autoplay -it 10 ";
 
   char *commands_filename = get_test_filename("test_commands");
 
@@ -502,7 +501,7 @@ void test_exec_add_phony_words() {
   char *commands_file_invocation =
       get_formatted_string("infile %s", commands_filename);
 
-  test_process_command(commands_file_invocation, 1, "autoplay 10", 4,
+  test_process_command(commands_file_invocation, 1, "autoplay 20", 4,
                        "Phonies formed from 7F IEE 11: II,EO,IEE");
 
   delete_file(commands_filename);
@@ -526,7 +525,7 @@ void test_exec_ucgi_command() {
   create_fifo(test_input_filename);
 
   char *initial_command =
-      get_formatted_string("ucgi infile %s", test_input_filename);
+      get_formatted_string("set -mode ucgi -infile %s", test_input_filename);
 
   ProcessArgs *process_args =
       create_process_args(initial_command, 2, "autoplay", 1, "still searching");
@@ -541,17 +540,17 @@ void test_exec_ucgi_command() {
 
   sleep(1);
   file_handler_write(input_writer,
-                     "r1 best r2 best i 1 numplays 1 threads 1\n");
+                     "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
   sleep(1);
   file_handler_write(input_writer,
-                     "go autoplay lex CSW21 s1 equity s2 equity\n");
+                     "autoplay -lex CSW21 -s1 equity -s2 equity\n");
   sleep(1);
-  file_handler_write(input_writer,
-                     "go autoplay lex CSW21 s1 equity s2 equity i 10000000\n");
+  file_handler_write(
+      input_writer, "autoplay -lex CSW21 -s1 equity -s2 equity -it 10000000\n");
   // Try to immediately start another command while the previous one
   // is still running. This should give a warning.
   file_handler_write(input_writer,
-                     "go autoplay lex CSW21 s1 equity s2 equity i 1\n");
+                     "autoplay -lex CSW21 -s1 equity -s2 equity -it 1\n");
   sleep(1);
   // Interrupt the autoplay which won't finish in 1 second
   file_handler_write(input_writer, "stop\n");
@@ -575,17 +574,14 @@ void test_exec_console_command() {
   create_fifo(test_input_filename);
 
   // infile other than STDIN
-  char *initial_command = get_formatted_string(
-      "go infer rack DGINR pindex 0 score 18 exch 0 numplays 7 threads 4 "
-      "info 1000000 "
-      "cgp " EMPTY_CGP " infile %s",
-      test_input_filename);
+  char *initial_command =
+      get_formatted_string("cgp %s -infile %s", EMPTY_CGP, test_input_filename);
 
   char *config_load_error_substr =
       get_formatted_string("code %d", CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
 
   ProcessArgs *process_args = create_process_args(
-      initial_command, 40, "autoplay 100", 1, config_load_error_substr);
+      initial_command, 40, "autoplay 200", 1, config_load_error_substr);
 
   pthread_t cmd_execution_thread;
   pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
@@ -595,10 +591,12 @@ void test_exec_console_command() {
   FileHandler *input_writer = file_handler_create_from_filename(
       test_input_filename, FILE_HANDLER_MODE_WRITE);
 
+  file_handler_write(
+      input_writer, "infer 1 DGINR 18 -numplays 7 -threads 4 -pfreq 1000000\n");
   file_handler_write(input_writer,
-                     "r1 best r2 best i 100 numplays 1 threads 4\n");
+                     "set -r1 best -r2 b -it 100 -nump 1 -thr 4\n");
   file_handler_write(input_writer,
-                     "go autoplay lex CSW21 s1 equity s2 equity\n");
+                     "autoplay -lex CSW21 -s1 equity -s2 equity\n");
   // Stop should have no effect and appear as an error
   file_handler_write(input_writer, "stop\n");
   file_handler_write(input_writer, "quit\n");

@@ -1,6 +1,7 @@
 #ifndef STATIC_EVAL_H
 #define STATIC_EVAL_H
 
+#include "../def/config_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/static_eval_defs.h"

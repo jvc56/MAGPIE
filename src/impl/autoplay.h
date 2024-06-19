@@ -1,12 +1,23 @@
 #ifndef AUTOPLAY_H
 #define AUTOPLAY_H
 
+#include <stdbool.h>
+
 #include "../def/autoplay_defs.h"
 
 #include "../ent/autoplay_results.h"
-#include "../ent/config.h"
+#include "../ent/game.h"
+#include "../ent/thread_control.h"
 
-autoplay_status_t autoplay(const Config *config,
+typedef struct AutoplayArgs {
+  int max_iterations;
+  bool use_game_pairs;
+  uint64_t seed;
+  GameArgs *game_args;
+  ThreadControl *thread_control;
+} AutoplayArgs;
+
+autoplay_status_t autoplay(const AutoplayArgs *args,
                            AutoplayResults *autoplay_results);
 
 #endif

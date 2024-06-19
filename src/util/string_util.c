@@ -21,6 +21,10 @@ bool has_prefix(const char *pre, const char *str) {
   return strncmp(pre, str, string_length(pre)) == 0;
 }
 
+bool has_iprefix(const char *pre, const char *str) {
+  return strncasecmp(pre, str, string_length(pre)) == 0;
+}
+
 // Raises a fatal error if str is null
 bool is_string_empty_or_whitespace(const char *str) {
   if (!str) {

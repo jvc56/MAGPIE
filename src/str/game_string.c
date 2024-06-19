@@ -21,6 +21,21 @@
 
 #include "../util/string_util.h"
 
+void string_builder_add_game_variant(StringBuilder *sb,
+                                     game_variant_t game_variant_type) {
+  switch (game_variant_type) {
+  case GAME_VARIANT_CLASSIC:
+    string_builder_add_string(sb, GAME_VARIANT_CLASSIC_NAME);
+    break;
+  case GAME_VARIANT_WORDSMOG:
+    string_builder_add_string(sb, GAME_VARIANT_WORDSMOG_NAME);
+    break;
+  default:
+    string_builder_add_string(sb, GAME_VARIANT_UNKNOWN_NAME);
+    break;
+  }
+}
+
 void string_builder_add_player_row(const LetterDistribution *ld,
                                    const Player *player,
                                    StringBuilder *game_string,

@@ -161,9 +161,9 @@ char *board_layout_get_default_name() {
 
 const char *board_layout_get_name(const BoardLayout *bl) { return bl->name; }
 
-bool board_layout_is_name_default(const BoardLayout *bl) {
+bool board_layout_is_name_default(const char *board_layout_name) {
   char *default_layout_name = board_layout_get_default_name();
-  bool is_default = strings_equal(default_layout_name, bl->name);
+  bool is_default = strings_equal(default_layout_name, board_layout_name);
   free(default_layout_name);
   return is_default;
 }

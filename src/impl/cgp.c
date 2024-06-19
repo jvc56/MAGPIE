@@ -1,5 +1,6 @@
 #include <ctype.h>
 
+#include "../def/config_defs.h"
 #include "../def/game_defs.h"
 
 #include "../ent/bag.h"
@@ -8,6 +9,7 @@
 
 #include "../impl/gameplay.h"
 
+#include "../str/game_string.h"
 #include "../str/rack_string.h"
 
 cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
@@ -314,9 +316,11 @@ char *game_get_cgp(const Game *game, bool write_player_on_turn_first) {
 //  - board layout
 //  - letter distribution
 //  - variant
-void string_builder_add_cgp_options(const Config *config,
-                                    StringBuilder *cgp_options_builder) {
-  PlayersData *players_data = config_get_players_data(config);
+void string_builder_add_cgp_options(StringBuilder *cgp_options_builder,
+                                    PlayersData *players_data, int bingo_bonus,
+                                    const char *board_layout_name,
+                                    const char *ld_name,
+                                    game_variant_t game_variant) {
   bool kwgs_are_shared =
       players_data_get_is_shared(players_data, PLAYERS_DATA_TYPE_KWG);
   const char *lexicon_name = NULL;
@@ -332,19 +336,16 @@ void string_builder_add_cgp_options(const Config *config,
         players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG, 1));
   }
 
-  int bingo_bonus = config_get_bingo_bonus(config);
   if (bingo_bonus != DEFAULT_BINGO_BONUS) {
     string_builder_add_formatted_string(cgp_options_builder, " bb %d;",
                                         bingo_bonus);
   }
 
-  const BoardLayout *board_layout = config_get_board_layout(config);
-  if (!board_layout_is_name_default(board_layout)) {
+  if (!board_layout_is_name_default(board_layout_name)) {
     string_builder_add_formatted_string(cgp_options_builder, " bdn %s;",
-                                        board_layout_get_name(board_layout));
+                                        board_layout_name);
   }
 
-  const char *ld_name = config_get_ld_name(config);
   bool write_ld = false;
   if (kwgs_are_shared) {
     char *default_ld_name = ld_get_default_name(lexicon_name);
@@ -361,21 +362,25 @@ void string_builder_add_cgp_options(const Config *config,
                                         ld_name);
   }
 
-  game_variant_t game_variant = config_get_game_variant(config);
   if (game_variant != GAME_VARIANT_CLASSIC) {
-    char *game_variant_name = get_game_variant_name_from_type(game_variant);
-    string_builder_add_formatted_string(cgp_options_builder, " var %s;",
-                                        game_variant_name);
-    free(game_variant_name);
+    string_builder_add_string(cgp_options_builder, " var ");
+    string_builder_add_game_variant(cgp_options_builder, game_variant);
+    string_builder_add_string(cgp_options_builder, ";");
   }
 }
 
-char *game_get_cgp_with_options(const Config *config, const Game *game,
-                                bool write_player_on_turn_first) {
+char *game_get_cgp_with_options(const Game *game,
+                                bool write_player_on_turn_first,
+                                PlayersData *players_data, int bingo_bonus,
+                                const char *board_layout_name,
+                                const char *ld_name,
+                                game_variant_t game_variant) {
   StringBuilder *cgp_with_options_builder = create_string_builder();
   string_builder_add_cgp(game, cgp_with_options_builder,
                          write_player_on_turn_first);
-  string_builder_add_cgp_options(config, cgp_with_options_builder);
+  string_builder_add_cgp_options(cgp_with_options_builder, players_data,
+                                 bingo_bonus, board_layout_name, ld_name,
+                                 game_variant);
   char *cgp_with_options = string_builder_dump(cgp_with_options_builder, NULL);
   destroy_string_builder(cgp_with_options_builder);
   return cgp_with_options;

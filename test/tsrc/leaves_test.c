@@ -2,11 +2,11 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "../../src/ent/config.h"
 #include "../../src/ent/klv.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/players_data.h"
 #include "../../src/ent/rack.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/util/log.h"
 #include "../../src/util/string_util.h"
@@ -16,7 +16,7 @@
 
 void test_leaves() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const KLV *klv = players_data_get_klv(config_get_players_data(config), 0);
   const LetterDistribution *ld = config_get_ld(config);
   Rack *rack = rack_create(ld_get_size(ld));
@@ -34,7 +34,7 @@ void test_leaves() {
     double klv_leave_value = klv_get_leave_value(klv, rack);
     assert(within_epsilon(
         klv_leave_value,
-        string_to_double(string_splitter_get_item(leave_and_value, 1))));
+        string_to_float(string_splitter_get_item(leave_and_value, 1))));
 
     destroy_string_splitter(leave_and_value);
   }

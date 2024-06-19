@@ -2,7 +2,6 @@
 
 #include "../../src/def/static_eval_defs.h"
 
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/klv.h"
 #include "../../src/ent/letter_distribution.h"
@@ -10,6 +9,7 @@
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
 #include "../../src/ent/static_eval.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
@@ -18,8 +18,8 @@
 
 void test_macondo_opening_equity_adjustments() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
   Player *player0 = game_get_player(game, 0);
   Rack *rack = player_get_rack(player0);
   const KLV *klv = player_get_klv(player0);
@@ -96,8 +96,8 @@ void test_macondo_opening_equity_adjustments() {
 
 void test_macondo_endgame_equity_adjustments() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(6);
 
   game_load_cgp(

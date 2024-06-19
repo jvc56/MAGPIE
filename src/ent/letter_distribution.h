@@ -8,6 +8,7 @@
 #include "../def/letter_distribution_defs.h"
 
 typedef struct LetterDistribution {
+  char *name;
   int size;
   int *distribution;
   int *scores;
@@ -22,6 +23,10 @@ typedef struct LetterDistribution {
 
 LetterDistribution *ld_create(const char *ld_name);
 void ld_destroy(LetterDistribution *ld);
+
+static inline const char *ld_get_name(const LetterDistribution *ld) {
+  return ld->name;
+}
 
 static inline int ld_get_size(const LetterDistribution *ld) { return ld->size; }
 

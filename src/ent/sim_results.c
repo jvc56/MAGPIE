@@ -29,6 +29,7 @@ struct SimResults {
   int max_plies;
   int num_simmed_plays;
   int iteration_count;
+  double zval;
   pthread_mutex_t simmed_plays_mutex;
   atomic_int node_count;
   SimmedPlay **simmed_plays;
@@ -101,7 +102,7 @@ void sim_results_destroy(SimResults *sim_results) {
 }
 
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_simmed_plays, int max_plies) {
+                       int num_simmed_plays, int max_plies, double zval) {
   sim_results_destroy_internal(sim_results);
 
   sim_results->simmed_plays =
@@ -110,6 +111,7 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   sim_results->num_simmed_plays = num_simmed_plays;
   sim_results->max_plies = max_plies;
   sim_results->iteration_count = 0;
+  sim_results->zval = zval;
   atomic_init(&sim_results->node_count, 0);
 }
 
@@ -170,6 +172,10 @@ int sim_results_get_number_of_plays(const SimResults *sim_results) {
 
 int sim_results_get_max_plies(const SimResults *sim_results) {
   return sim_results->max_plies;
+}
+
+double sim_results_get_zval(const SimResults *sim_results) {
+  return sim_results->zval;
 }
 
 int sim_results_get_node_count(const SimResults *sim_results) {

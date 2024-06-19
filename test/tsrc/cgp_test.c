@@ -2,9 +2,9 @@
 
 #include "../../src/def/validated_move_defs.h"
 
-#include "../../src/ent/config.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/validated_move.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
@@ -29,8 +29,16 @@ void assert_game_matches_cgp_with_options(const Config *config,
                                           const Game *game,
                                           const char *expected_cgp_with_options,
                                           bool write_player_on_turn_first) {
-  char *actual_cgp =
-      game_get_cgp_with_options(config, game, write_player_on_turn_first);
+  PlayersData *players_data = config_get_players_data(config);
+  int bingo_bonus = config_get_bingo_bonus(config);
+  const char *board_layout_name =
+      board_layout_get_name(config_get_board_layout(config));
+  const char *ld_name = ld_get_name(config_get_ld(config));
+  game_variant_t game_variant = config_get_game_variant(config);
+
+  char *actual_cgp = game_get_cgp_with_options(
+      game, write_player_on_turn_first, players_data, bingo_bonus,
+      board_layout_name, ld_name, game_variant);
 
   StringSplitter *split_cgp =
       split_string_by_whitespace(expected_cgp_with_options, true);
@@ -77,8 +85,8 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
 
 void test_cgp_english() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
 
   assert_cgp_load_and_write_are_equal(game, EMPTY_CGP);
   assert_cgp_load_and_write_are_equal(game, EMPTY_PLAYER0_RACK_CGP);
@@ -185,29 +193,29 @@ void test_cgp_english() {
 
 void test_cgp_english_with_options() {
   Config *config = create_config_or_die(
-      "setoptions lex CSW21 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
 
   assert_game_matches_cgp_with_options(
       config, game, EMPTY_CGP_WITHOUT_OPTIONS " lex CSW21;", true);
 
-  load_config_or_die(config, "bb 27");
+  load_and_exec_config_or_die(config, "set -bb 27");
   assert_game_matches_cgp_with_options(
       config, game, EMPTY_CGP_WITHOUT_OPTIONS " lex CSW21; bb 27;", true);
 
-  load_config_or_die(config, "bdn single_row_15");
+  load_and_exec_config_or_die(config, "set -bdn single_row_15");
   assert_game_matches_cgp_with_options(
       config, game,
       EMPTY_CGP_WITHOUT_OPTIONS " lex CSW21; bb 27; bdn single_row_15;", true);
 
-  load_config_or_die(config, "var wordsmog");
+  load_and_exec_config_or_die(config, "set -var wordsmog");
   assert_game_matches_cgp_with_options(
       config, game,
       EMPTY_CGP_WITHOUT_OPTIONS
       " lex CSW21; bb 27; bdn single_row_15; var wordsmog;",
       true);
 
-  load_config_or_die(config, "l1 NWL20 l2 CSW21");
+  load_and_exec_config_or_die(config, "set -l1 NWL20 -l2 CSW21");
   assert_game_matches_cgp_with_options(
       config, game,
       EMPTY_CGP_WITHOUT_OPTIONS " l1 NWL20; l2 CSW21; bb 27; bdn "
@@ -220,8 +228,8 @@ void test_cgp_english_with_options() {
 
 void test_cgp_catalan() {
   Config *config = create_config_or_die(
-      "setoptions lex DISC2 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+      "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
 
   assert_cgp_load_and_write_are_equal(game, EMPTY_CATALAN_CGP);
   assert_cgp_load_and_write_are_equal(game, CATALAN_CGP);
@@ -232,8 +240,8 @@ void test_cgp_catalan() {
 
 void test_cgp_polish() {
   Config *config = create_config_or_die(
-      "setoptions lex OSPS49 s1 equity s2 equity r1 all r2 all numplays 1");
-  Game *game = game_create(config);
+      "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
 
   assert_cgp_load_and_write_are_equal(game, POLISH_CGP);
   assert_cgp_load_and_write_are_equal(game, EMPTY_POLISH_CGP);

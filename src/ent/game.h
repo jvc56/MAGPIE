@@ -8,19 +8,26 @@
 
 #include "bag.h"
 #include "board.h"
-#include "config.h"
 #include "letter_distribution.h"
 #include "player.h"
 
 typedef struct Game Game;
 
-Game *game_create(const Config *config);
+typedef struct GameArgs {
+  const PlayersData *players_data;
+  const BoardLayout *board_layout;
+  const LetterDistribution *ld;
+  game_variant_t game_variant;
+} GameArgs;
+
+Game *game_create(const GameArgs *game_args);
 void game_destroy(Game *game);
-void game_update(const Config *config, Game *game);
+void game_update(Game *game, const GameArgs *game_args);
 Game *game_duplicate(const Game *game);
 void game_reset(Game *game);
 
 game_variant_t game_get_variant(const Game *game);
+game_variant_t get_game_variant_type_from_name(const char *variant_name);
 Board *game_get_board(const Game *game);
 Bag *game_get_bag(const Game *game);
 const LetterDistribution *game_get_ld(const Game *game);

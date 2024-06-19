@@ -35,11 +35,12 @@ typedef struct SimResults SimResults;
 
 SimResults *sim_results_create();
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_simmed_plays, int max_plies);
+                       int num_simmed_plays, int max_plies, double zval);
 void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);
 int sim_results_get_max_plies(const SimResults *sim_results);
+double sim_results_get_zval(const SimResults *sim_results);
 int sim_results_get_node_count(const SimResults *sim_results);
 int sim_results_get_iteration_count(const SimResults *sim_results);
 SimmedPlay *sim_results_get_simmed_play(SimResults *sim_results, int index);

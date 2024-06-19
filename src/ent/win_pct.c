@@ -10,12 +10,15 @@
 #include "../util/util.h"
 
 struct WinPct {
+  char *name;
   float **win_pcts;
   int min_spread;
   int max_spread;
   int number_of_spreads;
   unsigned int max_tiles_unseen;
 };
+
+const char *win_pct_get_name(WinPct *wp) { return wp->name; }
 
 float win_pct_get(const WinPct *wp, int spread_plus_leftover,
                   unsigned int game_unseen_tiles) {
@@ -40,7 +43,11 @@ char *get_win_pct_filepath(const char *win_pct_name) {
                               WIN_PCT_FILE_EXTENSION);
 }
 
-void parse_win_pct_csv(WinPct *wp, const char *win_pct_name) {
+WinPct *win_pct_create(const char *win_pct_name) {
+  WinPct *wp = malloc_or_die(sizeof(WinPct));
+
+  wp->name = string_duplicate(win_pct_name);
+
   char *win_pct_filename = get_win_pct_filepath(win_pct_name);
   StringSplitter *win_pct_lines = split_file_by_newline(win_pct_filename);
   free(win_pct_filename);
@@ -98,11 +105,7 @@ void parse_win_pct_csv(WinPct *wp, const char *win_pct_name) {
 
   wp->win_pcts = array;
   wp->max_tiles_unseen = number_of_columns - 2;
-}
 
-WinPct *win_pct_create(const char *win_pct_name) {
-  WinPct *wp = malloc_or_die(sizeof(WinPct));
-  parse_win_pct_csv(wp, win_pct_name);
   return wp;
 }
 
@@ -114,6 +117,7 @@ void win_pct_destroy(WinPct *wp) {
   for (int i = 0; i < wp->number_of_spreads; i++) {
     free(wp->win_pcts[i]);
   }
+  free(wp->name);
   free(wp->win_pcts);
   free(wp);
 }
