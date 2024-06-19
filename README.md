@@ -278,7 +278,7 @@ cgp C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/
 Run an inference:
 
 ```
- ./bin/magpie infer 0 HUJA 20 -numplays 20 -pfreq 1000000 -threads 4 -lex OSPS44
+ ./bin/magpie infer 1 HUJA 20 -numplays 20 -pfreq 1000000 -threads 4 -lex OSPS44
 ```
 
 Run autoplay games in ucgi mode and then stop:
