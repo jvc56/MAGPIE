@@ -54,6 +54,8 @@ void load_kwg(KWG *kwg, const char *data_dir, const char *kwg_name) {
   }
   free(kwg_filename);
 
+  kwg->name = string_duplicate(kwg_name);
+
   fseek(stream, 0, SEEK_END);        // seek to end of file
   long int kwg_size = ftell(stream); // get current file pointer
   fseek(stream, 0, SEEK_SET);
@@ -67,12 +69,14 @@ void load_kwg(KWG *kwg, const char *data_dir, const char *kwg_name) {
 
 KWG *kwg_create(const char *data_dir, const char *kwg_name) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
+  kwg->name = NULL;
   load_kwg(kwg, data_dir, kwg_name);
   return kwg;
 }
 
 KWG *kwg_create_empty() {
   KWG *kwg = malloc_or_die(sizeof(KWG));
+  kwg->name = NULL;
   return kwg;
 }
 
@@ -102,6 +106,7 @@ void kwg_destroy(KWG *kwg) {
     return;
   }
   free(kwg->nodes);
+  free(kwg->name);
   free(kwg);
 }
 

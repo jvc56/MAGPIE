@@ -8,6 +8,7 @@
 #include "../def/kwg_defs.h"
 
 typedef struct KWG {
+  char *name;
   uint32_t *nodes;
   int number_of_nodes;
 } KWG;
@@ -19,6 +20,8 @@ void kwg_destroy(KWG *kwg);
 void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes, FILE *stream);
 void kwg_allocate_nodes(KWG *kwg, size_t number_of_nodes);
 uint32_t *kwg_get_mutable_nodes(KWG *kwg);
+
+static inline const char *kwg_get_name(const KWG *kwg) { return kwg->name; }
 
 static inline uint32_t kwg_node(const KWG *kwg, uint32_t node_index) {
   return kwg->nodes[node_index];

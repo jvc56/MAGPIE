@@ -100,6 +100,8 @@ void klv_load(KLV *klv, const char *data_dir, const char *klv_name) {
   }
   free(klv_filename);
 
+  klv->name = string_duplicate(klv_name);
+
   uint32_t kwg_size;
   size_t result;
 
@@ -146,6 +148,7 @@ void klv_load(KLV *klv, const char *data_dir, const char *klv_name) {
 
 KLV *klv_create(const char *data_dir, const char *klv_name) {
   KLV *klv = malloc_or_die(sizeof(KLV));
+  klv->name = NULL;
   klv_load(klv, data_dir, klv_name);
   return klv;
 }
@@ -157,6 +160,7 @@ void klv_destroy(KLV *klv) {
   kwg_destroy(klv->kwg);
   free(klv->leave_values);
   free(klv->word_counts);
+  free(klv->name);
   free(klv);
 }
 
