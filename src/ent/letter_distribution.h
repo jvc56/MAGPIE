@@ -21,7 +21,7 @@ typedef struct LetterDistribution {
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
 } LetterDistribution;
 
-LetterDistribution *ld_create(const char *ld_name);
+LetterDistribution *ld_create(const char *data_dir, const char *ld_name);
 void ld_destroy(LetterDistribution *ld);
 
 static inline const char *ld_get_name(const LetterDistribution *ld) {

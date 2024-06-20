@@ -24,7 +24,6 @@ void test_wasm_api() {
 
   // play a phony 6G DI(PET)AZ keeping ERS.
   retstr = wasm_score_move(VS_ED, "6G.DIPETAZ.ADEIRSZ");
-
   // score is 57
   // equity of ERS is 15.497
   // -> total equity is 72.497

@@ -16,7 +16,6 @@
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
-#include "../def/win_pct_defs.h"
 
 #include "../ent/error_status.h"
 #include "../ent/game.h"
@@ -95,6 +94,7 @@ typedef struct ParsedArg {
 
 struct Config {
   ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
+  char *data_dir;
   arg_token_t exec_parg_token;
   bool ld_changed;
   exec_mode_t exec_mode;
@@ -1142,7 +1142,8 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
-                   updated_p1_lexicon_name, updated_p2_lexicon_name);
+                   config->data_dir, updated_p1_lexicon_name,
+                   updated_p2_lexicon_name);
 
   // Load the leaves
 
@@ -1172,7 +1173,8 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
-                   updated_p1_leaves_name, updated_p2_leaves_name);
+                   config->data_dir, updated_p1_leaves_name,
+                   updated_p2_leaves_name);
 
   free(updated_p1_leaves_name);
   free(updated_p2_leaves_name);
@@ -1197,7 +1199,7 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   config->ld_changed = false;
   if (updated_ld_name && !strings_equal(updated_ld_name, existing_ld_name)) {
     ld_destroy(config->ld);
-    config->ld = ld_create(updated_ld_name);
+    config->ld = ld_create(config->data_dir, updated_ld_name);
     config->ld_changed = true;
   }
 
@@ -1336,7 +1338,8 @@ config_load_status_t config_load_data(Config *config) {
   if (new_board_layout_name &&
       !strings_equal(board_layout_get_name(config->board_layout),
                      new_board_layout_name)) {
-    if (board_layout_load(config->board_layout, new_board_layout_name) !=
+    if (board_layout_load(config->board_layout, config->data_dir,
+                          new_board_layout_name) !=
         BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
       return CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR;
     }
@@ -1391,7 +1394,7 @@ config_load_status_t config_load_data(Config *config) {
   if (new_win_pct_name &&
       !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name)) {
     win_pct_destroy(config->win_pcts);
-    config->win_pcts = win_pct_create(new_win_pct_name);
+    config->win_pcts = win_pct_create(config->data_dir, new_win_pct_name);
   }
 
   // Set IO
@@ -1523,6 +1526,7 @@ Config *config_create_default() {
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
                     status_fatal);
 
+  config->data_dir = string_duplicate(DEFAULT_DATA_DIR);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
@@ -1535,8 +1539,8 @@ Config *config_create_default() {
   config->use_game_pairs = true;
   config->seed = 0;
   config->game_variant = DEFAULT_GAME_VARIANT;
-  config->win_pcts = win_pct_create(DEFAULT_WIN_PCT);
-  config->board_layout = board_layout_create_default();
+  config->win_pcts = win_pct_create(config->data_dir, DEFAULT_WIN_PCT);
+  config->board_layout = board_layout_create_default(config->data_dir);
   config->ld = NULL;
   config->players_data = players_data_create();
   config->thread_control = thread_control_create();
@@ -1569,5 +1573,6 @@ void config_destroy(Config *config) {
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   error_status_destroy(config->error_status);
+  free(config->data_dir);
   free(config);
 }

@@ -18,17 +18,9 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+#include "data_filepaths.h"
 #include "kwg.h"
 #include "rack.h"
-
-char *klv_get_filepath(const char *klv_name) {
-  // Check for invalid inputs
-  if (!klv_name) {
-    log_fatal("klv name is null");
-  }
-  return get_formatted_string("%s%s%s", KLV_FILEPATH, klv_name,
-                              KLV_FILE_EXTENSION);
-}
 
 float reverse_float(const float in_float) {
   float ret_val;
@@ -98,8 +90,10 @@ void klv_count_words(const KLV *klv, size_t kwg_size) {
   }
 }
 
-void klv_load(KLV *klv, const char *klv_name) {
-  char *klv_filename = klv_get_filepath(klv_name);
+void klv_load(KLV *klv, const char *data_dir, const char *klv_name) {
+  char *klv_filename =
+      data_filepaths_get(data_dir, klv_name, DATA_FILEPATH_TYPE_KLV);
+
   FILE *stream = stream_from_filename(klv_filename);
   if (!stream) {
     log_fatal("failed to open stream from filename: %s\n", klv_filename);
@@ -150,9 +144,9 @@ void klv_load(KLV *klv, const char *klv_name) {
   klv_count_words(klv, kwg_size);
 }
 
-KLV *klv_create(const char *klv_name) {
+KLV *klv_create(const char *data_dir, const char *klv_name) {
   KLV *klv = malloc_or_die(sizeof(KLV));
-  klv_load(klv, klv_name);
+  klv_load(klv, data_dir, klv_name);
   return klv;
 }
 

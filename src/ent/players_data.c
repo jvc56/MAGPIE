@@ -127,14 +127,14 @@ void players_data_set_data(PlayersData *players_data,
 }
 
 void *players_data_create_data(players_data_t players_data_type,
-                               const char *data_name) {
+                               const char *data_dir, const char *data_name) {
   void *data = NULL;
   switch (players_data_type) {
   case PLAYERS_DATA_TYPE_KWG:
-    data = kwg_create(data_name);
+    data = kwg_create(data_dir, data_name);
     break;
   case PLAYERS_DATA_TYPE_KLV:
-    data = klv_create(data_name);
+    data = klv_create(data_dir, data_name);
     break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
@@ -229,7 +229,7 @@ void players_data_destroy(PlayersData *players_data) {
 }
 
 void players_data_set(PlayersData *players_data,
-                      players_data_t players_data_type,
+                      players_data_t players_data_type, const char *data_dir,
                       const char *p1_data_name, const char *p2_data_name) {
 
   if (is_string_empty_or_null(p1_data_name)) {
@@ -269,7 +269,7 @@ void players_data_set(PlayersData *players_data,
         data_names[1] = string_duplicate(data_names[0]);
       } else {
         data_pointers[player_index] = players_data_create_data(
-            players_data_type, input_data_names[player_index]);
+            players_data_type, data_dir, input_data_names[player_index]);
         data_names[player_index] =
             string_duplicate(input_data_names[player_index]);
       }

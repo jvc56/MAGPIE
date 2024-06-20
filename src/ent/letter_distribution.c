@@ -6,6 +6,8 @@
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 
+#include "data_filepaths.h"
+
 #include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
@@ -13,15 +15,6 @@
 #define INVALID_LETTER (0x80 - 1)
 #define MULTICHAR_START_DELIMITIER '['
 #define MULTICHAR_END_DELIMITIER ']'
-
-char *get_ld_filepath(const char *ld_name) {
-  // Check for invalid inputs
-  if (!ld_name) {
-    log_fatal("letter distribution name is null");
-  }
-  return get_formatted_string("%s%s%s", LETTER_DISTRIBUTION_FILEPATH, ld_name,
-                              LETTER_DISTRIBUTION_FILE_EXTENSION);
-}
 
 // Sort the machine letters in descending score order
 void sort_score_order(LetterDistribution *ld) {
@@ -42,7 +35,7 @@ void sort_score_order(LetterDistribution *ld) {
   }
 }
 
-LetterDistribution *ld_create(const char *ld_name) {
+LetterDistribution *ld_create(const char *data_dir, const char *ld_name) {
   LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
 
   // This function call opens and closes the file, so
@@ -50,7 +43,8 @@ LetterDistribution *ld_create(const char *ld_name) {
 
   ld->name = string_duplicate(ld_name);
 
-  char *ld_filename = get_ld_filepath(ld_name);
+  char *ld_filename =
+      data_filepaths_get(data_dir, ld_name, DATA_FILEPATH_TYPE_LD);
 
   StringSplitter *ld_lines = split_file_by_newline(ld_filename);
 
