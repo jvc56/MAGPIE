@@ -442,7 +442,7 @@ void assert_board_layout_error(const char *board_layout_name,
                                board_layout_load_status_t expected_status) {
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, DEFAULT_DATA_DIR, board_layout_name);
+      board_layout_load(bl, DEFAULT_DATA_PATH, board_layout_name);
   board_layout_destroy(bl);
   if (actual_status != expected_status) {
     printf("board layout load statuses do not match: %d != %d", expected_status,
@@ -454,7 +454,7 @@ void assert_board_layout_error(const char *board_layout_name,
 BoardLayout *create_test_board_layout(const char *board_layout_name) {
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, DEFAULT_DATA_DIR, board_layout_name);
+      board_layout_load(bl, DEFAULT_DATA_PATH, board_layout_name);
   if (actual_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
     printf("board layout load failure for %s: %d\n", board_layout_name,
            actual_status);

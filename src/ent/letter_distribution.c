@@ -35,7 +35,7 @@ void sort_score_order(LetterDistribution *ld) {
   }
 }
 
-LetterDistribution *ld_create(const char *data_dir, const char *ld_name) {
+LetterDistribution *ld_create(const char *data_path, const char *ld_name) {
   LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
 
   // This function call opens and closes the file, so
@@ -44,7 +44,7 @@ LetterDistribution *ld_create(const char *data_dir, const char *ld_name) {
   ld->name = string_duplicate(ld_name);
 
   char *ld_filename =
-      data_filepaths_get(data_dir, ld_name, DATA_FILEPATH_TYPE_LD);
+      data_filepaths_get(data_path, ld_name, DATA_FILEPATH_TYPE_LD);
 
   StringSplitter *ld_lines = split_file_by_newline(ld_filename);
 

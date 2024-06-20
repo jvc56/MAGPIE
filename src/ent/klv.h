@@ -16,7 +16,7 @@ typedef struct KLV {
   double *leave_values;
 } KLV;
 
-KLV *klv_create(const char *data_dir, const char *klv_name);
+KLV *klv_create(const char *data_path, const char *klv_name);
 void klv_destroy(KLV *klv);
 
 static inline const char *klv_get_name(const KLV *klv) { return klv->name; }

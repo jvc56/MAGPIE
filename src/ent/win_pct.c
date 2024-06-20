@@ -34,13 +34,13 @@ float win_pct_get(const WinPct *wp, int spread_plus_leftover,
   return wp->win_pcts[wp->max_spread - spread_plus_leftover][game_unseen_tiles];
 };
 
-WinPct *win_pct_create(const char *data_dir, const char *win_pct_name) {
+WinPct *win_pct_create(const char *data_path, const char *win_pct_name) {
   WinPct *wp = malloc_or_die(sizeof(WinPct));
 
   wp->name = string_duplicate(win_pct_name);
 
   char *win_pct_filename =
-      data_filepaths_get(data_dir, win_pct_name, DATA_FILEPATH_TYPE_WIN_PCT);
+      data_filepaths_get(data_path, win_pct_name, DATA_FILEPATH_TYPE_WIN_PCT);
   StringSplitter *win_pct_lines = split_file_by_newline(win_pct_filename);
   free(win_pct_filename);
 

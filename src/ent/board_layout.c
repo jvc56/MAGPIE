@@ -134,9 +134,9 @@ board_layout_parse_split_file(BoardLayout *bl,
 }
 
 board_layout_load_status_t board_layout_load(BoardLayout *bl,
-                                             const char *data_dir,
+                                             const char *data_path,
                                              const char *board_layout_name) {
-  char *layout_filename = data_filepaths_get(data_dir, board_layout_name,
+  char *layout_filename = data_filepaths_get(data_path, board_layout_name,
                                              DATA_FILEPATH_TYPE_LAYOUT);
   StringSplitter *layout_rows = split_file_by_newline(layout_filename);
   free(layout_filename);
@@ -164,11 +164,11 @@ bool board_layout_is_name_default(const char *board_layout_name) {
   return is_default;
 }
 
-BoardLayout *board_layout_create_default(const char *data_dir) {
+BoardLayout *board_layout_create_default(const char *data_path) {
   BoardLayout *bl = board_layout_create();
   char *default_layout_name = board_layout_get_default_name();
   board_layout_load_status_t status =
-      board_layout_load(bl, data_dir, default_layout_name);
+      board_layout_load(bl, data_path, default_layout_name);
   free(default_layout_name);
   if (status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
     log_fatal("standard board with dim %d failed to load", BOARD_DIM);

@@ -90,9 +90,9 @@ void klv_count_words(const KLV *klv, size_t kwg_size) {
   }
 }
 
-void klv_load(KLV *klv, const char *data_dir, const char *klv_name) {
+void klv_load(KLV *klv, const char *data_path, const char *klv_name) {
   char *klv_filename =
-      data_filepaths_get(data_dir, klv_name, DATA_FILEPATH_TYPE_KLV);
+      data_filepaths_get(data_path, klv_name, DATA_FILEPATH_TYPE_KLV);
 
   FILE *stream = stream_from_filename(klv_filename);
   if (!stream) {
@@ -146,10 +146,10 @@ void klv_load(KLV *klv, const char *data_dir, const char *klv_name) {
   klv_count_words(klv, kwg_size);
 }
 
-KLV *klv_create(const char *data_dir, const char *klv_name) {
+KLV *klv_create(const char *data_path, const char *klv_name) {
   KLV *klv = malloc_or_die(sizeof(KLV));
   klv->name = NULL;
-  klv_load(klv, data_dir, klv_name);
+  klv_load(klv, data_path, klv_name);
   return klv;
 }
 

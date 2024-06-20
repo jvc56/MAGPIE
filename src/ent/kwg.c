@@ -44,9 +44,9 @@ void kwg_allocate_nodes(KWG *kwg, size_t number_of_nodes) {
 
 uint32_t *kwg_get_mutable_nodes(KWG *kwg) { return kwg->nodes; }
 
-void load_kwg(KWG *kwg, const char *data_dir, const char *kwg_name) {
+void load_kwg(KWG *kwg, const char *data_path, const char *kwg_name) {
   char *kwg_filename =
-      data_filepaths_get(data_dir, kwg_name, DATA_FILEPATH_TYPE_KWG);
+      data_filepaths_get(data_path, kwg_name, DATA_FILEPATH_TYPE_KWG);
 
   FILE *stream = stream_from_filename(kwg_filename);
   if (!stream) {
@@ -67,10 +67,10 @@ void load_kwg(KWG *kwg, const char *data_dir, const char *kwg_name) {
   fclose(stream);
 }
 
-KWG *kwg_create(const char *data_dir, const char *kwg_name) {
+KWG *kwg_create(const char *data_path, const char *kwg_name) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
   kwg->name = NULL;
-  load_kwg(kwg, data_dir, kwg_name);
+  load_kwg(kwg, data_path, kwg_name);
   return kwg;
 }
 

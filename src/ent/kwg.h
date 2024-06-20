@@ -13,7 +13,7 @@ typedef struct KWG {
   int number_of_nodes;
 } KWG;
 
-KWG *kwg_create(const char *data_dir, const char *kwg_name);
+KWG *kwg_create(const char *data_path, const char *kwg_name);
 KWG *kwg_create_empty();
 bool kwg_write_to_file(const KWG *kwg, const char *filename);
 void kwg_destroy(KWG *kwg);
