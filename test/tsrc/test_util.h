@@ -14,6 +14,7 @@
 #include "../../src/impl/config.h"
 
 #define TRIVIAL_CROSS_SET_STRING "*"
+#define DEFAULT_TEST_DATA_PATH "./data:./testdata"
 
 typedef struct SortedMoveList {
   int count;
@@ -55,18 +56,16 @@ void reset_file(const char *filename);
 void create_fifo(const char *fifo_name);
 void delete_fifo(const char *fifo_name);
 Config *create_config_or_die(const char *cmd);
+Config *config_create_default_test();
 void set_row(Game *game, int row, const char *row_content);
-void assert_board_layout_error(const char *board_layout_filename,
+void assert_board_layout_error(const char *data_path,
+                               const char *board_layout_filename,
                                board_layout_load_status_t expected_status);
-void load_game_with_test_board(Game *game, const char *board_layout_filename);
+void load_game_with_test_board(Game *game, const char *data_path,
+                               const char *board_layout_name);
 void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_position,
                                           const char *move_tiles,
                                           int move_score,
                                           bool play_move_on_board);
-void create_links(const char *src_dir_name, const char *dest_dir_name,
-                  const char *substr);
-void remove_links(const char *dir_name, const char *substr);
-char *get_current_directory();
-
 #endif

@@ -44,6 +44,14 @@ char *data_filepaths_get(const char *data_path, const char *data_name,
       full_filename_i = get_formatted_string("%s/letterdistributions/%s.csv",
                                              data_path_i, data_name);
       break;
+    case DATA_FILEPATH_TYPE_GCG:
+      full_filename_i =
+          get_formatted_string("%s/gcgs/%s.gcg", data_path_i, data_name);
+      break;
+    case DATA_FILEPATH_TYPE_LEAVES:
+      full_filename_i =
+          get_formatted_string("%s/leaves/%s.csv", data_path_i, data_name);
+      break;
     }
 
     if (access(full_filename_i, F_OK | R_OK) == 0) {
@@ -54,6 +62,11 @@ char *data_filepaths_get(const char *data_path, const char *data_name,
   }
 
   destroy_string_splitter(split_data_paths);
+
+  if (!full_filename) {
+    log_fatal("File for %s not found for the following paths: %s\n", data_name,
+              data_path);
+  }
 
   return full_filename;
 }

@@ -7,6 +7,8 @@ typedef enum {
   DATA_FILEPATH_TYPE_LAYOUT,
   DATA_FILEPATH_TYPE_WIN_PCT,
   DATA_FILEPATH_TYPE_LD,
+  DATA_FILEPATH_TYPE_GCG,
+  DATA_FILEPATH_TYPE_LEAVES,
 } data_filepath_t;
 
 char *data_filepaths_get(const char *data_path, const char *data_name,

@@ -1,7 +1,7 @@
 #ifndef TEST_CONSTANTS_H
 #define TEST_CONSTANTS_H
 
-#define TESTDATA_FILEPATH "test/testdata/"
+#define TESTDATA_FILEPATH "./testdata/"
 
 #define EMPTY_CGP_WITHOUT_OPTIONS                                              \
   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0"

@@ -35,7 +35,7 @@ void test_config_load_error(Config *config, const char *cmd,
 }
 
 void test_config_load_error_cases() {
-  Config *config = config_create_default();
+  Config *config = config_create_default_test();
   test_config_load_error(config, "endgame",
                          CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
   test_config_load_error(config, "sim -lex CSW21 -iter 1000 -plies 10 1",
@@ -60,23 +60,8 @@ void test_config_load_error_cases() {
                          CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
   test_config_load_error(config, "cgp 1 2 3",
                          CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
-
-  const char *target = "../../test/testdata/invalid_number_of_rows15.txt";
-  const char *link_name = "data/layouts/invalid_number_of_rows15.txt";
-
-  if (symlink(target, link_name) != 0) {
-    perror("symlink");
-    log_fatal("Failed to create symlink: %s %s", target, link_name);
-  }
-
   test_config_load_error(config, "sim -bdn invalid_number_of_rows15",
                          CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
-
-  if (unlink(link_name) != 0) {
-    perror("unlink");
-    log_fatal("Failed to destroy symlink: %s %s", target, link_name);
-  }
-
   test_config_load_error(config, "sim -var Lonify",
                          CONFIG_LOAD_STATUS_UNRECOGNIZED_GAME_VARIANT);
   test_config_load_error(config, "sim -bb 3b4",
@@ -151,7 +136,7 @@ void test_config_load_error_cases() {
 }
 
 void test_config_load_success() {
-  Config *config = config_create_default();
+  Config *config = config_create_default_test();
 
   // Loading with whitespace should not fail
   load_and_exec_config_or_die(config, "           ");
@@ -446,7 +431,7 @@ void assert_config_exec_status(Config *config, const char *cmd,
 }
 
 void test_config_exec_parse_args() {
-  Config *config = config_create_default();
+  Config *config = config_create_default_test();
 
   // Ensure all commands that require game data fail correctly
   assert_config_exec_status(

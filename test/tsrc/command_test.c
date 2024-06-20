@@ -199,7 +199,7 @@ void assert_command_status_and_output(Config *config,
 }
 
 void test_command_execution() {
-  Config *config = config_create_default();
+  Config *config = config_create_default_test();
 
   assert_command_status_and_output(config, "sim -lex CSW21 -it 1000 -plies 2h3",
                                    false, 5, 0, 1);

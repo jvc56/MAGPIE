@@ -45,6 +45,7 @@ typedef enum {
   ARG_TOKEN_INFER,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
+  ARG_TOKEN_DATA_PATH,
   ARG_TOKEN_BINGO_BONUS,
   ARG_TOKEN_BOARD_LAYOUT,
   ARG_TOKEN_GAME_VARIANT,
@@ -199,6 +200,10 @@ int config_get_parg_num_req_values(const Config *config,
 }
 
 // Config getters
+
+const char *config_get_data_path(const Config *config) {
+  return config->data_path;
+}
 
 exec_mode_t config_get_exec_mode(const Config *config) {
   return config->exec_mode;
@@ -1212,6 +1217,12 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
 config_load_status_t config_load_data(Config *config) {
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
 
+  const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
+  if (new_path) {
+    free(config->data_path);
+    config->data_path = string_duplicate(new_path);
+  }
+
   // Exec Mode
 
   const char *new_exec_mode_str =
@@ -1467,6 +1478,8 @@ Config *config_create_default() {
                     execute_autoplay, status_autoplay);
   parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
                     status_convert);
+  parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
+                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_BOARD_LAYOUT, "bdn", 1, 1, execute_fatal,
