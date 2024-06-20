@@ -108,8 +108,8 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
 // after calling this function.
 Config *create_config_or_die(const char *cmd) {
   Config *config = config_create_default();
-  load_and_exec_config_or_die(config, cmd);
   load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
+  load_and_exec_config_or_die(config, cmd);
   return config;
 }
 
