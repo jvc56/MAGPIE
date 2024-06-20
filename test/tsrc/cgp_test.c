@@ -251,20 +251,8 @@ void test_cgp_polish() {
 }
 
 void test_cgp() {
-  char *current_directory = get_current_directory();
-  char *src_path = get_formatted_string("%s/test/testdata/", current_directory);
-  char *dst_path = get_formatted_string("%s/data/layouts/", current_directory);
-  free(current_directory);
-
-  remove_links(dst_path, ".txt");
-  create_links(src_path, dst_path, ".txt");
-
   test_cgp_english();
   test_cgp_english_with_options();
   test_cgp_catalan();
   test_cgp_polish();
-
-  remove_links(dst_path, ".txt");
-  free(dst_path);
-  free(src_path);
 }

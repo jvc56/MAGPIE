@@ -16,6 +16,7 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+#include "data_filepaths.h"
 #include "letter_distribution.h"
 
 // The KWG data structure was originally
@@ -23,18 +24,9 @@
 // on how the KWG data structure works, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
 
-char *get_kwg_filepath(const char *kwg_name) {
-  // Check for invalid inputs
-  if (!kwg_name) {
-    log_fatal("kwg name is null");
-  }
-  return get_formatted_string("%s%s%s", KWG_FILEPATH, kwg_name,
-                              KWG_FILE_EXTENSION);
-}
-
 void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
                                 FILE *stream) {
-  kwg_allocate_nodes(kwg, number_of_nodes);                                  
+  kwg_allocate_nodes(kwg, number_of_nodes);
   size_t result = fread(kwg->nodes, sizeof(uint32_t), number_of_nodes, stream);
   if (result != number_of_nodes) {
     log_fatal("kwg nodes fread failure: %zd != %zd", result, number_of_nodes);
@@ -52,8 +44,9 @@ void kwg_allocate_nodes(KWG *kwg, size_t number_of_nodes) {
 
 uint32_t *kwg_get_mutable_nodes(KWG *kwg) { return kwg->nodes; }
 
-void load_kwg(KWG *kwg, const char *kwg_name) {
-  char *kwg_filename = get_kwg_filepath(kwg_name);
+void load_kwg(KWG *kwg, const char *data_path, const char *kwg_name) {
+  char *kwg_filename =
+      data_filepaths_get(data_path, kwg_name, DATA_FILEPATH_TYPE_KWG);
 
   FILE *stream = stream_from_filename(kwg_filename);
   if (!stream) {
@@ -61,8 +54,10 @@ void load_kwg(KWG *kwg, const char *kwg_name) {
   }
   free(kwg_filename);
 
-  fseek(stream, 0, SEEK_END);         // seek to end of file
-  long int kwg_size = ftell(stream);  // get current file pointer
+  kwg->name = string_duplicate(kwg_name);
+
+  fseek(stream, 0, SEEK_END);        // seek to end of file
+  long int kwg_size = ftell(stream); // get current file pointer
   fseek(stream, 0, SEEK_SET);
 
   size_t number_of_nodes = kwg_size / sizeof(uint32_t);
@@ -72,18 +67,20 @@ void load_kwg(KWG *kwg, const char *kwg_name) {
   fclose(stream);
 }
 
-KWG *kwg_create(const char *kwg_name) {
+KWG *kwg_create(const char *data_path, const char *kwg_name) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
-  load_kwg(kwg, kwg_name);
+  kwg->name = NULL;
+  load_kwg(kwg, data_path, kwg_name);
   return kwg;
 }
 
 KWG *kwg_create_empty() {
   KWG *kwg = malloc_or_die(sizeof(KWG));
+  kwg->name = NULL;
   return kwg;
 }
 
-bool kwg_write_to_file(const KWG *kwg, const char* filename) {
+bool kwg_write_to_file(const KWG *kwg, const char *filename) {
   FILE *stream = fopen(filename, "wb");
   if (!stream) {
     printf("could not open stream\n");
@@ -109,6 +106,7 @@ void kwg_destroy(KWG *kwg) {
     return;
   }
   free(kwg->nodes);
+  free(kwg->name);
   free(kwg);
 }
 

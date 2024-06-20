@@ -8,17 +8,20 @@
 #include "../def/kwg_defs.h"
 
 typedef struct KWG {
+  char *name;
   uint32_t *nodes;
   int number_of_nodes;
 } KWG;
 
-KWG *kwg_create(const char *kwg_name);
+KWG *kwg_create(const char *data_path, const char *kwg_name);
 KWG *kwg_create_empty();
 bool kwg_write_to_file(const KWG *kwg, const char *filename);
 void kwg_destroy(KWG *kwg);
 void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes, FILE *stream);
 void kwg_allocate_nodes(KWG *kwg, size_t number_of_nodes);
 uint32_t *kwg_get_mutable_nodes(KWG *kwg);
+
+static inline const char *kwg_get_name(const KWG *kwg) { return kwg->name; }
 
 static inline uint32_t kwg_node(const KWG *kwg, uint32_t node_index) {
   return kwg->nodes[node_index];
@@ -40,7 +43,7 @@ static inline uint32_t kwg_node_arc_index_prefetch(uint32_t node,
                                                    const KWG *kwg) {
   const uint32_t next_node = (node & KWG_ARC_INDEX_MASK);
 #ifdef __has_builtin
-#if __has_builtin(__builtin_prefetch)  
+#if __has_builtin(__builtin_prefetch)
   __builtin_prefetch(&kwg->nodes[next_node]);
 #endif
 #endif
@@ -61,9 +64,8 @@ static inline uint32_t kwg_get_root_node_index(const KWG *kwg) {
   return kwg_node_arc_index(gaddag_pointer_node);
 }
 
-static inline uint32_t kwg_get_next_node_index(const KWG *kwg,
-                                               uint32_t node_index,
-                                               uint8_t letter) {
+static inline uint32_t
+kwg_get_next_node_index(const KWG *kwg, uint32_t node_index, uint8_t letter) {
   uint32_t i = node_index;
   while (1) {
     const uint32_t node = kwg_node(kwg, i);

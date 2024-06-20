@@ -9,13 +9,13 @@
 typedef struct BoardLayout BoardLayout;
 
 BoardLayout *board_layout_create();
-char *board_layout_get_filepath(const char *layout_name);
 board_layout_load_status_t board_layout_load(BoardLayout *bl,
+                                             const char *data_path,
                                              const char *board_layout_name);
 char *board_layout_get_default_name();
 const char *board_layout_get_name(const BoardLayout *bl);
 bool board_layout_is_name_default(const char *board_layout_name);
-BoardLayout *board_layout_create_default();
+BoardLayout *board_layout_create_default(const char *data_path);
 void board_layout_destroy(BoardLayout *bl);
 
 char bonus_square_value_to_char(uint8_t bonus_square_value);

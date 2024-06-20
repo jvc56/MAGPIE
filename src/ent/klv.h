@@ -11,12 +11,15 @@
 // https://github.com/andy-k/wolges/blob/main/details.txt
 typedef struct KLV {
   KWG *kwg;
+  char *name;
   uint32_t *word_counts;
   double *leave_values;
 } KLV;
 
-KLV *klv_create(const char *klv_name);
+KLV *klv_create(const char *data_path, const char *klv_name);
 void klv_destroy(KLV *klv);
+
+static inline const char *klv_get_name(const KLV *klv) { return klv->name; }
 
 static inline double klv_get_indexed_leave_value(const KLV *klv,
                                                  uint32_t index) {

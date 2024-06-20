@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "../def/win_pct_defs.h"
+#include "data_filepaths.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"
@@ -34,21 +34,13 @@ float win_pct_get(const WinPct *wp, int spread_plus_leftover,
   return wp->win_pcts[wp->max_spread - spread_plus_leftover][game_unseen_tiles];
 };
 
-char *get_win_pct_filepath(const char *win_pct_name) {
-  // Check for invalid inputs
-  if (!win_pct_name) {
-    log_fatal("win percentage name is null");
-  }
-  return get_formatted_string("%s%s%s", WIN_PCT_FILEPATH, win_pct_name,
-                              WIN_PCT_FILE_EXTENSION);
-}
-
-WinPct *win_pct_create(const char *win_pct_name) {
+WinPct *win_pct_create(const char *data_path, const char *win_pct_name) {
   WinPct *wp = malloc_or_die(sizeof(WinPct));
 
   wp->name = string_duplicate(win_pct_name);
 
-  char *win_pct_filename = get_win_pct_filepath(win_pct_name);
+  char *win_pct_filename =
+      data_filepaths_get(data_path, win_pct_name, DATA_FILEPATH_TYPE_WIN_PCT);
   StringSplitter *win_pct_lines = split_file_by_newline(win_pct_filename);
   free(win_pct_filename);
 
