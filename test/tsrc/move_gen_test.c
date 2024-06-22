@@ -669,9 +669,66 @@ void consistent_tiebreaking_test() {
   config_destroy(config);
 }
 
+void movegen_game_update_test() {
+  Config *config = create_config_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  // Check that ld udpates
+  load_and_exec_config_or_die(config, "set -ld french");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 EAUX/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8G XU 22");
+
+  // Check that bingo bonus udpates
+  load_and_exec_config_or_die(config, "set -bb 40");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8D BUSUUTI 64");
+
+  // Check that lexicon updates
+  load_and_exec_config_or_die(config, "set -lex NWL20");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "(exch BUUU)");
+
+  // Check that move sorting updates
+  load_and_exec_config_or_die(config, "set -s1 score");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8E BITS 12");
+
+  // Check that board layout updates
+  load_and_exec_config_or_die(config,
+                              "set -bdn quadruple_word_opening15 -bb 50");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DITZIER/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8D DITZIER 126");
+
+  // Check that the variant updates
+  load_and_exec_config_or_die(
+      config, "set -lex CSW21_alpha -var wordsmog -bdn standard15");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DITZIER/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8B DEZIIRT 104");
+
+  config_destroy(config);
+}
+
 void test_move_gen() {
-  wordsmog_test();
-  return;
   leave_lookup_test();
   unfound_leave_lookup_test();
   macondo_tests();
@@ -680,4 +737,6 @@ void test_move_gen() {
   top_equity_play_recorder_test();
   distinct_lexica_test();
   consistent_tiebreaking_test();
+  wordsmog_test();
+  movegen_game_update_test();
 }
