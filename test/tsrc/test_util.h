@@ -10,6 +10,7 @@
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
+#include "../../src/ent/validated_move.h"
 
 #include "../../src/impl/config.h"
 
@@ -68,4 +69,9 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_tiles,
                                           int move_score,
                                           bool play_move_on_board);
+ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
+                                              const char *move_str,
+                                              int player_index,
+                                              bool allow_phonies,
+                                              bool allow_playthrough);
 #endif

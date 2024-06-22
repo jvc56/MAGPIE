@@ -541,3 +541,16 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   validated_moves_destroy(vms);
   move_list_destroy(move_list);
 }
+
+ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
+                                              const char *move_str,
+                                              int player_index,
+                                              bool allow_phonies,
+                                              bool allow_playthrough) {
+  load_cgp_or_die(game, cgp_str);
+  ValidatedMoves *vms = validated_moves_create(
+      game, player_index, move_str, allow_phonies, true, allow_playthrough);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  return vms;
+}
