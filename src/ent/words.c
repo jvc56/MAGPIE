@@ -86,6 +86,11 @@ FormedWords *formed_words_create(Board *board, Move *move) {
           break;
         }
       }
+
+      if (rend == BOARD_DIM) {
+        rend = BOARD_DIM - 1;
+      }
+
       int widx = 0;
       ws->words[formed_words_idx].word_length = rend - rbegin + 1;
       ws->words[formed_words_idx].valid = false; // we don't know validity yet.

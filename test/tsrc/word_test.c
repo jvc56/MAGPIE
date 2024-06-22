@@ -130,6 +130,30 @@ void test_words_played() {
 
   validated_moves_destroy(vms_spays);
 
+  // N1 ZA making ZE# and AN, testing crosswords at board edge
+  ValidatedMoves *vms_zo =
+      validated_moves_create(game, 0, "N1.ZA", false, true, false);
+  fw = validated_moves_get_formed_words(vms_zo, 0);
+  assert(formed_words_get_num_words(fw) == 3);
+
+  // ZE# (phony because lexicon is NWL)
+  assert(formed_words_get_word_length(fw, 0) == 2);
+  assert(formed_words_get_word_valid(fw, 0) == 0);
+  assert(memory_compare(formed_words_get_word(fw, 0), (uint8_t[]){26, 5}, 2) ==
+         0);
+  // AN
+  assert(formed_words_get_word_length(fw, 1) == 2);
+  assert(formed_words_get_word_valid(fw, 1) == 1);
+  assert(memory_compare(formed_words_get_word(fw, 1), (uint8_t[]){1, 14}, 2) ==
+         0);
+  // ZA
+  assert(formed_words_get_word_length(fw, 2) == 2);
+  assert(formed_words_get_word_valid(fw, 2) == 1);
+  assert(memory_compare(formed_words_get_word(fw, 2), (uint8_t[]){26, 1}, 2) ==
+         0);
+
+  validated_moves_destroy(vms_zo);
+
   game_destroy(game);
   config_destroy(config);
 }
