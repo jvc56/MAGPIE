@@ -131,9 +131,9 @@ void test_more_iterations() {
 }
 
 void perf_test_multithread_sim() {
-  Config *config =
-      create_config_or_die("set -s1 score -s2 score -r1 all -r2 all "
-                           "-threads 4 -plies 2 -it 1000 -scond 100");
+  Config *config = create_config_or_die(
+      "set -s1 score -s2 score -r1 all -r2 all "
+      "-threads 4 -plies 2 -it 1000 -numplays 15 -scond none");
   load_and_exec_config_or_die(
       config,
       "cgp "

@@ -477,9 +477,9 @@ BoardLayout *create_test_board_layout(const char *data_path,
 
 void load_game_with_test_board(Game *game, const char *data_path,
                                const char *board_layout_name) {
-  game_reset(game);
   BoardLayout *bl = create_test_board_layout(data_path, board_layout_name);
   board_apply_layout(bl, game_get_board(game));
+  game_reset(game);
   board_layout_destroy(bl);
 }
 
