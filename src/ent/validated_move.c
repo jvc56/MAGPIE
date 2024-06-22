@@ -451,7 +451,7 @@ validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     const KWG *kwg = player_get_kwg(player);
     score = static_eval_get_move_score(
-        game_get_ld(game), vm->move, board,
+        game_get_ld(game), vm->move, board, game_get_bingo_bonus(game),
         board_get_cross_set_index(
             game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
             player_index));

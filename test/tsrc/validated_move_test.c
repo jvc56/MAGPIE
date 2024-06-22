@@ -30,19 +30,6 @@ void assert_validated_move_error(
   validated_moves_destroy(vms);
 }
 
-ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
-                                              const char *move_str,
-                                              int player_index,
-                                              bool allow_phonies,
-                                              bool allow_playthrough) {
-  load_cgp_or_die(game, cgp_str);
-  ValidatedMoves *vms = validated_moves_create(
-      game, player_index, move_str, allow_phonies, true, allow_playthrough);
-  assert(validated_moves_get_validation_status(vms) ==
-         MOVE_VALIDATION_STATUS_SUCCESS);
-  return vms;
-}
-
 void test_validated_move_errors() {
   Config *config = create_config_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");

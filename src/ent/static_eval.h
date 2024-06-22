@@ -159,6 +159,7 @@ static inline double static_eval_get_move_equity(
 
 static inline int static_eval_get_move_score(const LetterDistribution *ld,
                                              const Move *move, Board *board,
+                                             int bingo_bonus,
                                              int cross_set_index) {
   int tiles_played = move_get_tiles_played(move);
   int tiles_length = move_get_tiles_length(move);
@@ -178,11 +179,11 @@ static inline int static_eval_get_move_score(const LetterDistribution *ld,
   int ls;
   int main_word_score = 0;
   int cross_scores = 0;
-  int bingo_bonus = 0;
+  int word_bingo_bonus = 0;
   int word_multiplier = 1;
 
   if (tiles_played == RACK_SIZE) {
-    bingo_bonus = DEFAULT_BINGO_BONUS;
+    word_bingo_bonus = bingo_bonus;
   }
 
   for (int idx = 0; idx < tiles_length; idx++) {
@@ -230,7 +231,7 @@ static inline int static_eval_get_move_score(const LetterDistribution *ld,
     board_transpose(board);
   }
 
-  return main_word_score * word_multiplier + cross_scores + bingo_bonus;
+  return main_word_score * word_multiplier + cross_scores + word_bingo_bonus;
 }
 
 #endif

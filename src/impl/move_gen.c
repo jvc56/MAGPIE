@@ -51,6 +51,7 @@ typedef struct MoveGen {
   int move_record_type;
   int number_of_tiles_in_bag;
   int player_index;
+  int bingo_bonus;
   bool kwgs_are_shared;
   bool is_wordsmog;
   Rack player_rack;
@@ -300,7 +301,7 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
 
   int bingo_bonus = 0;
   if (tiles_played == RACK_SIZE) {
-    bingo_bonus = DEFAULT_BINGO_BONUS;
+    bingo_bonus = gen->bingo_bonus;
   }
 
   score = main_word_score * word_multiplier + cross_score + bingo_bonus;
@@ -747,7 +748,7 @@ static inline void shadow_record(MoveGen *gen) {
 
   int bingo_bonus = 0;
   if (gen->tiles_played == RACK_SIZE) {
-    bingo_bonus = DEFAULT_BINGO_BONUS;
+    bingo_bonus = gen->bingo_bonus;
   }
 
   const int score =
@@ -1323,6 +1324,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
 
+  gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_sort_type = move_sort_type;

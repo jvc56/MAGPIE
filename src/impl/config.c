@@ -291,6 +291,7 @@ void config_fill_game_args(const Config *config, GameArgs *game_args) {
   game_args->players_data = config->players_data;
   game_args->board_layout = config->board_layout;
   game_args->ld = config->ld;
+  game_args->bingo_bonus = config->bingo_bonus;
   game_args->game_variant = config->game_variant;
 }
 
