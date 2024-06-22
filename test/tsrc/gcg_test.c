@@ -148,10 +148,9 @@ void test_parse_special_char() {
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
-  GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
-  assert_strings_equal(game_history_player_get_name(player0), "césar");
-  assert_strings_equal(game_history_player_get_name(player1), "hércules");
+  assert_strings_equal(game_history_player_get_name(game_history, 0), "césar");
+  assert_strings_equal(game_history_player_get_name(game_history, 1),
+                       "hércules");
   game_history_destroy(game_history);
   config_destroy(config);
 }
@@ -164,8 +163,8 @@ void test_parse_special_utf8_no_header() {
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
-  assert(strings_equal(game_history_player_get_name(player0), "cÃ©sar"));
+  assert(
+      strings_equal(game_history_player_get_name(game_history, 0), "cÃ©sar"));
   game_history_destroy(game_history);
   config_destroy(config);
 }
@@ -178,8 +177,7 @@ void test_parse_special_utf8_with_header() {
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
-  assert(strings_equal(game_history_player_get_name(player0), "césar"));
+  assert(strings_equal(game_history_player_get_name(game_history, 0), "césar"));
   game_history_destroy(game_history);
   config_destroy(config);
 }
@@ -192,12 +190,10 @@ void test_parse_dos_mode() {
   gcg_parse_status_t gcg_parse_status =
       test_parse_gcg(gcg_filename, config, game_history);
   assert(gcg_parse_status == GCG_PARSE_STATUS_SUCCESS);
-  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
-  GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
-  assert(
-      strings_equal(game_history_player_get_nickname(player0), "angwantibo"));
-  assert(
-      strings_equal(game_history_player_get_nickname(player1), "Michal_Josko"));
+  assert(strings_equal(game_history_player_get_nickname(game_history, 0),
+                       "angwantibo"));
+  assert(strings_equal(game_history_player_get_nickname(game_history, 1),
+                       "Michal_Josko"));
   game_history_destroy(game_history);
   config_destroy(config);
 }
@@ -296,8 +292,6 @@ void test_success_standard() {
   Game *game1 = config_game_create(config);
   Game *game2 = config_game_create(config);
   const LetterDistribution *ld = config_get_ld(config);
-  GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
-  GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
   Rack *rack = rack_create(ld_get_size(ld));
 
   assert(strings_equal(game_history_get_title(game_history), "test game"));
@@ -310,18 +304,19 @@ void test_success_standard() {
   assert(game_history_get_game_variant(game_history) == GAME_VARIANT_CLASSIC);
   assert(strings_equal(game_history_get_board_layout_name(game_history),
                        "standard15"));
-  assert(strings_equal(game_history_player_get_nickname(player0), "HastyBot"));
-  assert(game_history_player_get_score(player0) == 516);
+  assert(strings_equal(game_history_player_get_nickname(game_history, 0),
+                       "HastyBot"));
+  assert(game_history_player_get_score(game_history, 0) == 516);
   rack_set_to_string(ld, rack, "");
-  assert(
-      racks_are_equal(game_history_player_get_last_known_rack(player0), NULL));
-  assert(strings_equal(game_history_player_get_nickname(player1),
+  assert(racks_are_equal(
+      game_history_player_get_last_known_rack(game_history, 0), NULL));
+  assert(strings_equal(game_history_player_get_nickname(game_history, 1),
                        "RightBehindYou"));
-  assert(game_history_player_get_score(player1) == 358);
+  assert(game_history_player_get_score(game_history, 1) == 358);
   rack_set_to_string(ld, rack, "");
 
-  assert(
-      racks_are_equal(game_history_player_get_last_known_rack(player1), NULL));
+  assert(racks_are_equal(
+      game_history_player_get_last_known_rack(game_history, 1), NULL));
 
   assert(game_history_get_number_of_events(game_history) == 29);
   assert_game_event(game_history, 0, GAME_EVENT_EXCHANGE, 0, 0, "DIIIILU", "",
@@ -638,10 +633,10 @@ void test_success_incomplete() {
   load_cgp_or_die(game2,
                   "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   assert_games_are_equal(game1, game2, true);
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 0))));
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 1))));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
 
   gcg_filename = "success_just_last_rack";
@@ -653,10 +648,10 @@ void test_success_incomplete() {
       game2, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DIIIILU/ 0/0 0");
   assert_games_are_equal(game1, game2, true);
   rack_set_to_string(ld, rack, "DIIIILU");
-  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 0))));
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 1))));
+  assert(racks_are_equal(
+      rack, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
 
   gcg_filename = "incomplete_after_tile_placement";
@@ -668,10 +663,10 @@ void test_success_incomplete() {
                   "15/15/15/15/15/15/15/6ZA7/4CRoWDIE4/15/15/15/15/15/15 / "
                   "22/79 0");
   assert_games_are_equal(game1, game2, true);
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 0))));
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 1))));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
 
   gcg_filename = "incomplete_with_last_rack_after_tile_placement";
@@ -684,10 +679,10 @@ void test_success_incomplete() {
              "22/79 0");
   assert_games_are_equal(game1, game2, true);
   rack_set_to_string(ld, rack, "AENNRST");
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 0))));
-  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 1))));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      rack, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
 
   gcg_filename = "incomplete_after_phony_returned";
@@ -701,10 +696,10 @@ void test_success_incomplete() {
       "10LEA2/15/15/15/15 ADEEIRT/ 194/131 1");
   assert_games_are_equal(game1, game2, true);
   rack_set_to_string(ld, rack, "ADEEIRT");
-  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 0))));
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 1))));
+  assert(racks_are_equal(
+      rack, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
 
   gcg_filename = "incomplete_after_pass";
@@ -718,10 +713,10 @@ void test_success_incomplete() {
              "CDEEFGO/ 360/232 1");
   assert_games_are_equal(game1, game2, true);
   rack_set_to_string(ld, rack, "CDEEFGO");
-  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 0))));
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 1))));
+  assert(racks_are_equal(
+      rack, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
 
   gcg_filename = "incomplete_after_five_point_challenge";
@@ -736,10 +731,10 @@ void test_success_incomplete() {
       "AEIOOST/ 245/398 0");
   assert_games_are_equal(game1, game2, true);
   rack_set_to_string(ld, rack, "AEIOOST");
-  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 0))));
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 1))));
+  assert(racks_are_equal(
+      rack, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
 
   gcg_filename = "incomplete_after_exchange";
@@ -751,10 +746,10 @@ void test_success_incomplete() {
       game2, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AAENRSZ/ 0/0 1");
   assert_games_are_equal(game1, game2, true);
   rack_set_to_string(ld, rack, "AAENRSZ");
-  assert(racks_are_equal(NULL, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 0))));
-  assert(racks_are_equal(rack, game_history_player_get_last_known_rack(
-                                   game_history_get_player(game_history, 1))));
+  assert(racks_are_equal(
+      NULL, game_history_player_get_last_known_rack(game_history, 0)));
+  assert(racks_are_equal(
+      rack, game_history_player_get_last_known_rack(game_history, 1)));
   game_history_destroy(game_history);
   rack_destroy(rack);
   game_destroy(game1);

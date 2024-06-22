@@ -347,10 +347,9 @@ int get_player_index(const GCGParser *gcg_parser, const char *gcg_line,
 
   int player_index = -1;
   for (int i = 0; i < 2; i++) {
-    GameHistoryPlayer *player =
-        game_history_get_player(gcg_parser->game_history, i);
-    if (strings_equal(game_history_player_get_nickname(player),
-                      player_nickname)) {
+    if (strings_equal(
+            game_history_player_get_nickname(gcg_parser->game_history, i),
+            player_nickname)) {
       player_index = i;
       break;
     }
@@ -463,13 +462,8 @@ load_config_with_game_history(const GameHistory *game_history, Config *config) {
       game_history_get_game_variant(game_history);
   const char *player_nicknames[2] = {NULL, NULL};
 
-  const GameHistoryPlayer *game_history_players[2];
   for (int i = 0; i < 2; i++) {
-    game_history_players[i] = game_history_get_player(game_history, i);
-  }
-  for (int i = 0; i < 2; i++) {
-    player_nicknames[i] =
-        game_history_player_get_nickname(game_history_players[i]);
+    player_nicknames[i] = game_history_player_get_nickname(game_history, i);
   }
 
   string_builder_add_string(cfg_load_cmd_builder, "set ");
@@ -599,8 +593,6 @@ bool game_event_has_player_rack(const GameEvent *game_event, int player_index) {
 const Rack *get_player_next_rack(GameHistory *game_history,
                                  int initial_game_event_index,
                                  int player_index) {
-  GameHistoryPlayer *gh_player =
-      game_history_get_player(game_history, player_index);
   Rack *rack = NULL;
   int number_of_game_events = game_history_get_number_of_events(game_history);
   for (int game_event_index = initial_game_event_index + 1;
@@ -609,15 +601,15 @@ const Rack *get_player_next_rack(GameHistory *game_history,
         game_history_get_event(game_history, game_event_index);
     if (game_event_index == initial_game_event_index + 1 &&
         game_event_get_type(game_event) == GAME_EVENT_PHONY_TILES_RETURNED) {
-      game_history_player_set_next_rack_set(gh_player, true);
+      game_history_player_set_next_rack_set(game_history, player_index, true);
       return NULL;
     }
     if (game_event_has_player_rack(game_event, player_index)) {
-      game_history_player_set_next_rack_set(gh_player, true);
+      game_history_player_set_next_rack_set(game_history, player_index, true);
       return game_event_get_rack(game_event);
     }
   }
-  game_history_player_set_next_rack_set(gh_player, false);
+  game_history_player_set_next_rack_set(game_history, player_index, false);
   return rack;
 }
 
@@ -726,9 +718,8 @@ gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
     return GCG_PARSE_STATUS_CUMULATIVE_SCORING_ERROR;
   }
 
-  game_history_player_set_score(
-      game_history_get_player(game_history, game_event_player_index),
-      game_event_get_cumulative_score(game_event));
+  game_history_player_set_score(game_history, game_event_player_index,
+                                game_event_get_cumulative_score(game_event));
 
   return GCG_PARSE_STATUS_SUCCESS;
 }
@@ -823,9 +814,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
   if (token == GCG_MOVE_TOKEN || token == GCG_PASS_TOKEN ||
       token == GCG_EXCHANGE_TOKEN || token == GCG_RACK1_TOKEN ||
       token == GCG_RACK2_TOKEN) {
-    GameHistoryPlayer *player0 = game_history_get_player(game_history, 0);
-    GameHistoryPlayer *player1 = game_history_get_player(game_history, 1);
-    if (!player0 || !player1) {
+    if (!game_history_both_players_are_set(gcg_parser->game_history)) {
       return GCG_PARSE_STATUS_MOVE_BEFORE_PLAYER;
     }
 
@@ -882,29 +871,26 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     // The value of player_index is guaranteed to be either 0 or 1 by regex
     // matching
     player_index = get_matching_group_as_int(gcg_parser, gcg_line, 1) - 1;
-    if (game_history_get_player(game_history, player_index)) {
+    if (game_history_player_is_set(game_history, player_index)) {
       return GCG_PARSE_STATUS_PLAYER_NUMBER_REDUNDANT;
     }
     char *player_nickname =
         get_matching_group_as_string(gcg_parser, gcg_line, 2);
     char *player_name = get_matching_group_as_string(gcg_parser, gcg_line, 3);
-    game_history_set_player(
-        game_history, player_index,
-        game_history_player_create(player_name, player_nickname));
+    game_history_set_player(game_history, player_index, player_name,
+                            player_nickname);
     free(player_name);
     free(player_nickname);
-    if (game_history_get_player(game_history, 1 - player_index) &&
-        strings_equal(game_history_player_get_name(
-                          game_history_get_player(game_history, player_index)),
-                      game_history_player_get_name(game_history_get_player(
-                          game_history, 1 - player_index)))) {
+    if (game_history_player_is_set(game_history, 1 - player_index) &&
+        strings_equal(
+            game_history_player_get_name(game_history, player_index),
+            game_history_player_get_name(game_history, 1 - player_index))) {
       return GCG_PARSE_STATUS_DUPLICATE_NAMES;
     }
-    if (game_history_get_player(game_history, 1 - player_index) &&
-        strings_equal(game_history_player_get_nickname(
-                          game_history_get_player(game_history, player_index)),
-                      game_history_player_get_nickname(game_history_get_player(
-                          game_history, 1 - player_index)))) {
+    if (game_history_player_is_set(game_history, 1 - player_index) &&
+        strings_equal(
+            game_history_player_get_nickname(game_history, player_index),
+            game_history_player_get_nickname(game_history, 1 - player_index))) {
       return GCG_PARSE_STATUS_DUPLICATE_NICKNAMES;
     }
     break;
@@ -931,11 +917,11 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (!player_last_known_rack) {
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
-    game_history_player_set_last_known_rack(
-        game_history_get_player(game_history, 0), player_last_known_rack);
+    game_history_player_set_last_known_rack(game_history, 0,
+                                            player_last_known_rack);
     rack_destroy(player_last_known_rack);
-    player_last_known_rack = game_history_player_get_last_known_rack(
-        game_history_get_player(game_history, 0));
+    player_last_known_rack =
+        game_history_player_get_last_known_rack(game_history, 0);
     if (!draw_rack_from_bag(
             game_get_bag(gcg_parser->game),
             player_get_rack(game_get_player(gcg_parser->game, 0)),
@@ -949,11 +935,11 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     if (!player_last_known_rack) {
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
-    game_history_player_set_last_known_rack(
-        game_history_get_player(game_history, 1), player_last_known_rack);
+    game_history_player_set_last_known_rack(game_history, 1,
+                                            player_last_known_rack);
     rack_destroy(player_last_known_rack);
-    player_last_known_rack = game_history_player_get_last_known_rack(
-        game_history_get_player(game_history, 1));
+    player_last_known_rack =
+        game_history_player_get_last_known_rack(game_history, 1);
     if (!draw_rack_from_bag(
             game_get_bag(gcg_parser->game),
             player_get_rack(game_get_player(gcg_parser->game, 1)),
@@ -1342,8 +1328,8 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index) {
 
   bool player_has_last_rack[2];
   for (int player_index = 0; player_index < 2; player_index++) {
-    Rack *player_last_known_rack = game_history_player_get_last_known_rack(
-        game_history_get_player(game_history, player_index));
+    Rack *player_last_known_rack =
+        game_history_player_get_last_known_rack(game_history, player_index);
     if (player_last_known_rack) {
       player_has_last_rack[player_index] = true;
       Rack *player_rack = player_get_rack(game_get_player(game, player_index));
@@ -1368,8 +1354,8 @@ void game_play_to_turn(GameHistory *game_history, Game *game, int turn_index) {
         game_get_bag(game),
         game_get_player_draw_index(game, player_off_turn_index));
     if (!player_has_last_rack[player_on_turn_index] &&
-        !game_history_player_get_next_rack_set(
-            game_history_get_player(game_history, player_on_turn_index))) {
+        !game_history_player_get_next_rack_set(game_history,
+                                               player_on_turn_index)) {
       // This rack will be a randomly draw rack by the gameplay module and not
       // anything specified by the GCG, so we throw it back in the bag;
       return_rack_to_bag(

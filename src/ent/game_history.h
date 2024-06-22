@@ -42,30 +42,6 @@ void game_event_set_note(GameEvent *event, const char *note);
 const char *game_event_get_note(const GameEvent *event);
 int game_event_get_turn_value(const GameEvent *event);
 
-typedef struct GameHistoryPlayer GameHistoryPlayer;
-
-GameHistoryPlayer *game_history_player_create(const char *name,
-                                              const char *nickname);
-void game_history_player_destroy(GameHistoryPlayer *player);
-
-void game_history_player_set_name(GameHistoryPlayer *player, const char *name);
-const char *game_history_player_get_name(const GameHistoryPlayer *player);
-
-void game_history_player_set_nickname(GameHistoryPlayer *player,
-                                      const char *nickname);
-const char *game_history_player_get_nickname(const GameHistoryPlayer *player);
-
-void game_history_player_set_score(GameHistoryPlayer *player, int score);
-int game_history_player_get_score(const GameHistoryPlayer *player);
-
-void game_history_player_set_next_rack_set(GameHistoryPlayer *player,
-                                           bool next_rack_set);
-bool game_history_player_get_next_rack_set(const GameHistoryPlayer *player);
-
-void game_history_player_set_last_known_rack(GameHistoryPlayer *player,
-                                             const Rack *rack);
-Rack *game_history_player_get_last_known_rack(const GameHistoryPlayer *player);
-
 typedef struct GameHistory GameHistory;
 
 GameHistory *game_history_create();
@@ -99,11 +75,6 @@ void game_history_set_board_layout_name(GameHistory *history,
                                         const char *board_layout);
 const char *game_history_get_board_layout_name(const GameHistory *history);
 
-void game_history_set_player(GameHistory *history, int player_index,
-                             GameHistoryPlayer *player);
-GameHistoryPlayer *game_history_get_player(const GameHistory *history,
-                                           int player_index);
-
 int game_history_get_number_of_events(const GameHistory *history);
 
 GameEvent *game_history_get_event(const GameHistory *history, int event_index);
@@ -113,5 +84,37 @@ GameEvent *game_history_create_and_add_game_event(GameHistory *game_history);
 
 Game *game_history_get_game(const GameHistory *game_history);
 void game_history_set_game(GameHistory *game_history, Game *game);
+
+void game_history_player_set_name(GameHistory *game_history, int player_index,
+                                  const char *name);
+const char *game_history_player_get_name(const GameHistory *game_history,
+                                         int player_index);
+
+void game_history_player_set_nickname(GameHistory *game_history,
+                                      int player_index, const char *nickname);
+const char *game_history_player_get_nickname(const GameHistory *game_history,
+                                             int player_index);
+void game_history_player_set_score(GameHistory *game_history, int player_index,
+                                   int score);
+int game_history_player_get_score(const GameHistory *game_history,
+                                  int player_index);
+
+void game_history_player_set_next_rack_set(GameHistory *game_history,
+                                           int player_index,
+                                           bool next_rack_set);
+bool game_history_player_get_next_rack_set(const GameHistory *game_history,
+                                           int player_index);
+
+void game_history_player_set_last_known_rack(GameHistory *game_history,
+                                             int player_index,
+                                             const Rack *rack);
+Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
+                                              int player_index);
+void game_history_set_player(GameHistory *history, int player_index,
+                             const char *player_name,
+                             const char *player_nickname);
+bool game_history_player_is_set(const GameHistory *game_history,
+                                int player_index);
+bool game_history_both_players_are_set(const GameHistory *game_history);
 
 #endif

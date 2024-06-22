@@ -136,12 +136,26 @@ int game_event_get_turn_value(const GameEvent *event) {
   return 0;
 }
 
-struct GameHistoryPlayer {
+typedef struct GameHistoryPlayer {
   char *name;
   char *nickname;
   int score;
   bool next_rack_set;
   Rack *last_known_rack;
+} GameHistoryPlayer;
+
+struct GameHistory {
+  char *title;
+  char *description;
+  char *id_auth;
+  char *uid;
+  char *lexicon_name;
+  char *ld_name;
+  char *board_layout_name;
+  game_variant_t game_variant;
+  GameHistoryPlayer *players[2];
+  int number_of_events;
+  GameEvent **events;
 };
 
 GameHistoryPlayer *game_history_player_create(const char *name,
@@ -165,44 +179,61 @@ void game_history_player_destroy(GameHistoryPlayer *player) {
   free(player);
 }
 
-void game_history_player_set_name(GameHistoryPlayer *player, const char *name) {
+void game_history_player_set_name(GameHistory *game_history, int player_index,
+                                  const char *name) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   free(player->name);
   player->name = string_duplicate(name);
 }
 
-const char *game_history_player_get_name(const GameHistoryPlayer *player) {
+const char *game_history_player_get_name(const GameHistory *game_history,
+                                         int player_index) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   return player->name;
 }
 
-void game_history_player_set_nickname(GameHistoryPlayer *player,
-                                      const char *nickname) {
+void game_history_player_set_nickname(GameHistory *game_history,
+                                      int player_index, const char *nickname) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   free(player->nickname);
   player->nickname = string_duplicate(nickname);
 }
 
-const char *game_history_player_get_nickname(const GameHistoryPlayer *player) {
+const char *game_history_player_get_nickname(const GameHistory *game_history,
+                                             int player_index) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   return player->nickname;
 }
 
-void game_history_player_set_score(GameHistoryPlayer *player, int score) {
+void game_history_player_set_score(GameHistory *game_history, int player_index,
+                                   int score) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   player->score = score;
 }
 
-int game_history_player_get_score(const GameHistoryPlayer *player) {
+int game_history_player_get_score(const GameHistory *game_history,
+                                  int player_index) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   return player->score;
 }
 
-void game_history_player_set_next_rack_set(GameHistoryPlayer *player,
+void game_history_player_set_next_rack_set(GameHistory *game_history,
+                                           int player_index,
                                            bool next_rack_set) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   player->next_rack_set = next_rack_set;
 }
 
-bool game_history_player_get_next_rack_set(const GameHistoryPlayer *player) {
+bool game_history_player_get_next_rack_set(const GameHistory *game_history,
+                                           int player_index) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   return player->next_rack_set;
 }
 
-void game_history_player_set_last_known_rack(GameHistoryPlayer *player,
+void game_history_player_set_last_known_rack(GameHistory *game_history,
+                                             int player_index,
                                              const Rack *rack) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   if (!player->last_known_rack) {
     player->last_known_rack = rack_duplicate(rack);
   } else {
@@ -210,23 +241,20 @@ void game_history_player_set_last_known_rack(GameHistoryPlayer *player,
   }
 }
 
-Rack *game_history_player_get_last_known_rack(const GameHistoryPlayer *player) {
+Rack *game_history_player_get_last_known_rack(const GameHistory *game_history,
+                                              int player_index) {
+  GameHistoryPlayer *player = game_history->players[player_index];
   return player->last_known_rack;
 }
 
-struct GameHistory {
-  char *title;
-  char *description;
-  char *id_auth;
-  char *uid;
-  char *lexicon_name;
-  char *ld_name;
-  char *board_layout_name;
-  game_variant_t game_variant;
-  GameHistoryPlayer *players[2];
-  int number_of_events;
-  GameEvent **events;
-};
+bool game_history_player_is_set(const GameHistory *game_history,
+                                int player_index) {
+  return game_history->players[player_index];
+}
+
+bool game_history_both_players_are_set(const GameHistory *game_history) {
+  return game_history->players[0] && game_history->players[1];
+}
 
 void game_history_set_title(GameHistory *history, const char *title) {
   free(history->title);
@@ -304,8 +332,10 @@ const char *game_history_get_board_layout_name(const GameHistory *history) {
 }
 
 void game_history_set_player(GameHistory *history, int player_index,
-                             GameHistoryPlayer *player) {
-  history->players[player_index] = player;
+                             const char *player_name,
+                             const char *player_nickname) {
+  history->players[player_index] =
+      game_history_player_create(player_name, player_nickname);
 }
 
 GameHistoryPlayer *game_history_get_player(const GameHistory *history,
