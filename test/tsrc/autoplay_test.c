@@ -50,7 +50,7 @@ void autoplay_game_pairs_test() {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 1 -it 500 -gp true -threads 11 -seed %ld",
       seed);
-  Config *csw_config = create_config_or_die(options_string);
+  Config *csw_config = config_create_or_die(options_string);
   printf("running autoplay with: %s\n", options_string);
 
   free(options_string);

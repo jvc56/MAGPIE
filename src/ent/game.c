@@ -595,7 +595,7 @@ void game_unplay_last_move(Game *game) {
   board_copy(game->board, state->board);
 }
 
-void destroy_backups(Game *game) {
+void backups_destroy(Game *game) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     rack_destroy(game->game_backups[i]->p0rack);
     rack_destroy(game->game_backups[i]->p1rack);
@@ -617,7 +617,7 @@ void game_destroy(Game *game) {
   player_destroy(game->players[1]);
   rack_destroy(game->cross_set_rack);
   if (game->backups_preallocated) {
-    destroy_backups(game);
+    backups_destroy(game);
   }
   free(game);
 }

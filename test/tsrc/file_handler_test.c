@@ -21,7 +21,7 @@ typedef struct TestFIFOArgs {
   const char *fifo_filename;
 } TestFIFOArgs;
 
-TestFIFOArgs *create_test_fifo_args(const char *fifo_filename) {
+TestFIFOArgs *test_fifo_args_create(const char *fifo_filename) {
   TestFIFOArgs *test_fifo_args = malloc_or_die(sizeof(TestFIFOArgs));
   test_fifo_args->done_reading = false;
   test_fifo_args->done_writing = false;
@@ -29,7 +29,7 @@ TestFIFOArgs *create_test_fifo_args(const char *fifo_filename) {
   return test_fifo_args;
 }
 
-void destroy_test_fifo_args(TestFIFOArgs *test_fifo_args) {
+void test_fifo_args_destroy(TestFIFOArgs *test_fifo_args) {
   if (!test_fifo_args) {
     return;
   }
@@ -134,7 +134,7 @@ void *read_fifo_thread(void *uncasted_test_fifo_args) {
   FileHandler *fifo_reader =
       file_handler_create_from_filename(fifo_filename, FILE_HANDLER_MODE_READ);
 
-  StringBuilder *result_builder = create_string_builder();
+  StringBuilder *result_builder = string_builder_create();
   while (1) {
     char *line = file_handler_get_line(fifo_reader);
     if (!line) {
@@ -144,7 +144,7 @@ void *read_fifo_thread(void *uncasted_test_fifo_args) {
     free(line);
   }
   assert_strings_equal("abc", string_builder_peek(result_builder));
-  destroy_string_builder(result_builder);
+  string_builder_destroy(result_builder);
   file_handler_destroy(fifo_reader);
   test_fifo_args->done_reading = true;
   return NULL;
@@ -174,9 +174,9 @@ void *write_fifo_thread(void *uncasted_test_fifo_args) {
 
 void test_fifo() {
   char *test_fifo_filename = get_test_filename("fifo_test");
-  create_fifo(test_fifo_filename);
+  fifo_create(test_fifo_filename);
 
-  TestFIFOArgs *test_fifo_args = create_test_fifo_args(test_fifo_filename);
+  TestFIFOArgs *test_fifo_args = test_fifo_args_create(test_fifo_filename);
 
   pthread_t reader_thread_id;
   pthread_create(&reader_thread_id, NULL, read_fifo_thread, test_fifo_args);
@@ -189,7 +189,7 @@ void test_fifo() {
   block_for_fifo_finish(&test_fifo_args->done_reading,
                         &test_fifo_args->done_writing, 8);
 
-  destroy_test_fifo_args(test_fifo_args);
+  test_fifo_args_destroy(test_fifo_args);
   free(test_fifo_filename);
 }
 

@@ -44,7 +44,7 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
   // score, bp - bingo perc ig - this play has been cut-off
   const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
-  StringBuilder *sim_stats_string_builder = create_string_builder();
+  StringBuilder *sim_stats_string_builder = string_builder_create();
   int number_of_simmed_plays = sim_results_get_number_of_plays(sim_results);
   double zval = sim_results_get_zval(sim_results);
   for (int i = 0; i < number_of_simmed_plays; i++) {
@@ -60,7 +60,7 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
 
     Move *move = simmed_play_get_move(play);
     string_builder_add_string(sim_stats_string_builder, "info currmove ");
-    string_builder_add_ucgi_move(move, board, ld, sim_stats_string_builder);
+    string_builder_add_ucgi_move(sim_stats_string_builder, move, board, ld);
     bool ignore = simmed_play_get_ignore(play);
     string_builder_add_formatted_string(
         sim_stats_string_builder,
@@ -86,12 +86,12 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
     string_builder_add_string(sim_stats_string_builder, "bestsofar ");
   }
   const SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
-  string_builder_add_ucgi_move(simmed_play_get_move(play), board, ld,
-                               sim_stats_string_builder);
+  string_builder_add_ucgi_move(sim_stats_string_builder,
+                               simmed_play_get_move(play), board, ld);
   string_builder_add_formatted_string(sim_stats_string_builder,
                                       "\ninfo nps %f\n", nps);
   char *sim_stats_string = string_builder_dump(sim_stats_string_builder, NULL);
-  destroy_string_builder(sim_stats_string_builder);
+  string_builder_destroy(sim_stats_string_builder);
   return sim_stats_string;
 }
 

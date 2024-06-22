@@ -31,7 +31,7 @@ typedef struct AutoplayWorker {
   int worker_index;
 } AutoplayWorker;
 
-AutoplayWorker *create_autoplay_worker(const AutoplayArgs *args,
+AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        int max_games_for_worker,
                                        int worker_index) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
@@ -42,7 +42,7 @@ AutoplayWorker *create_autoplay_worker(const AutoplayArgs *args,
   return autoplay_worker;
 }
 
-void destroy_autoplay_worker(AutoplayWorker *autoplay_worker) {
+void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   if (!autoplay_worker) {
     return;
   }
@@ -166,7 +166,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
         max_iterations, number_of_threads, thread_index);
 
     autoplay_workers[thread_index] =
-        create_autoplay_worker(args, number_of_games_for_worker, thread_index);
+        autoplay_worker_create(args, number_of_games_for_worker, thread_index);
 
     pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
                    autoplay_workers[thread_index]);
@@ -198,7 +198,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   free(p2_score_stats);
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    destroy_autoplay_worker(autoplay_workers[thread_index]);
+    autoplay_worker_destroy(autoplay_workers[thread_index]);
   }
 
   // Destroy intrasim structs

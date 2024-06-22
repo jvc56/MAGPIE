@@ -143,7 +143,7 @@ typedef struct MoveGen {
 // only called once per command.
 static MoveGen *cached_gens[MAX_THREADS];
 
-MoveGen *create_generator() {
+MoveGen *generator_create() {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
   generator->anchor_list = anchor_list_create();
   generator->tiles_played = 0;
@@ -151,7 +151,7 @@ MoveGen *create_generator() {
   return generator;
 }
 
-void destroy_generator(MoveGen *gen) {
+void generator_destroy(MoveGen *gen) {
   if (!gen) {
     return;
   }
@@ -161,14 +161,14 @@ void destroy_generator(MoveGen *gen) {
 
 MoveGen *get_movegen(int thread_index) {
   if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = create_generator();
+    cached_gens[thread_index] = generator_create();
   }
   return cached_gens[thread_index];
 }
 
 void gen_destroy_cache() {
   for (int i = 0; i < (MAX_THREADS); i++) {
-    destroy_generator(cached_gens[i]);
+    generator_destroy(cached_gens[i]);
     cached_gens[i] = NULL;
   }
 }

@@ -26,7 +26,7 @@ void reset_and_load_game_failure(Game *game, const char *cgp,
 }
 
 void test_load_cgp() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   // Test that loading various CGPs doesn't result in
@@ -165,7 +165,7 @@ void test_load_cgp() {
 }
 
 void test_game_main() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);

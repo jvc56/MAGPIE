@@ -36,7 +36,7 @@ typedef struct MainArgs {
   char **argv;
 } MainArgs;
 
-ProcessArgs *create_process_args(const char *arg_string,
+ProcessArgs *process_args_create(const char *arg_string,
                                  int expected_output_line_count,
                                  const char *output_substr,
                                  int expected_outerror_line_count,
@@ -52,7 +52,7 @@ ProcessArgs *create_process_args(const char *arg_string,
   return process_args;
 }
 
-void destroy_process_args(ProcessArgs *process_args) {
+void process_args_destroy(ProcessArgs *process_args) {
   if (!process_args) {
     return;
   }
@@ -84,11 +84,11 @@ MainArgs *get_main_args_from_string(const char *arg_string) {
     main_args->argv[i] = get_formatted_string(
         "%s", string_splitter_get_item(arg_string_splitter, i));
   }
-  destroy_string_splitter(arg_string_splitter);
+  string_splitter_destroy(arg_string_splitter);
   return main_args;
 }
 
-void destroy_main_args(MainArgs *main_args) {
+void main_args_destroy(MainArgs *main_args) {
   if (!main_args) {
     return;
   }
@@ -383,7 +383,7 @@ void test_process_command(const char *arg_string,
   MainArgs *main_args = get_main_args_from_string(arg_string_with_outfile);
 
   process_command(main_args->argc, main_args->argv);
-  destroy_main_args(main_args);
+  main_args_destroy(main_args);
 
   char *test_output = get_string_from_file(test_output_filename);
   char *test_outerror = get_string_from_file(test_outerror_filename);
@@ -522,13 +522,13 @@ void *test_process_command_async(void *uncasted_process_args) {
 void test_exec_ucgi_command() {
   char *test_input_filename = get_test_filename("input");
 
-  create_fifo(test_input_filename);
+  fifo_create(test_input_filename);
 
   char *initial_command =
       get_formatted_string("set -mode ucgi -infile %s", test_input_filename);
 
   ProcessArgs *process_args =
-      create_process_args(initial_command, 2, "autoplay", 1, "still searching");
+      process_args_create(initial_command, 2, "autoplay", 1, "still searching");
 
   pthread_t cmd_execution_thread;
   pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
@@ -563,7 +563,7 @@ void test_exec_ucgi_command() {
 
   file_handler_destroy(input_writer);
   delete_fifo(test_input_filename);
-  destroy_process_args(process_args);
+  process_args_destroy(process_args);
   free(test_input_filename);
   free(initial_command);
 }
@@ -571,7 +571,7 @@ void test_exec_ucgi_command() {
 void test_exec_console_command() {
   char *test_input_filename = get_test_filename("input");
 
-  create_fifo(test_input_filename);
+  fifo_create(test_input_filename);
 
   // infile other than STDIN
   char *initial_command =
@@ -580,7 +580,7 @@ void test_exec_console_command() {
   char *config_load_error_substr =
       get_formatted_string("code %d", CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
 
-  ProcessArgs *process_args = create_process_args(
+  ProcessArgs *process_args = process_args_create(
       initial_command, 40, "autoplay 200", 1, config_load_error_substr);
 
   pthread_t cmd_execution_thread;
@@ -606,7 +606,7 @@ void test_exec_console_command() {
 
   file_handler_destroy(input_writer);
   delete_fifo(test_input_filename);
-  destroy_process_args(process_args);
+  process_args_destroy(process_args);
   free(config_load_error_substr);
   free(test_input_filename);
   free(initial_command);

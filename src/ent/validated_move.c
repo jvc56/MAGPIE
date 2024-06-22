@@ -415,7 +415,7 @@ move_validation_status_t validate_move(ValidatedMove *vm, const Game *game,
       validate_split_move(split_move, game, vm, player_index, tiles_played_rack,
                           allow_unknown_exchanges, allow_playthrough);
 
-  destroy_string_splitter(split_move);
+  string_splitter_destroy(split_move);
   rack_destroy(tiles_played_rack);
 
   return status;
@@ -560,7 +560,7 @@ ValidatedMoves *validated_moves_create(const Game *game, int player_index,
       }
     }
 
-    destroy_string_splitter(split_moves);
+    string_splitter_destroy(split_moves);
   }
 
   return vms;

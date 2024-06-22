@@ -90,10 +90,10 @@ WinPct *win_pct_create(const char *data_path, const char *win_pct_name) {
       array[row][i - 1] =
           string_to_double(string_splitter_get_item(win_pct_data, i));
     }
-    destroy_string_splitter(win_pct_data);
+    string_splitter_destroy(win_pct_data);
     row++;
   }
-  destroy_string_splitter(win_pct_lines);
+  string_splitter_destroy(win_pct_lines);
 
   wp->win_pcts = array;
   wp->max_tiles_unseen = number_of_columns - 2;

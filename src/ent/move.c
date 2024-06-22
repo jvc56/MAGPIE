@@ -77,7 +77,7 @@ void move_set_as_pass(Move *move) {
                PASS_MOVE_EQUITY);
 }
 
-void create_moves_for_move_list(MoveList *ml, int capacity) {
+void move_list_load_with_empty_moves(MoveList *ml, int capacity) {
   ml->capacity = capacity;
   // We need to use +1 here so that the
   // move list can temporarily hold the
@@ -90,7 +90,7 @@ void create_moves_for_move_list(MoveList *ml, int capacity) {
   }
 }
 
-void destroy_moves_for_move_list(MoveList *ml) {
+void moves_for_move_list_destroy(MoveList *ml) {
   for (int i = 0; i < ml->moves_size; i++) {
     move_destroy(ml->moves[i]);
   }
@@ -101,7 +101,7 @@ MoveList *move_list_create(int capacity) {
   MoveList *ml = malloc_or_die(sizeof(MoveList));
   ml->count = 0;
   ml->spare_move = move_create();
-  create_moves_for_move_list(ml, capacity);
+  move_list_load_with_empty_moves(ml, capacity);
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
   return ml;
 }
@@ -110,7 +110,7 @@ MoveList *move_list_duplicate(const MoveList *ml) {
   MoveList *new_ml = malloc_or_die(sizeof(MoveList));
   new_ml->count = ml->count;
   new_ml->spare_move = move_create();
-  create_moves_for_move_list(new_ml, ml->capacity);
+  move_list_load_with_empty_moves(new_ml, ml->capacity);
   for (int i = 0; i < new_ml->moves_size; i++) {
     move_copy(new_ml->moves[i], ml->moves[i]);
   }
@@ -121,7 +121,7 @@ void move_list_destroy(MoveList *ml) {
   if (!ml) {
     return;
   }
-  destroy_moves_for_move_list(ml);
+  moves_for_move_list_destroy(ml);
   move_destroy(ml->spare_move);
   free(ml);
 }

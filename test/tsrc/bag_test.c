@@ -18,10 +18,10 @@ void test_add_letter(const Config *config, Bag *bag, char *r,
                      char *expected_bag_string, int player_index) {
   LetterDistribution *ld = config_get_ld(config);
   bag_add_letter(bag, ld_hl_to_ml(ld, r), player_index);
-  StringBuilder *bag_string = create_string_builder();
-  string_builder_add_bag(bag, ld, bag_string);
+  StringBuilder *bag_string = string_builder_create();
+  string_builder_add_bag(bag_string, bag, ld);
   assert_strings_equal(string_builder_peek(bag_string), expected_bag_string);
-  destroy_string_builder(bag_string);
+  string_builder_destroy(bag_string);
 }
 
 int get_drawn_tile_index(int drawn_tiles, int player_index) {
@@ -29,7 +29,7 @@ int get_drawn_tile_index(int drawn_tiles, int player_index) {
 }
 
 void test_bag() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);

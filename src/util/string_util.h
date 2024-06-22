@@ -46,7 +46,7 @@ StringSplitter *split_string_by_whitespace(const char *input_string,
                                            bool ignore_empty);
 StringSplitter *split_string(const char *input_string, const char delimiter,
                              bool ignore_empty);
-void destroy_string_splitter(StringSplitter *string_splitter);
+void string_splitter_destroy(StringSplitter *string_splitter);
 StringSplitter *split_string_by_newline(const char *input_string,
                                         bool ignore_empty);
 StringSplitter *safe_split_file_by_newline(const char *filename);
@@ -54,8 +54,8 @@ StringSplitter *split_file_by_newline(const char *filename);
 
 typedef struct StringBuilder StringBuilder;
 
-StringBuilder *create_string_builder();
-void destroy_string_builder(StringBuilder *string_builder);
+StringBuilder *string_builder_create();
+void string_builder_destroy(StringBuilder *string_builder);
 void string_builder_add_string(StringBuilder *string_builder,
                                const char *string);
 void string_builder_add_formatted_string(StringBuilder *string_builder,
