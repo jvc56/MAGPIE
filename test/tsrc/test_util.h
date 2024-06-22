@@ -27,8 +27,8 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input);
 void draw_rack_to_string(const LetterDistribution *ld, Bag *bag, Rack *rack,
                          char *letters, int player_index);
 void play_top_n_equity_move(Game *game, int n);
-SortedMoveList *create_sorted_move_list(MoveList *ml);
-void destroy_sorted_move_list(SortedMoveList *sorted_move_list);
+SortedMoveList *sorted_move_list_create(MoveList *ml);
+void sorted_move_list_destroy(SortedMoveList *sorted_move_list);
 void print_move_list(const Board *board, const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length);
 void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
@@ -54,9 +54,9 @@ void load_and_exec_config_or_die(Config *config, const char *cmd);
 char *get_test_filename(const char *filename);
 void delete_file(const char *filename);
 void reset_file(const char *filename);
-void create_fifo(const char *fifo_name);
+void fifo_create(const char *fifo_name);
 void delete_fifo(const char *fifo_name);
-Config *create_config_or_die(const char *cmd);
+Config *config_create_or_die(const char *cmd);
 Config *config_create_default_test();
 void set_row(Game *game, int row, const char *row_content);
 void assert_board_layout_error(const char *data_path,

@@ -68,7 +68,7 @@ typedef struct SimmerWorker {
   Simmer *simmer;
 } SimmerWorker;
 
-Simmer *create_simmer(const SimArgs *args, Game *game, int num_simmed_plays,
+Simmer *simmer_create(const SimArgs *args, Game *game, int num_simmed_plays,
                       SimResults *sim_results) {
   Simmer *simmer = malloc_or_die(sizeof(Simmer));
   ThreadControl *thread_control = args->thread_control;
@@ -122,7 +122,7 @@ Simmer *create_simmer(const SimArgs *args, Game *game, int num_simmed_plays,
   return simmer;
 }
 
-void destroy_simmer(Simmer *simmer) {
+void simmer_destroy(Simmer *simmer) {
   if (!simmer) {
     return;
   }
@@ -132,7 +132,7 @@ void destroy_simmer(Simmer *simmer) {
   free(simmer);
 }
 
-SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
+SimmerWorker *simmer_create_worker(const Game *game, Simmer *simmer,
                                    int worker_index) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
 
@@ -159,7 +159,7 @@ SimmerWorker *create_simmer_worker(const Game *game, Simmer *simmer,
   return simmer_worker;
 }
 
-void destroy_simmer_worker(SimmerWorker *simmer_worker) {
+void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   if (!simmer_worker) {
     return;
   }
@@ -438,7 +438,7 @@ sim_status_t simulate_internal(const SimArgs *args, Game *game,
     return SIM_STATUS_NO_MOVES;
   }
 
-  Simmer *simmer = create_simmer(args, game, move_list_count, sim_results);
+  Simmer *simmer = simmer_create(args, game, move_list_count, sim_results);
 
   SimmerWorker **simmer_workers =
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->threads));
@@ -447,20 +447,20 @@ sim_status_t simulate_internal(const SimArgs *args, Game *game,
 
   for (int thread_index = 0; thread_index < simmer->threads; thread_index++) {
     simmer_workers[thread_index] =
-        create_simmer_worker(game, simmer, thread_index);
+        simmer_create_worker(game, simmer, thread_index);
     pthread_create(&worker_ids[thread_index], NULL, simmer_worker,
                    simmer_workers[thread_index]);
   }
 
   for (int thread_index = 0; thread_index < simmer->threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
-    destroy_simmer_worker(simmer_workers[thread_index]);
+    simmer_worker_destroy(simmer_workers[thread_index]);
   }
 
   // Destroy intrasim structs
   free(simmer_workers);
   free(worker_ids);
-  destroy_simmer(simmer);
+  simmer_destroy(simmer);
 
   // Print out the stats
   print_ucgi_sim_stats(game, sim_results, args->thread_control, true);

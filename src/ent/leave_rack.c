@@ -49,7 +49,7 @@ const LeaveRack *leave_rack_list_get_rack(const LeaveRackList *leave_rack_list,
   return leave_rack_list->leave_racks[index];
 }
 
-LeaveRack *create_leave_rack(int distribution_size) {
+LeaveRack *leave_rack_create(int distribution_size) {
   LeaveRack *leave_rack = malloc_or_die(sizeof(LeaveRack));
   leave_rack->draws = 0;
   leave_rack->equity = 0;
@@ -58,7 +58,7 @@ LeaveRack *create_leave_rack(int distribution_size) {
   return leave_rack;
 }
 
-void destroy_leave_rack(LeaveRack *leave_rack) {
+void leave_rack_destroy(LeaveRack *leave_rack) {
   if (!leave_rack) {
     return;
   }
@@ -71,12 +71,12 @@ LeaveRackList *leave_rack_list_create(int capacity, int distribution_size) {
   LeaveRackList *lrl = malloc_or_die(sizeof(LeaveRackList));
   lrl->count = 0;
   lrl->capacity = capacity;
-  lrl->spare_leave_rack = create_leave_rack(distribution_size);
+  lrl->spare_leave_rack = leave_rack_create(distribution_size);
   // Use capacity + 1 to temporarily hold a new insertion
   // before popping it.
   lrl->leave_racks = malloc_or_die((sizeof(LeaveRack *)) * (lrl->capacity + 1));
   for (int i = 0; i < lrl->capacity + 1; i++) {
-    lrl->leave_racks[i] = create_leave_rack(distribution_size);
+    lrl->leave_racks[i] = leave_rack_create(distribution_size);
   }
   return lrl;
 }
@@ -86,9 +86,9 @@ void leave_rack_list_destroy(LeaveRackList *lrl) {
     return;
   }
   for (int i = 0; i < lrl->capacity + 1; i++) {
-    destroy_leave_rack(lrl->leave_racks[i]);
+    leave_rack_destroy(lrl->leave_racks[i]);
   }
-  destroy_leave_rack(lrl->spare_leave_rack);
+  leave_rack_destroy(lrl->spare_leave_rack);
   free(lrl->leave_racks);
   free(lrl);
 }

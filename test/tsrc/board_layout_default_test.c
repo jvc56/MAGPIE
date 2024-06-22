@@ -14,7 +14,7 @@
 #include "test_util.h"
 
 void test_board_layout_success() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -117,7 +117,7 @@ void assert_opening_penalties(Game *game, const char *data_path,
 }
 
 void test_board_layout_correctness() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);

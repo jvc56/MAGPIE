@@ -193,7 +193,7 @@ void test_config_load_success() {
   int print_info = 200;
   int check_stop = 700;
 
-  StringBuilder *test_string_builder = create_string_builder();
+  StringBuilder *test_string_builder = string_builder_create();
   string_builder_add_formatted_string(
       test_string_builder,
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
@@ -389,7 +389,7 @@ void test_config_load_success() {
                                  PLAYERS_DATA_TYPE_KLV, 1),
       "FRA20");
 
-  destroy_string_builder(test_string_builder);
+  string_builder_destroy(test_string_builder);
   config_destroy(config);
 }
 

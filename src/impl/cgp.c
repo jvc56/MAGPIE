@@ -49,7 +49,7 @@ cgp_parse_status_t place_letters_on_board(Game *game, const char *letters,
 cgp_parse_status_t parse_cgp_board_row(Game *game, const char *cgp_board_row,
                                        int row_index) {
   cgp_parse_status_t cgp_parse_status = CGP_PARSE_STATUS_SUCCESS;
-  StringBuilder *tile_string_builder = create_string_builder();
+  StringBuilder *tile_string_builder = string_builder_create();
   int row_length = string_length(cgp_board_row);
 
   int current_row_number_of_spaces = 0;
@@ -84,7 +84,7 @@ cgp_parse_status_t parse_cgp_board_row(Game *game, const char *cgp_board_row,
   } else {
     current_column_index += current_row_number_of_spaces;
   }
-  destroy_string_builder(tile_string_builder);
+  string_builder_destroy(tile_string_builder);
 
   if (current_column_index != BOARD_DIM &&
       cgp_parse_status == CGP_PARSE_STATUS_SUCCESS) {
@@ -109,7 +109,7 @@ cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
       }
     }
   }
-  destroy_string_splitter(board_rows);
+  string_splitter_destroy(board_rows);
   return cgp_parse_status;
 }
 
@@ -142,7 +142,7 @@ cgp_parse_status_t parse_cgp_racks(Game *game, const char *cgp_racks) {
   } else {
     cgp_parse_status = parse_cgp_racks_with_string_splitter(player_racks, game);
   }
-  destroy_string_splitter(player_racks);
+  string_splitter_destroy(player_racks);
   return cgp_parse_status;
 }
 
@@ -162,7 +162,7 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
       player_set_score(game_get_player(game, player_index), player_score);
     }
   }
-  destroy_string_splitter(player_scores);
+  string_splitter_destroy(player_scores);
   return cgp_parse_status;
 }
 
@@ -211,7 +211,7 @@ cgp_parse_status_t parse_cgp(Game *game, const char *cgp) {
   } else {
     cgp_parse_status = parse_cgp_with_cgp_fields(cgp_fields, game);
   }
-  destroy_string_splitter(cgp_fields);
+  string_splitter_destroy(cgp_fields);
   return cgp_parse_status;
 }
 
@@ -244,7 +244,7 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
 // - Player racks
 // - Player scores
 // - Number of consecutive scoreless turns
-void string_builder_add_cgp(const Game *game, StringBuilder *cgp_builder,
+void string_builder_add_cgp(StringBuilder *cgp_builder, const Game *game,
                             bool write_player_on_turn_first) {
   const LetterDistribution *ld = game_get_ld(game);
   const Board *board = game_get_board(game);
@@ -284,9 +284,9 @@ void string_builder_add_cgp(const Game *game, StringBuilder *cgp_builder,
     player0 = game_get_player(game, 1);
   }
 
-  string_builder_add_rack(player_get_rack(player0), ld, cgp_builder);
+  string_builder_add_rack(cgp_builder, player_get_rack(player0), ld);
   string_builder_add_char(cgp_builder, '/');
-  string_builder_add_rack(player_get_rack(player1), ld, cgp_builder);
+  string_builder_add_rack(cgp_builder, player_get_rack(player1), ld);
 
   string_builder_add_char(cgp_builder, ' ');
 
@@ -301,10 +301,10 @@ void string_builder_add_cgp(const Game *game, StringBuilder *cgp_builder,
 }
 
 char *game_get_cgp(const Game *game, bool write_player_on_turn_first) {
-  StringBuilder *cgp_builder = create_string_builder();
-  string_builder_add_cgp(game, cgp_builder, write_player_on_turn_first);
+  StringBuilder *cgp_builder = string_builder_create();
+  string_builder_add_cgp(cgp_builder, game, write_player_on_turn_first);
   char *cgp = string_builder_dump(cgp_builder, NULL);
-  destroy_string_builder(cgp_builder);
+  string_builder_destroy(cgp_builder);
   return cgp;
 }
 
@@ -375,13 +375,13 @@ char *game_get_cgp_with_options(const Game *game,
                                 const char *board_layout_name,
                                 const char *ld_name,
                                 game_variant_t game_variant) {
-  StringBuilder *cgp_with_options_builder = create_string_builder();
-  string_builder_add_cgp(game, cgp_with_options_builder,
+  StringBuilder *cgp_with_options_builder = string_builder_create();
+  string_builder_add_cgp(cgp_with_options_builder, game,
                          write_player_on_turn_first);
   string_builder_add_cgp_options(cgp_with_options_builder, players_data,
                                  bingo_bonus, board_layout_name, ld_name,
                                  game_variant);
   char *cgp_with_options = string_builder_dump(cgp_with_options_builder, NULL);
-  destroy_string_builder(cgp_with_options_builder);
+  string_builder_destroy(cgp_with_options_builder);
   return cgp_with_options;
 }

@@ -92,21 +92,21 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
 }
 
 char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
-  StringBuilder *css_builder = create_string_builder();
+  StringBuilder *css_builder = string_builder_create();
   for (int i = 0; i < MAX_ALPHABET_SIZE; ++i) {
     if (input & ((uint64_t)1 << i)) {
       string_builder_add_string(css_builder, ld_ml_to_hl(ld, i));
     }
   }
   char *result = string_builder_dump(css_builder, NULL);
-  destroy_string_builder(css_builder);
+  string_builder_destroy(css_builder);
   return result;
 }
 
 // Loads path with a default test data path value.
 // To specify a different path, use load_and_exec_config_or_die
 // after calling this function.
-Config *create_config_or_die(const char *cmd) {
+Config *config_create_or_die(const char *cmd) {
   Config *config = config_create_default();
   load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
   load_and_exec_config_or_die(config, cmd);
@@ -133,7 +133,7 @@ void resort_sorted_move_list_by_score(SortedMoveList *sml) {
   qsort(sml->moves, sml->count, sizeof(Move *), compare_moves_for_sml);
 }
 
-SortedMoveList *create_sorted_move_list(MoveList *ml) {
+SortedMoveList *sorted_move_list_create(MoveList *ml) {
   int number_of_moves = move_list_get_count(ml);
   SortedMoveList *sorted_move_list = malloc_or_die((sizeof(SortedMoveList)));
   sorted_move_list->moves = malloc_or_die((sizeof(Move *)) * (number_of_moves));
@@ -145,7 +145,7 @@ SortedMoveList *create_sorted_move_list(MoveList *ml) {
   return sorted_move_list;
 }
 
-void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
+void sorted_move_list_destroy(SortedMoveList *sorted_move_list) {
   if (!sorted_move_list) {
     return;
   }
@@ -155,20 +155,20 @@ void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
 
 void print_move_list(const Board *board, const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length) {
-  StringBuilder *move_list_string = create_string_builder();
+  StringBuilder *move_list_string = string_builder_create();
   for (int i = 0; i < move_list_length; i++) {
-    string_builder_add_move(board, sml->moves[i], ld, move_list_string);
+    string_builder_add_move(move_list_string, board, sml->moves[i], ld);
     string_builder_add_string(move_list_string, "\n");
   }
   printf("%s\n", string_builder_peek(move_list_string));
-  destroy_string_builder(move_list_string);
+  string_builder_destroy(move_list_string);
 }
 
 void print_game(Game *game, MoveList *move_list) {
-  StringBuilder *game_string = create_string_builder();
-  string_builder_add_game(game, move_list, game_string);
+  StringBuilder *game_string = string_builder_create();
+  string_builder_add_game(game_string, game, move_list);
   printf("%s\n", string_builder_peek(game_string));
-  destroy_string_builder(game_string);
+  string_builder_destroy(game_string);
 }
 
 void print_cgp(const Game *game) {
@@ -182,35 +182,35 @@ void print_rack(const Rack *rack, const LetterDistribution *ld) {
     printf("(null)\n");
     return;
   }
-  StringBuilder *rack_sb = create_string_builder();
-  string_builder_add_rack(rack, ld, rack_sb);
+  StringBuilder *rack_sb = string_builder_create();
+  string_builder_add_rack(rack_sb, rack, ld);
   printf("%s", string_builder_peek(rack_sb));
-  destroy_string_builder(rack_sb);
+  string_builder_destroy(rack_sb);
 }
 
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,
                      InferenceResults *inference_results) {
-  StringBuilder *inference_string = create_string_builder();
-  string_builder_add_inference(ld, inference_results, target_played_tiles,
-                               inference_string);
+  StringBuilder *inference_string = string_builder_create();
+  string_builder_add_inference(inference_string, ld, inference_results,
+                               target_played_tiles);
   printf("%s\n", string_builder_peek(inference_string));
-  destroy_string_builder(inference_string);
+  string_builder_destroy(inference_string);
 }
 
 void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
                               MoveList *ml) {
-  SortedMoveList *sml = create_sorted_move_list(ml);
+  SortedMoveList *sml = sorted_move_list_create(ml);
   print_move_list(board, ld, sml, sml->count);
-  destroy_sorted_move_list(sml);
+  sorted_move_list_destroy(sml);
 }
 
 void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
-  SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
+  SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
   play_move(sorted_move_list->moves[n], game, NULL);
-  destroy_sorted_move_list(sorted_move_list);
+  sorted_move_list_destroy(sorted_move_list);
   move_list_destroy(move_list);
 }
 
@@ -357,20 +357,20 @@ void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
-  StringBuilder *move_string = create_string_builder();
+  StringBuilder *move_string = string_builder_create();
   Move *move;
   if (sml) {
     move = sml->moves[move_index];
   } else {
     move = move_list_get_move(move_list, move_index);
   }
-  string_builder_add_move(board, move, ld, move_string);
+  string_builder_add_move(move_string, board, move, ld);
   if (!strings_equal(string_builder_peek(move_string), expected_move_string)) {
     fprintf(stderr, "moves are not equal\ngot: >%s<\nexp: >%s<\n",
             string_builder_peek(move_string), expected_move_string);
     assert(0);
   }
-  destroy_string_builder(move_string);
+  string_builder_destroy(move_string);
 }
 
 void assert_players_are_equal(const Player *p1, const Player *p2,
@@ -431,7 +431,7 @@ void delete_file(const char *filename) {
 
 void reset_file(const char *filename) { fclose(fopen(filename, "w")); }
 
-void create_fifo(const char *fifo_name) {
+void fifo_create(const char *fifo_name) {
   int result;
 
   errno = 0;
@@ -462,8 +462,8 @@ void assert_board_layout_error(const char *data_path,
   assert(actual_status == expected_status);
 }
 
-BoardLayout *create_test_board_layout(const char *data_path,
-                                      const char *board_layout_name) {
+BoardLayout *board_layout_create_for_test(const char *data_path,
+                                          const char *board_layout_name) {
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
       board_layout_load(bl, data_path, board_layout_name);
@@ -477,7 +477,7 @@ BoardLayout *create_test_board_layout(const char *data_path,
 
 void load_game_with_test_board(Game *game, const char *data_path,
                                const char *board_layout_name) {
-  BoardLayout *bl = create_test_board_layout(data_path, board_layout_name);
+  BoardLayout *bl = board_layout_create_for_test(data_path, board_layout_name);
   board_apply_layout(bl, game_get_board(game));
   game_reset(game);
   board_layout_destroy(bl);

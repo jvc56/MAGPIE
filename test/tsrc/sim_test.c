@@ -36,7 +36,7 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
   sim_results_sort_plays_by_win_rate(sim_results);
   const LetterDistribution *ld = game_get_ld(game);
   printf("%-20s%-9s%-16s%-16s\n", "Play", "Score", "Win%", "Equity");
-  StringBuilder *move_description = create_string_builder();
+  StringBuilder *move_description = string_builder_create();
   double zval = sim_results_get_zval(sim_results);
   for (int i = 0; i < sim_results_get_number_of_plays(sim_results); i++) {
     const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
@@ -53,7 +53,7 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
 
     const char *ignore = simmed_play_get_ignore(play) ? "❌" : "";
     Move *move = simmed_play_get_move(play);
-    string_builder_add_move_description(move, ld, move_description);
+    string_builder_add_move_description(move_description, move, ld);
     printf("%-20s%-9d%-16s%-16s%s\n", string_builder_peek(move_description),
            move_get_score(move), wp, eq, ignore);
     string_builder_clear(move_description);
@@ -61,7 +61,7 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
     free(eq);
   }
   printf("Iterations: %d\n", sim_results_get_iteration_count(sim_results));
-  destroy_string_builder(move_description);
+  string_builder_destroy(move_description);
 }
 
 void test_p_to_z() {
@@ -71,7 +71,7 @@ void test_p_to_z() {
 }
 
 void test_win_pct() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all");
   assert(within_epsilon(win_pct_get(config_get_win_pcts(config), 118, 90),
                         0.844430));
@@ -79,7 +79,7 @@ void test_win_pct() {
 }
 
 void test_sim_error_cases() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
       "2 -threads 1 -iter 1 -scond 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -91,7 +91,7 @@ void test_sim_error_cases() {
 }
 
 void test_sim_single_iteration() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
       "2 -threads 1 -iter 1 -scond 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -106,7 +106,7 @@ void test_sim_single_iteration() {
 }
 
 void test_more_iterations() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
       "2 -threads 1 -iter 500 -scond 100");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -120,18 +120,18 @@ void test_more_iterations() {
   sim_results_sort_plays_by_win_rate(sim_results);
 
   SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
-  StringBuilder *move_string_builder = create_string_builder();
+  StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
-      simmed_play_get_move(play), config_get_ld(config), move_string_builder);
+      move_string_builder, simmed_play_get_move(play), config_get_ld(config));
 
   assert(strings_equal(string_builder_peek(move_string_builder), "8G QI"));
 
   config_destroy(config);
-  destroy_string_builder(move_string_builder);
+  string_builder_destroy(move_string_builder);
 }
 
 void perf_test_multithread_sim() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -s1 score -s2 score -r1 all -r2 all "
       "-threads 4 -plies 2 -it 1000 -numplays 15 -scond none");
   load_and_exec_config_or_die(
@@ -152,19 +152,19 @@ void perf_test_multithread_sim() {
   sim_results_sort_plays_by_win_rate(sim_results);
 
   SimmedPlay *play = sim_results_get_simmed_play(sim_results, 0);
-  StringBuilder *move_string_builder = create_string_builder();
+  StringBuilder *move_string_builder = string_builder_create();
   string_builder_add_move_description(
-      simmed_play_get_move(play), config_get_ld(config), move_string_builder);
+      move_string_builder, simmed_play_get_move(play), config_get_ld(config));
 
   assert(strings_equal(string_builder_peek(move_string_builder), "14F ZI.E"));
 
-  destroy_string_builder(move_string_builder);
+  string_builder_destroy(move_string_builder);
   config_destroy(config);
 }
 
 void test_play_similarity() {
   Config *config =
-      create_config_or_die("set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
+      config_create_or_die("set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
                            "-plies 2 -threads 1 -it 1200 -scond 100 -cfreq 50");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 ACEIRST");
@@ -181,14 +181,14 @@ void test_play_similarity() {
   // others should not be ignored, since the stopping condition
   // is NONE.
 
-  StringBuilder *p1_string_builder = create_string_builder();
+  StringBuilder *p1_string_builder = string_builder_create();
   bool found_ignored_play = false;
   for (int i = 0; i < 4; i++) {
     SimmedPlay *play_i = sim_results_get_simmed_play(sim_results, i);
     Move *move_i = simmed_play_get_move(play_i);
     string_builder_clear(p1_string_builder);
-    string_builder_add_move_description(move_i, config_get_ld(config),
-                                        p1_string_builder);
+    string_builder_add_move_description(p1_string_builder, move_i,
+                                        config_get_ld(config));
 
     const char *p1 = string_builder_peek(p1_string_builder);
     if (simmed_play_get_ignore(play_i)) {
@@ -200,7 +200,7 @@ void test_play_similarity() {
   }
 
   config_destroy(config);
-  destroy_string_builder(p1_string_builder);
+  string_builder_destroy(p1_string_builder);
 }
 
 void test_sim() {

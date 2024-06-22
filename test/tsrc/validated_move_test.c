@@ -31,7 +31,7 @@ void assert_validated_move_error(
 }
 
 void test_validated_move_errors() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -194,7 +194,7 @@ void test_validated_move_errors() {
 }
 
 void test_validated_move_success() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
@@ -486,7 +486,7 @@ void test_validated_move_score() {
   // The validated move scoring uses different
   // code than move generation, so it must be tested
   // separately.
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   ValidatedMoves *vms = NULL;
@@ -553,7 +553,7 @@ void test_validated_move_score() {
 
 void test_validated_move_distinct_kwg() {
   Config *config =
-      create_config_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+      config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
@@ -632,7 +632,7 @@ void test_validated_move_distinct_kwg() {
 
 void test_validated_move_wordsmog_phonies() {
   Config *config =
-      create_config_or_die("set -lex CSW21_alpha -s1 equity -s2 equity "
+      config_create_or_die("set -lex CSW21_alpha -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1 -var wordsmog");
   Game *game = config_game_create(config);
 
@@ -659,7 +659,7 @@ void test_validated_move_wordsmog_phonies() {
 }
 
 void test_validated_move_many() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 

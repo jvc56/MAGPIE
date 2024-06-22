@@ -37,7 +37,7 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
 }
 
 void test_shadow_score() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);
@@ -643,7 +643,7 @@ void test_shadow_score() {
 }
 
 void test_shadow_top_move() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);

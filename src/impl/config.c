@@ -495,7 +495,7 @@ void execute_cgp_load(Config *config) {
 
   config_init_game(config);
 
-  StringBuilder *cgp_builder = create_string_builder();
+  StringBuilder *cgp_builder = string_builder_create();
   int num_req_values = config_get_parg_num_req_values(config, ARG_TOKEN_CGP);
   for (int i = 0; i < num_req_values; i++) {
     const char *cgp_component = config_get_parg_value(config, ARG_TOKEN_CGP, i);
@@ -527,7 +527,7 @@ void execute_cgp_load(Config *config) {
     }
     config_reset_move_list(config);
   }
-  destroy_string_builder(cgp_builder);
+  string_builder_destroy(cgp_builder);
 }
 
 char *status_cgp_load(Config __attribute__((unused)) * config) {
@@ -559,7 +559,7 @@ void execute_add_moves(Config *config) {
   if (move_validation_status == MOVE_VALIDATION_STATUS_SUCCESS) {
     const LetterDistribution *ld = game_get_ld(config->game);
     const Board *board = game_get_board(config->game);
-    StringBuilder *phonies_sb = create_string_builder();
+    StringBuilder *phonies_sb = string_builder_create();
     int number_of_new_moves =
         validated_moves_get_number_of_moves(new_validated_moves);
     for (int i = 0; i < number_of_new_moves; i++) {
@@ -569,15 +569,15 @@ void execute_add_moves(Config *config) {
         string_builder_clear(phonies_sb);
         string_builder_add_string(phonies_sb, "Phonies formed from ");
         string_builder_add_move(
-            board, validated_moves_get_move(new_validated_moves, i), ld,
-            phonies_sb);
+            phonies_sb, board, validated_moves_get_move(new_validated_moves, i),
+            ld);
         string_builder_add_string(phonies_sb, ": ");
         string_builder_add_string(phonies_sb, phonies_formed);
         log_warn(string_builder_peek(phonies_sb));
       }
       free(phonies_formed);
     }
-    destroy_string_builder(phonies_sb);
+    string_builder_destroy(phonies_sb);
     config_init_move_list(config, number_of_new_moves);
     validated_moves_add_to_move_list(new_validated_moves, config->move_list);
   }
@@ -1438,7 +1438,7 @@ config_load_status_t config_load_command(Config *config, const char *cmd) {
     config_load_status = config_load_data(config);
   }
 
-  destroy_string_splitter(cmd_split_string);
+  string_splitter_destroy(cmd_split_string);
 
   return config_load_status;
 }

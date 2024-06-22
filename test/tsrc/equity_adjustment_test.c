@@ -17,7 +17,7 @@
 #include "test_util.h"
 
 void test_macondo_opening_equity_adjustments() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   Player *player0 = game_get_player(game, 0);
@@ -29,7 +29,7 @@ void test_macondo_opening_equity_adjustments() {
   generate_moves_for_game(game, 0, move_list);
 
   // Should be 8G VORTEX
-  SortedMoveList *vortex_sorted_move_list = create_sorted_move_list(move_list);
+  SortedMoveList *vortex_sorted_move_list = sorted_move_list_create(move_list);
 
   const Move *top_move = vortex_sorted_move_list->moves[0];
   assert(move_get_col_start(top_move) == 6);
@@ -39,14 +39,14 @@ void test_macondo_opening_equity_adjustments() {
                                  get_leave_value_for_move(klv, top_move, rack)),
                         move_get_equity(top_move)));
 
-  destroy_sorted_move_list(vortex_sorted_move_list);
+  sorted_move_list_destroy(vortex_sorted_move_list);
   game_reset(game);
 
   rack_set_to_string(ld, rack, "BDEIIIJ");
   // Should be 8D JIBED
   generate_moves_for_game(game, 0, move_list);
 
-  SortedMoveList *jibed_sorted_move_list = create_sorted_move_list(move_list);
+  SortedMoveList *jibed_sorted_move_list = sorted_move_list_create(move_list);
 
   top_move = jibed_sorted_move_list->moves[0];
   assert(move_get_col_start(top_move) == 3);
@@ -57,13 +57,13 @@ void test_macondo_opening_equity_adjustments() {
                                  OPENING_HOTSPOT_PENALTY),
                         move_get_equity(top_move)));
 
-  destroy_sorted_move_list(jibed_sorted_move_list);
+  sorted_move_list_destroy(jibed_sorted_move_list);
   game_reset(game);
 
   rack_set_to_string(ld, rack, "ACEEEFT");
   generate_moves_for_game(game, 0, move_list);
   // Should be 8D FACETE
-  SortedMoveList *facete_sorted_move_list = create_sorted_move_list(move_list);
+  SortedMoveList *facete_sorted_move_list = sorted_move_list_create(move_list);
   top_move = facete_sorted_move_list->moves[0];
   assert(move_get_col_start(top_move) == 3);
   assert(move_get_tiles_played(top_move) == 6);
@@ -72,13 +72,13 @@ void test_macondo_opening_equity_adjustments() {
                                  get_leave_value_for_move(klv, top_move, rack) +
                                  (2 * OPENING_HOTSPOT_PENALTY)),
                         move_get_equity(top_move)));
-  destroy_sorted_move_list(facete_sorted_move_list);
+  sorted_move_list_destroy(facete_sorted_move_list);
   game_reset(game);
 
   rack_set_to_string(ld, rack, "AAAALTY");
   generate_moves_for_game(game, 0, move_list);
   // Should be 8G ATALAYA
-  SortedMoveList *atalaya_sorted_move_list = create_sorted_move_list(move_list);
+  SortedMoveList *atalaya_sorted_move_list = sorted_move_list_create(move_list);
   top_move = atalaya_sorted_move_list->moves[0];
   assert(move_get_col_start(top_move) == 6);
   assert(move_get_tiles_played(top_move) == 7);
@@ -88,14 +88,14 @@ void test_macondo_opening_equity_adjustments() {
                                  (3 * OPENING_HOTSPOT_PENALTY)),
                         move_get_equity(top_move)));
 
-  destroy_sorted_move_list(atalaya_sorted_move_list);
+  sorted_move_list_destroy(atalaya_sorted_move_list);
   move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
 
 void test_macondo_endgame_equity_adjustments() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(6);
@@ -108,7 +108,7 @@ void test_macondo_endgame_equity_adjustments() {
 
   generate_moves_for_game(game, 0, move_list);
 
-  SortedMoveList *endgame_sorted_move_list = create_sorted_move_list(move_list);
+  SortedMoveList *endgame_sorted_move_list = sorted_move_list_create(move_list);
 
   const Move *move0 = endgame_sorted_move_list->moves[0];
   assert(move_get_score(move0) == 8);
@@ -152,7 +152,7 @@ void test_macondo_endgame_equity_adjustments() {
   assert(move_get_tiles_played(move5) == 2);
   assert(within_epsilon(move_get_equity(move5), -2));
 
-  destroy_sorted_move_list(endgame_sorted_move_list);
+  sorted_move_list_destroy(endgame_sorted_move_list);
   move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);

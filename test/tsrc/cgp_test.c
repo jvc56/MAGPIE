@@ -19,7 +19,7 @@ void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
   StringSplitter *split_cgp = split_string_by_whitespace(expected_cgp, true);
   char *expected_cgp_without_options =
       string_splitter_join(split_cgp, 0, 4, " ");
-  destroy_string_splitter(split_cgp);
+  string_splitter_destroy(split_cgp);
   assert_strings_equal(actual_cgp, expected_cgp_without_options);
   free(actual_cgp);
   free(expected_cgp_without_options);
@@ -44,7 +44,7 @@ void assert_game_matches_cgp_with_options(const Config *config,
       split_string_by_whitespace(expected_cgp_with_options, true);
   char *expected_cgp_without_options = string_splitter_join(
       split_cgp, 0, string_splitter_get_number_of_items(split_cgp), " ");
-  destroy_string_splitter(split_cgp);
+  string_splitter_destroy(split_cgp);
   assert_strings_equal(actual_cgp, expected_cgp_without_options);
   free(actual_cgp);
   free(expected_cgp_without_options);
@@ -84,7 +84,7 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
 }
 
 void test_cgp_english() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -192,7 +192,7 @@ void test_cgp_english() {
 }
 
 void test_cgp_english_with_options() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -227,7 +227,7 @@ void test_cgp_english_with_options() {
 }
 
 void test_cgp_catalan() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -239,7 +239,7 @@ void test_cgp_catalan() {
 }
 
 void test_cgp_polish() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 

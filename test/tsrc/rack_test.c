@@ -8,7 +8,7 @@
 #include "test_util.h"
 
 void test_rack_main() {
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);

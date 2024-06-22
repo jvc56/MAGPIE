@@ -61,7 +61,7 @@ char *data_filepaths_get(const char *data_path, const char *data_name,
     free(full_filename_i);
   }
 
-  destroy_string_splitter(split_data_paths);
+  string_splitter_destroy(split_data_paths);
 
   if (!full_filename) {
     log_fatal("File for %s not found for the following paths: %s\n", data_name,

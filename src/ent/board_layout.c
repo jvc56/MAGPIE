@@ -108,7 +108,7 @@ board_layout_parse_split_file(BoardLayout *bl,
   board_layout_load_status_t status =
       board_layout_parse_split_start_coords(bl, starting_coords);
 
-  destroy_string_splitter(starting_coords);
+  string_splitter_destroy(starting_coords);
 
   if (status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
     return status;
@@ -143,7 +143,7 @@ board_layout_load_status_t board_layout_load(BoardLayout *bl,
   board_layout_load_status_t status =
       board_layout_parse_split_file(bl, layout_rows);
 
-  destroy_string_splitter(layout_rows);
+  string_splitter_destroy(layout_rows);
 
   free(bl->name);
   bl->name = string_duplicate(board_layout_name);

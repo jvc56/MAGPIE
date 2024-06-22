@@ -36,9 +36,10 @@ void string_builder_add_game_variant(StringBuilder *sb,
   }
 }
 
-void string_builder_add_player_row(const LetterDistribution *ld,
+void string_builder_add_player_row(StringBuilder *game_string,
+                                   const LetterDistribution *ld,
                                    const Player *player,
-                                   StringBuilder *game_string,
+
                                    bool player_on_turn) {
 
   const char *player_on_turn_marker = "-> ";
@@ -61,16 +62,16 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   string_builder_add_formatted_string(
       game_string, "%s%s%*s", player_marker, display_player_name,
       25 - string_length(display_player_name), "");
-  string_builder_add_rack(player_rack, ld, game_string);
+  string_builder_add_rack(game_string, player_rack, ld);
   string_builder_add_formatted_string(game_string, "%*s%d",
                                       10 - rack_get_total_letters(player_rack),
                                       "", player_get_score(player));
   free(display_player_name);
 }
 
-void string_builder_add_board_row(const LetterDistribution *ld,
-                                  const Board *board,
-                                  StringBuilder *game_string, int row) {
+void string_builder_add_board_row(StringBuilder *game_string,
+                                  const LetterDistribution *ld,
+                                  const Board *board, int row) {
   string_builder_add_formatted_string(game_string, "%2d|", row + 1);
   for (int i = 0; i < BOARD_DIM; i++) {
     uint8_t current_letter = board_get_letter(board, row, i);
@@ -79,28 +80,28 @@ void string_builder_add_board_row(const LetterDistribution *ld,
           game_string,
           bonus_square_value_to_char(board_get_bonus_square(board, row, i)));
     } else {
-      string_builder_add_user_visible_letter(ld, game_string, current_letter);
+      string_builder_add_user_visible_letter(game_string, ld, current_letter);
     }
     string_builder_add_string(game_string, " ");
   }
   string_builder_add_string(game_string, "|");
 }
 
-void string_builder_add_move_with_rank_and_equity(Game *game,
+void string_builder_add_move_with_rank_and_equity(StringBuilder *game_string,
+                                                  Game *game,
                                                   MoveList *move_list,
-                                                  StringBuilder *game_string,
                                                   int move_index) {
   Board *board = game_get_board(game);
   Move *move = move_list_get_move(move_list, move_index);
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
-  string_builder_add_move(board, move, ld, game_string);
+  string_builder_add_move(game_string, board, move, ld);
   string_builder_add_formatted_string(game_string, " %0.2f",
                                       move_get_equity(move));
 }
 
-void string_builder_add_game(Game *game, MoveList *move_list,
-                             StringBuilder *game_string) {
+void string_builder_add_game(StringBuilder *game_string, Game *game,
+                             MoveList *move_list) {
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   Player *player0 = game_get_player(game, 0);
@@ -120,7 +121,7 @@ void string_builder_add_game(Game *game, MoveList *move_list,
 
   string_builder_add_string(game_string, "   ");
 
-  string_builder_add_player_row(ld, player0, game_string,
+  string_builder_add_player_row(game_string, ld, player0,
                                 player_on_turn_index == 0);
   string_builder_add_string(game_string, "\n   ");
 
@@ -129,24 +130,24 @@ void string_builder_add_game(Game *game, MoveList *move_list,
   }
 
   string_builder_add_string(game_string, "  ");
-  string_builder_add_player_row(ld, player1, game_string,
+  string_builder_add_player_row(game_string, ld, player1,
                                 player_on_turn_index == 1);
   string_builder_add_string(game_string, "\n");
 
   for (int i = 0; i < BOARD_DIM; i++) {
-    string_builder_add_board_row(ld, board, game_string, i);
+    string_builder_add_board_row(game_string, ld, board, i);
     if (i == 0) {
       string_builder_add_string(
           game_string, " --Tracking-----------------------------------");
     } else if (i == 1) {
       string_builder_add_string(game_string, " ");
-      string_builder_add_bag(bag, ld, game_string);
+      string_builder_add_bag(game_string, bag, ld);
 
       string_builder_add_formatted_string(game_string, "  %d",
                                           bag_get_tiles(bag));
 
     } else if (i - 2 < number_of_moves) {
-      string_builder_add_move_with_rank_and_equity(game, move_list, game_string,
+      string_builder_add_move_with_rank_and_equity(game_string, game, move_list,
                                                    i - 2);
     }
     string_builder_add_string(game_string, "\n");
@@ -165,7 +166,7 @@ char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
   if (move_list_get_count(move_list) == 0) {
     return string_duplicate("no moves to print\n");
   }
-  StringBuilder *moves_string_builder = create_string_builder();
+  StringBuilder *moves_string_builder = string_builder_create();
   const LetterDistribution *ld = game_get_ld(game);
   Board *board = game_get_board(game);
 
@@ -175,19 +176,19 @@ char *ucgi_static_moves(const Game *game, const MoveList *move_list) {
   for (int i = 0; i < move_list_get_count(sorted_move_list); i++) {
     Move *move = move_list_get_move(sorted_move_list, i);
     string_builder_add_string(moves_string_builder, "info currmove ");
-    string_builder_add_ucgi_move(move, board, ld, moves_string_builder);
+    string_builder_add_ucgi_move(moves_string_builder, move, board, ld);
 
     string_builder_add_formatted_string(
         moves_string_builder, " sc %d eq %.3f it 0\n", move_get_score(move),
         move_get_equity(move));
   }
   string_builder_add_string(moves_string_builder, "bestmove ");
-  string_builder_add_ucgi_move(move_list_get_move(sorted_move_list, 0), board,
-                               ld, moves_string_builder);
+  string_builder_add_ucgi_move(
+      moves_string_builder, move_list_get_move(sorted_move_list, 0), board, ld);
   string_builder_add_string(moves_string_builder, "\n");
   char *ucgi_static_moves_string =
       string_builder_dump(moves_string_builder, NULL);
-  destroy_string_builder(moves_string_builder);
+  string_builder_destroy(moves_string_builder);
   move_list_destroy(sorted_move_list);
   return ucgi_static_moves_string;
 }

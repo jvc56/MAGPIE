@@ -129,7 +129,7 @@ const char *incomplete_regex = "#incomplete.*";
 const char *tile_declaration_regex =
     "#tile ([^[:space:]]+)[[:space:]]+([^[:space:]]+)";
 
-TokenRegexPair *create_token_regex_pair(gcg_token_t token,
+TokenRegexPair *token_regex_pair_create(gcg_token_t token,
                                         const char *regex_string) {
   TokenRegexPair *token_regex_pair = malloc_or_die(sizeof(TokenRegexPair));
   token_regex_pair->token = token;
@@ -141,7 +141,7 @@ TokenRegexPair *create_token_regex_pair(gcg_token_t token,
   return token_regex_pair;
 }
 
-void destroy_token_regex_pair(TokenRegexPair *token_regex_pair) {
+void token_regex_pair_destroy(TokenRegexPair *token_regex_pair) {
   if (!token_regex_pair) {
     return;
   }
@@ -149,60 +149,60 @@ void destroy_token_regex_pair(TokenRegexPair *token_regex_pair) {
   free(token_regex_pair);
 }
 
-GCGParser *create_gcg_parser(Config *config, GameHistory *game_history) {
+GCGParser *gcg_parser_create(Config *config, GameHistory *game_history) {
   GCGParser *gcg_parser = malloc_or_die(sizeof(GCGParser));
   gcg_parser->game_history = game_history;
   gcg_parser->config = config;
   gcg_parser->game = NULL;
-  gcg_parser->note_builder = create_string_builder();
+  gcg_parser->note_builder = string_builder_create();
   // Allocate enough space for all of the tokens
   gcg_parser->token_regex_pairs =
       malloc_or_die(sizeof(TokenRegexPair) * (NUMBER_OF_GCG_TOKENS));
   gcg_parser->number_of_token_regex_pairs = 0;
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_PLAYER_TOKEN, player_regex);
+      token_regex_pair_create(GCG_PLAYER_TOKEN, player_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_TITLE_TOKEN, title_regex);
+      token_regex_pair_create(GCG_TITLE_TOKEN, title_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_DESCRIPTION_TOKEN, description_regex);
+      token_regex_pair_create(GCG_DESCRIPTION_TOKEN, description_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_ID_TOKEN, id_regex);
+      token_regex_pair_create(GCG_ID_TOKEN, id_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_RACK1_TOKEN, rack1_regex);
+      token_regex_pair_create(GCG_RACK1_TOKEN, rack1_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_RACK2_TOKEN, rack2_regex);
+      token_regex_pair_create(GCG_RACK2_TOKEN, rack2_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_ENCODING_TOKEN, character_encoding_regex);
+      token_regex_pair_create(GCG_ENCODING_TOKEN, character_encoding_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_MOVE_TOKEN, move_regex);
+      token_regex_pair_create(GCG_MOVE_TOKEN, move_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_NOTE_TOKEN, note_regex);
+      token_regex_pair_create(GCG_NOTE_TOKEN, note_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_LEXICON_TOKEN, lexicon_name_regex);
+      token_regex_pair_create(GCG_LEXICON_TOKEN, lexicon_name_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_PHONY_TILES_RETURNED_TOKEN,
+      token_regex_pair_create(GCG_PHONY_TILES_RETURNED_TOKEN,
                               phony_tiles_returned_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_PASS_TOKEN, pass_regex);
+      token_regex_pair_create(GCG_PASS_TOKEN, pass_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_CHALLENGE_BONUS_TOKEN, challenge_bonus_regex);
+      token_regex_pair_create(GCG_CHALLENGE_BONUS_TOKEN, challenge_bonus_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_EXCHANGE_TOKEN, exchange_regex);
+      token_regex_pair_create(GCG_EXCHANGE_TOKEN, exchange_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_END_RACK_POINTS_TOKEN, end_rack_points_regex);
+      token_regex_pair_create(GCG_END_RACK_POINTS_TOKEN, end_rack_points_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_TIME_PENALTY_TOKEN, time_penalty_regex);
+      token_regex_pair_create(GCG_TIME_PENALTY_TOKEN, time_penalty_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_END_RACK_PENALTY_TOKEN,
+      token_regex_pair_create(GCG_END_RACK_PENALTY_TOKEN,
                               points_lost_for_last_rack_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_GAME_TYPE_TOKEN, game_type_regex);
+      token_regex_pair_create(GCG_GAME_TYPE_TOKEN, game_type_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_TILE_SET_TOKEN, tile_set_regex);
+      token_regex_pair_create(GCG_TILE_SET_TOKEN, tile_set_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_BOARD_LAYOUT_TOKEN, board_layout_regex);
+      token_regex_pair_create(GCG_BOARD_LAYOUT_TOKEN, board_layout_regex);
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
-      create_token_regex_pair(GCG_TILE_DISTRIBUTION_NAME_TOKEN,
+      token_regex_pair_create(GCG_TILE_DISTRIBUTION_NAME_TOKEN,
                               tile_distribution_name_regex);
 
   for (int i = 0; i < NUMBER_OF_GCG_TOKENS; i++) {
@@ -217,9 +217,9 @@ void gcg_parser_destroy(GCGParser *gcg_parser) {
     return;
   }
   for (int i = 0; i < (gcg_parser->number_of_token_regex_pairs); i++) {
-    destroy_token_regex_pair(gcg_parser->token_regex_pairs[i]);
+    token_regex_pair_destroy(gcg_parser->token_regex_pairs[i]);
   }
-  destroy_string_builder(gcg_parser->note_builder);
+  string_builder_destroy(gcg_parser->note_builder);
   game_destroy(gcg_parser->game);
   free(gcg_parser->token_regex_pairs);
   free(gcg_parser);
@@ -318,7 +318,7 @@ StringSplitter *decode_gcg(GCGParser *gcg_parser, const char *gcg_string) {
   StringSplitter *gcg_lines = split_string_by_newline(gcg_string, true);
   StringSplitter *utf8_gcg_lines =
       decode_gcg_with_gcg_lines(gcg_lines, gcg_parser);
-  destroy_string_splitter(gcg_lines);
+  string_splitter_destroy(gcg_lines);
   return utf8_gcg_lines;
 }
 
@@ -453,7 +453,7 @@ void finalize_note(GCGParser *gcg_parser) {
 
 config_load_status_t
 load_config_with_game_history(const GameHistory *game_history, Config *config) {
-  StringBuilder *cfg_load_cmd_builder = create_string_builder();
+  StringBuilder *cfg_load_cmd_builder = string_builder_create();
   const char *lexicon = game_history_get_lexicon_name(game_history);
   const char *ld_name = game_history_get_ld_name(game_history);
   const char *board_layout_name =
@@ -510,7 +510,7 @@ load_config_with_game_history(const GameHistory *game_history, Config *config) {
   }
 
   char *cfg_load_cmd = string_builder_dump(cfg_load_cmd_builder, NULL);
-  destroy_string_builder(cfg_load_cmd_builder);
+  string_builder_destroy(cfg_load_cmd_builder);
   config_load_status_t status = config_load_command(config, cfg_load_cmd);
   free(cfg_load_cmd);
   return status;
@@ -957,7 +957,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     // Write the move rack
     game_event_set_type(game_event, GAME_EVENT_TILE_PLACEMENT_MOVE);
 
-    move_string_builder = create_string_builder();
+    move_string_builder = string_builder_create();
 
     // Position
     add_matching_group_to_string_builder(move_string_builder, gcg_parser,
@@ -975,12 +975,12 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     game_event_rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
     game_event_set_rack(game_event, game_event_rack);
     if (!game_event_rack) {
-      destroy_string_builder(move_string_builder);
+      string_builder_destroy(move_string_builder);
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
 
     cgp_move_string = string_builder_dump(move_string_builder, NULL);
-    destroy_string_builder(move_string_builder);
+    string_builder_destroy(move_string_builder);
 
     // Get the GCG score so it can be compared to the validated move score
     move_score = get_move_score_from_gcg_line(gcg_parser, gcg_line, 5);
@@ -1096,7 +1096,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_PASS);
 
-    move_string_builder = create_string_builder();
+    move_string_builder = string_builder_create();
 
     // Add the pass to the builder
     string_builder_add_formatted_string(move_string_builder, "%s.",
@@ -1107,12 +1107,12 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     game_event_rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
     game_event_set_rack(game_event, game_event_rack);
     if (!game_event_rack) {
-      destroy_string_builder(move_string_builder);
+      string_builder_destroy(move_string_builder);
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
 
     cgp_move_string = string_builder_dump(move_string_builder, NULL);
-    destroy_string_builder(move_string_builder);
+    string_builder_destroy(move_string_builder);
 
     copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 3);
     break;
@@ -1152,7 +1152,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_EXCHANGE);
 
-    move_string_builder = create_string_builder();
+    move_string_builder = string_builder_create();
 
     // Exchange token
     string_builder_add_formatted_string(move_string_builder, "%s.",
@@ -1168,12 +1168,12 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     game_event_rack = get_rack_from_matching(gcg_parser, gcg_line, 2);
     game_event_set_rack(game_event, game_event_rack);
     if (!game_event_rack) {
-      destroy_string_builder(move_string_builder);
+      string_builder_destroy(move_string_builder);
       return GCG_PARSE_STATUS_RACK_MALFORMED;
     }
 
     cgp_move_string = string_builder_dump(move_string_builder, NULL);
-    destroy_string_builder(move_string_builder);
+    string_builder_destroy(move_string_builder);
 
     copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4);
     break;
@@ -1251,7 +1251,7 @@ gcg_parse_status_t parse_gcg_with_parser(GCGParser *gcg_parser,
     finalize_note(gcg_parser);
   }
 
-  destroy_string_splitter(gcg_lines);
+  string_splitter_destroy(gcg_lines);
 
   if (gcg_parse_status != GCG_PARSE_STATUS_SUCCESS) {
     return gcg_parse_status;
@@ -1282,7 +1282,7 @@ gcg_parse_status_t parse_gcg_string(const char *gcg_string, Config *config,
   if (is_string_empty_or_whitespace(gcg_string)) {
     return GCG_PARSE_STATUS_GCG_EMPTY;
   }
-  GCGParser *gcg_parser = create_gcg_parser(config, game_history);
+  GCGParser *gcg_parser = gcg_parser_create(config, game_history);
   gcg_parse_status_t gcg_parse_status =
       parse_gcg_with_parser(gcg_parser, gcg_string);
   gcg_parser_destroy(gcg_parser);
