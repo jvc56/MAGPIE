@@ -319,7 +319,7 @@ struct StringBuilder {
   size_t len;
 };
 
-StringBuilder *string_builder_create() {
+StringBuilder *string_builder_create(void) {
   StringBuilder *string_builder = malloc_or_die(sizeof(StringBuilder));
   string_builder->string = malloc_or_die(string_builder_min_size);
   *string_builder->string = '\0';
@@ -472,7 +472,7 @@ typedef struct StringDelimiter {
   string_delimiter_class_t string_delimiter_class;
 } StringDelimiter;
 
-StringSplitter *string_splitter_create() {
+StringSplitter *string_splitter_create(void) {
   StringSplitter *string_splitter = malloc_or_die(sizeof(StringSplitter));
   string_splitter->number_of_items = 0;
   string_splitter->items = NULL;
@@ -490,7 +490,7 @@ void string_splitter_destroy(StringSplitter *string_splitter) {
   free(string_splitter);
 }
 
-StringDelimiter *string_delimiter_create() {
+StringDelimiter *string_delimiter_create(void) {
   StringDelimiter *string_delimiter = malloc_or_die(sizeof(StringSplitter));
   return string_delimiter;
 }

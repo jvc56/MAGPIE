@@ -7,7 +7,7 @@
 #include "../../src/ent/board.h"
 #include "../../src/ent/move.h"
 
-void test_move_resize() {
+void test_move_resize(void) {
   MoveList *ml = move_list_create(3);
 
   assert(move_list_get_capacity(ml) == 3);
@@ -39,7 +39,7 @@ void test_move_resize() {
   move_list_destroy(ml);
 }
 
-void test_move_compare() {
+void test_move_compare(void) {
 
   MoveList *ml = move_list_create(1);
 
@@ -122,7 +122,7 @@ void test_move_compare() {
   move_destroy(m);
 }
 
-void test_move() {
+void test_move(void) {
   // The majority of the move and move list functionalities
   // are tested in movegen tests.
   test_move_resize();

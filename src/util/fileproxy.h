@@ -4,6 +4,6 @@
 #include <stdio.h>
 
 FILE *stream_from_filename(const char *filename);
-void fileproxy_destroy_cache();
+void fileproxy_destroy_cache(void);
 
 #endif

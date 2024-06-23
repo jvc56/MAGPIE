@@ -31,7 +31,7 @@
 static Config *wasm_config = NULL;
 static Config *iso_config = NULL;
 
-void wasm_destroy_configs() {
+void wasm_destroy_configs(void) {
   config_destroy(wasm_config);
   config_destroy(iso_config);
 }
@@ -136,10 +136,10 @@ int process_command_wasm(const char *cmd) {
   return 0;
 }
 
-char *get_search_status_wasm() {
+char *get_search_status_wasm(void) {
   return command_search_status(wasm_config, false);
 }
 
-char *get_stop_search_wasm() {
+char *get_stop_search_wasm(void) {
   return command_search_status(wasm_config, true);
 }

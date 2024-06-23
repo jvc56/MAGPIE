@@ -11,7 +11,7 @@
 
 #include "test_util.h"
 
-void test_alphabet() {
+void test_alphabet(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   LetterDistribution *ld = config_get_ld(config);

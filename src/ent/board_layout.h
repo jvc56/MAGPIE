@@ -8,11 +8,11 @@
 
 typedef struct BoardLayout BoardLayout;
 
-BoardLayout *board_layout_create();
+BoardLayout *board_layout_create(void);
 board_layout_load_status_t board_layout_load(BoardLayout *bl,
                                              const char *data_path,
                                              const char *board_layout_name);
-char *board_layout_get_default_name();
+char *board_layout_get_default_name(void);
 const char *board_layout_get_name(const BoardLayout *bl);
 bool board_layout_is_name_default(const char *board_layout_name);
 BoardLayout *board_layout_create_default(const char *data_path);

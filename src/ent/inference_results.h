@@ -11,7 +11,7 @@
 
 typedef struct InferenceResults InferenceResults;
 
-InferenceResults *inference_results_create();
+InferenceResults *inference_results_create(void);
 void inference_results_destroy(InferenceResults *inference_results);
 void inference_results_reset(InferenceResults *results, int move_capacity,
                              int ld_size);

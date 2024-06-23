@@ -37,7 +37,7 @@
 #include "word_prune_test.h"
 #include "word_test.h"
 
-void run_all() {
+void run_all(void) {
   // Test the loading of the config
   test_players_data();
   test_config();
@@ -147,7 +147,7 @@ void run_test(const char *subtest) {
   }
 }
 
-void run_all_super() { test_board_layout_super(); }
+void run_all_super(void) { test_board_layout_super(); }
 
 int main(int argc, char *argv[]) {
   log_set_level(LOG_WARN);

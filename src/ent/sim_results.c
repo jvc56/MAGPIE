@@ -115,7 +115,7 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   atomic_init(&sim_results->node_count, 0);
 }
 
-SimResults *sim_results_create() {
+SimResults *sim_results_create(void) {
   SimResults *sim_results = malloc_or_die(sizeof(SimResults));
   sim_results->num_simmed_plays = 0;
   sim_results->max_plies = 0;

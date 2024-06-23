@@ -44,7 +44,7 @@ void assert_autoplay_results_are_equal(AutoplayResults *ar1,
   assert_stats_are_equal(ar1s2, ar2s2);
 }
 
-void autoplay_game_pairs_test() {
+void autoplay_game_pairs_test(void) {
   uint64_t seed = time(NULL);
   char *options_string = get_formatted_string(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
@@ -102,4 +102,4 @@ void autoplay_game_pairs_test() {
   config_destroy(csw_config);
 }
 
-void test_autoplay() { autoplay_game_pairs_test(); }
+void test_autoplay(void) { autoplay_game_pairs_test(); }

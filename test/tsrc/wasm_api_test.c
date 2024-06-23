@@ -16,7 +16,7 @@ const char *cgp1 =
     "4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/"
     "15/15/15/15/15/15 AHMPRTU/ 177/44 0 -lex CSW21; -ld english;";
 
-void test_wasm_api() {
+void test_wasm_api(void) {
   // Attempt to load a malformed cgp
   char *retstr = wasm_score_move("malformed_cgp" VS_ED, "6G.DIPETAZ.ADEIRSZ");
   assert_strings_equal(retstr, "wasm cgp load failed with type 2, code 6");

@@ -30,7 +30,7 @@ void assert_validated_move_error(
   validated_moves_destroy(vms);
 }
 
-void test_validated_move_errors() {
+void test_validated_move_errors(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -201,7 +201,7 @@ void test_validated_move_errors() {
   config_destroy(config);
 }
 
-void test_validated_move_success() {
+void test_validated_move_success(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -490,7 +490,7 @@ void test_validated_move_success() {
   config_destroy(config);
 }
 
-void test_validated_move_score() {
+void test_validated_move_score(void) {
   // The validated move scoring uses different
   // code than move generation, so it must be tested
   // separately.
@@ -559,7 +559,7 @@ void test_validated_move_score() {
   config_destroy(config);
 }
 
-void test_validated_move_distinct_kwg() {
+void test_validated_move_distinct_kwg(void) {
   Config *config =
       config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1");
@@ -638,7 +638,7 @@ void test_validated_move_distinct_kwg() {
   config_destroy(config);
 }
 
-void test_validated_move_wordsmog_phonies() {
+void test_validated_move_wordsmog_phonies(void) {
   Config *config =
       config_create_or_die("set -lex CSW21_alpha -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1 -var wordsmog");
@@ -666,7 +666,7 @@ void test_validated_move_wordsmog_phonies() {
   config_destroy(config);
 }
 
-void test_validated_move_many() {
+void test_validated_move_many(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -708,7 +708,7 @@ void test_validated_move_many() {
   config_destroy(config);
 }
 
-void test_validated_move() {
+void test_validated_move(void) {
   test_validated_move_errors();
   test_validated_move_success();
   test_validated_move_score();

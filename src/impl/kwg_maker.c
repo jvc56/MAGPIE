@@ -63,7 +63,7 @@ typedef struct MutableNodeList {
   size_t capacity;
 } MutableNodeList;
 
-MutableNodeList *mutable_node_list_create() {
+MutableNodeList *mutable_node_list_create(void) {
   MutableNodeList *mutable_node_list = malloc_or_die(sizeof(MutableNodeList));
   mutable_node_list->capacity = KWG_MUTABLE_NODE_LIST_INITIAL_CAPACITY;
   mutable_node_list->nodes =
@@ -202,7 +202,7 @@ typedef struct NodePointerList {
   size_t capacity;
 } NodePointerList;
 
-NodePointerList *node_pointer_list_create() {
+NodePointerList *node_pointer_list_create(void) {
   NodePointerList *node_pointer_list = malloc_or_die(sizeof(NodePointerList));
   node_pointer_list->capacity = KWG_ORDERED_POINTER_LIST_INITIAL_CAPACITY;
   node_pointer_list->nodes =

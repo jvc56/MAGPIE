@@ -11,7 +11,7 @@
 
 typedef struct PlayersData PlayersData;
 
-PlayersData *players_data_create();
+PlayersData *players_data_create(void);
 void players_data_destroy(PlayersData *players_data);
 
 const char *players_data_get_name(const PlayersData *players_data,

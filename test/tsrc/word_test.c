@@ -18,7 +18,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void test_words_played() {
+void test_words_played(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -158,4 +158,4 @@ void test_words_played() {
   config_destroy(config);
 }
 
-void test_words() { test_words_played(); }
+void test_words(void) { test_words_played(); }

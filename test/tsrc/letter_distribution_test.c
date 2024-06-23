@@ -7,7 +7,7 @@
 
 #include "test_util.h"
 
-void test_ld_score_order() {
+void test_ld_score_order(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
@@ -22,7 +22,7 @@ void test_ld_score_order() {
   config_destroy(config);
 }
 
-void test_ld_str_to_mls() {
+void test_ld_str_to_mls(void) {
   Config *nwl_config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *english_ld = config_get_ld(nwl_config);
@@ -140,7 +140,7 @@ void test_ld_str_to_mls() {
   config_destroy(disc_config);
 }
 
-void test_ld() {
+void test_ld(void) {
   test_ld_score_order();
   test_ld_str_to_mls();
 }

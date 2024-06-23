@@ -57,7 +57,7 @@ void reset_file(const char *filename);
 void fifo_create(const char *fifo_name);
 void delete_fifo(const char *fifo_name);
 Config *config_create_or_die(const char *cmd);
-Config *config_create_default_test();
+Config *config_create_default_test(void);
 void set_row(Game *game, int row, const char *row_content);
 void assert_board_layout_error(const char *data_path,
                                const char *board_layout_filename,

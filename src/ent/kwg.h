@@ -157,7 +157,7 @@ static inline KWG *kwg_create(const char *data_path, const char *kwg_name) {
   return kwg;
 }
 
-static inline KWG *kwg_create_empty() {
+static inline KWG *kwg_create_empty(void) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
   kwg->name = NULL;
   return kwg;

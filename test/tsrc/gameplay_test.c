@@ -117,7 +117,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
   game_destroy(expected_game);
 }
 
-void test_draw_at_most_to_rack() {
+void test_draw_at_most_to_rack(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
@@ -149,7 +149,7 @@ void test_draw_at_most_to_rack() {
   config_destroy(config);
 }
 
-void test_rack_is_drawable() {
+void test_rack_is_drawable(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
@@ -207,7 +207,7 @@ void test_rack_is_drawable() {
   config_destroy(config);
 }
 
-void test_six_exchanges_game() {
+void test_six_exchanges_game(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
@@ -256,7 +256,7 @@ void test_six_exchanges_game() {
   config_destroy(config);
 }
 
-void test_six_passes_game() {
+void test_six_passes_game(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
@@ -353,7 +353,7 @@ void test_six_passes_game() {
   config_destroy(config);
 }
 
-void test_standard_game() {
+void test_standard_game(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
@@ -427,7 +427,7 @@ void test_standard_game() {
   config_destroy(config);
 }
 
-void test_playmove() {
+void test_playmove(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -520,7 +520,7 @@ void test_playmove() {
   config_destroy(config);
 }
 
-void test_set_random_rack() {
+void test_set_random_rack(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -569,7 +569,7 @@ void test_set_random_rack() {
   config_destroy(config);
 }
 
-void test_backups() {
+void test_backups(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -620,7 +620,7 @@ void test_backups() {
   config_destroy(config);
 }
 
-void test_gameplay() {
+void test_gameplay(void) {
   test_draw_at_most_to_rack();
   test_rack_is_drawable();
   test_playmove();

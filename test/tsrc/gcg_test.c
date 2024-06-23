@@ -43,7 +43,7 @@ void test_single_error_case(const char *gcg_filename, Config *config,
   assert(gcg_parse_status == expected_gcg_parse_status);
 }
 
-void test_error_cases() {
+void test_error_cases(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   test_single_error_case("empty", config, GCG_PARSE_STATUS_GCG_EMPTY);
@@ -140,7 +140,7 @@ void test_error_cases() {
   config_destroy(no_lexicon_config);
 }
 
-void test_parse_special_char() {
+void test_parse_special_char(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_iso8859-1";
@@ -155,7 +155,7 @@ void test_parse_special_char() {
   config_destroy(config);
 }
 
-void test_parse_special_utf8_no_header() {
+void test_parse_special_utf8_no_header(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_utf8_noheader";
@@ -169,7 +169,7 @@ void test_parse_special_utf8_no_header() {
   config_destroy(config);
 }
 
-void test_parse_special_utf8_with_header() {
+void test_parse_special_utf8_with_header(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "name_utf8_with_header";
@@ -182,7 +182,7 @@ void test_parse_special_utf8_with_header() {
   config_destroy(config);
 }
 
-void test_parse_dos_mode() {
+void test_parse_dos_mode(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "utf8_dos";
@@ -280,7 +280,7 @@ void assert_game_play_to_turn(GameHistory *game_history, Game *game1,
   }
 }
 
-void test_success_standard() {
+void test_success_standard(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_standard";
@@ -443,7 +443,7 @@ void test_success_standard() {
   config_destroy(config);
 }
 
-void test_success_five_point_challenge() {
+void test_success_five_point_challenge(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_five_point_challenge";
@@ -519,7 +519,7 @@ void test_success_five_point_challenge() {
   config_destroy(config);
 }
 
-void test_success_six_pass() {
+void test_success_six_pass(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const char *gcg_filename = "success_six_pass";
@@ -613,7 +613,7 @@ void test_success_six_pass() {
   config_destroy(config);
 }
 
-void test_success_incomplete() {
+void test_success_incomplete(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
@@ -757,7 +757,7 @@ void test_success_incomplete() {
   config_destroy(config);
 }
 
-void test_gcg() {
+void test_gcg(void) {
   test_error_cases();
   test_parse_special_char();
   test_parse_special_utf8_no_header();

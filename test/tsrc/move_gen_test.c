@@ -117,7 +117,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
   sorted_move_list_destroy(sml);
 }
 
-void macondo_tests() {
+void macondo_tests(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -330,7 +330,7 @@ void macondo_tests() {
   config_destroy(config);
 }
 
-void leave_lookup_test() {
+void leave_lookup_test(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -367,7 +367,7 @@ void leave_lookup_test() {
   config_destroy(config);
 }
 
-void unfound_leave_lookup_test() {
+void unfound_leave_lookup_test(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -393,7 +393,7 @@ void unfound_leave_lookup_test() {
   config_destroy(config);
 }
 
-void exchange_tests() {
+void exchange_tests(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -434,7 +434,7 @@ void exchange_tests() {
   config_destroy(config);
 }
 
-void many_moves_tests() {
+void many_moves_tests(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -450,7 +450,7 @@ void many_moves_tests() {
   config_destroy(config);
 }
 
-void equity_test() {
+void equity_test(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -498,7 +498,7 @@ void equity_test() {
   config_destroy(config);
 }
 
-void top_equity_play_recorder_test() {
+void top_equity_play_recorder_test(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -526,7 +526,7 @@ void top_equity_play_recorder_test() {
   config_destroy(config);
 }
 
-void distinct_lexica_test() {
+void distinct_lexica_test(void) {
   Config *config =
       config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1");
@@ -608,7 +608,7 @@ void distinct_lexica_test() {
   config_destroy(config);
 }
 
-void wordsmog_test() {
+void wordsmog_test(void) {
   Config *config =
       config_create_or_die("set -lex CSW21_alpha -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1 -var wordsmog");
@@ -640,7 +640,7 @@ void wordsmog_test() {
   config_destroy(config);
 }
 
-void consistent_tiebreaking_test() {
+void consistent_tiebreaking_test(void) {
   Config *config =
       config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1");
@@ -670,7 +670,7 @@ void consistent_tiebreaking_test() {
   config_destroy(config);
 }
 
-void movegen_game_update_test() {
+void movegen_game_update_test(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
@@ -729,7 +729,7 @@ void movegen_game_update_test() {
   config_destroy(config);
 }
 
-void movegen_var_bingo_bonus_test() {
+void movegen_var_bingo_bonus_test(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   ValidatedMoves *vms = NULL;
@@ -781,7 +781,7 @@ void movegen_var_bingo_bonus_test() {
   config_destroy(config);
 }
 
-void test_move_gen() {
+void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
   macondo_tests();

@@ -1459,7 +1459,7 @@ char *config_get_execute_status(Config *config) {
   return status;
 }
 
-Config *config_create_default() {
+Config *config_create_default(void) {
   Config *config = malloc_or_die(sizeof(Config));
   parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
                     status_cgp_load);

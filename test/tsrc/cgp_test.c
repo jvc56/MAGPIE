@@ -83,7 +83,7 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
   validated_moves_destroy(vms);
 }
 
-void test_cgp_english() {
+void test_cgp_english(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -191,7 +191,7 @@ void test_cgp_english() {
   config_destroy(config);
 }
 
-void test_cgp_english_with_options() {
+void test_cgp_english_with_options(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -226,7 +226,7 @@ void test_cgp_english_with_options() {
   config_destroy(config);
 }
 
-void test_cgp_catalan() {
+void test_cgp_catalan(void) {
   Config *config = config_create_or_die(
       "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -238,7 +238,7 @@ void test_cgp_catalan() {
   config_destroy(config);
 }
 
-void test_cgp_polish() {
+void test_cgp_polish(void) {
   Config *config = config_create_or_die(
       "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -250,7 +250,7 @@ void test_cgp_polish() {
   config_destroy(config);
 }
 
-void test_cgp() {
+void test_cgp(void) {
   test_cgp_english();
   test_cgp_english_with_options();
   test_cgp_catalan();

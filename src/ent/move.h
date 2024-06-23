@@ -35,7 +35,7 @@ typedef struct MoveList {
   Move **moves;
 } MoveList;
 
-static inline Move *move_create() { return malloc_or_die(sizeof(Move)); }
+static inline Move *move_create(void) { return malloc_or_die(sizeof(Move)); }
 
 static inline void move_destroy(Move *move) {
   if (!move) {
