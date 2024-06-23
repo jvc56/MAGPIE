@@ -49,7 +49,7 @@ void game_increment_consecutive_scoreless_turns(Game *game);
 void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
 void game_start_next_player_turn(Game *game);
 
-void game_set_backup_mode(Game *game, int backup_mode);
+void game_set_backup_mode(Game *game, backup_mode_t backup_mode);
 void game_backup(Game *game);
 void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);
