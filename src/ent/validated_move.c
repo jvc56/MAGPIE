@@ -40,6 +40,10 @@ int get_letter_coords(const char c) {
   return c - 'a';
 }
 
+bool is_exchange_allowed(const Bag *bag) {
+  return bag_get_tiles(bag) >= RACK_SIZE;
+}
+
 move_validation_status_t validate_coordinates(Move *move,
                                               const char *coords_string) {
   int row_start = 0;
@@ -237,6 +241,7 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
 
   const LetterDistribution *ld = game_get_ld(game);
   const Board *board = game_get_board(game);
+  const Bag *bag = game_get_bag(game);
   move_validation_status_t status = MOVE_VALIDATION_STATUS_SUCCESS;
   int number_of_fields = string_splitter_get_number_of_items(split_move);
 
@@ -254,6 +259,9 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   if (strings_equal(move_type_or_coords, UCGI_PASS_MOVE)) {
     move_set_as_pass(vm->move);
   } else if (strings_equal(move_type_or_coords, UCGI_EXCHANGE_MOVE)) {
+    if (!is_exchange_allowed(bag)) {
+      return MOVE_VALIDATION_STATUS_EXCHANGE_INSUFFICIENT_TILES;
+    }
     // Equity is set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_EXCHANGE);
     move_set_score(vm->move, 0);
@@ -343,7 +351,6 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
   }
 
   // Check if the rack is in the bag
-  Bag *bag = game_get_bag(game);
   Rack *game_player_rack = player_get_rack(game_get_player(game, player_index));
   for (int i = 0; i < dist_size; i++) {
     if (rack_get_letter(vm->rack, i) >

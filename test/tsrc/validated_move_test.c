@@ -189,6 +189,14 @@ void test_validated_move_errors() {
       game, EMPTY_CGP, "ex.4", 0, false, false, false,
       MOVE_VALIDATION_STATUS_UNKNOWN_EXCHANGE_DISALLOWED);
 
+  assert_validated_move_error(
+      game, WORMROOT_CGP, "ex.BFQR.BFQRTTV", 0, false, false, false,
+      MOVE_VALIDATION_STATUS_EXCHANGE_INSUFFICIENT_TILES);
+
+  assert_validated_move_error(
+      game, WORMROOT_CGP, "ex.4", 0, false, true, false,
+      MOVE_VALIDATION_STATUS_EXCHANGE_INSUFFICIENT_TILES);
+
   game_destroy(game);
   config_destroy(config);
 }
