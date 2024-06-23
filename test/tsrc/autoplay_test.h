@@ -1,6 +1,6 @@
 #ifndef AUTOPLAY_TEST_H
 #define AUTOPLAY_TEST_H
 
-void test_autoplay();
+void test_autoplay(void);
 
 #endif

@@ -3,7 +3,7 @@
 
 typedef struct ConversionResults ConversionResults;
 
-ConversionResults *conversion_results_create();
+ConversionResults *conversion_results_create(void);
 void conversion_results_destroy(ConversionResults *results);
 
 int conversion_results_get_number_of_strings(const ConversionResults *results);

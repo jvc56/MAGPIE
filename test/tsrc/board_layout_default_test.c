@@ -13,7 +13,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void test_board_layout_success() {
+void test_board_layout_success(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -85,7 +85,7 @@ void test_board_layout_success() {
   config_destroy(config);
 }
 
-void test_board_layout_error() {
+void test_board_layout_error(void) {
   assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "malformed_start_coords15",
                             BOARD_LAYOUT_LOAD_STATUS_MALFORMED_START_COORDS);
   assert_board_layout_error(
@@ -116,7 +116,7 @@ void assert_opening_penalties(Game *game, const char *data_path,
   move_list_destroy(move_list);
 }
 
-void test_board_layout_correctness() {
+void test_board_layout_correctness(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -300,7 +300,7 @@ void test_board_layout_correctness() {
   config_destroy(config);
 }
 
-void test_board_layout_default() {
+void test_board_layout_default(void) {
   test_board_layout_success();
   test_board_layout_error();
   test_board_layout_correctness();

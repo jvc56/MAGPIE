@@ -1,6 +1,6 @@
 #ifndef BOARD_TEST_H
 #define BOARD_TEST_H
 
-void test_board();
+void test_board(void);
 
 #endif

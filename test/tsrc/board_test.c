@@ -95,7 +95,7 @@ void test_board_reset(Board *board) {
   }
 }
 
-void test_board_all() {
+void test_board_all(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -535,4 +535,4 @@ void test_board_all() {
   config_destroy(config);
 }
 
-void test_board() { test_board_all(); }
+void test_board(void) { test_board_all(); }

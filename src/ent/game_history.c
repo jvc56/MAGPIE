@@ -31,7 +31,7 @@ struct GameEvent {
   char *note;
 };
 
-GameEvent *game_event_create() {
+GameEvent *game_event_create(void) {
   GameEvent *game_event = malloc_or_die(sizeof(GameEvent));
   game_event->event_type = GAME_EVENT_UNKNOWN;
   game_event->player_index = -1;
@@ -351,7 +351,7 @@ GameEvent *game_history_get_event(const GameHistory *history, int event_index) {
   return history->events[event_index];
 }
 
-GameHistory *game_history_create() {
+GameHistory *game_history_create(void) {
   GameHistory *game_history = malloc_or_die(sizeof(GameHistory));
   game_history->title = NULL;
   game_history->description = NULL;

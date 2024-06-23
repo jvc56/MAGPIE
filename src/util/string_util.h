@@ -54,7 +54,7 @@ StringSplitter *split_file_by_newline(const char *filename);
 
 typedef struct StringBuilder StringBuilder;
 
-StringBuilder *string_builder_create();
+StringBuilder *string_builder_create(void);
 void string_builder_destroy(StringBuilder *string_builder);
 void string_builder_add_string(StringBuilder *string_builder,
                                const char *string);

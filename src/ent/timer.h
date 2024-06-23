@@ -3,7 +3,7 @@
 
 typedef struct Timer Timer;
 
-Timer *mtimer_create();
+Timer *mtimer_create(void);
 void mtimer_destroy(Timer *timer);
 void mtimer_start(Timer *timer);
 void mtimer_stop(Timer *timer);

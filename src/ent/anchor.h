@@ -29,7 +29,7 @@ typedef struct AnchorList {
   Anchor **anchors;
 } AnchorList;
 
-static inline AnchorList *anchor_list_create() {
+static inline AnchorList *anchor_list_create(void) {
   AnchorList *al = malloc_or_die(sizeof(AnchorList));
   al->count = 0;
   al->anchors = malloc_or_die((sizeof(Anchor *)) * ((BOARD_DIM) * (BOARD_DIM)));

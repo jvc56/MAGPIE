@@ -32,7 +32,7 @@ struct InferenceResults {
 
 int get_subtotals_size(int ld_size) { return ld_size * (RACK_SIZE) * 2; }
 
-InferenceResults *inference_results_create() {
+InferenceResults *inference_results_create(void) {
   InferenceResults *results = malloc_or_die(sizeof(InferenceResults));
   results->subtotals_size = 0;
   for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {

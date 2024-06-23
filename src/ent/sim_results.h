@@ -33,7 +33,7 @@ void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
 
 typedef struct SimResults SimResults;
 
-SimResults *sim_results_create();
+SimResults *sim_results_create(void);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_simmed_plays, int max_plies, double zval);
 void sim_results_destroy(SimResults *sim_results);

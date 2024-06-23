@@ -5,7 +5,7 @@
 
 typedef struct Stat Stat;
 
-Stat *stat_create();
+Stat *stat_create(void);
 void stat_destroy(Stat *stat);
 void stat_reset(Stat *stat);
 

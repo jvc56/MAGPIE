@@ -57,7 +57,7 @@ void test_gen_cross_set_row(Game *game, int row, int col,
   test_gen_cross_set(game, row, col, letters, expected_cross_score);
 }
 
-void test_classic_cross_set() {
+void test_classic_cross_set(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -159,7 +159,7 @@ void test_classic_cross_set() {
   config_destroy(config);
 }
 
-void test_alpha_cross_set() {
+void test_alpha_cross_set(void) {
   Config *config = config_create_or_die("set -lex CSW21_alpha -var wordsmog");
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);
@@ -235,7 +235,7 @@ void test_alpha_cross_set() {
   config_destroy(config);
 }
 
-void test_cross_set() {
+void test_cross_set(void) {
   test_classic_cross_set();
   test_alpha_cross_set();
 }

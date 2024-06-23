@@ -34,7 +34,7 @@ void test_config_load_error(Config *config, const char *cmd,
   }
 }
 
-void test_config_load_error_cases() {
+void test_config_load_error_cases(void) {
   Config *config = config_create_default_test();
   test_config_load_error(config, "endgame",
                          CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
@@ -135,7 +135,7 @@ void test_config_load_error_cases() {
   config_destroy(config);
 }
 
-void test_config_load_success() {
+void test_config_load_success(void) {
   Config *config = config_create_default_test();
 
   // Loading with whitespace should not fail
@@ -430,7 +430,7 @@ void assert_config_exec_status(Config *config, const char *cmd,
   }
 }
 
-void test_config_exec_parse_args() {
+void test_config_exec_parse_args(void) {
   Config *config = config_create_default_test();
 
   // Ensure all commands that require game data fail correctly
@@ -529,7 +529,7 @@ void test_config_exec_parse_args() {
   config_destroy(config);
 }
 
-void test_config() {
+void test_config(void) {
   test_config_load_error_cases();
   test_config_load_success();
   test_config_exec_parse_args();

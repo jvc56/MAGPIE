@@ -204,7 +204,7 @@ char *create_command_from_args(int argc, char *argv[]) {
   return command_string;
 }
 
-void caches_destroy() {
+void caches_destroy(void) {
   gen_destroy_cache();
   fileproxy_destroy_cache();
 }

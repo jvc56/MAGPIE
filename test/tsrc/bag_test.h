@@ -1,6 +1,6 @@
 #ifndef BAG_TEST_H
 #define BAG_TEST_H
 
-void test_bag();
+void test_bag(void);
 
 #endif

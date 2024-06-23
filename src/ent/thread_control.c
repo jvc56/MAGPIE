@@ -30,7 +30,7 @@ struct ThreadControl {
   Timer *timer;
 };
 
-ThreadControl *thread_control_create() {
+ThreadControl *thread_control_create(void) {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
   thread_control->halt_status = HALT_STATUS_NONE;
   thread_control->current_mode = MODE_STOPPED;

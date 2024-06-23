@@ -60,7 +60,7 @@ int board_layout_get_start_coord(const BoardLayout *bl, int index) {
   return bl->start_coords[index];
 }
 
-BoardLayout *board_layout_create() {
+BoardLayout *board_layout_create(void) {
   BoardLayout *bl = malloc_or_die(sizeof(BoardLayout));
   bl->name = NULL;
   return bl;
@@ -151,7 +151,7 @@ board_layout_load_status_t board_layout_load(BoardLayout *bl,
   return status;
 }
 
-char *board_layout_get_default_name() {
+char *board_layout_get_default_name(void) {
   return get_formatted_string("standard%d", BOARD_DIM);
 }
 

@@ -35,7 +35,7 @@ void error_status_set_type_and_code(ErrorStatus *error_status,
   error_status->type = type;
 }
 
-ErrorStatus *error_status_create() {
+ErrorStatus *error_status_create(void) {
   ErrorStatus *error_status = malloc_or_die(sizeof(ErrorStatus));
   error_status_set_type_and_code(error_status, ERROR_STATUS_TYPE_NONE, 0);
   return error_status;

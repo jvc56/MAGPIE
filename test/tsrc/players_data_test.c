@@ -71,7 +71,7 @@ void test_for_data_type(const char **data_names, const char *data_path,
   players_data_destroy(players_data);
 }
 
-void test_unshared_data() {
+void test_unshared_data(void) {
   PlayersData *players_data = players_data_create();
 
   const char *p1_name = "Alice";
@@ -105,7 +105,7 @@ void test_unshared_data() {
   players_data_destroy(players_data);
 }
 
-void test_players_data() {
+void test_players_data(void) {
   const char *data_names[] = {
       "CSW21", "CSW21", "NWL20",  "NWL20", "CSW21",  "NWL20", "CSW21",
       "CSW21", "CSW21", "CSW21",  "CSW21", "NWL20",  "NWL20", "NWL20",

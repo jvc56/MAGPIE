@@ -41,7 +41,7 @@ inference_status_t infer_for_test(const Config *config, int target_index,
   return status;
 }
 
-void test_trivial_random_probability() {
+void test_trivial_random_probability(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
@@ -87,7 +87,7 @@ void test_trivial_random_probability() {
   config_destroy(config);
 }
 
-void test_infer_rack_overflow() {
+void test_infer_rack_overflow(void) {
   Config *config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1 -threads 1");
@@ -109,7 +109,7 @@ void test_infer_rack_overflow() {
   config_destroy(config);
 }
 
-void test_infer_no_tiles_played_rack_empty() {
+void test_infer_no_tiles_played_rack_empty(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -123,7 +123,7 @@ void test_infer_no_tiles_played_rack_empty() {
   config_destroy(config);
 }
 
-void test_infer_both_play_and_exchange() {
+void test_infer_both_play_and_exchange(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -137,7 +137,7 @@ void test_infer_both_play_and_exchange() {
   config_destroy(config);
 }
 
-void test_infer_exchange_score_not_zero() {
+void test_infer_exchange_score_not_zero(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -151,7 +151,7 @@ void test_infer_exchange_score_not_zero() {
   config_destroy(config);
 }
 
-void test_infer_exchange_not_board_is_letter_allowed_in_cross_set() {
+void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -174,7 +174,7 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set() {
   config_destroy(config);
 }
 
-void test_infer_tiles_played_not_in_bag() {
+void test_infer_tiles_played_not_in_bag(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -808,7 +808,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   config_destroy(config);
 }
 
-void test_infer() {
+void test_infer(void) {
   test_trivial_random_probability();
   test_infer_rack_overflow();
   test_infer_no_tiles_played_rack_empty();

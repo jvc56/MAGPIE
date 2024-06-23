@@ -10,7 +10,7 @@
 
 typedef struct ThreadControl ThreadControl;
 
-ThreadControl *thread_control_create();
+ThreadControl *thread_control_create(void);
 void thread_control_destroy(ThreadControl *thread_control);
 
 bool thread_control_get_is_halted(ThreadControl *thread_control);

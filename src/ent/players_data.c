@@ -180,7 +180,7 @@ const char *players_data_get_data_name(const PlayersData *players_data,
   return data_name;
 }
 
-PlayersData *players_data_create() {
+PlayersData *players_data_create(void) {
   PlayersData *players_data = malloc_or_die(sizeof(PlayersData));
   for (int player_index = 0; player_index < 2; player_index++) {
     for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {

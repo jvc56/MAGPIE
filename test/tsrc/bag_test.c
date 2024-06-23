@@ -28,7 +28,7 @@ int get_drawn_tile_index(int drawn_tiles, int player_index) {
   return player_index * TEST_BAG_SIZE + drawn_tiles;
 }
 
-void test_bag() {
+void test_bag(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);

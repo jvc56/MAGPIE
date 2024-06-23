@@ -36,7 +36,7 @@ void test_fifo_args_destroy(TestFIFOArgs *test_fifo_args) {
   free(test_fifo_args);
 }
 
-void test_regular_file() {
+void test_regular_file(void) {
   char *test_output_filename1 = get_test_filename("output");
   char *test_output_filename2 = get_test_filename("output2");
 
@@ -172,7 +172,7 @@ void *write_fifo_thread(void *uncasted_test_fifo_args) {
   return NULL;
 }
 
-void test_fifo() {
+void test_fifo(void) {
   char *test_fifo_filename = get_test_filename("fifo_test");
   fifo_create(test_fifo_filename);
 
@@ -193,7 +193,7 @@ void test_fifo() {
   free(test_fifo_filename);
 }
 
-void test_file_handler() {
-  // test_regular_file();
+void test_file_handler(void) {
+  test_regular_file();
   test_fifo();
 }

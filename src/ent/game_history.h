@@ -11,7 +11,7 @@
 
 typedef struct GameEvent GameEvent;
 
-GameEvent *game_event_create();
+GameEvent *game_event_create(void);
 void game_event_destroy(GameEvent *game_event);
 
 void game_event_set_type(GameEvent *event, game_event_t event_type);
@@ -44,7 +44,7 @@ int game_event_get_turn_value(const GameEvent *event);
 
 typedef struct GameHistory GameHistory;
 
-GameHistory *game_history_create();
+GameHistory *game_history_create(void);
 void game_history_destroy(GameHistory *game_history);
 
 void game_history_set_title(GameHistory *history, const char *title);

@@ -19,7 +19,7 @@ void stat_reset(Stat *stat) {
   stat->sum_of_mean_differences_squared = 0;
 }
 
-Stat *stat_create() {
+Stat *stat_create(void) {
   Stat *stat = malloc_or_die(sizeof(Stat));
   stat_reset(stat);
   return stat;

@@ -113,7 +113,7 @@ Config *config_create_or_die(const char *cmd) {
   return config;
 }
 
-Config *config_create_default_test() {
+Config *config_create_default_test(void) {
   Config *config = config_create_default();
   load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
   return config;

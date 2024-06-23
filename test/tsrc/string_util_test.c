@@ -33,7 +33,7 @@ void test_whitespace_string_splitter(const char *input, bool ignore_empty,
   string_splitter_destroy(string_splitter);
 }
 
-void test_string_util() {
+void test_string_util(void) {
   // One char string splitter
   test_string_splitter("", ',', false, 1, (const char *[]){""});
   test_string_splitter("", ',', true, 0, (const char *[]){});

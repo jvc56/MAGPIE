@@ -64,13 +64,13 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
   string_builder_destroy(move_description);
 }
 
-void test_p_to_z() {
+void test_p_to_z(void) {
   assert(within_epsilon(p_to_z(95), 1.959964));
   assert(within_epsilon(p_to_z(98), 2.326348));
   assert(within_epsilon(p_to_z(99), 2.575829));
 }
 
-void test_win_pct() {
+void test_win_pct(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all");
   assert(within_epsilon(win_pct_get(config_get_win_pcts(config), 118, 90),
@@ -78,7 +78,7 @@ void test_win_pct() {
   config_destroy(config);
 }
 
-void test_sim_error_cases() {
+void test_sim_error_cases(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
       "2 -threads 1 -iter 1 -scond 100");
@@ -90,7 +90,7 @@ void test_sim_error_cases() {
   config_destroy(config);
 }
 
-void test_sim_single_iteration() {
+void test_sim_single_iteration(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
       "2 -threads 1 -iter 1 -scond 100");
@@ -105,7 +105,7 @@ void test_sim_single_iteration() {
   config_destroy(config);
 }
 
-void test_more_iterations() {
+void test_more_iterations(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
       "2 -threads 1 -iter 500 -scond 100");
@@ -130,7 +130,7 @@ void test_more_iterations() {
   string_builder_destroy(move_string_builder);
 }
 
-void perf_test_multithread_sim() {
+void perf_test_multithread_sim(void) {
   Config *config = config_create_or_die(
       "set -s1 score -s2 score -r1 all -r2 all "
       "-threads 4 -plies 2 -it 1000 -numplays 15 -scond none");
@@ -162,7 +162,7 @@ void perf_test_multithread_sim() {
   config_destroy(config);
 }
 
-void test_play_similarity() {
+void test_play_similarity(void) {
   Config *config =
       config_create_or_die("set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
                            "-plies 2 -threads 1 -it 1200 -scond 100 -cfreq 50");
@@ -203,7 +203,7 @@ void test_play_similarity() {
   string_builder_destroy(p1_string_builder);
 }
 
-void test_sim() {
+void test_sim(void) {
   test_p_to_z();
   test_win_pct();
   test_sim_error_cases();

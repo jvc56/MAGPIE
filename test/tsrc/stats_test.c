@@ -6,7 +6,7 @@
 
 #include "test_util.h"
 
-void test_single_stat() {
+void test_single_stat(void) {
   Stat *stat = stat_create();
 
   // Test the empty stat
@@ -68,7 +68,7 @@ void test_single_stat() {
   stat_destroy(stat);
 }
 
-void test_combined_stats() {
+void test_combined_stats(void) {
   Stat **fragmented_stats = malloc_or_die(sizeof(Stat *) * 10);
 
   Stat *singular_stat = stat_create();
@@ -141,7 +141,7 @@ void test_combined_stats() {
   free(fragmented_stats);
 }
 
-void test_stats() {
+void test_stats(void) {
   test_single_stat();
   test_combined_stats();
 }

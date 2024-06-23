@@ -25,7 +25,7 @@ void reset_and_load_game_failure(Game *game, const char *cgp,
   assert(cgp_parse_status == expected_cgp_parse_status);
 }
 
-void test_load_cgp() {
+void test_load_cgp(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -164,7 +164,7 @@ void test_load_cgp() {
   config_destroy(config);
 }
 
-void test_game_main() {
+void test_game_main(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
@@ -210,7 +210,7 @@ void test_game_main() {
   config_destroy(config);
 }
 
-void test_game() {
+void test_game(void) {
   test_game_main();
   test_load_cgp();
 }

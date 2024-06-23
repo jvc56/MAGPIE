@@ -16,7 +16,7 @@
 
 #include "test_util.h"
 
-void test_macondo_opening_equity_adjustments() {
+void test_macondo_opening_equity_adjustments(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -94,7 +94,7 @@ void test_macondo_opening_equity_adjustments() {
   config_destroy(config);
 }
 
-void test_macondo_endgame_equity_adjustments() {
+void test_macondo_endgame_equity_adjustments(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -158,7 +158,7 @@ void test_macondo_endgame_equity_adjustments() {
   config_destroy(config);
 }
 
-void test_equity_adjustments() {
+void test_equity_adjustments(void) {
   test_macondo_opening_equity_adjustments();
   test_macondo_endgame_equity_adjustments();
 }

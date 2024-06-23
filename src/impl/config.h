@@ -23,7 +23,7 @@
 typedef struct Config Config;
 
 // Constructors and Destructors
-Config *config_create_default();
+Config *config_create_default(void);
 void config_destroy(Config *config);
 
 // Loading commands and execution
