@@ -63,6 +63,7 @@ typedef struct MoveGen {
   Rack bingo_alpha_rack;
   Rack bingo_alpha_rack_shadow_right_copy;
   Rack opponent_rack;
+  Rack leave;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
   int row_number_of_anchors_cache[(BOARD_DIM) * 2];
@@ -1360,10 +1361,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
     // tiles and keeping 0 tiles.
     leave_map_set_current_index(&gen->leave_map, 0);
     uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
-    Rack *leave = rack_create(rack_get_dist_size(&gen->player_rack));
-    generate_exchange_moves(gen, leave, node_index, 0, 0,
+    rack_reset(&gen->leave);
+    generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
                             gen->number_of_tiles_in_bag >= RACK_SIZE);
-    rack_destroy(leave);
   }
   // Set the leave_map index to 2^number_of_letters - 1, which represents
   // using (playing) zero tiles and keeping
