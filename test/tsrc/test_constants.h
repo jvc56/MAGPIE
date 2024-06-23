@@ -165,6 +165,11 @@
 #define THERMOS_CGP                                                            \
   "15/15/3THERMOS2A2/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex CSW21;"
 
+#define WORMROOT_CGP                                                           \
+  "ZONULE1B2APAID/1KY2RHANJA4/GAM4R2HUI2/7G6D/6FECIT3O/6AE1TOWIES/6I4O2E/"     \
+  "1EnGUARD3R2D/NAOI2W4M3/6AT3R3/5PYE3O3/5L1L3O3/2COVE1L3T3/5X1E7/7N7 "        \
+  "BFQRTTV/EEEIIIN 1000/1000 0 lex CSW21;"
+
 // 21 x 21 boards
 
 #define ANTHROPOMORPHISATIONS_CGP                                              \
