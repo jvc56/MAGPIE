@@ -69,13 +69,13 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
         move_get_score(move), wp_mean, wp_se, eq_mean, eq_se,
         // need cast for WASM:
         (long long unsigned int)niters, ignore);
-    for (int i = 0; i < sim_results_get_max_plies(sim_results); i++) {
+    for (int j = 0; j < sim_results_get_max_plies(sim_results); j++) {
       string_builder_add_formatted_string(
           sim_stats_string_builder,
-          "ply%d-scm %.3f ply%d-scd %.3f ply%d-bp %.3f ", i + 1,
-          stat_get_mean(simmed_play_get_score_stat(play, i)), i + 1,
-          stat_get_stdev(simmed_play_get_score_stat(play, i)), i + 1,
-          stat_get_mean(simmed_play_get_bingo_stat(play, i)) * 100.0);
+          "ply%d-scm %.3f ply%d-scd %.3f ply%d-bp %.3f ", j + 1,
+          stat_get_mean(simmed_play_get_score_stat(play, j)), j + 1,
+          stat_get_stdev(simmed_play_get_score_stat(play, j)), j + 1,
+          stat_get_mean(simmed_play_get_bingo_stat(play, j)) * 100.0);
     }
     string_builder_add_string(sim_stats_string_builder, "\n");
   }

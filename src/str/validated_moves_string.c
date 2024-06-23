@@ -8,9 +8,9 @@
 #include "../util/string_util.h"
 
 char *validated_moves_get_phonies_string(const LetterDistribution *ld,
-                                         ValidatedMoves *vms, int i) {
-  const Move *move = validated_moves_get_move(vms, i);
-  const FormedWords *fw = validated_moves_get_formed_words(vms, i);
+                                         ValidatedMoves *vms, int vm_index) {
+  const Move *move = validated_moves_get_move(vms, vm_index);
+  const FormedWords *fw = validated_moves_get_formed_words(vms, vm_index);
   game_event_t move_type = move_get_type(move);
   StringBuilder *phonies_string_builder = string_builder_create();
   bool phonies_formed = false;
