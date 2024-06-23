@@ -748,33 +748,33 @@ static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
 
   // Calculate opening penalties
 
-  const int row = board->start_coords[0];
-  const int col = board->start_coords[1];
-  if (row - 1 >= 0) {
+  const int start_row = board->start_coords[0];
+  const int start_col = board->start_coords[1];
+  if (start_row - 1 >= 0) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      update_opening_penalty(board, BOARD_HORIZONTAL_DIRECTION, col, row - 1,
-                             col);
+      update_opening_penalty(board, BOARD_HORIZONTAL_DIRECTION, col,
+                             start_row - 1, col);
     }
   }
 
-  if (row + 1 < BOARD_DIM) {
+  if (start_row + 1 < BOARD_DIM) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      update_opening_penalty(board, BOARD_HORIZONTAL_DIRECTION, col, row + 1,
-                             col);
+      update_opening_penalty(board, BOARD_HORIZONTAL_DIRECTION, col,
+                             start_row + 1, col);
     }
   }
 
-  if (col - 1 >= 0) {
+  if (start_col - 1 >= 0) {
     for (int row = 0; row < BOARD_DIM; row++) {
       update_opening_penalty(board, BOARD_VERTICAL_DIRECTION, row, row,
-                             col - 1);
+                             start_col - 1);
     }
   }
 
-  if (col + 1 < BOARD_DIM) {
+  if (start_col + 1 < BOARD_DIM) {
     for (int row = 0; row < BOARD_DIM; row++) {
       update_opening_penalty(board, BOARD_VERTICAL_DIRECTION, row, row,
-                             col + 1);
+                             start_col + 1);
     }
   }
 }

@@ -68,8 +68,8 @@ WinPct *win_pct_create(const char *data_path, const char *win_pct_name) {
 
     if (i == 0) {
       number_of_columns = number_of_items;
-      for (int i = 0; i < wp->number_of_spreads; i++) {
-        array[i] = (float *)malloc_or_die(number_of_columns * sizeof(float));
+      for (int j = 0; j < wp->number_of_spreads; j++) {
+        array[j] = (float *)malloc_or_die(number_of_columns * sizeof(float));
       }
     } else if (number_of_items != number_of_columns) {
       log_fatal("inconsistent number of columns in %s at line %d: %d != %d\n",
@@ -86,9 +86,9 @@ WinPct *win_pct_create(const char *data_path, const char *win_pct_name) {
     }
 
     // Start at 1 to ignore the first column.
-    for (int i = 1; i < number_of_items; i++) {
-      array[row][i - 1] =
-          string_to_double(string_splitter_get_item(win_pct_data, i));
+    for (int j = 1; j < number_of_items; j++) {
+      array[row][j - 1] =
+          string_to_double(string_splitter_get_item(win_pct_data, j));
     }
     string_splitter_destroy(win_pct_data);
     row++;

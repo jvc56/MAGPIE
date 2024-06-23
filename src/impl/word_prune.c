@@ -116,20 +116,20 @@ void add_words_without_playthrough(const KWG *kwg, uint32_t node_index,
     const int new_node_index = kwg_node_arc_index_prefetch(node, kwg);
     if ((rack_get_letter(rack, ml) > 0) ||
         (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0)) {
-      int accepts = kwg_node_accepts(node);
+      bool node_accepts = kwg_node_accepts(node);
       if (rack_get_letter(rack, ml) > 0) {
         rack_take_letter(rack, ml);
         word[tiles_played] = ml;
         add_words_without_playthrough(
             kwg, new_node_index, rack, max_nonplaythrough, word,
-            tiles_played + 1, accepts, possible_word_list);
+            tiles_played + 1, node_accepts, possible_word_list);
         rack_add_letter(rack, ml);
       } else if (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0) {
         rack_take_letter(rack, BLANK_MACHINE_LETTER);
         word[tiles_played] = ml;
         add_words_without_playthrough(
             kwg, new_node_index, rack, max_nonplaythrough, word,
-            tiles_played + 1, accepts, possible_word_list);
+            tiles_played + 1, node_accepts, possible_word_list);
         rack_add_letter(rack, BLANK_MACHINE_LETTER);
       }
     }

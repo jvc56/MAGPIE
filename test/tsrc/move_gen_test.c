@@ -346,12 +346,12 @@ void leave_lookup_test() {
   Rack *rack = rack_create(ld_get_size(ld));
   for (int i = 0; i < 2; i++) {
     int number_of_moves = move_list_get_count(move_list);
-    for (int i = 0; i < number_of_moves; i++) {
-      Move *move = move_list_get_move(move_list, i);
+    for (int j = 0; j < number_of_moves; j++) {
+      Move *move = move_list_get_move(move_list, j);
       // This is after the opening and before the endgame
       // so the other equity adjustments will not be in effect.
       double move_leave_value = move_get_equity(move) - move_get_score(move);
-      if (i == 0) {
+      if (j == 0) {
         rack_set_to_string(ld, rack, "MOOORRT");
       } else {
         rack_set_to_string(ld, rack, "BFQRTTV");
