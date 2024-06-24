@@ -74,4 +74,6 @@ ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
                                               int player_index,
                                               bool allow_phonies,
                                               bool allow_playthrough);
+void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
+                             bool write_player_on_turn_first);
 #endif

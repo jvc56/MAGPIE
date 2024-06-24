@@ -9,6 +9,7 @@
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
+#include "../../src/util/log.h"
 
 #include "game_test.h"
 #include "test_constants.h"
@@ -159,6 +160,17 @@ void test_load_cgp(void) {
   reset_and_load_game_failure(
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 Z/ZZ 0/0 0",
       CGP_PARSE_STATUS_RACK_LETTERS_NOT_IN_BAG);
+
+  load_and_exec_config_or_die(config, "cgp " VS_FRENTZ_CGP);
+
+  config_load_status_t status = config_load_command(
+      config, "cgp 15/15/15/15/15/15/15/15/6ZZZ6/15/15/15/15/15/15 / 0/0 0");
+  if (status != CONFIG_LOAD_STATUS_SUCCESS) {
+    log_fatal("failed to load cgp in game test\n");
+  }
+  config_execute_command(config);
+
+  assert_game_matches_cgp(config_get_game(config), VS_FRENTZ_CGP, true);
 
   game_destroy(game);
   config_destroy(config);
