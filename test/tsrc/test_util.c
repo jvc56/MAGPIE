@@ -554,3 +554,16 @@ ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
          MOVE_VALIDATION_STATUS_SUCCESS);
   return vms;
 }
+
+void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
+                             bool write_player_on_turn_first) {
+  char *actual_cgp = game_get_cgp(game, write_player_on_turn_first);
+
+  StringSplitter *split_cgp = split_string_by_whitespace(expected_cgp, true);
+  char *expected_cgp_without_options =
+      string_splitter_join(split_cgp, 0, 4, " ");
+  string_splitter_destroy(split_cgp);
+  assert_strings_equal(actual_cgp, expected_cgp_without_options);
+  free(actual_cgp);
+  free(expected_cgp_without_options);
+}
