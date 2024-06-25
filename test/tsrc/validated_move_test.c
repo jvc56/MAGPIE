@@ -204,16 +204,15 @@ void test_validated_move_errors(void) {
 void test_validated_move_success(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
-  Game *game = config_game_create(config);
-  const LetterDistribution *ld = game_get_ld(game);
-  Player *player0 = game_get_player(game, 0);
-  const KLV *player_0_klv = player_get_klv(player0);
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  const LetterDistribution *ld = config_get_ld(config);
   ValidatedMoves *vms = NULL;
   const Move *move = NULL;
   Rack *rack = rack_create(ld_get_size(ld));
   Rack *leave = rack_create(ld_get_size(ld));
 
-  vms = assert_validated_move_success(game, EMPTY_CGP, "pass", 0, false, false);
+  vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
+                                      "pass", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_PASS);
@@ -225,8 +224,8 @@ void test_validated_move_success(void) {
 
   rack_set_to_string(ld, rack, "ACEGIK");
   rack_set_to_string(ld, leave, "ACEGIK");
-  vms = assert_validated_move_success(game, EMPTY_CGP, "pass.ACEGIK", 0, false,
-                                      false);
+  vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
+                                      "pass.ACEGIK", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_PASS);
@@ -238,8 +237,8 @@ void test_validated_move_success(void) {
   assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
   validated_moves_destroy(vms);
 
-  vms =
-      assert_validated_move_success(game, EMPTY_CGP, "ex.ABC", 0, false, false);
+  vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
+                                      "ex.ABC", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(!validated_moves_get_unknown_exchange(vms, 0));
@@ -256,7 +255,8 @@ void test_validated_move_success(void) {
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
-  vms = assert_validated_move_success(game, EMPTY_CGP, "ex.4", 0, false, false);
+  vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
+                                      "ex.4", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(validated_moves_get_unknown_exchange(vms, 0));
@@ -270,8 +270,8 @@ void test_validated_move_success(void) {
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, rack, "ABCDEFG");
-  vms = assert_validated_move_success(game, EMPTY_CGP, "ex.ABC.ABCDEFG", 0,
-                                      false, false);
+  vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
+                                      "ex.ABC.ABCDEFG", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(!validated_moves_get_unknown_exchange(vms, 0));
@@ -280,8 +280,10 @@ void test_validated_move_success(void) {
   assert(move_get_tiles_played(move) == 3);
   assert(move_get_score(move) == 0);
   rack_set_to_string(ld, leave, "DEFG");
-  assert(within_epsilon(move_get_equity(move),
-                        klv_get_leave_value(player_0_klv, leave)));
+  assert(within_epsilon(
+      move_get_equity(move),
+      klv_get_leave_value(
+          players_data_get_klv(config_get_players_data(config), 0), leave)));
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "A"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "B"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "C"));
@@ -291,8 +293,9 @@ void test_validated_move_success(void) {
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, rack, "AAIORT?");
-  vms = assert_validated_move_success(
-      game, ION_OPENING_CGP, "H1.AeRATION.AAIORT?.3.1", 0, false, false);
+  vms =
+      assert_validated_move_success(config_get_game(config), ION_OPENING_CGP,
+                                    "H1.AeRATION.AAIORT?.3.1", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -318,11 +321,11 @@ void test_validated_move_success(void) {
 
   for (int dir = 0; dir < 2; dir++) {
     if (dir == BOARD_HORIZONTAL_DIRECTION) {
-      vms = assert_validated_move_success(game, EMPTY_CGP, "8d.JIHAD", 0, false,
-                                          false);
+      vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
+                                          "8d.JIHAD", 0, false, false);
     } else {
-      vms = assert_validated_move_success(game, EMPTY_CGP, "H4.JIHAD", 0, false,
-                                          false);
+      vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
+                                          "H4.JIHAD", 0, false, false);
     }
     assert(validated_moves_get_number_of_moves(vms) == 1);
     move = validated_moves_get_move(vms, 0);
@@ -350,8 +353,9 @@ void test_validated_move_success(void) {
   }
 
   rack_set_to_string(ld, rack, "AEFFGIR");
-  vms = assert_validated_move_success(
-      game, ION_OPENING_CGP, "H2.FIREFANG.AEFFGIR.0.1", 0, false, false);
+  vms =
+      assert_validated_move_success(config_get_game(config), ION_OPENING_CGP,
+                                    "H2.FIREFANG.AEFFGIR.0.1", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -375,7 +379,8 @@ void test_validated_move_success(void) {
   assert(validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
-  vms = assert_validated_move_success(game, VS_ED, "N11.PeNT", 0, false, false);
+  vms = assert_validated_move_success(config_get_game(config), VS_ED,
+                                      "N11.PeNT", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -389,8 +394,9 @@ void test_validated_move_success(void) {
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, rack, "DDESW??");
-  vms = assert_validated_move_success(
-      game, VS_JEREMY, "14B.hEaDWORDS.DDESW??.0.0", 0, false, false);
+  vms = assert_validated_move_success(config_get_game(config), VS_JEREMY,
+                                      "14B.hEaDWORDS.DDESW??.0.0", 0, false,
+                                      false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -415,8 +421,9 @@ void test_validated_move_success(void) {
   validated_moves_destroy(vms);
 
   rack_set_to_string(ld, rack, "ABEOPXZ");
-  vms = assert_validated_move_success(
-      game, VS_OXY, "A1.OXYPHENBUTAZONE.ABEOPXZ.0.0", 0, false, false);
+  vms = assert_validated_move_success(config_get_game(config), VS_OXY,
+                                      "A1.OXYPHENBUTAZONE.ABEOPXZ.0.0", 0,
+                                      false, false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -448,45 +455,64 @@ void test_validated_move_success(void) {
 
   // Test allowing playthrough tiles
   // Any number of play through chars is allowed
-  vms = assert_validated_move_success(
-      game, VS_OXY, "A1.OX$P$$$B$$AZ$$E.ABEOPXZ.0.0", 0, false, true);
+  vms = assert_validated_move_success(config_get_game(config), VS_OXY,
+                                      "A1.OX$P$$$B$$AZ$$E.ABEOPXZ.0.0", 0,
+                                      false, true);
   validated_moves_destroy(vms);
 
-  vms = assert_validated_move_success(
-      game, VS_OXY, "A1.OXYPHENBU$AZONE.ABEOPXZ.0.0", 0, false, true);
+  vms = assert_validated_move_success(config_get_game(config), VS_OXY,
+                                      "A1.OXYPHENBU$AZONE.ABEOPXZ.0.0", 0,
+                                      false, true);
   validated_moves_destroy(vms);
 
-  vms = assert_validated_move_success(
-      game, VS_OXY, "A1.OX$PHENBU$AZONE.ABEOPXZ.0.0", 0, false, true);
+  vms = assert_validated_move_success(config_get_game(config), VS_OXY,
+                                      "A1.OX$PHENBU$AZONE.ABEOPXZ.0.0", 0,
+                                      false, true);
   validated_moves_destroy(vms);
 
   // Form a bunch of phonies which we will allow.
-  vms = assert_validated_move_success(game, ENTASIS_OPENING_CGP, "7C.VRRUWIW",
-                                      0, true, false);
+  vms = assert_validated_move_success(config_get_game(config),
+                                      ENTASIS_OPENING_CGP, "7C.VRRUWIW", 0,
+                                      true, false);
   validated_moves_destroy(vms);
 
   // Test equity
-  player_set_move_sort_type(player0, MOVE_SORT_EQUITY);
-  vms = assert_validated_move_success(game, ION_OPENING_CGP, "9G.NON.NONAIER",
-                                      0, false, false);
+  load_and_exec_config_or_die(config, "set -s1 equity");
+  // Load a cgp to update the players data
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  vms = assert_validated_move_success(config_get_game(config), ION_OPENING_CGP,
+                                      "9G.NON.NONAIER", 0, false, false);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_score(move) == 10);
   rack_set_to_string(ld, leave, "AEIR");
-  assert(within_epsilon(move_get_equity(move),
-                        10 + klv_get_leave_value(player_0_klv, leave)));
+  assert(within_epsilon(
+      move_get_equity(move),
+      10 + klv_get_leave_value(
+               players_data_get_klv(config_get_players_data(config), 0),
+               leave)));
   validated_moves_destroy(vms);
 
-  player_set_move_sort_type(player0, MOVE_SORT_SCORE);
-  vms = assert_validated_move_success(game, ION_OPENING_CGP, "9g.NON.NONAIER",
-                                      0, false, false);
+  load_and_exec_config_or_die(config, "set -s1 score");
+  // Load a cgp to update the players data
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  vms = assert_validated_move_success(config_get_game(config), ION_OPENING_CGP,
+                                      "9g.NON.NONAIER", 0, false, false);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_score(move) == 10);
   assert(within_epsilon(move_get_equity(move), 10));
   validated_moves_destroy(vms);
 
+  load_and_exec_config_or_die(config, "set -ld english_blank_is_5");
+  // Load a cgp load the game
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
+                                      "8D.zENAIDA", 0, false, false);
+  move = validated_moves_get_move(vms, 0);
+  assert(move_get_score(move) == 84);
+  validated_moves_destroy(vms);
+
   rack_destroy(rack);
   rack_destroy(leave);
-  game_destroy(game);
   config_destroy(config);
 }
 

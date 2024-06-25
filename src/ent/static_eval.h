@@ -210,7 +210,7 @@ static inline int static_eval_get_move_score(const LetterDistribution *ld,
     int cs = board_get_cross_score(board, row_start, col_start + idx,
                                    BOARD_HORIZONTAL_DIRECTION, cross_set_index);
     if (get_is_blanked(ml)) {
-      ls = 0;
+      ls = ld_get_score(ld, BLANK_MACHINE_LETTER);
     } else {
       ls = ld_get_score(ld, ml);
     }

@@ -832,7 +832,8 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
         game_history_set_lexicon_name(game_history, lexicon_name);
       }
       if (!game_history_get_ld_name(game_history)) {
-        char *default_ld_name = ld_get_default_name(lexicon_name);
+        char *default_ld_name =
+            ld_get_default_name_from_lexicon_name(lexicon_name);
         game_history_set_ld_name(game_history, default_ld_name);
         free(default_ld_name);
       }
