@@ -287,6 +287,12 @@ void test_config_lexical_data(void) {
   // the same ld type.
   assert_lexical_data(config, "set -lex CSW21", "CSW21", "CSW21", "NWL20",
                       "CSW21", "english_blank_is_5");
+  // Check that the leaves arg behaves as expected
+  assert_lexical_data(config, "set -leaves CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", "english_blank_is_5");
+  // Check that the leaves arg behaves as expected
+  assert_lexical_data(config, "set -leaves NWL20", "CSW21", "CSW21", "NWL20",
+                      "NWL20", "english_blank_is_5");
   // Check that defaults are set correctly when switching to a new language
   assert_lexical_data(config, "set -lex FRA20", "FRA20", "FRA20", "FRA20",
                       "FRA20", "french");
