@@ -124,7 +124,7 @@ typedef struct MoveGen {
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
 
-  // Include blank letters as zeroes so their scores can be added without
+  // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
   uint8_t tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
 
@@ -1380,6 +1380,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
       gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
     }
     gen->tile_scores[i] = ld_get_score(gen->ld, i);
+    gen->tile_scores[get_blanked_machine_letter(i)] =
+        ld_get_score(gen->ld, BLANK_MACHINE_LETTER);
   }
 
   set_descending_tile_scores(gen);

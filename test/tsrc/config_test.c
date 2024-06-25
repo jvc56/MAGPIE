@@ -144,35 +144,7 @@ void test_config_load_success(void) {
   // Loading with no lexicon data should not fail
   load_and_exec_config_or_die(config, "set -plies 3");
 
-  // Ensure defaults are set when just the lexicon is set
-  load_and_exec_config_or_die(config, "set -lex CSW21");
-
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 0),
-      "CSW21");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 1),
-      "CSW21");
-  assert_strings_equal(ld_get_name(config_get_ld(config)),
-                       ENGLISH_LETTER_DISTRIBUTION_NAME);
-
-  // Ensure defaults are set when just the lexicon changes
-  load_and_exec_config_or_die(config, "set -lex FRA20");
-
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 0),
-      "FRA20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 1),
-      "FRA20");
-  assert_strings_equal(ld_get_name(config_get_ld(config)),
-                       FRENCH_LETTER_DISTRIBUTION_NAME);
-
-  const char *ld_name = "french";
+  const char *ld_name = "english";
   int bingo_bonus = 73;
   const char *game_variant = "wordsmog";
   const char *p1 = "Alice";
@@ -232,35 +204,6 @@ void test_config_load_success(void) {
              config_get_thread_control(config)) == check_stop);
   assert(config_get_use_game_pairs(config));
 
-  assert_strings_equal(
-      p1, players_data_get_name(config_get_players_data(config), 0));
-  assert_strings_equal(
-      p2, players_data_get_name(config_get_players_data(config), 1));
-
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KWG, 0),
-                    l1));
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KWG, 1),
-                    l2));
-  // KLVs should use the same name
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KLV, 0),
-                    l1));
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KLV, 1),
-                    l2));
-
-  // Save KWG pointers as these shouldn't be reused
-  const KWG *p1_csw_kwg = players_data_get_data(config_get_players_data(config),
-                                                PLAYERS_DATA_TYPE_KWG, 0);
-  const KWG *p2_nwl_kwg = players_data_get_data(config_get_players_data(config),
-                                                PLAYERS_DATA_TYPE_KWG, 1);
-
   // Change some fields, confirm that
   // other fields retain their value.
   ld_name = "english";
@@ -311,85 +254,42 @@ void test_config_load_success(void) {
              config_get_thread_control(config)) == check_stop);
   assert(!config_get_use_game_pairs(config));
 
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KWG, 0),
-                    l1));
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KWG, 1),
-                    l2));
-  // KLVs should use the same name
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KLV, 0),
-                    l1));
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KLV, 1),
-                    l2));
-
-  // The players data should have swapped the lexicons
-  // and not created or destroyed any new KWGs
-  const KWG *p1_nwl_kwg = players_data_get_data(config_get_players_data(config),
-                                                PLAYERS_DATA_TYPE_KWG, 0);
-  const KWG *p2_csw_kwg = players_data_get_data(config_get_players_data(config),
-                                                PLAYERS_DATA_TYPE_KWG, 1);
-  assert(p1_csw_kwg == p2_csw_kwg);
-  assert(p1_nwl_kwg == p2_nwl_kwg);
-
-  // Test move sort/record key words
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder, "set -s1 score -r1 all");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-
-  // English and French should be able to play each other
-  // with either distribution
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder,
-                            "set -ld english -l1 CSW21 -l2 FRA20");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder,
-                            "set -ld french -l1 FRA20 -l2 CSW21");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder, "set -lex NWL20");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 0),
-      "NWL20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 1),
-      "NWL20");
-
-  // Correctly set leave and letter distribution defaults
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder, "set -lex FRA20");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 0),
-      "FRA20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 1),
-      "FRA20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KLV, 0),
-      "FRA20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KLV, 1),
-      "FRA20");
-
   string_builder_destroy(test_string_builder);
+  config_destroy(config);
+}
+
+void assert_lexical_data(Config *config, const char *cmd, const char *l1,
+                         const char *l2, const char *k1, const char *k2,
+                         const char *ld) {
+  load_and_exec_config_or_die(config, cmd);
+  const PlayersData *pd = config_get_players_data(config);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KWG, 0),
+                       l1);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KWG, 1),
+                       l2);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KLV, 0),
+                       k1);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KLV, 1),
+                       k2);
+  assert_strings_equal(ld_get_name(config_get_ld(config)), ld);
+}
+
+void test_config_lexical_data(void) {
+  Config *config = config_create_default_test();
+  // Check that defaults are set correctly
+  assert_lexical_data(config, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", "english");
+  // Check that lexicons, leaves, and ld change change
+  // successfully if they belong to the same ld type.
+  assert_lexical_data(config, "set -l2 NWL20 -ld english_blank_is_5 -k1 NWL20",
+                      "CSW21", "NWL20", "NWL20", "CSW21", "english_blank_is_5");
+  // The leaves and ld should stay the same since they are
+  // the same ld type.
+  assert_lexical_data(config, "set -lex CSW21", "CSW21", "CSW21", "NWL20",
+                      "CSW21", "english_blank_is_5");
+  // Check that defaults are set correctly when switching to a new language
+  assert_lexical_data(config, "set -lex FRA20", "FRA20", "FRA20", "FRA20",
+                      "FRA20", "french");
   config_destroy(config);
 }
 
@@ -532,5 +432,6 @@ void test_config_exec_parse_args(void) {
 void test_config(void) {
   test_config_load_error_cases();
   test_config_load_success();
+  test_config_lexical_data();
   test_config_exec_parse_args();
 }

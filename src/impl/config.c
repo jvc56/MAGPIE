@@ -51,6 +51,7 @@ typedef enum {
   ARG_TOKEN_GAME_VARIANT,
   ARG_TOKEN_LETTER_DISTRIBUTION,
   ARG_TOKEN_LEXICON,
+  ARG_TOKEN_LEAVES,
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_LEAVES,
@@ -1036,32 +1037,26 @@ bool is_lexicon_required(const char *new_p1_leaves_name,
   return new_p1_leaves_name || new_p2_leaves_name || new_ld_name;
 }
 
-bool lds_are_compatible(const char *ld_name_1, const char *ld_name_2) {
-  return strings_equal(ld_name_1, ld_name_2) ||
-         // English and French use the same letters so they are
-         // allowed to play against each other.
-         (strings_equal(ld_name_1, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
-          strings_equal(ld_name_2, FRENCH_LETTER_DISTRIBUTION_NAME)) ||
-         (strings_equal(ld_name_2, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
-          strings_equal(ld_name_1, FRENCH_LETTER_DISTRIBUTION_NAME));
+bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name) {
+  if (!p1_lexicon_name && !p2_lexicon_name) {
+    return true;
+  }
+  if (!p1_lexicon_name || !p2_lexicon_name) {
+    return false;
+  }
+  return ld_types_compat(ld_get_type_from_lex_name(p1_lexicon_name),
+                         ld_get_type_from_lex_name(p2_lexicon_name));
 }
 
-bool lexicons_are_compatible(const char *p1_lexicon_name,
-                             const char *p2_lexicon_name) {
-  char *p1_ld = ld_get_default_name(p1_lexicon_name);
-  char *p2_ld = ld_get_default_name(p2_lexicon_name);
-  bool compatible = lds_are_compatible(p1_ld, p2_ld);
-  free(p1_ld);
-  free(p2_ld);
-  return compatible;
-}
-
-bool ld_is_compatible_with_lexicon(const char *lexicon_name,
-                                   const char *ld_name) {
-  char *ld_from_lexicon_name = ld_get_default_name(lexicon_name);
-  bool compatible = lds_are_compatible(ld_from_lexicon_name, ld_name);
-  free(ld_from_lexicon_name);
-  return compatible;
+bool lex_ld_compat(const char *lexicon_name, const char *ld_name) {
+  if (!lexicon_name && !ld_name) {
+    return true;
+  }
+  if (!lexicon_name || !ld_name) {
+    return false;
+  }
+  return ld_types_compat(ld_get_type_from_lex_name(lexicon_name),
+                         ld_get_type_from_ld_name(ld_name));
 }
 
 char *get_default_klv_name(const char *lexicon_name) {
@@ -1100,13 +1095,25 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
         config_get_parg_value(config, ARG_TOKEN_P2_LEXICON, 0);
   }
 
-  const char *new_p1_leaves_name =
-      config_get_parg_value(config, ARG_TOKEN_P1_LEAVES, 0);
-  const char *new_p2_leaves_name =
-      config_get_parg_value(config, ARG_TOKEN_P2_LEAVES, 0);
+  const char *new_leaves_name =
+      config_get_parg_value(config, ARG_TOKEN_LEAVES, 0);
+
+  const char *new_p1_leaves_name = new_leaves_name;
+  const char *new_p2_leaves_name = new_leaves_name;
+
+  // The "k1" and "k2" args override the "leaves" arg
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_LEAVES) > 0) {
+    new_p1_leaves_name = config_get_parg_value(config, ARG_TOKEN_P1_LEAVES, 0);
+  }
+
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_LEAVES) > 0) {
+    new_p2_leaves_name = config_get_parg_value(config, ARG_TOKEN_P2_LEAVES, 0);
+  }
+
   const char *new_ld_name =
       config_get_parg_value(config, ARG_TOKEN_LETTER_DISTRIBUTION, 0);
 
+  // Load the lexicons
   const char *existing_p1_lexicon_name = players_data_get_data_name(
       config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
   const char *existing_p2_lexicon_name = players_data_get_data_name(
@@ -1142,10 +1149,14 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
     }
   }
 
-  if (!lexicons_are_compatible(updated_p1_lexicon_name,
-                               updated_p2_lexicon_name)) {
+  if (!lex_lex_compat(updated_p1_lexicon_name, updated_p2_lexicon_name)) {
     return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
   }
+
+  // Set the use_default bool here because the 'existing_p1_lexicon_name'
+  // variable might be free'd in players_data_set.
+  const bool use_default =
+      !lex_lex_compat(updated_p1_lexicon_name, existing_p1_lexicon_name);
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
                    config->data_path, updated_p1_lexicon_name,
@@ -1153,26 +1164,31 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
 
   // Load the leaves
 
-  char *updated_p1_leaves_name;
+  const char *existing_p1_leaves_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KLV, 0);
+  char *updated_p1_leaves_name = NULL;
   if (new_p1_leaves_name) {
     updated_p1_leaves_name = string_duplicate(new_p1_leaves_name);
-  } else {
+  } else if (use_default || !existing_p1_leaves_name) {
     updated_p1_leaves_name = get_default_klv_name(updated_p1_lexicon_name);
+  } else {
+    updated_p1_leaves_name = string_duplicate(existing_p1_leaves_name);
   }
 
-  char *updated_p2_leaves_name;
+  const char *existing_p2_leaves_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KLV, 1);
+  char *updated_p2_leaves_name = NULL;
   if (new_p2_leaves_name) {
     updated_p2_leaves_name = string_duplicate(new_p2_leaves_name);
-  } else {
+  } else if (use_default || !existing_p2_leaves_name) {
     updated_p2_leaves_name = get_default_klv_name(updated_p2_lexicon_name);
+  } else {
+    updated_p2_leaves_name = string_duplicate(existing_p2_leaves_name);
   }
 
-  if (!lexicons_are_compatible(updated_p1_leaves_name,
-                               updated_p2_leaves_name) ||
-      !lexicons_are_compatible(updated_p1_lexicon_name,
-                               updated_p1_leaves_name) ||
-      !lexicons_are_compatible(updated_p2_lexicon_name,
-                               updated_p2_leaves_name)) {
+  if (!lex_lex_compat(updated_p1_leaves_name, updated_p2_leaves_name) ||
+      !lex_lex_compat(updated_p1_lexicon_name, updated_p1_leaves_name) ||
+      !lex_lex_compat(updated_p2_lexicon_name, updated_p2_leaves_name)) {
     free(updated_p1_leaves_name);
     free(updated_p2_leaves_name);
     return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
@@ -1187,23 +1203,28 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
 
   // Load letter distribution
 
-  char *updated_ld_name = NULL;
   const char *existing_ld_name = NULL;
   if (config->ld) {
     existing_ld_name = ld_get_name(config->ld);
   }
-  if (!is_string_empty_or_null(new_ld_name)) {
-    if (!ld_is_compatible_with_lexicon(updated_p1_lexicon_name, new_ld_name)) {
-      return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
-    }
+  char *updated_ld_name = NULL;
+  if (new_ld_name) {
     updated_ld_name = string_duplicate(new_ld_name);
-  } else if (new_p1_lexicon_name || new_p2_lexicon_name || !existing_ld_name) {
-    updated_ld_name = ld_get_default_name(updated_p1_lexicon_name);
+  } else if (use_default || !existing_ld_name) {
+    updated_ld_name =
+        ld_get_default_name_from_lexicon_name(updated_p1_lexicon_name);
+  } else {
+    updated_ld_name = string_duplicate(existing_ld_name);
+  }
+
+  if (!lex_ld_compat(updated_p1_lexicon_name, updated_ld_name)) {
+    free(updated_ld_name);
+    return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
   }
 
   // If the letter distribution name has changed, update it
   config->ld_changed = false;
-  if (updated_ld_name && !strings_equal(updated_ld_name, existing_ld_name)) {
+  if (!strings_equal(updated_ld_name, existing_ld_name)) {
     ld_destroy(config->ld);
     config->ld = ld_create(config->data_path, updated_ld_name);
     config->ld_changed = true;
@@ -1462,7 +1483,7 @@ char *config_get_execute_status(Config *config) {
 Config *config_create_default(void) {
   Config *config = malloc_or_die(sizeof(Config));
   parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
-                    status_cgp_load);
+                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
                     status_cgp_load);
   parsed_arg_create(config, ARG_TOKEN_MOVES, "addmoves", 1, 1,
@@ -1490,6 +1511,8 @@ Config *config_create_default(void) {
   parsed_arg_create(config, ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_LEXICON, "lex", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_LEAVES, "leaves", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P1_NAME, "p1", 1, 1, execute_fatal,
                     status_fatal);

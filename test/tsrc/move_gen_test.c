@@ -612,7 +612,9 @@ void wordsmog_test(void) {
   Config *config =
       config_create_or_die("set -lex CSW21_alpha -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1 -var wordsmog");
-  Game *game = config_game_create(config);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
 
   assert_validated_and_generated_moves(game, "FEEZEEE", "8D", "ZEEFE", 54,
                                        true);
@@ -636,7 +638,13 @@ void wordsmog_test(void) {
   // CANONIZERS
   assert_validated_and_generated_moves(game, "AEINNR?", "D3", "ANI(SOZ)ERcN",
                                        182, true);
-  game_destroy(game);
+
+  load_and_exec_config_or_die(config, "set -ld english_blank_is_5");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+
+  assert_validated_and_generated_moves(game, "AEIINO?", "8B", "AEpIINO", 82,
+                                       true);
   config_destroy(config);
 }
 
@@ -674,13 +682,14 @@ void movegen_game_update_test(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
 
-  // Check that ld udpates
-  load_and_exec_config_or_die(config, "set -ld french");
+  // Check that ld udpates and that blanks can be any score
+  load_and_exec_config_or_die(config, "set -ld english_blank_is_5");
   load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 EAUX/ 0/0 0");
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 E?INAOI/ 0/0 0");
   load_and_exec_config_or_die(config, "gen");
   assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
-              "8G XU 22");
+              "8C EpINAOI 82");
 
   // Check that bingo bonus udpates
   load_and_exec_config_or_die(config, "set -bb 40");

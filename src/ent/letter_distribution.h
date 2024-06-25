@@ -15,6 +15,15 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+typedef enum {
+  LD_TYPE_ENGLISH,
+  LD_TYPE_GERMAN,
+  LD_TYPE_NORWEGIAN,
+  LD_TYPE_CATALAN,
+  LD_TYPE_POLISH,
+  LD_TYPE_FRENCH,
+} ld_t;
+
 #define INVALID_LETTER (0x80 - 1)
 #define MULTICHAR_START_DELIMITIER '['
 #define MULTICHAR_END_DELIMITIER ']'
@@ -365,9 +374,59 @@ static inline int ld_str_to_mls(const LetterDistribution *ld, const char *str,
   return num_mls;
 }
 
+static inline bool ld_types_compat(ld_t ld_type_1, ld_t ld_type_2) {
+  return ld_type_1 == ld_type_2;
+}
+
+static inline ld_t ld_get_type_from_lex_name(const char *lexicon_name) {
+  ld_t ld_type;
+  if (has_iprefix("CSW", lexicon_name) || has_iprefix("NWL", lexicon_name) ||
+      has_iprefix("TWL", lexicon_name) ||
+      has_iprefix("America", lexicon_name) ||
+      has_iprefix("CEL", lexicon_name)) {
+    ld_type = LD_TYPE_ENGLISH;
+  } else if (has_iprefix("RD", lexicon_name)) {
+    ld_type = LD_TYPE_GERMAN;
+  } else if (has_iprefix("NSF", lexicon_name)) {
+    ld_type = LD_TYPE_NORWEGIAN;
+  } else if (has_iprefix("DISC", lexicon_name)) {
+    ld_type = LD_TYPE_CATALAN;
+  } else if (has_iprefix("FRA", lexicon_name)) {
+    ld_type = LD_TYPE_FRENCH;
+  } else if (has_iprefix("OSPS", lexicon_name)) {
+    ld_type = LD_TYPE_POLISH;
+  } else {
+    log_fatal("default letter distribution not found for lexicon '%s'\n",
+              lexicon_name);
+  }
+  return ld_type;
+}
+
+static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
+  ld_t ld_type;
+  if (has_iprefix(ENGLISH_LETTER_DISTRIBUTION_NAME, ld_name)) {
+    ld_type = LD_TYPE_ENGLISH;
+  } else if (has_iprefix(GERMAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
+    ld_type = LD_TYPE_GERMAN;
+  } else if (has_iprefix(NORWEGIAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
+    ld_type = LD_TYPE_NORWEGIAN;
+  } else if (has_iprefix(CATALAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
+    ld_type = LD_TYPE_CATALAN;
+  } else if (has_iprefix(FRENCH_LETTER_DISTRIBUTION_NAME, ld_name)) {
+    ld_type = LD_TYPE_FRENCH;
+  } else if (has_iprefix(POLISH_LETTER_DISTRIBUTION_NAME, ld_name)) {
+    ld_type = LD_TYPE_POLISH;
+  } else {
+    log_fatal(
+        "default letter distribution not found for letter distribution '%s'\n",
+        ld_name);
+  }
+  return ld_type;
+}
+
 // Use the lexicon name in combination with the constant
 // BOARD_DIM to determine a default letter distribution name.
-static inline char *ld_get_default_name(const char *lexicon_name) {
+static inline char *ld_get_default_name_from_type(ld_t ld_type) {
   if (BOARD_DIM != DEFAULT_BOARD_DIM && BOARD_DIM != DEFAULT_SUPER_BOARD_DIM) {
     log_fatal("Default letter distribution not supported with a board "
               "dimension of %d. Only %d and %d have "
@@ -380,32 +439,39 @@ static inline char *ld_get_default_name(const char *lexicon_name) {
   }
 
   char *ld_name = NULL;
-  if (has_prefix("CSW", lexicon_name) || has_prefix("NWL", lexicon_name) ||
-      has_prefix("TWL", lexicon_name) || has_prefix("America", lexicon_name) ||
-      has_prefix("CEL", lexicon_name)) {
+  switch (ld_type) {
+  case LD_TYPE_ENGLISH:
     ld_name = get_formatted_string("%s%s", ENGLISH_LETTER_DISTRIBUTION_NAME,
                                    ld_name_extension);
-  } else if (has_prefix("RD", lexicon_name)) {
+    break;
+  case LD_TYPE_GERMAN:
     ld_name = get_formatted_string("%s%s", GERMAN_LETTER_DISTRIBUTION_NAME,
                                    ld_name_extension);
-  } else if (has_prefix("NSF", lexicon_name)) {
+    break;
+  case LD_TYPE_NORWEGIAN:
     ld_name = get_formatted_string("%s%s", NORWEGIAN_LETTER_DISTRIBUTION_NAME,
                                    ld_name_extension);
-  } else if (has_prefix("DISC", lexicon_name)) {
+    break;
+  case LD_TYPE_CATALAN:
     ld_name = get_formatted_string("%s%s", CATALAN_LETTER_DISTRIBUTION_NAME,
                                    ld_name_extension);
-  } else if (has_prefix("FRA", lexicon_name)) {
+    break;
+  case LD_TYPE_FRENCH:
     ld_name = get_formatted_string("%s%s", FRENCH_LETTER_DISTRIBUTION_NAME,
                                    ld_name_extension);
-  } else if (has_prefix("OSPS", lexicon_name)) {
+    break;
+  case LD_TYPE_POLISH:
     ld_name = get_formatted_string("%s%s", POLISH_LETTER_DISTRIBUTION_NAME,
                                    ld_name_extension);
-  } else {
-    log_fatal("default letter distribution not found for lexicon %s.\n",
-              lexicon_name);
+    break;
   }
 
   return ld_name;
+}
+
+static inline char *
+ld_get_default_name_from_lexicon_name(const char *lexicon_name) {
+  return ld_get_default_name_from_type(ld_get_type_from_lex_name(lexicon_name));
 }
 
 #endif

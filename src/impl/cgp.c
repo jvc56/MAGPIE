@@ -348,7 +348,7 @@ void string_builder_add_cgp_options(StringBuilder *cgp_options_builder,
 
   bool write_ld = false;
   if (kwgs_are_shared) {
-    char *default_ld_name = ld_get_default_name(lexicon_name);
+    char *default_ld_name = ld_get_default_name_from_lexicon_name(lexicon_name);
     if (!strings_equal(ld_name, default_ld_name)) {
       write_ld = true;
     }
