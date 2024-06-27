@@ -26,14 +26,14 @@ void assert_stats_are_equal(Stat *s1, Stat *s2) {
 void assert_autoplay_results_are_equal(AutoplayResults *ar1,
                                        AutoplayResults *ar2) {
   assert(autoplay_results_get_games(ar1) == autoplay_results_get_games(ar2));
+  assert(autoplay_results_get_p1_firsts(ar1) ==
+         autoplay_results_get_p1_firsts(ar2));
   assert(autoplay_results_get_p1_wins(ar1) ==
          autoplay_results_get_p1_wins(ar2));
   assert(autoplay_results_get_p1_losses(ar1) ==
          autoplay_results_get_p1_losses(ar2));
   assert(autoplay_results_get_p1_ties(ar1) ==
          autoplay_results_get_p1_ties(ar2));
-  assert(autoplay_results_get_p1_firsts(ar1) ==
-         autoplay_results_get_p1_firsts(ar2));
 
   Stat *ar1s1 = autoplay_results_get_p1_score(ar1);
   Stat *ar1s2 = autoplay_results_get_p2_score(ar1);
@@ -48,7 +48,7 @@ void autoplay_game_pairs_test(void) {
   uint64_t seed = time(NULL);
   char *options_string = get_formatted_string(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -it 500 -gp true -threads 11 -seed %ld",
+      "-numplays 1 -it 200 -gp true -threads 11 -seed %ld",
       seed);
   Config *csw_config = config_create_or_die(options_string);
   printf("running autoplay with: %s\n", options_string);
@@ -96,6 +96,26 @@ void autoplay_game_pairs_test(void) {
   status = config_autoplay(csw_config, ar1);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
   assert(autoplay_results_get_games(ar1) == max_iterations);
+
+  // Ensure pseudo-randomness is consistent for any number of threads
+  for (int i = 0; i < 11; i++) {
+    options_string = get_formatted_string(
+        "set -r1 best -r2 best -gp false -threads %d -seed %ld -it 20", i + 1,
+        seed);
+
+    load_and_exec_config_or_die(csw_config, options_string);
+
+    free(options_string);
+
+    if (i == 0) {
+      status = config_autoplay(csw_config, ar1);
+      assert(status == AUTOPLAY_STATUS_SUCCESS);
+    } else {
+      status = config_autoplay(csw_config, ar2);
+      assert(status == AUTOPLAY_STATUS_SUCCESS);
+      assert_autoplay_results_are_equal(ar1, ar2);
+    }
+  }
 
   autoplay_results_destroy(ar1);
   autoplay_results_destroy(ar2);

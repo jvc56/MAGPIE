@@ -9,6 +9,7 @@
 
 #include "file_handler.h"
 #include "timer.h"
+#include "xoshiro.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"
@@ -18,6 +19,8 @@ struct ThreadControl {
   int number_of_threads;
   int print_info_interval;
   int check_stopping_condition_interval;
+  uint64_t iter_count;
+  XoshiroPRNG *prng;
   check_stop_status_t check_stop_status;
   mode_search_status_t current_mode;
   halt_status_t halt_status;
@@ -25,6 +28,7 @@ struct ThreadControl {
   pthread_mutex_t current_mode_mutex;
   pthread_mutex_t halt_status_mutex;
   pthread_mutex_t searching_mode_mutex;
+  pthread_mutex_t iter_mutex;
   FileHandler *outfile;
   FileHandler *infile;
   Timer *timer;
@@ -38,15 +42,18 @@ ThreadControl *thread_control_create(void) {
   thread_control->number_of_threads = 1;
   thread_control->check_stopping_condition_interval = 0;
   thread_control->print_info_interval = 0;
+  thread_control->iter_count = 0;
   pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
   pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
   pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
+  pthread_mutex_init(&thread_control->iter_mutex, NULL);
   thread_control->outfile = file_handler_create_from_filename(
       STDOUT_FILENAME, FILE_HANDLER_MODE_WRITE);
   thread_control->infile =
       file_handler_create_from_filename(STDIN_FILENAME, FILE_HANDLER_MODE_READ);
   thread_control->timer = mtimer_create();
+  thread_control->prng = prng_create(time(NULL));
   return thread_control;
 }
 
@@ -57,6 +64,7 @@ void thread_control_destroy(ThreadControl *thread_control) {
   file_handler_destroy(thread_control->outfile);
   file_handler_destroy(thread_control->infile);
   mtimer_destroy(thread_control->timer);
+  prng_destroy(thread_control->prng);
   free(thread_control);
 }
 
@@ -207,13 +215,13 @@ bool thread_control_set_check_stop_inactive(ThreadControl *thread_control) {
   return success;
 }
 
-// This does not require locking since it is
+// NOT THREAD SAFE: This does not require locking since it is
 // not called during a multithreaded commmand
 int thread_control_get_threads(const ThreadControl *thread_control) {
   return thread_control->number_of_threads;
 }
 
-// This does not require locking since it is
+// NOT THREAD SAFE: This does not require locking since it is
 // not called during a multithreaded commmand
 void thread_control_set_threads(ThreadControl *thread_control,
                                 int number_of_threads) {
@@ -228,4 +236,23 @@ void thread_control_wait_for_mode_stopped(ThreadControl *thread_control) {
   pthread_mutex_lock(&thread_control->searching_mode_mutex);
   // We can only acquire the lock once the search has stopped.
   pthread_mutex_unlock(&thread_control->searching_mode_mutex);
+}
+
+void thread_control_get_next_iter_output(ThreadControl *thread_control,
+                                         ThreadControlIterOutput *iter_output) {
+  pthread_mutex_lock(&thread_control->iter_mutex);
+  iter_output->seed = prng_next(thread_control->prng);
+  iter_output->iter_count = thread_control->iter_count++;
+  pthread_mutex_unlock(&thread_control->iter_mutex);
+}
+
+// NOT THREAD SAFE: This function is meant to be called
+// before a multithreaded operation. Do not call this in a
+// multithreaded context as it is intentionally not thread safe.
+void thread_control_prng_seed(ThreadControl *thread_control, uint64_t seed) {
+  prng_seed(thread_control->prng, seed);
+}
+
+void thread_control_reset_iter_count(ThreadControl *thread_control) {
+  thread_control->iter_count = 0;
 }

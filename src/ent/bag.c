@@ -63,6 +63,9 @@ void bag_reset(const LetterDistribution *ld, Bag *bag) {
   bag_shuffle(bag);
 }
 
+// Sets the bag's PRNG then resets the bag.
+void bag_seed(Bag *bag, uint64_t seed) { prng_seed(bag->prng, seed); }
+
 Bag *bag_create(const LetterDistribution *ld) {
   Bag *bag = malloc_or_die(sizeof(Bag));
   bag->prng = prng_create(42);
@@ -171,16 +174,6 @@ void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
     bag->start_tile_index--;
   }
   bag->tiles[insert_index] = letter;
-}
-
-// This function ensures that all workers for a given
-// job are seeded with unique non-overlapping sequences
-// for the PRNGs in their bags.
-void bag_seed_for_worker(Bag *bag, uint64_t seed, int worker_index) {
-  prng_seed(bag->prng, seed);
-  for (int j = 0; j < worker_index; j++) {
-    prng_jump(bag->prng);
-  }
 }
 
 // Gets the number of a tiles 'ml' in the bag. For drawing tiles

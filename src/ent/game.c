@@ -420,6 +420,8 @@ void game_reset(Game *game) {
   game->backup_cursor = 0;
 }
 
+void game_seed(Game *game, uint64_t seed) { bag_seed(game->bag, seed); }
+
 // This assumes the game has not started yet.
 void game_set_starting_player_index(Game *game, int starting_player_index) {
   game->starting_player_index = starting_player_index;

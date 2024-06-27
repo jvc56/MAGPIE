@@ -107,7 +107,6 @@ struct Config {
   double stop_cond_pct;
   double equity_margin;
   bool use_game_pairs;
-  uint64_t seed;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -241,8 +240,6 @@ WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
 }
-
-uint64_t config_get_seed(const Config *config) { return config->seed; }
 
 PlayersData *config_get_players_data(const Config *config) {
   return config->players_data;
@@ -680,7 +677,6 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->max_iterations = config->max_iterations;
   sim_args->num_plies = config_get_plies(config);
   sim_args->stop_cond_pct = config_get_stop_cond_pct(config);
-  sim_args->seed = config->seed;
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
   sim_args->known_opp_rack = known_opp_rack;
@@ -856,7 +852,6 @@ void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args) {
   autoplay_args->max_iterations = config->max_iterations;
   autoplay_args->use_game_pairs = config->use_game_pairs;
-  autoplay_args->seed = config->seed;
   autoplay_args->thread_control = config->thread_control;
   config_fill_game_args(config, autoplay_args->game_args);
 }
@@ -1358,12 +1353,12 @@ config_load_status_t config_load_data(Config *config) {
 
   // Seed
 
-  config_load_status =
-      config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &config->seed);
+  uint64_t seed;
+  config_load_status = config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &seed);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
-
+  thread_control_prng_seed(config->thread_control, seed);
   // Board layout
 
   const char *new_board_layout_name =
@@ -1574,7 +1569,6 @@ Config *config_create_default(void) {
   config->stop_cond_pct = 99;
   config->equity_margin = 0;
   config->use_game_pairs = true;
-  config->seed = 0;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->win_pcts = win_pct_create(config->data_path, DEFAULT_WIN_PCT);
   config->board_layout = board_layout_create_default(config->data_path);
