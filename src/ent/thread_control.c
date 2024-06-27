@@ -253,6 +253,9 @@ void thread_control_prng_seed(ThreadControl *thread_control, uint64_t seed) {
   prng_seed(thread_control->prng, seed);
 }
 
+// NOT THREAD SAFE: This function is meant to be called
+// before a multithreaded operation. Do not call this in a
+// multithreaded context as it is intentionally not thread safe.
 void thread_control_reset_iter_count(ThreadControl *thread_control) {
   thread_control->iter_count = 0;
 }

@@ -63,7 +63,6 @@ void bag_reset(const LetterDistribution *ld, Bag *bag) {
   bag_shuffle(bag);
 }
 
-// Sets the bag's PRNG then resets the bag.
 void bag_seed(Bag *bag, uint64_t seed) { prng_seed(bag->prng, seed); }
 
 Bag *bag_create(const LetterDistribution *ld) {
