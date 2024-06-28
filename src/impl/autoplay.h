@@ -12,7 +12,6 @@
 typedef struct AutoplayArgs {
   int max_iterations;
   bool use_game_pairs;
-  uint64_t seed;
   GameArgs *game_args;
   ThreadControl *thread_control;
 } AutoplayArgs;

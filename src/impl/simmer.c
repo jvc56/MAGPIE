@@ -83,7 +83,6 @@ Simmer *simmer_create(const SimArgs *args, Game *game, int num_simmed_plays,
   simmer->max_iterations = args->max_iterations;
   simmer->zval = p_to_z(args->stop_cond_pct);
   simmer->threads = thread_control_get_threads(thread_control);
-  simmer->seed = args->seed;
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
 
   Rack *known_opp_rack = args->known_opp_rack;
@@ -142,8 +141,6 @@ SimmerWorker *simmer_create_worker(const Game *game, Simmer *simmer,
   // Game
   simmer_worker->game = game_duplicate(game);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
-  bag_seed_for_worker(game_get_bag(simmer_worker->game), simmer->seed,
-                      worker_index);
 
   // MoveList
   simmer_worker->move_list = move_list_create(1);
@@ -309,10 +306,13 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
   int plies = sim_results_get_max_plies(sim_results);
   int number_of_plays = sim_results_get_number_of_plays(sim_results);
 
+  ThreadControlIterOutput iter_output;
+  thread_control_get_next_iter_output(simmer->thread_control, &iter_output);
+  game_seed(game, iter_output.seed);
+
   // set random rack for opponent (throw in rack, bag_shuffle, draw new tiles).
   set_random_rack(game, 1 - game_get_player_on_turn_index(game),
                   simmer->known_opp_rack);
-  // need a new bag_shuffle for every iteration:
   Bag *bag = game_get_bag(game);
   bag_shuffle(bag);
 

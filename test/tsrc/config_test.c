@@ -195,7 +195,6 @@ void test_config_load_success(void) {
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
   assert(within_epsilon(config_get_stop_cond_pct(config), 98));
-  assert(config_get_seed(config) == (uint64_t)seed);
   assert(thread_control_get_threads(config_get_thread_control(config)) ==
          number_of_threads);
   assert(thread_control_get_print_info_interval(

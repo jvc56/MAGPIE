@@ -12,7 +12,6 @@ typedef struct SimArgs {
   int max_iterations;
   int num_plies;
   double stop_cond_pct;
-  uint64_t seed;
   const Game *game;
   const MoveList *move_list;
   Rack *known_opp_rack;

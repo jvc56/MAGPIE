@@ -26,6 +26,7 @@ void game_destroy(Game *game);
 void game_update(Game *game, const GameArgs *game_args);
 Game *game_duplicate(const Game *game);
 void game_reset(Game *game);
+void game_seed(Game *game, uint64_t seed);
 
 game_variant_t game_get_variant(const Game *game);
 int game_get_bingo_bonus(const Game *game);
