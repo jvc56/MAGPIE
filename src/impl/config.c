@@ -13,6 +13,7 @@
 #include "../def/game_defs.h"
 #include "../def/gen_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/math_util_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
@@ -1315,10 +1316,11 @@ config_load_status_t config_load_data(Config *config) {
   const char *new_stop_cond_str =
       config_get_parg_value(config, ARG_TOKEN_STOP_COND_PCT, 0);
   if (new_stop_cond_str && has_iprefix(new_stop_cond_str, "none")) {
-    config->stop_cond_pct = STOP_COND_NONE;
+    config->stop_cond_pct = PERCENTILE_MAX + 10;
   } else {
-    config_load_status = config_load_double(config, ARG_TOKEN_STOP_COND_PCT,
-                                            0.0, 100.0, &config->stop_cond_pct);
+    config_load_status =
+        config_load_double(config, ARG_TOKEN_STOP_COND_PCT, 0.0, PERCENTILE_MAX,
+                           &config->stop_cond_pct);
     if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
       return config_load_status;
     }

@@ -59,7 +59,7 @@ void string_builder_add_letter_minimum(
       inference_results, inference_stat_type, letter, minimum,
       INFERENCE_SUBTOTAL_LEAVE);
   double inference_probability =
-      ((double)draw_subtotal) / (double)stat_get_weight(equity_values);
+      ((double)draw_subtotal) / (double)stat_get_num_samples(equity_values);
   double random_probability = get_probability_for_random_minimum_draw(
       bag_as_rack, rack, letter, minimum, number_of_tiles_played_or_exchanged);
   string_builder_add_formatted_string(
@@ -99,8 +99,8 @@ void string_builder_add_inference_type(
   Stat *equity_values = inference_results_get_equity_values(
       inference_results, inference_stat_type);
 
-  uint64_t total_draws = stat_get_weight(equity_values);
-  uint64_t total_leaves = stat_get_cardinality(equity_values);
+  uint64_t total_draws = stat_get_num_samples(equity_values);
+  uint64_t total_leaves = stat_get_num_unique_samples(equity_values);
 
   string_builder_add_formatted_string(
       inference_string,
@@ -188,7 +188,7 @@ void string_builder_add_inference(StringBuilder *inference_string,
       inference_results_get_equity_margin(inference_results));
 
   // Create a transient stat to use the stat functions
-  Stat *letter_stat = stat_create();
+  Stat *letter_stat = stat_create(false);
 
   Rack *bag_as_rack = inference_results_get_bag_as_rack(inference_results);
 
@@ -231,7 +231,7 @@ void string_builder_add_inference(StringBuilder *inference_string,
         leave_rack_list_get_rack(leave_rack_list, common_leave_index);
     string_builder_add_leave_rack(
         inference_string, leave_rack, ld, common_leave_index,
-        stat_get_weight(inference_results_get_equity_values(
+        stat_get_num_samples(inference_results_get_equity_values(
             inference_results, common_leaves_type)));
   }
 }
@@ -290,7 +290,7 @@ void string_builder_ucgi_add_letter_minimum(
       INFERENCE_SUBTOTAL_LEAVE);
   double inference_probability =
       ((double)draw_subtotal) /
-      (double)stat_get_weight(inference_results_get_equity_values(
+      (double)stat_get_num_samples(inference_results_get_equity_values(
           inference_results, inference_stat_type));
   double random_probability = get_probability_for_random_minimum_draw(
       bag_as_rack, rack, letter, minimum, number_of_tiles_played_or_exchanged);
@@ -332,8 +332,8 @@ void string_builder_ucgi_add_inference_record(
   Stat *equity_values = inference_results_get_equity_values(
       inference_results, inference_stat_type);
 
-  uint64_t total_draws = stat_get_weight(equity_values);
-  uint64_t total_leaves = stat_get_cardinality(equity_values);
+  uint64_t total_draws = stat_get_num_samples(equity_values);
+  uint64_t total_leaves = stat_get_num_unique_samples(equity_values);
 
   string_builder_add_formatted_string(
       ucgi_string_builder,
@@ -365,7 +365,7 @@ void print_ucgi_inference(const LetterDistribution *ld,
   }
 
   // Create a transient stat to use the stat functions
-  Stat *letter_stat = stat_create();
+  Stat *letter_stat = stat_create(false);
 
   StringBuilder *ucgi_string_builder = string_builder_create();
   string_builder_ucgi_add_inference_record(
@@ -406,7 +406,7 @@ void print_ucgi_inference(const LetterDistribution *ld,
         leave_rack_list_get_rack(leave_rack_list, common_leave_index);
     string_builder_add_ucgi_leave_rack(
         ucgi_string_builder, leave_rack, ld, common_leave_index,
-        stat_get_weight(common_leave_equity_values), is_exchange);
+        stat_get_num_samples(common_leave_equity_values), is_exchange);
   }
   thread_control_print(thread_control,
                        string_builder_peek(ucgi_string_builder));
