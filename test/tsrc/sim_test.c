@@ -91,7 +91,7 @@ void test_win_pct(void) {
 void test_sim_error_cases(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 1 -scond 100");
+      "2 -threads 1 -iter 1 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AAADERW");
   sim_status_t status =
@@ -103,7 +103,7 @@ void test_sim_error_cases(void) {
 void test_sim_single_iteration(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 1 -scond 100");
+      "2 -threads 1 -iter 1 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AAADERW");
   load_and_exec_config_or_die(config, "gen");
@@ -118,7 +118,7 @@ void test_sim_single_iteration(void) {
 void test_more_iterations(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
-      "2 -threads 1 -iter 500 -scond 100");
+      "2 -threads 1 -iter 500 -scond none");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 AEIQRST");
   load_and_exec_config_or_die(config, "gen");
@@ -173,9 +173,9 @@ void perf_test_multithread_sim(void) {
 }
 
 void test_play_similarity(void) {
-  Config *config =
-      config_create_or_die("set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
-                           "-plies 2 -threads 1 -it 1200 -scond 100 -cfreq 50");
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all "
+      "-plies 2 -threads 1 -it 1200 -scond none -cfreq 50");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack 1 ACEIRST");
   load_and_exec_config_or_die(config, "gen");
@@ -214,12 +214,11 @@ void test_play_similarity(void) {
 }
 
 void test_sim(void) {
-  // test_p_to_z();
-  // test_win_pct();
-  // test_sim_error_cases();
-  // test_sim_single_iteration();
-  // test_more_iterations();
-  // test_play_similarity();
-  // FIXME: uncomment
+  test_p_to_z();
+  test_win_pct();
+  test_sim_error_cases();
+  test_sim_single_iteration();
+  test_more_iterations();
+  test_play_similarity();
   perf_test_multithread_sim();
 }
