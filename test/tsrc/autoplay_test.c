@@ -16,13 +16,6 @@
 
 #include "test_util.h"
 
-void assert_stats_are_equal(Stat *s1, Stat *s2) {
-  assert(stat_get_num_samples(s1) == stat_get_num_samples(s2));
-  assert(stat_get_num_unique_samples(s1) == stat_get_num_unique_samples(s2));
-  assert(within_epsilon(stat_get_mean(s1), stat_get_mean(s2)));
-  assert(within_epsilon(stat_get_stdev(s1), stat_get_stdev(s2)));
-}
-
 void assert_autoplay_results_are_equal(AutoplayResults *ar1,
                                        AutoplayResults *ar2) {
   assert(autoplay_results_get_games(ar1) == autoplay_results_get_games(ar2));

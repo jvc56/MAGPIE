@@ -223,6 +223,19 @@ void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
   rack_reset(rack);
 }
 
+void set_random_rack(Game *game, int player_index, Rack *known_rack) {
+  Rack *player_rack = player_get_rack(game_get_player(game, player_index));
+  Bag *bag = game_get_bag(game);
+  const int player_draw_index = game_get_player_draw_index(game, player_index);
+  return_rack_to_bag(player_rack, bag, player_draw_index);
+  if (known_rack) {
+    draw_rack_from_bag(bag, player_rack, known_rack, player_draw_index);
+  }
+  draw_at_most_to_rack(bag, player_rack,
+                       RACK_SIZE - rack_get_total_letters(player_rack),
+                       player_draw_index);
+}
+
 void execute_exchange_move(const Move *move, Game *game) {
   Rack *player_on_turn_rack = player_get_rack(
       game_get_player(game, game_get_player_on_turn_index(game)));
@@ -333,34 +346,4 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
                          int player_draw_index) {
   bag_draw_letter(bag, letter, player_draw_index);
   rack_add_letter(rack, letter);
-}
-
-void set_random_rack(Game *game, int pidx, Rack *known_rack) {
-  Bag *bag = game_get_bag(game);
-  Rack *prack = player_get_rack(game_get_player(game, pidx));
-  int ntiles = rack_get_total_letters(prack);
-  int player_draw_index = game_get_player_draw_index(game, pidx);
-  // always try to fill rack if possible.
-  if (ntiles < RACK_SIZE) {
-    ntiles = RACK_SIZE;
-  }
-  // throw in existing rack, then redraw from the bag.
-  for (int i = 0; i < rack_get_dist_size(prack); i++) {
-    if (rack_get_letter(prack, i) > 0) {
-      for (int j = 0; j < rack_get_letter(prack, i); j++) {
-        bag_add_letter(bag, i, player_draw_index);
-      }
-    }
-  }
-  rack_reset(prack);
-  int ndrawn = 0;
-  if (known_rack && rack_get_total_letters(known_rack) > 0) {
-    for (int i = 0; i < rack_get_dist_size(known_rack); i++) {
-      for (int j = 0; j < rack_get_letter(known_rack, i); j++) {
-        draw_letter_to_rack(bag, prack, i, player_draw_index);
-        ndrawn++;
-      }
-    }
-  }
-  draw_at_most_to_rack(bag, prack, ntiles - ndrawn, player_draw_index);
 }

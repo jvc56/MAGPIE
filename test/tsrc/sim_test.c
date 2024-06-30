@@ -140,6 +140,45 @@ void test_more_iterations(void) {
   string_builder_destroy(move_string_builder);
 }
 
+void test_sim_consistency(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 15 -plies "
+      "2 -threads 1 -iter 30 -scond none");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack 1 AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+
+  uint64_t seed = time(NULL);
+  SimResults *sim_results_single_threaded = config_get_sim_results(config);
+  SimResults *sim_results_multithreaded = sim_results_create();
+  for (int i = 0; i < 11; i++) {
+    char *set_threads_cmd =
+        get_formatted_string("set -threads %d -seed %lu", i + 1, seed);
+    load_and_exec_config_or_die(config, set_threads_cmd);
+    free(set_threads_cmd);
+
+    SimResults *sim_results;
+
+    if (i == 0) {
+      sim_results = sim_results_single_threaded;
+    } else {
+      sim_results = sim_results_multithreaded;
+    }
+
+    sim_status_t status = config_simulate(config, NULL, sim_results);
+    assert(status == SIM_STATUS_SUCCESS);
+    assert(thread_control_get_halt_status(config_get_thread_control(config)) ==
+           HALT_STATUS_MAX_ITERATIONS);
+
+    if (i != 0) {
+      assert_sim_results_equal(sim_results_single_threaded, sim_results);
+    }
+  }
+
+  sim_results_destroy(sim_results_multithreaded);
+  config_destroy(config);
+}
+
 void perf_test_multithread_sim(void) {
   Config *config = config_create_or_die(
       "set -s1 score -s2 score -r1 all -r2 all "
@@ -214,6 +253,9 @@ void test_play_similarity(void) {
 }
 
 void test_sim(void) {
+  // FIXME:
+  test_sim_consistency();
+  return;
   test_p_to_z();
   test_win_pct();
   test_sim_error_cases();

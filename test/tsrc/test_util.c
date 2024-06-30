@@ -567,3 +567,62 @@ void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
   free(actual_cgp);
   free(expected_cgp_without_options);
 }
+
+void assert_stats_are_equal(const Stat *s1, const Stat *s2) {
+  assert(stat_get_num_unique_samples(s1) == stat_get_num_unique_samples(s2));
+  assert(stat_get_num_samples(s1) == stat_get_num_samples(s2));
+  assert(within_epsilon(stat_get_mean(s1), stat_get_mean(s2)));
+  assert(within_epsilon(stat_get_variance(s1), stat_get_variance(s2)));
+}
+
+void assert_moves_are_equal(const Move *m1, const Move *m2) {
+  assert(move_get_type(m1) == move_get_type(m2));
+  assert(move_get_row_start(m1) == move_get_row_start(m2));
+  assert(move_get_col_start(m1) == move_get_col_start(m2));
+  assert(move_get_tiles_played(m1) == move_get_tiles_played(m2));
+  assert(move_get_tiles_length(m1) == move_get_tiles_length(m2));
+  assert(move_get_score(m1) == move_get_score(m2));
+  assert(move_get_dir(m1) == move_get_dir(m2));
+  assert(within_epsilon(move_get_equity(m1), move_get_equity(m2)));
+  int tiles_length = move_get_tiles_length(m1);
+  for (int i = 0; i < tiles_length; i++) {
+    assert(move_get_tile(m1, i) == move_get_tile(m2, i));
+  }
+}
+
+void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
+                                   int max_plies) {
+  assert(simmed_play_get_id(sp1) == simmed_play_get_id(sp2));
+  assert(simmed_play_get_ignore(sp1) == simmed_play_get_ignore(sp2));
+  assert_moves_are_equal(simmed_play_get_move(sp1), simmed_play_get_move(sp2));
+
+  for (int i = 0; i < max_plies; i++) {
+    assert_stats_are_equal(simmed_play_get_score_stat(sp1, i),
+                           simmed_play_get_score_stat(sp2, i));
+    assert_stats_are_equal(simmed_play_get_bingo_stat(sp1, i),
+                           simmed_play_get_bingo_stat(sp2, i));
+  }
+
+  assert_stats_are_equal(simmed_play_get_equity_stat(sp1),
+                         simmed_play_get_equity_stat(sp2));
+  assert_stats_are_equal(simmed_play_get_win_pct_stat(sp1),
+                         simmed_play_get_win_pct_stat(sp2));
+}
+
+// NOT THREAD SAFE
+void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
+  sim_results_sort_plays_by_win_rate(sr1);
+  sim_results_sort_plays_by_win_rate(sr2);
+  assert(sim_results_get_max_plies(sr1) == sim_results_get_max_plies(sr2));
+  assert(sim_results_get_number_of_plays(sr1) ==
+         sim_results_get_number_of_plays(sr2));
+  assert(sim_results_get_iteration_count(sr1) ==
+         sim_results_get_iteration_count(sr2));
+  assert(within_epsilon(sim_results_get_zval(sr1), sim_results_get_zval(sr2)));
+  assert(sim_results_get_node_count(sr1) == sim_results_get_node_count(sr2));
+  for (int i = 0; i < sim_results_get_number_of_plays(sr1); i++) {
+    assert_simmed_plays_are_equal(sim_results_get_simmed_play(sr1, i),
+                                  sim_results_get_simmed_play(sr2, i),
+                                  sim_results_get_max_plies(sr1));
+  }
+}
