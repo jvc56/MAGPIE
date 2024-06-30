@@ -17,8 +17,8 @@
 #include "test_util.h"
 
 void assert_stats_are_equal(Stat *s1, Stat *s2) {
-  assert(stat_get_weight(s1) == stat_get_weight(s2));
-  assert(stat_get_cardinality(s1) == stat_get_cardinality(s2));
+  assert(stat_get_num_samples(s1) == stat_get_num_samples(s2));
+  assert(stat_get_num_unique_samples(s1) == stat_get_num_unique_samples(s2));
   assert(within_epsilon(stat_get_mean(s1), stat_get_mean(s2)));
   assert(within_epsilon(stat_get_stdev(s1), stat_get_stdev(s2)));
 }

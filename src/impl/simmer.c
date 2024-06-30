@@ -8,6 +8,7 @@
 
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/math_util_defs.h"
 #include "../def/move_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
@@ -81,7 +82,11 @@ Simmer *simmer_create(const SimArgs *args, Game *game, int num_simmed_plays,
   simmer->initial_spread =
       player_get_score(player) - player_get_score(opponent);
   simmer->max_iterations = args->max_iterations;
-  simmer->zval = p_to_z(args->stop_cond_pct);
+  if (args->stop_cond_pct > PERCENTILE_MAX) {
+    simmer->zval = p_to_z(PERCENTILE_MAX) + 10;
+  } else {
+    simmer->zval = p_to_z(args->stop_cond_pct);
+  }
   simmer->threads = thread_control_get_threads(thread_control);
   pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
 
@@ -117,7 +122,6 @@ Simmer *simmer_create(const SimArgs *args, Game *game, int num_simmed_plays,
                     args->num_plies, simmer->zval);
 
   simmer->sim_results = sim_results;
-
   return simmer;
 }
 
@@ -257,7 +261,7 @@ bool plays_are_similar(const SimmedPlay *m1, const SimmedPlay *m2,
 bool is_multithreaded(const Simmer *simmer) { return simmer->threads > 1; }
 
 bool handle_potential_stopping_condition(Simmer *simmer) {
-  bool use_stopping_cond = simmer->zval < 100;
+  bool use_stopping_cond = is_z_valid(simmer->zval);
   SimResults *sim_results = simmer->sim_results;
   int number_of_plays = sim_results_get_number_of_plays(sim_results);
   int total_ignored = 0;
@@ -270,9 +274,8 @@ bool handle_potential_stopping_condition(Simmer *simmer) {
 
   const SimmedPlay *tentative_winner =
       sim_results_get_simmed_play(sim_results, 0);
-  double mu = stat_get_mean(simmed_play_get_win_pct_stat(tentative_winner));
-  double std_error = stat_get_stderr(
-      simmed_play_get_win_pct_stat(tentative_winner), simmer->zval);
+  const Stat *tentative_winner_stat =
+      simmed_play_get_win_pct_stat(tentative_winner);
 
   for (int i = 1; i < number_of_plays; i++) {
     SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
@@ -280,11 +283,11 @@ bool handle_potential_stopping_condition(Simmer *simmer) {
       total_ignored++;
       continue;
     }
-    double mu_i = stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
-    double std_error_i = stat_get_stderr(
-        simmed_play_get_win_pct_stat(simmed_play), simmer->zval);
+    const Stat *simmed_play_stat = simmed_play_get_win_pct_stat(simmed_play);
 
-    if ((use_stopping_cond && (mu - std_error) > (mu_i + std_error_i)) ||
+    if ((use_stopping_cond &&
+         stats_is_greater_than(tentative_winner_stat, simmed_play_stat,
+                               simmer->zval)) ||
         (sim_results_get_iteration_count(sim_results) >
              SIMILAR_PLAYS_ITER_CUTOFF &&
          plays_are_similar(tentative_winner, simmed_play, simmer))) {

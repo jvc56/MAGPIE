@@ -15,6 +15,4 @@ typedef enum {
   PLAYS_IDENTICAL,
 } similar_plays_t;
 
-#define STOP_COND_NONE 200.0;
-
 #endif

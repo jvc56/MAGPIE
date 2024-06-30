@@ -28,8 +28,8 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
 
 AutoplayResults *autoplay_results_create(void) {
   AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
-  autoplay_results->p1_score = stat_create();
-  autoplay_results->p2_score = stat_create();
+  autoplay_results->p1_score = stat_create(true);
+  autoplay_results->p2_score = stat_create(true);
   autoplay_results_reset(autoplay_results);
   return autoplay_results;
 }
