@@ -94,9 +94,9 @@ double stat_get_margin_of_error(const Stat *stat, double zval) {
 double stats_get_welch_t(const Stat *stat1, const Stat *stat2) {
   double mean1 = stat_get_mean(stat1);
   double mean2 = stat_get_mean(stat2);
-  double stderr1 = stat_get_sem(stat1);
-  double stderr2 = stat_get_sem(stat2);
-  return (mean1 - mean2) / sqrt(stderr1 * stderr1 + stderr2 * stderr2);
+  double sem1 = stat_get_sem(stat1);
+  double sem2 = stat_get_sem(stat2);
+  return (mean1 - mean2) / sqrt(sem1 * sem1 + sem2 * sem2);
 }
 
 // Returns true if stat1 is greater than stat2

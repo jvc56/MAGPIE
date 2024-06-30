@@ -216,8 +216,7 @@ void macondo_tests(void) {
   rack_set_to_string(ld, player_get_rack(player), "DDESW??");
   // Have the opponent draw any 7 tiles to prevent exchanges
   // from being generated
-  draw_at_most_to_rack(game_get_bag(game),
-                       player_get_rack(game_get_player(game, 1)), RACK_SIZE, 1);
+  draw_to_full_rack(game, 1);
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 8285);
   assert(count_nonscoring_plays(move_list) == 1);
@@ -292,8 +291,7 @@ void macondo_tests(void) {
   rack_set_to_string(ld, player_get_rack(player), "V");
   // Have the opponent draw any 7 tiles to prevent exchanges
   // from being generated
-  draw_at_most_to_rack(game_get_bag(game),
-                       player_get_rack(game_get_player(game, 1)), RACK_SIZE, 1);
+  draw_to_full_rack(game, 1);
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 0);
   assert(count_nonscoring_plays(move_list) == 1);

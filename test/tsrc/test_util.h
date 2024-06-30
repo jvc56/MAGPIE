@@ -10,6 +10,7 @@
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
+#include "../../src/ent/sim_results.h"
 #include "../../src/ent/validated_move.h"
 
 #include "../../src/impl/config.h"
@@ -24,8 +25,6 @@ typedef struct SortedMoveList {
 
 uint64_t string_to_cross_set(const LetterDistribution *ld, const char *letters);
 char *cross_set_to_string(const LetterDistribution *ld, uint64_t input);
-void draw_rack_to_string(const LetterDistribution *ld, Bag *bag, Rack *rack,
-                         char *letters, int player_index);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *sorted_move_list_create(MoveList *ml);
 void sorted_move_list_destroy(SortedMoveList *sorted_move_list);
@@ -76,4 +75,7 @@ ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
                                               bool allow_playthrough);
 void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
                              bool write_player_on_turn_first);
+void assert_stats_are_equal(const Stat *s1, const Stat *s2);
+void assert_sim_results_equal(SimResults *sr1, SimResults *sr2);
+
 #endif

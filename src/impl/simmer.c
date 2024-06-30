@@ -311,13 +311,13 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
 
   ThreadControlIterOutput iter_output;
   thread_control_get_next_iter_output(simmer->thread_control, &iter_output);
+  // This will shuffle the bag, so there is no need
+  // to call bag_shuffle explicitly.
   game_seed(game, iter_output.seed);
 
+  int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
   // set random rack for opponent (throw in rack, bag_shuffle, draw new tiles).
-  set_random_rack(game, 1 - game_get_player_on_turn_index(game),
-                  simmer->known_opp_rack);
-  Bag *bag = game_get_bag(game);
-  bag_shuffle(bag);
+  set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
 
   for (int i = 0; i < number_of_plays; i++) {
     SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, i);
@@ -368,13 +368,15 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
         simmer->win_pcts, simmed_play, spread, leftover,
         game_get_game_end_reason(game),
         // number of tiles unseen to us: bag tiles + tiles on opp rack.
-        bag_get_tiles(bag) +
+        bag_get_tiles(game_get_bag(game)) +
             rack_get_total_letters(player_get_rack(
                 game_get_player(game, 1 - simmer->initial_player))),
         plies % 2, is_multithreaded(simmer));
     // reset to first state. we only need to restore one backup.
     game_unplay_last_move(game);
   }
+
+  return_rack_to_bag(game, player_off_turn_index);
 }
 
 void *simmer_worker(void *uncasted_simmer_worker) {
@@ -473,6 +475,7 @@ sim_status_t simulate_internal(const SimArgs *args, Game *game,
 sim_status_t simulate(const SimArgs *args, SimResults *sim_results) {
   ThreadControl *thread_control = args->thread_control;
   thread_control_unhalt(thread_control);
+  thread_control_reset_iter_count(thread_control);
 
   Timer *timer = thread_control_get_timer(thread_control);
   mtimer_start(timer);

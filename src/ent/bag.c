@@ -53,7 +53,8 @@ void bag_reset(const LetterDistribution *ld, Bag *bag) {
   int tile_index = 0;
   int ld_size = ld_get_size(ld);
   for (int i = 0; i < ld_size; i++) {
-    for (int k = 0; k < ld_get_dist(ld, i); k++) {
+    int num_tiles = ld_get_dist(ld, i);
+    for (int k = 0; k < num_tiles; k++) {
       bag->tiles[tile_index] = i;
       tile_index++;
     }
@@ -63,7 +64,31 @@ void bag_reset(const LetterDistribution *ld, Bag *bag) {
   bag_shuffle(bag);
 }
 
-void bag_seed(Bag *bag, uint64_t seed) { prng_seed(bag->prng, seed); }
+// Sorts the bag in alphabetical order
+void bag_alphabetize(Bag *bag) {
+  int tiles_count[MAX_ALPHABET_SIZE];
+  for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
+    tiles_count[i] = 0;
+  }
+  for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
+    tiles_count[bag->tiles[i]]++;
+  }
+  int tile_index = bag->start_tile_index;
+  for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
+    for (int k = 0; k < tiles_count[i]; k++) {
+      bag->tiles[tile_index] = i;
+      tile_index++;
+    }
+  }
+}
+
+// Seeds the bag, orders the bag alphabetically, then shuffles
+// using the seed.
+void bag_seed(Bag *bag, uint64_t seed) {
+  prng_seed(bag->prng, seed);
+  bag_alphabetize(bag);
+  bag_shuffle(bag);
+}
 
 Bag *bag_create(const LetterDistribution *ld) {
   Bag *bag = malloc_or_die(sizeof(Bag));

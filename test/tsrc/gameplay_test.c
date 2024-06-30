@@ -16,16 +16,12 @@
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 
+#include "test_constants.h"
 #include "test_util.h"
 
 void return_racks_to_bag(Game *game) {
-  Bag *bag = game_get_bag(game);
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
-  Rack *player0_rack = player_get_rack(player0);
-  Rack *player1_rack = player_get_rack(player1);
-  return_rack_to_bag(player0_rack, bag, game_get_player_draw_index(game, 0));
-  return_rack_to_bag(player1_rack, bag, game_get_player_draw_index(game, 1));
+  return_rack_to_bag(game, 0);
+  return_rack_to_bag(game, 1);
 }
 
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
@@ -49,21 +45,14 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
 
     int player_on_turn_index = game_get_player_on_turn_index(actual_game);
     int opponent_index = 1 - player_on_turn_index;
-    Player *player_on_turn = game_get_player(actual_game, player_on_turn_index);
-    Player *opponent = game_get_player(actual_game, 1 - player_on_turn_index);
-    Rack *player_on_turn_rack = player_get_rack(player_on_turn);
-    Rack *opponent_rack = player_get_rack(opponent);
 
-    draw_rack_to_string(ld, bag, player_on_turn_rack, racks[i],
-                        player_on_turn_index);
+    draw_rack_string_from_bag(actual_game, player_on_turn_index, racks[i]);
     // If it's the last turn, have the opponent draw the remaining tiles
     // so the end of actual_game subtractions are correct. If the bag has less
     // than RACK_SIZE tiles, have the opponent draw the remaining tiles
     // so the endgame adjustments are added to the move equity values.
     if (i == array_length - 1 || bag_get_tiles(bag) < RACK_SIZE) {
-      draw_at_most_to_rack(
-          bag, opponent_rack, RACK_SIZE,
-          game_get_player_draw_index(actual_game, opponent_index));
+      draw_to_full_rack(actual_game, opponent_index);
     }
 
     Player *player0 = game_get_player(actual_game, 0);
@@ -117,79 +106,78 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
   game_destroy(expected_game);
 }
 
-void test_draw_at_most_to_rack(void) {
+void test_draw_to_full_rack(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
-  const LetterDistribution *ld = config_get_ld(config);
-  int ld_size = ld_get_size(ld);
-  Bag *bag = bag_create(ld);
-  Rack *rack = rack_create(ld_size);
-
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  Game *game = config_get_game(config);
+  Bag *bag = game_get_bag(game);
   // Check drawing from the bag
-  int drawing_player = 0;
+  int drawing_player_index = 0;
   int number_of_remaining_tiles = bag_get_tiles(bag);
-
+  Rack *rack;
   while (bag_get_tiles(bag) > RACK_SIZE) {
-    draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
-    drawing_player = 1 - drawing_player;
+    draw_to_full_rack(game, drawing_player_index);
+    rack = player_get_rack(game_get_player(game, drawing_player_index));
     number_of_remaining_tiles -= RACK_SIZE;
     assert(!rack_is_empty(rack));
     assert(rack_get_total_letters(rack) == RACK_SIZE);
     rack_reset(rack);
+    drawing_player_index = 1 - drawing_player_index;
   }
 
-  draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
+  draw_to_full_rack(game, drawing_player_index);
+  rack = player_get_rack(game_get_player(game, drawing_player_index));
   assert(bag_is_empty(bag));
   assert(!rack_is_empty(rack));
   assert(rack_get_total_letters(rack) == number_of_remaining_tiles);
   rack_reset(rack);
 
-  bag_destroy(bag);
-  rack_destroy(rack);
   config_destroy(config);
 }
 
 void test_rack_is_drawable(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   const LetterDistribution *ld = config_get_ld(config);
-  int ld_size = ld_get_size(ld);
-  Bag *bag = bag_create(ld);
-  Bag *empty_bag = bag_duplicate(bag);
-
-  int number_of_letters = bag_get_tiles(empty_bag);
-  for (int i = 0; i < number_of_letters; i++) {
-    bag_draw_random_letter(empty_bag, 0);
-  }
-
-  Rack *rack = rack_create(ld_size);
-  Rack *rack_to_draw = rack_create(ld_size);
+  Game *game = config_get_game(config);
+  Bag *bag = game_get_bag(game);
+  Rack *rack = rack_create(ld_get_size(ld));
+  Rack *rack_to_draw = rack_create(ld_get_size(ld));
 
   // Just bag nonempty
-  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
-  assert(rack_is_drawable(bag, rack, rack_to_draw));
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVW");
+  assert(rack_is_drawable(game, 0, rack_to_draw));
 
-  rack_set_to_string(ld, rack_to_draw, "UUUZVVWZ");
-  assert(!rack_is_drawable(bag, rack, rack_to_draw));
+  rack_set_to_string(ld, rack_to_draw, "UUZVVWZ");
+  assert(!rack_is_drawable(game, 0, rack_to_draw));
+
+  int number_of_letters = bag_get_tiles(bag);
+  for (int i = 0; i < number_of_letters; i++) {
+    bag_draw_random_letter(bag, 0);
+  }
 
   // Just rack nonempty
-  rack_set_to_string(ld, rack, "UUUUVVWZ");
-  rack_set_to_string(ld, rack_to_draw, "UUUUVWZ");
-  assert(rack_is_drawable(empty_bag, rack, rack_to_draw));
+  rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "UUUUVVW");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVW");
+  assert(rack_is_drawable(game, 0, rack_to_draw));
 
-  rack_set_to_string(ld, rack, "UUVVWZ");
+  rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "UUVVWZ");
   rack_set_to_string(ld, rack_to_draw, "UUUZVVWZ");
-  assert(!rack_is_drawable(empty_bag, rack, rack_to_draw));
+  assert(!rack_is_drawable(game, 0, rack_to_draw));
 
   // Both rack and bag nonempty
 
+  game_reset(game);
+
   bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "V"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
-  rack_set_to_string(ld, rack, "UUVZ");
-  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
-  assert(rack_is_drawable(bag, rack, rack_to_draw));
+  rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "UUVW");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVW");
+  assert(rack_is_drawable(game, 0, rack_to_draw));
 
   bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
@@ -197,11 +185,10 @@ void test_rack_is_drawable(void) {
   bag_draw_letter(bag, ld_hl_to_ml(ld, "V"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
   rack_set_to_string(ld, rack, "UUVZ");
+  draw_rack_from_bag(game, 0, rack);
   rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
-  assert(!rack_is_drawable(bag, rack, rack_to_draw));
+  assert(!rack_is_drawable(game, 0, rack_to_draw));
 
-  bag_destroy(bag);
-  bag_destroy(empty_bag);
   rack_destroy(rack);
   rack_destroy(rack_to_draw);
   config_destroy(config);
@@ -442,7 +429,7 @@ void test_playmove(void) {
   Rack *player1_rack = player_get_rack(player1);
 
   // Test play
-  draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
+  draw_rack_string_from_bag(game, 0, "DEKNRTY");
   play_top_n_equity_move(game, 0);
 
   assert(game_get_consecutive_scoreless_turns(game) == 0);
@@ -462,7 +449,7 @@ void test_playmove(void) {
   game_reset(game);
 
   // Test exchange
-  draw_rack_to_string(ld, bag, player0_rack, "UUUVVWW", 0);
+  draw_rack_string_from_bag(game, 0, "UUUVVWW");
   play_top_n_equity_move(game, 0);
 
   assert(game_get_consecutive_scoreless_turns(game) == 1);
@@ -484,10 +471,8 @@ void test_playmove(void) {
       game, "15/15/12F2/11TROW/4V3EWE1A2/2iNAURATE1TIP1/4L1AAH2EM1B/"
             "3PAIGLE2X1TO/2JANN4FAQIR/4C2MOKES1ZO/4EBIoNISE2U/2ODDITY1R1S2G/"
             "1DUI1EALE3YEH/CODGER2LOTIONS/9RIN3 / 517/349 5 lex CSW21;");
-  draw_at_most_to_rack(bag, player0_rack, 1,
-                       game_get_player_draw_index(game, 0));
-  draw_at_most_to_rack(bag, player1_rack, 1,
-                       game_get_player_draw_index(game, 1));
+  rack_add_letter(player_get_rack(player0), bag_draw_random_letter(bag, 0));
+  rack_add_letter(player_get_rack(player1), bag_draw_random_letter(bag, 1));
 
   int player0_score = player_get_score(player0);
   int player1_score = player_get_score(player1);
@@ -534,7 +519,7 @@ void test_set_random_rack(void) {
 
   assert(bag_get_tiles(bag) == 100);
   // draw some random rack.
-  draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
+  draw_rack_string_from_bag(game, 0, "DEKNRTY");
   assert(bag_get_tiles(bag) == 93);
 
   set_random_rack(game, 0, NULL);
@@ -580,13 +565,12 @@ void test_backups(void) {
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
 
-  Rack *player0_rack = player_get_rack(player0);
   Rack *player1_rack = player_get_rack(player1);
 
   // draw some random rack.
-  draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
+  draw_rack_string_from_bag(game, 0, "DEKNRTY");
 
-  draw_rack_to_string(ld, bag, player1_rack, "AOQRTUZ", 1);
+  draw_rack_string_from_bag(game, 1, "AOQRTUZ");
   assert(bag_get_tiles(bag) == 86);
 
   // backup
@@ -621,7 +605,7 @@ void test_backups(void) {
 }
 
 void test_gameplay(void) {
-  test_draw_at_most_to_rack();
+  test_draw_to_full_rack();
   test_rack_is_drawable();
   test_playmove();
   test_six_exchanges_game();

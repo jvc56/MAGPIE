@@ -116,13 +116,10 @@ cgp_parse_status_t parse_cgp_board(Game *game, const char *cgp_board) {
 cgp_parse_status_t
 parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
                                      Game *game) {
-  const LetterDistribution *ld = game_get_ld(game);
-  Bag *bag = game_get_bag(game);
   for (int player_index = 0; player_index < 2; player_index++) {
     int number_of_letters_added = draw_rack_string_from_bag(
-        ld, bag, player_get_rack(game_get_player(game, player_index)),
-        string_splitter_get_item(player_racks, player_index),
-        game_get_player_draw_index(game, player_index));
+        game, player_index,
+        string_splitter_get_item(player_racks, player_index));
     if (number_of_letters_added == -1) {
       return CGP_PARSE_STATUS_MALFORMED_RACK_LETTERS;
     }

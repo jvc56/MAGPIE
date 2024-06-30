@@ -420,6 +420,9 @@ void game_reset(Game *game) {
   game->backup_cursor = 0;
 }
 
+// Sets the bag state with the given seed, ensuring the
+// next iteration will be consistent. Any leftover random
+// racks should be returned before calling this function.
 void game_seed(Game *game, uint64_t seed) { bag_seed(game->bag, seed); }
 
 // This assumes the game has not started yet.

@@ -75,8 +75,8 @@ void play_autoplay_game(Game *game, MoveList *move_list,
                         AutoplayResults *autoplay_results,
                         int starting_player_index, int thread_index,
                         uint64_t seed) {
-  game_seed(game, seed);
   game_reset(game);
+  game_seed(game, seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (!game_over(game)) {
