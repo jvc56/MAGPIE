@@ -376,7 +376,6 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
     game_unplay_last_move(game);
   }
 
-  // FIXME: gameplay should really take more Game and less Bag/Rack args.
   return_rack_to_bag(game, player_off_turn_index);
 }
 

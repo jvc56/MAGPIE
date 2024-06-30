@@ -221,19 +221,6 @@ void load_cgp_or_die(Game *game, const char *cgp) {
   }
 }
 
-// FIXME: use other function
-void draw_rack_to_string(const LetterDistribution *ld, Bag *bag, Rack *rack,
-                         char *letters, int player_index) {
-
-  uint8_t mls[MAX_BAG_SIZE];
-  int num_mls = ld_str_to_mls(ld, letters, false, mls, MAX_BAG_SIZE);
-  for (int i = 0; i < num_mls; i++) {
-    // For tests we assume that player_index == player_draw_index
-    // since starting_player_index will always be 0.
-    draw_letter_to_rack(bag, rack, mls[i], player_index);
-  }
-}
-
 int count_newlines(const char *str) {
   int count = 0;
 

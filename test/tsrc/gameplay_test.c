@@ -45,11 +45,8 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
 
     int player_on_turn_index = game_get_player_on_turn_index(actual_game);
     int opponent_index = 1 - player_on_turn_index;
-    Player *player_on_turn = game_get_player(actual_game, player_on_turn_index);
-    Rack *player_on_turn_rack = player_get_rack(player_on_turn);
 
-    draw_rack_to_string(ld, bag, player_on_turn_rack, racks[i],
-                        player_on_turn_index);
+    draw_rack_string_from_bag(actual_game, player_on_turn_index, racks[i]);
     // If it's the last turn, have the opponent draw the remaining tiles
     // so the end of actual_game subtractions are correct. If the bag has less
     // than RACK_SIZE tiles, have the opponent draw the remaining tiles
@@ -432,7 +429,7 @@ void test_playmove(void) {
   Rack *player1_rack = player_get_rack(player1);
 
   // Test play
-  draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
+  draw_rack_string_from_bag(game, 0, "DEKNRTY");
   play_top_n_equity_move(game, 0);
 
   assert(game_get_consecutive_scoreless_turns(game) == 0);
@@ -452,7 +449,7 @@ void test_playmove(void) {
   game_reset(game);
 
   // Test exchange
-  draw_rack_to_string(ld, bag, player0_rack, "UUUVVWW", 0);
+  draw_rack_string_from_bag(game, 0, "UUUVVWW");
   play_top_n_equity_move(game, 0);
 
   assert(game_get_consecutive_scoreless_turns(game) == 1);
@@ -522,7 +519,7 @@ void test_set_random_rack(void) {
 
   assert(bag_get_tiles(bag) == 100);
   // draw some random rack.
-  draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
+  draw_rack_string_from_bag(game, 0, "DEKNRTY");
   assert(bag_get_tiles(bag) == 93);
 
   set_random_rack(game, 0, NULL);
@@ -568,13 +565,12 @@ void test_backups(void) {
   Player *player0 = game_get_player(game, 0);
   Player *player1 = game_get_player(game, 1);
 
-  Rack *player0_rack = player_get_rack(player0);
   Rack *player1_rack = player_get_rack(player1);
 
   // draw some random rack.
-  draw_rack_to_string(ld, bag, player0_rack, "DEKNRTY", 0);
+  draw_rack_string_from_bag(game, 0, "DEKNRTY");
 
-  draw_rack_to_string(ld, bag, player1_rack, "AOQRTUZ", 1);
+  draw_rack_string_from_bag(game, 1, "AOQRTUZ");
   assert(bag_get_tiles(bag) == 86);
 
   // backup

@@ -212,15 +212,3 @@ int bag_get_letter(const Bag *bag, uint8_t ml) {
   }
   return sum;
 }
-
-// FIXME: remove
-char *bag_get_inorder_string(const Bag *bag) {
-  char *str = malloc_or_die(sizeof(char) *
-                            (bag->end_tile_index - bag->start_tile_index + 1));
-  int index = 0;
-  for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
-    str[index++] = bag->tiles[i] + 'A' - 1;
-  }
-  str[index] = '\0';
-  return str;
-}

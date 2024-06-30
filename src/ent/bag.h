@@ -25,7 +25,5 @@ uint8_t bag_draw_random_letter(Bag *bag, int player_draw_index);
 void bag_seed(Bag *bag, uint64_t seed);
 void bag_reset(const LetterDistribution *ld, Bag *bag);
 void bag_shuffle(Bag *bag);
-// FIXME: remove
-char *bag_get_inorder_string(const Bag *bag);
 
 #endif
