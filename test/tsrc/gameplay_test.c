@@ -46,9 +46,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     int player_on_turn_index = game_get_player_on_turn_index(actual_game);
     int opponent_index = 1 - player_on_turn_index;
     Player *player_on_turn = game_get_player(actual_game, player_on_turn_index);
-    Player *opponent = game_get_player(actual_game, 1 - player_on_turn_index);
     Rack *player_on_turn_rack = player_get_rack(player_on_turn);
-    Rack *opponent_rack = player_get_rack(opponent);
 
     draw_rack_to_string(ld, bag, player_on_turn_rack, racks[i],
                         player_on_turn_index);
@@ -57,9 +55,7 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
     // than RACK_SIZE tiles, have the opponent draw the remaining tiles
     // so the endgame adjustments are added to the move equity values.
     if (i == array_length - 1 || bag_get_tiles(bag) < RACK_SIZE) {
-      draw_at_most_to_rack(
-          bag, opponent_rack, RACK_SIZE,
-          game_get_player_draw_index(actual_game, opponent_index));
+      draw_to_full_rack(actual_game, opponent_index);
     }
 
     Player *player0 = game_get_player(actual_game, 0);
@@ -113,35 +109,33 @@ void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
   game_destroy(expected_game);
 }
 
-void test_draw_at_most_to_rack(void) {
+void test_draw_to_full_rack(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
-  const LetterDistribution *ld = config_get_ld(config);
-  int ld_size = ld_get_size(ld);
-  Bag *bag = bag_create(ld);
-  Rack *rack = rack_create(ld_size);
-
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  Game *game = config_get_game(config);
+  Bag *bag = game_get_bag(game);
   // Check drawing from the bag
-  int drawing_player = 0;
+  int drawing_player_index = 0;
   int number_of_remaining_tiles = bag_get_tiles(bag);
-
+  Rack *rack;
   while (bag_get_tiles(bag) > RACK_SIZE) {
-    draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
-    drawing_player = 1 - drawing_player;
+    draw_to_full_rack(game, drawing_player_index);
+    rack = player_get_rack(game_get_player(game, drawing_player_index));
     number_of_remaining_tiles -= RACK_SIZE;
     assert(!rack_is_empty(rack));
     assert(rack_get_total_letters(rack) == RACK_SIZE);
     rack_reset(rack);
+    drawing_player_index = 1 - drawing_player_index;
   }
 
-  draw_at_most_to_rack(bag, rack, RACK_SIZE, drawing_player);
+  draw_to_full_rack(game, drawing_player_index);
+  rack = player_get_rack(game_get_player(game, drawing_player_index));
   assert(bag_is_empty(bag));
   assert(!rack_is_empty(rack));
   assert(rack_get_total_letters(rack) == number_of_remaining_tiles);
   rack_reset(rack);
 
-  bag_destroy(bag);
-  rack_destroy(rack);
   config_destroy(config);
 }
 
@@ -480,10 +474,8 @@ void test_playmove(void) {
       game, "15/15/12F2/11TROW/4V3EWE1A2/2iNAURATE1TIP1/4L1AAH2EM1B/"
             "3PAIGLE2X1TO/2JANN4FAQIR/4C2MOKES1ZO/4EBIoNISE2U/2ODDITY1R1S2G/"
             "1DUI1EALE3YEH/CODGER2LOTIONS/9RIN3 / 517/349 5 lex CSW21;");
-  draw_at_most_to_rack(bag, player0_rack, 1,
-                       game_get_player_draw_index(game, 0));
-  draw_at_most_to_rack(bag, player1_rack, 1,
-                       game_get_player_draw_index(game, 1));
+  rack_add_letter(player_get_rack(player0), bag_draw_random_letter(bag, 0));
+  rack_add_letter(player_get_rack(player1), bag_draw_random_letter(bag, 1));
 
   int player0_score = player_get_score(player0);
   int player1_score = player_get_score(player1);
@@ -617,7 +609,7 @@ void test_backups(void) {
 }
 
 void test_gameplay(void) {
-  test_draw_at_most_to_rack();
+  test_draw_to_full_rack();
   test_rack_is_drawable();
   test_playmove();
   test_six_exchanges_game();

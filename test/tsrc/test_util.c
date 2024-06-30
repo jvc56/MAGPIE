@@ -221,6 +221,7 @@ void load_cgp_or_die(Game *game, const char *cgp) {
   }
 }
 
+// FIXME: use other function
 void draw_rack_to_string(const LetterDistribution *ld, Bag *bag, Rack *rack,
                          char *letters, int player_index) {
 
