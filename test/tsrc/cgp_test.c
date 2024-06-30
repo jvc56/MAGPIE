@@ -53,18 +53,13 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
          MOVE_VALIDATION_STATUS_SUCCESS);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   const Move *move = validated_moves_get_move(vms, 0);
-  Player *player = game_get_player(game, game_get_player_on_turn_index(game));
-  Rack *player_rack = player_get_rack(player);
-  const int player_draw_index = player_get_index(player);
-  const LetterDistribution *ld = game_get_ld(game);
-  Bag *bag = game_get_bag(game);
+  int player_on_turn_index = game_get_player_on_turn_index(game);
   play_move(move, game, NULL);
 
   // Return the random rack to the bag and then draw
   // the rack specified by the caller.
-  return_rack_to_bag(player_rack, bag, player_draw_index);
-  draw_rack_string_from_bag(ld, bag, player_rack, rack_string,
-                            player_draw_index);
+  return_rack_to_bag(game, player_on_turn_index);
+  draw_rack_string_from_bag(game, player_on_turn_index, rack_string);
 
   assert_game_matches_cgp(game, expected_cgp, write_player_on_turn_first);
   validated_moves_destroy(vms);

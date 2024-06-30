@@ -253,9 +253,6 @@ void test_play_similarity(void) {
 }
 
 void test_sim(void) {
-  // FIXME:
-  test_sim_consistency();
-  return;
   test_p_to_z();
   test_win_pct();
   test_sim_error_cases();
@@ -263,4 +260,5 @@ void test_sim(void) {
   test_more_iterations();
   test_play_similarity();
   perf_test_multithread_sim();
+  test_sim_consistency();
 }

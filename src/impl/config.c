@@ -627,12 +627,9 @@ void execute_set_rack(Config *config) {
       CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG, new_rack);
 
   if (error_status_get_success(config->error_status)) {
-    Bag *bag = game_get_bag(config->game);
-    if (rack_is_drawable(bag, player_rack, new_rack)) {
-      int player_draw_index =
-          game_get_player_draw_index(config->game, player_index);
-      return_rack_to_bag(player_rack, bag, player_draw_index);
-      if (!draw_rack_from_bag(bag, player_rack, new_rack, player_draw_index)) {
+    if (rack_is_drawable(config->game, player_index, new_rack)) {
+      return_rack_to_bag(config->game, player_index);
+      if (!draw_rack_from_bag(config->game, player_index, new_rack)) {
         log_fatal("failed to draw rack from bag in set rack command");
       }
     } else {

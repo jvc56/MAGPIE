@@ -16,16 +16,12 @@
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/gameplay.h"
 
+#include "test_constants.h"
 #include "test_util.h"
 
 void return_racks_to_bag(Game *game) {
-  Bag *bag = game_get_bag(game);
-  Player *player0 = game_get_player(game, 0);
-  Player *player1 = game_get_player(game, 1);
-  Rack *player0_rack = player_get_rack(player0);
-  Rack *player1_rack = player_get_rack(player1);
-  return_rack_to_bag(player0_rack, bag, game_get_player_draw_index(game, 0));
-  return_rack_to_bag(player1_rack, bag, game_get_player_draw_index(game, 1));
+  return_rack_to_bag(game, 0);
+  return_rack_to_bag(game, 1);
 }
 
 void test_gameplay_by_turn(const Config *config, char *cgps[], char *racks[],
@@ -152,44 +148,45 @@ void test_draw_at_most_to_rack(void) {
 void test_rack_is_drawable(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   const LetterDistribution *ld = config_get_ld(config);
-  int ld_size = ld_get_size(ld);
-  Bag *bag = bag_create(ld);
-  Bag *empty_bag = bag_duplicate(bag);
-
-  int number_of_letters = bag_get_tiles(empty_bag);
-  for (int i = 0; i < number_of_letters; i++) {
-    bag_draw_random_letter(empty_bag, 0);
-  }
-
-  Rack *rack = rack_create(ld_size);
-  Rack *rack_to_draw = rack_create(ld_size);
+  Game *game = config_get_game(config);
+  Bag *bag = game_get_bag(game);
+  Rack *rack = rack_create(ld_get_size(ld));
+  Rack *rack_to_draw = rack_create(ld_get_size(ld));
 
   // Just bag nonempty
-  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
-  assert(rack_is_drawable(bag, rack, rack_to_draw));
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVW");
+  assert(rack_is_drawable(game, 0, rack_to_draw));
 
-  rack_set_to_string(ld, rack_to_draw, "UUUZVVWZ");
-  assert(!rack_is_drawable(bag, rack, rack_to_draw));
+  rack_set_to_string(ld, rack_to_draw, "UUZVVWZ");
+  assert(!rack_is_drawable(game, 0, rack_to_draw));
+
+  int number_of_letters = bag_get_tiles(bag);
+  for (int i = 0; i < number_of_letters; i++) {
+    bag_draw_random_letter(bag, 0);
+  }
 
   // Just rack nonempty
-  rack_set_to_string(ld, rack, "UUUUVVWZ");
-  rack_set_to_string(ld, rack_to_draw, "UUUUVWZ");
-  assert(rack_is_drawable(empty_bag, rack, rack_to_draw));
+  rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "UUUUVVW");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVW");
+  assert(rack_is_drawable(game, 0, rack_to_draw));
 
-  rack_set_to_string(ld, rack, "UUVVWZ");
+  rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "UUVVWZ");
   rack_set_to_string(ld, rack_to_draw, "UUUZVVWZ");
-  assert(!rack_is_drawable(empty_bag, rack, rack_to_draw));
+  assert(!rack_is_drawable(game, 0, rack_to_draw));
 
   // Both rack and bag nonempty
 
+  game_reset(game);
+
   bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "V"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
-  rack_set_to_string(ld, rack, "UUVZ");
-  rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
-  assert(rack_is_drawable(bag, rack, rack_to_draw));
+  rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "UUVW");
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVW");
+  assert(rack_is_drawable(game, 0, rack_to_draw));
 
   bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
@@ -197,11 +194,10 @@ void test_rack_is_drawable(void) {
   bag_draw_letter(bag, ld_hl_to_ml(ld, "V"), 0);
   bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
   rack_set_to_string(ld, rack, "UUVZ");
+  draw_rack_from_bag(game, 0, rack);
   rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
-  assert(!rack_is_drawable(bag, rack, rack_to_draw));
+  assert(!rack_is_drawable(game, 0, rack_to_draw));
 
-  bag_destroy(bag);
-  bag_destroy(empty_bag);
   rack_destroy(rack);
   rack_destroy(rack_to_draw);
   config_destroy(config);

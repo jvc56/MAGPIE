@@ -158,31 +158,11 @@ void draw_at_most_to_rack(Bag *bag, Rack *rack, int n, int player_draw_index) {
   }
 }
 
-// Draws a nonrandom set of letters specified by rack_string from the
-// bag to the rack. Assumes the rack is empty.
-// Returns number of letters drawn on success
-// Returns -1 if the string was malformed.
-// Returns -2 if the tiles were not in the bag.
-int draw_rack_string_from_bag(const LetterDistribution *ld, Bag *bag,
-                              Rack *rack, const char *rack_string,
-                              int player_draw_index) {
-  const int number_of_letters_set = rack_set_to_string(ld, rack, rack_string);
-  const int dist_size = rack_get_dist_size(rack);
-  for (int i = 0; i < dist_size; i++) {
-    const int rack_number_of_letter = rack_get_letter(rack, i);
-    for (int j = 0; j < rack_number_of_letter; j++) {
-      if (!bag_draw_letter(bag, i, player_draw_index)) {
-        return -2;
-      }
-    }
-  }
-  return number_of_letters_set;
-}
-
 // Returns true if there are enough tiles in bag and player_rack
 // to draw rack_to_draw.
-bool rack_is_drawable(const Bag *bag, const Rack *player_rack,
-                      const Rack *rack_to_draw) {
+bool rack_is_drawable(Game *game, int player_index, const Rack *rack_to_draw) {
+  Bag *bag = game_get_bag(game);
+  Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   const int dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
     if (bag_get_letter(bag, i) + rack_get_letter(player_rack, i) <
@@ -197,12 +177,15 @@ bool rack_is_drawable(const Bag *bag, const Rack *player_rack,
 // bag to the rack. Assumes the rack is empty.
 // Returns true on success.
 // Return false when the rack letters are not in the bag.
-bool draw_rack_from_bag(Bag *bag, Rack *rack, const Rack *rack_to_draw,
-                        int player_draw_index) {
-  rack_copy(rack, rack_to_draw);
-  const int dist_size = rack_get_dist_size(rack);
+bool draw_rack_from_bag(Game *game, int player_index,
+                        const Rack *rack_to_draw) {
+  Bag *bag = game_get_bag(game);
+  Rack *player_rack = player_get_rack(game_get_player(game, player_index));
+  int player_draw_index = game_get_player_draw_index(game, player_index);
+  const int dist_size = rack_get_dist_size(player_rack);
+  rack_copy(player_rack, rack_to_draw);
   for (int i = 0; i < dist_size; i++) {
-    const int rack_number_of_letter = rack_get_letter(rack, i);
+    const int rack_number_of_letter = rack_get_letter(player_rack, i);
     for (int j = 0; j < rack_number_of_letter; j++) {
       if (!bag_draw_letter(bag, i, player_draw_index)) {
         return false;
@@ -212,24 +195,53 @@ bool draw_rack_from_bag(Bag *bag, Rack *rack, const Rack *rack_to_draw,
   return true;
 }
 
-void return_rack_to_bag(Rack *rack, Bag *bag, int player_draw_index) {
-  const int dist_size = rack_get_dist_size(rack);
+// Draws a nonrandom set of letters specified by rack_string from the
+// bag to the rack. Assumes the rack is empty.
+// Returns number of letters drawn on success
+// Returns -1 if the string was malformed.
+// Returns -2 if the tiles were not in the bag.
+int draw_rack_string_from_bag(Game *game, int player_index,
+                              const char *rack_string) {
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *player_rack_copy = rack_create(ld_get_size(ld));
+  int number_of_letters_set =
+      rack_set_to_string(ld, player_rack_copy, rack_string);
+
+  if (number_of_letters_set != -1) {
+    if (!rack_is_drawable(game, player_index, player_rack_copy)) {
+      number_of_letters_set = -2;
+    } else {
+      draw_rack_from_bag(game, player_index, player_rack_copy);
+    }
+  }
+
+  rack_destroy(player_rack_copy);
+
+  return number_of_letters_set;
+}
+
+void return_rack_to_bag(Game *game, int player_index) {
+  Bag *bag = game_get_bag(game);
+  Rack *player_rack = player_get_rack(game_get_player(game, player_index));
+  int player_draw_index = game_get_player_draw_index(game, player_index);
+  const int dist_size = rack_get_dist_size(player_rack);
+
   for (int i = 0; i < dist_size; i++) {
-    const int rack_number_of_letter = rack_get_letter(rack, i);
+    const int rack_number_of_letter = rack_get_letter(player_rack, i);
     for (int j = 0; j < rack_number_of_letter; j++) {
       bag_add_letter(bag, i, player_draw_index);
     }
   }
-  rack_reset(rack);
+  rack_reset(player_rack);
 }
 
 void set_random_rack(Game *game, int player_index, Rack *known_rack) {
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   Bag *bag = game_get_bag(game);
   const int player_draw_index = game_get_player_draw_index(game, player_index);
-  return_rack_to_bag(player_rack, bag, player_draw_index);
+  return_rack_to_bag(game, player_index);
   if (known_rack) {
-    draw_rack_from_bag(bag, player_rack, known_rack, player_draw_index);
+    draw_rack_from_bag(game, player_index, known_rack);
   }
   draw_at_most_to_rack(bag, player_rack,
                        RACK_SIZE - rack_get_total_letters(player_rack),
@@ -279,8 +291,8 @@ play_move_status_t play_move(const Move *move, Game *game,
     game_backup(game);
   }
   const LetterDistribution *ld = game_get_ld(game);
-  Player *player_on_turn =
-      game_get_player(game, game_get_player_on_turn_index(game));
+  int player_on_turn_index = game_get_player_on_turn_index(game);
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
   Bag *bag = game_get_bag(game);
   Rack *player_on_turn_rack = player_get_rack(player_on_turn);
   int player_on_turn_draw_index = game_get_player_on_turn_draw_index(game);
@@ -303,9 +315,8 @@ play_move_status_t play_move(const Move *move, Game *game,
   }
 
   if (rack_to_draw) {
-    return_rack_to_bag(player_on_turn_rack, bag, player_on_turn_draw_index);
-    if (!draw_rack_from_bag(bag, player_on_turn_rack, rack_to_draw,
-                            player_on_turn_draw_index)) {
+    return_rack_to_bag(game, player_on_turn_index);
+    if (!draw_rack_from_bag(game, player_on_turn_index, rack_to_draw)) {
       return PLAY_MOVE_STATUS_RACK_TO_DRAW_NOT_IN_BAG;
     }
   }
