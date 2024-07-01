@@ -69,8 +69,8 @@ void game_data_reset(void *data) {
 
 void *game_data_create() {
   GameData *game_data = malloc_or_die(sizeof(GameData));
-  game_data->p0_score = stat_create();
-  game_data->p1_score = stat_create();
+  game_data->p0_score = stat_create(true);
+  game_data->p1_score = stat_create(true);
   game_data_reset(game_data);
   return (void *)game_data;
 }
@@ -107,14 +107,4 @@ void game_data_add_game(void *data, const Game *game) {
 void game_data_combine(void *data1, const void *data2) {
   GameData *gd1 = (GameData *)data1;
   const GameData *gd2 = (const GameData *)data2;
-}
-
-void autoplay_results_add(const AutoplayResults *result_to_add,
-                          AutoplayResults *result_to_be_updated) {
-  // Stats are combined elsewhere
-  result_to_be_updated->p0_firsts += result_to_add->p0_firsts;
-  result_to_be_updated->p0_wins += result_to_add->p0_wins;
-  result_to_be_updated->p0_losses += result_to_add->p0_losses;
-  result_to_be_updated->p0_ties += result_to_add->p0_ties;
-  result_to_be_updated->total_games += result_to_add->total_games;
 }
