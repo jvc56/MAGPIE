@@ -6,8 +6,7 @@
 
 #include "../util/string_util.h"
 
-void string_builder_add_bag(const Bag *bag,
-                            const LetterDistribution *ld,
-                            StringBuilder *bag_string_builder);
+void string_builder_add_bag(StringBuilder *bag_string_builder, const Bag *bag,
+                            const LetterDistribution *ld);
 
 #endif

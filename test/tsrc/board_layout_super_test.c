@@ -18,16 +18,16 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void test_board_layout_error_super() {
+void test_board_layout_error_super(void) {
   // Most of the error enums are tested in the 15 version.
-  assert_board_layout_error("standard15",
+  assert_board_layout_error(DEFAULT_TEST_DATA_PATH, "standard15",
                             BOARD_LAYOUT_LOAD_STATUS_INVALID_NUMBER_OF_ROWS);
 }
 
-void test_board_layout_correctness_super() {
+void test_board_layout_correctness_super(void) {
   // Use the CEL lexicon since it can support words longer than 15
   // which we need to test here.
-  Config *config = create_config_or_die(
+  Config *config = config_create_or_die(
       "set -lex CEL_super -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -64,7 +64,7 @@ void test_board_layout_correctness_super() {
   config_destroy(config);
 }
 
-void test_board_layout_super() {
+void test_board_layout_super(void) {
   test_board_layout_error_super();
   test_board_layout_correctness_super();
 }

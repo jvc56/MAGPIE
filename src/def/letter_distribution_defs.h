@@ -22,7 +22,4 @@
 
 #define SUPER_LETTER_DISTRIBUTION_NAME_EXTENSION "super"
 
-#define LETTER_DISTRIBUTION_FILEPATH "data/letterdistributions/"
-#define LETTER_DISTRIBUTION_FILE_EXTENSION ".csv"
-
 #endif

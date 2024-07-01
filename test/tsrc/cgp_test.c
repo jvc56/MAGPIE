@@ -12,19 +12,6 @@
 #include "test_constants.h"
 #include "test_util.h"
 
-void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
-                             bool write_player_on_turn_first) {
-  char *actual_cgp = game_get_cgp(game, write_player_on_turn_first);
-
-  StringSplitter *split_cgp = split_string_by_whitespace(expected_cgp, true);
-  char *expected_cgp_without_options =
-      string_splitter_join(split_cgp, 0, 4, " ");
-  destroy_string_splitter(split_cgp);
-  assert_strings_equal(actual_cgp, expected_cgp_without_options);
-  free(actual_cgp);
-  free(expected_cgp_without_options);
-}
-
 void assert_game_matches_cgp_with_options(const Config *config,
                                           const Game *game,
                                           const char *expected_cgp_with_options,
@@ -44,7 +31,7 @@ void assert_game_matches_cgp_with_options(const Config *config,
       split_string_by_whitespace(expected_cgp_with_options, true);
   char *expected_cgp_without_options = string_splitter_join(
       split_cgp, 0, string_splitter_get_number_of_items(split_cgp), " ");
-  destroy_string_splitter(split_cgp);
+  string_splitter_destroy(split_cgp);
   assert_strings_equal(actual_cgp, expected_cgp_without_options);
   free(actual_cgp);
   free(expected_cgp_without_options);
@@ -66,25 +53,20 @@ void play_move_and_validate_cgp(Game *game, const char *move_string,
          MOVE_VALIDATION_STATUS_SUCCESS);
   assert(validated_moves_get_number_of_moves(vms) == 1);
   const Move *move = validated_moves_get_move(vms, 0);
-  Player *player = game_get_player(game, game_get_player_on_turn_index(game));
-  Rack *player_rack = player_get_rack(player);
-  const int player_draw_index = player_get_index(player);
-  const LetterDistribution *ld = game_get_ld(game);
-  Bag *bag = game_get_bag(game);
+  int player_on_turn_index = game_get_player_on_turn_index(game);
   play_move(move, game, NULL);
 
   // Return the random rack to the bag and then draw
   // the rack specified by the caller.
-  return_rack_to_bag(player_rack, bag, player_draw_index);
-  draw_rack_string_from_bag(ld, bag, player_rack, rack_string,
-                            player_draw_index);
+  return_rack_to_bag(game, player_on_turn_index);
+  draw_rack_string_from_bag(game, player_on_turn_index, rack_string);
 
   assert_game_matches_cgp(game, expected_cgp, write_player_on_turn_first);
   validated_moves_destroy(vms);
 }
 
-void test_cgp_english() {
-  Config *config = create_config_or_die(
+void test_cgp_english(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -191,8 +173,8 @@ void test_cgp_english() {
   config_destroy(config);
 }
 
-void test_cgp_english_with_options() {
-  Config *config = create_config_or_die(
+void test_cgp_english_with_options(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -226,8 +208,8 @@ void test_cgp_english_with_options() {
   config_destroy(config);
 }
 
-void test_cgp_catalan() {
-  Config *config = create_config_or_die(
+void test_cgp_catalan(void) {
+  Config *config = config_create_or_die(
       "set -lex DISC2 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -238,8 +220,8 @@ void test_cgp_catalan() {
   config_destroy(config);
 }
 
-void test_cgp_polish() {
-  Config *config = create_config_or_die(
+void test_cgp_polish(void) {
+  Config *config = config_create_or_die(
       "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
 
@@ -250,21 +232,9 @@ void test_cgp_polish() {
   config_destroy(config);
 }
 
-void test_cgp() {
-  char *current_directory = get_current_directory();
-  char *src_path = get_formatted_string("%s/test/testdata/", current_directory);
-  char *dst_path = get_formatted_string("%s/data/layouts/", current_directory);
-  free(current_directory);
-
-  remove_links(dst_path, ".txt");
-  create_links(src_path, dst_path, ".txt");
-
+void test_cgp(void) {
   test_cgp_english();
   test_cgp_english_with_options();
   test_cgp_catalan();
   test_cgp_polish();
-
-  remove_links(dst_path, ".txt");
-  free(dst_path);
-  free(src_path);
 }

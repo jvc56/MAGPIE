@@ -14,9 +14,10 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
-#include "../../src/impl/config.h"
+#include "../../src/ent/validated_move.h"
 
 #include "../../src/impl/cgp.h"
+#include "../../src/impl/config.h"
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
 
@@ -54,7 +55,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
                          int row, int min_length, int expected_plays,
                          int *move_indexes, const char **move_strings) {
   if (row_string) {
-    StringBuilder *cgp_builder = create_string_builder();
+    StringBuilder *cgp_builder = string_builder_create();
     for (int i = 0; i < BOARD_DIM; i++) {
       if (i == row) {
         string_builder_add_string(cgp_builder, row_string);
@@ -68,7 +69,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
 
     string_builder_add_formatted_string(cgp_builder, " %s/ 0/0 0", rack_string);
     load_cgp_or_die(game, string_builder_peek(cgp_builder));
-    destroy_string_builder(cgp_builder);
+    string_builder_destroy(cgp_builder);
   }
 
   if (rack_string) {
@@ -79,7 +80,7 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
   }
 
   generate_moves_for_game(game, 0, move_list);
-  SortedMoveList *sml = create_sorted_move_list(move_list);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
 
   if (expected_plays >= 0) {
     int actual_plays = 0;
@@ -113,11 +114,11 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
       i++;
     }
   }
-  destroy_sorted_move_list(sml);
+  sorted_move_list_destroy(sml);
 }
 
-void macondo_tests() {
-  Config *config = create_config_or_die(
+void macondo_tests(void) {
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);
@@ -177,7 +178,7 @@ void macondo_tests() {
   assert(count_nonscoring_plays(move_list) == 96);
 
   SortedMoveList *test_gen_all_moves_full_rack_sorted_move_list =
-      create_sorted_move_list(move_list);
+      sorted_move_list_create(move_list);
 
   int highest_scores[] = {38, 36, 36, 34, 34, 33, 30, 30, 30, 28};
   int number_of_highest_scores = sizeof(highest_scores) / sizeof(int);
@@ -187,7 +188,7 @@ void macondo_tests() {
            highest_scores[i]);
   }
 
-  destroy_sorted_move_list(test_gen_all_moves_full_rack_sorted_move_list);
+  sorted_move_list_destroy(test_gen_all_moves_full_rack_sorted_move_list);
 
   // TestGenAllMovesFullRackAgain
   game_load_cgp(game, VS_ED);
@@ -215,21 +216,20 @@ void macondo_tests() {
   rack_set_to_string(ld, player_get_rack(player), "DDESW??");
   // Have the opponent draw any 7 tiles to prevent exchanges
   // from being generated
-  draw_at_most_to_rack(game_get_bag(game),
-                       player_get_rack(game_get_player(game, 1)), RACK_SIZE, 1);
+  draw_to_full_rack(game, 1);
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 8285);
   assert(count_nonscoring_plays(move_list) == 1);
 
   SortedMoveList *test_gen_all_moves_with_blanks_sorted_move_list =
-      create_sorted_move_list(move_list);
+      sorted_move_list_create(move_list);
 
   assert_move(game, move_list, test_gen_all_moves_with_blanks_sorted_move_list,
               0, "14B hEaDW(OR)DS 106");
   assert_move(game, move_list, test_gen_all_moves_with_blanks_sorted_move_list,
               1, "14B hEaDW(OR)D 38");
 
-  destroy_sorted_move_list(test_gen_all_moves_with_blanks_sorted_move_list);
+  sorted_move_list_destroy(test_gen_all_moves_with_blanks_sorted_move_list);
 
   rack_reset(player_get_rack(player));
 
@@ -241,12 +241,12 @@ void macondo_tests() {
   assert(count_nonscoring_plays(move_list) == 128);
 
   SortedMoveList *test_giant_twenty_seven_timer_sorted_move_list =
-      create_sorted_move_list(move_list);
+      sorted_move_list_create(move_list);
 
   assert_move(game, move_list, test_giant_twenty_seven_timer_sorted_move_list,
               0, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
 
-  destroy_sorted_move_list(test_giant_twenty_seven_timer_sorted_move_list);
+  sorted_move_list_destroy(test_giant_twenty_seven_timer_sorted_move_list);
 
   // TestGenerateEmptyBoard
   game_reset(game);
@@ -256,7 +256,7 @@ void macondo_tests() {
   assert(count_nonscoring_plays(move_list) == 128);
 
   SortedMoveList *test_generate_empty_board_sorted_move_list =
-      create_sorted_move_list(move_list);
+      sorted_move_list_create(move_list);
 
   const Move *move = test_generate_empty_board_sorted_move_list->moves[0];
   assert(move_get_score(move) == 80);
@@ -265,7 +265,7 @@ void macondo_tests() {
   assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
   assert(move_get_row_start(move) == 7);
 
-  destroy_sorted_move_list(test_generate_empty_board_sorted_move_list);
+  sorted_move_list_destroy(test_generate_empty_board_sorted_move_list);
   rack_reset(player_get_rack(player));
 
   // Check that GONOPORE is the best play
@@ -273,7 +273,7 @@ void macondo_tests() {
   rack_set_to_string(ld, player_get_rack(player), "GONOPOR");
   generate_moves_for_game(game, 0, move_list);
 
-  SortedMoveList *test_generate_gonopore = create_sorted_move_list(move_list);
+  SortedMoveList *test_generate_gonopore = sorted_move_list_create(move_list);
 
   move = test_generate_gonopore->moves[0];
   assert(move_get_score(move) == 86);
@@ -283,7 +283,7 @@ void macondo_tests() {
   assert(move_get_row_start(move) == 14);
   assert(move_get_col_start(move) == 0);
 
-  destroy_sorted_move_list(test_generate_gonopore);
+  sorted_move_list_destroy(test_generate_gonopore);
   rack_reset(player_get_rack(player));
 
   // TestGenerateNoPlays
@@ -291,8 +291,7 @@ void macondo_tests() {
   rack_set_to_string(ld, player_get_rack(player), "V");
   // Have the opponent draw any 7 tiles to prevent exchanges
   // from being generated
-  draw_at_most_to_rack(game_get_bag(game),
-                       player_get_rack(game_get_player(game, 1)), RACK_SIZE, 1);
+  draw_to_full_rack(game, 1);
   generate_moves_for_game(game, 0, move_list);
   assert(count_scoring_plays(move_list) == 0);
   assert(count_nonscoring_plays(move_list) == 1);
@@ -329,8 +328,8 @@ void macondo_tests() {
   config_destroy(config);
 }
 
-void leave_lookup_test() {
-  Config *config = create_config_or_die(
+void leave_lookup_test(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
@@ -345,12 +344,12 @@ void leave_lookup_test() {
   Rack *rack = rack_create(ld_get_size(ld));
   for (int i = 0; i < 2; i++) {
     int number_of_moves = move_list_get_count(move_list);
-    for (int i = 0; i < number_of_moves; i++) {
-      Move *move = move_list_get_move(move_list, i);
+    for (int j = 0; j < number_of_moves; j++) {
+      Move *move = move_list_get_move(move_list, j);
       // This is after the opening and before the endgame
       // so the other equity adjustments will not be in effect.
       double move_leave_value = move_get_equity(move) - move_get_score(move);
-      if (i == 0) {
+      if (j == 0) {
         rack_set_to_string(ld, rack, "MOOORRT");
       } else {
         rack_set_to_string(ld, rack, "BFQRTTV");
@@ -366,8 +365,8 @@ void leave_lookup_test() {
   config_destroy(config);
 }
 
-void unfound_leave_lookup_test() {
-  Config *config = create_config_or_die(
+void unfound_leave_lookup_test(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(1);
@@ -392,8 +391,8 @@ void unfound_leave_lookup_test() {
   config_destroy(config);
 }
 
-void exchange_tests() {
-  Config *config = create_config_or_die(
+void exchange_tests(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(10);
@@ -408,10 +407,10 @@ void exchange_tests() {
 
   generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, 0, move_list);
   SortedMoveList *test_not_an_exchange_sorted_move_list =
-      create_sorted_move_list(move_list);
+      sorted_move_list_create(move_list);
   assert(move_get_type(test_not_an_exchange_sorted_move_list->moves[0]) ==
          GAME_EVENT_TILE_PLACEMENT_MOVE);
-  destroy_sorted_move_list(test_not_an_exchange_sorted_move_list);
+  sorted_move_list_destroy(test_not_an_exchange_sorted_move_list);
 
   game_load_cgp(game, cgp);
   // The second top equity play only uses
@@ -419,22 +418,22 @@ void exchange_tests() {
   play_top_n_equity_move(game, 1);
   generate_moves_for_game(game, 0, move_list);
   SortedMoveList *test_exchange_sorted_move_list =
-      create_sorted_move_list(move_list);
+      sorted_move_list_create(move_list);
 
   assert(move_get_type(test_exchange_sorted_move_list->moves[0]) ==
          GAME_EVENT_EXCHANGE);
   assert(move_get_score(test_exchange_sorted_move_list->moves[0]) == 0);
   assert(move_get_tiles_length(test_exchange_sorted_move_list->moves[0]) ==
          move_get_tiles_played(test_exchange_sorted_move_list->moves[0]));
-  destroy_sorted_move_list(test_exchange_sorted_move_list);
+  sorted_move_list_destroy(test_exchange_sorted_move_list);
 
   move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
 
-void many_moves_tests() {
-  Config *config = create_config_or_die(
+void many_moves_tests(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create(239000);
@@ -449,8 +448,8 @@ void many_moves_tests() {
   config_destroy(config);
 }
 
-void equity_test() {
-  Config *config = create_config_or_die(
+void equity_test(void) {
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
@@ -471,7 +470,7 @@ void equity_test() {
   assert(count_nonscoring_plays(move_list) == 64);
 
   SortedMoveList *equity_test_sorted_move_list =
-      create_sorted_move_list(move_list);
+      sorted_move_list_create(move_list);
 
   double previous_equity = 1000000.0;
   Rack *move_rack = rack_create(ld_size);
@@ -490,15 +489,15 @@ void equity_test() {
       move_get_type(equity_test_sorted_move_list->moves[number_of_moves - 1]) ==
       GAME_EVENT_PASS);
 
-  destroy_sorted_move_list(equity_test_sorted_move_list);
+  sorted_move_list_destroy(equity_test_sorted_move_list);
   rack_destroy(move_rack);
   move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
 
-void top_equity_play_recorder_test() {
-  Config *config = create_config_or_die(
+void top_equity_play_recorder_test(void) {
+  Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
@@ -525,9 +524,9 @@ void top_equity_play_recorder_test() {
   config_destroy(config);
 }
 
-void distinct_lexica_test() {
+void distinct_lexica_test(void) {
   Config *config =
-      create_config_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+      config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
@@ -607,11 +606,13 @@ void distinct_lexica_test() {
   config_destroy(config);
 }
 
-void wordsmog_test() {
+void wordsmog_test(void) {
   Config *config =
-      create_config_or_die("set -lex CSW21_alpha -s1 equity -s2 equity "
+      config_create_or_die("set -lex CSW21_alpha -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1 -var wordsmog");
-  Game *game = config_game_create(config);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
 
   assert_validated_and_generated_moves(game, "FEEZEEE", "8D", "ZEEFE", 54,
                                        true);
@@ -635,13 +636,19 @@ void wordsmog_test() {
   // CANONIZERS
   assert_validated_and_generated_moves(game, "AEINNR?", "D3", "ANI(SOZ)ERcN",
                                        182, true);
-  game_destroy(game);
+
+  load_and_exec_config_or_die(config, "set -ld english_blank_is_5");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+
+  assert_validated_and_generated_moves(game, "AEIINO?", "8B", "AEpIINO", 82,
+                                       true);
   config_destroy(config);
 }
 
-void consistent_tiebreaking_test() {
+void consistent_tiebreaking_test(void) {
   Config *config =
-      create_config_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+      config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
                            "-r1 best -r2 best -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
@@ -669,9 +676,119 @@ void consistent_tiebreaking_test() {
   config_destroy(config);
 }
 
-void test_move_gen() {
-  wordsmog_test();
-  return;
+void movegen_game_update_test(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  // Check that ld udpates and that blanks can be any score
+  load_and_exec_config_or_die(config, "set -ld english_blank_is_5");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 E?INAOI/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8C EpINAOI 82");
+
+  // Check that bingo bonus udpates
+  load_and_exec_config_or_die(config, "set -bb 40");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8D BUSUUTI 64");
+
+  // Check that lexicon updates
+  load_and_exec_config_or_die(config, "set -lex NWL20");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "(exch BUUU)");
+
+  // Check that move sorting updates
+  load_and_exec_config_or_die(config, "set -s1 score");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8E BITS 12");
+
+  // Check that board layout updates
+  load_and_exec_config_or_die(config,
+                              "set -bdn quadruple_word_opening15 -bb 50");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DITZIER/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8D DITZIER 126");
+
+  // Check that the variant updates
+  load_and_exec_config_or_die(
+      config, "set -lex CSW21_alpha -var wordsmog -bdn standard15");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DITZIER/ 0/0 0");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8B DEZIIRT 104");
+
+  config_destroy(config);
+}
+
+void movegen_var_bingo_bonus_test(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  ValidatedMoves *vms = NULL;
+
+  const char *opening_busuuti_cgp =
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0";
+
+  char *opening_busuuti_cgp_cmd =
+      get_formatted_string("cgp %s", opening_busuuti_cgp);
+
+  // Check that bingo bonus udpates
+  load_and_exec_config_or_die(config, opening_busuuti_cgp_cmd);
+  load_and_exec_config_or_die(config, "set -bb 40");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8D BUSUUTI 64");
+
+  vms = assert_validated_move_success(config_get_game(config),
+                                      opening_busuuti_cgp, "8D.BUSUUTI", 0,
+                                      false, false);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 64);
+  validated_moves_destroy(vms);
+
+  load_and_exec_config_or_die(config, opening_busuuti_cgp_cmd);
+  load_and_exec_config_or_die(config, "set -bb 30");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8D BUSUUTI 54");
+
+  vms = assert_validated_move_success(config_get_game(config),
+                                      opening_busuuti_cgp, "8D.BUSUUTI", 0,
+                                      false, false);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 54);
+  validated_moves_destroy(vms);
+
+  load_and_exec_config_or_die(config, opening_busuuti_cgp_cmd);
+  load_and_exec_config_or_die(config, "set -bb 300");
+  load_and_exec_config_or_die(config, "gen");
+  assert_move(config_get_game(config), config_get_move_list(config), NULL, 0,
+              "8D BUSUUTI 324");
+
+  vms = assert_validated_move_success(config_get_game(config),
+                                      opening_busuuti_cgp, "8D.BUSUUTI", 0,
+                                      false, false);
+  assert(move_get_score(validated_moves_get_move(vms, 0)) == 324);
+  validated_moves_destroy(vms);
+
+  free(opening_busuuti_cgp_cmd);
+  config_destroy(config);
+}
+
+void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
   macondo_tests();
@@ -680,4 +797,7 @@ void test_move_gen() {
   top_equity_play_recorder_test();
   distinct_lexica_test();
   consistent_tiebreaking_test();
+  wordsmog_test();
+  movegen_game_update_test();
+  movegen_var_bingo_bonus_test();
 }

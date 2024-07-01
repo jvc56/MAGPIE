@@ -16,17 +16,15 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            data/lexica
-            data/strategy
-            data/layouts
-            data/letterdistributions
+            data/*
+            testdata/*
           # Increment this whenever the downloaded data changes
-          key: downloaded-data-files-5
+          key: downloaded-data-files-7
 
       - name: Download data files
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: >
-          ./download_test_data.sh
+          ./download_data.sh
 
       - name: Run unit tests
         run: ./run u && ./run u 21

@@ -18,6 +18,7 @@ typedef struct GameArgs {
   const BoardLayout *board_layout;
   const LetterDistribution *ld;
   game_variant_t game_variant;
+  int bingo_bonus;
 } GameArgs;
 
 Game *game_create(const GameArgs *game_args);
@@ -25,8 +26,10 @@ void game_destroy(Game *game);
 void game_update(Game *game, const GameArgs *game_args);
 Game *game_duplicate(const Game *game);
 void game_reset(Game *game);
+void game_seed(Game *game, uint64_t seed);
 
 game_variant_t game_get_variant(const Game *game);
+int game_get_bingo_bonus(const Game *game);
 game_variant_t get_game_variant_type_from_name(const char *variant_name);
 Board *game_get_board(const Game *game);
 Bag *game_get_bag(const Game *game);
@@ -48,7 +51,7 @@ void game_increment_consecutive_scoreless_turns(Game *game);
 void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
 void game_start_next_player_turn(Game *game);
 
-void game_set_backup_mode(Game *game, int backup_mode);
+void game_set_backup_mode(Game *game, backup_mode_t backup_mode);
 void game_backup(Game *game);
 void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);

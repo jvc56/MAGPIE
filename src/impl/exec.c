@@ -195,16 +195,16 @@ void command_scan_loop(Config *config, const char *initial_command_string) {
 }
 
 char *create_command_from_args(int argc, char *argv[]) {
-  StringBuilder *command_string_builder = create_string_builder();
+  StringBuilder *command_string_builder = string_builder_create();
   for (int i = 1; i < argc; i++) {
     string_builder_add_formatted_string(command_string_builder, "%s ", argv[i]);
   }
   char *command_string = string_builder_dump(command_string_builder, NULL);
-  destroy_string_builder(command_string_builder);
+  string_builder_destroy(command_string_builder);
   return command_string;
 }
 
-void destroy_caches() {
+void caches_destroy(void) {
   gen_destroy_cache();
   fileproxy_destroy_cache();
 }
@@ -216,5 +216,5 @@ void process_command(int argc, char *argv[]) {
   command_scan_loop(config, initial_command_string);
   free(initial_command_string);
   config_destroy(config);
-  destroy_caches();
+  caches_destroy();
 }

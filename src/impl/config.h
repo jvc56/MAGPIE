@@ -23,7 +23,7 @@
 typedef struct Config Config;
 
 // Constructors and Destructors
-Config *config_create_default();
+Config *config_create_default(void);
 void config_destroy(Config *config);
 
 // Loading commands and execution
@@ -33,6 +33,7 @@ char *config_get_execute_status(Config *config);
 bool config_continue_on_coldstart(const Config *config);
 
 // Getters
+const char *config_get_data_path(const Config *config);
 int config_get_bingo_bonus(const Config *config);
 BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);

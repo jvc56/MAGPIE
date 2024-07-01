@@ -1,6 +1,6 @@
 #ifndef LEAVES_TEST_H
 #define LEAVES_TEST_H
 
-void test_leaves();
+void test_leaves(void);
 
 #endif

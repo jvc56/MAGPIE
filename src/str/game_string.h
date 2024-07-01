@@ -10,8 +10,8 @@
 void string_builder_add_game_variant(StringBuilder *sb,
                                      game_variant_t game_variant_type);
 
-void string_builder_add_game(Game *game, MoveList *move_list,
-                             StringBuilder *game_string);
+void string_builder_add_game(StringBuilder *game_string, Game *game,
+                             MoveList *move_list);
 
 char *ucgi_static_moves(const Game *game, const MoveList *move_list);
 

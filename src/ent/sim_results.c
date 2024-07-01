@@ -47,12 +47,12 @@ SimmedPlay **simmed_plays_create(const MoveList *move_list,
 
     sp->score_stat = malloc_or_die(sizeof(Stat *) * max_plies);
     sp->bingo_stat = malloc_or_die(sizeof(Stat *) * max_plies);
-    sp->equity_stat = stat_create();
-    sp->leftover_stat = stat_create();
-    sp->win_pct_stat = stat_create();
+    sp->equity_stat = stat_create(true);
+    sp->leftover_stat = stat_create(true);
+    sp->win_pct_stat = stat_create(true);
     for (int j = 0; j < max_plies; j++) {
-      sp->score_stat[j] = stat_create();
-      sp->bingo_stat[j] = stat_create();
+      sp->score_stat[j] = stat_create(true);
+      sp->bingo_stat[j] = stat_create(true);
     }
     sp->ignore = false;
     sp->play_id = i;
@@ -115,7 +115,7 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   atomic_init(&sim_results->node_count, 0);
 }
 
-SimResults *sim_results_create() {
+SimResults *sim_results_create(void) {
   SimResults *sim_results = malloc_or_die(sizeof(SimResults));
   sim_results->num_simmed_plays = 0;
   sim_results->max_plies = 0;

@@ -41,6 +41,7 @@ struct Game {
   int player_on_turn_index;
   int starting_player_index;
   int consecutive_scoreless_turns;
+  int bingo_bonus;
   game_end_reason_t game_end_reason;
   bool data_is_shared[NUMBER_OF_DATA];
   Board *board;
@@ -58,11 +59,13 @@ struct Game {
   // Backups
   MinimalGameBackup *game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
-  int backup_mode;
+  backup_mode_t backup_mode;
   bool backups_preallocated;
 };
 
 game_variant_t game_get_variant(const Game *game) { return game->variant; }
+
+int game_get_bingo_bonus(const Game *game) { return game->bingo_bonus; }
 
 game_variant_t get_game_variant_type_from_name(const char *variant_name) {
   game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
@@ -421,6 +424,11 @@ void game_reset(Game *game) {
   game->backup_cursor = 0;
 }
 
+// Sets the bag state with the given seed, ensuring the
+// next iteration will be consistent. Any leftover random
+// racks should be returned before calling this function.
+void game_seed(Game *game, uint64_t seed) { bag_seed(game->bag, seed); }
+
 // This assumes the game has not started yet.
 void game_set_starting_player_index(Game *game, int starting_player_index) {
   game->starting_player_index = starting_player_index;
@@ -444,7 +452,7 @@ void pre_allocate_backups(Game *game) {
   }
 }
 
-void game_set_backup_mode(Game *game, int backup_mode) {
+void game_set_backup_mode(Game *game, backup_mode_t backup_mode) {
   game->backup_mode = backup_mode;
   if (backup_mode == BACKUP_MODE_SIMULATION && !game->backups_preallocated) {
     game->backup_cursor = 0;
@@ -455,6 +463,7 @@ void game_set_backup_mode(Game *game, int backup_mode) {
 
 void game_update(Game *game, const GameArgs *game_args) {
   game->ld = game_args->ld;
+  game->bingo_bonus = game_args->bingo_bonus;
   for (int player_index = 0; player_index < 2; player_index++) {
     player_update(game_args->players_data, game->players[player_index]);
   }
@@ -462,11 +471,21 @@ void game_update(Game *game, const GameArgs *game_args) {
     game->data_is_shared[i] =
         players_data_get_is_shared(game_args->players_data, (players_data_t)i);
   }
+  board_apply_layout(game_args->board_layout, game->board);
+
+  game->variant = game_args->game_variant;
+  rack_destroy(game->cross_set_rack);
+  if (game->variant == GAME_VARIANT_WORDSMOG) {
+    game->cross_set_rack = rack_create(ld_get_size(game->ld));
+  } else {
+    game->cross_set_rack = NULL;
+  }
 }
 
 Game *game_create(const GameArgs *game_args) {
   Game *game = malloc_or_die(sizeof(Game));
   game->ld = game_args->ld;
+  game->bingo_bonus = game_args->bingo_bonus;
   game->bag = bag_create(game->ld);
   game->board = board_create(game_args->board_layout);
   for (int player_index = 0; player_index < 2; player_index++) {
@@ -477,6 +496,7 @@ Game *game_create(const GameArgs *game_args) {
     game->data_is_shared[i] =
         players_data_get_is_shared(game_args->players_data, (players_data_t)i);
   }
+
   game->starting_player_index = 0;
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
@@ -505,6 +525,7 @@ Game *game_duplicate(const Game *game) {
   new_game->bag = bag_duplicate(game->bag);
   new_game->board = board_duplicate(game->board);
   new_game->ld = game->ld;
+  new_game->bingo_bonus = game->bingo_bonus;
 
   for (int j = 0; j < 2; j++) {
     new_game->players[j] = player_duplicate(game->players[j]);
@@ -583,7 +604,7 @@ void game_unplay_last_move(Game *game) {
   board_copy(game->board, state->board);
 }
 
-void destroy_backups(Game *game) {
+void backups_destroy(Game *game) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     rack_destroy(game->game_backups[i]->p0rack);
     rack_destroy(game->game_backups[i]->p1rack);
@@ -605,7 +626,7 @@ void game_destroy(Game *game) {
   player_destroy(game->players[1]);
   rack_destroy(game->cross_set_rack);
   if (game->backups_preallocated) {
-    destroy_backups(game);
+    backups_destroy(game);
   }
   free(game);
 }

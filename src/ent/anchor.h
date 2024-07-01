@@ -1,7 +1,11 @@
 #ifndef ANCHOR_H
 #define ANCHOR_H
 
-#include <stdbool.h>
+#include <stdlib.h>
+
+#include "../def/board_defs.h"
+
+#include "../util/util.h"
 
 typedef struct Anchor {
   // The row of the board for this anchor
@@ -25,8 +29,33 @@ typedef struct AnchorList {
   Anchor **anchors;
 } AnchorList;
 
-AnchorList *anchor_list_create();
-void anchor_list_destroy(AnchorList *al);
+static inline AnchorList *anchor_list_create(void) {
+  AnchorList *al = malloc_or_die(sizeof(AnchorList));
+  al->count = 0;
+  al->anchors = malloc_or_die((sizeof(Anchor *)) * ((BOARD_DIM) * (BOARD_DIM)));
+  for (int i = 0; i < ((BOARD_DIM) * (BOARD_DIM)); i++) {
+    al->anchors[i] = malloc_or_die(sizeof(Anchor));
+  }
+  return al;
+}
+
+static inline void anchor_destroy(Anchor *anchor) {
+  if (!anchor) {
+    return;
+  }
+  free(anchor);
+}
+
+static inline void anchor_list_destroy(AnchorList *al) {
+  if (!al) {
+    return;
+  }
+  for (int i = 0; i < ((BOARD_DIM) * (BOARD_DIM)); i++) {
+    anchor_destroy(al->anchors[i]);
+  }
+  free(al->anchors);
+  free(al);
+}
 
 static inline int anchor_get_col(const AnchorList *al, int index) {
   return al->anchors[index]->col;
@@ -67,6 +96,21 @@ static inline void anchor_list_add_anchor(AnchorList *al, int row, int col,
 
 static inline void anchor_list_reset(AnchorList *al) { al->count = 0; }
 
-void anchor_list_sort(AnchorList *al);
+static inline int anchor_compare(const void *a, const void *b) {
+  const Anchor *anchor_a = *(const Anchor **)a;
+  const Anchor *anchor_b = *(const Anchor **)b;
+  if (anchor_a->highest_possible_equity > anchor_b->highest_possible_equity) {
+    return -1;
+  } else if (anchor_a->highest_possible_equity <
+             anchor_b->highest_possible_equity) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+static inline void anchor_list_sort(AnchorList *al) {
+  qsort(al->anchors, al->count, sizeof(Anchor *), anchor_compare);
+}
 
 #endif

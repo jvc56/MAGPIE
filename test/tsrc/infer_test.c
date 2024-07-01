@@ -41,8 +41,8 @@ inference_status_t infer_for_test(const Config *config, int target_index,
   return status;
 }
 
-void test_trivial_random_probability() {
-  Config *config = create_config_or_die(
+void test_trivial_random_probability(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
@@ -87,9 +87,9 @@ void test_trivial_random_probability() {
   config_destroy(config);
 }
 
-void test_infer_rack_overflow() {
+void test_infer_rack_overflow(void) {
   Config *config =
-      create_config_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1 -threads 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
@@ -109,8 +109,8 @@ void test_infer_rack_overflow() {
   config_destroy(config);
 }
 
-void test_infer_no_tiles_played_rack_empty() {
-  Config *config = create_config_or_die(
+void test_infer_no_tiles_played_rack_empty(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -123,8 +123,8 @@ void test_infer_no_tiles_played_rack_empty() {
   config_destroy(config);
 }
 
-void test_infer_both_play_and_exchange() {
-  Config *config = create_config_or_die(
+void test_infer_both_play_and_exchange(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -137,8 +137,8 @@ void test_infer_both_play_and_exchange() {
   config_destroy(config);
 }
 
-void test_infer_exchange_score_not_zero() {
-  Config *config = create_config_or_die(
+void test_infer_exchange_score_not_zero(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -151,8 +151,8 @@ void test_infer_exchange_score_not_zero() {
   config_destroy(config);
 }
 
-void test_infer_exchange_not_board_is_letter_allowed_in_cross_set() {
-  Config *config = create_config_or_die(
+void test_infer_exchange_not_board_is_letter_allowed_in_cross_set(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
@@ -174,8 +174,8 @@ void test_infer_exchange_not_board_is_letter_allowed_in_cross_set() {
   config_destroy(config);
 }
 
-void test_infer_tiles_played_not_in_bag() {
-  Config *config = create_config_or_die(
+void test_infer_tiles_played_not_in_bag(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -194,7 +194,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
       get_formatted_string("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1 -threads %d",
                            number_of_threads);
-  Config *config = create_config_or_die(config_settings_str);
+  Config *config = config_create_or_die(config_settings_str);
   free(config_settings_str);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -212,7 +212,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   Rack *player1_rack = player_get_rack(player1);
 
   InferenceResults *inference_results = inference_results_create();
-  Stat *letter_stat = stat_create();
+  Stat *letter_stat = stat_create(false);
   inference_status_t status;
   LeaveRackList *lrl;
 
@@ -224,8 +224,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
 
   Stat *equity_values = inference_results_get_equity_values(
       inference_results, INFERENCE_TYPE_LEAVE);
-  assert(stat_get_weight(equity_values) == 3);
-  assert(stat_get_cardinality(equity_values) == 1);
+  assert(stat_get_num_samples(equity_values) == 3);
+  assert(stat_get_num_unique_samples(equity_values) == 1);
   rack_set_to_string(ld, rack, "S");
   assert(within_epsilon(stat_get_mean(equity_values),
                         klv_get_leave_value(klv, rack)));
@@ -278,8 +278,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(stat_get_weight(equity_values) == 83);
-  assert(stat_get_cardinality(equity_values) == 22);
+  assert(stat_get_num_samples(equity_values) == 83);
+  assert(stat_get_num_unique_samples(equity_values) == 22);
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "A") || i == ld_hl_to_ml(ld, "B") ||
         i == ld_hl_to_ml(ld, "K") || i == ld_hl_to_ml(ld, "Q") ||
@@ -365,8 +365,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(stat_get_weight(equity_values) == 1);
-  assert(stat_get_cardinality(equity_values) == 1);
+  assert(stat_get_num_samples(equity_values) == 1);
+  assert(stat_get_num_unique_samples(equity_values) == 1);
   rack_set_to_string(ld, rack, "DDSW??");
   assert(within_epsilon(stat_get_mean(equity_values),
                         klv_get_leave_value(klv, rack)));
@@ -406,8 +406,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(stat_get_weight(equity_values) == 450);
-  assert(stat_get_cardinality(equity_values) == 3);
+  assert(stat_get_num_samples(equity_values) == 450);
+  assert(stat_get_num_unique_samples(equity_values) == 3);
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "?")) {
       // The blank was only in leave 1
@@ -537,8 +537,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(stat_get_weight(equity_values) == 35);
-  assert(stat_get_cardinality(equity_values) == 4);
+  assert(stat_get_num_samples(equity_values) == 35);
+  assert(stat_get_num_unique_samples(equity_values) == 4);
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "E")) {
       assert(inference_results_get_subtotal(inference_results,
@@ -657,9 +657,9 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(stat_get_weight(equity_values) == 91);
+  assert(stat_get_num_samples(equity_values) == 91);
   // All letters except the 4 described above are possible, so 27 - 4 = 23
-  assert(stat_get_cardinality(equity_values) == 23);
+  assert(stat_get_num_unique_samples(equity_values) == 23);
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "B") || i == ld_hl_to_ml(ld, "K") ||
         i == ld_hl_to_ml(ld, "Q") || i == ld_hl_to_ml(ld, "Z")) {
@@ -689,8 +689,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(stat_get_weight(equity_values) == 2);
-  assert(stat_get_cardinality(equity_values) == 1);
+  assert(stat_get_num_samples(equity_values) == 2);
+  assert(stat_get_num_unique_samples(equity_values) == 1);
   rack_set_to_string(ld, rack, "X?");
   assert(within_epsilon(stat_get_mean(equity_values),
                         klv_get_leave_value(klv, rack)));
@@ -725,19 +725,19 @@ void test_infer_nonerror_cases(int number_of_threads) {
   // inference_results results were recreated
   equity_values = inference_results_get_equity_values(inference_results,
                                                       INFERENCE_TYPE_LEAVE);
-  assert(stat_get_weight(equity_values) == 660);
-  assert(stat_get_cardinality(equity_values) == 3);
+  assert(stat_get_num_samples(equity_values) == 660);
+  assert(stat_get_num_unique_samples(equity_values) == 3);
   rack_set_to_string(ld, rack, "?HIR");
   double bhir_value = klv_get_leave_value(klv, rack);
-  double bhir_weighted_value = bhir_value * 160;
+  double bhir_prop_value = bhir_value * 160;
   rack_set_to_string(ld, rack, "?HNR");
   double bhnr_value = klv_get_leave_value(klv, rack);
-  double bhnr_weighted_value = bhnr_value * 100;
+  double bhnr_prop_value = bhnr_value * 100;
   rack_set_to_string(ld, rack, "HINR");
   double hirn_value = klv_get_leave_value(klv, rack);
-  double hirn_weighted_value = hirn_value * 400;
+  double hirn_prop_value = hirn_value * 400;
   double mean_rin_leave_value =
-      (bhir_weighted_value + bhnr_weighted_value + hirn_weighted_value) / 660;
+      (bhir_prop_value + bhnr_prop_value + hirn_prop_value) / 660;
   assert(within_epsilon(stat_get_mean(equity_values), mean_rin_leave_value));
 
   // Test exchanges
@@ -808,7 +808,7 @@ void test_infer_nonerror_cases(int number_of_threads) {
   config_destroy(config);
 }
 
-void test_infer() {
+void test_infer(void) {
   test_trivial_random_probability();
   test_infer_rack_overflow();
   test_infer_no_tiles_played_rack_empty();

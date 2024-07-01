@@ -7,7 +7,7 @@
 
 typedef struct ErrorStatus ErrorStatus;
 
-ErrorStatus *error_status_create();
+ErrorStatus *error_status_create(void);
 
 error_status_t error_status_get_type(ErrorStatus *error_status);
 int error_status_get_code(ErrorStatus *error_status);

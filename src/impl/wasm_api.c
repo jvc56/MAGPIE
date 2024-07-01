@@ -31,7 +31,7 @@
 static Config *wasm_config = NULL;
 static Config *iso_config = NULL;
 
-void wasm_destroy_configs() {
+void wasm_destroy_configs(void) {
   config_destroy(wasm_config);
   config_destroy(iso_config);
 }
@@ -87,10 +87,10 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   const Move *move = validated_moves_get_move(vms, 0);
   char *phonies_string = validated_moves_get_phonies_string(ld, vms, 0);
 
-  StringBuilder *return_string_builder = create_string_builder();
-  StringBuilder *move_string_builder = create_string_builder();
+  StringBuilder *return_string_builder = string_builder_create();
+  StringBuilder *move_string_builder = string_builder_create();
 
-  string_builder_add_ucgi_move(move, board, ld, move_string_builder);
+  string_builder_add_ucgi_move(move_string_builder, move, board, ld);
 
   string_builder_add_formatted_string(return_string_builder, "currmove %s",
                                       string_builder_peek(move_string_builder));
@@ -108,9 +108,9 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
 
   validated_moves_destroy(vms);
   free(phonies_string);
-  destroy_string_builder(move_string_builder);
+  string_builder_destroy(move_string_builder);
   char *return_string = string_builder_dump(return_string_builder, NULL);
-  destroy_string_builder(return_string_builder);
+  string_builder_destroy(return_string_builder);
   // Caller can use UTF8ToString on the returned pointer but it MUST FREE
   // this string after it's done with it!
   return return_string;
@@ -136,10 +136,10 @@ int process_command_wasm(const char *cmd) {
   return 0;
 }
 
-char *get_search_status_wasm() {
+char *get_search_status_wasm(void) {
   return command_search_status(wasm_config, false);
 }
 
-char *get_stop_search_wasm() {
+char *get_stop_search_wasm(void) {
   return command_search_status(wasm_config, true);
 }

@@ -1,9 +1,6 @@
 #ifndef BOARD_LAYOUT_DEFS_H
 #define BOARD_LAYOUT_DEFS_H
 
-#define BOARD_LAYOUT_FILEPATH "data/layouts/"
-#define BOARD_LAYOUT_FILE_EXTENSION ".txt"
-
 #define BRICK_VALUE 0xFF
 #define BRICK_CHAR '#'
 

@@ -5,7 +5,7 @@
 
 typedef struct AutoplayResults AutoplayResults;
 
-AutoplayResults *autoplay_results_create();
+AutoplayResults *autoplay_results_create(void);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 
 int autoplay_results_get_games(const AutoplayResults *autoplay_results);

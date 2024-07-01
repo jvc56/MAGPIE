@@ -24,6 +24,9 @@ SOFTWARE.
 
 #include "math_util.h"
 #include <math.h>
+#include <stdbool.h>
+
+#include "../def/math_util_defs.h"
 
 // Returns a floating point number y such that std::erf(y)
 // is close to x. The current implementation is quite accurate
@@ -151,3 +154,5 @@ long double erfinv_refine(long double x, int nr_iter) {
 
 // Convert a percentage to a z-score
 long double p_to_z(double p) { return sqrt(2) * erfinv(p / 100); };
+
+bool is_z_valid(double zval) { return zval <= p_to_z(PERCENTILE_MAX); }

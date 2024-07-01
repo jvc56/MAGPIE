@@ -18,7 +18,6 @@
 // game before any operations on the game are performed.
 struct PlayersData {
   bool data_is_shared[NUMBER_OF_DATA];
-  char *data_names[(NUMBER_OF_DATA * 2)];
   void *data[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
@@ -77,27 +76,6 @@ void players_data_set_is_shared(PlayersData *players_data,
   players_data->data_is_shared[(int)players_data_type] = is_shared;
 }
 
-void players_data_destroy_data_name(PlayersData *players_data,
-                                    players_data_t players_data_type,
-                                    int player_index) {
-  int data_name_index =
-      players_data_get_player_data_index(players_data_type, player_index);
-  free(players_data->data_names[data_name_index]);
-  players_data->data_names[data_name_index] = NULL;
-}
-
-void players_data_set_data_name(PlayersData *players_data,
-                                players_data_t players_data_type,
-                                int player_index, const char *data_name) {
-  int data_name_index =
-      players_data_get_player_data_index(players_data_type, player_index);
-  if (strings_equal(players_data->data_names[data_name_index], data_name)) {
-    return;
-  }
-  players_data_destroy_data_name(players_data, players_data_type, player_index);
-  players_data->data_names[data_name_index] = string_duplicate(data_name);
-}
-
 void *players_data_get_data(const PlayersData *players_data,
                             players_data_t players_data_type,
                             int player_index) {
@@ -127,14 +105,14 @@ void players_data_set_data(PlayersData *players_data,
 }
 
 void *players_data_create_data(players_data_t players_data_type,
-                               const char *data_name) {
+                               const char *data_path, const char *data_name) {
   void *data = NULL;
   switch (players_data_type) {
   case PLAYERS_DATA_TYPE_KWG:
-    data = kwg_create(data_name);
+    data = kwg_create(data_path, data_name);
     break;
   case PLAYERS_DATA_TYPE_KLV:
-    data = klv_create(data_name);
+    data = klv_create(data_path, data_name);
     break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
@@ -182,19 +160,33 @@ int get_index_of_existing_data(const PlayersData *players_data,
 const char *players_data_get_data_name(const PlayersData *players_data,
                                        players_data_t players_data_type,
                                        int player_index) {
-  int data_name_index =
+
+  const char *data_name = NULL;
+  int data_index =
       players_data_get_player_data_index(players_data_type, player_index);
-  return players_data->data_names[data_name_index];
+  if (players_data->data[data_index]) {
+    switch (players_data_type) {
+    case PLAYERS_DATA_TYPE_KWG:
+      data_name = kwg_get_name(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_KLV:
+      data_name = klv_get_name(players_data->data[data_index]);
+      break;
+    case NUMBER_OF_DATA:
+      log_fatal("cannot destroy invalid players data type");
+      break;
+    }
+  }
+  return data_name;
 }
 
-PlayersData *players_data_create() {
+PlayersData *players_data_create(void) {
   PlayersData *players_data = malloc_or_die(sizeof(PlayersData));
   for (int player_index = 0; player_index < 2; player_index++) {
     for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {
       int player_data_index = players_data_get_player_data_index(
           (players_data_t)data_index, player_index);
       players_data->data_is_shared[data_index] = false;
-      players_data->data_names[player_data_index] = NULL;
       players_data->data[player_data_index] = NULL;
     }
     players_data_set_move_sort_type(players_data, player_index,
@@ -217,8 +209,6 @@ void players_data_destroy(PlayersData *players_data) {
     bool is_shared =
         players_data_get_is_shared(players_data, (players_data_t)data_index);
     for (int player_index = 0; player_index < 2; player_index++) {
-      players_data_destroy_data_name(players_data, (players_data_t)data_index,
-                                     player_index);
       if (!is_shared || player_index == 0) {
         players_data_destroy_data(players_data, (players_data_t)data_index,
                                   player_index);
@@ -229,7 +219,7 @@ void players_data_destroy(PlayersData *players_data) {
 }
 
 void players_data_set(PlayersData *players_data,
-                      players_data_t players_data_type,
+                      players_data_t players_data_type, const char *data_path,
                       const char *p1_data_name, const char *p2_data_name) {
 
   if (is_string_empty_or_null(p1_data_name)) {
@@ -269,7 +259,7 @@ void players_data_set(PlayersData *players_data,
         data_names[1] = string_duplicate(data_names[0]);
       } else {
         data_pointers[player_index] = players_data_create_data(
-            players_data_type, input_data_names[player_index]);
+            players_data_type, data_path, input_data_names[player_index]);
         data_names[player_index] =
             string_duplicate(input_data_names[player_index]);
       }
@@ -295,8 +285,6 @@ void players_data_set(PlayersData *players_data,
     }
     players_data_set_data(players_data, players_data_type, player_index,
                           data_pointers[player_index]);
-    players_data_set_data_name(players_data, players_data_type, player_index,
-                               data_names[player_index]);
   }
   players_data_set_is_shared(players_data, players_data_type,
                              new_data_is_shared);

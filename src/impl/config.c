@@ -13,10 +13,10 @@
 #include "../def/game_defs.h"
 #include "../def/gen_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/math_util_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
-#include "../def/win_pct_defs.h"
 
 #include "../ent/error_status.h"
 #include "../ent/game.h"
@@ -46,11 +46,13 @@ typedef enum {
   ARG_TOKEN_INFER,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
+  ARG_TOKEN_DATA_PATH,
   ARG_TOKEN_BINGO_BONUS,
   ARG_TOKEN_BOARD_LAYOUT,
   ARG_TOKEN_GAME_VARIANT,
   ARG_TOKEN_LETTER_DISTRIBUTION,
   ARG_TOKEN_LEXICON,
+  ARG_TOKEN_LEAVES,
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_LEAVES,
@@ -95,6 +97,7 @@ typedef struct ParsedArg {
 
 struct Config {
   ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
+  char *data_path;
   arg_token_t exec_parg_token;
   bool ld_changed;
   exec_mode_t exec_mode;
@@ -105,7 +108,6 @@ struct Config {
   double stop_cond_pct;
   double equity_margin;
   bool use_game_pairs;
-  uint64_t seed;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -200,6 +202,10 @@ int config_get_parg_num_req_values(const Config *config,
 
 // Config getters
 
+const char *config_get_data_path(const Config *config) {
+  return config->data_path;
+}
+
 exec_mode_t config_get_exec_mode(const Config *config) {
   return config->exec_mode;
 }
@@ -235,8 +241,6 @@ WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
 }
-
-uint64_t config_get_seed(const Config *config) { return config->seed; }
 
 PlayersData *config_get_players_data(const Config *config) {
   return config->players_data;
@@ -286,6 +290,7 @@ void config_fill_game_args(const Config *config, GameArgs *game_args) {
   game_args->players_data = config->players_data;
   game_args->board_layout = config->board_layout;
   game_args->ld = config->ld;
+  game_args->bingo_bonus = config->bingo_bonus;
   game_args->game_variant = config->game_variant;
 }
 
@@ -489,7 +494,7 @@ void execute_cgp_load(Config *config) {
 
   config_init_game(config);
 
-  StringBuilder *cgp_builder = create_string_builder();
+  StringBuilder *cgp_builder = string_builder_create();
   int num_req_values = config_get_parg_num_req_values(config, ARG_TOKEN_CGP);
   for (int i = 0; i < num_req_values; i++) {
     const char *cgp_component = config_get_parg_value(config, ARG_TOKEN_CGP, i);
@@ -521,7 +526,7 @@ void execute_cgp_load(Config *config) {
     }
     config_reset_move_list(config);
   }
-  destroy_string_builder(cgp_builder);
+  string_builder_destroy(cgp_builder);
 }
 
 char *status_cgp_load(Config __attribute__((unused)) * config) {
@@ -553,7 +558,7 @@ void execute_add_moves(Config *config) {
   if (move_validation_status == MOVE_VALIDATION_STATUS_SUCCESS) {
     const LetterDistribution *ld = game_get_ld(config->game);
     const Board *board = game_get_board(config->game);
-    StringBuilder *phonies_sb = create_string_builder();
+    StringBuilder *phonies_sb = string_builder_create();
     int number_of_new_moves =
         validated_moves_get_number_of_moves(new_validated_moves);
     for (int i = 0; i < number_of_new_moves; i++) {
@@ -563,15 +568,15 @@ void execute_add_moves(Config *config) {
         string_builder_clear(phonies_sb);
         string_builder_add_string(phonies_sb, "Phonies formed from ");
         string_builder_add_move(
-            board, validated_moves_get_move(new_validated_moves, i), ld,
-            phonies_sb);
+            phonies_sb, board, validated_moves_get_move(new_validated_moves, i),
+            ld);
         string_builder_add_string(phonies_sb, ": ");
         string_builder_add_string(phonies_sb, phonies_formed);
         log_warn(string_builder_peek(phonies_sb));
       }
       free(phonies_formed);
     }
-    destroy_string_builder(phonies_sb);
+    string_builder_destroy(phonies_sb);
     config_init_move_list(config, number_of_new_moves);
     validated_moves_add_to_move_list(new_validated_moves, config->move_list);
   }
@@ -622,12 +627,9 @@ void execute_set_rack(Config *config) {
       CONFIG_LOAD_STATUS_MALFORMED_RACK_ARG, new_rack);
 
   if (error_status_get_success(config->error_status)) {
-    Bag *bag = game_get_bag(config->game);
-    if (rack_is_drawable(bag, player_rack, new_rack)) {
-      int player_draw_index =
-          game_get_player_draw_index(config->game, player_index);
-      return_rack_to_bag(player_rack, bag, player_draw_index);
-      if (!draw_rack_from_bag(bag, player_rack, new_rack, player_draw_index)) {
+    if (rack_is_drawable(config->game, player_index, new_rack)) {
+      return_rack_to_bag(config->game, player_index);
+      if (!draw_rack_from_bag(config->game, player_index, new_rack)) {
         log_fatal("failed to draw rack from bag in set rack command");
       }
     } else {
@@ -673,7 +675,6 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->max_iterations = config->max_iterations;
   sim_args->num_plies = config_get_plies(config);
   sim_args->stop_cond_pct = config_get_stop_cond_pct(config);
-  sim_args->seed = config->seed;
   sim_args->game = config_get_game(config);
   sim_args->move_list = config_get_move_list(config);
   sim_args->known_opp_rack = known_opp_rack;
@@ -849,7 +850,6 @@ void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args) {
   autoplay_args->max_iterations = config->max_iterations;
   autoplay_args->use_game_pairs = config->use_game_pairs;
-  autoplay_args->seed = config->seed;
   autoplay_args->thread_control = config->thread_control;
   config_fill_game_args(config, autoplay_args->game_args);
 }
@@ -1030,32 +1030,26 @@ bool is_lexicon_required(const char *new_p1_leaves_name,
   return new_p1_leaves_name || new_p2_leaves_name || new_ld_name;
 }
 
-bool lds_are_compatible(const char *ld_name_1, const char *ld_name_2) {
-  return strings_equal(ld_name_1, ld_name_2) ||
-         // English and French use the same letters so they are
-         // allowed to play against each other.
-         (strings_equal(ld_name_1, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
-          strings_equal(ld_name_2, FRENCH_LETTER_DISTRIBUTION_NAME)) ||
-         (strings_equal(ld_name_2, ENGLISH_LETTER_DISTRIBUTION_NAME) &&
-          strings_equal(ld_name_1, FRENCH_LETTER_DISTRIBUTION_NAME));
+bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name) {
+  if (!p1_lexicon_name && !p2_lexicon_name) {
+    return true;
+  }
+  if (!p1_lexicon_name || !p2_lexicon_name) {
+    return false;
+  }
+  return ld_types_compat(ld_get_type_from_lex_name(p1_lexicon_name),
+                         ld_get_type_from_lex_name(p2_lexicon_name));
 }
 
-bool lexicons_are_compatible(const char *p1_lexicon_name,
-                             const char *p2_lexicon_name) {
-  char *p1_ld = ld_get_default_name(p1_lexicon_name);
-  char *p2_ld = ld_get_default_name(p2_lexicon_name);
-  bool compatible = lds_are_compatible(p1_ld, p2_ld);
-  free(p1_ld);
-  free(p2_ld);
-  return compatible;
-}
-
-bool ld_is_compatible_with_lexicon(const char *lexicon_name,
-                                   const char *ld_name) {
-  char *ld_from_lexicon_name = ld_get_default_name(lexicon_name);
-  bool compatible = lds_are_compatible(ld_from_lexicon_name, ld_name);
-  free(ld_from_lexicon_name);
-  return compatible;
+bool lex_ld_compat(const char *lexicon_name, const char *ld_name) {
+  if (!lexicon_name && !ld_name) {
+    return true;
+  }
+  if (!lexicon_name || !ld_name) {
+    return false;
+  }
+  return ld_types_compat(ld_get_type_from_lex_name(lexicon_name),
+                         ld_get_type_from_ld_name(ld_name));
 }
 
 char *get_default_klv_name(const char *lexicon_name) {
@@ -1094,13 +1088,25 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
         config_get_parg_value(config, ARG_TOKEN_P2_LEXICON, 0);
   }
 
-  const char *new_p1_leaves_name =
-      config_get_parg_value(config, ARG_TOKEN_P1_LEAVES, 0);
-  const char *new_p2_leaves_name =
-      config_get_parg_value(config, ARG_TOKEN_P2_LEAVES, 0);
+  const char *new_leaves_name =
+      config_get_parg_value(config, ARG_TOKEN_LEAVES, 0);
+
+  const char *new_p1_leaves_name = new_leaves_name;
+  const char *new_p2_leaves_name = new_leaves_name;
+
+  // The "k1" and "k2" args override the "leaves" arg
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_LEAVES) > 0) {
+    new_p1_leaves_name = config_get_parg_value(config, ARG_TOKEN_P1_LEAVES, 0);
+  }
+
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_LEAVES) > 0) {
+    new_p2_leaves_name = config_get_parg_value(config, ARG_TOKEN_P2_LEAVES, 0);
+  }
+
   const char *new_ld_name =
       config_get_parg_value(config, ARG_TOKEN_LETTER_DISTRIBUTION, 0);
 
+  // Load the lexicons
   const char *existing_p1_lexicon_name = players_data_get_data_name(
       config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
   const char *existing_p2_lexicon_name = players_data_get_data_name(
@@ -1136,68 +1142,84 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
     }
   }
 
-  if (!lexicons_are_compatible(updated_p1_lexicon_name,
-                               updated_p2_lexicon_name)) {
+  if (!lex_lex_compat(updated_p1_lexicon_name, updated_p2_lexicon_name)) {
     return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
   }
 
+  // Set the use_default bool here because the 'existing_p1_lexicon_name'
+  // variable might be free'd in players_data_set.
+  const bool use_default =
+      !lex_lex_compat(updated_p1_lexicon_name, existing_p1_lexicon_name);
+
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
-                   updated_p1_lexicon_name, updated_p2_lexicon_name);
+                   config->data_path, updated_p1_lexicon_name,
+                   updated_p2_lexicon_name);
 
   // Load the leaves
 
-  char *updated_p1_leaves_name;
+  const char *existing_p1_leaves_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KLV, 0);
+  char *updated_p1_leaves_name = NULL;
   if (new_p1_leaves_name) {
     updated_p1_leaves_name = string_duplicate(new_p1_leaves_name);
-  } else {
+  } else if (use_default || !existing_p1_leaves_name) {
     updated_p1_leaves_name = get_default_klv_name(updated_p1_lexicon_name);
+  } else {
+    updated_p1_leaves_name = string_duplicate(existing_p1_leaves_name);
   }
 
-  char *updated_p2_leaves_name;
+  const char *existing_p2_leaves_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KLV, 1);
+  char *updated_p2_leaves_name = NULL;
   if (new_p2_leaves_name) {
     updated_p2_leaves_name = string_duplicate(new_p2_leaves_name);
-  } else {
+  } else if (use_default || !existing_p2_leaves_name) {
     updated_p2_leaves_name = get_default_klv_name(updated_p2_lexicon_name);
+  } else {
+    updated_p2_leaves_name = string_duplicate(existing_p2_leaves_name);
   }
 
-  if (!lexicons_are_compatible(updated_p1_leaves_name,
-                               updated_p2_leaves_name) ||
-      !lexicons_are_compatible(updated_p1_lexicon_name,
-                               updated_p1_leaves_name) ||
-      !lexicons_are_compatible(updated_p2_lexicon_name,
-                               updated_p2_leaves_name)) {
+  if (!lex_lex_compat(updated_p1_leaves_name, updated_p2_leaves_name) ||
+      !lex_lex_compat(updated_p1_lexicon_name, updated_p1_leaves_name) ||
+      !lex_lex_compat(updated_p2_lexicon_name, updated_p2_leaves_name)) {
     free(updated_p1_leaves_name);
     free(updated_p2_leaves_name);
     return CONFIG_LOAD_STATUS_INCOMPATIBLE_LEXICONS;
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
-                   updated_p1_leaves_name, updated_p2_leaves_name);
+                   config->data_path, updated_p1_leaves_name,
+                   updated_p2_leaves_name);
 
   free(updated_p1_leaves_name);
   free(updated_p2_leaves_name);
 
   // Load letter distribution
 
-  char *updated_ld_name = NULL;
   const char *existing_ld_name = NULL;
   if (config->ld) {
     existing_ld_name = ld_get_name(config->ld);
   }
-  if (!is_string_empty_or_null(new_ld_name)) {
-    if (!ld_is_compatible_with_lexicon(updated_p1_lexicon_name, new_ld_name)) {
-      return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
-    }
+  char *updated_ld_name = NULL;
+  if (new_ld_name) {
     updated_ld_name = string_duplicate(new_ld_name);
-  } else if (new_p1_lexicon_name || new_p2_lexicon_name || !existing_ld_name) {
-    updated_ld_name = ld_get_default_name(updated_p1_lexicon_name);
+  } else if (use_default || !existing_ld_name) {
+    updated_ld_name =
+        ld_get_default_name_from_lexicon_name(updated_p1_lexicon_name);
+  } else {
+    updated_ld_name = string_duplicate(existing_ld_name);
+  }
+
+  if (!lex_ld_compat(updated_p1_lexicon_name, updated_ld_name)) {
+    free(updated_ld_name);
+    return CONFIG_LOAD_STATUS_INCOMPATIBLE_LETTER_DISTRIBUTION;
   }
 
   // If the letter distribution name has changed, update it
   config->ld_changed = false;
-  if (updated_ld_name && !strings_equal(updated_ld_name, existing_ld_name)) {
+  if (!strings_equal(updated_ld_name, existing_ld_name)) {
     ld_destroy(config->ld);
-    config->ld = ld_create(updated_ld_name);
+    config->ld = ld_create(config->data_path, updated_ld_name);
     config->ld_changed = true;
   }
 
@@ -1209,6 +1231,12 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
 // Assumes all args are parsed and correctly set in pargs.
 config_load_status_t config_load_data(Config *config) {
   config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
+
+  const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
+  if (new_path) {
+    free(config->data_path);
+    config->data_path = string_duplicate(new_path);
+  }
 
   // Exec Mode
 
@@ -1285,10 +1313,11 @@ config_load_status_t config_load_data(Config *config) {
   const char *new_stop_cond_str =
       config_get_parg_value(config, ARG_TOKEN_STOP_COND_PCT, 0);
   if (new_stop_cond_str && has_iprefix(new_stop_cond_str, "none")) {
-    config->stop_cond_pct = STOP_COND_NONE;
+    config->stop_cond_pct = PERCENTILE_MAX + 10;
   } else {
-    config_load_status = config_load_double(config, ARG_TOKEN_STOP_COND_PCT,
-                                            0.0, 100.0, &config->stop_cond_pct);
+    config_load_status =
+        config_load_double(config, ARG_TOKEN_STOP_COND_PCT, 0.0, PERCENTILE_MAX,
+                           &config->stop_cond_pct);
     if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
       return config_load_status;
     }
@@ -1323,12 +1352,12 @@ config_load_status_t config_load_data(Config *config) {
 
   // Seed
 
-  config_load_status =
-      config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &config->seed);
+  uint64_t seed;
+  config_load_status = config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &seed);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
-
+  thread_control_prng_seed(config->thread_control, seed);
   // Board layout
 
   const char *new_board_layout_name =
@@ -1336,7 +1365,8 @@ config_load_status_t config_load_data(Config *config) {
   if (new_board_layout_name &&
       !strings_equal(board_layout_get_name(config->board_layout),
                      new_board_layout_name)) {
-    if (board_layout_load(config->board_layout, new_board_layout_name) !=
+    if (board_layout_load(config->board_layout, config->data_path,
+                          new_board_layout_name) !=
         BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
       return CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR;
     }
@@ -1391,7 +1421,7 @@ config_load_status_t config_load_data(Config *config) {
   if (new_win_pct_name &&
       !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name)) {
     win_pct_destroy(config->win_pcts);
-    config->win_pcts = win_pct_create(new_win_pct_name);
+    config->win_pcts = win_pct_create(config->data_path, new_win_pct_name);
   }
 
   // Set IO
@@ -1423,7 +1453,7 @@ config_load_status_t config_load_command(Config *config, const char *cmd) {
     config_load_status = config_load_data(config);
   }
 
-  destroy_string_splitter(cmd_split_string);
+  string_splitter_destroy(cmd_split_string);
 
   return config_load_status;
 }
@@ -1444,10 +1474,10 @@ char *config_get_execute_status(Config *config) {
   return status;
 }
 
-Config *config_create_default() {
+Config *config_create_default(void) {
   Config *config = malloc_or_die(sizeof(Config));
   parsed_arg_create(config, ARG_TOKEN_SET, "setoptions", 0, 0, execute_noop,
-                    status_cgp_load);
+                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_CGP, "cgp", 4, 4, execute_cgp_load,
                     status_cgp_load);
   parsed_arg_create(config, ARG_TOKEN_MOVES, "addmoves", 1, 1,
@@ -1464,6 +1494,8 @@ Config *config_create_default() {
                     execute_autoplay, status_autoplay);
   parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
                     status_convert);
+  parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
+                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_BOARD_LAYOUT, "bdn", 1, 1, execute_fatal,
@@ -1473,6 +1505,8 @@ Config *config_create_default() {
   parsed_arg_create(config, ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_LEXICON, "lex", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_LEAVES, "leaves", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P1_NAME, "p1", 1, 1, execute_fatal,
                     status_fatal);
@@ -1523,6 +1557,7 @@ Config *config_create_default() {
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
                     status_fatal);
 
+  config->data_path = string_duplicate(DEFAULT_DATA_PATH);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
@@ -1533,10 +1568,9 @@ Config *config_create_default() {
   config->stop_cond_pct = 99;
   config->equity_margin = 0;
   config->use_game_pairs = true;
-  config->seed = 0;
   config->game_variant = DEFAULT_GAME_VARIANT;
-  config->win_pcts = win_pct_create(DEFAULT_WIN_PCT);
-  config->board_layout = board_layout_create_default();
+  config->win_pcts = win_pct_create(config->data_path, DEFAULT_WIN_PCT);
+  config->board_layout = board_layout_create_default(config->data_path);
   config->ld = NULL;
   config->players_data = players_data_create();
   config->thread_control = thread_control_create();
@@ -1569,5 +1603,6 @@ void config_destroy(Config *config) {
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   error_status_destroy(config->error_status);
+  free(config->data_path);
   free(config);
 }

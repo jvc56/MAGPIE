@@ -53,13 +53,40 @@ void bag_reset(const LetterDistribution *ld, Bag *bag) {
   int tile_index = 0;
   int ld_size = ld_get_size(ld);
   for (int i = 0; i < ld_size; i++) {
-    for (int k = 0; k < ld_get_dist(ld, i); k++) {
+    int num_tiles = ld_get_dist(ld, i);
+    for (int k = 0; k < num_tiles; k++) {
       bag->tiles[tile_index] = i;
       tile_index++;
     }
   }
   bag->start_tile_index = 0;
   bag->end_tile_index = tile_index;
+  bag_shuffle(bag);
+}
+
+// Sorts the bag in alphabetical order
+void bag_alphabetize(Bag *bag) {
+  int tiles_count[MAX_ALPHABET_SIZE];
+  for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
+    tiles_count[i] = 0;
+  }
+  for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
+    tiles_count[bag->tiles[i]]++;
+  }
+  int tile_index = bag->start_tile_index;
+  for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
+    for (int k = 0; k < tiles_count[i]; k++) {
+      bag->tiles[tile_index] = i;
+      tile_index++;
+    }
+  }
+}
+
+// Seeds the bag, orders the bag alphabetically, then shuffles
+// using the seed.
+void bag_seed(Bag *bag, uint64_t seed) {
+  prng_seed(bag->prng, seed);
+  bag_alphabetize(bag);
   bag_shuffle(bag);
 }
 
@@ -171,16 +198,6 @@ void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index) {
     bag->start_tile_index--;
   }
   bag->tiles[insert_index] = letter;
-}
-
-// This function ensures that all workers for a given
-// job are seeded with unique non-overlapping sequences
-// for the PRNGs in their bags.
-void bag_seed_for_worker(Bag *bag, uint64_t seed, int worker_index) {
-  prng_seed(bag->prng, seed);
-  for (int j = 0; j < worker_index; j++) {
-    prng_jump(bag->prng);
-  }
 }
 
 // Gets the number of a tiles 'ml' in the bag. For drawing tiles

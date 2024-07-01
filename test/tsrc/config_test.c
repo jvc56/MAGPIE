@@ -34,8 +34,8 @@ void test_config_load_error(Config *config, const char *cmd,
   }
 }
 
-void test_config_load_error_cases() {
-  Config *config = config_create_default();
+void test_config_load_error_cases(void) {
+  Config *config = config_create_default_test();
   test_config_load_error(config, "endgame",
                          CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
   test_config_load_error(config, "sim -lex CSW21 -iter 1000 -plies 10 1",
@@ -60,23 +60,8 @@ void test_config_load_error_cases() {
                          CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
   test_config_load_error(config, "cgp 1 2 3",
                          CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
-
-  const char *target = "../../test/testdata/invalid_number_of_rows15.txt";
-  const char *link_name = "data/layouts/invalid_number_of_rows15.txt";
-
-  if (symlink(target, link_name) != 0) {
-    perror("symlink");
-    log_fatal("Failed to create symlink: %s %s", target, link_name);
-  }
-
   test_config_load_error(config, "sim -bdn invalid_number_of_rows15",
                          CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
-
-  if (unlink(link_name) != 0) {
-    perror("unlink");
-    log_fatal("Failed to destroy symlink: %s %s", target, link_name);
-  }
-
   test_config_load_error(config, "sim -var Lonify",
                          CONFIG_LOAD_STATUS_UNRECOGNIZED_GAME_VARIANT);
   test_config_load_error(config, "sim -bb 3b4",
@@ -150,8 +135,8 @@ void test_config_load_error_cases() {
   config_destroy(config);
 }
 
-void test_config_load_success() {
-  Config *config = config_create_default();
+void test_config_load_success(void) {
+  Config *config = config_create_default_test();
 
   // Loading with whitespace should not fail
   load_and_exec_config_or_die(config, "           ");
@@ -159,35 +144,7 @@ void test_config_load_success() {
   // Loading with no lexicon data should not fail
   load_and_exec_config_or_die(config, "set -plies 3");
 
-  // Ensure defaults are set when just the lexicon is set
-  load_and_exec_config_or_die(config, "set -lex CSW21");
-
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 0),
-      "CSW21");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 1),
-      "CSW21");
-  assert_strings_equal(ld_get_name(config_get_ld(config)),
-                       ENGLISH_LETTER_DISTRIBUTION_NAME);
-
-  // Ensure defaults are set when just the lexicon changes
-  load_and_exec_config_or_die(config, "set -lex FRA20");
-
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 0),
-      "FRA20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 1),
-      "FRA20");
-  assert_strings_equal(ld_get_name(config_get_ld(config)),
-                       FRENCH_LETTER_DISTRIBUTION_NAME);
-
-  const char *ld_name = "french";
+  const char *ld_name = "english";
   int bingo_bonus = 73;
   const char *game_variant = "wordsmog";
   const char *p1 = "Alice";
@@ -208,7 +165,7 @@ void test_config_load_success() {
   int print_info = 200;
   int check_stop = 700;
 
-  StringBuilder *test_string_builder = create_string_builder();
+  StringBuilder *test_string_builder = string_builder_create();
   string_builder_add_formatted_string(
       test_string_builder,
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
@@ -238,7 +195,6 @@ void test_config_load_success() {
   assert(config_get_plies(config) == plies);
   assert(config_get_max_iterations(config) == max_iterations);
   assert(within_epsilon(config_get_stop_cond_pct(config), 98));
-  assert(config_get_seed(config) == (uint64_t)seed);
   assert(thread_control_get_threads(config_get_thread_control(config)) ==
          number_of_threads);
   assert(thread_control_get_print_info_interval(
@@ -246,35 +202,6 @@ void test_config_load_success() {
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
   assert(config_get_use_game_pairs(config));
-
-  assert_strings_equal(
-      p1, players_data_get_name(config_get_players_data(config), 0));
-  assert_strings_equal(
-      p2, players_data_get_name(config_get_players_data(config), 1));
-
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KWG, 0),
-                    l1));
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KWG, 1),
-                    l2));
-  // KLVs should use the same name
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KLV, 0),
-                    l1));
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KLV, 1),
-                    l2));
-
-  // Save KWG pointers as these shouldn't be reused
-  const KWG *p1_csw_kwg = players_data_get_data(config_get_players_data(config),
-                                                PLAYERS_DATA_TYPE_KWG, 0);
-  const KWG *p2_nwl_kwg = players_data_get_data(config_get_players_data(config),
-                                                PLAYERS_DATA_TYPE_KWG, 1);
 
   // Change some fields, confirm that
   // other fields retain their value.
@@ -326,85 +253,48 @@ void test_config_load_success() {
              config_get_thread_control(config)) == check_stop);
   assert(!config_get_use_game_pairs(config));
 
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KWG, 0),
-                    l1));
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KWG, 1),
-                    l2));
-  // KLVs should use the same name
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KLV, 0),
-                    l1));
-  assert(
-      strings_equal(players_data_get_data_name(config_get_players_data(config),
-                                               PLAYERS_DATA_TYPE_KLV, 1),
-                    l2));
+  string_builder_destroy(test_string_builder);
+  config_destroy(config);
+}
 
-  // The players data should have swapped the lexicons
-  // and not created or destroyed any new KWGs
-  const KWG *p1_nwl_kwg = players_data_get_data(config_get_players_data(config),
-                                                PLAYERS_DATA_TYPE_KWG, 0);
-  const KWG *p2_csw_kwg = players_data_get_data(config_get_players_data(config),
-                                                PLAYERS_DATA_TYPE_KWG, 1);
-  assert(p1_csw_kwg == p2_csw_kwg);
-  assert(p1_nwl_kwg == p2_nwl_kwg);
+void assert_lexical_data(Config *config, const char *cmd, const char *l1,
+                         const char *l2, const char *k1, const char *k2,
+                         const char *ld) {
+  load_and_exec_config_or_die(config, cmd);
+  const PlayersData *pd = config_get_players_data(config);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KWG, 0),
+                       l1);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KWG, 1),
+                       l2);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KLV, 0),
+                       k1);
+  assert_strings_equal(players_data_get_data_name(pd, PLAYERS_DATA_TYPE_KLV, 1),
+                       k2);
+  assert_strings_equal(ld_get_name(config_get_ld(config)), ld);
+}
 
-  // Test move sort/record key words
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder, "set -s1 score -r1 all");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-
-  // English and French should be able to play each other
-  // with either distribution
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder,
-                            "set -ld english -l1 CSW21 -l2 FRA20");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder,
-                            "set -ld french -l1 FRA20 -l2 CSW21");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder, "set -lex NWL20");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 0),
-      "NWL20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 1),
-      "NWL20");
-
-  // Correctly set leave and letter distribution defaults
-  string_builder_clear(test_string_builder);
-  string_builder_add_string(test_string_builder, "set -lex FRA20");
-  load_and_exec_config_or_die(config, string_builder_peek(test_string_builder));
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 0),
-      "FRA20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KWG, 1),
-      "FRA20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KLV, 0),
-      "FRA20");
-  assert_strings_equal(
-      players_data_get_data_name(config_get_players_data(config),
-                                 PLAYERS_DATA_TYPE_KLV, 1),
-      "FRA20");
-
-  destroy_string_builder(test_string_builder);
+void test_config_lexical_data(void) {
+  Config *config = config_create_default_test();
+  // Check that defaults are set correctly
+  assert_lexical_data(config, "set -lex CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", "english");
+  // Check that lexicons, leaves, and ld change change
+  // successfully if they belong to the same ld type.
+  assert_lexical_data(config, "set -l2 NWL20 -ld english_blank_is_5 -k1 NWL20",
+                      "CSW21", "NWL20", "NWL20", "CSW21", "english_blank_is_5");
+  // The leaves and ld should stay the same since they are
+  // the same ld type.
+  assert_lexical_data(config, "set -lex CSW21", "CSW21", "CSW21", "NWL20",
+                      "CSW21", "english_blank_is_5");
+  // Check that the leaves arg behaves as expected
+  assert_lexical_data(config, "set -leaves CSW21", "CSW21", "CSW21", "CSW21",
+                      "CSW21", "english_blank_is_5");
+  // Check that the leaves arg behaves as expected
+  assert_lexical_data(config, "set -leaves NWL20", "CSW21", "CSW21", "NWL20",
+                      "NWL20", "english_blank_is_5");
+  // Check that defaults are set correctly when switching to a new language
+  assert_lexical_data(config, "set -lex FRA20", "FRA20", "FRA20", "FRA20",
+                      "FRA20", "french");
   config_destroy(config);
 }
 
@@ -445,8 +335,8 @@ void assert_config_exec_status(Config *config, const char *cmd,
   }
 }
 
-void test_config_exec_parse_args() {
-  Config *config = config_create_default();
+void test_config_exec_parse_args(void) {
+  Config *config = config_create_default_test();
 
   // Ensure all commands that require game data fail correctly
   assert_config_exec_status(
@@ -544,8 +434,9 @@ void test_config_exec_parse_args() {
   config_destroy(config);
 }
 
-void test_config() {
+void test_config(void) {
   test_config_load_error_cases();
   test_config_load_success();
+  test_config_lexical_data();
   test_config_exec_parse_args();
 }

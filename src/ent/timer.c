@@ -21,7 +21,7 @@ void mtimer_reset(Timer *timer) {
   timer->is_running = false;
 }
 
-Timer *mtimer_create() {
+Timer *mtimer_create(void) {
   Timer *timer = (Timer *)malloc_or_die(sizeof(Timer));
   mtimer_reset(timer);
   return timer;

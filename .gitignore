@@ -10,11 +10,7 @@ covhtml
 dev/*.txt
 perf*
 .env
-data/lexica/*
-data/strategy/*
-data/layouts/*
-test/testdata/outerror
-test/testdata/output
-test/testdata/test_commands
+data
+testdata
 oprofile_data
 TODO

@@ -63,7 +63,7 @@ typedef struct MutableNodeList {
   size_t capacity;
 } MutableNodeList;
 
-MutableNodeList *mutable_node_list_create() {
+MutableNodeList *mutable_node_list_create(void) {
   MutableNodeList *mutable_node_list = malloc_or_die(sizeof(MutableNodeList));
   mutable_node_list->capacity = KWG_MUTABLE_NODE_LIST_INITIAL_CAPACITY;
   mutable_node_list->nodes =
@@ -202,7 +202,7 @@ typedef struct NodePointerList {
   size_t capacity;
 } NodePointerList;
 
-NodePointerList *node_pointer_list_create() {
+NodePointerList *node_pointer_list_create(void) {
   NodePointerList *node_pointer_list = malloc_or_die(sizeof(NodePointerList));
   node_pointer_list->capacity = KWG_ORDERED_POINTER_LIST_INITIAL_CAPACITY;
   node_pointer_list->nodes =
@@ -388,10 +388,10 @@ void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
     const uint32_t node = kwg_node(kwg, i);
     const uint8_t ml = kwg_node_tile(node);
     const uint32_t new_node_index = kwg_node_arc_index_prefetch(node, kwg);
-    const bool accepts = kwg_node_accepts(node);
+    const bool node_accepts = kwg_node_accepts(node);
     prefix[prefix_length] = ml;
-    write_words_aux(kwg, new_node_index, prefix, prefix_length + 1, accepts,
-                    words, nodes_reached);
+    write_words_aux(kwg, new_node_index, prefix, prefix_length + 1,
+                    node_accepts, words, nodes_reached);
     if (kwg_node_is_end(node)) {
       break;
     }

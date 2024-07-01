@@ -319,7 +319,7 @@ struct StringBuilder {
   size_t len;
 };
 
-StringBuilder *create_string_builder() {
+StringBuilder *string_builder_create(void) {
   StringBuilder *string_builder = malloc_or_die(sizeof(StringBuilder));
   string_builder->string = malloc_or_die(string_builder_min_size);
   *string_builder->string = '\0';
@@ -329,7 +329,7 @@ StringBuilder *create_string_builder() {
   return string_builder;
 }
 
-void destroy_string_builder(StringBuilder *string_builder) {
+void string_builder_destroy(StringBuilder *string_builder) {
   if (!string_builder) {
     return;
   }
@@ -472,14 +472,14 @@ typedef struct StringDelimiter {
   string_delimiter_class_t string_delimiter_class;
 } StringDelimiter;
 
-StringSplitter *create_string_splitter() {
+StringSplitter *string_splitter_create(void) {
   StringSplitter *string_splitter = malloc_or_die(sizeof(StringSplitter));
   string_splitter->number_of_items = 0;
   string_splitter->items = NULL;
   return string_splitter;
 }
 
-void destroy_string_splitter(StringSplitter *string_splitter) {
+void string_splitter_destroy(StringSplitter *string_splitter) {
   if (!string_splitter) {
     return;
   }
@@ -490,12 +490,12 @@ void destroy_string_splitter(StringSplitter *string_splitter) {
   free(string_splitter);
 }
 
-StringDelimiter *create_string_delimiter() {
+StringDelimiter *string_delimiter_create(void) {
   StringDelimiter *string_delimiter = malloc_or_die(sizeof(StringSplitter));
   return string_delimiter;
 }
 
-void destroy_string_delimiter(StringDelimiter *string_delimiter) {
+void string_delimiter_destroy(StringDelimiter *string_delimiter) {
   if (!string_delimiter) {
     return;
   }
@@ -545,7 +545,7 @@ char *string_splitter_join(const StringSplitter *string_splitter,
     log_fatal("invalid bounds for join: %d, %d, %d\n", start_index, end_index,
               number_of_items);
   }
-  StringBuilder *joined_string_builder = create_string_builder();
+  StringBuilder *joined_string_builder = string_builder_create();
   for (int i = start_index; i < end_index; i++) {
     string_builder_add_string(joined_string_builder,
                               string_splitter_get_item(string_splitter, i));
@@ -554,7 +554,7 @@ char *string_splitter_join(const StringSplitter *string_splitter,
     }
   }
   char *joined_string = string_builder_dump(joined_string_builder, NULL);
-  destroy_string_builder(joined_string_builder);
+  string_builder_destroy(joined_string_builder);
   return joined_string;
 }
 
@@ -605,7 +605,7 @@ StringSplitter *split_string_internal(const char *input_string,
   int number_of_items = split_string_scan(string_delimiter, NULL, input_string,
                                           ignore_empty, false);
 
-  StringSplitter *string_splitter = create_string_splitter();
+  StringSplitter *string_splitter = string_splitter_create();
   string_splitter->number_of_items = number_of_items;
   if (string_splitter->number_of_items > 0) {
     string_splitter->items =
@@ -621,23 +621,23 @@ StringSplitter *split_string_by_range(const char *input_string,
                                       const char min_delimiter,
                                       const char max_delimiter,
                                       bool ignore_empty) {
-  StringDelimiter *string_delimiter = create_string_delimiter();
+  StringDelimiter *string_delimiter = string_delimiter_create();
   string_delimiter->min_delimiter = min_delimiter;
   string_delimiter->max_delimiter = max_delimiter;
   string_delimiter->string_delimiter_class = STRING_DELIMITER_RANGED;
   StringSplitter *string_splitter =
       split_string_internal(input_string, string_delimiter, ignore_empty);
-  destroy_string_delimiter(string_delimiter);
+  string_delimiter_destroy(string_delimiter);
   return string_splitter;
 }
 
 StringSplitter *split_string_by_whitespace(const char *input_string,
                                            bool ignore_empty) {
-  StringDelimiter *string_delimiter = create_string_delimiter();
+  StringDelimiter *string_delimiter = string_delimiter_create();
   string_delimiter->string_delimiter_class = STRING_DELIMITER_WHITESPACE;
   StringSplitter *string_splitter =
       split_string_internal(input_string, string_delimiter, ignore_empty);
-  destroy_string_delimiter(string_delimiter);
+  string_delimiter_destroy(string_delimiter);
   return string_splitter;
 }
 

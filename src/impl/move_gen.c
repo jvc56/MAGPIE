@@ -51,6 +51,7 @@ typedef struct MoveGen {
   int move_record_type;
   int number_of_tiles_in_bag;
   int player_index;
+  int bingo_bonus;
   bool kwgs_are_shared;
   bool is_wordsmog;
   Rack player_rack;
@@ -62,6 +63,7 @@ typedef struct MoveGen {
   Rack bingo_alpha_rack;
   Rack bingo_alpha_rack_shadow_right_copy;
   Rack opponent_rack;
+  Rack leave;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
   int row_number_of_anchors_cache[(BOARD_DIM) * 2];
@@ -122,7 +124,7 @@ typedef struct MoveGen {
   double best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
 
-  // Include blank letters as zeroes so their scores can be added without
+  // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
   uint8_t tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
 
@@ -142,7 +144,7 @@ typedef struct MoveGen {
 // only called once per command.
 static MoveGen *cached_gens[MAX_THREADS];
 
-MoveGen *create_generator() {
+MoveGen *generator_create(void) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
   generator->anchor_list = anchor_list_create();
   generator->tiles_played = 0;
@@ -150,7 +152,7 @@ MoveGen *create_generator() {
   return generator;
 }
 
-void destroy_generator(MoveGen *gen) {
+void generator_destroy(MoveGen *gen) {
   if (!gen) {
     return;
   }
@@ -160,14 +162,14 @@ void destroy_generator(MoveGen *gen) {
 
 MoveGen *get_movegen(int thread_index) {
   if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = create_generator();
+    cached_gens[thread_index] = generator_create();
   }
   return cached_gens[thread_index];
 }
 
-void gen_destroy_cache() {
+void gen_destroy_cache(void) {
   for (int i = 0; i < (MAX_THREADS); i++) {
-    destroy_generator(cached_gens[i]);
+    generator_destroy(cached_gens[i]);
     cached_gens[i] = NULL;
   }
 }
@@ -300,7 +302,7 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
 
   int bingo_bonus = 0;
   if (tiles_played == RACK_SIZE) {
-    bingo_bonus = DEFAULT_BINGO_BONUS;
+    bingo_bonus = gen->bingo_bonus;
   }
 
   score = main_word_score * word_multiplier + cross_score + bingo_bonus;
@@ -747,7 +749,7 @@ static inline void shadow_record(MoveGen *gen) {
 
   int bingo_bonus = 0;
   if (gen->tiles_played == RACK_SIZE) {
-    bingo_bonus = DEFAULT_BINGO_BONUS;
+    bingo_bonus = gen->bingo_bonus;
   }
 
   const int score =
@@ -1323,6 +1325,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
 
+  gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_sort_type = move_sort_type;
@@ -1358,10 +1361,9 @@ void generate_moves(Game *game, move_record_t move_record_type,
     // tiles and keeping 0 tiles.
     leave_map_set_current_index(&gen->leave_map, 0);
     uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
-    Rack *leave = rack_create(rack_get_dist_size(&gen->player_rack));
-    generate_exchange_moves(gen, leave, node_index, 0, 0,
+    rack_reset(&gen->leave);
+    generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
                             gen->number_of_tiles_in_bag >= RACK_SIZE);
-    rack_destroy(leave);
   }
   // Set the leave_map index to 2^number_of_letters - 1, which represents
   // using (playing) zero tiles and keeping
@@ -1378,6 +1380,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
       gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
     }
     gen->tile_scores[i] = ld_get_score(gen->ld, i);
+    gen->tile_scores[get_blanked_machine_letter(i)] =
+        ld_get_score(gen->ld, BLANK_MACHINE_LETTER);
   }
 
   set_descending_tile_scores(gen);

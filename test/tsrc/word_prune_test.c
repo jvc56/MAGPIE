@@ -30,8 +30,8 @@ void assert_word_count(const LetterDistribution *ld, DictionaryWordList *words,
   assert(count == expected_count);
 }
 
-void test_possible_words() {
-  Config *config = create_config_or_die(
+void test_possible_words(void) {
+  Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   // empty board
   Game *game = config_game_create(config);
@@ -87,4 +87,4 @@ void test_possible_words() {
   config_destroy(config);
 }
 
-void test_word_prune() { test_possible_words(); }
+void test_word_prune(void) { test_possible_words(); }

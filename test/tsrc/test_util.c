@@ -92,20 +92,30 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
 }
 
 char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
-  StringBuilder *css_builder = create_string_builder();
+  StringBuilder *css_builder = string_builder_create();
   for (int i = 0; i < MAX_ALPHABET_SIZE; ++i) {
     if (input & ((uint64_t)1 << i)) {
       string_builder_add_string(css_builder, ld_ml_to_hl(ld, i));
     }
   }
   char *result = string_builder_dump(css_builder, NULL);
-  destroy_string_builder(css_builder);
+  string_builder_destroy(css_builder);
   return result;
 }
 
-Config *create_config_or_die(const char *cmd) {
+// Loads path with a default test data path value.
+// To specify a different path, use load_and_exec_config_or_die
+// after calling this function.
+Config *config_create_or_die(const char *cmd) {
   Config *config = config_create_default();
+  load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
   load_and_exec_config_or_die(config, cmd);
+  return config;
+}
+
+Config *config_create_default_test(void) {
+  Config *config = config_create_default();
+  load_and_exec_config_or_die(config, "set -path " DEFAULT_TEST_DATA_PATH);
   return config;
 }
 
@@ -123,7 +133,7 @@ void resort_sorted_move_list_by_score(SortedMoveList *sml) {
   qsort(sml->moves, sml->count, sizeof(Move *), compare_moves_for_sml);
 }
 
-SortedMoveList *create_sorted_move_list(MoveList *ml) {
+SortedMoveList *sorted_move_list_create(MoveList *ml) {
   int number_of_moves = move_list_get_count(ml);
   SortedMoveList *sorted_move_list = malloc_or_die((sizeof(SortedMoveList)));
   sorted_move_list->moves = malloc_or_die((sizeof(Move *)) * (number_of_moves));
@@ -135,7 +145,7 @@ SortedMoveList *create_sorted_move_list(MoveList *ml) {
   return sorted_move_list;
 }
 
-void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
+void sorted_move_list_destroy(SortedMoveList *sorted_move_list) {
   if (!sorted_move_list) {
     return;
   }
@@ -145,20 +155,20 @@ void destroy_sorted_move_list(SortedMoveList *sorted_move_list) {
 
 void print_move_list(const Board *board, const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length) {
-  StringBuilder *move_list_string = create_string_builder();
+  StringBuilder *move_list_string = string_builder_create();
   for (int i = 0; i < move_list_length; i++) {
-    string_builder_add_move(board, sml->moves[i], ld, move_list_string);
+    string_builder_add_move(move_list_string, board, sml->moves[i], ld);
     string_builder_add_string(move_list_string, "\n");
   }
   printf("%s\n", string_builder_peek(move_list_string));
-  destroy_string_builder(move_list_string);
+  string_builder_destroy(move_list_string);
 }
 
 void print_game(Game *game, MoveList *move_list) {
-  StringBuilder *game_string = create_string_builder();
-  string_builder_add_game(game, move_list, game_string);
+  StringBuilder *game_string = string_builder_create();
+  string_builder_add_game(game_string, game, move_list);
   printf("%s\n", string_builder_peek(game_string));
-  destroy_string_builder(game_string);
+  string_builder_destroy(game_string);
 }
 
 void print_cgp(const Game *game) {
@@ -172,35 +182,35 @@ void print_rack(const Rack *rack, const LetterDistribution *ld) {
     printf("(null)\n");
     return;
   }
-  StringBuilder *rack_sb = create_string_builder();
-  string_builder_add_rack(rack, ld, rack_sb);
+  StringBuilder *rack_sb = string_builder_create();
+  string_builder_add_rack(rack_sb, rack, ld);
   printf("%s", string_builder_peek(rack_sb));
-  destroy_string_builder(rack_sb);
+  string_builder_destroy(rack_sb);
 }
 
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,
                      InferenceResults *inference_results) {
-  StringBuilder *inference_string = create_string_builder();
-  string_builder_add_inference(ld, inference_results, target_played_tiles,
-                               inference_string);
+  StringBuilder *inference_string = string_builder_create();
+  string_builder_add_inference(inference_string, ld, inference_results,
+                               target_played_tiles);
   printf("%s\n", string_builder_peek(inference_string));
-  destroy_string_builder(inference_string);
+  string_builder_destroy(inference_string);
 }
 
 void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
                               MoveList *ml) {
-  SortedMoveList *sml = create_sorted_move_list(ml);
+  SortedMoveList *sml = sorted_move_list_create(ml);
   print_move_list(board, ld, sml, sml->count);
-  destroy_sorted_move_list(sml);
+  sorted_move_list_destroy(sml);
 }
 
 void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
-  SortedMoveList *sorted_move_list = create_sorted_move_list(move_list);
+  SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
   play_move(sorted_move_list->moves[n], game, NULL);
-  destroy_sorted_move_list(sorted_move_list);
+  sorted_move_list_destroy(sorted_move_list);
   move_list_destroy(move_list);
 }
 
@@ -208,18 +218,6 @@ void load_cgp_or_die(Game *game, const char *cgp) {
   cgp_parse_status_t cgp_parse_status = game_load_cgp(game, cgp);
   if (cgp_parse_status != CGP_PARSE_STATUS_SUCCESS) {
     log_fatal("cgp load failed with %d\n", cgp_parse_status);
-  }
-}
-
-void draw_rack_to_string(const LetterDistribution *ld, Bag *bag, Rack *rack,
-                         char *letters, int player_index) {
-
-  uint8_t mls[MAX_BAG_SIZE];
-  int num_mls = ld_str_to_mls(ld, letters, false, mls, MAX_BAG_SIZE);
-  for (int i = 0; i < num_mls; i++) {
-    // For tests we assume that player_index == player_draw_index
-    // since starting_player_index will always be 0.
-    draw_letter_to_rack(bag, rack, mls[i], player_index);
   }
 }
 
@@ -347,20 +345,20 @@ void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
 
-  StringBuilder *move_string = create_string_builder();
+  StringBuilder *move_string = string_builder_create();
   Move *move;
   if (sml) {
     move = sml->moves[move_index];
   } else {
     move = move_list_get_move(move_list, move_index);
   }
-  string_builder_add_move(board, move, ld, move_string);
+  string_builder_add_move(move_string, board, move, ld);
   if (!strings_equal(string_builder_peek(move_string), expected_move_string)) {
     fprintf(stderr, "moves are not equal\ngot: >%s<\nexp: >%s<\n",
             string_builder_peek(move_string), expected_move_string);
     assert(0);
   }
-  destroy_string_builder(move_string);
+  string_builder_destroy(move_string);
 }
 
 void assert_players_are_equal(const Player *p1, const Player *p2,
@@ -421,7 +419,7 @@ void delete_file(const char *filename) {
 
 void reset_file(const char *filename) { fclose(fopen(filename, "w")); }
 
-void create_fifo(const char *fifo_name) {
+void fifo_create(const char *fifo_name) {
   int result;
 
   errno = 0;
@@ -438,11 +436,12 @@ void delete_fifo(const char *fifo_name) { unlink(fifo_name); }
 
 // Board layout test helpers
 
-void assert_board_layout_error(const char *board_layout_name,
+void assert_board_layout_error(const char *data_path,
+                               const char *board_layout_name,
                                board_layout_load_status_t expected_status) {
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, board_layout_name);
+      board_layout_load(bl, data_path, board_layout_name);
   board_layout_destroy(bl);
   if (actual_status != expected_status) {
     printf("board layout load statuses do not match: %d != %d", expected_status,
@@ -451,10 +450,11 @@ void assert_board_layout_error(const char *board_layout_name,
   assert(actual_status == expected_status);
 }
 
-BoardLayout *create_test_board_layout(const char *board_layout_name) {
+BoardLayout *board_layout_create_for_test(const char *data_path,
+                                          const char *board_layout_name) {
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, board_layout_name);
+      board_layout_load(bl, data_path, board_layout_name);
   if (actual_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
     printf("board layout load failure for %s: %d\n", board_layout_name,
            actual_status);
@@ -463,10 +463,11 @@ BoardLayout *create_test_board_layout(const char *board_layout_name) {
   return bl;
 }
 
-void load_game_with_test_board(Game *game, const char *board_layout_name) {
-  game_reset(game);
-  BoardLayout *bl = create_test_board_layout(board_layout_name);
+void load_game_with_test_board(Game *game, const char *data_path,
+                               const char *board_layout_name) {
+  BoardLayout *bl = board_layout_create_for_test(data_path, board_layout_name);
   board_apply_layout(bl, game_get_board(game));
+  game_reset(game);
   board_layout_destroy(bl);
 }
 
@@ -529,77 +530,87 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   move_list_destroy(move_list);
 }
 
-void create_links(const char *src_dir_name, const char *dest_dir_name,
-                  const char *substr) {
-  DIR *src_dir, *dest_dir;
-  struct dirent *src_entry;
-
-  src_dir = opendir(src_dir_name);
-  if (src_dir == NULL) {
-    log_fatal("failed to open %s\n", src_dir_name);
-  }
-
-  dest_dir = opendir(dest_dir_name);
-  if (dest_dir == NULL) {
-    log_fatal("failed to open %s\n", dest_dir_name);
-  }
-
-  while ((src_entry = readdir(src_dir)) != NULL) {
-    if (src_entry->d_type == DT_REG &&
-        has_substring(src_entry->d_name, substr)) {
-      char *src_path =
-          get_formatted_string("%s%s", src_dir_name, src_entry->d_name);
-      char *dest_path =
-          get_formatted_string("%s%s", dest_dir_name, src_entry->d_name);
-      if (symlink(src_path, dest_path) != 0) {
-        closedir(src_dir);
-        closedir(dest_dir);
-        log_fatal("failed to create symlink from %s to %s\n", src_path,
-                  dest_path);
-      }
-      printf("Created link: %s -> %s\n", src_path, dest_path);
-      free(src_path);
-      free(dest_path);
-    }
-  }
-
-  closedir(src_dir);
-  closedir(dest_dir);
+ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
+                                              const char *move_str,
+                                              int player_index,
+                                              bool allow_phonies,
+                                              bool allow_playthrough) {
+  load_cgp_or_die(game, cgp_str);
+  ValidatedMoves *vms = validated_moves_create(
+      game, player_index, move_str, allow_phonies, true, allow_playthrough);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  return vms;
 }
 
-void remove_links(const char *dir_name, const char *substr) {
-  DIR *dir;
-  struct dirent *entry;
+void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
+                             bool write_player_on_turn_first) {
+  char *actual_cgp = game_get_cgp(game, write_player_on_turn_first);
 
-  dir = opendir(dir_name);
-  if (dir == NULL) {
-    log_fatal("failed to open %s\n", dir_name);
-  }
-
-  while ((entry = readdir(dir)) != NULL) {
-    if (entry->d_type == DT_LNK && has_substring(entry->d_name, substr)) {
-      // Very inefficient but convenient.
-      char *path = get_formatted_string("%s%s", dir_name, entry->d_name);
-      if (unlink(path) != 0) {
-        closedir(dir);
-        log_fatal("failed to unlink symlink from %s to %s\n", path);
-      }
-      printf("Removed link: %s\n", path);
-      free(path);
-    }
-  }
-
-  closedir(dir);
+  StringSplitter *split_cgp = split_string_by_whitespace(expected_cgp, true);
+  char *expected_cgp_without_options =
+      string_splitter_join(split_cgp, 0, 4, " ");
+  string_splitter_destroy(split_cgp);
+  assert_strings_equal(actual_cgp, expected_cgp_without_options);
+  free(actual_cgp);
+  free(expected_cgp_without_options);
 }
 
-char *get_current_directory() {
-  char current_dir[1024];
-  char *ret_val;
-  if (getcwd(current_dir, sizeof(current_dir)) != NULL) {
-    printf("Current directory: %s\n", current_dir);
-    ret_val = string_duplicate(current_dir);
-  } else {
-    log_fatal("failed to current directory\n");
+void assert_stats_are_equal(const Stat *s1, const Stat *s2) {
+  assert(stat_get_num_unique_samples(s1) == stat_get_num_unique_samples(s2));
+  assert(stat_get_num_samples(s1) == stat_get_num_samples(s2));
+  assert(within_epsilon(stat_get_mean(s1), stat_get_mean(s2)));
+  assert(within_epsilon(stat_get_variance(s1), stat_get_variance(s2)));
+}
+
+void assert_moves_are_equal(const Move *m1, const Move *m2) {
+  assert(move_get_type(m1) == move_get_type(m2));
+  assert(move_get_row_start(m1) == move_get_row_start(m2));
+  assert(move_get_col_start(m1) == move_get_col_start(m2));
+  assert(move_get_tiles_played(m1) == move_get_tiles_played(m2));
+  assert(move_get_tiles_length(m1) == move_get_tiles_length(m2));
+  assert(move_get_score(m1) == move_get_score(m2));
+  assert(move_get_dir(m1) == move_get_dir(m2));
+  assert(within_epsilon(move_get_equity(m1), move_get_equity(m2)));
+  int tiles_length = move_get_tiles_length(m1);
+  for (int i = 0; i < tiles_length; i++) {
+    assert(move_get_tile(m1, i) == move_get_tile(m2, i));
   }
-  return ret_val;
+}
+
+void assert_simmed_plays_are_equal(const SimmedPlay *sp1, const SimmedPlay *sp2,
+                                   int max_plies) {
+  assert(simmed_play_get_id(sp1) == simmed_play_get_id(sp2));
+  assert(simmed_play_get_ignore(sp1) == simmed_play_get_ignore(sp2));
+  assert_moves_are_equal(simmed_play_get_move(sp1), simmed_play_get_move(sp2));
+
+  for (int i = 0; i < max_plies; i++) {
+    assert_stats_are_equal(simmed_play_get_score_stat(sp1, i),
+                           simmed_play_get_score_stat(sp2, i));
+    assert_stats_are_equal(simmed_play_get_bingo_stat(sp1, i),
+                           simmed_play_get_bingo_stat(sp2, i));
+  }
+
+  assert_stats_are_equal(simmed_play_get_equity_stat(sp1),
+                         simmed_play_get_equity_stat(sp2));
+  assert_stats_are_equal(simmed_play_get_win_pct_stat(sp1),
+                         simmed_play_get_win_pct_stat(sp2));
+}
+
+// NOT THREAD SAFE
+void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
+  sim_results_sort_plays_by_win_rate(sr1);
+  sim_results_sort_plays_by_win_rate(sr2);
+  assert(sim_results_get_max_plies(sr1) == sim_results_get_max_plies(sr2));
+  assert(sim_results_get_number_of_plays(sr1) ==
+         sim_results_get_number_of_plays(sr2));
+  assert(sim_results_get_iteration_count(sr1) ==
+         sim_results_get_iteration_count(sr2));
+  assert(within_epsilon(sim_results_get_zval(sr1), sim_results_get_zval(sr2)));
+  assert(sim_results_get_node_count(sr1) == sim_results_get_node_count(sr2));
+  for (int i = 0; i < sim_results_get_number_of_plays(sr1); i++) {
+    assert_simmed_plays_are_equal(sim_results_get_simmed_play(sr1, i),
+                                  sim_results_get_simmed_play(sr2, i),
+                                  sim_results_get_max_plies(sr1));
+  }
 }

@@ -31,7 +31,7 @@ typedef struct AutoplayWorker {
   int worker_index;
 } AutoplayWorker;
 
-AutoplayWorker *create_autoplay_worker(const AutoplayArgs *args,
+AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        int max_games_for_worker,
                                        int worker_index) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
@@ -42,7 +42,7 @@ AutoplayWorker *create_autoplay_worker(const AutoplayArgs *args,
   return autoplay_worker;
 }
 
-void destroy_autoplay_worker(AutoplayWorker *autoplay_worker) {
+void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   if (!autoplay_worker) {
     return;
   }
@@ -73,8 +73,10 @@ void record_results(Game *game, AutoplayResults *autoplay_results,
 
 void play_autoplay_game(Game *game, MoveList *move_list,
                         AutoplayResults *autoplay_results,
-                        int starting_player_index, int thread_index) {
+                        int starting_player_index, int thread_index,
+                        uint64_t seed) {
   game_reset(game);
+  game_seed(game, seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (!game_over(game)) {
@@ -89,50 +91,29 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   const AutoplayArgs *args = autoplay_worker->args;
   ThreadControl *thread_control = args->thread_control;
   Game *game = game_create(args->game_args);
-  Bag *bag = game_get_bag(game);
   MoveList *move_list = move_list_create(1);
 
   // Declare local vars for autoplay_worker fields for convenience
   bool use_game_pairs = args->use_game_pairs;
   int max_games_for_worker = autoplay_worker->max_games_for_worker;
   int worker_index = autoplay_worker->worker_index;
-  int starting_player_for_thread = worker_index % 2;
-
-  Bag *game_pair_bag = NULL;
-  if (use_game_pairs) {
-    // Create a Bag to save the PRNG state of the game
-    // to use for game pairs. The initial seed does
-    // not matter since it will be overwritten before
-    // the first game of the pair is played.
-    game_pair_bag = bag_create(game_get_ld(game));
-  }
-  bag_seed_for_worker(bag, args->seed, worker_index);
+  ThreadControlIterOutput iter_output;
 
   for (int i = 0; i < max_games_for_worker; i++) {
     if (thread_control_get_is_halted(thread_control)) {
       break;
     }
-    int starting_player_index = (i + starting_player_for_thread) % 2;
-
-    // If we are using game pairs, we have to save the state of the
-    // Bag PRNG before playing the first game so the state can be
-    // reloaded before playing the second game of the pair, ensuring
-    // both games are played with an identical Bag PRNG.
-    if (use_game_pairs) {
-      bag_copy(game_pair_bag, bag);
-    }
-
+    thread_control_get_next_iter_output(thread_control, &iter_output);
+    int starting_player_index = iter_output.iter_count % 2;
     play_autoplay_game(game, move_list, autoplay_worker->autoplay_results,
-                       starting_player_index, autoplay_worker->worker_index);
+                       starting_player_index, worker_index, iter_output.seed);
     if (use_game_pairs) {
-      bag_copy(bag, game_pair_bag);
       play_autoplay_game(game, move_list, autoplay_worker->autoplay_results,
-                         1 - starting_player_index,
-                         autoplay_worker->worker_index);
+                         1 - starting_player_index, worker_index,
+                         iter_output.seed);
     }
   }
 
-  bag_destroy(game_pair_bag);
   move_list_destroy(move_list);
   game_destroy(game);
   return NULL;
@@ -153,6 +134,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   int max_iterations = args->max_iterations;
 
   thread_control_unhalt(thread_control);
+  thread_control_reset_iter_count(thread_control);
   autoplay_results_reset(autoplay_results);
 
   int number_of_threads = thread_control_get_threads(thread_control);
@@ -166,7 +148,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
         max_iterations, number_of_threads, thread_index);
 
     autoplay_workers[thread_index] =
-        create_autoplay_worker(args, number_of_games_for_worker, thread_index);
+        autoplay_worker_create(args, number_of_games_for_worker, thread_index);
 
     pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
                    autoplay_workers[thread_index]);
@@ -198,7 +180,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   free(p2_score_stats);
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    destroy_autoplay_worker(autoplay_workers[thread_index]);
+    autoplay_worker_destroy(autoplay_workers[thread_index]);
   }
 
   // Destroy intrasim structs

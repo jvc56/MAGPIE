@@ -11,7 +11,7 @@
 
 typedef struct PlayersData PlayersData;
 
-PlayersData *players_data_create();
+PlayersData *players_data_create(void);
 void players_data_destroy(PlayersData *players_data);
 
 const char *players_data_get_name(const PlayersData *players_data,
@@ -40,6 +40,6 @@ bool players_data_get_is_shared(const PlayersData *players_data,
                                 players_data_t players_data_type);
 
 void players_data_set(PlayersData *players_data,
-                      players_data_t players_data_type,
+                      players_data_t players_data_type, const char *data_path,
                       const char *p1_data_name, const char *p2_data_name);
 #endif

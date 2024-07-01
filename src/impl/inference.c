@@ -79,7 +79,7 @@ typedef struct Inference {
   InferenceResults *results;
 } Inference;
 
-void destroy_inference(Inference *inference) {
+void inference_destroy(Inference *inference) {
   if (!inference) {
     return;
   }
@@ -90,10 +90,10 @@ void destroy_inference(Inference *inference) {
   free(inference);
 }
 
-void destroy_inference_copy(Inference *inference) {
+void inference_copy_destroy(Inference *inference) {
   game_destroy(inference->game);
   inference_results_destroy(inference->results);
-  destroy_inference(inference);
+  inference_destroy(inference);
 }
 
 uint64_t get_number_of_draws_for_rack(const Rack *bag_as_rack,
@@ -497,7 +497,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
   }
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    destroy_inference_copy(inferences_for_workers[thread_index]);
+    inference_copy_destroy(inferences_for_workers[thread_index]);
   }
 
   free(inferences_for_workers);
@@ -586,7 +586,7 @@ inference_status_t infer(InferenceArgs *args, InferenceResults *results) {
   }
 
   game_destroy(game);
-  destroy_inference(inference);
+  inference_destroy(inference);
   gen_destroy_cache();
 
   return status;

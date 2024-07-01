@@ -6,8 +6,7 @@
 
 #include "../util/string_util.h"
 
-void string_builder_add_rack(const Rack *rack,
-                             const LetterDistribution *ld,
-                             StringBuilder *string_builder);
+void string_builder_add_rack(StringBuilder *string_builder, const Rack *rack,
+                             const LetterDistribution *ld);
 
 #endif

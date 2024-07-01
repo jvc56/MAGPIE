@@ -1,6 +1,6 @@
 #ifndef ALPHABET_TEST_H
 #define ALPHABET_TEST_H
 
-void test_alphabet();
+void test_alphabet(void);
 
 #endif

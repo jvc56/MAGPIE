@@ -16,7 +16,7 @@ void test_string_splitter(const char *input, const char delimiter,
     assert_strings_equal(string_splitter_get_item(string_splitter, i),
                          expected_items[i]);
   }
-  destroy_string_splitter(string_splitter);
+  string_splitter_destroy(string_splitter);
 }
 
 void test_whitespace_string_splitter(const char *input, bool ignore_empty,
@@ -30,10 +30,10 @@ void test_whitespace_string_splitter(const char *input, bool ignore_empty,
     assert_strings_equal(string_splitter_get_item(string_splitter, i),
                          expected_items[i]);
   }
-  destroy_string_splitter(string_splitter);
+  string_splitter_destroy(string_splitter);
 }
 
-void test_string_util() {
+void test_string_util(void) {
   // One char string splitter
   test_string_splitter("", ',', false, 1, (const char *[]){""});
   test_string_splitter("", ',', true, 0, (const char *[]){});

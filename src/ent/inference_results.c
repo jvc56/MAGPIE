@@ -32,7 +32,7 @@ struct InferenceResults {
 
 int get_subtotals_size(int ld_size) { return ld_size * (RACK_SIZE) * 2; }
 
-InferenceResults *inference_results_create() {
+InferenceResults *inference_results_create(void) {
   InferenceResults *results = malloc_or_die(sizeof(InferenceResults));
   results->subtotals_size = 0;
   for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
@@ -75,7 +75,7 @@ void inference_results_reset(InferenceResults *results, int move_capacity,
 
   results->subtotals_size = get_subtotals_size(ld_size);
   for (int i = 0; i < NUMBER_OF_STAT_TYPES; i++) {
-    results->equity_values[i] = stat_create();
+    results->equity_values[i] = stat_create(false);
     results->subtotals[i] =
         (uint64_t *)malloc_or_die(results->subtotals_size * sizeof(uint64_t));
     for (int j = 0; j < results->subtotals_size; j++) {
@@ -203,9 +203,9 @@ void inference_results_set_stat_for_letter(InferenceResults *inference_results,
   // We do not have direct stats for when the letter
   // was never drawn so we infer it here
   uint64_t number_of_draws_without_letter =
-      stat_get_weight(inference_results_get_equity_values(
+      stat_get_num_samples(inference_results_get_equity_values(
           inference_results, inference_stat_type)) -
-      stat_get_weight(stat);
+      stat_get_num_samples(stat);
   stat_push(stat, 0, number_of_draws_without_letter);
 }
 
