@@ -108,3 +108,23 @@ void game_data_combine(void *data1, const void *data2) {
   GameData *gd1 = (GameData *)data1;
   const GameData *gd2 = (const GameData *)data2;
 }
+
+Recorder *recorder_create(recorder_reset_func_t reset_func,
+                          recorder_create_func_t create_func,
+                          recorder_destroy_func_t destroy_func,
+                          recorder_add_move_func_t add_move_func,
+                          recorder_add_game_func_t add_game_func,
+                          recorder_combine_func_t combine_func) {
+  Recorder *recorder = malloc_or_die(sizeof(Recorder));
+  recorder->reset_func = reset_func;
+  recorder->create_func = create_func;
+  recorder->destroy_func = destroy_func;
+  recorder->add_move_func = add_move_func;
+  recorder->add_game_func = add_game_func;
+  recorder->combine_func = combine_func;
+  return recorder;
+}
+
+AutoplayResults *autoplay_results_create(uint64_t options) {
+  AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
+}
