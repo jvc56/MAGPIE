@@ -266,6 +266,10 @@ SimResults *config_get_sim_results(const Config *config) {
   return config->sim_results;
 }
 
+AutoplayResults *config_get_autoplay_results(const Config *config) {
+  return config->autoplay_results;
+}
+
 bool config_exec_parg_is_set(const Config *config) {
   return config->exec_parg_token != NUMBER_OF_ARG_TOKENS;
 }
@@ -870,7 +874,19 @@ void execute_autoplay(Config *config) {
                               CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
     return;
   }
-  autoplay_status_t status = config_autoplay(config, config->autoplay_results);
+
+  autoplay_status_t status = autoplay_results_set_options(
+      config->autoplay_results,
+      config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0));
+
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
+                            (int)status);
+
+  if (status != AUTOPLAY_STATUS_SUCCESS) {
+    return;
+  }
+
+  status = config_autoplay(config, config->autoplay_results);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)status);
 }
@@ -1357,6 +1373,9 @@ config_load_status_t config_load_data(Config *config) {
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
+  if (!config_get_parg_value(config, ARG_TOKEN_RANDOM_SEED, 0)) {
+    seed = time(NULL);
+  }
   thread_control_prng_seed(config->thread_control, seed);
   // Board layout
 
@@ -1490,7 +1509,7 @@ Config *config_create_default(void) {
                     status_sim);
   parsed_arg_create(config, ARG_TOKEN_INFER, "infer", 2, 3, execute_infer,
                     status_infer);
-  parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 0, 0,
+  parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 1, 1,
                     execute_autoplay, status_autoplay);
   parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
                     status_convert);

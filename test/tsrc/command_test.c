@@ -291,15 +291,16 @@ void test_command_execution(void) {
   // Autoplay finishes normally
   assert_command_status_and_output(
       config,
-      "autoplay -lex CSW21 -s1 equity -s2 equity "
+      "autoplay game -lex CSW21 -s1 equity -s2 equity "
       "-r1 best -r2 best -it 10 -numplays 1 -threads 3",
       false, 30, 1, 0);
 
   // Autoplay interrupted
-  assert_command_status_and_output(config,
-                                   "autoplay -lex CSW21 -s1 equity -s2 equity "
-                                   "-r1 best -r2 best -it 10000000 -threads 5",
-                                   true, 5, 1, 0);
+  assert_command_status_and_output(
+      config,
+      "autoplay game -lex CSW21 -s1 equity -s2 equity "
+      "-r1 best -r2 best -it 10000000 -threads 5",
+      true, 5, 1, 0);
 
   for (int i = 0; i < 3; i++) {
     // Catalan
@@ -315,10 +316,10 @@ void test_command_execution(void) {
         config, "infer 1 AIMSX 52 -numplays 20 -threads 4 -pfreq 1000000",
         false, 60, 52, 0);
 
-    assert_command_status_and_output(
-        config,
-        "autoplay -s1 equity -s2 equity -r1 best -r2 best -it 10 -numplays 1 ",
-        false, 30, 1, 0);
+    assert_command_status_and_output(config,
+                                     "autoplay game -s1 equity -s2 equity -r1 "
+                                     "best -r2 best -it 10 -numplays 1 ",
+                                     false, 30, 1, 0);
     // CSW
     assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP,
                                      false, 5, 0, 0);
@@ -335,7 +336,7 @@ void test_command_execution(void) {
 
     assert_command_status_and_output(
         config,
-        "autoplay -lex CSW21 -s1 equity -s2 equity "
+        "autoplay game -lex CSW21 -s1 equity -s2 equity "
         "-r1 best -r2 best -it 10 -numplays 1",
         false, 30, 1, 0);
     // Polish
@@ -353,10 +354,11 @@ void test_command_execution(void) {
                                      "1000000 -threads 4",
                                      false, 60, 58, 0);
 
-    assert_command_status_and_output(config,
-                                     "autoplay -s1 equity -s2 equity -r1 best "
-                                     "-r2 best -it 10 -numplays 1 -lex OSPS49",
-                                     false, 30, 1, 0);
+    assert_command_status_and_output(
+        config,
+        "autoplay game -s1 equity -s2 equity -r1 best "
+        "-r2 best -it 10 -numplays 1 -lex OSPS49",
+        false, 30, 1, 0);
   }
   config_destroy(config);
 }
@@ -458,7 +460,7 @@ void test_exec_file_commands(void) {
       "set -threads 4\n"
       "cgp " EMPTY_POLISH_CGP "\ninfer 1 HUJA 20\n"
       "set -r1 best -r2 best -it 10 -numplays 1 -threads 3\n"
-      "autoplay -lex CSW21 -s1 equity -s2 equity ";
+      "autoplay game -lex CSW21 -s1 equity -s2 equity ";
   char *commands_filename = get_test_filename("test_commands");
 
   write_string_to_file(commands_filename, "w", commands_file_content);
@@ -492,7 +494,7 @@ void test_exec_add_phony_words(void) {
       "addmoves 8g.ABC,8g.CAB,8f.GAF,8D.FADGE,8H.BACED\n"
       "cgp " ION_OPENING_CGP "\n"
       "addmoves 7d.GED,7f.IEE,H7.AN,7H.AI\n"
-      "autoplay -it 10 ";
+      "autoplay game -it 10 ";
 
   char *commands_filename = get_test_filename("test_commands");
 
@@ -501,7 +503,7 @@ void test_exec_add_phony_words(void) {
   char *commands_file_invocation =
       get_formatted_string("infile %s", commands_filename);
 
-  test_process_command(commands_file_invocation, 1, "autoplay 20", 4,
+  test_process_command(commands_file_invocation, 1, "autoplay games 20", 4,
                        "Phonies formed from 7F IEE 11: II,EO,IEE");
 
   delete_file(commands_filename);
@@ -543,14 +545,15 @@ void test_exec_ucgi_command(void) {
                      "set -r1 best -r2 best -it 1 -numplays 1 -threads 1\n");
   sleep(1);
   file_handler_write(input_writer,
-                     "autoplay -lex CSW21 -s1 equity -s2 equity\n");
+                     "autoplay game -lex CSW21 -s1 equity -s2 equity\n");
   sleep(1);
   file_handler_write(
-      input_writer, "autoplay -lex CSW21 -s1 equity -s2 equity -it 10000000\n");
+      input_writer,
+      "autoplay game -lex CSW21 -s1 equity -s2 equity -it 10000000\n");
   // Try to immediately start another command while the previous one
   // is still running. This should give a warning.
   file_handler_write(input_writer,
-                     "autoplay -lex CSW21 -s1 equity -s2 equity -it 1\n");
+                     "autoplay game -lex CSW21 -s1 equity -s2 equity -it 1\n");
   sleep(1);
   // Interrupt the autoplay which won't finish in 1 second
   file_handler_write(input_writer, "stop\n");
@@ -581,7 +584,7 @@ void test_exec_console_command(void) {
       get_formatted_string("code %d", CONFIG_LOAD_STATUS_UNRECOGNIZED_ARG);
 
   ProcessArgs *process_args = process_args_create(
-      initial_command, 40, "autoplay 200", 1, config_load_error_substr);
+      initial_command, 40, "autoplay games 200", 1, config_load_error_substr);
 
   pthread_t cmd_execution_thread;
   pthread_create(&cmd_execution_thread, NULL, test_process_command_async,
@@ -596,7 +599,7 @@ void test_exec_console_command(void) {
   file_handler_write(input_writer,
                      "set -r1 best -r2 b -it 100 -nump 1 -thr 4\n");
   file_handler_write(input_writer,
-                     "autoplay -lex CSW21 -s1 equity -s2 equity\n");
+                     "autoplay game -lex CSW21 -s1 equity -s2 equity\n");
   // Stop should have no effect and appear as an error
   file_handler_write(input_writer, "stop\n");
   file_handler_write(input_writer, "quit\n");

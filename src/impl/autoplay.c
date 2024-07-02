@@ -20,8 +20,6 @@
 #include "gameplay.h"
 #include "move_gen.h"
 
-#include "../str/autoplay_string.h"
-
 #include "../util/util.h"
 
 typedef struct AutoplayWorker {
@@ -32,13 +30,15 @@ typedef struct AutoplayWorker {
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
+                                       const AutoplayResults *target,
                                        int max_games_for_worker,
                                        int worker_index) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = args;
   autoplay_worker->max_games_for_worker = max_games_for_worker;
   autoplay_worker->worker_index = worker_index;
-  autoplay_worker->autoplay_results = autoplay_results_create();
+  autoplay_worker->autoplay_results =
+      autoplay_results_create_empty_copy(target);
   return autoplay_worker;
 }
 
@@ -50,27 +50,6 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
-void record_results(Game *game, AutoplayResults *autoplay_results,
-                    int starting_player_index) {
-
-  int p0_score = player_get_score(game_get_player(game, 0));
-  int p1_score = player_get_score(game_get_player(game, 1));
-
-  autoplay_results_increment_total_games(autoplay_results);
-  if (p0_score > p1_score) {
-    autoplay_results_increment_p1_wins(autoplay_results);
-  } else if (p1_score > p0_score) {
-    autoplay_results_increment_p1_losses(autoplay_results);
-  } else {
-    autoplay_results_increment_p1_ties(autoplay_results);
-  }
-  if (starting_player_index == 0) {
-    autoplay_results_increment_p1_firsts(autoplay_results);
-  }
-  autoplay_results_increment_p1_score(autoplay_results, p0_score);
-  autoplay_results_increment_p2_score(autoplay_results, p1_score);
-}
-
 void play_autoplay_game(Game *game, MoveList *move_list,
                         AutoplayResults *autoplay_results,
                         int starting_player_index, int thread_index,
@@ -80,9 +59,11 @@ void play_autoplay_game(Game *game, MoveList *move_list,
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   while (!game_over(game)) {
-    play_move(get_top_equity_move(game, thread_index, move_list), game, NULL);
+    const Move *move = get_top_equity_move(game, thread_index, move_list);
+    autoplay_results_add_move(autoplay_results, move);
+    play_move(move, game, NULL);
   }
-  record_results(game, autoplay_results, starting_player_index);
+  autoplay_results_add_game(autoplay_results, game);
 }
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
@@ -143,41 +124,31 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   pthread_t *worker_ids =
       malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-
     int number_of_games_for_worker = get_number_of_games_for_worker(
         max_iterations, number_of_threads, thread_index);
-
-    autoplay_workers[thread_index] =
-        autoplay_worker_create(args, number_of_games_for_worker, thread_index);
-
+    autoplay_workers[thread_index] = autoplay_worker_create(
+        args, autoplay_results, number_of_games_for_worker, thread_index);
     pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
                    autoplay_workers[thread_index]);
   }
 
-  Stat **p1_score_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
-  Stat **p2_score_stats = malloc_or_die((sizeof(Stat *)) * (number_of_threads));
+  AutoplayResults **autoplay_results_list =
+      malloc_or_die((sizeof(AutoplayResults *)) * (number_of_threads));
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     pthread_join(worker_ids[thread_index], NULL);
-    autoplay_results_add(autoplay_workers[thread_index]->autoplay_results,
-                         autoplay_results);
-    p1_score_stats[thread_index] = autoplay_results_get_p1_score(
-        autoplay_workers[thread_index]->autoplay_results);
-    p2_score_stats[thread_index] = autoplay_results_get_p2_score(
-        autoplay_workers[thread_index]->autoplay_results);
+    autoplay_results_list[thread_index] =
+        autoplay_workers[thread_index]->autoplay_results;
   }
 
   // If autoplay was interrupted by the user,
   // this will not change the status.
   thread_control_halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
 
-  stats_combine(p1_score_stats, number_of_threads,
-                autoplay_results_get_p1_score(autoplay_results));
-  free(p1_score_stats);
+  autoplay_results_combine(autoplay_results_list, number_of_threads,
+                           autoplay_results);
 
-  stats_combine(p2_score_stats, number_of_threads,
-                autoplay_results_get_p2_score(autoplay_results));
-  free(p2_score_stats);
+  free(autoplay_results_list);
 
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     autoplay_worker_destroy(autoplay_workers[thread_index]);
@@ -187,7 +158,10 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   free(autoplay_workers);
   free(worker_ids);
 
-  print_ucgi_autoplay_results(autoplay_results, thread_control);
+  char *autoplay_results_string =
+      autoplay_results_to_string(autoplay_results, false);
+  thread_control_print(thread_control, autoplay_results_string);
+  free(autoplay_results_string);
   gen_destroy_cache();
 
   return AUTOPLAY_STATUS_SUCCESS;

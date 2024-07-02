@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "../../src/def/autoplay_defs.h"
 #include "../../src/def/config_defs.h"
 #include "../../src/def/game_defs.h"
 #include "../../src/def/move_defs.h"
@@ -350,7 +351,8 @@ void test_config_exec_parse_args(void) {
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
   assert_config_exec_status(config, "infer 0 3", ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "autoplay", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "autoplay game",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
 
   // CGP
@@ -428,9 +430,15 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_MISSING_ARG);
   // Autoplay
-  assert_config_exec_status(config,
-                            "autoplay -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",
-                            ERROR_STATUS_TYPE_NONE, 0);
+  assert_config_exec_status(
+      config, "autoplay move -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",
+      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_INVALID_OPTIONS);
+  assert_config_exec_status(
+      config, "autoplay ,,, -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",
+      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_EMPTY_OPTIONS);
+  assert_config_exec_status(
+      config, "autoplay game -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",
+      ERROR_STATUS_TYPE_NONE, 0);
   config_destroy(config);
 }
 

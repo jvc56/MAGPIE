@@ -53,6 +53,7 @@ exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
 MoveList *config_get_move_list(const Config *config);
 SimResults *config_get_sim_results(const Config *config);
+AutoplayResults *config_get_autoplay_results(const Config *config);
 
 // Entity creators
 

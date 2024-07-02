@@ -16,102 +16,66 @@
 
 #include "test_util.h"
 
-void assert_autoplay_results_are_equal(AutoplayResults *ar1,
-                                       AutoplayResults *ar2) {
-  assert(autoplay_results_get_games(ar1) == autoplay_results_get_games(ar2));
-  assert(autoplay_results_get_p1_firsts(ar1) ==
-         autoplay_results_get_p1_firsts(ar2));
-  assert(autoplay_results_get_p1_wins(ar1) ==
-         autoplay_results_get_p1_wins(ar2));
-  assert(autoplay_results_get_p1_losses(ar1) ==
-         autoplay_results_get_p1_losses(ar2));
-  assert(autoplay_results_get_p1_ties(ar1) ==
-         autoplay_results_get_p1_ties(ar2));
-
-  Stat *ar1s1 = autoplay_results_get_p1_score(ar1);
-  Stat *ar1s2 = autoplay_results_get_p2_score(ar1);
-  Stat *ar2s1 = autoplay_results_get_p1_score(ar2);
-  Stat *ar2s2 = autoplay_results_get_p2_score(ar2);
-
-  assert_stats_are_equal(ar1s1, ar2s1);
-  assert_stats_are_equal(ar1s2, ar2s2);
-}
-
 void autoplay_game_pairs_test(void) {
-  uint64_t seed = time(NULL);
-  char *options_string = get_formatted_string(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -it 200 -gp true -threads 11 -seed %ld",
-      seed);
-  Config *csw_config = config_create_or_die(options_string);
-  printf("running autoplay with: %s\n", options_string);
 
-  free(options_string);
+  Config *csw_config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 -it "
+      "100 -gp true -threads 11");
 
-  AutoplayResults *ar1 = autoplay_results_create();
+  load_and_exec_config_or_die(csw_config, "autoplay games -seed 26");
 
-  autoplay_status_t status = config_autoplay(csw_config, ar1);
-  assert(status == AUTOPLAY_STATUS_SUCCESS);
-  int max_iterations = config_get_max_iterations(csw_config);
-  assert(autoplay_results_get_games(ar1) == max_iterations * 2);
-  assert(autoplay_results_get_p1_firsts(ar1) == max_iterations);
-  assert_stats_are_equal(autoplay_results_get_p1_score(ar1),
-                         autoplay_results_get_p2_score(ar1));
+  char *ar1_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false);
+  assert_strings_equal(ar1_str, "autoplay games 200 100 100 0 100 460.940000 "
+                                "60.687820 460.940000 60.687820\n");
 
-  // Random seeds is a transient field, so it must be set again
-  options_string =
-      get_formatted_string("set -r1 best -r2 best -seed %ld", seed);
+  load_and_exec_config_or_die(csw_config,
+                              "autoplay games -r1 best -r2 best -seed 26");
 
-  load_and_exec_config_or_die(csw_config, options_string);
-
-  printf("running autoplay with: %s\n", options_string);
-
-  free(options_string);
-
-  AutoplayResults *ar2 = autoplay_results_create();
-
-  status = config_autoplay(csw_config, ar2);
-  assert(status == AUTOPLAY_STATUS_SUCCESS);
-  max_iterations = config_get_max_iterations(csw_config);
-  assert(autoplay_results_get_games(ar2) == max_iterations * 2);
-  assert(autoplay_results_get_p1_firsts(ar2) == max_iterations);
-  assert_stats_are_equal(autoplay_results_get_p1_score(ar2),
-                         autoplay_results_get_p2_score(ar2));
-
+  char *ar2_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false);
   // Autoplay using the "best" move recorder should be the same
   // as autoplay using the "all" move recorder.
-  assert_autoplay_results_are_equal(ar1, ar2);
+  assert_strings_equal(ar1_str, ar2_str);
 
-  load_and_exec_config_or_die(csw_config, "set -it 7 -gp false -threads 2");
-  max_iterations = config_get_max_iterations(csw_config);
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games -it 7 -gp false -threads 2 -seed 27");
 
   // Autoplay should reset the stats
-  status = config_autoplay(csw_config, ar1);
-  assert(status == AUTOPLAY_STATUS_SUCCESS);
-  assert(autoplay_results_get_games(ar1) == max_iterations);
-
+  char *ar3_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false);
+  assert_strings_equal(
+      ar3_str,
+      "autoplay games 7 1 6 0 4 422.000000 58.657196 475.000000 89.701356\n");
   // Ensure pseudo-randomness is consistent for any number of threads
+  char *single_thread_str = NULL;
+  char *multi_thread_str = NULL;
   for (int i = 0; i < 11; i++) {
-    options_string = get_formatted_string(
-        "set -r1 best -r2 best -gp false -threads %d -seed %ld -it 20", i + 1,
-        seed);
+    char *options_string =
+        get_formatted_string("autoplay games -r1 best -r2 best -gp false "
+                             "-threads %d -seed 28 -it 20",
+                             i + 1);
 
     load_and_exec_config_or_die(csw_config, options_string);
 
     free(options_string);
 
     if (i == 0) {
-      status = config_autoplay(csw_config, ar1);
-      assert(status == AUTOPLAY_STATUS_SUCCESS);
+      single_thread_str = autoplay_results_to_string(
+          config_get_autoplay_results(csw_config), false);
     } else {
-      status = config_autoplay(csw_config, ar2);
-      assert(status == AUTOPLAY_STATUS_SUCCESS);
-      assert_autoplay_results_are_equal(ar1, ar2);
+      free(multi_thread_str);
+      multi_thread_str = autoplay_results_to_string(
+          config_get_autoplay_results(csw_config), false);
+      assert_strings_equal(single_thread_str, multi_thread_str);
     }
   }
 
-  autoplay_results_destroy(ar1);
-  autoplay_results_destroy(ar2);
+  free(ar1_str);
+  free(ar2_str);
+  free(ar3_str);
+  free(single_thread_str);
+  free(multi_thread_str);
   config_destroy(csw_config);
 }
 
