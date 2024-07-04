@@ -36,6 +36,8 @@ typedef struct KLV {
 
 static inline const char *klv_get_name(const KLV *klv) { return klv->name; }
 
+static inline const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
+
 static inline double klv_get_indexed_leave_value(const KLV *klv,
                                                  uint32_t index) {
   if (index == KLV_UNFOUND_INDEX) {

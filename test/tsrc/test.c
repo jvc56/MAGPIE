@@ -21,6 +21,7 @@
 #include "infer_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
+#include "leave_list_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
@@ -75,6 +76,7 @@ void run_all(void) {
   test_word_prune();
   test_kwg_maker();
   test_file_handler();
+  test_leave_list();
 }
 
 void run_test(const char *subtest) {
@@ -142,6 +144,8 @@ void run_test(const char *subtest) {
     test_file_handler();
   } else if (strings_equal(subtest, "cgp")) {
     test_cgp();
+  } else if (strings_equal(subtest, "ll")) {
+    test_leave_list();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

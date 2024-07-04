@@ -5,6 +5,7 @@
 #include "../../src/ent/leave_map.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/rack.h"
+
 #include "../../src/impl/config.h"
 
 #include "test_util.h"
