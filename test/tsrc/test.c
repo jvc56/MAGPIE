@@ -21,6 +21,7 @@
 #include "infer_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
+#include "leave_count_hashmap_test.h"
 #include "leave_list_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
@@ -52,6 +53,7 @@ void run_all(void) {
   test_kwg_alpha();
 
   // Now test the rest
+  test_leave_count_hashmap();
   test_bag();
   test_rack();
   test_board();
@@ -146,6 +148,8 @@ void run_test(const char *subtest) {
     test_cgp();
   } else if (strings_equal(subtest, "ll")) {
     test_leave_list();
+  } else if (strings_equal(subtest, "hm")) {
+    test_leave_count_hashmap();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

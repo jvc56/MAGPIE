@@ -1,16 +1,10 @@
 #include "leave_list.h"
 
 #include "klv.h"
+#include "leave_count_hashmap.h"
 #include "rack.h"
 
 #include "../util/util.h"
-
-typedef struct EndIndex EndIndex;
-
-struct EndIndex {
-  int index;
-  EndIndex *next;
-};
 
 typedef struct LeaveListItem {
   int count_index;
@@ -29,7 +23,7 @@ struct LeaveList {
   LeaveListItem *empty_leave;
   LeaveListItem **leaves_ordered_by_klv_index;
   LeaveListItem **leaves_ordered_by_count;
-  EndIndex **end_index_buckets;
+  LeaveCountHashMap *leave_count_hashmap;
 };
 
 LeaveListItem *leave_list_item_create(void) {
@@ -45,13 +39,8 @@ LeaveList *leave_list_create(int number_of_leaves) {
   leave_list->end_index_list_size = number_of_leaves;
   size_t leaves_malloc_size = sizeof(LeaveListItem *) * number_of_leaves;
   leave_list->leaves_ordered_by_klv_index = malloc_or_die(leaves_malloc_size);
-  leave_list->end_index_buckets =
-      malloc_or_die(sizeof(EndIndex *) * number_of_leaves);
   for (int i = 0; i < number_of_leaves; i++) {
     leave_list->leaves_ordered_by_klv_index[i] = leave_list_item_create();
-    leave_list->end_index_buckets[i] = malloc_or_die(sizeof(EndIndex));
-    leave_list->end_index_buckets[i]->index = -1;
-    leave_list->end_index_buckets[i]->next = NULL;
   }
 
   leave_list->empty_leave = leave_list_item_create();
@@ -61,7 +50,13 @@ LeaveList *leave_list_create(int number_of_leaves) {
   memory_copy(leave_list->leaves_ordered_by_count,
               leave_list->leaves_ordered_by_klv_index, leaves_malloc_size);
 
-  leave_list->end_index_buckets[0]->index = number_of_leaves - 1;
+  leave_list->leave_count_hashmap =
+      leave_count_hashmap_create(number_of_leaves);
+
+  leave_count_hashmap_set(leave_list->leave_count_hashmap, 0,
+                          number_of_leaves - 1);
+
+  leave_list->subleave = rack_create(0);
 
   return leave_list;
 }
@@ -70,73 +65,48 @@ void leave_list_destroy(LeaveList *leave_list) {
   for (int i = 0; i < leave_list->number_of_leaves; i++) {
     free(leave_list->leaves_ordered_by_klv_index[i]);
   }
-  for (int i = 0; i < leave_list->end_index_list_size; i++) {
-    EndIndex *end_index = leave_list->end_index_buckets[i];
-    while (end_index) {
-      EndIndex *next = end_index->next;
-      free(end_index);
-      end_index = next;
-    }
-  }
   free(leave_list->leaves_ordered_by_klv_index);
   free(leave_list->leaves_ordered_by_count);
-  free(leave_list->end_index_buckets);
   free(leave_list->empty_leave);
+  leave_count_hashmap_destroy(leave_list->leave_count_hashmap);
+  rack_destroy(leave_list->subleave);
   free(leave_list);
 }
 
-EndIndex *leave_list_get_end_index_bucket(LeaveList *leave_list, int count) {
-  int bucket_index = count % leave_list->end_index_list_size;
-  int entry_index = count / leave_list->end_index_list_size;
-  EndIndex *entry = leave_list->end_index_buckets[bucket_index];
-  for (int i = 0; i < entry_index; i++) {
-    if (!entry->next) {
-      EndIndex *new_bucket = malloc_or_die(sizeof(EndIndex));
-      new_bucket->index = -1;
-      new_bucket->next = NULL;
-      entry->next = new_bucket;
-    }
-    entry = entry->next;
-  }
-  return entry;
+void leave_list_item_increment_count(LeaveListItem *item, double equity) {
+  item->count++;
+  item->mean += item->mean + ((double)1 / item->count) * (equity - item->mean);
 }
 
 void leave_list_add_subleave(LeaveList *leave_list, int klv_index,
                              double equity) {
   LeaveListItem *item = leave_list->leaves_ordered_by_klv_index[klv_index];
 
-  item->count++;
-  item->mean += item->mean + ((double)1 / item->count) * (equity - item->mean);
+  int old_count = item->count;
 
-  EndIndex *curr_entry =
-      leave_list_get_end_index_bucket(leave_list, item->count - 1);
-  EndIndex *new_entry =
-      leave_list_get_end_index_bucket(leave_list, item->count);
+  leave_list_item_increment_count(item, equity);
+
+  uint64_t old_end_index =
+      leave_count_hashmap_get(leave_list->leave_count_hashmap, old_count);
 
   LeaveListItem *swapped_item =
-      leave_list->leaves_ordered_by_count[curr_entry->index];
+      leave_list->leaves_ordered_by_count[old_end_index];
 
-  int tmp_count_index = item->count_index;
+  int item_old_count_index = item->count_index;
   item->count_index = swapped_item->count_index;
-  swapped_item->count_index = tmp_count_index;
+  swapped_item->count_index = item_old_count_index;
 
-  leave_list->leaves_ordered_by_count[curr_entry->index] = item;
-  leave_list->leaves_ordered_by_count[item->count_index] = swapped_item;
+  leave_list->leaves_ordered_by_count[old_end_index] = item;
+  leave_list->leaves_ordered_by_count[item_old_count_index] = swapped_item;
 
   // Ensure new end index is correct
-  new_entry->index = curr_entry->index;
-  curr_entry->index--;
+  leave_count_hashmap_set(leave_list->leave_count_hashmap, old_count,
+                          old_end_index - 1);
 
-  if (item->count > 1) {
-    EndIndex *prev_entry =
-        leave_list_get_end_index_bucket(leave_list, item->count - 2);
-    if (prev_entry->index == curr_entry->index) {
-      curr_entry->index = -1;
-    } else {
-      curr_entry->index--;
-    }
-  } else {
-    curr_entry->index--;
+  if (old_end_index == 0 ||
+      leave_list->leaves_ordered_by_count[old_end_index - 1]->count !=
+          old_count) {
+    leave_count_hashmap_delete(leave_list->leave_count_hashmap, old_count);
   }
 }
 
@@ -151,10 +121,8 @@ void generate_subleaves(LeaveList *leave_list, uint32_t node_index,
       leave_list_add_subleave(leave_list, word_index - 1,
                               leave_list->move_equity);
     } else {
-      LeaveListItem *item = leave_list->empty_leave;
-      item->count++;
-      item->mean += item->mean + ((double)1 / item->count) *
-                                     (leave_list->move_equity - item->mean);
+      leave_list_item_increment_count(leave_list->empty_leave,
+                                      leave_list->move_equity);
     }
   } else {
     generate_subleaves(leave_list, node_index, word_index, ml + 1);
@@ -179,11 +147,12 @@ void generate_subleaves(LeaveList *leave_list, uint32_t node_index,
 }
 
 void leave_list_add_leave(LeaveList *leave_list, const KLV *klv,
-                          Rack *full_rack, Rack *subleave, double move_equity) {
+                          Rack *full_rack, double move_equity) {
   leave_list->klv = klv;
   leave_list->full_rack = full_rack;
-  leave_list->subleave = subleave;
   leave_list->move_equity = move_equity;
+  rack_copy_dist_size(leave_list->subleave, leave_list->full_rack);
+  rack_reset(leave_list->subleave);
   generate_subleaves(leave_list, kwg_get_dawg_root_node_index(klv->kwg), 0, 0);
 }
 
