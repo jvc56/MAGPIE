@@ -16,6 +16,7 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/klv.h"
+#include "../ent/leave_list.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -36,6 +37,36 @@ double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
     }
   }
   return klv_get_leave_value(klv, rack);
+}
+
+void rack_take_move(Rack *rack, const Move *move) {
+  int tiles_length = move_get_tiles_length(move);
+
+  for (int idx = 0; idx < tiles_length; idx++) {
+    uint8_t letter = move_get_tile(move, idx);
+    if (letter == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    if (get_is_blanked(letter)) {
+      letter = BLANK_MACHINE_LETTER;
+    }
+    rack_take_letter(rack, letter);
+  }
+}
+
+void rack_add_move(Rack *rack, const Move *move) {
+  int tiles_length = move_get_tiles_length(move);
+
+  for (int idx = 0; idx < tiles_length; idx++) {
+    uint8_t letter = move_get_tile(move, idx);
+    if (letter == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    if (get_is_blanked(letter)) {
+      letter = BLANK_MACHINE_LETTER;
+    }
+    rack_add_letter(rack, letter);
+  }
 }
 
 void play_move_on_board(const Move *move, Game *game) {
@@ -309,8 +340,10 @@ play_move_status_t play_move(const Move *move, Game *game,
   }
 
   if (rack_to_draw) {
-    return_rack_to_bag(game, player_on_turn_index);
-    if (!draw_rack_from_bag(game, player_on_turn_index, rack_to_draw)) {
+    if (rack_is_drawable(game, player_on_turn_index, rack_to_draw)) {
+      return_rack_to_bag(game, player_on_turn_index);
+      draw_rack_from_bag(game, player_on_turn_index, rack_to_draw);
+    } else {
       return PLAY_MOVE_STATUS_RACK_TO_DRAW_NOT_IN_BAG;
     }
   }
@@ -351,4 +384,22 @@ void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
                          int player_draw_index) {
   bag_draw_letter(bag, letter, player_draw_index);
   rack_add_letter(rack, letter);
+}
+
+// Assumes the move has been removed from the rack and new tiles
+// have not been drawn yet.
+bool set_rare_rack(const LeaveList *leave_list, Game *game, int player_index) {
+  const int number_of_leaves = leave_list_get_number_of_leaves(leave_list);
+  Rack *player_rack = player_get_rack(game_get_player(game, player_index));
+  for (int i = 0; i < number_of_leaves; i++) {
+    const Rack *rare_leave = leave_list_get_rack_by_count_index(leave_list, i);
+    if (rack_contains_subrack(rare_leave, player_rack) &&
+        rack_is_drawable(game, player_index, rare_leave)) {
+      return_rack_to_bag(game, player_index);
+      draw_rack_from_bag(game, player_index, rare_leave);
+      draw_to_full_rack(game, player_index);
+      return true;
+    }
+  }
+  return false;
 }

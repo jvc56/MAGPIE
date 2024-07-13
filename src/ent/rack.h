@@ -36,10 +36,6 @@ static inline void rack_copy(Rack *dst, const Rack *src) {
   memory_copy(dst, src, sizeof(Rack));
 }
 
-static inline void rack_copy_dist_size(Rack *dst, const Rack *src) {
-  dst->dist_size = src->dist_size;
-}
-
 static inline Rack *rack_duplicate(const Rack *rack) {
   Rack *new_rack = rack_create(rack->dist_size);
   rack_copy(new_rack, rack);
@@ -96,6 +92,16 @@ static inline bool rack_subtract(Rack *rack_to_update, Rack *value_to_sub) {
     }
     rack_to_update->array[i] -= value_to_sub->array[i];
     rack_to_update->number_of_letters -= value_to_sub->array[i];
+  }
+  return true;
+}
+
+static inline int rack_contains_subrack(const Rack *rack, const Rack *subrack) {
+  const int dist_size = rack->dist_size;
+  for (int i = 0; i < dist_size; i++) {
+    if (subrack->array[i] > rack->array[i]) {
+      return false;
+    }
   }
   return true;
 }

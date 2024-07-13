@@ -28,6 +28,7 @@
 // on how the KLV data structure works, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
 typedef struct KLV {
+  int number_of_leaves;
   KWG *kwg;
   char *name;
   uint32_t *word_counts;
@@ -37,6 +38,10 @@ typedef struct KLV {
 static inline const char *klv_get_name(const KLV *klv) { return klv->name; }
 
 static inline const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
+
+static inline int klv_get_number_of_leaves(const KLV *klv) {
+  return klv->number_of_leaves;
+}
 
 static inline double klv_get_indexed_leave_value(const KLV *klv,
                                                  uint32_t index) {
@@ -189,6 +194,7 @@ static inline void klv_load(KLV *klv, const char *data_path,
     log_fatal("number of leaves fread failure: %zd != %d\n", result, 1);
   }
   number_of_leaves = le32toh(number_of_leaves);
+  klv->number_of_leaves = number_of_leaves;
 
   klv->leave_values =
       (double *)malloc_or_die(number_of_leaves * sizeof(double));
@@ -232,8 +238,9 @@ static inline void klv_destroy(KLV *klv) {
   free(klv);
 }
 
-static inline uint32_t klv_get_word_index_of(const KLV *klv, const Rack *leave,
-                                             uint32_t node_index) {
+static inline uint32_t klv_get_word_index_internal(const KLV *klv,
+                                                   const Rack *leave,
+                                                   uint32_t node_index) {
   int idx = 0;
   int lidx = 0;
   int lidx_letter_count = rack_get_letter(leave, lidx);
@@ -276,6 +283,17 @@ static inline uint32_t klv_get_word_index_of(const KLV *klv, const Rack *leave,
   return KLV_UNFOUND_INDEX;
 }
 
+static inline int klv_get_word_index(const KLV *klv, const Rack *leave) {
+  if (rack_is_empty(leave)) {
+    return -1;
+  }
+  if (!klv) {
+    return -1;
+  }
+  return klv_get_word_index_internal(klv, leave,
+                                     kwg_get_dawg_root_node_index(klv->kwg));
+}
+
 static inline double klv_get_leave_value(const KLV *klv, const Rack *leave) {
   if (rack_is_empty(leave)) {
     return 0.0;
@@ -283,8 +301,8 @@ static inline double klv_get_leave_value(const KLV *klv, const Rack *leave) {
   if (!klv) {
     return 0.0;
   }
-  const uint32_t index =
-      klv_get_word_index_of(klv, leave, kwg_get_dawg_root_node_index(klv->kwg));
+  const uint32_t index = klv_get_word_index_internal(
+      klv, leave, kwg_get_dawg_root_node_index(klv->kwg));
   return klv_get_indexed_leave_value(klv, index);
 }
 
