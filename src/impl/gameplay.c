@@ -392,7 +392,7 @@ bool set_rare_rack(const LeaveList *leave_list, Game *game, int player_index) {
   const int number_of_leaves = leave_list_get_number_of_leaves(leave_list);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   for (int i = 0; i < number_of_leaves; i++) {
-    const Rack *rare_leave = leave_list_get_rack_by_count_index(leave_list, i);
+    const Rack *rare_leave = leave_list_get_rack(leave_list, i);
     if (rack_contains_subrack(rare_leave, player_rack) &&
         rack_is_drawable(game, player_index, rare_leave)) {
       return_rack_to_bag(game, player_index);

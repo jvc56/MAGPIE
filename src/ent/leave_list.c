@@ -153,7 +153,7 @@ void leave_list_destroy(LeaveList *leave_list) {
 
 void leave_list_item_increment_count(LeaveListItem *item, double equity) {
   item->count++;
-  item->mean += item->mean + ((double)1 / item->count) * (equity - item->mean);
+  item->mean += (1.0 / item->count) * (equity - item->mean);
 }
 
 void leave_list_add_subleave(LeaveList *leave_list, int klv_index,
@@ -161,8 +161,8 @@ void leave_list_add_subleave(LeaveList *leave_list, int klv_index,
   LeaveListItem *item = leave_list->leaves_ordered_by_klv_index[klv_index];
 
   int old_count = item->count;
-
   leave_list_item_increment_count(item, equity);
+  int new_count = item->count;
 
   uint64_t old_end_index =
       leave_count_hashmap_get(leave_list->leave_count_hashmap, old_count);
@@ -177,9 +177,14 @@ void leave_list_add_subleave(LeaveList *leave_list, int klv_index,
   leave_list->leaves_ordered_by_count[old_end_index] = item;
   leave_list->leaves_ordered_by_count[item_old_count_index] = swapped_item;
 
-  // Ensure new end index is correct
   leave_count_hashmap_set(leave_list->leave_count_hashmap, old_count,
                           old_end_index - 1);
+
+  if (leave_count_hashmap_get(leave_list->leave_count_hashmap, new_count) ==
+      UNSET_KEY_OR_VALUE) {
+    leave_count_hashmap_set(leave_list->leave_count_hashmap, new_count,
+                            old_end_index);
+  }
 
   if (old_end_index == 0 ||
       leave_list->leaves_ordered_by_count[old_end_index - 1]->count !=
@@ -247,9 +252,16 @@ int leave_list_get_number_of_leaves(const LeaveList *leave_list) {
   return leave_list->number_of_leaves;
 }
 
-const Rack *leave_list_get_rack_by_count_index(const LeaveList *leave_list,
-                                               int count_index) {
+const Rack *leave_list_get_rack(const LeaveList *leave_list, int count_index) {
   return &leave_list->leaves_ordered_by_count[count_index]->leave;
+}
+
+uint64_t leave_list_get_count(const LeaveList *leave_list, int count_index) {
+  return leave_list->leaves_ordered_by_count[count_index]->count;
+}
+
+double leave_list_get_mean(const LeaveList *leave_list, int count_index) {
+  return leave_list->leaves_ordered_by_count[count_index]->mean;
 }
 
 int leave_list_get_empty_leave_count(const LeaveList *leave_list) {
@@ -258,4 +270,8 @@ int leave_list_get_empty_leave_count(const LeaveList *leave_list) {
 
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
   return leave_list->empty_leave->mean;
+}
+
+int leave_list_get_count_index(const LeaveList *leave_list, int klv_index) {
+  return leave_list->leaves_ordered_by_klv_index[klv_index]->count_index;
 }

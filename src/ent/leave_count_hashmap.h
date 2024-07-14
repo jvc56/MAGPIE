@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define UNSET_KEY_VALUE 0xFFFFFFFFFFFFFFFF
+#define UNSET_KEY_OR_VALUE 0xFFFFFFFFFFFFFFFF
 
 typedef struct LeaveCountHashMap LeaveCountHashMap;
 

@@ -16,7 +16,7 @@ struct HashEntry {
 
 HashEntry *hashentry_create(uint64_t index) {
   HashEntry *hashentry = malloc_or_die(sizeof(HashEntry));
-  hashentry->key = UNSET_KEY_VALUE;
+  hashentry->key = UNSET_KEY_OR_VALUE;
   hashentry->index = index;
   hashentry->next = NULL;
   return hashentry;
@@ -73,7 +73,7 @@ uint64_t leave_count_hashmap_get_num_entries(LeaveCountHashMap *hm) {
 void leave_count_hashmap_reset(LeaveCountHashMap *hm) {
   for (uint64_t i = 0; i < hm->capacity; i++) {
     hm->buckets[i] = NULL;
-    hm->entries[i]->key = UNSET_KEY_VALUE;
+    hm->entries[i]->key = UNSET_KEY_OR_VALUE;
     hm->entries[i]->next = NULL;
   }
   hm->next_available_entry_index = 0;
@@ -93,7 +93,7 @@ uint64_t leave_count_hashmap_get(LeaveCountHashMap *hm, uint64_t key) {
     }
     entry = entry->next;
   }
-  return UNSET_KEY_VALUE;
+  return UNSET_KEY_OR_VALUE;
 }
 
 HashEntry *leave_count_hashmap_get_next_available_entry(LeaveCountHashMap *hm,
