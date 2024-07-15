@@ -9,7 +9,7 @@
 
 struct BagBitMaps {
   const LetterDistribution *ld;
-  int unit_size;
+  int unit_size_in_bits;
   int units_per_bag_bitmap;
   int number_of_bag_bitmaps;
   // The entry at index 0 is the bag which is
@@ -21,19 +21,21 @@ BagBitMaps *bag_bitmaps_create(const LetterDistribution *ld,
                                int number_of_bitmaps) {
   BagBitMaps *bag_bitmaps = malloc(sizeof(BagBitMaps));
 
+  bag_bitmaps->ld = ld;
+
   int bag_size = 0;
   int ld_size = ld_get_size(ld);
   for (int i = 0; i < ld_size; i++) {
     bag_size += ld_get_dist(ld, i);
   }
 
-  bag_bitmaps->unit_size = sizeof(BAG_BITMAPS_UNIT);
-  bag_bitmaps->units_per_bag_bitmap =
-      bag_size / (bag_bitmaps->unit_size * CHAR_BIT);
+  int unit_size = sizeof(BAG_BITMAPS_UNIT);
+  bag_bitmaps->unit_size_in_bits = unit_size * CHAR_BIT;
+  bag_bitmaps->units_per_bag_bitmap = bag_size / bag_bitmaps->unit_size_in_bits;
   bag_bitmaps->number_of_bag_bitmaps = number_of_bitmaps + 1;
   bag_bitmaps->bitmaps = calloc_or_die(bag_bitmaps->number_of_bag_bitmaps *
                                            bag_bitmaps->units_per_bag_bitmap,
-                                       bag_bitmaps->unit_size);
+                                       unit_size);
   return bag_bitmaps;
 }
 
@@ -45,16 +47,16 @@ void bag_bitmaps_destroy(BagBitMaps *bag_bitmaps) {
 void bag_bitmaps_set_bit(BagBitMaps *bag_bitmaps, int bag_bitmap_start_index,
                          int bit_index) {
   const int unit_index =
-      bag_bitmap_start_index + bit_index / bag_bitmaps->unit_size;
-  const int unit_offset = bit_index % bag_bitmaps->unit_size;
+      bag_bitmap_start_index + bit_index / bag_bitmaps->unit_size_in_bits;
+  const int unit_offset = bit_index % bag_bitmaps->unit_size_in_bits;
   bag_bitmaps->bitmaps[unit_index] |= (BAG_BITMAPS_UNIT)1 << unit_offset;
 }
 
 bool bag_bitmaps_get_bit(const BagBitMaps *bag_bitmaps,
                          int bag_bitmap_start_index, int bit_index) {
   const int unit_index =
-      bag_bitmap_start_index + bit_index / bag_bitmaps->unit_size;
-  const int unit_offset = bit_index % bag_bitmaps->unit_size;
+      bag_bitmap_start_index + bit_index / bag_bitmaps->unit_size_in_bits;
+  const int unit_offset = bit_index % bag_bitmaps->unit_size_in_bits;
   return bag_bitmaps->bitmaps[unit_index] &
          ((BAG_BITMAPS_UNIT)1 << unit_offset);
 }
@@ -98,7 +100,7 @@ void bag_bitmaps_set_rack(BagBitMaps *bag_bitmaps, Rack *rack, int index) {
   // Use +1 to account for the bag bitmap at index 0 since
   // this function is exposed to the API and clients do not
   // know about the bag bitmap at index 0.
-  bag_bitmaps_set_rack(bag_bitmaps, rack, index - 1);
+  bag_bitmaps_set_rack_internal(bag_bitmaps, rack, index + 1);
 }
 
 // Swap two bag bitmaps
