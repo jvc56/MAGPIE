@@ -31,7 +31,9 @@ BagBitMaps *bag_bitmaps_create(const LetterDistribution *ld,
 
   int unit_size = sizeof(BAG_BITMAPS_UNIT);
   bag_bitmaps->unit_size_in_bits = unit_size * CHAR_BIT;
-  bag_bitmaps->units_per_bag_bitmap = bag_size / bag_bitmaps->unit_size_in_bits;
+  bag_bitmaps->units_per_bag_bitmap =
+      (bag_size + bag_bitmaps->unit_size_in_bits - 1) /
+      bag_bitmaps->unit_size_in_bits;
   bag_bitmaps->number_of_bag_bitmaps = number_of_bitmaps + 1;
   bag_bitmaps->bitmaps = calloc_or_die(bag_bitmaps->number_of_bag_bitmaps *
                                            bag_bitmaps->units_per_bag_bitmap,
@@ -61,7 +63,12 @@ bool bag_bitmaps_get_bit(const BagBitMaps *bag_bitmaps,
          ((BAG_BITMAPS_UNIT)1 << unit_offset);
 }
 
-void bag_bitmaps_set_bits(BagBitMaps *bag_bitmaps, Rack *rack, int index) {
+void bag_bitmaps_set_bitmap_internal(BagBitMaps *bag_bitmaps, const Rack *rack,
+                                     int index) {
+  // First, reset the bitmap.
+  for (int i = 0; i < bag_bitmaps->units_per_bag_bitmap; i++) {
+    bag_bitmaps->bitmaps[index * bag_bitmaps->units_per_bag_bitmap + i] = 0;
+  }
   const int dist_size = rack_get_dist_size(rack);
   int bag_bitmap_start_index = index * bag_bitmaps->units_per_bag_bitmap;
   int bit_index = 0;
@@ -76,8 +83,16 @@ void bag_bitmaps_set_bits(BagBitMaps *bag_bitmaps, Rack *rack, int index) {
   }
 }
 
-void bag_bitmaps_set_rack_internal(BagBitMaps *bag_bitmaps, Rack *rack,
-                                   int index) {
+void bag_bitmaps_set_bitmap(BagBitMaps *bag_bitmaps, const Rack *rack,
+                            int index) {
+  // Use +1 to account for the bag bitmap at index 0 since
+  // this function is exposed to the API and clients do not
+  // know about the bag bitmap at index 0.
+  bag_bitmaps_set_bitmap_internal(bag_bitmaps, rack, index + 1);
+}
+
+void bag_bitmaps_draw_rack(BagBitMaps *bag_bitmaps, Bag *bag, Rack *rack,
+                           int player_draw_index, int index) {
   const int dist_size = rack_get_dist_size(rack);
   int bag_bitmap_start_index = index * bag_bitmaps->units_per_bag_bitmap;
   int bit_index = 0;
@@ -90,17 +105,12 @@ void bag_bitmaps_set_rack_internal(BagBitMaps *bag_bitmaps, Rack *rack,
       } else {
         break;
       }
+      bit_index++;
     }
     bit_index += num_letter_dist - num_set;
     rack_add_letters(rack, i, num_set);
+    bag_draw_letters(bag, i, num_set, player_draw_index);
   }
-}
-
-void bag_bitmaps_set_rack(BagBitMaps *bag_bitmaps, Rack *rack, int index) {
-  // Use +1 to account for the bag bitmap at index 0 since
-  // this function is exposed to the API and clients do not
-  // know about the bag bitmap at index 0.
-  bag_bitmaps_set_rack_internal(bag_bitmaps, rack, index + 1);
 }
 
 // Swap two bag bitmaps
@@ -123,17 +133,17 @@ void bag_bitmaps_swap(BagBitMaps *bag_bitmaps, int i, int j) {
 // Returns true and sets the rack to the first available subrack
 // by index.
 // Returns false if there is no valid subrack.
-bool bag_bitmaps_get_first_subrack(BagBitMaps *bag_bitmaps, const Bag *bag,
-                                   Rack *rack) {
+bool bag_bitmaps_draw_first_available_subrack(BagBitMaps *bag_bitmaps, Bag *bag,
+                                              Rack *rack,
+                                              int player_draw_index) {
   const int dist_size = rack_get_dist_size(rack);
   for (int i = 0; i < dist_size; i++) {
     rack_add_letters(rack, i, bag_get_letter(bag, i));
   }
-  bag_bitmaps_set_bits(bag_bitmaps, rack, 0);
+  bag_bitmaps_set_bitmap_internal(bag_bitmaps, rack, 0);
   for (int i = 0; i < dist_size; i++) {
     rack_take_letters(rack, i, bag_get_letter(bag, i));
   }
-
   const int number_of_bitmaps = bag_bitmaps->number_of_bag_bitmaps;
   const int units_per_bag_bitmap = bag_bitmaps->units_per_bag_bitmap;
   for (int i = 1; i < number_of_bitmaps; i++) {
@@ -149,7 +159,7 @@ bool bag_bitmaps_get_first_subrack(BagBitMaps *bag_bitmaps, const Bag *bag,
       }
     }
     if (valid_subrack) {
-      bag_bitmaps_set_rack_internal(bag_bitmaps, rack, i);
+      bag_bitmaps_draw_rack(bag_bitmaps, bag, rack, player_draw_index, i);
       return true;
     }
   }

@@ -173,6 +173,16 @@ bool bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   return true;
 }
 
+bool bag_draw_letters(Bag *bag, uint8_t letter, int num_letters,
+                      int player_draw_index) {
+  for (int i = 0; i < num_letters; i++) {
+    if (!bag_draw_letter(bag, letter, player_draw_index)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // The player index should be the player who drew the tile.
 // Failing to adhere to this requirement will result in
 // undefined behavior.
