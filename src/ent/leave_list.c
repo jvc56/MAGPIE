@@ -156,6 +156,18 @@ void leave_list_item_increment_count(LeaveListItem *item, double equity) {
   item->mean += (1.0 / item->count) * (equity - item->mean);
 }
 
+void leave_list_swap_items(LeaveList *leave_list, int i, int j) {
+  // Perform the swap
+  LeaveListItem *temp = leave_list->leaves_ordered_by_count[i];
+  leave_list->leaves_ordered_by_count[i] =
+      leave_list->leaves_ordered_by_count[j];
+  leave_list->leaves_ordered_by_count[j] = temp;
+
+  // Reassign count indexes
+  leave_list->leaves_ordered_by_count[i]->count_index = i;
+  leave_list->leaves_ordered_by_count[j]->count_index = j;
+}
+
 void leave_list_add_subleave(LeaveList *leave_list, int klv_index,
                              double equity) {
   LeaveListItem *item = leave_list->leaves_ordered_by_klv_index[klv_index];
@@ -167,15 +179,7 @@ void leave_list_add_subleave(LeaveList *leave_list, int klv_index,
   uint64_t old_end_index =
       leave_count_hashmap_get(leave_list->leave_count_hashmap, old_count);
 
-  LeaveListItem *swapped_item =
-      leave_list->leaves_ordered_by_count[old_end_index];
-
-  int item_old_count_index = item->count_index;
-  item->count_index = swapped_item->count_index;
-  swapped_item->count_index = item_old_count_index;
-
-  leave_list->leaves_ordered_by_count[old_end_index] = item;
-  leave_list->leaves_ordered_by_count[item_old_count_index] = swapped_item;
+  leave_list_swap_items(leave_list, old_end_index, item->count_index);
 
   leave_count_hashmap_set(leave_list->leave_count_hashmap, old_count,
                           old_end_index - 1);

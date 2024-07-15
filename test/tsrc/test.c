@@ -5,6 +5,7 @@
 
 #include "alphabet_test.h"
 #include "autoplay_test.h"
+#include "bag_bitmaps_test.h"
 #include "bag_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -56,6 +57,7 @@ void run_all(void) {
   test_leave_count_hashmap();
   test_bag();
   test_rack();
+  test_bag_bitmaps();
   test_board();
   test_board_layout_default();
   test_cross_set();
@@ -150,6 +152,8 @@ void run_test(const char *subtest) {
     test_leave_list();
   } else if (strings_equal(subtest, "hm")) {
     test_leave_count_hashmap();
+  } else if (strings_equal(subtest, "bb")) {
+    test_bag_bitmaps();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }
