@@ -22,22 +22,10 @@ void assert_leave_list_item(const LetterDistribution *ld, const KLV *klv,
   // to the count ordering upon creation.
   int actual_count_index = leave_list_get_count_index(
       leave_list, klv_get_word_index(klv, expected_rack));
+  rack_destroy(expected_rack);
   if (expected_count_index >= 0) {
     assert(actual_count_index == expected_count_index);
   }
-  const Rack *actual_rack = leave_list_get_rack(leave_list, actual_count_index);
-
-  // FIXME: remove
-  // StringBuilder *sb = string_builder_create();
-  // string_builder_add_rack(sb, actual_rack, ld);
-  // string_builder_add_string(sb, "\n");
-  // string_builder_add_rack(sb, expected_rack, ld);
-  // string_builder_add_string(sb, "\n");
-  // printf("%s\n", string_builder_peek(sb));
-  // string_builder_destroy(sb);
-
-  assert(racks_are_equal(expected_rack, actual_rack));
-  rack_destroy(expected_rack);
   assert(leave_list_get_count(leave_list, actual_count_index) == count);
   assert(within_epsilon(leave_list_get_mean(leave_list, actual_count_index),
                         mean));
@@ -51,7 +39,8 @@ void test_leave_list_add_leave(void) {
                                    PLAYERS_DATA_TYPE_KLV, 0);
   LeaveList *leave_list = leave_list_create(ld, klv);
 
-  int number_of_leaves = klv_get_number_of_leaves(klv);
+  const int number_of_leaves = klv_get_number_of_leaves(klv);
+  const int player_draw_index = 0;
 
   assert(leave_list_get_number_of_leaves(leave_list) == number_of_leaves);
 
@@ -221,7 +210,133 @@ void test_leave_list_add_leave(void) {
   assert_leave_list_item(ld, klv, leave_list, "HI", -1, 1, 7.0);
   assert_leave_list_item(ld, klv, leave_list, "II", -1, 1, 7.0);
 
+  Bag *bag = bag_create(ld);
+  Rack *expected_rack = rack_create(ld_get_size(ld));
+  int number_of_letters = bag_get_tiles(bag);
+  for (int i = 0; i < number_of_letters; i++) {
+    bag_draw_random_letter(bag, 0);
+  }
+
+  rack_reset(rack);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack,
+                                                player_draw_index));
+  assert(bag_get_tiles(bag) == 0);
+  rack_set_to_string(ld, expected_rack, "A");
+  assert(racks_are_equal(expected_rack, rack));
+
+  rack_reset(rack);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "D"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "F"), 0);
+  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack,
+                                                player_draw_index));
+  assert(bag_get_tiles(bag) == 0);
+  rack_set_to_string(ld, expected_rack, "DEF");
+  assert(racks_are_equal(expected_rack, rack));
+
+  rack_set_to_string(ld, rack, "DE");
+  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  rack_set_to_string(ld, rack, "DG");
+  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  rack_set_to_string(ld, rack, "EG");
+  leave_list_add_leave(leave_list, klv, rack, 1.0);
+
+  rack_reset(rack);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "D"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "E"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "G"), 0);
+  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack,
+                                                player_draw_index));
+  assert(bag_get_tiles(bag) == 0);
+  rack_set_to_string(ld, expected_rack, "DEG");
+  assert(racks_are_equal(expected_rack, rack));
+
+  rack_set_to_string(ld, rack, "DEG");
+  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  rack_set_to_string(ld, rack, "H");
+  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  rack_set_to_string(ld, rack, "I");
+  leave_list_add_leave(leave_list, klv, rack, 2.0);
+  rack_set_to_string(ld, rack, "HI");
+  leave_list_add_leave(leave_list, klv, rack, 4.0);
+  rack_set_to_string(ld, rack, "ABC");
+  leave_list_add_leave(leave_list, klv, rack, 6.0);
+  rack_set_to_string(ld, rack, "ABCI");
+  leave_list_add_leave(leave_list, klv, rack, 8.0);
+
+  rack_reset(rack);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "C"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
+  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack,
+                                                player_draw_index));
+  assert(bag_get_tiles(bag) == 0);
+  rack_set_to_string(ld, expected_rack, "ABCII");
+  assert(racks_are_equal(expected_rack, rack));
+
+  rack_set_to_string(ld, rack, "J");
+  leave_list_add_leave(leave_list, klv, rack, 4.0);
+  rack_set_to_string(ld, rack, "JK");
+  leave_list_add_leave(leave_list, klv, rack, 5.0);
+  rack_set_to_string(ld, rack, "JKL");
+  leave_list_add_leave(leave_list, klv, rack, 6.0);
+  rack_set_to_string(ld, rack, "KLM");
+  leave_list_add_leave(leave_list, klv, rack, 7.0);
+
+  double empty_leave_mean = leave_list_get_empty_leave_mean(leave_list);
+
+  leave_list_write_to_klv(leave_list);
+
+  rack_set_to_string(ld, rack, "J");
+  assert(
+      within_epsilon(klv_get_leave_value(klv, rack), 5.0 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "K");
+  assert(
+      within_epsilon(klv_get_leave_value(klv, rack), 6.0 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "L");
+  assert(within_epsilon(klv_get_leave_value(klv, rack),
+                        13.0 / 2 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "M");
+  assert(
+      within_epsilon(klv_get_leave_value(klv, rack), 7.0 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "JK");
+  assert(within_epsilon(klv_get_leave_value(klv, rack),
+                        11.0 / 2 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "KL");
+  assert(within_epsilon(klv_get_leave_value(klv, rack),
+                        13.0 / 2 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "JL");
+  assert(
+      within_epsilon(klv_get_leave_value(klv, rack), 6.0 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "LM");
+  assert(
+      within_epsilon(klv_get_leave_value(klv, rack), 7.0 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "KM");
+  assert(
+      within_epsilon(klv_get_leave_value(klv, rack), 7.0 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "JKL");
+  assert(
+      within_epsilon(klv_get_leave_value(klv, rack), 6.0 - empty_leave_mean));
+
+  rack_set_to_string(ld, rack, "KLM");
+  assert(
+      within_epsilon(klv_get_leave_value(klv, rack), 7.0 - empty_leave_mean));
+
+  rack_destroy(expected_rack);
   rack_destroy(rack);
+  bag_destroy(bag);
   leave_list_destroy(leave_list);
   config_destroy(config);
 }

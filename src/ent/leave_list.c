@@ -1,6 +1,7 @@
 #include "leave_list.h"
 
 #include "bag.h"
+#include "bag_bitmaps.h"
 #include "game.h"
 #include "klv.h"
 #include "leave_count_hashmap.h"
@@ -17,7 +18,6 @@ typedef struct LeaveListItem {
   int count_index;
   int count;
   double mean;
-  Rack leave;
 } LeaveListItem;
 
 struct LeaveList {
@@ -30,6 +30,7 @@ struct LeaveList {
   LeaveListItem **leaves_ordered_by_klv_index;
   LeaveListItem **leaves_ordered_by_count;
   LeaveCountHashMap *leave_count_hashmap;
+  BagBitMaps *bag_bitmaps;
 };
 
 LeaveListItem *leave_list_item_create(int count_index) {
@@ -55,8 +56,7 @@ int leave_list_set_item_leaves(LeaveList *leave_list,
       if (word_index == KLV_UNFOUND_INDEX) {
         log_fatal("word index not found in klv: %u", word_index);
       }
-      rack_copy(&leave_list->leaves_ordered_by_klv_index[word_index - 1]->leave,
-                leave);
+      bag_bitmaps_set_bitmap(leave_list->bag_bitmaps, leave, word_index - 1);
       number_of_set_leaves++;
     }
   } else {
@@ -124,6 +124,9 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv) {
 
   bag_destroy(bag);
 
+  leave_list->bag_bitmaps =
+      bag_bitmaps_create(ld, leave_list->number_of_leaves);
+
   const int number_of_set_leaves = leave_list_set_item_leaves(
       leave_list, ld, bag_as_rack, leave_list->subleave,
       kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0);
@@ -148,6 +151,7 @@ void leave_list_destroy(LeaveList *leave_list) {
   free(leave_list->empty_leave);
   leave_count_hashmap_destroy(leave_list->leave_count_hashmap);
   rack_destroy(leave_list->subleave);
+  bag_bitmaps_destroy(leave_list->bag_bitmaps);
   free(leave_list);
 }
 
@@ -166,6 +170,8 @@ void leave_list_swap_items(LeaveList *leave_list, int i, int j) {
   // Reassign count indexes
   leave_list->leaves_ordered_by_count[i]->count_index = i;
   leave_list->leaves_ordered_by_count[j]->count_index = j;
+
+  bag_bitmaps_swap(leave_list->bag_bitmaps, i, j);
 }
 
 void leave_list_add_subleave(LeaveList *leave_list, int klv_index,
@@ -252,12 +258,14 @@ void leave_list_write_to_klv(LeaveList *leave_list) {
   }
 }
 
-int leave_list_get_number_of_leaves(const LeaveList *leave_list) {
-  return leave_list->number_of_leaves;
+bool leave_list_draw_rarest_available_leave(LeaveList *leave_list, Bag *bag,
+                                            Rack *rack, int player_draw_index) {
+  return bag_bitmaps_draw_first_available_subrack(leave_list->bag_bitmaps, bag,
+                                                  rack, player_draw_index);
 }
 
-const Rack *leave_list_get_rack(const LeaveList *leave_list, int count_index) {
-  return &leave_list->leaves_ordered_by_count[count_index]->leave;
+int leave_list_get_number_of_leaves(const LeaveList *leave_list) {
+  return leave_list->number_of_leaves;
 }
 
 uint64_t leave_list_get_count(const LeaveList *leave_list, int count_index) {
