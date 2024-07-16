@@ -608,7 +608,7 @@ void test_validated_move_distinct_kwg(void) {
   rack_set_to_string(ld, player0_rack, "KOPRRSS");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "8H SPORK 32");
-  play_move(move_list_get_move(move_list, 0), game, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
 
   // Play SCHIZIER, better than best CSW word of SCHERZI
   vms = validated_moves_create(game, 1, "H8.SCHIZIER", false, true, false);
@@ -625,7 +625,7 @@ void test_validated_move_distinct_kwg(void) {
   rack_set_to_string(ld, player1_rack, "CEHIIRZ");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "H8 (S)CHIZIER 146");
-  play_move(move_list_get_move(move_list, 0), game, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
 
   // Play WIGGLY, not GOLLYWOG because that's NWL only
   vms = validated_moves_create(game, 0, "11G.WIGGLY", false, true, false);
@@ -642,7 +642,7 @@ void test_validated_move_distinct_kwg(void) {
   rack_set_to_string(ld, player0_rack, "GGLLOWY");
   generate_moves_for_game(game, 0, move_list);
   assert_move(game, move_list, NULL, 0, "11G W(I)GGLY 28");
-  play_move(move_list_get_move(move_list, 0), game, NULL);
+  play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
 
   // Play 13C QUEAS(I)ER, not L3 SQUEA(K)ER(Y) because that's CSW only
   vms = validated_moves_create(game, 1, "13C.QUEASIER", false, true, false);

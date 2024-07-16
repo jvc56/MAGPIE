@@ -209,7 +209,7 @@ void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
-  play_move(sorted_move_list->moves[n], game, NULL);
+  play_move(sorted_move_list->moves[n], game, NULL, NULL);
   sorted_move_list_destroy(sorted_move_list);
   move_list_destroy(move_list);
 }
@@ -523,7 +523,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
          MOVE_VALIDATION_STATUS_SUCCESS);
 
   if (play_move_on_board) {
-    play_move(move_list_get_move(move_list, 0), game, NULL);
+    play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
   }
 
   validated_moves_destroy(vms);

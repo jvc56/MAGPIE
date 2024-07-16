@@ -249,7 +249,7 @@ void set_random_rack(Game *game, int player_index, Rack *known_rack) {
   draw_to_full_rack(game, player_index);
 }
 
-void execute_exchange_move(const Move *move, Game *game) {
+void execute_exchange_move(const Move *move, Game *game, Rack *leave) {
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Rack *player_on_turn_rack =
       player_get_rack(game_get_player(game, player_on_turn_index));
@@ -258,6 +258,11 @@ void execute_exchange_move(const Move *move, Game *game) {
   for (int i = 0; i < move_get_tiles_played(move); i++) {
     rack_take_letter(player_on_turn_rack, move_get_tile(move, i));
   }
+
+  if (leave) {
+    rack_copy(leave, player_on_turn_rack);
+  }
+
   draw_to_full_rack(game, player_on_turn_index);
   int player_draw_index = game_get_player_on_turn_draw_index(game);
   for (int i = 0; i < move_get_tiles_played(move); i++) {
@@ -283,8 +288,13 @@ void draw_starting_racks(Game *game) {
 }
 
 // Assumes the move has been validated
+// If rack_to_draw is not null, it will attempt to set the
+// player rack to rack_to_draw after the play or will
+// return an error if it is not possible.
+// If leave is not null, it will set the rack to leave
+// after the play is made.
 play_move_status_t play_move(const Move *move, Game *game,
-                             const Rack *rack_to_draw) {
+                             const Rack *rack_to_draw, Rack *leave) {
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
     game_backup(game);
   }
@@ -294,6 +304,9 @@ play_move_status_t play_move(const Move *move, Game *game,
   Rack *player_on_turn_rack = player_get_rack(player_on_turn);
   if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     play_move_on_board(move, game);
+    if (leave) {
+      rack_copy(leave, player_on_turn_rack);
+    }
     update_cross_set_for_move(move, game);
     game_set_consecutive_scoreless_turns(game, 0);
 
@@ -303,9 +316,12 @@ play_move_status_t play_move(const Move *move, Game *game,
       standard_end_of_game_calculations(game);
     }
   } else if (move_get_type(move) == GAME_EVENT_PASS) {
+    if (leave) {
+      rack_copy(leave, player_on_turn_rack);
+    }
     game_increment_consecutive_scoreless_turns(game);
   } else if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
-    execute_exchange_move(move, game);
+    execute_exchange_move(move, game, leave);
     game_increment_consecutive_scoreless_turns(game);
   }
 

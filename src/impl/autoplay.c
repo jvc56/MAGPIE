@@ -61,7 +61,7 @@ void play_autoplay_game(Game *game, MoveList *move_list,
   while (!game_over(game)) {
     const Move *move = get_top_equity_move(game, thread_index, move_list);
     autoplay_results_add_move(autoplay_results, move);
-    play_move(move, game, NULL);
+    play_move(move, game, NULL, NULL);
   }
   autoplay_results_add_game(autoplay_results, game);
 }

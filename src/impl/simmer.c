@@ -328,7 +328,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
     double leftover = 0.0;
     game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
     // play move
-    play_move(simmed_play_get_move(simmed_play), game, NULL);
+    play_move(simmed_play_get_move(simmed_play), game, NULL, NULL);
     sim_results_increment_node_count(sim_results);
     game_set_backup_mode(game, BACKUP_MODE_OFF);
     // further plies will NOT be backed up.
@@ -343,7 +343,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
       const Move *best_play = get_top_equity_move(
           game, simmer_worker->thread_index, simmer_worker->move_list);
       rack_copy(rack_placeholder, player_get_rack(player_on_turn));
-      play_move(best_play, game, NULL);
+      play_move(best_play, game, NULL, NULL);
       sim_results_increment_node_count(sim_results);
       if (ply == plies - 2 || ply == plies - 1) {
         double this_leftover = get_leave_value_for_move(
