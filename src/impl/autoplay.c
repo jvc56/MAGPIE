@@ -11,7 +11,9 @@
 
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
+#include "../ent/checkpoint.h"
 #include "../ent/game.h"
+#include "../ent/leave_list.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/stats.h"
@@ -22,23 +24,36 @@
 
 #include "../util/util.h"
 
+typedef struct SharedData {
+  LeaveList *leave_list;
+  Checkpoint *checkpoint;
+} SharedData;
+
+void leave_gen_prebroadcast_func(void *data) {
+  SharedData *shared_data = (SharedData *)data;
+  leave_list_write_to_klv(shared_data->leave_list);
+}
+
 typedef struct AutoplayWorker {
   const AutoplayArgs *args;
   AutoplayResults *autoplay_results;
   int max_games_for_worker;
   int worker_index;
+  SharedData *shared_data;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        const AutoplayResults *target,
                                        int max_games_for_worker,
-                                       int worker_index) {
+                                       int worker_index,
+                                       SharedData *shared_data) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = args;
   autoplay_worker->max_games_for_worker = max_games_for_worker;
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
+  autoplay_worker->shared_data = shared_data;
   return autoplay_worker;
 }
 
@@ -48,6 +63,24 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   }
   autoplay_results_destroy(autoplay_worker->autoplay_results);
   free(autoplay_worker);
+}
+
+SharedData *autoplay_worker_shared_data_create(const LetterDistribution *ld,
+                                               KLV *klv,
+                                               int number_of_threads) {
+  SharedData *shared_data = malloc_or_die(sizeof(SharedData));
+  shared_data->leave_list = leave_list_create(ld, klv);
+  shared_data->checkpoint =
+      checkpoint_create(number_of_threads, leave_gen_prebroadcast_func);
+  return shared_data;
+}
+
+void autoplay_worker_shared_data_destroy(SharedData *shared_data) {
+  if (!shared_data) {
+    return;
+  }
+  leave_list_destroy(shared_data->leave_list);
+  free(shared_data);
 }
 
 void play_autoplay_game(Game *game, MoveList *move_list,
@@ -66,21 +99,18 @@ void play_autoplay_game(Game *game, MoveList *move_list,
   autoplay_results_add_game(autoplay_results, game);
 }
 
-void *autoplay_worker(void *uncasted_autoplay_worker) {
-  AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
-
+void autoplay_single_generation(AutoplayWorker *autoplay_worker, Game *game,
+                                MoveList *move_list) {
   const AutoplayArgs *args = autoplay_worker->args;
   ThreadControl *thread_control = args->thread_control;
-  Game *game = game_create(args->game_args);
-  MoveList *move_list = move_list_create(1);
 
   // Declare local vars for autoplay_worker fields for convenience
-  bool use_game_pairs = args->use_game_pairs;
-  int max_games_for_worker = autoplay_worker->max_games_for_worker;
-  int worker_index = autoplay_worker->worker_index;
+  const bool use_game_pairs = args->use_game_pairs;
+  const int max_games_for_worker = autoplay_worker->max_games_for_worker;
+  const int worker_index = autoplay_worker->worker_index;
   ThreadControlIterOutput iter_output;
 
-  for (int i = 0; i < max_games_for_worker; i++) {
+  for (int j = 0; j < max_games_for_worker; j++) {
     if (thread_control_get_is_halted(thread_control)) {
       break;
     }
@@ -93,6 +123,33 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
                          1 - starting_player_index, worker_index,
                          iter_output.seed);
     }
+  }
+}
+
+void autoplay_leave_gen(AutoplayWorker *autoplay_worker, Game *game,
+                        MoveList *move_list) {
+  const AutoplayArgs *args = autoplay_worker->args;
+  const int gens = args->gens;
+  for (int i = 0; i < gens; i++) {
+    autoplay_single_generation(autoplay_worker, game, move_list);
+    checkpoint_wait(autoplay_worker->shared_data->checkpoint,
+                    autoplay_worker->shared_data);
+  }
+}
+
+void *autoplay_worker(void *uncasted_autoplay_worker) {
+  AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
+  const AutoplayArgs *args = autoplay_worker->args;
+  Game *game = game_create(args->game_args);
+  MoveList *move_list = move_list_create(1);
+
+  switch (args->type) {
+  case AUTOPLAY_TYPE_DEFAULT:
+    autoplay_single_generation(autoplay_worker, game, move_list);
+    break;
+  case AUTOPLAY_TYPE_LEAVE_GEN:
+    autoplay_leave_gen(autoplay_worker, game, move_list);
+    break;
   }
 
   move_list_destroy(move_list);
@@ -112,13 +169,26 @@ int get_number_of_games_for_worker(int max_iterations, int number_of_threads,
 autoplay_status_t autoplay(const AutoplayArgs *args,
                            AutoplayResults *autoplay_results) {
   ThreadControl *thread_control = args->thread_control;
-  int max_iterations = args->max_iterations;
 
   thread_control_unhalt(thread_control);
   thread_control_reset_iter_count(thread_control);
   autoplay_results_reset(autoplay_results);
 
-  int number_of_threads = thread_control_get_threads(thread_control);
+  const int max_iterations = args->max_iterations;
+  const int number_of_threads = thread_control_get_threads(thread_control);
+
+  // We can use player index 0 here since it is guaranteed that
+  // players share the the KLV.
+  SharedData *shared_data = NULL;
+  if (args->type == AUTOPLAY_TYPE_LEAVE_GEN) {
+    KLV *klv = players_data_get_klv(args->game_args->players_data, 0);
+    shared_data = autoplay_worker_shared_data_create(args->game_args->ld, klv,
+                                                     number_of_threads);
+    if (args->create_leaves) {
+      klv_set_all_leave_values_to_zero(klv);
+    }
+  }
+
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
   pthread_t *worker_ids =
@@ -127,7 +197,8 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
     int number_of_games_for_worker = get_number_of_games_for_worker(
         max_iterations, number_of_threads, thread_index);
     autoplay_workers[thread_index] = autoplay_worker_create(
-        args, autoplay_results, number_of_games_for_worker, thread_index);
+        args, autoplay_results, number_of_games_for_worker, thread_index,
+        shared_data);
     pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
                    autoplay_workers[thread_index]);
   }

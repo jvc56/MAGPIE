@@ -13,11 +13,13 @@
 #include "../def/game_defs.h"
 #include "../def/gen_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/leave_gen_defs.h"
 #include "../def/math_util_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
+#include "../ent/autoplay_results.h"
 #include "../ent/error_status.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
@@ -46,6 +48,7 @@ typedef enum {
   ARG_TOKEN_INFER,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
+  ARG_TOKEN_LEAVE_GEN,
   ARG_TOKEN_DATA_PATH,
   ARG_TOKEN_BINGO_BONUS,
   ARG_TOKEN_BOARD_LAYOUT,
@@ -851,19 +854,29 @@ char *status_infer(Config __attribute__((unused)) * config) {
 // Autoplay
 
 void config_fill_autoplay_args(const Config *config,
-                               AutoplayArgs *autoplay_args) {
+                               AutoplayArgs *autoplay_args, int gens,
+                               int max_force_draw_turn,
+                               autoplay_t autoplay_type, bool create_leaves) {
   autoplay_args->max_iterations = config->max_iterations;
   autoplay_args->use_game_pairs = config->use_game_pairs;
   autoplay_args->thread_control = config->thread_control;
+  autoplay_args->gens = gens;
+  autoplay_args->max_force_draw_turn = max_force_draw_turn;
+  autoplay_args->type = autoplay_type;
+  autoplay_args->create_leaves = create_leaves;
   config_fill_game_args(config, autoplay_args->game_args);
 }
 
 autoplay_status_t config_autoplay(const Config *config,
-                                  AutoplayResults *autoplay_results) {
+                                  AutoplayResults *autoplay_results, int gens,
+                                  int max_force_draw_turn,
+                                  autoplay_t autoplay_type,
+                                  bool create_leaves) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
-  config_fill_autoplay_args(config, &args);
+  config_fill_autoplay_args(config, &args, gens, max_force_draw_turn,
+                            autoplay_type, create_leaves);
   return autoplay(&args, autoplay_results);
 }
 
@@ -886,7 +899,8 @@ void execute_autoplay(Config *config) {
     return;
   }
 
-  status = config_autoplay(config, config->autoplay_results);
+  status = config_autoplay(config, config->autoplay_results, 1, 0,
+                           AUTOPLAY_TYPE_DEFAULT, false);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)status);
 }
@@ -921,6 +935,85 @@ void execute_convert(Config *config) {
 
 char *status_convert(Config __attribute__((unused)) * config) {
   return string_duplicate("no status available for convert");
+}
+
+// Leave Gen
+
+void execute_leave_gen(Config *config) {
+  if (!config_has_game_data(config)) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    return;
+  }
+
+  if (!players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KWG) ||
+      !players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KLV)) {
+    set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_LEAVE_GEN,
+                              (int)LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+    return;
+  }
+
+  autoplay_results_reset_options(config->autoplay_results);
+
+  leave_gen_status_t status = LEAVE_GEN_STATUS_SUCCESS;
+
+  const char *create_or_refine_str =
+      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 0);
+  bool create_leaves;
+  if (has_iprefix(create_or_refine_str, "create")) {
+    create_leaves = true;
+  } else if (has_iprefix(create_or_refine_str, "refine")) {
+    create_leaves = false;
+  } else {
+    status = LEAVE_GEN_STATUS_INVALID_CREATE_OR_REFINE_OPTION;
+  }
+
+  if (status != LEAVE_GEN_STATUS_SUCCESS) {
+    set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_LEAVE_GEN,
+                              (int)status);
+    return;
+  }
+
+  const char *gen_str = config_get_parg_value(config, ARG_TOKEN_INFER, 1);
+  int gens;
+  if (!string_to_int_or_set_error_status(
+          gen_str, 1, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &gens)) {
+    return;
+  }
+
+  const char *iter_str = config_get_parg_value(config, ARG_TOKEN_INFER, 2);
+  int iters;
+  if (!string_to_int_or_set_error_status(
+          iter_str, 1, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &iters)) {
+    return;
+  }
+
+  const char *max_force_draw_turn_str =
+      config_get_parg_value(config, ARG_TOKEN_INFER, 3);
+  int max_force_draw_turns;
+  if (!string_to_int_or_set_error_status(
+          max_force_draw_turn_str, 1, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &max_force_draw_turns)) {
+    return;
+  }
+
+  autoplay_status_t autoplay_status = config_autoplay(
+      config, config->autoplay_results, gens, max_force_draw_turns,
+      AUTOPLAY_TYPE_LEAVE_GEN, create_leaves);
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
+                            (int)autoplay_status);
+}
+
+char *status_leave_gen(Config __attribute__((unused)) * config) {
+  return string_duplicate("no status available for leave gen");
 }
 
 // Config load helpers
@@ -1513,6 +1606,8 @@ Config *config_create_default(void) {
                     execute_autoplay, status_autoplay);
   parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
                     status_convert);
+  parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 4, 4,
+                    execute_leave_gen, status_leave_gen);
   parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,

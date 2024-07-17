@@ -43,6 +43,12 @@ static inline int klv_get_number_of_leaves(const KLV *klv) {
   return klv->number_of_leaves;
 }
 
+static inline void klv_set_all_leave_values_to_zero(KLV *klv) {
+  for (int i = 0; i < klv->number_of_leaves; i++) {
+    klv->leave_values[i] = 0.0;
+  }
+}
+
 static inline double klv_get_indexed_leave_value(const KLV *klv,
                                                  uint32_t index) {
   if (index == KLV_UNFOUND_INDEX) {
@@ -305,5 +311,7 @@ static inline double klv_get_leave_value(const KLV *klv, const Rack *leave) {
       klv, leave, kwg_get_dawg_root_node_index(klv->kwg));
   return klv_get_indexed_leave_value(klv, index);
 }
+
+// FIXME: implement writing KLV to file
 
 #endif

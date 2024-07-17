@@ -11,6 +11,7 @@
 #include "board_layout_super_test.h"
 #include "board_test.h"
 #include "cgp_test.h"
+#include "checkpoint_test.h"
 #include "command_test.h"
 #include "config_test.h"
 #include "cross_set_test.h"
@@ -52,6 +53,7 @@ void run_all(void) {
   test_leaves();
   test_leave_map();
   test_kwg_alpha();
+  test_checkpoint();
 
   // Now test the rest
   test_leave_count_hashmap();
@@ -154,6 +156,8 @@ void run_test(const char *subtest) {
     test_leave_count_hashmap();
   } else if (strings_equal(subtest, "bb")) {
     test_bag_bitmaps();
+  } else if (strings_equal(subtest, "ch")) {
+    test_checkpoint();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

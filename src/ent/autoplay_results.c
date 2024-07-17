@@ -326,6 +326,10 @@ autoplay_results_set_options(AutoplayResults *autoplay_results,
   return status;
 }
 
+void autoplay_results_reset_options(AutoplayResults *autoplay_results) {
+  autoplay_results_set_options_int(autoplay_results, 0, NULL);
+}
+
 AutoplayResults *
 autoplay_results_create_empty_copy(const AutoplayResults *orig) {
   AutoplayResults *autoplay_results = autoplay_results_create();
