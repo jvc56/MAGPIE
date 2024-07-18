@@ -18,6 +18,7 @@
 #include "../ent/player.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
+#include "../ent/xoshiro.h"
 
 #include "gameplay.h"
 #include "move_gen.h"
@@ -25,7 +26,9 @@
 #include "../util/util.h"
 
 typedef struct SharedData {
+  KLV *klv;
   LeaveList *leave_list;
+  pthread_mutex_t leave_list_mutex;
   Checkpoint *checkpoint;
 } SharedData;
 
@@ -69,9 +72,11 @@ SharedData *autoplay_worker_shared_data_create(const LetterDistribution *ld,
                                                KLV *klv,
                                                int number_of_threads) {
   SharedData *shared_data = malloc_or_die(sizeof(SharedData));
+  shared_data->klv = klv;
   shared_data->leave_list = leave_list_create(ld, klv);
   shared_data->checkpoint =
       checkpoint_create(number_of_threads, leave_gen_prebroadcast_func);
+  pthread_mutex_init(&shared_data->leave_list_mutex, NULL);
   return shared_data;
 }
 
@@ -83,31 +88,74 @@ void autoplay_worker_shared_data_destroy(SharedData *shared_data) {
   free(shared_data);
 }
 
-void play_autoplay_game(Game *game, MoveList *move_list,
-                        AutoplayResults *autoplay_results,
-                        int starting_player_index, int thread_index,
-                        uint64_t seed) {
+void autoplay_leave_list_draw_rarest_available_leave(
+    AutoplayWorker *autoplay_worker, Game *game, int player_on_turn_index) {
+  pthread_mutex_lock(&autoplay_worker->shared_data->leave_list_mutex);
+  leave_list_draw_rarest_available_leave(
+      autoplay_worker->shared_data->leave_list, game_get_bag(game),
+      player_get_rack(game_get_player(game, player_on_turn_index)),
+      game_get_player_draw_index(game, player_on_turn_index));
+  pthread_mutex_unlock(&autoplay_worker->shared_data->leave_list_mutex);
+}
+
+void autoplay_leave_list_add_leave(AutoplayWorker *autoplay_worker, Game *game,
+                                   int player_on_turn_index,
+                                   double move_equity) {
+  pthread_mutex_lock(&autoplay_worker->shared_data->leave_list_mutex);
+  leave_list_add_leave(
+      autoplay_worker->shared_data->leave_list,
+      autoplay_worker->shared_data->klv,
+      player_get_rack(game_get_player(game, player_on_turn_index)),
+      move_equity);
+  pthread_mutex_unlock(&autoplay_worker->shared_data->leave_list_mutex);
+}
+
+void play_autoplay_game(AutoplayWorker *autoplay_worker, Game *game,
+                        MoveList *move_list, Rack *leaves[2],
+                        int starting_player_index, uint64_t seed) {
+  AutoplayResults *autoplay_results = autoplay_worker->autoplay_results;
+  const int thread_index = autoplay_worker->worker_index;
   game_reset(game);
   game_seed(game, seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
+  int turn_number = 0;
+  int force_draw_turn_number = -1;
+  if (leaves[0] && leaves[1]) {
+    force_draw_turn_number =
+        prng_get_random_number(bag_get_prng(game_get_bag(game)),
+                               autoplay_worker->args->max_force_draw_turn);
+  }
   while (!game_over(game)) {
+    const int player_on_turn_index = game_get_player_on_turn_index(game);
+    Rack *leave_from_previous_move = leaves[player_on_turn_index];
+    if (turn_number == force_draw_turn_number) {
+      return_rack_to_bag(game, player_on_turn_index);
+      draw_rack_from_bag(game, player_on_turn_index, leave_from_previous_move);
+      autoplay_leave_list_draw_rarest_available_leave(autoplay_worker, game,
+                                                      player_on_turn_index);
+      draw_to_full_rack(game, player_on_turn_index);
+    }
     const Move *move = get_top_equity_move(game, thread_index, move_list);
     autoplay_results_add_move(autoplay_results, move);
-    play_move(move, game, NULL, NULL);
+    if (force_draw_turn_number > 0) {
+      autoplay_leave_list_add_leave(autoplay_worker, game, player_on_turn_index,
+                                    move_get_equity(move));
+    }
+    play_move(move, game, NULL, leave_from_previous_move);
+    turn_number++;
   }
   autoplay_results_add_game(autoplay_results, game);
 }
 
 void autoplay_single_generation(AutoplayWorker *autoplay_worker, Game *game,
-                                MoveList *move_list) {
+                                MoveList *move_list, Rack *leaves[2]) {
   const AutoplayArgs *args = autoplay_worker->args;
   ThreadControl *thread_control = args->thread_control;
 
-  // Declare local vars for autoplay_worker fields for convenience
-  const bool use_game_pairs = args->use_game_pairs;
+  const bool use_game_pairs =
+      args->use_game_pairs && args->type == AUTOPLAY_TYPE_DEFAULT;
   const int max_games_for_worker = autoplay_worker->max_games_for_worker;
-  const int worker_index = autoplay_worker->worker_index;
   ThreadControlIterOutput iter_output;
 
   for (int j = 0; j < max_games_for_worker; j++) {
@@ -116,12 +164,11 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker, Game *game,
     }
     thread_control_get_next_iter_output(thread_control, &iter_output);
     int starting_player_index = iter_output.iter_count % 2;
-    play_autoplay_game(game, move_list, autoplay_worker->autoplay_results,
-                       starting_player_index, worker_index, iter_output.seed);
+    play_autoplay_game(autoplay_worker, game, move_list, leaves,
+                       starting_player_index, iter_output.seed);
     if (use_game_pairs) {
-      play_autoplay_game(game, move_list, autoplay_worker->autoplay_results,
-                         1 - starting_player_index, worker_index,
-                         iter_output.seed);
+      play_autoplay_game(autoplay_worker, game, move_list, leaves,
+                         1 - starting_player_index, iter_output.seed);
     }
   }
 }
@@ -130,11 +177,19 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker, Game *game,
                         MoveList *move_list) {
   const AutoplayArgs *args = autoplay_worker->args;
   const int gens = args->gens;
+  const LetterDistribution *ld = args->game_args->ld;
+
+  Rack *leaves[2] = {rack_create(ld_get_size(ld)),
+                     rack_create(ld_get_size(ld))};
+
   for (int i = 0; i < gens; i++) {
-    autoplay_single_generation(autoplay_worker, game, move_list);
+    autoplay_single_generation(autoplay_worker, game, move_list, leaves);
     checkpoint_wait(autoplay_worker->shared_data->checkpoint,
                     autoplay_worker->shared_data);
   }
+
+  rack_destroy(leaves[0]);
+  rack_destroy(leaves[1]);
 }
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
@@ -145,7 +200,8 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
 
   switch (args->type) {
   case AUTOPLAY_TYPE_DEFAULT:
-    autoplay_single_generation(autoplay_worker, game, move_list);
+    autoplay_single_generation(autoplay_worker, game, move_list,
+                               (Rack *[2]){NULL, NULL});
     break;
   case AUTOPLAY_TYPE_LEAVE_GEN:
     autoplay_leave_gen(autoplay_worker, game, move_list);

@@ -36,6 +36,8 @@ int bag_get_tiles(const Bag *bag) {
   return bag->end_tile_index - bag->start_tile_index;
 }
 
+XoshiroPRNG *bag_get_prng(const Bag *bag) { return bag->prng; }
+
 void bag_shuffle(Bag *bag) {
   int tiles_remaining = bag_get_tiles(bag);
   if (tiles_remaining > 1) {

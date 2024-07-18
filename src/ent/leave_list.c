@@ -86,6 +86,20 @@ int leave_list_set_item_leaves(LeaveList *leave_list,
   return number_of_set_leaves;
 }
 
+Rack *get_new_bag_as_rack(const LetterDistribution *ld) {
+  Bag *bag = bag_create(ld);
+  const int ld_size = ld_get_size(ld);
+  Rack *bag_as_rack = rack_create(ld_size);
+
+  for (int i = 0; i < ld_size; i++) {
+    int number_of_tiles = bag_get_letter(bag, i);
+    rack_add_letters(bag_as_rack, i, number_of_tiles);
+  }
+
+  bag_destroy(bag);
+  return bag_as_rack;
+}
+
 LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv) {
   LeaveList *leave_list = malloc_or_die(sizeof(LeaveList));
   leave_list->klv = klv;
@@ -114,15 +128,7 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv) {
 
   leave_list->subleave = rack_create(ld_size);
 
-  Bag *bag = bag_create(ld);
-  Rack *bag_as_rack = rack_create(ld_size);
-
-  for (int i = 0; i < ld_size; i++) {
-    int number_of_tiles = bag_get_letter(bag, i);
-    rack_add_letters(bag_as_rack, i, number_of_tiles);
-  }
-
-  bag_destroy(bag);
+  Rack *bag_as_rack = get_new_bag_as_rack(ld);
 
   leave_list->bag_bitmaps =
       bag_bitmaps_create(ld, leave_list->number_of_leaves);

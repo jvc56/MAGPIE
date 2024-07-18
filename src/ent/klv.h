@@ -312,6 +312,4 @@ static inline double klv_get_leave_value(const KLV *klv, const Rack *leave) {
   return klv_get_indexed_leave_value(klv, index);
 }
 
-// FIXME: implement writing KLV to file
-
 #endif

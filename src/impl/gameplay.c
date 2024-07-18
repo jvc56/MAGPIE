@@ -291,8 +291,8 @@ void draw_starting_racks(Game *game) {
 // If rack_to_draw is not null, it will attempt to set the
 // player rack to rack_to_draw after the play or will
 // return an error if it is not possible.
-// If leave is not null, it will set the rack to leave
-// after the play is made.
+// If the input leave rack is not null, it will record the leave of
+// the play in the leave rack.
 play_move_status_t play_move(const Move *move, Game *game,
                              const Rack *rack_to_draw, Rack *leave) {
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {

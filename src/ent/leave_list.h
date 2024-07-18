@@ -21,5 +21,6 @@ double leave_list_get_mean(const LeaveList *leave_list, int count_index);
 int leave_list_get_empty_leave_count(const LeaveList *leave_list);
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list);
 int leave_list_get_count_index(const LeaveList *leave_list, int klv_index);
+Rack *get_new_bag_as_rack(const LetterDistribution *ld);
 
 #endif

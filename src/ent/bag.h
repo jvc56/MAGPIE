@@ -18,6 +18,7 @@ Bag *bag_duplicate(const Bag *bag);
 int bag_get_size(const Bag *bag);
 int bag_get_tiles(const Bag *bag);
 int bag_get_letter(const Bag *bag, uint8_t ml);
+XoshiroPRNG *bag_get_prng(const Bag *bag);
 bool bag_is_empty(const Bag *bag);
 
 void bag_add_letter(Bag *bag, uint8_t letter, int player_draw_index);
