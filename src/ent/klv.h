@@ -233,6 +233,18 @@ static inline KLV *klv_create(const char *data_path, const char *klv_name) {
   return klv;
 }
 
+// Takes ownership of the KWG
+static inline KLV *klv_create_zeroed_from_kwg(KWG *kwg, int number_of_leaves,
+                                              const char *klv_name) {
+  KLV *klv = malloc_or_die(sizeof(KLV));
+  klv->kwg = kwg;
+  klv->name = string_duplicate(klv_name);
+  klv->number_of_leaves = number_of_leaves;
+  klv->leave_values = (double *)calloc_or_die(number_of_leaves, sizeof(double));
+  klv->word_counts = (uint32_t *)calloc_or_die(kwg_size(kwg), sizeof(uint32_t));
+  return klv;
+}
+
 static inline void klv_destroy(KLV *klv) {
   if (!klv) {
     return;
