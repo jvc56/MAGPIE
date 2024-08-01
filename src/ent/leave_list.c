@@ -9,9 +9,6 @@
 
 #include "../util/util.h"
 
-// FIXME: remove
-#include "../str/rack_string.h"
-
 #define MAX_LEAVE_SIZE (RACK_SIZE - 1)
 
 typedef struct LeaveListItem {

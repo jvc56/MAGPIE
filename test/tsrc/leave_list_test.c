@@ -8,9 +8,6 @@
 
 #include "test_util.h"
 
-// FIXME: remove
-#include "../../src/str/rack_string.h"
-
 void assert_leave_list_item(const LetterDistribution *ld, const KLV *klv,
                             LeaveList *leave_list, const char *leave_str,
                             int expected_count_index, uint64_t count,

@@ -856,27 +856,25 @@ char *status_infer(Config __attribute__((unused)) * config) {
 void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args, int gens,
                                int max_force_draw_turn,
-                               autoplay_t autoplay_type, bool create_leaves) {
+                               autoplay_t autoplay_type) {
   autoplay_args->max_iterations = config->max_iterations;
   autoplay_args->use_game_pairs = config->use_game_pairs;
   autoplay_args->thread_control = config->thread_control;
   autoplay_args->gens = gens;
   autoplay_args->max_force_draw_turn = max_force_draw_turn;
   autoplay_args->type = autoplay_type;
-  autoplay_args->create_leaves = create_leaves;
   config_fill_game_args(config, autoplay_args->game_args);
 }
 
 autoplay_status_t config_autoplay(const Config *config,
                                   AutoplayResults *autoplay_results, int gens,
                                   int max_force_draw_turn,
-                                  autoplay_t autoplay_type,
-                                  bool create_leaves) {
+                                  autoplay_t autoplay_type) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
   config_fill_autoplay_args(config, &args, gens, max_force_draw_turn,
-                            autoplay_type, create_leaves);
+                            autoplay_type);
   return autoplay(&args, autoplay_results);
 }
 
@@ -900,7 +898,7 @@ void execute_autoplay(Config *config) {
   }
 
   status = config_autoplay(config, config->autoplay_results, 1, 0,
-                           AUTOPLAY_TYPE_DEFAULT, false);
+                           AUTOPLAY_TYPE_DEFAULT);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)status);
 }
@@ -958,26 +956,7 @@ void execute_leave_gen(Config *config) {
 
   autoplay_results_reset_options(config->autoplay_results);
 
-  leave_gen_status_t status = LEAVE_GEN_STATUS_SUCCESS;
-
-  const char *create_or_refine_str =
-      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 0);
-  bool create_leaves;
-  if (has_iprefix(create_or_refine_str, "create")) {
-    create_leaves = true;
-  } else if (has_iprefix(create_or_refine_str, "refine")) {
-    create_leaves = false;
-  } else {
-    status = LEAVE_GEN_STATUS_INVALID_CREATE_OR_REFINE_OPTION;
-  }
-
-  if (status != LEAVE_GEN_STATUS_SUCCESS) {
-    set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_LEAVE_GEN,
-                              (int)status);
-    return;
-  }
-
-  const char *gen_str = config_get_parg_value(config, ARG_TOKEN_INFER, 1);
+  const char *gen_str = config_get_parg_value(config, ARG_TOKEN_INFER, 0);
   int gens;
   if (!string_to_int_or_set_error_status(
           gen_str, 1, INT_MAX, config->error_status,
@@ -986,7 +965,7 @@ void execute_leave_gen(Config *config) {
     return;
   }
 
-  const char *iter_str = config_get_parg_value(config, ARG_TOKEN_INFER, 2);
+  const char *iter_str = config_get_parg_value(config, ARG_TOKEN_INFER, 1);
   int iters;
   if (!string_to_int_or_set_error_status(
           iter_str, 1, INT_MAX, config->error_status,
@@ -996,7 +975,7 @@ void execute_leave_gen(Config *config) {
   }
 
   const char *max_force_draw_turn_str =
-      config_get_parg_value(config, ARG_TOKEN_INFER, 3);
+      config_get_parg_value(config, ARG_TOKEN_INFER, 2);
   int max_force_draw_turns;
   if (!string_to_int_or_set_error_status(
           max_force_draw_turn_str, 1, INT_MAX, config->error_status,
@@ -1005,9 +984,9 @@ void execute_leave_gen(Config *config) {
     return;
   }
 
-  autoplay_status_t autoplay_status = config_autoplay(
-      config, config->autoplay_results, gens, max_force_draw_turns,
-      AUTOPLAY_TYPE_LEAVE_GEN, create_leaves);
+  autoplay_status_t autoplay_status =
+      config_autoplay(config, config->autoplay_results, gens,
+                      max_force_draw_turns, AUTOPLAY_TYPE_LEAVE_GEN);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)autoplay_status);
 }
@@ -1606,8 +1585,9 @@ Config *config_create_default(void) {
                     execute_autoplay, status_autoplay);
   parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
                     status_convert);
-  parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 4, 4,
+  parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 3, 3,
                     execute_leave_gen, status_leave_gen);
+  // FIXME: write a klvcreate command
   parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,

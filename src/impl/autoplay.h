@@ -13,7 +13,6 @@ typedef struct AutoplayArgs {
   int gens;
   int max_iterations;
   int max_force_draw_turn;
-  bool create_leaves;
   bool use_game_pairs;
   autoplay_t type;
   GameArgs *game_args;

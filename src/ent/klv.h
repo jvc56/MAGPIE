@@ -44,9 +44,7 @@ static inline int klv_get_number_of_leaves(const KLV *klv) {
 }
 
 static inline void klv_set_all_leave_values_to_zero(KLV *klv) {
-  for (int i = 0; i < klv->number_of_leaves; i++) {
-    klv->leave_values[i] = 0.0;
-  }
+  memset(klv->leave_values, 0, klv->number_of_leaves * sizeof(double));
 }
 
 static inline double klv_get_indexed_leave_value(const KLV *klv,
@@ -55,6 +53,12 @@ static inline double klv_get_indexed_leave_value(const KLV *klv,
     return 0.0;
   }
   return klv->leave_values[index];
+}
+
+// Assumes the index is valid
+static inline double klv_set_indexed_leave_value(const KLV *klv, uint32_t index,
+                                                 double value) {
+  return klv->leave_values[index] = value;
 }
 
 static inline uint32_t klv_get_root_node_index(const KLV *klv) {
@@ -112,9 +116,12 @@ static inline float reverse_float(const float in_float) {
   return ret_val;
 }
 
-// Egregious hack to convert endianness of a float
-static inline float
-convert_little_endian_to_host(const float little_endian_float) {
+// Returns the float in little-endian format.
+// - If the host is little-endian, it returns the original float
+// - If the host is not little-endian, it must therefore be big-endian
+//   and returns the reverse of the original float to convert it to
+//   little-endian format.
+static inline float convert_float_to_le(const float input_float) {
   // Check if host machine is little-endian
   union {
     uint32_t i;
@@ -123,10 +130,10 @@ convert_little_endian_to_host(const float little_endian_float) {
 
   if (endian_check.c[0] == 4) {
     // Host machine is little-endian
-    return little_endian_float;
+    return input_float;
   } else {
     // Host machine is big-endian
-    return reverse_float(little_endian_float);
+    return reverse_float(input_float);
   }
 }
 
@@ -213,8 +220,7 @@ static inline void klv_load(KLV *klv, const char *data_path,
   fclose(stream);
 
   for (uint32_t i = 0; i < number_of_leaves; i++) {
-    klv->leave_values[i] =
-        (double)convert_little_endian_to_host(temp_floats[i]);
+    klv->leave_values[i] = (double)convert_float_to_le(temp_floats[i]);
   }
   free(temp_floats);
 
@@ -241,7 +247,10 @@ static inline KLV *klv_create_zeroed_from_kwg(KWG *kwg, int number_of_leaves,
   klv->name = string_duplicate(klv_name);
   klv->number_of_leaves = number_of_leaves;
   klv->leave_values = (double *)calloc_or_die(number_of_leaves, sizeof(double));
-  klv->word_counts = (uint32_t *)calloc_or_die(kwg_size(kwg), sizeof(uint32_t));
+  const int number_of_kwg_nodes = kwg_get_number_of_nodes(kwg);
+  klv->word_counts =
+      (uint32_t *)calloc_or_die(number_of_kwg_nodes, sizeof(uint32_t));
+  klv_count_words(klv, number_of_kwg_nodes);
   return klv;
 }
 
@@ -322,6 +331,62 @@ static inline double klv_get_leave_value(const KLV *klv, const Rack *leave) {
   const uint32_t index = klv_get_word_index_internal(
       klv, leave, kwg_get_dawg_root_node_index(klv->kwg));
   return klv_get_indexed_leave_value(klv, index);
+}
+
+static inline void klv_write(const KLV *klv) {
+  char *klv_filename =
+      data_filepaths_get(klv->name, klv->name, DATA_FILEPATH_TYPE_KLV);
+
+  // Open the file stream for writing
+  FILE *stream = fopen(klv_filename, "wb");
+  if (!stream) {
+    log_fatal("failed to open stream for writing: %s\n", klv_filename);
+  }
+  free(klv_filename);
+
+  const uint32_t kwg_number_of_nodes = kwg_get_number_of_nodes(klv->kwg);
+
+  uint32_t kwg_size = htole32(kwg_number_of_nodes);
+  size_t result = fwrite(&kwg_size, sizeof(kwg_size), 1, stream);
+  if (result != 1) {
+    log_fatal("kwg size fwrite failure: %zd != %d\n", result, 1);
+  }
+
+  uint32_t *le_nodes =
+      (uint32_t *)malloc_or_die(kwg_number_of_nodes * sizeof(uint32_t));
+  for (uint32_t i = 0; i < kwg_number_of_nodes; i++) {
+    le_nodes[i] = htole32(kwg_node(klv->kwg, i));
+  }
+
+  // Write the nodes to the stream
+  result = fwrite(le_nodes, sizeof(uint32_t), kwg_number_of_nodes, stream);
+  if (result != kwg_number_of_nodes) {
+    log_fatal("kwg nodes fwrite failure: %zd != %zd", result,
+              kwg_number_of_nodes);
+  }
+
+  // Free the temporary buffer
+  free(le_nodes);
+
+  uint32_t number_of_leaves = klv->number_of_leaves;
+  uint32_t le_number_of_leaves = htole32(number_of_leaves);
+  result = fwrite(&le_number_of_leaves, sizeof(le_number_of_leaves), 1, stream);
+  if (result != 1) {
+    log_fatal("number of leaves fwrite failure: %zd != %d\n", result, 1);
+  }
+
+  float *le_floats = (float *)malloc_or_die(number_of_leaves * sizeof(float));
+  for (uint32_t i = 0; i < number_of_leaves; i++) {
+    le_floats[i] = convert_float_to_le((float)klv->leave_values[i]);
+  }
+  result = fwrite(le_floats, sizeof(float), number_of_leaves, stream);
+  if (result != number_of_leaves) {
+    log_fatal("leave values fwrite failure: %zd != %d\n", result,
+              number_of_leaves);
+  }
+  free(le_floats);
+
+  fclose(stream);
 }
 
 #endif

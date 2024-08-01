@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "letter_distribution.h"
+#include "xoshiro.h"
 
 #define MAX_BAG_SIZE 1000
 

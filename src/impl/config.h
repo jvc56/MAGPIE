@@ -67,7 +67,7 @@ inference_status_t config_infer(const Config *config, int target_index,
 autoplay_status_t config_autoplay(const Config *config,
                                   AutoplayResults *autoplay_results, int gens,
                                   int max_force_draw_turn,
-                                  autoplay_t autoplay_type, bool create_leaves);
+                                  autoplay_t autoplay_type);
 sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
                              SimResults *sim_results);
 #endif

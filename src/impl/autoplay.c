@@ -135,6 +135,7 @@ void play_autoplay_game(AutoplayWorker *autoplay_worker, Game *game,
       autoplay_leave_list_draw_rarest_available_leave(autoplay_worker, game,
                                                       player_on_turn_index);
       draw_to_full_rack(game, player_on_turn_index);
+      // FIXME: end the game after recording this move.
     }
     const Move *move = get_top_equity_move(game, thread_index, move_list);
     autoplay_results_add_move(autoplay_results, move);
@@ -240,9 +241,6 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
     KLV *klv = players_data_get_klv(args->game_args->players_data, 0);
     shared_data = autoplay_worker_shared_data_create(args->game_args->ld, klv,
                                                      number_of_threads);
-    if (args->create_leaves) {
-      klv_set_all_leave_values_to_zero(klv);
-    }
   }
 
   AutoplayWorker **autoplay_workers =

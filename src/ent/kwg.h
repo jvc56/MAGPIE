@@ -33,6 +33,10 @@ typedef struct KWG {
 
 static inline const char *kwg_get_name(const KWG *kwg) { return kwg->name; }
 
+static inline int kwg_get_number_of_nodes(const KWG *kwg) {
+  return kwg->number_of_nodes;
+}
+
 static inline uint32_t kwg_node(const KWG *kwg, uint32_t node_index) {
   return kwg->nodes[node_index];
 }
@@ -207,10 +211,6 @@ static inline bool kwg_in_letter_set(const KWG *kwg, uint8_t letter,
     }
     i++;
   }
-}
-
-static inline int kwg_get_number_of_nodes(const KWG *kwg) {
-  return kwg->number_of_nodes;
 }
 
 #endif

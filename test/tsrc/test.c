@@ -21,6 +21,7 @@
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "infer_test.h"
+#include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
 #include "leave_count_hashmap_test.h"
@@ -65,6 +66,7 @@ void run_all(void) {
   test_cross_set();
   test_move();
   test_cgp();
+  test_klv();
   test_game();
   test_validated_move();
   test_shadow();
@@ -158,6 +160,8 @@ void run_test(const char *subtest) {
     test_bag_bitmaps();
   } else if (strings_equal(subtest, "ch")) {
     test_checkpoint();
+  } else if (strings_equal(subtest, "klv")) {
+    test_klv();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

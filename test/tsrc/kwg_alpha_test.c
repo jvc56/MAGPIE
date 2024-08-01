@@ -4,7 +4,9 @@
 
 #include "../../src/ent/kwg.h"
 #include "../../src/ent/rack.h"
+
 #include "../../src/impl/config.h"
+
 #include "test_util.h"
 
 void assert_kwg_accepts_alpha(const KWG *kwg, const LetterDistribution *ld,

@@ -8,7 +8,9 @@
 
 #include "../str/rack_string.h"
 
-typedef void (*leave_iter_func_t)(void *);
+#define LEAVES_CSV_MAX_LINE_LENGTH 256
+
+typedef void (*leave_iter_func_t)(void *, uint32_t);
 
 typedef struct LeaveIter {
   leave_iter_func_t leave_iter_func;
@@ -27,15 +29,16 @@ typedef struct KLVCreateData {
   DictionaryWordList *dwl;
 } KLVCreateData;
 
-void klv_write_row(void *data) {
+void klv_write_row(void *data, uint32_t word_index) {
   KLVWriteData *lasb = (KLVWriteData *)data;
   string_builder_add_rack(lasb->string_builder, lasb->leave, lasb->ld);
   string_builder_add_formatted_string(
       lasb->string_builder, ",%f",
-      klv_get_indexed_leave_value(lasb->klv, index));
+      klv_get_indexed_leave_value(lasb->klv, word_index - 1));
 }
 
-void klv_add_leave_to_word_list(void *data) {
+void klv_add_leave_to_word_list(void *data,
+                                uint32_t __attribute__((unused)) word_index) {
   KLVCreateData *klv_data = (KLVCreateData *)data;
   uint8_t word[(RACK_SIZE)-1];
   int letter_index = 0;
@@ -73,7 +76,7 @@ void klv_iter_for_length_recur(LeaveIter *leave_iter, KLV *klv, int length,
   }
 
   if (rack_get_total_letters(leave) == length) {
-    leave_iter->leave_iter_func(leave_iter->data);
+    leave_iter->leave_iter_func(leave_iter->data, word_index);
     return;
   }
 
@@ -93,12 +96,13 @@ void klv_iter_for_length_recur(LeaveIter *leave_iter, KLV *klv, int length,
 void klv_iter_for_length(LeaveIter *leave_iter, KLV *klv, Rack *bag_as_rack,
                          Rack *leave, int length) {
   klv_iter_for_length_recur(leave_iter, klv, length, bag_as_rack, leave,
-                            kwg_get_dawg_root_node_index(klv->kwg), 0, 0);
+                            kwg_get_dawg_root_node_index(klv_get_kwg(klv)), 0,
+                            0);
 }
 
 // Writes a CSV file of leave,value for the leaves in the KLV.
-void klv_write(const KLV *klv, const LetterDistribution *ld,
-               const char *filepath) {
+void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
+                      const char *data_path) {
   const int dist_size = ld_get_size(ld);
   Rack *leave = rack_create(dist_size);
   Rack *bag_as_rack = get_new_bag_as_rack(ld);
@@ -118,13 +122,17 @@ void klv_write(const KLV *klv, const LetterDistribution *ld,
     klv_iter_for_length(&leave_iter, klv, bag_as_rack, leave, i);
   }
 
-  write_string_to_file(filepath, "w", string_builder_peek(klv_builder));
-  string_builder_destroy(klv_builder);
   rack_destroy(leave);
   rack_destroy(bag_as_rack);
+
+  char *leaves_filename =
+      data_filepaths_get(data_path, klv->name, DATA_FILEPATH_TYPE_LEAVES);
+  write_string_to_file(leaves_filename, "w", string_builder_peek(klv_builder));
+  free(leaves_filename);
+  string_builder_destroy(klv_builder);
 }
 
-KLV *klv_create_empty(const LetterDistribution *ld) {
+KLV *klv_create_empty(const LetterDistribution *ld, const char *name) {
   const int dist_size = ld_get_size(ld);
   Rack *leave = rack_create(dist_size);
   Rack *bag_as_rack = get_new_bag_as_rack(ld);
@@ -141,9 +149,66 @@ KLV *klv_create_empty(const LetterDistribution *ld) {
     klv_iter_for_length(&leave_iter, NULL, bag_as_rack, leave, i);
   }
 
-  KWG *kwg = make_kwg_from_words(klv_create_data.dwl, KWG_MAKER_OUTPUT_DAWG,
-                                 KWG_MAKER_MERGE_EXACT);
+  return klv_create_zeroed_from_kwg(
+      make_kwg_from_words(klv_create_data.dwl, KWG_MAKER_OUTPUT_DAWG,
+                          KWG_MAKER_MERGE_EXACT),
+      dictionary_word_list_get_count(klv_create_data.dwl), name);
 }
 
 // Reads a CSV file of leave,value and returns a KLV.
-KLV *klv_read(const LetterDistribution *ld, const char *filepath) {}
+// FIXME: convert log_fatal's to error enums
+KLV *klv_read_from_csv(const LetterDistribution *ld, const char *data_path,
+                       const char *leaves_name) {
+  char *leaves_filename =
+      data_filepaths_get(data_path, leaves_name, DATA_FILEPATH_TYPE_LEAVES);
+
+  FILE *stream = stream_from_filename(leaves_filename);
+  if (!stream) {
+    log_fatal("failed to open stream from filename: %s\n", leaves_filename);
+  }
+  free(leaves_filename);
+
+  KLV *klv = klv_create_empty(ld, leaves_name);
+
+  int number_of_leaves = klv_get_number_of_leaves(klv);
+
+  bool *leave_was_set = (bool *)malloc_or_die(sizeof(bool) * number_of_leaves);
+
+  for (int i = 0; i < number_of_leaves; i++) {
+    leave_was_set[i] = false;
+  }
+
+  Rack *leave_rack = rack_create(ld_get_size(ld));
+  bool str_to_double_success = false;
+  char line[LEAVES_CSV_MAX_LINE_LENGTH];
+  while (fgets(line, sizeof(line), stream)) {
+    if (strchr(line, '\n') == NULL && !feof(stream)) {
+      log_fatal("line exceeds max length: %s\n", line);
+    }
+    char *leave_str = strtok(line, ",");
+    char *value_str = strtok(NULL, "\n");
+    if (leave_str && value_str) {
+      rack_set_to_string(ld, leave_rack, leave_str);
+      int leave_index = klv_get_word_index(klv, leave_rack);
+      if (leave_was_set[leave_index]) {
+        log_fatal("duplicate leave: %s\n", leave_str);
+      }
+      double value =
+          string_to_double_or_set_error(value_str, &str_to_double_success);
+      if (!str_to_double_success) {
+        log_fatal("malformed leave value in klv: %s\n", line);
+      }
+      klv_set_indexed_leave_value(klv, leave_index, value);
+      leave_was_set[leave_index] = true;
+    } else {
+      log_fatal("malformed row in klv: %s\n", line);
+    }
+  }
+
+  rack_destroy(leave_rack);
+  free(leave_was_set);
+
+  fclose(stream);
+
+  return klv;
+}

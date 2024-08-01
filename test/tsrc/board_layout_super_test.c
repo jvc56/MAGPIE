@@ -57,7 +57,7 @@ void test_board_layout_correctness_super(void) {
   AutoplayResults *ar = autoplay_results_create();
 
   autoplay_status_t status =
-      config_autoplay(config, ar, 1, 0, AUTOPLAY_TYPE_DEFAULT, false);
+      config_autoplay(config, ar, 1, 0, AUTOPLAY_TYPE_DEFAULT);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
 
   autoplay_results_destroy(ar);
