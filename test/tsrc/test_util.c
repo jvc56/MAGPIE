@@ -177,13 +177,26 @@ void print_cgp(const Game *game) {
   free(cgp);
 }
 
+void print_english_rack(const Rack *rack) {
+  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
+    printf("?");
+  }
+  const int ld_size = rack_get_dist_size(rack);
+  for (int i = 1; i < ld_size; i++) {
+    const int num_letter = rack_get_letter(rack, i);
+    for (int j = 0; j < num_letter; j++) {
+      printf("%c", i + 'A' - 1);
+    }
+  }
+}
+
 void print_rack(const Rack *rack, const LetterDistribution *ld) {
   if (!rack) {
     printf("(null)\n");
     return;
   }
   StringBuilder *rack_sb = string_builder_create();
-  string_builder_add_rack(rack_sb, rack, ld);
+  string_builder_add_rack(rack_sb, rack, ld, false);
   printf("%s", string_builder_peek(rack_sb));
   string_builder_destroy(rack_sb);
 }
@@ -436,12 +449,12 @@ void delete_fifo(const char *fifo_name) { unlink(fifo_name); }
 
 // Board layout test helpers
 
-void assert_board_layout_error(const char *data_path,
+void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_name,
                                board_layout_load_status_t expected_status) {
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, data_path, board_layout_name);
+      board_layout_load(bl, data_paths, board_layout_name);
   board_layout_destroy(bl);
   if (actual_status != expected_status) {
     printf("board layout load statuses do not match: %d != %d", expected_status,
@@ -450,11 +463,11 @@ void assert_board_layout_error(const char *data_path,
   assert(actual_status == expected_status);
 }
 
-BoardLayout *board_layout_create_for_test(const char *data_path,
+BoardLayout *board_layout_create_for_test(const char *data_paths,
                                           const char *board_layout_name) {
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, data_path, board_layout_name);
+      board_layout_load(bl, data_paths, board_layout_name);
   if (actual_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
     printf("board layout load failure for %s: %d\n", board_layout_name,
            actual_status);
@@ -463,9 +476,9 @@ BoardLayout *board_layout_create_for_test(const char *data_path,
   return bl;
 }
 
-void load_game_with_test_board(Game *game, const char *data_path,
+void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name) {
-  BoardLayout *bl = board_layout_create_for_test(data_path, board_layout_name);
+  BoardLayout *bl = board_layout_create_for_test(data_paths, board_layout_name);
   board_apply_layout(bl, game_get_board(game));
   game_reset(game);
   board_layout_destroy(bl);

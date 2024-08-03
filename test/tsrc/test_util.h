@@ -44,6 +44,7 @@ void assert_boards_are_equal(Board *b1, Board *b2);
 void assert_games_are_equal(Game *g1, Game *g2, bool check_scores);
 void print_game(Game *game, MoveList *move_list);
 void print_cgp(const Game *game);
+void print_english_rack(const Rack *rack);
 void print_rack(const Rack *rack, const LetterDistribution *ld);
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,
@@ -58,10 +59,10 @@ void delete_fifo(const char *fifo_name);
 Config *config_create_or_die(const char *cmd);
 Config *config_create_default_test(void);
 void set_row(Game *game, int row, const char *row_content);
-void assert_board_layout_error(const char *data_path,
+void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_filename,
                                board_layout_load_status_t expected_status);
-void load_game_with_test_board(Game *game, const char *data_path,
+void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name);
 void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_position,

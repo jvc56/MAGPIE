@@ -23,7 +23,7 @@ void test_leaves(void) {
   const LetterDistribution *ld = config_get_ld(config);
   Rack *rack = rack_create(ld_get_size(ld));
 
-  char *leaves_csv_filename = data_filepaths_get(
+  char *leaves_csv_filename = data_filepaths_get_readable_filename(
       config_get_data_path(config), "CSW21", DATA_FILEPATH_TYPE_LEAVES);
 
   FILE *file = fopen(leaves_csv_filename, "r");

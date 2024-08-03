@@ -70,7 +70,7 @@ static inline void sort_score_order(LetterDistribution *ld) {
   }
 }
 
-static inline LetterDistribution *ld_create(const char *data_path,
+static inline LetterDistribution *ld_create(const char *data_paths,
                                             const char *ld_name) {
   LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
 
@@ -79,8 +79,8 @@ static inline LetterDistribution *ld_create(const char *data_path,
 
   ld->name = string_duplicate(ld_name);
 
-  char *ld_filename =
-      data_filepaths_get(data_path, ld_name, DATA_FILEPATH_TYPE_LD);
+  char *ld_filename = data_filepaths_get_readable_filename(
+      data_paths, ld_name, DATA_FILEPATH_TYPE_LD);
 
   StringSplitter *ld_lines = split_file_by_newline(ld_filename);
 

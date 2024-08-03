@@ -175,10 +175,10 @@ static inline void klv_count_words(const KLV *klv, size_t kwg_size) {
   }
 }
 
-static inline void klv_load(KLV *klv, const char *data_path,
+static inline void klv_load(KLV *klv, const char *data_paths,
                             const char *klv_name) {
-  char *klv_filename =
-      data_filepaths_get(data_path, klv_name, DATA_FILEPATH_TYPE_KLV);
+  char *klv_filename = data_filepaths_get_readable_filename(
+      data_paths, klv_name, DATA_FILEPATH_TYPE_KLV);
 
   FILE *stream = stream_from_filename(klv_filename);
   if (!stream) {
@@ -232,10 +232,10 @@ static inline void klv_load(KLV *klv, const char *data_path,
   klv_count_words(klv, kwg_size);
 }
 
-static inline KLV *klv_create(const char *data_path, const char *klv_name) {
+static inline KLV *klv_create(const char *data_paths, const char *klv_name) {
   KLV *klv = malloc_or_die(sizeof(KLV));
   klv->name = NULL;
-  klv_load(klv, data_path, klv_name);
+  klv_load(klv, data_paths, klv_name);
   return klv;
 }
 
@@ -293,6 +293,7 @@ static inline uint32_t klv_get_word_index_internal(const KLV *klv,
 
     // Advance lidx
     while (lidx_letter_count == 0) {
+      // FIXME: this should use the rack methods
       lidx++;
       if (lidx >= leave->dist_size) {
         break;
@@ -334,8 +335,8 @@ static inline double klv_get_leave_value(const KLV *klv, const Rack *leave) {
 }
 
 static inline void klv_write(const KLV *klv) {
-  char *klv_filename =
-      data_filepaths_get(klv->name, klv->name, DATA_FILEPATH_TYPE_KLV);
+  char *klv_filename = data_filepaths_get_readable_filename(
+      klv->name, klv->name, DATA_FILEPATH_TYPE_KLV);
 
   // Open the file stream for writing
   FILE *stream = fopen(klv_filename, "wb");

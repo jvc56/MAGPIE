@@ -100,7 +100,7 @@ typedef struct ParsedArg {
 
 struct Config {
   ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
-  char *data_path;
+  char *data_paths;
   arg_token_t exec_parg_token;
   bool ld_changed;
   exec_mode_t exec_mode;
@@ -206,7 +206,7 @@ int config_get_parg_num_req_values(const Config *config,
 // Config getters
 
 const char *config_get_data_path(const Config *config) {
-  return config->data_path;
+  return config->data_paths;
 }
 
 exec_mode_t config_get_exec_mode(const Config *config) {
@@ -1240,7 +1240,7 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
       !lex_lex_compat(updated_p1_lexicon_name, existing_p1_lexicon_name);
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
-                   config->data_path, updated_p1_lexicon_name,
+                   config->data_paths, updated_p1_lexicon_name,
                    updated_p2_lexicon_name);
 
   // Load the leaves
@@ -1276,7 +1276,7 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
-                   config->data_path, updated_p1_leaves_name,
+                   config->data_paths, updated_p1_leaves_name,
                    updated_p2_leaves_name);
 
   free(updated_p1_leaves_name);
@@ -1307,7 +1307,7 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   config->ld_changed = false;
   if (!strings_equal(updated_ld_name, existing_ld_name)) {
     ld_destroy(config->ld);
-    config->ld = ld_create(config->data_path, updated_ld_name);
+    config->ld = ld_create(config->data_paths, updated_ld_name);
     config->ld_changed = true;
   }
 
@@ -1322,8 +1322,8 @@ config_load_status_t config_load_data(Config *config) {
 
   const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
   if (new_path) {
-    free(config->data_path);
-    config->data_path = string_duplicate(new_path);
+    free(config->data_paths);
+    config->data_paths = string_duplicate(new_path);
   }
 
   // Exec Mode
@@ -1456,7 +1456,7 @@ config_load_status_t config_load_data(Config *config) {
   if (new_board_layout_name &&
       !strings_equal(board_layout_get_name(config->board_layout),
                      new_board_layout_name)) {
-    if (board_layout_load(config->board_layout, config->data_path,
+    if (board_layout_load(config->board_layout, config->data_paths,
                           new_board_layout_name) !=
         BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
       return CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR;
@@ -1512,7 +1512,7 @@ config_load_status_t config_load_data(Config *config) {
   if (new_win_pct_name &&
       !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name)) {
     win_pct_destroy(config->win_pcts);
-    config->win_pcts = win_pct_create(config->data_path, new_win_pct_name);
+    config->win_pcts = win_pct_create(config->data_paths, new_win_pct_name);
   }
 
   // Set IO
@@ -1651,7 +1651,7 @@ Config *config_create_default(void) {
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
                     status_fatal);
 
-  config->data_path = string_duplicate(DEFAULT_DATA_PATH);
+  config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
@@ -1663,8 +1663,8 @@ Config *config_create_default(void) {
   config->equity_margin = 0;
   config->use_game_pairs = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
-  config->win_pcts = win_pct_create(config->data_path, DEFAULT_WIN_PCT);
-  config->board_layout = board_layout_create_default(config->data_path);
+  config->win_pcts = win_pct_create(config->data_paths, DEFAULT_WIN_PCT);
+  config->board_layout = board_layout_create_default(config->data_paths);
   config->ld = NULL;
   config->players_data = players_data_create();
   config->thread_control = thread_control_create();
@@ -1697,6 +1697,6 @@ void config_destroy(Config *config) {
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   error_status_destroy(config->error_status);
-  free(config->data_path);
+  free(config->data_paths);
   free(config);
 }

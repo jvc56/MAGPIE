@@ -6,7 +6,7 @@
 #define DEFAULT_CHALLENGE_BONUS 5
 #define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC
 #define DEFAULT_MOVE_LIST_CAPACITY 15
-#define DEFAULT_DATA_PATH "./data"
+#define DEFAULT_DATA_PATHS "./data"
 #define DEFAULT_WIN_PCT "winpct"
 
 typedef enum {

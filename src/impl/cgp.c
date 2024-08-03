@@ -281,9 +281,9 @@ void string_builder_add_cgp(StringBuilder *cgp_builder, const Game *game,
     player0 = game_get_player(game, 1);
   }
 
-  string_builder_add_rack(cgp_builder, player_get_rack(player0), ld);
+  string_builder_add_rack(cgp_builder, player_get_rack(player0), ld, false);
   string_builder_add_char(cgp_builder, '/');
-  string_builder_add_rack(cgp_builder, player_get_rack(player1), ld);
+  string_builder_add_rack(cgp_builder, player_get_rack(player1), ld, false);
 
   string_builder_add_char(cgp_builder, ' ');
 

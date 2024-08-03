@@ -7,6 +7,6 @@
 #include "../util/string_util.h"
 
 void string_builder_add_rack(StringBuilder *string_builder, const Rack *rack,
-                             const LetterDistribution *ld);
+                             const LetterDistribution *ld, bool blanks_first);
 
 #endif
