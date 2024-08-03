@@ -334,9 +334,9 @@ static inline double klv_get_leave_value(const KLV *klv, const Rack *leave) {
   return klv_get_indexed_leave_value(klv, index);
 }
 
-static inline void klv_write(const KLV *klv) {
-  char *klv_filename = data_filepaths_get_readable_filename(
-      klv->name, klv->name, DATA_FILEPATH_TYPE_KLV);
+static inline void klv_write(const KLV *klv, const char *data_path) {
+  char *klv_filename = data_filepaths_get_writable_filename(
+      data_path, klv->name, DATA_FILEPATH_TYPE_KLV);
 
   // Open the file stream for writing
   FILE *stream = fopen(klv_filename, "wb");

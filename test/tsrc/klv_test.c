@@ -55,58 +55,59 @@ void test_small_klv(void) {
                        "?,1.000000\nA,0.000000\nB,0.000000\n?A,2.000000\n?B,0."
                        "000000\nAA,0.000000\nAB,0.000000\n?AA,0.000000\n?AB,0."
                        "000000\nAAB,4.000000\n?AAB,3.000000\n");
-
   free(leaves_file_string);
+
+  KLV *small_klv_copy = klv_read_from_csv(ld, data_path, small_klv->name);
+
+  assert_klvs_equal(small_klv, small_klv_copy);
+
+  klv_write(small_klv_copy, data_path);
+
+  KLV *small_klv_copy2 = klv_create(data_path, small_klv->name);
+
+  assert_klvs_equal(small_klv, small_klv_copy2);
+  assert_klvs_equal(small_klv_copy, small_klv_copy2);
+
+  klv_destroy(small_klv_copy2);
+  klv_destroy(small_klv_copy);
   klv_destroy(small_klv);
   config_destroy(config);
 }
 
 void test_normal_klv(void) {
-  Config *config_normie = config_create_or_die("set -lex CSW21");
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+  const char *data_path = "testdata";
+  assert(ld_get_size(ld) == 27);
 
-  const KWG *csw_kwg =
-      players_data_get_kwg(config_get_players_data(config_normie), 0);
-  DictionaryWordList *words = dictionary_word_list_create();
-  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+  KLV *normal_klv = klv_create_empty(ld, "normal");
+  assert(klv_get_number_of_leaves(normal_klv) == 914624);
 
-  for (int i = 0; i < 30000; i += 2000) {
-    for (int j = 0; j < 5; j++) {
-      const DictionaryWord *dw = dictionary_word_list_get_word(words, i + j);
-      const uint8_t *w = dictionary_word_get_word(dw);
-      printf("word at %d:", i);
-      for (int k = 0; k < dictionary_word_get_length(dw); k++) {
-        printf("%c", w[k] + 'A' - 1);
-      }
-      printf("\n");
-    }
-  }
+  set_klv_leave_value(normal_klv, ld, "?", 1.0);
+  set_klv_leave_value(normal_klv, ld, "?Z", 2.0);
+  set_klv_leave_value(normal_klv, ld, "YYZ", 3.0);
+  set_klv_leave_value(normal_klv, ld, "WWXYYZ", 4.0);
 
-  dictionary_word_list_destroy(words);
+  klv_write_to_csv(normal_klv, ld, "testdata");
 
-  const LetterDistribution *ld = config_get_ld(config_normie);
-  const KLV *klv =
-      players_data_get_klv(config_get_players_data(config_normie), 0);
-  Rack *rack = rack_create(ld_get_size(ld));
-  print_word_index_for_rack(klv, ld, rack, "?");
-  print_word_index_for_rack(klv, ld, rack, "??");
-  print_word_index_for_rack(klv, ld, rack, "??A");
-  print_word_index_for_rack(klv, ld, rack, "??AA");
-  print_word_index_for_rack(klv, ld, rack, "??AAA");
-  print_word_index_for_rack(klv, ld, rack, "??AAAA");
-  print_word_index_for_rack(klv, ld, rack, "??AAAB");
-  print_word_index_for_rack(klv, ld, rack, "??AAAC");
-  print_word_index_for_rack(klv, ld, rack, "??AAAD");
-  print_word_index_for_rack(klv, ld, rack, "VWXYYZ");
-  print_word_index_for_rack(klv, ld, rack, "WWXYYZ");
-  print_word_index_for_rack(klv, ld, rack, "?");
-  print_word_index_for_rack(klv, ld, rack, "?A");
-  print_word_index_for_rack(klv, ld, rack, "?AB");
-  rack_destroy(rack);
-  config_destroy(config_normie);
+  KLV *normal_klv_copy = klv_read_from_csv(ld, data_path, normal_klv->name);
+
+  assert_klvs_equal(normal_klv, normal_klv_copy);
+
+  klv_write(normal_klv_copy, data_path);
+
+  KLV *normal_klv_copy2 = klv_create(data_path, normal_klv->name);
+
+  assert_klvs_equal(normal_klv, normal_klv_copy2);
+  assert_klvs_equal(normal_klv_copy, normal_klv_copy2);
+
+  klv_destroy(normal_klv_copy2);
+  klv_destroy(normal_klv_copy);
+  klv_destroy(normal_klv);
+  config_destroy(config);
 }
 
 void test_klv(void) {
-  // FIXME: uncomment
-  // test_normal_klv();
   test_small_klv();
+  test_normal_klv();
 }

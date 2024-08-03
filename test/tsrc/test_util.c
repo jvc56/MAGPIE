@@ -627,3 +627,26 @@ void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
                                   sim_results_get_max_plies(sr1));
   }
 }
+
+// Does not check that the node names are equal
+void assert_kwgs_are_equal(const KWG *kwg1, const KWG *kwg2) {
+  const int num_nodes = kwg_get_number_of_nodes(kwg1);
+  assert(num_nodes == kwg_get_number_of_nodes(kwg2));
+  for (int i = 0; i < num_nodes; i++) {
+    assert(kwg_node(kwg1, i) == kwg_node(kwg2, i));
+  }
+}
+
+void assert_klvs_equal(const KLV *klv1, const KLV *klv2) {
+  assert_kwgs_are_equal(klv_get_kwg(klv1), klv_get_kwg(klv2));
+  const int num_nodes = kwg_get_number_of_nodes(klv_get_kwg(klv1));
+  const int number_of_leaves = klv_get_number_of_leaves(klv1);
+  assert(number_of_leaves == klv_get_number_of_leaves(klv2));
+  for (int i = 0; i < num_nodes; i++) {
+    assert(klv1->word_counts[i] == klv2->word_counts[i]);
+  }
+  for (int i = 0; i < number_of_leaves; i++) {
+    assert(within_epsilon(klv_get_indexed_leave_value(klv1, i),
+                          klv_get_indexed_leave_value(klv2, i)));
+  }
+}

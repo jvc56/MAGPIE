@@ -78,5 +78,6 @@ void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
                              bool write_player_on_turn_first);
 void assert_stats_are_equal(const Stat *s1, const Stat *s2);
 void assert_sim_results_equal(SimResults *sr1, SimResults *sr2);
+void assert_klvs_equal(const KLV *klv1, const KLV *klv2);
 
 #endif

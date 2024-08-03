@@ -91,7 +91,7 @@ void klv_iter_for_length_recur(LeaveIter *leave_iter, KLV *klv, int length,
     // If we are only recording the leaves for a certain length,
     // then we have already reached the specified length and
     // must return so we do not exceed that length.
-    if (length != -1) {
+    if (length != -1 || total_letters_on_rack == (RACK_SIZE)-1) {
       return;
     }
   }
