@@ -29,9 +29,9 @@
 
 #include "autoplay.h"
 #include "cgp.h"
+#include "convert.h"
 #include "gameplay.h"
 #include "inference.h"
-#include "kwg_maker.h"
 #include "simmer.h"
 
 #include "../str/game_string.h"
@@ -205,7 +205,7 @@ int config_get_parg_num_req_values(const Config *config,
 
 // Config getters
 
-const char *config_get_data_path(const Config *config) {
+const char *config_get_data_paths(const Config *config) {
   return config->data_paths;
 }
 
@@ -912,8 +912,9 @@ char *status_autoplay(Config __attribute__((unused)) * config) {
 void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
   args->conversion_type_string =
       config_get_parg_value(config, ARG_TOKEN_CONVERT, 0);
-  args->input_filename = config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
-  args->output_filename = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
+  args->data_paths = config_get_data_paths(config);
+  args->input_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
+  args->output_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
   args->ld = config->ld;
 }
 

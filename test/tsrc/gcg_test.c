@@ -27,7 +27,7 @@
 gcg_parse_status_t test_parse_gcg(const char *gcg_filename, Config *config,
                                   GameHistory *game_history) {
   char *gcg_filepath = data_filepaths_get_readable_filename(
-      config_get_data_path(config), gcg_filename, DATA_FILEPATH_TYPE_GCG);
+      config_get_data_paths(config), gcg_filename, DATA_FILEPATH_TYPE_GCG);
   gcg_parse_status_t gcg_parse_status =
       parse_gcg(gcg_filepath, config, game_history);
   free(gcg_filepath);

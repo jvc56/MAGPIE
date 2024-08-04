@@ -33,7 +33,7 @@ char *config_get_execute_status(Config *config);
 bool config_continue_on_coldstart(const Config *config);
 
 // Getters
-const char *config_get_data_path(const Config *config);
+const char *config_get_data_paths(const Config *config);
 int config_get_bingo_bonus(const Config *config);
 BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);

@@ -121,7 +121,7 @@ void test_board_layout_correctness(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   Board *board = game_get_board(game);
-  const char *data_paths = config_get_data_path(config);
+  const char *data_paths = config_get_data_paths(config);
 
   assert(board_get_anchor(board, 7, 7, BOARD_HORIZONTAL_DIRECTION));
   assert(!board_get_anchor(board, 7, 7, BOARD_VERTICAL_DIRECTION));

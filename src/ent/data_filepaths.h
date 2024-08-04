@@ -9,6 +9,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_LD,
   DATA_FILEPATH_TYPE_GCG,
   DATA_FILEPATH_TYPE_LEAVES,
+  DATA_FILEPATH_TYPE_LEXICON,
 } data_filepath_t;
 
 char *data_filepaths_get_readable_filename(const char *data_paths,

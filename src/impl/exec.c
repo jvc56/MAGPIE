@@ -24,9 +24,9 @@
 #include "autoplay.h"
 #include "cgp.h"
 #include "config.h"
+#include "convert.h"
 #include "gameplay.h"
 #include "inference.h"
-#include "kwg_maker.h"
 #include "move_gen.h"
 #include "simmer.h"
 

@@ -5,11 +5,11 @@
 
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
+#include "../def/convert_defs.h"
 #include "../def/error_status_defs.h"
 #include "../def/game_defs.h"
 #include "../def/gen_defs.h"
 #include "../def/inference_defs.h"
-#include "../def/kwg_defs.h"
 #include "../def/leave_gen_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/validated_move_defs.h"

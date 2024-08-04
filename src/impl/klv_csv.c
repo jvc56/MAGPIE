@@ -122,7 +122,7 @@ void klv_iter_for_length(LeaveIter *leave_iter, KLV *klv, Rack *bag_as_rack,
 
 // Writes a CSV file of leave,value for the leaves in the KLV.
 void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
-                      const char *data_path) {
+                      const char *data_path, const char *full_filepath) {
   const int dist_size = ld_get_size(ld);
   Rack *leave = rack_create(dist_size);
   Rack *bag_as_rack = get_new_bag_as_rack(ld);
@@ -145,8 +145,13 @@ void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
   rack_destroy(leave);
   rack_destroy(bag_as_rack);
 
-  char *leaves_filename = data_filepaths_get_writable_filename(
-      data_path, klv->name, DATA_FILEPATH_TYPE_LEAVES);
+  char *leaves_filename = NULL;
+  if (full_filepath) {
+    leaves_filename = string_duplicate(full_filepath);
+  } else {
+    leaves_filename = data_filepaths_get_writable_filename(
+        data_path, klv->name, DATA_FILEPATH_TYPE_LEAVES);
+  }
   write_string_to_file(leaves_filename, "w", string_builder_peek(klv_builder));
   free(leaves_filename);
   string_builder_destroy(klv_builder);

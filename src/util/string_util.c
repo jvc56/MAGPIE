@@ -25,6 +25,46 @@ bool has_iprefix(const char *pre, const char *str) {
   return strncasecmp(pre, str, string_length(pre)) == 0;
 }
 
+bool has_suffix(const char *str, const char *suffix) {
+  if (!str || !suffix) {
+    return false;
+  }
+  size_t str_len = strlen(str);
+  size_t suffix_len = strlen(suffix);
+  if (suffix_len > str_len) {
+    return false;
+  }
+  return strncmp(str + str_len - suffix_len, suffix, suffix_len) == 0;
+}
+
+bool has_isuffix(const char *str, const char *suffix) {
+  if (!str || !suffix) {
+    return false;
+  }
+  size_t str_len = strlen(str);
+  size_t suffix_len = strlen(suffix);
+  if (suffix_len > str_len) {
+    return false;
+  }
+  return strncasecmp(str + str_len - suffix_len, suffix, suffix_len) == 0;
+}
+
+bool string_contains(const char *str, char ch) {
+  if (!str) {
+    return false;
+  }
+
+  // Iterate through the string to check for the character
+  while (*str) {
+    if (*str == ch) {
+      return true;
+    }
+    str++;
+  }
+
+  return false;
+}
+
 // Raises a fatal error if str is null
 bool is_string_empty_or_whitespace(const char *str) {
   if (!str) {

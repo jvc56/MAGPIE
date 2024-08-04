@@ -5,8 +5,8 @@
 #include "../../src/ent/letter_distribution.h"
 
 #include "../../src/impl/config.h"
+#include "../../src/impl/convert.h"
 #include "../../src/impl/klv_csv.h"
-#include "../../src/impl/kwg_maker.h"
 
 #include "../../src/util/string_util.h"
 
@@ -42,7 +42,7 @@ void test_small_klv(void) {
   set_klv_leave_value(small_klv, ld, "?AAB", 3.0);
   set_klv_leave_value(small_klv, ld, "AAB", 4.0);
 
-  klv_write_to_csv(small_klv, ld, data_path);
+  klv_write_to_csv(small_klv, ld, data_path, NULL);
 
   char *leaves_filename = data_filepaths_get_readable_filename(
       data_path, small_klv->name, DATA_FILEPATH_TYPE_LEAVES);
@@ -61,7 +61,7 @@ void test_small_klv(void) {
 
   assert_klvs_equal(small_klv, small_klv_copy);
 
-  klv_write(small_klv_copy, data_path);
+  klv_write(small_klv_copy, data_path, NULL);
 
   KLV *small_klv_copy2 = klv_create(data_path, small_klv->name);
 
@@ -88,13 +88,15 @@ void test_normal_klv(void) {
   set_klv_leave_value(normal_klv, ld, "YYZ", 3.0);
   set_klv_leave_value(normal_klv, ld, "WWXYYZ", 4.0);
 
-  klv_write_to_csv(normal_klv, ld, "testdata");
+  // FIXME: test using full filepath
+  klv_write_to_csv(normal_klv, ld, "testdata", NULL);
 
   KLV *normal_klv_copy = klv_read_from_csv(ld, data_path, normal_klv->name);
 
   assert_klvs_equal(normal_klv, normal_klv_copy);
 
-  klv_write(normal_klv_copy, data_path);
+  // FIXME: test using full filepath
+  klv_write(normal_klv_copy, data_path, NULL);
 
   KLV *normal_klv_copy2 = klv_create(data_path, normal_klv->name);
 
