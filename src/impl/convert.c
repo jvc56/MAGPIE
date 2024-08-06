@@ -13,49 +13,70 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+conversion_status_t convert_from_text_with_dwl(
+    const LetterDistribution *ld, conversion_type_t conversion_type,
+    const char *input_filename, const char *output_filename,
+    DictionaryWordList *strings, ConversionResults *conversion_results) {
+  FILE *input_file = fopen(input_filename, "r");
+  if (!input_file) {
+    return CONVERT_STATUS_INPUT_FILE_ERROR;
+  }
+  char line[BOARD_DIM + 2]; // +1 for \n, +1 for \0
+  uint8_t mls[BOARD_DIM];
+  while (fgets(line, BOARD_DIM + 2, input_file)) {
+    int word_length_with_newline = string_length(line);
+    if (word_length_with_newline == BOARD_DIM + 1 &&
+        line[word_length_with_newline - 1] != '\n') {
+      return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
+    }
+    if (line[word_length_with_newline - 1] == '\n') {
+      line[word_length_with_newline - 1] = '\0';
+    }
+    int word_length = string_length(line);
+    int mls_length = ld_str_to_mls(ld, line, false, mls, word_length);
+    if (mls_length < 0) {
+      return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+    }
+    if (!unblank_machine_letters(mls, mls_length)) {
+      return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+    }
+    if (mls_length < 2) {
+      return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
+    }
+    dictionary_word_list_add_word(strings, mls, mls_length);
+  }
+
+  kwg_maker_output_t output_type = KWG_MAKER_OUTPUT_DAWG_AND_GADDAG;
+  if (conversion_type == CONVERT_TEXT2DAWG) {
+    output_type = KWG_MAKER_OUTPUT_DAWG;
+  } else if (conversion_type == CONVERT_TEXT2GADDAG) {
+    output_type = KWG_MAKER_OUTPUT_GADDAG;
+  }
+  conversion_status_t status = CONVERT_STATUS_SUCCESS;
+  KWG *kwg = make_kwg_from_words(strings, output_type, KWG_MAKER_MERGE_EXACT);
+  if (!kwg_write_to_file(kwg, output_filename)) {
+    status = CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
+  } else {
+    conversion_results_set_number_of_strings(
+        conversion_results, dictionary_word_list_get_count(strings));
+  }
+  kwg_destroy(kwg);
+  return status;
+}
+
 conversion_status_t convert_with_filenames(
     const LetterDistribution *ld, conversion_type_t conversion_type,
     const char *data_paths, const char *input_filename,
     const char *output_filename, ConversionResults *conversion_results) {
-  DictionaryWordList *strings = dictionary_word_list_create();
-  char line[BOARD_DIM + 2]; // +1 for \n, +1 for \0
-  uint8_t mls[BOARD_DIM];
+  conversion_status_t status = CONVERT_STATUS_SUCCESS;
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
       (conversion_type == CONVERT_TEXT2KWG)) {
-    FILE *input_file = fopen(input_filename, "r");
-    if (!input_file) {
-      return CONVERT_STATUS_INPUT_FILE_ERROR;
-    }
-    while (fgets(line, BOARD_DIM + 2, input_file)) {
-      const int word_length = string_length(line) - 1;
-      line[word_length] = '\0';
-      if (word_length > BOARD_DIM) {
-        return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
-      }
-      int mls_length = ld_str_to_mls(ld, line, false, mls, word_length);
-      if (mls_length < 0) {
-        return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
-      }
-      if (mls_length < 2) {
-        return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
-      }
-      dictionary_word_list_add_word(strings, mls, mls_length);
-    }
-
-    kwg_maker_output_t output_type = KWG_MAKER_OUTPUT_DAWG_AND_GADDAG;
-    if (conversion_type == CONVERT_TEXT2DAWG) {
-      output_type = KWG_MAKER_OUTPUT_DAWG;
-    } else if (conversion_type == CONVERT_TEXT2GADDAG) {
-      output_type = KWG_MAKER_OUTPUT_GADDAG;
-    }
-    KWG *kwg = make_kwg_from_words(strings, output_type, KWG_MAKER_MERGE_EXACT);
-    if (!kwg_write_to_file(kwg, output_filename)) {
-      printf("failed to write output file: %s\n", output_filename);
-      return CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
-    }
-    conversion_results_set_number_of_strings(
-        conversion_results, dictionary_word_list_get_count(strings));
+    DictionaryWordList *strings = dictionary_word_list_create();
+    status = convert_from_text_with_dwl(ld, conversion_type, input_filename,
+                                        output_filename, strings,
+                                        conversion_results);
+    dictionary_word_list_destroy(strings);
   } else if (conversion_type == CONVERT_CSV2KLV) {
     KLV *klv = klv_read_from_csv(ld, data_paths, input_filename);
     klv_write(klv, NULL, output_filename);
@@ -65,10 +86,9 @@ conversion_status_t convert_with_filenames(
     klv_write_to_csv(klv, ld, NULL, output_filename);
     klv_destroy(klv);
   } else {
-    return CONVERT_STATUS_UNIMPLEMENTED_CONVERSION_TYPE;
+    status = CONVERT_STATUS_UNIMPLEMENTED_CONVERSION_TYPE;
   }
-
-  return CONVERT_STATUS_SUCCESS;
+  return status;
 }
 
 data_filepath_t

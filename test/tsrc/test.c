@@ -14,6 +14,7 @@
 #include "checkpoint_test.h"
 #include "command_test.h"
 #include "config_test.h"
+#include "convert_test.h"
 #include "cross_set_test.h"
 #include "equity_adjustment_test.h"
 #include "file_handler_test.h"
@@ -85,6 +86,7 @@ void run_all(void) {
   test_kwg_maker();
   test_file_handler();
   test_leave_list();
+  test_convert();
 }
 
 void run_test(const char *subtest) {
@@ -162,6 +164,8 @@ void run_test(const char *subtest) {
     test_checkpoint();
   } else if (strings_equal(subtest, "klv")) {
     test_klv();
+  } else if (strings_equal(subtest, "cv")) {
+    test_convert();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

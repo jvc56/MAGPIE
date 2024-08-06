@@ -52,6 +52,19 @@ static inline uint8_t get_unblanked_machine_letter(uint8_t ml) {
 
 static inline bool get_is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
 
+// Returns true if the machine letters are successfully unblanked
+// Returns false if the unblanking fails and renders the machine letters
+// invalid.
+static inline bool unblank_machine_letters(uint8_t *mls, int size) {
+  for (int i = 0; i < size; i++) {
+    if (mls[i] == BLANK_MACHINE_LETTER) {
+      return false;
+    }
+    mls[i] = get_unblanked_machine_letter(mls[i]);
+  }
+  return true;
+}
+
 static inline void sort_score_order(LetterDistribution *ld) {
   int *score_order = ld->score_order;
   int *scores = ld->scores;

@@ -5,11 +5,13 @@
 
 #include "../def/autoplay_defs.h"
 #include "../def/config_defs.h"
+#include "../def/convert_defs.h"
 #include "../def/game_defs.h"
 #include "../def/simmer_defs.h"
 
 #include "../ent/autoplay_results.h"
 #include "../ent/board_layout.h"
+#include "../ent/conversion_results.h"
 #include "../ent/error_status.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -70,4 +72,7 @@ autoplay_status_t config_autoplay(const Config *config,
                                   autoplay_t autoplay_type);
 sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
                              SimResults *sim_results);
+
+conversion_status_t config_convert(const Config *config,
+                                   ConversionResults *results);
 #endif
