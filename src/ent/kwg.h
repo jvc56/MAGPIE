@@ -169,7 +169,7 @@ static inline KWG *kwg_create_empty(void) {
 static inline bool kwg_write_to_file(const KWG *kwg, const char *filename) {
   FILE *stream = fopen(filename, "wb");
   if (!stream) {
-    printf("could not open stream\n");
+    printf("could not open stream for filename: %s\n", filename);
     return false;
   }
   for (int i = 0; i < kwg->number_of_nodes; i++) {

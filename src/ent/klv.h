@@ -334,21 +334,12 @@ static inline double klv_get_leave_value(const KLV *klv, const Rack *leave) {
   return klv_get_indexed_leave_value(klv, index);
 }
 
-static inline void klv_write(const KLV *klv, const char *data_path,
-                             const char *full_filepath) {
-  char *klv_filename = NULL;
-  if (full_filepath) {
-    klv_filename = string_duplicate(full_filepath);
-  } else {
-    klv_filename = data_filepaths_get_writable_filename(data_path, klv->name,
-                                                        DATA_FILEPATH_TYPE_KLV);
-  }
+static inline void klv_write(const KLV *klv, const char *klv_filename) {
   // Open the file stream for writing
   FILE *stream = fopen(klv_filename, "wb");
   if (!stream) {
     log_fatal("failed to open stream for writing: %s\n", klv_filename);
   }
-  free(klv_filename);
 
   const uint32_t kwg_number_of_nodes = kwg_get_number_of_nodes(klv->kwg);
 

@@ -27,44 +27,119 @@ bool is_filepath(const char *filepath) {
          has_suffix(filepath, LEXICON_EXTENSION);
 }
 
-char *get_filepath(const char *data_paths, const char *data_name,
-                   data_filepath_t type) {
-  char *filepath = NULL;
+void string_builder_add_directory_for_data_type(StringBuilder *sb,
+                                                const char *data_path,
+                                                data_filepath_t type) {
   switch (type) {
   case DATA_FILEPATH_TYPE_KWG:
-    filepath = get_formatted_string("%s/lexica/%s%s", data_paths, data_name,
-                                    KWG_EXTENSION);
-    break;
   case DATA_FILEPATH_TYPE_KLV:
-    filepath = get_formatted_string("%s/lexica/%s%s", data_paths, data_name,
-                                    KLV_EXTENSION);
+  case DATA_FILEPATH_TYPE_LEXICON:
+    string_builder_add_formatted_string(sb, "%s/lexica/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
-    filepath = get_formatted_string("%s/layouts/%s%s", data_paths, data_name,
-                                    LAYOUT_EXTENSION);
+    string_builder_add_formatted_string(sb, "%s/layouts/", data_path);
     break;
   case DATA_FILEPATH_TYPE_WIN_PCT:
-    filepath = get_formatted_string("%s/strategy/%s%s", data_paths, data_name,
-                                    WIN_PCT_EXTENSION);
+    string_builder_add_formatted_string(sb, "%s/strategy/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LD:
-    filepath = get_formatted_string("%s/letterdistributions/%s%s", data_paths,
-                                    data_name, LD_EXTENSION);
+    string_builder_add_formatted_string(sb, "%s/letterdistributions/",
+                                        data_path);
     break;
   case DATA_FILEPATH_TYPE_GCG:
-    filepath = get_formatted_string("%s/gcgs/%s%s", data_paths, data_name,
-                                    GCG_EXTENSION);
+    string_builder_add_formatted_string(sb, "%s/gcgs/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LEAVES:
-    filepath = get_formatted_string("%s/leaves/%s%s", data_paths, data_name,
-                                    LEAVES_EXTENSION);
-    break;
-  case DATA_FILEPATH_TYPE_LEXICON:
-    filepath = get_formatted_string("%s/lexica/%s%s", data_paths, data_name,
-                                    LEXICON_EXTENSION);
+    string_builder_add_formatted_string(sb, "%s/leaves/", data_path);
     break;
   }
+}
+
+char *get_filepath(const char *data_path, const char *data_name,
+                   data_filepath_t type) {
+  StringBuilder *filepath_sb = string_builder_create();
+  string_builder_add_directory_for_data_type(filepath_sb, data_path, type);
+  string_builder_add_string(filepath_sb, data_name);
+  const char *file_ext = NULL;
+  switch (type) {
+  case DATA_FILEPATH_TYPE_KWG:
+    file_ext = KWG_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_KLV:
+    file_ext = KLV_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_LAYOUT:
+    file_ext = LAYOUT_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_WIN_PCT:
+    file_ext = WIN_PCT_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_LD:
+    file_ext = LD_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_GCG:
+    file_ext = GCG_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_LEAVES:
+    file_ext = LEAVES_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_LEXICON:
+    file_ext = LEXICON_EXTENSION;
+    break;
+  }
+  string_builder_add_string(filepath_sb, file_ext);
+  char *filepath = string_builder_dump(filepath_sb, NULL);
+  string_builder_destroy(filepath_sb);
   return filepath;
+}
+
+char *data_filepaths_get_first_valid_filename(const char *data_paths,
+                                              const char *data_name,
+                                              data_filepath_t type,
+                                              bool directory_name_only) {
+  if (!data_paths) {
+    log_fatal("data paths is null for filepath type %d\n", type);
+  }
+  StringSplitter *split_data_paths = split_string(data_paths, ':', true);
+  int number_of_data_paths =
+      string_splitter_get_number_of_items(split_data_paths);
+  char *ret_val = NULL;
+  for (int i = 0; i < number_of_data_paths; i++) {
+    const char *data_path_i = string_splitter_get_item(split_data_paths, i);
+    char *full_filename_i = get_filepath(data_path_i, data_name, type);
+    if (access(full_filename_i, F_OK | R_OK) == 0) {
+      if (directory_name_only) {
+        ret_val = string_duplicate(data_path_i);
+        free(full_filename_i);
+      } else {
+        ret_val = full_filename_i;
+      }
+      break;
+    }
+    free(full_filename_i);
+  }
+  string_splitter_destroy(split_data_paths);
+  if (!ret_val) {
+    log_fatal("File for %s not found for the following paths: %s\n", data_name,
+              data_paths);
+  }
+  return ret_val;
+}
+
+// Returns the directory name that is used in the filename
+// returned by data_filepaths_get_readable_filename.
+// Assumes the data name is not already a valid filepath.
+char *data_filepaths_get_directory_name(const char *data_paths,
+                                        const char *data_name,
+                                        data_filepath_t type) {
+  if (!data_name) {
+    log_fatal("data name is null for filepath type %d\n", type);
+  }
+  if (is_filepath(data_name)) {
+    return NULL;
+  }
+  return data_filepaths_get_first_valid_filename(data_paths, data_name, type,
+                                                 true);
 }
 
 // Returns a filename string that exists and is readable.
@@ -87,26 +162,8 @@ char *data_filepaths_get_readable_filename(const char *data_paths,
       log_fatal("Full file path %s not found\n", data_name);
     }
   } else {
-    if (!data_paths) {
-      log_fatal("data paths is null for filepath type %d\n", type);
-    }
-    StringSplitter *split_data_paths = split_string(data_paths, ':', true);
-    int number_of_data_paths =
-        string_splitter_get_number_of_items(split_data_paths);
-    for (int i = 0; i < number_of_data_paths; i++) {
-      const char *data_path_i = string_splitter_get_item(split_data_paths, i);
-      char *full_filename_i = get_filepath(data_path_i, data_name, type);
-      if (access(full_filename_i, F_OK | R_OK) == 0) {
-        full_filename = full_filename_i;
-        break;
-      }
-      free(full_filename_i);
-    }
-    string_splitter_destroy(split_data_paths);
-    if (!full_filename) {
-      log_fatal("File for %s not found for the following paths: %s\n",
-                data_name, data_paths);
-    }
+    full_filename = data_filepaths_get_first_valid_filename(
+        data_paths, data_name, type, false);
   }
 
   return full_filename;
@@ -122,8 +179,28 @@ char *data_filepaths_get_readable_filename(const char *data_paths,
 char *data_filepaths_get_writable_filename(const char *data_path,
                                            const char *data_name,
                                            data_filepath_t type) {
-  if (is_filepath(data_name)) {
-    return string_duplicate(data_name);
+  if (!data_name) {
+    log_fatal("data name is null for filepath type %d\n", type);
   }
-  return get_filepath(data_path, data_name, type);
+  char *writable_filepath;
+  if (is_filepath(data_name)) {
+    writable_filepath = string_duplicate(data_name);
+  } else {
+    if (!data_path) {
+      log_fatal("data path is null for filepath type %d\n", type);
+    }
+    writable_filepath = get_filepath(data_path, data_name, type);
+  }
+  // File already exists and is not writable
+  if (access(writable_filepath, F_OK) == 0 &&
+      access(writable_filepath, W_OK) != 0) {
+    log_fatal("File %s already exists and is not writable\n",
+              writable_filepath);
+  }
+  char *dir_path = get_dirpath_from_filepath(writable_filepath);
+  if (access(dir_path, W_OK) != 0) {
+    log_fatal("Directory %s is not writable\n", dir_path);
+  }
+  free(dir_path);
+  return writable_filepath;
 }

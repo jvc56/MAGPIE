@@ -73,5 +73,6 @@ void string_builder_clear(StringBuilder *string_builder);
 size_t string_builder_length(const StringBuilder *string_builder);
 const char *string_builder_peek(const StringBuilder *string_builder);
 char *string_builder_dump(const StringBuilder *string_builder, size_t *length);
+char *get_dirpath_from_filepath(const char *filepath);
 
 #endif

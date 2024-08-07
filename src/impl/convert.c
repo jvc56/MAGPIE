@@ -79,11 +79,11 @@ conversion_status_t convert_with_filenames(
     dictionary_word_list_destroy(strings);
   } else if (conversion_type == CONVERT_CSV2KLV) {
     KLV *klv = klv_read_from_csv(ld, data_paths, input_filename);
-    klv_write(klv, NULL, output_filename);
+    klv_write(klv, output_filename);
     klv_destroy(klv);
   } else if (conversion_type == CONVERT_KLV2CSV) {
     KLV *klv = klv_create(data_paths, input_filename);
-    klv_write_to_csv(klv, ld, NULL, output_filename);
+    klv_write_to_csv(klv, ld, output_filename);
     klv_destroy(klv);
   } else {
     status = CONVERT_STATUS_UNIMPLEMENTED_CONVERSION_TYPE;
@@ -193,17 +193,24 @@ conversion_status_t convert(ConversionArgs *args,
     return CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
   }
 
+  data_filepath_t input_filepath_type =
+      get_input_filepath_type_from_conv_type(conversion_type);
+
   char *input_filename = data_filepaths_get_readable_filename(
-      args->data_paths, args->input_name,
-      get_input_filepath_type_from_conv_type(conversion_type));
+      args->data_paths, args->input_name, input_filepath_type);
+
+  char *directory_name = data_filepaths_get_directory_name(
+      args->data_paths, args->output_name, input_filepath_type);
+
   char *output_filename = data_filepaths_get_writable_filename(
-      args->data_paths, args->output_name,
+      directory_name, args->output_name,
       get_output_filepath_type_from_conv_type(conversion_type));
 
   conversion_status_t status = convert_with_filenames(
       args->ld, conversion_type, args->data_paths, input_filename,
       output_filename, conversion_results);
 
+  free(directory_name);
   free(input_filename);
   free(output_filename);
 

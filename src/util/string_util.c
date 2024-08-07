@@ -710,3 +710,32 @@ StringSplitter *split_file_by_newline(const char *filename) {
   free(file_content);
   return file_content_split_by_newline;
 }
+
+char *get_dirpath_from_filepath(const char *filepath) {
+  // Make a copy of the input filepath because strtok modifies the string
+  char *filepath_copy = string_duplicate(filepath);
+  if (filepath_copy == NULL) {
+    log_fatal("failed to duplicate string: %s\n", filepath);
+  }
+
+  // Find the last occurrence of the '/' or '\' character
+  char *last_slash = strrchr(filepath_copy, '/');
+  char *last_backslash = strrchr(filepath_copy, '\\');
+  char *last_separator =
+      last_slash > last_backslash ? last_slash : last_backslash;
+
+  if (last_separator != NULL) {
+    // Terminate the string at the last separator to get the directory path
+    *(last_separator + 1) = '\0';
+  } else {
+    // If there's no separator, the input is considered invalid for this
+    // function
+    log_fatal("cannot find directory path from filepath: %s\n", filepath);
+  }
+
+  // Allocate memory for the directory path to return
+  char *directory = string_duplicate(filepath_copy);
+  free(filepath_copy); // Free the copy as it's no longer needed
+
+  return directory;
+}
