@@ -439,6 +439,11 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(
       config, "autoplay game -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",
       ERROR_STATUS_TYPE_NONE, 0);
+
+  // Create
+  assert_config_exec_status(config, "create klx CSW50 english",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE);
   config_destroy(config);
 }
 

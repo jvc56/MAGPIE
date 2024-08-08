@@ -739,3 +739,42 @@ char *get_dirpath_from_filepath(const char *filepath) {
 
   return directory;
 }
+
+const char *get_base_filename(const char *filepath) {
+  // Find the last occurrence of the Unix directory separator
+  const char *base_filename_unix = strrchr(filepath, '/');
+  // Find the last occurrence of the Windows directory separator
+  const char *base_filename_win = strrchr(filepath, '\\');
+
+  // Use the appropriate separator position
+  const char *base_filename = base_filename_unix > base_filename_win
+                                  ? base_filename_unix
+                                  : base_filename_win;
+
+  // If the directory separator is not found, return the original filepath
+  if (base_filename == NULL) {
+    base_filename = filepath;
+  } else {
+    // Move past the directory separator to get the base filename
+    base_filename++;
+  }
+
+  return base_filename;
+}
+
+char *cut_off_after_char(const char *str, char ch) {
+  char *pos = strchr(str, ch);
+
+  if (pos == NULL) {
+    return string_duplicate(str);
+  }
+
+  size_t new_len = pos - str;
+
+  char *new_str = (char *)malloc_or_die(new_len + 1);
+
+  strncpy(new_str, str, new_len);
+  new_str[new_len] = '\0';
+
+  return new_str;
+}

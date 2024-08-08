@@ -96,7 +96,7 @@ char *get_filepath(const char *data_path, const char *data_name,
 char *data_filepaths_get_first_valid_filename(const char *data_paths,
                                               const char *data_name,
                                               data_filepath_t type,
-                                              bool directory_name_only) {
+                                              bool data_path_only) {
   if (!data_paths) {
     log_fatal("data paths is null for filepath type %d\n", type);
   }
@@ -108,7 +108,7 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
     const char *data_path_i = string_splitter_get_item(split_data_paths, i);
     char *full_filename_i = get_filepath(data_path_i, data_name, type);
     if (access(full_filename_i, F_OK | R_OK) == 0) {
-      if (directory_name_only) {
+      if (data_path_only) {
         ret_val = string_duplicate(data_path_i);
         free(full_filename_i);
       } else {
@@ -126,10 +126,10 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
   return ret_val;
 }
 
-// Returns the directory name that is used in the filename
+// Returns the data path that is used in the filename
 // returned by data_filepaths_get_readable_filename.
 // Assumes the data name is not already a valid filepath.
-char *data_filepaths_get_directory_name(const char *data_paths,
+char *data_filepaths_get_data_path_name(const char *data_paths,
                                         const char *data_name,
                                         data_filepath_t type) {
   if (!data_name) {
@@ -173,10 +173,9 @@ char *data_filepaths_get_readable_filename(const char *data_paths,
 // currently exist.
 // If data_name looks like a filepath, then data_name is just returned
 // as is.
-// Assumes that only a single data path is provided with the data_paths
-// argument as opposed to multiple paths separated by ':' as in
-// data_filepaths_get_readable_filename
-char *data_filepaths_get_writable_filename(const char *data_path,
+// If data paths has multiple paths delimited by ':', then the
+// first path is used.
+char *data_filepaths_get_writable_filename(const char *data_paths,
                                            const char *data_name,
                                            data_filepath_t type) {
   if (!data_name) {
@@ -186,10 +185,12 @@ char *data_filepaths_get_writable_filename(const char *data_path,
   if (is_filepath(data_name)) {
     writable_filepath = string_duplicate(data_name);
   } else {
-    if (!data_path) {
+    if (!data_paths) {
       log_fatal("data path is null for filepath type %d\n", type);
     }
-    writable_filepath = get_filepath(data_path, data_name, type);
+    char *first_data_path = cut_off_after_char(data_paths, ':');
+    writable_filepath = get_filepath(first_data_path, data_name, type);
+    free(first_data_path);
   }
   // File already exists and is not writable
   if (access(writable_filepath, F_OK) == 0 &&

@@ -33,6 +33,14 @@ void test_convert_error(void) {
   args.data_paths = DEFAULT_TEST_DATA_PATH;
   args.input_name = "CSW21_too_long";
   args.output_name = "CSW21_too_long";
+  args.ld = NULL;
+  assert(convert(&args, conversion_results) ==
+         CONVERT_STATUS_MISSING_LETTER_DISTRIBUTION);
+
+  args.conversion_type_string = "text2dawg";
+  args.data_paths = DEFAULT_TEST_DATA_PATH;
+  args.input_name = "CSW21_too_long";
+  args.output_name = "CSW21_too_long";
   args.ld = config_get_ld(config);
   assert(convert(&args, conversion_results) ==
          CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG);

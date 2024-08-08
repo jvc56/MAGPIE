@@ -32,6 +32,7 @@
 #include "convert.h"
 #include "gameplay.h"
 #include "inference.h"
+#include "klv_csv.h"
 #include "simmer.h"
 
 #include "../str/game_string.h"
@@ -49,6 +50,7 @@ typedef enum {
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
   ARG_TOKEN_LEAVE_GEN,
+  ARG_TOKEN_CREATE_DATA,
   ARG_TOKEN_DATA_PATH,
   ARG_TOKEN_BINGO_BONUS,
   ARG_TOKEN_BOARD_LAYOUT,
@@ -996,6 +998,43 @@ char *status_leave_gen(Config __attribute__((unused)) * config) {
   return string_duplicate("no status available for leave gen");
 }
 
+// Create
+
+void execute_create_data(Config *config) {
+  const char *create_type_str =
+      config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 0);
+
+  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
+  if (has_iprefix(create_type_str, "klv")) {
+    const char *klv_name_str =
+        config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 1);
+    char *klv_filename = data_filepaths_get_writable_filename(
+        config_get_data_paths(config), klv_name_str, DATA_FILEPATH_TYPE_KLV);
+    const char *ld_name_str =
+        config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2);
+    const LetterDistribution *ld = config_get_ld(config);
+    LetterDistribution *arg_ld = NULL;
+    if (ld_name_str) {
+      arg_ld = ld_create(config_get_data_paths(config), ld_name_str);
+      ld = arg_ld;
+    }
+    KLV *klv = klv_create_empty(ld, klv_name_str);
+    klv_write(klv, klv_filename);
+    klv_destroy(klv);
+    free(klv_filename);
+    ld_destroy(arg_ld);
+  } else {
+    config_load_status = CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE;
+  }
+
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            (int)config_load_status);
+}
+
+char *status_create_data(Config __attribute__((unused)) * config) {
+  return string_duplicate("no status available for create");
+}
+
 // Config load helpers
 
 config_load_status_t config_load_parsed_args(Config *config,
@@ -1588,7 +1627,8 @@ Config *config_create_default(void) {
                     status_convert);
   parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 3, 3,
                     execute_leave_gen, status_leave_gen);
-  // FIXME: write a klvcreate command
+  parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 2, 3,
+                    execute_create_data, status_create_data);
   parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,

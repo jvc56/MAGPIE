@@ -189,8 +189,13 @@ conversion_status_t convert(ConversionArgs *args,
   if (args->input_name == NULL) {
     return CONVERT_STATUS_INPUT_FILE_ERROR;
   }
+
   if (args->output_name == NULL) {
     return CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
+  }
+
+  if (args->ld == NULL) {
+    return CONVERT_STATUS_MISSING_LETTER_DISTRIBUTION;
   }
 
   data_filepath_t input_filepath_type =
@@ -199,18 +204,18 @@ conversion_status_t convert(ConversionArgs *args,
   char *input_filename = data_filepaths_get_readable_filename(
       args->data_paths, args->input_name, input_filepath_type);
 
-  char *directory_name = data_filepaths_get_directory_name(
+  char *data_path = data_filepaths_get_data_path_name(
       args->data_paths, args->output_name, input_filepath_type);
 
   char *output_filename = data_filepaths_get_writable_filename(
-      directory_name, args->output_name,
+      data_path, args->output_name,
       get_output_filepath_type_from_conv_type(conversion_type));
 
   conversion_status_t status = convert_with_filenames(
       args->ld, conversion_type, args->data_paths, input_filename,
       output_filename, conversion_results);
 
-  free(directory_name);
+  free(data_path);
   free(input_filename);
   free(output_filename);
 

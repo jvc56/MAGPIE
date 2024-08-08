@@ -74,5 +74,7 @@ size_t string_builder_length(const StringBuilder *string_builder);
 const char *string_builder_peek(const StringBuilder *string_builder);
 char *string_builder_dump(const StringBuilder *string_builder, size_t *length);
 char *get_dirpath_from_filepath(const char *filepath);
+const char *get_base_filename(const char *filepath);
+char *cut_off_after_char(const char *str, char ch);
 
 #endif
