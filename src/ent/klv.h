@@ -293,12 +293,11 @@ static inline uint32_t klv_get_word_index_internal(const KLV *klv,
 
     // Advance lidx
     while (lidx_letter_count == 0) {
-      // FIXME: this should use the rack methods
       lidx++;
-      if (lidx >= leave->dist_size) {
+      if (lidx >= rack_get_dist_size(leave)) {
         break;
       }
-      lidx_letter_count = leave->array[lidx];
+      lidx_letter_count = rack_get_letter(leave, lidx);
     }
 
     if (number_of_letters == 0) {

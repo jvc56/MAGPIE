@@ -310,7 +310,10 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
   int number_of_plays = sim_results_get_number_of_plays(sim_results);
 
   ThreadControlIterOutput iter_output;
-  thread_control_get_next_iter_output(simmer->thread_control, &iter_output);
+  // We can ignore the return value here because the sim results
+  // are keeping track of the iteration count.
+  thread_control_get_next_iter_output(simmer->thread_control, &iter_output,
+                                      INT64_MAX);
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
   game_seed(game, iter_output.seed);

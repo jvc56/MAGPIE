@@ -859,12 +859,13 @@ void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args, int gens,
                                int max_force_draw_turn,
                                autoplay_t autoplay_type) {
-  autoplay_args->max_iterations = config->max_iterations;
-  autoplay_args->use_game_pairs = config->use_game_pairs;
-  autoplay_args->thread_control = config->thread_control;
+  autoplay_args->games_per_gen = config_get_max_iterations(config);
+  autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
+  autoplay_args->thread_control = config_get_thread_control(config);
   autoplay_args->gens = gens;
   autoplay_args->max_force_draw_turn = max_force_draw_turn;
   autoplay_args->type = autoplay_type;
+  autoplay_args->data_paths = config_get_data_paths(config);
   config_fill_game_args(config, autoplay_args->game_args);
 }
 

@@ -778,3 +778,32 @@ char *cut_off_after_char(const char *str, char ch) {
 
   return new_str;
 }
+
+char *insert_before_dot(const char *str, const char *insert) {
+  const char *dot_position =
+      strchr(str, '.'); // Find the first occurrence of '.'
+  size_t str_len = string_length(str);
+  size_t insert_len = string_length(insert);
+
+  // Calculate the new length of the string
+  size_t new_len = str_len + insert_len;
+  char *new_str = (char *)malloc_or_die(new_len + 1);
+
+  if (dot_position) {
+    // Copy the part before the dot
+    size_t prefix_len = dot_position - str;
+    strncpy(new_str, str, prefix_len);
+
+    // Insert the new content
+    string_copy(new_str + prefix_len, insert);
+
+    // Copy the part after the dot
+    string_copy(new_str + prefix_len + insert_len, dot_position);
+  } else {
+    // If there's no dot, concatenate the original string and the insert string
+    string_copy(new_str, str);
+    strcat(new_str, insert);
+  }
+
+  return new_str;
+}

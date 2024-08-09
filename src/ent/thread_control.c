@@ -238,12 +238,23 @@ void thread_control_wait_for_mode_stopped(ThreadControl *thread_control) {
   pthread_mutex_unlock(&thread_control->searching_mode_mutex);
 }
 
-void thread_control_get_next_iter_output(ThreadControl *thread_control,
-                                         ThreadControlIterOutput *iter_output) {
+// Returns true if the iter_count is already greater than or equal to
+// stop_iter_count and does nothing else.
+// Returns false if the iter_count is less than the stop_iter_count
+// and increments the iter_count and sets the next seed.
+bool thread_control_get_next_iter_output(ThreadControl *thread_control,
+                                         ThreadControlIterOutput *iter_output,
+                                         uint64_t stop_iter_count) {
+  bool at_stop_count = false;
   pthread_mutex_lock(&thread_control->iter_mutex);
-  iter_output->seed = prng_next(thread_control->prng);
-  iter_output->iter_count = thread_control->iter_count++;
+  if (thread_control->iter_count >= stop_iter_count) {
+    at_stop_count = true;
+  } else {
+    iter_output->seed = prng_next(thread_control->prng);
+    iter_output->iter_count = thread_control->iter_count++;
+  }
   pthread_mutex_unlock(&thread_control->iter_mutex);
+  return at_stop_count;
 }
 
 // NOT THREAD SAFE: This function is meant to be called

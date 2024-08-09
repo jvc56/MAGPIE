@@ -11,10 +11,11 @@
 
 typedef struct AutoplayArgs {
   int gens;
-  int max_iterations;
+  int games_per_gen;
   int max_force_draw_turn;
   bool use_game_pairs;
   autoplay_t type;
+  const char *data_paths;
   GameArgs *game_args;
   ThreadControl *thread_control;
 } AutoplayArgs;

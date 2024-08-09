@@ -429,7 +429,7 @@ int get_letters_in_common(const DictionaryWord *word, uint8_t *last_word,
   return letters_in_common;
 }
 
-// FIXME: add comment about alphabetical order if true
+// The dictionary word list must be in alphabetical order.
 KWG *make_kwg_from_words(const DictionaryWordList *words,
                          kwg_maker_output_t output, kwg_maker_merge_t merging) {
   const bool output_dawg = (output == KWG_MAKER_OUTPUT_DAWG) ||

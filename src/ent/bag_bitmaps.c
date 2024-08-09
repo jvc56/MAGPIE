@@ -91,7 +91,7 @@ void bag_bitmaps_set_bitmap(BagBitMaps *bag_bitmaps, const Rack *rack,
   bag_bitmaps_set_bitmap_internal(bag_bitmaps, rack, index + 1);
 }
 
-void bag_bitmaps_draw_rack(BagBitMaps *bag_bitmaps, Bag *bag, Rack *rack,
+void bag_bitmaps_draw_rack(const BagBitMaps *bag_bitmaps, Bag *bag, Rack *rack,
                            int player_draw_index, int index) {
   const int dist_size = rack_get_dist_size(rack);
   int bag_bitmap_start_index = index * bag_bitmaps->units_per_bag_bitmap;
@@ -109,7 +109,9 @@ void bag_bitmaps_draw_rack(BagBitMaps *bag_bitmaps, Bag *bag, Rack *rack,
     }
     bit_index += num_letter_dist - num_set;
     rack_add_letters(rack, i, num_set);
-    bag_draw_letters(bag, i, num_set, player_draw_index);
+    if (bag) {
+      bag_draw_letters(bag, i, num_set, player_draw_index);
+    }
   }
 }
 

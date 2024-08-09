@@ -8,9 +8,6 @@
 
 #include "../str/rack_string.h"
 
-// FIXME: Remove
-#include "../../test/tsrc/test_util.h"
-
 #define LEAVES_CSV_MAX_LINE_LENGTH 256
 
 typedef void (*leave_iter_func_t)(void *, uint32_t);
@@ -54,26 +51,9 @@ void klv_add_leave_to_word_list(void *data,
   dictionary_word_list_add_word(klv_data->dwl, word, letter_index);
 }
 
-// FIXME: use this in other files maybe?
-void get_next_node_and_word_index(const KLV *klv, uint32_t *node_index,
-                                  uint32_t *word_index, uint8_t ml) {
-  if (!klv) {
-    return;
-  }
-  uint32_t sibling_word_index;
-  *node_index = increment_node_to_ml(klv, *node_index, *word_index,
-                                     &sibling_word_index, ml);
-  *word_index = sibling_word_index;
-  uint32_t child_word_index;
-  *node_index = follow_arc(klv, *node_index, *word_index, &child_word_index);
-  *word_index = child_word_index;
-}
-
 // To record in alphabetical order for all lengths, use length = -1
 void klv_iter_for_length_recur(LeaveIter *leave_iter, KLV *klv, int length,
-                               Rack *bag_as_rack, Rack *leave,
-                               uint32_t node_index, uint32_t word_index,
-                               uint8_t ml) {
+                               Rack *bag_as_rack, Rack *leave, uint8_t ml) {
   const int dist_size = rack_get_dist_size(leave);
   if (ml == dist_size) {
     return;
@@ -100,9 +80,7 @@ void klv_iter_for_length_recur(LeaveIter *leave_iter, KLV *klv, int length,
     if (rack_get_letter(bag_as_rack, i) > 0) {
       rack_take_letter(bag_as_rack, i);
       rack_add_letter(leave, i);
-      get_next_node_and_word_index(klv, &node_index, &word_index, i);
-      klv_iter_for_length_recur(leave_iter, klv, length, bag_as_rack, leave,
-                                node_index, word_index, i);
+      klv_iter_for_length_recur(leave_iter, klv, length, bag_as_rack, leave, i);
       rack_add_letter(bag_as_rack, i);
       rack_take_letter(leave, i);
     }
@@ -112,12 +90,7 @@ void klv_iter_for_length_recur(LeaveIter *leave_iter, KLV *klv, int length,
 // To record in alphabetical order for all lengths, use length = -1
 void klv_iter_for_length(LeaveIter *leave_iter, KLV *klv, Rack *bag_as_rack,
                          Rack *leave, int length) {
-  uint32_t dawg_root_node_index = 0;
-  if (klv) {
-    dawg_root_node_index = kwg_get_dawg_root_node_index(klv_get_kwg(klv));
-  }
-  klv_iter_for_length_recur(leave_iter, klv, length, bag_as_rack, leave,
-                            dawg_root_node_index, 0, 0);
+  klv_iter_for_length_recur(leave_iter, klv, length, bag_as_rack, leave, 0);
 }
 
 // Writes a CSV file of leave,value for the leaves in the KLV.
@@ -177,7 +150,6 @@ KLV *klv_create_empty(const LetterDistribution *ld, const char *name) {
 }
 
 // Reads a CSV file of leave,value and returns a KLV.
-// FIXME: convert log_fatal's to error enums
 KLV *klv_read_from_csv(const LetterDistribution *ld, const char *data_paths,
                        const char *leaves_name) {
   char *leaves_filename = data_filepaths_get_readable_filename(

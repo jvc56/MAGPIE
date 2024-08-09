@@ -7,6 +7,8 @@
 #include "leave_count_hashmap.h"
 #include "rack.h"
 
+#include "../str/rack_string.h"
+
 #include "../util/util.h"
 
 #define MAX_LEAVE_SIZE (RACK_SIZE - 1)
@@ -18,8 +20,10 @@ typedef struct LeaveListItem {
 } LeaveListItem;
 
 struct LeaveList {
+  // Owned by the caller
   KLV *klv;
   Rack *full_rack;
+  // Owned by this struct
   Rack *subleave;
   double move_equity;
   int number_of_leaves;
@@ -146,6 +150,9 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv) {
 }
 
 void leave_list_destroy(LeaveList *leave_list) {
+  if (!leave_list) {
+    return;
+  }
   for (int i = 0; i < leave_list->number_of_leaves; i++) {
     free(leave_list->leaves_ordered_by_klv_index[i]);
   }
@@ -289,4 +296,33 @@ double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
 
 int leave_list_get_count_index(const LeaveList *leave_list, int klv_index) {
   return leave_list->leaves_ordered_by_klv_index[klv_index]->count_index;
+}
+
+void string_builder_add_most_or_least_common_leaves(
+    StringBuilder *sb, const LeaveList *leave_list,
+    const LetterDistribution *ld, int n, bool most_common) {
+  const int number_of_leaves = leave_list->number_of_leaves;
+  int i = 0;
+  if (!most_common) {
+    i = number_of_leaves - 1;
+    string_builder_add_formatted_string(sb, "Top %d most common leaves:\n", n);
+  } else {
+    string_builder_add_formatted_string(sb, "Top %d least common leaves:\n", n);
+  }
+  while (i < number_of_leaves && i >= 0 && n > 0) {
+    const int count = leave_list->leaves_ordered_by_count[i]->count;
+    // Here we use the subleave to help print the most/leave common leaves
+    Rack *rack = leave_list->subleave;
+    rack_reset(rack);
+    bag_bitmaps_draw_rack(leave_list->bag_bitmaps, NULL, rack, 0, i);
+    string_builder_add_formatted_string(sb, "%d:", i);
+    string_builder_add_rack(sb, rack, ld, false);
+    string_builder_add_formatted_string(sb, " %d\n", count);
+    n--;
+    if (most_common) {
+      i++;
+    } else {
+      i--;
+    }
+  }
 }
