@@ -238,11 +238,9 @@ void players_data_set(PlayersData *players_data,
   bool old_data_is_shared =
       players_data_get_is_shared(players_data, players_data_type);
   void *data_pointers[2];
-  char *data_names[2];
 
   for (int player_index = 0; player_index < 2; player_index++) {
     data_pointers[player_index] = NULL;
-    data_names[player_index] = NULL;
   }
 
   int existing_data_indexes[2];
@@ -256,20 +254,13 @@ void players_data_set(PlayersData *players_data,
     if (existing_data_indexes[player_index] < 0) {
       if (player_index == 1 && new_data_is_shared) {
         data_pointers[1] = data_pointers[0];
-        data_names[1] = string_duplicate(data_names[0]);
       } else {
         data_pointers[player_index] = players_data_create_data(
             players_data_type, data_paths, input_data_names[player_index]);
-        data_names[player_index] =
-            string_duplicate(input_data_names[player_index]);
       }
     } else {
       data_pointers[player_index] = players_data_get_data(
           players_data, players_data_type, existing_data_indexes[player_index]);
-      data_names[player_index] = get_formatted_string(
-          "%s",
-          players_data_get_data_name(players_data, players_data_type,
-                                     existing_data_indexes[player_index]));
     }
   }
 
@@ -288,7 +279,27 @@ void players_data_set(PlayersData *players_data,
   }
   players_data_set_is_shared(players_data, players_data_type,
                              new_data_is_shared);
+}
+
+// Destroys and recreates the existing data for both players.
+void players_data_reload(PlayersData *players_data,
+                         players_data_t players_data_type,
+                         const char *data_paths) {
+  const bool data_is_shared =
+      players_data_get_is_shared(players_data, players_data_type);
   for (int player_index = 0; player_index < 2; player_index++) {
-    free(data_names[player_index]);
+    if (player_index == 1 && data_is_shared) {
+      players_data_set_data(
+          players_data, players_data_type, player_index,
+          players_data_get_data(players_data, players_data_type, 0));
+    } else {
+      void *recreated_data = players_data_create_data(
+          players_data_type, data_paths,
+          players_data_get_data_name(players_data, players_data_type,
+                                     player_index));
+      players_data_destroy_data(players_data, players_data_type, player_index);
+      players_data_set_data(players_data, players_data_type, player_index,
+                            recreated_data);
+    }
   }
 }

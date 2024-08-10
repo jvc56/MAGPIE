@@ -14,7 +14,7 @@
 typedef struct Game Game;
 
 typedef struct GameArgs {
-  const PlayersData *players_data;
+  PlayersData *players_data;
   const BoardLayout *board_layout;
   const LetterDistribution *ld;
   game_variant_t game_variant;

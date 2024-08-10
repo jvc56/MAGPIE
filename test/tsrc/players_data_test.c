@@ -105,6 +105,43 @@ void test_unshared_data(void) {
   players_data_destroy(players_data);
 }
 
+void test_reloaded_data(void) {
+  PlayersData *players_data = players_data_create();
+
+  players_data_set_name(players_data, 0, "Alice");
+  players_data_set_move_sort_type(players_data, 0, MOVE_SORT_SCORE);
+  players_data_set_move_record_type(players_data, 0, MOVE_RECORD_ALL);
+
+  players_data_set_name(players_data, 1, "Bob");
+  players_data_set_move_sort_type(players_data, 1, MOVE_SORT_SCORE);
+  players_data_set_move_record_type(players_data, 1, MOVE_RECORD_ALL);
+
+  players_data_set(players_data, PLAYERS_DATA_TYPE_KLV, DEFAULT_DATA_PATHS,
+                   "CSW21", "CSW21");
+
+  KLV *klv1 = players_data_get_klv(players_data, 0);
+
+  const int leave_index = 7;
+  const double old_leave_value = klv_get_indexed_leave_value(klv1, leave_index);
+  const double new_leave_value = 17.0;
+
+  klv_set_indexed_leave_value(klv1, leave_index, new_leave_value);
+
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_KLV, 1) == klv1);
+  assert(within_epsilon(klv_get_indexed_leave_value(klv1, leave_index),
+                        new_leave_value));
+
+  players_data_reload(players_data, PLAYERS_DATA_TYPE_KLV, DEFAULT_DATA_PATHS);
+
+  KLV *klv2 = players_data_get_klv(players_data, 0);
+
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_KLV, 0) != klv1);
+  assert(players_data_get_data(players_data, PLAYERS_DATA_TYPE_KLV, 1) != klv1);
+  assert(within_epsilon(klv_get_indexed_leave_value(klv2, leave_index),
+                        old_leave_value));
+  players_data_destroy(players_data);
+}
+
 void test_players_data(void) {
   const char *data_names[] = {
       "CSW21", "CSW21", "NWL20",  "NWL20", "CSW21",  "NWL20", "CSW21",
@@ -118,4 +155,5 @@ void test_players_data(void) {
   test_for_data_type(data_names, DEFAULT_DATA_PATHS, PLAYERS_DATA_TYPE_KLV,
                      number_of_data_names);
   test_unshared_data();
+  test_reloaded_data();
 }

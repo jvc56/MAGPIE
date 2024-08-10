@@ -264,6 +264,7 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker, Game *game,
 void autoplay_leave_gen(AutoplayWorker *autoplay_worker, Game *game,
                         MoveList *move_list) {
   const AutoplayArgs *args = autoplay_worker->args;
+  ThreadControl *thread_control = args->thread_control;
   const int gens = args->gens;
   const LetterDistribution *ld = args->game_args->ld;
 
@@ -274,6 +275,9 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker, Game *game,
     autoplay_single_generation(autoplay_worker, game, move_list, leaves);
     checkpoint_wait(autoplay_worker->shared_data->checkpoint,
                     autoplay_worker->shared_data);
+    if (thread_control_get_is_halted(thread_control)) {
+      break;
+    }
   }
 
   rack_destroy(leaves[0]);
@@ -354,9 +358,12 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
     autoplay_worker_destroy(autoplay_workers[thread_index]);
   }
 
-  autoplay_worker_shared_data_destroy(shared_data);
   free(autoplay_workers);
   free(worker_ids);
+  autoplay_worker_shared_data_destroy(shared_data);
+
+  players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
+                      args->data_paths);
 
   char *autoplay_results_string =
       autoplay_results_to_string(autoplay_results, false);

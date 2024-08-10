@@ -16,8 +16,7 @@
 
 #include "test_util.h"
 
-void autoplay_game_pairs_test(void) {
-
+void test_autoplay_default(void) {
   Config *csw_config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 -it "
       "100 -gp true -threads 11");
@@ -79,4 +78,15 @@ void autoplay_game_pairs_test(void) {
   config_destroy(csw_config);
 }
 
-void test_autoplay(void) { autoplay_game_pairs_test(); }
+void test_autoplay_leavegen(void) {
+  return;
+  Config *csw_config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 best -r2 best -numplays 1");
+
+  load_and_exec_config_or_die(csw_config, "leavegen 1 10 5");
+}
+
+void test_autoplay(void) {
+  test_autoplay_default();
+  test_autoplay_leavegen();
+}
