@@ -960,7 +960,7 @@ void execute_leave_gen(Config *config) {
 
   autoplay_results_reset_options(config->autoplay_results);
 
-  const char *gen_str = config_get_parg_value(config, ARG_TOKEN_INFER, 0);
+  const char *gen_str = config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 0);
   int gens;
   if (!string_to_int_or_set_error_status(
           gen_str, 1, INT_MAX, config->error_status,
@@ -969,7 +969,7 @@ void execute_leave_gen(Config *config) {
     return;
   }
 
-  const char *iter_str = config_get_parg_value(config, ARG_TOKEN_INFER, 1);
+  const char *iter_str = config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 1);
   int iters;
   if (!string_to_int_or_set_error_status(
           iter_str, 1, INT_MAX, config->error_status,
@@ -979,7 +979,7 @@ void execute_leave_gen(Config *config) {
   }
 
   const char *max_force_draw_turn_str =
-      config_get_parg_value(config, ARG_TOKEN_INFER, 2);
+      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 2);
   int max_force_draw_turns;
   if (!string_to_int_or_set_error_status(
           max_force_draw_turn_str, 1, INT_MAX, config->error_status,

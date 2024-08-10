@@ -9,6 +9,7 @@
 #include "../../src/def/autoplay_defs.h"
 #include "../../src/def/config_defs.h"
 #include "../../src/def/game_defs.h"
+#include "../../src/def/leave_gen_defs.h"
 #include "../../src/def/move_defs.h"
 #include "../../src/def/players_data_defs.h"
 #include "../../src/def/simmer_defs.h"
@@ -444,6 +445,45 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "create klx CSW50 english",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE);
+  config_destroy(config);
+  config = config_create_default_test();
+  // Leave Gen
+  assert_config_exec_status(config, "leavegen 2 20 4",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+
+  load_and_exec_config_or_die(config, "set -l1 CSW21 -l2 NWL20");
+  assert_config_exec_status(config, "leavegen 2 20 0",
+                            ERROR_STATUS_TYPE_LEAVE_GEN,
+                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+
+  load_and_exec_config_or_die(config,
+                              "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
+  assert_config_exec_status(config, "leavegen 2 20 4",
+                            ERROR_STATUS_TYPE_LEAVE_GEN,
+                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+
+  load_and_exec_config_or_die(config,
+                              "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
+  assert_config_exec_status(config, "leavegen 2 20 4",
+                            ERROR_STATUS_TYPE_LEAVE_GEN,
+                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+
+  load_and_exec_config_or_die(config,
+                              "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 CSW21");
+
+  assert_config_exec_status(config, "leavegen 0 20 4",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+
+  assert_config_exec_status(config, "leavegen 2 0 4",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+
+  assert_config_exec_status(config, "leavegen 2 20 0",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+
   config_destroy(config);
 }
 
