@@ -352,7 +352,7 @@ void test_config_exec_parse_args(void) {
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
   assert_config_exec_status(config, "infer 0 3", ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "autoplay game",
+  assert_config_exec_status(config, "autoplay game 10",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
 
@@ -432,14 +432,14 @@ void test_config_exec_parse_args(void) {
                             CONFIG_LOAD_STATUS_MISSING_ARG);
   // Autoplay
   assert_config_exec_status(
-      config, "autoplay move -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",
+      config, "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
       ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_INVALID_OPTIONS);
   assert_config_exec_status(
-      config, "autoplay ,,, -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",
+      config, "autoplay ,,, 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
       ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_EMPTY_OPTIONS);
-  assert_config_exec_status(
-      config, "autoplay game -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",
-      ERROR_STATUS_TYPE_NONE, 0);
+  assert_config_exec_status(config,
+                            "autoplay game 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+                            ERROR_STATUS_TYPE_NONE, 0);
 
   // Create
   assert_config_exec_status(config, "create klx CSW50 english",

@@ -858,8 +858,9 @@ char *status_infer(Config __attribute__((unused)) * config) {
 void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args, int gens,
                                int max_force_draw_turn,
-                               autoplay_t autoplay_type) {
-  autoplay_args->games_per_gen = config_get_max_iterations(config);
+                               autoplay_t autoplay_type,
+                               int num_games_per_gen) {
+  autoplay_args->games_per_gen = num_games_per_gen;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->thread_control = config_get_thread_control(config);
   autoplay_args->gens = gens;
@@ -872,12 +873,13 @@ void config_fill_autoplay_args(const Config *config,
 autoplay_status_t config_autoplay(const Config *config,
                                   AutoplayResults *autoplay_results, int gens,
                                   int max_force_draw_turn,
-                                  autoplay_t autoplay_type) {
+                                  autoplay_t autoplay_type,
+                                  int num_games_per_gen) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
   config_fill_autoplay_args(config, &args, gens, max_force_draw_turn,
-                            autoplay_type);
+                            autoplay_type, num_games_per_gen);
   return autoplay(&args, autoplay_results);
 }
 
@@ -900,8 +902,18 @@ void execute_autoplay(Config *config) {
     return;
   }
 
+  const char *num_games_str =
+      config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 1);
+  int num_games;
+  if (!string_to_int_or_set_error_status(
+          num_games_str, 1, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &num_games)) {
+    return;
+  }
+
   status = config_autoplay(config, config->autoplay_results, 1, 0,
-                           AUTOPLAY_TYPE_DEFAULT);
+                           AUTOPLAY_TYPE_DEFAULT, num_games);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)status);
 }
@@ -969,12 +981,13 @@ void execute_leave_gen(Config *config) {
     return;
   }
 
-  const char *iter_str = config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 1);
-  int iters;
+  const char *num_games_str =
+      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 1);
+  int num_games;
   if (!string_to_int_or_set_error_status(
-          iter_str, 1, INT_MAX, config->error_status,
+          num_games_str, 1, INT_MAX, config->error_status,
           ERROR_STATUS_TYPE_CONFIG_LOAD,
-          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &iters)) {
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &num_games)) {
     return;
   }
 
@@ -990,7 +1003,7 @@ void execute_leave_gen(Config *config) {
 
   autoplay_status_t autoplay_status =
       config_autoplay(config, config->autoplay_results, gens,
-                      max_force_draw_turns, AUTOPLAY_TYPE_LEAVE_GEN);
+                      max_force_draw_turns, AUTOPLAY_TYPE_LEAVE_GEN, num_games);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)autoplay_status);
 }
@@ -1622,7 +1635,7 @@ Config *config_create_default(void) {
                     status_sim);
   parsed_arg_create(config, ARG_TOKEN_INFER, "infer", 2, 3, execute_infer,
                     status_infer);
-  parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 1, 1,
+  parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2,
                     execute_autoplay, status_autoplay);
   parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
                     status_convert);

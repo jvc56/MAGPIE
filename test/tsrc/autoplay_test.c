@@ -17,11 +17,11 @@
 #include "test_util.h"
 
 void test_autoplay_default(void) {
-  Config *csw_config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 -it "
-      "100 -gp true -threads 11");
+  Config *csw_config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1  -gp true -threads 11");
 
-  load_and_exec_config_or_die(csw_config, "autoplay games -seed 26");
+  load_and_exec_config_or_die(csw_config, "autoplay games 100 -seed 26");
 
   char *ar1_str = autoplay_results_to_string(
       config_get_autoplay_results(csw_config), false);
@@ -29,7 +29,7 @@ void test_autoplay_default(void) {
                                 "60.687820 460.940000 60.687820\n");
 
   load_and_exec_config_or_die(csw_config,
-                              "autoplay games -r1 best -r2 best -seed 26");
+                              "autoplay games 100 -r1 best -r2 best -seed 26");
 
   char *ar2_str = autoplay_results_to_string(
       config_get_autoplay_results(csw_config), false);
@@ -37,8 +37,8 @@ void test_autoplay_default(void) {
   // as autoplay using the "all" move recorder.
   assert_strings_equal(ar1_str, ar2_str);
 
-  load_and_exec_config_or_die(
-      csw_config, "autoplay games -it 7 -gp false -threads 2 -seed 27");
+  load_and_exec_config_or_die(csw_config,
+                              "autoplay games 7 -gp false -threads 2 -seed 27");
 
   // Autoplay should reset the stats
   char *ar3_str = autoplay_results_to_string(
@@ -51,8 +51,8 @@ void test_autoplay_default(void) {
   char *multi_thread_str = NULL;
   for (int i = 0; i < 11; i++) {
     char *options_string =
-        get_formatted_string("autoplay games -r1 best -r2 best -gp false "
-                             "-threads %d -seed 28 -it 20",
+        get_formatted_string("autoplay games 20 -r1 best -r2 best -gp false "
+                             "-threads %d -seed 28",
                              i + 1);
 
     load_and_exec_config_or_die(csw_config, options_string);
@@ -83,10 +83,11 @@ void test_autoplay_leavegen(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 best -r2 best -numplays 1");
 
   load_and_exec_config_or_die(csw_config, "leavegen 2 10 5");
+
+  config_destroy(csw_config);
 }
 
 void test_autoplay(void) {
-  // FIXME: uncomment
-  // test_autoplay_default();
+  test_autoplay_default();
   test_autoplay_leavegen();
 }

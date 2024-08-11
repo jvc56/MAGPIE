@@ -1,9 +1,9 @@
 #include "leave_list.h"
 
 #include "bag.h"
-#include "bag_bitmaps.h"
 #include "game.h"
 #include "klv.h"
+#include "leave_bitmaps.h"
 #include "leave_count_hashmap.h"
 #include "rack.h"
 
@@ -31,7 +31,7 @@ struct LeaveList {
   LeaveListItem **leaves_ordered_by_klv_index;
   LeaveListItem **leaves_ordered_by_count;
   LeaveCountHashMap *leave_count_hashmap;
-  BagBitMaps *bag_bitmaps;
+  LeaveBitMaps *leave_bitmaps;
 };
 
 LeaveListItem *leave_list_item_create(int count_index) {
@@ -57,7 +57,7 @@ int leave_list_set_item_leaves(LeaveList *leave_list,
       if (word_index == KLV_UNFOUND_INDEX) {
         log_fatal("word index not found in klv: %u", word_index);
       }
-      bag_bitmaps_set_bitmap(leave_list->bag_bitmaps, leave, word_index - 1);
+      leave_bitmaps_set_leave(leave_list->leave_bitmaps, leave, word_index - 1);
       number_of_set_leaves++;
     }
   } else {
@@ -131,8 +131,8 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv) {
 
   Rack *bag_as_rack = get_new_bag_as_rack(ld);
 
-  leave_list->bag_bitmaps =
-      bag_bitmaps_create(ld, leave_list->number_of_leaves);
+  leave_list->leave_bitmaps =
+      leave_bitmaps_create(ld, leave_list->number_of_leaves);
 
   const int number_of_set_leaves = leave_list_set_item_leaves(
       leave_list, ld, bag_as_rack, leave_list->subleave,
@@ -161,7 +161,7 @@ void leave_list_destroy(LeaveList *leave_list) {
   free(leave_list->empty_leave);
   leave_count_hashmap_destroy(leave_list->leave_count_hashmap);
   rack_destroy(leave_list->subleave);
-  bag_bitmaps_destroy(leave_list->bag_bitmaps);
+  leave_bitmaps_destroy(leave_list->leave_bitmaps);
   free(leave_list);
 }
 
@@ -181,7 +181,7 @@ void leave_list_swap_items(LeaveList *leave_list, int i, int j) {
   leave_list->leaves_ordered_by_count[i]->count_index = i;
   leave_list->leaves_ordered_by_count[j]->count_index = j;
 
-  bag_bitmaps_swap(leave_list->bag_bitmaps, i, j);
+  leave_bitmaps_swap_leaves(leave_list->leave_bitmaps, i, j);
 }
 
 void leave_list_add_subleave(LeaveList *leave_list, int klv_index,
@@ -220,9 +220,15 @@ void generate_subleaves(LeaveList *leave_list, uint32_t node_index,
     ml++;
   }
   if (ml == ld_size) {
-    if (!rack_is_empty(leave_list->subleave)) {
-      leave_list_add_subleave(leave_list, word_index - 1,
-                              leave_list->move_equity);
+    const int number_of_letters_in_subleave =
+        rack_get_total_letters(leave_list->subleave);
+    if (number_of_letters_in_subleave > 0) {
+      // Superleaves will only contain all possible subleaves
+      // of size RACK_SIZE - 1 and below.
+      if (number_of_letters_in_subleave < (RACK_SIZE)) {
+        leave_list_add_subleave(leave_list, word_index - 1,
+                                leave_list->move_equity);
+      }
     } else {
       leave_list_item_increment_count(leave_list->empty_leave,
                                       leave_list->move_equity);
@@ -270,8 +276,8 @@ void leave_list_write_to_klv(LeaveList *leave_list) {
 
 bool leave_list_draw_rarest_available_leave(LeaveList *leave_list, Bag *bag,
                                             Rack *rack, int player_draw_index) {
-  return bag_bitmaps_draw_first_available_subrack(leave_list->bag_bitmaps, bag,
-                                                  rack, player_draw_index);
+  return leave_bitmaps_draw_first_available_subrack(
+      leave_list->leave_bitmaps, bag, rack, player_draw_index);
 }
 
 int leave_list_get_number_of_leaves(const LeaveList *leave_list) {
@@ -303,7 +309,7 @@ void string_builder_add_most_or_least_common_leaves(
     const LetterDistribution *ld, int n, bool most_common) {
   const int number_of_leaves = leave_list->number_of_leaves;
   int i = 0;
-  if (!most_common) {
+  if (most_common) {
     i = number_of_leaves - 1;
     string_builder_add_formatted_string(sb, "Top %d most common leaves:\n", n);
   } else {
@@ -314,7 +320,7 @@ void string_builder_add_most_or_least_common_leaves(
     // Here we use the subleave to help print the most/leave common leaves
     Rack *rack = leave_list->subleave;
     rack_reset(rack);
-    bag_bitmaps_draw_rack(leave_list->bag_bitmaps, NULL, rack, 0, i);
+    leave_bitmaps_draw_to_leave(leave_list->leave_bitmaps, NULL, rack, 0, i);
     string_builder_add_formatted_string(sb, "%d:", i);
     string_builder_add_rack(sb, rack, ld, false);
     string_builder_add_formatted_string(sb, " %d\n", count);

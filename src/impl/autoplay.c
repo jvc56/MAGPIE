@@ -46,14 +46,15 @@ void leave_gen_prebroadcast_func(void *data) {
   SharedData *shared_data = (SharedData *)data;
   leave_list_write_to_klv(shared_data->leave_list);
   shared_data->gens_completed++;
+
   // Write the KLV for the current generation.
   char *label = get_formatted_string("_gen_%d", shared_data->gens_completed);
   char *gen_labeled_klv_name = insert_before_dot(shared_data->klv->name, label);
   char *gen_labeled_klv_filename = data_filepaths_get_writable_filename(
       shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV);
-  klv_write(shared_data->klv, gen_labeled_klv_name);
-  free(gen_labeled_klv_name);
-  free(label);
+
+  klv_write(shared_data->klv, gen_labeled_klv_filename);
+
   // Print info about the current state.
   StringBuilder *leave_gen_sb = string_builder_create();
   string_builder_add_formatted_string(leave_gen_sb, "Games: %d\n",
@@ -76,9 +77,9 @@ void leave_gen_prebroadcast_func(void *data) {
         shared_data->forced_draw_turns_count[i]);
   }
 
-  char *report_name_prefix = cut_off_after_char(gen_labeled_klv_filename, '.');
-  char *report_name =
-      get_formatted_string("%s%s.txt", report_name_prefix, label, ".txt");
+  char *report_name_prefix =
+      cut_off_after_last_char(gen_labeled_klv_filename, '.');
+  char *report_name = get_formatted_string("%s_report.txt", report_name_prefix);
 
   write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb));
   string_builder_destroy(leave_gen_sb);

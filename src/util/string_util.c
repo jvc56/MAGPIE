@@ -762,7 +762,24 @@ const char *get_base_filename(const char *filepath) {
   return base_filename;
 }
 
-char *cut_off_after_char(const char *str, char ch) {
+char *cut_off_after_last_char(const char *str, char ch) {
+  char *pos = strrchr(str, ch);
+
+  if (pos == NULL) {
+    return string_duplicate(str);
+  }
+
+  size_t new_len = pos - str;
+
+  char *new_str = (char *)malloc_or_die(new_len + 1);
+
+  strncpy(new_str, str, new_len);
+  new_str[new_len] = '\0';
+
+  return new_str;
+}
+
+char *cut_off_after_first_char(const char *str, char ch) {
   char *pos = strchr(str, ch);
 
   if (pos == NULL) {

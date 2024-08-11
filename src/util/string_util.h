@@ -75,7 +75,8 @@ const char *string_builder_peek(const StringBuilder *string_builder);
 char *string_builder_dump(const StringBuilder *string_builder, size_t *length);
 char *get_dirpath_from_filepath(const char *filepath);
 const char *get_base_filename(const char *filepath);
-char *cut_off_after_char(const char *str, char ch);
+char *cut_off_after_last_char(const char *str, char ch);
+char *cut_off_after_first_char(const char *str, char ch);
 char *insert_before_dot(const char *str, const char *insert);
 
 #endif

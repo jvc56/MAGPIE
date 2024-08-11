@@ -331,6 +331,20 @@ void test_leave_list_add_leave(void) {
   assert(
       within_epsilon(klv_get_leave_value(klv, rack), 7.0 - empty_leave_mean));
 
+  // Ensure that adding a full rack runs without error
+  const double full_rack_value = 1013.0;
+  rack_set_to_string(ld, rack, "PQRSTUV");
+  leave_list_add_leave(leave_list, klv, rack, full_rack_value);
+
+  assert_leave_list_item(ld, klv, leave_list, "S", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "ST", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "STUV", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "P", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "Q", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "R", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "PQRSTU", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "QRSTUV", -1, 1, full_rack_value);
+
   rack_destroy(expected_rack);
   rack_destroy(rack);
   bag_destroy(bag);

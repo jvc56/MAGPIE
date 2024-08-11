@@ -46,7 +46,7 @@ void test_board_layout_correctness_super(void) {
   uint64_t seed = time(NULL);
 
   char *options_string =
-      get_formatted_string("set -it 500 -gp true -threads 11 -seed %ld", seed);
+      get_formatted_string("set -gp true -threads 11 -seed %ld", seed);
 
   load_and_exec_config_or_die(config, options_string);
 
@@ -57,7 +57,7 @@ void test_board_layout_correctness_super(void) {
   AutoplayResults *ar = autoplay_results_create();
 
   autoplay_status_t status =
-      config_autoplay(config, ar, 1, 0, AUTOPLAY_TYPE_DEFAULT);
+      config_autoplay(config, ar, 1, 0, AUTOPLAY_TYPE_DEFAULT, 500);
   assert(status == AUTOPLAY_STATUS_SUCCESS);
 
   autoplay_results_destroy(ar);

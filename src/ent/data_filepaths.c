@@ -188,7 +188,7 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
     if (!data_paths) {
       log_fatal("data path is null for filepath type %d\n", type);
     }
-    char *first_data_path = cut_off_after_char(data_paths, ':');
+    char *first_data_path = cut_off_after_first_char(data_paths, ':');
     writable_filepath = get_filepath(first_data_path, data_name, type);
     free(first_data_path);
   }
