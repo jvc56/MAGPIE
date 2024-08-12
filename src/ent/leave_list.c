@@ -270,7 +270,9 @@ void leave_list_write_to_klv(LeaveList *leave_list) {
   double average_leave_value = leave_list->empty_leave->mean;
   KLV *klv = leave_list->klv;
   for (int i = 0; i < number_of_leaves; i++) {
-    klv->leave_values[i] = items[i]->mean - average_leave_value;
+    if (items[i]->count > 0) {
+      klv->leave_values[i] = items[i]->mean - average_leave_value;
+    }
   }
 }
 
@@ -311,9 +313,11 @@ void string_builder_add_most_or_least_common_leaves(
   int i = 0;
   if (most_common) {
     i = number_of_leaves - 1;
-    string_builder_add_formatted_string(sb, "Top %d most common leaves:\n", n);
+    string_builder_add_formatted_string(sb, "Top %d most common leaves:\n\n",
+                                        n);
   } else {
-    string_builder_add_formatted_string(sb, "Top %d least common leaves:\n", n);
+    string_builder_add_formatted_string(sb, "Top %d least common leaves:\n\n",
+                                        n);
   }
   while (i < number_of_leaves && i >= 0 && n > 0) {
     const int count = leave_list->leaves_ordered_by_count[i]->count;
@@ -321,14 +325,14 @@ void string_builder_add_most_or_least_common_leaves(
     Rack *rack = leave_list->subleave;
     rack_reset(rack);
     leave_bitmaps_draw_to_leave(leave_list->leave_bitmaps, NULL, rack, 0, i);
-    string_builder_add_formatted_string(sb, "%d:", i);
+    string_builder_add_formatted_string(sb, "%-*d %-*d ", 7, i + 1, 7, count);
     string_builder_add_rack(sb, rack, ld, false);
-    string_builder_add_formatted_string(sb, " %d\n", count);
+    string_builder_add_char(sb, '\n');
     n--;
     if (most_common) {
-      i++;
-    } else {
       i--;
+    } else {
+      i++;
     }
   }
 }
