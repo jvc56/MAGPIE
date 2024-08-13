@@ -398,6 +398,9 @@ static inline ld_t ld_get_type_from_lex_name(const char *lexicon_name) {
   } else {
     log_fatal("default letter distribution not found for lexicon '%s'\n",
               lexicon_name);
+  #if __has_builtin(__builtin_unreachable) 
+    __builtin_unreachable();
+  #endif
   }
   return ld_type;
 }
@@ -405,7 +408,7 @@ static inline ld_t ld_get_type_from_lex_name(const char *lexicon_name) {
 static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
   ld_t ld_type;
   if (has_iprefix(ENGLISH_LETTER_DISTRIBUTION_NAME, ld_name)) {
-    ld_type = LD_TYPE_ENGLISH;
+      ld_type = LD_TYPE_ENGLISH;
   } else if (has_iprefix(GERMAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
     ld_type = LD_TYPE_GERMAN;
   } else if (has_iprefix(NORWEGIAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
@@ -420,6 +423,9 @@ static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
     log_fatal(
         "default letter distribution not found for letter distribution '%s'\n",
         ld_name);
+  #if __has_builtin(__builtin_unreachable) 
+    __builtin_unreachable();
+  #endif
   }
   return ld_type;
 }
