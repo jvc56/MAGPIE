@@ -8,9 +8,9 @@
 
 #include "../../src/ent/autoplay_results.h"
 #include "../../src/ent/stats.h"
-#include "../../src/impl/config.h"
 
 #include "../../src/impl/autoplay.h"
+#include "../../src/impl/config.h"
 
 #include "../../src/util/string_util.h"
 
@@ -84,7 +84,8 @@ void test_autoplay_leavegen(void) {
 
   load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed");
   load_and_exec_config_or_die(csw_config, "set -leaves CSW21_zeroed");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 10 100");
+  load_and_exec_config_or_die(csw_config, "leavegen 2 100 10");
+  load_and_exec_config_or_die(csw_config, "leavegen 2 100 0");
   load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed_ml");
   load_and_exec_config_or_die(csw_config,
                               "set -leaves CSW21_zeroed_ml -threads 11");

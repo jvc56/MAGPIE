@@ -995,11 +995,13 @@ void execute_leave_gen(Config *config) {
       config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 2);
   int max_force_draw_turns;
   if (!string_to_int_or_set_error_status(
-          max_force_draw_turn_str, 1, INT_MAX, config->error_status,
+          max_force_draw_turn_str, 0, INT_MAX, config->error_status,
           ERROR_STATUS_TYPE_CONFIG_LOAD,
           CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &max_force_draw_turns)) {
     return;
   }
+  // Convert from 1-indexed to 0-indexed
+  max_force_draw_turns--;
 
   autoplay_status_t autoplay_status =
       config_autoplay(config, config->autoplay_results, gens,

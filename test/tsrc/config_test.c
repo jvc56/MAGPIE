@@ -480,7 +480,7 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
 
-  assert_config_exec_status(config, "leavegen 2 20 0",
+  assert_config_exec_status(config, "leavegen 2 20 -1",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
 
