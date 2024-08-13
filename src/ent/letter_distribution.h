@@ -379,47 +379,55 @@ static inline bool ld_types_compat(ld_t ld_type_1, ld_t ld_type_2) {
 }
 
 static inline ld_t ld_get_type_from_lex_name(const char *lexicon_name) {
+  ld_t ld_type;
   if (has_iprefix("CSW", lexicon_name) || has_iprefix("NWL", lexicon_name) ||
       has_iprefix("TWL", lexicon_name) ||
       has_iprefix("America", lexicon_name) ||
       has_iprefix("CEL", lexicon_name)) {
-    return LD_TYPE_ENGLISH;
+    ld_type = LD_TYPE_ENGLISH;
   } else if (has_iprefix("RD", lexicon_name)) {
-    return LD_TYPE_GERMAN;
+    ld_type = LD_TYPE_GERMAN;
   } else if (has_iprefix("NSF", lexicon_name)) {
-    return LD_TYPE_NORWEGIAN;
+    ld_type = LD_TYPE_NORWEGIAN;
   } else if (has_iprefix("DISC", lexicon_name)) {
-    return LD_TYPE_CATALAN;
+    ld_type = LD_TYPE_CATALAN;
   } else if (has_iprefix("FRA", lexicon_name)) {
-    return LD_TYPE_FRENCH;
+    ld_type = LD_TYPE_FRENCH;
   } else if (has_iprefix("OSPS", lexicon_name)) {
-    return LD_TYPE_POLISH;
+    ld_type = LD_TYPE_POLISH;
   } else {
     log_fatal("default letter distribution not found for lexicon '%s'\n",
               lexicon_name);
-    return LD_TYPE_ENGLISH;
+  #if __has_builtin(__builtin_unreachable) 
+    __builtin_unreachable();
+  #endif
   }
+  return ld_type;
 }
 
 static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
+  ld_t ld_type;
   if (has_iprefix(ENGLISH_LETTER_DISTRIBUTION_NAME, ld_name)) {
-    return LD_TYPE_ENGLISH;
+      ld_type = LD_TYPE_ENGLISH;
   } else if (has_iprefix(GERMAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
-    return LD_TYPE_GERMAN;
+    ld_type = LD_TYPE_GERMAN;
   } else if (has_iprefix(NORWEGIAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
-    return LD_TYPE_NORWEGIAN;
+    ld_type = LD_TYPE_NORWEGIAN;
   } else if (has_iprefix(CATALAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
-    return LD_TYPE_CATALAN;
+    ld_type = LD_TYPE_CATALAN;
   } else if (has_iprefix(FRENCH_LETTER_DISTRIBUTION_NAME, ld_name)) {
-    return LD_TYPE_FRENCH;
+    ld_type = LD_TYPE_FRENCH;
   } else if (has_iprefix(POLISH_LETTER_DISTRIBUTION_NAME, ld_name)) {
-    return LD_TYPE_POLISH;
+    ld_type = LD_TYPE_POLISH;
   } else {
     log_fatal(
         "default letter distribution not found for letter distribution '%s'\n",
         ld_name);
-    return LD_TYPE_ENGLISH;
+  #if __has_builtin(__builtin_unreachable) 
+    __builtin_unreachable();
+  #endif
   }
+  return ld_type;
 }
 
 // Use the lexicon name in combination with the constant
