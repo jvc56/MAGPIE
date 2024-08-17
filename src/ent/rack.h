@@ -83,9 +83,8 @@ static inline bool racks_are_equal(const Rack *rack1, const Rack *rack2) {
 // Returns true if rack_to_update contains value_to_sub
 // and subtracts value_to_sub from rack_to_update
 // on success.
-// This function is not in the critical path, so
-// we can leave it in the .c file unlike other rack functions.
-static inline bool rack_subtract(Rack *rack_to_update, Rack *value_to_sub) {
+static inline bool rack_subtract(Rack *rack_to_update,
+                                 const Rack *value_to_sub) {
   for (int i = 0; i < rack_to_update->dist_size; i++) {
     if (rack_to_update->array[i] < value_to_sub->array[i]) {
       return false;
@@ -94,6 +93,13 @@ static inline bool rack_subtract(Rack *rack_to_update, Rack *value_to_sub) {
     rack_to_update->number_of_letters -= value_to_sub->array[i];
   }
   return true;
+}
+
+static inline void rack_add(Rack *rack_to_update, const Rack *value_to_add) {
+  for (int i = 0; i < rack_to_update->dist_size; i++) {
+    rack_to_update->array[i] += value_to_add->array[i];
+    rack_to_update->number_of_letters += value_to_add->array[i];
+  }
 }
 
 static inline int rack_contains_subrack(const Rack *rack, const Rack *subrack) {

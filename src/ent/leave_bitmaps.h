@@ -181,7 +181,8 @@ static inline int get_number_of_letters_in_unit(BITMAP_UNIT x) {
 // Returns false if there is no valid leave.
 static inline bool
 leave_bitmaps_draw_first_available_subrack(LeaveBitMaps *lb, Bag *bag,
-                                           Rack *rack, int player_draw_index) {
+                                           Rack *rack, Rack *empty_rack,
+                                           int player_draw_index) {
   const int dist_size = rack_get_dist_size(rack);
   for (int i = 0; i < dist_size; i++) {
     rack_add_letters(rack, i, bag_get_letter(bag, i));
@@ -212,6 +213,9 @@ leave_bitmaps_draw_first_available_subrack(LeaveBitMaps *lb, Bag *bag,
     }
     if (leave_is_available) {
       leave_bitmaps_draw_to_leave(lb, bag, rack, player_draw_index, i);
+      if (empty_rack) {
+        leave_bitmaps_draw_to_leave(lb, NULL, empty_rack, -1, i);
+      }
       return true;
     }
   }

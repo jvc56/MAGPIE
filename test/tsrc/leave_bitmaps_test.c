@@ -22,6 +22,7 @@ void test_leave_bitmaps(void) {
 
   Game *game = config_game_create(config);
   Rack *rack = player_get_rack(game_get_player(game, 0));
+  Rack *empty_rack = rack_duplicate(rack);
   Bag *bag = game_get_bag(game);
 
   Rack *expected_rack = rack_create(ld_get_size(ld));
@@ -58,7 +59,7 @@ void test_leave_bitmaps(void) {
   bag_add_letter(bag, ld_hl_to_ml(ld, "X"), 0);
   bag_add_letter(bag, ld_hl_to_ml(ld, "Z"), 0);
 
-  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack,
+  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack, NULL,
                                                     player_draw_index));
 
   rack_set_to_string(ld, expected_rack, "CDE");
@@ -67,7 +68,7 @@ void test_leave_bitmaps(void) {
 
   bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
 
-  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack,
+  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack, NULL,
                                                     player_draw_index));
 
   rack_set_to_string(ld, expected_rack, "ABC");
@@ -78,7 +79,7 @@ void test_leave_bitmaps(void) {
 
   leave_bitmaps_swap_leaves(lb, 0, 1);
 
-  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack,
+  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack, NULL,
                                                     player_draw_index));
 
   rack_set_to_string(ld, expected_rack, "BCD");
@@ -89,7 +90,7 @@ void test_leave_bitmaps(void) {
 
   bag_draw_letter(bag, ld_hl_to_ml(ld, "C"), 0);
 
-  assert(!leave_bitmaps_draw_first_available_subrack(lb, bag, rack,
+  assert(!leave_bitmaps_draw_first_available_subrack(lb, bag, rack, NULL,
                                                      player_draw_index));
   assert(bag_get_tiles(bag) == 6);
 
@@ -98,7 +99,7 @@ void test_leave_bitmaps(void) {
   bag_add_letter(bag, ld_hl_to_ml(ld, "Y"), 0);
   bag_add_letter(bag, ld_hl_to_ml(ld, "Y"), 0);
 
-  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack,
+  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack, NULL,
                                                     player_draw_index));
 
   rack_set_to_string(ld, expected_rack, "VVYY");
@@ -128,7 +129,7 @@ void test_leave_bitmaps(void) {
 
   // The FGGHIIJK is available in the pool but is more than 7
   // letters so it is not a valid leave.
-  assert(!leave_bitmaps_draw_first_available_subrack(lb, bag, rack,
+  assert(!leave_bitmaps_draw_first_available_subrack(lb, bag, rack, NULL,
                                                      player_draw_index));
   assert(bag_get_tiles(bag) == 10);
 
@@ -141,13 +142,17 @@ void test_leave_bitmaps(void) {
 
   // The FGGHIJK is available in the pool and is exactly 7 letters so it should
   // be available.
-  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack,
+  rack_reset(empty_rack);
+  assert(leave_bitmaps_draw_first_available_subrack(lb, bag, rack, empty_rack,
                                                     player_draw_index));
   assert(bag_get_tiles(bag) == 8);
   rack_set_to_string(ld, expected_rack, "FGGHIJK");
   assert(racks_are_equal(expected_rack, rack));
+  rack_set_to_string(ld, expected_rack, "FGGHIJ");
+  assert(racks_are_equal(expected_rack, empty_rack));
 
   rack_destroy(expected_rack);
+  rack_destroy(empty_rack);
   leave_bitmaps_destroy(lb);
   game_destroy(game);
   config_destroy(config);

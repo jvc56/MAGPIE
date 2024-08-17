@@ -10,13 +10,18 @@
 
 #include "../util/util.h"
 
+typedef enum {
+  AUTOPLAY_RECORDER_TYPE_GAME,
+  NUMBER_OF_AUTOPLAY_RECORDERS,
+} autoplay_recorder_t;
+
 typedef struct Recorder Recorder;
 
 typedef void (*recorder_reset_func_t)(Recorder *);
 typedef void (*recorder_create_data_func_t)(Recorder *, const Recorder *);
 typedef void (*recorder_destroy_data_func_t)(Recorder *);
 typedef void (*recorder_add_move_func_t)(Recorder *, const Move *);
-typedef void (*recorder_add_game_func_t)(Recorder *, const Game *);
+typedef void (*recorder_add_game_func_t)(Recorder *, const Game *, int turns);
 typedef void (*recorder_combine_func_t)(Recorder **, int, Recorder *);
 typedef char *(*recorder_str_func_t)(Recorder *, bool);
 
@@ -53,23 +58,31 @@ void add_game_noop(Recorder __attribute__((unused)) * recorder,
 
 typedef struct GameData {
   int total_games;
+  int total_turns;
   int p0_wins;
   int p0_losses;
   int p0_ties;
   int p0_firsts;
   Stat *p0_score;
   Stat *p1_score;
+  Stat *turns;
+  int game_end_reasons[NUMBER_OF_GAME_END_REASONS];
 } GameData;
 
 void game_data_reset(Recorder *recorder) {
   GameData *gd = (GameData *)recorder->data;
   gd->total_games = 0;
+  gd->total_turns = 0;
   gd->p0_wins = 0;
   gd->p0_losses = 0;
   gd->p0_ties = 0;
   gd->p0_firsts = 0;
   stat_reset(gd->p0_score);
   stat_reset(gd->p1_score);
+  stat_reset(gd->turns);
+  for (int i = 0; i < NUMBER_OF_GAME_END_REASONS; i++) {
+    gd->game_end_reasons[i] = 0;
+  }
 }
 
 void game_data_create(Recorder *recorder, const Recorder
@@ -78,6 +91,7 @@ void game_data_create(Recorder *recorder, const Recorder
   GameData *game_data = malloc_or_die(sizeof(GameData));
   game_data->p0_score = stat_create(true);
   game_data->p1_score = stat_create(true);
+  game_data->turns = stat_create(true);
   recorder->data = game_data;
   recorder->shared_data = NULL;
   game_data_reset(recorder);
@@ -90,10 +104,11 @@ void game_data_destroy(Recorder *recorder) {
   GameData *gd = (GameData *)recorder->data;
   stat_destroy(gd->p0_score);
   stat_destroy(gd->p1_score);
+  stat_destroy(gd->turns);
   free(gd);
 }
 
-void game_data_add_game(Recorder *recorder, const Game *game) {
+void game_data_add_game(Recorder *recorder, const Game *game, int turns) {
   int p0_game_score = player_get_score(game_get_player(game, 0));
   int p1_game_score = player_get_score(game_get_player(game, 1));
   GameData *gd = (GameData *)recorder->data;
@@ -110,6 +125,9 @@ void game_data_add_game(Recorder *recorder, const Game *game) {
   }
   stat_push(gd->p0_score, (double)p0_game_score, 1);
   stat_push(gd->p1_score, (double)p1_game_score, 1);
+  stat_push(gd->turns, (double)turns, 1);
+  gd->total_turns += turns;
+  gd->game_end_reasons[game_get_game_end_reason(game)]++;
 }
 
 void game_data_combine(Recorder **recorder_list, int recorder_list_size,
@@ -118,6 +136,7 @@ void game_data_combine(Recorder **recorder_list, int recorder_list_size,
       malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
   Stat **p1_score_stats =
       malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
+  Stat **turns_stats = malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
 
   GameData *gd_primary = (GameData *)primary_recorder->data;
 
@@ -130,12 +149,19 @@ void game_data_combine(Recorder **recorder_list, int recorder_list_size,
     gd_primary->p0_firsts += gd_i->p0_firsts;
     p0_score_stats[i] = gd_i->p0_score;
     p1_score_stats[i] = gd_i->p1_score;
+    turns_stats[i] = gd_i->turns;
+    gd_primary->total_turns += gd_i->total_turns;
+    for (int j = 0; j < NUMBER_OF_GAME_END_REASONS; j++) {
+      gd_primary->game_end_reasons[j] += gd_i->game_end_reasons[j];
+    }
   }
 
   stats_combine(p0_score_stats, recorder_list_size, gd_primary->p0_score);
   stats_combine(p1_score_stats, recorder_list_size, gd_primary->p1_score);
+  stats_combine(turns_stats, recorder_list_size, gd_primary->turns);
   free(p0_score_stats);
   free(p1_score_stats);
+  free(turns_stats);
 }
 
 char *game_data_ucgi_str(const GameData *gd) {
@@ -144,6 +170,14 @@ char *game_data_ucgi_str(const GameData *gd) {
       gd->p0_wins, gd->p0_losses, gd->p0_ties, gd->p0_firsts,
       stat_get_mean(gd->p0_score), stat_get_stdev(gd->p0_score),
       stat_get_mean(gd->p1_score), stat_get_stdev(gd->p1_score));
+}
+
+char *get_total_and_percentage_string(int total, double pct) {
+  return get_formatted_string("%d (%2.2f%%)", total, pct * 100.0);
+}
+
+char *get_score_and_dev_string(double score, double stdev) {
+  return get_formatted_string("%2.2f %2.2f", score, stdev);
 }
 
 char *game_data_human_readable_str(const GameData *gd) {
@@ -158,23 +192,63 @@ char *game_data_human_readable_str(const GameData *gd) {
   int p0_ties = gd->p0_ties;
   double p0_tie_pct = (double)p0_ties / gd->total_games;
 
+  const int col_witdth = 16;
   StringBuilder *sb = string_builder_create();
-  string_builder_add_string(sb, "Player 1");
-  string_builder_add_formatted_string(sb, "%10s", "");
-  string_builder_add_string(sb, "Player 2");
-  string_builder_add_formatted_string(sb, "%10s", "");
-  string_builder_add_formatted_string(sb, "Wins    %d %f %d %f %d", p0_wins,
-                                      p0_win_pct, p1_wins, p1_win_pct,
+
+  string_builder_add_formatted_string(sb, "Games Played: %d\n",
                                       gd->total_games);
-  string_builder_add_formatted_string(sb, "Losses  %d %f %d %f %d", p0_losses,
-                                      p0_loss_pct, p1_losses, p1_loss_pct,
-                                      gd->total_games);
-  string_builder_add_formatted_string(sb, "Ties    %d %f %d %f %d", p0_ties,
-                                      p0_tie_pct, p0_ties, p0_tie_pct, p0_ties);
-  string_builder_add_formatted_string(
-      sb, "Score   %f %f %f %f", stat_get_mean(gd->p0_score),
-      stat_get_stdev(gd->p0_score), stat_get_mean(gd->p1_score),
-      stat_get_stdev(gd->p1_score));
+  string_builder_add_formatted_string(sb, "Turns Played: %d\n",
+                                      gd->total_turns);
+  string_builder_add_formatted_string(sb, "Turns per Game: %0.2f %0.2f\n\n",
+                                      stat_get_mean(gd->turns),
+                                      stat_get_stdev(gd->turns));
+
+  const char game_end_reason_strs[NUMBER_OF_GAME_END_REASONS][20] = {
+      "None:", "Standard:", "Pass:"};
+
+  for (int i = 0; i < NUMBER_OF_GAME_END_REASONS; i++) {
+    string_builder_add_formatted_string(
+        sb, "Game End Reason %-*s %d (%2.2f%%)\n", 10, game_end_reason_strs[i],
+        gd->game_end_reasons[i],
+        100 * ((double)gd->game_end_reasons[i] / gd->total_games));
+  }
+
+  string_builder_add_formatted_string(sb, "\n%-*s%-*s%-*s\n", col_witdth, "",
+                                      col_witdth, "Player 1", col_witdth,
+                                      "Player 2");
+
+  char *p0_win_str = get_total_and_percentage_string(p0_wins, p0_win_pct);
+  char *p1_win_str = get_total_and_percentage_string(p1_wins, p1_win_pct);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
+                                      "Wins:", col_witdth, p0_win_str,
+                                      col_witdth, p1_win_str);
+  free(p0_win_str);
+  free(p1_win_str);
+
+  char *p0_loss_str = get_total_and_percentage_string(p0_losses, p0_loss_pct);
+  char *p1_loss_str = get_total_and_percentage_string(p1_losses, p1_loss_pct);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
+                                      "Losses:", col_witdth, p0_loss_str,
+                                      col_witdth, p1_loss_str);
+  free(p0_loss_str);
+  free(p1_loss_str);
+
+  char *p0_ties_str = get_total_and_percentage_string(p0_ties, p0_tie_pct);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
+                                      "Ties:", col_witdth, p0_ties_str,
+                                      col_witdth, p0_ties_str);
+  free(p0_ties_str);
+
+  char *p0_score_str = get_score_and_dev_string(stat_get_mean(gd->p0_score),
+                                                stat_get_stdev(gd->p0_score));
+  char *p1_score_str = get_score_and_dev_string(stat_get_mean(gd->p1_score),
+                                                stat_get_stdev(gd->p1_score));
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
+                                      "Score:", col_witdth, p0_score_str,
+                                      col_witdth, p1_score_str);
+  free(p0_score_str);
+  free(p1_score_str);
+
   char *ret_str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return ret_str;
@@ -226,8 +300,8 @@ void recorder_add_move(Recorder *recorder, const Move *move) {
   recorder->add_move_func(recorder, move);
 }
 
-void recorder_add_game(Recorder *recorder, const Game *game) {
-  recorder->add_game_func(recorder, game);
+void recorder_add_game(Recorder *recorder, const Game *game, int turns) {
+  recorder->add_game_func(recorder, game, turns);
 }
 
 void recorder_combine(Recorder **recorder_list, int list_size,
@@ -338,6 +412,9 @@ autoplay_results_create_empty_copy(const AutoplayResults *orig) {
 }
 
 void autoplay_results_destroy(AutoplayResults *autoplay_results) {
+  if (!autoplay_results) {
+    return;
+  }
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     recorder_destroy(autoplay_results->recorders[i]);
   }
@@ -362,10 +439,10 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 }
 
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game) {
+                               const Game *game, int turns) {
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
-      recorder_add_game(autoplay_results->recorders[i], game);
+      recorder_add_game(autoplay_results->recorders[i], game, turns);
     }
   }
 }

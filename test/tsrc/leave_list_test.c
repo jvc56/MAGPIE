@@ -61,53 +61,53 @@ void test_leave_list_add_leave(void) {
 
   // Adding the empty leave should have no effect
   rack_set_to_string(ld, rack, "");
-  leave_list_add_leave(leave_list, klv, rack, 3.0);
+  leave_list_add_leave(leave_list, rack, 3.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 1);
 
   rack_set_to_string(ld, rack, "A");
-  leave_list_add_leave(leave_list, klv, rack, 4.0);
+  leave_list_add_leave(leave_list, rack, 4.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 2);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 7.0 / 2));
   assert_leave_list_item(ld, klv, leave_list, "A", number_of_leaves - 1, 1,
                          4.0);
 
   rack_set_to_string(ld, rack, "B");
-  leave_list_add_leave(leave_list, klv, rack, 5.0);
+  leave_list_add_leave(leave_list, rack, 5.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 3);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 12.0 / 3));
   assert_leave_list_item(ld, klv, leave_list, "B", number_of_leaves - 2, 1,
                          5.0);
 
   rack_set_to_string(ld, rack, "A");
-  leave_list_add_leave(leave_list, klv, rack, 6.0);
+  leave_list_add_leave(leave_list, rack, 6.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 4);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 18.0 / 4));
   assert_leave_list_item(ld, klv, leave_list, "A", number_of_leaves - 1, 2,
                          10.0 / 2);
 
   rack_set_to_string(ld, rack, "B");
-  leave_list_add_leave(leave_list, klv, rack, 7.0);
+  leave_list_add_leave(leave_list, rack, 7.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 5);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 25.0 / 5));
   assert_leave_list_item(ld, klv, leave_list, "B", number_of_leaves - 2, 2,
                          12.0 / 2);
 
   rack_set_to_string(ld, rack, "B");
-  leave_list_add_leave(leave_list, klv, rack, 9.0);
+  leave_list_add_leave(leave_list, rack, 9.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 6);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 34.0 / 6));
   assert_leave_list_item(ld, klv, leave_list, "B", number_of_leaves - 1, 3,
                          21.0 / 3);
 
   rack_set_to_string(ld, rack, "C");
-  leave_list_add_leave(leave_list, klv, rack, 11.0);
+  leave_list_add_leave(leave_list, rack, 11.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 7);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 45.0 / 7));
   assert_leave_list_item(ld, klv, leave_list, "C", number_of_leaves - 3, 1,
                          11.0);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_leave(leave_list, klv, rack, 15.0);
+  leave_list_add_leave(leave_list, rack, 15.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 8);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 60.0 / 8));
   assert_leave_list_item(ld, klv, leave_list, "D", -1, 1, 15.0);
@@ -119,7 +119,7 @@ void test_leave_list_add_leave(void) {
   assert_leave_list_item(ld, klv, leave_list, "DEF", -1, 1, 15.0);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_leave(leave_list, klv, rack, 17.0);
+  leave_list_add_leave(leave_list, rack, 17.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 9);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 77.0 / 9));
   assert_leave_list_item(ld, klv, leave_list, "D", -1, 2, 32.0 / 2);
@@ -131,7 +131,7 @@ void test_leave_list_add_leave(void) {
   assert_leave_list_item(ld, klv, leave_list, "DEF", -1, 2, 32.0 / 2);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_leave(leave_list, klv, rack, 17.0);
+  leave_list_add_leave(leave_list, rack, 17.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 10);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 94.0 / 10));
@@ -144,7 +144,7 @@ void test_leave_list_add_leave(void) {
   assert_leave_list_item(ld, klv, leave_list, "DEF", -1, 3, 49.0 / 3);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  leave_list_add_leave(leave_list, rack, 1.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 11);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 95.0 / 11));
@@ -157,7 +157,7 @@ void test_leave_list_add_leave(void) {
   assert_leave_list_item(ld, klv, leave_list, "DEF", -1, 4, 50.0 / 4);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  leave_list_add_leave(leave_list, rack, 1.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 12);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 96.0 / 12));
@@ -170,7 +170,7 @@ void test_leave_list_add_leave(void) {
   assert_leave_list_item(ld, klv, leave_list, "DEF", -1, 5, 51.0 / 5);
 
   rack_set_to_string(ld, rack, "DEG");
-  leave_list_add_leave(leave_list, klv, rack, 3.0);
+  leave_list_add_leave(leave_list, rack, 3.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 13);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 99.0 / 13));
@@ -187,7 +187,7 @@ void test_leave_list_add_leave(void) {
   assert_leave_list_item(ld, klv, leave_list, "DEG", -1, 1, 3.0);
 
   rack_set_to_string(ld, rack, "HII");
-  leave_list_add_leave(leave_list, klv, rack, 7.0);
+  leave_list_add_leave(leave_list, rack, 7.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 14);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 106.0 / 14));
@@ -216,7 +216,7 @@ void test_leave_list_add_leave(void) {
 
   rack_reset(rack);
   bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
-  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack,
+  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack, NULL,
                                                 player_draw_index));
   assert(bag_get_tiles(bag) == 0);
   rack_set_to_string(ld, expected_rack, "A");
@@ -226,41 +226,41 @@ void test_leave_list_add_leave(void) {
   bag_add_letter(bag, ld_hl_to_ml(ld, "D"), 0);
   bag_add_letter(bag, ld_hl_to_ml(ld, "E"), 0);
   bag_add_letter(bag, ld_hl_to_ml(ld, "F"), 0);
-  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack,
+  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack, NULL,
                                                 player_draw_index));
   assert(bag_get_tiles(bag) == 0);
   rack_set_to_string(ld, expected_rack, "DEF");
   assert(racks_are_equal(expected_rack, rack));
 
   rack_set_to_string(ld, rack, "DE");
-  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  leave_list_add_leave(leave_list, rack, 1.0);
   rack_set_to_string(ld, rack, "DG");
-  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  leave_list_add_leave(leave_list, rack, 1.0);
   rack_set_to_string(ld, rack, "EG");
-  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  leave_list_add_leave(leave_list, rack, 1.0);
 
   rack_reset(rack);
   bag_add_letter(bag, ld_hl_to_ml(ld, "D"), 0);
   bag_add_letter(bag, ld_hl_to_ml(ld, "E"), 0);
   bag_add_letter(bag, ld_hl_to_ml(ld, "G"), 0);
-  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack,
+  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack, NULL,
                                                 player_draw_index));
   assert(bag_get_tiles(bag) == 0);
   rack_set_to_string(ld, expected_rack, "DEG");
   assert(racks_are_equal(expected_rack, rack));
 
   rack_set_to_string(ld, rack, "DEG");
-  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  leave_list_add_leave(leave_list, rack, 1.0);
   rack_set_to_string(ld, rack, "H");
-  leave_list_add_leave(leave_list, klv, rack, 1.0);
+  leave_list_add_leave(leave_list, rack, 1.0);
   rack_set_to_string(ld, rack, "I");
-  leave_list_add_leave(leave_list, klv, rack, 2.0);
+  leave_list_add_leave(leave_list, rack, 2.0);
   rack_set_to_string(ld, rack, "HI");
-  leave_list_add_leave(leave_list, klv, rack, 4.0);
+  leave_list_add_leave(leave_list, rack, 4.0);
   rack_set_to_string(ld, rack, "ABC");
-  leave_list_add_leave(leave_list, klv, rack, 6.0);
+  leave_list_add_leave(leave_list, rack, 6.0);
   rack_set_to_string(ld, rack, "ABCI");
-  leave_list_add_leave(leave_list, klv, rack, 8.0);
+  leave_list_add_leave(leave_list, rack, 8.0);
 
   rack_reset(rack);
   bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
@@ -268,20 +268,20 @@ void test_leave_list_add_leave(void) {
   bag_add_letter(bag, ld_hl_to_ml(ld, "C"), 0);
   bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
   bag_add_letter(bag, ld_hl_to_ml(ld, "I"), 0);
-  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack,
+  assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack, NULL,
                                                 player_draw_index));
   assert(bag_get_tiles(bag) == 0);
   rack_set_to_string(ld, expected_rack, "ABCII");
   assert(racks_are_equal(expected_rack, rack));
 
   rack_set_to_string(ld, rack, "J");
-  leave_list_add_leave(leave_list, klv, rack, 4.0);
+  leave_list_add_leave(leave_list, rack, 4.0);
   rack_set_to_string(ld, rack, "JK");
-  leave_list_add_leave(leave_list, klv, rack, 5.0);
+  leave_list_add_leave(leave_list, rack, 5.0);
   rack_set_to_string(ld, rack, "JKL");
-  leave_list_add_leave(leave_list, klv, rack, 6.0);
+  leave_list_add_leave(leave_list, rack, 6.0);
   rack_set_to_string(ld, rack, "KLM");
-  leave_list_add_leave(leave_list, klv, rack, 7.0);
+  leave_list_add_leave(leave_list, rack, 7.0);
 
   double empty_leave_mean = leave_list_get_empty_leave_mean(leave_list);
 
@@ -334,7 +334,7 @@ void test_leave_list_add_leave(void) {
   // Ensure that adding a full rack runs without error
   const double full_rack_value = 1013.0;
   rack_set_to_string(ld, rack, "PQRSTUV");
-  leave_list_add_leave(leave_list, klv, rack, full_rack_value);
+  leave_list_add_leave(leave_list, rack, full_rack_value);
 
   assert_leave_list_item(ld, klv, leave_list, "S", -1, 1, full_rack_value);
   assert_leave_list_item(ld, klv, leave_list, "ST", -1, 1, full_rack_value);
@@ -344,6 +344,29 @@ void test_leave_list_add_leave(void) {
   assert_leave_list_item(ld, klv, leave_list, "R", -1, 1, full_rack_value);
   assert_leave_list_item(ld, klv, leave_list, "PQRSTU", -1, 1, full_rack_value);
   assert_leave_list_item(ld, klv, leave_list, "QRSTUV", -1, 1, full_rack_value);
+
+  // Test adding a subleave
+
+  const double subleave_value = 2000.0;
+  rack_set_to_string(ld, rack, "STUV");
+  leave_list_add_subleave(leave_list, rack, subleave_value);
+
+  assert_leave_list_item(ld, klv, leave_list, "S", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "T", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "U", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "V", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "ST", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "SU", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "SV", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "TU", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "TV", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "UV", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "STU", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "STV", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "SUV", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "TUV", -1, 1, full_rack_value);
+  assert_leave_list_item(ld, klv, leave_list, "STUV", -1, 2,
+                         (full_rack_value + subleave_value) / 2);
 
   rack_destroy(expected_rack);
   rack_destroy(rack);

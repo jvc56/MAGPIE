@@ -970,7 +970,15 @@ void execute_leave_gen(Config *config) {
     return;
   }
 
-  autoplay_results_reset_options(config->autoplay_results);
+  autoplay_status_t autoplay_status =
+      autoplay_results_set_options(config->autoplay_results, "games");
+
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
+                            (int)autoplay_status);
+
+  if (autoplay_status != AUTOPLAY_STATUS_SUCCESS) {
+    return;
+  }
 
   const char *gen_str = config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 0);
   int gens;
@@ -1003,7 +1011,7 @@ void execute_leave_gen(Config *config) {
   // Convert from 1-indexed to 0-indexed
   max_force_draw_turns--;
 
-  autoplay_status_t autoplay_status =
+  autoplay_status =
       config_autoplay(config, config->autoplay_results, gens,
                       max_force_draw_turns, AUTOPLAY_TYPE_LEAVE_GEN, num_games);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,

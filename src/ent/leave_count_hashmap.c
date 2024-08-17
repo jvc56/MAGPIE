@@ -38,6 +38,15 @@ struct LeaveCountHashMap {
   HashEntry **buckets;
 };
 
+void leave_count_hashmap_reset(LeaveCountHashMap *hm) {
+  for (uint64_t i = 0; i < hm->capacity; i++) {
+    hm->buckets[i] = NULL;
+    hm->entries[i]->key = UNSET_KEY_OR_VALUE;
+    hm->entries[i]->next = NULL;
+  }
+  hm->next_available_entry_index = 0;
+}
+
 LeaveCountHashMap *leave_count_hashmap_create(uint64_t capacity) {
   if (capacity == 0) {
     log_fatal("leave count hashmap capacity must be greater than 0\n");
@@ -68,15 +77,6 @@ void leave_count_hashmap_destroy(LeaveCountHashMap *hm) {
 
 uint64_t leave_count_hashmap_get_num_entries(LeaveCountHashMap *hm) {
   return hm->next_available_entry_index;
-}
-
-void leave_count_hashmap_reset(LeaveCountHashMap *hm) {
-  for (uint64_t i = 0; i < hm->capacity; i++) {
-    hm->buckets[i] = NULL;
-    hm->entries[i]->key = UNSET_KEY_OR_VALUE;
-    hm->entries[i]->next = NULL;
-  }
-  hm->next_available_entry_index = 0;
 }
 
 uint64_t leave_count_hashmap_hash(LeaveCountHashMap *hm, uint64_t key) {

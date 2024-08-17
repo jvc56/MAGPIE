@@ -79,13 +79,13 @@ void test_autoplay_default(void) {
 }
 
 void test_autoplay_leavegen(void) {
-  Config *csw_config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 best -r2 best -numplays 1");
+  Config *csw_config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 best -r2 "
+                           "best -numplays 1 -threads 1");
 
   load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed");
   load_and_exec_config_or_die(csw_config, "set -leaves CSW21_zeroed");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 100 10");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 100 0");
+  load_and_exec_config_or_die(csw_config, "leavegen 2 200 60 -seed 0");
   load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed_ml");
   load_and_exec_config_or_die(csw_config,
                               "set -leaves CSW21_zeroed_ml -threads 11");

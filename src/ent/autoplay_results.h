@@ -8,12 +8,6 @@
 #include "game.h"
 #include "move.h"
 
-typedef enum {
-  AUTOPLAY_RECORDER_TYPE_GAME,
-  AUTOPLAY_RECORDER_TYPE_LEAVEGEN,
-  NUMBER_OF_AUTOPLAY_RECORDERS,
-} autoplay_recorder_t;
-
 typedef struct AutoplayResults AutoplayResults;
 
 AutoplayResults *autoplay_results_create(void);
@@ -28,7 +22,7 @@ void autoplay_results_reset(AutoplayResults *autoplay_results);
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Move *move);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game);
+                               const Game *game, int turns);
 void autoplay_results_combine(AutoplayResults **autoplay_results_list,
                               int list_size, AutoplayResults *target);
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,

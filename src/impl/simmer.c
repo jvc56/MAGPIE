@@ -388,6 +388,7 @@ void *simmer_worker(void *uncasted_simmer_worker) {
   SimResults *sim_results = simmer->sim_results;
   ThreadControl *thread_control = simmer->thread_control;
   while (!thread_control_get_is_halted(thread_control)) {
+    // FIXME: move this logic into the thread control
     int current_iteration_count;
     bool reached_max_iteration = false;
     if (is_multithreaded(simmer)) {

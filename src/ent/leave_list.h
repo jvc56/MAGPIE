@@ -9,11 +9,15 @@ typedef struct LeaveList LeaveList;
 
 LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv);
 void leave_list_destroy(LeaveList *leave_list);
-void leave_list_add_leave(LeaveList *leave_list, KLV *klv, Rack *full_rack,
+void leave_list_reset(LeaveList *leave_list);
+void leave_list_add_leave(LeaveList *leave_list, Rack *full_rack,
                           double move_equity);
+void leave_list_add_subleave(LeaveList *leave_list, const Rack *subleave,
+                             double equity);
 void leave_list_write_to_klv(LeaveList *leave_list);
 bool leave_list_draw_rarest_available_leave(LeaveList *leave_list, Bag *bag,
-                                            Rack *rack, int player_draw_index);
+                                            Rack *rack, Rack *empty_rack,
+                                            int player_draw_index);
 
 int leave_list_get_number_of_leaves(const LeaveList *leave_list);
 uint64_t leave_list_get_count(const LeaveList *leave_list, int count_index);

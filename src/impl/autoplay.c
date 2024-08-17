@@ -27,8 +27,6 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-#define MAX_RECORDED_FORCE_DRAW_TURNS 50
-
 typedef enum {
   AUTOPLAY_MODE_DEFAULT,
   AUTOPLAY_MODE_LEAVEGEN,
@@ -39,7 +37,9 @@ typedef struct SharedData {
   uint64_t gens_completed;
   uint64_t games_per_gen;
   uint64_t next_stop_count;
-  int max_force_draw_turn;
+  uint64_t gen_leaves_recorded;
+  uint64_t total_leaves_recorded;
+  AutoplayResults *gen_autoplay_results;
   const LetterDistribution *ld;
   const char *data_paths;
   KLV *klv;
@@ -47,8 +47,11 @@ typedef struct SharedData {
   pthread_mutex_t leave_list_mutex;
   Checkpoint *pregen_checkpoint;
   Checkpoint *postgen_checkpoint;
-  uint64_t forced_draw_turns_count[MAX_RECORDED_FORCE_DRAW_TURNS];
   Stat *force_draw_turns;
+  uint64_t recordable_turns_over_max_force_draw;
+  const ThreadControl *thread_control;
+  AutoplayResults *primary_autoplay_results;
+  AutoplayResults **autoplay_results_list;
 } SharedData;
 
 void pregen_prebroadcast_func(void *data) {
@@ -70,31 +73,65 @@ void postgen_prebroadcast_func(void *data) {
 
   klv_write(shared_data->klv, gen_labeled_klv_filename);
 
+  const int number_of_threads =
+      thread_control_get_threads(shared_data->thread_control);
+
+  // Get total game data.
+  autoplay_results_combine(shared_data->autoplay_results_list,
+                           number_of_threads,
+                           shared_data->primary_autoplay_results);
+
+  // Get generational game data
+  autoplay_results_reset(shared_data->gen_autoplay_results);
+  autoplay_results_combine(shared_data->autoplay_results_list,
+                           number_of_threads,
+                           shared_data->gen_autoplay_results);
+
+  for (int i = 0; i < number_of_threads; i++) {
+    autoplay_results_reset(shared_data->autoplay_results_list[i]);
+  }
+
   // Print info about the current state.
   StringBuilder *leave_gen_sb = string_builder_create();
-  string_builder_add_formatted_string(leave_gen_sb, "Total Games:     %d\n",
-                                      shared_data->gens_completed *
-                                          shared_data->games_per_gen);
+
+  string_builder_add_string(
+      leave_gen_sb, "************************\n"
+                    "Cumulative Autoplay Data\n************************\n\n");
+
+  char *cumul_game_data_str =
+      autoplay_results_to_string(shared_data->primary_autoplay_results, true);
+  string_builder_add_string(leave_gen_sb, cumul_game_data_str);
+  free(cumul_game_data_str);
+
+  string_builder_add_string(
+      leave_gen_sb,
+      "\n**************************\n"
+      "Generational Autoplay Data\n**************************\n\n");
+
+  char *gen_game_data_str =
+      autoplay_results_to_string(shared_data->gen_autoplay_results, true);
+  string_builder_add_string(leave_gen_sb, gen_game_data_str);
+  free(gen_game_data_str);
+
+  shared_data->total_leaves_recorded += shared_data->gen_leaves_recorded;
   string_builder_add_formatted_string(
-      leave_gen_sb, "Total Moves:     %d\n\n",
-      leave_list_get_empty_leave_count(shared_data->leave_list));
+      leave_gen_sb,
+      "\nAverage Turn Equity: %0.2f\nLeaves Recorded: %d\nForced draws: "
+      "%d\nForced draw average turn: "
+      "%0.2f %0.2f\nRecordable turns over max force draw: %d\n\n",
+
+      leave_list_get_empty_leave_mean(shared_data->leave_list),
+      shared_data->total_leaves_recorded,
+      stat_get_num_samples(shared_data->force_draw_turns),
+      stat_get_mean(shared_data->force_draw_turns) + 1,
+      stat_get_stdev(shared_data->force_draw_turns),
+      shared_data->recordable_turns_over_max_force_draw);
+
   string_builder_add_most_or_least_common_leaves(
-      leave_gen_sb, shared_data->leave_list, shared_data->ld, 20, true);
+      leave_gen_sb, shared_data->leave_list, shared_data->ld, 100, true);
   string_builder_add_string(leave_gen_sb, "\n");
   string_builder_add_most_or_least_common_leaves(
-      leave_gen_sb, shared_data->leave_list, shared_data->ld, 20, false);
-
-  if (shared_data->max_force_draw_turn >= 0) {
-    string_builder_add_formatted_string(
-        leave_gen_sb,
-        "\nForced draw average turn: %f\n\nForced draw counts:\n\n",
-        stat_get_mean(shared_data->force_draw_turns) + 1);
-    for (int i = 0; i < MAX_RECORDED_FORCE_DRAW_TURNS; i++) {
-      string_builder_add_formatted_string(
-          leave_gen_sb, "%d: %d\n", i + 1,
-          shared_data->forced_draw_turns_count[i]);
-    }
-  }
+      leave_gen_sb, shared_data->leave_list, shared_data->ld, 100, false);
 
   char *report_name_prefix =
       cut_off_after_last_char(gen_labeled_klv_filename, '.');
@@ -109,13 +146,18 @@ void postgen_prebroadcast_func(void *data) {
   free(gen_labeled_klv_name);
   free(label);
 
-  // FIXME: reset counts for leave list
+  // Reset data for the next generation.
+  leave_list_reset(shared_data->leave_list);
+  stat_reset(shared_data->force_draw_turns);
+  shared_data->gen_leaves_recorded = 0;
+  shared_data->recordable_turns_over_max_force_draw = 0;
 }
 
 typedef struct AutoplayWorker {
   int worker_index;
   const AutoplayArgs *args;
   Rack *original_rack;
+  Rack *rare_leave;
   AutoplayResults *autoplay_results;
   SharedData *shared_data;
 } AutoplayWorker;
@@ -128,6 +170,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->args = args;
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->original_rack = NULL;
+  autoplay_worker->rare_leave = NULL;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
   autoplay_worker->shared_data = shared_data;
@@ -147,24 +190,34 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
 // are set, since all autoplay modes use those fields.
 // If the KLV is not NULL, then all of the fields are set, since only
 // the leave gen mode uses the KLV, leave_list, etc.
-SharedData *autoplay_worker_shared_data_create(const LetterDistribution *ld,
-                                               const char *data_paths, KLV *klv,
-                                               int number_of_threads,
-                                               uint64_t games_per_gen,
-                                               int max_force_draw_turn) {
+SharedData *autoplay_worker_shared_data_create(
+    AutoplayResults *primary_autoplay_results,
+    AutoplayResults **autoplay_results_list,
+    const ThreadControl *thread_control, const LetterDistribution *ld,
+    const char *data_paths, KLV *klv, int number_of_threads,
+    uint64_t games_per_gen) {
   SharedData *shared_data = malloc_or_die(sizeof(SharedData));
+  // FIXME: some of these should be in the if statement below
+  shared_data->thread_control = thread_control;
   shared_data->mode = AUTOPLAY_MODE_DEFAULT;
+  shared_data->gen_leaves_recorded = 0;
+  shared_data->total_leaves_recorded = 0;
   shared_data->gens_completed = 0;
   shared_data->games_per_gen = games_per_gen;
   shared_data->next_stop_count = games_per_gen;
-  shared_data->max_force_draw_turn = max_force_draw_turn;
+  shared_data->recordable_turns_over_max_force_draw = 0;
   shared_data->klv = klv;
   shared_data->leave_list = NULL;
   shared_data->pregen_checkpoint = NULL;
   shared_data->postgen_checkpoint = NULL;
   shared_data->force_draw_turns = NULL;
+  shared_data->gen_autoplay_results = NULL;
   if (klv) {
     shared_data->mode = AUTOPLAY_MODE_LEAVEGEN;
+    shared_data->gen_autoplay_results =
+        autoplay_results_create_empty_copy(primary_autoplay_results);
+    shared_data->primary_autoplay_results = primary_autoplay_results;
+    shared_data->autoplay_results_list = autoplay_results_list;
     shared_data->ld = ld;
     shared_data->data_paths = data_paths;
     shared_data->leave_list = leave_list_create(ld, klv);
@@ -173,9 +226,6 @@ SharedData *autoplay_worker_shared_data_create(const LetterDistribution *ld,
     shared_data->postgen_checkpoint =
         checkpoint_create(number_of_threads, postgen_prebroadcast_func);
     pthread_mutex_init(&shared_data->leave_list_mutex, NULL);
-    for (int i = 0; i < MAX_RECORDED_FORCE_DRAW_TURNS; i++) {
-      shared_data->forced_draw_turns_count[i] = 0;
-    }
     shared_data->force_draw_turns = stat_create(false);
   }
   return shared_data;
@@ -189,34 +239,45 @@ void autoplay_worker_shared_data_destroy(SharedData *shared_data) {
   checkpoint_destroy(shared_data->pregen_checkpoint);
   checkpoint_destroy(shared_data->postgen_checkpoint);
   stat_destroy(shared_data->force_draw_turns);
+  autoplay_results_destroy(shared_data->gen_autoplay_results);
   free(shared_data);
 }
 
 void autoplay_leave_list_draw_rarest_available_leave(
     AutoplayWorker *autoplay_worker, Game *game, int player_on_turn_index,
-    int force_draw_turn) {
+    int force_draw_turn, Rack *rare_leave) {
+  rack_reset(rare_leave);
   pthread_mutex_lock(&autoplay_worker->shared_data->leave_list_mutex);
   leave_list_draw_rarest_available_leave(
       autoplay_worker->shared_data->leave_list, game_get_bag(game),
-      player_get_rack(game_get_player(game, player_on_turn_index)),
+      player_get_rack(game_get_player(game, player_on_turn_index)), rare_leave,
       game_get_player_draw_index(game, player_on_turn_index));
-  if (force_draw_turn < MAX_RECORDED_FORCE_DRAW_TURNS) {
-    autoplay_worker->shared_data->forced_draw_turns_count[force_draw_turn]++;
-  }
   stat_push(autoplay_worker->shared_data->force_draw_turns,
             (double)force_draw_turn, 1);
   pthread_mutex_unlock(&autoplay_worker->shared_data->leave_list_mutex);
 }
 
 void autoplay_leave_list_add_leave(AutoplayWorker *autoplay_worker, Game *game,
-                                   int player_on_turn_index,
-                                   double move_equity) {
+                                   int player_on_turn_index, double move_equity,
+                                   int exceeded_max_force_draw) {
   pthread_mutex_lock(&autoplay_worker->shared_data->leave_list_mutex);
   leave_list_add_leave(
       autoplay_worker->shared_data->leave_list,
-      autoplay_worker->shared_data->klv,
       player_get_rack(game_get_player(game, player_on_turn_index)),
       move_equity);
+  autoplay_worker->shared_data->gen_leaves_recorded++;
+  autoplay_worker->shared_data->recordable_turns_over_max_force_draw +=
+      exceeded_max_force_draw;
+  pthread_mutex_unlock(&autoplay_worker->shared_data->leave_list_mutex);
+}
+
+void autoplay_leave_list_add_subleave(AutoplayWorker *autoplay_worker,
+                                      const Rack *subleave,
+                                      double move_equity) {
+  pthread_mutex_lock(&autoplay_worker->shared_data->leave_list_mutex);
+  leave_list_add_subleave(autoplay_worker->shared_data->leave_list, subleave,
+                          move_equity);
+  autoplay_worker->shared_data->gen_leaves_recorded++;
   pthread_mutex_unlock(&autoplay_worker->shared_data->leave_list_mutex);
 }
 
@@ -234,10 +295,11 @@ void play_autoplay_game(AutoplayWorker *autoplay_worker, Game *game,
   const bool is_leavegen_mode =
       autoplay_worker->shared_data->mode == AUTOPLAY_MODE_LEAVEGEN;
   Rack *original_rack = autoplay_worker->original_rack;
-  if (is_leavegen_mode && autoplay_worker->args->max_force_draw_turn >= 0) {
-    force_draw_turn_number =
-        prng_get_random_number(bag_get_prng(game_get_bag(game)),
-                               autoplay_worker->args->max_force_draw_turn);
+  Rack *rare_leave = autoplay_worker->rare_leave;
+  const int max_force_draw_turn = autoplay_worker->args->max_force_draw_turn;
+  if (is_leavegen_mode && max_force_draw_turn >= 0) {
+    force_draw_turn_number = prng_get_random_number(
+        bag_get_prng(game_get_bag(game)), max_force_draw_turn + 1);
     for (int i = 0; i < 2; i++) {
       rack_reset(leaves[i]);
     }
@@ -251,32 +313,29 @@ void play_autoplay_game(AutoplayWorker *autoplay_worker, Game *game,
       return_rack_to_bag(game, player_on_turn_index);
       draw_rack_from_bag(game, player_on_turn_index, leave_from_previous_move);
       autoplay_leave_list_draw_rarest_available_leave(
-          autoplay_worker, game, player_on_turn_index, turn_number);
+          autoplay_worker, game, player_on_turn_index, turn_number, rare_leave);
       draw_to_full_rack(game, player_on_turn_index);
       const Move *forced_move =
           get_top_equity_move(game, thread_index, move_list);
-      // FIXME: only add for the exact leave
-      autoplay_leave_list_add_leave(autoplay_worker, game, player_on_turn_index,
-                                    move_get_equity(forced_move));
+      autoplay_leave_list_add_subleave(autoplay_worker, rare_leave,
+                                       move_get_equity(forced_move));
       return_rack_to_bag(game, player_on_turn_index);
       draw_rack_from_bag(game, player_on_turn_index, original_rack);
     }
     const Move *move = get_top_equity_move(game, thread_index, move_list);
-    if (!is_leavegen_mode) {
-      autoplay_results_add_move(autoplay_results, move);
-    } else {
+    autoplay_results_add_move(autoplay_results, move);
+    if (is_leavegen_mode) {
       autoplay_leave_list_add_leave(autoplay_worker, game, player_on_turn_index,
-                                    move_get_equity(move));
+                                    move_get_equity(move),
+                                    turn_number > max_force_draw_turn);
     }
     play_move(move, game, NULL, leave_from_previous_move);
+    turn_number++;
     if (is_leavegen_mode && bag_get_tiles(game_get_bag(game)) < (RACK_SIZE)) {
       break;
     }
-    turn_number++;
   }
-  if (!is_leavegen_mode) {
-    autoplay_results_add_game(autoplay_results, game);
-  }
+  autoplay_results_add_game(autoplay_results, game, turn_number);
 }
 
 void autoplay_single_generation(AutoplayWorker *autoplay_worker, Game *game,
@@ -318,19 +377,21 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker, Game *game,
   Rack *leaves[2] = {rack_create(ld_get_size(ld)),
                      rack_create(ld_get_size(ld))};
   autoplay_worker->original_rack = rack_create(ld_get_size(ld));
+  autoplay_worker->rare_leave = rack_create(ld_get_size(ld));
+
+  SharedData *shared_data = autoplay_worker->shared_data;
 
   for (uint64_t i = 0; i < gens; i++) {
-    checkpoint_wait(autoplay_worker->shared_data->pregen_checkpoint,
-                    autoplay_worker->shared_data);
+    checkpoint_wait(shared_data->pregen_checkpoint, shared_data);
     autoplay_single_generation(autoplay_worker, game, move_list, leaves);
-    checkpoint_wait(autoplay_worker->shared_data->postgen_checkpoint,
-                    autoplay_worker->shared_data);
+    checkpoint_wait(shared_data->postgen_checkpoint, shared_data);
     if (thread_control_get_is_halted(thread_control)) {
       break;
     }
   }
 
   rack_destroy(autoplay_worker->original_rack);
+  rack_destroy(autoplay_worker->rare_leave);
   rack_destroy(leaves[0]);
   rack_destroy(leaves[1]);
 }
@@ -365,43 +426,50 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   autoplay_results_reset(autoplay_results);
 
   const int number_of_threads = thread_control_get_threads(thread_control);
+  const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
 
   KLV *klv = NULL;
-  if (args->type == AUTOPLAY_TYPE_LEAVE_GEN) {
+  if (is_leavegen_mode) {
     // We can use player index 0 here since it is guaranteed that
     // players share the the KLV.
     klv = players_data_get_klv(args->game_args->players_data, 0);
-  }
-  SharedData *shared_data = autoplay_worker_shared_data_create(
-      args->game_args->ld, args->data_paths, klv, number_of_threads,
-      args->games_per_gen, args->max_force_draw_turn);
-
-  AutoplayWorker **autoplay_workers =
-      malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
-  pthread_t *worker_ids =
-      malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
-  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    autoplay_workers[thread_index] = autoplay_worker_create(
-        args, autoplay_results, thread_index, shared_data);
-    pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
-                   autoplay_workers[thread_index]);
   }
 
   AutoplayResults **autoplay_results_list =
       malloc_or_die((sizeof(AutoplayResults *)) * (number_of_threads));
 
+  SharedData *shared_data = autoplay_worker_shared_data_create(
+      autoplay_results, autoplay_results_list, thread_control,
+      args->game_args->ld, args->data_paths, klv, number_of_threads,
+      args->games_per_gen);
+
+  AutoplayWorker **autoplay_workers =
+      malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
+  pthread_t *worker_ids =
+      malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
+
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
-    pthread_join(worker_ids[thread_index], NULL);
+    autoplay_workers[thread_index] = autoplay_worker_create(
+        args, autoplay_results, thread_index, shared_data);
     autoplay_results_list[thread_index] =
         autoplay_workers[thread_index]->autoplay_results;
+    pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
+                   autoplay_workers[thread_index]);
+  }
+
+  for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
+    pthread_join(worker_ids[thread_index], NULL);
   }
 
   // If autoplay was interrupted by the user,
   // this will not change the status.
   thread_control_halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
 
-  autoplay_results_combine(autoplay_results_list, number_of_threads,
-                           autoplay_results);
+  // The stats have already been combined in leavegen mode
+  if (!is_leavegen_mode) {
+    autoplay_results_combine(autoplay_results_list, number_of_threads,
+                             autoplay_results);
+  }
 
   free(autoplay_results_list);
 

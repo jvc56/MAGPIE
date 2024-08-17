@@ -49,6 +49,7 @@ bool thread_control_get_next_iter_output(ThreadControl *thread_control,
                                          ThreadControlIterOutput *iter_output,
                                          uint64_t stop_iter_count);
 void thread_control_prng_seed(ThreadControl *thread_control, uint64_t seed);
+uint64_t thread_control_get_iter_count(const ThreadControl *thread_control);
 void thread_control_reset_iter_count(ThreadControl *thread_control);
 
 #endif
