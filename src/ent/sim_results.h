@@ -45,7 +45,7 @@ int sim_results_get_node_count(const SimResults *sim_results);
 int sim_results_get_iteration_count(const SimResults *sim_results);
 SimmedPlay *sim_results_get_simmed_play(SimResults *sim_results, int index);
 
-void sim_results_increment_iteration_count(SimResults *sim_results);
+void sim_results_set_iteration_count(SimResults *sim_results, int count);
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
 bool sim_results_sort_plays_by_win_rate(SimResults *sim_results);

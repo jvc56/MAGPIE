@@ -20,6 +20,7 @@ struct ThreadControl {
   int print_info_interval;
   int check_stopping_condition_interval;
   uint64_t iter_count;
+  uint64_t max_iter_count;
   XoshiroPRNG *prng;
   check_stop_status_t check_stop_status;
   mode_search_status_t current_mode;
@@ -43,6 +44,7 @@ ThreadControl *thread_control_create(void) {
   thread_control->check_stopping_condition_interval = 0;
   thread_control->print_info_interval = 0;
   thread_control->iter_count = 0;
+  thread_control->max_iter_count = 0;
   pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
   pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
@@ -108,6 +110,21 @@ int thread_control_get_print_info_interval(
 void thread_control_set_print_info_interval(ThreadControl *thread_control,
                                             int print_info_interval) {
   thread_control->print_info_interval = print_info_interval;
+}
+
+uint64_t
+thread_control_get_max_iter_count(const ThreadControl *thread_control) {
+  return thread_control->max_iter_count;
+}
+
+void thread_control_set_max_iter_count(ThreadControl *thread_control,
+                                       uint64_t max_iter_count) {
+  thread_control->max_iter_count = max_iter_count;
+}
+
+void thread_control_increment_max_iter_count(ThreadControl *thread_control,
+                                             uint64_t inc) {
+  thread_control->max_iter_count += inc;
 }
 
 int thread_control_get_check_stop_interval(
@@ -243,15 +260,18 @@ void thread_control_wait_for_mode_stopped(ThreadControl *thread_control) {
 // Returns false if the iter_count is less than the stop_iter_count
 // and increments the iter_count and sets the next seed.
 bool thread_control_get_next_iter_output(ThreadControl *thread_control,
-                                         ThreadControlIterOutput *iter_output,
-                                         uint64_t stop_iter_count) {
+                                         ThreadControlIterOutput *iter_output) {
   bool at_stop_count = false;
   pthread_mutex_lock(&thread_control->iter_mutex);
-  if (thread_control->iter_count >= stop_iter_count) {
+  if (thread_control->iter_count >= thread_control->max_iter_count) {
     at_stop_count = true;
   } else {
     iter_output->seed = prng_next(thread_control->prng);
     iter_output->iter_count = thread_control->iter_count++;
+    iter_output->print_info =
+        thread_control->print_info_interval > 0 &&
+        iter_output->iter_count > 0 &&
+        iter_output->iter_count % thread_control->print_info_interval == 0;
   }
   pthread_mutex_unlock(&thread_control->iter_mutex);
   return at_stop_count;

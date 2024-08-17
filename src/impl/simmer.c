@@ -49,7 +49,6 @@ typedef struct Simmer {
   double zval;
   int threads;
   uint64_t seed;
-  pthread_mutex_t iteration_count_mutex;
 
   Rack *known_opp_rack;
   Rack *similar_plays_rack;
@@ -88,7 +87,6 @@ Simmer *simmer_create(const SimArgs *args, Game *game, int num_simmed_plays,
     simmer->zval = p_to_z(args->stop_cond_pct);
   }
   simmer->threads = thread_control_get_threads(thread_control);
-  pthread_mutex_init(&simmer->iteration_count_mutex, NULL);
 
   Rack *known_opp_rack = args->known_opp_rack;
 
@@ -301,7 +299,7 @@ bool handle_potential_stopping_condition(Simmer *simmer) {
   return total_ignored >= number_of_plays - 1;
 }
 
-void sim_single_iteration(SimmerWorker *simmer_worker) {
+void sim_single_iteration(SimmerWorker *simmer_worker, uint64_t seed) {
   Game *game = simmer_worker->game;
   Rack *rack_placeholder = simmer_worker->rack_placeholder;
   Simmer *simmer = simmer_worker->simmer;
@@ -309,14 +307,9 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
   int plies = sim_results_get_max_plies(sim_results);
   int number_of_plays = sim_results_get_number_of_plays(sim_results);
 
-  ThreadControlIterOutput iter_output;
-  // We can ignore the return value here because the sim results
-  // are keeping track of the iteration count.
-  thread_control_get_next_iter_output(simmer->thread_control, &iter_output,
-                                      INT64_MAX);
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
-  game_seed(game, iter_output.seed);
+  game_seed(game, seed);
 
   int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
   // set random rack for opponent (throw in rack, bag_shuffle, draw new tiles).
@@ -385,36 +378,17 @@ void sim_single_iteration(SimmerWorker *simmer_worker) {
 void *simmer_worker(void *uncasted_simmer_worker) {
   SimmerWorker *simmer_worker = (SimmerWorker *)uncasted_simmer_worker;
   Simmer *simmer = simmer_worker->simmer;
-  SimResults *sim_results = simmer->sim_results;
   ThreadControl *thread_control = simmer->thread_control;
+  ThreadControlIterOutput iter_output;
   while (!thread_control_get_is_halted(thread_control)) {
-    // FIXME: move this logic into the thread control
-    int current_iteration_count;
-    bool reached_max_iteration = false;
-    if (is_multithreaded(simmer)) {
-      pthread_mutex_lock(&simmer->iteration_count_mutex);
-    }
-    if (sim_results_get_iteration_count(sim_results) ==
-        simmer->max_iterations) {
-      reached_max_iteration = true;
-    } else {
-      sim_results_increment_iteration_count(sim_results);
-      current_iteration_count = sim_results_get_iteration_count(sim_results);
-    }
-    if (is_multithreaded(simmer)) {
-      pthread_mutex_unlock(&simmer->iteration_count_mutex);
-    }
-
-    if (reached_max_iteration) {
+    if (thread_control_get_next_iter_output(simmer->thread_control,
+                                            &iter_output)) {
       thread_control_halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
       break;
     }
-    sim_single_iteration(simmer_worker);
+    sim_single_iteration(simmer_worker, iter_output.seed);
 
-    int print_info_interval =
-        thread_control_get_print_info_interval(thread_control);
-    if (print_info_interval > 0 && current_iteration_count > 0 &&
-        current_iteration_count % print_info_interval == 0) {
+    if (iter_output.print_info) {
       print_ucgi_sim_stats(simmer_worker->game, simmer->sim_results,
                            thread_control, false);
     }
@@ -422,7 +396,7 @@ void *simmer_worker(void *uncasted_simmer_worker) {
     int check_stopping_condition_interval =
         thread_control_get_check_stop_interval(thread_control);
     if (check_stopping_condition_interval > 0 &&
-        current_iteration_count % check_stopping_condition_interval == 0 &&
+        iter_output.iter_count % check_stopping_condition_interval == 0 &&
         thread_control_set_check_stop_active(thread_control)) {
       if (!thread_control_get_is_halted(thread_control) &&
           handle_potential_stopping_condition(simmer)) {
@@ -471,6 +445,8 @@ sim_status_t simulate_internal(const SimArgs *args, Game *game,
   free(worker_ids);
   simmer_destroy(simmer);
 
+  sim_results_set_iteration_count(
+      sim_results, thread_control_get_iter_count(args->thread_control));
   // Print out the stats
   print_ucgi_sim_stats(game, sim_results, args->thread_control, true);
   return SIM_STATUS_SUCCESS;
@@ -480,6 +456,7 @@ sim_status_t simulate(const SimArgs *args, SimResults *sim_results) {
   ThreadControl *thread_control = args->thread_control;
   thread_control_unhalt(thread_control);
   thread_control_reset_iter_count(thread_control);
+  thread_control_set_max_iter_count(args->thread_control, args->max_iterations);
 
   Timer *timer = thread_control_get_timer(thread_control);
   mtimer_start(timer);

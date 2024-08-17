@@ -36,7 +36,6 @@ typedef struct SharedData {
   autoplay_mode_t mode;
   uint64_t gens_completed;
   uint64_t games_per_gen;
-  uint64_t next_stop_count;
   uint64_t gen_leaves_recorded;
   uint64_t total_leaves_recorded;
   AutoplayResults *gen_autoplay_results;
@@ -45,20 +44,13 @@ typedef struct SharedData {
   KLV *klv;
   LeaveList *leave_list;
   pthread_mutex_t leave_list_mutex;
-  Checkpoint *pregen_checkpoint;
   Checkpoint *postgen_checkpoint;
   Stat *force_draw_turns;
   uint64_t recordable_turns_over_max_force_draw;
-  const ThreadControl *thread_control;
+  ThreadControl *thread_control;
   AutoplayResults *primary_autoplay_results;
   AutoplayResults **autoplay_results_list;
 } SharedData;
-
-void pregen_prebroadcast_func(void *data) {
-  SharedData *shared_data = (SharedData *)data;
-  shared_data->next_stop_count =
-      (shared_data->gens_completed + 1) * shared_data->games_per_gen;
-}
 
 void postgen_prebroadcast_func(void *data) {
   SharedData *shared_data = (SharedData *)data;
@@ -151,6 +143,8 @@ void postgen_prebroadcast_func(void *data) {
   stat_reset(shared_data->force_draw_turns);
   shared_data->gen_leaves_recorded = 0;
   shared_data->recordable_turns_over_max_force_draw = 0;
+  thread_control_increment_max_iter_count(shared_data->thread_control,
+                                          shared_data->games_per_gen);
 }
 
 typedef struct AutoplayWorker {
@@ -192,10 +186,9 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
 // the leave gen mode uses the KLV, leave_list, etc.
 SharedData *autoplay_worker_shared_data_create(
     AutoplayResults *primary_autoplay_results,
-    AutoplayResults **autoplay_results_list,
-    const ThreadControl *thread_control, const LetterDistribution *ld,
-    const char *data_paths, KLV *klv, int number_of_threads,
-    uint64_t games_per_gen) {
+    AutoplayResults **autoplay_results_list, ThreadControl *thread_control,
+    const LetterDistribution *ld, const char *data_paths, KLV *klv,
+    int number_of_threads, uint64_t games_per_gen) {
   SharedData *shared_data = malloc_or_die(sizeof(SharedData));
   // FIXME: some of these should be in the if statement below
   shared_data->thread_control = thread_control;
@@ -204,11 +197,9 @@ SharedData *autoplay_worker_shared_data_create(
   shared_data->total_leaves_recorded = 0;
   shared_data->gens_completed = 0;
   shared_data->games_per_gen = games_per_gen;
-  shared_data->next_stop_count = games_per_gen;
   shared_data->recordable_turns_over_max_force_draw = 0;
   shared_data->klv = klv;
   shared_data->leave_list = NULL;
-  shared_data->pregen_checkpoint = NULL;
   shared_data->postgen_checkpoint = NULL;
   shared_data->force_draw_turns = NULL;
   shared_data->gen_autoplay_results = NULL;
@@ -221,8 +212,6 @@ SharedData *autoplay_worker_shared_data_create(
     shared_data->ld = ld;
     shared_data->data_paths = data_paths;
     shared_data->leave_list = leave_list_create(ld, klv);
-    shared_data->pregen_checkpoint =
-        checkpoint_create(number_of_threads, pregen_prebroadcast_func);
     shared_data->postgen_checkpoint =
         checkpoint_create(number_of_threads, postgen_prebroadcast_func);
     pthread_mutex_init(&shared_data->leave_list_mutex, NULL);
@@ -236,7 +225,6 @@ void autoplay_worker_shared_data_destroy(SharedData *shared_data) {
     return;
   }
   leave_list_destroy(shared_data->leave_list);
-  checkpoint_destroy(shared_data->pregen_checkpoint);
   checkpoint_destroy(shared_data->postgen_checkpoint);
   stat_destroy(shared_data->force_draw_turns);
   autoplay_results_destroy(shared_data->gen_autoplay_results);
@@ -343,8 +331,6 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker, Game *game,
   const AutoplayArgs *args = autoplay_worker->args;
   ThreadControl *thread_control = args->thread_control;
 
-  const uint64_t stop_count = autoplay_worker->shared_data->next_stop_count;
-
   const bool use_game_pairs =
       args->use_game_pairs && args->type == AUTOPLAY_TYPE_DEFAULT;
   ThreadControlIterOutput iter_output;
@@ -353,8 +339,7 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker, Game *game,
     if (thread_control_get_is_halted(thread_control)) {
       break;
     }
-    if (thread_control_get_next_iter_output(thread_control, &iter_output,
-                                            stop_count)) {
+    if (thread_control_get_next_iter_output(thread_control, &iter_output)) {
       break;
     }
     int starting_player_index = iter_output.iter_count % 2;
@@ -382,7 +367,6 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker, Game *game,
   SharedData *shared_data = autoplay_worker->shared_data;
 
   for (uint64_t i = 0; i < gens; i++) {
-    checkpoint_wait(shared_data->pregen_checkpoint, shared_data);
     autoplay_single_generation(autoplay_worker, game, move_list, leaves);
     checkpoint_wait(shared_data->postgen_checkpoint, shared_data);
     if (thread_control_get_is_halted(thread_control)) {
@@ -423,6 +407,8 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
 
   thread_control_unhalt(thread_control);
   thread_control_reset_iter_count(thread_control);
+  thread_control_set_max_iter_count(args->thread_control, args->games_per_gen);
+
   autoplay_results_reset(autoplay_results);
 
   const int number_of_threads = thread_control_get_threads(thread_control);

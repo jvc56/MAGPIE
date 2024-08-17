@@ -190,8 +190,8 @@ int sim_results_get_iteration_count(const SimResults *sim_results) {
 
 // Not thread safe. Caller is responsible for ensuring thread
 // safety
-void sim_results_increment_iteration_count(SimResults *sim_results) {
-  sim_results->iteration_count++;
+void sim_results_set_iteration_count(SimResults *sim_results, int count) {
+  sim_results->iteration_count = count;
 }
 
 SimmedPlay *sim_results_get_simmed_play(SimResults *sim_results, int index) {
