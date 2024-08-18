@@ -34,7 +34,7 @@ void test_leave_list_add_leave(void) {
   const LetterDistribution *ld = config_get_ld(config);
   KLV *klv = players_data_get_data(config_get_players_data(config),
                                    PLAYERS_DATA_TYPE_KLV, 0);
-  LeaveList *leave_list = leave_list_create(ld, klv);
+  LeaveList *leave_list = leave_list_create(ld, klv, 100000);
 
   const int number_of_leaves = klv_get_number_of_leaves(klv);
   const int player_draw_index = 0;
