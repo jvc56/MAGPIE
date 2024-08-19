@@ -9,7 +9,7 @@ MAGPIE is a crossword game playing and analysis program that currently supports 
 - Exhaustive inferences
 - Autoplay
 
-MAGPIE is basically a C rewrite of [Macondo](https://github.com/domino14/macondo) and uses several algorithms and data structures originally developed in [wolges](https://github.com/andy-k/wolges), including shadow playing and the KWG and KLV data structures.
+MAGPIE started as a C rewrite of [Macondo](https://github.com/domino14/macondo) but has since incorporated a variety of new features, algorithms, and data strctures. It uses several concepts originally developed in [wolges](https://github.com/andy-k/wolges), including shadow playing and the KWG and KLV data structures.
 
 ## Installation
 
