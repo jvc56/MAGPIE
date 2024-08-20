@@ -51,6 +51,8 @@ void print_inference(const LetterDistribution *ld,
                      InferenceResults *inference_results);
 void load_cgp_or_die(Game *game, const char *cgp);
 void load_and_exec_config_or_die(Config *config, const char *cmd);
+bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
+                                       int seconds);
 char *get_test_filename(const char *filename);
 void delete_file(const char *filename);
 void reset_file(const char *filename);

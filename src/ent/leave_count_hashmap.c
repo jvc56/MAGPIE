@@ -83,7 +83,6 @@ uint64_t leave_count_hashmap_hash(LeaveCountHashMap *hm, uint64_t key) {
   return key % hm->capacity;
 }
 
-// Assumes the key exists
 uint64_t leave_count_hashmap_get(LeaveCountHashMap *hm, uint64_t key) {
   uint64_t hashkey = leave_count_hashmap_hash(hm, key);
   HashEntry *entry = hm->buckets[hashkey];

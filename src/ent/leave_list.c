@@ -28,13 +28,10 @@ struct LeaveList {
   Rack *subleave;
   double move_equity;
   int number_of_leaves;
-  // The maximum count of a valid rare draw.
-  // Leaves above this count will not be considered
-  // rare and will therefore be considered unavailable.
-  int max_rare_draw_count;
-  // The index of the maximum count of a valid rare draw
-  // in the leave list items ordered by count.
-  int max_rare_draw_count_index;
+  // Leaves with this count are no longer considered
+  // rare and are excluded from forced draws.
+  int target_min_leave_count;
+  int leaves_under_target_min_count;
   LeaveListItem *empty_leave;
   LeaveListItem **leaves_ordered_by_klv_index;
   LeaveListItem **leaves_ordered_by_count;
@@ -115,7 +112,7 @@ Rack *get_new_bag_as_rack(const LetterDistribution *ld) {
 }
 
 LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
-                             int max_rare_draw_count) {
+                             int target_min_leave_count) {
   LeaveList *leave_list = malloc_or_die(sizeof(LeaveList));
   leave_list->klv = klv;
 
@@ -140,8 +137,8 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
   leave_count_hashmap_set(leave_list->leave_count_hashmap, 0,
                           leave_list->number_of_leaves - 1);
 
-  leave_list->max_rare_draw_count = max_rare_draw_count;
-  leave_list->max_rare_draw_count_index = leave_list->number_of_leaves - 1;
+  leave_list->target_min_leave_count = target_min_leave_count;
+  leave_list->leaves_under_target_min_count = leave_list->number_of_leaves;
 
   const int ld_size = ld_get_size(ld);
 
@@ -191,6 +188,8 @@ void leave_list_reset(LeaveList *leave_list) {
   leave_count_hashmap_reset(leave_list->leave_count_hashmap);
   leave_count_hashmap_set(leave_list->leave_count_hashmap, 0,
                           leave_list->number_of_leaves - 1);
+
+  leave_list->leaves_under_target_min_count = leave_list->number_of_leaves;
 }
 
 void leave_list_item_increment_count(LeaveListItem *item, double equity) {
@@ -212,10 +211,11 @@ void leave_list_swap_items(LeaveList *leave_list, int i, int j) {
   leave_bitmaps_swap_leaves(leave_list->leave_bitmaps, i, j);
 }
 
-int leave_list_get_min_count(const LeaveList *leave_list) {
+int leave_list_get_lowest_leave_count(const LeaveList *leave_list) {
   return leave_list->leaves_ordered_by_count[0]->count;
 }
 
+// Returns the minimum leave count for the updated leave list.
 int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
                                            double equity) {
   LeaveListItem *item = leave_list->leaves_ordered_by_klv_index[klv_index];
@@ -224,9 +224,8 @@ int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
   leave_list_item_increment_count(item, equity);
   int new_count = item->count;
 
-  // FIXME: test this logic
-  if (new_count > leave_list->max_rare_draw_count) {
-    leave_list->max_rare_draw_count_index--;
+  if (new_count >= leave_list->target_min_leave_count) {
+    leave_list->leaves_under_target_min_count--;
   }
 
   uint64_t old_end_index =
@@ -234,8 +233,14 @@ int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
 
   leave_list_swap_items(leave_list, old_end_index, item->count_index);
 
-  leave_count_hashmap_set(leave_list->leave_count_hashmap, old_count,
-                          old_end_index - 1);
+  if (old_end_index == 0 ||
+      leave_list->leaves_ordered_by_count[old_end_index - 1]->count !=
+          old_count) {
+    leave_count_hashmap_delete(leave_list->leave_count_hashmap, old_count);
+  } else {
+    leave_count_hashmap_set(leave_list->leave_count_hashmap, old_count,
+                            old_end_index - 1);
+  }
 
   if (leave_count_hashmap_get(leave_list->leave_count_hashmap, new_count) ==
       UNSET_KEY_OR_VALUE) {
@@ -243,15 +248,11 @@ int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
                             old_end_index);
   }
 
-  if (old_end_index == 0 ||
-      leave_list->leaves_ordered_by_count[old_end_index - 1]->count !=
-          old_count) {
-    leave_count_hashmap_delete(leave_list->leave_count_hashmap, old_count);
-  }
-  return leave_list_get_min_count(leave_list);
+  return leave_list_get_lowest_leave_count(leave_list);
 }
 
 // Adds a single subleave to the list.
+// Returns the minimum leave count for the updated leave list.
 int leave_list_add_subleave(LeaveList *leave_list, const Rack *subleave,
                             double equity) {
   return leave_list_add_subleave_with_klv_index(
@@ -311,7 +312,7 @@ int leave_list_add_leave(LeaveList *leave_list, Rack *full_rack,
   rack_reset(leave_list->subleave);
   generate_subleaves(leave_list,
                      kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0);
-  return leave_list_get_min_count(leave_list);
+  return leave_list_get_lowest_leave_count(leave_list);
 }
 
 void leave_list_write_to_klv(LeaveList *leave_list) {
@@ -331,7 +332,15 @@ bool leave_list_draw_rarest_available_leave(LeaveList *leave_list, Bag *bag,
                                             int player_draw_index) {
   return leave_bitmaps_draw_first_available_subrack(
       leave_list->leave_bitmaps, bag, rack, empty_rack, player_draw_index,
-      leave_list->max_rare_draw_count_index);
+      leave_list->leaves_under_target_min_count);
+}
+
+int leave_list_get_target_min_leave_count(const LeaveList *leave_list) {
+  return leave_list->target_min_leave_count;
+}
+
+int leave_list_get_leaves_under_target_min_count(const LeaveList *leave_list) {
+  return leave_list->leaves_under_target_min_count;
 }
 
 int leave_list_get_number_of_leaves(const LeaveList *leave_list) {

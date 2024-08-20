@@ -196,6 +196,7 @@ void perf_test_multithread_sim(void) {
   assert(status == SIM_STATUS_SUCCESS);
   assert(thread_control_get_halt_status(config_get_thread_control(config)) ==
          HALT_STATUS_MAX_ITERATIONS);
+  assert(sim_results_get_iteration_count(sim_results) == 1000);
 
   print_sim_stats(config_get_game(config), sim_results);
   sim_results_sort_plays_by_win_rate(sim_results);

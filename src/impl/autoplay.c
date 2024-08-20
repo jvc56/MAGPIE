@@ -38,6 +38,7 @@ typedef struct SharedData {
   uint64_t games_per_gen;
   uint64_t gen_leaves_recorded;
   uint64_t total_leaves_recorded;
+  uint64_t failed_force_draws;
   AutoplayResults *gen_autoplay_results;
   const LetterDistribution *ld;
   const char *data_paths;
@@ -109,17 +110,30 @@ void postgen_prebroadcast_func(void *data) {
   shared_data->total_leaves_recorded += shared_data->gen_leaves_recorded;
   string_builder_add_formatted_string(
       leave_gen_sb,
-      "\nAverage Turn Equity: %0.2f\nMinimum Leave Count: %d\nLeaves Recorded: "
-      "%d\nForced draws: "
-      "%d\nForced draw average turn: "
-      "%0.2f %0.2f\nRecordable turns over max force draw: %d\n\n",
+      "\nAverage Turn Equity: %0.2f\nLowest Leave Count: %d\nTarget Minimum "
+      "Leave "
+      "Count: %d\nLeaves Under "
+      "Target Minimum Leave Count: %d\nLeaves Recorded: "
+      "%d\nForced draws: %d\nFailed forced draws: %d\n",
       leave_list_get_empty_leave_mean(shared_data->leave_list),
-      leave_list_get_min_count(shared_data->leave_list),
+      leave_list_get_lowest_leave_count(shared_data->leave_list),
+      leave_list_get_target_min_leave_count(shared_data->leave_list),
+      leave_list_get_leaves_under_target_min_count(shared_data->leave_list),
       shared_data->total_leaves_recorded,
       stat_get_num_samples(shared_data->force_draw_turns),
-      stat_get_mean(shared_data->force_draw_turns) + 1,
-      stat_get_stdev(shared_data->force_draw_turns),
-      shared_data->recordable_turns_over_max_force_draw);
+      shared_data->failed_force_draws);
+
+  if (stat_get_num_samples(shared_data->force_draw_turns) > 0) {
+    string_builder_add_formatted_string(
+        leave_gen_sb,
+        "Forced draw average turn: %0.2f %0.2f\n"
+        "Recordable turns over max force draw: %d\n\n",
+        stat_get_mean(shared_data->force_draw_turns) + 1,
+        stat_get_stdev(shared_data->force_draw_turns),
+        shared_data->recordable_turns_over_max_force_draw);
+  } else {
+    string_builder_add_string(leave_gen_sb, "\n");
+  }
 
   string_builder_add_most_or_least_common_leaves(
       leave_gen_sb, shared_data->leave_list, shared_data->ld, 100, true);
@@ -143,6 +157,7 @@ void postgen_prebroadcast_func(void *data) {
   // Reset data for the next generation.
   leave_list_reset(shared_data->leave_list);
   stat_reset(shared_data->force_draw_turns);
+  shared_data->failed_force_draws = 0;
   shared_data->gen_leaves_recorded = 0;
   shared_data->recordable_turns_over_max_force_draw = 0;
   thread_control_increment_max_iter_count(shared_data->thread_control,
@@ -192,7 +207,6 @@ SharedData *autoplay_worker_shared_data_create(
     const LetterDistribution *ld, const char *data_paths, KLV *klv,
     int number_of_threads, uint64_t games_per_gen, int min_leave_count) {
   SharedData *shared_data = malloc_or_die(sizeof(SharedData));
-  // FIXME: some of these should be in the if statement below
   shared_data->thread_control = thread_control;
   shared_data->mode = AUTOPLAY_MODE_DEFAULT;
   shared_data->gen_leaves_recorded = 0;
@@ -200,6 +214,7 @@ SharedData *autoplay_worker_shared_data_create(
   shared_data->gens_completed = 0;
   shared_data->games_per_gen = games_per_gen;
   shared_data->recordable_turns_over_max_force_draw = 0;
+  shared_data->failed_force_draws = 0;
   shared_data->klv = klv;
   shared_data->leave_list = NULL;
   shared_data->postgen_checkpoint = NULL;
@@ -241,12 +256,16 @@ void autoplay_leave_list_draw_rarest_available_leave(
     int force_draw_turn, Rack *rare_leave) {
   rack_reset(rare_leave);
   pthread_mutex_lock(&autoplay_worker->shared_data->leave_list_mutex);
-  leave_list_draw_rarest_available_leave(
-      autoplay_worker->shared_data->leave_list, game_get_bag(game),
-      player_get_rack(game_get_player(game, player_on_turn_index)), rare_leave,
-      game_get_player_draw_index(game, player_on_turn_index));
-  stat_push(autoplay_worker->shared_data->force_draw_turns,
-            (double)force_draw_turn, 1);
+  if (leave_list_draw_rarest_available_leave(
+          autoplay_worker->shared_data->leave_list, game_get_bag(game),
+          player_get_rack(game_get_player(game, player_on_turn_index)),
+          rare_leave, game_get_player_draw_index(game, player_on_turn_index))) {
+
+    stat_push(autoplay_worker->shared_data->force_draw_turns,
+              (double)force_draw_turn, 1);
+  } else {
+    autoplay_worker->shared_data->failed_force_draws++;
+  }
   pthread_mutex_unlock(&autoplay_worker->shared_data->leave_list_mutex);
 }
 
@@ -363,7 +382,8 @@ void print_current_status(AutoplayWorker *autoplay_worker,
     gen = shared_data->gens_completed;
     leaves_recorded = shared_data->gen_leaves_recorded;
     forced_draws = stat_get_num_samples(shared_data->force_draw_turns);
-    min_leave_count = leave_list_get_min_count(shared_data->leave_list);
+    min_leave_count =
+        leave_list_get_lowest_leave_count(shared_data->leave_list);
     pthread_mutex_unlock(&shared_data->leave_list_mutex);
     string_builder_add_formatted_string(status_sb,
                                         ", gen %d: %ld recorded leaves, %d "

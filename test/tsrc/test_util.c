@@ -2,6 +2,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <math.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,6 +42,9 @@
 
 #include "test_constants.h"
 #include "test_util.h"
+
+// Global variable for the timeout function.
+jmp_buf env;
 
 bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
@@ -88,6 +94,37 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
   if (!error_status_get_success(error_status)) {
     error_status_log_warn_if_failed(error_status);
     abort();
+  }
+}
+
+void timeout_handler(int __attribute__((unused)) signum) {
+  // Long jump back to the main function if the alarm triggers
+  longjmp(env, 1);
+}
+
+bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
+                                       int seconds) {
+  // Set up the signal handler
+  signal(SIGALRM, timeout_handler);
+
+  // Set a time limit
+  alarm(seconds);
+
+  // Save the environment for long jump
+  if (setjmp(env) == 0) {
+    // If setjmp returns 0, continue execution
+
+    // Call the original function
+    load_and_exec_config_or_die(config, cmd);
+
+    // Disable the alarm
+    alarm(0);
+
+    // If the function completes within the time limit, return true
+    return true;
+  } else {
+    // If longjmp is called, the function exceeded the time limit
+    return false;
   }
 }
 

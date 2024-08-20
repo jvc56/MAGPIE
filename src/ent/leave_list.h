@@ -19,8 +19,9 @@ void leave_list_write_to_klv(LeaveList *leave_list);
 bool leave_list_draw_rarest_available_leave(LeaveList *leave_list, Bag *bag,
                                             Rack *rack, Rack *empty_rack,
                                             int player_draw_index);
-int leave_list_get_min_count(const LeaveList *leave_list);
-
+int leave_list_get_lowest_leave_count(const LeaveList *leave_list);
+int leave_list_get_target_min_leave_count(const LeaveList *leave_list);
+int leave_list_get_leaves_under_target_min_count(const LeaveList *leave_list);
 int leave_list_get_number_of_leaves(const LeaveList *leave_list);
 uint64_t leave_list_get_count(const LeaveList *leave_list, int count_index);
 double leave_list_get_mean(const LeaveList *leave_list, int count_index);
