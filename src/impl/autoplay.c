@@ -93,7 +93,7 @@ void postgen_prebroadcast_func(void *data) {
                     "Cumulative Autoplay Data\n************************\n\n");
 
   char *cumul_game_data_str = autoplay_results_to_string(
-      lg_shared_data->primary_autoplay_results, true);
+      lg_shared_data->primary_autoplay_results, true, false);
   string_builder_add_string(leave_gen_sb, cumul_game_data_str);
   free(cumul_game_data_str);
 
@@ -102,8 +102,8 @@ void postgen_prebroadcast_func(void *data) {
       "\n**************************\n"
       "Generational Autoplay Data\n**************************\n\n");
 
-  char *gen_game_data_str =
-      autoplay_results_to_string(lg_shared_data->gen_autoplay_results, true);
+  char *gen_game_data_str = autoplay_results_to_string(
+      lg_shared_data->gen_autoplay_results, true, false);
   string_builder_add_string(leave_gen_sb, gen_game_data_str);
   free(gen_game_data_str);
 
@@ -380,7 +380,7 @@ bool play_autoplay_game(AutoplayWorker *autoplay_worker, Game *game,
       break;
     }
   }
-  autoplay_results_add_game(autoplay_results, game, turn_number);
+  autoplay_results_add_game(autoplay_results, game, turn_number, false);
   return min_leave_count_reached;
 }
 
@@ -517,10 +517,12 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
 
   KLV *klv = NULL;
+  bool show_divergent_results = args->use_game_pairs;
   if (is_leavegen_mode) {
     // We can use player index 0 here since it is guaranteed that
     // players share the the KLV.
     klv = players_data_get_klv(args->game_args->players_data, 0);
+    show_divergent_results = false;
   }
 
   AutoplayResults **autoplay_results_list =
@@ -572,8 +574,8 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
                       args->data_paths);
 
-  char *autoplay_results_string =
-      autoplay_results_to_string(autoplay_results, false);
+  char *autoplay_results_string = autoplay_results_to_string(
+      autoplay_results, false, show_divergent_results);
   thread_control_print(thread_control, autoplay_results_string);
   free(autoplay_results_string);
   gen_destroy_cache();

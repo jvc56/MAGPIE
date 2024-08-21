@@ -21,9 +21,9 @@ typedef void (*recorder_reset_func_t)(Recorder *);
 typedef void (*recorder_create_data_func_t)(Recorder *, const Recorder *);
 typedef void (*recorder_destroy_data_func_t)(Recorder *);
 typedef void (*recorder_add_move_func_t)(Recorder *, const Move *);
-typedef void (*recorder_add_game_func_t)(Recorder *, const Game *, int turns);
+typedef void (*recorder_add_game_func_t)(Recorder *, const Game *, int, bool);
 typedef void (*recorder_combine_func_t)(Recorder **, int, Recorder *);
-typedef char *(*recorder_str_func_t)(Recorder *, bool);
+typedef char *(*recorder_str_func_t)(Recorder *, bool, bool);
 
 struct Recorder {
   void *data;
@@ -69,8 +69,7 @@ typedef struct GameData {
   int game_end_reasons[NUMBER_OF_GAME_END_REASONS];
 } GameData;
 
-void game_data_reset(Recorder *recorder) {
-  GameData *gd = (GameData *)recorder->data;
+void game_data_reset(GameData *gd) {
   gd->total_games = 0;
   gd->total_turns = 0;
   gd->p0_wins = 0;
@@ -85,33 +84,28 @@ void game_data_reset(Recorder *recorder) {
   }
 }
 
-void game_data_create(Recorder *recorder, const Recorder
-                                              __attribute__((unused)) *
-                                              primary_recorder) {
+GameData *game_data_create(void) {
   GameData *game_data = malloc_or_die(sizeof(GameData));
   game_data->p0_score = stat_create(true);
   game_data->p1_score = stat_create(true);
   game_data->turns = stat_create(true);
-  recorder->data = game_data;
-  recorder->shared_data = NULL;
-  game_data_reset(recorder);
+  game_data_reset(game_data);
+  return game_data;
 }
 
-void game_data_destroy(Recorder *recorder) {
-  if (!recorder) {
+void game_data_destroy(GameData *gd) {
+  if (!gd) {
     return;
   }
-  GameData *gd = (GameData *)recorder->data;
   stat_destroy(gd->p0_score);
   stat_destroy(gd->p1_score);
   stat_destroy(gd->turns);
   free(gd);
 }
 
-void game_data_add_game(Recorder *recorder, const Game *game, int turns) {
+void game_data_add_game(GameData *gd, const Game *game, int turns) {
   int p0_game_score = player_get_score(game_get_player(game, 0));
   int p1_game_score = player_get_score(game_get_player(game, 1));
-  GameData *gd = (GameData *)recorder->data;
   gd->total_games++;
   if (p0_game_score > p1_game_score) {
     gd->p0_wins++;
@@ -130,40 +124,6 @@ void game_data_add_game(Recorder *recorder, const Game *game, int turns) {
   gd->game_end_reasons[game_get_game_end_reason(game)]++;
 }
 
-void game_data_combine(Recorder **recorder_list, int recorder_list_size,
-                       Recorder *primary_recorder) {
-  Stat **p0_score_stats =
-      malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
-  Stat **p1_score_stats =
-      malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
-  Stat **turns_stats = malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
-
-  GameData *gd_primary = (GameData *)primary_recorder->data;
-
-  for (int i = 0; i < recorder_list_size; i++) {
-    GameData *gd_i = (GameData *)recorder_list[i]->data;
-    gd_primary->total_games += gd_i->total_games;
-    gd_primary->p0_wins += gd_i->p0_wins;
-    gd_primary->p0_losses += gd_i->p0_losses;
-    gd_primary->p0_ties += gd_i->p0_ties;
-    gd_primary->p0_firsts += gd_i->p0_firsts;
-    p0_score_stats[i] = gd_i->p0_score;
-    p1_score_stats[i] = gd_i->p1_score;
-    turns_stats[i] = gd_i->turns;
-    gd_primary->total_turns += gd_i->total_turns;
-    for (int j = 0; j < NUMBER_OF_GAME_END_REASONS; j++) {
-      gd_primary->game_end_reasons[j] += gd_i->game_end_reasons[j];
-    }
-  }
-
-  stats_combine(p0_score_stats, recorder_list_size, gd_primary->p0_score);
-  stats_combine(p1_score_stats, recorder_list_size, gd_primary->p1_score);
-  stats_combine(turns_stats, recorder_list_size, gd_primary->turns);
-  free(p0_score_stats);
-  free(p1_score_stats);
-  free(turns_stats);
-}
-
 char *game_data_ucgi_str(const GameData *gd) {
   return get_formatted_string(
       "autoplay games %d %d %d %d %d %f %f %f %f\n", gd->total_games,
@@ -180,7 +140,7 @@ char *get_score_and_dev_string(double score, double stdev) {
   return get_formatted_string("%2.2f %2.2f", score, stdev);
 }
 
-char *game_data_human_readable_str(const GameData *gd) {
+char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   int p0_wins = gd->p0_wins;
   double p0_win_pct = (double)p0_wins / gd->total_games;
   int p0_losses = gd->p0_losses;
@@ -194,6 +154,12 @@ char *game_data_human_readable_str(const GameData *gd) {
 
   const int col_witdth = 16;
   StringBuilder *sb = string_builder_create();
+
+  if (divergent) {
+    string_builder_add_string(sb, "Divergent Games:\n\n");
+  } else {
+    string_builder_add_string(sb, "All Games:\n\n");
+  }
 
   string_builder_add_formatted_string(sb, "Games Played: %d\n",
                                       gd->total_games);
@@ -254,13 +220,121 @@ char *game_data_human_readable_str(const GameData *gd) {
   return ret_str;
 }
 
-char *game_data_str(Recorder *recorder, bool human_readable) {
-  GameData *gd = (GameData *)recorder->data;
+char *game_data_str(const GameData *gd, bool human_readable, bool divergent) {
   if (human_readable) {
-    return game_data_human_readable_str(gd);
+    return game_data_human_readable_str(gd, divergent);
   } else {
     return game_data_ucgi_str(gd);
   }
+}
+
+typedef struct GameDataSets {
+  GameData *all_games;
+  GameData *divergent_games;
+} GameDataSets;
+
+void game_data_sets_reset(Recorder *recorder) {
+  GameDataSets *sets = (GameDataSets *)recorder->data;
+  game_data_reset(sets->all_games);
+  game_data_reset(sets->divergent_games);
+}
+
+void game_data_sets_create(Recorder *recorder, const Recorder
+                                                   __attribute__((unused)) *
+                                                   primary_recorder) {
+  GameDataSets *sets = malloc_or_die(sizeof(GameDataSets));
+  sets->all_games = game_data_create();
+  sets->divergent_games = game_data_create();
+  recorder->data = sets;
+  recorder->shared_data = NULL;
+}
+
+void game_data_sets_destroy(Recorder *recorder) {
+  GameDataSets *sets = (GameDataSets *)recorder->data;
+  game_data_destroy(sets->all_games);
+  game_data_destroy(sets->divergent_games);
+  free(sets);
+}
+
+void game_data_sets_add_game(Recorder *recorder, const Game *game, int turns,
+                             bool divergent) {
+  GameDataSets *sets = (GameDataSets *)recorder->data;
+  game_data_add_game(sets->all_games, game, turns);
+  if (divergent) {
+    game_data_add_game(sets->divergent_games, game, turns);
+  }
+}
+
+void game_data_sets_combine_subset(Recorder **recorder_list,
+                                   int recorder_list_size,
+                                   Recorder *primary_recorder, bool divergent) {
+  Stat **p0_score_stats =
+      malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
+  Stat **p1_score_stats =
+      malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
+  Stat **turns_stats = malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
+
+  GameDataSets *sets = (GameDataSets *)primary_recorder->data;
+  GameData *gd_primary = sets->all_games;
+  if (divergent) {
+    gd_primary = sets->divergent_games;
+  }
+
+  for (int i = 0; i < recorder_list_size; i++) {
+    GameDataSets *sets_i = (GameDataSets *)recorder_list[i]->data;
+    GameData *gd_i = sets_i->all_games;
+    if (divergent) {
+      gd_i = sets_i->divergent_games;
+    }
+    gd_primary->total_games += gd_i->total_games;
+    gd_primary->p0_wins += gd_i->p0_wins;
+    gd_primary->p0_losses += gd_i->p0_losses;
+    gd_primary->p0_ties += gd_i->p0_ties;
+    gd_primary->p0_firsts += gd_i->p0_firsts;
+    p0_score_stats[i] = gd_i->p0_score;
+    p1_score_stats[i] = gd_i->p1_score;
+    turns_stats[i] = gd_i->turns;
+    gd_primary->total_turns += gd_i->total_turns;
+    for (int j = 0; j < NUMBER_OF_GAME_END_REASONS; j++) {
+      gd_primary->game_end_reasons[j] += gd_i->game_end_reasons[j];
+    }
+  }
+
+  stats_combine(p0_score_stats, recorder_list_size, gd_primary->p0_score);
+  stats_combine(p1_score_stats, recorder_list_size, gd_primary->p1_score);
+  stats_combine(turns_stats, recorder_list_size, gd_primary->turns);
+  free(p0_score_stats);
+  free(p1_score_stats);
+  free(turns_stats);
+}
+
+void game_data_sets_combine(Recorder **recorder_list, int recorder_list_size,
+                            Recorder *primary_recorder) {
+  game_data_sets_combine_subset(recorder_list, recorder_list_size,
+                                primary_recorder, false);
+  game_data_sets_combine_subset(recorder_list, recorder_list_size,
+                                primary_recorder, true);
+}
+
+char *game_data_sets_str(Recorder *recorder, bool human_readable,
+                         bool show_divergent) {
+  GameDataSets *sets = (GameDataSets *)recorder->data;
+  StringBuilder *sb = string_builder_create();
+
+  char *all_game_str = game_data_str(sets->all_games, human_readable, false);
+  string_builder_add_string(sb, all_game_str);
+  free(all_game_str);
+
+  if (show_divergent) {
+    char *divergent_games_str =
+        game_data_str(sets->divergent_games, human_readable, true);
+    string_builder_add_string(sb, divergent_games_str);
+    free(divergent_games_str);
+  }
+
+  char *str = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return str;
 }
 
 // Generic recorder and autoplay results functions
@@ -300,8 +374,9 @@ void recorder_add_move(Recorder *recorder, const Move *move) {
   recorder->add_move_func(recorder, move);
 }
 
-void recorder_add_game(Recorder *recorder, const Game *game, int turns) {
-  recorder->add_game_func(recorder, game, turns);
+void recorder_add_game(Recorder *recorder, const Game *game, int turns,
+                       bool divergent) {
+  recorder->add_game_func(recorder, game, turns, divergent);
 }
 
 void recorder_combine(Recorder **recorder_list, int list_size,
@@ -309,8 +384,9 @@ void recorder_combine(Recorder **recorder_list, int list_size,
   primary_recorder->combine_func(recorder_list, list_size, primary_recorder);
 }
 
-char *recorder_str(Recorder *recorder, bool human_readable) {
-  return recorder->str_func(recorder, human_readable);
+char *recorder_str(Recorder *recorder, bool human_readable,
+                   bool show_divergent) {
+  return recorder->str_func(recorder, human_readable, show_divergent);
 }
 
 AutoplayResults *autoplay_results_create() {
@@ -355,8 +431,9 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
                                       const AutoplayResults *primary) {
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_GAME,
-      game_data_reset, game_data_create, game_data_destroy, add_move_noop,
-      game_data_add_game, game_data_combine, game_data_str);
+      game_data_sets_reset, game_data_sets_create, game_data_sets_destroy,
+      add_move_noop, game_data_sets_add_game, game_data_sets_combine,
+      game_data_sets_str);
   autoplay_results->options = options;
 }
 
@@ -439,10 +516,10 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 }
 
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, int turns) {
+                               const Game *game, int turns, bool divergent) {
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
-      recorder_add_game(autoplay_results->recorders[i], game, turns);
+      recorder_add_game(autoplay_results->recorders[i], game, turns, divergent);
     }
   }
 }
@@ -463,14 +540,14 @@ void autoplay_results_combine(AutoplayResults **autoplay_results_list,
 }
 
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
-                                 bool human_readable) {
+                                 bool human_readable, bool show_divergent) {
   StringBuilder *ar_sb = string_builder_create();
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (!autoplay_results->recorders[i]) {
       continue;
     }
-    char *rec_str =
-        recorder_str(autoplay_results->recorders[i], human_readable);
+    char *rec_str = recorder_str(autoplay_results->recorders[i], human_readable,
+                                 show_divergent);
     string_builder_add_string(ar_sb, rec_str);
     free(rec_str);
   }

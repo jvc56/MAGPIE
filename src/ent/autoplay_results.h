@@ -22,10 +22,10 @@ void autoplay_results_reset(AutoplayResults *autoplay_results);
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Move *move);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, int turns);
+                               const Game *game, int turns, bool divergent);
 void autoplay_results_combine(AutoplayResults **autoplay_results_list,
                               int list_size, AutoplayResults *target);
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
-                                 bool human_readable);
+                                 bool human_readable, bool show_divergent);
 
 #endif

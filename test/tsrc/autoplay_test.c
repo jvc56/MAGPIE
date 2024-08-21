@@ -24,7 +24,7 @@ void test_autoplay_default(void) {
   load_and_exec_config_or_die(csw_config, "autoplay games 100 -seed 26");
 
   char *ar1_str = autoplay_results_to_string(
-      config_get_autoplay_results(csw_config), false);
+      config_get_autoplay_results(csw_config), false, false);
   assert_strings_equal(ar1_str, "autoplay games 200 100 100 0 100 460.940000 "
                                 "60.687820 460.940000 60.687820\n");
 
@@ -32,7 +32,7 @@ void test_autoplay_default(void) {
                               "autoplay games 100 -r1 best -r2 best -seed 26");
 
   char *ar2_str = autoplay_results_to_string(
-      config_get_autoplay_results(csw_config), false);
+      config_get_autoplay_results(csw_config), false, false);
   // Autoplay using the "best" move recorder should be the same
   // as autoplay using the "all" move recorder.
   assert_strings_equal(ar1_str, ar2_str);
@@ -42,7 +42,7 @@ void test_autoplay_default(void) {
 
   // Autoplay should reset the stats
   char *ar3_str = autoplay_results_to_string(
-      config_get_autoplay_results(csw_config), false);
+      config_get_autoplay_results(csw_config), false, false);
   assert_strings_equal(
       ar3_str,
       "autoplay games 7 1 6 0 4 422.000000 58.657196 475.000000 89.701356\n");
@@ -61,11 +61,11 @@ void test_autoplay_default(void) {
 
     if (i == 0) {
       single_thread_str = autoplay_results_to_string(
-          config_get_autoplay_results(csw_config), false);
+          config_get_autoplay_results(csw_config), false, false);
     } else {
       free(multi_thread_str);
       multi_thread_str = autoplay_results_to_string(
-          config_get_autoplay_results(csw_config), false);
+          config_get_autoplay_results(csw_config), false, false);
       assert_strings_equal(single_thread_str, multi_thread_str);
     }
   }
@@ -94,8 +94,8 @@ void test_autoplay_leavegen(void) {
   load_and_exec_config_or_die_timed(ab_config,
                                     "leavegen 1 200 99999999 0 60 -seed 3", 60);
 
-  char *ab_ar_str =
-      autoplay_results_to_string(config_get_autoplay_results(ab_config), false);
+  char *ab_ar_str = autoplay_results_to_string(
+      config_get_autoplay_results(ab_config), false, false);
   assert_strings_equal(ab_ar_str, "autoplay games 200 95 103 2 100 287.965000 "
                                   "60.399622 289.805000 65.878043\n");
   free(ab_ar_str);
