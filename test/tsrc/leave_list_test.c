@@ -381,10 +381,11 @@ int leave_list_add_sas(LeaveList *leave_list, const LetterDistribution *ld,
                        double equity) {
   rack_reset(subleave);
   rack_set_to_string(ld, subleave, subleave_str);
-  int min_leave_count = leave_list_add_subleave(leave_list, subleave, equity);
+  int lowest_leave_count =
+      leave_list_add_subleave(leave_list, subleave, equity);
   assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
          expected_leaves_under_target_min_count);
-  return min_leave_count;
+  return lowest_leave_count;
 }
 
 void test_leave_list_draw_rarest_available(void) {

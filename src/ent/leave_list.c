@@ -252,7 +252,7 @@ int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
 }
 
 // Adds a single subleave to the list.
-// Returns the minimum leave count for the updated leave list.
+// Returns the lowest leave count.
 int leave_list_add_subleave(LeaveList *leave_list, const Rack *subleave,
                             double equity) {
   return leave_list_add_subleave_with_klv_index(

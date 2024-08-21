@@ -858,11 +858,12 @@ char *status_infer(Config __attribute__((unused)) * config) {
 void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args,
                                autoplay_t autoplay_type, int gens,
-                               int num_games_per_gen, int min_leave_count,
-                               int force_draw_start, int max_force_draw_turn) {
+                               int num_games_per_gen,
+                               int target_min_leave_count, int force_draw_start,
+                               int max_force_draw_turn) {
   autoplay_args->type = autoplay_type;
   autoplay_args->gens = gens;
-  autoplay_args->min_leave_count = min_leave_count;
+  autoplay_args->target_min_leave_count = target_min_leave_count;
   autoplay_args->force_draw_start = force_draw_start;
   autoplay_args->games_per_gen = num_games_per_gen;
   autoplay_args->max_force_draw_turn = max_force_draw_turn;
@@ -872,17 +873,16 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
 }
 
-autoplay_status_t config_autoplay(const Config *config,
-                                  AutoplayResults *autoplay_results,
-                                  autoplay_t autoplay_type, int gens,
-                                  int num_games_per_gen, int min_leave_count,
-                                  int force_draw_start,
-                                  int max_force_draw_turn) {
+autoplay_status_t
+config_autoplay(const Config *config, AutoplayResults *autoplay_results,
+                autoplay_t autoplay_type, int gens, int num_games_per_gen,
+                int target_min_leave_count, int force_draw_start,
+                int max_force_draw_turn) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
   config_fill_autoplay_args(config, &args, autoplay_type, gens,
-                            num_games_per_gen, min_leave_count,
+                            num_games_per_gen, target_min_leave_count,
                             force_draw_start, max_force_draw_turn);
   return autoplay(&args, autoplay_results);
 }
@@ -1005,11 +1005,11 @@ void execute_leave_gen(Config *config) {
 
   const char *min_leave_count_str =
       config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 2);
-  int min_leave_count;
+  int target_min_leave_count;
   if (!string_to_int_or_set_error_status(
           min_leave_count_str, 1, INT_MAX, config->error_status,
           ERROR_STATUS_TYPE_CONFIG_LOAD,
-          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &min_leave_count)) {
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &target_min_leave_count)) {
     return;
   }
 
@@ -1035,9 +1035,10 @@ void execute_leave_gen(Config *config) {
   // Convert from 1-indexed to 0-indexed
   max_force_draw_turns--;
 
-  autoplay_status = config_autoplay(
-      config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN, gens,
-      num_games, min_leave_count, max_force_draw_turns, max_force_draw_turns);
+  autoplay_status =
+      config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
+                      gens, num_games, target_min_leave_count,
+                      max_force_draw_turns, max_force_draw_turns);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)autoplay_status);
 }

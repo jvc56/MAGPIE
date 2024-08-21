@@ -66,12 +66,11 @@ inference_status_t config_infer(const Config *config, int target_index,
                                 int target_score, int target_num_exch,
                                 Rack *target_played_tiles,
                                 InferenceResults *results);
-autoplay_status_t config_autoplay(const Config *config,
-                                  AutoplayResults *autoplay_results,
-                                  autoplay_t autoplay_type, int gens,
-                                  int num_games_per_gen, int min_leave_count,
-                                  int force_draw_start,
-                                  int max_force_draw_turn);
+autoplay_status_t
+config_autoplay(const Config *config, AutoplayResults *autoplay_results,
+                autoplay_t autoplay_type, int gens, int num_games_per_gen,
+                int target_min_leave_count, int force_draw_start,
+                int max_force_draw_turn);
 sim_status_t config_simulate(const Config *config, Rack *known_opp_rack,
                              SimResults *sim_results);
 
