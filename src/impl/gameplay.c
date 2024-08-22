@@ -151,7 +151,7 @@ void update_cross_set_for_move(const Move *move, Game *game) {
   }
 }
 
-// Draws at most n random tiles from the bag to the rack.
+// Draws the required number of tiles to fill the rack to RACK_SIZE.
 void draw_to_full_rack(Game *game, int player_index) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));

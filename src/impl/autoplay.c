@@ -167,8 +167,6 @@ void postgen_prebroadcast_func(void *data) {
 typedef struct AutoplayWorker {
   int worker_index;
   const AutoplayArgs *args;
-  Rack *original_rack;
-  Rack *rare_leave;
   AutoplayResults *autoplay_results;
   AutoplaySharedData *shared_data;
 } AutoplayWorker;
@@ -180,8 +178,6 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = args;
   autoplay_worker->worker_index = worker_index;
-  autoplay_worker->original_rack = NULL;
-  autoplay_worker->rare_leave = NULL;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
   autoplay_worker->shared_data = shared_data;
@@ -313,74 +309,175 @@ bool autoplay_leave_list_add_subleave(LeavegenSharedData *lg_shared_data,
   return min_leave_count_reached;
 }
 
-// Returns true if the required minimum leave count was reached.
-bool play_autoplay_game(AutoplayWorker *autoplay_worker, Game *game,
-                        MoveList *move_list, Rack *leaves[2],
-                        int starting_player_index, uint64_t seed,
-                        uint64_t iter_count) {
-  AutoplayResults *autoplay_results = autoplay_worker->autoplay_results;
-  AutoplaySharedData *shared_data = autoplay_worker->shared_data;
-  LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
-  const int thread_index = autoplay_worker->worker_index;
+typedef struct GameRunner {
+  bool min_leave_count_reached;
+  int turn_number;
+  int force_draw_turn_number;
+  Game *game;
+  MoveList *move_list;
+  Rack *leaves[2];
+  Rack *original_rack;
+  Rack *rare_leave;
+  AutoplaySharedData *shared_data;
+} GameRunner;
 
-  Rack *original_rack = autoplay_worker->original_rack;
-  Rack *rare_leave = autoplay_worker->rare_leave;
-  const int max_force_draw_turn = autoplay_worker->args->max_force_draw_turn;
-  const int target_min_leave_count =
-      autoplay_worker->args->target_min_leave_count;
+GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
+  const AutoplayArgs *args = autoplay_worker->args;
+  GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
+  game_runner->min_leave_count_reached = false;
+  const int dist_size = ld_get_size(args->game_args->ld);
+  game_runner->leaves[0] = rack_create(dist_size);
+  game_runner->leaves[1] = rack_create(dist_size);
+  game_runner->original_rack = rack_create(dist_size);
+  game_runner->rare_leave = rack_create(dist_size);
+  game_runner->shared_data = autoplay_worker->shared_data;
+  game_runner->game = game_create(args->game_args);
+  game_runner->move_list = move_list_create(1);
+  return game_runner;
+}
 
+void game_runner_destroy(GameRunner *game_runner) {
+  if (!game_runner) {
+    return;
+  }
+  rack_destroy(game_runner->leaves[0]);
+  rack_destroy(game_runner->leaves[1]);
+  rack_destroy(game_runner->original_rack);
+  rack_destroy(game_runner->rare_leave);
+  game_destroy(game_runner->game);
+  move_list_destroy(game_runner->move_list);
+  free(game_runner);
+}
+
+void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
+                       ThreadControlIterOutput *iter_output,
+                       int starting_player_index) {
+  Game *game = game_runner->game;
   game_reset(game);
-  game_seed(game, seed);
+  game_seed(game, iter_output->seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
-  int turn_number = 0;
-  int force_draw_turn_number = -1;
-  if (lg_shared_data && max_force_draw_turn >= 0 &&
-      iter_count >= (uint64_t)autoplay_worker->args->force_draw_start) {
-    force_draw_turn_number = prng_get_random_number(
+  game_runner->turn_number = 0;
+  game_runner->force_draw_turn_number = -1;
+  const int max_force_draw_turn = autoplay_worker->args->max_force_draw_turn;
+  if (game_runner->shared_data->leavegen_shared_data &&
+      max_force_draw_turn >= 0 &&
+      iter_output->iter_count >=
+          (uint64_t)autoplay_worker->args->force_draw_start) {
+    game_runner->force_draw_turn_number = prng_get_random_number(
         bag_get_prng(game_get_bag(game)), max_force_draw_turn + 1);
     for (int i = 0; i < 2; i++) {
-      rack_reset(leaves[i]);
+      rack_reset(game_runner->leaves[i]);
     }
   }
-  bool min_leave_count_reached = false;
-  while (!game_over(game)) {
-    const int player_on_turn_index = game_get_player_on_turn_index(game);
-    Rack *leave_from_previous_move = leaves[player_on_turn_index];
-    if (turn_number == force_draw_turn_number) {
-      rack_copy(original_rack,
-                player_get_rack(game_get_player(game, player_on_turn_index)));
-      return_rack_to_bag(game, player_on_turn_index);
-      draw_rack_from_bag(game, player_on_turn_index, leave_from_previous_move);
-      autoplay_leave_list_draw_rarest_available_leave(
-          lg_shared_data, game, player_on_turn_index, turn_number, rare_leave);
-      draw_to_full_rack(game, player_on_turn_index);
-      const Move *forced_move =
-          get_top_equity_move(game, thread_index, move_list);
-      if (autoplay_leave_list_add_subleave(lg_shared_data, rare_leave,
-                                           move_get_equity(forced_move),
-                                           target_min_leave_count)) {
-        min_leave_count_reached = true;
-      }
-      return_rack_to_bag(game, player_on_turn_index);
-      draw_rack_from_bag(game, player_on_turn_index, original_rack);
+}
+
+bool game_runner_is_game_over(GameRunner *game_runner) {
+  return game_over(game_runner->game) ||
+         (game_runner->shared_data->leavegen_shared_data &&
+          bag_get_tiles(game_get_bag(game_runner->game)) < (RACK_SIZE));
+}
+
+const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
+                                  GameRunner *game_runner) {
+  if (game_runner_is_game_over(game_runner)) {
+    log_fatal("game runner attempted to play a move when the game is over\n");
+  }
+  Game *game = game_runner->game;
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  Rack *leave_from_previous_move = game_runner->leaves[player_on_turn_index];
+  LeavegenSharedData *lg_shared_data =
+      game_runner->shared_data->leavegen_shared_data;
+  const int thread_index = autoplay_worker->worker_index;
+  const int target_min_leave_count =
+      autoplay_worker->args->target_min_leave_count;
+  if (game_runner->turn_number == game_runner->force_draw_turn_number) {
+    rack_copy(game_runner->original_rack,
+              player_get_rack(game_get_player(game, player_on_turn_index)));
+    return_rack_to_bag(game, player_on_turn_index);
+    draw_rack_from_bag(game, player_on_turn_index, leave_from_previous_move);
+    autoplay_leave_list_draw_rarest_available_leave(
+        lg_shared_data, game, player_on_turn_index, game_runner->turn_number,
+        game_runner->rare_leave);
+    draw_to_full_rack(game, player_on_turn_index);
+    const Move *forced_move =
+        get_top_equity_move(game, thread_index, game_runner->move_list);
+    if (autoplay_leave_list_add_subleave(
+            lg_shared_data, game_runner->rare_leave,
+            move_get_equity(forced_move), target_min_leave_count)) {
+      game_runner->min_leave_count_reached = true;
     }
-    const Move *move = get_top_equity_move(game, thread_index, move_list);
-    autoplay_results_add_move(autoplay_results, move);
-    if (lg_shared_data) {
-      if (autoplay_leave_list_add_leave(
-              lg_shared_data, game, player_on_turn_index, move_get_equity(move),
-              turn_number > max_force_draw_turn, target_min_leave_count)) {
-        min_leave_count_reached = true;
+    return_rack_to_bag(game, player_on_turn_index);
+    draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);
+  }
+  const Move *move =
+      get_top_equity_move(game, thread_index, game_runner->move_list);
+  if (lg_shared_data) {
+    if (autoplay_leave_list_add_leave(
+            lg_shared_data, game, player_on_turn_index, move_get_equity(move),
+            game_runner->turn_number >
+                autoplay_worker->args->max_force_draw_turn,
+            target_min_leave_count)) {
+      game_runner->min_leave_count_reached = true;
+    }
+  }
+  play_move(move, game, NULL, leave_from_previous_move);
+  game_runner->turn_number++;
+  return move;
+}
+
+// Returns true if the required minimum leave count was reached.
+bool play_autoplay_games(AutoplayWorker *autoplay_worker,
+                         GameRunner *game_runner1, GameRunner *game_runner2,
+                         ThreadControlIterOutput *iter_output) {
+  const int starting_player_index = iter_output->iter_count % 2;
+  game_runner_start(autoplay_worker, game_runner1, iter_output,
+                    starting_player_index);
+  if (game_runner2) {
+    game_runner_start(autoplay_worker, game_runner2, iter_output,
+                      1 - starting_player_index);
+  }
+  bool games_are_divergent = false;
+  while (true) {
+    const Move *move1 = NULL;
+    bool game1_is_over = game_runner_is_game_over(game_runner1);
+    if (!game1_is_over) {
+      move1 = game_runner_play_move(autoplay_worker, game_runner1);
+      autoplay_results_add_move(autoplay_worker->autoplay_results, move1);
+    }
+
+    const Move *move2 = NULL;
+    bool game2_is_over = true;
+    if (game_runner2) {
+      game2_is_over = game_runner_is_game_over(game_runner2);
+      if (!game2_is_over) {
+        move2 = game_runner_play_move(autoplay_worker, game_runner2);
+        autoplay_results_add_move(autoplay_worker->autoplay_results, move2);
       }
     }
-    play_move(move, game, NULL, leave_from_previous_move);
-    turn_number++;
-    if (lg_shared_data && bag_get_tiles(game_get_bag(game)) < (RACK_SIZE)) {
+
+    if (game1_is_over && game2_is_over) {
       break;
     }
+
+    // It is guaranteed that at least one move is not null
+    // at this point.
+    if (!move1 || !move2 || compare_moves(move1, move2, true) != -1) {
+      games_are_divergent = true;
+    }
   }
-  autoplay_results_add_game(autoplay_results, game, turn_number, false);
+  bool min_leave_count_reached = game_runner1->min_leave_count_reached;
+  autoplay_results_add_game(autoplay_worker->autoplay_results,
+                            game_runner1->game, game_runner1->turn_number,
+                            games_are_divergent);
+  if (game_runner2) {
+    // We do not check for min leave counts here because leave gen
+    // does not use game pairs and therefore does not have a second
+    // game runner.
+    autoplay_results_add_game(autoplay_worker->autoplay_results,
+                              game_runner2->game, game_runner2->turn_number,
+                              games_are_divergent);
+  }
   return min_leave_count_reached;
 }
 
@@ -388,6 +485,7 @@ void print_current_status(AutoplayWorker *autoplay_worker,
                           uint64_t iter_count) {
   StringBuilder *status_sb = string_builder_create();
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
+  // FIXME: test this print
   string_builder_add_formatted_string(
       status_sb, "%d seconds, %ld games",
       (int)mtimer_elapsed_seconds(shared_data->timer), iter_count);
@@ -404,6 +502,7 @@ void print_current_status(AutoplayWorker *autoplay_worker,
     lowest_leave_count =
         leave_list_get_lowest_leave_count(lg_shared_data->leave_list);
     pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
+    // FIXME: add number of leaves under target min leave count
     string_builder_add_formatted_string(status_sb,
                                         ", gen %d, %ld leaves recorded, %d "
                                         "forced draws, %d lowest leave count\n",
@@ -417,13 +516,10 @@ void print_current_status(AutoplayWorker *autoplay_worker,
   string_builder_destroy(status_sb);
 }
 
-void autoplay_single_generation(AutoplayWorker *autoplay_worker, Game *game,
-                                MoveList *move_list, Rack *leaves[2]) {
-  const AutoplayArgs *args = autoplay_worker->args;
-  ThreadControl *thread_control = args->thread_control;
-
-  const bool use_game_pairs =
-      args->use_game_pairs && args->type == AUTOPLAY_TYPE_DEFAULT;
+void autoplay_single_generation(AutoplayWorker *autoplay_worker,
+                                GameRunner *game_runner1,
+                                GameRunner *game_runner2) {
+  ThreadControl *thread_control = autoplay_worker->args->thread_control;
   ThreadControlIterOutput iter_output;
 
   while (true) {
@@ -432,74 +528,53 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker, Game *game,
       break;
     }
     if (thread_control_get_next_iter_output(thread_control, &iter_output)) {
-      // The max iteration was reached
+      // The max iteration was already reached
       break;
     }
-    int starting_player_index = iter_output.iter_count % 2;
-    if (play_autoplay_game(autoplay_worker, game, move_list, leaves,
-                           starting_player_index, iter_output.seed,
-                           iter_output.iter_count)) {
-      // The minimum leave count was reached
-      break;
-    }
-    if (use_game_pairs) {
-      play_autoplay_game(autoplay_worker, game, move_list, leaves,
-                         1 - starting_player_index, iter_output.seed,
-                         iter_output.iter_count);
-    }
+    bool min_leave_count_reached = play_autoplay_games(
+        autoplay_worker, game_runner1, game_runner2, &iter_output);
     if (iter_output.print_info) {
       print_current_status(autoplay_worker, iter_output.iter_count);
+    }
+    if (min_leave_count_reached) {
+      break;
     }
   }
 }
 
-void autoplay_leave_gen(AutoplayWorker *autoplay_worker, Game *game,
-                        MoveList *move_list) {
+void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
+                        GameRunner *game_runner) {
   const AutoplayArgs *args = autoplay_worker->args;
-  ThreadControl *thread_control = args->thread_control;
-  const uint64_t gens = args->gens;
-  const LetterDistribution *ld = args->game_args->ld;
-
-  Rack *leaves[2] = {rack_create(ld_get_size(ld)),
-                     rack_create(ld_get_size(ld))};
-  autoplay_worker->original_rack = rack_create(ld_get_size(ld));
-  autoplay_worker->rare_leave = rack_create(ld_get_size(ld));
-
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
-
-  for (uint64_t i = 0; i < gens; i++) {
-    autoplay_single_generation(autoplay_worker, game, move_list, leaves);
+  for (int i = 0; i < args->gens; i++) {
+    autoplay_single_generation(autoplay_worker, game_runner, NULL);
     checkpoint_wait(shared_data->leavegen_shared_data->postgen_checkpoint,
                     shared_data);
-    if (thread_control_get_is_halted(thread_control)) {
+    if (thread_control_get_is_halted(args->thread_control)) {
       break;
     }
   }
-
-  rack_destroy(autoplay_worker->original_rack);
-  rack_destroy(autoplay_worker->rare_leave);
-  rack_destroy(leaves[0]);
-  rack_destroy(leaves[1]);
 }
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
   const AutoplayArgs *args = autoplay_worker->args;
-  Game *game = game_create(args->game_args);
-  MoveList *move_list = move_list_create(1);
-
+  GameRunner *game_runner1 = game_runner_create(autoplay_worker);
+  GameRunner *game_runner2 = NULL;
   switch (args->type) {
   case AUTOPLAY_TYPE_DEFAULT:
-    autoplay_single_generation(autoplay_worker, game, move_list,
-                               (Rack *[2]){NULL, NULL});
+    if (args->use_game_pairs) {
+      game_runner2 = game_runner_create(autoplay_worker);
+    }
+    autoplay_single_generation(autoplay_worker, game_runner1, game_runner2);
+    game_runner_destroy(game_runner2);
     break;
   case AUTOPLAY_TYPE_LEAVE_GEN:
-    autoplay_leave_gen(autoplay_worker, game, move_list);
+    autoplay_leave_gen(autoplay_worker, game_runner1);
     break;
   }
 
-  move_list_destroy(move_list);
-  game_destroy(game);
+  game_runner_destroy(game_runner1);
   return NULL;
 }
 

@@ -14,6 +14,7 @@
 
 #include "../../src/util/string_util.h"
 
+#include "test_constants.h"
 #include "test_util.h"
 
 void test_autoplay_default(void) {
@@ -118,7 +119,67 @@ void test_autoplay_leavegen(void) {
   config_destroy(csw_config);
 }
 
+void test_autoplay_divergent_games(void) {
+  Config *csw_config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1  -gp true -threads 11");
+  Game *game;
+
+  AutoplayResults *ar = autoplay_results_create();
+
+  autoplay_status_t status = autoplay_results_set_options(ar, "games");
+  assert(status == AUTOPLAY_STATUS_SUCCESS);
+
+  load_and_exec_config_or_die(csw_config, "cgp " VS_ANDY_CGP);
+  game = config_get_game(csw_config);
+  autoplay_results_add_game(ar, game, 20, false);
+
+  load_and_exec_config_or_die(csw_config, "cgp " VS_FRENTZ_CGP);
+  game = config_get_game(csw_config);
+  autoplay_results_add_game(ar, game, 20, true);
+
+  load_and_exec_config_or_die(csw_config, "cgp " MANY_MOVES);
+  game = config_get_game(csw_config);
+  autoplay_results_add_game(ar, game, 20, false);
+
+  load_and_exec_config_or_die(csw_config, "cgp " UEY_CGP);
+  game = config_get_game(csw_config);
+  autoplay_results_add_game(ar, game, 20, true);
+
+  char *ar_str = autoplay_results_to_string(ar, false, true);
+  assert_strings_equal(
+      ar_str,
+      "autoplay games 4 1 3 0 4 251.750000 78.270365 279.250000 67.667693\n"
+      "autoplay games 2 0 2 0 2 295.500000 34.648232 328.000000 63.639610\n");
+  free(ar_str);
+
+  autoplay_results_destroy(ar);
+
+  load_and_exec_config_or_die(csw_config,
+                              "autoplay games 50 -seed 50 -lex CSW21 -gp true");
+
+  // There should be no divergent games for CSW21 vs CSW21
+  char *ar_gp_same_lex_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false, true);
+  assert_strings_equal(ar_gp_same_lex_str,
+                       "autoplay games 100 50 50 0 50 465.610000 61.689495 "
+                       "465.610000 61.689495\nautoplay games 0 0 0 0 0 "
+                       "0.000000 0.000000 0.000000 0.000000\n");
+  free(ar_gp_same_lex_str);
+
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games 50 -seed 50 -l1 CSW21 -l2 NWL20 -gp true");
+
+  char *ar_gp_diff_lex_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false, true);
+  assert_strings_equal(ar_gp_diff_lex_str, "");
+  free(ar_gp_diff_lex_str);
+
+  config_destroy(csw_config);
+}
+
 void test_autoplay(void) {
   test_autoplay_default();
   test_autoplay_leavegen();
+  test_autoplay_divergent_games();
 }
