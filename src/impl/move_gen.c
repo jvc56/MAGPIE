@@ -342,7 +342,7 @@ static inline void record_exchange(MoveGen *gen) {
 
   update_best_move_or_insert_into_movelist(
       gen, 0, tiles_exchanged, GAME_EVENT_EXCHANGE, 0, 0, 0, tiles_exchanged,
-      gen->dir, gen->exchange_strip);
+      BOARD_HORIZONTAL_DIRECTION, gen->exchange_strip);
 }
 
 // Look up leave values for all subsets of the player's rack and if add_exchange

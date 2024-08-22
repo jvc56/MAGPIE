@@ -172,7 +172,10 @@ void test_autoplay_divergent_games(void) {
 
   char *ar_gp_diff_lex_str = autoplay_results_to_string(
       config_get_autoplay_results(csw_config), false, true);
-  assert_strings_equal(ar_gp_diff_lex_str, "");
+  assert_strings_equal(ar_gp_diff_lex_str,
+                       "autoplay games 100 70 30 0 50 472.030000 59.216510 "
+                       "423.730000 62.515591\nautoplay games 100 70 30 0 50 "
+                       "472.030000 59.216510 423.730000 62.515591\n");
   free(ar_gp_diff_lex_str);
 
   config_destroy(csw_config);
