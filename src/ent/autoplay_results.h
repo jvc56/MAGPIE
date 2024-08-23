@@ -8,6 +8,8 @@
 #include "game.h"
 #include "move.h"
 
+#include "../util/string_util.h"
+
 typedef struct AutoplayResults AutoplayResults;
 
 AutoplayResults *autoplay_results_create(void);
@@ -27,5 +29,9 @@ void autoplay_results_combine(AutoplayResults **autoplay_results_list,
                               int list_size, AutoplayResults *target);
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);
+void string_builder_add_winning_player_confidence(StringBuilder *sb,
+                                                  double p0_win_pct,
+                                                  double p1_win_pct,
+                                                  int total_games);
 
 #endif

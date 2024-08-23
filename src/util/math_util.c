@@ -153,6 +153,14 @@ long double erfinv_refine(long double x, int nr_iter) {
 }
 
 // Convert a percentage to a z-score
-long double p_to_z(double p) { return sqrt(2) * erfinv(p / 100); };
+// This implements p = P(-Z<x<Z)
+double p_to_z(double p) { return sqrt(2) * erfinv(p / 100); };
+
+double z_to_p_cdf(double z) { return (0.5 * (1 + erf(z / sqrt(2.0)))) * 100; }
+
+// Assumes estimated_prob is between 0.5 and 1
+double odds_that_player_is_better(double sampled_win_pct, int total_games) {
+  return z_to_p_cdf((sampled_win_pct - 0.5) * 2 * sqrt((double)total_games));
+}
 
 bool is_z_valid(double zval) { return zval <= p_to_z(PERCENTILE_MAX); }

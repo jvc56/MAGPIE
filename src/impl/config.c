@@ -75,6 +75,7 @@ typedef enum {
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_USE_GAME_PAIRS,
+  ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
@@ -113,6 +114,7 @@ struct Config {
   double stop_cond_pct;
   double equity_margin;
   bool use_game_pairs;
+  bool human_readable;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -245,6 +247,10 @@ WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
+}
+
+bool config_get_human_readable(const Config *config) {
+  return config->human_readable;
 }
 
 PlayersData *config_get_players_data(const Config *config) {
@@ -868,6 +874,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->games_per_gen = num_games_per_gen;
   autoplay_args->max_force_draw_turn = max_force_draw_turn;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
+  autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->thread_control = config_get_thread_control(config);
   autoplay_args->data_paths = config_get_data_paths(config);
   config_fill_game_args(config, autoplay_args->game_args);
@@ -1493,8 +1500,8 @@ config_load_status_t config_load_data(Config *config) {
     config->stop_cond_pct = PERCENTILE_MAX + 10;
   } else {
     config_load_status =
-        config_load_double(config, ARG_TOKEN_STOP_COND_PCT, 0.0, PERCENTILE_MAX,
-                           &config->stop_cond_pct);
+        config_load_double(config, ARG_TOKEN_STOP_COND_PCT, PERCENTILE_MIN,
+                           PERCENTILE_MAX, &config->stop_cond_pct);
     if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
       return config_load_status;
     }
@@ -1523,6 +1530,14 @@ config_load_status_t config_load_data(Config *config) {
 
   config_load_status = config_load_bool(config, ARG_TOKEN_USE_GAME_PAIRS,
                                         &config->use_game_pairs);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
+  // Human readable
+
+  config_load_status = config_load_bool(config, ARG_TOKEN_HUMAN_READABLE,
+                                        &config->human_readable);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
@@ -1726,6 +1741,8 @@ Config *config_create_default(void) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1, execute_fatal,
+                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_RANDOM_SEED, "seed", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
@@ -1752,6 +1769,7 @@ Config *config_create_default(void) {
   config->stop_cond_pct = 99;
   config->equity_margin = 0;
   config->use_game_pairs = true;
+  config->human_readable = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->win_pcts = win_pct_create(config->data_paths, DEFAULT_WIN_PCT);
   config->board_layout = board_layout_create_default(config->data_paths);

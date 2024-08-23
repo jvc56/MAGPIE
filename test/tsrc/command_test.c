@@ -300,8 +300,26 @@ void test_command_execution(void) {
   assert_command_status_and_output(
       config,
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity "
-      "-r1 best -r2 best -threads 5 -gp false",
+      "-r1 best -r2 best -threads 5 -hr false -gp false",
       true, 5, 1, 0);
+
+  assert_command_status_and_output(
+      config,
+      "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
+      "-r1 best -r2 best -threads 1 -hr false -gp true",
+      false, 5, 2, 0);
+
+  assert_command_status_and_output(
+      config,
+      "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
+      "-r1 best -r2 best -threads 1 -hr true -gp false",
+      false, 5, 18, 0);
+
+  assert_command_status_and_output(
+      config,
+      "autoplay game 50 -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+      "-r1 best -r2 best -threads 1 -hr true -gp true",
+      false, 5, 36, 0);
 
   for (int i = 0; i < 3; i++) {
     // Catalan
@@ -321,7 +339,7 @@ void test_command_execution(void) {
     assert_command_status_and_output(
         config,
         "autoplay game 10 -s1 equity -s2 equity -r1 "
-        "best -r2 best -numplays 1 -gp false ",
+        "best -r2 best -numplays 1  -hr false -gp false ",
         false, 30, 1, 0);
     // CSW
     assert_command_status_and_output(config, "cgp " DELDAR_VS_HARSHAN_CGP,
@@ -360,7 +378,7 @@ void test_command_execution(void) {
     assert_command_status_and_output(
         config,
         "autoplay game 10 -s1 equity -s2 equity -r1 best "
-        "-r2 best -numplays 1 -lex OSPS49 -gp false",
+        "-r2 best -numplays 1 -lex OSPS49 -hr false -gp false",
         false, 30, 1, 0);
   }
   config_destroy(config);

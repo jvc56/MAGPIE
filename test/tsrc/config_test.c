@@ -56,6 +56,10 @@ void test_config_load_error_cases(void) {
                          CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
   test_config_load_error(config, "set -gp off",
                          CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+  test_config_load_error(config, "set -hr on",
+                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+  test_config_load_error(config, "set -hr off",
+                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
   test_config_load_error(config, "set -seed -2",
                          CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
   test_config_load_error(config, "sim -lex CSW21 -it 1000 -plies",
@@ -173,7 +177,8 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
       "%s -s2 %s -r2 %s -eq %0.2f -numplays %d "
       "-plies %d -it "
-      "%d -scond %d -seed %d -threads %d -pfreq %d -cfreq %d -gp true -p1 %s "
+      "%d -scond %d -seed %d -threads %d -pfreq %d -cfreq %d -gp true -hr true "
+      "-p1 %s "
       "-p2 "
       "%s",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, equity_margin,
@@ -204,6 +209,7 @@ void test_config_load_success(void) {
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
   assert(config_get_use_game_pairs(config));
+  assert(config_get_human_readable(config));
 
   // Change some fields, confirm that
   // other fields retain their value.
@@ -226,7 +232,7 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -l1 %s -l2 %s  -s1 "
       "%s -r1 %s -s2 %s -r2 %s -plies %d -it %d "
       "-threads %d "
-      "-pfreq %d -gp false ",
+      "-pfreq %d -gp false -hr false",
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, plies, max_iterations,
       number_of_threads, print_info);
 
@@ -254,6 +260,7 @@ void test_config_load_success(void) {
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
   assert(!config_get_use_game_pairs(config));
+  assert(!config_get_human_readable(config));
 
   string_builder_destroy(test_string_builder);
   config_destroy(config);

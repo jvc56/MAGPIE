@@ -8,6 +8,7 @@
 #include "move.h"
 #include "stats.h"
 
+#include "../util/math_util.h"
 #include "../util/util.h"
 
 typedef enum {
@@ -124,12 +125,25 @@ void game_data_add_game(GameData *gd, const Game *game, int turns) {
   gd->game_end_reasons[game_get_game_end_reason(game)]++;
 }
 
+void string_builder_add_game_end_reasons(StringBuilder *sb,
+                                         const GameData *gd) {
+  for (int i = 0; i < NUMBER_OF_GAME_END_REASONS; i++) {
+    string_builder_add_formatted_string(sb, "%d ", gd->game_end_reasons[i]);
+  }
+}
+
 char *game_data_ucgi_str(const GameData *gd) {
-  return get_formatted_string(
-      "autoplay games %d %d %d %d %d %f %f %f %f\n", gd->total_games,
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "autoplay games %d %d %d %d %d %f %f %f %f ", gd->total_games,
       gd->p0_wins, gd->p0_losses, gd->p0_ties, gd->p0_firsts,
       stat_get_mean(gd->p0_score), stat_get_stdev(gd->p0_score),
       stat_get_mean(gd->p1_score), stat_get_stdev(gd->p1_score));
+  string_builder_add_game_end_reasons(sb, gd);
+  string_builder_add_string(sb, "\n");
+  char *res = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return res;
 }
 
 char *get_total_and_percentage_string(int total, double pct) {
@@ -138,6 +152,24 @@ char *get_total_and_percentage_string(int total, double pct) {
 
 char *get_score_and_dev_string(double score, double stdev) {
   return get_formatted_string("%2.2f %2.2f", score, stdev);
+}
+
+void string_builder_add_winning_player_confidence(StringBuilder *sb,
+                                                  double p0_win_pct,
+                                                  double p1_win_pct,
+                                                  int total_games) {
+  int winning_player_num;
+  double winning_player_win_pct;
+  if (p0_win_pct >= 0.5) {
+    winning_player_num = 1;
+    winning_player_win_pct = p0_win_pct;
+  } else {
+    winning_player_num = 2;
+    winning_player_win_pct = p1_win_pct;
+  }
+  string_builder_add_formatted_string(
+      sb, "Player %d is better with confidence: %f%%\n", winning_player_num,
+      odds_that_player_is_better(winning_player_win_pct, total_games));
 }
 
 char *game_data_human_readable_str(const GameData *gd, bool divergent) {
@@ -156,15 +188,23 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   StringBuilder *sb = string_builder_create();
 
   if (divergent) {
-    string_builder_add_string(sb, "Divergent Games:\n\n");
+    string_builder_add_string(sb, "Divergent Games\n\n");
   } else {
-    string_builder_add_string(sb, "All Games:\n\n");
+    string_builder_add_string(sb, "All Games\n\n");
   }
 
   string_builder_add_formatted_string(sb, "Games Played: %d\n",
                                       gd->total_games);
   string_builder_add_formatted_string(sb, "Turns Played: %d\n",
                                       gd->total_turns);
+
+  if (gd->total_games == 0) {
+    string_builder_add_string(sb, "\n");
+    char *no_games_ret_str = string_builder_dump(sb, NULL);
+    string_builder_destroy(sb);
+    return no_games_ret_str;
+  }
+
   string_builder_add_formatted_string(sb, "Turns per Game: %0.2f %0.2f\n\n",
                                       stat_get_mean(gd->turns),
                                       stat_get_stdev(gd->turns));
@@ -214,6 +254,12 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
                                       col_witdth, p1_score_str);
   free(p0_score_str);
   free(p1_score_str);
+
+  string_builder_add_string(sb, "\n");
+
+  string_builder_add_winning_player_confidence(sb, p0_win_pct, p1_win_pct,
+                                               gd->total_games);
+  string_builder_add_string(sb, "\n");
 
   char *ret_str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);

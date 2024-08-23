@@ -485,9 +485,8 @@ void print_current_status(AutoplayWorker *autoplay_worker,
                           uint64_t iter_count) {
   StringBuilder *status_sb = string_builder_create();
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
-  // FIXME: test this print
   string_builder_add_formatted_string(
-      status_sb, "%d seconds, %ld games",
+      status_sb, "seconds: %d, games: %ld",
       (int)mtimer_elapsed_seconds(shared_data->timer), iter_count);
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   if (lg_shared_data) {
@@ -495,19 +494,28 @@ void print_current_status(AutoplayWorker *autoplay_worker,
     uint64_t leaves_recorded;
     uint64_t forced_draws;
     int lowest_leave_count;
+    uint64_t failed_forced_draws;
+    uint64_t leaves_under_target_min_count;
+    uint64_t turns_over_max_forced_draw;
     pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
     gen = lg_shared_data->gens_completed;
     leaves_recorded = lg_shared_data->gen_leaves_recorded;
     forced_draws = stat_get_num_samples(lg_shared_data->success_force_draws);
     lowest_leave_count =
         leave_list_get_lowest_leave_count(lg_shared_data->leave_list);
+    failed_forced_draws = lg_shared_data->failed_force_draws;
+    leaves_under_target_min_count =
+        leave_list_get_leaves_under_target_min_count(
+            lg_shared_data->leave_list);
+    turns_over_max_forced_draw =
+        lg_shared_data->recordable_turns_over_max_force_draw;
     pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
-    // FIXME: add number of leaves under target min leave count
-    string_builder_add_formatted_string(status_sb,
-                                        ", gen %d, %ld leaves recorded, %d "
-                                        "forced draws, %d lowest leave count\n",
-                                        gen, leaves_recorded, forced_draws,
-                                        lowest_leave_count);
+    string_builder_add_formatted_string(
+        status_sb,
+        " gen: %d, leaves rec: %ld, leaves under: %ld, lowest leave: %d, "
+        "fdraws: %ld, ffdraws:%ld, tomfd: %ld\n",
+        gen, leaves_recorded, leaves_under_target_min_count, lowest_leave_count,
+        forced_draws, failed_forced_draws, turns_over_max_forced_draw);
   } else {
     string_builder_add_string(status_sb, "\n");
   }
@@ -650,7 +658,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
                       args->data_paths);
 
   char *autoplay_results_string = autoplay_results_to_string(
-      autoplay_results, false, show_divergent_results);
+      autoplay_results, args->human_readable, show_divergent_results);
   thread_control_print(thread_control, autoplay_results_string);
   free(autoplay_results_string);
   gen_destroy_cache();

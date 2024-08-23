@@ -16,6 +16,7 @@ typedef struct AutoplayArgs {
   int force_draw_start;
   int max_force_draw_turn;
   bool use_game_pairs;
+  bool human_readable;
   autoplay_t type;
   const char *data_paths;
   GameArgs *game_args;
