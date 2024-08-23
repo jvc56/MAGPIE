@@ -306,20 +306,20 @@ void test_command_execution(void) {
   assert_command_status_and_output(
       config,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
-      "-r1 best -r2 best -threads 1 -hr false -gp true",
-      false, 5, 2, 0);
+      "-r1 best -r2 best -threads 1 -hr false -gp true -pfreq 4",
+      false, 5, 4, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
-      "-r1 best -r2 best -threads 1 -hr true -gp false",
-      false, 5, 18, 0);
+      "-r1 best -r2 best -threads 1 -hr true -gp false -pfreq 0",
+      false, 5, 19, 0);
 
   assert_command_status_and_output(
       config,
       "autoplay game 50 -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
       "-r1 best -r2 best -threads 1 -hr true -gp true",
-      false, 5, 36, 0);
+      false, 5, 38, 0);
 
   for (int i = 0; i < 3; i++) {
     // Catalan

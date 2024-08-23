@@ -1476,7 +1476,7 @@ config_load_status_t config_load_data(Config *config) {
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
-  if (print_info_interval > 0) {
+  if (print_info_interval >= 0) {
     thread_control_set_print_info_interval(config->thread_control,
                                            print_info_interval);
   }

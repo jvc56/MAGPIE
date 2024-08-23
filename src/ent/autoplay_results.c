@@ -186,6 +186,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
 
   const int col_witdth = 16;
   StringBuilder *sb = string_builder_create();
+  string_builder_add_string(sb, "\n");
 
   if (divergent) {
     string_builder_add_string(sb, "Divergent Games\n\n");
