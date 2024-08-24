@@ -1056,6 +1056,7 @@ char *status_leave_gen(Config __attribute__((unused)) * config) {
 
 // Create
 
+// This only implements creating a klv for now.
 void execute_create_data(Config *config) {
   const char *create_type_str =
       config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 0);
@@ -1066,19 +1067,14 @@ void execute_create_data(Config *config) {
         config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 1);
     char *klv_filename = data_filepaths_get_writable_filename(
         config_get_data_paths(config), klv_name_str, DATA_FILEPATH_TYPE_KLV);
-    const char *ld_name_str =
-        config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2);
-    const LetterDistribution *ld = config_get_ld(config);
-    LetterDistribution *arg_ld = NULL;
-    if (ld_name_str) {
-      arg_ld = ld_create(config_get_data_paths(config), ld_name_str);
-      ld = arg_ld;
-    }
+    LetterDistribution *ld =
+        ld_create(config_get_data_paths(config),
+                  config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2));
     KLV *klv = klv_create_empty(ld, klv_name_str);
     klv_write(klv, klv_filename);
     klv_destroy(klv);
     free(klv_filename);
-    ld_destroy(arg_ld);
+    ld_destroy(ld);
   } else {
     config_load_status = CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE;
   }
@@ -1691,7 +1687,7 @@ Config *config_create_default(void) {
                     status_convert);
   parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 5, 5,
                     execute_leave_gen, status_leave_gen);
-  parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 2, 3,
+  parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 3, 3,
                     execute_create_data, status_create_data);
   parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
                     status_fatal);

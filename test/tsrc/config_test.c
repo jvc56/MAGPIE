@@ -66,6 +66,8 @@ void test_config_load_error_cases(void) {
                          CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
   test_config_load_error(config, "cgp 1 2 3",
                          CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
+  test_config_load_error(config, "create klv CSW50",
+                         CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
   test_config_load_error(config, "sim -bdn invalid_number_of_rows15",
                          CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
   test_config_load_error(config, "sim -var Lonify",
@@ -454,6 +456,7 @@ void test_config_exec_parse_args(void) {
                             CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE);
   config_destroy(config);
   config = config_create_default_test();
+
   // Leave Gen
   assert_config_exec_status(config, "leavegen 2 20 1 0 4",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,

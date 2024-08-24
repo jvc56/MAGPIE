@@ -123,10 +123,10 @@ void test_autoplay_leavegen(void) {
                            "best -numplays 1 -threads 1");
 
   // Make sure the leavegen command can run without error.
-  load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed");
+  load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed english");
   load_and_exec_config_or_die(csw_config, "set -leaves CSW21_zeroed");
   load_and_exec_config_or_die(csw_config, "leavegen 2 200 1 0 60 -seed 0");
-  load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed_ml");
+  load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed_ml english");
   load_and_exec_config_or_die(csw_config,
                               "set -leaves CSW21_zeroed_ml -threads 11");
   load_and_exec_config_or_die(csw_config, "leavegen 2 100 1 0 200");
