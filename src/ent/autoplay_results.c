@@ -155,21 +155,35 @@ char *get_score_and_dev_string(double score, double stdev) {
 }
 
 void string_builder_add_winning_player_confidence(StringBuilder *sb,
-                                                  double p0_win_pct,
-                                                  double p1_win_pct,
+                                                  double p0_total,
+                                                  double p1_total,
                                                   int total_games) {
-  int winning_player_num;
-  double winning_player_win_pct;
-  if (p0_win_pct >= 0.5) {
+  // Apply a continuity correction from binomial to normal distribution
+  // See
+  // https://library.virginia.edu/data/articles/continuity-corrections-imperfect-responses-to-slight-problems#fn1
+  // for more details.
+  double p0_total_corrected_pct = (p0_total - 0.5) / total_games;
+  double p1_total_corrected_pct = (p1_total - 0.5) / total_games;
+
+  int winning_player_num = 0;
+  double winning_player_total_corrected_pct;
+  if (p0_total_corrected_pct >= 0.5) {
     winning_player_num = 1;
-    winning_player_win_pct = p0_win_pct;
-  } else {
+    winning_player_total_corrected_pct = p0_total_corrected_pct;
+  } else if (p1_total_corrected_pct >= 0.5) {
     winning_player_num = 2;
-    winning_player_win_pct = p1_win_pct;
+    winning_player_total_corrected_pct = p1_total_corrected_pct;
   }
-  string_builder_add_formatted_string(
-      sb, "Player %d is better with confidence: %f%%\n", winning_player_num,
-      odds_that_player_is_better(winning_player_win_pct, total_games));
+
+  if (winning_player_num > 0) {
+    string_builder_add_formatted_string(
+        sb, "Player %d is better with confidence: %f%%\n", winning_player_num,
+        odds_that_player_is_better(winning_player_total_corrected_pct,
+                                   total_games));
+  } else {
+    string_builder_add_string(
+        sb, "Results too close to determine which player is better\n");
+  }
 }
 
 char *game_data_human_readable_str(const GameData *gd, bool divergent) {
@@ -183,6 +197,12 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   double p1_loss_pct = (double)p1_losses / gd->total_games;
   int p0_ties = gd->p0_ties;
   double p0_tie_pct = (double)p0_ties / gd->total_games;
+
+  double p0_total = (double)gd->p0_wins + (double)gd->p0_ties / (double)2;
+  double p0_total_pct = p0_total / (double)(gd->total_games);
+
+  double p1_total = (double)(gd->total_games) - p0_total;
+  double p1_total_pct = p1_total / (double)(gd->total_games);
 
   const int col_witdth = 16;
   StringBuilder *sb = string_builder_create();
@@ -224,6 +244,14 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
                                       col_witdth, "Player 1", col_witdth,
                                       "Player 2");
 
+  char *p0_total_str = get_total_and_percentage_string(p0_total, p0_total_pct);
+  char *p1_total_str = get_total_and_percentage_string(p1_total, p1_total_pct);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
+                                      "Total:", col_witdth, p0_total_str,
+                                      col_witdth, p1_total_str);
+  free(p0_total_str);
+  free(p1_total_str);
+
   char *p0_win_str = get_total_and_percentage_string(p0_wins, p0_win_pct);
   char *p1_win_str = get_total_and_percentage_string(p1_wins, p1_win_pct);
   string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
@@ -258,7 +286,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
 
   string_builder_add_string(sb, "\n");
 
-  string_builder_add_winning_player_confidence(sb, p0_win_pct, p1_win_pct,
+  string_builder_add_winning_player_confidence(sb, p0_total, p1_total,
                                                gd->total_games);
   string_builder_add_string(sb, "\n");
 

@@ -545,7 +545,7 @@ inference_status_t verify_inference(const Inference *inference) {
 }
 
 inference_status_t infer(InferenceArgs *args, InferenceResults *results) {
-  thread_control_unhalt(args->thread_control);
+  thread_control_reset(args->thread_control, 0);
 
   if (!args->target_played_tiles) {
     return INFERENCE_STATUS_NO_TILES_PLAYED;

@@ -29,6 +29,7 @@
 
 typedef struct LeavegenSharedData {
   uint64_t gens_completed;
+  uint64_t gen_start_games;
   uint64_t gen_leaves_recorded;
   uint64_t total_leaves_recorded;
   uint64_t failed_force_draws;
@@ -48,7 +49,6 @@ typedef struct LeavegenSharedData {
 typedef struct AutoplaySharedData {
   uint64_t games_per_gen;
   ThreadControl *thread_control;
-  Timer *timer;
   LeavegenSharedData *leavegen_shared_data;
 } AutoplaySharedData;
 
@@ -160,6 +160,8 @@ void postgen_prebroadcast_func(void *data) {
   lg_shared_data->failed_force_draws = 0;
   lg_shared_data->gen_leaves_recorded = 0;
   lg_shared_data->recordable_turns_over_max_force_draw = 0;
+  lg_shared_data->gen_start_games =
+      thread_control_get_iter_count(shared_data->thread_control);
   thread_control_increment_max_iter_count(shared_data->thread_control,
                                           shared_data->games_per_gen);
 }
@@ -201,6 +203,7 @@ leavegen_shared_data_create(AutoplayResults *primary_autoplay_results,
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->gens_completed = 0;
+  shared_data->gen_start_games = 0;
   shared_data->gen_leaves_recorded = 0;
   shared_data->total_leaves_recorded = 0;
   shared_data->recordable_turns_over_max_force_draw = 0;
@@ -229,8 +232,6 @@ AutoplaySharedData *autoplay_shared_data_create(
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
   shared_data->games_per_gen = games_per_gen;
   shared_data->thread_control = thread_control;
-  shared_data->timer = mtimer_create();
-  mtimer_start(shared_data->timer);
   shared_data->leavegen_shared_data = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
@@ -255,7 +256,6 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   if (!shared_data) {
     return;
   }
-  mtimer_destroy(shared_data->timer);
   leavegen_shared_data_destroy(shared_data->leavegen_shared_data);
   free(shared_data);
 }
@@ -361,8 +361,13 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   game_runner->force_draw_turn_number = -1;
   const int max_force_draw_turn = autoplay_worker->args->max_force_draw_turn;
   if (game_runner->shared_data->leavegen_shared_data &&
+      // A negative max_force_draw_turn means that we
+      // aren't forcing draws at all.
       max_force_draw_turn >= 0 &&
-      iter_output->iter_count >=
+      // We only force draws if we've played enough games for this
+      // generation.
+      (iter_output->iter_count -
+       game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
           (uint64_t)autoplay_worker->args->force_draw_start) {
     game_runner->force_draw_turn_number = prng_get_random_number(
         bag_get_prng(game_get_bag(game)), max_force_draw_turn + 1);
@@ -426,6 +431,13 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   return move;
 }
 
+void autoplay_add_game(ThreadControl *thread_control,
+                       AutoplayResults *autoplay_results, const Game *game,
+                       int turns, bool divergent) {
+  autoplay_results_add_game(autoplay_results, game, turns, divergent);
+  thread_control_complete_iter(thread_control);
+}
+
 // Returns true if the required minimum leave count was reached.
 bool play_autoplay_games(AutoplayWorker *autoplay_worker,
                          GameRunner *game_runner1, GameRunner *game_runner2,
@@ -467,27 +479,30 @@ bool play_autoplay_games(AutoplayWorker *autoplay_worker,
     }
   }
   bool min_leave_count_reached = game_runner1->min_leave_count_reached;
-  autoplay_results_add_game(autoplay_worker->autoplay_results,
-                            game_runner1->game, game_runner1->turn_number,
-                            games_are_divergent);
+  autoplay_add_game(autoplay_worker->args->thread_control,
+                    autoplay_worker->autoplay_results, game_runner1->game,
+                    game_runner1->turn_number, games_are_divergent);
   if (game_runner2) {
     // We do not check for min leave counts here because leave gen
     // does not use game pairs and therefore does not have a second
     // game runner.
-    autoplay_results_add_game(autoplay_worker->autoplay_results,
-                              game_runner2->game, game_runner2->turn_number,
-                              games_are_divergent);
+    autoplay_add_game(autoplay_worker->args->thread_control,
+                      autoplay_worker->autoplay_results, game_runner2->game,
+                      game_runner2->turn_number, games_are_divergent);
   }
   return min_leave_count_reached;
 }
 
-void print_current_status(AutoplayWorker *autoplay_worker,
-                          uint64_t iter_count) {
+void print_current_status(AutoplayWorker *autoplay_worker) {
   StringBuilder *status_sb = string_builder_create();
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
+  ThreadControlIterCompletedOutput iter_completed_output;
+  thread_control_get_iter_count_completed(shared_data->thread_control,
+                                          &iter_completed_output);
   string_builder_add_formatted_string(
-      status_sb, "seconds: %d, games: %ld",
-      (int)mtimer_elapsed_seconds(shared_data->timer), iter_count);
+      status_sb, "seconds: %.3f, games: %ld",
+      iter_completed_output.time_elapsed,
+      iter_completed_output.iter_count_completed);
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   if (lg_shared_data) {
     int gen;
@@ -497,8 +512,10 @@ void print_current_status(AutoplayWorker *autoplay_worker,
     uint64_t failed_forced_draws;
     uint64_t leaves_under_target_min_count;
     uint64_t turns_over_max_forced_draw;
+    uint64_t gen_start_games;
     pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
     gen = lg_shared_data->gens_completed;
+    gen_start_games = lg_shared_data->gen_start_games;
     leaves_recorded = lg_shared_data->gen_leaves_recorded;
     forced_draws = stat_get_num_samples(lg_shared_data->success_force_draws);
     lowest_leave_count =
@@ -512,9 +529,11 @@ void print_current_status(AutoplayWorker *autoplay_worker,
     pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
     string_builder_add_formatted_string(
         status_sb,
-        " gen: %d, leaves rec: %ld, leaves under: %ld, lowest leave: %d, "
+        " gen: %d, gen games: %ld, leaves rec: %ld, leaves under: %ld, lowest "
+        "leave: %d, "
         "fdraws: %ld, ffdraws:%ld, tomfd: %ld\n",
-        gen, leaves_recorded, leaves_under_target_min_count, lowest_leave_count,
+        gen, iter_completed_output.iter_count_completed - gen_start_games,
+        leaves_recorded, leaves_under_target_min_count, lowest_leave_count,
         forced_draws, failed_forced_draws, turns_over_max_forced_draw);
   } else {
     string_builder_add_string(status_sb, "\n");
@@ -542,7 +561,7 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker,
     bool min_leave_count_reached = play_autoplay_games(
         autoplay_worker, game_runner1, game_runner2, &iter_output);
     if (iter_output.print_info) {
-      print_current_status(autoplay_worker, iter_output.iter_count);
+      print_current_status(autoplay_worker);
     }
     if (min_leave_count_reached) {
       break;
@@ -590,9 +609,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
                            AutoplayResults *autoplay_results) {
   ThreadControl *thread_control = args->thread_control;
 
-  thread_control_unhalt(thread_control);
-  thread_control_reset_iter_count(thread_control);
-  thread_control_set_max_iter_count(args->thread_control, args->games_per_gen);
+  thread_control_reset(thread_control, args->games_per_gen);
 
   autoplay_results_reset(autoplay_results);
 

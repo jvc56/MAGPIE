@@ -20,7 +20,9 @@ struct ThreadControl {
   int print_info_interval;
   int check_stopping_condition_interval;
   uint64_t iter_count;
+  uint64_t iter_count_completed;
   uint64_t max_iter_count;
+  double time_elapsed;
   XoshiroPRNG *prng;
   check_stop_status_t check_stop_status;
   mode_search_status_t current_mode;
@@ -30,6 +32,7 @@ struct ThreadControl {
   pthread_mutex_t halt_status_mutex;
   pthread_mutex_t searching_mode_mutex;
   pthread_mutex_t iter_mutex;
+  pthread_mutex_t iter_completed_mutex;
   FileHandler *outfile;
   FileHandler *infile;
   Timer *timer;
@@ -44,12 +47,15 @@ ThreadControl *thread_control_create(void) {
   thread_control->check_stopping_condition_interval = 0;
   thread_control->print_info_interval = 0;
   thread_control->iter_count = 0;
+  thread_control->iter_count_completed = 0;
+  thread_control->time_elapsed = 0;
   thread_control->max_iter_count = 0;
   pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
   pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
   pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_mutex, NULL);
+  pthread_mutex_init(&thread_control->iter_completed_mutex, NULL);
   thread_control->outfile = file_handler_create_from_filename(
       STDOUT_FILENAME, FILE_HANDLER_MODE_WRITE);
   thread_control->infile =
@@ -98,10 +104,6 @@ FileHandler *thread_control_get_infile(ThreadControl *thread_control) {
   return thread_control->infile;
 }
 
-Timer *thread_control_get_timer(ThreadControl *thread_control) {
-  return thread_control->timer;
-}
-
 int thread_control_get_print_info_interval(
     const ThreadControl *thread_control) {
   return thread_control->print_info_interval;
@@ -115,11 +117,6 @@ void thread_control_set_print_info_interval(ThreadControl *thread_control,
 uint64_t
 thread_control_get_max_iter_count(const ThreadControl *thread_control) {
   return thread_control->max_iter_count;
-}
-
-void thread_control_set_max_iter_count(ThreadControl *thread_control,
-                                       uint64_t max_iter_count) {
-  thread_control->max_iter_count = max_iter_count;
 }
 
 void thread_control_increment_max_iter_count(ThreadControl *thread_control,
@@ -160,17 +157,6 @@ bool thread_control_halt(ThreadControl *thread_control,
   if (thread_control->halt_status == HALT_STATUS_NONE &&
       halt_status != HALT_STATUS_NONE) {
     thread_control->halt_status = halt_status;
-    success = true;
-  }
-  pthread_mutex_unlock(&thread_control->halt_status_mutex);
-  return success;
-}
-
-bool thread_control_unhalt(ThreadControl *thread_control) {
-  bool success = false;
-  pthread_mutex_lock(&thread_control->halt_status_mutex);
-  if (thread_control->halt_status != HALT_STATUS_NONE) {
-    thread_control->halt_status = HALT_STATUS_NONE;
     success = true;
   }
   pthread_mutex_unlock(&thread_control->halt_status_mutex);
@@ -277,6 +263,40 @@ bool thread_control_get_next_iter_output(ThreadControl *thread_control,
   return at_stop_count;
 }
 
+// This function should be called when a thread has completed computation
+// for an iteration given by thread_control_get_next_iter_output.
+// It increments the count completed and records the elapsed time.
+void thread_control_complete_iter(ThreadControl *thread_control) {
+  pthread_mutex_lock(&thread_control->iter_completed_mutex);
+  thread_control->iter_count_completed++;
+  thread_control->time_elapsed = mtimer_elapsed_seconds(thread_control->timer);
+  pthread_mutex_unlock(&thread_control->iter_completed_mutex);
+}
+
+void thread_control_get_iter_count_completed(
+    ThreadControl *thread_control,
+    ThreadControlIterCompletedOutput *iter_completed_output) {
+  pthread_mutex_lock(&thread_control->iter_completed_mutex);
+  iter_completed_output->iter_count_completed =
+      thread_control->iter_count_completed;
+  iter_completed_output->time_elapsed = thread_control->time_elapsed;
+  pthread_mutex_unlock(&thread_control->iter_completed_mutex);
+}
+
+// NOT THREAD SAFE: This function is meant to be called
+// before a multithreaded operation. Do not call this in a
+// multithreaded context as it is intentionally not thread safe.
+void thread_control_start_timer(ThreadControl *thread_control) {
+  mtimer_start(thread_control->timer);
+}
+
+// NOT THREAD SAFE: This function is meant to be called
+// before a multithreaded operation. Do not call this in a
+// multithreaded context as it is intentionally not thread safe.
+void thread_control_stop_timer(ThreadControl *thread_control) {
+  mtimer_stop(thread_control->timer);
+}
+
 // NOT THREAD SAFE: This function is meant to be called
 // before a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
@@ -294,6 +314,12 @@ uint64_t thread_control_get_iter_count(const ThreadControl *thread_control) {
 // NOT THREAD SAFE: This function is meant to be called
 // before a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
-void thread_control_reset_iter_count(ThreadControl *thread_control) {
+void thread_control_reset(ThreadControl *thread_control,
+                          uint64_t max_iter_count) {
   thread_control->iter_count = 0;
+  thread_control->iter_count_completed = 0;
+  thread_control->time_elapsed = 0;
+  thread_control->max_iter_count = max_iter_count;
+  thread_control->halt_status = HALT_STATUS_NONE;
+  mtimer_reset(thread_control->timer);
 }

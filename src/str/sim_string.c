@@ -29,11 +29,12 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
     return string_duplicate(SEARCH_STATUS_STARTING);
   }
 
-  Timer *timer = thread_control_get_timer(thread_control);
+  ThreadControlIterCompletedOutput iter_completed_output;
+  thread_control_get_iter_count_completed(thread_control,
+                                          &iter_completed_output);
 
-  double elapsed = mtimer_elapsed_seconds(timer);
   int total_node_count = sim_results_get_node_count(sim_results);
-  double nps = (double)total_node_count / elapsed;
+  double nps = (double)total_node_count / iter_completed_output.time_elapsed;
   // No need to keep the mutex locked too long here. This is because this
   // function (ucgi_sim_stats) will only execute on a single thread.
 

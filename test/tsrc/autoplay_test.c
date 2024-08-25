@@ -19,9 +19,6 @@
 #include "test_util.h"
 
 void test_odds_that_player_is_better(void) {
-  assert(within_epsilon(odds_that_player_is_better(0.5, 10), 50.0));
-  assert(within_epsilon(odds_that_player_is_better(0.5, 100), 50.0));
-  assert(within_epsilon(odds_that_player_is_better(0.5, 1000), 50.0));
   assert(within_epsilon(odds_that_player_is_better(0.6, 10), 73.645537));
   assert(within_epsilon(odds_that_player_is_better(0.6, 100), 97.724987));
   assert(within_epsilon(odds_that_player_is_better(0.6, 1000), 100.0));

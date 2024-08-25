@@ -387,6 +387,7 @@ void *simmer_worker(void *uncasted_simmer_worker) {
       break;
     }
     sim_single_iteration(simmer_worker, iter_output.seed);
+    thread_control_complete_iter(thread_control);
 
     if (iter_output.print_info) {
       print_ucgi_sim_stats(simmer_worker->game, simmer->sim_results,
@@ -453,13 +454,7 @@ sim_status_t simulate_internal(const SimArgs *args, Game *game,
 }
 
 sim_status_t simulate(const SimArgs *args, SimResults *sim_results) {
-  ThreadControl *thread_control = args->thread_control;
-  thread_control_unhalt(thread_control);
-  thread_control_reset_iter_count(thread_control);
-  thread_control_set_max_iter_count(args->thread_control, args->max_iterations);
-
-  Timer *timer = thread_control_get_timer(thread_control);
-  mtimer_start(timer);
+  thread_control_reset(args->thread_control, args->max_iterations);
 
   Game *game = game_duplicate(args->game);
 
@@ -467,8 +462,6 @@ sim_status_t simulate(const SimArgs *args, SimResults *sim_results) {
 
   game_destroy(game);
   gen_destroy_cache();
-
-  mtimer_stop(timer);
 
   return sim_status;
 }
