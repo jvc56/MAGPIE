@@ -36,6 +36,10 @@ static inline void rack_copy(Rack *dst, const Rack *src) {
   memory_copy(dst, src, sizeof(Rack));
 }
 
+static inline void rack_set_dist_size(Rack *rack, int dist_size) {
+  rack->dist_size = dist_size;
+}
+
 static inline Rack *rack_duplicate(const Rack *rack) {
   Rack *new_rack = rack_create(rack->dist_size);
   rack_copy(new_rack, rack);

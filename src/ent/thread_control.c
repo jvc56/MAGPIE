@@ -314,6 +314,7 @@ uint64_t thread_control_get_iter_count(const ThreadControl *thread_control) {
 // NOT THREAD SAFE: This function is meant to be called
 // before a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
+// Resets all iteration counts and resets then starts the timer.
 void thread_control_reset(ThreadControl *thread_control,
                           uint64_t max_iter_count) {
   thread_control->iter_count = 0;
@@ -322,4 +323,5 @@ void thread_control_reset(ThreadControl *thread_control,
   thread_control->max_iter_count = max_iter_count;
   thread_control->halt_status = HALT_STATUS_NONE;
   mtimer_reset(thread_control->timer);
+  mtimer_start(thread_control->timer);
 }
