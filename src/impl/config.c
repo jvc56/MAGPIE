@@ -744,8 +744,11 @@ char *status_sim(Config *config) {
     log_warn("Simmer has not been initialized.");
     return NULL;
   }
-  return ucgi_sim_stats(config->game, sim_results, config->thread_control,
-                        true);
+  return ucgi_sim_stats(
+      config->game, sim_results,
+      (double)sim_results_get_node_count(sim_results) /
+          thread_control_get_time_elapsed(config->thread_control),
+      true);
 }
 
 // Inference

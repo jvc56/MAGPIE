@@ -380,6 +380,7 @@ void *simmer_worker(void *uncasted_simmer_worker) {
   Simmer *simmer = simmer_worker->simmer;
   ThreadControl *thread_control = simmer->thread_control;
   ThreadControlIterOutput iter_output;
+  ThreadControlIterCompletedOutput iter_completed_output;
   while (!thread_control_get_is_halted(thread_control)) {
     if (thread_control_get_next_iter_output(simmer->thread_control,
                                             &iter_output)) {
@@ -387,17 +388,22 @@ void *simmer_worker(void *uncasted_simmer_worker) {
       break;
     }
     sim_single_iteration(simmer_worker, iter_output.seed);
-    thread_control_complete_iter(thread_control);
+    thread_control_complete_iter(thread_control, &iter_completed_output);
 
-    if (iter_output.print_info) {
-      print_ucgi_sim_stats(simmer_worker->game, simmer->sim_results,
-                           thread_control, false);
+    if (iter_completed_output.print_info) {
+      print_ucgi_sim_stats(
+          simmer_worker->game, simmer->sim_results, thread_control,
+          (double)sim_results_get_node_count(simmer->sim_results) /
+              iter_completed_output.time_elapsed,
+          false);
     }
 
     int check_stopping_condition_interval =
         thread_control_get_check_stop_interval(thread_control);
     if (check_stopping_condition_interval > 0 &&
-        iter_output.iter_count % check_stopping_condition_interval == 0 &&
+        iter_completed_output.iter_count_completed %
+                check_stopping_condition_interval ==
+            0 &&
         thread_control_set_check_stop_active(thread_control)) {
       if (!thread_control_get_is_halted(thread_control) &&
           handle_potential_stopping_condition(simmer)) {
@@ -449,7 +455,11 @@ sim_status_t simulate_internal(const SimArgs *args, Game *game,
   sim_results_set_iteration_count(
       sim_results, thread_control_get_iter_count(args->thread_control));
   // Print out the stats
-  print_ucgi_sim_stats(game, sim_results, args->thread_control, true);
+  print_ucgi_sim_stats(
+      game, sim_results, args->thread_control,
+      (double)sim_results_get_node_count(sim_results) /
+          thread_control_get_time_elapsed(args->thread_control),
+      true);
   return SIM_STATUS_SUCCESS;
 }
 

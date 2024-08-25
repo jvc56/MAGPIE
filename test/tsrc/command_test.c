@@ -307,7 +307,7 @@ void test_command_execution(void) {
       config,
       "autoplay game 10 -lex CSW21 -s1 equity -s2 equity "
       "-r1 best -r2 best -threads 1 -hr false -gp true -pfreq 4",
-      false, 5, 4, 0);
+      false, 5, 7, 0);
 
   assert_command_status_and_output(
       config,

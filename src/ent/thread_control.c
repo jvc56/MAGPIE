@@ -254,10 +254,6 @@ bool thread_control_get_next_iter_output(ThreadControl *thread_control,
   } else {
     iter_output->seed = prng_next(thread_control->prng);
     iter_output->iter_count = thread_control->iter_count++;
-    iter_output->print_info =
-        thread_control->print_info_interval > 0 &&
-        iter_output->iter_count > 0 &&
-        iter_output->iter_count % thread_control->print_info_interval == 0;
   }
   pthread_mutex_unlock(&thread_control->iter_mutex);
   return at_stop_count;
@@ -266,53 +262,59 @@ bool thread_control_get_next_iter_output(ThreadControl *thread_control,
 // This function should be called when a thread has completed computation
 // for an iteration given by thread_control_get_next_iter_output.
 // It increments the count completed and records the elapsed time.
-void thread_control_complete_iter(ThreadControl *thread_control) {
-  pthread_mutex_lock(&thread_control->iter_completed_mutex);
-  thread_control->iter_count_completed++;
-  thread_control->time_elapsed = mtimer_elapsed_seconds(thread_control->timer);
-  pthread_mutex_unlock(&thread_control->iter_completed_mutex);
-}
-
-void thread_control_get_iter_count_completed(
+void thread_control_complete_iter(
     ThreadControl *thread_control,
     ThreadControlIterCompletedOutput *iter_completed_output) {
   pthread_mutex_lock(&thread_control->iter_completed_mutex);
+  // Update internal fields
+  thread_control->iter_count_completed++;
+  thread_control->time_elapsed = mtimer_elapsed_seconds(thread_control->timer);
+  // Set output
   iter_completed_output->iter_count_completed =
       thread_control->iter_count_completed;
   iter_completed_output->time_elapsed = thread_control->time_elapsed;
+  iter_completed_output->print_info =
+      thread_control->print_info_interval > 0 &&
+      thread_control->iter_count_completed %
+              thread_control->print_info_interval ==
+          0;
   pthread_mutex_unlock(&thread_control->iter_completed_mutex);
 }
 
 // NOT THREAD SAFE: This function is meant to be called
-// before a multithreaded operation. Do not call this in a
+// before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
 void thread_control_start_timer(ThreadControl *thread_control) {
   mtimer_start(thread_control->timer);
 }
 
 // NOT THREAD SAFE: This function is meant to be called
-// before a multithreaded operation. Do not call this in a
+// before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
 void thread_control_stop_timer(ThreadControl *thread_control) {
   mtimer_stop(thread_control->timer);
 }
 
+double thread_control_get_time_elapsed(const ThreadControl *thread_control) {
+  return mtimer_elapsed_seconds(thread_control->timer);
+}
+
 // NOT THREAD SAFE: This function is meant to be called
-// before a multithreaded operation. Do not call this in a
+// before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
 void thread_control_prng_seed(ThreadControl *thread_control, uint64_t seed) {
   prng_seed(thread_control->prng, seed);
 }
 
 // NOT THREAD SAFE: This function is meant to be called
-// before a multithreaded operation. Do not call this in a
+// before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
 uint64_t thread_control_get_iter_count(const ThreadControl *thread_control) {
   return thread_control->iter_count;
 }
 
 // NOT THREAD SAFE: This function is meant to be called
-// before a multithreaded operation. Do not call this in a
+// before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
 // Resets all iteration counts and resets then starts the timer.
 void thread_control_reset(ThreadControl *thread_control,
