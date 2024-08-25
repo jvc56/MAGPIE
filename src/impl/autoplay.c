@@ -431,11 +431,65 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   return move;
 }
 
-void autoplay_add_game(ThreadControl *thread_control,
-                       AutoplayResults *autoplay_results, const Game *game,
+void print_current_status(
+    AutoplayWorker *autoplay_worker,
+    ThreadControlIterCompletedOutput *iter_completed_output) {
+  StringBuilder *status_sb = string_builder_create();
+  AutoplaySharedData *shared_data = autoplay_worker->shared_data;
+  string_builder_add_formatted_string(
+      status_sb, "seconds: %.3f, games: %ld",
+      iter_completed_output->time_elapsed,
+      iter_completed_output->iter_count_completed);
+  LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
+  if (lg_shared_data) {
+    int gen;
+    uint64_t leaves_recorded;
+    uint64_t forced_draws;
+    int lowest_leave_count;
+    uint64_t failed_forced_draws;
+    uint64_t leaves_under_target_min_count;
+    uint64_t turns_over_max_forced_draw;
+    uint64_t gen_start_games;
+    pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
+    gen = lg_shared_data->gens_completed;
+    gen_start_games = lg_shared_data->gen_start_games;
+    leaves_recorded = lg_shared_data->gen_leaves_recorded;
+    forced_draws = stat_get_num_samples(lg_shared_data->success_force_draws);
+    lowest_leave_count =
+        leave_list_get_lowest_leave_count(lg_shared_data->leave_list);
+    failed_forced_draws = lg_shared_data->failed_force_draws;
+    leaves_under_target_min_count =
+        leave_list_get_leaves_under_target_min_count(
+            lg_shared_data->leave_list);
+    turns_over_max_forced_draw =
+        lg_shared_data->recordable_turns_over_max_force_draw;
+    pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
+    string_builder_add_formatted_string(
+        status_sb,
+        " gen: %d, gen games: %ld, leaves rec: %ld, leaves under: %ld, lowest "
+        "leave: %d, "
+        "fdraws: %ld, ffdraws:%ld, tomfd: %ld\n",
+        gen, iter_completed_output->iter_count_completed - gen_start_games,
+        leaves_recorded, leaves_under_target_min_count, lowest_leave_count,
+        forced_draws, failed_forced_draws, turns_over_max_forced_draw);
+  } else {
+    string_builder_add_string(status_sb, "\n");
+  }
+  thread_control_print(autoplay_worker->args->thread_control,
+                       string_builder_peek(status_sb));
+  string_builder_destroy(status_sb);
+}
+
+void autoplay_add_game(AutoplayWorker *autoplay_worker, const Game *game,
                        int turns, bool divergent) {
-  autoplay_results_add_game(autoplay_results, game, turns, divergent);
-  thread_control_complete_iter(thread_control);
+  autoplay_results_add_game(autoplay_worker->autoplay_results, game, turns,
+                            divergent);
+  ThreadControlIterCompletedOutput iter_completed_output;
+  thread_control_complete_iter(autoplay_worker->args->thread_control,
+                               &iter_completed_output);
+  if (iter_completed_output.print_info) {
+    print_current_status(autoplay_worker, &iter_completed_output);
+  }
 }
 
 // Returns true if the required minimum leave count was reached.
@@ -479,68 +533,16 @@ bool play_autoplay_games(AutoplayWorker *autoplay_worker,
     }
   }
   bool min_leave_count_reached = game_runner1->min_leave_count_reached;
-  autoplay_add_game(autoplay_worker->args->thread_control,
-                    autoplay_worker->autoplay_results, game_runner1->game,
+  autoplay_add_game(autoplay_worker, game_runner1->game,
                     game_runner1->turn_number, games_are_divergent);
   if (game_runner2) {
     // We do not check for min leave counts here because leave gen
     // does not use game pairs and therefore does not have a second
     // game runner.
-    autoplay_add_game(autoplay_worker->args->thread_control,
-                      autoplay_worker->autoplay_results, game_runner2->game,
+    autoplay_add_game(autoplay_worker, game_runner2->game,
                       game_runner2->turn_number, games_are_divergent);
   }
   return min_leave_count_reached;
-}
-
-void print_current_status(AutoplayWorker *autoplay_worker) {
-  StringBuilder *status_sb = string_builder_create();
-  AutoplaySharedData *shared_data = autoplay_worker->shared_data;
-  ThreadControlIterCompletedOutput iter_completed_output;
-  thread_control_get_iter_count_completed(shared_data->thread_control,
-                                          &iter_completed_output);
-  string_builder_add_formatted_string(
-      status_sb, "seconds: %.3f, games: %ld",
-      iter_completed_output.time_elapsed,
-      iter_completed_output.iter_count_completed);
-  LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
-  if (lg_shared_data) {
-    int gen;
-    uint64_t leaves_recorded;
-    uint64_t forced_draws;
-    int lowest_leave_count;
-    uint64_t failed_forced_draws;
-    uint64_t leaves_under_target_min_count;
-    uint64_t turns_over_max_forced_draw;
-    uint64_t gen_start_games;
-    pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
-    gen = lg_shared_data->gens_completed;
-    gen_start_games = lg_shared_data->gen_start_games;
-    leaves_recorded = lg_shared_data->gen_leaves_recorded;
-    forced_draws = stat_get_num_samples(lg_shared_data->success_force_draws);
-    lowest_leave_count =
-        leave_list_get_lowest_leave_count(lg_shared_data->leave_list);
-    failed_forced_draws = lg_shared_data->failed_force_draws;
-    leaves_under_target_min_count =
-        leave_list_get_leaves_under_target_min_count(
-            lg_shared_data->leave_list);
-    turns_over_max_forced_draw =
-        lg_shared_data->recordable_turns_over_max_force_draw;
-    pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
-    string_builder_add_formatted_string(
-        status_sb,
-        " gen: %d, gen games: %ld, leaves rec: %ld, leaves under: %ld, lowest "
-        "leave: %d, "
-        "fdraws: %ld, ffdraws:%ld, tomfd: %ld\n",
-        gen, iter_completed_output.iter_count_completed - gen_start_games,
-        leaves_recorded, leaves_under_target_min_count, lowest_leave_count,
-        forced_draws, failed_forced_draws, turns_over_max_forced_draw);
-  } else {
-    string_builder_add_string(status_sb, "\n");
-  }
-  thread_control_print(autoplay_worker->args->thread_control,
-                       string_builder_peek(status_sb));
-  string_builder_destroy(status_sb);
 }
 
 void autoplay_single_generation(AutoplayWorker *autoplay_worker,
@@ -560,9 +562,6 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker,
     }
     bool min_leave_count_reached = play_autoplay_games(
         autoplay_worker, game_runner1, game_runner2, &iter_output);
-    if (iter_output.print_info) {
-      print_current_status(autoplay_worker);
-    }
     if (min_leave_count_reached) {
       break;
     }

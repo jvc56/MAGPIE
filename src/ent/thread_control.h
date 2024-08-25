@@ -14,12 +14,12 @@ typedef struct ThreadControl ThreadControl;
 typedef struct ThreadControlIterOutput {
   uint64_t seed;
   uint64_t iter_count;
-  bool print_info;
 } ThreadControlIterOutput;
 
 typedef struct ThreadControlIterCompletedOutput {
   uint64_t iter_count_completed;
   double time_elapsed;
+  bool print_info;
 } ThreadControlIterCompletedOutput;
 
 ThreadControl *thread_control_create(void);
@@ -58,12 +58,11 @@ void thread_control_reset(ThreadControl *thread_control,
 uint64_t thread_control_get_max_iter_count(const ThreadControl *thread_control);
 void thread_control_increment_max_iter_count(ThreadControl *thread_control,
                                              uint64_t inc);
-
-void thread_control_complete_iter(ThreadControl *thread_control);
-void thread_control_get_iter_count_completed(
+void thread_control_complete_iter(
     ThreadControl *thread_control,
     ThreadControlIterCompletedOutput *iter_completed_output);
 void thread_control_start_timer(ThreadControl *thread_control);
 void thread_control_stop_timer(ThreadControl *thread_control);
+double thread_control_get_time_elapsed(const ThreadControl *thread_control);
 
 #endif

@@ -19,8 +19,8 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 
-char *ucgi_sim_stats(Game *game, SimResults *sim_results,
-                     ThreadControl *thread_control, bool best_known_play) {
+char *ucgi_sim_stats(Game *game, SimResults *sim_results, double nps,
+                     bool best_known_play) {
   sim_results_lock_simmed_plays(sim_results);
   bool success = sim_results_sort_plays_by_win_rate(sim_results);
   sim_results_unlock_simmed_plays(sim_results);
@@ -29,12 +29,6 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
     return string_duplicate(SEARCH_STATUS_STARTING);
   }
 
-  ThreadControlIterCompletedOutput iter_completed_output;
-  thread_control_get_iter_count_completed(thread_control,
-                                          &iter_completed_output);
-
-  int total_node_count = sim_results_get_node_count(sim_results);
-  double nps = (double)total_node_count / iter_completed_output.time_elapsed;
   // No need to keep the mutex locked too long here. This is because this
   // function (ucgi_sim_stats) will only execute on a single thread.
 
@@ -106,9 +100,10 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results,
 }
 
 void print_ucgi_sim_stats(Game *game, SimResults *sim_results,
-                          ThreadControl *thread_control, bool print_best_play) {
+                          ThreadControl *thread_control, double nps,
+                          bool print_best_play) {
   char *sim_stats_string =
-      ucgi_sim_stats(game, sim_results, thread_control, print_best_play);
+      ucgi_sim_stats(game, sim_results, nps, print_best_play);
   thread_control_print(thread_control, sim_stats_string);
   free(sim_stats_string);
 }
