@@ -1324,6 +1324,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   gen->player_index = player_on_turn_index;
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
+  rack_set_dist_size(&gen->leave, ld_get_size(ld));
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
