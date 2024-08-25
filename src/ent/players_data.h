@@ -40,6 +40,10 @@ bool players_data_get_is_shared(const PlayersData *players_data,
                                 players_data_t players_data_type);
 
 void players_data_set(PlayersData *players_data,
-                      players_data_t players_data_type, const char *data_path,
+                      players_data_t players_data_type, const char *data_paths,
                       const char *p1_data_name, const char *p2_data_name);
+void players_data_reload(PlayersData *players_data,
+                         players_data_t players_data_type,
+                         const char *data_paths);
+
 #endif

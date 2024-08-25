@@ -10,8 +10,15 @@
 #include "../ent/thread_control.h"
 
 typedef struct AutoplayArgs {
-  int max_iterations;
+  int gens;
+  int games_per_gen;
+  int target_min_leave_count;
+  int force_draw_start;
+  int max_force_draw_turn;
   bool use_game_pairs;
+  bool human_readable;
+  autoplay_t type;
+  const char *data_paths;
   GameArgs *game_args;
   ThreadControl *thread_control;
 } AutoplayArgs;

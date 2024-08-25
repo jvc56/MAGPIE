@@ -2,6 +2,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <math.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,6 +42,9 @@
 
 #include "test_constants.h"
 #include "test_util.h"
+
+// Global variable for the timeout function.
+jmp_buf env;
 
 bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
@@ -88,6 +94,37 @@ void load_and_exec_config_or_die(Config *config, const char *cmd) {
   if (!error_status_get_success(error_status)) {
     error_status_log_warn_if_failed(error_status);
     abort();
+  }
+}
+
+void timeout_handler(int __attribute__((unused)) signum) {
+  // Long jump back to the main function if the alarm triggers
+  longjmp(env, 1);
+}
+
+bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
+                                       int seconds) {
+  // Set up the signal handler
+  signal(SIGALRM, timeout_handler);
+
+  // Set a time limit
+  alarm(seconds);
+
+  // Save the environment for long jump
+  if (setjmp(env) == 0) {
+    // If setjmp returns 0, continue execution
+
+    // Call the original function
+    load_and_exec_config_or_die(config, cmd);
+
+    // Disable the alarm
+    alarm(0);
+
+    // If the function completes within the time limit, return true
+    return true;
+  } else {
+    // If longjmp is called, the function exceeded the time limit
+    return false;
   }
 }
 
@@ -177,13 +214,26 @@ void print_cgp(const Game *game) {
   free(cgp);
 }
 
+void print_english_rack(const Rack *rack) {
+  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
+    printf("?");
+  }
+  const int ld_size = rack_get_dist_size(rack);
+  for (int i = 1; i < ld_size; i++) {
+    const int num_letter = rack_get_letter(rack, i);
+    for (int j = 0; j < num_letter; j++) {
+      printf("%c", i + 'A' - 1);
+    }
+  }
+}
+
 void print_rack(const Rack *rack, const LetterDistribution *ld) {
   if (!rack) {
     printf("(null)\n");
     return;
   }
   StringBuilder *rack_sb = string_builder_create();
-  string_builder_add_rack(rack_sb, rack, ld);
+  string_builder_add_rack(rack_sb, rack, ld, false);
   printf("%s", string_builder_peek(rack_sb));
   string_builder_destroy(rack_sb);
 }
@@ -209,7 +259,7 @@ void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
   generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
-  play_move(sorted_move_list->moves[n], game, NULL);
+  play_move(sorted_move_list->moves[n], game, NULL, NULL);
   sorted_move_list_destroy(sorted_move_list);
   move_list_destroy(move_list);
 }
@@ -436,12 +486,12 @@ void delete_fifo(const char *fifo_name) { unlink(fifo_name); }
 
 // Board layout test helpers
 
-void assert_board_layout_error(const char *data_path,
+void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_name,
                                board_layout_load_status_t expected_status) {
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, data_path, board_layout_name);
+      board_layout_load(bl, data_paths, board_layout_name);
   board_layout_destroy(bl);
   if (actual_status != expected_status) {
     printf("board layout load statuses do not match: %d != %d", expected_status,
@@ -450,11 +500,11 @@ void assert_board_layout_error(const char *data_path,
   assert(actual_status == expected_status);
 }
 
-BoardLayout *board_layout_create_for_test(const char *data_path,
+BoardLayout *board_layout_create_for_test(const char *data_paths,
                                           const char *board_layout_name) {
   BoardLayout *bl = board_layout_create();
   board_layout_load_status_t actual_status =
-      board_layout_load(bl, data_path, board_layout_name);
+      board_layout_load(bl, data_paths, board_layout_name);
   if (actual_status != BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
     printf("board layout load failure for %s: %d\n", board_layout_name,
            actual_status);
@@ -463,9 +513,9 @@ BoardLayout *board_layout_create_for_test(const char *data_path,
   return bl;
 }
 
-void load_game_with_test_board(Game *game, const char *data_path,
+void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name) {
-  BoardLayout *bl = board_layout_create_for_test(data_path, board_layout_name);
+  BoardLayout *bl = board_layout_create_for_test(data_paths, board_layout_name);
   board_apply_layout(bl, game_get_board(game));
   game_reset(game);
   board_layout_destroy(bl);
@@ -523,7 +573,7 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
          MOVE_VALIDATION_STATUS_SUCCESS);
 
   if (play_move_on_board) {
-    play_move(move_list_get_move(move_list, 0), game, NULL);
+    play_move(move_list_get_move(move_list, 0), game, NULL, NULL);
   }
 
   validated_moves_destroy(vms);
@@ -612,5 +662,28 @@ void assert_sim_results_equal(SimResults *sr1, SimResults *sr2) {
     assert_simmed_plays_are_equal(sim_results_get_simmed_play(sr1, i),
                                   sim_results_get_simmed_play(sr2, i),
                                   sim_results_get_max_plies(sr1));
+  }
+}
+
+// Does not check that the node names are equal
+void assert_kwgs_are_equal(const KWG *kwg1, const KWG *kwg2) {
+  const int num_nodes = kwg_get_number_of_nodes(kwg1);
+  assert(num_nodes == kwg_get_number_of_nodes(kwg2));
+  for (int i = 0; i < num_nodes; i++) {
+    assert(kwg_node(kwg1, i) == kwg_node(kwg2, i));
+  }
+}
+
+void assert_klvs_equal(const KLV *klv1, const KLV *klv2) {
+  assert_kwgs_are_equal(klv_get_kwg(klv1), klv_get_kwg(klv2));
+  const int num_nodes = kwg_get_number_of_nodes(klv_get_kwg(klv1));
+  const int number_of_leaves = klv_get_number_of_leaves(klv1);
+  assert(number_of_leaves == klv_get_number_of_leaves(klv2));
+  for (int i = 0; i < num_nodes; i++) {
+    assert(klv1->word_counts[i] == klv2->word_counts[i]);
+  }
+  for (int i = 0; i < number_of_leaves; i++) {
+    assert(within_epsilon(klv_get_indexed_leave_value(klv1, i),
+                          klv_get_indexed_leave_value(klv2, i)));
   }
 }

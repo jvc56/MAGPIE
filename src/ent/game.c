@@ -103,6 +103,10 @@ void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason) {
   game->game_end_reason = game_end_reason;
 }
 
+int game_get_starting_player_index(const Game *game) {
+  return game->starting_player_index;
+}
+
 int game_get_player_draw_index(const Game *game, int player_index) {
   return player_index ^ game->starting_player_index;
 }

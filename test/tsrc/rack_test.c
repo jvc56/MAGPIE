@@ -108,8 +108,20 @@ void test_rack_main(void) {
   assert(!rack_is_empty(rack));
   assert(rack_get_total_letters(rack) == 2);
 
+  rack_reset(rack);
+
+  Rack *rack_to_add = rack_duplicate(rack);
+  rack_set_to_string(ld, rack, "ABBC");
+  rack_set_to_string(ld, rack_to_add, "BCCEF");
+  rack_add(rack, rack_to_add);
+
+  // Use rack_sub as comparison
+  rack_set_to_string(ld, rack_sub, "ABBBCCCEF");
+  racks_are_equal(rack, rack_sub);
+
   rack_destroy(rack);
   rack_destroy(rack_sub);
+  rack_destroy(rack_to_add);
   config_destroy(config);
 }
 

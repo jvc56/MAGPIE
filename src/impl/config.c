@@ -13,11 +13,13 @@
 #include "../def/game_defs.h"
 #include "../def/gen_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/leave_gen_defs.h"
 #include "../def/math_util_defs.h"
 #include "../def/simmer_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 
+#include "../ent/autoplay_results.h"
 #include "../ent/error_status.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
@@ -27,9 +29,10 @@
 
 #include "autoplay.h"
 #include "cgp.h"
+#include "convert.h"
 #include "gameplay.h"
 #include "inference.h"
-#include "kwg_maker.h"
+#include "klv_csv.h"
 #include "simmer.h"
 
 #include "../str/game_string.h"
@@ -46,6 +49,8 @@ typedef enum {
   ARG_TOKEN_INFER,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
+  ARG_TOKEN_LEAVE_GEN,
+  ARG_TOKEN_CREATE_DATA,
   ARG_TOKEN_DATA_PATH,
   ARG_TOKEN_BINGO_BONUS,
   ARG_TOKEN_BOARD_LAYOUT,
@@ -70,6 +75,7 @@ typedef enum {
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_USE_GAME_PAIRS,
+  ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
@@ -97,7 +103,7 @@ typedef struct ParsedArg {
 
 struct Config {
   ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
-  char *data_path;
+  char *data_paths;
   arg_token_t exec_parg_token;
   bool ld_changed;
   exec_mode_t exec_mode;
@@ -108,6 +114,7 @@ struct Config {
   double stop_cond_pct;
   double equity_margin;
   bool use_game_pairs;
+  bool human_readable;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -202,8 +209,8 @@ int config_get_parg_num_req_values(const Config *config,
 
 // Config getters
 
-const char *config_get_data_path(const Config *config) {
-  return config->data_path;
+const char *config_get_data_paths(const Config *config) {
+  return config->data_paths;
 }
 
 exec_mode_t config_get_exec_mode(const Config *config) {
@@ -242,6 +249,10 @@ bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
 }
 
+bool config_get_human_readable(const Config *config) {
+  return config->human_readable;
+}
+
 PlayersData *config_get_players_data(const Config *config) {
   return config->players_data;
 }
@@ -264,6 +275,10 @@ MoveList *config_get_move_list(const Config *config) {
 
 SimResults *config_get_sim_results(const Config *config) {
   return config->sim_results;
+}
+
+AutoplayResults *config_get_autoplay_results(const Config *config) {
+  return config->autoplay_results;
 }
 
 bool config_exec_parg_is_set(const Config *config) {
@@ -847,19 +862,35 @@ char *status_infer(Config __attribute__((unused)) * config) {
 // Autoplay
 
 void config_fill_autoplay_args(const Config *config,
-                               AutoplayArgs *autoplay_args) {
-  autoplay_args->max_iterations = config->max_iterations;
-  autoplay_args->use_game_pairs = config->use_game_pairs;
-  autoplay_args->thread_control = config->thread_control;
+                               AutoplayArgs *autoplay_args,
+                               autoplay_t autoplay_type, int gens,
+                               int num_games_per_gen,
+                               int target_min_leave_count, int force_draw_start,
+                               int max_force_draw_turn) {
+  autoplay_args->type = autoplay_type;
+  autoplay_args->gens = gens;
+  autoplay_args->target_min_leave_count = target_min_leave_count;
+  autoplay_args->force_draw_start = force_draw_start;
+  autoplay_args->games_per_gen = num_games_per_gen;
+  autoplay_args->max_force_draw_turn = max_force_draw_turn;
+  autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
+  autoplay_args->human_readable = config_get_human_readable(config);
+  autoplay_args->thread_control = config_get_thread_control(config);
+  autoplay_args->data_paths = config_get_data_paths(config);
   config_fill_game_args(config, autoplay_args->game_args);
 }
 
-autoplay_status_t config_autoplay(const Config *config,
-                                  AutoplayResults *autoplay_results) {
+autoplay_status_t
+config_autoplay(const Config *config, AutoplayResults *autoplay_results,
+                autoplay_t autoplay_type, int gens, int num_games_per_gen,
+                int target_min_leave_count, int force_draw_start,
+                int max_force_draw_turn) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
-  config_fill_autoplay_args(config, &args);
+  config_fill_autoplay_args(config, &args, autoplay_type, gens,
+                            num_games_per_gen, target_min_leave_count,
+                            force_draw_start, max_force_draw_turn);
   return autoplay(&args, autoplay_results);
 }
 
@@ -870,7 +901,30 @@ void execute_autoplay(Config *config) {
                               CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
     return;
   }
-  autoplay_status_t status = config_autoplay(config, config->autoplay_results);
+
+  autoplay_status_t status = autoplay_results_set_options(
+      config->autoplay_results,
+      config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 0));
+
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
+                            (int)status);
+
+  if (status != AUTOPLAY_STATUS_SUCCESS) {
+    return;
+  }
+
+  const char *num_games_str =
+      config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 1);
+  int num_games;
+  if (!string_to_int_or_set_error_status(
+          num_games_str, 1, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &num_games)) {
+    return;
+  }
+
+  status = config_autoplay(config, config->autoplay_results,
+                           AUTOPLAY_TYPE_DEFAULT, 1, num_games, 0, 0, 0);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)status);
 }
@@ -884,8 +938,9 @@ char *status_autoplay(Config __attribute__((unused)) * config) {
 void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
   args->conversion_type_string =
       config_get_parg_value(config, ARG_TOKEN_CONVERT, 0);
-  args->input_filename = config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
-  args->output_filename = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
+  args->data_paths = config_get_data_paths(config);
+  args->input_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
+  args->output_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
   args->ld = config->ld;
 }
 
@@ -905,6 +960,131 @@ void execute_convert(Config *config) {
 
 char *status_convert(Config __attribute__((unused)) * config) {
   return string_duplicate("no status available for convert");
+}
+
+// Leave Gen
+
+void execute_leave_gen(Config *config) {
+  if (!config_has_game_data(config)) {
+    set_or_clear_error_status(config->error_status,
+                              ERROR_STATUS_TYPE_CONFIG_LOAD,
+                              CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+    return;
+  }
+
+  if (!players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KWG) ||
+      !players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KLV)) {
+    set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_LEAVE_GEN,
+                              (int)LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+    return;
+  }
+
+  autoplay_status_t autoplay_status =
+      autoplay_results_set_options(config->autoplay_results, "games");
+
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
+                            (int)autoplay_status);
+
+  if (autoplay_status != AUTOPLAY_STATUS_SUCCESS) {
+    return;
+  }
+
+  const char *gen_str = config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 0);
+  int gens;
+  if (!string_to_int_or_set_error_status(
+          gen_str, 1, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &gens)) {
+    return;
+  }
+
+  const char *num_games_str =
+      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 1);
+  int num_games;
+  if (!string_to_int_or_set_error_status(
+          num_games_str, 1, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &num_games)) {
+    return;
+  }
+
+  const char *min_leave_count_str =
+      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 2);
+  int target_min_leave_count;
+  if (!string_to_int_or_set_error_status(
+          min_leave_count_str, 1, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &target_min_leave_count)) {
+    return;
+  }
+
+  const char *force_draw_start_str =
+      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 3);
+  int force_draw_start;
+  if (!string_to_int_or_set_error_status(
+          force_draw_start_str, 0, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &force_draw_start)) {
+    return;
+  }
+
+  const char *max_force_draw_turn_str =
+      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 4);
+  int max_force_draw_turns;
+  if (!string_to_int_or_set_error_status(
+          max_force_draw_turn_str, 0, INT_MAX, config->error_status,
+          ERROR_STATUS_TYPE_CONFIG_LOAD,
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &max_force_draw_turns)) {
+    return;
+  }
+  // Convert from 1-indexed to 0-indexed
+  max_force_draw_turns--;
+
+  autoplay_status =
+      config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
+                      gens, num_games, target_min_leave_count,
+                      max_force_draw_turns, max_force_draw_turns);
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
+                            (int)autoplay_status);
+}
+
+char *status_leave_gen(Config __attribute__((unused)) * config) {
+  return string_duplicate("no status available for leave gen");
+}
+
+// Create
+
+// This only implements creating a klv for now.
+void execute_create_data(Config *config) {
+  const char *create_type_str =
+      config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 0);
+
+  config_load_status_t config_load_status = CONFIG_LOAD_STATUS_SUCCESS;
+  if (has_iprefix(create_type_str, "klv")) {
+    const char *klv_name_str =
+        config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 1);
+    char *klv_filename = data_filepaths_get_writable_filename(
+        config_get_data_paths(config), klv_name_str, DATA_FILEPATH_TYPE_KLV);
+    LetterDistribution *ld =
+        ld_create(config_get_data_paths(config),
+                  config_get_parg_value(config, ARG_TOKEN_CREATE_DATA, 2));
+    KLV *klv = klv_create_empty(ld, klv_name_str);
+    klv_write(klv, klv_filename);
+    klv_destroy(klv);
+    free(klv_filename);
+    ld_destroy(ld);
+  } else {
+    config_load_status = CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE;
+  }
+
+  set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            (int)config_load_status);
+}
+
+char *status_create_data(Config __attribute__((unused)) * config) {
+  return string_duplicate("no status available for create");
 }
 
 // Config load helpers
@@ -1152,7 +1332,7 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
       !lex_lex_compat(updated_p1_lexicon_name, existing_p1_lexicon_name);
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
-                   config->data_path, updated_p1_lexicon_name,
+                   config->data_paths, updated_p1_lexicon_name,
                    updated_p2_lexicon_name);
 
   // Load the leaves
@@ -1188,7 +1368,7 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
-                   config->data_path, updated_p1_leaves_name,
+                   config->data_paths, updated_p1_leaves_name,
                    updated_p2_leaves_name);
 
   free(updated_p1_leaves_name);
@@ -1219,7 +1399,7 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   config->ld_changed = false;
   if (!strings_equal(updated_ld_name, existing_ld_name)) {
     ld_destroy(config->ld);
-    config->ld = ld_create(config->data_path, updated_ld_name);
+    config->ld = ld_create(config->data_paths, updated_ld_name);
     config->ld_changed = true;
   }
 
@@ -1234,8 +1414,8 @@ config_load_status_t config_load_data(Config *config) {
 
   const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
   if (new_path) {
-    free(config->data_path);
-    config->data_path = string_duplicate(new_path);
+    free(config->data_paths);
+    config->data_paths = string_duplicate(new_path);
   }
 
   // Exec Mode
@@ -1292,7 +1472,7 @@ config_load_status_t config_load_data(Config *config) {
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
-  if (print_info_interval > 0) {
+  if (print_info_interval >= 0) {
     thread_control_set_print_info_interval(config->thread_control,
                                            print_info_interval);
   }
@@ -1316,8 +1496,8 @@ config_load_status_t config_load_data(Config *config) {
     config->stop_cond_pct = PERCENTILE_MAX + 10;
   } else {
     config_load_status =
-        config_load_double(config, ARG_TOKEN_STOP_COND_PCT, 0.0, PERCENTILE_MAX,
-                           &config->stop_cond_pct);
+        config_load_double(config, ARG_TOKEN_STOP_COND_PCT, PERCENTILE_MIN,
+                           PERCENTILE_MAX, &config->stop_cond_pct);
     if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
       return config_load_status;
     }
@@ -1350,12 +1530,23 @@ config_load_status_t config_load_data(Config *config) {
     return config_load_status;
   }
 
+  // Human readable
+
+  config_load_status = config_load_bool(config, ARG_TOKEN_HUMAN_READABLE,
+                                        &config->human_readable);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
   // Seed
 
   uint64_t seed;
   config_load_status = config_load_uint64(config, ARG_TOKEN_RANDOM_SEED, &seed);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
+  }
+  if (!config_get_parg_value(config, ARG_TOKEN_RANDOM_SEED, 0)) {
+    seed = time(NULL);
   }
   thread_control_prng_seed(config->thread_control, seed);
   // Board layout
@@ -1365,7 +1556,7 @@ config_load_status_t config_load_data(Config *config) {
   if (new_board_layout_name &&
       !strings_equal(board_layout_get_name(config->board_layout),
                      new_board_layout_name)) {
-    if (board_layout_load(config->board_layout, config->data_path,
+    if (board_layout_load(config->board_layout, config->data_paths,
                           new_board_layout_name) !=
         BOARD_LAYOUT_LOAD_STATUS_SUCCESS) {
       return CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR;
@@ -1421,7 +1612,7 @@ config_load_status_t config_load_data(Config *config) {
   if (new_win_pct_name &&
       !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name)) {
     win_pct_destroy(config->win_pcts);
-    config->win_pcts = win_pct_create(config->data_path, new_win_pct_name);
+    config->win_pcts = win_pct_create(config->data_paths, new_win_pct_name);
   }
 
   // Set IO
@@ -1490,10 +1681,14 @@ Config *config_create_default(void) {
                     status_sim);
   parsed_arg_create(config, ARG_TOKEN_INFER, "infer", 2, 3, execute_infer,
                     status_infer);
-  parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 0, 0,
+  parsed_arg_create(config, ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2,
                     execute_autoplay, status_autoplay);
   parsed_arg_create(config, ARG_TOKEN_CONVERT, "convert", 3, 3, execute_convert,
                     status_convert);
+  parsed_arg_create(config, ARG_TOKEN_LEAVE_GEN, "leavegen", 5, 5,
+                    execute_leave_gen, status_leave_gen);
+  parsed_arg_create(config, ARG_TOKEN_CREATE_DATA, "createdata", 3, 3,
+                    execute_create_data, status_create_data);
   parsed_arg_create(config, ARG_TOKEN_DATA_PATH, "path", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_BINGO_BONUS, "bb", 1, 1, execute_fatal,
@@ -1542,6 +1737,8 @@ Config *config_create_default(void) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1, execute_fatal,
+                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_RANDOM_SEED, "seed", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,
@@ -1557,7 +1754,7 @@ Config *config_create_default(void) {
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
                     status_fatal);
 
-  config->data_path = string_duplicate(DEFAULT_DATA_PATH);
+  config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
   config->ld_changed = false;
   config->exec_mode = EXEC_MODE_CONSOLE;
@@ -1568,9 +1765,10 @@ Config *config_create_default(void) {
   config->stop_cond_pct = 99;
   config->equity_margin = 0;
   config->use_game_pairs = true;
+  config->human_readable = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
-  config->win_pcts = win_pct_create(config->data_path, DEFAULT_WIN_PCT);
-  config->board_layout = board_layout_create_default(config->data_path);
+  config->win_pcts = win_pct_create(config->data_paths, DEFAULT_WIN_PCT);
+  config->board_layout = board_layout_create_default(config->data_paths);
   config->ld = NULL;
   config->players_data = players_data_create();
   config->thread_control = thread_control_create();
@@ -1603,6 +1801,6 @@ void config_destroy(Config *config) {
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   error_status_destroy(config->error_status);
-  free(config->data_path);
+  free(config->data_paths);
   free(config);
 }

@@ -195,6 +195,7 @@ static inline bool within_epsilon_for_equity(double a, double b) {
 // Returns -1 if the moves are equivalent
 // Dies if moves are equivalent and duplicates
 // are not allowed
+// Assumes the moves are not null
 static inline int compare_moves(const Move *move_1, const Move *move_2,
                                 bool allow_duplicates) {
   if (!within_epsilon_for_equity(move_1->equity, move_2->equity)) {

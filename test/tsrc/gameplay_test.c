@@ -604,6 +604,58 @@ void test_backups(void) {
   config_destroy(config);
 }
 
+void test_leave_record(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *player0_rack = player_get_rack(game_get_player(game, 0));
+
+  Rack *actual_leave = rack_create(ld_get_size(ld));
+  Rack *expected_leave = rack_create(ld_get_size(ld));
+
+  ValidatedMoves *vms;
+  const Move *move;
+
+  rack_set_to_string(ld, player0_rack, "DEKNRTY");
+  vms = validated_moves_create(game, 0, "8G.KY", false, false, false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  move = validated_moves_get_move(vms, 0);
+  play_move(move, game, NULL, actual_leave);
+  rack_set_to_string(ld, expected_leave, "DENRT");
+  assert(racks_are_equal(expected_leave, actual_leave));
+  validated_moves_destroy(vms);
+  game_reset(game);
+
+  rack_set_to_string(ld, player0_rack, "DEKNRTY");
+  vms = validated_moves_create(game, 0, "ex.DKY", false, false, false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  move = validated_moves_get_move(vms, 0);
+  play_move(move, game, NULL, actual_leave);
+  rack_set_to_string(ld, expected_leave, "ENRT");
+  assert(racks_are_equal(expected_leave, actual_leave));
+  validated_moves_destroy(vms);
+  game_reset(game);
+
+  rack_set_to_string(ld, player0_rack, "DEKNRTY");
+  vms = validated_moves_create(game, 0, "pass", false, false, false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+  move = validated_moves_get_move(vms, 0);
+  play_move(move, game, NULL, actual_leave);
+  rack_set_to_string(ld, expected_leave, "DEKNRTY");
+  assert(racks_are_equal(expected_leave, actual_leave));
+  validated_moves_destroy(vms);
+  game_reset(game);
+
+  rack_destroy(actual_leave);
+  rack_destroy(expected_leave);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_gameplay(void) {
   test_draw_to_full_rack();
   test_rack_is_drawable();
@@ -613,4 +665,5 @@ void test_gameplay(void) {
   test_standard_game();
   test_set_random_rack();
   test_backups();
+  test_leave_record();
 }

@@ -6,8 +6,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "../../src/def/autoplay_defs.h"
 #include "../../src/def/config_defs.h"
 #include "../../src/def/game_defs.h"
+#include "../../src/def/leave_gen_defs.h"
 #include "../../src/def/move_defs.h"
 #include "../../src/def/players_data_defs.h"
 #include "../../src/def/simmer_defs.h"
@@ -54,11 +56,17 @@ void test_config_load_error_cases(void) {
                          CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
   test_config_load_error(config, "set -gp off",
                          CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+  test_config_load_error(config, "set -hr on",
+                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
+  test_config_load_error(config, "set -hr off",
+                         CONFIG_LOAD_STATUS_MALFORMED_BOOL_ARG);
   test_config_load_error(config, "set -seed -2",
                          CONFIG_LOAD_STATUS_MALFORMED_INT_ARG);
   test_config_load_error(config, "sim -lex CSW21 -it 1000 -plies",
                          CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
   test_config_load_error(config, "cgp 1 2 3",
+                         CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
+  test_config_load_error(config, "create klv CSW50",
                          CONFIG_LOAD_STATUS_INSUFFICIENT_NUMBER_OF_VALUES);
   test_config_load_error(config, "sim -bdn invalid_number_of_rows15",
                          CONFIG_LOAD_STATUS_BOARD_LAYOUT_ERROR);
@@ -171,7 +179,8 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
       "%s -s2 %s -r2 %s -eq %0.2f -numplays %d "
       "-plies %d -it "
-      "%d -scond %d -seed %d -threads %d -pfreq %d -cfreq %d -gp true -p1 %s "
+      "%d -scond %d -seed %d -threads %d -pfreq %d -cfreq %d -gp true -hr true "
+      "-p1 %s "
       "-p2 "
       "%s",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, equity_margin,
@@ -202,6 +211,7 @@ void test_config_load_success(void) {
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
   assert(config_get_use_game_pairs(config));
+  assert(config_get_human_readable(config));
 
   // Change some fields, confirm that
   // other fields retain their value.
@@ -224,7 +234,7 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -l1 %s -l2 %s  -s1 "
       "%s -r1 %s -s2 %s -r2 %s -plies %d -it %d "
       "-threads %d "
-      "-pfreq %d -gp false ",
+      "-pfreq %d -gp false -hr false",
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, plies, max_iterations,
       number_of_threads, print_info);
 
@@ -252,6 +262,7 @@ void test_config_load_success(void) {
   assert(thread_control_get_check_stop_interval(
              config_get_thread_control(config)) == check_stop);
   assert(!config_get_use_game_pairs(config));
+  assert(!config_get_human_readable(config));
 
   string_builder_destroy(test_string_builder);
   config_destroy(config);
@@ -350,7 +361,8 @@ void test_config_exec_parse_args(void) {
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
   assert_config_exec_status(config, "infer 0 3", ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
-  assert_config_exec_status(config, "autoplay", ERROR_STATUS_TYPE_CONFIG_LOAD,
+  assert_config_exec_status(config, "autoplay game 10",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
 
   // CGP
@@ -428,9 +440,68 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_MISSING_ARG);
   // Autoplay
+  assert_config_exec_status(
+      config, "autoplay move 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_INVALID_OPTIONS);
+  assert_config_exec_status(
+      config, "autoplay ,,, 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
+      ERROR_STATUS_TYPE_AUTOPLAY, AUTOPLAY_STATUS_EMPTY_OPTIONS);
   assert_config_exec_status(config,
-                            "autoplay -l1 CSW21 -l2 NWL20 -r1 b -r2 b -iter 2",
+                            "autoplay game 10 -l1 CSW21 -l2 NWL20 -r1 b -r2 b",
                             ERROR_STATUS_TYPE_NONE, 0);
+
+  // Create
+  assert_config_exec_status(config, "create klx CSW50 english",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE);
+  config_destroy(config);
+  config = config_create_default_test();
+
+  // Leave Gen
+  assert_config_exec_status(config, "leavegen 2 20 1 0 4",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
+
+  load_and_exec_config_or_die(config, "set -l1 CSW21 -l2 NWL20");
+  assert_config_exec_status(config, "leavegen 2 20 1 0 0",
+                            ERROR_STATUS_TYPE_LEAVE_GEN,
+                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+
+  load_and_exec_config_or_die(config,
+                              "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
+  assert_config_exec_status(config, "leavegen 2 20 1 0 4",
+                            ERROR_STATUS_TYPE_LEAVE_GEN,
+                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+
+  load_and_exec_config_or_die(config,
+                              "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
+  assert_config_exec_status(config, "leavegen 2 20 1 0 4",
+                            ERROR_STATUS_TYPE_LEAVE_GEN,
+                            LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
+
+  load_and_exec_config_or_die(config,
+                              "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 CSW21");
+
+  assert_config_exec_status(config, "leavegen 0 20 1 0 4",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+
+  assert_config_exec_status(config, "leavegen 2 0 1 5 4",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+
+  assert_config_exec_status(config, "leavegen 2 20 0 60 60",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+
+  assert_config_exec_status(config, "leavegen 2 20 1 -1 60",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+
+  assert_config_exec_status(config, "leavegen 2 20 1 60 -1",
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
+                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
+
   config_destroy(config);
 }
 

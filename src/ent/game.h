@@ -14,7 +14,7 @@
 typedef struct Game Game;
 
 typedef struct GameArgs {
-  const PlayersData *players_data;
+  PlayersData *players_data;
   const BoardLayout *board_layout;
   const LetterDistribution *ld;
   game_variant_t game_variant;
@@ -40,6 +40,7 @@ game_end_reason_t game_get_game_end_reason(const Game *game);
 bool game_over(const Game *game);
 backup_mode_t game_get_backup_mode(const Game *game);
 int game_get_consecutive_scoreless_turns(const Game *game);
+int game_get_starting_player_index(const Game *game);
 int game_get_player_draw_index(const Game *game, int player_index);
 int game_get_player_on_turn_draw_index(const Game *game);
 bool game_get_data_is_shared(const Game *game,

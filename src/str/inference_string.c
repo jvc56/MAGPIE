@@ -28,15 +28,15 @@ void string_builder_add_leave_rack(StringBuilder *inference_string,
   double leave_rack_equity = leave_rack_get_equity(leave_rack);
 
   if (rack_is_empty(leave_rack_exchanged)) {
-    string_builder_add_rack(inference_string, leave_rack_leave, ld);
+    string_builder_add_rack(inference_string, leave_rack_leave, ld, false);
     string_builder_add_formatted_string(
         inference_string, "%-3d %-6.2f %-6d %0.2f\n", index + 1,
         ((double)leave_rack_draws / total_draws) * 100, leave_rack_draws,
         leave_rack_equity);
   } else {
-    string_builder_add_rack(inference_string, leave_rack_leave, ld);
+    string_builder_add_rack(inference_string, leave_rack_leave, ld, false);
     string_builder_add_spaces(inference_string, 1);
-    string_builder_add_rack(inference_string, leave_rack_exchanged, ld);
+    string_builder_add_rack(inference_string, leave_rack_exchanged, ld, false);
     string_builder_add_formatted_string(
         inference_string, "%-3d %-6.2f %-6d\n", index + 1,
         ((double)leave_rack_draws / total_draws) * 100, leave_rack_draws);
@@ -161,7 +161,7 @@ void string_builder_add_inference(StringBuilder *inference_string,
 
   if (!is_exchange) {
     string_builder_add_string(inference_string, "Played tiles:          ");
-    string_builder_add_rack(inference_string, target_played_tiles, ld);
+    string_builder_add_rack(inference_string, target_played_tiles, ld, false);
     number_of_tiles_played_or_exchanged =
         rack_get_total_letters(target_played_tiles);
   } else {
@@ -179,7 +179,7 @@ void string_builder_add_inference(StringBuilder *inference_string,
       inference_results_get_target_known_unplayed_tiles(inference_results);
   if (rack_get_total_letters(target_unplayed_tiles) > 0) {
     string_builder_add_string(inference_string, "Partial Rack:          ");
-    string_builder_add_rack(inference_string, target_unplayed_tiles, ld);
+    string_builder_add_rack(inference_string, target_unplayed_tiles, ld, false);
     string_builder_add_string(inference_string, "\n");
   }
 
@@ -263,14 +263,15 @@ void string_builder_add_ucgi_leave_rack(StringBuilder *ucgi_string_builder,
   int draws = leave_rack_get_draws(leave_rack);
   double equity = leave_rack_get_equity(leave_rack);
   if (!is_exchange) {
-    string_builder_add_rack(ucgi_string_builder, leave_rack_leave, ld);
+    string_builder_add_rack(ucgi_string_builder, leave_rack_leave, ld, false);
     string_builder_add_formatted_string(
         ucgi_string_builder, " %-3d %-6.2f %-6d %0.2f\n", index + 1,
         ((double)draws / total_draws) * 100, draws, equity);
   } else {
-    string_builder_add_rack(ucgi_string_builder, leave_rack_leave, ld);
+    string_builder_add_rack(ucgi_string_builder, leave_rack_leave, ld, false);
     string_builder_add_spaces(ucgi_string_builder, 1);
-    string_builder_add_rack(ucgi_string_builder, leave_rack_exchanged, ld);
+    string_builder_add_rack(ucgi_string_builder, leave_rack_exchanged, ld,
+                            false);
     string_builder_add_formatted_string(
         ucgi_string_builder, "%-3d %-6.2f %-6d\n", index + 1,
         ((double)draws / total_draws) * 100, draws);

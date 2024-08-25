@@ -671,7 +671,8 @@ gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
     play_move_status_t play_move_status =
         play_move(validated_moves_get_move(vms, 0), game,
                   get_player_next_rack(game_history, game_event_index,
-                                       game_event_player_index));
+                                       game_event_player_index),
+                  NULL);
     if (play_move_status != PLAY_MOVE_STATUS_SUCCESS) {
       return GCG_PARSE_STATUS_RACK_NOT_IN_BAG;
     }

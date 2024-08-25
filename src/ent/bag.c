@@ -29,10 +29,14 @@ struct Bag {
   XoshiroPRNG *prng;
 };
 
+int bag_get_size(const Bag *bag) { return bag->size; }
+
 // Returns the number of tiles in the bag
 int bag_get_tiles(const Bag *bag) {
   return bag->end_tile_index - bag->start_tile_index;
 }
+
+XoshiroPRNG *bag_get_prng(const Bag *bag) { return bag->prng; }
 
 void bag_shuffle(Bag *bag) {
   int tiles_remaining = bag_get_tiles(bag);
@@ -167,6 +171,16 @@ bool bag_draw_letter(Bag *bag, uint8_t letter, int player_draw_index) {
   } else {
     bag->tiles[letter_index] = bag->tiles[bag->start_tile_index];
     bag->start_tile_index++;
+  }
+  return true;
+}
+
+bool bag_draw_letters(Bag *bag, uint8_t letter, int num_letters,
+                      int player_draw_index) {
+  for (int i = 0; i < num_letters; i++) {
+    if (!bag_draw_letter(bag, letter, player_draw_index)) {
+      return false;
+    }
   }
   return true;
 }

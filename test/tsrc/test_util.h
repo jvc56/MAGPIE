@@ -44,12 +44,15 @@ void assert_boards_are_equal(Board *b1, Board *b2);
 void assert_games_are_equal(Game *g1, Game *g2, bool check_scores);
 void print_game(Game *game, MoveList *move_list);
 void print_cgp(const Game *game);
+void print_english_rack(const Rack *rack);
 void print_rack(const Rack *rack, const LetterDistribution *ld);
 void print_inference(const LetterDistribution *ld,
                      const Rack *target_played_tiles,
                      InferenceResults *inference_results);
 void load_cgp_or_die(Game *game, const char *cgp);
 void load_and_exec_config_or_die(Config *config, const char *cmd);
+bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
+                                       int seconds);
 char *get_test_filename(const char *filename);
 void delete_file(const char *filename);
 void reset_file(const char *filename);
@@ -58,10 +61,10 @@ void delete_fifo(const char *fifo_name);
 Config *config_create_or_die(const char *cmd);
 Config *config_create_default_test(void);
 void set_row(Game *game, int row, const char *row_content);
-void assert_board_layout_error(const char *data_path,
+void assert_board_layout_error(const char *data_paths,
                                const char *board_layout_filename,
                                board_layout_load_status_t expected_status);
-void load_game_with_test_board(Game *game, const char *data_path,
+void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name);
 void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_position,
@@ -77,5 +80,6 @@ void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
                              bool write_player_on_turn_first);
 void assert_stats_are_equal(const Stat *s1, const Stat *s2);
 void assert_sim_results_equal(SimResults *sr1, SimResults *sr2);
+void assert_klvs_equal(const KLV *klv1, const KLV *klv2);
 
 #endif

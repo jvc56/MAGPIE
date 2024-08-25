@@ -10,8 +10,11 @@
 #include "board_layout_super_test.h"
 #include "board_test.h"
 #include "cgp_test.h"
+#include "checkpoint_test.h"
 #include "command_test.h"
 #include "config_test.h"
+#include "convert_test.h"
+#include "create_data_test.h"
 #include "cross_set_test.h"
 #include "equity_adjustment_test.h"
 #include "file_handler_test.h"
@@ -19,8 +22,12 @@
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "infer_test.h"
+#include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
+#include "leave_bitmaps_test.h"
+#include "leave_count_hashmap_test.h"
+#include "leave_list_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
@@ -49,15 +56,19 @@ void run_all(void) {
   test_leaves();
   test_leave_map();
   test_kwg_alpha();
+  test_checkpoint();
 
   // Now test the rest
+  test_leave_count_hashmap();
   test_bag();
   test_rack();
+  test_leave_bitmaps();
   test_board();
   test_board_layout_default();
   test_cross_set();
   test_move();
   test_cgp();
+  test_klv();
   test_game();
   test_validated_move();
   test_shadow();
@@ -75,6 +86,9 @@ void run_all(void) {
   test_word_prune();
   test_kwg_maker();
   test_file_handler();
+  test_leave_list();
+  test_convert();
+  test_create_data();
 }
 
 void run_test(const char *subtest) {
@@ -142,6 +156,20 @@ void run_test(const char *subtest) {
     test_file_handler();
   } else if (strings_equal(subtest, "cgp")) {
     test_cgp();
+  } else if (strings_equal(subtest, "ll")) {
+    test_leave_list();
+  } else if (strings_equal(subtest, "hm")) {
+    test_leave_count_hashmap();
+  } else if (strings_equal(subtest, "lb")) {
+    test_leave_bitmaps();
+  } else if (strings_equal(subtest, "ch")) {
+    test_checkpoint();
+  } else if (strings_equal(subtest, "klv")) {
+    test_klv();
+  } else if (strings_equal(subtest, "cv")) {
+    test_convert();
+  } else if (strings_equal(subtest, "cd")) {
+    test_create_data();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

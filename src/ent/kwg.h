@@ -33,6 +33,10 @@ typedef struct KWG {
 
 static inline const char *kwg_get_name(const KWG *kwg) { return kwg->name; }
 
+static inline int kwg_get_number_of_nodes(const KWG *kwg) {
+  return kwg->number_of_nodes;
+}
+
 static inline uint32_t kwg_node(const KWG *kwg, uint32_t node_index) {
   return kwg->nodes[node_index];
 }
@@ -121,15 +125,14 @@ static inline void kwg_read_nodes_from_stream(KWG *kwg, size_t number_of_nodes,
   for (uint32_t i = 0; i < number_of_nodes; i++) {
     kwg->nodes[i] = le32toh(kwg->nodes[i]);
   }
-  kwg->number_of_nodes = number_of_nodes;
 }
 
 static inline uint32_t *kwg_get_mutable_nodes(KWG *kwg) { return kwg->nodes; }
 
-static inline void load_kwg(KWG *kwg, const char *data_path,
+static inline void load_kwg(KWG *kwg, const char *data_paths,
                             const char *kwg_name) {
-  char *kwg_filename =
-      data_filepaths_get(data_path, kwg_name, DATA_FILEPATH_TYPE_KWG);
+  char *kwg_filename = data_filepaths_get_readable_filename(
+      data_paths, kwg_name, DATA_FILEPATH_TYPE_KWG);
 
   FILE *stream = stream_from_filename(kwg_filename);
   if (!stream) {
@@ -150,10 +153,10 @@ static inline void load_kwg(KWG *kwg, const char *data_path,
   fclose(stream);
 }
 
-static inline KWG *kwg_create(const char *data_path, const char *kwg_name) {
+static inline KWG *kwg_create(const char *data_paths, const char *kwg_name) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
   kwg->name = NULL;
-  load_kwg(kwg, data_path, kwg_name);
+  load_kwg(kwg, data_paths, kwg_name);
   return kwg;
 }
 
@@ -166,7 +169,7 @@ static inline KWG *kwg_create_empty(void) {
 static inline bool kwg_write_to_file(const KWG *kwg, const char *filename) {
   FILE *stream = fopen(filename, "wb");
   if (!stream) {
-    printf("could not open stream\n");
+    printf("could not open stream for filename: %s\n", filename);
     return false;
   }
   for (int i = 0; i < kwg->number_of_nodes; i++) {
@@ -207,10 +210,6 @@ static inline bool kwg_in_letter_set(const KWG *kwg, uint8_t letter,
     }
     i++;
   }
-}
-
-static inline int kwg_get_number_of_nodes(const KWG *kwg) {
-  return kwg->number_of_nodes;
 }
 
 #endif

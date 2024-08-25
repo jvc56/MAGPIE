@@ -9,6 +9,9 @@
 
 bool has_prefix(const char *pre, const char *str);
 bool has_iprefix(const char *pre, const char *str);
+bool has_suffix(const char *str, const char *suffix);
+bool has_isuffix(const char *str, const char *suffix);
+bool string_contains(const char *str, char ch);
 bool is_string_empty_or_whitespace(const char *str);
 bool is_string_empty_or_null(const char *str);
 bool is_all_digits_or_empty(const char *str);
@@ -70,5 +73,10 @@ void string_builder_clear(StringBuilder *string_builder);
 size_t string_builder_length(const StringBuilder *string_builder);
 const char *string_builder_peek(const StringBuilder *string_builder);
 char *string_builder_dump(const StringBuilder *string_builder, size_t *length);
+char *get_dirpath_from_filepath(const char *filepath);
+const char *get_base_filename(const char *filepath);
+char *cut_off_after_last_char(const char *str, char ch);
+char *cut_off_after_first_char(const char *str, char ch);
+char *insert_before_dot(const char *str, const char *insert);
 
 #endif

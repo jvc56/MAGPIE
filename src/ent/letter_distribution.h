@@ -52,6 +52,19 @@ static inline uint8_t get_unblanked_machine_letter(uint8_t ml) {
 
 static inline bool get_is_blanked(uint8_t ml) { return (ml & BLANK_MASK) > 0; }
 
+// Returns true if the machine letters are successfully unblanked
+// Returns false if the unblanking fails and renders the machine letters
+// invalid.
+static inline bool unblank_machine_letters(uint8_t *mls, int size) {
+  for (int i = 0; i < size; i++) {
+    if (mls[i] == BLANK_MACHINE_LETTER) {
+      return false;
+    }
+    mls[i] = get_unblanked_machine_letter(mls[i]);
+  }
+  return true;
+}
+
 static inline void sort_score_order(LetterDistribution *ld) {
   int *score_order = ld->score_order;
   int *scores = ld->scores;
@@ -70,7 +83,7 @@ static inline void sort_score_order(LetterDistribution *ld) {
   }
 }
 
-static inline LetterDistribution *ld_create(const char *data_path,
+static inline LetterDistribution *ld_create(const char *data_paths,
                                             const char *ld_name) {
   LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
 
@@ -79,8 +92,8 @@ static inline LetterDistribution *ld_create(const char *data_path,
 
   ld->name = string_duplicate(ld_name);
 
-  char *ld_filename =
-      data_filepaths_get(data_path, ld_name, DATA_FILEPATH_TYPE_LD);
+  char *ld_filename = data_filepaths_get_readable_filename(
+      data_paths, ld_name, DATA_FILEPATH_TYPE_LD);
 
   StringSplitter *ld_lines = split_file_by_newline(ld_filename);
 
@@ -378,7 +391,8 @@ static inline bool ld_types_compat(ld_t ld_type_1, ld_t ld_type_2) {
   return ld_type_1 == ld_type_2;
 }
 
-static inline ld_t ld_get_type_from_lex_name(const char *lexicon_name) {
+static inline ld_t ld_get_type_from_lex_name(const char *full_lexicon_name) {
+  const char *lexicon_name = get_base_filename(full_lexicon_name);
   ld_t ld_type;
   if (has_iprefix("CSW", lexicon_name) || has_iprefix("NWL", lexicon_name) ||
       has_iprefix("TWL", lexicon_name) ||
