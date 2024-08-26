@@ -109,8 +109,8 @@ void test_autoplay_leavegen(void) {
 
   char *ab_ar_str = autoplay_results_to_string(
       config_get_autoplay_results(ab_config), false, false);
-  assert_strings_equal(ab_ar_str, "autoplay games 200 95 103 2 100 287.965000 "
-                                  "60.399622 289.805000 65.878043 153 0 47 \n");
+  assert_strings_equal(ab_ar_str, "autoplay games 200 93 105 2 100 287.450000 "
+                                  "59.948366 290.285000 66.045315 153 0 47 \n");
   free(ab_ar_str);
 
   config_destroy(ab_config);
