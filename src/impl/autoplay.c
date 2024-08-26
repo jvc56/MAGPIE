@@ -260,21 +260,23 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   free(shared_data);
 }
 
-void autoplay_leave_list_draw_rarest_available_leave(
+bool autoplay_leave_list_draw_rarest_available_leave(
     LeavegenSharedData *lg_shared_data, Game *game, int player_on_turn_index,
     int force_draw_turn, Rack *rare_leave) {
   rack_reset(rare_leave);
   pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
+  bool success = false;
   if (leave_list_draw_rarest_available_leave(
           lg_shared_data->leave_list, game_get_bag(game),
           player_get_rack(game_get_player(game, player_on_turn_index)),
           rare_leave, game_get_player_draw_index(game, player_on_turn_index))) {
-
     stat_push(lg_shared_data->success_force_draws, (double)force_draw_turn, 1);
+    success = true;
   } else {
     lg_shared_data->failed_force_draws++;
   }
   pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
+  return success;
 }
 
 // Returns true if the required minimum leave count was reached.
@@ -401,16 +403,17 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
               player_get_rack(game_get_player(game, player_on_turn_index)));
     return_rack_to_bag(game, player_on_turn_index);
     draw_rack_from_bag(game, player_on_turn_index, leave_from_previous_move);
-    autoplay_leave_list_draw_rarest_available_leave(
-        lg_shared_data, game, player_on_turn_index, game_runner->turn_number,
-        game_runner->rare_leave);
-    draw_to_full_rack(game, player_on_turn_index);
-    const Move *forced_move =
-        get_top_equity_move(game, thread_index, game_runner->move_list);
-    if (autoplay_leave_list_add_subleave(
-            lg_shared_data, game_runner->rare_leave,
-            move_get_equity(forced_move), target_min_leave_count)) {
-      game_runner->min_leave_count_reached = true;
+    if (autoplay_leave_list_draw_rarest_available_leave(
+            lg_shared_data, game, player_on_turn_index,
+            game_runner->turn_number, game_runner->rare_leave)) {
+      draw_to_full_rack(game, player_on_turn_index);
+      const Move *forced_move =
+          get_top_equity_move(game, thread_index, game_runner->move_list);
+      if (autoplay_leave_list_add_subleave(
+              lg_shared_data, game_runner->rare_leave,
+              move_get_equity(forced_move), target_min_leave_count)) {
+        game_runner->min_leave_count_reached = true;
+      }
     }
     return_rack_to_bag(game, player_on_turn_index);
     draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);

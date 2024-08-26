@@ -224,7 +224,7 @@ int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
   leave_list_item_increment_count(item, equity);
   int new_count = item->count;
 
-  if (new_count >= leave_list->target_min_leave_count) {
+  if (new_count == leave_list->target_min_leave_count) {
     leave_list->leaves_under_target_min_count--;
   }
 

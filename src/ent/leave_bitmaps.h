@@ -182,7 +182,7 @@ static inline int get_number_of_letters_in_unit(BITMAP_UNIT x) {
 static inline bool leave_bitmaps_draw_first_available_subrack(
     LeaveBitMaps *lb, Bag *bag, Rack *rack, Rack *empty_rack,
     int player_draw_index, int leaves_under_target_min_count) {
-  if (leaves_under_target_min_count < 0) {
+  if (leaves_under_target_min_count <= 0) {
     return false;
   }
   const int dist_size = rack_get_dist_size(rack);

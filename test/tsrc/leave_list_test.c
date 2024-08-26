@@ -561,6 +561,17 @@ void test_leave_list_draw_rarest_available(void) {
                                                  player_draw_index));
   bag_reset(ld, bag);
 
+  leave_list_reset(ll);
+
+  lutmc = number_of_leaves;
+
+  for (int i = 0; i < tmc - 1; i++) {
+    assert(leave_list_add_sas(ll, ld, sl, "A", lutmc, 1.0) == 0);
+  }
+  for (int i = 0; i < 5; i++) {
+    assert(leave_list_add_sas(ll, ld, sl, "A", lutmc - 1, 1.0) == 0);
+  }
+
   bag_destroy(bag);
   rack_destroy(rack);
   rack_destroy(sl);

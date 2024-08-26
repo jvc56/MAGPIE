@@ -1047,8 +1047,8 @@ void execute_leave_gen(Config *config) {
 
   autoplay_status =
       config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
-                      gens, num_games, target_min_leave_count,
-                      max_force_draw_turns, max_force_draw_turns);
+                      gens, num_games, target_min_leave_count, force_draw_start,
+                      max_force_draw_turns);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)autoplay_status);
 }
