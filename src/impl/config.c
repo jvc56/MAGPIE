@@ -864,16 +864,14 @@ char *status_infer(Config __attribute__((unused)) * config) {
 
 // Autoplay
 
-void config_fill_autoplay_args(const Config *config,
-                               AutoplayArgs *autoplay_args,
-                               autoplay_t autoplay_type, int gens,
-                               int num_games_per_gen,
-                               int target_min_leave_count, int force_draw_start,
-                               int max_force_draw_turn) {
+void config_fill_autoplay_args(
+    const Config *config, AutoplayArgs *autoplay_args, autoplay_t autoplay_type,
+    int gens, int num_games_per_gen, int target_min_leave_count,
+    int games_before_force_draw_start, int max_force_draw_turn) {
   autoplay_args->type = autoplay_type;
   autoplay_args->gens = gens;
   autoplay_args->target_min_leave_count = target_min_leave_count;
-  autoplay_args->force_draw_start = force_draw_start;
+  autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
   autoplay_args->games_per_gen = num_games_per_gen;
   autoplay_args->max_force_draw_turn = max_force_draw_turn;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
@@ -886,14 +884,14 @@ void config_fill_autoplay_args(const Config *config,
 autoplay_status_t
 config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                 autoplay_t autoplay_type, int gens, int num_games_per_gen,
-                int target_min_leave_count, int force_draw_start,
+                int target_min_leave_count, int games_before_force_draw_start,
                 int max_force_draw_turn) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
   config_fill_autoplay_args(config, &args, autoplay_type, gens,
                             num_games_per_gen, target_min_leave_count,
-                            force_draw_start, max_force_draw_turn);
+                            games_before_force_draw_start, max_force_draw_turn);
   return autoplay(&args, autoplay_results);
 }
 
@@ -1023,13 +1021,14 @@ void execute_leave_gen(Config *config) {
     return;
   }
 
-  const char *force_draw_start_str =
+  const char *games_before_force_draw_start_str =
       config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 3);
-  int force_draw_start;
+  int games_before_force_draw_start;
   if (!string_to_int_or_set_error_status(
-          force_draw_start_str, 0, INT_MAX, config->error_status,
+          games_before_force_draw_start_str, 0, INT_MAX, config->error_status,
           ERROR_STATUS_TYPE_CONFIG_LOAD,
-          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS, &force_draw_start)) {
+          CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS,
+          &games_before_force_draw_start)) {
     return;
   }
 
@@ -1047,8 +1046,8 @@ void execute_leave_gen(Config *config) {
 
   autoplay_status =
       config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
-                      gens, num_games, target_min_leave_count, force_draw_start,
-                      max_force_draw_turns);
+                      gens, num_games, target_min_leave_count,
+                      games_before_force_draw_start, max_force_draw_turns);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_AUTOPLAY,
                             (int)autoplay_status);
 }

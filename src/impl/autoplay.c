@@ -370,7 +370,7 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
       // generation.
       (iter_output->iter_count -
        game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
-          (uint64_t)autoplay_worker->args->force_draw_start) {
+          (uint64_t)autoplay_worker->args->games_before_force_draw_start) {
     game_runner->force_draw_turn_number = prng_get_random_number(
         bag_get_prng(game_get_bag(game)), max_force_draw_turn + 1);
     for (int i = 0; i < 2; i++) {
