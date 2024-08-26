@@ -469,10 +469,10 @@ void print_current_status(
     pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
     string_builder_add_formatted_string(
         status_sb,
-        " gen: %d, gen games: %ld, leaves rec: %ld, leaves under: %ld, lowest "
+        ", gen: %d, gen games: %ld, leaves rec: %ld, leaves under: %ld, lowest "
         "leave: %d, "
-        "fdraws: %ld, ffdraws:%ld, tomfd: %ld\n",
-        gen, iter_completed_output->iter_count_completed - gen_start_games,
+        "fdraws: %ld, ffdraws: %ld, tomfd: %ld\n",
+        gen + 1, iter_completed_output->iter_count_completed - gen_start_games,
         leaves_recorded, leaves_under_target_min_count, lowest_leave_count,
         forced_draws, failed_forced_draws, turns_over_max_forced_draw);
   } else {
