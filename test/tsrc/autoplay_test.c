@@ -100,17 +100,17 @@ void test_autoplay_leavegen(void) {
   // the maximum number of games, so if this takes too long, we know it
   // failed.
   load_and_exec_config_or_die_timed(ab_config,
-                                    "leavegen 1 99999999 2 0 30 -seed 3", 60);
+                                    "leavegen 1 99999999 2 0 -seed 3", 60);
 
   // The maximum game limit should be reached well before reaching
   // the minimum leave count.
   load_and_exec_config_or_die_timed(ab_config,
-                                    "leavegen 1 200 99999999 0 60 -seed 3", 60);
+                                    "leavegen 1 200 99999999 0 -seed 3", 60);
 
   char *ab_ar_str = autoplay_results_to_string(
       config_get_autoplay_results(ab_config), false, false);
-  assert_strings_equal(ab_ar_str, "autoplay games 200 93 105 2 100 287.450000 "
-                                  "59.948366 290.285000 66.045315 153 0 47 \n");
+  assert_strings_equal(ab_ar_str, "autoplay games 200 100 100 0 100 287.560000 "
+                                  "60.542243 286.715000 62.229061 151 0 49 \n");
   free(ab_ar_str);
 
   config_destroy(ab_config);
@@ -122,11 +122,11 @@ void test_autoplay_leavegen(void) {
   // Make sure the leavegen command can run without error.
   load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed english");
   load_and_exec_config_or_die(csw_config, "set -leaves CSW21_zeroed");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 200 1 0 60 -seed 0");
+  load_and_exec_config_or_die(csw_config, "leavegen 2 200 1 0 -seed 0");
   load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed_ml english");
   load_and_exec_config_or_die(csw_config,
                               "set -leaves CSW21_zeroed_ml -threads 11");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 100 1 0 200");
+  load_and_exec_config_or_die(csw_config, "leavegen 2 100 1 0");
 
   config_destroy(csw_config);
 }
