@@ -322,6 +322,13 @@ void assert_strings_equal(const char *str1, const char *str2) {
   }
 }
 
+void clear_bag(Bag *bag) {
+  int number_of_letters = bag_get_tiles(bag);
+  for (int i = 0; i < number_of_letters; i++) {
+    bag_draw_random_letter(bag, 0);
+  }
+}
+
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size) {
   Bag *b1_copy = bag_duplicate(b1);
   Bag *b2_copy = bag_duplicate(b2);

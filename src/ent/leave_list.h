@@ -4,6 +4,7 @@
 #include "bag.h"
 #include "klv.h"
 #include "rack.h"
+#include "thread_control.h"
 
 typedef struct LeaveList LeaveList;
 
@@ -29,6 +30,7 @@ int leave_list_get_empty_leave_count(const LeaveList *leave_list);
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list);
 int leave_list_get_count_index(const LeaveList *leave_list, int klv_index);
 Rack *get_new_bag_as_rack(const LetterDistribution *ld);
+void leave_list_seed(LeaveList *leave_list, ThreadControl *thread_control);
 
 void string_builder_add_most_or_least_common_leaves(
     StringBuilder *sb, const LeaveList *leave_list,

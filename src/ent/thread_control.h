@@ -8,6 +8,7 @@
 
 #include "file_handler.h"
 #include "timer.h"
+#include "xoshiro.h"
 
 typedef struct ThreadControl ThreadControl;
 
@@ -64,5 +65,6 @@ void thread_control_complete_iter(
 void thread_control_start_timer(ThreadControl *thread_control);
 void thread_control_stop_timer(ThreadControl *thread_control);
 double thread_control_get_time_elapsed(const ThreadControl *thread_control);
-
+void thread_control_copy_to_dst_and_jump(ThreadControl *thread_control,
+                                         XoshiroPRNG *dst);
 #endif

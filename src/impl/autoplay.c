@@ -189,12 +189,11 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
-LeavegenSharedData *
-leavegen_shared_data_create(AutoplayResults *primary_autoplay_results,
-                            AutoplayResults **autoplay_results_list,
-                            const LetterDistribution *ld,
-                            const char *data_paths, KLV *klv,
-                            int number_of_threads, int target_min_leave_count) {
+LeavegenSharedData *leavegen_shared_data_create(
+    ThreadControl *thread_control, AutoplayResults *primary_autoplay_results,
+    AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
+    const char *data_paths, KLV *klv, int number_of_threads,
+    int target_min_leave_count) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->gens_completed = 0;
@@ -210,6 +209,7 @@ leavegen_shared_data_create(AutoplayResults *primary_autoplay_results,
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
   shared_data->leave_list = leave_list_create(ld, klv, target_min_leave_count);
+  leave_list_seed(shared_data->leave_list, thread_control);
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   pthread_mutex_init(&shared_data->leave_list_mutex, NULL);
@@ -229,8 +229,8 @@ AutoplaySharedData *autoplay_shared_data_create(
   shared_data->leavegen_shared_data = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
-        primary_autoplay_results, autoplay_results_list, ld, data_paths, klv,
-        number_of_threads, target_min_leave_count);
+        thread_control, primary_autoplay_results, autoplay_results_list, ld,
+        data_paths, klv, number_of_threads, target_min_leave_count);
   }
   return shared_data;
 }

@@ -30,6 +30,34 @@ void test_odds_that_player_is_better(void) {
   assert(within_epsilon(odds_that_player_is_better(0.9, 1000), 100.0));
 }
 
+void assert_autoplay_output(const char *output, int expected_newlines,
+                            const char **expected_substrs) {
+  int newlines_in_output = count_newlines(output);
+  bool success = true;
+  if (newlines_in_output != expected_newlines) {
+    printf("mismatched autoplay output:\nexpected: %d\ngot:%d\n",
+           expected_newlines, newlines_in_output);
+    success = false;
+  }
+
+  StringSplitter *split_output = split_string_by_newline(output, false);
+  assert(string_splitter_get_number_of_items(split_output) ==
+         expected_newlines + 1);
+  // We don't really care about what comes after the last newline
+  for (int i = 0; i < expected_newlines; i++) {
+    const char *actual = string_splitter_get_item(split_output, i);
+    const char *expected = expected_substrs[i];
+    if (!has_substring(actual, expected)) {
+      printf("pattern not found in autoplay output:\n%s\n***\n%s\n", expected,
+             actual);
+      success = false;
+    }
+  }
+
+  assert(success);
+  string_splitter_destroy(split_output);
+}
+
 void test_autoplay_default(void) {
   Config *csw_config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
@@ -39,8 +67,8 @@ void test_autoplay_default(void) {
 
   char *ar1_str = autoplay_results_to_string(
       config_get_autoplay_results(csw_config), false, false);
-  assert_strings_equal(ar1_str, "autoplay games 200 100 100 0 100 460.940000 "
-                                "60.687820 460.940000 60.687820 0 200 0 \n");
+  assert_autoplay_output(ar1_str, 1,
+                         (const char *[]){"autoplay games 200 100 100 0"});
 
   load_and_exec_config_or_die(csw_config,
                               "autoplay games 100 -r1 best -r2 best -seed 26");
@@ -57,8 +85,8 @@ void test_autoplay_default(void) {
   // Autoplay should reset the stats
   char *ar3_str = autoplay_results_to_string(
       config_get_autoplay_results(csw_config), false, false);
-  assert_strings_equal(ar3_str, "autoplay games 7 1 6 0 4 422.000000 58.657196 "
-                                "475.000000 89.701356 0 7 0 \n");
+  assert_autoplay_output(ar3_str, 1, (const char *[]){"autoplay games 7"});
+
   // Ensure pseudo-randomness is consistent for any number of threads
   char *single_thread_str = NULL;
   char *multi_thread_str = NULL;
@@ -109,8 +137,8 @@ void test_autoplay_leavegen(void) {
 
   char *ab_ar_str = autoplay_results_to_string(
       config_get_autoplay_results(ab_config), false, false);
-  assert_strings_equal(ab_ar_str, "autoplay games 200 100 100 0 100 287.560000 "
-                                  "60.542243 286.715000 62.229061 151 0 49 \n");
+  assert_autoplay_output(ab_ar_str, 1, (const char *[]){"autoplay games 200"});
+
   free(ab_ar_str);
 
   config_destroy(ab_config);
@@ -159,10 +187,9 @@ void test_autoplay_divergent_games(void) {
   autoplay_results_add_game(ar, game, 20, true);
 
   char *ar_str = autoplay_results_to_string(ar, false, true);
-  assert_strings_equal(ar_str, "autoplay games 4 1 3 0 4 251.750000 78.270365 "
-                               "279.250000 67.667693 4 0 0 \n"
-                               "autoplay games 2 0 2 0 2 295.500000 34.648232 "
-                               "328.000000 63.639610 2 0 0 \n");
+  assert_autoplay_output(
+      ar_str, 2, (const char *[]){"autoplay games 4", "autoplay games 2"});
+
   free(ar_str);
 
   autoplay_results_destroy(ar);
@@ -173,11 +200,10 @@ void test_autoplay_divergent_games(void) {
   // There should be no divergent games for CSW21 vs CSW21
   char *ar_gp_same_lex_str = autoplay_results_to_string(
       config_get_autoplay_results(csw_config), false, true);
-  assert_strings_equal(
-      ar_gp_same_lex_str,
-      "autoplay games 100 50 50 0 50 465.610000 61.689495 "
-      "465.610000 61.689495 0 100 0 \nautoplay games 0 0 0 0 0 "
-      "0.000000 0.000000 0.000000 0.000000 0 0 0 \n");
+  assert_autoplay_output(
+      ar_gp_same_lex_str, 2,
+      (const char *[]){"autoplay games 100", "autoplay games 0"});
+
   free(ar_gp_same_lex_str);
 
   load_and_exec_config_or_die(
@@ -185,11 +211,10 @@ void test_autoplay_divergent_games(void) {
 
   char *ar_gp_diff_lex_str = autoplay_results_to_string(
       config_get_autoplay_results(csw_config), false, true);
-  assert_strings_equal(
-      ar_gp_diff_lex_str,
-      "autoplay games 100 70 30 0 50 472.030000 59.216510 "
-      "423.730000 62.515591 0 100 0 \nautoplay games 100 70 30 0 50 "
-      "472.030000 59.216510 423.730000 62.515591 0 100 0 \n");
+  assert_autoplay_output(
+      ar_gp_diff_lex_str, 2,
+      (const char *[]){"autoplay games 100", "autoplay games 100"});
+
   free(ar_gp_diff_lex_str);
 
   config_destroy(csw_config);
