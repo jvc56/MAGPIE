@@ -458,47 +458,43 @@ void test_config_exec_parse_args(void) {
   config = config_create_default_test();
 
   // Leave Gen
-  assert_config_exec_status(config, "leavegen 2 20 1 0 4",
+  assert_config_exec_status(config, "leavegen 2 20 1 0",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_GAME_DATA_MISSING);
 
   load_and_exec_config_or_die(config, "set -l1 CSW21 -l2 NWL20");
-  assert_config_exec_status(config, "leavegen 2 20 1 0 0",
+  assert_config_exec_status(config, "leavegen 2 20 1 0",
                             ERROR_STATUS_TYPE_LEAVE_GEN,
                             LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
 
   load_and_exec_config_or_die(config,
                               "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
-  assert_config_exec_status(config, "leavegen 2 20 1 0 4",
+  assert_config_exec_status(config, "leavegen 2 20 1 0",
                             ERROR_STATUS_TYPE_LEAVE_GEN,
                             LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
 
   load_and_exec_config_or_die(config,
                               "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 NWL20");
-  assert_config_exec_status(config, "leavegen 2 20 1 0 4",
+  assert_config_exec_status(config, "leavegen 2 20 1 0",
                             ERROR_STATUS_TYPE_LEAVE_GEN,
                             LEAVE_GEN_STATUS_DIFFERENT_LEXICA_OR_LEAVES);
 
   load_and_exec_config_or_die(config,
                               "set -l1 CSW21 -l2 CSW21 -k1 CSW21 -k2 CSW21");
 
-  assert_config_exec_status(config, "leavegen 0 20 1 0 4",
+  assert_config_exec_status(config, "leavegen 0 20 1 0",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
 
-  assert_config_exec_status(config, "leavegen 2 0 1 5 4",
+  assert_config_exec_status(config, "leavegen 2 0 1 5",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
 
-  assert_config_exec_status(config, "leavegen 2 20 0 60 60",
+  assert_config_exec_status(config, "leavegen 2 20 0 60",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
 
-  assert_config_exec_status(config, "leavegen 2 20 1 -1 60",
-                            ERROR_STATUS_TYPE_CONFIG_LOAD,
-                            CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
-
-  assert_config_exec_status(config, "leavegen 2 20 1 60 -1",
+  assert_config_exec_status(config, "leavegen 2 20 1 -1",
                             ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_INT_ARG_OUT_OF_BOUNDS);
 

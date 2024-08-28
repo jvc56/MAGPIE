@@ -6,6 +6,8 @@
 #include "leave_bitmaps.h"
 #include "leave_count_hashmap.h"
 #include "rack.h"
+#include "thread_control.h"
+#include "xoshiro.h"
 
 #include "../str/rack_string.h"
 
@@ -37,6 +39,7 @@ struct LeaveList {
   LeaveListItem **leaves_ordered_by_count;
   LeaveCountHashMap *leave_count_hashmap;
   LeaveBitMaps *leave_bitmaps;
+  XoshiroPRNG *prng;
 };
 
 LeaveListItem *leave_list_item_create(int count_index) {
@@ -161,6 +164,8 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
 
   rack_destroy(bag_as_rack);
 
+  leave_list->prng = prng_create(0);
+
   return leave_list;
 }
 
@@ -177,6 +182,7 @@ void leave_list_destroy(LeaveList *leave_list) {
   leave_count_hashmap_destroy(leave_list->leave_count_hashmap);
   rack_destroy(leave_list->subleave);
   leave_bitmaps_destroy(leave_list->leave_bitmaps);
+  prng_destroy(leave_list->prng);
   free(leave_list);
 }
 
@@ -228,25 +234,41 @@ int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
     leave_list->leaves_under_target_min_count--;
   }
 
-  uint64_t old_end_index =
+  uint64_t old_count_end_index =
       leave_count_hashmap_get(leave_list->leave_count_hashmap, old_count);
 
-  leave_list_swap_items(leave_list, old_end_index, item->count_index);
+  leave_list_swap_items(leave_list, old_count_end_index, item->count_index);
 
-  if (old_end_index == 0 ||
-      leave_list->leaves_ordered_by_count[old_end_index - 1]->count !=
+  if (old_count_end_index == 0 ||
+      leave_list->leaves_ordered_by_count[old_count_end_index - 1]->count !=
           old_count) {
     leave_count_hashmap_delete(leave_list->leave_count_hashmap, old_count);
   } else {
     leave_count_hashmap_set(leave_list->leave_count_hashmap, old_count,
-                            old_end_index - 1);
+                            old_count_end_index - 1);
   }
 
-  if (leave_count_hashmap_get(leave_list->leave_count_hashmap, new_count) ==
-      UNSET_KEY_OR_VALUE) {
+  uint64_t new_count_end_index =
+      leave_count_hashmap_get(leave_list->leave_count_hashmap, new_count);
+  if (new_count_end_index == UNSET_KEY_OR_VALUE) {
     leave_count_hashmap_set(leave_list->leave_count_hashmap, new_count,
-                            old_end_index);
+                            old_count_end_index);
+    new_count_end_index = old_count_end_index;
   }
+
+  // Swap the newly incremented item with another item of the
+  // same count to randomize the order of items having the
+  // same count.
+  // The old_count_end_index is now the new count start index
+  // which is why we +1 here.
+  const uint64_t number_of_new_count_items =
+      new_count_end_index - old_count_end_index + 1;
+  const uint64_t random_new_count_index =
+      prng_get_random_number(leave_list->prng, number_of_new_count_items) +
+      old_count_end_index;
+
+  leave_list_swap_items(leave_list, old_count_end_index,
+                        (int)random_new_count_index);
 
   return leave_list_get_lowest_leave_count(leave_list);
 }
@@ -365,6 +387,12 @@ double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
 
 int leave_list_get_count_index(const LeaveList *leave_list, int klv_index) {
   return leave_list->leaves_ordered_by_klv_index[klv_index]->count_index;
+}
+
+// Calls thread_control_copy_to_dst_and_jump with the leave list
+// PRNG as the dst PRNG.
+void leave_list_seed(LeaveList *leave_list, ThreadControl *thread_control) {
+  thread_control_copy_to_dst_and_jump(thread_control, leave_list->prng);
 }
 
 void string_builder_add_most_or_least_common_leaves(

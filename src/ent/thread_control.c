@@ -306,6 +306,14 @@ void thread_control_prng_seed(ThreadControl *thread_control, uint64_t seed) {
   prng_seed(thread_control->prng, seed);
 }
 
+// Copies the thread control PRNG to the other PRNG and performs a PRNG
+// jump on the thread control PRNG.
+void thread_control_copy_to_dst_and_jump(ThreadControl *thread_control,
+                                         XoshiroPRNG *dst) {
+  prng_copy(dst, thread_control->prng);
+  prng_jump(thread_control->prng);
+}
+
 // NOT THREAD SAFE: This function is meant to be called
 // before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.

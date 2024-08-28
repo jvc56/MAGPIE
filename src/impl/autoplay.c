@@ -41,7 +41,6 @@ typedef struct LeavegenSharedData {
   pthread_mutex_t leave_list_mutex;
   Checkpoint *postgen_checkpoint;
   Stat *success_force_draws;
-  uint64_t recordable_turns_over_max_force_draw;
   AutoplayResults *primary_autoplay_results;
   AutoplayResults **autoplay_results_list;
 } LeavegenSharedData;
@@ -125,12 +124,9 @@ void postgen_prebroadcast_func(void *data) {
 
   if (stat_get_num_samples(lg_shared_data->success_force_draws) > 0) {
     string_builder_add_formatted_string(
-        leave_gen_sb,
-        "Forced draw average turn: %0.2f %0.2f\n"
-        "Recordable turns over max force draw: %d\n\n",
+        leave_gen_sb, "Forced draw average turn: %0.2f %0.2f\n\n",
         stat_get_mean(lg_shared_data->success_force_draws) + 1,
-        stat_get_stdev(lg_shared_data->success_force_draws),
-        lg_shared_data->recordable_turns_over_max_force_draw);
+        stat_get_stdev(lg_shared_data->success_force_draws));
   } else {
     string_builder_add_string(leave_gen_sb, "\n");
   }
@@ -159,7 +155,6 @@ void postgen_prebroadcast_func(void *data) {
   stat_reset(lg_shared_data->success_force_draws);
   lg_shared_data->failed_force_draws = 0;
   lg_shared_data->gen_leaves_recorded = 0;
-  lg_shared_data->recordable_turns_over_max_force_draw = 0;
   lg_shared_data->gen_start_games =
       thread_control_get_iter_count(shared_data->thread_control);
   thread_control_increment_max_iter_count(shared_data->thread_control,
@@ -194,19 +189,17 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
-LeavegenSharedData *
-leavegen_shared_data_create(AutoplayResults *primary_autoplay_results,
-                            AutoplayResults **autoplay_results_list,
-                            const LetterDistribution *ld,
-                            const char *data_paths, KLV *klv,
-                            int number_of_threads, int target_min_leave_count) {
+LeavegenSharedData *leavegen_shared_data_create(
+    ThreadControl *thread_control, AutoplayResults *primary_autoplay_results,
+    AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
+    const char *data_paths, KLV *klv, int number_of_threads,
+    int target_min_leave_count) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->gens_completed = 0;
   shared_data->gen_start_games = 0;
   shared_data->gen_leaves_recorded = 0;
   shared_data->total_leaves_recorded = 0;
-  shared_data->recordable_turns_over_max_force_draw = 0;
   shared_data->failed_force_draws = 0;
   shared_data->klv = klv;
   shared_data->gen_autoplay_results =
@@ -216,6 +209,7 @@ leavegen_shared_data_create(AutoplayResults *primary_autoplay_results,
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
   shared_data->leave_list = leave_list_create(ld, klv, target_min_leave_count);
+  leave_list_seed(shared_data->leave_list, thread_control);
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   pthread_mutex_init(&shared_data->leave_list_mutex, NULL);
@@ -235,8 +229,8 @@ AutoplaySharedData *autoplay_shared_data_create(
   shared_data->leavegen_shared_data = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
-        primary_autoplay_results, autoplay_results_list, ld, data_paths, klv,
-        number_of_threads, target_min_leave_count);
+        thread_control, primary_autoplay_results, autoplay_results_list, ld,
+        data_paths, klv, number_of_threads, target_min_leave_count);
   }
   return shared_data;
 }
@@ -283,7 +277,6 @@ bool autoplay_leave_list_draw_rarest_available_leave(
 bool autoplay_leave_list_add_leave(LeavegenSharedData *lg_shared_data,
                                    Game *game, int player_on_turn_index,
                                    double move_equity,
-                                   int exceeded_max_force_draw,
                                    int target_min_leave_count) {
   pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
   bool target_min_leave_count_reached =
@@ -292,8 +285,6 @@ bool autoplay_leave_list_add_leave(LeavegenSharedData *lg_shared_data,
           player_get_rack(game_get_player(game, player_on_turn_index)),
           move_equity) >= target_min_leave_count;
   lg_shared_data->gen_leaves_recorded++;
-  lg_shared_data->recordable_turns_over_max_force_draw +=
-      exceeded_max_force_draw;
   pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
   return target_min_leave_count_reached;
 }
@@ -313,8 +304,8 @@ bool autoplay_leave_list_add_subleave(LeavegenSharedData *lg_shared_data,
 
 typedef struct GameRunner {
   bool min_leave_count_reached;
+  bool force_draw;
   int turn_number;
-  int force_draw_turn_number;
   Game *game;
   MoveList *move_list;
   Rack *leaves[2];
@@ -360,19 +351,14 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
   game_runner->turn_number = 0;
-  game_runner->force_draw_turn_number = -1;
-  const int max_force_draw_turn = autoplay_worker->args->max_force_draw_turn;
+  game_runner->force_draw = false;
   if (game_runner->shared_data->leavegen_shared_data &&
-      // A negative max_force_draw_turn means that we
-      // aren't forcing draws at all.
-      max_force_draw_turn >= 0 &&
       // We only force draws if we've played enough games for this
       // generation.
       (iter_output->iter_count -
        game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
           (uint64_t)autoplay_worker->args->games_before_force_draw_start) {
-    game_runner->force_draw_turn_number = prng_get_random_number(
-        bag_get_prng(game_get_bag(game)), max_force_draw_turn + 1);
+    game_runner->force_draw = true;
     for (int i = 0; i < 2; i++) {
       rack_reset(game_runner->leaves[i]);
     }
@@ -398,7 +384,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   const int thread_index = autoplay_worker->worker_index;
   const int target_min_leave_count =
       autoplay_worker->args->target_min_leave_count;
-  if (game_runner->turn_number == game_runner->force_draw_turn_number) {
+  if (game_runner->force_draw) {
     rack_copy(game_runner->original_rack,
               player_get_rack(game_get_player(game, player_on_turn_index)));
     return_rack_to_bag(game, player_on_turn_index);
@@ -423,8 +409,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   if (lg_shared_data) {
     if (autoplay_leave_list_add_leave(
             lg_shared_data, game, player_on_turn_index, move_get_equity(move),
-            game_runner->turn_number >
-                autoplay_worker->args->max_force_draw_turn,
             target_min_leave_count)) {
       game_runner->min_leave_count_reached = true;
     }
@@ -451,7 +435,6 @@ void print_current_status(
     int lowest_leave_count;
     uint64_t failed_forced_draws;
     uint64_t leaves_under_target_min_count;
-    uint64_t turns_over_max_forced_draw;
     uint64_t gen_start_games;
     pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
     gen = lg_shared_data->gens_completed;
@@ -464,17 +447,15 @@ void print_current_status(
     leaves_under_target_min_count =
         leave_list_get_leaves_under_target_min_count(
             lg_shared_data->leave_list);
-    turns_over_max_forced_draw =
-        lg_shared_data->recordable_turns_over_max_force_draw;
     pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
     string_builder_add_formatted_string(
         status_sb,
         ", gen: %d, gen games: %ld, leaves rec: %ld, leaves under: %ld, lowest "
         "leave: %d, "
-        "fdraws: %ld, ffdraws: %ld, tomfd: %ld\n",
+        "fdraws: %ld, ffdraws: %ld\n",
         gen + 1, iter_completed_output->iter_count_completed - gen_start_games,
         leaves_recorded, leaves_under_target_min_count, lowest_leave_count,
-        forced_draws, failed_forced_draws, turns_over_max_forced_draw);
+        forced_draws, failed_forced_draws);
   } else {
     string_builder_add_string(status_sb, "\n");
   }

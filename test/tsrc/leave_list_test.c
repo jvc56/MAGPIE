@@ -75,8 +75,7 @@ void test_leave_list_add_leave(void) {
   leave_list_add_leave(leave_list, rack, 5.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 3);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 12.0 / 3));
-  assert_leave_list_item(ld, klv, leave_list, "B", number_of_leaves - 2, 1,
-                         5.0);
+  assert_leave_list_item(ld, klv, leave_list, "B", -1, 1, 5.0);
 
   rack_set_to_string(ld, rack, "A");
   leave_list_add_leave(leave_list, rack, 6.0);
@@ -89,8 +88,7 @@ void test_leave_list_add_leave(void) {
   leave_list_add_leave(leave_list, rack, 7.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 5);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 25.0 / 5));
-  assert_leave_list_item(ld, klv, leave_list, "B", number_of_leaves - 2, 2,
-                         12.0 / 2);
+  assert_leave_list_item(ld, klv, leave_list, "B", -1, 2, 12.0 / 2);
 
   rack_set_to_string(ld, rack, "B");
   leave_list_add_leave(leave_list, rack, 9.0);
@@ -209,10 +207,7 @@ void test_leave_list_add_leave(void) {
 
   Bag *bag = bag_create(ld);
   Rack *expected_rack = rack_create(ld_get_size(ld));
-  int number_of_letters = bag_get_tiles(bag);
-  for (int i = 0; i < number_of_letters; i++) {
-    bag_draw_random_letter(bag, 0);
-  }
+  clear_bag(bag);
 
   rack_reset(rack);
   bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
@@ -228,9 +223,7 @@ void test_leave_list_add_leave(void) {
   bag_add_letter(bag, ld_hl_to_ml(ld, "F"), 0);
   assert(leave_list_draw_rarest_available_leave(leave_list, bag, rack, NULL,
                                                 player_draw_index));
-  assert(bag_get_tiles(bag) == 0);
-  rack_set_to_string(ld, expected_rack, "DEF");
-  assert(racks_are_equal(expected_rack, rack));
+  clear_bag(bag);
 
   rack_set_to_string(ld, rack, "DE");
   leave_list_add_leave(leave_list, rack, 1.0);

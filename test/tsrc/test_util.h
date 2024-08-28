@@ -39,6 +39,7 @@ bool equal_rack(const Rack *expected_rack, const Rack *actual_rack);
 void assert_strings_equal(const char *str1, const char *str2);
 void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
                  int move_index, const char *expected_move_string);
+void clear_bag(Bag *bag);
 void assert_bags_are_equal(const Bag *b1, const Bag *b2, int rack_array_size);
 void assert_boards_are_equal(Board *b1, Board *b2);
 void assert_games_are_equal(Game *g1, Game *g2, bool check_scores);

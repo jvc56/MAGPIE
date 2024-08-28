@@ -8,13 +8,6 @@
 
 #include "test_util.h"
 
-void clear_bag(Bag *bag) {
-  int number_of_letters = bag_get_tiles(bag);
-  for (int i = 0; i < number_of_letters; i++) {
-    bag_draw_random_letter(bag, 0);
-  }
-}
-
 void test_leave_bitmaps(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
