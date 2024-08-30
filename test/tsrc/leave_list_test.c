@@ -513,6 +513,7 @@ void test_leave_list_add_leave(void) {
   // 4 letter leaves that fit on the rack. The leave DEFG is in the pool,
   // but does not fit on the rack, so it should not be considered.
   rack_set_to_string(ld, player_rack, "ABCH");
+  printf("\n\nDEBUGGING DRAW\n\n");
   assert(leave_list_draw_rare_leave(leave_list, ld, bag, player_rack,
                                     player_draw_index, rack));
   rack_set_to_string(ld, expected_rack, "CEFGH");
@@ -631,6 +632,7 @@ int leave_list_add_sas(LeaveList *leave_list, const LetterDistribution *ld,
   rack_set_to_string(ld, subleave, subleave_str);
   int lowest_leave_count =
       leave_list_add_subleave(leave_list, subleave, equity);
+  printf("lowest leave count is %d\n", lowest_leave_count);
   assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
          expected_leaves_under_target_min_count);
   return lowest_leave_count;

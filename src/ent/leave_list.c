@@ -95,6 +95,10 @@ void leave_list_reset(LeaveList *leave_list) {
     leave_list_item_reset(leave_list->leaves[i]);
   }
   leave_list->leaves_under_target_min_count = leave_list->number_of_leaves;
+  memset(leave_list->leave_counts, 0,
+         sizeof(int) * leave_list->target_min_leave_count);
+  leave_list->leave_counts[0] = leave_list->number_of_leaves;
+  leave_list->lowest_leave_count = 0;
 }
 
 void leave_list_item_increment_count(LeaveListItem *item, double equity) {
@@ -205,6 +209,19 @@ void leave_list_write_to_klv(LeaveList *leave_list) {
   }
 }
 
+void llprint_english_rack(const Rack *rack) {
+  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
+    printf("?");
+  }
+  const int ld_size = rack_get_dist_size(rack);
+  for (int i = 1; i < ld_size; i++) {
+    const int num_letter = rack_get_letter(rack, i);
+    for (int j = 0; j < num_letter; j++) {
+      printf("%c", i + 'A' - 1);
+    }
+  }
+}
+
 bool leave_list_draw_rare_leave_internal(
     LeaveList *leave_list, const LetterDistribution *ld, int player_draw_index,
     uint32_t node_index, uint32_t word_index, uint8_t ml, int tiles_on_rack) {
@@ -212,8 +229,17 @@ bool leave_list_draw_rare_leave_internal(
   while (ml < ld_size && rack_get_letter(leave_list->bag_as_rack, ml) == 0) {
     ml++;
   }
+
+  printf("draw rare: %c, %d, >", 'A' + ml - 1, tiles_on_rack);
+  llprint_english_rack(leave_list->rare_leave);
+  printf("< >");
+  llprint_english_rack(leave_list->player_rack);
+  printf("<\n");
+
   const int number_of_letters_in_leave =
       rack_get_total_letters(leave_list->rare_leave);
+  // FIXME: letters in leave should be under 7, not under or equal to 7
+  // FIXME: this check shouldn't be needed
   if (ml == ld_size && number_of_letters_in_leave <= (RACK_SIZE)) {
     if (number_of_letters_in_leave > 0) {
       if (word_index == KLV_UNFOUND_INDEX) {
@@ -235,15 +261,28 @@ bool leave_list_draw_rare_leave_internal(
     const int num_ml_in_bag = rack_get_letter(leave_list->bag_as_rack, ml);
     const int num_ml_on_player_rack =
         rack_get_letter(leave_list->player_rack, ml);
-    const int max_ml_to_add_to_rare_leave =
-        (RACK_SIZE)-tiles_on_rack - num_ml_on_player_rack;
+    const int max_ml_that_fits_on_rack =
+        ((RACK_SIZE)-tiles_on_rack) + num_ml_on_player_rack;
 
-    int tiles_to_add_to_rare_leave = num_ml_in_bag;
-    if (tiles_to_add_to_rare_leave > max_ml_to_add_to_rare_leave) {
-      tiles_to_add_to_rare_leave = max_ml_to_add_to_rare_leave;
+    int max_tiles_to_add_to_rare_leave = num_ml_in_bag;
+    if (max_tiles_to_add_to_rare_leave > max_ml_that_fits_on_rack) {
+      max_tiles_to_add_to_rare_leave = max_ml_that_fits_on_rack;
     }
 
-    for (int i = 0; i < tiles_to_add_to_rare_leave; i++) {
+    int num_tiles_on_rare_leave =
+        rack_get_total_letters(leave_list->rare_leave);
+
+    if (num_tiles_on_rare_leave + max_tiles_to_add_to_rare_leave >
+        (RACK_SIZE)-1) {
+      max_tiles_to_add_to_rare_leave =
+          ((RACK_SIZE)-1) - num_tiles_on_rare_leave;
+    }
+
+    printf("dr data  : %c, %d, %d, %d, %d, %d\n", 'A' + ml - 1, tiles_on_rack,
+           num_ml_in_bag, num_ml_on_player_rack, max_ml_that_fits_on_rack,
+           max_tiles_to_add_to_rare_leave);
+
+    for (int i = 1; i <= max_tiles_to_add_to_rare_leave; i++) {
       rack_add_letter(leave_list->rare_leave, ml);
       rack_take_letter(leave_list->bag_as_rack, ml);
       uint32_t sibling_word_index;
@@ -259,14 +298,17 @@ bool leave_list_draw_rare_leave_internal(
       if (i > num_ml_on_player_rack) {
         tiles_added_to_rack = i - num_ml_on_player_rack;
       }
+      printf("at %d added %d\n", i, tiles_added_to_rack);
       if (leave_list_draw_rare_leave_internal(
               leave_list, ld, player_draw_index, node_index, word_index, ml + 1,
               tiles_on_rack + tiles_added_to_rack)) {
         return true;
       }
     }
-    rack_take_letters(leave_list->rare_leave, ml, tiles_to_add_to_rare_leave);
-    rack_add_letters(leave_list->bag_as_rack, ml, tiles_to_add_to_rare_leave);
+    rack_take_letters(leave_list->rare_leave, ml,
+                      max_tiles_to_add_to_rare_leave);
+    rack_add_letters(leave_list->bag_as_rack, ml,
+                     max_tiles_to_add_to_rare_leave);
   }
   return false;
 }
@@ -297,19 +339,6 @@ void copy_bag_and_player_rack_to_rack(Rack *rack, const Bag *bag,
   for (int i = 0; i < dist_size; i++) {
     rack_add_letters(rack, i,
                      bag_get_letter(bag, i) + rack_get_letter(player_rack, i));
-  }
-}
-
-void llprint_english_rack(const Rack *rack) {
-  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
-    printf("?");
-  }
-  const int ld_size = rack_get_dist_size(rack);
-  for (int i = 1; i < ld_size; i++) {
-    const int num_letter = rack_get_letter(rack, i);
-    for (int j = 0; j < num_letter; j++) {
-      printf("%c", i + 'A' - 1);
-    }
   }
 }
 
