@@ -131,12 +131,6 @@ void postgen_prebroadcast_func(void *data) {
     string_builder_add_string(leave_gen_sb, "\n");
   }
 
-  string_builder_add_most_or_least_common_leaves(
-      leave_gen_sb, lg_shared_data->leave_list, lg_shared_data->ld, 100, true);
-  string_builder_add_string(leave_gen_sb, "\n");
-  string_builder_add_most_or_least_common_leaves(
-      leave_gen_sb, lg_shared_data->leave_list, lg_shared_data->ld, 100, false);
-
   char *report_name_prefix =
       cut_off_after_last_char(gen_labeled_klv_filename, '.');
   char *report_name = get_formatted_string("%s_report.txt", report_name_prefix);

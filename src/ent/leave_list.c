@@ -3,8 +3,6 @@
 #include "bag.h"
 #include "game.h"
 #include "klv.h"
-#include "leave_bitmaps.h"
-#include "leave_count_hashmap.h"
 #include "rack.h"
 #include "thread_control.h"
 #include "xoshiro.h"
@@ -34,6 +32,8 @@ struct LeaveList {
   // rare and are excluded from forced draws.
   int target_min_leave_count;
   int leaves_under_target_min_count;
+  int *leave_counts;
+  int lowest_leave_count;
   LeaveListItem *empty_leave;
   // Ordered by klv index
   LeaveListItem **leaves;
@@ -64,6 +64,10 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
   }
   leave_list->empty_leave = leave_list_item_create();
   leave_list->target_min_leave_count = target_min_leave_count;
+  leave_list->leave_counts =
+      calloc_or_die(leave_list->target_min_leave_count, sizeof(int));
+  leave_list->leave_counts[0] = leave_list->number_of_leaves;
+  leave_list->lowest_leave_count = 0;
   leave_list->leaves_under_target_min_count = leave_list->number_of_leaves;
   leave_list->rack = rack_create(ld_get_size(ld));
   leave_list->bag_as_rack = rack_create(ld_get_size(ld));
@@ -79,6 +83,7 @@ void leave_list_destroy(LeaveList *leave_list) {
   }
   free(leave_list->leaves);
   free(leave_list->empty_leave);
+  free(leave_list->leave_counts);
   rack_destroy(leave_list->rack);
   rack_destroy(leave_list->bag_as_rack);
   free(leave_list);
@@ -97,15 +102,33 @@ void leave_list_item_increment_count(LeaveListItem *item, double equity) {
   item->mean += (1.0 / item->count) * (equity - item->mean);
 }
 
-// Returns the minimum leave count for the updated leave list.
+int leave_list_get_lowest_leave_count(const LeaveList *leave_list) {
+  return leave_list->lowest_leave_count;
+}
+
+// Returns the lowest leave count for the updated leave list.
 int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
                                            double equity) {
   LeaveListItem *item = leave_list->leaves[klv_index];
   leave_list_item_increment_count(item, equity);
-  if (item->count == leave_list->target_min_leave_count) {
-    leave_list->leaves_under_target_min_count--;
+  const int new_count = item->count;
+  if (new_count <= leave_list->target_min_leave_count) {
+    // Update the number of leaves under the target minimum
+    if (new_count == leave_list->target_min_leave_count) {
+      leave_list->leaves_under_target_min_count--;
+    }
+    // Update the leave counts
+    leave_list->leave_counts[new_count - 1]--;
+    if (new_count < leave_list->target_min_leave_count) {
+      leave_list->leave_counts[new_count]++;
+    }
+    // Update the lowest leave count
+    if (leave_list->leave_counts[new_count - 1] == 0 &&
+        leave_list->lowest_leave_count == new_count - 1) {
+      leave_list->lowest_leave_count++;
+    }
   }
-  return -1;
+  return leave_list_get_lowest_leave_count(leave_list);
 }
 
 // Adds a single rack to the list.
@@ -201,31 +224,28 @@ bool leave_list_draw_rare_leave_internal(
         return true;
       }
     }
-  } else {
-    // FIXME: use better name
-    int num_ml_already_on_player_rack =
-        rack_get_letter(leave_list->player_rack, ml);
-    tiles_on_rack += num_ml_already_on_player_rack;
-    if (tiles_on_rack > (RACK_SIZE)) {
-      return false;
-    }
-
+  } else if (tiles_on_rack <= (RACK_SIZE)) {
     if (leave_list_draw_rare_leave_internal(leave_list, ld, player_draw_index,
                                             node_index, word_index, ml + 1,
                                             tiles_on_rack)) {
       return true;
     }
-    int max_num_bag_ml_to_add = rack_get_letter(leave_list->bag_as_rack, ml);
-    if (number_of_letters_in_leave + max_num_bag_ml_to_add > MAX_LEAVE_SIZE) {
-      max_num_bag_ml_to_add = MAX_LEAVE_SIZE - number_of_letters_in_leave;
+
+    // FIXME: use better names
+    const int num_ml_in_bag = rack_get_letter(leave_list->bag_as_rack, ml);
+    const int num_ml_on_player_rack =
+        rack_get_letter(leave_list->player_rack, ml);
+    const int max_ml_to_add_to_rare_leave =
+        (RACK_SIZE)-tiles_on_rack - num_ml_on_player_rack;
+
+    int tiles_to_add_to_rare_leave = num_ml_in_bag;
+    if (tiles_to_add_to_rare_leave > max_ml_to_add_to_rare_leave) {
+      tiles_to_add_to_rare_leave = max_ml_to_add_to_rare_leave;
     }
-    // FIXME: use better name
-    int num_added = 0;
-    // FIXME: don't add over rack size
-    for (int i = 0; i < max_num_bag_ml_to_add; i++) {
+
+    for (int i = 0; i < tiles_to_add_to_rare_leave; i++) {
       rack_add_letter(leave_list->rare_leave, ml);
       rack_take_letter(leave_list->bag_as_rack, ml);
-      num_added++;
       uint32_t sibling_word_index;
       node_index = increment_node_to_ml(leave_list->klv, node_index, word_index,
                                         &sibling_word_index, ml);
@@ -234,19 +254,19 @@ bool leave_list_draw_rare_leave_internal(
       node_index = follow_arc(leave_list->klv, node_index, word_index,
                               &child_word_index);
       word_index = child_word_index;
-      int additional_num_required_tiles =
-          num_added - num_ml_already_on_player_rack;
-      if (additional_num_required_tiles < 0) {
-        additional_num_required_tiles = 0;
+
+      int tiles_added_to_rack = 0;
+      if (i > num_ml_on_player_rack) {
+        tiles_added_to_rack = i - num_ml_on_player_rack;
       }
       if (leave_list_draw_rare_leave_internal(
               leave_list, ld, player_draw_index, node_index, word_index, ml + 1,
-              tiles_on_rack + additional_num_required_tiles)) {
+              tiles_on_rack + tiles_added_to_rack)) {
         return true;
       }
     }
-    rack_take_letters(leave_list->rare_leave, ml, max_num_bag_ml_to_add);
-    rack_add_letters(leave_list->bag_as_rack, ml, max_num_bag_ml_to_add);
+    rack_take_letters(leave_list->rare_leave, ml, tiles_to_add_to_rare_leave);
+    rack_add_letters(leave_list->bag_as_rack, ml, tiles_to_add_to_rare_leave);
   }
   return false;
 }
@@ -280,6 +300,19 @@ void copy_bag_and_player_rack_to_rack(Rack *rack, const Bag *bag,
   }
 }
 
+void llprint_english_rack(const Rack *rack) {
+  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
+    printf("?");
+  }
+  const int ld_size = rack_get_dist_size(rack);
+  for (int i = 1; i < ld_size; i++) {
+    const int num_letter = rack_get_letter(rack, i);
+    for (int j = 0; j < num_letter; j++) {
+      printf("%c", i + 'A' - 1);
+    }
+  }
+}
+
 bool leave_list_draw_rare_leave(LeaveList *leave_list,
                                 const LetterDistribution *ld, Bag *bag,
                                 Rack *player_rack, int player_draw_index,
@@ -290,8 +323,12 @@ bool leave_list_draw_rare_leave(LeaveList *leave_list,
   leave_list->rare_leave = rare_leave;
   bool success = leave_list_draw_rare_leave_internal(
       leave_list, ld, player_draw_index,
-      kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0, 0);
+      kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0,
+      rack_get_total_letters(leave_list->player_rack));
   if (success) {
+    printf("successfully drew rack: >");
+    llprint_english_rack(rare_leave);
+    printf("<\n");
     draw_to_rack(bag, player_rack, leave_list->rare_leave, player_draw_index);
   }
   return success;
@@ -313,11 +350,6 @@ uint64_t leave_list_get_count(const LeaveList *leave_list, int count_index) {
   return leave_list->leaves[count_index]->count;
 }
 
-int leave_list_get_lowest_leave_count(const LeaveList *leave_list) {
-  // FIXME: implement this
-  return leave_list->leaves[0]->count;
-}
-
 double leave_list_get_mean(const LeaveList *leave_list, int count_index) {
   return leave_list->leaves[count_index]->mean;
 }
@@ -328,35 +360,4 @@ int leave_list_get_empty_leave_count(const LeaveList *leave_list) {
 
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
   return leave_list->empty_leave->mean;
-}
-
-void string_builder_add_most_or_least_common_leaves(
-    StringBuilder *sb, const LeaveList *leave_list,
-    const LetterDistribution *ld, int n, bool most_common) {
-  const int number_of_leaves = leave_list->number_of_leaves;
-  int i = 0;
-  if (most_common) {
-    i = number_of_leaves - 1;
-    string_builder_add_formatted_string(sb, "Top %d most common leaves:\n\n",
-                                        n);
-  } else {
-    string_builder_add_formatted_string(sb, "Top %d least common leaves:\n\n",
-                                        n);
-  }
-  while (i < number_of_leaves && i >= 0 && n > 0) {
-    const int count = leave_list->leaves[i]->count;
-    // Here we use the rack to help print the most/leave common leaves
-    Rack *rack = leave_list->rack;
-    // FIXME: figure out how to print
-    rack_set_to_string(ld, rack, "ABCDEFG");
-    string_builder_add_rack(sb, rack, ld, false);
-    string_builder_add_formatted_string(
-        sb, "%*s %d\n", (RACK_SIZE)-rack_get_total_letters(rack), "", count);
-    n--;
-    if (most_common) {
-      i--;
-    } else {
-      i++;
-    }
-  }
 }

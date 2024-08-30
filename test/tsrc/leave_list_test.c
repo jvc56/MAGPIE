@@ -19,7 +19,7 @@ void assert_leave_list_item(const LetterDistribution *ld, const KLV *klv,
   assert(within_epsilon(leave_list_get_mean(leave_list, klv_index), mean));
 }
 
-void test_leave_list_add_leave_and_draw_rarest(void) {
+void test_leave_list_add_leave(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
@@ -636,4 +636,201 @@ int leave_list_add_sas(LeaveList *leave_list, const LetterDistribution *ld,
   return lowest_leave_count;
 }
 
-void test_leave_list(void) { test_leave_list_add_leave_and_draw_rarest(); }
+void test_leave_list_draw_rarest_available(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW21_ab -ld english_ab -s1 equity -s2 "
+                           "equity -r1 all -r2 all -numplays 1");
+  const LetterDistribution *ld = config_get_ld(config);
+  KLV *klv = players_data_get_data(config_get_players_data(config),
+                                   PLAYERS_DATA_TYPE_KLV, 0);
+  Bag *bag = bag_create(ld);
+  Rack *sl = rack_create(ld_get_size(ld));
+  Rack *player_rack = rack_create(ld_get_size(ld));
+  Rack *rare_leave = rack_create(ld_get_size(ld));
+
+  int tmc = 3;
+  LeaveList *ll = leave_list_create(ld, klv, tmc);
+
+  const int number_of_leaves = klv_get_number_of_leaves(klv);
+  const int player_draw_index = 0;
+
+  int lutmc = number_of_leaves;
+
+  for (int i = 0; i < tmc - 1; i++) {
+    rack_set_to_string(ld, player_rack, "A");
+    assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                      player_draw_index, rare_leave));
+    bag_reset(ld, bag);
+    rack_set_to_string(ld, player_rack, "AAAABB");
+    assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                      player_draw_index, rare_leave));
+    bag_reset(ld, bag);
+    rack_set_to_string(ld, player_rack, "BBBBBB");
+    assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                      player_draw_index, rare_leave));
+    bag_reset(ld, bag);
+
+    assert(leave_list_add_sas(ll, ld, sl, "A", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "B", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AA", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "BB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAA", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "ABB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "BBB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAAA", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAAB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AABB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "ABBB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "BBBB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAAAA", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAAAB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAABB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AABBB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "ABBBB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "BBBBB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAAAAA", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAAAAB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAAABB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AAABBB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "AABBBB", lutmc, 1.0) == i);
+
+    rack_set_to_string(ld, player_rack, "A");
+    assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                      player_draw_index, rare_leave));
+    bag_reset(ld, bag);
+    rack_set_to_string(ld, player_rack, "AAAABB");
+    assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                      player_draw_index, rare_leave));
+    bag_reset(ld, bag);
+    rack_set_to_string(ld, player_rack, "BBBBBB");
+    assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                      player_draw_index, rare_leave));
+    bag_reset(ld, bag);
+
+    assert(leave_list_add_sas(ll, ld, sl, "ABBBBB", lutmc, 1.0) == i);
+    assert(leave_list_add_sas(ll, ld, sl, "BBBBBB", lutmc, 1.0) == i + 1);
+
+    rack_set_to_string(ld, player_rack, "A");
+    assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                      player_draw_index, rare_leave));
+    bag_reset(ld, bag);
+    rack_set_to_string(ld, player_rack, "AAAABB");
+    assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                      player_draw_index, rare_leave));
+    bag_reset(ld, bag);
+    rack_set_to_string(ld, player_rack, "BBBBBB");
+    assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                      player_draw_index, rare_leave));
+    bag_reset(ld, bag);
+  }
+
+  rack_set_to_string(ld, player_rack, "A");
+  assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack, player_draw_index,
+                                    rare_leave));
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "AAAABB");
+  assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack, player_draw_index,
+                                    rare_leave));
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "BBBBBB");
+  assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack, player_draw_index,
+                                    rare_leave));
+  bag_reset(ld, bag);
+
+  lutmc--;
+  assert(leave_list_add_sas(ll, ld, sl, "A", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "B", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AA", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "BB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAA", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "ABB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "BBB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAAA", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAAB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AABB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "ABBB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "BBBB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAAAA", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAAAB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAABB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AABBB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "ABBBB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "BBBBB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAAAAA", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAAAAB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAAABB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "AAABBB", lutmc--, 1.0) == tmc - 1);
+
+  rack_set_to_string(ld, player_rack, "A");
+  assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack, player_draw_index,
+                                    rare_leave));
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "AAAABB");
+
+  printf("starting buggy draw\n");
+  assert(!leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                     player_draw_index, rare_leave));
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "BBBBBB");
+  assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack, player_draw_index,
+                                    rare_leave));
+  bag_reset(ld, bag);
+
+  assert(leave_list_add_sas(ll, ld, sl, "ABBBBB", lutmc--, 1.0) == tmc - 1);
+  assert(leave_list_add_sas(ll, ld, sl, "BBBBBB", lutmc--, 1.0) == tmc - 1);
+
+  rack_set_to_string(ld, player_rack, "A");
+  assert(leave_list_draw_rare_leave(ll, ld, bag, player_rack, player_draw_index,
+                                    rare_leave));
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "AAAABB");
+  assert(!leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                     player_draw_index, rare_leave));
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "BBBBBB");
+  assert(!leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                     player_draw_index, rare_leave));
+  bag_reset(ld, bag);
+
+  assert(leave_list_add_sas(ll, ld, sl, "AABBBB", lutmc--, 1.0) == tmc);
+
+  rack_set_to_string(ld, player_rack, "A");
+  assert(!leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                     player_draw_index, rare_leave));
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "AAAABB");
+  assert(!leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                     player_draw_index, rare_leave));
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "BBBBBB");
+  assert(!leave_list_draw_rare_leave(ll, ld, bag, player_rack,
+                                     player_draw_index, rare_leave));
+  bag_reset(ld, bag);
+
+  leave_list_reset(ll);
+
+  lutmc = number_of_leaves;
+
+  for (int i = 0; i < tmc - 1; i++) {
+    assert(leave_list_add_sas(ll, ld, sl, "A", lutmc, 1.0) == 0);
+  }
+  for (int i = 0; i < 5; i++) {
+    assert(leave_list_add_sas(ll, ld, sl, "A", lutmc - 1, 1.0) == 0);
+  }
+
+  bag_destroy(bag);
+  rack_destroy(player_rack);
+  rack_destroy(rare_leave);
+  rack_destroy(sl);
+  leave_list_destroy(ll);
+  config_destroy(config);
+}
+
+void test_leave_list(void) {
+  test_leave_list_add_leave();
+  test_leave_list_draw_rarest_available();
+}
