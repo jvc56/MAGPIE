@@ -15,8 +15,6 @@ void assert_leave_list_item(const LetterDistribution *ld, const KLV *klv,
   rack_set_to_string(ld, leave, leave_str);
   int klv_index = klv_get_word_index(klv, leave);
   rack_destroy(leave);
-  printf("actual count: %ld\n", leave_list_get_count(leave_list, klv_index));
-  printf("actual mean: %f\n", leave_list_get_mean(leave_list, klv_index));
   assert(leave_list_get_count(leave_list, klv_index) == count);
   assert(within_epsilon(leave_list_get_mean(leave_list, klv_index), mean));
 }
@@ -445,11 +443,11 @@ void test_leave_list_add_leave_and_draw_rarest(void) {
   rack_set_to_string(ld, player_rack, "ABCH");
   assert(leave_list_draw_rare_leave(leave_list, ld, bag, player_rack,
                                     player_draw_index, rack));
-  assert(bag_get_tiles(bag) == 1);
   rack_set_to_string(ld, expected_rack, "EFGH");
   assert(racks_are_equal(expected_rack, rack));
   rack_set_to_string(ld, expected_rack, "ABCEFGH");
   assert(racks_are_equal(expected_rack, player_rack));
+  assert(bag_get_tiles(bag) == 1);
 
   // Remove all 4 letters leaves and below from
   // consideration by making all of their counts at
@@ -510,14 +508,18 @@ void test_leave_list_add_leave_and_draw_rarest(void) {
   assert_leave_list_item(ld, klv, leave_list, "DEGH", 3, 1.0);
   assert_leave_list_item(ld, klv, leave_list, "DEFG", 0, 0.0);
 
-  // DEGH was the last available leave and has just met
+  // DEGH was the last available 4 letter leave and has just met
   // the minimum count, so there should be no more available
-  // leaves that fit on the rack. The leave DEFG is in the pool,
+  // 4 letter leaves that fit on the rack. The leave DEFG is in the pool,
   // but does not fit on the rack, so it should not be considered.
   rack_set_to_string(ld, player_rack, "ABCH");
-  assert(!leave_list_draw_rare_leave(leave_list, ld, bag, player_rack,
-                                     player_draw_index, rack));
-  assert(bag_get_tiles(bag) == 4);
+  assert(leave_list_draw_rare_leave(leave_list, ld, bag, player_rack,
+                                    player_draw_index, rack));
+  rack_set_to_string(ld, expected_rack, "CEFGH");
+  assert(racks_are_equal(expected_rack, rack));
+  rack_set_to_string(ld, expected_rack, "ABCEFGH");
+  assert(racks_are_equal(expected_rack, player_rack));
+  assert(bag_get_tiles(bag) == 1);
 
   rack_set_to_string(ld, rack, "J");
   leave_list_add_leave(leave_list, rack, 4.0);

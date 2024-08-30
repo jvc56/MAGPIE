@@ -191,7 +191,7 @@ bool leave_list_draw_rare_leave_internal(
   }
   const int number_of_letters_in_leave =
       rack_get_total_letters(leave_list->rare_leave);
-  if (ml == ld_size || tiles_on_rack == (RACK_SIZE)) {
+  if (ml == ld_size && number_of_letters_in_leave <= (RACK_SIZE)) {
     if (number_of_letters_in_leave > 0) {
       if (word_index == KLV_UNFOUND_INDEX) {
         log_fatal("word index not found in klv: %u", word_index);
@@ -202,20 +202,26 @@ bool leave_list_draw_rare_leave_internal(
       }
     }
   } else {
+    // FIXME: use better name
     int num_ml_already_on_player_rack =
         rack_get_letter(leave_list->player_rack, ml);
-
-    if (leave_list_draw_rare_leave_internal(
-            leave_list, ld, player_draw_index, node_index, word_index, ml + 1,
-            tiles_on_rack + num_ml_already_on_player_rack)) {
-      return true;
+    tiles_on_rack += num_ml_already_on_player_rack;
+    if (tiles_on_rack > (RACK_SIZE)) {
+      return false;
     }
 
+    if (leave_list_draw_rare_leave_internal(leave_list, ld, player_draw_index,
+                                            node_index, word_index, ml + 1,
+                                            tiles_on_rack)) {
+      return true;
+    }
     int max_num_bag_ml_to_add = rack_get_letter(leave_list->bag_as_rack, ml);
     if (number_of_letters_in_leave + max_num_bag_ml_to_add > MAX_LEAVE_SIZE) {
       max_num_bag_ml_to_add = MAX_LEAVE_SIZE - number_of_letters_in_leave;
     }
+    // FIXME: use better name
     int num_added = 0;
+    // FIXME: don't add over rack size
     for (int i = 0; i < max_num_bag_ml_to_add; i++) {
       rack_add_letter(leave_list->rare_leave, ml);
       rack_take_letter(leave_list->bag_as_rack, ml);
@@ -257,8 +263,7 @@ void draw_to_rack(Bag *bag, Rack *player_rack, const Rack *rack_to_draw,
         rack_get_letter(rack_to_draw, i) - rack_get_letter(player_rack, i);
     if (num_to_draw > 0) {
       if (!bag_draw_letters(bag, i, num_to_draw, player_draw_index)) {
-        printf("attempted to draw letter %d from bag, but failed\n", i);
-        abort();
+        log_fatal("attempted to draw letter %d from bag, but failed\n", i);
       }
       rack_add_letters(player_rack, i, num_to_draw);
     }
@@ -275,31 +280,11 @@ void copy_bag_and_player_rack_to_rack(Rack *rack, const Bag *bag,
   }
 }
 
-void llprint_english_rack(const Rack *rack) {
-  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
-    printf("?");
-  }
-  const int ld_size = rack_get_dist_size(rack);
-  for (int i = 1; i < ld_size; i++) {
-    const int num_letter = rack_get_letter(rack, i);
-    for (int j = 0; j < num_letter; j++) {
-      printf("%c", i + 'A' - 1);
-    }
-  }
-}
-
 bool leave_list_draw_rare_leave(LeaveList *leave_list,
                                 const LetterDistribution *ld, Bag *bag,
                                 Rack *player_rack, int player_draw_index,
                                 Rack *rare_leave) {
-  printf("\n\nLL DRAW RARE LEAVE\n\n");
   copy_bag_and_player_rack_to_rack(leave_list->bag_as_rack, bag, player_rack);
-  printf("start prack: >");
-  llprint_english_rack(player_rack);
-  printf("<\n");
-  printf("start bag: >");
-  llprint_english_rack(leave_list->bag_as_rack);
-  printf("<\n");
   rack_reset(rare_leave);
   leave_list->player_rack = player_rack;
   leave_list->rare_leave = rare_leave;
@@ -307,9 +292,6 @@ bool leave_list_draw_rare_leave(LeaveList *leave_list,
       leave_list, ld, player_draw_index,
       kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0, 0);
   if (success) {
-    printf("rare leave drawn: >");
-    llprint_english_rack(rare_leave);
-    printf("<\n");
     draw_to_rack(bag, player_rack, leave_list->rare_leave, player_draw_index);
   }
   return success;
