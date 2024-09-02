@@ -219,8 +219,6 @@ bool leave_list_draw_rare_leave_internal(
 
   const int num_letters_in_leave =
       rack_get_total_letters(leave_list->rare_leave);
-  // FIXME: letters in leave should be under 7, not under or equal to 7
-  // FIXME: this check shouldn't be needed
   if (ml == ld_size) {
     if (num_letters_in_leave > 0) {
       if (word_index == KLV_UNFOUND_INDEX) {
@@ -231,7 +229,7 @@ bool leave_list_draw_rare_leave_internal(
         return true;
       }
     }
-  } else if (tiles_on_rack <= (RACK_SIZE)) {
+  } else {
     if (leave_list_draw_rare_leave_internal(leave_list, ld, player_draw_index,
                                             node_index, word_index, ml + 1,
                                             tiles_on_rack)) {
@@ -247,6 +245,7 @@ bool leave_list_draw_rare_leave_internal(
 
     // n = min(r + (S - R), ((S - 1) - L), b);
 
+    // FIXME: write more detailed comments
     const int num_ml_in_rack = rack_get_letter(leave_list->player_rack, ml);
     const int rack_size_limit = num_ml_in_rack + ((RACK_SIZE)-tiles_on_rack);
     const int leave_size_limit = ((RACK_SIZE)-1) - num_letters_in_leave;
