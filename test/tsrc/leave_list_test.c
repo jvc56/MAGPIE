@@ -636,6 +636,32 @@ int leave_list_add_sas(LeaveList *leave_list, const LetterDistribution *ld,
   return lowest_leave_count;
 }
 
+void assert_leave_list_valid_leaves_count(LeaveList *leave_list,
+                                          const LetterDistribution *ld,
+                                          const Bag *bag,
+                                          const Rack *player_rack,
+                                          int expected_leaves) {
+  int tmc = leave_list_get_target_min_leave_count(leave_list);
+  Rack *rare_leave = rack_duplicate(player_rack);
+  rack_reset(rare_leave);
+  Bag *test_bag = bag_duplicate(bag);
+  Rack *test_player_rack = rack_duplicate(player_rack);
+  int available_leaves = 0;
+  while (leave_list_draw_rare_leave(leave_list, ld, test_bag, test_player_rack,
+                                    0, rare_leave)) {
+    available_leaves++;
+    for (int i = 0; i < tmc; i++) {
+      leave_list_add_single_leave(leave_list, rare_leave, 0.0);
+    }
+    bag_copy(test_bag, bag);
+    rack_copy(test_player_rack, player_rack);
+  }
+  assert(available_leaves == expected_leaves);
+  rack_destroy(rare_leave);
+  rack_destroy(test_player_rack);
+  bag_destroy(test_bag);
+}
+
 void test_leave_list_draw_rarest_available(void) {
   Config *config =
       config_create_or_die("set -lex CSW21_ab -ld english_ab -s1 equity -s2 "
@@ -820,6 +846,93 @@ void test_leave_list_draw_rarest_available(void) {
   for (int i = 0; i < 5; i++) {
     assert(leave_list_add_sas(ll, ld, sl, "A", lutmc - 1, 1.0) == 0);
   }
+
+  leave_list_reset(ll);
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "A");
+  // All leaves are available
+  assert_leave_list_valid_leaves_count(ll, ld, bag, player_rack, 27);
+
+  leave_list_reset(ll);
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "B");
+  // All leaves are available
+  assert_leave_list_valid_leaves_count(ll, ld, bag, player_rack, 27);
+
+  leave_list_reset(ll);
+  bag_reset(ld, bag);
+  rack_set_to_string(ld, player_rack, "AA");
+  // The leave of BBBBBB is not available
+  assert_leave_list_valid_leaves_count(ll, ld, bag, player_rack, 26);
+
+  leave_list_reset(ll);
+  clear_bag(bag);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  rack_set_to_string(ld, player_rack, "AA");
+  // The leave of BBBBBB is not available because it doesn't fit in the rack
+  // The leave of AABBBBB and ABBBBB are not available because the bag only has
+  // 4 Bs.
+  assert_leave_list_valid_leaves_count(ll, ld, bag, player_rack, 24);
+
+  leave_list_reset(ll);
+  clear_bag(bag);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  rack_set_to_string(ld, player_rack, "");
+  // No leaves with a B are available
+  assert_leave_list_valid_leaves_count(ll, ld, bag, player_rack, 6);
+
+  leave_list_reset(ll);
+  clear_bag(bag);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  rack_set_to_string(ld, player_rack, "AAA");
+  // No leaves with a B are available
+  assert_leave_list_valid_leaves_count(ll, ld, bag, player_rack, 6);
+
+  leave_list_reset(ll);
+  clear_bag(bag);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  rack_set_to_string(ld, player_rack, "");
+  // No leaves with 4 or more of a single tile are available
+  assert_leave_list_valid_leaves_count(ll, ld, bag, player_rack, 15);
+
+  leave_list_reset(ll);
+  clear_bag(bag);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  bag_add_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  rack_set_to_string(ld, player_rack, "AAB");
+  // No leaves with 4 or more of a single tile are available
+  assert_leave_list_valid_leaves_count(ll, ld, bag, player_rack, 15);
 
   bag_destroy(bag);
   rack_destroy(player_rack);
