@@ -253,7 +253,8 @@ static inline char *ld_ml_to_hl(const LetterDistribution *ld, uint8_t ml) {
 // This is a linear search. This function should not be used for anything
 // that is speed-critical. If we ever need to use this in anything
 // speed-critical, we should use a hash.
-static inline uint8_t ld_hl_to_ml(const LetterDistribution *ld, char *letter) {
+static inline uint8_t ld_hl_to_ml(const LetterDistribution *ld,
+                                  const char *letter) {
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
     if (strings_equal(ld->ld_ml_to_hl[i], letter)) {
       return i;
@@ -412,9 +413,9 @@ static inline ld_t ld_get_type_from_lex_name(const char *full_lexicon_name) {
   } else {
     log_fatal("default letter distribution not found for lexicon '%s'\n",
               lexicon_name);
-  #if __has_builtin(__builtin_unreachable) 
+#if __has_builtin(__builtin_unreachable)
     __builtin_unreachable();
-  #endif
+#endif
   }
   return ld_type;
 }
@@ -422,7 +423,7 @@ static inline ld_t ld_get_type_from_lex_name(const char *full_lexicon_name) {
 static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
   ld_t ld_type;
   if (has_iprefix(ENGLISH_LETTER_DISTRIBUTION_NAME, ld_name)) {
-      ld_type = LD_TYPE_ENGLISH;
+    ld_type = LD_TYPE_ENGLISH;
   } else if (has_iprefix(GERMAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
     ld_type = LD_TYPE_GERMAN;
   } else if (has_iprefix(NORWEGIAN_LETTER_DISTRIBUTION_NAME, ld_name)) {
@@ -437,9 +438,9 @@ static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
     log_fatal(
         "default letter distribution not found for letter distribution '%s'\n",
         ld_name);
-  #if __has_builtin(__builtin_unreachable) 
+#if __has_builtin(__builtin_unreachable)
     __builtin_unreachable();
-  #endif
+#endif
   }
   return ld_type;
 }
