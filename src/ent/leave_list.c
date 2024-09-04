@@ -111,8 +111,8 @@ int leave_list_get_lowest_leave_count(const LeaveList *leave_list) {
 }
 
 // Returns the lowest leave count for the updated leave list.
-int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
-                                           double equity) {
+int leave_list_add_single_leave_with_klv_index(LeaveList *leave_list,
+                                               int klv_index, double equity) {
   LeaveListItem *item = leave_list->leaves[klv_index];
   leave_list_item_increment_count(item, equity);
   const int new_count = item->count;
@@ -137,9 +137,9 @@ int leave_list_add_subleave_with_klv_index(LeaveList *leave_list, int klv_index,
 
 // Adds a single rack to the list.
 // Returns the lowest leave count.
-int leave_list_add_subleave(LeaveList *leave_list, const Rack *rack,
-                            double equity) {
-  return leave_list_add_subleave_with_klv_index(
+int leave_list_add_single_leave(LeaveList *leave_list, const Rack *rack,
+                                double equity) {
+  return leave_list_add_single_leave_with_klv_index(
       leave_list, klv_get_word_index(leave_list->klv, rack), equity);
 }
 
@@ -156,8 +156,8 @@ void generate_subleaves(LeaveList *leave_list, uint32_t node_index,
       // Superleaves will only contain all possible subleaves
       // of size RACK_SIZE - 1 and below.
       if (number_of_letters_in_subleave < (RACK_SIZE)) {
-        leave_list_add_subleave_with_klv_index(leave_list, word_index - 1,
-                                               leave_list->move_equity);
+        leave_list_add_single_leave_with_klv_index(leave_list, word_index - 1,
+                                                   leave_list->move_equity);
       }
     } else {
       leave_list_item_increment_count(leave_list->empty_leave,
@@ -182,13 +182,13 @@ void generate_subleaves(LeaveList *leave_list, uint32_t node_index,
   }
 }
 
-// Adds a leave and all of its subleaves to the list. So for a
-// leave of X letters where X < RACK_SIZE, 2^X subleaves will be added.
+// Adds every subset of tiles on the rack as a leave with equity move_equity. So
+// for a leave of X distinct letters, 2^X - 1 subleaves will be added. The -1
+// is because the full rack is not added as a leave.
 // Returns the minimum count of the leaves in the list after adding
 // all the subleaves.
-// FIXME: needs a better name
-int leave_list_add_leave(LeaveList *leave_list, Rack *player_rack,
-                         double move_equity) {
+int leave_list_add_leaves_for_rack(LeaveList *leave_list, Rack *player_rack,
+                                   double move_equity) {
   leave_list->player_rack = player_rack;
   leave_list->move_equity = move_equity;
   rack_reset(leave_list->rack);
@@ -230,36 +230,56 @@ bool leave_list_draw_rare_leave_internal(
       }
     }
   } else {
+    // Advance to the next machine letter without adding any of the current
+    // machine letter.
     if (leave_list_draw_rare_leave_internal(leave_list, ld, player_draw_index,
                                             node_index, word_index, ml + 1,
                                             tiles_on_rack)) {
       return true;
     }
 
-    // Notes:
-    // R = tiles on rack
-    // r = ml on rack
-    // b = ml in bag
-    // L = tiles on leave
-    // S = RACK_SIZE
+    // Given the current rack and bag, the maximum number of current
+    // machine letters we can add to the current leave is limited by the
+    // following constraints:
+    //
+    //   1. The total number of tiles on the rack must be less than or equal to
+    //      RACK_SIZE. Using this constraint, the number of addition tiles we
+    //      can add to the current leave is limited to num_ml_in_rack +
+    //      (RACK_SIZE)-tiles_on_rack. We can add num_ml_in_rack to this limit
+    //      since those tiles are already part of the rack, and do not increase
+    //      the total rack size.
+    //
+    //   2. The total number of tiles on the leave must be less than or equal to
+    //      RACK_SIZE - 1. Using this constraint, the number of addition tiles
+    //      we can add to the current leave is limited to ((RACK_SIZE)-1) -
+    //      num_letters_in_leave. This is just the remaining number of available
+    //      spaces for tiles in the leave.
+    //
+    //   3. The total number of current machine letter must be less
+    //      than or equal to the number of that machine letter available in the
+    //      bag_as_rack, which is the combined player rack + bag.
+    //
+    // We take the minimum of these values to determine the maximum number of
+    // tiles we can add to the current leave.
 
-    // n = min(r + (S - R), ((S - 1) - L), b);
-
-    // FIXME: write more detailed comments
+    // Save the number of the current machine letter for convenience.
     const int num_ml_in_rack = rack_get_letter(leave_list->player_rack, ml);
-    const int rack_size_limit = num_ml_in_rack + ((RACK_SIZE)-tiles_on_rack);
-    const int leave_size_limit = ((RACK_SIZE)-1) - num_letters_in_leave;
-    const int bag_ml_limit = rack_get_letter(leave_list->bag_as_rack, ml);
 
-    int min_ml_limit = rack_size_limit;
-    if (min_ml_limit > leave_size_limit) {
-      min_ml_limit = leave_size_limit;
+    // Establish the maximums described above.
+    const int rack_size_max = num_ml_in_rack + ((RACK_SIZE)-tiles_on_rack);
+    const int leave_size_max = ((RACK_SIZE)-1) - num_letters_in_leave;
+    const int bag_ml_max = rack_get_letter(leave_list->bag_as_rack, ml);
+
+    // Get the minimum of the maximums.
+    int max_ml_to_add = rack_size_max;
+    if (max_ml_to_add > leave_size_max) {
+      max_ml_to_add = leave_size_max;
     }
-    if (min_ml_limit > bag_ml_limit) {
-      min_ml_limit = bag_ml_limit;
+    if (max_ml_to_add > bag_ml_max) {
+      max_ml_to_add = bag_ml_max;
     }
 
-    for (int ml_added = 1; ml_added <= min_ml_limit; ml_added++) {
+    for (int ml_added = 1; ml_added <= max_ml_to_add; ml_added++) {
       rack_add_letter(leave_list->rare_leave, ml);
       rack_take_letter(leave_list->bag_as_rack, ml);
       uint32_t sibling_word_index;
@@ -271,6 +291,8 @@ bool leave_list_draw_rare_leave_internal(
                               &child_word_index);
       word_index = child_word_index;
 
+      // If the number of machine letters added to the leave exceeds the number
+      // of machine letters already on the rack, the rack size will increase.
       int tiles_added_to_rack = 0;
       if (ml_added > num_ml_in_rack) {
         tiles_added_to_rack = ml_added - num_ml_in_rack;
@@ -281,8 +303,8 @@ bool leave_list_draw_rare_leave_internal(
         return true;
       }
     }
-    rack_take_letters(leave_list->rare_leave, ml, min_ml_limit);
-    rack_add_letters(leave_list->bag_as_rack, ml, min_ml_limit);
+    rack_take_letters(leave_list->rare_leave, ml, max_ml_to_add);
+    rack_add_letters(leave_list->bag_as_rack, ml, max_ml_to_add);
   }
   return false;
 }

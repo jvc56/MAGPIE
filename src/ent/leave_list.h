@@ -12,10 +12,10 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
                              int target_min_leave_count);
 void leave_list_destroy(LeaveList *leave_list);
 void leave_list_reset(LeaveList *leave_list);
-int leave_list_add_leave(LeaveList *leave_list, Rack *full_rack,
-                         double move_equity);
-int leave_list_add_subleave(LeaveList *leave_list, const Rack *subleave,
-                            double equity);
+int leave_list_add_leaves_for_rack(LeaveList *leave_list, Rack *full_rack,
+                                   double move_equity);
+int leave_list_add_single_leave(LeaveList *leave_list, const Rack *leave,
+                                double equity);
 void leave_list_write_to_klv(LeaveList *leave_list);
 bool leave_list_draw_rare_leave(LeaveList *leave_list,
                                 const LetterDistribution *ld, Bag *bag,
