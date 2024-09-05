@@ -30,7 +30,7 @@ void assert_leave_list_item_children_count(const LetterDistribution *ld,
   rack_set_to_string(ld, leave, leave_str);
   int klv_index = klv_get_word_index(klv, leave);
   rack_destroy(leave);
-  assert(leave_list_get_children_under_target_count(leave_list, klv_index) ==
+  assert(leave_list_get_superset_count(leave_list, klv_index) ==
          included_count);
 }
 
@@ -40,8 +40,8 @@ void test_leave_list_add_leaves_for_rack(void) {
   const LetterDistribution *ld = config_get_ld(config);
   KLV *klv = players_data_get_data(config_get_players_data(config),
                                    PLAYERS_DATA_TYPE_KLV, 0);
-  int target_min_leave_count = 3;
-  LeaveList *leave_list = leave_list_create(ld, klv, target_min_leave_count);
+  int target_leave_count = 3;
+  LeaveList *leave_list = leave_list_create(ld, klv, target_leave_count);
 
   const int number_of_leaves = klv_get_number_of_leaves(klv);
   const int player_draw_index = 0;
@@ -120,7 +120,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   leave_list_add_leaves_for_rack(leave_list, rack, 4.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 2);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 7.0 / 2));
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "A", 1, 4.0);
 
@@ -128,7 +128,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   leave_list_add_leaves_for_rack(leave_list, rack, 5.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 3);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 12.0 / 3));
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "B", 1, 5.0);
 
@@ -136,7 +136,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   leave_list_add_leaves_for_rack(leave_list, rack, 6.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 4);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 18.0 / 4));
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "A", 2, 10.0 / 2);
 
@@ -144,7 +144,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   leave_list_add_leaves_for_rack(leave_list, rack, 7.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 5);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 25.0 / 5));
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "B", 2, 12.0 / 2);
 
@@ -152,7 +152,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   leave_list_add_leaves_for_rack(leave_list, rack, 9.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 6);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 34.0 / 6));
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 1);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "B", 3, 21.0 / 3);
 
@@ -161,7 +161,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   assert(leave_list_get_empty_leave_count(leave_list) == 7);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 45.0 / 7));
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "C", 1, 11.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 1);
 
   rack_set_to_string(ld, rack, "DEF");
@@ -175,7 +175,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "DF", 1, 15.0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EF", 1, 15.0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "DEF", 1, 15.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 1);
 
   rack_set_to_string(ld, rack, "DEF");
@@ -190,7 +190,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EF", 2, 32.0 / 2);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "DEF", 2,
                                         32.0 / 2);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 1);
 
   rack_set_to_string(ld, rack, "DEF");
@@ -206,7 +206,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EF", 3, 49.0 / 3);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "DEF", 3,
                                         49.0 / 3);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 8);
 
   rack_set_to_string(ld, rack, "DEF");
@@ -222,7 +222,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EF", 4, 50.0 / 4);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "DEF", 4,
                                         50.0 / 4);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 8);
 
   rack_set_to_string(ld, rack, "DEF");
@@ -238,7 +238,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EF", 5, 51.0 / 5);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "DEF", 5,
                                         51.0 / 5);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 8);
 
   rack_set_to_string(ld, rack, "DEG");
@@ -258,7 +258,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "DEF", 5,
                                         51.0 / 5);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "DEG", 1, 3.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 8);
 
   rack_set_to_string(ld, rack, "HII");
@@ -282,7 +282,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "I", 1, 7.0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "HI", 1, 7.0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "II", 1, 7.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 8);
 
   leave_list_reset(leave_list);
@@ -302,7 +302,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "AGHM", 0, 0.0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "ABC", 0, 0.0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "?ABCD", 0, 0.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
 
   Bag *bag = bag_create(ld);
@@ -350,15 +350,15 @@ void test_leave_list_add_leaves_for_rack(void) {
 
   rack_set_to_string(ld, rack, "DE");
   leave_list_add_leaves_for_rack(leave_list, rack, 1.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
   rack_set_to_string(ld, rack, "DG");
   leave_list_add_leaves_for_rack(leave_list, rack, 1.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
   rack_set_to_string(ld, rack, "EG");
   leave_list_add_leaves_for_rack(leave_list, rack, 1.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
 
   rack_reset(player_rack);
@@ -374,7 +374,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   rack_set_to_string(ld, rack, "DEG");
   leave_list_add_leaves_for_rack(leave_list, rack, 1.0);
   // The leaves D, E, and G, all reached the min count
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 3);
 
   rack_set_to_string(ld, rack, "H");
@@ -388,7 +388,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   rack_set_to_string(ld, rack, "ABCI");
   leave_list_add_leaves_for_rack(leave_list, rack, 8.0);
   // The leave I reached the min count
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 4);
 
   rack_reset(player_rack);
@@ -407,14 +407,14 @@ void test_leave_list_add_leaves_for_rack(void) {
 
   // Add the leave II 3 times to reach the min count
   leave_list_add_leaves_for_rack(leave_list, rack, 2.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 4);
   leave_list_add_leaves_for_rack(leave_list, rack, 2.0);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 4);
   leave_list_add_leaves_for_rack(leave_list, rack, 2.0);
   // The leave II reached the min count
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 5);
 
   rack_reset(player_rack);
@@ -426,7 +426,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   rack_set_to_string(ld, expected_rack, "EI");
   assert(racks_are_equal(expected_rack, rack));
 
-  for (int i = 0; i < target_min_leave_count; i++) {
+  for (int i = 0; i < target_leave_count; i++) {
     rack_set_to_string(ld, rack, "ABCDII");
     leave_list_add_leaves_for_rack(leave_list, rack, 2.0);
     rack_set_to_string(ld, rack, "ABCEII");
@@ -448,7 +448,7 @@ void test_leave_list_add_leaves_for_rack(void) {
   rack_set_to_string(ld, expected_rack, "ABCDE");
   assert(racks_are_equal(expected_rack, rack));
 
-  for (int i = 0; i < target_min_leave_count; i++) {
+  for (int i = 0; i < target_leave_count; i++) {
     rack_set_to_string(ld, rack, "ABCDE");
     leave_list_add_leaves_for_rack(leave_list, rack, 2.0);
   }
@@ -713,14 +713,13 @@ void test_leave_list_add_leaves_for_rack(void) {
 
 int leave_list_add_sas(LeaveList *leave_list, const LetterDistribution *ld,
                        Rack *subleave, const char *subleave_str,
-                       int expected_leaves_under_target_min_count,
-                       double equity) {
+                       int expected_leaves_below_target_count, double equity) {
   rack_reset(subleave);
   rack_set_to_string(ld, subleave, subleave_str);
   int lowest_leave_count =
       leave_list_add_single_leave(leave_list, subleave, equity);
-  assert(leave_list_get_leaves_under_target_min_count(leave_list) ==
-         expected_leaves_under_target_min_count);
+  assert(leave_list_get_leaves_below_target_count(leave_list) ==
+         expected_leaves_below_target_count);
   return lowest_leave_count;
 }
 
@@ -729,7 +728,7 @@ void assert_leave_list_valid_leaves_count(LeaveList *leave_list,
                                           const Bag *bag,
                                           const Rack *player_rack,
                                           int expected_leaves) {
-  int tmc = leave_list_get_target_min_leave_count(leave_list);
+  int tmc = leave_list_get_target_leave_count(leave_list);
   Rack *rare_leave = rack_duplicate(player_rack);
   rack_reset(rare_leave);
   Bag *test_bag = bag_duplicate(bag);

@@ -18,15 +18,16 @@
 typedef struct LeaveListItem {
   int count;
   double mean;
-  int children_under_target_count;
+  // The number of leaves that contain this leave
+  int superset_count;
 } LeaveListItem;
 
 struct LeaveList {
   int number_of_leaves;
   // Leaves with this count are no longer considered
   // rare and are excluded from forced draws.
-  int target_min_leave_count;
-  int leaves_under_target_min_count;
+  int target_leave_count;
+  int leaves_below_target_count;
   int lowest_leave_count;
   int next_available_rack_index;
   double move_equity;
@@ -44,7 +45,7 @@ struct LeaveList {
 void leave_list_item_reset(LeaveListItem *item) {
   item->count = 0;
   item->mean = 0;
-  item->children_under_target_count = 0;
+  item->superset_count = 0;
 }
 
 LeaveListItem *leave_list_item_create(void) {
@@ -63,32 +64,31 @@ void release_current_rack(LeaveList *leave_list) {
   leave_list->next_available_rack_index--;
 }
 
-void update_children_under_target_count(LeaveList *leave_list,
-                                        const Rack *full_rack, Rack *subrack,
-                                        uint32_t node_index,
-                                        uint32_t word_index, uint8_t ml,
-                                        int inc_val) {
-  const int ld_size = rack_get_dist_size(full_rack);
-  while (ml < ld_size && rack_get_letter(full_rack, ml) == 0) {
+void update_superset_count_for_subleaves(LeaveList *leave_list,
+                                         const Rack *full_leave, Rack *subleave,
+                                         uint32_t node_index,
+                                         uint32_t word_index, uint8_t ml,
+                                         int inc_val) {
+  const int ld_size = rack_get_dist_size(full_leave);
+  while (ml < ld_size && rack_get_letter(full_leave, ml) == 0) {
     ml++;
   }
 
-  const int rack_num_letters = rack_get_total_letters(subrack);
+  const int rack_num_letters = rack_get_total_letters(subleave);
   if (ml == ld_size) {
     if (rack_num_letters > 0) {
-      leave_list->leaves[word_index - 1]->children_under_target_count +=
-          inc_val;
+      leave_list->leaves[word_index - 1]->superset_count += inc_val;
     }
     return;
   }
 
   // Add none of the current ml
-  update_children_under_target_count(leave_list, full_rack, subrack, node_index,
-                                     word_index, ml + 1, inc_val);
+  update_superset_count_for_subleaves(leave_list, full_leave, subleave,
+                                      node_index, word_index, ml + 1, inc_val);
 
-  const int num_ml_to_add = rack_get_letter(full_rack, ml);
+  const int num_ml_to_add = rack_get_letter(full_leave, ml);
   for (int i = 0; i < num_ml_to_add; i++) {
-    rack_add_letter(subrack, ml);
+    rack_add_letter(subleave, ml);
     uint32_t sibling_word_index;
     node_index = increment_node_to_ml(leave_list->klv, node_index, word_index,
                                       &sibling_word_index, ml);
@@ -97,46 +97,47 @@ void update_children_under_target_count(LeaveList *leave_list,
     node_index =
         follow_arc(leave_list->klv, node_index, word_index, &child_word_index);
     word_index = child_word_index;
-    update_children_under_target_count(leave_list, full_rack, subrack,
-                                       node_index, word_index, ml + 1, inc_val);
+    update_superset_count_for_subleaves(leave_list, full_leave, subleave,
+                                        node_index, word_index, ml + 1,
+                                        inc_val);
   }
-  rack_take_letters(subrack, ml, num_ml_to_add);
+  rack_take_letters(subleave, ml, num_ml_to_add);
 }
 
-void leave_list_increment_children_under_target_count(LeaveList *leave_list,
-                                                      const Rack *full_rack,
-                                                      Rack *subrack) {
-  rack_reset(subrack);
-  update_children_under_target_count(
-      leave_list, full_rack, subrack,
+void leave_list_increment_superset_count_for_subleaves(LeaveList *leave_list,
+                                                       const Rack *full_rack,
+                                                       Rack *subleave) {
+  rack_reset(subleave);
+  update_superset_count_for_subleaves(
+      leave_list, full_rack, subleave,
       kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0, 1);
 }
 
-void leave_list_decrement_children_under_target_count(LeaveList *leave_list,
-                                                      const Rack *full_rack,
-                                                      Rack *subrack) {
-  rack_reset(subrack);
-  update_children_under_target_count(
-      leave_list, full_rack, subrack,
+void leave_list_decrement_superset_count_for_subleaves(LeaveList *leave_list,
+                                                       const Rack *full_rack,
+                                                       Rack *subleave) {
+  rack_reset(subleave);
+  update_superset_count_for_subleaves(
+      leave_list, full_rack, subleave,
       kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0, -1);
 }
 
-void set_initial_children_under_target_counts(LeaveList *leave_list,
-                                              const LetterDistribution *ld,
-                                              Rack *subrack, uint8_t ml) {
-  const int rack_num_letters = rack_get_total_letters(subrack);
+void set_initial_superset_count_for_all_leaves(LeaveList *leave_list,
+                                               const LetterDistribution *ld,
+                                               Rack *leave, uint8_t ml) {
+  const int rack_num_letters = rack_get_total_letters(leave);
   if (ml == ld_get_size(ld)) {
     if (rack_num_letters > 0) {
-      Rack *next_subrack = get_next_available_rack(leave_list);
-      leave_list_increment_children_under_target_count(leave_list, subrack,
-                                                       next_subrack);
+      Rack *subleave = get_next_available_rack(leave_list);
+      leave_list_increment_superset_count_for_subleaves(leave_list, leave,
+                                                        subleave);
       release_current_rack(leave_list);
     }
     return;
   }
 
   // Add none of the current ml
-  set_initial_children_under_target_counts(leave_list, ld, subrack, ml + 1);
+  set_initial_superset_count_for_all_leaves(leave_list, ld, leave, ml + 1);
 
   // Add the current ml
   int max_ml_to_add = ((RACK_SIZE)-1) - rack_num_letters;
@@ -145,14 +146,14 @@ void set_initial_children_under_target_counts(LeaveList *leave_list,
     max_ml_to_add = ml_dist;
   }
   for (int i = 0; i < max_ml_to_add; i++) {
-    rack_add_letter(subrack, ml);
-    set_initial_children_under_target_counts(leave_list, ld, subrack, ml + 1);
+    rack_add_letter(leave, ml);
+    set_initial_superset_count_for_all_leaves(leave_list, ld, leave, ml + 1);
   }
-  rack_take_letters(subrack, ml, max_ml_to_add);
+  rack_take_letters(leave, ml, max_ml_to_add);
 }
 
 LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
-                             int target_min_leave_count) {
+                             int target_leave_count) {
   LeaveList *leave_list = malloc_or_die(sizeof(LeaveList));
   leave_list->klv = klv;
   leave_list->ld = ld;
@@ -164,12 +165,12 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
     leave_list->leaves[i] = leave_list_item_create();
   }
   leave_list->empty_leave = leave_list_item_create();
-  leave_list->target_min_leave_count = target_min_leave_count;
+  leave_list->target_leave_count = target_leave_count;
   leave_list->leave_counts =
-      calloc_or_die(leave_list->target_min_leave_count, sizeof(int));
+      calloc_or_die(leave_list->target_leave_count, sizeof(int));
   leave_list->leave_counts[0] = leave_list->number_of_leaves;
   leave_list->lowest_leave_count = 0;
-  leave_list->leaves_under_target_min_count = leave_list->number_of_leaves;
+  leave_list->leaves_below_target_count = leave_list->number_of_leaves;
   leave_list->next_available_rack_index = 0;
 
   const int ld_size = ld_get_size(ld);
@@ -178,7 +179,7 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
   }
 
   Rack *subrack = get_next_available_rack(leave_list);
-  set_initial_children_under_target_counts(leave_list, ld, subrack, 0);
+  set_initial_superset_count_for_all_leaves(leave_list, ld, subrack, 0);
   release_current_rack(leave_list);
 
   return leave_list;
@@ -202,15 +203,15 @@ void leave_list_reset(LeaveList *leave_list) {
   for (int i = 0; i < leave_list->number_of_leaves; i++) {
     leave_list_item_reset(leave_list->leaves[i]);
   }
-  leave_list->leaves_under_target_min_count = leave_list->number_of_leaves;
+  leave_list->leaves_below_target_count = leave_list->number_of_leaves;
   memset(leave_list->leave_counts, 0,
-         sizeof(int) * leave_list->target_min_leave_count);
+         sizeof(int) * leave_list->target_leave_count);
   leave_list->leave_counts[0] = leave_list->number_of_leaves;
   leave_list->lowest_leave_count = 0;
 
-  Rack *subrack = get_next_available_rack(leave_list);
-  set_initial_children_under_target_counts(leave_list, leave_list->ld, subrack,
-                                           0);
+  Rack *leave = get_next_available_rack(leave_list);
+  set_initial_superset_count_for_all_leaves(leave_list, leave_list->ld, leave,
+                                            0);
   release_current_rack(leave_list);
 }
 
@@ -225,26 +226,26 @@ int leave_list_get_lowest_leave_count(const LeaveList *leave_list) {
 
 // Returns the lowest leave count for the updated leave list.
 int leave_list_add_single_leave_internal(LeaveList *leave_list,
-                                         const Rack *full_rack, int klv_index,
+                                         const Rack *leave, int klv_index,
                                          double equity) {
   if (klv_index == -1) {
-    klv_index = klv_get_word_index(leave_list->klv, full_rack);
+    klv_index = klv_get_word_index(leave_list->klv, leave);
   }
   LeaveListItem *item = leave_list->leaves[klv_index];
   leave_list_item_increment_count(item, equity);
   const int new_count = item->count;
-  if (new_count <= leave_list->target_min_leave_count) {
+  if (new_count <= leave_list->target_leave_count) {
     // Update the number of leaves under the target minimum
-    if (new_count == leave_list->target_min_leave_count) {
-      leave_list->leaves_under_target_min_count--;
-      Rack *subrack = get_next_available_rack(leave_list);
-      leave_list_decrement_children_under_target_count(leave_list, full_rack,
-                                                       subrack);
+    if (new_count == leave_list->target_leave_count) {
+      leave_list->leaves_below_target_count--;
+      Rack *subleave = get_next_available_rack(leave_list);
+      leave_list_decrement_superset_count_for_subleaves(leave_list, leave,
+                                                        subleave);
       release_current_rack(leave_list);
     }
     // Update the leave counts
     leave_list->leave_counts[new_count - 1]--;
-    if (new_count < leave_list->target_min_leave_count) {
+    if (new_count < leave_list->target_leave_count) {
       leave_list->leave_counts[new_count]++;
     }
     // Update the lowest leave count
@@ -258,39 +259,37 @@ int leave_list_add_single_leave_internal(LeaveList *leave_list,
 
 // Adds a single rack to the list.
 // Returns the lowest leave count.
-int leave_list_add_single_leave(LeaveList *leave_list, const Rack *full_rack,
+int leave_list_add_single_leave(LeaveList *leave_list, const Rack *leave,
                                 double equity) {
-  return leave_list_add_single_leave_internal(leave_list, full_rack, -1,
-                                              equity);
+  return leave_list_add_single_leave_internal(leave_list, leave, -1, equity);
 }
 
 void generate_subleaves(LeaveList *leave_list, const Rack *full_player_rack,
-                        Rack *subrack, uint32_t node_index, uint32_t word_index,
-                        uint8_t ml) {
+                        Rack *subleave, uint32_t node_index,
+                        uint32_t word_index, uint8_t ml) {
   const uint32_t ld_size = rack_get_dist_size(full_player_rack);
   while (ml < ld_size && rack_get_letter(full_player_rack, ml) == 0) {
     ml++;
   }
   if (ml == ld_size) {
-    const int number_of_letters_in_subleave = rack_get_total_letters(subrack);
+    const int number_of_letters_in_subleave = rack_get_total_letters(subleave);
     if (number_of_letters_in_subleave > 0) {
       // Superleaves will only contain all possible subleaves
       // of size RACK_SIZE - 1 and below.
       if (number_of_letters_in_subleave < (RACK_SIZE)) {
-        leave_list_add_single_leave_internal(leave_list, full_player_rack,
-                                             word_index - 1,
-                                             leave_list->move_equity);
+        leave_list_add_single_leave_internal(
+            leave_list, subleave, word_index - 1, leave_list->move_equity);
       }
     } else {
       leave_list_item_increment_count(leave_list->empty_leave,
                                       leave_list->move_equity);
     }
   } else {
-    generate_subleaves(leave_list, full_player_rack, subrack, node_index,
+    generate_subleaves(leave_list, full_player_rack, subleave, node_index,
                        word_index, ml + 1);
     const int num_this = rack_get_letter(full_player_rack, ml);
     for (int i = 0; i < num_this; i++) {
-      rack_add_letter(subrack, ml);
+      rack_add_letter(subleave, ml);
       uint32_t sibling_word_index;
       node_index = increment_node_to_ml(leave_list->klv, node_index, word_index,
                                         &sibling_word_index, ml);
@@ -299,10 +298,10 @@ void generate_subleaves(LeaveList *leave_list, const Rack *full_player_rack,
       node_index = follow_arc(leave_list->klv, node_index, word_index,
                               &child_word_index);
       word_index = child_word_index;
-      generate_subleaves(leave_list, full_player_rack, subrack, node_index,
+      generate_subleaves(leave_list, full_player_rack, subleave, node_index,
                          word_index, ml + 1);
     }
-    rack_take_letters(subrack, ml, num_this);
+    rack_take_letters(subleave, ml, num_this);
   }
 }
 
@@ -315,8 +314,8 @@ int leave_list_add_leaves_for_rack(LeaveList *leave_list,
                                    const Rack *full_player_rack,
                                    double move_equity) {
   leave_list->move_equity = move_equity;
-  Rack *subrack = get_next_available_rack(leave_list);
-  generate_subleaves(leave_list, full_player_rack, subrack,
+  Rack *subleave = get_next_available_rack(leave_list);
+  generate_subleaves(leave_list, full_player_rack, subleave,
                      kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0);
   release_current_rack(leave_list);
   return leave_list_get_lowest_leave_count(leave_list);
@@ -350,7 +349,7 @@ bool leave_list_draw_rare_leave_internal(
         log_fatal("word index not found in klv: %u", word_index);
       }
       if (leave_list->leaves[word_index - 1]->count <
-          leave_list->target_min_leave_count) {
+          leave_list->target_leave_count) {
         return true;
       }
     }
@@ -485,12 +484,12 @@ bool leave_list_draw_rare_leave(LeaveList *leave_list,
   return success;
 }
 
-int leave_list_get_target_min_leave_count(const LeaveList *leave_list) {
-  return leave_list->target_min_leave_count;
+int leave_list_get_target_leave_count(const LeaveList *leave_list) {
+  return leave_list->target_leave_count;
 }
 
-int leave_list_get_leaves_under_target_min_count(const LeaveList *leave_list) {
-  return leave_list->leaves_under_target_min_count;
+int leave_list_get_leaves_below_target_count(const LeaveList *leave_list) {
+  return leave_list->leaves_below_target_count;
 }
 
 int leave_list_get_number_of_leaves(const LeaveList *leave_list) {
@@ -513,7 +512,6 @@ double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
   return leave_list->empty_leave->mean;
 }
 
-int leave_list_get_children_under_target_count(const LeaveList *leave_list,
-                                               int klv_index) {
-  return leave_list->leaves[klv_index]->children_under_target_count;
+int leave_list_get_superset_count(const LeaveList *leave_list, int klv_index) {
+  return leave_list->leaves[klv_index]->superset_count;
 }
