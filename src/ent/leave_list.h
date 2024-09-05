@@ -12,7 +12,7 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
                              int target_min_leave_count);
 void leave_list_destroy(LeaveList *leave_list);
 void leave_list_reset(LeaveList *leave_list);
-int leave_list_add_leaves_for_rack(LeaveList *leave_list, Rack *full_rack,
+int leave_list_add_leaves_for_rack(LeaveList *leave_list, const Rack *full_rack,
                                    double move_equity);
 int leave_list_add_single_leave(LeaveList *leave_list, const Rack *leave,
                                 double equity);
