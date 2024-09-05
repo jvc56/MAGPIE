@@ -29,6 +29,7 @@ struct LeaveList {
   int target_leave_count;
   int leaves_below_target_count;
   int lowest_leave_count;
+  int attempted_rare_draws;
   int next_available_rack_index;
   double move_equity;
   // Owned by the caller
@@ -351,9 +352,12 @@ bool leave_list_draw_rare_leave_internal(
       if (leave_list->leaves[word_index - 1]->count <
           leave_list->target_leave_count) {
         return true;
+      } else {
+        leave_list->attempted_rare_draws++;
       }
     }
-  } else {
+  } else if (num_letters_in_leave == 0 ||
+             leave_list->leaves[word_index - 1]->superset_count > 0) {
     // Advance to the next machine letter without adding any of the current
     // machine letter.
     if (leave_list_draw_rare_leave_internal(
@@ -473,6 +477,7 @@ bool leave_list_draw_rare_leave(LeaveList *leave_list,
   copy_bag_and_player_rack_to_rare_draw_pool(rare_draw_pool, bag,
                                              full_player_rack);
   rack_reset(rare_leave);
+  leave_list->attempted_rare_draws = 0;
   bool success = leave_list_draw_rare_leave_internal(
       leave_list, full_player_rack, rare_draw_pool, rare_leave, ld,
       player_draw_index, kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0,
@@ -514,4 +519,8 @@ double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
 
 int leave_list_get_superset_count(const LeaveList *leave_list, int klv_index) {
   return leave_list->leaves[klv_index]->superset_count;
+}
+
+int leave_list_get_attempted_rare_draws(const LeaveList *leave_list) {
+  return leave_list->attempted_rare_draws;
 }

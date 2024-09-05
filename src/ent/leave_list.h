@@ -30,4 +30,6 @@ double leave_list_get_mean(const LeaveList *leave_list, int klv_index);
 int leave_list_get_superset_count(const LeaveList *leave_list, int klv_index);
 int leave_list_get_empty_leave_count(const LeaveList *leave_list);
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list);
+int leave_list_get_attempted_rare_draws(const LeaveList *leave_list);
+
 #endif
