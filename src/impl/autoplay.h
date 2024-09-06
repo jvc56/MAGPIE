@@ -12,7 +12,7 @@
 typedef struct AutoplayArgs {
   int gens;
   int games_per_gen;
-  int target_min_leave_count;
+  int target_leave_count;
   int games_before_force_draw_start;
   bool use_game_pairs;
   bool human_readable;
