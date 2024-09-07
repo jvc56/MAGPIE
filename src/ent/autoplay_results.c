@@ -464,7 +464,7 @@ char *recorder_str(Recorder *recorder, bool human_readable,
   return recorder->str_func(recorder, human_readable, show_divergent);
 }
 
-AutoplayResults *autoplay_results_create() {
+AutoplayResults *autoplay_results_create(void) {
   AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     autoplay_results->recorders[i] = NULL;
