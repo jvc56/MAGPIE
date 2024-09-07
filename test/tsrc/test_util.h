@@ -37,6 +37,8 @@ bool within_epsilon(double a, double b);
 int count_newlines(const char *str);
 bool equal_rack(const Rack *expected_rack, const Rack *actual_rack);
 void assert_strings_equal(const char *str1, const char *str2);
+void assert_racks_equal(const LetterDistribution *ld, const Rack *r1,
+                        const Rack *r2);
 void assert_move(Game *game, MoveList *move_list, const SortedMoveList *sml,
                  int move_index, const char *expected_move_string);
 void clear_bag(Bag *bag);

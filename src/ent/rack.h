@@ -158,4 +158,13 @@ static inline int rack_get_score(const LetterDistribution *ld,
   return sum;
 }
 
+static inline Rack *get_new_bag_as_rack(const LetterDistribution *ld) {
+  const int ld_size = ld_get_size(ld);
+  Rack *bag_as_rack = rack_create(ld_size);
+  for (int ml = 0; ml < ld_size; ml++) {
+    rack_add_letters(bag_as_rack, ml, ld_get_dist(ld, ml));
+  }
+  return bag_as_rack;
+}
+
 #endif

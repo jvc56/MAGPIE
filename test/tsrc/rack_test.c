@@ -1,5 +1,6 @@
 #include <assert.h>
 
+#include "../../src/ent/encoded_rack.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/ent/rack.h"
 #include "../../src/impl/config.h"
@@ -125,4 +126,50 @@ void test_rack_main(void) {
   config_destroy(config);
 }
 
-void test_rack(void) { test_rack_main(); }
+void assert_rack_encode_decode(const LetterDistribution *ld, Rack *rack1,
+                               Rack *rack2, const char *rack_str) {
+  EncodedRack encoded_rack;
+  rack_set_to_string(ld, rack1, rack_str);
+  rack_encode(rack1, &encoded_rack);
+  rack_decode(&encoded_rack, rack2);
+  assert(racks_are_equal(rack1, rack2));
+}
+
+void test_encoded_rack(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  const LetterDistribution *ld = config_get_ld(config);
+  int ld_size = ld_get_size(ld);
+  Rack *rack1 = rack_create(ld_size);
+  Rack *rack2 = rack_create(ld_size);
+
+  assert_rack_encode_decode(ld, rack1, rack2, "");
+  assert_rack_encode_decode(ld, rack1, rack2, "?");
+  assert_rack_encode_decode(ld, rack1, rack2, "??");
+  assert_rack_encode_decode(ld, rack1, rack2, "???????");
+  assert_rack_encode_decode(ld, rack1, rack2, "??AA");
+  assert_rack_encode_decode(ld, rack1, rack2, "??AAAAA");
+  assert_rack_encode_decode(ld, rack1, rack2, "AAAAAAA");
+  assert_rack_encode_decode(ld, rack1, rack2, "BBBBBBB");
+  assert_rack_encode_decode(ld, rack1, rack2, "??AEEFI");
+  assert_rack_encode_decode(ld, rack1, rack2, "??AEFFZ");
+  assert_rack_encode_decode(ld, rack1, rack2, "BDIMPTV");
+  assert_rack_encode_decode(ld, rack1, rack2, "Z");
+  assert_rack_encode_decode(ld, rack1, rack2, "ZZZ");
+  assert_rack_encode_decode(ld, rack1, rack2, "ZZZZZZZ");
+  assert_rack_encode_decode(ld, rack1, rack2, "YZ");
+  assert_rack_encode_decode(ld, rack1, rack2, "YYZ");
+  assert_rack_encode_decode(ld, rack1, rack2, "XYYZ");
+  assert_rack_encode_decode(ld, rack1, rack2, "VWWXYYZ");
+  assert_rack_encode_decode(ld, rack1, rack2, "?Z");
+  assert_rack_encode_decode(ld, rack1, rack2, "??YYZ");
+
+  rack_destroy(rack1);
+  rack_destroy(rack2);
+  config_destroy(config);
+}
+
+void test_rack(void) {
+  test_rack_main();
+  test_encoded_rack();
+}

@@ -32,7 +32,6 @@ typedef struct LeavegenSharedData {
   uint64_t gen_start_games;
   uint64_t gen_leaves_recorded;
   uint64_t total_leaves_recorded;
-  uint64_t failed_force_draws;
   AutoplayResults *gen_autoplay_results;
   const LetterDistribution *ld;
   const char *data_paths;
@@ -40,7 +39,6 @@ typedef struct LeavegenSharedData {
   LeaveList *leave_list;
   pthread_mutex_t leave_list_mutex;
   Checkpoint *postgen_checkpoint;
-  Stat *success_force_draws;
   AutoplayResults *primary_autoplay_results;
   AutoplayResults **autoplay_results_list;
 } LeavegenSharedData;
@@ -112,24 +110,18 @@ void postgen_prebroadcast_func(void *data) {
       "\nAverage Turn Equity: %0.2f\nLowest Leave Count: %d\nTarget Minimum "
       "Leave "
       "Count: %d\nLeaves Under "
-      "Target Minimum Leave Count: %d\nLeaves Recorded: "
-      "%d\nForced draws: %d\nFailed forced draws: %d\n",
+      "Target Minimum Leave Count: %d\nLeaves Recorded: %d\n\n",
       leave_list_get_empty_leave_mean(lg_shared_data->leave_list),
       leave_list_get_lowest_leave_count(lg_shared_data->leave_list),
       leave_list_get_target_leave_count(lg_shared_data->leave_list),
       leave_list_get_leaves_below_target_count(lg_shared_data->leave_list),
-      lg_shared_data->total_leaves_recorded,
-      stat_get_num_samples(lg_shared_data->success_force_draws),
-      lg_shared_data->failed_force_draws);
+      lg_shared_data->total_leaves_recorded);
 
-  if (stat_get_num_samples(lg_shared_data->success_force_draws) > 0) {
-    string_builder_add_formatted_string(
-        leave_gen_sb, "Forced draw average turn: %0.2f %0.2f\n\n",
-        stat_get_mean(lg_shared_data->success_force_draws) + 1,
-        stat_get_stdev(lg_shared_data->success_force_draws));
-  } else {
-    string_builder_add_string(leave_gen_sb, "\n");
-  }
+  string_builder_add_most_or_least_common_leaves(
+      leave_gen_sb, lg_shared_data->leave_list, lg_shared_data->ld, 100, true);
+  string_builder_add_string(leave_gen_sb, "\n");
+  string_builder_add_most_or_least_common_leaves(
+      leave_gen_sb, lg_shared_data->leave_list, lg_shared_data->ld, 100, false);
 
   char *report_name_prefix =
       cut_off_after_last_char(gen_labeled_klv_filename, '.');
@@ -146,8 +138,6 @@ void postgen_prebroadcast_func(void *data) {
 
   // Reset data for the next generation.
   leave_list_reset(lg_shared_data->leave_list);
-  stat_reset(lg_shared_data->success_force_draws);
-  lg_shared_data->failed_force_draws = 0;
   lg_shared_data->gen_leaves_recorded = 0;
   lg_shared_data->gen_start_games =
       thread_control_get_iter_count(shared_data->thread_control);
@@ -183,19 +173,17 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
-LeavegenSharedData *
-leavegen_shared_data_create(AutoplayResults *primary_autoplay_results,
-                            AutoplayResults **autoplay_results_list,
-                            const LetterDistribution *ld,
-                            const char *data_paths, KLV *klv,
-                            int number_of_threads, int target_leave_count) {
+LeavegenSharedData *leavegen_shared_data_create(
+    ThreadControl *thread_control, AutoplayResults *primary_autoplay_results,
+    AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
+    const char *data_paths, KLV *klv, int number_of_threads,
+    int target_leave_count) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->gens_completed = 0;
   shared_data->gen_start_games = 0;
   shared_data->gen_leaves_recorded = 0;
   shared_data->total_leaves_recorded = 0;
-  shared_data->failed_force_draws = 0;
   shared_data->klv = klv;
   shared_data->gen_autoplay_results =
       autoplay_results_create_empty_copy(primary_autoplay_results);
@@ -204,10 +192,10 @@ leavegen_shared_data_create(AutoplayResults *primary_autoplay_results,
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
   shared_data->leave_list = leave_list_create(ld, klv, target_leave_count);
+  leave_list_seed(shared_data->leave_list, thread_control);
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   pthread_mutex_init(&shared_data->leave_list_mutex, NULL);
-  shared_data->success_force_draws = stat_create(false);
   return shared_data;
 }
 
@@ -223,8 +211,8 @@ AutoplaySharedData *autoplay_shared_data_create(
   shared_data->leavegen_shared_data = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
-        primary_autoplay_results, autoplay_results_list, ld, data_paths, klv,
-        number_of_threads, target_leave_count);
+        thread_control, primary_autoplay_results, autoplay_results_list, ld,
+        data_paths, klv, number_of_threads, target_leave_count);
   }
   return shared_data;
 }
@@ -235,7 +223,6 @@ void leavegen_shared_data_destroy(LeavegenSharedData *lg_shared_data) {
   }
   leave_list_destroy(lg_shared_data->leave_list);
   checkpoint_destroy(lg_shared_data->postgen_checkpoint);
-  stat_destroy(lg_shared_data->success_force_draws);
   autoplay_results_destroy(lg_shared_data->gen_autoplay_results);
   free(lg_shared_data);
 }
@@ -248,35 +235,21 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   free(shared_data);
 }
 
-bool autoplay_leave_list_draw_rare_leave(LeavegenSharedData *lg_shared_data,
-                                         Game *game, int player_on_turn_index,
-                                         int force_draw_turn,
-                                         Rack *rare_leave) {
-  rack_reset(rare_leave);
+void autoplay_leave_list_get_rarest_leave(LeavegenSharedData *lg_shared_data,
+                                          Rack *rare_leave) {
   pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
-  bool success = false;
-  if (leave_list_draw_rare_leave(
-          lg_shared_data->leave_list, game_get_ld(game), game_get_bag(game),
-          player_get_rack(game_get_player(game, player_on_turn_index)),
-          game_get_player_draw_index(game, player_on_turn_index), rare_leave)) {
-    stat_push(lg_shared_data->success_force_draws, (double)force_draw_turn, 1);
-    success = true;
-  } else {
-    lg_shared_data->failed_force_draws++;
-  }
+  leave_list_get_rarest_leave(lg_shared_data->leave_list, rare_leave);
   pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
-  return success;
 }
 
 // Returns true if the required minimum leave count was reached.
-bool autoplay_leave_list_add_leaves_for_rack(LeavegenSharedData *lg_shared_data,
-                                             Game *game,
-                                             int player_on_turn_index,
-                                             double move_equity,
-                                             int target_leave_count) {
+bool autoplay_leave_list_add_all_subleaves(LeavegenSharedData *lg_shared_data,
+                                           Game *game, int player_on_turn_index,
+                                           double move_equity,
+                                           int target_leave_count) {
   pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
   bool target_leave_count_reached =
-      leave_list_add_leaves_for_rack(
+      leave_list_add_all_subleaves(
           lg_shared_data->leave_list,
           player_get_rack(game_get_player(game, player_on_turn_index)),
           move_equity) >= target_leave_count;
@@ -286,14 +259,14 @@ bool autoplay_leave_list_add_leaves_for_rack(LeavegenSharedData *lg_shared_data,
 }
 
 // Returns true if the required minimum leave count was reached.
-bool autoplay_leave_list_add_single_leave(LeavegenSharedData *lg_shared_data,
-                                          const Rack *subleave,
-                                          double move_equity,
-                                          int target_leave_count) {
+bool autoplay_leave_list_add_single_subleave(LeavegenSharedData *lg_shared_data,
+                                             const Rack *subleave,
+                                             double move_equity,
+                                             int target_leave_count) {
   pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
   bool min_leave_count_reached =
-      leave_list_add_single_leave(lg_shared_data->leave_list, subleave,
-                                  move_equity) >= target_leave_count;
+      leave_list_add_single_subleave(lg_shared_data->leave_list, subleave,
+                                     move_equity) >= target_leave_count;
   lg_shared_data->gen_leaves_recorded++;
   pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
   return min_leave_count_reached;
@@ -308,6 +281,7 @@ typedef struct GameRunner {
   Rack *leaves[2];
   Rack *original_rack;
   Rack *rare_leave;
+  Rack *bag_and_rare_leave_overlap;
   AutoplaySharedData *shared_data;
 } GameRunner;
 
@@ -320,6 +294,7 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   game_runner->leaves[1] = rack_create(dist_size);
   game_runner->original_rack = rack_create(dist_size);
   game_runner->rare_leave = rack_create(dist_size);
+  game_runner->bag_and_rare_leave_overlap = rack_create(dist_size);
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
   game_runner->move_list = move_list_create(1);
@@ -334,6 +309,7 @@ void game_runner_destroy(GameRunner *game_runner) {
   rack_destroy(game_runner->leaves[1]);
   rack_destroy(game_runner->original_rack);
   rack_destroy(game_runner->rare_leave);
+  rack_destroy(game_runner->bag_and_rare_leave_overlap);
   game_destroy(game_runner->game);
   move_list_destroy(game_runner->move_list);
   free(game_runner);
@@ -381,29 +357,60 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   const int thread_index = autoplay_worker->worker_index;
   const int target_leave_count = autoplay_worker->args->target_leave_count;
   if (game_runner->force_draw) {
-    rack_copy(game_runner->original_rack,
-              player_get_rack(game_get_player(game, player_on_turn_index)));
+    Rack *player_rack =
+        player_get_rack(game_get_player(game, player_on_turn_index));
+    const int player_on_turn_draw_index =
+        game_get_player_on_turn_draw_index(game);
+    // Backup the original rack before returning it to the bag.
+    rack_copy(game_runner->original_rack, player_rack);
     return_rack_to_bag(game, player_on_turn_index);
-    draw_rack_from_bag(game, player_on_turn_index, leave_from_previous_move);
-    if (autoplay_leave_list_draw_rare_leave(
-            lg_shared_data, game, player_on_turn_index,
-            game_runner->turn_number, game_runner->rare_leave)) {
-      draw_to_full_rack(game, player_on_turn_index);
-      const Move *forced_move =
-          get_top_equity_move(game, thread_index, game_runner->move_list);
-      if (autoplay_leave_list_add_single_leave(
-              lg_shared_data, game_runner->rare_leave,
-              move_get_equity(forced_move), target_leave_count)) {
-        game_runner->min_leave_count_reached = true;
-      }
+
+    // Draw the rarest leave. This leave might not be available
+    // with the current bag.
+    autoplay_leave_list_get_rarest_leave(lg_shared_data,
+                                         game_runner->rare_leave);
+    // Set the rack to the rare leave
+    rack_copy(player_rack, game_runner->rare_leave);
+    // Remove the rare leave from the bag, for whatever
+    // tiles in the rare leave are in the bag. This is to prevent
+    // violating the letter distribution. For example, if the rare
+    // leave was WWXYYZ, we wouldn't want to randomly draw W, X, Y, or
+    // Z from the bag to fill up the rest of the rack since that would violate
+    // the letter distribution.
+    rack_reset(game_runner->bag_and_rare_leave_overlap);
+    draw_leave_from_bag(game_get_bag(game), player_on_turn_draw_index,
+                        game_runner->bag_and_rare_leave_overlap,
+                        game_runner->rare_leave);
+    // Fill up the rest of the rack with tiles from the bag
+    draw_to_full_rack(game, player_on_turn_index);
+    const Move *forced_move =
+        get_top_equity_move(game, thread_index, game_runner->move_list);
+    if (autoplay_leave_list_add_single_subleave(
+            lg_shared_data, game_runner->rare_leave,
+            move_get_equity(forced_move), target_leave_count)) {
+      game_runner->min_leave_count_reached = true;
     }
+    // Remove the rare leave from the player's rack and return the
+    // tiles that remain since we know for sure that these tiles
+    // were drawn from the bag.
+    rack_subtract(player_rack, game_runner->rare_leave);
     return_rack_to_bag(game, player_on_turn_index);
+
+    // Add the overlap between the rare leave and the bag back to the
+    // player's rack. These were tiles that were in the rare leave but
+    // also were in the bag, and thus they were drawn from the bag
+    // as described above. These tiles need to be returned to the bag
+    // as well.
+    rack_copy(player_rack, game_runner->bag_and_rare_leave_overlap);
+    return_rack_to_bag(game, player_on_turn_index);
+
+    // Redrawn the original rack.
     draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);
   }
   const Move *move =
       get_top_equity_move(game, thread_index, game_runner->move_list);
   if (lg_shared_data) {
-    if (autoplay_leave_list_add_leaves_for_rack(
+    if (autoplay_leave_list_add_all_subleaves(
             lg_shared_data, game, player_on_turn_index, move_get_equity(move),
             target_leave_count)) {
       game_runner->min_leave_count_reached = true;
@@ -427,30 +434,24 @@ void print_current_status(
   if (lg_shared_data) {
     int gen;
     uint64_t leaves_recorded;
-    uint64_t forced_draws;
     int lowest_leave_count;
-    uint64_t failed_forced_draws;
     uint64_t leaves_below_target_count;
     uint64_t gen_start_games;
     pthread_mutex_lock(&lg_shared_data->leave_list_mutex);
     gen = lg_shared_data->gens_completed;
     gen_start_games = lg_shared_data->gen_start_games;
     leaves_recorded = lg_shared_data->gen_leaves_recorded;
-    forced_draws = stat_get_num_samples(lg_shared_data->success_force_draws);
     lowest_leave_count =
         leave_list_get_lowest_leave_count(lg_shared_data->leave_list);
-    failed_forced_draws = lg_shared_data->failed_force_draws;
     leaves_below_target_count =
         leave_list_get_leaves_below_target_count(lg_shared_data->leave_list);
     pthread_mutex_unlock(&lg_shared_data->leave_list_mutex);
     string_builder_add_formatted_string(
         status_sb,
         ", gen: %d, gen games: %ld, leaves rec: %ld, leaves under: %ld, lowest "
-        "leave: %d, "
-        "fdraws: %ld, ffdraws: %ld\n",
+        "leave: %d\n",
         gen + 1, iter_completed_output->iter_count_completed - gen_start_games,
-        leaves_recorded, leaves_below_target_count, lowest_leave_count,
-        forced_draws, failed_forced_draws);
+        leaves_recorded, leaves_below_target_count, lowest_leave_count);
   } else {
     string_builder_add_string(status_sb, "\n");
   }
