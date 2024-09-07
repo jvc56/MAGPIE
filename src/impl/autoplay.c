@@ -315,6 +315,11 @@ void game_runner_destroy(GameRunner *game_runner) {
   free(game_runner);
 }
 
+void game_runner_reset_for_new_gen(GameRunner *game_runner) {
+  // All other values are reset before the start of each game.
+  game_runner->min_leave_count_reached = false;
+}
+
 void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
                        ThreadControlIterOutput *iter_output,
                        int starting_player_index) {
@@ -553,6 +558,7 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
   const AutoplayArgs *args = autoplay_worker->args;
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   for (int i = 0; i < args->gens; i++) {
+    game_runner_reset_for_new_gen(game_runner);
     autoplay_single_generation(autoplay_worker, game_runner, NULL);
     checkpoint_wait(shared_data->leavegen_shared_data->postgen_checkpoint,
                     shared_data);
