@@ -22,6 +22,7 @@
 #include "../ent/xoshiro.h"
 
 #include "gameplay.h"
+#include "klv_csv.h"
 #include "move_gen.h"
 
 #include "../util/string_util.h"
@@ -61,8 +62,12 @@ void postgen_prebroadcast_func(void *data) {
       insert_before_dot(lg_shared_data->klv->name, label);
   char *gen_labeled_klv_filename = data_filepaths_get_writable_filename(
       lg_shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV);
+  char *leaves_filename = data_filepaths_get_writable_filename(
+      lg_shared_data->data_paths, gen_labeled_klv_name,
+      DATA_FILEPATH_TYPE_LEAVES);
 
   klv_write(lg_shared_data->klv, gen_labeled_klv_filename);
+  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld, leaves_filename);
 
   const int number_of_threads =
       thread_control_get_threads(shared_data->thread_control);
@@ -135,6 +140,7 @@ void postgen_prebroadcast_func(void *data) {
   free(gen_labeled_klv_filename);
   free(gen_labeled_klv_name);
   free(label);
+  free(leaves_filename);
 
   // Reset data for the next generation.
   leave_list_reset(lg_shared_data->leave_list);
@@ -313,6 +319,11 @@ void game_runner_destroy(GameRunner *game_runner) {
   game_destroy(game_runner->game);
   move_list_destroy(game_runner->move_list);
   free(game_runner);
+}
+
+void game_runner_reset_for_new_gen(GameRunner *game_runner) {
+  // All other values are reset before the start of each game.
+  game_runner->min_leave_count_reached = false;
 }
 
 void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
@@ -553,6 +564,7 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
   const AutoplayArgs *args = autoplay_worker->args;
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   for (int i = 0; i < args->gens; i++) {
+    game_runner_reset_for_new_gen(game_runner);
     autoplay_single_generation(autoplay_worker, game_runner, NULL);
     checkpoint_wait(shared_data->leavegen_shared_data->postgen_checkpoint,
                     shared_data);
