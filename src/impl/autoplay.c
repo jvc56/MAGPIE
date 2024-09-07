@@ -22,6 +22,7 @@
 #include "../ent/xoshiro.h"
 
 #include "gameplay.h"
+#include "klv_csv.h"
 #include "move_gen.h"
 
 #include "../util/string_util.h"
@@ -61,8 +62,12 @@ void postgen_prebroadcast_func(void *data) {
       insert_before_dot(lg_shared_data->klv->name, label);
   char *gen_labeled_klv_filename = data_filepaths_get_writable_filename(
       lg_shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV);
+  char *leaves_filename = data_filepaths_get_writable_filename(
+      lg_shared_data->data_paths, gen_labeled_klv_name,
+      DATA_FILEPATH_TYPE_LEAVES);
 
   klv_write(lg_shared_data->klv, gen_labeled_klv_filename);
+  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld, leaves_filename);
 
   const int number_of_threads =
       thread_control_get_threads(shared_data->thread_control);
@@ -135,6 +140,7 @@ void postgen_prebroadcast_func(void *data) {
   free(gen_labeled_klv_filename);
   free(gen_labeled_klv_name);
   free(label);
+  free(leaves_filename);
 
   // Reset data for the next generation.
   leave_list_reset(lg_shared_data->leave_list);
