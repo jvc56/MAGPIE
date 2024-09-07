@@ -87,20 +87,6 @@ void klv_iter_for_length_recur(LeaveIter *leave_iter, KLV *klv, int length,
   }
 }
 
-Rack *get_new_bag_as_rack(const LetterDistribution *ld) {
-  Bag *bag = bag_create(ld);
-  const int ld_size = ld_get_size(ld);
-  Rack *bag_as_rack = rack_create(ld_size);
-
-  for (int i = 0; i < ld_size; i++) {
-    int number_of_tiles = bag_get_letter(bag, i);
-    rack_add_letters(bag_as_rack, i, number_of_tiles);
-  }
-
-  bag_destroy(bag);
-  return bag_as_rack;
-}
-
 // To record in alphabetical order for all lengths, use length = -1
 void klv_iter_for_length(LeaveIter *leave_iter, KLV *klv, Rack *bag_as_rack,
                          Rack *leave, int length) {

@@ -322,6 +322,20 @@ void assert_strings_equal(const char *str1, const char *str2) {
   }
 }
 
+void assert_racks_equal(const LetterDistribution *ld, const Rack *r1,
+                        const Rack *r2) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_rack(sb, r1, ld, false);
+  char *r1_str = string_builder_dump(sb, NULL);
+  string_builder_clear(sb);
+  string_builder_add_rack(sb, r2, ld, false);
+  char *r2_str = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  assert_strings_equal(r1_str, r2_str);
+  free(r1_str);
+  free(r2_str);
+}
+
 void clear_bag(Bag *bag) {
   int number_of_letters = bag_get_tiles(bag);
   for (int i = 0; i < number_of_letters; i++) {

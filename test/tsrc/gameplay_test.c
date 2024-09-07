@@ -189,6 +189,73 @@ void test_rack_is_drawable(void) {
   rack_set_to_string(ld, rack_to_draw, "UUUUVVWZ");
   assert(!rack_is_drawable(game, 0, rack_to_draw));
 
+  Rack *expected_rack = rack_create(ld_get_size(ld));
+
+  game_reset(game);
+  rack_reset(rack);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "U"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "V"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  rack_set_to_string(ld, rack_to_draw, "UUUUVVW");
+  draw_leave_from_bag(bag, 0, rack, rack_to_draw);
+  rack_set_to_string(ld, expected_rack, "UUVW");
+  assert(racks_are_equal(rack, expected_rack));
+
+  game_reset(game);
+  rack_reset(rack);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "Z"), 0);
+  rack_set_to_string(ld, rack_to_draw, "WWXYYZ");
+  draw_leave_from_bag(bag, 0, rack, rack_to_draw);
+  rack_set_to_string(ld, expected_rack, "WWXYY");
+  assert(racks_are_equal(rack, expected_rack));
+
+  game_reset(game);
+  rack_reset(rack);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "A"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "B"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "C"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "F"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "F"), 0);
+  rack_set_to_string(ld, rack_to_draw, "ABCDEFG");
+  draw_leave_from_bag(bag, 0, rack, rack_to_draw);
+  rack_set_to_string(ld, expected_rack, "CDEG");
+  assert(racks_are_equal(rack, expected_rack));
+
+  game_reset(game);
+  rack_reset(rack);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "Y"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "Y"), 0);
+  rack_set_to_string(ld, rack_to_draw, "WWXYYZ");
+  draw_leave_from_bag(bag, 0, rack, rack_to_draw);
+  rack_set_to_string(ld, expected_rack, "XZ");
+  assert(racks_are_equal(rack, expected_rack));
+
+  game_reset(game);
+  rack_reset(rack);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "W"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "X"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "Y"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "Y"), 0);
+  bag_draw_letter(bag, ld_hl_to_ml(ld, "Z"), 0);
+  rack_set_to_string(ld, rack_to_draw, "WWXYYZ");
+  draw_leave_from_bag(bag, 0, rack, rack_to_draw);
+  rack_set_to_string(ld, expected_rack, "");
+  assert(racks_are_equal(rack, expected_rack));
+
+  rack_destroy(expected_rack);
   rack_destroy(rack);
   rack_destroy(rack_to_draw);
   config_destroy(config);

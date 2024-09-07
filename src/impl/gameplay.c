@@ -201,6 +201,23 @@ bool draw_rack_from_bag(Game *game, int player_index,
   return true;
 }
 
+// Draws whatever the tiles in rack_to_draw from the bag to rack_to_update.
+// If there are not enough tiles in the bag, it continues to draw normally
+// and just returns whatever tiles were available.
+void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
+                         const Rack *rack_to_draw) {
+  const int dist_size = rack_get_dist_size(rack_to_draw);
+  for (int i = 0; i < dist_size; i++) {
+    const int rack_number_of_letter = rack_get_letter(rack_to_draw, i);
+    for (int j = 0; j < rack_number_of_letter; j++) {
+      if (!bag_draw_letter(bag, i, player_draw_index)) {
+        continue;
+      }
+      rack_add_letter(rack_to_update, i);
+    }
+  }
+}
+
 // Draws a nonrandom set of letters specified by rack_string from the
 // bag to the rack. Assumes the rack is empty.
 // Returns number of letters drawn on success
