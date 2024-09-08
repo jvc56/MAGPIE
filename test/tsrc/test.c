@@ -6,6 +6,7 @@
 #include "alphabet_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
+#include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
 #include "board_test.h"
@@ -61,6 +62,7 @@ void run_all(void) {
   test_leave_count_hashmap();
   test_bag();
   test_rack();
+  test_bit_rack();
   test_board();
   test_board_layout_default();
   test_cross_set();
@@ -110,6 +112,8 @@ void run_test(const char *subtest) {
     test_bag();
   } else if (strings_equal(subtest, "rack")) {
     test_rack();
+  } else if (strings_equal(subtest, "bitrack")) {
+    test_bit_rack();
   } else if (strings_equal(subtest, "board")) {
     test_board();
   } else if (strings_equal(subtest, "layout")) {
@@ -171,7 +175,10 @@ void run_test(const char *subtest) {
   }
 }
 
-void run_all_super(void) { test_board_layout_super(); }
+void run_all_super(void) {
+  test_bit_rack();
+  test_board_layout_super();
+}
 
 int main(int argc, char *argv[]) {
   log_set_level(LOG_WARN);
