@@ -133,7 +133,6 @@ void bit_rack_div_mod_no_intrinsic(const BitRack *bit_rack, uint32_t divisor,
                         (third_quotient_32 << 32) | fourth_quotient_32};
   *remainder = fourth_remainder_32;
 }
-
 #endif
 
 void bit_rack_div_mod(const BitRack *bit_rack, uint32_t divisor,
