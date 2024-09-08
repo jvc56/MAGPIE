@@ -1,0 +1,7 @@
+#ifndef BIT_RACK_DEFS_H
+#define BIT_RACK_DEFS_H
+
+#define BIT_RACK_BITS_PER_LETTER 4
+#define BIT_RACK_MAX_ALPHABET_SIZE 32
+
+#endif
