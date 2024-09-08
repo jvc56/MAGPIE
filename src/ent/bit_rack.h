@@ -10,6 +10,12 @@
 #include "letter_distribution.h"
 #include "rack.h"
 
+// These are 128 bit integers representing multisets of tiles, used as keys for
+// maps storing words formed by those tiles. They can include both undesignated
+// blanks (from players' racks) and designated blanks (from the board).
+
+// Arithmetic addition of two BitRacks performs unions of the multisets.
+
 #if defined(__SIZEOF_INT128__)
 #define USE_INT128_INTRINSIC 1
 #else
@@ -95,6 +101,9 @@ void bit_rack_add_bit_rack(BitRack *bit_rack, const BitRack *other) {
 #if USE_INT128_INTRINSIC
   *bit_rack += *other;
 #else
+  // No carry is needed: high and low are split at a boundary between letter
+  // counts. Letter counts should never overflow, so neither will the internal
+  // uint64s.
   bit_rack->low += other->low;
   bit_rack->high += other->high;
 #endif
