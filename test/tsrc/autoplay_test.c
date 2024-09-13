@@ -121,7 +121,6 @@ void test_autoplay_default(void) {
 }
 
 void test_autoplay_leavegen(void) {
-  mkdir(DEFAULT_DATA_PATHS "/leaves", 0777);
   Config *ab_config = config_create_or_die(
       "set -lex CSW21_ab -ld english_ab -s1 equity -s2 equity -r1 best -r2 "
       "best -numplays 1 -threads 1");
