@@ -16,7 +16,6 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/klv.h"
-#include "../ent/leave_list.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"

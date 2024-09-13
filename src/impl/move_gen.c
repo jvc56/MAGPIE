@@ -364,8 +364,8 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
         value = klv_get_indexed_leave_value(gen->klv, word_index - 1);
       }
       leave_map_set_current_value(&gen->leave_map, value);
-      if (value > gen->best_leaves[leave->number_of_letters]) {
-        gen->best_leaves[leave->number_of_letters] = value;
+      if (value > gen->best_leaves[rack_get_total_letters(leave)]) {
+        gen->best_leaves[rack_get_total_letters(leave)] = value;
       }
       if (add_exchange) {
         record_exchange(gen);
