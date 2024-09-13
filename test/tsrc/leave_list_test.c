@@ -60,14 +60,15 @@ void test_leave_list_normal_leaves(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "?ABCD", 0, 0.0);
 
   Rack *rack = rack_create(ld_get_size(ld));
+  Rack *subrack = rack_create(ld_get_size(ld));
 
   // Adding the empty leave should have no effect
   rack_set_to_string(ld, rack, "");
-  leave_list_add_all_subleaves(leave_list, rack, 3.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 3.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 1);
 
   rack_set_to_string(ld, rack, "A");
-  leave_list_add_all_subleaves(leave_list, rack, 4.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 4.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 2);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 7.0 / 2));
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
@@ -75,7 +76,7 @@ void test_leave_list_normal_leaves(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "A", 1, 4.0);
 
   rack_set_to_string(ld, rack, "B");
-  leave_list_add_all_subleaves(leave_list, rack, 5.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 5.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 3);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 12.0 / 3));
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
@@ -83,7 +84,7 @@ void test_leave_list_normal_leaves(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "B", 1, 5.0);
 
   rack_set_to_string(ld, rack, "A");
-  leave_list_add_all_subleaves(leave_list, rack, 6.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 6.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 4);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 18.0 / 4));
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
@@ -91,7 +92,7 @@ void test_leave_list_normal_leaves(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "A", 2, 10.0 / 2);
 
   rack_set_to_string(ld, rack, "B");
-  leave_list_add_all_subleaves(leave_list, rack, 7.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 7.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 5);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 25.0 / 5));
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
@@ -99,7 +100,7 @@ void test_leave_list_normal_leaves(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "B", 2, 12.0 / 2);
 
   rack_set_to_string(ld, rack, "B");
-  leave_list_add_all_subleaves(leave_list, rack, 9.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 9.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 6);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 34.0 / 6));
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
@@ -107,7 +108,7 @@ void test_leave_list_normal_leaves(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "B", 3, 21.0 / 3);
 
   rack_set_to_string(ld, rack, "C");
-  leave_list_add_all_subleaves(leave_list, rack, 11.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 11.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 7);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 45.0 / 7));
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "C", 1, 11.0);
@@ -115,7 +116,7 @@ void test_leave_list_normal_leaves(void) {
          number_of_leaves - 1);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_all_subleaves(leave_list, rack, 15.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 15.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 8);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 60.0 / 8));
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "D", 1, 15.0);
@@ -129,7 +130,7 @@ void test_leave_list_normal_leaves(void) {
          number_of_leaves - 1);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_all_subleaves(leave_list, rack, 17.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 17.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 9);
   assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 77.0 / 9));
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "D", 2, 32.0 / 2);
@@ -144,7 +145,7 @@ void test_leave_list_normal_leaves(void) {
          number_of_leaves - 1);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_all_subleaves(leave_list, rack, 17.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 17.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 10);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 94.0 / 10));
@@ -160,7 +161,7 @@ void test_leave_list_normal_leaves(void) {
          number_of_leaves - 8);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_all_subleaves(leave_list, rack, 1.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 1.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 11);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 95.0 / 11));
@@ -176,7 +177,7 @@ void test_leave_list_normal_leaves(void) {
          number_of_leaves - 8);
 
   rack_set_to_string(ld, rack, "DEF");
-  leave_list_add_all_subleaves(leave_list, rack, 1.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 1.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 12);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 96.0 / 12));
@@ -192,7 +193,7 @@ void test_leave_list_normal_leaves(void) {
          number_of_leaves - 8);
 
   rack_set_to_string(ld, rack, "DEG");
-  leave_list_add_all_subleaves(leave_list, rack, 3.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 3.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 13);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 99.0 / 13));
@@ -212,7 +213,7 @@ void test_leave_list_normal_leaves(void) {
          number_of_leaves - 8);
 
   rack_set_to_string(ld, rack, "HII");
-  leave_list_add_all_subleaves(leave_list, rack, 7.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 7.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 14);
   assert(
       within_epsilon(leave_list_get_empty_leave_mean(leave_list), 106.0 / 14));
@@ -261,34 +262,34 @@ void test_leave_list_normal_leaves(void) {
   clear_bag(bag);
 
   rack_set_to_string(ld, rack, "DE");
-  leave_list_add_all_subleaves(leave_list, rack, 1.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 1.0);
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
   rack_set_to_string(ld, rack, "DG");
-  leave_list_add_all_subleaves(leave_list, rack, 1.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 1.0);
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
   rack_set_to_string(ld, rack, "EG");
-  leave_list_add_all_subleaves(leave_list, rack, 1.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 1.0);
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves);
 
   rack_set_to_string(ld, rack, "DEG");
-  leave_list_add_all_subleaves(leave_list, rack, 1.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 1.0);
   // The leaves D, E, and G, all reached the min count
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 3);
 
   rack_set_to_string(ld, rack, "H");
-  leave_list_add_all_subleaves(leave_list, rack, 1.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 1.0);
   rack_set_to_string(ld, rack, "I");
-  leave_list_add_all_subleaves(leave_list, rack, 2.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
   rack_set_to_string(ld, rack, "HI");
-  leave_list_add_all_subleaves(leave_list, rack, 4.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 4.0);
   rack_set_to_string(ld, rack, "ABC");
-  leave_list_add_all_subleaves(leave_list, rack, 6.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 6.0);
   rack_set_to_string(ld, rack, "ABCI");
-  leave_list_add_all_subleaves(leave_list, rack, 8.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 8.0);
   // The leave I reached the min count
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 4);
@@ -296,33 +297,33 @@ void test_leave_list_normal_leaves(void) {
   rack_set_to_string(ld, rack, "II");
 
   // Add the leave II 3 times to reach the min count
-  leave_list_add_all_subleaves(leave_list, rack, 2.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 4);
-  leave_list_add_all_subleaves(leave_list, rack, 2.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 4);
-  leave_list_add_all_subleaves(leave_list, rack, 2.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
   // The leave II reached the min count
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 5);
 
   for (int i = 0; i < target_leave_count; i++) {
     rack_set_to_string(ld, rack, "ABCDII");
-    leave_list_add_all_subleaves(leave_list, rack, 2.0);
+    leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
     rack_set_to_string(ld, rack, "ABCEII");
-    leave_list_add_all_subleaves(leave_list, rack, 2.0);
+    leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
     rack_set_to_string(ld, rack, "ABDEII");
-    leave_list_add_all_subleaves(leave_list, rack, 2.0);
+    leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
     rack_set_to_string(ld, rack, "ACDEII");
-    leave_list_add_all_subleaves(leave_list, rack, 2.0);
+    leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
     rack_set_to_string(ld, rack, "BCDEII");
-    leave_list_add_all_subleaves(leave_list, rack, 2.0);
+    leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
   }
 
   for (int i = 0; i < target_leave_count; i++) {
     rack_set_to_string(ld, rack, "ABCDE");
-    leave_list_add_all_subleaves(leave_list, rack, 2.0);
+    leave_list_add_all_subleaves(leave_list, rack, subrack, 2.0);
   }
 
   // Test with nonempty player leaves
@@ -330,13 +331,13 @@ void test_leave_list_normal_leaves(void) {
   clear_bag(bag);
 
   rack_set_to_string(ld, rack, "J");
-  leave_list_add_all_subleaves(leave_list, rack, 4.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 4.0);
   rack_set_to_string(ld, rack, "JK");
-  leave_list_add_all_subleaves(leave_list, rack, 5.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 5.0);
   rack_set_to_string(ld, rack, "JKL");
-  leave_list_add_all_subleaves(leave_list, rack, 6.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 6.0);
   rack_set_to_string(ld, rack, "KLM");
-  leave_list_add_all_subleaves(leave_list, rack, 7.0);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, 7.0);
 
   double empty_leave_mean = leave_list_get_empty_leave_mean(leave_list);
 
@@ -389,7 +390,7 @@ void test_leave_list_normal_leaves(void) {
   // Ensure that adding a full rack runs without error
   const double full_rack_value = 1013.0;
   rack_set_to_string(ld, rack, "PQRSTUV");
-  leave_list_add_all_subleaves(leave_list, rack, full_rack_value);
+  leave_list_add_all_subleaves(leave_list, rack, subrack, full_rack_value);
 
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "S", 1,
                                         full_rack_value);
@@ -448,21 +449,20 @@ void test_leave_list_normal_leaves(void) {
   rack_destroy(player_rack);
   rack_destroy(expected_rack);
   rack_destroy(rack);
+  rack_destroy(subrack);
   bag_destroy(bag);
   leave_list_destroy(leave_list);
   config_destroy(config);
 }
 
-int leave_list_add_sas(LeaveList *leave_list, const LetterDistribution *ld,
-                       Rack *subleave, const char *subleave_str,
-                       int expected_leaves_below_target_count, double equity) {
+void leave_list_add_sas(LeaveList *leave_list, const LetterDistribution *ld,
+                        Rack *subleave, const char *subleave_str,
+                        int expected_leaves_below_target_count, double equity) {
   rack_reset(subleave);
   rack_set_to_string(ld, subleave, subleave_str);
-  int lowest_leave_count =
-      leave_list_add_single_subleave(leave_list, subleave, equity);
+  leave_list_add_single_subleave(leave_list, subleave, equity);
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          expected_leaves_below_target_count);
-  return lowest_leave_count;
 }
 
 void test_leave_list_small_leaves(void) {
@@ -485,84 +485,86 @@ void test_leave_list_small_leaves(void) {
   int lutmc = number_of_leaves;
 
   for (int i = 0; i < tmc - 1; i++) {
-    assert(leave_list_add_sas(ll, ld, sl, "A", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "B", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AA", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "BB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAA", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "ABB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "BBB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAAA", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAAB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AABB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "ABBB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "BBBB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAAAA", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAAAB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAABB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AABBB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "ABBBB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "BBBBB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAAAAA", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAAAAB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAAABB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AAABBB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "AABBBB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "ABBBBB", lutmc, 1.0) == i);
-    assert(leave_list_add_sas(ll, ld, sl, "BBBBBB", lutmc, 1.0) == i + 1);
+    leave_list_add_sas(ll, ld, sl, "A", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "B", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AA", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "BB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAA", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "ABB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "BBB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAAA", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAAB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AABB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "ABBB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "BBBB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAAAA", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAAAB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAABB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AABBB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "ABBBB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "BBBBB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAAAAA", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAAAAB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAAABB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AAABBB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "AABBBB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "ABBBBB", lutmc, 1.0);
+    leave_list_add_sas(ll, ld, sl, "BBBBBB", lutmc, 1.0);
   }
 
   lutmc--;
-  assert(leave_list_add_sas(ll, ld, sl, "A", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "B", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AA", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "BB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAA", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "ABB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "BBB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAAA", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAAB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AABB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "ABBB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "BBBB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAAAA", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAAAB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAABB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AABBB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "ABBBB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "BBBBB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAAAAA", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAAAAB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAAABB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AAABBB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "ABBBBB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "BBBBBB", lutmc--, 1.0) == tmc - 1);
-  assert(leave_list_add_sas(ll, ld, sl, "AABBBB", lutmc--, 1.0) == tmc);
+  leave_list_add_sas(ll, ld, sl, "A", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "B", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AA", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "BB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAA", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "ABB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "BBB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAAA", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAAB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AABB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "ABBB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "BBBB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAAAA", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAAAB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAABB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AABBB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "ABBBB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "BBBBB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAAAAA", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAAAAB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAAABB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AAABBB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "ABBBBB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "BBBBBB", lutmc--, 1.0);
+  leave_list_add_sas(ll, ld, sl, "AABBBB", lutmc--, 1.0);
 
   leave_list_reset(ll);
 
   lutmc = number_of_leaves;
 
   for (int i = 0; i < tmc - 1; i++) {
-    assert(leave_list_add_sas(ll, ld, sl, "A", lutmc, 1.0) == 0);
+    leave_list_add_sas(ll, ld, sl, "A", lutmc, 1.0);
   }
   for (int i = 0; i < 5; i++) {
-    assert(leave_list_add_sas(ll, ld, sl, "A", lutmc - 1, 1.0) == 0);
+    leave_list_add_sas(ll, ld, sl, "A", lutmc - 1, 1.0);
   }
 
   leave_list_reset(ll);
 
   int rare_leaves_drawn = 0;
+  XoshiroPRNG *prng = prng_create(100);
   while (leave_list_get_leaves_below_target_count(ll) > 0) {
-    leave_list_get_rarest_leave(ll, rare_leave);
+    assert(leave_list_get_rare_leave(ll, prng, rare_leave));
     leave_list_add_single_subleave(ll, rare_leave, 10.0);
     rare_leaves_drawn++;
   }
   assert(rare_leaves_drawn == number_of_leaves * tmc);
+  assert(!leave_list_get_rare_leave(ll, prng, rare_leave));
 
   bag_destroy(bag);
   rack_destroy(player_rack);

@@ -16,7 +16,6 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/klv.h"
-#include "../ent/leave_list.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -25,6 +24,9 @@
 #include "move_gen.h"
 
 #include "../util/string_util.h"
+
+// FIXME: remove
+#include "../str/move_string.h"
 
 double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
