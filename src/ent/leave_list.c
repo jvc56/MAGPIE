@@ -6,7 +6,6 @@
 #include "encoded_rack.h"
 #include "game.h"
 #include "klv.h"
-#include "leave_count_hashmap.h"
 #include "rack.h"
 #include "thread_control.h"
 #include "xoshiro.h"
@@ -14,20 +13,6 @@
 #include "../str/rack_string.h"
 
 #include "../util/util.h"
-
-// FIXME: remove
-void bprint_english_rack(const Rack *rack) {
-  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
-    printf("?");
-  }
-  const int ld_size = rack_get_dist_size(rack);
-  for (int i = 1; i < ld_size; i++) {
-    const int num_letter = rack_get_letter(rack, i);
-    for (int j = 0; j < num_letter; j++) {
-      printf("%c", i + 'A' - 1);
-    }
-  }
-}
 
 #define MAX_LEAVE_SIZE (RACK_SIZE - 1)
 
@@ -207,33 +192,31 @@ void leave_list_swap_items(LeaveList *leave_list, int i, int j) {
 void leave_list_add_subleave_with_klv_index(LeaveList *leave_list,
                                             int klv_index, double equity) {
   LeaveListItem *item = leave_list->leaves_ordered_by_klv_index[klv_index];
+  bool item_reached_target_count = false;
   pthread_mutex_lock(&item->mutex);
-  printf("outer: grabbed %p\n", item);
   leave_list_item_increment_count(item, equity);
-  if (item->count == leave_list->target_leave_count) {
+  item_reached_target_count = item->count == leave_list->target_leave_count;
+  pthread_mutex_unlock(&item->mutex);
+
+  if (item_reached_target_count) {
     pthread_mutex_lock(&leave_list->partition_index_mutex);
-    printf("grabbed partition\n");
     const int curr_partition_index = leave_list->partition_index;
     if (curr_partition_index >= item->count_index) {
       if (curr_partition_index != item->count_index) {
         LeaveListItem *swap_item =
-            leave_list->leaves_partitioned_by_target_count
-                [leave_list->partition_index];
+            leave_list
+                ->leaves_partitioned_by_target_count[curr_partition_index];
+        pthread_mutex_lock(&item->mutex);
         pthread_mutex_lock(&swap_item->mutex);
-        printf("inner: grabbed %p\n", swap_item);
         leave_list_swap_items(leave_list, item->count_index,
                               swap_item->count_index);
-        printf("inner: released %p\n", swap_item);
         pthread_mutex_unlock(&swap_item->mutex);
+        pthread_mutex_unlock(&item->mutex);
       }
       leave_list->partition_index--;
-      printf("partition index: %d\n", leave_list->partition_index);
     }
-    printf("released partition\n");
     pthread_mutex_unlock(&leave_list->partition_index_mutex);
   }
-  printf("outer: released %p\n", item);
-  pthread_mutex_unlock(&item->mutex);
 }
 
 // Adds a single subleave to the list.
@@ -328,13 +311,9 @@ bool leave_list_get_rare_leave(LeaveList *leave_list, XoshiroPRNG *prng,
   }
   const int random_rack_index =
       prng_get_random_number(prng, leave_list->partition_index + 1);
-  // printf("random rack index: %d\n", random_rack_index);
   rack_decode(&leave_list->leaves_partitioned_by_target_count[random_rack_index]
                    ->encoded_rack,
               rack);
-  // printf("decoded rack: >");
-  // bprint_english_rack(rack);
-  // printf("<\n");
   return true;
 }
 

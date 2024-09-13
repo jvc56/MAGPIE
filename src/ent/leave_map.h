@@ -142,11 +142,6 @@ leave_map_take_letter_and_update_complement_index(LeaveMap *leave_map,
   const int base_index = leave_map->letter_base_index_map[letter];
   const int offset = rack->array[letter];
   const int bit_index = base_index + offset;
-  if (bit_index < 0 || bit_index > 6 || rack_get_total_letters(rack) > 7) {
-    printf("A rack has %d letters, trying letter %d, %d, %d, %d\n",
-           rack_get_total_letters(rack), letter, base_index, offset, bit_index);
-    abort();
-  }
   const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
   leave_map->current_index |= reversed_bit;
 }
@@ -158,11 +153,6 @@ leave_map_add_letter_and_update_complement_index(LeaveMap *leave_map,
   const int base_index = leave_map->letter_base_index_map[letter];
   const int offset = rack->array[letter] - 1;
   const int bit_index = base_index + offset;
-  if (bit_index < 0 || bit_index > 6 || rack_get_total_letters(rack) > 7) {
-    printf("B rack has %d letters, trying letter %d, %d, %d, %d\n",
-           rack_get_total_letters(rack), letter, base_index, offset, bit_index);
-    abort();
-  }
   const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
   leave_map->current_index &= ~reversed_bit;
 }

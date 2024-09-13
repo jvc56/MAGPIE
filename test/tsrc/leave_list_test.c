@@ -566,6 +566,7 @@ void test_leave_list_small_leaves(void) {
   assert(rare_leaves_drawn == number_of_leaves * tmc);
   assert(!leave_list_get_rare_leave(ll, prng, rare_leave));
 
+  prng_destroy(prng);
   bag_destroy(bag);
   rack_destroy(player_rack);
   rack_destroy(rare_leave);

@@ -28,10 +28,6 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-// FIXME: remove
-#include "../str/move_string.h"
-#include "../util/string_util.h"
-
 typedef struct LeavegenSharedData {
   uint64_t gens_completed;
   uint64_t gen_start_games;
@@ -253,8 +249,6 @@ typedef struct GameRunner {
   Rack *rare_leave;
   Rack *bag_and_rare_leave_overlap;
   AutoplaySharedData *shared_data;
-  // FIXME: remove
-  StringBuilder *sb;
 } GameRunner;
 
 GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
@@ -269,7 +263,6 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
   game_runner->move_list = move_list_create(1);
-  game_runner->sb = string_builder_create();
   return game_runner;
 }
 
@@ -284,7 +277,6 @@ void game_runner_destroy(GameRunner *game_runner) {
   rack_destroy(game_runner->bag_and_rare_leave_overlap);
   game_destroy(game_runner->game);
   move_list_destroy(game_runner->move_list);
-  string_builder_destroy(game_runner->sb);
   free(game_runner);
 }
 
@@ -317,20 +309,6 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
           bag_get_tiles(game_get_bag(game_runner->game)) < (RACK_SIZE));
 }
 
-// FIXME: remove
-void sb_add_english_rack(StringBuilder *sb, const Rack *rack) {
-  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
-    string_builder_add_char(sb, '?');
-  }
-  const int ld_size = rack_get_dist_size(rack);
-  for (int i = 1; i < ld_size; i++) {
-    const int num_letter = rack_get_letter(rack, i);
-    for (int j = 0; j < num_letter; j++) {
-      string_builder_add_char(sb, i + 'A' - 1);
-    }
-  }
-}
-
 const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                                   GameRunner *game_runner) {
   if (game_runner_is_game_over(game_runner)) {
@@ -346,22 +324,12 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   // leave does not necessarily fit in the bag. If we've reached the
   // target minimum leave count for all leaves, no rare leave can be
   // drawn.
-  Rack *player_rack =
-      player_get_rack(game_get_player(game, player_on_turn_index));
-
-  // string_builder_clear(game_runner->sb);
-  // string_builder_add_formatted_string(game_runner->sb,
-  //                                     "%d: before force, normal rack is >",
-  //                                     autoplay_worker->worker_index);
-  // sb_add_english_rack(game_runner->sb, player_rack);
-  // string_builder_add_string(game_runner->sb, "<\nSTARTING GAME\n");
-  // thread_control_print(autoplay_worker->args->thread_control,
-  //                      string_builder_peek(game_runner->sb));
-
   if (game_runner->force_draw &&
       leave_list_get_rare_leave(lg_shared_data->leave_list,
                                 autoplay_worker->prng,
                                 game_runner->rare_leave)) {
+    Rack *player_rack =
+        player_get_rack(game_get_player(game, player_on_turn_index));
     const int player_on_turn_draw_index =
         game_get_player_on_turn_draw_index(game);
     // Backup the original rack before returning it to the bag.
@@ -391,19 +359,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     // Fill up the rest of the rack with tiles from the bag
     draw_to_full_rack(game, player_on_turn_index);
 
-    // string_builder_add_formatted_string(game_runner->sb,
-    //                                     "and force move rack is >",
-    //                                     autoplay_worker->worker_index);
-    // sb_add_english_rack(game_runner->sb, player_rack);
-    // string_builder_add_string(game_runner->sb, "<\n");
-    // thread_control_print(autoplay_worker->args->thread_control,
-    //                      string_builder_peek(game_runner->sb));
-
-    if (rack_get_total_letters(player_rack) > 7) {
-      printf("A 2 player rack has %d\n", rack_get_total_letters(player_rack));
-      abort();
-    }
-
     const Move *forced_move =
         get_top_equity_move(game, thread_index, game_runner->move_list);
     leave_list_add_single_subleave(lg_shared_data->leave_list,
@@ -413,16 +368,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     // tiles that remain since we know for sure that these tiles
     // were drawn from the bag.
     rack_subtract(player_rack, game_runner->rare_leave);
-
-    // string_builder_clear(game_runner->sb);
-    // string_builder_add_formatted_string(game_runner->sb, "%d: after sub rare
-    // >",
-    //                                     autoplay_worker->worker_index);
-    // sb_add_english_rack(game_runner->sb, player_rack);
-    // string_builder_add_string(game_runner->sb, "<\n");
-    // thread_control_print(autoplay_worker->args->thread_control,
-    //                      string_builder_peek(game_runner->sb));
-
     return_rack_to_bag(game, player_on_turn_index);
 
     // Add the overlap between the rare leave and the bag back to the
@@ -431,45 +376,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     // as described above. These tiles need to be returned to the bag
     // as well.
     rack_copy(player_rack, game_runner->bag_and_rare_leave_overlap);
-
-    // string_builder_clear(game_runner->sb);
-    // string_builder_add_formatted_string(game_runner->sb,
-    //                                     "%d: after copy overlap >",
-    //                                     autoplay_worker->worker_index);
-    // sb_add_english_rack(game_runner->sb, player_rack);
-    // string_builder_add_string(game_runner->sb, "<\n");
-    // thread_control_print(autoplay_worker->args->thread_control,
-    //                      string_builder_peek(game_runner->sb));
-
     return_rack_to_bag(game, player_on_turn_index);
 
     // Redrawn the original rack.
     draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);
-
-    // string_builder_clear(game_runner->sb);
-    // string_builder_add_formatted_string(game_runner->sb, "%d: after redraw
-    // >",
-    //                                     autoplay_worker->worker_index);
-    // sb_add_english_rack(game_runner->sb, player_rack);
-    // string_builder_add_string(game_runner->sb, "<\n");
-    // thread_control_print(autoplay_worker->args->thread_control,
-    //                      string_builder_peek(game_runner->sb));
-
-    if (rack_get_total_letters(player_rack) > 7) {
-      printf("B player rack has %d\n", rack_get_total_letters(player_rack));
-      abort();
-    }
-  }
-  // string_builder_clear(game_runner->sb);
-  // string_builder_add_formatted_string(game_runner->sb,
-  //                                     "%d: after force, normal rack is >",
-  //                                     autoplay_worker->worker_index);
-  // sb_add_english_rack(game_runner->sb, player_rack);
-  // string_builder_add_string(game_runner->sb, "<\n");
-  // thread_control_print(autoplay_worker->args->thread_control,
-  //                      string_builder_peek(game_runner->sb));
-  if (rack_get_total_letters(player_rack) > 7) {
-    abort();
   }
   const Move *move =
       get_top_equity_move(game, thread_index, game_runner->move_list);
@@ -484,29 +394,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         game_runner->bag_and_rare_leave_overlap, move_get_equity(move));
   }
   play_move(move, game, NULL, leave_from_previous_move);
-
-  // string_builder_clear(game_runner->sb);
-  // string_builder_add_formatted_string(game_runner->sb, "%d: played move >",
-  //                                     autoplay_worker->worker_index);
-  // string_builder_add_move_description(game_runner->sb, move,
-  //                                     autoplay_worker->args->game_args->ld);
-  // string_builder_add_string(game_runner->sb, "< with a leave of >");
-
-  // sb_add_english_rack(game_runner->sb, leave_from_previous_move);
-  // string_builder_add_string(game_runner->sb, "<\n");
-
-  // thread_control_print(autoplay_worker->args->thread_control,
-  //                      string_builder_peek(game_runner->sb));
-
-  // string_builder_clear(game_runner->sb);
-  // string_builder_add_formatted_string(game_runner->sb,
-  //                                     "%d: rack after move is >",
-  //                                     autoplay_worker->worker_index);
-  // sb_add_english_rack(game_runner->sb, player_rack);
-  // string_builder_add_string(game_runner->sb, "<\nFINISHED GAME\n");
-  // thread_control_print(autoplay_worker->args->thread_control,
-  //                      string_builder_peek(game_runner->sb));
-
   game_runner->turn_number++;
   return move;
 }

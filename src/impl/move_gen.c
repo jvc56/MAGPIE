@@ -340,22 +340,6 @@ static inline void record_exchange(MoveGen *gen) {
     }
   }
 
-  // FIXME: remove
-  // printf("recording exchange for >");
-  // for (int i = 0; i < rack_get_letter(&gen->player_rack,
-  // BLANK_MACHINE_LETTER);
-  //      i++) {
-  //   printf("?");
-  // }
-  // const int ld_size = rack_get_dist_size(&gen->player_rack);
-  // for (int i = 1; i < ld_size; i++) {
-  //   const int num_letter = rack_get_letter(&gen->player_rack, i);
-  //   for (int j = 0; j < num_letter; j++) {
-  //     printf("%c", i + 'A' - 1);
-  //   }
-  // }
-  // printf("<\n");
-
   update_best_move_or_insert_into_movelist(
       gen, 0, tiles_exchanged, GAME_EVENT_EXCHANGE, 0, 0, 0, tiles_exchanged,
       BOARD_HORIZONTAL_DIRECTION, gen->exchange_strip);
@@ -1379,20 +1363,6 @@ void generate_moves(Game *game, move_record_t move_record_type,
     leave_map_set_current_index(&gen->leave_map, 0);
     uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
     rack_reset(&gen->leave);
-    // FIXME: remove
-    // printf("generating exchange moves for >");
-    // for (int i = 0;
-    //      i < rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER); i++) {
-    //   printf("?");
-    // }
-    // const int ld_size = rack_get_dist_size(&gen->player_rack);
-    // for (int i = 1; i < ld_size; i++) {
-    //   const int num_letter = rack_get_letter(&gen->player_rack, i);
-    //   for (int j = 0; j < num_letter; j++) {
-    //     printf("%c", i + 'A' - 1);
-    //   }
-    // }
-    // printf("<\n");
     generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
                             gen->number_of_tiles_in_bag >= RACK_SIZE);
   }
