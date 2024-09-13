@@ -33,7 +33,7 @@ struct LeaveList {
   // Index of the last leave in the leaves_partitioned_by_target_count
   // which has a count less than target_leave_count. All leaves
   // with an index greater than this are no longer considered rare.
-  // All leaves with an index less than this are considered rare.
+  // All leaves with an index less than or equal to this are considered rare.
   int partition_index;
   LeaveListItem *empty_leave;
   // Owned by the caller
@@ -188,7 +188,6 @@ void leave_list_swap_items(LeaveList *leave_list, int i, int j) {
   leave_list->leaves_partitioned_by_target_count[j]->count_index = j;
 }
 
-// Returns true if all leaves reached the minimum target count.
 void leave_list_add_subleave_with_klv_index(LeaveList *leave_list,
                                             int klv_index, double equity) {
   LeaveListItem *item = leave_list->leaves_ordered_by_klv_index[klv_index];
@@ -220,7 +219,6 @@ void leave_list_add_subleave_with_klv_index(LeaveList *leave_list,
 }
 
 // Adds a single subleave to the list.
-// Returns true if all leaves reached the minimum target count.
 void leave_list_add_single_subleave(LeaveList *leave_list, const Rack *subleave,
                                     double equity) {
   leave_list_add_subleave_with_klv_index(
@@ -365,12 +363,12 @@ void string_builder_add_most_or_least_common_leaves(
   }
   Rack *rack = rack_create(ld_get_size(ld));
   while (i < number_of_leaves && i >= 0 && n > 0) {
-    const int count = leave_list->leaves_partitioned_by_target_count[i]->count;
     rack_decode(
         &leave_list->leaves_partitioned_by_target_count[i]->encoded_rack, rack);
     string_builder_add_rack(sb, rack, ld, false);
     string_builder_add_formatted_string(
-        sb, "%*s %d\n", (RACK_SIZE)-rack_get_total_letters(rack), "", count);
+        sb, "%*s %d\n", (RACK_SIZE)-rack_get_total_letters(rack), "",
+        leave_list->leaves_partitioned_by_target_count[i]->count);
     n--;
     if (most_common) {
       i--;

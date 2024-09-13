@@ -339,13 +339,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     // Set the rack to the rare leave
     rack_copy(player_rack, game_runner->rare_leave);
 
-    // string_builder_clear(game_runner->sb);
-    // string_builder_add_formatted_string(game_runner->sb, "%d: rare leave is
-    // >",
-    //                                     autoplay_worker->worker_index);
-    // sb_add_english_rack(game_runner->sb, player_rack);
-    // string_builder_add_string(game_runner->sb, "< ");
-
     // Remove the rare leave from the bag, for whatever
     // tiles in the rare leave are in the bag. This is to prevent
     // violating the letter distribution. For example, if the rare

@@ -157,7 +157,7 @@ void test_autoplay_leavegen(void) {
   load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed_ml english");
   load_and_exec_config_or_die(csw_config,
                               "set -leaves CSW21_zeroed_ml -threads 11");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 10 1 0 -seed 1");
+  load_and_exec_config_or_die(csw_config, "leavegen 2 100 1 0 -seed 1");
 
   config_destroy(csw_config);
 }
