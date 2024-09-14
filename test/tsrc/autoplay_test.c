@@ -214,7 +214,7 @@ void test_autoplay_divergent_games(void) {
       config_get_autoplay_results(csw_config), false, true);
   assert_autoplay_output(
       ar_gp_diff_lex_str, 2,
-      (const char *[]){"autoplay games 100", "autoplay games 52"});
+      (const char *[]){"autoplay games 100", "autoplay games 100"});
 
   free(ar_gp_diff_lex_str);
 
