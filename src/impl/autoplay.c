@@ -463,8 +463,9 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
 
     // It is guaranteed that at least one move is not null
     // at this point.
-    if (!move1 || !move2 ||
-        compare_moves_without_equity(move1, move2, true) != -1) {
+    if (!games_are_divergent &&
+        (!move1 || !move2 ||
+         compare_moves_without_equity(move1, move2, true) != -1)) {
       games_are_divergent = true;
     }
   }
