@@ -233,6 +233,48 @@ static inline int compare_moves(const Move *move_1, const Move *move_2,
   return -1;
 }
 
+// Does not compare move equity
+// Returns 1 if move_1 is "better" than move_2
+// Returns 0 if move_2 is "better" than move_1
+// Returns -1 if the moves are equivalent
+// Dies if moves are equivalent and duplicates
+// are not allowed
+// Assumes the moves are not null
+static inline int compare_moves_without_equity(const Move *move_1,
+                                               const Move *move_2,
+                                               bool allow_duplicates) {
+  if (move_1->score != move_2->score) {
+    return move_1->score > move_2->score;
+  }
+  if (move_1->move_type != move_2->move_type) {
+    return move_1->move_type < move_2->move_type;
+  }
+  if (move_1->row_start != move_2->row_start) {
+    return move_1->row_start < move_2->row_start;
+  }
+  if (move_1->col_start != move_2->col_start) {
+    return move_1->col_start < move_2->col_start;
+  }
+  if (move_1->dir != move_2->dir) {
+    return move_2->dir;
+  }
+  if (move_1->tiles_played != move_2->tiles_played) {
+    return move_1->tiles_played < move_2->tiles_played;
+  }
+  if (move_1->tiles_length != move_2->tiles_length) {
+    return move_1->tiles_length < move_2->tiles_length;
+  }
+  for (int i = 0; i < move_1->tiles_length; i++) {
+    if (move_1->tiles[i] != move_2->tiles[i]) {
+      return move_1->tiles[i] < move_2->tiles[i];
+    }
+  }
+  if (!allow_duplicates) {
+    log_fatal("duplicate move in move list detected: %d\n", move_1->move_type);
+  }
+  return -1;
+}
+
 static inline void move_list_insert_spare_move_top_equity(MoveList *ml,
                                                           double equity) {
   ml->spare_move->equity = equity;
