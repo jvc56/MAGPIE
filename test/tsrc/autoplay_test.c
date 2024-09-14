@@ -8,6 +8,7 @@
 #include "../../src/def/autoplay_defs.h"
 
 #include "../../src/ent/autoplay_results.h"
+#include "../../src/ent/data_filepaths.h"
 #include "../../src/ent/stats.h"
 
 #include "../../src/impl/autoplay.h"
@@ -217,6 +218,34 @@ void test_autoplay_divergent_games(void) {
       (const char *[]){"autoplay games 100", "autoplay games 100"});
 
   free(ar_gp_diff_lex_str);
+
+  load_and_exec_config_or_die(csw_config, "set -lex CSW21");
+
+  KLV *small_diff_klv = klv_create(DEFAULT_TEST_DATA_PATH, "CSW21");
+  const int num = klv_get_number_of_leaves(small_diff_klv);
+
+  for (int i = 0; i < num; i++) {
+    small_diff_klv->leave_values[i] += -1 + (2 * (i % 2));
+  }
+
+  char *small_diff_klv_filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, "CSW21_small_diff", DATA_FILEPATH_TYPE_KLV);
+
+  klv_write(small_diff_klv, small_diff_klv_filename);
+  free(small_diff_klv_filename);
+  klv_destroy(small_diff_klv);
+
+  load_and_exec_config_or_die(
+      csw_config,
+      "autoplay games 50 -seed 50 -k1 CSW21 -k2 CSW21_small_diff -gp true");
+
+  char *small_diff_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false, true);
+  assert_autoplay_output(
+      small_diff_str, 2,
+      (const char *[]){"autoplay games 100", "autoplay games 88"});
+
+  free(small_diff_str);
 
   config_destroy(csw_config);
 }

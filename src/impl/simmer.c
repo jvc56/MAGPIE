@@ -458,7 +458,7 @@ sim_status_t simulate_internal(const SimArgs *args, Game *game,
   print_ucgi_sim_stats(
       game, sim_results, args->thread_control,
       (double)sim_results_get_node_count(sim_results) /
-          thread_control_get_time_elapsed(args->thread_control),
+          thread_control_get_seconds_elapsed(args->thread_control),
       true);
   return SIM_STATUS_SUCCESS;
 }

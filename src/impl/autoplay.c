@@ -91,6 +91,9 @@ void postgen_prebroadcast_func(void *data) {
       leave_gen_sb, "************************\n"
                     "Cumulative Autoplay Data\n************************\n\n");
 
+  string_builder_add_formatted_string(
+      leave_gen_sb, "Seconds: %f\n",
+      thread_control_get_seconds_elapsed(shared_data->thread_control));
   char *cumul_game_data_str = autoplay_results_to_string(
       lg_shared_data->primary_autoplay_results, true, false);
   string_builder_add_string(leave_gen_sb, cumul_game_data_str);
@@ -111,16 +114,10 @@ void postgen_prebroadcast_func(void *data) {
       "\nAverage Turn Equity: %0.2f\nTarget Minimum "
       "Leave "
       "Count: %d\nLeaves Under "
-      "Target Minimum Leave Count: %d\nLeaves Recorded: %d\n\n",
+      "Target Minimum Leave Count: %d\n\n",
       leave_list_get_empty_leave_mean(lg_shared_data->leave_list),
       leave_list_get_target_leave_count(lg_shared_data->leave_list),
       leave_list_get_leaves_below_target_count(lg_shared_data->leave_list));
-
-  string_builder_add_most_or_least_common_leaves(
-      leave_gen_sb, lg_shared_data->leave_list, lg_shared_data->ld, 100, true);
-  string_builder_add_string(leave_gen_sb, "\n");
-  string_builder_add_most_or_least_common_leaves(
-      leave_gen_sb, lg_shared_data->leave_list, lg_shared_data->ld, 100, false);
 
   char *report_name_prefix =
       cut_off_after_last_char(gen_labeled_klv_filename, '.');
@@ -466,7 +463,9 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
 
     // It is guaranteed that at least one move is not null
     // at this point.
-    if (!move1 || !move2 || compare_moves(move1, move2, true) != -1) {
+    if (!games_are_divergent &&
+        (!move1 || !move2 ||
+         compare_moves_without_equity(move1, move2, true) != -1)) {
       games_are_divergent = true;
     }
   }

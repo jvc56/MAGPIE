@@ -29,7 +29,4 @@ int leave_list_get_empty_leave_count(const LeaveList *leave_list);
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list);
 const EncodedRack *leave_list_get_encoded_rack(const LeaveList *leave_list,
                                                int klv_index);
-void string_builder_add_most_or_least_common_leaves(
-    StringBuilder *sb, const LeaveList *leave_list,
-    const LetterDistribution *ld, int n, bool most_common);
 #endif
