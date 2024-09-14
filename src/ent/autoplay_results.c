@@ -191,12 +191,12 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   double p0_win_pct = (double)p0_wins / gd->total_games;
   int p0_losses = gd->p0_losses;
   double p0_loss_pct = (double)p0_losses / gd->total_games;
-  int p1_wins = gd->total_games - p0_wins;
-  double p1_win_pct = (double)p1_wins / gd->total_games;
-  int p1_losses = gd->total_games - p0_losses;
-  double p1_loss_pct = (double)p1_losses / gd->total_games;
   int p0_ties = gd->p0_ties;
   double p0_tie_pct = (double)p0_ties / gd->total_games;
+  int p1_wins = gd->total_games - p0_wins - p0_ties;
+  double p1_win_pct = (double)p1_wins / gd->total_games;
+  int p1_losses = gd->total_games - p0_losses - p0_ties;
+  double p1_loss_pct = (double)p1_losses / gd->total_games;
 
   double p0_total = (double)gd->p0_wins + (double)gd->p0_ties / (double)2;
   double p0_total_pct = p0_total / (double)(gd->total_games);
