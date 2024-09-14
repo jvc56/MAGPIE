@@ -347,34 +347,3 @@ const EncodedRack *leave_list_get_encoded_rack(const LeaveList *leave_list,
                                                int klv_index) {
   return &leave_list->leaves_ordered_by_klv_index[klv_index]->encoded_rack;
 }
-
-void string_builder_add_most_or_least_common_leaves(
-    StringBuilder *sb, const LeaveList *leave_list,
-    const LetterDistribution *ld, int n, bool most_common) {
-  const int number_of_leaves = leave_list->number_of_leaves;
-  int i = 0;
-  if (most_common) {
-    i = number_of_leaves - 1;
-    string_builder_add_formatted_string(sb, "Top %d most common leaves:\n\n",
-                                        n);
-  } else {
-    string_builder_add_formatted_string(sb, "Top %d least common leaves:\n\n",
-                                        n);
-  }
-  Rack *rack = rack_create(ld_get_size(ld));
-  while (i < number_of_leaves && i >= 0 && n > 0) {
-    rack_decode(
-        &leave_list->leaves_partitioned_by_target_count[i]->encoded_rack, rack);
-    string_builder_add_rack(sb, rack, ld, false);
-    string_builder_add_formatted_string(
-        sb, "%*s %d\n", (RACK_SIZE)-rack_get_total_letters(rack), "",
-        leave_list->leaves_partitioned_by_target_count[i]->count);
-    n--;
-    if (most_common) {
-      i--;
-    } else {
-      i++;
-    }
-  }
-  rack_destroy(rack);
-}

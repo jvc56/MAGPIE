@@ -197,9 +197,9 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   double p0_loss_pct = (double)p0_losses / gd->total_games;
   int p0_ties = gd->p0_ties;
   double p0_tie_pct = (double)p0_ties / gd->total_games;
-  int p1_wins = gd->total_games - p0_wins - p0_ties;
+  int p1_wins = p0_losses;
   double p1_win_pct = (double)p1_wins / gd->total_games;
-  int p1_losses = gd->total_games - p0_losses - p0_ties;
+  int p1_losses = p0_wins;
   double p1_loss_pct = (double)p1_losses / gd->total_games;
 
   double p0_total = (double)gd->p0_wins + (double)gd->p0_ties / (double)2;
@@ -208,7 +208,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   double p1_total = (double)(gd->total_games) - p0_total;
   double p1_total_pct = p1_total / (double)(gd->total_games);
 
-  const int col_witdth = 25;
+  const int col_width = 25;
   StringBuilder *sb = string_builder_create();
   string_builder_add_string(sb, "\n");
 
@@ -244,25 +244,25 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
         100 * ((double)gd->game_end_reasons[i] / gd->total_games));
   }
 
-  string_builder_add_formatted_string(sb, "\n%-*s%-*s%-*s\n", col_witdth, "",
-                                      col_witdth, "Player 1", col_witdth,
+  string_builder_add_formatted_string(sb, "\n%-*s%-*s%-*s\n", col_width, "",
+                                      col_width, "Player 1", col_width,
                                       "Player 2");
 
   char *p0_total_str =
       get_total_float_and_percentage_string(p0_total, p0_total_pct);
   char *p1_total_str =
       get_total_float_and_percentage_string(p1_total, p1_total_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Total:", col_witdth, p0_total_str,
-                                      col_witdth, p1_total_str);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
+                                      "Total:", col_width, p0_total_str,
+                                      col_width, p1_total_str);
   free(p0_total_str);
   free(p1_total_str);
 
   char *p0_win_str = get_total_int_and_percentage_string(p0_wins, p0_win_pct);
   char *p1_win_str = get_total_int_and_percentage_string(p1_wins, p1_win_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Wins:", col_witdth, p0_win_str,
-                                      col_witdth, p1_win_str);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
+                                      "Wins:", col_width, p0_win_str, col_width,
+                                      p1_win_str);
   free(p0_win_str);
   free(p1_win_str);
 
@@ -270,25 +270,25 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
       get_total_int_and_percentage_string(p0_losses, p0_loss_pct);
   char *p1_loss_str =
       get_total_int_and_percentage_string(p1_losses, p1_loss_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Losses:", col_witdth, p0_loss_str,
-                                      col_witdth, p1_loss_str);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
+                                      "Losses:", col_width, p0_loss_str,
+                                      col_width, p1_loss_str);
   free(p0_loss_str);
   free(p1_loss_str);
 
   char *p0_ties_str = get_total_int_and_percentage_string(p0_ties, p0_tie_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Ties:", col_witdth, p0_ties_str,
-                                      col_witdth, p0_ties_str);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
+                                      "Ties:", col_width, p0_ties_str,
+                                      col_width, p0_ties_str);
   free(p0_ties_str);
 
   char *p0_score_str = get_score_and_dev_string(stat_get_mean(gd->p0_score),
                                                 stat_get_stdev(gd->p0_score));
   char *p1_score_str = get_score_and_dev_string(stat_get_mean(gd->p1_score),
                                                 stat_get_stdev(gd->p1_score));
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Score:", col_witdth, p0_score_str,
-                                      col_witdth, p1_score_str);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
+                                      "Score:", col_width, p0_score_str,
+                                      col_width, p1_score_str);
   free(p0_score_str);
   free(p1_score_str);
 

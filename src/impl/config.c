@@ -747,7 +747,7 @@ char *status_sim(Config *config) {
   return ucgi_sim_stats(
       config->game, sim_results,
       (double)sim_results_get_node_count(sim_results) /
-          thread_control_get_time_elapsed(config->thread_control),
+          thread_control_get_seconds_elapsed(config->thread_control),
       true);
 }
 
