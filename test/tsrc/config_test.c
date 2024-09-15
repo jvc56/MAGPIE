@@ -460,7 +460,7 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_TYPE_NONE, 0);
   // Create
   assert_config_exec_status(config, "create klx CSW50 english",
-                            ERROR_STATUS_TYPE_AUTOPLAY,
+                            ERROR_STATUS_TYPE_CONFIG_LOAD,
                             CONFIG_LOAD_STATUS_UNRECOGNIZED_CREATE_DATA_TYPE);
   config_destroy(config);
   config = config_create_default_test();

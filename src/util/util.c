@@ -94,6 +94,15 @@ double string_to_double_or_set_error(const char *str, bool *success) {
 
 uint64_t string_to_uint64_or_set_error(const char *str, bool *success) {
   char *endptr;
+  // Skip leading whitespaces
+  while (isspace(*str)) {
+    str++;
+  }
+  // Check for a negative sign
+  if (*str == '-') {
+    *success = false;
+    return 0;
+  }
   uint64_t result = strtoull(str, &endptr, 10);
   if (*endptr != '\0') {
     *success = false;

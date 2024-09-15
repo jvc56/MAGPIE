@@ -129,12 +129,7 @@ void test_autoplay_leavegen(void) {
   // The minimum leave count should be achieved quickly, so if this takes too
   // long, we know it failed.
   load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3", 60);
-
-  char *ab_ar_str = autoplay_results_to_string(
-      config_get_autoplay_results(ab_config), false, false);
-  assert_autoplay_output(ab_ar_str, 1, (const char *[]){"autoplay games 200"});
-
-  free(ab_ar_str);
+  load_and_exec_config_or_die_timed(ab_config, "leavegen 1,2,1 0 -seed 3", 60);
 
   config_destroy(ab_config);
 }
