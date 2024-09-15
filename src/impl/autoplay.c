@@ -394,7 +394,7 @@ void print_current_status(
   StringBuilder *status_sb = string_builder_create();
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   string_builder_add_formatted_string(
-      status_sb, "Played games %ld in %.3f seconds.",
+      status_sb, "Played %ld games in %.3f seconds.",
       iter_completed_output->iter_count_completed,
       iter_completed_output->time_elapsed);
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
