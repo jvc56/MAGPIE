@@ -163,12 +163,13 @@ void leave_list_destroy(LeaveList *leave_list) {
   free(leave_list);
 }
 
-void leave_list_reset(LeaveList *leave_list) {
+void leave_list_reset(LeaveList *leave_list, int target_leave_count) {
   leave_list_item_reset(leave_list->empty_leave);
   for (int i = 0; i < leave_list->number_of_leaves; i++) {
     leave_list_item_reset(leave_list->leaves_partitioned_by_target_count[i]);
   }
   leave_list->partition_index = leave_list->number_of_leaves - 1;
+  leave_list->target_leave_count = target_leave_count;
 }
 
 void leave_list_item_increment_count(LeaveListItem *item, double equity) {

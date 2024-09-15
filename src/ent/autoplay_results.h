@@ -24,7 +24,8 @@ void autoplay_results_reset(AutoplayResults *autoplay_results);
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Move *move);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, int turns, bool divergent);
+                               const Game *game, uint64_t turns,
+                               bool divergent);
 void autoplay_results_combine(AutoplayResults **autoplay_results_list,
                               int list_size, AutoplayResults *target);
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
@@ -32,6 +33,6 @@ char *autoplay_results_to_string(AutoplayResults *autoplay_results,
 void string_builder_add_winning_player_confidence(StringBuilder *sb,
                                                   double p0_win_pct,
                                                   double p1_win_pct,
-                                                  int total_games);
+                                                  uint64_t total_games);
 
 #endif

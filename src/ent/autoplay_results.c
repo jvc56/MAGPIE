@@ -22,7 +22,8 @@ typedef void (*recorder_reset_func_t)(Recorder *);
 typedef void (*recorder_create_data_func_t)(Recorder *, const Recorder *);
 typedef void (*recorder_destroy_data_func_t)(Recorder *);
 typedef void (*recorder_add_move_func_t)(Recorder *, const Move *);
-typedef void (*recorder_add_game_func_t)(Recorder *, const Game *, int, bool);
+typedef void (*recorder_add_game_func_t)(Recorder *, const Game *, uint64_t,
+                                         bool);
 typedef void (*recorder_combine_func_t)(Recorder **, int, Recorder *);
 typedef char *(*recorder_str_func_t)(Recorder *, bool, bool);
 
@@ -58,12 +59,12 @@ void add_game_noop(Recorder __attribute__((unused)) * recorder,
 // Game Recorder
 
 typedef struct GameData {
-  int total_games;
-  int total_turns;
-  int p0_wins;
-  int p0_losses;
-  int p0_ties;
-  int p0_firsts;
+  uint64_t total_games;
+  uint64_t total_turns;
+  uint64_t p0_wins;
+  uint64_t p0_losses;
+  uint64_t p0_ties;
+  uint64_t p0_firsts;
   Stat *p0_score;
   Stat *p1_score;
   Stat *turns;
@@ -104,7 +105,7 @@ void game_data_destroy(GameData *gd) {
   free(gd);
 }
 
-void game_data_add_game(GameData *gd, const Game *game, int turns) {
+void game_data_add_game(GameData *gd, const Game *game, uint64_t turns) {
   int p0_game_score = player_get_score(game_get_player(game, 0));
   int p1_game_score = player_get_score(game_get_player(game, 1));
   gd->total_games++;
@@ -135,7 +136,7 @@ void string_builder_add_game_end_reasons(StringBuilder *sb,
 char *game_data_ucgi_str(const GameData *gd) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_formatted_string(
-      sb, "autoplay games %d %d %d %d %d %f %f %f %f ", gd->total_games,
+      sb, "autoplay games %ld %ld %ld %ld %ld %f %f %f %f ", gd->total_games,
       gd->p0_wins, gd->p0_losses, gd->p0_ties, gd->p0_firsts,
       stat_get_mean(gd->p0_score), stat_get_stdev(gd->p0_score),
       stat_get_mean(gd->p1_score), stat_get_stdev(gd->p1_score));
@@ -146,8 +147,8 @@ char *game_data_ucgi_str(const GameData *gd) {
   return res;
 }
 
-char *get_total_int_and_percentage_string(int total, double pct) {
-  return get_formatted_string("%d (%2.2f%%)", total, pct * 100.0);
+char *get_total_int_and_percentage_string(uint64_t total, double pct) {
+  return get_formatted_string("%ld (%2.2f%%)", total, pct * 100.0);
 }
 
 char *get_total_float_and_percentage_string(double total, double pct) {
@@ -161,7 +162,7 @@ char *get_score_and_dev_string(double score, double stdev) {
 void string_builder_add_winning_player_confidence(StringBuilder *sb,
                                                   double p0_total,
                                                   double p1_total,
-                                                  int total_games) {
+                                                  uint64_t total_games) {
   // Apply a continuity correction from binomial to normal distribution
   // See
   // https://library.virginia.edu/data/articles/continuity-corrections-imperfect-responses-to-slight-problems#fn1
@@ -191,11 +192,11 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
 }
 
 char *game_data_human_readable_str(const GameData *gd, bool divergent) {
-  int p0_wins = gd->p0_wins;
+  uint64_t p0_wins = gd->p0_wins;
   double p0_win_pct = (double)p0_wins / gd->total_games;
-  int p0_losses = gd->p0_losses;
+  uint64_t p0_losses = gd->p0_losses;
   double p0_loss_pct = (double)p0_losses / gd->total_games;
-  int p0_ties = gd->p0_ties;
+  uint64_t p0_ties = gd->p0_ties;
   double p0_tie_pct = (double)p0_ties / gd->total_games;
 
   double p0_total = (double)gd->p0_wins + (double)gd->p0_ties / (double)2;
@@ -329,8 +330,8 @@ void game_data_sets_destroy(Recorder *recorder) {
   free(sets);
 }
 
-void game_data_sets_add_game(Recorder *recorder, const Game *game, int turns,
-                             bool divergent) {
+void game_data_sets_add_game(Recorder *recorder, const Game *game,
+                             uint64_t turns, bool divergent) {
   GameDataSets *sets = (GameDataSets *)recorder->data;
   game_data_add_game(sets->all_games, game, turns);
   if (divergent) {
@@ -447,7 +448,7 @@ void recorder_add_move(Recorder *recorder, const Move *move) {
   recorder->add_move_func(recorder, move);
 }
 
-void recorder_add_game(Recorder *recorder, const Game *game, int turns,
+void recorder_add_game(Recorder *recorder, const Game *game, uint64_t turns,
                        bool divergent) {
   recorder->add_game_func(recorder, game, turns, divergent);
 }
@@ -589,7 +590,8 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 }
 
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, int turns, bool divergent) {
+                               const Game *game, uint64_t turns,
+                               bool divergent) {
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
       recorder_add_game(autoplay_results->recorders[i], game, turns, divergent);

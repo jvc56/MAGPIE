@@ -29,8 +29,10 @@
 #include "../util/util.h"
 
 typedef struct LeavegenSharedData {
-  uint64_t gens_completed;
+  int num_gens;
+  int gens_completed;
   uint64_t gen_start_games;
+  int *min_leave_targets;
   AutoplayResults *gen_autoplay_results;
   const LetterDistribution *ld;
   const char *data_paths;
@@ -42,7 +44,6 @@ typedef struct LeavegenSharedData {
 } LeavegenSharedData;
 
 typedef struct AutoplaySharedData {
-  uint64_t games_per_gen;
   ThreadControl *thread_control;
   LeavegenSharedData *leavegen_shared_data;
 } AutoplaySharedData;
@@ -134,11 +135,13 @@ void postgen_prebroadcast_func(void *data) {
   free(leaves_filename);
 
   // Reset data for the next generation.
-  leave_list_reset(lg_shared_data->leave_list);
-  lg_shared_data->gen_start_games =
-      thread_control_get_iter_count(shared_data->thread_control);
-  thread_control_increment_max_iter_count(shared_data->thread_control,
-                                          shared_data->games_per_gen);
+  if (lg_shared_data->gens_completed < lg_shared_data->num_gens) {
+    leave_list_reset(
+        lg_shared_data->leave_list,
+        lg_shared_data->min_leave_targets[lg_shared_data->gens_completed]);
+    lg_shared_data->gen_start_games =
+        thread_control_get_iter_count(shared_data->thread_control);
+  }
 }
 
 typedef struct AutoplayWorker {
@@ -147,6 +150,7 @@ typedef struct AutoplayWorker {
   AutoplayResults *autoplay_results;
   AutoplaySharedData *shared_data;
   XoshiroPRNG *prng;
+  int *min_leave_targets;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -177,14 +181,14 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
-LeavegenSharedData *
-leavegen_shared_data_create(AutoplayResults *primary_autoplay_results,
-                            AutoplayResults **autoplay_results_list,
-                            const LetterDistribution *ld,
-                            const char *data_paths, KLV *klv,
-                            int number_of_threads, int target_leave_count) {
+LeavegenSharedData *leavegen_shared_data_create(
+    AutoplayResults *primary_autoplay_results,
+    AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
+    const char *data_paths, KLV *klv, int number_of_threads, int num_gens,
+    int *min_leave_targets) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
+  shared_data->num_gens = num_gens;
   shared_data->gens_completed = 0;
   shared_data->gen_start_games = 0;
   shared_data->klv = klv;
@@ -194,7 +198,8 @@ leavegen_shared_data_create(AutoplayResults *primary_autoplay_results,
   shared_data->autoplay_results_list = autoplay_results_list;
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
-  shared_data->leave_list = leave_list_create(ld, klv, target_leave_count);
+  shared_data->min_leave_targets = min_leave_targets;
+  shared_data->leave_list = leave_list_create(ld, klv, min_leave_targets[0]);
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   return shared_data;
@@ -205,15 +210,14 @@ AutoplaySharedData *autoplay_shared_data_create(
     AutoplayResults *primary_autoplay_results,
     AutoplayResults **autoplay_results_list, ThreadControl *thread_control,
     const LetterDistribution *ld, const char *data_paths, KLV *klv,
-    int number_of_threads, uint64_t games_per_gen, int target_leave_count) {
+    int number_of_threads, int num_gens, int *min_leave_targets) {
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
-  shared_data->games_per_gen = games_per_gen;
   shared_data->thread_control = thread_control;
   shared_data->leavegen_shared_data = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, ld, data_paths, klv,
-        number_of_threads, target_leave_count);
+        number_of_threads, num_gens, min_leave_targets);
   }
   return shared_data;
 }
@@ -394,7 +398,7 @@ void print_current_status(
   StringBuilder *status_sb = string_builder_create();
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   string_builder_add_formatted_string(
-      status_sb, "Played games %ld in %.3f seconds.",
+      status_sb, "Played %ld games in %.3f seconds.",
       iter_completed_output->iter_count_completed,
       iter_completed_output->time_elapsed);
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
@@ -509,10 +513,10 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
                         GameRunner *game_runner) {
   const AutoplayArgs *args = autoplay_worker->args;
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
-  for (int i = 0; i < args->gens; i++) {
+  LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
+  for (int i = 0; i < lg_shared_data->num_gens; i++) {
     autoplay_single_generation(autoplay_worker, game_runner, NULL);
-    checkpoint_wait(shared_data->leavegen_shared_data->postgen_checkpoint,
-                    shared_data);
+    checkpoint_wait(lg_shared_data->postgen_checkpoint, shared_data);
     if (thread_control_get_is_halted(args->thread_control)) {
       break;
     }
@@ -541,16 +545,58 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   return NULL;
 }
 
+bool parse_min_leave_targets(StringSplitter *split_min_leave_targets,
+                             int *min_leave_targets) {
+  int num_gens = string_splitter_get_number_of_items(split_min_leave_targets);
+  for (int i = 0; i < num_gens; i++) {
+    const char *item = string_splitter_get_item(split_min_leave_targets, i);
+    if (is_string_empty_or_whitespace(item)) {
+      return false;
+    }
+    bool success;
+    min_leave_targets[i] = string_to_int_or_set_error(item, &success);
+    if (!success || min_leave_targets[i] < 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 autoplay_status_t autoplay(const AutoplayArgs *args,
                            AutoplayResults *autoplay_results) {
+  const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
+  uint64_t num_gens = 1;
+  int *min_leave_targets = NULL;
+  uint64_t first_gen_num_games;
+  if (is_leavegen_mode) {
+    StringSplitter *split_min_leave_targets =
+        split_string(args->num_games_or_min_leave_targets, ',', false);
+    num_gens = string_splitter_get_number_of_items(split_min_leave_targets);
+    min_leave_targets = malloc_or_die((sizeof(int)) * (num_gens));
+    bool success =
+        parse_min_leave_targets(split_min_leave_targets, min_leave_targets);
+    string_splitter_destroy(split_min_leave_targets);
+    if (!success) {
+      free(min_leave_targets);
+      return AUTOPLAY_STATUS_MALFORMED_MINIMUM_LEAVE_TARGETS;
+    }
+    first_gen_num_games = UINT64_MAX;
+  } else {
+    bool success;
+    first_gen_num_games = string_to_uint64_or_set_error(
+        args->num_games_or_min_leave_targets, &success);
+    if (!success) {
+      return AUTOPLAY_STATUS_MALFORMED_NUM_GAMES;
+    }
+  }
+
   ThreadControl *thread_control = args->thread_control;
 
-  thread_control_reset(thread_control, args->games_per_gen);
+  thread_control_reset(thread_control, first_gen_num_games);
 
   autoplay_results_reset(autoplay_results);
 
   const int number_of_threads = thread_control_get_threads(thread_control);
-  const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
 
   KLV *klv = NULL;
   bool show_divergent_results = args->use_game_pairs;
@@ -566,8 +612,8 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
 
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
       autoplay_results, autoplay_results_list, thread_control,
-      args->game_args->ld, args->data_paths, klv, number_of_threads,
-      args->games_per_gen, args->target_leave_count);
+      args->game_args->ld, args->data_paths, klv, number_of_threads, num_gens,
+      min_leave_targets);
 
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
@@ -606,6 +652,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   free(autoplay_workers);
   free(worker_ids);
   autoplay_shared_data_destroy(shared_data);
+  free(min_leave_targets);
 
   players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
                       args->data_paths);

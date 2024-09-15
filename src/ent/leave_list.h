@@ -12,7 +12,7 @@ typedef struct LeaveList LeaveList;
 LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
                              int target_leave_count);
 void leave_list_destroy(LeaveList *leave_list);
-void leave_list_reset(LeaveList *leave_list);
+void leave_list_reset(LeaveList *leave_list, int target_leave_count);
 void leave_list_add_all_subleaves(LeaveList *leave_list, Rack *full_rack,
                                   Rack *subleave, double move_equity);
 void leave_list_add_single_subleave(LeaveList *leave_list, const Rack *leave,

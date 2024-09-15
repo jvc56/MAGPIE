@@ -236,7 +236,7 @@ void test_leave_list_normal_leaves(void) {
   assert(leave_list_get_leaves_below_target_count(leave_list) ==
          number_of_leaves - 8);
 
-  leave_list_reset(leave_list);
+  leave_list_reset(leave_list, target_leave_count);
 
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "A", 0, 0.0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "B", 0, 0.0);
@@ -327,7 +327,7 @@ void test_leave_list_normal_leaves(void) {
   }
 
   // Test with nonempty player leaves
-  leave_list_reset(leave_list);
+  leave_list_reset(leave_list, target_leave_count);
   clear_bag(bag);
 
   rack_set_to_string(ld, rack, "J");
@@ -543,7 +543,7 @@ void test_leave_list_small_leaves(void) {
   leave_list_add_sas(ll, ld, sl, "BBBBBB", lutmc--, 1.0);
   leave_list_add_sas(ll, ld, sl, "AABBBB", lutmc--, 1.0);
 
-  leave_list_reset(ll);
+  leave_list_reset(ll, tmc);
 
   lutmc = number_of_leaves;
 
@@ -554,7 +554,7 @@ void test_leave_list_small_leaves(void) {
     leave_list_add_sas(ll, ld, sl, "A", lutmc - 1, 1.0);
   }
 
-  leave_list_reset(ll);
+  leave_list_reset(ll, tmc);
 
   int rare_leaves_drawn = 0;
   XoshiroPRNG *prng = prng_create(100);
