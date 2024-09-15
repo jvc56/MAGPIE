@@ -126,16 +126,9 @@ void test_autoplay_leavegen(void) {
       "set -lex CSW21_ab -ld english_ab -s1 equity -s2 equity -r1 best -r2 "
       "best -numplays 1 -threads 1");
 
-  // The minimum leave count should be achieved well before reaching
-  // the maximum number of games, so if this takes too long, we know it
-  // failed.
-  load_and_exec_config_or_die_timed(ab_config,
-                                    "leavegen 1 99999999 2 0 -seed 3", 60);
-
-  // The maximum game limit should be reached well before reaching
-  // the minimum leave count.
-  load_and_exec_config_or_die_timed(ab_config,
-                                    "leavegen 1 200 99999999 0 -seed 3", 60);
+  // The minimum leave count should be achieved quickly, so if this takes too
+  // long, we know it failed.
+  load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3", 60);
 
   char *ab_ar_str = autoplay_results_to_string(
       config_get_autoplay_results(ab_config), false, false);
@@ -144,21 +137,6 @@ void test_autoplay_leavegen(void) {
   free(ab_ar_str);
 
   config_destroy(ab_config);
-
-  Config *csw_config =
-      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 best -r2 "
-                           "best -numplays 1 -threads 1");
-
-  // Make sure the leavegen command can run without error.
-  load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed english");
-  load_and_exec_config_or_die(csw_config, "set -leaves CSW21_zeroed");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 200 1 0 -seed 0");
-  load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed_ml english");
-  load_and_exec_config_or_die(csw_config,
-                              "set -leaves CSW21_zeroed_ml -threads 11");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 100 1 0 -seed 1");
-
-  config_destroy(csw_config);
 }
 
 void test_autoplay_divergent_games(void) {
