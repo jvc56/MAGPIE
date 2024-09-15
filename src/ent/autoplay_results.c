@@ -136,7 +136,7 @@ void string_builder_add_game_end_reasons(StringBuilder *sb,
 char *game_data_ucgi_str(const GameData *gd) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_formatted_string(
-      sb, "autoplay games %ld %ld %ld %ld %ld %f %f %f %f ", gd->total_games,
+      sb, "autoplay games %lu %lu %lu %lu %lu %f %f %f %f ", gd->total_games,
       gd->p0_wins, gd->p0_losses, gd->p0_ties, gd->p0_firsts,
       stat_get_mean(gd->p0_score), stat_get_stdev(gd->p0_score),
       stat_get_mean(gd->p1_score), stat_get_stdev(gd->p1_score));
@@ -148,7 +148,7 @@ char *game_data_ucgi_str(const GameData *gd) {
 }
 
 char *get_total_int_and_percentage_string(uint64_t total, double pct) {
-  return get_formatted_string("%ld (%2.2f%%)", total, pct * 100.0);
+  return get_formatted_string("%lu (%2.2f%%)", total, pct * 100.0);
 }
 
 char *get_total_float_and_percentage_string(double total, double pct) {
