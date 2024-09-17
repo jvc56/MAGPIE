@@ -118,9 +118,6 @@ get_input_filepath_type_from_conv_type(conversion_type_t conversion_type) {
     break;
   default:
     log_fatal("cannot get input filepath type for unknown conversion type");
-#if __has_builtin(__builtin_unreachable)
-    __builtin_unreachable();
-#endif
     break;
   }
   return filepath_type;
@@ -153,9 +150,6 @@ get_output_filepath_type_from_conv_type(conversion_type_t conversion_type) {
     break;
   default:
     log_fatal("cannot get output filepath type for unknown conversion type");
-#if __has_builtin(__builtin_unreachable)
-    __builtin_unreachable();
-#endif    
     break;
   }
   return filepath_type;

@@ -413,9 +413,6 @@ static inline ld_t ld_get_type_from_lex_name(const char *full_lexicon_name) {
   } else {
     log_fatal("default letter distribution not found for lexicon '%s'\n",
               lexicon_name);
-#if __has_builtin(__builtin_unreachable)
-    __builtin_unreachable();
-#endif
   }
   return ld_type;
 }
@@ -438,9 +435,6 @@ static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
     log_fatal(
         "default letter distribution not found for letter distribution '%s'\n",
         ld_name);
-#if __has_builtin(__builtin_unreachable)
-    __builtin_unreachable();
-#endif
   }
   return ld_type;
 }
