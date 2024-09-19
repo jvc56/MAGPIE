@@ -16,6 +16,11 @@
 // 1 byte: minor version number
 // 1 byte: minimum word length
 // 1 byte: maximum word length
+// Use the following either to dynamically allocate buffers for intermediate
+// and final results, or to validate that sstatically allocated buffers are
+// large enough.
+// 4 bytes: maximum size in bytes of blank pair results
+// 4 bytes: maximum size in bytes of word lookup results
 // xxxxxx: repeated WordOfSameLengthMap binary data
 
 // WordOfSameLengthMap binary format:
@@ -41,7 +46,7 @@
 
 // WordMapEntry binary format:
 // ===========================
-// 16 bytes: either word bucket start or inline words
+// 16 bytes: either word bucket start (last 4 bytes) or inline words
 // 12 bytes: isInline bit | BitRack quotient (96 bits)
 //           (number of word buckets must be high enough that maximum quotient
 //           fits. largest_bit_rack_for_ld(ld) / num_word_buckets < (1 << 95)).
