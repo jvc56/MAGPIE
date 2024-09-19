@@ -11,6 +11,8 @@ uint8_t dictionary_word_get_length(const DictionaryWord *dictionary_word);
 typedef struct DictionaryWordList DictionaryWordList;
 
 DictionaryWordList *dictionary_word_list_create(void);
+DictionaryWordList *dictionary_word_list_create_with_capacity(int capacity);
+
 void dictionary_word_list_clear(DictionaryWordList *dictionary_word_list);
 void dictionary_word_list_add_word(DictionaryWordList *dictionary_word_list,
                                    const uint8_t *word, int word_length);

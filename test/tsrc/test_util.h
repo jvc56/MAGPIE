@@ -5,6 +5,7 @@
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
+#include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
@@ -84,5 +85,7 @@ void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
 void assert_stats_are_equal(const Stat *s1, const Stat *s2);
 void assert_sim_results_equal(SimResults *sr1, SimResults *sr2);
 void assert_klvs_equal(const KLV *klv1, const KLV *klv2);
+void assert_word_count(const LetterDistribution *ld, const DictionaryWordList *words,
+                       const char *human_readable_word, int expected_count);
 
 #endif

@@ -1,0 +1,6 @@
+#ifndef WORD_MAP_DEFS_H
+#define WORD_MAP_DEFS_H
+
+#define WORD_MAP_BUCKET_ITEMS_CAPACITY 1
+
+#endif
