@@ -11,9 +11,41 @@
 #include "letter_distribution.h"
 
 // WordMap binary format:
+// ======================
 // 1 byte: major version number
 // 1 byte: minor version number
-// 
+// 1 byte: minimum word length
+// 1 byte: maximum word length
+// xxxxxx: repeated WordOfSameLengthMap binary data
+
+// WordOfSameLengthMap binary format:
+// ==================================
+// 4 bytes: number of word buckets
+// num_word_buckets * 4 bytes: word bucket starts
+// 4 bytes: number of word entries
+// 28 * number_of_word_entries bytes: word entries
+// 4 bytes: number of words
+// num_words * word_length bytes: uint8_t mls of words
+// ----------------------------------
+// 4 bytes: number of blank buckets
+// num_blank_buckets * 4 bytes: blank bucket starts
+// 4 bytes: number of blank entries
+// 28 * number_of_blank_entries bytes: blank entries
+// ----------------------------------
+// 4 bytes: number of double blank buckets
+// double_num_blank_buckets * 4 bytes: double blank bucket starts
+// 4 bytes: number of double blank entries
+// 28 * number_of_double_blank_entries bytes: double blank entries
+// 4 bytes: number of blank letter pairs
+// num_blank_letter_pairs * 2 bytes: uint8_t mls of blank letter pairs
+
+// WordMapEntry binary format:
+// ===========================
+// 16 bytes: either word bucket start or inline words
+// 12 bytes: isInline bit | BitRack quotient (96 bits)
+//           (number of word buckets must be high enough that maximum quotient
+//           fits. largest_bit_rack_for_ld(ld) / num_word_buckets < (1 << 95)).
+
 typedef struct WordsOfSameLengthMap {
   uint32_t *word_bucket_starts;
   uint32_t num_word_buckets;
