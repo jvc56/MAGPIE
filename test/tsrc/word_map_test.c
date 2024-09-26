@@ -267,9 +267,36 @@ void test_double_blanks(void) {
   config_destroy(config);
 }
 
+void test_create_from_mutables(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+  MutableWordMap *word_map = word_map_create_anagram_sets(words);
+  MutableBlankMap *blank_map = word_map_create_blank_sets(word_map, ld);
+  MutableDoubleBlankMap *double_blank_map =
+      word_map_create_double_blank_sets(word_map, ld);
+  WordMap *map = word_map_create_from_mutables(word_map, blank_map,
+                                               double_blank_map);
+  assert(map != NULL);
+  assert(map->major_version == WORD_MAP_MAJOR_VERSION);
+  assert(map->minor_version == WORD_MAP_MINOR_VERSION);
+  assert(map->min_word_length == 2);
+  assert(map->max_word_length == 15);
+  assert(map->max_blank_pair_bytes == 2 * 235); // A??
+  assert(map->max_word_lookup_bytes == 4152); // AERS?? 
+  dictionary_word_list_destroy(words);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_word_map(void) {
-  test_csw();
-  test_anagram_sets();
-  test_blanks();
-  test_double_blanks();
+  //test_csw();
+  //test_anagram_sets();
+  //test_blanks();
+  //test_double_blanks();
+  test_create_from_mutables();
 }

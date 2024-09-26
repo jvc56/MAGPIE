@@ -6,6 +6,7 @@
 #include <stdlib.h>
 
 #include "../def/board_defs.h"
+#include "../def/word_map_defs.h"
 #include "bit_rack.h"
 #include "dictionary_word.h"
 #include "letter_distribution.h"
@@ -46,10 +47,15 @@
 
 // WordMapEntry binary format:
 // ===========================
-// 16 bytes: either word bucket start (last 4 bytes) or inline words
+// 16 bytes: either word bucket index(last 4 bytes) or inline words
 // 12 bytes: isInline bit | BitRack quotient (96 bits)
 //           (number of word buckets must be high enough that maximum quotient
 //           fits. largest_bit_rack_for_ld(ld) / num_word_buckets < (1 << 95)).
+
+typedef struct WordEntry {
+  uint8_t bucket_or_inline[WORD_MAP_INLINE_VALUE_BYTES];
+  uint8_t quotient[WORD_MAP_QUOTIENT_BYTES];
+} WordEntry;
 
 typedef struct WordsOfSameLengthMap {
   uint32_t *word_bucket_starts;
@@ -66,6 +72,12 @@ typedef struct WordsOfSameLengthMap {
 } WordsOfSameLengthMap;
 
 typedef struct WordMap {
+  uint8_t major_version;
+  uint8_t minor_version;
+  uint8_t min_word_length;
+  uint8_t max_word_length;
+  uint32_t max_blank_pair_bytes;
+  uint32_t max_word_lookup_bytes;
   WordsOfSameLengthMap maps[BOARD_DIM + 1];
 } WordMap;
 
@@ -156,6 +168,10 @@ int mutable_double_blanks_for_same_length_get_num_sets(
     const MutableDoubleBlanksForSameLengthMap *map);
 
 double average_double_blank_sets_per_nonempty_bucket(
-    const MutableDoubleBlanksForSameLengthMap *double_blank_map);                                  
+    const MutableDoubleBlanksForSameLengthMap *double_blank_map);
+
+WordMap *word_map_create_from_mutables(const MutableWordMap *word_map,
+                                       const MutableBlankMap *blank_map,
+                                       const MutableDoubleBlankMap *double_blank_map);                                  
 
 #endif

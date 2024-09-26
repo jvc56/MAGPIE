@@ -295,4 +295,30 @@ static inline BitRack largest_bit_rack_for_ld(const LetterDistribution *ld) {
   return bit_rack;
 }
 
+static inline void bit_rack_add_letter(BitRack *bit_rack, uint8_t ml) {
+  const int shift = ml * BIT_RACK_BITS_PER_LETTER;
+#if USE_INT128_INTRINSIC
+  *bit_rack += (unsigned __int128)1 << shift;
+#else
+  if (shift < 64) {
+    bit_rack->low += 1ULL << shift;
+  } else {
+    bit_rack->high += 1ULL << (shift - 64);
+  }
+#endif
+}
+
+static inline void bit_rack_take_letter(BitRack *bit_rack, uint8_t ml) {
+  const int shift = ml * BIT_RACK_BITS_PER_LETTER;
+#if USE_INT128_INTRINSIC
+  *bit_rack -= (unsigned __int128)1 << shift;
+#else
+  if (shift < 64) {
+    bit_rack->low -= 1ULL << shift;
+  } else {
+    bit_rack->high -= 1ULL << (shift - 64);
+  }
+#endif  
+}
+
 #endif

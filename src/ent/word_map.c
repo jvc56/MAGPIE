@@ -1,3 +1,6 @@
+#include <limits.h>
+#include <stdint.h>
+
 #include "word_map.h"
 #include "bit_rack.h"
 #include "dictionary_word.h"
@@ -62,9 +65,14 @@ MutableWordMap *word_map_create_anagram_sets(const DictionaryWordList *words) {
     num_words_by_length[dictionary_word_get_length(word)]++;
   }
   MutableWordMap *word_map = malloc_or_die(sizeof(MutableWordMap));
-  for (int i = 0; i < BOARD_DIM + 1; i++) {
+  for (int i = 0; i <= BOARD_DIM; i++) {
     MutableWordsOfSameLengthMap *map = &word_map->maps[i];
     printf("num words by length %d: %d\n", i, num_words_by_length[i]);
+    if (num_words_by_length[i] == 0) {
+      map->num_word_buckets = 0;
+      map->word_buckets = NULL;
+      continue;
+    }
     map->num_word_buckets = next_prime(num_words_by_length[i]);
     map->word_buckets =
         malloc_or_die(sizeof(MutableWordMapBucket) * map->num_word_buckets);
@@ -343,4 +351,145 @@ double average_double_blank_sets_per_nonempty_bucket(
     }
   }
   return (double)num_sets / num_buckets;
+}
+
+int get_min_word_length(const MutableWordMap *word_map) {
+  for (int i = 0; i <= BOARD_DIM; i++) {
+    if (word_map->maps[i].num_word_buckets > 0) {
+      return i;
+    }
+  }
+  return INT_MAX;
+}
+
+int get_max_word_length(const MutableWordMap *word_map) {
+  for (int i = BOARD_DIM; i >= 0; i--) {
+    if (word_map->maps[i].num_word_buckets > 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+uint32_t
+max_blank_pair_result_size(const MutableDoubleBlankMap *double_blank_map) {
+  uint32_t max_size = 0;
+  for (int len = 0; len <= BOARD_DIM; len++) {
+    for (uint32_t bucket_index = 0;
+         bucket_index < double_blank_map->maps[len].num_double_blank_buckets;
+         bucket_index++) {
+      const MutableDoubleBlankMapBucket *bucket =
+          &double_blank_map->maps[len].double_blank_buckets[bucket_index];
+      for (uint32_t entry_index = 0; entry_index < bucket->num_entries;
+           entry_index++) {
+        const MutableDoubleBlankMapEntry *entry = &bucket->entries[entry_index];
+        const uint32_t size =
+            2 * dictionary_word_list_get_count(entry->letter_pairs);
+        if (size > max_size) {
+          max_size = size;
+          BitRack bit_rack = bit_rack_mul(
+              &entry->quotient,
+              double_blank_map->maps[len].num_double_blank_buckets);
+          bit_rack_add_uint32(&bit_rack, bucket_index);
+          bit_rack_set_letter_count(&bit_rack, BLANK_MACHINE_LETTER, 0);
+          for (uint8_t ml = 0; ml <= 26; ml++) {
+            for (int i = 0; i < bit_rack_get_letter(&bit_rack, ml); i++) {
+              printf("%c", 'A' + ml - 1);
+            }
+          }
+          printf(": %d\n", size);
+        }
+      }
+    }
+  }
+  return max_size;
+}
+
+uint32_t get_number_of_words(const MutableWordsOfSameLengthMap *map,
+                             const BitRack *bit_rack) {
+  BitRack quotient;
+  uint32_t bucket_index;
+  bit_rack_div_mod(bit_rack, map->num_word_buckets, &quotient, &bucket_index);
+  const MutableWordMapBucket *bucket = &map->word_buckets[bucket_index];
+  for (uint32_t i = 0; i < bucket->num_entries; i++) {
+    const MutableWordMapEntry *entry = &bucket->entries[i];
+    if (bit_rack_equals(&entry->quotient, &quotient)) {
+      return dictionary_word_list_get_count(entry->letters);
+    }
+  }
+  return 0;
+}
+
+uint32_t number_of_double_blank_words(const MutableWordMap *word_map,
+                                      int word_length,
+                                      const BitRack *bit_rack_without_blanks,
+                                      const DictionaryWordList *blank_pairs) {
+  int num_words = 0;
+  const MutableWordsOfSameLengthMap *map = &word_map->maps[word_length];
+  for (int i = 0; i < dictionary_word_list_get_count(blank_pairs); i++) {
+    BitRack bit_rack = *bit_rack_without_blanks;
+    const DictionaryWord *blank_pair =
+        dictionary_word_list_get_word(blank_pairs, i);
+    const uint8_t ml1 = dictionary_word_get_word(blank_pair)[0];
+    const uint8_t ml2 = dictionary_word_get_word(blank_pair)[1];
+    bit_rack_add_letter(&bit_rack, ml1);
+    bit_rack_add_letter(&bit_rack, ml2);
+    num_words += get_number_of_words(map, &bit_rack);
+  }
+  return num_words;
+}
+
+uint32_t
+max_word_lookup_result_size(const MutableWordMap *word_map,
+                            const MutableDoubleBlankMap *double_blank_map) {
+  uint32_t max_size = 0;
+  for (int len = 15; len <= BOARD_DIM; len++) {
+    for (uint32_t bucket_index = 0;
+         bucket_index < double_blank_map->maps[len].num_double_blank_buckets;
+         bucket_index++) {
+      const MutableDoubleBlanksForSameLengthMap *map =
+          &double_blank_map->maps[len];
+      const MutableDoubleBlankMapBucket *bucket =
+          &map->double_blank_buckets[bucket_index];
+      for (uint32_t entry_index = 0; entry_index < bucket->num_entries;
+           entry_index++) {
+        const MutableDoubleBlankMapEntry *entry = &bucket->entries[entry_index];
+        BitRack bit_rack =
+            bit_rack_mul(&entry->quotient, map->num_double_blank_buckets);
+        bit_rack_add_uint32(&bit_rack, bucket_index);
+        bit_rack_set_letter_count(&bit_rack, BLANK_MACHINE_LETTER, 0);
+        const uint32_t size =
+            len * number_of_double_blank_words(word_map, len, &bit_rack,
+                                               entry->letter_pairs);
+        if (size > max_size) {
+          max_size = size;
+          for (uint8_t ml = 0; ml <= 26; ml++) {
+            for (int i = 0; i < bit_rack_get_letter(&bit_rack, ml); i++) {
+              printf("%c", 'A' + ml - 1);
+            }
+          }
+          printf(": %d\n", size);
+        }
+      }
+    }
+  }
+  return max_size;
+}
+
+WordMap *
+word_map_create_from_mutables(const MutableWordMap *word_map,
+                              const MutableBlankMap *blank_map,
+                              const MutableDoubleBlankMap *double_blank_map) {
+  assert(word_map != NULL);
+  assert(blank_map != NULL);
+  assert(double_blank_map != NULL);
+  WordMap *map = malloc_or_die(sizeof(WordMap));
+  map->major_version = WORD_MAP_MAJOR_VERSION;
+  map->minor_version = WORD_MAP_MINOR_VERSION;
+  map->min_word_length = get_min_word_length(word_map);
+  map->max_word_length = get_max_word_length(word_map);
+  map->max_blank_pair_bytes = max_blank_pair_result_size(double_blank_map);
+  map->max_word_lookup_bytes =
+      max_word_lookup_result_size(word_map, double_blank_map);
+  return map;
 }
