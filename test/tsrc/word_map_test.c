@@ -204,7 +204,8 @@ void test_blanks(void) {
   MutableBlankMap *blank_map = word_map_create_blank_sets(word_map, ld);
   assert(blank_map != NULL);
   for (int i = 2; i <= 15; i++) {
-    printf("length %d num sets %d average bucket %f\n", i,
+    printf("length %d num buckets %d num sets %d average bucket %f\n", i,
+           blank_map->maps[i].num_blank_buckets,
            mutable_blanks_for_same_length_get_num_sets(&blank_map->maps[i]),
            average_blank_sets_per_nonempty_bucket(&blank_map->maps[i]));
   }
@@ -267,6 +268,71 @@ void test_double_blanks(void) {
   config_destroy(config);
 }
 
+void test_resize_words(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+  const MutableWordMap *word_map = word_map_create_anagram_sets(words);
+  uint32_t min_num_buckets = compute_min_num_buckets(ld);
+  assert(min_num_buckets == 587);
+  const MutableWordMap *resized_word_map =
+      mutable_word_map_resize(word_map, min_num_buckets);
+  assert(resized_word_map != NULL);
+  for (int i = 0; i <= BOARD_DIM; i++) {
+    assert(
+        mutable_words_of_same_length_get_num_sets(&resized_word_map->maps[i]) ==
+        mutable_words_of_same_length_get_num_sets(&word_map->maps[i]));
+  }
+  dictionary_word_list_destroy(words);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void test_resize_blanks(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+  MutableWordMap *word_map = word_map_create_anagram_sets(words);
+  MutableBlankMap *blank_map = word_map_create_blank_sets(word_map, ld);
+
+  uint32_t min_num_buckets = compute_min_num_buckets(ld);
+  assert(min_num_buckets == 587);
+  MutableBlankMap *resized_blank_map =
+      mutable_blank_map_resize(blank_map, ld, min_num_buckets);
+  assert(resized_blank_map != NULL);
+  for (int i = 0; i <= BOARD_DIM; i++) {
+    assert(mutable_blanks_for_same_length_get_num_sets(
+               &resized_blank_map->maps[i]) ==
+           mutable_blanks_for_same_length_get_num_sets(&blank_map->maps[i]));
+  }
+  for (int i = 2; i <= 15; i++) {
+    printf("(resized) length %d num buckets %d num sets %d average bucket %f\n",
+           i, resized_blank_map->maps[i].num_blank_buckets,
+           mutable_blanks_for_same_length_get_num_sets(
+               &resized_blank_map->maps[i]),
+           average_blank_sets_per_nonempty_bucket(&resized_blank_map->maps[i]));
+  }
+
+  assert_mutable_blank_map_set(resized_blank_map, ld, "Q?", "I");
+  assert_mutable_blank_map_set(resized_blank_map, ld, "APNOEAL?", "J");
+  assert_mutable_blank_map_set(resized_blank_map, ld, "AUTHORISE?", "DRSZ");
+  assert_mutable_blank_map_set(resized_blank_map, ld, "SATINE?",
+                               "ABCDEFGHIJKLMNOPRSTUVWXZ");
+  assert_mutable_blank_map_set(resized_blank_map, ld, "COMPUTERI?ATION", "SZ");
+
+  dictionary_word_list_destroy(words);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_create_from_mutables(void) {
   Config *config = config_create_or_die("set -lex CSW21");
   const LetterDistribution *ld = config_get_ld(config);
@@ -296,7 +362,9 @@ void test_create_from_mutables(void) {
 void test_word_map(void) {
   //test_csw();
   //test_anagram_sets();
-  //test_blanks();
-  //test_double_blanks();
-  test_create_from_mutables();
+  test_blanks();
+  // test_double_blanks();
+  // test_resize_words();
+  test_resize_blanks();
+  // test_create_from_mutables();
 }

@@ -321,4 +321,12 @@ static inline void bit_rack_take_letter(BitRack *bit_rack, uint8_t ml) {
 #endif  
 }
 
+static inline uint64_t bit_rack_get_high64(const BitRack *bit_rack) {
+#if USE_INT128_INTRINSIC
+  return *bit_rack >> 64;
+#else
+  return bit_rack->high;
+#endif
+}
+
 #endif
