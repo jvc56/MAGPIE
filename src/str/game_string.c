@@ -88,8 +88,8 @@ void string_builder_add_board_row(StringBuilder *game_string,
 }
 
 void string_builder_add_move_with_rank_and_equity(StringBuilder *game_string,
-                                                  Game *game,
-                                                  MoveList *move_list,
+                                                  const Game *game,
+                                                  const MoveList *move_list,
                                                   int move_index) {
   Board *board = game_get_board(game);
   Move *move = move_list_get_move(move_list, move_index);
@@ -100,8 +100,8 @@ void string_builder_add_move_with_rank_and_equity(StringBuilder *game_string,
                                       move_get_equity(move));
 }
 
-void string_builder_add_game(StringBuilder *game_string, Game *game,
-                             MoveList *move_list) {
+void string_builder_add_game(StringBuilder *game_string, const Game *game,
+                             const MoveList *move_list) {
   Board *board = game_get_board(game);
   Bag *bag = game_get_bag(game);
   Player *player0 = game_get_player(game, 0);

@@ -22,7 +22,8 @@ void autoplay_results_reset_options(AutoplayResults *autoplay_results);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
-                               const Move *move);
+                               const Game *game, const Move *move,
+                               const Rack *leave);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, uint64_t turns,
                                bool divergent);
@@ -34,5 +35,7 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
                                                   double p0_win_pct,
                                                   double p1_win_pct,
                                                   uint64_t total_games);
+void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
+                                            int write_buffer_size);
 
 #endif

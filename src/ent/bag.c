@@ -226,3 +226,9 @@ int bag_get_letter(const Bag *bag, uint8_t ml) {
   }
   return sum;
 }
+
+void bag_increment_unseen_count(const Bag *bag, int *unseen_count) {
+  for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
+    unseen_count[bag->tiles[i]]++;
+  }
+}
