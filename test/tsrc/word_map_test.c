@@ -162,9 +162,11 @@ look_up_double_blank_set(const MutableDoubleBlankMap *double_blank_map,
         &double_blank_map_for_length->double_blank_buckets[bucket_index]
              .entries[i];
     if (bit_rack_equals(&entry->quotient, &quotient)) {
+      printf("matching quotient, returning letter_pairs\n");
       return entry->letter_pairs;
     }
   }
+  printf("no matching quotient, returning NULL\n");
   return NULL;
 }
 
@@ -333,6 +335,56 @@ void test_resize_blanks(void) {
   config_destroy(config);
 }
 
+void test_resize_double_blanks(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+  MutableWordMap *word_map = word_map_create_anagram_sets(words);
+  MutableDoubleBlankMap *double_blank_map =
+      word_map_create_double_blank_sets(word_map, ld);
+
+  uint32_t min_num_buckets = compute_min_num_buckets(ld);
+  assert(min_num_buckets == 587);
+  MutableDoubleBlankMap *resized_double_blank_map =
+      mutable_double_blank_map_resize(double_blank_map, ld, min_num_buckets);
+  assert(resized_double_blank_map != NULL);
+  for (int i = 0; i <= BOARD_DIM; i++) {
+    assert(mutable_double_blanks_for_same_length_get_num_sets(
+               &resized_double_blank_map->maps[i]) ==
+           mutable_double_blanks_for_same_length_get_num_sets(
+               &double_blank_map->maps[i]));
+  }
+  for (int i = 2; i <= 15; i++) {
+    printf("(resized) length %d num sets %d\n", i,
+           mutable_double_blanks_for_same_length_get_num_sets(
+               &resized_double_blank_map->maps[i]));
+  }
+  assert_mutable_double_blank_set_count(resized_double_blank_map, ld, "??", 93);
+  // AB / BA
+  assert_mutable_double_blank_set_contains_once(resized_double_blank_map, ld,
+                                                "??", "AB");
+
+  assert_mutable_double_blank_set_count(resized_double_blank_map, ld,
+                                        "EUREKA??", 3);
+  // HEUREKAS
+  assert_mutable_double_blank_set_contains_once(resized_double_blank_map, ld,
+                                                "EUREKA??", "HS");
+  // REUPTAKE
+  assert_mutable_double_blank_set_contains_once(resized_double_blank_map, ld,
+                                                "EUREKA??", "PT");
+  // SQUEAKER
+  assert_mutable_double_blank_set_contains_once(resized_double_blank_map, ld,
+                                                "EUREKA??", "QS");
+
+  dictionary_word_list_destroy(words);
+  game_destroy(game);
+  config_destroy(config);                                                
+}
+
 void test_create_from_mutables(void) {
   Config *config = config_create_or_die("set -lex CSW21");
   const LetterDistribution *ld = config_get_ld(config);
@@ -360,11 +412,12 @@ void test_create_from_mutables(void) {
 }
 
 void test_word_map(void) {
-  //test_csw();
-  //test_anagram_sets();
+  test_csw();
+  test_anagram_sets();
   test_blanks();
-  // test_double_blanks();
-  // test_resize_words();
+  test_double_blanks();
+  test_resize_words();
   test_resize_blanks();
+  test_resize_double_blanks();
   // test_create_from_mutables();
 }

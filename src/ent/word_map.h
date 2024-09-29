@@ -179,6 +179,11 @@ MutableBlankMap *mutable_blank_map_resize(const MutableBlankMap *blank_map,
                                           const LetterDistribution *ld,
                                           uint32_t min_num_buckets);
 
+MutableDoubleBlankMap *
+mutable_double_blank_map_resize(const MutableDoubleBlankMap *double_blank_map,
+                                const LetterDistribution *ld,
+                                uint32_t min_num_buckets);
+
 WordMap *word_map_create_from_mutables(const MutableWordMap *word_map,
                                        const MutableBlankMap *blank_map,
                                        const MutableDoubleBlankMap *double_blank_map);                                  

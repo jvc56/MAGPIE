@@ -117,6 +117,16 @@ void dictionary_word_list_unique(DictionaryWordList *sorted,
   }
 }
 
+void dictionary_word_list_copy(const DictionaryWordList *src,
+                               DictionaryWordList **dst) {
+  *dst = dictionary_word_list_create_with_capacity(src->count);                                
+  for (int i = 0; i < src->count; i++) {
+    dictionary_word_list_add_word(*dst, src->dictionary_words[i].word,
+                                  src->dictionary_words[i].length);
+  }
+  printf("dst->count %d\n", (*dst)->count);
+}
+
 void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list) {
   free(dictionary_word_list->dictionary_words);
   free(dictionary_word_list);
