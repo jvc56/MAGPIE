@@ -385,7 +385,6 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
                             game_runner->game, *move, game_runner->leave);
   play_move(*move, game, NULL, NULL);
   game_runner->turn_number++;
-  return;
 }
 
 void print_current_status(
