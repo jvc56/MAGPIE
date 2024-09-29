@@ -27,8 +27,8 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, uint64_t turns,
                                bool divergent);
-void autoplay_results_combine(AutoplayResults **autoplay_results_list,
-                              int list_size, AutoplayResults *target);
+void autoplay_results_finalize(AutoplayResults **autoplay_results_list,
+                               int list_size, AutoplayResults *target);
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);
 void string_builder_add_winning_player_confidence(StringBuilder *sb,

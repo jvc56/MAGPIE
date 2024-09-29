@@ -71,15 +71,15 @@ void postgen_prebroadcast_func(void *data) {
       thread_control_get_threads(shared_data->thread_control);
 
   // Get total game data.
-  autoplay_results_combine(lg_shared_data->autoplay_results_list,
-                           number_of_threads,
-                           lg_shared_data->primary_autoplay_results);
+  autoplay_results_finalize(lg_shared_data->autoplay_results_list,
+                            number_of_threads,
+                            lg_shared_data->primary_autoplay_results);
 
   // Get generational game data
   autoplay_results_reset(lg_shared_data->gen_autoplay_results);
-  autoplay_results_combine(lg_shared_data->autoplay_results_list,
-                           number_of_threads,
-                           lg_shared_data->gen_autoplay_results);
+  autoplay_results_finalize(lg_shared_data->autoplay_results_list,
+                            number_of_threads,
+                            lg_shared_data->gen_autoplay_results);
 
   for (int i = 0; i < number_of_threads; i++) {
     autoplay_results_reset(lg_shared_data->autoplay_results_list[i]);
@@ -633,8 +633,8 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
 
   // The stats have already been combined in leavegen mode
   if (!is_leavegen_mode) {
-    autoplay_results_combine(autoplay_results_list, number_of_threads,
-                             autoplay_results);
+    autoplay_results_finalize(autoplay_results_list, number_of_threads,
+                              autoplay_results);
   }
 
   free(autoplay_results_list);

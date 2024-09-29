@@ -568,9 +568,6 @@ void fj_write_buffer_to_output(Recorder *recorder, int index,
   }
 }
 
-// FIXME: remove
-#include "../str/game_string.h"
-
 void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   FJData *fj_data = (FJData *)recorder->data;
   const Game *game = args->game;
@@ -608,8 +605,6 @@ void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   }
   fj_data->move_count = 0;
   for (int i = 0; i < FJ_NUMBER_OF_GAME_PARTITIONS; i++) {
-    StringBuilder *sb = fj_data->builders[i];
-    string_builder_add_game(sb, game, NULL);
     fj_write_buffer_to_output(recorder, i, false);
   }
 }
@@ -683,8 +678,8 @@ void recorder_add_game(Recorder *recorder, const Game *game, uint64_t turns,
   recorder->add_game_func(recorder, &args);
 }
 
-void recorder_combine(Recorder **recorder_list, int list_size,
-                      Recorder *primary_recorder) {
+void recorder_finalize(Recorder **recorder_list, int list_size,
+                       Recorder *primary_recorder) {
   primary_recorder->finalize_func(recorder_list, list_size, primary_recorder);
 }
 
@@ -883,8 +878,8 @@ void autoplay_results_add_game(AutoplayResults *autoplay_results,
   }
 }
 
-void autoplay_results_combine(AutoplayResults **autoplay_results_list,
-                              int list_size, AutoplayResults *primary) {
+void autoplay_results_finalize(AutoplayResults **autoplay_results_list,
+                               int list_size, AutoplayResults *primary) {
   Recorder **recorder_list = malloc_or_die(sizeof(Recorder *) * list_size);
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (!autoplay_results_list[0]->recorders[i]) {
@@ -893,7 +888,7 @@ void autoplay_results_combine(AutoplayResults **autoplay_results_list,
     for (int j = 0; j < list_size; j++) {
       recorder_list[j] = autoplay_results_list[j]->recorders[i];
     }
-    recorder_combine(recorder_list, list_size, primary->recorders[i]);
+    recorder_finalize(recorder_list, list_size, primary->recorders[i]);
   }
   free(recorder_list);
 }

@@ -43,24 +43,9 @@ void test_board_layout_correctness_super(void) {
   assert_validated_and_generated_moves(game, "ANTHROS", "11A",
                                        "ANTHRO(POMORPHISATION)S", 155, true);
 
-  uint64_t seed = time(NULL);
+  load_and_exec_config_or_die(
+      config, "autoplay games,fj 100 -gp false -threads 11 -seed 100");
 
-  char *options_string =
-      get_formatted_string("set -gp true -threads 11 -seed %ld", seed);
-
-  load_and_exec_config_or_die(config, options_string);
-
-  printf("running 21 autoplay with: %s\n", options_string);
-
-  free(options_string);
-
-  AutoplayResults *ar = autoplay_results_create();
-
-  autoplay_status_t status =
-      config_autoplay(config, ar, AUTOPLAY_TYPE_DEFAULT, "500", 0);
-  assert(status == AUTOPLAY_STATUS_SUCCESS);
-
-  autoplay_results_destroy(ar);
   game_destroy(game);
   config_destroy(config);
 }
