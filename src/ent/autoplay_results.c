@@ -514,7 +514,7 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   FJData *fj_data = (FJData *)recorder->data;
   const Game *game = args->game;
   const Bag *bag = game_get_bag(game);
-  if (fj_data->move_count >= MAX_NUMBER_OF_MOVES || bag_get_tiles(bag) == 0) {
+  if (fj_data->move_count >= MAX_NUMBER_OF_MOVES) {
     return;
   }
   FJMove *fj_move = &fj_data->moves[fj_data->move_count];
@@ -525,7 +525,12 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   const Player *player = game_get_player(game, fj_move->player_index);
   const Player *opponent = game_get_player(game, 1 - fj_move->player_index);
   fj_move->score_diff = player_get_score(player) - player_get_score(opponent);
-  fj_move->unseen_total = bag_get_tiles(bag) + (RACK_SIZE);
+  const int num_tiles_in_bag = bag_get_tiles(bag);
+  if (num_tiles_in_bag == 0) {
+    fj_move->unseen_total = rack_get_total_letters(player_get_rack(opponent));
+  } else {
+    fj_move->unseen_total = bag_get_tiles(bag) + (RACK_SIZE);
+  }
   bag_increment_unseen_count(bag, fj_move->unseen_counts);
   rack_increment_unseen_count(player_get_rack(opponent),
                               fj_move->unseen_counts);
