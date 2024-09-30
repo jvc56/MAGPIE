@@ -223,10 +223,19 @@ void test_autoplay_divergent_games(void) {
   config_destroy(csw_config);
 }
 
+void test_autoplay_fj_record(void) {
+  Config *csw_config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1  -gp false -threads 11");
+  load_and_exec_config_or_die(csw_config, "autoplay fj 100 -seed 50 -wb 1");
+  config_destroy(csw_config);
+}
+
 void test_autoplay(void) {
   test_odds_that_player_is_better();
   test_autoplay_default();
   test_autoplay_leavegen();
   test_autoplay_divergent_games();
+  test_autoplay_fj_record();
   return;
 }

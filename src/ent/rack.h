@@ -167,4 +167,11 @@ static inline Rack *get_new_bag_as_rack(const LetterDistribution *ld) {
   return bag_as_rack;
 }
 
+static inline void rack_increment_unseen_count(const Rack *rack,
+                                               int *unseen_count) {
+  for (int i = 0; i < rack_get_dist_size(rack); i++) {
+    unseen_count[i] += rack_get_letter(rack, i);
+  }
+}
+
 #endif

@@ -30,5 +30,5 @@ uint8_t bag_draw_random_letter(Bag *bag, int player_draw_index);
 void bag_seed(Bag *bag, uint64_t seed);
 void bag_reset(const LetterDistribution *ld, Bag *bag);
 void bag_shuffle(Bag *bag);
-
+void bag_increment_unseen_count(const Bag *bag, int *unseen_count);
 #endif

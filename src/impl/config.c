@@ -75,6 +75,7 @@ typedef enum {
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_USE_GAME_PAIRS,
+  ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
@@ -1493,6 +1494,14 @@ config_load_status_t config_load_data(Config *config) {
     return config_load_status;
   }
 
+  int write_buffer_size;
+  config_load_status = config_load_int(config, ARG_TOKEN_WRITE_BUFFER_SIZE, 1,
+                                       INT_MAX, &write_buffer_size);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+  autoplay_results_set_write_buffer_size(config->autoplay_results,
+                                         write_buffer_size);
   // Seed
 
   uint64_t seed;
@@ -1694,6 +1703,8 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1,
+                    execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_RANDOM_SEED, "seed", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1,

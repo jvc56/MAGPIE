@@ -71,15 +71,15 @@ void postgen_prebroadcast_func(void *data) {
       thread_control_get_threads(shared_data->thread_control);
 
   // Get total game data.
-  autoplay_results_combine(lg_shared_data->autoplay_results_list,
-                           number_of_threads,
-                           lg_shared_data->primary_autoplay_results);
+  autoplay_results_finalize(lg_shared_data->autoplay_results_list,
+                            number_of_threads,
+                            lg_shared_data->primary_autoplay_results);
 
   // Get generational game data
   autoplay_results_reset(lg_shared_data->gen_autoplay_results);
-  autoplay_results_combine(lg_shared_data->autoplay_results_list,
-                           number_of_threads,
-                           lg_shared_data->gen_autoplay_results);
+  autoplay_results_finalize(lg_shared_data->autoplay_results_list,
+                            number_of_threads,
+                            lg_shared_data->gen_autoplay_results);
 
   for (int i = 0; i < number_of_threads; i++) {
     autoplay_results_reset(lg_shared_data->autoplay_results_list[i]);
@@ -245,7 +245,7 @@ typedef struct GameRunner {
   int turn_number;
   Game *game;
   MoveList *move_list;
-  Rack *leaves[2];
+  Rack *leave;
   Rack *original_rack;
   Rack *rare_leave;
   Rack *bag_and_rare_leave_overlap;
@@ -256,8 +256,7 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   const AutoplayArgs *args = autoplay_worker->args;
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
   const int dist_size = ld_get_size(args->game_args->ld);
-  game_runner->leaves[0] = rack_create(dist_size);
-  game_runner->leaves[1] = rack_create(dist_size);
+  game_runner->leave = rack_create(dist_size);
   game_runner->original_rack = rack_create(dist_size);
   game_runner->rare_leave = rack_create(dist_size);
   game_runner->bag_and_rare_leave_overlap = rack_create(dist_size);
@@ -271,8 +270,7 @@ void game_runner_destroy(GameRunner *game_runner) {
   if (!game_runner) {
     return;
   }
-  rack_destroy(game_runner->leaves[0]);
-  rack_destroy(game_runner->leaves[1]);
+  rack_destroy(game_runner->leave);
   rack_destroy(game_runner->original_rack);
   rack_destroy(game_runner->rare_leave);
   rack_destroy(game_runner->bag_and_rare_leave_overlap);
@@ -298,9 +296,6 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
        game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
           (uint64_t)autoplay_worker->args->games_before_force_draw_start) {
     game_runner->force_draw = true;
-    for (int i = 0; i < 2; i++) {
-      rack_reset(game_runner->leaves[i]);
-    }
   }
 }
 
@@ -310,14 +305,13 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
           bag_get_tiles(game_get_bag(game_runner->game)) < (RACK_SIZE));
 }
 
-const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
-                                  GameRunner *game_runner) {
+void game_runner_play_move(AutoplayWorker *autoplay_worker,
+                           GameRunner *game_runner, Move **move) {
   if (game_runner_is_game_over(game_runner)) {
     log_fatal("game runner attempted to play a move when the game is over\n");
   }
   Game *game = game_runner->game;
   const int player_on_turn_index = game_get_player_on_turn_index(game);
-  Rack *leave_from_previous_move = game_runner->leaves[player_on_turn_index];
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
   const int thread_index = autoplay_worker->worker_index;
@@ -375,8 +369,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     // Redrawn the original rack.
     draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);
   }
-  const Move *move =
-      get_top_equity_move(game, thread_index, game_runner->move_list);
+  *move = get_top_equity_move(game, thread_index, game_runner->move_list);
 
   if (lg_shared_data) {
     leave_list_add_all_subleaves(
@@ -385,11 +378,13 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         // Use the bag_and_rare_leave_overlap as a scratch subleave rack
         // for the leave list add all subleaves call. It gets reset
         // before use.
-        game_runner->bag_and_rare_leave_overlap, move_get_equity(move));
+        game_runner->bag_and_rare_leave_overlap, move_get_equity(*move));
   }
-  play_move(move, game, NULL, leave_from_previous_move);
+  get_leave_for_move(*move, game, game_runner->leave);
+  autoplay_results_add_move(autoplay_worker->autoplay_results,
+                            game_runner->game, *move, game_runner->leave);
+  play_move(*move, game, NULL, NULL);
   game_runner->turn_number++;
-  return move;
 }
 
 void print_current_status(
@@ -444,20 +439,18 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
   }
   bool games_are_divergent = false;
   while (true) {
-    const Move *move1 = NULL;
+    Move *move1 = NULL;
     bool game1_is_over = game_runner_is_game_over(game_runner1);
     if (!game1_is_over) {
-      move1 = game_runner_play_move(autoplay_worker, game_runner1);
-      autoplay_results_add_move(autoplay_worker->autoplay_results, move1);
+      game_runner_play_move(autoplay_worker, game_runner1, &move1);
     }
 
-    const Move *move2 = NULL;
+    Move *move2 = NULL;
     bool game2_is_over = true;
     if (game_runner2) {
       game2_is_over = game_runner_is_game_over(game_runner2);
       if (!game2_is_over) {
-        move2 = game_runner_play_move(autoplay_worker, game_runner2);
-        autoplay_results_add_move(autoplay_worker->autoplay_results, move2);
+        game_runner_play_move(autoplay_worker, game_runner2, &move2);
       }
     }
 
@@ -639,8 +632,8 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
 
   // The stats have already been combined in leavegen mode
   if (!is_leavegen_mode) {
-    autoplay_results_combine(autoplay_results_list, number_of_threads,
-                             autoplay_results);
+    autoplay_results_finalize(autoplay_results_list, number_of_threads,
+                              autoplay_results);
   }
 
   free(autoplay_results_list);
