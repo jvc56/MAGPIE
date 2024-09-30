@@ -578,6 +578,8 @@ void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
     string_builder_add_formatted_string(fj_data->sb, "%lu,", args->seed);
     string_builder_add_move(fj_data->sb, board, &fj_move->move, ld);
     string_builder_add_char(fj_data->sb, ',');
+    string_builder_add_formatted_string(fj_data->sb, "%d,",
+                                        move_get_score(&fj_move->move));
     string_builder_add_rack(fj_data->sb, &fj_move->leave, ld, false);
     string_builder_add_formatted_string(fj_data->sb, ",%d,%d,%.1f",
                                         player_result, fj_move->score_diff,
