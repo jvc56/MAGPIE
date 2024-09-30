@@ -9,6 +9,7 @@
 #include "move.h"
 #include "stats.h"
 
+#include "../str/move_string.h"
 #include "../str/rack_string.h"
 
 #include "../util/math_util.h"
@@ -27,6 +28,7 @@ typedef struct RecorderArgs {
   const Move *move;
   const Rack *leave;
   uint64_t number_of_turns;
+  uint64_t seed;
   bool divergent;
   bool human_readable;
 } RecorderArgs;
@@ -432,54 +434,43 @@ char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
 }
 
 // FJ recorders
-#define FJ_NUMBER_OF_GAME_PARTITIONS 2
 #define MAX_NUMBER_OF_MOVES 100
-#define FJ_MIDGAME_FILENAME "fj_log_8_to_91.csv"
-#define FJ_EARLYGAME_FILENAME "fj_log_92_to_93.csv"
+#define FJ_FILENAME "fj_log.csv"
 
 typedef struct FJMove {
   int unseen_counts[MAX_ALPHABET_SIZE];
   Rack leave;
+  Move move;
   int score_diff;
   int unseen_total;
   int player_index;
 } FJMove;
 
 typedef struct FJData {
-  StringBuilder *builders[FJ_NUMBER_OF_GAME_PARTITIONS];
+  StringBuilder *sb;
   FJMove moves[MAX_NUMBER_OF_MOVES];
   int move_count;
 } FJData;
 
 typedef struct FJSharedData {
-  pthread_mutex_t output_mutexes[FJ_NUMBER_OF_GAME_PARTITIONS];
-  FILE *output_files[FJ_NUMBER_OF_GAME_PARTITIONS];
+  pthread_mutex_t fh_mutex;
+  FILE *fh;
 } FJSharedData;
 
 void fj_data_reset_fh(FJSharedData *shared_data) {
-  for (int i = 0; i < FJ_NUMBER_OF_GAME_PARTITIONS; i++) {
-    if (shared_data->output_files[i]) {
-      fclose(shared_data->output_files[i]);
-      shared_data->output_files[i] = NULL;
-    }
-    const char *filename = NULL;
-    if (i == 0) {
-      filename = FJ_MIDGAME_FILENAME;
-    } else if (i == 1) {
-      filename = FJ_EARLYGAME_FILENAME;
-    }
-    shared_data->output_files[i] = fopen(filename, "w");
-    if (!shared_data->output_files[i]) {
-      log_fatal("Error opening fj file for writing: %s\n", filename);
-    }
+  if (shared_data->fh) {
+    fclose(shared_data->fh);
+    shared_data->fh = NULL;
+  }
+  shared_data->fh = fopen(FJ_FILENAME, "w");
+  if (!shared_data->fh) {
+    log_fatal("Error opening fj file for writing: %s\n", FJ_FILENAME);
   }
 }
 
 void fj_data_reset(Recorder *recorder) {
   FJData *fj_data = (FJData *)recorder->data;
-  for (int i = 0; i < FJ_NUMBER_OF_GAME_PARTITIONS; i++) {
-    string_builder_clear(fj_data->builders[i]);
-  }
+  string_builder_clear(fj_data->sb);
   if (recorder->owns_thread_shared_data) {
     fj_data_reset_fh(recorder->thread_shared_data);
   }
@@ -493,18 +484,14 @@ void fj_data_reset(Recorder *recorder) {
 
 void fj_data_create(Recorder *recorder) {
   FJData *data = malloc_or_die(sizeof(FJData));
-  for (int i = 0; i < FJ_NUMBER_OF_GAME_PARTITIONS; i++) {
-    data->builders[i] = string_builder_create();
-  }
+  data->sb = string_builder_create();
   FJSharedData *shared_data = NULL;
   // If this recorder is not the owner, the thread shared data will be
   // assigned in the recorder_create function.
   if (recorder->owns_thread_shared_data) {
     shared_data = malloc_or_die(sizeof(FJSharedData));
-    for (int i = 0; i < FJ_NUMBER_OF_GAME_PARTITIONS; i++) {
-      pthread_mutex_init(&shared_data->output_mutexes[i], NULL);
-      shared_data->output_files[i] = NULL;
-    }
+    pthread_mutex_init(&shared_data->fh_mutex, NULL);
+    shared_data->fh = NULL;
   }
   recorder->data = data;
   recorder->thread_shared_data = shared_data;
@@ -513,15 +500,11 @@ void fj_data_create(Recorder *recorder) {
 
 void fj_data_destroy(Recorder *recorder) {
   FJData *fj_data = (FJData *)recorder->data;
-  for (int i = 0; i < FJ_NUMBER_OF_GAME_PARTITIONS; i++) {
-    string_builder_destroy(fj_data->builders[i]);
-  }
+  string_builder_destroy(fj_data->sb);
   if (recorder->owns_thread_shared_data) {
     FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
-    for (int i = 0; i < FJ_NUMBER_OF_GAME_PARTITIONS; i++) {
-      fclose(shared_data->output_files[i]);
-      shared_data->output_files[i] = NULL;
-    }
+    fclose(shared_data->fh);
+    shared_data->fh = NULL;
     free(shared_data);
   }
   free(fj_data);
@@ -537,6 +520,7 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   FJMove *fj_move = &fj_data->moves[fj_data->move_count];
   const Rack *leave = args->leave;
   rack_copy(&fj_move->leave, leave);
+  move_copy(&fj_move->move, args->move);
   fj_move->player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, fj_move->player_index);
   const Player *opponent = game_get_player(game, 1 - fj_move->player_index);
@@ -549,28 +533,28 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   return;
 }
 
-void fj_write_buffer_to_output(Recorder *recorder, int index,
-                               bool always_flush) {
+void fj_write_buffer_to_output(Recorder *recorder, bool always_flush) {
   FJData *fj_data = (FJData *)recorder->data;
   FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
   const GenericSharedData *generic_shared_data = recorder->generic_shared_data;
-  int str_len = string_builder_length(fj_data->builders[index]);
+  int str_len = string_builder_length(fj_data->sb);
   if (str_len > 0 &&
       (always_flush || str_len >= generic_shared_data->write_buffer_size)) {
-    pthread_mutex_lock(&shared_data->output_mutexes[index]);
-    if (fputs(string_builder_peek(fj_data->builders[index]),
-              shared_data->output_files[index]) == EOF) {
-      fclose(shared_data->output_files[index]);
+    pthread_mutex_lock(&shared_data->fh_mutex);
+    if (fputs(string_builder_peek(fj_data->sb), shared_data->fh) == EOF) {
+      fclose(shared_data->fh);
       log_fatal("Error writing to fj file of index: %d\n", index);
     }
-    pthread_mutex_unlock(&shared_data->output_mutexes[index]);
-    string_builder_clear(fj_data->builders[index]);
+    pthread_mutex_unlock(&shared_data->fh_mutex);
+    string_builder_clear(fj_data->sb);
   }
 }
 
 void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   FJData *fj_data = (FJData *)recorder->data;
   const Game *game = args->game;
+  const LetterDistribution *ld = game_get_ld(game);
+  const Board *board = game_get_board(game);
   double player_one_result = 0.5;
   int player_one_score = player_get_score(game_get_player(game, 0));
   int player_two_score = player_get_score(game_get_player(game, 1));
@@ -583,30 +567,25 @@ void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
       rack_get_dist_size(player_get_rack(game_get_player(game, 0)));
   for (int i = 0; i < fj_data->move_count; i++) {
     FJMove *fj_move = &fj_data->moves[i];
-    int sb_index;
-    if (fj_move->unseen_total <= 91) {
-      sb_index = 0;
-    } else {
-      sb_index = 1;
-    }
-    StringBuilder *sb = fj_data->builders[sb_index];
-    string_builder_add_rack(sb, &fj_move->leave, game_get_ld(game), false);
     const double player_result =
         fj_move->player_index * (1 - player_one_result) +
         (1 - fj_move->player_index) * player_one_result;
-    string_builder_add_formatted_string(sb, ",%d,%d,%.1f", fj_move->score_diff,
-                                        fj_move->unseen_total, player_result);
+    string_builder_add_formatted_string(fj_data->sb, "%lu,", args->seed);
+    string_builder_add_move(fj_data->sb, board, &fj_move->move, ld);
+    string_builder_add_char(fj_data->sb, ',');
+    string_builder_add_rack(fj_data->sb, &fj_move->leave, ld, false);
+    string_builder_add_formatted_string(fj_data->sb, ",%d,%d,%.1f",
+                                        player_result, fj_move->score_diff,
+                                        fj_move->unseen_total);
     for (int ml = 0; ml < dist_size; ml++) {
-      string_builder_add_formatted_string(sb, ",%d",
+      string_builder_add_formatted_string(fj_data->sb, ",%d",
                                           fj_move->unseen_counts[ml]);
       fj_move->unseen_counts[ml] = 0;
     }
-    string_builder_add_char(sb, '\n');
+    string_builder_add_char(fj_data->sb, '\n');
   }
   fj_data->move_count = 0;
-  for (int i = 0; i < FJ_NUMBER_OF_GAME_PARTITIONS; i++) {
-    fj_write_buffer_to_output(recorder, i, false);
-  }
+  fj_write_buffer_to_output(recorder, false);
 }
 
 void fj_data_finalize(Recorder **recorders, int num_recorders,
@@ -615,9 +594,7 @@ void fj_data_finalize(Recorder **recorders, int num_recorders,
     Recorder *recorder = recorders[i];
     FJData *fj_data = (FJData *)recorder->data;
     fj_data->move_count = 0;
-    for (int j = 0; j < FJ_NUMBER_OF_GAME_PARTITIONS; j++) {
-      fj_write_buffer_to_output(recorder, j, true);
-    }
+    fj_write_buffer_to_output(recorder, true);
   }
 }
 
@@ -660,22 +637,12 @@ void recorder_destroy(Recorder *recorder) {
 
 void recorder_reset(Recorder *recorder) { recorder->reset_func(recorder); }
 
-void recorder_add_move(Recorder *recorder, const Game *game, const Move *move,
-                       const Rack *leave) {
-  RecorderArgs args;
-  args.game = game;
-  args.move = move;
-  args.leave = leave;
-  recorder->add_move_func(recorder, &args);
+void recorder_add_move(Recorder *recorder, const RecorderArgs *args) {
+  recorder->add_move_func(recorder, args);
 }
 
-void recorder_add_game(Recorder *recorder, const Game *game, uint64_t turns,
-                       bool divergent) {
-  RecorderArgs args;
-  args.game = game;
-  args.number_of_turns = turns;
-  args.divergent = divergent;
-  recorder->add_game_func(recorder, &args);
+void recorder_add_game(Recorder *recorder, const RecorderArgs *args) {
+  recorder->add_game_func(recorder, args);
 }
 
 void recorder_finalize(Recorder **recorder_list, int list_size,
@@ -861,19 +828,28 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
                                const Rack *leave) {
+  RecorderArgs args;
+  args.game = game;
+  args.move = move;
+  args.leave = leave;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
-      recorder_add_move(autoplay_results->recorders[i], game, move, leave);
+      recorder_add_move(autoplay_results->recorders[i], &args);
     }
   }
 }
 
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, uint64_t turns,
-                               bool divergent) {
+                               const Game *game, uint64_t turns, bool divergent,
+                               uint64_t seed) {
+  RecorderArgs args;
+  args.game = game;
+  args.number_of_turns = turns;
+  args.divergent = divergent;
+  args.seed = seed;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
-      recorder_add_game(autoplay_results->recorders[i], game, turns, divergent);
+      recorder_add_game(autoplay_results->recorders[i], &args);
     }
   }
 }

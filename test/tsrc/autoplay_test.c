@@ -147,19 +147,19 @@ void test_autoplay_divergent_games(void) {
 
   load_and_exec_config_or_die(csw_config, "cgp " VS_ANDY_CGP);
   game = config_get_game(csw_config);
-  autoplay_results_add_game(ar, game, 20, false);
+  autoplay_results_add_game(ar, game, 20, false, 1);
 
   load_and_exec_config_or_die(csw_config, "cgp " VS_FRENTZ_CGP);
   game = config_get_game(csw_config);
-  autoplay_results_add_game(ar, game, 20, true);
+  autoplay_results_add_game(ar, game, 20, true, 2);
 
   load_and_exec_config_or_die(csw_config, "cgp " MANY_MOVES);
   game = config_get_game(csw_config);
-  autoplay_results_add_game(ar, game, 20, false);
+  autoplay_results_add_game(ar, game, 20, false, 3);
 
   load_and_exec_config_or_die(csw_config, "cgp " UEY_CGP);
   game = config_get_game(csw_config);
-  autoplay_results_add_game(ar, game, 20, true);
+  autoplay_results_add_game(ar, game, 20, true, 4);
 
   char *ar_str = autoplay_results_to_string(ar, false, true);
   assert_autoplay_output(

@@ -243,6 +243,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
 typedef struct GameRunner {
   bool force_draw;
   int turn_number;
+  uint64_t seed;
   Game *game;
   MoveList *move_list;
   Rack *leave;
@@ -284,6 +285,7 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
                        int starting_player_index) {
   Game *game = game_runner->game;
   game_reset(game);
+  game_runner->seed = iter_output->seed;
   game_seed(game, iter_output->seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
@@ -414,10 +416,11 @@ void print_current_status(
   string_builder_destroy(status_sb);
 }
 
-void autoplay_add_game(AutoplayWorker *autoplay_worker, const Game *game,
-                       int turns, bool divergent) {
-  autoplay_results_add_game(autoplay_worker->autoplay_results, game, turns,
-                            divergent);
+void autoplay_add_game(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
+                       bool divergent) {
+  autoplay_results_add_game(autoplay_worker->autoplay_results,
+                            game_runner->game, game_runner->turn_number,
+                            divergent, game_runner->seed);
   ThreadControlIterCompletedOutput iter_completed_output;
   thread_control_complete_iter(autoplay_worker->args->thread_control,
                                &iter_completed_output);
@@ -466,14 +469,12 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
       games_are_divergent = true;
     }
   }
-  autoplay_add_game(autoplay_worker, game_runner1->game,
-                    game_runner1->turn_number, games_are_divergent);
+  autoplay_add_game(autoplay_worker, game_runner1, games_are_divergent);
   if (game_runner2) {
     // We do not check for min leave counts here because leave gen
     // does not use game pairs and therefore does not have a second
     // game runner.
-    autoplay_add_game(autoplay_worker, game_runner2->game,
-                      game_runner2->turn_number, games_are_divergent);
+    autoplay_add_game(autoplay_worker, game_runner2, games_are_divergent);
   }
 }
 
