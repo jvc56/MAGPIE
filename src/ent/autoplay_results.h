@@ -37,5 +37,7 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
                                                   uint64_t total_games);
 void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
                                             int write_buffer_size);
+void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
+                                          const char *filepath);
 
 #endif

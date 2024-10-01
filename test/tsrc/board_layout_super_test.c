@@ -44,7 +44,7 @@ void test_board_layout_correctness_super(void) {
                                        "ANTHRO(POMORPHISATION)S", 155, true);
 
   load_and_exec_config_or_die(
-      config, "autoplay games,fj 100 -gp false -threads 11 -seed 100");
+      config, "autoplay games 100 -gp false -threads 11 -seed 100");
 
   game_destroy(game);
   config_destroy(config);

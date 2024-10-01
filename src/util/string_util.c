@@ -798,7 +798,7 @@ char *cut_off_after_first_char(const char *str, char ch) {
 
 char *insert_before_dot(const char *str, const char *insert) {
   const char *dot_position =
-      strchr(str, '.'); // Find the first occurrence of '.'
+      strrchr(str, '.'); // Find the last occurrence of '.'
   size_t str_len = string_length(str);
   size_t insert_len = string_length(insert);
 

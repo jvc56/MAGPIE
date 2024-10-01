@@ -81,6 +81,7 @@ typedef enum {
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INFO_INTERVAL,
   ARG_TOKEN_CHECK_STOP_INTERVAL,
+  ARG_TOKEN_RECORD_FILEPATH,
   ARG_TOKEN_INFILE,
   ARG_TOKEN_OUTFILE,
   ARG_TOKEN_EXEC_MODE,
@@ -116,6 +117,7 @@ struct Config {
   double equity_margin;
   bool use_game_pairs;
   bool human_readable;
+  char *record_filepath;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -1579,6 +1581,13 @@ config_load_status_t config_load_data(Config *config) {
     config->win_pcts = win_pct_create(config->data_paths, new_win_pct_name);
   }
 
+  const char *record_filepath =
+      config_get_parg_value(config, ARG_TOKEN_RECORD_FILEPATH, 0);
+  if (record_filepath) {
+    autoplay_results_set_record_filepath(config->autoplay_results,
+                                         record_filepath);
+  }
+
   // Set IO
 
   thread_control_set_io(config->thread_control,
@@ -1712,6 +1721,8 @@ Config *config_create_default(void) {
   parsed_arg_create(config, ARG_TOKEN_PRINT_INFO_INTERVAL, "pfrequency", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_CHECK_STOP_INTERVAL, "cfrequency", 1, 1,
+                    execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_RECORD_FILEPATH, "recfile", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_INFILE, "infile", 1, 1, execute_fatal,
                     status_fatal);
