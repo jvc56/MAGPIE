@@ -227,7 +227,9 @@ void test_autoplay_fj_record(void) {
   Config *csw_config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1  -gp false -threads 11");
-  load_and_exec_config_or_die(csw_config, "autoplay fj 100 -seed 50 -wb 1");
+  load_and_exec_config_or_die(
+      csw_config,
+      "autoplay fj 50 -seed 50 -wb 1000000 -recfile ./data/lexica/output.txt");
   config_destroy(csw_config);
 }
 

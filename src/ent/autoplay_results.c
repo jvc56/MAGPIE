@@ -13,6 +13,7 @@
 #include "../str/rack_string.h"
 
 #include "../util/math_util.h"
+#include "../util/string_util.h"
 #include "../util/util.h"
 
 #define DEFAULT_WRITE_BUFFER_SIZE 1024
@@ -36,6 +37,7 @@ typedef struct RecorderArgs {
 // Read-only data shared across all recorder types
 typedef struct GenericSharedData {
   int write_buffer_size;
+  char *output_filepath;
 } GenericSharedData;
 
 typedef struct Recorder Recorder;
@@ -435,44 +437,55 @@ char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
 
 // FJ recorders
 #define MAX_NUMBER_OF_MOVES 100
+#define MAX_NUMBER_OF_TILES 100
 #define FJ_FILENAME "fj_log.csv"
 
 typedef struct FJMove {
   int unseen_counts[MAX_ALPHABET_SIZE];
   Rack leave;
-  Move move;
+  int move_score;
   int score_diff;
   int unseen_total;
   int player_index;
 } FJMove;
 
 typedef struct FJData {
-  StringBuilder *sb;
+  StringBuilder *sbs[MAX_NUMBER_OF_TILES];
   FJMove moves[MAX_NUMBER_OF_MOVES];
   int move_count;
 } FJData;
 
 typedef struct FJSharedData {
-  pthread_mutex_t fh_mutex;
-  FILE *fh;
+  pthread_mutex_t fh_mutexes[MAX_NUMBER_OF_TILES];
+  FILE *fhs[MAX_NUMBER_OF_TILES];
 } FJSharedData;
 
-void fj_data_reset_fh(FJSharedData *shared_data) {
-  if (shared_data->fh) {
-    fclose(shared_data->fh);
-    shared_data->fh = NULL;
-  }
-  shared_data->fh = fopen(FJ_FILENAME, "w");
-  if (!shared_data->fh) {
-    log_fatal("Error opening fj file for writing: %s\n", FJ_FILENAME);
+void fj_data_reset_fh(FJSharedData *shared_data, const char *filename) {
+  for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+    char *ext = get_formatted_string("_%d", i);
+    char *filename_num_remaining = insert_before_dot(filename, ext);
+    free(ext);
+    if (shared_data->fhs[i]) {
+      fclose(shared_data->fhs[i]);
+      shared_data->fhs[i] = NULL;
+    }
+    shared_data->fhs[i] = fopen(filename_num_remaining, "w");
+    if (!shared_data->fhs[i]) {
+      log_fatal("Error opening fj file for writing: %s\n",
+                filename_num_remaining);
+    }
+    free(filename_num_remaining);
   }
 }
 
 void fj_data_reset(Recorder *recorder) {
   FJData *fj_data = (FJData *)recorder->data;
-  string_builder_clear(fj_data->sb);
+  for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+    string_builder_clear(fj_data->sbs[i]);
+  }
   if (recorder->owns_thread_shared_data) {
-    fj_data_reset_fh(recorder->thread_shared_data);
+    fj_data_reset_fh(recorder->thread_shared_data,
+                     recorder->generic_shared_data->output_filepath);
   }
   for (int i = 0; i < MAX_NUMBER_OF_MOVES; i++) {
     for (int j = 0; j < MAX_ALPHABET_SIZE; j++) {
@@ -484,14 +497,18 @@ void fj_data_reset(Recorder *recorder) {
 
 void fj_data_create(Recorder *recorder) {
   FJData *data = malloc_or_die(sizeof(FJData));
-  data->sb = string_builder_create();
+  for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+    data->sbs[i] = string_builder_create();
+  }
   FJSharedData *shared_data = NULL;
   // If this recorder is not the owner, the thread shared data will be
   // assigned in the recorder_create function.
   if (recorder->owns_thread_shared_data) {
     shared_data = malloc_or_die(sizeof(FJSharedData));
-    pthread_mutex_init(&shared_data->fh_mutex, NULL);
-    shared_data->fh = NULL;
+    for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+      pthread_mutex_init(&shared_data->fh_mutexes[i], NULL);
+      shared_data->fhs[i] = NULL;
+    }
   }
   recorder->data = data;
   recorder->thread_shared_data = shared_data;
@@ -500,11 +517,14 @@ void fj_data_create(Recorder *recorder) {
 
 void fj_data_destroy(Recorder *recorder) {
   FJData *fj_data = (FJData *)recorder->data;
-  string_builder_destroy(fj_data->sb);
+  for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+    string_builder_destroy(fj_data->sbs[i]);
+  }
   if (recorder->owns_thread_shared_data) {
     FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
-    fclose(shared_data->fh);
-    shared_data->fh = NULL;
+    for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+      fclose(shared_data->fhs[i]);
+    }
     free(shared_data);
   }
   free(fj_data);
@@ -514,23 +534,18 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   FJData *fj_data = (FJData *)recorder->data;
   const Game *game = args->game;
   const Bag *bag = game_get_bag(game);
-  if (fj_data->move_count >= MAX_NUMBER_OF_MOVES) {
+  if (fj_data->move_count >= MAX_NUMBER_OF_MOVES || bag_get_tiles(bag) == 0) {
     return;
   }
   FJMove *fj_move = &fj_data->moves[fj_data->move_count];
   const Rack *leave = args->leave;
   rack_copy(&fj_move->leave, leave);
-  move_copy(&fj_move->move, args->move);
+  fj_move->move_score = move_get_score(args->move);
   fj_move->player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, fj_move->player_index);
   const Player *opponent = game_get_player(game, 1 - fj_move->player_index);
   fj_move->score_diff = player_get_score(player) - player_get_score(opponent);
-  const int num_tiles_in_bag = bag_get_tiles(bag);
-  if (num_tiles_in_bag == 0) {
-    fj_move->unseen_total = rack_get_total_letters(player_get_rack(opponent));
-  } else {
-    fj_move->unseen_total = bag_get_tiles(bag) + (RACK_SIZE);
-  }
+  fj_move->unseen_total = bag_get_tiles(bag) + (RACK_SIZE);
   bag_increment_unseen_count(bag, fj_move->unseen_counts);
   rack_increment_unseen_count(player_get_rack(opponent),
                               fj_move->unseen_counts);
@@ -538,20 +553,23 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   return;
 }
 
-void fj_write_buffer_to_output(Recorder *recorder, bool always_flush) {
+void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
+                               bool always_flush) {
   FJData *fj_data = (FJData *)recorder->data;
   FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
   const GenericSharedData *generic_shared_data = recorder->generic_shared_data;
-  int str_len = string_builder_length(fj_data->sb);
+  StringBuilder *sb = fj_data->sbs[remaining_tiles];
+  int str_len = string_builder_length(sb);
   if (str_len > 0 &&
       (always_flush || str_len >= generic_shared_data->write_buffer_size)) {
-    pthread_mutex_lock(&shared_data->fh_mutex);
-    if (fputs(string_builder_peek(fj_data->sb), shared_data->fh) == EOF) {
-      fclose(shared_data->fh);
+    pthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
+    if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
+        EOF) {
+      fclose(shared_data->fhs[remaining_tiles]);
       log_fatal("Error writing to fj file of index: %d\n", index);
     }
-    pthread_mutex_unlock(&shared_data->fh_mutex);
-    string_builder_clear(fj_data->sb);
+    pthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
+    string_builder_clear(sb);
   }
 }
 
@@ -559,7 +577,6 @@ void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   FJData *fj_data = (FJData *)recorder->data;
   const Game *game = args->game;
   const LetterDistribution *ld = game_get_ld(game);
-  const Board *board = game_get_board(game);
   double player_one_result = 0.5;
   int player_one_score = player_get_score(game_get_player(game, 0));
   int player_two_score = player_get_score(game_get_player(game, 1));
@@ -575,24 +592,20 @@ void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
     const double player_result =
         fj_move->player_index * (1 - player_one_result) +
         (1 - fj_move->player_index) * player_one_result;
-    string_builder_add_formatted_string(fj_data->sb, "%lu,", args->seed);
-    string_builder_add_move(fj_data->sb, board, &fj_move->move, ld);
-    string_builder_add_char(fj_data->sb, ',');
-    string_builder_add_formatted_string(fj_data->sb, "%d,",
-                                        move_get_score(&fj_move->move));
-    string_builder_add_rack(fj_data->sb, &fj_move->leave, ld, false);
-    string_builder_add_formatted_string(fj_data->sb, ",%d,%d,%.1f",
-                                        player_result, fj_move->score_diff,
-                                        fj_move->unseen_total);
+    StringBuilder *sb = fj_data->sbs[fj_move->unseen_total];
+    string_builder_add_formatted_string(sb, "%d,", fj_move->move_score);
+    string_builder_add_rack(sb, &fj_move->leave, ld, false);
+    string_builder_add_formatted_string(sb, ",%.1f,%d", player_result,
+                                        fj_move->score_diff);
     for (int ml = 0; ml < dist_size; ml++) {
-      string_builder_add_formatted_string(fj_data->sb, ",%d",
+      string_builder_add_formatted_string(sb, ",%d",
                                           fj_move->unseen_counts[ml]);
       fj_move->unseen_counts[ml] = 0;
     }
-    string_builder_add_char(fj_data->sb, '\n');
+    string_builder_add_char(sb, '\n');
+    fj_write_buffer_to_output(recorder, fj_move->unseen_total, false);
   }
   fj_data->move_count = 0;
-  fj_write_buffer_to_output(recorder, false);
 }
 
 void fj_data_finalize(Recorder **recorders, int num_recorders,
@@ -601,7 +614,9 @@ void fj_data_finalize(Recorder **recorders, int num_recorders,
     Recorder *recorder = recorders[i];
     FJData *fj_data = (FJData *)recorder->data;
     fj_data->move_count = 0;
-    fj_write_buffer_to_output(recorder, true);
+    for (int j = 0; j < MAX_NUMBER_OF_TILES; j++) {
+      fj_write_buffer_to_output(recorder, j, true);
+    }
   }
 }
 
@@ -614,8 +629,10 @@ Recorder *recorder_create(const Recorder *primary_recorder,
                           recorder_add_move_func_t add_move_func,
                           recorder_add_game_func_t add_game_func,
                           recorder_finalize_func_t finalize_func,
-                          recorder_str_func_t str_func) {
+                          recorder_str_func_t str_func,
+                          const GenericSharedData *generic_shared_data) {
   Recorder *recorder = malloc_or_die(sizeof(Recorder));
+  recorder->generic_shared_data = generic_shared_data;
   recorder->reset_func = reset_func;
   recorder->destroy_data_func = destroy_data_func;
   recorder->add_move_func = add_move_func;
@@ -686,20 +703,13 @@ void autoplay_results_set_recorder(
       }
       autoplay_results->recorders[recorder_type] = recorder_create(
           primary_recorder, reset_func, create_data_func, destroy_data_func,
-          add_move_func, add_game_func, finalize_func, str_func);
-      autoplay_results->recorders[recorder_type]->generic_shared_data =
-          autoplay_results->generic_shared_data;
+          add_move_func, add_game_func, finalize_func, str_func,
+          autoplay_results->generic_shared_data);
     }
   } else {
     recorder_destroy(autoplay_results->recorders[recorder_type]);
     autoplay_results->recorders[recorder_type] = NULL;
   }
-}
-
-void copy_generic_shared_data(AutoplayResults *dst,
-                              const AutoplayResults *src) {
-  dst->generic_shared_data->write_buffer_size =
-      src->generic_shared_data->write_buffer_size;
 }
 
 void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
@@ -715,9 +725,6 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       fj_data_reset, fj_data_create, fj_data_destroy, fj_data_add_move,
       fj_data_add_game, fj_data_finalize, get_str_noop);
   autoplay_results->options = options;
-  if (primary) {
-    copy_generic_shared_data(autoplay_results, primary);
-  }
 }
 
 autoplay_status_t autoplay_results_set_options_with_splitter(
@@ -770,10 +777,12 @@ GenericSharedData *create_generic_shared_data(void) {
   GenericSharedData *generic_shared_data =
       malloc_or_die(sizeof(GenericSharedData));
   generic_shared_data->write_buffer_size = DEFAULT_WRITE_BUFFER_SIZE;
+  generic_shared_data->output_filepath = string_duplicate("record_output.txt");
   return generic_shared_data;
 }
 
 void destroy_generic_shared_data(GenericSharedData *generic_shared_data) {
+  free(generic_shared_data->output_filepath);
   free(generic_shared_data);
 }
 
@@ -898,4 +907,11 @@ char *autoplay_results_to_string(AutoplayResults *autoplay_results,
 void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
                                             int write_buffer_size) {
   autoplay_results->generic_shared_data->write_buffer_size = write_buffer_size;
+}
+
+void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
+                                          const char *filepath) {
+  free(autoplay_results->generic_shared_data->output_filepath);
+  autoplay_results->generic_shared_data->output_filepath =
+      string_duplicate(filepath);
 }
