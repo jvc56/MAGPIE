@@ -147,7 +147,7 @@ Load a game in progress while specifying the lexicon and letter distribution opt
 cgp 4AUREOLED3/11O3/11Z3/10FY3/10A4/10C4/10I4/7THANX3/10GUV2/15/15/15/15/15/15 AHMPRTU/ 177/44 0 -lex CSW21; -ld english;
 ```
 #### generate
-Generates plays for the position. The generate command takes no arguments as its behavior is mediated the options. Generating plays completely resets the move list, discarding any moves that may have be added manually.
+Generates plays for the position. The generate command takes no arguments as its behavior is mediated by the options. Generating plays completely resets the move list, discarding any moves that may have be added manually.
 ##### Examples
 Generate moves for the current position:
 ```
@@ -256,11 +256,11 @@ Specifies the bingo bonus. The default value is 50.
 
 #### bdn
 
-Specifies the board layout. For now, only the `crossword` layout is available.
+Specifies the board layout.
 
 #### var
 
-Specifies the game variant. For now, only the `classic` variant is available.
+Specifies the game variant.
 
 #### ld
 
@@ -346,7 +346,3 @@ Specifies the output file for the MAGPIE execution. Warnings and errors still ge
 #### mode
 
 Specifies that MAGPIE should run in console or UCGI mode.
- ./bin/magpie ucgi
-autoplay -lex CSW21 -s1 equity -s2 equity -r1 best -r2 best -it 1000000 -numplays 1 -threads 4
-stop
-```
