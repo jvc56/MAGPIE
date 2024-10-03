@@ -1,14 +1,10 @@
 #ifndef KWG_H
 #define KWG_H
 
-#if defined(__APPLE__)
-#include "../../compat/endian.h"
-#else
-#include <endian.h>
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "../compat/endian_conv.h"
 
 #include "../def/kwg_defs.h"
 
