@@ -4,21 +4,21 @@
 #if defined(_WIN32)
 
 #include <windows.h>
-#if BYTE_ORDER == LITTLE_ENDIAN
+// Assumes Windows is little-endian
 #define htobe16(x) _byteswap_ushort(x)
-#define htobe32(x) _byteswap_ulong(x)
-#define htobe64(x) _byteswap_uint64(x)
+#define htole16(x) (x)
 #define be16toh(x) _byteswap_ushort(x)
+#define le16toh(x) (x)
+
+#define htobe32(x) _byteswap_ulong(x)
+#define htole32(x) (x)
 #define be32toh(x) _byteswap_ulong(x)
+#define le32toh(x) (x)
+
+#define htobe64(x) _byteswap_uint64(x)
+#define htole64(x) (x)
 #define be64toh(x) _byteswap_uint64(x)
-#else
-#define htobe16(x) (x)
-#define htobe32(x) (x)
-#define htobe64(x) (x)
-#define be16toh(x) (x)
-#define be32toh(x) (x)
-#define be64toh(x) (x)
-#endif
+#define le64toh(x) (x)
 
 #elif defined(__APPLE__)
 
