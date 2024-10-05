@@ -638,7 +638,7 @@ uint32_t
 max_word_lookup_result_size(const MutableWordMap *word_map,
                             const MutableDoubleBlankMap *double_blank_map) {
   uint32_t max_size = 0;
-  for (int len = 15; len <= BOARD_DIM; len++) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
     for (uint32_t bucket_index = 0;
          bucket_index < double_blank_map->maps[len].num_double_blank_buckets;
          bucket_index++) {
