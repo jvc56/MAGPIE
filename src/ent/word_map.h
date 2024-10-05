@@ -63,7 +63,7 @@ typedef struct WordsOfSameLengthMap {
   uint32_t *blank_bucket_starts;
   uint32_t num_blank_buckets;
   uint32_t *double_blank_bucket_starts;
-  uint32_t double_num_blank_buckets;
+  uint32_t num_double_blank_buckets;
   BitRack *word_map_entries;
   BitRack *blank_map_entries;
   BitRack *double_blank_map_entries;

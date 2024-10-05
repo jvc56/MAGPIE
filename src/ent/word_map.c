@@ -671,6 +671,16 @@ max_word_lookup_result_size(const MutableWordMap *word_map,
   return max_size;
 }
 
+void fill_words_of_same_length_map(
+    const MutableWordsOfSameLengthMap *word_map,
+    const MutableBlanksForSameLengthMap *blank_map,
+    const MutableDoubleBlanksForSameLengthMap *double_blank_map,
+    WordsOfSameLengthMap *map) {
+  map->num_word_buckets = word_map->num_word_buckets;
+  map->num_blank_buckets = blank_map->num_blank_buckets;
+  map->num_double_blank_buckets = double_blank_map->num_double_blank_buckets;
+}
+
 WordMap *
 word_map_create_from_mutables(const MutableWordMap *word_map,
                               const MutableBlankMap *blank_map,
@@ -686,5 +696,9 @@ word_map_create_from_mutables(const MutableWordMap *word_map,
   map->max_blank_pair_bytes = max_blank_pair_result_size(double_blank_map);
   map->max_word_lookup_bytes =
       max_word_lookup_result_size(word_map, double_blank_map);
+  for (int i = 2; i <= BOARD_DIM; i++) {
+    fill_words_of_same_length_map(&word_map->maps[i], &blank_map->maps[i],
+                                  &double_blank_map->maps[i], &map->maps[i]);
+  }
   return map;
 }
