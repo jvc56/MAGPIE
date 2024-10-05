@@ -11,6 +11,8 @@ uint8_t dictionary_word_get_length(const DictionaryWord *dictionary_word);
 typedef struct DictionaryWordList DictionaryWordList;
 
 DictionaryWordList *dictionary_word_list_create(void);
+DictionaryWordList *dictionary_word_list_create_with_capacity(int capacity);
+
 void dictionary_word_list_clear(DictionaryWordList *dictionary_word_list);
 void dictionary_word_list_add_word(DictionaryWordList *dictionary_word_list,
                                    const uint8_t *word, int word_length);
@@ -21,7 +23,9 @@ dictionary_word_list_get_word(const DictionaryWordList *dictionary_word_list,
                               int index);
 void dictionary_word_list_sort(DictionaryWordList *dictionary_word_list);
 void dictionary_word_list_unique(DictionaryWordList *sorted,
-                                 DictionaryWordList *unique);
+                                 DictionaryWordList *unique);     
+void dictionary_word_list_copy(const DictionaryWordList *src,
+                               DictionaryWordList **dst);                                                             
 void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list);
 
 #endif // DICTIONARY_WORD_H
