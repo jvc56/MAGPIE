@@ -124,7 +124,7 @@ void dictionary_word_list_copy(const DictionaryWordList *src,
     dictionary_word_list_add_word(*dst, src->dictionary_words[i].word,
                                   src->dictionary_words[i].length);
   }
-  printf("dst->count %d\n", (*dst)->count);
+  //printf("dst->count %d\n", (*dst)->count);
 }
 
 void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list) {

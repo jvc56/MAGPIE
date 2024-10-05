@@ -147,13 +147,13 @@ look_up_double_blank_set(const MutableDoubleBlankMap *double_blank_map,
   bit_rack_div_mod(&bit_rack,
                    double_blank_map_for_length->num_double_blank_buckets,
                    &quotient, &bucket_index);
-  printf("double_blank_map_for_length->num_double_blank_buckets %d\n",
-         double_blank_map_for_length->num_double_blank_buckets);
-  printf("bucket index %d\n", bucket_index);
-  printf("double_blank_map_for_length->double_blank_buckets[bucket_index].num_"
-         "entries: %d\n",
-         double_blank_map_for_length->double_blank_buckets[bucket_index]
-             .num_entries);
+  // printf("double_blank_map_for_length->num_double_blank_buckets %d\n",
+  //        double_blank_map_for_length->num_double_blank_buckets);
+  // printf("bucket index %d\n", bucket_index);
+  // printf("double_blank_map_for_length->double_blank_buckets[bucket_index].num_"
+  //        "entries: %d\n",
+  //        double_blank_map_for_length->double_blank_buckets[bucket_index]
+  //            .num_entries);
   for (uint32_t i = 0;
        i < double_blank_map_for_length->double_blank_buckets[bucket_index]
                .num_entries;
@@ -162,11 +162,11 @@ look_up_double_blank_set(const MutableDoubleBlankMap *double_blank_map,
         &double_blank_map_for_length->double_blank_buckets[bucket_index]
              .entries[i];
     if (bit_rack_equals(&entry->quotient, &quotient)) {
-      printf("matching quotient, returning letter_pairs\n");
+      //printf("matching quotient, returning letter_pairs\n");
       return entry->letter_pairs;
     }
   }
-  printf("no matching quotient, returning NULL\n");
+  //printf("no matching quotient, returning NULL\n");
   return NULL;
 }
 

@@ -513,7 +513,7 @@ void set_double_blank_map_letter_pairs(MutableDoubleBlanksForSameLengthMap *map,
   MutableDoubleBlankMapEntry *entry = &bucket->entries[bucket->num_entries];
   entry->quotient = quotient;
   dictionary_word_list_copy(letter_pairs, &entry->letter_pairs);
-  printf("entry->letter_pairs %d\n", dictionary_word_list_get_count(entry->letter_pairs));
+  //printf("entry->letter_pairs %d\n", dictionary_word_list_get_count(entry->letter_pairs));
   bucket->num_entries++;
 }
 
