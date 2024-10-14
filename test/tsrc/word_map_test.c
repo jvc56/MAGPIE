@@ -385,6 +385,15 @@ void test_resize_double_blanks(void) {
   config_destroy(config);                                                
 }
 
+void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
+                           const LetterDistribution *ld, int start, int length) {
+  char hl[2] = {0, 0};                            
+  for (int i = 0; i < length; i++) {
+    hl[0] = expected_word[i];
+    assert(buffer[start + i] == ld_hl_to_ml(ld, hl));
+  }
+}
+
 void test_create_from_mutables(void) {
   Config *config = config_create_or_die("set -lex CSW21");
   const LetterDistribution *ld = config_get_ld(config);
@@ -421,6 +430,29 @@ void test_create_from_mutables(void) {
   assert(map->max_word_length == 15);
   assert(map->max_blank_pair_bytes == 2 * 42); // EIQSTU??
   assert(map->max_word_lookup_bytes == 47 * 8); // EIQSTU??
+
+  uint8_t *buffer = malloc_or_die(map->max_word_lookup_bytes);
+  BitRack iq = string_to_bit_rack(ld, "IQ");
+  int bytes_written = word_map_write_words_to_buffer(map, &iq, buffer);
+  assert(bytes_written == 2);
+  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+
+  BitRack torque = string_to_bit_rack(ld, "TORQUE");
+  bytes_written = word_map_write_words_to_buffer(map, &torque, buffer);
+  assert(bytes_written == 6*3);
+  assert_word_in_buffer(buffer, "QUOTER", ld, 6*0, 6);
+  assert_word_in_buffer(buffer, "ROQUET", ld, 6*1, 6);
+  assert_word_in_buffer(buffer, "TORQUE", ld, 6*2, 6);
+
+  BitRack questor = string_to_bit_rack(ld, "QUESTOR");
+  bytes_written = word_map_write_words_to_buffer(map, &questor, buffer);
+  assert(bytes_written == 7*4);
+  assert_word_in_buffer(buffer, "QUESTOR", ld, 7*0, 7);
+  assert_word_in_buffer(buffer, "QUOTERS", ld, 7*1, 7);
+  assert_word_in_buffer(buffer, "ROQUETS", ld, 7*2, 7);
+  assert_word_in_buffer(buffer, "TORQUES", ld, 7*3, 7);
+
+  free(buffer);
   dictionary_word_list_destroy(q_words);
   dictionary_word_list_destroy(words);
   game_destroy(game);

@@ -1,6 +1,7 @@
 #ifndef BIT_RACK_H
 #define BIT_RACK_H
 
+#include <_types/_uint32_t.h>
 #include <_types/_uint8_t.h>
 #include <assert.h>
 #include <stdbool.h>
@@ -329,4 +330,33 @@ static inline uint64_t bit_rack_get_high64(const BitRack *bit_rack) {
 #endif
 }
 
+static inline uint64_t bit_rack_get_low64(const BitRack *bit_rack) {
+#if USE_INT128_INTRINSIC
+  return (uint64_t)*bit_rack;
+#else
+  return bit_rack->low;
+#endif
+}
+
+// TODO: Generalize this to work with any number of bytes
+static inline void bit_rack_write_12_bytes(const BitRack *bit_rack,
+                                           uint8_t bytes[12]) {
+  // assumes little-endian                                            
+  memory_copy(bytes, ((uint8_t *)bit_rack), 12);
+}
+
+static inline BitRack bit_rack_read_12_bytes(const uint8_t bytes[12]) {
+  BitRack bit_rack = 0;
+  // assumes little-endian                                            
+  memory_copy(((uint8_t *)&bit_rack), bytes, 12);
+  return bit_rack;
+}
+
+static inline int bit_rack_num_letters(const BitRack *bit_rack) {
+  int num_letters = 0;
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    num_letters += bit_rack_get_letter(bit_rack, ml);
+  }
+  return num_letters;
+}
 #endif

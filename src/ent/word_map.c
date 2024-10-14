@@ -109,6 +109,19 @@ int mutable_words_of_same_length_get_num_sets(
   return num_sets;
 }
 
+int mutable_words_of_same_length_get_num_words(
+    const MutableWordsOfSameLengthMap *map) {
+  int num_words = 0;
+  for (uint32_t i = 0; i < map->num_word_buckets; i++) {
+    const MutableWordMapBucket *bucket = &map->word_buckets[i];
+    for (uint32_t j = 0; j < bucket->num_entries; j++) {
+      const MutableWordMapEntry *entry = &bucket->entries[j];
+      num_words += dictionary_word_list_get_count(entry->letters);
+    }
+  }
+  return num_words;
+}
+
 int mutable_blanks_for_same_length_get_num_sets(
     const MutableBlanksForSameLengthMap *map) {
   int num_sets = 0;
@@ -671,14 +684,91 @@ max_word_lookup_result_size(const MutableWordMap *word_map,
   return max_size;
 }
 
+void write_word_range(uint32_t word_start, uint32_t num_words,
+                      uint8_t bytes[16]) {
+  uint64_t *p_zero = (uint64_t *)bytes;
+  *p_zero = 0;
+  uint32_t *p_word_start = (uint32_t *)bytes + 2;
+  *p_word_start = word_start;
+  uint32_t *p_num_words = (uint32_t *)bytes + 3;
+  *p_num_words = num_words;
+}
+
+void write_letters(const MutableWordMapEntry *entry, uint32_t word_start,
+                   uint8_t *letters) {
+  const int num_words = dictionary_word_list_get_count(entry->letters);
+  const int word_length = dictionary_word_get_length(
+      dictionary_word_list_get_word(entry->letters, 0));
+  for (int i = 0; i < num_words; i++) {
+    const DictionaryWord *word =
+        dictionary_word_list_get_word(entry->letters, i);
+    for (int j = 0; j < word_length; j++) {
+      printf("%c", dictionary_word_get_word(word)[j] + 'A' - 1);
+    }
+    printf("\n");
+    const uint8_t *word_letters = dictionary_word_get_word(word);
+    memory_copy(letters + word_start + i * word_length, word_letters,
+                word_length);
+  }
+}
+
+uint32_t write_word_entries(const MutableWordMapBucket *bucket, int word_length,
+                            WordEntry *entries, uint8_t *letters,
+                            uint32_t *word_start) {
+  printf("  write_word_entries: %d\n", bucket->num_entries);
+  for (uint32_t i = 0; i < bucket->num_entries; i++) {
+    printf("   entry %d\n", i);
+    const MutableWordMapEntry *entry = &bucket->entries[i];
+    printf("    quotient (from mutable)");
+    for (int j = 11; j >= 0; j--) {
+      printf(" %d", (uint8_t)(entry->quotient >> (j * 8)));
+    }
+    printf("\n quotient (from bytes)");
+    bit_rack_write_12_bytes(&entry->quotient, entries[i].quotient);
+    for (int j = 0; j < 12; j++) {
+      printf(" %d", entries[i].quotient[j]);
+    }
+    printf("\n");
+    const uint32_t num_words = dictionary_word_list_get_count(entry->letters);
+    write_word_range(*word_start, num_words, entries[i].bucket_or_inline);
+    write_letters(entry, *word_start, letters);
+    *word_start += num_words * word_length;
+  }
+  return bucket->num_entries;
+}
+
 void fill_words_of_same_length_map(
     const MutableWordsOfSameLengthMap *word_map,
     const MutableBlanksForSameLengthMap *blank_map,
-    const MutableDoubleBlanksForSameLengthMap *double_blank_map,
+    const MutableDoubleBlanksForSameLengthMap *double_blank_map, int length,
     WordsOfSameLengthMap *map) {
+  printf("fill_words_of_same_length_map, length %d\n", length);
   map->num_word_buckets = word_map->num_word_buckets;
   map->num_blank_buckets = blank_map->num_blank_buckets;
   map->num_double_blank_buckets = double_blank_map->num_double_blank_buckets;
+  const int num_sets = mutable_words_of_same_length_get_num_sets(word_map);
+  const int num_words = mutable_words_of_same_length_get_num_words(word_map);
+  printf("num_word_buckets: %d\n", map->num_word_buckets);
+  map->word_bucket_starts =
+      malloc_or_die(sizeof(uint32_t) * (map->num_word_buckets + 1));
+  int entry_index = 0;
+  for (uint32_t i = 0; i < word_map->num_word_buckets; i++) {
+    const MutableWordMapBucket *bucket = &word_map->word_buckets[i];
+    map->word_bucket_starts[i] = entry_index;
+    entry_index += bucket->num_entries;
+  }
+  map->word_bucket_starts[map->num_word_buckets] = entry_index;
+  map->word_map_entries = malloc_or_die(sizeof(WordEntry) * num_sets);
+  map->word_letters = malloc_or_die(sizeof(uint8_t) * num_words * length);
+  entry_index = 0;
+  uint32_t word_start = 0;
+  for (uint32_t i = 0; i < word_map->num_word_buckets; i++) {
+    printf("bucket %d, entry_index %d\n", i, entry_index);
+    const uint32_t bucket_size = write_word_entries(
+        &word_map->word_buckets[i], length, &map->word_map_entries[entry_index],
+        map->word_letters, &word_start);
+    entry_index += bucket_size;
+  }
 }
 
 WordMap *
@@ -698,7 +788,40 @@ word_map_create_from_mutables(const MutableWordMap *word_map,
       max_word_lookup_result_size(word_map, double_blank_map);
   for (int i = 2; i <= BOARD_DIM; i++) {
     fill_words_of_same_length_map(&word_map->maps[i], &blank_map->maps[i],
-                                  &double_blank_map->maps[i], &map->maps[i]);
+                                  &double_blank_map->maps[i], i, &map->maps[i]);
   }
   return map;
+}
+
+int word_map_write_words_to_buffer(const WordMap *map, const BitRack *bit_rack,
+                                   uint8_t *buffer) {
+  printf("word_map_write_words_to_buffer(...)\n");
+  const int length = bit_rack_num_letters(bit_rack);
+  printf("length: %d\n", length);
+  BitRack quotient;
+  uint32_t bucket_index;
+  const WordsOfSameLengthMap *word_map = &map->maps[length];
+  bit_rack_div_mod(bit_rack, word_map->num_word_buckets, &quotient,
+                   &bucket_index);
+  printf("bucket_index: %d\n", bucket_index);
+  const uint32_t start = word_map->word_bucket_starts[bucket_index];
+  const uint32_t end = word_map->word_bucket_starts[bucket_index + 1];
+  printf("start: %d, end: %d\n", start, end);
+  for (uint32_t i = start; i < end; i++) {
+    const WordEntry *entry = &word_map->word_map_entries[i];
+    const BitRack entry_quotient = bit_rack_read_12_bytes(entry->quotient);
+    if (!bit_rack_equals(&entry_quotient, &quotient)) {
+      continue;
+    }
+    const uint64_t expected_zero = *((uint64_t *)entry->bucket_or_inline);
+    assert(expected_zero == 0);
+    const uint32_t word_start = *((uint32_t *)entry->bucket_or_inline + 2);
+    const uint32_t num_words = *((uint32_t *)entry->bucket_or_inline + 3);
+    const uint8_t *letters = word_map->word_letters + word_start;
+    const int bytes_written = num_words * length;
+    memory_copy(buffer, letters, bytes_written);
+    return bytes_written;
+  }
+  assert(false);
+  return 0;
 }

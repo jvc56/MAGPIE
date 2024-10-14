@@ -47,7 +47,7 @@
 
 // WordMapEntry binary format:
 // ===========================
-// 16 bytes: either word bucket index(last 4 bytes) or inline words
+// 16 bytes: either word bucket index (last 4 bytes) or inline words
 // 12 bytes: isInline bit | BitRack quotient (96 bits)
 //           (number of word buckets must be high enough that maximum quotient
 //           fits. largest_bit_rack_for_ld(ld) / num_word_buckets < (1 << 95)).
@@ -64,7 +64,7 @@ typedef struct WordsOfSameLengthMap {
   uint32_t num_blank_buckets;
   uint32_t *double_blank_bucket_starts;
   uint32_t num_double_blank_buckets;
-  BitRack *word_map_entries;
+  WordEntry *word_map_entries;
   BitRack *blank_map_entries;
   BitRack *double_blank_map_entries;
   uint8_t *word_letters;
@@ -186,6 +186,8 @@ mutable_double_blank_map_resize(const MutableDoubleBlankMap *double_blank_map,
 
 WordMap *word_map_create_from_mutables(const MutableWordMap *word_map,
                                        const MutableBlankMap *blank_map,
-                                       const MutableDoubleBlankMap *double_blank_map);                                  
+                                       const MutableDoubleBlankMap *double_blank_map);
+
+int word_map_write_words_to_buffer(const WordMap *word_map, const BitRack *bit_rack, uint8_t *buffer);
 
 #endif
