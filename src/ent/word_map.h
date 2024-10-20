@@ -190,11 +190,14 @@ word_map_create_from_mutables(const MutableWordMap *word_map,
                               const MutableDoubleBlankMap *double_blank_map);
 
 int word_map_write_blankless_words_to_buffer(const WordMap *word_map,
-                                   const BitRack *bit_rack, uint8_t *buffer);
+                                             const BitRack *bit_rack,
+                                             uint8_t *buffer);
 
-int word_map_write_blanks_to_buffer(const WordMap *word_map,
-                                    BitRack *bit_rack,
+int word_map_write_blanks_to_buffer(const WordMap *word_map, BitRack *bit_rack,
                                     uint8_t *buffer);
 
+int word_map_write_double_blanks_to_buffer(const WordMap *word_map,
+                                           BitRack *bit_rack,
+                                           uint8_t *buffer);
 
 #endif

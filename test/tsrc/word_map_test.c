@@ -453,6 +453,22 @@ void test_create_from_mutables(void) {
   assert_word_in_buffer(buffer, "ROQUETS", ld, 7*2, 7);
   assert_word_in_buffer(buffer, "TORQUES", ld, 7*3, 7);
 
+  BitRack docquets = string_to_bit_rack(ld, "DOCQUETS");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &docquets, buffer);
+  assert(bytes_written == 8);
+  assert_word_in_buffer(buffer, "DOCQUETS", ld, 8*0, 8);
+
+  BitRack requoted = string_to_bit_rack(ld, "REQUOTED");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &requoted, buffer);
+  assert(bytes_written == 8*2);
+  assert_word_in_buffer(buffer, "REQUOTED", ld, 8*0, 8);
+  assert_word_in_buffer(buffer, "ROQUETED", ld, 8*1, 8);
+
+  BitRack unquoted = string_to_bit_rack(ld, "UNQUOTED");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &unquoted, buffer);
+  assert(bytes_written == 8);
+  assert_word_in_buffer(buffer, "UNQUOTED", ld, 8*0, 8);
+
   BitRack q_blank = string_to_bit_rack(ld, "Q?");
   bytes_written = word_map_write_blanks_to_buffer(map, &q_blank, buffer);
   assert(bytes_written == 2);
@@ -475,6 +491,27 @@ void test_create_from_mutables(void) {
   assert_word_in_buffer(buffer, "QUATRES", ld, 7 * 11, 7);
   assert_word_in_buffer(buffer, "QUAVERS", ld, 7 * 12, 7);
 
+  BitRack double_blank = string_to_bit_rack(ld, "??");
+  bytes_written =
+      word_map_write_double_blanks_to_buffer(map, &double_blank, buffer);
+  assert(bytes_written == 2);
+  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+
+  BitRack quoted_double_blank = string_to_bit_rack(ld, "QUOTED??");
+  bytes_written =
+      word_map_write_double_blanks_to_buffer(map, &quoted_double_blank, buffer);
+  assert(bytes_written == 8*4);
+  assert_word_in_buffer(buffer, "DOCQUETS", ld, 8*0, 8);
+  assert_word_in_buffer(buffer, "UNQUOTED", ld, 8*1, 8);
+  assert_word_in_buffer(buffer, "REQUOTED", ld, 8*2, 8);
+  assert_word_in_buffer(buffer, "ROQUETED", ld, 8*3, 8);
+
+  BitRack quarterbackin_double_blank = string_to_bit_rack(ld, "QUARTERBACKIN??");
+  bytes_written =
+      word_map_write_double_blanks_to_buffer(map, &quarterbackin_double_blank, buffer);
+  assert(bytes_written == 15);
+  assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+  
   free(buffer);
   dictionary_word_list_destroy(q_words);
   dictionary_word_list_destroy(words);
