@@ -433,24 +433,47 @@ void test_create_from_mutables(void) {
 
   uint8_t *buffer = malloc_or_die(map->max_word_lookup_bytes);
   BitRack iq = string_to_bit_rack(ld, "IQ");
-  int bytes_written = word_map_write_words_to_buffer(map, &iq, buffer);
+  int bytes_written =
+      word_map_write_blankless_words_to_buffer(map, &iq, buffer);
   assert(bytes_written == 2);
   assert_word_in_buffer(buffer, "QI", ld, 0, 2);
 
   BitRack torque = string_to_bit_rack(ld, "TORQUE");
-  bytes_written = word_map_write_words_to_buffer(map, &torque, buffer);
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &torque, buffer);
   assert(bytes_written == 6*3);
   assert_word_in_buffer(buffer, "QUOTER", ld, 6*0, 6);
   assert_word_in_buffer(buffer, "ROQUET", ld, 6*1, 6);
   assert_word_in_buffer(buffer, "TORQUE", ld, 6*2, 6);
 
   BitRack questor = string_to_bit_rack(ld, "QUESTOR");
-  bytes_written = word_map_write_words_to_buffer(map, &questor, buffer);
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &questor, buffer);
   assert(bytes_written == 7*4);
   assert_word_in_buffer(buffer, "QUESTOR", ld, 7*0, 7);
   assert_word_in_buffer(buffer, "QUOTERS", ld, 7*1, 7);
   assert_word_in_buffer(buffer, "ROQUETS", ld, 7*2, 7);
   assert_word_in_buffer(buffer, "TORQUES", ld, 7*3, 7);
+
+  BitRack q_blank = string_to_bit_rack(ld, "Q?");
+  bytes_written = word_map_write_blanks_to_buffer(map, &q_blank, buffer);
+  assert(bytes_written == 2);
+  assert_word_in_buffer(buffer, "QI", ld, 2*0, 2);
+
+  BitRack square_blank = string_to_bit_rack(ld, "SQUARE?");
+  bytes_written = word_map_write_blanks_to_buffer(map, &square_blank, buffer);
+  assert(bytes_written == 7 * 13);
+  assert_word_in_buffer(buffer, "BARQUES", ld, 7 * 0, 7);
+  assert_word_in_buffer(buffer, "SQUARED", ld, 7 * 1, 7);
+  assert_word_in_buffer(buffer, "QUAERES", ld, 7 * 2, 7);
+  assert_word_in_buffer(buffer, "QUASHER", ld, 7 * 3, 7);
+  assert_word_in_buffer(buffer, "QUAKERS", ld, 7 * 4, 7);
+  assert_word_in_buffer(buffer, "MARQUES", ld, 7 * 5, 7);
+  assert_word_in_buffer(buffer, "MASQUER", ld, 7 * 6, 7);
+  assert_word_in_buffer(buffer, "SQUARER", ld, 7 * 7, 7);
+  assert_word_in_buffer(buffer, "SQUARES", ld, 7 * 8, 7);
+  assert_word_in_buffer(buffer, "QUAREST", ld, 7 * 9, 7);
+  assert_word_in_buffer(buffer, "QUARTES", ld, 7 * 10, 7);
+  assert_word_in_buffer(buffer, "QUATRES", ld, 7 * 11, 7);
+  assert_word_in_buffer(buffer, "QUAVERS", ld, 7 * 12, 7);
 
   free(buffer);
   dictionary_word_list_destroy(q_words);

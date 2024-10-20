@@ -65,8 +65,8 @@ typedef struct WordsOfSameLengthMap {
   uint32_t *double_blank_bucket_starts;
   uint32_t num_double_blank_buckets;
   WordEntry *word_map_entries;
-  BitRack *blank_map_entries;
-  BitRack *double_blank_map_entries;
+  WordEntry *blank_map_entries;
+  WordEntry *double_blank_map_entries;
   uint8_t *word_letters;
   uint8_t *double_blank_letters;
 } WordsOfSameLengthMap;
@@ -184,10 +184,17 @@ mutable_double_blank_map_resize(const MutableDoubleBlankMap *double_blank_map,
                                 const LetterDistribution *ld,
                                 uint32_t min_num_buckets);
 
-WordMap *word_map_create_from_mutables(const MutableWordMap *word_map,
-                                       const MutableBlankMap *blank_map,
-                                       const MutableDoubleBlankMap *double_blank_map);
+WordMap *
+word_map_create_from_mutables(const MutableWordMap *word_map,
+                              const MutableBlankMap *blank_map,
+                              const MutableDoubleBlankMap *double_blank_map);
 
-int word_map_write_words_to_buffer(const WordMap *word_map, const BitRack *bit_rack, uint8_t *buffer);
+int word_map_write_blankless_words_to_buffer(const WordMap *word_map,
+                                   const BitRack *bit_rack, uint8_t *buffer);
+
+int word_map_write_blanks_to_buffer(const WordMap *word_map,
+                                    BitRack *bit_rack,
+                                    uint8_t *buffer);
+
 
 #endif

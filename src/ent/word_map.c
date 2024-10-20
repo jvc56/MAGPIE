@@ -686,8 +686,7 @@ max_word_lookup_result_size(const MutableWordMap *word_map,
 
 void write_word_range(uint32_t word_start, uint32_t num_words,
                       uint8_t bytes[16]) {
-  uint64_t *p_zero = (uint64_t *)bytes;
-  *p_zero = 0;
+  memset(bytes, 0, sizeof(uint64_t));
   uint32_t *p_word_start = (uint32_t *)bytes + 2;
   *p_word_start = word_start;
   uint32_t *p_num_words = (uint32_t *)bytes + 3;
@@ -769,6 +768,37 @@ void fill_words_of_same_length_map(
         map->word_letters, &word_start);
     entry_index += bucket_size;
   }
+  map->blank_bucket_starts =
+      malloc_or_die(sizeof(uint32_t) * (map->num_blank_buckets + 1));
+  const int num_blank_sets =
+      mutable_blanks_for_same_length_get_num_sets(blank_map);
+  map->blank_map_entries = malloc_or_die(sizeof(WordEntry) * num_blank_sets);
+  entry_index = 0;
+  for (uint32_t i = 0; i < blank_map->num_blank_buckets; i++) {
+    const MutableBlankMapBucket *bucket = &blank_map->blank_buckets[i];
+    memory_copy(&map->blank_bucket_starts[i], &entry_index, sizeof(uint32_t));
+    entry_index += bucket->num_entries;
+  }
+  memory_copy(&map->blank_bucket_starts[map->num_blank_buckets], &entry_index,
+              sizeof(uint32_t));
+  map->blank_bucket_starts[map->num_blank_buckets] = entry_index;
+  map->blank_map_entries = malloc_or_die(sizeof(WordEntry) * entry_index);
+  printf("num blank map entries: %d\n", entry_index);
+  entry_index = 0;
+  for (uint32_t i = 0; i < blank_map->num_blank_buckets; i++) {
+    const MutableBlankMapBucket *bucket = &blank_map->blank_buckets[i];
+    for (uint32_t j = 0; j < bucket->num_entries; j++) {
+      const MutableBlankMapEntry *entry = &bucket->entries[j];
+      memset(map->blank_map_entries[entry_index].bucket_or_inline, 0,
+             sizeof(uint64_t));
+      memory_copy(map->blank_map_entries[entry_index].bucket_or_inline +
+                      sizeof(uint64_t),
+                  &entry->blank_letters, sizeof(uint32_t));
+      bit_rack_write_12_bytes(&entry->quotient,
+                              map->blank_map_entries[entry_index].quotient);
+      entry_index++;
+    }
+  }
 }
 
 WordMap *
@@ -793,9 +823,11 @@ word_map_create_from_mutables(const MutableWordMap *word_map,
   return map;
 }
 
-int word_map_write_words_to_buffer(const WordMap *map, const BitRack *bit_rack,
-                                   uint8_t *buffer) {
+int word_map_write_blankless_words_to_buffer(const WordMap *map,
+                                             const BitRack *bit_rack,
+                                             uint8_t *buffer) {
   printf("word_map_write_words_to_buffer(...)\n");
+  assert(bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER) == 0);
   const int length = bit_rack_num_letters(bit_rack);
   printf("length: %d\n", length);
   BitRack quotient;
@@ -824,4 +856,44 @@ int word_map_write_words_to_buffer(const WordMap *map, const BitRack *bit_rack,
   }
   assert(false);
   return 0;
+}
+
+int word_map_write_blanks_to_buffer(const WordMap *map, BitRack *bit_rack,
+                                    uint8_t *buffer) {
+  printf("word_map_write_blanks_to_buffer(...)\n");
+  assert(bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER) == 1);
+  const int length = bit_rack_num_letters(bit_rack);
+  printf("length: %d\n", length);
+  BitRack quotient;
+  uint32_t bucket_index;
+  const WordsOfSameLengthMap *word_map = &map->maps[length];
+  bit_rack_div_mod(bit_rack, word_map->num_blank_buckets, &quotient,
+                   &bucket_index);
+  printf("bucket_index: %d\n", bucket_index);
+  const uint32_t start = word_map->blank_bucket_starts[bucket_index];
+  const uint32_t end = word_map->blank_bucket_starts[bucket_index + 1];
+  printf("start: %d, end: %d\n", start, end);
+  int bytes_written = 0;
+  for (uint32_t i = start; i < end; i++) {
+    const WordEntry *entry = &word_map->blank_map_entries[i];
+    const BitRack entry_quotient = bit_rack_read_12_bytes(entry->quotient);
+    if (!bit_rack_equals(&entry_quotient, &quotient)) {
+      continue;
+    }
+    const uint64_t expected_zero = *((uint64_t *)entry->bucket_or_inline);
+    assert(expected_zero == 0);
+    const uint32_t blank_letters = *((uint32_t *)entry->bucket_or_inline + 2);
+    bit_rack_take_letter(bit_rack, BLANK_MACHINE_LETTER);
+    for (uint8_t ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+      if (blank_letters & (1ULL << ml)) {
+        bit_rack_add_letter(bit_rack, ml);
+        bytes_written += word_map_write_blankless_words_to_buffer(
+            map, bit_rack, buffer + bytes_written);
+        bit_rack_take_letter(bit_rack, ml);
+      }
+    }
+    bit_rack_add_letter(bit_rack, BLANK_MACHINE_LETTER);
+    return bytes_written;
+  }
+  return bytes_written;
 }
