@@ -1,8 +1,6 @@
 #ifndef BIT_RACK_H
 #define BIT_RACK_H
 
-#include <_types/_uint32_t.h>
-#include <_types/_uint8_t.h>
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
