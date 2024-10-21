@@ -200,4 +200,7 @@ int word_map_write_double_blanks_to_buffer(const WordMap *word_map,
                                            BitRack *bit_rack,
                                            uint8_t *buffer);
 
+int word_map_write_words_to_buffer(const WordMap *word_map,
+                                   BitRack *bit_rack, uint8_t *buffer);
+
 #endif

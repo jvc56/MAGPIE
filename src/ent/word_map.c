@@ -1045,3 +1045,17 @@ int word_map_write_double_blanks_to_buffer(const WordMap *map,
   }
   return bytes_written;
 }
+
+int word_map_write_words_to_buffer(const WordMap *map, BitRack *bit_rack,
+                                   uint8_t *buffer) {
+  switch(bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER)) {
+    case 0:
+      return word_map_write_blankless_words_to_buffer(map, bit_rack, buffer);
+    case 1:
+      return word_map_write_blanks_to_buffer(map, bit_rack, buffer);
+    case 2:
+      return word_map_write_double_blanks_to_buffer(map, bit_rack, buffer);
+    default:
+      assert(false);
+  }
+}

@@ -511,7 +511,32 @@ void test_create_from_mutables(void) {
       word_map_write_double_blanks_to_buffer(map, &quarterbackin_double_blank, buffer);
   assert(bytes_written == 15);
   assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
-  
+
+  bytes_written = word_map_write_words_to_buffer(map, &iq, buffer);
+  assert(bytes_written == 2);
+  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+
+  bytes_written = word_map_write_words_to_buffer(map, &square_blank, buffer);
+  assert(bytes_written == 7 * 13);
+  assert_word_in_buffer(buffer, "BARQUES", ld, 0, 7);
+  assert_word_in_buffer(buffer, "SQUARED", ld, 7, 7);
+  assert_word_in_buffer(buffer, "QUAERES", ld, 14, 7);
+  assert_word_in_buffer(buffer, "QUASHER", ld, 21, 7);
+  assert_word_in_buffer(buffer, "QUAKERS", ld, 28, 7);
+  assert_word_in_buffer(buffer, "MARQUES", ld, 35, 7);
+  assert_word_in_buffer(buffer, "MASQUER", ld, 42, 7);
+  assert_word_in_buffer(buffer, "SQUARER", ld, 49, 7);
+  assert_word_in_buffer(buffer, "SQUARES", ld, 56, 7);
+  assert_word_in_buffer(buffer, "QUAREST", ld, 63, 7);
+  assert_word_in_buffer(buffer, "QUARTES", ld, 70, 7);
+  assert_word_in_buffer(buffer, "QUATRES", ld, 77, 7);
+  assert_word_in_buffer(buffer, "QUAVERS", ld, 84, 7);
+
+  bytes_written =
+      word_map_write_words_to_buffer(map, &quarterbackin_double_blank, buffer);
+  assert(bytes_written == 15);
+  assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+
   free(buffer);
   dictionary_word_list_destroy(q_words);
   dictionary_word_list_destroy(words);
