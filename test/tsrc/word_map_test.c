@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <stdio.h>
+#include <time.h>
 
 #include "../../src/def/letter_distribution_defs.h"
 #include "../../src/ent/dictionary_word.h"
@@ -438,6 +440,10 @@ void test_create_from_mutables(void) {
   assert(bytes_written == 2);
   assert_word_in_buffer(buffer, "QI", ld, 0, 2);
 
+  BitRack cv = string_to_bit_rack(ld, "CV");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &cv, buffer);
+  assert(bytes_written == 0);
+
   BitRack torque = string_to_bit_rack(ld, "TORQUE");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &torque, buffer);
   assert(bytes_written == 6*3);
@@ -491,6 +497,10 @@ void test_create_from_mutables(void) {
   assert_word_in_buffer(buffer, "QUATRES", ld, 7 * 11, 7);
   assert_word_in_buffer(buffer, "QUAVERS", ld, 7 * 12, 7);
 
+  BitRack trongle_blank = string_to_bit_rack(ld, "TRONGLE?");
+  bytes_written = word_map_write_blanks_to_buffer(map, &trongle_blank, buffer);
+  assert(bytes_written == 0);
+
   BitRack double_blank = string_to_bit_rack(ld, "??");
   bytes_written =
       word_map_write_double_blanks_to_buffer(map, &double_blank, buffer);
@@ -511,6 +521,11 @@ void test_create_from_mutables(void) {
       word_map_write_double_blanks_to_buffer(map, &quarterbackin_double_blank, buffer);
   assert(bytes_written == 15);
   assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+
+  BitRack vxz_double_blank = string_to_bit_rack(ld, "VXZ??");
+  bytes_written =
+      word_map_write_double_blanks_to_buffer(map, &vxz_double_blank, buffer);
+  assert(bytes_written == 0);
 
   bytes_written = word_map_write_words_to_buffer(map, &iq, buffer);
   assert(bytes_written == 2);
