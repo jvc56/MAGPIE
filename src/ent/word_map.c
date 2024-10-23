@@ -1,10 +1,14 @@
 #include <limits.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
+#include "data_filepaths.h"
 #include "word_map.h"
 #include "bit_rack.h"
 #include "dictionary_word.h"
 
+#include "../util/fileproxy.h"
 #include "../util/util.h"
 #include "letter_distribution.h"
 #include "rack.h"
@@ -811,7 +815,9 @@ void fill_words_of_same_length_map(
     entry_index += bucket->num_entries;
   }
   map->word_bucket_starts[map->num_word_buckets] = entry_index;
+  map->num_word_entries = num_sets;
   map->word_map_entries = malloc_or_die(sizeof(WordEntry) * num_sets);
+  map->num_words = num_words;
   map->word_letters = malloc_or_die(sizeof(uint8_t) * num_words * length);
   entry_index = 0;
   uint32_t word_start = 0;
@@ -826,6 +832,7 @@ void fill_words_of_same_length_map(
       malloc_or_die(sizeof(uint32_t) * (map->num_blank_buckets + 1));
   const int num_blank_sets =
       mutable_blanks_for_same_length_get_num_sets(blank_map);
+  map->num_blank_entries = num_blank_sets;
   map->blank_map_entries = malloc_or_die(sizeof(WordEntry) * num_blank_sets);
   entry_index = 0;
   for (uint32_t i = 0; i < blank_map->num_blank_buckets; i++) {
@@ -856,6 +863,7 @@ void fill_words_of_same_length_map(
       malloc_or_die(sizeof(uint32_t) * (map->num_double_blank_buckets + 1));
   const int num_double_blank_sets =
       mutable_double_blanks_for_same_length_get_num_sets(double_blank_map);
+  map->num_double_blank_entries = num_double_blank_sets;
   map->double_blank_map_entries =
       malloc_or_die(sizeof(WordEntry) * num_double_blank_sets);
   entry_index = 0;
@@ -872,6 +880,7 @@ void fill_words_of_same_length_map(
       malloc_or_die(sizeof(WordEntry) * entry_index);
   const int num_double_blank_pairs =
       mutable_double_blanks_for_same_length_get_num_pairs(double_blank_map);
+  map->num_blank_pairs = num_double_blank_pairs;
   printf("num_double_blank_pairs: %d\n", num_double_blank_pairs);
   map->double_blank_letters =
       malloc_or_die(sizeof(uint8_t) * num_double_blank_pairs * 2);
@@ -1048,14 +1057,194 @@ int word_map_write_double_blanks_to_buffer(const WordMap *map,
 
 int word_map_write_words_to_buffer(const WordMap *map, BitRack *bit_rack,
                                    uint8_t *buffer) {
-  switch(bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER)) {
-    case 0:
-      return word_map_write_blankless_words_to_buffer(map, bit_rack, buffer);
-    case 1:
-      return word_map_write_blanks_to_buffer(map, bit_rack, buffer);
-    case 2:
-      return word_map_write_double_blanks_to_buffer(map, bit_rack, buffer);
-    default:
-      assert(false);
+  switch (bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER)) {
+  case 0:
+    return word_map_write_blankless_words_to_buffer(map, bit_rack, buffer);
+  case 1:
+    return word_map_write_blanks_to_buffer(map, bit_rack, buffer);
+  case 2:
+    return word_map_write_double_blanks_to_buffer(map, bit_rack, buffer);
+  default:
+    assert(false);
   }
+}
+
+WordMap *
+word_map_create_from_dictionary_word_list(const LetterDistribution *ld,
+                                          const DictionaryWordList *words) {
+  const MutableWordMap *mutable_word_map = word_map_create_anagram_sets(words);
+  const MutableBlankMap *mutable_blank_map =
+      word_map_create_blank_sets(mutable_word_map, ld);
+  const MutableDoubleBlankMap *mutable_double_blank_map =
+      word_map_create_double_blank_sets(mutable_word_map, ld);
+  WordMap *word_map = word_map_create_from_mutables(
+      mutable_word_map, mutable_blank_map, mutable_double_blank_map);
+  return word_map;
+}
+
+bool write_byte_to_stream(uint8_t byte, FILE *stream) {
+  const size_t result = fwrite(&byte, sizeof(byte), 1, stream);
+  return result == 1;
+}
+
+bool write_uint32_to_stream(uint32_t i, FILE *stream) {
+  const size_t result = fwrite(&i, sizeof(i), 1, stream);
+  return result == 1;
+}
+
+bool write_words_of_same_length_map_to_stream(int length,
+                                              const WordsOfSameLengthMap *map,
+                                              FILE *stream) {
+  if (!write_uint32_to_stream(map->num_word_buckets, stream)) {
+    printf("num word buckets: %d\n", map->num_word_buckets);
+    return false;
+  }
+  size_t result =
+      fwrite(map->word_bucket_starts,
+             sizeof(uint32_t), map->num_word_buckets + 1, stream);
+  if (result != map->num_word_buckets + 1) {
+    printf("word bucket starts: %d\n", map->num_word_buckets);
+    return false;
+  }
+  if (!write_uint32_to_stream(map->num_word_entries, stream)) {
+    printf("num word entries: %d\n", map->num_word_entries);
+    return false;
+  }
+  result = fwrite(map->word_map_entries,
+                  sizeof(WordEntry), map->num_word_entries, stream);
+  if (result != map->num_word_entries) {
+    printf("word map entries: %d\n", map->num_word_entries);
+    return false;
+  }
+  if (!write_uint32_to_stream(map->num_words, stream)) {
+    printf("num words: %d\n", map->num_words);
+    return false;
+  }
+  result = fwrite(map->word_letters, sizeof(uint8_t),
+                  map->num_words * length, stream);
+  if (result != map->num_words * length) {
+    printf("word letters: %d\n", map->num_words * length);
+    return false;
+  }
+  if (!write_uint32_to_stream(map->num_blank_buckets, stream)) {
+    printf("num blank buckets");
+    return false;
+  }
+  result = fwrite(map->blank_bucket_starts,
+                  sizeof(uint32_t), map->num_blank_buckets + 1, stream);
+  if (result != map->num_blank_buckets + 1) {
+    printf("blank buckets starts: %d\n", map->num_blank_buckets);
+    return false;
+  }
+  if (!write_uint32_to_stream(map->num_blank_entries, stream)) {
+    printf("num blank entries: %d\n", map->num_blank_entries);
+    return false;
+  }
+  result = fwrite(map->blank_map_entries,
+                  sizeof(WordEntry), map->num_blank_entries, stream);
+  if (result != map->num_blank_entries) {
+    printf("num blank entries: %d\n", map->num_blank_entries);
+    return false;
+  }
+  if (!write_uint32_to_stream(map->num_double_blank_buckets, stream)) {
+    printf("num double blank buckets: %d\n", map->num_double_blank_buckets);
+    return false;
+  }
+  result =
+      fwrite(map->double_blank_bucket_starts,
+             sizeof(uint32_t), map->num_double_blank_buckets + 1, stream);
+  if (result != map->num_double_blank_buckets + 1) {
+    printf("double blank bucket starts: %d\n", map->num_double_blank_buckets);
+    return false;
+  }
+  if (!write_uint32_to_stream(map->num_double_blank_entries, stream)) {
+    printf("num double blank entries: %d\n", map->num_double_blank_entries);
+    return false;
+  }
+  result = fwrite(map->double_blank_map_entries,
+                  sizeof(WordEntry), map->num_double_blank_entries, stream);
+  if (result != map->num_double_blank_entries) {
+    printf("double blank entries: %d\n", map->num_double_blank_entries);
+    return false;
+  }
+  if (!write_uint32_to_stream(map->num_blank_pairs, stream)) {
+    printf("num blank pairs: %d\n", map->num_blank_pairs);
+    return false;
+  }
+  result = fwrite(map->double_blank_letters,
+                  sizeof(uint8_t), map->num_blank_pairs * 2, stream);
+  if (result != map->num_blank_pairs * 2) {
+    printf("blank pairs: %d\n", map->num_blank_pairs);
+    return false;
+  }
+  return true;
+}
+
+bool word_map_write_to_file(const WordMap *word_map, const char *filename) {
+  printf("writing word map to file: %s\n", filename);
+  FILE *stream = fopen(filename, "wb");
+  if (!stream) {
+    printf("could not open stream for filename: %s\n", filename);
+    return false;
+  }
+  if (!write_byte_to_stream(word_map->major_version, stream)) {
+    printf("could not write major version to stream\n");
+    return false;
+  }
+  if (!write_byte_to_stream(word_map->minor_version, stream)) {
+    printf("could not write minor version to stream\n");
+    return false;
+  }
+  if (!write_byte_to_stream(word_map->min_word_length, stream)) {
+    printf("could not write min word length to stream\n");
+    return false;
+  }
+  if (!write_byte_to_stream(word_map->max_word_length, stream)) {
+    printf("could not write max word length to stream\n");
+    return false;
+  }
+  if (!write_uint32_to_stream(word_map->max_word_lookup_bytes, stream)) {
+    printf("could not write max word lookup bytes to stream\n");
+    return false;
+  }
+  if (!write_uint32_to_stream(word_map->max_blank_pair_bytes, stream)) {
+    printf("could not write max blank pair bytes to stream\n");
+    return false;
+  }
+  for (int len = word_map->min_word_length; len <= word_map->max_word_length;
+       len++) {
+    if (!write_words_of_same_length_map_to_stream(len, &word_map->maps[len],
+                                                  stream)) {
+      printf("could not write words of same length map to stream\n");
+      return false;
+    }
+  }
+  return true;
+}
+
+void word_map_destroy(WordMap *map) {
+  for (int i = 2; i <= BOARD_DIM; i++) {
+    free(map->maps[i].word_bucket_starts);
+    free(map->maps[i].word_map_entries);
+    free(map->maps[i].word_letters);
+    free(map->maps[i].blank_bucket_starts);
+    free(map->maps[i].blank_map_entries);
+    free(map->maps[i].double_blank_bucket_starts);
+    free(map->maps[i].double_blank_map_entries);
+    free(map->maps[i].double_blank_letters);
+  }
+  free(map);
+}
+
+void load_word_map(WordMap *wmp, const char *data_paths, const char *wmp_name) {
+  char *wmp_filename = data_filepaths_get_readable_filename(
+    data_paths, wmp_name, DATA_FILEPATH_TYPE_WORDMAP);
+  
+  FILE *stream = stream_from_filename(wmp_filename);
+  if (!stream) {
+    printf("could not open stream for filename: %s\n", wmp_filename);
+  }
+  free(wmp_filename);
+
+  wmp->name = string_duplicate(wmp_name);
 }

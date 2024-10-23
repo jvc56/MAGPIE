@@ -64,14 +64,20 @@ typedef struct WordsOfSameLengthMap {
   uint32_t num_blank_buckets;
   uint32_t *double_blank_bucket_starts;
   uint32_t num_double_blank_buckets;
+  uint32_t num_word_entries;
   WordEntry *word_map_entries;
+  uint32_t num_blank_entries;
   WordEntry *blank_map_entries;
+  uint32_t num_double_blank_entries;
   WordEntry *double_blank_map_entries;
+  uint32_t num_words;
   uint8_t *word_letters;
+  uint32_t num_blank_pairs;
   uint8_t *double_blank_letters;
 } WordsOfSameLengthMap;
 
 typedef struct WordMap {
+  char *name;
   uint8_t major_version;
   uint8_t minor_version;
   uint8_t min_word_length;
@@ -189,6 +195,8 @@ word_map_create_from_mutables(const MutableWordMap *word_map,
                               const MutableBlankMap *blank_map,
                               const MutableDoubleBlankMap *double_blank_map);
 
+void word_map_destroy(WordMap *word_map);
+
 int word_map_write_blankless_words_to_buffer(const WordMap *word_map,
                                              const BitRack *bit_rack,
                                              uint8_t *buffer);
@@ -200,7 +208,16 @@ int word_map_write_double_blanks_to_buffer(const WordMap *word_map,
                                            BitRack *bit_rack,
                                            uint8_t *buffer);
 
-int word_map_write_words_to_buffer(const WordMap *word_map,
-                                   BitRack *bit_rack, uint8_t *buffer);
+int word_map_write_words_to_buffer(const WordMap *word_map, BitRack *bit_rack,
+                                   uint8_t *buffer);
+
+WordMap *
+word_map_create_from_dictionary_word_list(const LetterDistribution *ld,
+                                          const DictionaryWordList *words);
+
+bool word_map_write_to_file(const WordMap *word_map, const char *filename);
+
+void load_word_map(WordMap *wmp, const char *data_paths,
+                   const char *wmp_name);
 
 #endif

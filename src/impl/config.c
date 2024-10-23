@@ -953,6 +953,7 @@ conversion_status_t config_convert(const Config *config,
 }
 
 void execute_convert(Config *config) {
+  printf("execute convert\n");
   conversion_status_t status =
       config_convert(config, config->conversion_results);
   set_or_clear_error_status(config->error_status, ERROR_STATUS_TYPE_CONVERT,
