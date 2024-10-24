@@ -559,6 +559,55 @@ void test_create_from_mutables(void) {
   config_destroy(config);
 }
 
+void test_write_and_read(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+  printf("words: %d\n", dictionary_word_list_get_count(words));
+
+  DictionaryWordList *q_words = dictionary_word_list_create();
+  const uint8_t q = ld_hl_to_ml(ld, "Q");
+  for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
+    const DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    const uint8_t length = dictionary_word_get_length(word);
+    for (int j = 0; j < length; j++) {
+      if (dictionary_word_get_word(word)[j] == q) {
+        dictionary_word_list_add_word(q_words, dictionary_word_get_word(word),
+                                      length);
+        break;
+      }
+    }
+  }
+  printf("q_words: %d\n", dictionary_word_list_get_count(q_words));
+
+  MutableWordMap *word_map = word_map_create_anagram_sets(q_words);
+  MutableBlankMap *blank_map = word_map_create_blank_sets(word_map, ld);
+  MutableDoubleBlankMap *double_blank_map =
+      word_map_create_double_blank_sets(word_map, ld);
+  WordMap *wmp = word_map_create_from_mutables(word_map, blank_map,
+                                               double_blank_map);
+
+  assert(wmp != NULL);
+  assert(wmp->major_version == WORD_MAP_MAJOR_VERSION);
+  assert(wmp->minor_version == WORD_MAP_MINOR_VERSION);
+  assert(wmp->min_word_length == 2);
+  assert(wmp->max_word_length == 15);
+
+  assert(word_map_write_to_file(wmp, "testdata/lexica/q_words.wmp"));
+
+  WordMap *wmp_copy = NULL;
+  load_word_map(wmp_copy, "testdata", "q_words");
+
+  dictionary_word_list_destroy(q_words);
+  dictionary_word_list_destroy(words);
+  game_destroy(game);
+  config_destroy(config);                                               
+}
+
 void test_word_map(void) {
   //test_csw();
   //test_anagram_sets();
@@ -567,5 +616,6 @@ void test_word_map(void) {
   //test_resize_words();
   //test_resize_blanks();
   //test_resize_double_blanks();
-  test_create_from_mutables();
+  //test_create_from_mutables();
+  test_write_and_read();
 }

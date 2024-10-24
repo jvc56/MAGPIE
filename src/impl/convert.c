@@ -18,23 +18,16 @@ conversion_status_t convert_from_text_with_dwl(
     const LetterDistribution *ld, conversion_type_t conversion_type,
     const char *input_filename, const char *output_filename,
     DictionaryWordList *strings, ConversionResults *conversion_results) {
-  printf("convert_from_text_with_dwl(...) input_filename: %s output_file_name: %s\n",
-         input_filename, output_filename);
-  printf("dwl size: %d\n", dictionary_word_list_get_count(strings));
-  printf("conversion_type: %d\n", conversion_type);         
   FILE *input_file = fopen(input_filename, "r");
   if (!input_file) {
-    printf("input file error: %p\n", input_file);
     return CONVERT_STATUS_INPUT_FILE_ERROR;
   }
   char line[BOARD_DIM + 2]; // +1 for \n, +1 for \0
   uint8_t mls[BOARD_DIM];
   while (fgets(line, BOARD_DIM + 2, input_file)) {
-    printf("line: %s\n", line);
     int word_length_with_newline = string_length(line);
     if (word_length_with_newline == BOARD_DIM + 1 &&
         line[word_length_with_newline - 1] != '\n') {
-      printf("word too long\n");
       return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
     }
     if (line[word_length_with_newline - 1] == '\n') {
@@ -43,15 +36,12 @@ conversion_status_t convert_from_text_with_dwl(
     int word_length = string_length(line);
     int mls_length = ld_str_to_mls(ld, line, false, mls, word_length);
     if (mls_length < 0) {
-      printf("text contains invalid letter\n");
       return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
     }
     if (!unblank_machine_letters(mls, mls_length)) {
-      printf("text contains invalid letter\n");
       return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
     }
     if (mls_length < 2) {
-      printf("word too short: %s\n", line);
       return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
     }
     dictionary_word_list_add_word(strings, mls, mls_length);
@@ -87,9 +77,6 @@ conversion_status_t convert_with_filenames(
     const LetterDistribution *ld, conversion_type_t conversion_type,
     const char *data_paths, const char *input_filename,
     const char *output_filename, ConversionResults *conversion_results) {
-  printf(
-      "convert_with_filenames(...) input_filename: %s output_file_name: %s\n",
-      input_filename, output_filename);
   conversion_status_t status = CONVERT_STATUS_SUCCESS;
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
@@ -216,13 +203,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
 conversion_status_t convert(ConversionArgs *args,
                             ConversionResults *conversion_results) {
   const char *conversion_type_string = args->conversion_type_string;
-  printf("convert(...) conversion_type_string: %s\n", conversion_type_string);
   conversion_type_t conversion_type =
       get_conversion_type_from_string(conversion_type_string);
-  printf("conversion_type: %d\n", conversion_type);
-  printf("input_name: %s\n", args->input_name);
-  printf("output_name: %s\n", args->output_name);
-  printf("ld: %p\n", args->ld);
   if (conversion_type == CONVERT_UNKNOWN) {
     return CONVERT_STATUS_UNRECOGNIZED_CONVERSION_TYPE;
   }
@@ -244,16 +226,13 @@ conversion_status_t convert(ConversionArgs *args,
 
   char *input_filename = data_filepaths_get_readable_filename(
       args->data_paths, args->input_name, input_filepath_type);
-  printf("input_filename: %s\n", input_filename);
 
   char *data_path = data_filepaths_get_data_path_name(
       args->data_paths, args->output_name, input_filepath_type);
-  printf("data_path: %s\n", data_path);
 
   char *output_filename = data_filepaths_get_writable_filename(
       data_path, args->output_name,
       get_output_filepath_type_from_conv_type(conversion_type));
-  printf("output_filename: %s\n", output_filename);
 
   conversion_status_t status = convert_with_filenames(
       args->ld, conversion_type, args->data_paths, input_filename,

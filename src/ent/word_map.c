@@ -1236,6 +1236,16 @@ void word_map_destroy(WordMap *map) {
   free(map);
 }
 
+bool read_byte_from_stream(uint8_t *byte, FILE *stream) {
+  const size_t result = fread(byte, sizeof(*byte), 1, stream);
+  return result == 1;
+}
+
+bool read_uint32_from_stream(uint32_t *i, FILE *stream) {
+  const size_t result = fread(i, sizeof(*i), 1, stream);
+  return result == 1;
+}
+
 void load_word_map(WordMap *wmp, const char *data_paths, const char *wmp_name) {
   char *wmp_filename = data_filepaths_get_readable_filename(
     data_paths, wmp_name, DATA_FILEPATH_TYPE_WORDMAP);
@@ -1245,6 +1255,20 @@ void load_word_map(WordMap *wmp, const char *data_paths, const char *wmp_name) {
     printf("could not open stream for filename: %s\n", wmp_filename);
   }
   free(wmp_filename);
+  
+  wmp = malloc_or_die(sizeof(WordMap));
 
   wmp->name = string_duplicate(wmp_name);
+  if (!read_byte_from_stream(&wmp->major_version, stream)) {
+    printf("could not read major version from stream\n");
+  }
+  if (!read_byte_from_stream(&wmp->minor_version, stream)) {
+    printf("could not read minor version from stream\n");
+  }
+  if (!read_byte_from_stream(&wmp->min_word_length, stream)) {
+    printf("could not read min word length from stream\n");
+  }
+  if (!read_byte_from_stream(&wmp->max_word_length, stream)) {
+    printf("could not read max word length from stream\n");
+  }
 }

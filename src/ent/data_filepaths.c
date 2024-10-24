@@ -60,12 +60,9 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
 
 char *get_filepath(const char *data_path, const char *data_name,
                    data_filepath_t type) {
-  printf("get_filepath(...) data_path: %s\n", data_path);
   StringBuilder *filepath_sb = string_builder_create();
   string_builder_add_directory_for_data_type(filepath_sb, data_path, type);
-  printf("filepath_sb: %s\n", string_builder_peek(filepath_sb));
   string_builder_add_string(filepath_sb, data_name);
-  printf("filepath_sb: %s\n", string_builder_peek(filepath_sb));
   const char *file_ext = NULL;
   switch (type) {
   case DATA_FILEPATH_TYPE_KWG:
@@ -98,7 +95,6 @@ char *get_filepath(const char *data_path, const char *data_name,
   }
   string_builder_add_string(filepath_sb, file_ext);
   char *filepath = string_builder_dump(filepath_sb, NULL);
-  printf("filepath: %s\n", filepath);
   string_builder_destroy(filepath_sb);
   return filepath;
 }
@@ -107,10 +103,6 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
                                               const char *data_name,
                                               data_filepath_t type,
                                               bool data_path_only) {
-  printf("data_paths: %s\n", data_paths);
-  printf("data_name: %s\n", data_name);
-  printf("type: %d\n", type);
-  printf("data_path_only: %d\n", data_path_only);
   if (!data_paths) {
     log_fatal("data paths is null for filepath type %d\n", type);
   }
@@ -121,6 +113,7 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
   for (int i = 0; i < number_of_data_paths; i++) {
     const char *data_path_i = string_splitter_get_item(split_data_paths, i);
     char *full_filename_i = get_filepath(data_path_i, data_name, type);
+    printf("full_filename_i: %s\n", full_filename_i);
     if (access(full_filename_i, F_OK | R_OK) == 0) {
       if (data_path_only) {
         ret_val = string_duplicate(data_path_i);
