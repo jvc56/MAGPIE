@@ -20,8 +20,8 @@
 // Use the following either to dynamically allocate buffers for intermediate
 // and final results, or to validate that sstatically allocated buffers are
 // large enough.
-// 4 bytes: maximum size in bytes of blank pair results
 // 4 bytes: maximum size in bytes of word lookup results
+// 4 bytes: maximum size in bytes of blank pair results
 // xxxxxx: repeated WordOfSameLengthMap binary data
 
 // WordOfSameLengthMap binary format:
