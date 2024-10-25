@@ -29,9 +29,13 @@ uint8_t dictionary_word_get_length(const DictionaryWord *dictionary_word) {
 }
 
 DictionaryWordList *dictionary_word_list_create(void) {
+  return dictionary_word_list_create_with_capacity(INITIAL_DICTIONARY_WORD_LIST_CAPACITY);
+}
+
+DictionaryWordList *dictionary_word_list_create_with_capacity(int capacity) {
   DictionaryWordList *dictionary_word_list =
       malloc_or_die(sizeof(DictionaryWordList));
-  dictionary_word_list->capacity = INITIAL_DICTIONARY_WORD_LIST_CAPACITY;
+  dictionary_word_list->capacity = capacity;
   dictionary_word_list->dictionary_words =
       malloc_or_die(sizeof(DictionaryWord) * dictionary_word_list->capacity);
   dictionary_word_list->count = 0;
@@ -110,6 +114,15 @@ void dictionary_word_list_unique(DictionaryWordList *sorted,
       dictionary_word_list_add_word(unique, sorted->dictionary_words[i].word,
                                     sorted->dictionary_words[i].length);
     }
+  }
+}
+
+void dictionary_word_list_copy(const DictionaryWordList *src,
+                               DictionaryWordList **dst) {
+  *dst = dictionary_word_list_create_with_capacity(src->count);                                
+  for (int i = 0; i < src->count; i++) {
+    dictionary_word_list_add_word(*dst, src->dictionary_words[i].word,
+                                  src->dictionary_words[i].length);
   }
 }
 

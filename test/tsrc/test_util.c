@@ -19,6 +19,7 @@
 
 #include "../../src/ent/bag.h"
 #include "../../src/ent/board.h"
+#include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
@@ -707,4 +708,22 @@ void assert_klvs_equal(const KLV *klv1, const KLV *klv2) {
     assert(within_epsilon(klv_get_indexed_leave_value(klv1, i),
                           klv_get_indexed_leave_value(klv2, i)));
   }
+}
+
+void assert_word_count(const LetterDistribution *ld,
+                       const DictionaryWordList *words,
+                       const char *human_readable_word, int expected_count) {
+  int expected_length = string_length(human_readable_word);
+  uint8_t expected[BOARD_DIM];
+  ld_str_to_mls(ld, human_readable_word, false, expected, expected_length);
+  int count = 0;
+  for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
+    DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    if ((dictionary_word_get_length(word) == expected_length) &&
+        (memory_compare(dictionary_word_get_word(word), expected,
+                        expected_length) == 0)) {
+      count++;
+    }
+  }
+  assert(count == expected_count);
 }

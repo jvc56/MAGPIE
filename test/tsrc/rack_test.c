@@ -11,8 +11,8 @@
 void test_rack_main(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
-  LetterDistribution *ld = config_get_ld(config);
-  int ld_size = ld_get_size(ld);
+  const LetterDistribution *ld = config_get_ld(config);
+  const int ld_size = ld_get_size(ld);
   Rack *rack = rack_create(ld_size);
   Rack *rack_sub = rack_create(ld_size);
 

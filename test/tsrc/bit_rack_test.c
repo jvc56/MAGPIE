@@ -82,7 +82,7 @@ void test_high_and_low_64(void) {
   Rack *rack = rack_create(ld_size);
   rack_set_to_string(ld, rack, "??Z");
   const BitRack bit_rack = bit_rack_create_from_rack(ld, rack);
-  assert(bit_rack_high_64(&bit_rack) == 1ULL << (26 * 4 - 64));
+  assert(bit_rack_high_64(&bit_rack) == 1ULL << (26 * BIT_RACK_BITS_PER_LETTER - 64));
   assert(bit_rack_low_64(&bit_rack) == 2);
   rack_destroy(rack);
   config_destroy(config);
@@ -120,6 +120,21 @@ void test_div_mod(void) {
   config_destroy(config);
 }
 
+void test_largest_bit_rack_for_ld(void) {
+  Config *config = config_create_or_die("set -lex NWL20");
+  const LetterDistribution *ld = config_get_ld(config);
+  const BitRack bit_rack = largest_bit_rack_for_ld(ld);
+
+  Rack *expected_rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, expected_rack, "ZYYXWWVVUUUUTTT");
+  const BitRack expected_bit_rack = bit_rack_create_from_rack(ld, expected_rack);
+  assert(bit_rack_equals(&bit_rack, &expected_bit_rack));
+
+  rack_destroy(expected_rack);
+  config_destroy(config);
+
+}
+
 void test_bit_rack(void) {
   test_compatibility();
   if (BOARD_DIM > 15) {
@@ -130,4 +145,5 @@ void test_bit_rack(void) {
   test_add_bit_rack();
   test_high_and_low_64();
   test_div_mod();
+  test_largest_bit_rack_for_ld();
 }
