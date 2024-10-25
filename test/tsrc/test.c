@@ -41,6 +41,7 @@
 #include "string_util_test.h"
 #include "validated_move_test.h"
 #include "wasm_api_test.h"
+#include "wmp_test.h"
 #include "word_map_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
@@ -85,7 +86,6 @@ void run_all(void) {
   test_wasm_api();
   test_words();
   test_word_prune();
-  test_word_map();
   test_kwg_maker();
   test_file_handler();
   test_leave_list();
@@ -174,6 +174,8 @@ void run_test(const char *subtest) {
     test_convert();
   } else if (strings_equal(subtest, "cd")) {
     test_create_data();
+  } else if (strings_equal(subtest, "wmp")) {
+    test_wmp();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

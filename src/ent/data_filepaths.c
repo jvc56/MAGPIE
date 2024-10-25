@@ -113,7 +113,6 @@ char *data_filepaths_get_first_valid_filename(const char *data_paths,
   for (int i = 0; i < number_of_data_paths; i++) {
     const char *data_path_i = string_splitter_get_item(split_data_paths, i);
     char *full_filename_i = get_filepath(data_path_i, data_name, type);
-    printf("full_filename_i: %s\n", full_filename_i);
     if (access(full_filename_i, F_OK | R_OK) == 0) {
       if (data_path_only) {
         ret_val = string_duplicate(data_path_i);

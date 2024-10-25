@@ -3,11 +3,15 @@
 #include <time.h>
 
 #include "../../src/def/letter_distribution_defs.h"
+#include "../../src/ent/bag.h"
 #include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/kwg.h"
 #include "../../src/ent/word_map.h"
 #include "../../src/impl/config.h"
+#include "../../src/impl/gameplay.h"
 #include "../../src/impl/kwg_maker.h"
+#include "../../src/str/game_string.h"
+#include "../../src/str/rack_string.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -559,6 +563,28 @@ void test_create_from_mutables(void) {
   config_destroy(config);
 }
 
+void time_random_racks(Game *game, WordMap *map) {
+ const LetterDistribution *ld = game_get_ld(game);
+ uint8_t *buffer = malloc_or_die(map->max_word_lookup_bytes);
+ for (int i = 0; i < 10000000; i++) {
+    //game_destroy(game);
+    //game = config_game_create(config);
+    game_reset(game);
+    game_seed(game, i);
+    draw_starting_racks(game);
+    Player *player = game_get_player(game, 0);
+    Rack *rack = player_get_rack(player);
+    BitRack bitrack = bit_rack_create_from_rack(ld, rack);
+    int bytes_written = word_map_write_words_to_buffer(map, &bitrack, buffer);
+    assert(bytes_written % 7 == 0);
+    //StringBuilder *sb = string_builder_create();
+    //string_builder_add_game(sb, game, NULL);
+    //printf("game: %s\n", string_builder_peek(sb));
+    //string_builder_add_rack(sb, rack, ld, false);
+    //printf("rack: %s solutions: %d\n", string_builder_peek(sb), bytes_written/7);
+    //string_builder_destroy(sb);
+  }
+}
 void test_write_and_read(void) {
   Config *config = config_create_or_die("set -lex CSW21");
   const LetterDistribution *ld = config_get_ld(config);
@@ -582,12 +608,15 @@ void test_write_and_read(void) {
       }
     }
   }
-  printf("q_words: %d\n", dictionary_word_list_get_count(q_words));
+  //printf("q_words: %d\n", dictionary_word_list_get_count(q_words));
+  printf("words: %d\n", dictionary_word_list_get_count(words));
 
-  MutableWordMap *word_map = word_map_create_anagram_sets(q_words);
+  //MutableWordMap *word_map = word_map_create_anagram_sets(q_words);
+/*  
+  MutableWordMap *word_map = word_map_create_anagram_sets(words);
   MutableBlankMap *blank_map = word_map_create_blank_sets(word_map, ld);
   MutableDoubleBlankMap *double_blank_map =
-      word_map_create_double_blank_sets(word_map, ld);
+      word_map_create_double_blank_sets(word_map, ld);      
   WordMap *wmp = word_map_create_from_mutables(word_map, blank_map,
                                                double_blank_map);
 
@@ -597,10 +626,187 @@ void test_write_and_read(void) {
   assert(wmp->min_word_length == 2);
   assert(wmp->max_word_length == 15);
 
-  assert(word_map_write_to_file(wmp, "testdata/lexica/q_words.wmp"));
+  //assert(word_map_write_to_file(wmp, "testdata/lexica/q_words.wmp"));
+  assert(word_map_write_to_file(wmp, "testdata/lexica/words.wmp"));
+*/
 
-  WordMap *wmp_copy = NULL;
-  load_word_map(wmp_copy, "testdata", "q_words");
+  WordMap *map = malloc_or_die(sizeof(WordMap));
+  map->name = NULL;
+  //load_word_map(map, "testdata", "q_words");
+  load_word_map(map, "testdata", "words");
+
+  //assert(map->max_blank_pair_bytes == 2 * 42); // EIQSTU??
+  //assert(map->max_word_lookup_bytes == 47 * 8); // EIQSTU??
+
+  uint8_t *buffer = malloc_or_die(map->max_word_lookup_bytes);
+  BitRack iq = string_to_bit_rack(ld, "IQ");
+  int bytes_written =
+      word_map_write_blankless_words_to_buffer(map, &iq, buffer);
+  assert(bytes_written == 2);
+  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+
+  BitRack cv = string_to_bit_rack(ld, "CV");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &cv, buffer);
+  assert(bytes_written == 0);
+
+  BitRack torque = string_to_bit_rack(ld, "TORQUE");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &torque, buffer);
+  assert(bytes_written == 6*3);
+  assert_word_in_buffer(buffer, "QUOTER", ld, 6*0, 6);
+  assert_word_in_buffer(buffer, "ROQUET", ld, 6*1, 6);
+  assert_word_in_buffer(buffer, "TORQUE", ld, 6*2, 6);
+
+  BitRack questor = string_to_bit_rack(ld, "QUESTOR");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &questor, buffer);
+  assert(bytes_written == 7*4);
+  assert_word_in_buffer(buffer, "QUESTOR", ld, 7*0, 7);
+  assert_word_in_buffer(buffer, "QUOTERS", ld, 7*1, 7);
+  assert_word_in_buffer(buffer, "ROQUETS", ld, 7*2, 7);
+  assert_word_in_buffer(buffer, "TORQUES", ld, 7*3, 7);
+
+  BitRack docquets = string_to_bit_rack(ld, "DOCQUETS");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &docquets, buffer);
+  assert(bytes_written == 8);
+  assert_word_in_buffer(buffer, "DOCQUETS", ld, 8*0, 8);
+
+  BitRack requoted = string_to_bit_rack(ld, "REQUOTED");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &requoted, buffer);
+  assert(bytes_written == 8*2);
+  assert_word_in_buffer(buffer, "REQUOTED", ld, 8*0, 8);
+  assert_word_in_buffer(buffer, "ROQUETED", ld, 8*1, 8);
+
+  BitRack unquoted = string_to_bit_rack(ld, "UNQUOTED");
+  bytes_written = word_map_write_blankless_words_to_buffer(map, &unquoted, buffer);
+  assert(bytes_written == 8);
+  assert_word_in_buffer(buffer, "UNQUOTED", ld, 8*0, 8);
+
+  BitRack q_blank = string_to_bit_rack(ld, "Q?");
+  bytes_written = word_map_write_blanks_to_buffer(map, &q_blank, buffer);
+  assert(bytes_written == 2);
+  assert_word_in_buffer(buffer, "QI", ld, 2*0, 2);
+
+  BitRack square_blank = string_to_bit_rack(ld, "SQUARE?");
+  bytes_written = word_map_write_blanks_to_buffer(map, &square_blank, buffer);
+  assert(bytes_written == 7 * 13);
+  assert_word_in_buffer(buffer, "BARQUES", ld, 7 * 0, 7);
+  assert_word_in_buffer(buffer, "SQUARED", ld, 7 * 1, 7);
+  assert_word_in_buffer(buffer, "QUAERES", ld, 7 * 2, 7);
+  assert_word_in_buffer(buffer, "QUASHER", ld, 7 * 3, 7);
+  assert_word_in_buffer(buffer, "QUAKERS", ld, 7 * 4, 7);
+  assert_word_in_buffer(buffer, "MARQUES", ld, 7 * 5, 7);
+  assert_word_in_buffer(buffer, "MASQUER", ld, 7 * 6, 7);
+  assert_word_in_buffer(buffer, "SQUARER", ld, 7 * 7, 7);
+  assert_word_in_buffer(buffer, "SQUARES", ld, 7 * 8, 7);
+  assert_word_in_buffer(buffer, "QUAREST", ld, 7 * 9, 7);
+  assert_word_in_buffer(buffer, "QUARTES", ld, 7 * 10, 7);
+  assert_word_in_buffer(buffer, "QUATRES", ld, 7 * 11, 7);
+  assert_word_in_buffer(buffer, "QUAVERS", ld, 7 * 12, 7);
+
+  BitRack trongle_blank = string_to_bit_rack(ld, "TRONGLE?");
+  bytes_written = word_map_write_blanks_to_buffer(map, &trongle_blank, buffer);
+  assert(bytes_written == 0);
+
+  BitRack double_blank = string_to_bit_rack(ld, "??");
+  bytes_written =
+      word_map_write_double_blanks_to_buffer(map, &double_blank, buffer);
+  //assert(bytes_written == 2);
+  //assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+
+  BitRack quoted_double_blank = string_to_bit_rack(ld, "QUOTED??");
+  bytes_written =
+      word_map_write_double_blanks_to_buffer(map, &quoted_double_blank, buffer);
+  assert(bytes_written == 8*4);
+  //assert_word_in_buffer(buffer, "DOCQUETS", ld, 8*0, 8);
+  //assert_word_in_buffer(buffer, "UNQUOTED", ld, 8*1, 8);
+  //assert_word_in_buffer(buffer, "REQUOTED", ld, 8*2, 8);
+  //assert_word_in_buffer(buffer, "ROQUETED", ld, 8*3, 8);
+
+  BitRack quarterbackin_double_blank = string_to_bit_rack(ld, "QUARTERBACKIN??");
+  bytes_written =
+      word_map_write_double_blanks_to_buffer(map, &quarterbackin_double_blank, buffer);
+  assert(bytes_written == 15);
+  assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+
+  BitRack vxz_double_blank = string_to_bit_rack(ld, "VXZ??");
+  bytes_written =
+      word_map_write_double_blanks_to_buffer(map, &vxz_double_blank, buffer);
+  assert(bytes_written == 0);
+
+  bytes_written = word_map_write_words_to_buffer(map, &iq, buffer);
+  assert(bytes_written == 2);
+  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+
+  bytes_written = word_map_write_words_to_buffer(map, &square_blank, buffer);
+  assert(bytes_written == 7 * 13);
+  assert_word_in_buffer(buffer, "BARQUES", ld, 0, 7);
+  assert_word_in_buffer(buffer, "SQUARED", ld, 7, 7);
+  assert_word_in_buffer(buffer, "QUAERES", ld, 14, 7);
+  assert_word_in_buffer(buffer, "QUASHER", ld, 21, 7);
+  assert_word_in_buffer(buffer, "QUAKERS", ld, 28, 7);
+  assert_word_in_buffer(buffer, "MARQUES", ld, 35, 7);
+  assert_word_in_buffer(buffer, "MASQUER", ld, 42, 7);
+  assert_word_in_buffer(buffer, "SQUARER", ld, 49, 7);
+  assert_word_in_buffer(buffer, "SQUARES", ld, 56, 7);
+  assert_word_in_buffer(buffer, "QUAREST", ld, 63, 7);
+  assert_word_in_buffer(buffer, "QUARTES", ld, 70, 7);
+  assert_word_in_buffer(buffer, "QUATRES", ld, 77, 7);
+  assert_word_in_buffer(buffer, "QUAVERS", ld, 84, 7);
+
+  bytes_written =
+      word_map_write_words_to_buffer(map, &quarterbackin_double_blank, buffer);
+  assert(bytes_written == 15);
+  assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+
+/*
+  // time some lookup operations
+  clock_t start = clock();
+  for (int i = 0; i < 1000000; i++) {
+    bytes_written = word_map_write_words_to_buffer(map, &square_blank, buffer);
+    assert(bytes_written == 7 * 13);
+  }
+  clock_t end = clock();
+  double seconds = (double)(end - start) / CLOCKS_PER_SEC;
+  printf("1e6 SQUARE? lookups time: %fs\n", seconds);
+
+  start = clock();
+  for (int i = 0; i < 1000000; i++) {
+    bytes_written = word_map_write_words_to_buffer(map, &quarterbackin_double_blank, buffer);
+    assert(bytes_written == 15);
+  }
+  end = clock();
+  seconds = (double)(end - start) / CLOCKS_PER_SEC;
+  printf("1e6 QUARTERBACKIN?? lookups time: %fs\n", seconds);
+
+  BitRack rates_double_blank = string_to_bit_rack(ld, "RATES??");
+  start = clock();
+  for (int i = 0; i < 1000000; i++) {
+    bytes_written = word_map_write_words_to_buffer(map, &rates_double_blank, buffer);
+    assert(bytes_written == 3780);
+  }
+  end = clock();
+  seconds = (double)(end - start) / CLOCKS_PER_SEC;
+  printf("1e6 RATES?? lookups time: %fs\n", seconds);
+
+  BitRack magpie = string_to_bit_rack(ld, "MAGPIE");
+  start = clock();
+  for (int i = 0; i < 1000000; i++) {
+    bytes_written = word_map_write_words_to_buffer(map, &magpie, buffer);
+    assert(bytes_written == 6);
+  }
+  end = clock();
+  seconds = (double)(end - start) / CLOCKS_PER_SEC;
+  printf("1e6 MAGPIE lookups time: %fs\n", seconds);
+
+  BitRack abcdefg = string_to_bit_rack(ld, "ABCDEFG");
+  start = clock();
+  for (int i = 0; i < 1000000; i++) {
+    bytes_written = word_map_write_words_to_buffer(map, &abcdefg, buffer);
+    assert(bytes_written == 0);
+  }
+  end = clock();
+  printf("1e6 ABCDEFG lookups time: %fs\n", (double)(end - start) / CLOCKS_PER_SEC);
+*/
+  time_random_racks(game, map);
 
   dictionary_word_list_destroy(q_words);
   dictionary_word_list_destroy(words);
