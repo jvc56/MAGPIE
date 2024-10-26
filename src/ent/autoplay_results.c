@@ -568,6 +568,7 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
       fclose(shared_data->fhs[remaining_tiles]);
       log_fatal("Error writing to fj file of index: %d\n", index);
     }
+    fflush(shared_data->fhs[remaining_tiles]);
     pthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
     string_builder_clear(sb);
   }
