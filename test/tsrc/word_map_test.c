@@ -103,7 +103,7 @@ uint32_t blanks_to_bits(const LetterDistribution *ld, const char *rack_string) {
   return bits;
 }
 
-BitRack string_to_bit_rack(const LetterDistribution *ld,
+BitRack string_to_bit_rack2(const LetterDistribution *ld,
                            const char *rack_string) {
   Rack *rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, rack, rack_string);
@@ -113,7 +113,7 @@ BitRack string_to_bit_rack(const LetterDistribution *ld,
 uint32_t look_up_blank_set(const MutableBlankMap *blank_map,
                            const LetterDistribution *ld,
                            const char *rack_string) {
-  const BitRack bit_rack = string_to_bit_rack(ld, rack_string);
+  const BitRack bit_rack = string_to_bit_rack2(ld, rack_string);
   const int length = string_length(rack_string);
   const MutableBlanksForSameLengthMap *blank_map_for_length =
       &blank_map->maps[length];
@@ -144,7 +144,7 @@ const DictionaryWordList *
 look_up_double_blank_set(const MutableDoubleBlankMap *double_blank_map,
                          const LetterDistribution *ld,
                          const char *rack_string) {
-  const BitRack bit_rack = string_to_bit_rack(ld, rack_string);
+  const BitRack bit_rack = string_to_bit_rack2(ld, rack_string);
   const int length = string_length(rack_string);
   const MutableDoubleBlanksForSameLengthMap *double_blank_map_for_length =
       &double_blank_map->maps[length];
@@ -391,7 +391,7 @@ void test_resize_double_blanks(void) {
   config_destroy(config);                                                
 }
 
-void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
+void assert_word_in_buffer2(uint8_t *buffer, const char *expected_word,
                            const LetterDistribution *ld, int start, int length) {
   char hl[2] = {0, 0};                            
   for (int i = 0; i < length; i++) {
@@ -438,123 +438,123 @@ void test_create_from_mutables(void) {
   assert(map->max_word_lookup_bytes == 47 * 8); // EIQSTU??
 
   uint8_t *buffer = malloc_or_die(map->max_word_lookup_bytes);
-  BitRack iq = string_to_bit_rack(ld, "IQ");
+  BitRack iq = string_to_bit_rack2(ld, "IQ");
   int bytes_written =
       word_map_write_blankless_words_to_buffer(map, &iq, buffer);
   assert(bytes_written == 2);
-  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+  assert_word_in_buffer2(buffer, "QI", ld, 0, 2);
 
-  BitRack cv = string_to_bit_rack(ld, "CV");
+  BitRack cv = string_to_bit_rack2(ld, "CV");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &cv, buffer);
   assert(bytes_written == 0);
 
-  BitRack torque = string_to_bit_rack(ld, "TORQUE");
+  BitRack torque = string_to_bit_rack2(ld, "TORQUE");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &torque, buffer);
   assert(bytes_written == 6*3);
-  assert_word_in_buffer(buffer, "QUOTER", ld, 6*0, 6);
-  assert_word_in_buffer(buffer, "ROQUET", ld, 6*1, 6);
-  assert_word_in_buffer(buffer, "TORQUE", ld, 6*2, 6);
+  assert_word_in_buffer2(buffer, "QUOTER", ld, 6*0, 6);
+  assert_word_in_buffer2(buffer, "ROQUET", ld, 6*1, 6);
+  assert_word_in_buffer2(buffer, "TORQUE", ld, 6*2, 6);
 
-  BitRack questor = string_to_bit_rack(ld, "QUESTOR");
+  BitRack questor = string_to_bit_rack2(ld, "QUESTOR");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &questor, buffer);
   assert(bytes_written == 7*4);
-  assert_word_in_buffer(buffer, "QUESTOR", ld, 7*0, 7);
-  assert_word_in_buffer(buffer, "QUOTERS", ld, 7*1, 7);
-  assert_word_in_buffer(buffer, "ROQUETS", ld, 7*2, 7);
-  assert_word_in_buffer(buffer, "TORQUES", ld, 7*3, 7);
+  assert_word_in_buffer2(buffer, "QUESTOR", ld, 7*0, 7);
+  assert_word_in_buffer2(buffer, "QUOTERS", ld, 7*1, 7);
+  assert_word_in_buffer2(buffer, "ROQUETS", ld, 7*2, 7);
+  assert_word_in_buffer2(buffer, "TORQUES", ld, 7*3, 7);
 
-  BitRack docquets = string_to_bit_rack(ld, "DOCQUETS");
+  BitRack docquets = string_to_bit_rack2(ld, "DOCQUETS");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &docquets, buffer);
   assert(bytes_written == 8);
-  assert_word_in_buffer(buffer, "DOCQUETS", ld, 8*0, 8);
+  assert_word_in_buffer2(buffer, "DOCQUETS", ld, 8*0, 8);
 
-  BitRack requoted = string_to_bit_rack(ld, "REQUOTED");
+  BitRack requoted = string_to_bit_rack2(ld, "REQUOTED");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &requoted, buffer);
   assert(bytes_written == 8*2);
-  assert_word_in_buffer(buffer, "REQUOTED", ld, 8*0, 8);
-  assert_word_in_buffer(buffer, "ROQUETED", ld, 8*1, 8);
+  assert_word_in_buffer2(buffer, "REQUOTED", ld, 8*0, 8);
+  assert_word_in_buffer2(buffer, "ROQUETED", ld, 8*1, 8);
 
-  BitRack unquoted = string_to_bit_rack(ld, "UNQUOTED");
+  BitRack unquoted = string_to_bit_rack2(ld, "UNQUOTED");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &unquoted, buffer);
   assert(bytes_written == 8);
-  assert_word_in_buffer(buffer, "UNQUOTED", ld, 8*0, 8);
+  assert_word_in_buffer2(buffer, "UNQUOTED", ld, 8*0, 8);
 
-  BitRack q_blank = string_to_bit_rack(ld, "Q?");
+  BitRack q_blank = string_to_bit_rack2(ld, "Q?");
   bytes_written = word_map_write_blanks_to_buffer(map, &q_blank, buffer);
   assert(bytes_written == 2);
-  assert_word_in_buffer(buffer, "QI", ld, 2*0, 2);
+  assert_word_in_buffer2(buffer, "QI", ld, 2*0, 2);
 
-  BitRack square_blank = string_to_bit_rack(ld, "SQUARE?");
+  BitRack square_blank = string_to_bit_rack2(ld, "SQUARE?");
   bytes_written = word_map_write_blanks_to_buffer(map, &square_blank, buffer);
   assert(bytes_written == 7 * 13);
-  assert_word_in_buffer(buffer, "BARQUES", ld, 7 * 0, 7);
-  assert_word_in_buffer(buffer, "SQUARED", ld, 7 * 1, 7);
-  assert_word_in_buffer(buffer, "QUAERES", ld, 7 * 2, 7);
-  assert_word_in_buffer(buffer, "QUASHER", ld, 7 * 3, 7);
-  assert_word_in_buffer(buffer, "QUAKERS", ld, 7 * 4, 7);
-  assert_word_in_buffer(buffer, "MARQUES", ld, 7 * 5, 7);
-  assert_word_in_buffer(buffer, "MASQUER", ld, 7 * 6, 7);
-  assert_word_in_buffer(buffer, "SQUARER", ld, 7 * 7, 7);
-  assert_word_in_buffer(buffer, "SQUARES", ld, 7 * 8, 7);
-  assert_word_in_buffer(buffer, "QUAREST", ld, 7 * 9, 7);
-  assert_word_in_buffer(buffer, "QUARTES", ld, 7 * 10, 7);
-  assert_word_in_buffer(buffer, "QUATRES", ld, 7 * 11, 7);
-  assert_word_in_buffer(buffer, "QUAVERS", ld, 7 * 12, 7);
+  assert_word_in_buffer2(buffer, "BARQUES", ld, 7 * 0, 7);
+  assert_word_in_buffer2(buffer, "SQUARED", ld, 7 * 1, 7);
+  assert_word_in_buffer2(buffer, "QUAERES", ld, 7 * 2, 7);
+  assert_word_in_buffer2(buffer, "QUASHER", ld, 7 * 3, 7);
+  assert_word_in_buffer2(buffer, "QUAKERS", ld, 7 * 4, 7);
+  assert_word_in_buffer2(buffer, "MARQUES", ld, 7 * 5, 7);
+  assert_word_in_buffer2(buffer, "MASQUER", ld, 7 * 6, 7);
+  assert_word_in_buffer2(buffer, "SQUARER", ld, 7 * 7, 7);
+  assert_word_in_buffer2(buffer, "SQUARES", ld, 7 * 8, 7);
+  assert_word_in_buffer2(buffer, "QUAREST", ld, 7 * 9, 7);
+  assert_word_in_buffer2(buffer, "QUARTES", ld, 7 * 10, 7);
+  assert_word_in_buffer2(buffer, "QUATRES", ld, 7 * 11, 7);
+  assert_word_in_buffer2(buffer, "QUAVERS", ld, 7 * 12, 7);
 
-  BitRack trongle_blank = string_to_bit_rack(ld, "TRONGLE?");
+  BitRack trongle_blank = string_to_bit_rack2(ld, "TRONGLE?");
   bytes_written = word_map_write_blanks_to_buffer(map, &trongle_blank, buffer);
   assert(bytes_written == 0);
 
-  BitRack double_blank = string_to_bit_rack(ld, "??");
+  BitRack double_blank = string_to_bit_rack2(ld, "??");
   bytes_written =
       word_map_write_double_blanks_to_buffer(map, &double_blank, buffer);
   assert(bytes_written == 2);
-  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+  assert_word_in_buffer2(buffer, "QI", ld, 0, 2);
 
-  BitRack quoted_double_blank = string_to_bit_rack(ld, "QUOTED??");
+  BitRack quoted_double_blank = string_to_bit_rack2(ld, "QUOTED??");
   bytes_written =
       word_map_write_double_blanks_to_buffer(map, &quoted_double_blank, buffer);
   assert(bytes_written == 8*4);
-  assert_word_in_buffer(buffer, "DOCQUETS", ld, 8*0, 8);
-  assert_word_in_buffer(buffer, "UNQUOTED", ld, 8*1, 8);
-  assert_word_in_buffer(buffer, "REQUOTED", ld, 8*2, 8);
-  assert_word_in_buffer(buffer, "ROQUETED", ld, 8*3, 8);
+  assert_word_in_buffer2(buffer, "DOCQUETS", ld, 8*0, 8);
+  assert_word_in_buffer2(buffer, "UNQUOTED", ld, 8*1, 8);
+  assert_word_in_buffer2(buffer, "REQUOTED", ld, 8*2, 8);
+  assert_word_in_buffer2(buffer, "ROQUETED", ld, 8*3, 8);
 
-  BitRack quarterbackin_double_blank = string_to_bit_rack(ld, "QUARTERBACKIN??");
+  BitRack quarterbackin_double_blank = string_to_bit_rack2(ld, "QUARTERBACKIN??");
   bytes_written =
       word_map_write_double_blanks_to_buffer(map, &quarterbackin_double_blank, buffer);
   assert(bytes_written == 15);
-  assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+  assert_word_in_buffer2(buffer, "QUARTERBACKINGS", ld, 0, 15);
 
-  BitRack vxz_double_blank = string_to_bit_rack(ld, "VXZ??");
+  BitRack vxz_double_blank = string_to_bit_rack2(ld, "VXZ??");
   bytes_written =
       word_map_write_double_blanks_to_buffer(map, &vxz_double_blank, buffer);
   assert(bytes_written == 0);
 
   bytes_written = word_map_write_words_to_buffer(map, &iq, buffer);
   assert(bytes_written == 2);
-  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+  assert_word_in_buffer2(buffer, "QI", ld, 0, 2);
 
   bytes_written = word_map_write_words_to_buffer(map, &square_blank, buffer);
   assert(bytes_written == 7 * 13);
-  assert_word_in_buffer(buffer, "BARQUES", ld, 0, 7);
-  assert_word_in_buffer(buffer, "SQUARED", ld, 7, 7);
-  assert_word_in_buffer(buffer, "QUAERES", ld, 14, 7);
-  assert_word_in_buffer(buffer, "QUASHER", ld, 21, 7);
-  assert_word_in_buffer(buffer, "QUAKERS", ld, 28, 7);
-  assert_word_in_buffer(buffer, "MARQUES", ld, 35, 7);
-  assert_word_in_buffer(buffer, "MASQUER", ld, 42, 7);
-  assert_word_in_buffer(buffer, "SQUARER", ld, 49, 7);
-  assert_word_in_buffer(buffer, "SQUARES", ld, 56, 7);
-  assert_word_in_buffer(buffer, "QUAREST", ld, 63, 7);
-  assert_word_in_buffer(buffer, "QUARTES", ld, 70, 7);
-  assert_word_in_buffer(buffer, "QUATRES", ld, 77, 7);
-  assert_word_in_buffer(buffer, "QUAVERS", ld, 84, 7);
+  assert_word_in_buffer2(buffer, "BARQUES", ld, 0, 7);
+  assert_word_in_buffer2(buffer, "SQUARED", ld, 7, 7);
+  assert_word_in_buffer2(buffer, "QUAERES", ld, 14, 7);
+  assert_word_in_buffer2(buffer, "QUASHER", ld, 21, 7);
+  assert_word_in_buffer2(buffer, "QUAKERS", ld, 28, 7);
+  assert_word_in_buffer2(buffer, "MARQUES", ld, 35, 7);
+  assert_word_in_buffer2(buffer, "MASQUER", ld, 42, 7);
+  assert_word_in_buffer2(buffer, "SQUARER", ld, 49, 7);
+  assert_word_in_buffer2(buffer, "SQUARES", ld, 56, 7);
+  assert_word_in_buffer2(buffer, "QUAREST", ld, 63, 7);
+  assert_word_in_buffer2(buffer, "QUARTES", ld, 70, 7);
+  assert_word_in_buffer2(buffer, "QUATRES", ld, 77, 7);
+  assert_word_in_buffer2(buffer, "QUAVERS", ld, 84, 7);
 
   bytes_written =
       word_map_write_words_to_buffer(map, &quarterbackin_double_blank, buffer);
   assert(bytes_written == 15);
-  assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+  assert_word_in_buffer2(buffer, "QUARTERBACKINGS", ld, 0, 15);
 
   free(buffer);
   dictionary_word_list_destroy(q_words);
@@ -639,80 +639,80 @@ void test_write_and_read(void) {
   //assert(map->max_word_lookup_bytes == 47 * 8); // EIQSTU??
 
   uint8_t *buffer = malloc_or_die(map->max_word_lookup_bytes);
-  BitRack iq = string_to_bit_rack(ld, "IQ");
+  BitRack iq = string_to_bit_rack2(ld, "IQ");
   int bytes_written =
       word_map_write_blankless_words_to_buffer(map, &iq, buffer);
   assert(bytes_written == 2);
-  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+  assert_word_in_buffer2(buffer, "QI", ld, 0, 2);
 
-  BitRack cv = string_to_bit_rack(ld, "CV");
+  BitRack cv = string_to_bit_rack2(ld, "CV");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &cv, buffer);
   assert(bytes_written == 0);
 
-  BitRack torque = string_to_bit_rack(ld, "TORQUE");
+  BitRack torque = string_to_bit_rack2(ld, "TORQUE");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &torque, buffer);
   assert(bytes_written == 6*3);
-  assert_word_in_buffer(buffer, "QUOTER", ld, 6*0, 6);
-  assert_word_in_buffer(buffer, "ROQUET", ld, 6*1, 6);
-  assert_word_in_buffer(buffer, "TORQUE", ld, 6*2, 6);
+  assert_word_in_buffer2(buffer, "QUOTER", ld, 6*0, 6);
+  assert_word_in_buffer2(buffer, "ROQUET", ld, 6*1, 6);
+  assert_word_in_buffer2(buffer, "TORQUE", ld, 6*2, 6);
 
-  BitRack questor = string_to_bit_rack(ld, "QUESTOR");
+  BitRack questor = string_to_bit_rack2(ld, "QUESTOR");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &questor, buffer);
   assert(bytes_written == 7*4);
-  assert_word_in_buffer(buffer, "QUESTOR", ld, 7*0, 7);
-  assert_word_in_buffer(buffer, "QUOTERS", ld, 7*1, 7);
-  assert_word_in_buffer(buffer, "ROQUETS", ld, 7*2, 7);
-  assert_word_in_buffer(buffer, "TORQUES", ld, 7*3, 7);
+  assert_word_in_buffer2(buffer, "QUESTOR", ld, 7*0, 7);
+  assert_word_in_buffer2(buffer, "QUOTERS", ld, 7*1, 7);
+  assert_word_in_buffer2(buffer, "ROQUETS", ld, 7*2, 7);
+  assert_word_in_buffer2(buffer, "TORQUES", ld, 7*3, 7);
 
-  BitRack docquets = string_to_bit_rack(ld, "DOCQUETS");
+  BitRack docquets = string_to_bit_rack2(ld, "DOCQUETS");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &docquets, buffer);
   assert(bytes_written == 8);
-  assert_word_in_buffer(buffer, "DOCQUETS", ld, 8*0, 8);
+  assert_word_in_buffer2(buffer, "DOCQUETS", ld, 8*0, 8);
 
-  BitRack requoted = string_to_bit_rack(ld, "REQUOTED");
+  BitRack requoted = string_to_bit_rack2(ld, "REQUOTED");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &requoted, buffer);
   assert(bytes_written == 8*2);
-  assert_word_in_buffer(buffer, "REQUOTED", ld, 8*0, 8);
-  assert_word_in_buffer(buffer, "ROQUETED", ld, 8*1, 8);
+  assert_word_in_buffer2(buffer, "REQUOTED", ld, 8*0, 8);
+  assert_word_in_buffer2(buffer, "ROQUETED", ld, 8*1, 8);
 
-  BitRack unquoted = string_to_bit_rack(ld, "UNQUOTED");
+  BitRack unquoted = string_to_bit_rack2(ld, "UNQUOTED");
   bytes_written = word_map_write_blankless_words_to_buffer(map, &unquoted, buffer);
   assert(bytes_written == 8);
-  assert_word_in_buffer(buffer, "UNQUOTED", ld, 8*0, 8);
+  assert_word_in_buffer2(buffer, "UNQUOTED", ld, 8*0, 8);
 
-  BitRack q_blank = string_to_bit_rack(ld, "Q?");
+  BitRack q_blank = string_to_bit_rack2(ld, "Q?");
   bytes_written = word_map_write_blanks_to_buffer(map, &q_blank, buffer);
   assert(bytes_written == 2);
-  assert_word_in_buffer(buffer, "QI", ld, 2*0, 2);
+  assert_word_in_buffer2(buffer, "QI", ld, 2*0, 2);
 
-  BitRack square_blank = string_to_bit_rack(ld, "SQUARE?");
+  BitRack square_blank = string_to_bit_rack2(ld, "SQUARE?");
   bytes_written = word_map_write_blanks_to_buffer(map, &square_blank, buffer);
   assert(bytes_written == 7 * 13);
-  assert_word_in_buffer(buffer, "BARQUES", ld, 7 * 0, 7);
-  assert_word_in_buffer(buffer, "SQUARED", ld, 7 * 1, 7);
-  assert_word_in_buffer(buffer, "QUAERES", ld, 7 * 2, 7);
-  assert_word_in_buffer(buffer, "QUASHER", ld, 7 * 3, 7);
-  assert_word_in_buffer(buffer, "QUAKERS", ld, 7 * 4, 7);
-  assert_word_in_buffer(buffer, "MARQUES", ld, 7 * 5, 7);
-  assert_word_in_buffer(buffer, "MASQUER", ld, 7 * 6, 7);
-  assert_word_in_buffer(buffer, "SQUARER", ld, 7 * 7, 7);
-  assert_word_in_buffer(buffer, "SQUARES", ld, 7 * 8, 7);
-  assert_word_in_buffer(buffer, "QUAREST", ld, 7 * 9, 7);
-  assert_word_in_buffer(buffer, "QUARTES", ld, 7 * 10, 7);
-  assert_word_in_buffer(buffer, "QUATRES", ld, 7 * 11, 7);
-  assert_word_in_buffer(buffer, "QUAVERS", ld, 7 * 12, 7);
+  assert_word_in_buffer2(buffer, "BARQUES", ld, 7 * 0, 7);
+  assert_word_in_buffer2(buffer, "SQUARED", ld, 7 * 1, 7);
+  assert_word_in_buffer2(buffer, "QUAERES", ld, 7 * 2, 7);
+  assert_word_in_buffer2(buffer, "QUASHER", ld, 7 * 3, 7);
+  assert_word_in_buffer2(buffer, "QUAKERS", ld, 7 * 4, 7);
+  assert_word_in_buffer2(buffer, "MARQUES", ld, 7 * 5, 7);
+  assert_word_in_buffer2(buffer, "MASQUER", ld, 7 * 6, 7);
+  assert_word_in_buffer2(buffer, "SQUARER", ld, 7 * 7, 7);
+  assert_word_in_buffer2(buffer, "SQUARES", ld, 7 * 8, 7);
+  assert_word_in_buffer2(buffer, "QUAREST", ld, 7 * 9, 7);
+  assert_word_in_buffer2(buffer, "QUARTES", ld, 7 * 10, 7);
+  assert_word_in_buffer2(buffer, "QUATRES", ld, 7 * 11, 7);
+  assert_word_in_buffer2(buffer, "QUAVERS", ld, 7 * 12, 7);
 
-  BitRack trongle_blank = string_to_bit_rack(ld, "TRONGLE?");
+  BitRack trongle_blank = string_to_bit_rack2(ld, "TRONGLE?");
   bytes_written = word_map_write_blanks_to_buffer(map, &trongle_blank, buffer);
   assert(bytes_written == 0);
 
-  BitRack double_blank = string_to_bit_rack(ld, "??");
+  BitRack double_blank = string_to_bit_rack2(ld, "??");
   bytes_written =
       word_map_write_double_blanks_to_buffer(map, &double_blank, buffer);
   //assert(bytes_written == 2);
   //assert_word_in_buffer(buffer, "QI", ld, 0, 2);
 
-  BitRack quoted_double_blank = string_to_bit_rack(ld, "QUOTED??");
+  BitRack quoted_double_blank = string_to_bit_rack2(ld, "QUOTED??");
   bytes_written =
       word_map_write_double_blanks_to_buffer(map, &quoted_double_blank, buffer);
   assert(bytes_written == 8*4);
@@ -721,41 +721,41 @@ void test_write_and_read(void) {
   //assert_word_in_buffer(buffer, "REQUOTED", ld, 8*2, 8);
   //assert_word_in_buffer(buffer, "ROQUETED", ld, 8*3, 8);
 
-  BitRack quarterbackin_double_blank = string_to_bit_rack(ld, "QUARTERBACKIN??");
+  BitRack quarterbackin_double_blank = string_to_bit_rack2(ld, "QUARTERBACKIN??");
   bytes_written =
       word_map_write_double_blanks_to_buffer(map, &quarterbackin_double_blank, buffer);
   assert(bytes_written == 15);
-  assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+  assert_word_in_buffer2(buffer, "QUARTERBACKINGS", ld, 0, 15);
 
-  BitRack vxz_double_blank = string_to_bit_rack(ld, "VXZ??");
+  BitRack vxz_double_blank = string_to_bit_rack2(ld, "VXZ??");
   bytes_written =
       word_map_write_double_blanks_to_buffer(map, &vxz_double_blank, buffer);
   assert(bytes_written == 0);
 
   bytes_written = word_map_write_words_to_buffer(map, &iq, buffer);
   assert(bytes_written == 2);
-  assert_word_in_buffer(buffer, "QI", ld, 0, 2);
+  assert_word_in_buffer2(buffer, "QI", ld, 0, 2);
 
   bytes_written = word_map_write_words_to_buffer(map, &square_blank, buffer);
   assert(bytes_written == 7 * 13);
-  assert_word_in_buffer(buffer, "BARQUES", ld, 0, 7);
-  assert_word_in_buffer(buffer, "SQUARED", ld, 7, 7);
-  assert_word_in_buffer(buffer, "QUAERES", ld, 14, 7);
-  assert_word_in_buffer(buffer, "QUASHER", ld, 21, 7);
-  assert_word_in_buffer(buffer, "QUAKERS", ld, 28, 7);
-  assert_word_in_buffer(buffer, "MARQUES", ld, 35, 7);
-  assert_word_in_buffer(buffer, "MASQUER", ld, 42, 7);
-  assert_word_in_buffer(buffer, "SQUARER", ld, 49, 7);
-  assert_word_in_buffer(buffer, "SQUARES", ld, 56, 7);
-  assert_word_in_buffer(buffer, "QUAREST", ld, 63, 7);
-  assert_word_in_buffer(buffer, "QUARTES", ld, 70, 7);
-  assert_word_in_buffer(buffer, "QUATRES", ld, 77, 7);
-  assert_word_in_buffer(buffer, "QUAVERS", ld, 84, 7);
+  assert_word_in_buffer2(buffer, "BARQUES", ld, 0, 7);
+  assert_word_in_buffer2(buffer, "SQUARED", ld, 7, 7);
+  assert_word_in_buffer2(buffer, "QUAERES", ld, 14, 7);
+  assert_word_in_buffer2(buffer, "QUASHER", ld, 21, 7);
+  assert_word_in_buffer2(buffer, "QUAKERS", ld, 28, 7);
+  assert_word_in_buffer2(buffer, "MARQUES", ld, 35, 7);
+  assert_word_in_buffer2(buffer, "MASQUER", ld, 42, 7);
+  assert_word_in_buffer2(buffer, "SQUARER", ld, 49, 7);
+  assert_word_in_buffer2(buffer, "SQUARES", ld, 56, 7);
+  assert_word_in_buffer2(buffer, "QUAREST", ld, 63, 7);
+  assert_word_in_buffer2(buffer, "QUARTES", ld, 70, 7);
+  assert_word_in_buffer2(buffer, "QUATRES", ld, 77, 7);
+  assert_word_in_buffer2(buffer, "QUAVERS", ld, 84, 7);
 
   bytes_written =
       word_map_write_words_to_buffer(map, &quarterbackin_double_blank, buffer);
   assert(bytes_written == 15);
-  assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+  assert_word_in_buffer2(buffer, "QUARTERBACKINGS", ld, 0, 15);
 
 /*
   // time some lookup operations

@@ -15,7 +15,7 @@ void time_random_racks_with_wmp(Game *game, WMP *wmp) {
   uint8_t *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
   int bytes_written = 0;
   uint64_t lookups = 0;
-  for (int i = 0; i < 1e6; i++) {
+  for (int i = 0; i < 1e4; i++) {
     game_reset(game);
     draw_to_full_rack(game, 0);
     Player *player = game_get_player(game, 0);
@@ -40,12 +40,11 @@ void time_random_racks_with_wmp(Game *game, WMP *wmp) {
 }
 
 void benchmark_csw_wmp(void) {
-  WMP *wmp = wmp_create("testdata", "CSW21");
+  WMP *wmp = wmp_create("testdata", "CSW21_2to7");
   assert(wmp != NULL);
 
   Config *config = config_create_or_die("set -lex CSW21");
   Game *game = config_game_create(config);
-  sleep(10);
   time_random_racks_with_wmp(game, wmp);
 
   game_destroy(game);
@@ -53,6 +52,69 @@ void benchmark_csw_wmp(void) {
   wmp_destroy(wmp);
 }
 
+// This only works on ASCII languages, e.g. English, French. Polish would need
+// to support multibyte user-visible characters, but Polish isn't even supported
+// for BitRack (and therefore for WMP) because the lexicon is >32 letters
+// (including the blank).
+void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
+                           const LetterDistribution *ld, int index,
+                           int length) {
+  const int start = index * length;
+  char hl[2] = {0, 0};
+  for (int i = 0; i < length; i++) {
+    hl[0] = expected_word[i];
+    assert(buffer[start + i] == ld_hl_to_ml(ld, hl));
+  }
+}
+
+BitRack string_to_bit_rack(const LetterDistribution *ld,
+                           const char *rack_string) {
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, rack_string);
+  BitRack bit_rack = bit_rack_create_from_rack(ld, rack);
+  rack_destroy(rack);
+  return bit_rack;
+}
+
+void test_short_and_long_words(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+
+  WMP *wmp = wmp_create("testdata", "CSW21_3or15");
+  assert(wmp != NULL);
+
+  uint8_t *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+  BitRack inq = string_to_bit_rack(ld, "INQ");
+  int bytes_written = wmp_write_words_to_buffer(wmp, &inq, 3, buffer);
+  assert(bytes_written == 3);
+  assert_word_in_buffer(buffer, "QIN", ld, 0, 3);
+
+  BitRack vv_blank = string_to_bit_rack(ld, "VV?");
+  bytes_written = wmp_write_words_to_buffer(wmp, &vv_blank, 3, buffer);
+  assert(bytes_written == 3);
+  assert_word_in_buffer(buffer, "VAV", ld, 0, 3);
+
+  BitRack q_blank_blank = string_to_bit_rack(ld, "Q??");
+  bytes_written = wmp_write_words_to_buffer(wmp, &q_blank_blank, 3, buffer);
+  assert(bytes_written == 15);
+
+  assert_word_in_buffer(buffer, "QAT", ld, 0, 3);
+  assert_word_in_buffer(buffer, "QUA", ld, 1, 3);
+  assert_word_in_buffer(buffer, "QIN", ld, 2, 3);
+  assert_word_in_buffer(buffer, "QIS", ld, 3, 3);
+  assert_word_in_buffer(buffer, "SUQ", ld, 4, 3);
+
+  BitRack quarterbackin_double_blank =
+      string_to_bit_rack(ld, "QUARTERBACKIN??");
+  bytes_written =
+      wmp_write_words_to_buffer(wmp, &quarterbackin_double_blank, 15, buffer);
+  assert(bytes_written == 15);
+  assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
+
+  config_destroy(config);
+}
+
 void test_wmp(void) {
   benchmark_csw_wmp();
+  test_short_and_long_words();
 }

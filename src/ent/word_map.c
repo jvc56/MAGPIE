@@ -738,7 +738,7 @@ void write_pairs(const MutableDoubleBlankMapEntry *entry, uint32_t *pair_start,
   dictionary_word_list_sort(sorted_pairs);
   for (int i = 0; i < num_pairs; i++) {
     const DictionaryWord *pair =
-        dictionary_word_list_get_word(entry->letter_pairs, i);
+        dictionary_word_list_get_word(sorted_pairs, i);
     const uint8_t *pair_letters = dictionary_word_get_word(pair);
     memory_copy(pairs + *pair_start, pair_letters, 2);
     printf(" %c%c", pair_letters[0] + 'A' - 1, pair_letters[1] + 'A' - 1);

@@ -30,28 +30,26 @@ typedef struct WMPEntry {
 } WMPEntry;
 
 typedef struct WMPForLength {
-  // Sizes
+  // Blankless words
   uint32_t num_word_buckets;
-  uint32_t num_blank_buckets;
-  uint32_t num_double_blank_buckets;
   uint32_t num_word_entries;
-  uint32_t num_blank_entries;
-  uint32_t num_double_blank_entries;
   uint32_t num_words;
-  uint32_t num_blank_pairs;
-
-  // Hash bucket starts
   uint32_t *word_bucket_starts;
-  uint32_t *blank_bucket_starts;
-  uint32_t *double_blank_bucket_starts;
-
-  // Hash entries
   WMPEntry *word_map_entries;
-  WMPEntry *blank_map_entries;
-  WMPEntry *double_blank_map_entries;
-
-  // Letter blobs
   uint8_t *word_letters;
+
+  // Single Blanks
+  uint32_t num_blank_buckets;
+  uint32_t num_blank_entries;
+  uint32_t *blank_bucket_starts;
+  WMPEntry *blank_map_entries;
+
+  // Double Blanks
+  uint32_t num_double_blank_buckets;
+  uint32_t num_double_blank_entries;
+  uint32_t num_blank_pairs;
+  uint32_t *double_blank_bucket_starts;
+  WMPEntry *double_blank_map_entries;
   uint8_t *double_blank_letters;
 } WMPForLength;
 
