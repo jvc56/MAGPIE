@@ -10,12 +10,13 @@
 
 #include "test_util.h"
 
-void time_random_racks_with_wmp(Game *game, WMP *wmp) {
+void time_wmp_buffer_writes(Game *game, WMP *wmp) {
   const LetterDistribution *ld = game_get_ld(game);
   uint8_t *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
   int bytes_written = 0;
   uint64_t lookups = 0;
-  for (int i = 0; i < 1e4; i++) {
+  uint64_t total_bytes_written = 0;
+  for (int i = 0; i < 1e6; i++) {
     game_reset(game);
     draw_to_full_rack(game, 0);
     Player *player = game_get_player(game, 0);
@@ -30,22 +31,54 @@ void time_random_racks_with_wmp(Game *game, WMP *wmp) {
       const int count = set.count_by_size[size];
       for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
         BitRack *bit_rack = &set.subracks[offset + idx_for_size];
-        bytes_written = wmp_write_words_to_buffer(wmp, bit_rack, size, buffer);
-        assert(bytes_written % size == 0);
+        bytes_written = wmp_write_words_to_buffer(wmp, bit_rack, size, buffer); assert(bytes_written % size == 0);
+        total_bytes_written += bytes_written;
         lookups++;
       }
     }
   }
-  printf("performed %llu lookups\n", lookups);
+  printf("performed %llu lookups, %llu bytes written\n", lookups,
+          total_bytes_written);
+}
+
+void time_wmp_existence_checks(Game *game, WMP *wmp) {
+  const LetterDistribution *ld = game_get_ld(game);
+  uint64_t lookups = 0;
+  uint64_t num_with_solution = 0;
+  for (int i = 0; i < 1e6; i++) {
+    game_reset(game);
+    draw_to_full_rack(game, 0);
+    Player *player = game_get_player(game, 0);
+
+    Rack *full_rack = player_get_rack(player);
+    BitRack full_bit_rack = bit_rack_create_from_rack(ld, full_rack);
+
+    BitRackPowerSet set;
+    bit_rack_power_set_init(&set, &full_bit_rack);
+    for (int size = 2; size <= RACK_SIZE; size++) {
+      const int offset = bit_rack_get_combination_offset(size);
+      const int count = set.count_by_size[size];
+      for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
+        BitRack *bit_rack = &set.subracks[offset + idx_for_size];
+        const bool has_solution = wmp_has_word(wmp, bit_rack, size);
+        num_with_solution += has_solution;
+        lookups++;
+      }
+    }
+  }
+  printf("performed %llu lookups, %llu having solutions\n", lookups,
+         num_with_solution);
 }
 
 void benchmark_csw_wmp(void) {
-  WMP *wmp = wmp_create("testdata", "CSW21_2to7");
+  WMP *wmp = wmp_create("testdata", "CSW21");
   assert(wmp != NULL);
 
   Config *config = config_create_or_die("set -lex CSW21");
   Game *game = config_game_create(config);
-  time_random_racks_with_wmp(game, wmp);
+  sleep(10);
+  time_wmp_buffer_writes(game, wmp);
+  time_wmp_existence_checks(game, wmp);
 
   game_destroy(game);
   config_destroy(config);
@@ -116,5 +149,5 @@ void test_short_and_long_words(void) {
 
 void test_wmp(void) {
   benchmark_csw_wmp();
-  test_short_and_long_words();
+  //test_short_and_long_words();
 }
