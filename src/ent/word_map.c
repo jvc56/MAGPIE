@@ -799,13 +799,11 @@ void fill_words_of_same_length_map(
     const MutableBlanksForSameLengthMap *blank_map,
     const MutableDoubleBlanksForSameLengthMap *double_blank_map, int length,
     WordsOfSameLengthMap *map) {
-  printf("fill_words_of_same_length_map, length %d\n", length);
   map->num_word_buckets = word_map->num_word_buckets;
   map->num_blank_buckets = blank_map->num_blank_buckets;
   map->num_double_blank_buckets = double_blank_map->num_double_blank_buckets;
   const int num_sets = mutable_words_of_same_length_get_num_sets(word_map);
   const int num_words = mutable_words_of_same_length_get_num_words(word_map);
-  printf("num_word_buckets: %d\n", map->num_word_buckets);
   map->word_bucket_starts =
       malloc_or_die(sizeof(uint32_t) * (map->num_word_buckets + 1));
   int entry_index = 0;

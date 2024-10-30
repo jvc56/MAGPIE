@@ -5,7 +5,6 @@
 #include "../def/kwg_defs.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
-#include "../ent/letter_distribution.h"
 
 KWG *make_kwg_from_words(const DictionaryWordList *words,
                          kwg_maker_output_t output, kwg_maker_merge_t merge);
