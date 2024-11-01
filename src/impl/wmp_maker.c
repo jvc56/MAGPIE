@@ -515,7 +515,7 @@ MutableWordMap *make_mwmp_from_words(const DictionaryWordList *words) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
     num_words_by_length[dictionary_word_get_length(word)]++;
   }
-  for (int len = 0; len <= BOARD_DIM; len++) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
     MutableWordsOfSameLengthMap *mwfl = &mwmp->maps[len];
     // This is ideally sized based on number of anagram sets rather than number
     // of words, but we won't know how many anagram sets there are until we
@@ -632,7 +632,7 @@ void fill_mbfl_from_mwfl(MutableBlanksForSameLengthMap *mbfl,
 
 MutableBlankMap *make_mutable_blank_map_from_mwmp(const MutableWordMap *mwmp) {
   MutableBlankMap *mutable_blank_map = malloc_or_die(sizeof(MutableBlankMap));
-  for (int len = 0; len <= BOARD_DIM; len++) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
     fill_mbfl_from_mwfl(&mutable_blank_map->maps[len], &mwmp->maps[len], len);
   }
   return mutable_blank_map;
@@ -734,11 +734,58 @@ make_mutable_double_blank_map_from_mwmp(const MutableWordMap *mwmp) {
   assert(mwmp != NULL);
   MutableDoubleBlankMap *mutable_double_blank_map =
       malloc_or_die(sizeof(MutableDoubleBlankMap));
-  for (int len = 0; len <= BOARD_DIM; len++) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
     fill_mdbfl_from_mwfl(&mutable_double_blank_map->maps[len], &mwmp->maps[len],
                          len);
   }
   return mutable_double_blank_map;
+}
+
+void mutable_word_map_destroy(MutableWordMap *mwmp) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    MutableWordsOfSameLengthMap *mwfl = &mwmp->maps[len];
+    for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
+         bucket_idx++) {
+      MutableWordMapBucket *bucket = &mwfl->word_buckets[bucket_idx];
+      for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
+        MutableWordMapEntry *entry = &bucket->entries[entry_idx];
+        dictionary_word_list_destroy(entry->letters);
+      }
+      free(bucket->entries);
+    }
+    free(mwfl->word_buckets);
+  }
+  free(mwmp);
+}
+
+void mutable_blank_map_destroy(MutableBlankMap *mbmp) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    MutableBlanksForSameLengthMap *mbfl = &mbmp->maps[len];
+    for (uint32_t bucket_idx = 0; bucket_idx < mbfl->num_blank_buckets;
+         bucket_idx++) {
+      MutableBlankMapBucket *bucket = &mbfl->blank_buckets[bucket_idx];
+      free(bucket->entries);
+    }
+    free(mbfl->blank_buckets);
+  }
+  free(mbmp);
+}
+
+void mutable_double_blank_map_destroy(MutableDoubleBlankMap *mdbmp) {
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    MutableDoubleBlanksForSameLengthMap *mdbfl = &mdbmp->maps[len];
+    for (uint32_t bucket_idx = 0; bucket_idx < mdbfl->num_double_blank_buckets;
+         bucket_idx++) {
+      MutableDoubleBlankMapBucket *bucket = &mdbfl->double_blank_buckets[bucket_idx];
+      for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
+        MutableDoubleBlankMapEntry *entry = &bucket->entries[entry_idx];
+        dictionary_word_list_destroy(entry->letter_pairs);
+      }
+      free(bucket->entries);
+    }
+    free(mdbfl->double_blank_buckets);
+  }
+  free(mdbmp);
 }
 
 WMP *make_wmp_from_words(const DictionaryWordList *words) {
@@ -749,5 +796,8 @@ WMP *make_wmp_from_words(const DictionaryWordList *words) {
       make_mutable_double_blank_map_from_mwmp(mutable_word_map);
   WMP *wmp = make_wmp_from_mutables(mutable_word_map, mutable_blank_map,
                                     mutable_double_blank_map);
+  mutable_word_map_destroy(mutable_word_map);
+  mutable_blank_map_destroy(mutable_blank_map);
+  mutable_double_blank_map_destroy(mutable_double_blank_map);                                      
   return wmp;
 }
