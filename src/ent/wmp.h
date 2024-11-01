@@ -206,7 +206,9 @@ static inline void wmp_destroy(WMP *wmp) {
   if (wmp->name != NULL) {
     free(wmp->name);
   }
-  for (int len = 0; len <= wmp->board_dim; len++) {
+  // wmp->wfls[0] and wmp->wfls[1] should have uninitialized data
+  // and no allocated arrays.
+  for (int len = 2; len <= wmp->board_dim; len++) {
     WMPForLength *wfl = &wmp->wfls[len];
     free(wfl->word_bucket_starts);
     free(wfl->word_map_entries);
@@ -214,7 +216,7 @@ static inline void wmp_destroy(WMP *wmp) {
 
     free(wfl->blank_bucket_starts);
     free(wfl->blank_map_entries);
-    
+
     free(wfl->double_blank_bucket_starts);
     free(wfl->double_blank_map_entries);
     free(wfl->double_blank_letters);

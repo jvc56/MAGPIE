@@ -515,7 +515,7 @@ MutableWordMap *make_mwmp_from_words(const DictionaryWordList *words) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
     num_words_by_length[dictionary_word_get_length(word)]++;
   }
-  for (int len = 2; len <= BOARD_DIM; len++) {
+  for (int len = 0; len <= BOARD_DIM; len++) {
     MutableWordsOfSameLengthMap *mwfl = &mwmp->maps[len];
     // This is ideally sized based on number of anagram sets rather than number
     // of words, but we won't know how many anagram sets there are until we
@@ -632,7 +632,7 @@ void fill_mbfl_from_mwfl(MutableBlanksForSameLengthMap *mbfl,
 
 MutableBlankMap *make_mutable_blank_map_from_mwmp(const MutableWordMap *mwmp) {
   MutableBlankMap *mutable_blank_map = malloc_or_die(sizeof(MutableBlankMap));
-  for (int len = 2; len <= BOARD_DIM; len++) {
+  for (int len = 0; len <= BOARD_DIM; len++) {
     fill_mbfl_from_mwfl(&mutable_blank_map->maps[len], &mwmp->maps[len], len);
   }
   return mutable_blank_map;
@@ -734,7 +734,7 @@ make_mutable_double_blank_map_from_mwmp(const MutableWordMap *mwmp) {
   assert(mwmp != NULL);
   MutableDoubleBlankMap *mutable_double_blank_map =
       malloc_or_die(sizeof(MutableDoubleBlankMap));
-  for (int len = 2; len <= BOARD_DIM; len++) {
+  for (int len = 0; len <= BOARD_DIM; len++) {
     fill_mdbfl_from_mwfl(&mutable_double_blank_map->maps[len], &mwmp->maps[len],
                          len);
   }
