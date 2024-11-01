@@ -206,6 +206,19 @@ static inline void wmp_destroy(WMP *wmp) {
   if (wmp->name != NULL) {
     free(wmp->name);
   }
+  for (int len = 0; len <= wmp->board_dim; len++) {
+    WMPForLength *wfl = &wmp->wfls[len];
+    free(wfl->word_bucket_starts);
+    free(wfl->word_map_entries);
+    free(wfl->word_letters);
+
+    free(wfl->blank_bucket_starts);
+    free(wfl->blank_map_entries);
+    
+    free(wfl->double_blank_bucket_starts);
+    free(wfl->double_blank_map_entries);
+    free(wfl->double_blank_letters);
+  }
   free(wmp);
 }
 
