@@ -70,8 +70,8 @@ void time_wmp_buffer_writes(Game *game, WMP *wmp) {
   const LetterDistribution *ld = game_get_ld(game);
   uint8_t *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
   int bytes_written = 0;
-  uint64_t lookups = 0;
-  uint64_t total_bytes_written = 0;
+  int lookups = 0;
+  int total_bytes_written = 0;
   const clock_t start = clock();
   for (int i = 0; i < 1e3; i++) {
     game_reset(game);
@@ -96,14 +96,14 @@ void time_wmp_buffer_writes(Game *game, WMP *wmp) {
     }
   }
   const clock_t end = clock();
-  printf("performed %llu lookups, %llu bytes written in %f seconds\n", lookups,
+  printf("performed %d lookups, %d bytes written in %f seconds\n", lookups,
          total_bytes_written, (double)(end - start) / CLOCKS_PER_SEC);
 }
 
 void time_wmp_existence_checks(Game *game, WMP *wmp) {
   const LetterDistribution *ld = game_get_ld(game);
-  uint64_t lookups = 0;
-  uint64_t num_with_solution = 0;
+  int lookups = 0;
+  int num_with_solution = 0;
   const clock_t start = clock();
   for (int i = 0; i < 1e3; i++) {
     game_reset(game);
@@ -127,8 +127,8 @@ void time_wmp_existence_checks(Game *game, WMP *wmp) {
     }
   }
   const clock_t end = clock();
-  printf("performed %llu lookups, %llu having solutions in %f seconds\n", lookups,
-         num_with_solution, (double)(end - start) / CLOCKS_PER_SEC);
+  printf("performed %d lookups, %d having solutions in %f seconds\n",
+         lookups, num_with_solution, (double)(end - start) / CLOCKS_PER_SEC);
 }
 
 void benchmark_csw_wmp(void) {
