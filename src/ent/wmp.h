@@ -294,10 +294,12 @@ static inline int wfl_write_double_blanks_to_buffer(const WMPForLength *wfl,
     if (!bit_rack_equals(&entry_quotient, &quotient)) {
       continue;
     }
-    const uint64_t expected_zero = *((uint64_t *)entry->bucket_or_inline);
-    assert(expected_zero == 0);
-    const uint32_t pair_start = *((uint32_t *)entry->bucket_or_inline + 2);
-    const uint32_t num_pairs = *((uint32_t *)entry->bucket_or_inline + 3);
+    uint32_t pair_start;
+    memory_copy(&pair_start, (uint32_t *)entry->bucket_or_inline + 2,
+                sizeof(pair_start));
+    uint32_t num_pairs;
+    memory_copy(&num_pairs, (uint32_t *)entry->bucket_or_inline + 3,
+                sizeof(num_pairs));
     const uint8_t *pairs = wfl->double_blank_letters + pair_start;
     bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
     for (uint32_t j = 0; j < num_pairs; j++) {
