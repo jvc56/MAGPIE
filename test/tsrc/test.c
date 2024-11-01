@@ -47,7 +47,7 @@
 #include "word_test.h"
 
 void run_all(void) {
-  test_wmp_maker();
+  test_wmp();
   return;
 
   // Test the loading of the config
