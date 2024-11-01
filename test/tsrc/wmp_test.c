@@ -96,6 +96,7 @@ void time_wmp_buffer_writes(Game *game, WMP *wmp) {
     }
   }
   const clock_t end = clock();
+  free(buffer);
   printf("performed %d lookups, %d bytes written in %f seconds\n", lookups,
          total_bytes_written, (double)(end - start) / CLOCKS_PER_SEC);
 }
@@ -180,6 +181,8 @@ void test_short_and_long_words(void) {
   assert(bytes_written == 15);
   assert_word_in_buffer(buffer, "QUARTERBACKINGS", ld, 0, 15);
 
+  wmp_destroy(wmp);
+  free(buffer);
   config_destroy(config);
 }
 
