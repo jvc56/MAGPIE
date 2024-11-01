@@ -224,10 +224,12 @@ static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
     if (!bit_rack_equals(&entry_quotient, &quotient)) {
       continue;
     }
-    const uint64_t expected_zero = *((uint64_t *)entry->bucket_or_inline);
-    assert(expected_zero == 0);
-    const uint32_t word_start = *((uint32_t *)entry->bucket_or_inline + 2);
-    const uint32_t num_words = *((uint32_t *)entry->bucket_or_inline + 3);
+    uint32_t word_start;
+    memory_copy(&word_start, (uint32_t *)entry->bucket_or_inline + 2,
+                sizeof(word_start));
+    uint32_t num_words;
+    memory_copy(&num_words, (uint32_t *)entry->bucket_or_inline + 3,
+                sizeof(num_words));
     const uint8_t *letters = wfl->word_letters + word_start;
     const int bytes_written = num_words * word_length;
     memory_copy(buffer, letters, bytes_written);
