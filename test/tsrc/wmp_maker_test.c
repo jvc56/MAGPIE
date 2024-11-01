@@ -83,6 +83,7 @@ void test_make_wmp_from_words(void) {
   assert_word_in_buffer(buffer, "TUQUE", ld, 2, 5);
   assert_word_in_buffer(buffer, "QUIPU", ld, 3, 5);
 
+  wmp_destroy(wmp);
   dictionary_word_list_destroy(q_words_2to8);
   game_destroy(game);
   config_destroy(config);
