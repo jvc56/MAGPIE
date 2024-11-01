@@ -254,9 +254,9 @@ static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
     if (!bit_rack_equals(&entry_quotient, &quotient)) {
       continue;
     }
-    const uint64_t expected_zero = *((uint64_t *)entry->bucket_or_inline);
-    assert(expected_zero == 0);
-    const uint32_t blank_letters = *((uint32_t *)entry->bucket_or_inline + 2);
+    uint32_t blank_letters;
+    memory_copy(&blank_letters, (uint32_t *)entry->bucket_or_inline + 2,
+                sizeof(blank_letters));
     bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
     for (uint8_t ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
       if (blank_letters & (1ULL << ml)) {
