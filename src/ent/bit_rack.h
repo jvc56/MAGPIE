@@ -211,11 +211,9 @@ static inline bool bit_rack_equals(const BitRack *a, const BitRack *b) {
 #endif
 }
 
-static inline Rack *bit_rack_to_rack(const BitRack *bit_rack,
-                                     const LetterDistribution *ld) {
-  const int ld_size = ld->size;
-  Rack *rack = rack_create(ld_size);
-  for (int ml = 0; ml < ld_size; ml++) {
+static inline Rack *bit_rack_to_rack(const BitRack *bit_rack) {
+  Rack *rack = rack_create(BIT_RACK_MAX_ALPHABET_SIZE);
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     rack->array[ml] = bit_rack_get_letter(bit_rack, ml);
     rack->number_of_letters += rack->array[ml];
   }

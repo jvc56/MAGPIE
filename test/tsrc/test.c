@@ -42,6 +42,7 @@
 #include "validated_move_test.h"
 #include "wasm_api_test.h"
 #include "wmp_test.h"
+#include "wmp_maker_test.h"
 #include "word_map_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
@@ -176,6 +177,8 @@ void run_test(const char *subtest) {
     test_create_data();
   } else if (strings_equal(subtest, "wmp")) {
     test_wmp();
+  } else if (strings_equal(subtest, "wmpmaker")) {
+    test_wmp_maker();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

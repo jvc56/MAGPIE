@@ -55,10 +55,8 @@ typedef struct WMPForLength {
 
 typedef struct WMP {
   char *name;
-  uint8_t major_version;
-  uint8_t minor_version;
-  uint8_t min_word_length;
-  uint8_t max_word_length;
+  uint8_t version;
+  uint8_t board_dim;
   uint32_t max_blank_pair_bytes;
   uint32_t max_word_lookup_bytes;
   WMPForLength wfls[BOARD_DIM + 1];
@@ -105,16 +103,14 @@ static inline void read_wmp_entries_from_stream(WMPEntry *entries, uint32_t n,
 }
 
 static inline void read_header_from_stream(WMP *wmp, FILE *stream) {
-  read_byte_from_stream(&wmp->major_version, stream);
-  read_byte_from_stream(&wmp->minor_version, stream);
-  read_byte_from_stream(&wmp->min_word_length, stream);
-  read_byte_from_stream(&wmp->max_word_length, stream);
+  read_byte_from_stream(&wmp->version, stream);
+  read_byte_from_stream(&wmp->board_dim, stream);
   read_uint32_from_stream(&wmp->max_word_lookup_bytes, stream);
   read_uint32_from_stream(&wmp->max_blank_pair_bytes, stream);
 }
 
 static inline void read_wfl_blankless_words(WMPForLength *wfl, uint32_t len,
-                                  FILE *stream) {
+                                            FILE *stream) {
   read_uint32_from_stream(&wfl->num_word_buckets, stream);
   wfl->word_bucket_starts =
       (uint32_t *)malloc_or_die((wfl->num_word_buckets + 1) * sizeof(uint32_t));
@@ -143,7 +139,7 @@ static inline void read_wfl_blanks(WMPForLength *wfl, FILE *stream) {
   wfl->blank_map_entries =
       (WMPEntry *)malloc_or_die(wfl->num_blank_entries * sizeof(WMPEntry));
   read_wmp_entries_from_stream(wfl->blank_map_entries, wfl->num_blank_entries,
-                               stream);                           
+                               stream);
 }
 
 static inline void read_wfl_double_blanks(WMPForLength *wfl, FILE *stream) {
@@ -154,16 +150,16 @@ static inline void read_wfl_double_blanks(WMPForLength *wfl, FILE *stream) {
                            wfl->num_double_blank_buckets + 1, stream);
 
   read_uint32_from_stream(&wfl->num_double_blank_entries, stream);
-  wfl->double_blank_map_entries =
-      (WMPEntry *)malloc_or_die(wfl->num_double_blank_entries * sizeof(WMPEntry));
+  wfl->double_blank_map_entries = (WMPEntry *)malloc_or_die(
+      wfl->num_double_blank_entries * sizeof(WMPEntry));
   read_wmp_entries_from_stream(wfl->double_blank_map_entries,
                                wfl->num_double_blank_entries, stream);
 
   read_uint32_from_stream(&wfl->num_blank_pairs, stream);
-  wfl->double_blank_letters = (uint8_t *)malloc_or_die(
-      wfl->num_blank_pairs * 2 * sizeof(uint8_t));
+  wfl->double_blank_letters =
+      (uint8_t *)malloc_or_die(wfl->num_blank_pairs * 2 * sizeof(uint8_t));
   read_bytes_from_stream(wfl->double_blank_letters, wfl->num_blank_pairs * 2,
-                         stream);                               
+                         stream);
 }
 
 static inline void read_wmp_for_length(WMP *wmp, uint32_t len, FILE *stream) {
@@ -187,15 +183,11 @@ static inline void wmp_load(WMP *wmp, const char *data_paths,
   wmp->name = string_duplicate(wmp_name);
 
   read_header_from_stream(wmp, stream);
-  if (wmp->min_word_length > wmp->max_word_length) {
-    log_fatal("min_word_length > max_word_length\n");
-  }
-  if (wmp->max_word_length > BOARD_DIM) {
-    log_fatal("max_word_length > BOARD_DIM\n");
+  if (wmp->board_dim != BOARD_DIM) {
+    log_fatal("wmp->board_dim != BOARD_DIM\n");
   }
 
-  for (uint32_t len = wmp->min_word_length; len <= wmp->max_word_length;
-       len++) {
+  for (uint32_t len = 2; len <= BOARD_DIM; len++) {
     read_wmp_for_length(wmp, len, stream);
   }
 }
@@ -208,16 +200,19 @@ static inline WMP *wmp_create(const char *data_paths, const char *wmp_name) {
 }
 
 static inline void wmp_destroy(WMP *wmp) {
-  if (!wmp) {
+  if (wmp == NULL) {
     return;
   }
-  free(wmp->name);
+  if (wmp->name != NULL) {
+    free(wmp->name);
+  }
   free(wmp);
 }
 
-int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
-                                        const BitRack *bit_rack,
-                                        int word_length, uint8_t *buffer) {
+static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
+                                                      const BitRack *bit_rack,
+                                                      int word_length,
+                                                      uint8_t *buffer) {
   BitRack quotient;
   uint32_t bucket_index;
   bit_rack_div_mod(bit_rack, wfl->num_word_buckets, &quotient, &bucket_index);
@@ -241,8 +236,12 @@ int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
   return 0;
 }
 
-int wfl_write_blanks_to_buffer(const WMPForLength *wfl, BitRack *bit_rack,
-                               int word_length, uint8_t *buffer) {
+static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
+                                             BitRack *bit_rack, int word_length,
+                                             uint8_t *buffer) {
+  if (wfl->num_blank_buckets == 0) {
+    return 0;
+  }
   BitRack quotient;
   uint32_t bucket_index;
   bit_rack_div_mod(bit_rack, wfl->num_blank_buckets, &quotient, &bucket_index);
@@ -273,9 +272,13 @@ int wfl_write_blanks_to_buffer(const WMPForLength *wfl, BitRack *bit_rack,
   return bytes_written;
 }
 
-int wfl_write_double_blanks_to_buffer(const WMPForLength *wfl,
-                                      BitRack *bit_rack, int word_length,
-                                      uint8_t *buffer) {
+static inline int wfl_write_double_blanks_to_buffer(const WMPForLength *wfl,
+                                                    BitRack *bit_rack,
+                                                    int word_length,
+                                                    uint8_t *buffer) {
+  if (wfl->num_double_blank_buckets == 0) {
+    return 0;
+  }
   BitRack quotient;
   uint32_t bucket_index;
   bit_rack_div_mod(bit_rack, wfl->num_double_blank_buckets, &quotient,
@@ -311,8 +314,8 @@ int wfl_write_double_blanks_to_buffer(const WMPForLength *wfl,
   return bytes_written;
 }
 
-int wmp_write_words_to_buffer(const WMP *wmp, BitRack *bit_rack,
-                              int word_length, uint8_t *buffer) {
+static inline int wmp_write_words_to_buffer(const WMP *wmp, BitRack *bit_rack,
+                                            int word_length, uint8_t *buffer) {
   const WMPForLength *wfl = &wmp->wfls[word_length];
   switch (bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER)) {
   case 0:
@@ -328,7 +331,11 @@ int wmp_write_words_to_buffer(const WMP *wmp, BitRack *bit_rack,
   }
 }
 
-const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
+static inline const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl,
+                                                 const BitRack *bit_rack) {
+  if (wfl->num_word_buckets == 0) {
+    return NULL;
+  }
   BitRack quotient;
   uint32_t bucket_index;
   bit_rack_div_mod(bit_rack, wfl->num_word_buckets, &quotient, &bucket_index);
@@ -344,7 +351,11 @@ const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl, const BitRack *bit_r
   return NULL;
 }
 
-const WMPEntry *wfl_get_blank_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
+static inline const WMPEntry *wfl_get_blank_entry(const WMPForLength *wfl,
+                                                  const BitRack *bit_rack) {
+  if (wfl->num_blank_buckets == 0) {
+    return NULL;
+  }
   BitRack quotient;
   uint32_t bucket_index;
   bit_rack_div_mod(bit_rack, wfl->num_blank_buckets, &quotient, &bucket_index);
@@ -360,10 +371,15 @@ const WMPEntry *wfl_get_blank_entry(const WMPForLength *wfl, const BitRack *bit_
   return NULL;
 }
 
-const WMPEntry *wfl_get_double_blank_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
+static inline const WMPEntry *
+wfl_get_double_blank_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
+  if (wfl->num_double_blank_buckets == 0) {
+    return NULL;
+  }
   BitRack quotient;
   uint32_t bucket_index;
-  bit_rack_div_mod(bit_rack, wfl->num_double_blank_buckets, &quotient, &bucket_index);
+  bit_rack_div_mod(bit_rack, wfl->num_double_blank_buckets, &quotient,
+                   &bucket_index);
   const uint32_t start = wfl->double_blank_bucket_starts[bucket_index];
   const uint32_t end = wfl->double_blank_bucket_starts[bucket_index + 1];
   for (uint32_t i = start; i < end; i++) {
@@ -376,7 +392,8 @@ const WMPEntry *wfl_get_double_blank_entry(const WMPForLength *wfl, const BitRac
   return NULL;
 }
 
-const WMPEntry *wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
+static inline const WMPEntry *
+wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
   const WMPForLength *wfl = &wmp->wfls[word_length];
   switch (bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER)) {
   case 0:
@@ -389,7 +406,138 @@ const WMPEntry *wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int 
   return NULL;
 }
 
-bool wmp_has_word(const WMP *wmp, const BitRack *bit_rack, int word_length) {
+static inline bool wmp_has_word(const WMP *wmp, const BitRack *bit_rack,
+                                int word_length) {
   return wmp_get_word_entry(wmp, bit_rack, word_length) != NULL;
+}
+
+static inline bool write_byte_to_stream(uint8_t byte, FILE *stream) {
+  const size_t result = fwrite(&byte, sizeof(byte), 1, stream);
+  return result == 1;
+}
+
+static inline bool write_uint32_to_stream(uint32_t i, FILE *stream) {
+  const size_t result = fwrite(&i, sizeof(i), 1, stream);
+  return result == 1;
+}
+
+static inline bool write_wfl_to_stream(int length, const WMPForLength *wfl,
+                                       FILE *stream) {
+  if (!write_uint32_to_stream(wfl->num_word_buckets, stream)) {
+    printf("num word buckets: %d\n", wfl->num_word_buckets);
+    return false;
+  }
+  size_t result = fwrite(wfl->word_bucket_starts, sizeof(uint32_t),
+                         wfl->num_word_buckets + 1, stream);
+  if (result != wfl->num_word_buckets + 1) {
+    printf("word bucket starts: %d\n", wfl->num_word_buckets);
+    return false;
+  }
+  if (!write_uint32_to_stream(wfl->num_word_entries, stream)) {
+    printf("num word entries: %d\n", wfl->num_word_entries);
+    return false;
+  }
+  result = fwrite(wfl->word_map_entries, sizeof(WMPEntry),
+                  wfl->num_word_entries, stream);
+  if (result != wfl->num_word_entries) {
+    printf("word map entries: %d\n", wfl->num_word_entries);
+    return false;
+  }
+  if (!write_uint32_to_stream(wfl->num_words, stream)) {
+    printf("num words: %d\n", wfl->num_words);
+    return false;
+  }
+  result = fwrite(wfl->word_letters, sizeof(uint8_t), wfl->num_words * length,
+                  stream);
+  if (result != wfl->num_words * length) {
+    printf("word letters: %d\n", wfl->num_words * length);
+    return false;
+  }
+  if (!write_uint32_to_stream(wfl->num_blank_buckets, stream)) {
+    printf("num blank buckets");
+    return false;
+  }
+  result = fwrite(wfl->blank_bucket_starts, sizeof(uint32_t),
+                  wfl->num_blank_buckets + 1, stream);
+  if (result != wfl->num_blank_buckets + 1) {
+    printf("blank buckets starts: %d\n", wfl->num_blank_buckets);
+    return false;
+  }
+  if (!write_uint32_to_stream(wfl->num_blank_entries, stream)) {
+    printf("num blank entries: %d\n", wfl->num_blank_entries);
+    return false;
+  }
+  result = fwrite(wfl->blank_map_entries, sizeof(WMPEntry),
+                  wfl->num_blank_entries, stream);
+  if (result != wfl->num_blank_entries) {
+    printf("num blank entries: %d\n", wfl->num_blank_entries);
+    return false;
+  }
+  if (!write_uint32_to_stream(wfl->num_double_blank_buckets, stream)) {
+    printf("num double blank buckets: %d\n", wfl->num_double_blank_buckets);
+    return false;
+  }
+  result = fwrite(wfl->double_blank_bucket_starts, sizeof(uint32_t),
+                  wfl->num_double_blank_buckets + 1, stream);
+  if (result != wfl->num_double_blank_buckets + 1) {
+    printf("double blank bucket starts: %d\n", wfl->num_double_blank_buckets);
+    return false;
+  }
+  if (!write_uint32_to_stream(wfl->num_double_blank_entries, stream)) {
+    printf("num double blank entries: %d\n", wfl->num_double_blank_entries);
+    return false;
+  }
+  result = fwrite(wfl->double_blank_map_entries, sizeof(WMPEntry),
+                  wfl->num_double_blank_entries, stream);
+  if (result != wfl->num_double_blank_entries) {
+    printf("double blank entries: %d\n", wfl->num_double_blank_entries);
+    return false;
+  }
+  if (!write_uint32_to_stream(wfl->num_blank_pairs, stream)) {
+    printf("num blank pairs: %d\n", wfl->num_blank_pairs);
+    return false;
+  }
+  result = fwrite(wfl->double_blank_letters, sizeof(uint8_t),
+                  wfl->num_blank_pairs * 2, stream);
+  if (result != wfl->num_blank_pairs * 2) {
+    printf("blank pairs: %d\n", wfl->num_blank_pairs);
+    return false;
+  }
+  return true;
+}
+
+static inline bool wmp_write_to_file(const WMP *wmp, const char *filename) {
+  FILE *stream = fopen(filename, "wb");
+  if (!stream) {
+    log_error("could not open file for writing: %s\n", filename);
+    return false;
+  }
+  if (!write_byte_to_stream(wmp->version, stream)) {
+    log_error("could not write version to stream\n");
+    return false;
+  }
+  if (!write_byte_to_stream(wmp->board_dim, stream)) {
+    printf("could not write board_dim to stream\n");
+    return false;
+  }
+  if (!write_uint32_to_stream(wmp->max_word_lookup_bytes, stream)) {
+    printf("could not write max word lookup bytes to stream\n");
+    return false;
+  }
+  if (!write_uint32_to_stream(wmp->max_blank_pair_bytes, stream)) {
+    printf("could not write max blank pair bytes to stream\n");
+    return false;
+  }
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    if (!write_wfl_to_stream(len, &wmp->wfls[len], stream)) {
+      printf("could not write words of same length map to stream\n");
+      return false;
+    }
+  }
+  if (fclose(stream) != 0) {
+    printf("could not close WMP file after writing\n");
+    return false;
+  }
+  return true;
 }
 #endif

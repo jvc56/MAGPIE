@@ -85,30 +85,6 @@ void benchmark_csw_wmp(void) {
   wmp_destroy(wmp);
 }
 
-// This only works on ASCII languages, e.g. English, French. Polish would need
-// to support multibyte user-visible characters, but Polish isn't even supported
-// for BitRack (and therefore for WMP) because the lexicon is >32 letters
-// (including the blank).
-void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
-                           const LetterDistribution *ld, int index,
-                           int length) {
-  const int start = index * length;
-  char hl[2] = {0, 0};
-  for (int i = 0; i < length; i++) {
-    hl[0] = expected_word[i];
-    assert(buffer[start + i] == ld_hl_to_ml(ld, hl));
-  }
-}
-
-BitRack string_to_bit_rack(const LetterDistribution *ld,
-                           const char *rack_string) {
-  Rack *rack = rack_create(ld_get_size(ld));
-  rack_set_to_string(ld, rack, rack_string);
-  BitRack bit_rack = bit_rack_create_from_rack(ld, rack);
-  rack_destroy(rack);
-  return bit_rack;
-}
-
 void test_short_and_long_words(void) {
   Config *config = config_create_or_die("set -lex CSW21");
   const LetterDistribution *ld = config_get_ld(config);

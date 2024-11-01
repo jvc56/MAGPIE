@@ -5,10 +5,10 @@
 #include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
-#include "../ent/word_map.h"
 
 #include "klv_csv.h"
 #include "kwg_maker.h"
+#include "wmp_maker.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"
@@ -48,11 +48,11 @@ conversion_status_t convert_from_text_with_dwl(
   }
 
   if (conversion_type == CONVERT_TEXT2WORDMAP) {
-    WordMap *word_map = word_map_create_from_dictionary_word_list(ld, strings);
-    if (!word_map_write_to_file(word_map, output_filename)) {
+    WMP *wmp = make_wmp_from_words(strings);
+    if (!wmp_write_to_file(wmp, output_filename)) {
       return CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
     }
-    word_map_destroy(word_map);
+    wmp_destroy(wmp);
     return CONVERT_STATUS_SUCCESS;
   }
   kwg_maker_output_t output_type = KWG_MAKER_OUTPUT_DAWG_AND_GADDAG;
