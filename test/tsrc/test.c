@@ -43,7 +43,6 @@
 #include "wasm_api_test.h"
 #include "wmp_test.h"
 #include "wmp_maker_test.h"
-#include "word_map_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
 
@@ -155,8 +154,6 @@ void run_test(const char *subtest) {
     test_words();
   } else if (strings_equal(subtest, "wordprune")) {
     test_word_prune();
-  } else if (strings_equal(subtest, "wordmap")) {
-    test_word_map();
   } else if (strings_equal(subtest, "kwgmaker")) {
     test_kwg_maker();
   } else if (strings_equal(subtest, "fh")) {

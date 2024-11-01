@@ -394,7 +394,9 @@ uint32_t write_double_blank_entries(const MutableDoubleBlankMapBucket *bucket,
   for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
     const MutableDoubleBlankMapEntry *entry = &bucket->entries[entry_idx];
     bit_rack_write_12_bytes(&entry->quotient, entries[entry_idx].quotient);
-    const DictionaryWordList *pairs = entry->letter_pairs;
+    DictionaryWordList *pairs;
+    dictionary_word_list_copy(entry->letter_pairs, &pairs);
+    dictionary_word_list_sort(pairs);
     const int num_pairs = dictionary_word_list_get_count(pairs);
     write_word_range(*pair_start, num_pairs,
                      entries[entry_idx].bucket_or_inline);
@@ -404,6 +406,7 @@ uint32_t write_double_blank_entries(const MutableDoubleBlankMapBucket *bucket,
       const uint8_t *pair_letters = dictionary_word_get_word(pair);
       memory_copy(letters + *pair_start + pair_idx * 2, pair_letters, 2);
     }
+    dictionary_word_list_destroy(pairs);
     *pair_start += num_pairs * 2;
   }
   return bucket->num_entries;
