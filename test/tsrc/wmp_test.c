@@ -73,7 +73,7 @@ void time_wmp_buffer_writes(Game *game, WMP *wmp) {
   int lookups = 0;
   int total_bytes_written = 0;
   const clock_t start = clock();
-  for (int i = 0; i < 1e3; i++) {
+  for (int i = 0; i < 1e5; i++) {
     game_reset(game);
     draw_to_full_rack(game, 0);
     Player *player = game_get_player(game, 0);
@@ -106,7 +106,7 @@ void time_wmp_existence_checks(Game *game, WMP *wmp) {
   int lookups = 0;
   int num_with_solution = 0;
   const clock_t start = clock();
-  for (int i = 0; i < 1e3; i++) {
+  for (int i = 0; i < 1e5; i++) {
     game_reset(game);
     draw_to_full_rack(game, 0);
     Player *player = game_get_player(game, 0);

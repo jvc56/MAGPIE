@@ -252,23 +252,40 @@ max_word_lookup_result_size(const MutableWordMap *word_map,
   return max_size;
 }
 
-int mwfl_get_num_words(const MutableWordsOfSameLengthMap *mwfl) {
-  int num_words = 0;
+int mwfl_get_num_uninlined_words(const MutableWordsOfSameLengthMap *mwfl,
+                                 int word_length) {
+  int num_uninlined_words = 0;
+  const int max_inlined = max_inlined_words(word_length);
   for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
        bucket_idx++) {
     const MutableWordMapBucket *bucket = &mwfl->word_buckets[bucket_idx];
     for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
       const MutableWordMapEntry *entry = &bucket->entries[entry_idx];
-      num_words += dictionary_word_list_get_count(entry->letters);
+      const int num_words = dictionary_word_list_get_count(entry->letters);
+      if (num_words > max_inlined) {
+        num_uninlined_words += dictionary_word_list_get_count(entry->letters);
+      }
     }
   }
-  return num_words;
+  return num_uninlined_words;
 }
 
-void write_word_range(uint32_t word_start, uint32_t num_words,
-                      uint8_t bytes[16]) {
+void write_inlined_word_range(const DictionaryWordList *words,
+                              uint8_t bytes[WMP_INLINE_VALUE_BYTES]) {
+  memset(bytes, 0, WMP_INLINE_VALUE_BYTES);                                
+  for (int word_idx = 0; word_idx < dictionary_word_list_get_count(words);
+       word_idx++) {
+    const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
+    const uint8_t *word_letters = dictionary_word_get_word(word);
+    const int word_length = dictionary_word_get_length(word);
+    memory_copy(bytes + word_idx * word_length, word_letters, word_length);
+  }
+}
 
-  // 8 zero bytes at start of entry designating it is non-inline
+void write_uninlined_word_range(uint32_t word_start, uint32_t num_words,
+                                uint8_t bytes[WMP_INLINE_VALUE_BYTES]) {
+
+  // 8 zero bytes at start of entry designating it is uninlined
   memset(bytes, 0, sizeof(uint64_t));
 
   // 4 bytes for word start (index into wfl->word_letters)
@@ -299,8 +316,12 @@ uint32_t write_word_entries(const MutableWordMapBucket *bucket, int word_length,
     const MutableWordMapEntry *entry = &bucket->entries[entry_idx];
     bit_rack_write_12_bytes(&entry->quotient, entries[entry_idx].quotient);
     const uint32_t num_words = dictionary_word_list_get_count(entry->letters);
-    write_word_range(*word_start, num_words,
-                     entries[entry_idx].bucket_or_inline);
+    if (num_words <= max_inlined_words(word_length)) {
+      write_inlined_word_range(entry->letters,
+                               entries[entry_idx].bucket_or_inline);
+      continue;
+    }
+    write_uninlined_word_range(*word_start, num_words, entries[entry_idx].bucket_or_inline);
     write_letters(entry, *word_start, word_length, letters);
     *word_start += num_words * word_length;
   }
@@ -321,8 +342,9 @@ void fill_wfl_blankless(const MutableWordsOfSameLengthMap *mwfl,
   }
   wfl->word_bucket_starts[wfl->num_word_buckets] = entry_idx;
 
-  wfl->num_words = mwfl_get_num_words(mwfl);
-  wfl->word_letters = (uint8_t *)malloc_or_die(wfl->num_words * word_length);
+  wfl->num_uninlined_words = mwfl_get_num_uninlined_words(mwfl, word_length);
+  wfl->word_letters =
+      (uint8_t *)malloc_or_die(wfl->num_uninlined_words * word_length);
   wfl->num_word_entries = entry_idx;
   wfl->word_map_entries =
       (WMPEntry *)malloc_or_die(wfl->num_word_entries * sizeof(WMPEntry));
@@ -398,8 +420,8 @@ uint32_t write_double_blank_entries(const MutableDoubleBlankMapBucket *bucket,
     dictionary_word_list_copy(entry->letter_pairs, &pairs);
     dictionary_word_list_sort(pairs);
     const int num_pairs = dictionary_word_list_get_count(pairs);
-    write_word_range(*pair_start, num_pairs,
-                     entries[entry_idx].bucket_or_inline);
+    write_uninlined_word_range(*pair_start, num_pairs,
+                               entries[entry_idx].bucket_or_inline);
     for (int pair_idx = 0; pair_idx < num_pairs; pair_idx++) {
       const DictionaryWord *pair =
           dictionary_word_list_get_word(pairs, pair_idx);
@@ -747,7 +769,8 @@ void mutable_word_map_destroy(MutableWordMap *mwmp) {
     for (uint32_t bucket_idx = 0; bucket_idx < mwfl->num_word_buckets;
          bucket_idx++) {
       MutableWordMapBucket *bucket = &mwfl->word_buckets[bucket_idx];
-      for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
+      for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries;
+           entry_idx++) {
         MutableWordMapEntry *entry = &bucket->entries[entry_idx];
         dictionary_word_list_destroy(entry->letters);
       }
@@ -776,8 +799,10 @@ void mutable_double_blank_map_destroy(MutableDoubleBlankMap *mdbmp) {
     MutableDoubleBlanksForSameLengthMap *mdbfl = &mdbmp->maps[len];
     for (uint32_t bucket_idx = 0; bucket_idx < mdbfl->num_double_blank_buckets;
          bucket_idx++) {
-      MutableDoubleBlankMapBucket *bucket = &mdbfl->double_blank_buckets[bucket_idx];
-      for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
+      MutableDoubleBlankMapBucket *bucket =
+          &mdbfl->double_blank_buckets[bucket_idx];
+      for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries;
+           entry_idx++) {
         MutableDoubleBlankMapEntry *entry = &bucket->entries[entry_idx];
         dictionary_word_list_destroy(entry->letter_pairs);
       }
@@ -798,6 +823,6 @@ WMP *make_wmp_from_words(const DictionaryWordList *words) {
                                     mutable_double_blank_map);
   mutable_word_map_destroy(mutable_word_map);
   mutable_blank_map_destroy(mutable_blank_map);
-  mutable_double_blank_map_destroy(mutable_double_blank_map);                                      
+  mutable_double_blank_map_destroy(mutable_double_blank_map);
   return wmp;
 }

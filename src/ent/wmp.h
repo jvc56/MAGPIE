@@ -33,7 +33,7 @@ typedef struct WMPForLength {
   // Blankless words
   uint32_t num_word_buckets;
   uint32_t num_word_entries;
-  uint32_t num_words;
+  uint32_t num_uninlined_words;
   uint32_t *word_bucket_starts;
   WMPEntry *word_map_entries;
   uint8_t *word_letters;
@@ -123,9 +123,10 @@ static inline void read_wfl_blankless_words(WMPForLength *wfl, uint32_t len,
   read_wmp_entries_from_stream(wfl->word_map_entries, wfl->num_word_entries,
                                stream);
 
-  read_uint32_from_stream(&wfl->num_words, stream);
-  wfl->word_letters = (uint8_t *)malloc_or_die(wfl->num_words * len);
-  read_bytes_from_stream(wfl->word_letters, wfl->num_words * len, stream);
+  read_uint32_from_stream(&wfl->num_uninlined_words, stream);
+  wfl->word_letters = (uint8_t *)malloc_or_die(wfl->num_uninlined_words * len);
+  read_bytes_from_stream(wfl->word_letters, wfl->num_uninlined_words * len,
+                         stream);
 }
 
 static inline void read_wfl_blanks(WMPForLength *wfl, FILE *stream) {
@@ -224,10 +225,38 @@ static inline void wmp_destroy(WMP *wmp) {
   free(wmp);
 }
 
-static inline int
-wmp_entry_write_blankless_words_to_buffer(const WMPEntry *entry,
-                                          const WMPForLength *wfl,
-                                          int word_length, uint8_t *buffer) {
+static inline bool wmp_entry_is_inlined(const WMPEntry *entry) {
+  return entry->bucket_or_inline[0] != 0;
+}
+
+static inline uint32_t max_inlined_words(int word_length) {
+  return WMP_INLINE_VALUE_BYTES / word_length;
+}
+
+static inline int wmp_entry_number_of_inlined_bytes(const WMPEntry *entry,
+                                                    int word_length) {                                                      
+  int num_bytes = max_inlined_words(word_length) * word_length;
+  while (num_bytes > word_length) {
+    const int byte_idx = num_bytes - 1;
+    if (entry->bucket_or_inline[byte_idx] != 0) {
+      break;
+    }
+    num_bytes -= word_length;
+  }
+  return num_bytes;
+}
+
+static inline int wmp_entry_write_inlined_blankless_words_to_buffer(
+    const WMPEntry *entry, int word_length, uint8_t *buffer) {
+  const int bytes_written =
+      wmp_entry_number_of_inlined_bytes(entry, word_length);
+  memory_copy(buffer, entry->bucket_or_inline, bytes_written);
+  return bytes_written;
+}
+
+static inline int wmp_entry_write_uninlined_blankless_words_to_buffer(
+    const WMPEntry *entry, const WMPForLength *wfl, int word_length,
+    uint8_t *buffer) {
   uint32_t word_start;
   memory_copy(&word_start, (uint32_t *)entry->bucket_or_inline + 2,
               sizeof(word_start));
@@ -240,10 +269,20 @@ wmp_entry_write_blankless_words_to_buffer(const WMPEntry *entry,
   return bytes_written;
 }
 
-static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
-                                                      const BitRack *bit_rack,
-                                                      int word_length,
-                                                      uint8_t *buffer) {
+static inline int
+wmp_entry_write_blankless_words_to_buffer(const WMPEntry *entry,
+                                          const WMPForLength *wfl,
+                                          int word_length, uint8_t *buffer) {
+  if (wmp_entry_is_inlined(entry)) {
+    return wmp_entry_write_inlined_blankless_words_to_buffer(entry, word_length,
+                                                             buffer);
+  }
+  return wmp_entry_write_uninlined_blankless_words_to_buffer(
+      entry, wfl, word_length, buffer);
+}
+
+static inline const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl,
+                                                 const BitRack *bit_rack) {
   BitRack quotient;
   uint32_t bucket_index;
   bit_rack_div_mod(bit_rack, wfl->num_word_buckets, &quotient, &bucket_index);
@@ -252,21 +291,23 @@ static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
   for (uint32_t i = start; i < end; i++) {
     const WMPEntry *entry = &wfl->word_map_entries[i];
     const BitRack entry_quotient = bit_rack_read_12_bytes(entry->quotient);
-    if (!bit_rack_equals(&entry_quotient, &quotient)) {
-      continue;
+    if (bit_rack_equals(&entry_quotient, &quotient)) {
+      return entry;
     }
-    uint32_t word_start;
-    memory_copy(&word_start, (uint32_t *)entry->bucket_or_inline + 2,
-                sizeof(word_start));
-    uint32_t num_words;
-    memory_copy(&num_words, (uint32_t *)entry->bucket_or_inline + 3,
-                sizeof(num_words));
-    const uint8_t *letters = wfl->word_letters + word_start;
-    const int bytes_written = num_words * word_length;
-    memory_copy(buffer, letters, bytes_written);
-    return bytes_written;
   }
-  return 0;
+  return NULL;
+}
+
+static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
+                                                      const BitRack *bit_rack,
+                                                      int word_length,
+                                                      uint8_t *buffer) {
+  const WMPEntry *entry = wfl_get_word_entry(wfl, bit_rack);
+  if (entry == NULL) {
+    return 0;
+  }
+  return wmp_entry_write_blankless_words_to_buffer(entry, wfl, word_length,
+                                                   buffer);
 }
 
 static inline int wmp_entry_write_blanks_to_buffer(const WMPEntry *entry,
@@ -394,25 +435,7 @@ static inline int wfl_write_double_blanks_to_buffer(const WMPForLength *wfl,
   return bytes_written;
 }
 
-static inline const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl,
-                                                 const BitRack *bit_rack) {
-  if (wfl->num_word_buckets == 0) {
-    return NULL;
-  }
-  BitRack quotient;
-  uint32_t bucket_index;
-  bit_rack_div_mod(bit_rack, wfl->num_word_buckets, &quotient, &bucket_index);
-  const uint32_t start = wfl->word_bucket_starts[bucket_index];
-  const uint32_t end = wfl->word_bucket_starts[bucket_index + 1];
-  for (uint32_t i = start; i < end; i++) {
-    const WMPEntry *entry = &wfl->word_map_entries[i];
-    const BitRack entry_quotient = bit_rack_read_12_bytes(entry->quotient);
-    if (bit_rack_equals(&entry_quotient, &quotient)) {
-      return entry;
-    }
-  }
-  return NULL;
-}
+
 
 static inline const WMPEntry *wfl_get_blank_entry(const WMPForLength *wfl,
                                                   const BitRack *bit_rack) {
@@ -470,10 +493,10 @@ wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
 }
 
 static inline int wmp_entry_write_words_to_buffer(const WMPEntry *entry,
-                                                   const WMP *wmp,
-                                                   BitRack *bit_rack,
-                                                   int word_length,
-                                                   uint8_t *buffer) {
+                                                  const WMP *wmp,
+                                                  BitRack *bit_rack,
+                                                  int word_length,
+                                                  uint8_t *buffer) {
   const WMPForLength *wfl = &wmp->wfls[word_length];
   switch (bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER)) {
   case 0:
@@ -536,14 +559,14 @@ static inline bool write_wfl_to_stream(int length, const WMPForLength *wfl,
     printf("word map entries: %d\n", wfl->num_word_entries);
     return false;
   }
-  if (!write_uint32_to_stream(wfl->num_words, stream)) {
-    printf("num words: %d\n", wfl->num_words);
+  if (!write_uint32_to_stream(wfl->num_uninlined_words, stream)) {
+    printf("num uninlined words: %d\n", wfl->num_uninlined_words);
     return false;
   }
-  result = fwrite(wfl->word_letters, sizeof(uint8_t), wfl->num_words * length,
-                  stream);
-  if (result != wfl->num_words * length) {
-    printf("word letters: %d\n", wfl->num_words * length);
+  result = fwrite(wfl->word_letters, sizeof(uint8_t),
+                  wfl->num_uninlined_words * length, stream);
+  if (result != wfl->num_uninlined_words * length) {
+    printf("word letters: %d\n", wfl->num_uninlined_words * length);
     return false;
   }
   if (!write_uint32_to_stream(wfl->num_blank_buckets, stream)) {
