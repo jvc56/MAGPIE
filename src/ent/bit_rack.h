@@ -1,7 +1,6 @@
 #ifndef BIT_RACK_H
 #define BIT_RACK_H
 
-#include <libkern/OSByteOrder.h>
 #if defined(__APPLE__)
 #include "../../compat/endian.h"
 #else
