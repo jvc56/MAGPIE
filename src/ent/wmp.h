@@ -1,12 +1,6 @@
 #ifndef WMP_H
 #define WMP_H
 
-#if defined(__APPLE__)
-#include "../../compat/endian.h"
-#else
-#include <endian.h>
-#endif
-
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

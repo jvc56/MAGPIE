@@ -124,6 +124,24 @@ void test_div_mod(void) {
   config_destroy(config);
 }
 
+void test_mul(void) {
+  Config *config = config_create_or_die("set -lex NWL20");
+  const LetterDistribution *ld = config_get_ld(config);
+  const int ld_size = ld_get_size(ld);
+  Rack *rack = rack_create(ld_size);
+  rack_set_to_string(ld, rack, "OOOOO"); // 5 << (4*15);
+  BitRack bit_rack = bit_rack_create_from_rack(ld, rack);
+  assert(bit_rack_get_high_64(&bit_rack) == 0);
+  assert(bit_rack_get_low_64(&bit_rack) == (5ULL << 60));
+  // should shift the 5 value from the highest of the low to the lowest of the high
+  BitRack result = bit_rack_mul(&bit_rack, 16);
+  assert(bit_rack_get_high_64(&result) == 5);
+  assert(bit_rack_get_low_64(&result) == 0);
+  
+  rack_destroy(rack);
+  config_destroy(config);
+}
+
 void test_largest_bit_rack_for_ld(void) {
   Config *config = config_create_or_die("set -lex NWL20");
   const LetterDistribution *ld = config_get_ld(config);
@@ -149,5 +167,6 @@ void test_bit_rack(void) {
   test_add_bit_rack();
   test_high_and_low_64();
   test_div_mod();
+  test_mul();
   test_largest_bit_rack_for_ld();
 }
