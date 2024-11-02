@@ -68,7 +68,11 @@ static inline bool bit_rack_type_has_expected_size(void) {
 }
 
 static inline bool bit_rack_is_compatible_with_endianness(void) {
+#if defined(__APPLE__)
   return OSHostByteOrder() == OSLittleEndian;
+#else
+  return __BYTE_ORDER == __LITTLE_ENDIAN;
+#endif  
 }
 
 static inline BitRack bit_rack_create_empty(void) {
