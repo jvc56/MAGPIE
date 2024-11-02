@@ -85,8 +85,9 @@ void test_high_and_low_64(void) {
   Rack *rack = rack_create(ld_size);
   rack_set_to_string(ld, rack, "??Z");
   const BitRack bit_rack = bit_rack_create_from_rack(ld, rack);
-  assert(bit_rack_high_64(&bit_rack) == 1ULL << (26 * BIT_RACK_BITS_PER_LETTER - 64));
-  assert(bit_rack_low_64(&bit_rack) == 2);
+  assert(bit_rack_get_high_64(&bit_rack) ==
+         1ULL << (26 * BIT_RACK_BITS_PER_LETTER - 64));
+  assert(bit_rack_get_low_64(&bit_rack) == 2);
   rack_destroy(rack);
   config_destroy(config);
 }
@@ -102,21 +103,21 @@ void test_div_mod(void) {
   BitRack quotient;
   uint32_t remainder;
   bit_rack_div_mod(&bit_rack, 2, &quotient, &remainder);
-  assert(bit_rack_high_64(&quotient) == 1ULL << 39);
-  assert(bit_rack_low_64(&quotient) == 0);
+  assert(bit_rack_get_high_64(&quotient) == 1ULL << 39);
+  assert(bit_rack_get_low_64(&quotient) == 0);
   assert(remainder == 0);
 
   bit_rack_div_mod(&bit_rack, 3, &quotient, &remainder);
-  assert(bit_rack_high_64(&quotient) == 366503875925);
-  assert(bit_rack_low_64(&quotient) == 6148914691236517205);
+  assert(bit_rack_get_high_64(&quotient) == 366503875925);
+  assert(bit_rack_get_low_64(&quotient) == 6148914691236517205);
   assert(remainder == 1);
 
   rack_set_to_string(ld, rack, "Q"); // 1 << (4*17);
   const BitRack bit_rack2 = bit_rack_create_from_rack(ld, rack);
 
   bit_rack_div_mod(&bit_rack2, 1000003, &quotient, &remainder);
-  assert(bit_rack_high_64(&quotient) == 0);
-  assert(bit_rack_low_64(&quotient) == 295147019738293);
+  assert(bit_rack_get_high_64(&quotient) == 0);
+  assert(bit_rack_get_low_64(&quotient) == 295147019738293);
   assert(remainder == 610977);
 
   rack_destroy(rack);
@@ -130,7 +131,8 @@ void test_largest_bit_rack_for_ld(void) {
 
   Rack *expected_rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, expected_rack, "ZYYXWWVVUUUUTTT");
-  const BitRack expected_bit_rack = bit_rack_create_from_rack(ld, expected_rack);
+  const BitRack expected_bit_rack =
+      bit_rack_create_from_rack(ld, expected_rack);
   assert(bit_rack_equals(&bit_rack, &expected_bit_rack));
 
   rack_destroy(expected_rack);

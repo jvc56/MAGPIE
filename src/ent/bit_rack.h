@@ -203,7 +203,7 @@ static inline void bit_rack_div_mod(const BitRack *bit_rack, uint32_t divisor,
 #endif
 }
 
-static inline uint64_t bit_rack_high_64(const BitRack *bit_rack) {
+static inline uint64_t bit_rack_get_high_64(const BitRack *bit_rack) {
 #if USE_INT128_INTRINSIC
   return (uint64_t)(*bit_rack >> 64);
 #else
@@ -211,7 +211,7 @@ static inline uint64_t bit_rack_high_64(const BitRack *bit_rack) {
 #endif
 }
 
-static inline uint64_t bit_rack_low_64(const BitRack *bit_rack) {
+static inline uint64_t bit_rack_get_low_64(const BitRack *bit_rack) {
 #if USE_INT128_INTRINSIC
   return (uint64_t)*bit_rack;
 #else
@@ -334,22 +334,6 @@ static inline void bit_rack_take_letter(BitRack *bit_rack, uint8_t ml) {
   } else {
     bit_rack->high -= 1ULL << (shift - 64);
   }
-#endif
-}
-
-static inline uint64_t bit_rack_get_high64(const BitRack *bit_rack) {
-#if USE_INT128_INTRINSIC
-  return *bit_rack >> 64;
-#else
-  return bit_rack->high;
-#endif
-}
-
-static inline uint64_t bit_rack_get_low64(const BitRack *bit_rack) {
-#if USE_INT128_INTRINSIC
-  return (uint64_t)*bit_rack;
-#else
-  return bit_rack->low;
 #endif
 }
 
