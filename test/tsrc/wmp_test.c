@@ -187,6 +187,7 @@ void test_short_and_long_words(void) {
 }
 
 void test_wmp(void) {
+  sleep(10);
   write_wmp_files();
   benchmark_csw_wmp();
   test_short_and_long_words();

@@ -1,6 +1,13 @@
 #ifndef BIT_RACK_H
 #define BIT_RACK_H
 
+#include <libkern/OSByteOrder.h>
+#if defined(__APPLE__)
+#include "../../compat/endian.h"
+#else
+#include <endian.h>
+#endif
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,8 +34,8 @@
 typedef unsigned __int128 BitRack;
 #else
 typedef struct {
-  uint64_t high;
   uint64_t low;
+  uint64_t high;
 } BitRack;
 #endif
 
@@ -55,6 +62,14 @@ bit_rack_is_compatible_with_ld(const LetterDistribution *ld) {
 
   return ld->size <= BIT_RACK_MAX_ALPHABET_SIZE &&
          max_letter_count_on_board <= bit_rack_max_letter_count;
+}
+
+static inline bool bit_rack_type_has_expected_size(void) {
+  return sizeof(BitRack) == 16;
+}
+
+static inline bool bit_rack_is_compatible_with_endianness(void) {
+  return OSHostByteOrder() == OSLittleEndian;
 }
 
 static inline BitRack bit_rack_create_empty(void) {
@@ -113,7 +128,8 @@ static inline uint8_t bit_rack_get_letter(const BitRack *bit_rack, uint8_t ml) {
   const int shift = ml * BIT_RACK_BITS_PER_LETTER;
 
 #if USE_INT128_INTRINSIC
-  return (uint8_t)((*bit_rack >> shift) & ((1 << BIT_RACK_BITS_PER_LETTER) - 1));
+  return (uint8_t)((*bit_rack >> shift) &
+                   ((1 << BIT_RACK_BITS_PER_LETTER) - 1));
 #else
   if (shift < 64) {
     return (int)((bit_rack->low >> shift) &
@@ -169,8 +185,8 @@ static inline void bit_rack_div_mod_no_intrinsic(const BitRack *bit_rack,
   const uint32_t fourth_quotient_32 = fourth_quotient & 0xFFFFFFFF;
   const uint64_t fourth_remainder_32 = fourth_dividend % divisor;
 
-  *quotient = (BitRack){(first_quotient_32 << 32) | second_quotient_32,
-                        (third_quotient_32 << 32) | fourth_quotient_32};
+  *quotient = (BitRack){(third_quotient_32 << 32) | fourth_quotient_32,
+                        (first_quotient_32 << 32) | second_quotient_32};
   *remainder = fourth_remainder_32;
 }
 #endif
@@ -224,7 +240,10 @@ static inline void bit_rack_add_uint32(BitRack *bit_rack, uint32_t addend) {
 #if USE_INT128_INTRINSIC
   *bit_rack += addend;
 #else
-// TODO
+  const uint64_t low_sum = bit_rack->low + addend;
+  bit_rack->low = low_sum;
+  bool overflow = low_sum < bit_rack->low;
+  bit_rack->high += overflow;
 #endif
 }
 
@@ -233,33 +252,28 @@ static inline BitRack bit_rack_mul(const BitRack *bit_rack,
 #if USE_INT128_INTRINSIC
   return *bit_rack * multiplier;
 #else
-  /*
-    uint64_t a32 = Uint128Low64(lhs) >> 32;
-    uint64_t a00 = Uint128Low64(lhs) & 0xffffffff;
-    uint64_t b32 = Uint128Low64(rhs) >> 32;
-    uint64_t b00 = Uint128Low64(rhs) & 0xffffffff;
-    uint128 result =
-        MakeUint128(Uint128High64(lhs) * Uint128Low64(rhs) +
-                        Uint128Low64(lhs) * Uint128High64(rhs) + a32 * b32,
-                    a00 * b00);
-    result += uint128(a32 * b00) << 32;
-    result += uint128(a00 * b32) << 32;
-  */
-  // TODO: Implement this
-  const uint64_t low_high32 = bit_rack->low >> 32;
   const uint64_t low_low32 = bit_rack->low & 0xFFFFFFFF;
-  const uint64_t high_high32 = bit_rack->high >> 32;
+  const uint64_t low_high32 = bit_rack->low >> 32;
   const uint64_t high_low32 = bit_rack->high & 0xFFFFFFFF;
+  const uint64_t high_high32 = bit_rack->high >> 32;
 
-  const uint64_t low_low_product = low_low32 * multiplier;
-  const uint64_t low_high_product = low_high32 * multiplier;
-  const uint64_t high_low_product = high_low32 * multiplier;
-  const uint64_t high_high_product = high_high32 * multiplier;
+  // Calculate partial products
+  uint64_t low_low_product = low_low32 * multiplier;
+  uint64_t low_high_product = low_high32 * multiplier;
+  uint64_t high_low_product = high_low32 * multiplier;
+  uint64_t high_high_product = high_high32 * multiplier;
 
-  const uint64_t product_low = low_low_product & 0xFFFFFFFF | low_h_product
-                                                                  << 32;
-  const uint64_t product_high = low_high_product >> 32 | high_low_product << 32;
-  return {0, 0}; // FIXME
+  // Assemble the 128-bit result
+  BitRack result;
+  result.low = low_low_product + (low_high_product << 32);
+  result.high =
+      high_high_product + (low_high_product >> 32) + (high_low_product << 32);
+
+  // Handle carry from low to high part
+  const uint64_t carry = result.low < low_low_product;
+  result.high += carry;
+
+  return result;
 #endif
 }
 
@@ -272,11 +286,11 @@ static inline void bit_rack_set_letter_count(BitRack *bit_rack, uint8_t ml,
   *bit_rack |= (unsigned __int128)count << shift;
 #else
   if (shift < 64) {
-    bit_rack->low &= ~((1 << BIT_RACK_BITS_PER_LETTER) - 1) << shift;
+    bit_rack->low &= ~((1ULL << BIT_RACK_BITS_PER_LETTER) - 1) << shift;
     bit_rack->low |= count << shift;
   } else {
-    bit_rack->high &= ~((1 << BIT_RACK_BITS_PER_LETTER) - 1) << (shift - 64);
-    bit_rack->high |= count << (shift - 64);
+    bit_rack->high &= ~((1ULL << BIT_RACK_BITS_PER_LETTER) - 1) << (shift - 64);
+    bit_rack->high |= (uint64_t)count << (shift - 64);
   }
 #endif
 }
@@ -320,7 +334,7 @@ static inline void bit_rack_take_letter(BitRack *bit_rack, uint8_t ml) {
   } else {
     bit_rack->high -= 1ULL << (shift - 64);
   }
-#endif  
+#endif
 }
 
 static inline uint64_t bit_rack_get_high64(const BitRack *bit_rack) {
@@ -342,13 +356,13 @@ static inline uint64_t bit_rack_get_low64(const BitRack *bit_rack) {
 // TODO: Generalize this to work with any number of bytes
 static inline void bit_rack_write_12_bytes(const BitRack *bit_rack,
                                            uint8_t bytes[12]) {
-  // assumes little-endian                                            
+  // assumes little-endian
   memory_copy(bytes, ((uint8_t *)bit_rack), 12);
 }
 
 static inline BitRack bit_rack_read_12_bytes(const uint8_t bytes[12]) {
-  BitRack bit_rack = 0;
-  // assumes little-endian                                            
+  BitRack bit_rack = bit_rack_create_empty();
+  // assumes little-endian
   memory_copy(((uint8_t *)&bit_rack), bytes, 12);
   return bit_rack;
 }
@@ -371,19 +385,6 @@ static inline uint8_t bit_rack_get_combination_offset(int size) {
 static inline void fill_bit_rack_power_set(const BitRack *full,
                                            BitRack *current, uint8_t next_ml,
                                            int count, BitRackPowerSet *set) {
-  /*
-    printf("fill_bit_rack_power_set(...) full_count: %d next_ml: %d, count:
-    %d\ncurrent: ", full_count, next_ml, count); for (int i = 0; i <
-    BIT_RACK_MAX_ALPHABET_SIZE; i++) { char c = '?'; if (i > 0) { c = 'A' + i -
-    1;
-      }
-      for (int j = 0; j < bit_rack_get_letter(current, i); j++) {
-        printf("%c", c);
-      }
-    }
-    printf("\n");
-    assert(full != NULL);
-  */
   int max_num_this = 0;
   for (; next_ml < BIT_RACK_MAX_ALPHABET_SIZE; next_ml++) {
     max_num_this = bit_rack_get_letter(full, next_ml);
@@ -410,8 +411,5 @@ static inline void bit_rack_power_set_init(BitRackPowerSet *set,
   memset(set->count_by_size, 0, sizeof(set->count_by_size));
   BitRack empty = bit_rack_create_empty();
   fill_bit_rack_power_set(full, &empty, BLANK_MACHINE_LETTER, 0, set);
-  // for (int size = 0; size <= RACK_SIZE; size++) {
-  //   printf("size: %d, count %d\n", size, set->count_by_size[size]);
-  // }
 }
 #endif

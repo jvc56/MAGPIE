@@ -602,7 +602,7 @@ void set_blank_map_bit(MutableBlanksForSameLengthMap *mbfl,
   }
   MutableBlankMapEntry *entry = &bucket->entries[bucket->num_entries];
   entry->quotient = quotient;
-  entry->blank_letters = 1 << ml;
+  entry->blank_letters = (uint32_t)1 << ml;
   bucket->num_entries++;
 }
 

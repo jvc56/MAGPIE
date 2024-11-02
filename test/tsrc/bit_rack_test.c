@@ -8,6 +8,9 @@
 #include "test_util.h"
 
 void test_compatibility(void) {
+  assert(bit_rack_type_has_expected_size());
+  assert(bit_rack_is_compatible_with_endianness());
+
   Config *english_config = config_create_or_die("set -lex NWL20");
   const LetterDistribution *english_ld = config_get_ld(english_config);
   if (BOARD_DIM <= 15) {
@@ -132,7 +135,6 @@ void test_largest_bit_rack_for_ld(void) {
 
   rack_destroy(expected_rack);
   config_destroy(config);
-
 }
 
 void test_bit_rack(void) {
