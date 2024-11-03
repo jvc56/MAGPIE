@@ -296,8 +296,11 @@ static inline void bit_rack_set_letter_count(BitRack *bit_rack, uint8_t ml,
 static inline BitRack largest_bit_rack_for_ld(const LetterDistribution *ld) {
   BitRack bit_rack = bit_rack_create_empty();
   int letters_to_add = BOARD_DIM;
-  for (int ml = ld->size - 1; ml >= 0; ml--) {
-    const int letter_count = ld->distribution[ml];
+  for (int ml = ld->size - 1; ml >= 1; ml--) {
+    int letter_count = ld->distribution[ml];
+    if (ml == ld->size - 1) {
+      letter_count += ld->distribution[BLANK_MACHINE_LETTER];
+    }
     if (letters_to_add >= letter_count) {
       bit_rack_set_letter_count(&bit_rack, ml, letter_count);
       letters_to_add -= letter_count;
@@ -402,5 +405,9 @@ static inline void bit_rack_power_set_init(BitRackPowerSet *set,
   memset(set->count_by_size, 0, sizeof(set->count_by_size));
   BitRack empty = bit_rack_create_empty();
   fill_bit_rack_power_set(full, &empty, BLANK_MACHINE_LETTER, 0, set);
+}
+
+static inline bool bit_rack_fits_in_12_bytes(const BitRack *bit_rack) {
+  return (bit_rack_get_high_64(bit_rack) & 0xFFFFFFFF00000000ULL) == 0;
 }
 #endif

@@ -173,7 +173,7 @@ void test_largest_bit_rack_for_ld(void) {
   const BitRack bit_rack = largest_bit_rack_for_ld(ld);
 
   Rack *expected_rack = rack_create(ld_get_size(ld));
-  rack_set_to_string(ld, expected_rack, "ZYYXWWVVUUUUTTT");
+  rack_set_to_string(ld, expected_rack, "ZZZYYXWWVVUUUUT");
   const BitRack expected_bit_rack =
       bit_rack_create_from_rack(ld, expected_rack);
   assert(bit_rack_equals(&bit_rack, &expected_bit_rack));

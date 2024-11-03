@@ -17,6 +17,59 @@
 #include "../util/util.h"
 
 #include "data_filepaths.h"
+// WordMap binary format:
+// ======================
+// 1 byte: major version number
+// 1 byte: board size
+// 1 byte: maximum word length
+// Use the following either to dynamically allocate buffers for intermediate
+// and final results, or to validate that statically allocated buffers are
+// large enough.
+// 4 bytes: maximum size in bytes of word lookup results
+// 4 bytes: maximum size in bytes of blank pair results
+// xxxxxx: repeated WordOfSameLengthMap binary data
+
+// WordOfSameLengthMap binary format:
+// ==================================
+// 4 bytes: number of word buckets
+// num_word_buckets * 4 bytes: word bucket starts
+// 4 bytes: number of word entries
+// 28 * number_of_word_entries bytes: word entries
+// 4 bytes: number of uninlined words
+// num_unlined_words * word_length bytes: uint8_t mls of words
+// ----------------------------------
+// 4 bytes: number of blank buckets
+// num_blank_buckets * 4 bytes: blank bucket starts
+// 4 bytes: number of blank entries
+// 28 * number_of_blank_entries bytes: blank entries
+// ----------------------------------
+// 4 bytes: number of double blank buckets
+// double_num_blank_buckets * 4 bytes: double blank bucket starts
+// 4 bytes: number of double blank entries
+// 28 * number_of_double_blank_entries bytes: double blank entries
+// 4 bytes: number of blank letter pairs
+// num_blank_letter_pairs * 2 bytes: uint8_t mls of blank letter pairs
+
+// WMPEntry binary format:
+// ===========================
+// 16 bytes: If first byte is nonzero, a complete list of contiguous anagrams,
+//           terminated by a zero byte (unless it fills the whole 16 bytes).
+//           If the first byte is zero,
+//             If num_blanks == 0:
+//                8 bytes: zeroes
+//                4 bytes: start index into word_letters
+//                4 bytes: number of words
+//             If num_blanks == 1:
+//                8 bytes: zeroes
+//                4 bytes: bitvector for blank letters with solutions
+//                4 bytes: zeroes
+//             If num_blanks == 2:
+//                8 bytes: zeroes
+//                4 bytes: start index into double_blank_letters
+//                4 bytes: number of blank pairs
+// 12 bytes: BitRack quotient (96 bits)
+//           (number of word buckets must be high enough that maximum quotient
+//           fits. largest_bit_rack_for_ld(ld) / num_word_buckets < (1 << 96)).
 
 typedef struct WMPEntry {
   uint8_t bucket_or_inline[WMP_INLINE_VALUE_BYTES];

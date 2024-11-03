@@ -4,6 +4,6 @@
 #include "../ent/dictionary_word.h"
 #include "../ent/wmp.h"
 
-WMP *make_wmp_from_words(const DictionaryWordList *words);
+WMP *make_wmp_from_words(const DictionaryWordList *words, const LetterDistribution *ld);
 
 #endif

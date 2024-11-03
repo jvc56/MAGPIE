@@ -48,7 +48,7 @@ conversion_status_t convert_from_text_with_dwl(
   }
 
   if (conversion_type == CONVERT_TEXT2WORDMAP) {
-    WMP *wmp = make_wmp_from_words(strings);
+    WMP *wmp = make_wmp_from_words(strings, ld);
     if (!wmp_write_to_file(wmp, output_filename)) {
       return CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
     }
