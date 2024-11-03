@@ -363,8 +363,8 @@ void fill_wfl_blankless(const MutableWordsOfSameLengthMap *mwfl,
 
 void write_blank_wmp_entry(const MutableBlankMapEntry *entry,
                            WMPEntry *wmp_entry) {
-  memset(wmp_entry->bucket_or_inline, 0, sizeof(uint64_t));
-  memory_copy(wmp_entry->bucket_or_inline + sizeof(uint64_t),
+  memset(wmp_entry->bucket_or_inline, 0, WORD_MAP_BLANK_LETTERS_OFFSET_BYTES);
+  memory_copy(wmp_entry->bucket_or_inline + WORD_MAP_BLANK_LETTERS_OFFSET_BYTES,
               &entry->blank_letters, sizeof(uint32_t));
   bit_rack_write_12_bytes(&entry->quotient, wmp_entry->quotient);
 }
