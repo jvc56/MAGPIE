@@ -47,9 +47,6 @@
 #include "word_test.h"
 
 void run_all(void) {
-  test_wmp();
-  return;
-
   // Test the loading of the config
   test_players_data();
   test_config();
@@ -90,6 +87,8 @@ void run_all(void) {
   test_words();
   test_word_prune();
   test_kwg_maker();
+  test_wmp_maker();
+  test_wmp();
   test_file_handler();
   test_leave_list();
   test_convert();
