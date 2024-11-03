@@ -272,7 +272,7 @@ int mwfl_get_num_uninlined_words(const MutableWordsOfSameLengthMap *mwfl,
 
 void write_inlined_word_range(const DictionaryWordList *words,
                               uint8_t bytes[WMP_INLINE_VALUE_BYTES]) {
-  memset(bytes, 0, WMP_INLINE_VALUE_BYTES);                                
+  memset(bytes, 0, WMP_INLINE_VALUE_BYTES);
   for (int word_idx = 0; word_idx < dictionary_word_list_get_count(words);
        word_idx++) {
     const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
@@ -321,7 +321,8 @@ uint32_t write_word_entries(const MutableWordMapBucket *bucket, int word_length,
                                entries[entry_idx].bucket_or_inline);
       continue;
     }
-    write_uninlined_word_range(*word_start, num_words, entries[entry_idx].bucket_or_inline);
+    write_uninlined_word_range(*word_start, num_words,
+                               entries[entry_idx].bucket_or_inline);
     write_letters(entry, *word_start, word_length, letters);
     *word_start += num_words * word_length;
   }
