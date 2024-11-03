@@ -24,7 +24,7 @@
 // Arithmetic addition of two BitRacks performs unions of the multisets.
 
 #if defined(__SIZEOF_INT128__)
-#define USE_INT128_INTRINSIC 0
+#define USE_INT128_INTRINSIC 1
 #else
 #define USE_INT128_INTRINSIC 0
 #endif

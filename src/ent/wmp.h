@@ -178,6 +178,9 @@ static inline void wmp_load(WMP *wmp, const char *data_paths,
   wmp->name = string_duplicate(wmp_name);
 
   read_header_from_stream(wmp, stream);
+  if (wmp->version < WORD_MAP_EARLIEST_SUPPORTED_VERSION) {
+    log_fatal("wmp->version < WORD_MAP_EARLIEST_SUPPORTED_VERSION\n");
+  }
   if (wmp->board_dim != BOARD_DIM) {
     log_fatal("wmp->board_dim != BOARD_DIM\n");
   }
