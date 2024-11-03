@@ -335,7 +335,6 @@ static inline void bit_rack_take_letter(BitRack *bit_rack, uint8_t ml) {
 #endif
 }
 
-// TODO: Generalize this to work with any number of bytes
 static inline void bit_rack_write_12_bytes(const BitRack *bit_rack,
                                            uint8_t bytes[12]) {
   // assumes little-endian
