@@ -205,6 +205,7 @@ conversion_status_t convert(ConversionArgs *args,
   const char *conversion_type_string = args->conversion_type_string;
   conversion_type_t conversion_type =
       get_conversion_type_from_string(conversion_type_string);
+
   if (conversion_type == CONVERT_UNKNOWN) {
     return CONVERT_STATUS_UNRECOGNIZED_CONVERSION_TYPE;
   }
