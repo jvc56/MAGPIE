@@ -75,7 +75,7 @@ typedef struct __attribute__((packed)) WMPEntry {
   union {
     uint8_t bucket_or_inline[WMP_INLINE_VALUE_BYTES];
     struct {
-      bool is_inline;
+      uint8_t nonzero_if_inlined;
       uint8_t _unused_padding1[7]; // for alignment
       union {
         struct {
@@ -296,7 +296,7 @@ static inline void wmp_destroy(WMP *wmp) {
 }
 
 static inline bool wmp_entry_is_inlined(const WMPEntry *entry) {
-  return entry->bucket_or_inline[0] != 0;
+  return entry->nonzero_if_inlined != 0;
 }
 
 static inline uint32_t max_inlined_words(int word_length) {
@@ -365,7 +365,7 @@ static inline int
 wmp_entry_write_blankless_words_to_buffer(const WMPEntry *entry,
                                           const WMPForLength *wfl,
                                           int word_length, uint8_t *buffer) {
-  if (entry->is_inline) {
+  if (wmp_entry_is_inlined(entry)) {
     return wmp_entry_write_inlined_blankless_words_to_buffer(entry, word_length,
                                                              buffer);
   }
