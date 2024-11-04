@@ -295,7 +295,7 @@ void thread_control_stop_timer(ThreadControl *thread_control) {
   mtimer_stop(thread_control->timer);
 }
 
-double thread_control_get_time_elapsed(const ThreadControl *thread_control) {
+double thread_control_get_seconds_elapsed(const ThreadControl *thread_control) {
   return mtimer_elapsed_seconds(thread_control->timer);
 }
 

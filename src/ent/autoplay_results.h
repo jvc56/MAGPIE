@@ -22,16 +22,22 @@ void autoplay_results_reset_options(AutoplayResults *autoplay_results);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
-                               const Move *move);
+                               const Game *game, const Move *move,
+                               const Rack *leave);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, int turns, bool divergent);
-void autoplay_results_combine(AutoplayResults **autoplay_results_list,
-                              int list_size, AutoplayResults *target);
+                               const Game *game, uint64_t turns, bool divergent,
+                               uint64_t seed);
+void autoplay_results_finalize(AutoplayResults **autoplay_results_list,
+                               int list_size, AutoplayResults *target);
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);
 void string_builder_add_winning_player_confidence(StringBuilder *sb,
                                                   double p0_win_pct,
                                                   double p1_win_pct,
-                                                  int total_games);
+                                                  uint64_t total_games);
+void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
+                                            int write_buffer_size);
+void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
+                                          const char *filepath);
 
 #endif

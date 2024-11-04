@@ -1,5 +1,6 @@
 #include "autoplay_results.h"
 
+#include <pthread.h>
 #include <stdlib.h>
 
 #include "../def/autoplay_defs.h"
@@ -8,62 +9,88 @@
 #include "move.h"
 #include "stats.h"
 
+#include "../str/move_string.h"
+#include "../str/rack_string.h"
+
 #include "../util/math_util.h"
+#include "../util/string_util.h"
 #include "../util/util.h"
+
+#define DEFAULT_WRITE_BUFFER_SIZE 1024
 
 typedef enum {
   AUTOPLAY_RECORDER_TYPE_GAME,
+  AUTOPLAY_RECORDER_TYPE_FJ,
   NUMBER_OF_AUTOPLAY_RECORDERS,
 } autoplay_recorder_t;
+
+typedef struct RecorderArgs {
+  const Game *game;
+  const Move *move;
+  const Rack *leave;
+  uint64_t number_of_turns;
+  uint64_t seed;
+  bool divergent;
+  bool human_readable;
+} RecorderArgs;
+
+// Read-only data shared across all recorder types
+typedef struct GenericSharedData {
+  int write_buffer_size;
+  char *output_filepath;
+} GenericSharedData;
 
 typedef struct Recorder Recorder;
 
 typedef void (*recorder_reset_func_t)(Recorder *);
-typedef void (*recorder_create_data_func_t)(Recorder *, const Recorder *);
+typedef void (*recorder_create_data_func_t)(Recorder *);
 typedef void (*recorder_destroy_data_func_t)(Recorder *);
-typedef void (*recorder_add_move_func_t)(Recorder *, const Move *);
-typedef void (*recorder_add_game_func_t)(Recorder *, const Game *, int, bool);
-typedef void (*recorder_combine_func_t)(Recorder **, int, Recorder *);
-typedef char *(*recorder_str_func_t)(Recorder *, bool, bool);
+typedef void (*recorder_add_move_func_t)(Recorder *, const RecorderArgs *);
+typedef void (*recorder_add_game_func_t)(Recorder *, const RecorderArgs *);
+typedef void (*recorder_finalize_func_t)(Recorder **, int, Recorder *);
+typedef char *(*recorder_str_func_t)(Recorder *, const RecorderArgs *);
 
 struct Recorder {
   void *data;
-  void *shared_data;
-  bool owns_shared_data;
+  void *thread_shared_data;
+  bool owns_thread_shared_data;
+  const GenericSharedData *generic_shared_data;
   recorder_reset_func_t reset_func;
   recorder_destroy_data_func_t destroy_data_func;
   recorder_add_move_func_t add_move_func;
   recorder_add_game_func_t add_game_func;
-  recorder_combine_func_t combine_func;
+  recorder_finalize_func_t finalize_func;
   recorder_str_func_t str_func;
 };
 
 struct AutoplayResults {
   uint64_t options;
+  bool owns_generic_shared_data;
+  GenericSharedData *generic_shared_data;
   Recorder *recorders[NUMBER_OF_AUTOPLAY_RECORDERS];
 };
 
 // Generic recorders
 
 void add_move_noop(Recorder __attribute__((unused)) * recorder,
-                   const Move __attribute__((unused)) * move) {
+                   const RecorderArgs __attribute__((unused)) * args) {
   return;
 }
 
-void add_game_noop(Recorder __attribute__((unused)) * recorder,
-                   const Game __attribute__((unused)) * game) {
-  return;
+char *get_str_noop(Recorder __attribute__((unused)) * recorder,
+                   const RecorderArgs __attribute__((unused)) * args) {
+  return NULL;
 }
 
 // Game Recorder
 
 typedef struct GameData {
-  int total_games;
-  int total_turns;
-  int p0_wins;
-  int p0_losses;
-  int p0_ties;
-  int p0_firsts;
+  uint64_t total_games;
+  uint64_t total_turns;
+  uint64_t p0_wins;
+  uint64_t p0_losses;
+  uint64_t p0_ties;
+  uint64_t p0_firsts;
   Stat *p0_score;
   Stat *p1_score;
   Stat *turns;
@@ -104,7 +131,9 @@ void game_data_destroy(GameData *gd) {
   free(gd);
 }
 
-void game_data_add_game(GameData *gd, const Game *game, int turns) {
+void game_data_add_game(GameData *gd, const RecorderArgs *args) {
+  const Game *game = args->game;
+  uint64_t turns = args->number_of_turns;
   int p0_game_score = player_get_score(game_get_player(game, 0));
   int p1_game_score = player_get_score(game_get_player(game, 1));
   gd->total_games++;
@@ -135,7 +164,7 @@ void string_builder_add_game_end_reasons(StringBuilder *sb,
 char *game_data_ucgi_str(const GameData *gd) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_formatted_string(
-      sb, "autoplay games %d %d %d %d %d %f %f %f %f ", gd->total_games,
+      sb, "autoplay games %lu %lu %lu %lu %lu %f %f %f %f ", gd->total_games,
       gd->p0_wins, gd->p0_losses, gd->p0_ties, gd->p0_firsts,
       stat_get_mean(gd->p0_score), stat_get_stdev(gd->p0_score),
       stat_get_mean(gd->p1_score), stat_get_stdev(gd->p1_score));
@@ -146,8 +175,12 @@ char *game_data_ucgi_str(const GameData *gd) {
   return res;
 }
 
-char *get_total_and_percentage_string(int total, double pct) {
-  return get_formatted_string("%d (%2.2f%%)", total, pct * 100.0);
+char *get_total_int_and_percentage_string(uint64_t total, double pct) {
+  return get_formatted_string("%lu (%2.2f%%)", total, pct * 100.0);
+}
+
+char *get_total_float_and_percentage_string(double total, double pct) {
+  return get_formatted_string("%2.1f (%2.2f%%)", total, pct * 100.0);
 }
 
 char *get_score_and_dev_string(double score, double stdev) {
@@ -157,7 +190,7 @@ char *get_score_and_dev_string(double score, double stdev) {
 void string_builder_add_winning_player_confidence(StringBuilder *sb,
                                                   double p0_total,
                                                   double p1_total,
-                                                  int total_games) {
+                                                  uint64_t total_games) {
   // Apply a continuity correction from binomial to normal distribution
   // See
   // https://library.virginia.edu/data/articles/continuity-corrections-imperfect-responses-to-slight-problems#fn1
@@ -187,15 +220,11 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
 }
 
 char *game_data_human_readable_str(const GameData *gd, bool divergent) {
-  int p0_wins = gd->p0_wins;
+  uint64_t p0_wins = gd->p0_wins;
   double p0_win_pct = (double)p0_wins / gd->total_games;
-  int p0_losses = gd->p0_losses;
+  uint64_t p0_losses = gd->p0_losses;
   double p0_loss_pct = (double)p0_losses / gd->total_games;
-  int p1_wins = gd->total_games - p0_wins;
-  double p1_win_pct = (double)p1_wins / gd->total_games;
-  int p1_losses = gd->total_games - p0_losses;
-  double p1_loss_pct = (double)p1_losses / gd->total_games;
-  int p0_ties = gd->p0_ties;
+  uint64_t p0_ties = gd->p0_ties;
   double p0_tie_pct = (double)p0_ties / gd->total_games;
 
   double p0_total = (double)gd->p0_wins + (double)gd->p0_ties / (double)2;
@@ -204,7 +233,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   double p1_total = (double)(gd->total_games) - p0_total;
   double p1_total_pct = p1_total / (double)(gd->total_games);
 
-  const int col_witdth = 16;
+  const int col_width = 25;
   StringBuilder *sb = string_builder_create();
   string_builder_add_string(sb, "\n");
 
@@ -240,49 +269,47 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
         100 * ((double)gd->game_end_reasons[i] / gd->total_games));
   }
 
-  string_builder_add_formatted_string(sb, "\n%-*s%-*s%-*s\n", col_witdth, "",
-                                      col_witdth, "Player 1", col_witdth,
+  string_builder_add_formatted_string(sb, "\n%-*s%-*s%-*s\n", col_width, "",
+                                      col_width, "Player 1", col_width,
                                       "Player 2");
 
-  char *p0_total_str = get_total_and_percentage_string(p0_total, p0_total_pct);
-  char *p1_total_str = get_total_and_percentage_string(p1_total, p1_total_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Total:", col_witdth, p0_total_str,
-                                      col_witdth, p1_total_str);
-  free(p0_total_str);
+  char *p0_total_str =
+      get_total_float_and_percentage_string(p0_total, p0_total_pct);
+  char *p1_total_str =
+      get_total_float_and_percentage_string(p1_total, p1_total_pct);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
+                                      "Total:", col_width, p0_total_str,
+                                      col_width, p1_total_str);
   free(p1_total_str);
+  free(p0_total_str);
 
-  char *p0_win_str = get_total_and_percentage_string(p0_wins, p0_win_pct);
-  char *p1_win_str = get_total_and_percentage_string(p1_wins, p1_win_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Wins:", col_witdth, p0_win_str,
-                                      col_witdth, p1_win_str);
+  char *p0_win_str = get_total_int_and_percentage_string(p0_wins, p0_win_pct);
+  char *p0_loss_str =
+      get_total_int_and_percentage_string(p0_losses, p0_loss_pct);
+  string_builder_add_formatted_string(
+      sb,
+      "%-*s%-*s%-*s\n"
+      "%-*s%-*s%-*s\n",
+      col_width, "Wins:", col_width, p0_win_str, col_width, p0_loss_str,
+      col_width, "Losses:", col_width, p0_loss_str, col_width, p0_win_str);
   free(p0_win_str);
-  free(p1_win_str);
-
-  char *p0_loss_str = get_total_and_percentage_string(p0_losses, p0_loss_pct);
-  char *p1_loss_str = get_total_and_percentage_string(p1_losses, p1_loss_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Losses:", col_witdth, p0_loss_str,
-                                      col_witdth, p1_loss_str);
   free(p0_loss_str);
-  free(p1_loss_str);
 
-  char *p0_ties_str = get_total_and_percentage_string(p0_ties, p0_tie_pct);
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Ties:", col_witdth, p0_ties_str,
-                                      col_witdth, p0_ties_str);
+  char *p0_ties_str = get_total_int_and_percentage_string(p0_ties, p0_tie_pct);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
+                                      "Ties:", col_width, p0_ties_str,
+                                      col_width, p0_ties_str);
   free(p0_ties_str);
 
   char *p0_score_str = get_score_and_dev_string(stat_get_mean(gd->p0_score),
                                                 stat_get_stdev(gd->p0_score));
   char *p1_score_str = get_score_and_dev_string(stat_get_mean(gd->p1_score),
                                                 stat_get_stdev(gd->p1_score));
-  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_witdth,
-                                      "Score:", col_witdth, p0_score_str,
-                                      col_witdth, p1_score_str);
-  free(p0_score_str);
+  string_builder_add_formatted_string(sb, "%-*s%-*s%-*s\n", col_width,
+                                      "Score:", col_width, p0_score_str,
+                                      col_width, p1_score_str);
   free(p1_score_str);
+  free(p0_score_str);
 
   string_builder_add_string(sb, "\n");
 
@@ -295,9 +322,9 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   return ret_str;
 }
 
-char *game_data_str(const GameData *gd, bool human_readable, bool divergent) {
-  if (human_readable) {
-    return game_data_human_readable_str(gd, divergent);
+char *game_data_str(const GameData *gd, const RecorderArgs *args) {
+  if (args->human_readable) {
+    return game_data_human_readable_str(gd, args->divergent);
   } else {
     return game_data_ucgi_str(gd);
   }
@@ -314,14 +341,12 @@ void game_data_sets_reset(Recorder *recorder) {
   game_data_reset(sets->divergent_games);
 }
 
-void game_data_sets_create(Recorder *recorder, const Recorder
-                                                   __attribute__((unused)) *
-                                                   primary_recorder) {
+void game_data_sets_create(Recorder *recorder) {
   GameDataSets *sets = malloc_or_die(sizeof(GameDataSets));
   sets->all_games = game_data_create();
   sets->divergent_games = game_data_create();
   recorder->data = sets;
-  recorder->shared_data = NULL;
+  recorder->thread_shared_data = NULL;
 }
 
 void game_data_sets_destroy(Recorder *recorder) {
@@ -331,18 +356,18 @@ void game_data_sets_destroy(Recorder *recorder) {
   free(sets);
 }
 
-void game_data_sets_add_game(Recorder *recorder, const Game *game, int turns,
-                             bool divergent) {
+void game_data_sets_add_game(Recorder *recorder, const RecorderArgs *args) {
   GameDataSets *sets = (GameDataSets *)recorder->data;
-  game_data_add_game(sets->all_games, game, turns);
-  if (divergent) {
-    game_data_add_game(sets->divergent_games, game, turns);
+  game_data_add_game(sets->all_games, args);
+  if (args->divergent) {
+    game_data_add_game(sets->divergent_games, args);
   }
 }
 
-void game_data_sets_combine_subset(Recorder **recorder_list,
-                                   int recorder_list_size,
-                                   Recorder *primary_recorder, bool divergent) {
+void game_data_sets_finalize_subset(Recorder **recorder_list,
+                                    int recorder_list_size,
+                                    Recorder *primary_recorder,
+                                    bool divergent) {
   Stat **p0_score_stats =
       malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
   Stat **p1_score_stats =
@@ -383,26 +408,24 @@ void game_data_sets_combine_subset(Recorder **recorder_list,
   free(turns_stats);
 }
 
-void game_data_sets_combine(Recorder **recorder_list, int recorder_list_size,
-                            Recorder *primary_recorder) {
-  game_data_sets_combine_subset(recorder_list, recorder_list_size,
-                                primary_recorder, false);
-  game_data_sets_combine_subset(recorder_list, recorder_list_size,
-                                primary_recorder, true);
+void game_data_sets_finalize(Recorder **recorder_list, int recorder_list_size,
+                             Recorder *primary_recorder) {
+  game_data_sets_finalize_subset(recorder_list, recorder_list_size,
+                                 primary_recorder, false);
+  game_data_sets_finalize_subset(recorder_list, recorder_list_size,
+                                 primary_recorder, true);
 }
 
-char *game_data_sets_str(Recorder *recorder, bool human_readable,
-                         bool show_divergent) {
+char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
   GameDataSets *sets = (GameDataSets *)recorder->data;
   StringBuilder *sb = string_builder_create();
 
-  char *all_game_str = game_data_str(sets->all_games, human_readable, false);
+  char *all_game_str = game_data_str(sets->all_games, args);
   string_builder_add_string(sb, all_game_str);
   free(all_game_str);
 
-  if (show_divergent) {
-    char *divergent_games_str =
-        game_data_str(sets->divergent_games, human_readable, true);
+  if (args->divergent) {
+    char *divergent_games_str = game_data_str(sets->divergent_games, args);
     string_builder_add_string(sb, divergent_games_str);
     free(divergent_games_str);
   }
@@ -410,6 +433,192 @@ char *game_data_sets_str(Recorder *recorder, bool human_readable,
   char *str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return str;
+}
+
+// FJ recorders
+#define MAX_NUMBER_OF_MOVES 100
+#define MAX_NUMBER_OF_TILES 100
+#define FJ_FILENAME "fj_log.csv"
+
+typedef struct FJMove {
+  int unseen_counts[MAX_ALPHABET_SIZE];
+  Rack leave;
+  int move_score;
+  int score_diff;
+  int unseen_total;
+  int player_index;
+} FJMove;
+
+typedef struct FJData {
+  StringBuilder *sbs[MAX_NUMBER_OF_TILES];
+  FJMove moves[MAX_NUMBER_OF_MOVES];
+  int move_count;
+} FJData;
+
+typedef struct FJSharedData {
+  pthread_mutex_t fh_mutexes[MAX_NUMBER_OF_TILES];
+  FILE *fhs[MAX_NUMBER_OF_TILES];
+} FJSharedData;
+
+void fj_data_reset_fh(FJSharedData *shared_data, const char *filename) {
+  for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+    char *ext = get_formatted_string("_%d", i);
+    char *filename_num_remaining = insert_before_dot(filename, ext);
+    free(ext);
+    if (shared_data->fhs[i]) {
+      fclose(shared_data->fhs[i]);
+      shared_data->fhs[i] = NULL;
+    }
+    shared_data->fhs[i] = fopen(filename_num_remaining, "w");
+    if (!shared_data->fhs[i]) {
+      log_fatal("Error opening fj file for writing: %s\n",
+                filename_num_remaining);
+    }
+    free(filename_num_remaining);
+  }
+}
+
+void fj_data_reset(Recorder *recorder) {
+  FJData *fj_data = (FJData *)recorder->data;
+  for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+    string_builder_clear(fj_data->sbs[i]);
+  }
+  if (recorder->owns_thread_shared_data) {
+    fj_data_reset_fh(recorder->thread_shared_data,
+                     recorder->generic_shared_data->output_filepath);
+  }
+  for (int i = 0; i < MAX_NUMBER_OF_MOVES; i++) {
+    for (int j = 0; j < MAX_ALPHABET_SIZE; j++) {
+      fj_data->moves[i].unseen_counts[j] = 0;
+    }
+  }
+  fj_data->move_count = 0;
+}
+
+void fj_data_create(Recorder *recorder) {
+  FJData *data = malloc_or_die(sizeof(FJData));
+  for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+    data->sbs[i] = string_builder_create();
+  }
+  FJSharedData *shared_data = NULL;
+  // If this recorder is not the owner, the thread shared data will be
+  // assigned in the recorder_create function.
+  if (recorder->owns_thread_shared_data) {
+    shared_data = malloc_or_die(sizeof(FJSharedData));
+    for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+      pthread_mutex_init(&shared_data->fh_mutexes[i], NULL);
+      shared_data->fhs[i] = NULL;
+    }
+  }
+  recorder->data = data;
+  recorder->thread_shared_data = shared_data;
+  fj_data_reset(recorder);
+}
+
+void fj_data_destroy(Recorder *recorder) {
+  FJData *fj_data = (FJData *)recorder->data;
+  for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+    string_builder_destroy(fj_data->sbs[i]);
+  }
+  if (recorder->owns_thread_shared_data) {
+    FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
+    for (int i = 0; i < MAX_NUMBER_OF_TILES; i++) {
+      fclose(shared_data->fhs[i]);
+    }
+    free(shared_data);
+  }
+  free(fj_data);
+}
+
+void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  FJData *fj_data = (FJData *)recorder->data;
+  const Game *game = args->game;
+  const Bag *bag = game_get_bag(game);
+  if (fj_data->move_count >= MAX_NUMBER_OF_MOVES || bag_get_tiles(bag) == 0) {
+    return;
+  }
+  FJMove *fj_move = &fj_data->moves[fj_data->move_count];
+  const Rack *leave = args->leave;
+  rack_copy(&fj_move->leave, leave);
+  fj_move->move_score = move_get_score(args->move);
+  fj_move->player_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, fj_move->player_index);
+  const Player *opponent = game_get_player(game, 1 - fj_move->player_index);
+  fj_move->score_diff = player_get_score(player) - player_get_score(opponent);
+  fj_move->unseen_total = bag_get_tiles(bag) + (RACK_SIZE);
+  bag_increment_unseen_count(bag, fj_move->unseen_counts);
+  rack_increment_unseen_count(player_get_rack(opponent),
+                              fj_move->unseen_counts);
+  fj_data->move_count++;
+  return;
+}
+
+void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
+                               bool always_flush) {
+  FJData *fj_data = (FJData *)recorder->data;
+  FJSharedData *shared_data = (FJSharedData *)recorder->thread_shared_data;
+  const GenericSharedData *generic_shared_data = recorder->generic_shared_data;
+  StringBuilder *sb = fj_data->sbs[remaining_tiles];
+  int str_len = string_builder_length(sb);
+  if (str_len > 0 &&
+      (always_flush || str_len >= generic_shared_data->write_buffer_size)) {
+    pthread_mutex_lock(&shared_data->fh_mutexes[remaining_tiles]);
+    if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
+        EOF) {
+      fclose(shared_data->fhs[remaining_tiles]);
+      log_fatal("Error writing to fj file of index: %d\n", index);
+    }
+    fflush(shared_data->fhs[remaining_tiles]);
+    pthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
+    string_builder_clear(sb);
+  }
+}
+
+void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
+  FJData *fj_data = (FJData *)recorder->data;
+  const Game *game = args->game;
+  const LetterDistribution *ld = game_get_ld(game);
+  double player_one_result = 0.5;
+  int player_one_score = player_get_score(game_get_player(game, 0));
+  int player_two_score = player_get_score(game_get_player(game, 1));
+  if (player_one_score < player_two_score) {
+    player_one_result = 0;
+  } else if (player_one_score > player_two_score) {
+    player_one_result = 1;
+  }
+  const int dist_size =
+      rack_get_dist_size(player_get_rack(game_get_player(game, 0)));
+  for (int i = 0; i < fj_data->move_count; i++) {
+    FJMove *fj_move = &fj_data->moves[i];
+    const double player_result =
+        fj_move->player_index * (1 - player_one_result) +
+        (1 - fj_move->player_index) * player_one_result;
+    StringBuilder *sb = fj_data->sbs[fj_move->unseen_total];
+    string_builder_add_formatted_string(sb, "%d,", fj_move->move_score);
+    string_builder_add_rack(sb, &fj_move->leave, ld, false);
+    string_builder_add_formatted_string(sb, ",%.1f,%d", player_result,
+                                        fj_move->score_diff);
+    for (int ml = 0; ml < dist_size; ml++) {
+      string_builder_add_formatted_string(sb, ",%d",
+                                          fj_move->unseen_counts[ml]);
+      fj_move->unseen_counts[ml] = 0;
+    }
+    string_builder_add_char(sb, '\n');
+    fj_write_buffer_to_output(recorder, fj_move->unseen_total, false);
+  }
+  fj_data->move_count = 0;
+}
+
+void fj_data_finalize(Recorder **recorders, int num_recorders,
+                      Recorder __attribute__((unused)) * primary_recorder) {
+  for (int i = 0; i < num_recorders; i++) {
+    Recorder *recorder = recorders[i];
+    FJData *fj_data = (FJData *)recorder->data;
+    fj_data->move_count = 0;
+    for (int j = 0; j < MAX_NUMBER_OF_TILES; j++) {
+      fj_write_buffer_to_output(recorder, j, true);
+    }
+  }
 }
 
 // Generic recorder and autoplay results functions
@@ -420,17 +629,25 @@ Recorder *recorder_create(const Recorder *primary_recorder,
                           recorder_destroy_data_func_t destroy_data_func,
                           recorder_add_move_func_t add_move_func,
                           recorder_add_game_func_t add_game_func,
-                          recorder_combine_func_t combine_func,
-                          recorder_str_func_t str_func) {
+                          recorder_finalize_func_t finalize_func,
+                          recorder_str_func_t str_func,
+                          const GenericSharedData *generic_shared_data) {
   Recorder *recorder = malloc_or_die(sizeof(Recorder));
+  recorder->generic_shared_data = generic_shared_data;
   recorder->reset_func = reset_func;
   recorder->destroy_data_func = destroy_data_func;
   recorder->add_move_func = add_move_func;
   recorder->add_game_func = add_game_func;
-  recorder->combine_func = combine_func;
+  recorder->finalize_func = finalize_func;
   recorder->str_func = str_func;
-  recorder->owns_shared_data = !primary_recorder;
-  create_data_func(recorder, primary_recorder);
+  recorder->owns_thread_shared_data = !primary_recorder;
+  create_data_func(recorder);
+  // If this recorder owns the shared data, then it was already created
+  // in the create_data_func call above. If not, we need to copy the pointer
+  // to the shared data from the primary recorder.
+  if (primary_recorder) {
+    recorder->thread_shared_data = primary_recorder->thread_shared_data;
+  }
 
   return recorder;
 }
@@ -445,31 +662,25 @@ void recorder_destroy(Recorder *recorder) {
 
 void recorder_reset(Recorder *recorder) { recorder->reset_func(recorder); }
 
-void recorder_add_move(Recorder *recorder, const Move *move) {
-  recorder->add_move_func(recorder, move);
+void recorder_add_move(Recorder *recorder, const RecorderArgs *args) {
+  recorder->add_move_func(recorder, args);
 }
 
-void recorder_add_game(Recorder *recorder, const Game *game, int turns,
-                       bool divergent) {
-  recorder->add_game_func(recorder, game, turns, divergent);
+void recorder_add_game(Recorder *recorder, const RecorderArgs *args) {
+  recorder->add_game_func(recorder, args);
 }
 
-void recorder_combine(Recorder **recorder_list, int list_size,
-                      Recorder *primary_recorder) {
-  primary_recorder->combine_func(recorder_list, list_size, primary_recorder);
+void recorder_finalize(Recorder **recorder_list, int list_size,
+                       Recorder *primary_recorder) {
+  primary_recorder->finalize_func(recorder_list, list_size, primary_recorder);
 }
 
 char *recorder_str(Recorder *recorder, bool human_readable,
                    bool show_divergent) {
-  return recorder->str_func(recorder, human_readable, show_divergent);
-}
-
-AutoplayResults *autoplay_results_create(void) {
-  AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
-  for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
-    autoplay_results->recorders[i] = NULL;
-  }
-  return autoplay_results;
+  RecorderArgs args;
+  args.human_readable = human_readable;
+  args.divergent = show_divergent;
+  return recorder->str_func(recorder, &args);
 }
 
 uint64_t autoplay_results_build_option(autoplay_recorder_t recorder_type) {
@@ -484,7 +695,7 @@ void autoplay_results_set_recorder(
     recorder_destroy_data_func_t destroy_data_func,
     recorder_add_move_func_t add_move_func,
     recorder_add_game_func_t add_game_func,
-    recorder_combine_func_t combine_func, recorder_str_func_t str_func) {
+    recorder_finalize_func_t finalize_func, recorder_str_func_t str_func) {
   if (options & autoplay_results_build_option(recorder_type)) {
     if (!autoplay_results->recorders[recorder_type]) {
       const Recorder *primary_recorder = NULL;
@@ -493,7 +704,8 @@ void autoplay_results_set_recorder(
       }
       autoplay_results->recorders[recorder_type] = recorder_create(
           primary_recorder, reset_func, create_data_func, destroy_data_func,
-          add_move_func, add_game_func, combine_func, str_func);
+          add_move_func, add_game_func, finalize_func, str_func,
+          autoplay_results->generic_shared_data);
     }
   } else {
     recorder_destroy(autoplay_results->recorders[recorder_type]);
@@ -507,8 +719,12 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_GAME,
       game_data_sets_reset, game_data_sets_create, game_data_sets_destroy,
-      add_move_noop, game_data_sets_add_game, game_data_sets_combine,
+      add_move_noop, game_data_sets_add_game, game_data_sets_finalize,
       game_data_sets_str);
+  autoplay_results_set_recorder(
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_FJ,
+      fj_data_reset, fj_data_create, fj_data_destroy, fj_data_add_move,
+      fj_data_add_game, fj_data_finalize, get_str_noop);
   autoplay_results->options = options;
 }
 
@@ -526,6 +742,8 @@ autoplay_status_t autoplay_results_set_options_with_splitter(
     const char *option_str = string_splitter_get_item(split_options, i);
     if (has_iprefix(option_str, "games")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME);
+    } else if (has_iprefix(option_str, "fj")) {
+      options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_FJ);
     } else {
       status = AUTOPLAY_STATUS_INVALID_OPTIONS;
       break;
@@ -556,9 +774,49 @@ void autoplay_results_reset_options(AutoplayResults *autoplay_results) {
   autoplay_results_set_options_int(autoplay_results, 0, NULL);
 }
 
+GenericSharedData *create_generic_shared_data(void) {
+  GenericSharedData *generic_shared_data =
+      malloc_or_die(sizeof(GenericSharedData));
+  generic_shared_data->write_buffer_size = DEFAULT_WRITE_BUFFER_SIZE;
+  generic_shared_data->output_filepath = string_duplicate("record_output.txt");
+  return generic_shared_data;
+}
+
+void destroy_generic_shared_data(GenericSharedData *generic_shared_data) {
+  free(generic_shared_data->output_filepath);
+  free(generic_shared_data);
+}
+
+void autoplay_results_add_generic_shared_data(
+    AutoplayResults *autoplay_results) {
+  autoplay_results->generic_shared_data = create_generic_shared_data();
+  autoplay_results->owns_generic_shared_data = true;
+}
+
+AutoplayResults *autoplay_results_create_internal(void) {
+  AutoplayResults *autoplay_results = malloc_or_die(sizeof(AutoplayResults));
+  for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
+    autoplay_results->recorders[i] = NULL;
+  }
+  return autoplay_results;
+}
+
+AutoplayResults *autoplay_results_create_without_generic_shared_data(void) {
+  return autoplay_results_create_internal();
+}
+
+AutoplayResults *autoplay_results_create(void) {
+  AutoplayResults *autoplay_results = autoplay_results_create_internal();
+  autoplay_results_add_generic_shared_data(autoplay_results);
+  return autoplay_results;
+}
+
 AutoplayResults *
 autoplay_results_create_empty_copy(const AutoplayResults *orig) {
-  AutoplayResults *autoplay_results = autoplay_results_create();
+  AutoplayResults *autoplay_results =
+      autoplay_results_create_without_generic_shared_data();
+  autoplay_results->generic_shared_data = orig->generic_shared_data;
+  autoplay_results->owns_generic_shared_data = false;
   autoplay_results_set_options_int(autoplay_results, orig->options, orig);
   return autoplay_results;
 }
@@ -569,6 +827,9 @@ void autoplay_results_destroy(AutoplayResults *autoplay_results) {
   }
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     recorder_destroy(autoplay_results->recorders[i]);
+  }
+  if (autoplay_results->owns_generic_shared_data) {
+    destroy_generic_shared_data(autoplay_results->generic_shared_data);
   }
   free(autoplay_results);
 }
@@ -582,25 +843,36 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
 }
 
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
-                               const Move *move) {
+                               const Game *game, const Move *move,
+                               const Rack *leave) {
+  RecorderArgs args;
+  args.game = game;
+  args.move = move;
+  args.leave = leave;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
-      recorder_add_move(autoplay_results->recorders[i], move);
+      recorder_add_move(autoplay_results->recorders[i], &args);
     }
   }
 }
 
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
-                               const Game *game, int turns, bool divergent) {
+                               const Game *game, uint64_t turns, bool divergent,
+                               uint64_t seed) {
+  RecorderArgs args;
+  args.game = game;
+  args.number_of_turns = turns;
+  args.divergent = divergent;
+  args.seed = seed;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
-      recorder_add_game(autoplay_results->recorders[i], game, turns, divergent);
+      recorder_add_game(autoplay_results->recorders[i], &args);
     }
   }
 }
 
-void autoplay_results_combine(AutoplayResults **autoplay_results_list,
-                              int list_size, AutoplayResults *primary) {
+void autoplay_results_finalize(AutoplayResults **autoplay_results_list,
+                               int list_size, AutoplayResults *primary) {
   Recorder **recorder_list = malloc_or_die(sizeof(Recorder *) * list_size);
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (!autoplay_results_list[0]->recorders[i]) {
@@ -609,7 +881,7 @@ void autoplay_results_combine(AutoplayResults **autoplay_results_list,
     for (int j = 0; j < list_size; j++) {
       recorder_list[j] = autoplay_results_list[j]->recorders[i];
     }
-    recorder_combine(recorder_list, list_size, primary->recorders[i]);
+    recorder_finalize(recorder_list, list_size, primary->recorders[i]);
   }
   free(recorder_list);
 }
@@ -623,10 +895,24 @@ char *autoplay_results_to_string(AutoplayResults *autoplay_results,
     }
     char *rec_str = recorder_str(autoplay_results->recorders[i], human_readable,
                                  show_divergent);
-    string_builder_add_string(ar_sb, rec_str);
-    free(rec_str);
+    if (rec_str) {
+      string_builder_add_string(ar_sb, rec_str);
+      free(rec_str);
+    }
   }
   char *ar_str = string_builder_dump(ar_sb, NULL);
   string_builder_destroy(ar_sb);
   return ar_str;
+}
+
+void autoplay_results_set_write_buffer_size(AutoplayResults *autoplay_results,
+                                            int write_buffer_size) {
+  autoplay_results->generic_shared_data->write_buffer_size = write_buffer_size;
+}
+
+void autoplay_results_set_record_filepath(AutoplayResults *autoplay_results,
+                                          const char *filepath) {
+  free(autoplay_results->generic_shared_data->output_filepath);
+  autoplay_results->generic_shared_data->output_filepath =
+      string_duplicate(filepath);
 }

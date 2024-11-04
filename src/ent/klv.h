@@ -1,18 +1,14 @@
 #ifndef KLV_H
 #define KLV_H
 
-#if defined(__APPLE__)
-#include "../../compat/endian.h"
-#else
-#include <endian.h>
-#endif
-
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "../def/klv_defs.h"
+
+#include "../compat/endian_conv.h"
 
 #include "../util/fileproxy.h"
 #include "../util/log.h"
@@ -114,27 +110,6 @@ static inline float reverse_float(const float in_float) {
   return_float[3] = float_to_convert[0];
 
   return ret_val;
-}
-
-// Returns the float in little-endian format.
-// - If the host is little-endian, it returns the original float
-// - If the host is not little-endian, it must therefore be big-endian
-//   and returns the reverse of the original float to convert it to
-//   little-endian format.
-static inline float convert_float_to_le(const float input_float) {
-  // Check if host machine is little-endian
-  union {
-    uint32_t i;
-    char c[4];
-  } endian_check = {0x01020304};
-
-  if (endian_check.c[0] == 4) {
-    // Host machine is little-endian
-    return input_float;
-  } else {
-    // Host machine is big-endian
-    return reverse_float(input_float);
-  }
 }
 
 static inline int klv_count_words_at(const KLV *klv, uint32_t node_index,

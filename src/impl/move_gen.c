@@ -364,8 +364,8 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
         value = klv_get_indexed_leave_value(gen->klv, word_index - 1);
       }
       leave_map_set_current_value(&gen->leave_map, value);
-      if (value > gen->best_leaves[leave->number_of_letters]) {
-        gen->best_leaves[leave->number_of_letters] = value;
+      if (value > gen->best_leaves[rack_get_total_letters(leave)]) {
+        gen->best_leaves[rack_get_total_letters(leave)] = value;
       }
       if (add_exchange) {
         record_exchange(gen);
@@ -848,7 +848,7 @@ static inline void insert_unrestricted_multipliers(MoveGen *gen, int col) {
 }
 
 static inline bool is_single_bit_set(uint64_t bitset) {
-#if __has_builtin(__builtin_popcountll)
+#if defined(__has_builtin) && __has_builtin(__builtin_popcountll)
   return __builtin_popcountll(bitset) == 1;
 #else
   return bitset && !(bitset & (bitset - 1));
@@ -856,7 +856,7 @@ static inline bool is_single_bit_set(uint64_t bitset) {
 }
 
 static inline int get_single_bit_index(uint64_t bitset) {
-#if __has_builtin(__builtin_ctzll)
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
   return __builtin_ctzll(bitset);
 #else
   // Probably not the fastest fallback but it does well because it often

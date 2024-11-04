@@ -1,14 +1,10 @@
 #ifndef KWG_H
 #define KWG_H
 
-#if defined(__APPLE__)
-#include "../../compat/endian.h"
-#else
-#include <endian.h>
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "../compat/endian_conv.h"
 
 #include "../def/kwg_defs.h"
 
@@ -56,10 +52,8 @@ static inline uint32_t kwg_node_arc_index(uint32_t node) {
 static inline uint32_t kwg_node_arc_index_prefetch(uint32_t node,
                                                    const KWG *kwg) {
   const uint32_t next_node = (node & KWG_ARC_INDEX_MASK);
-#ifdef __has_builtin
-#if __has_builtin(__builtin_prefetch)
+#if defined(__has_builtin) && __has_builtin(__builtin_prefetch)
   __builtin_prefetch(&kwg->nodes[next_node]);
-#endif
 #endif
   return next_node;
 }

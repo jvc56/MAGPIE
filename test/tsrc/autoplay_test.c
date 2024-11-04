@@ -2,11 +2,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #include "../../src/def/autoplay_defs.h"
 
 #include "../../src/ent/autoplay_results.h"
+#include "../../src/ent/data_filepaths.h"
 #include "../../src/ent/stats.h"
 
 #include "../../src/impl/autoplay.h"
@@ -124,39 +126,12 @@ void test_autoplay_leavegen(void) {
       "set -lex CSW21_ab -ld english_ab -s1 equity -s2 equity -r1 best -r2 "
       "best -numplays 1 -threads 1");
 
-  // The minimum leave count should be achieved well before reaching
-  // the maximum number of games, so if this takes too long, we know it
-  // failed.
-  load_and_exec_config_or_die_timed(ab_config,
-                                    "leavegen 1 99999999 2 0 -seed 3", 60);
-
-  // The maximum game limit should be reached well before reaching
-  // the minimum leave count.
-  load_and_exec_config_or_die_timed(ab_config,
-                                    "leavegen 1 200 99999999 0 -seed 3", 60);
-
-  char *ab_ar_str = autoplay_results_to_string(
-      config_get_autoplay_results(ab_config), false, false);
-  assert_autoplay_output(ab_ar_str, 1, (const char *[]){"autoplay games 200"});
-
-  free(ab_ar_str);
+  // The minimum leave count should be achieved quickly, so if this takes too
+  // long, we know it failed.
+  load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3", 60);
+  load_and_exec_config_or_die_timed(ab_config, "leavegen 1,2,1 0 -seed 3", 60);
 
   config_destroy(ab_config);
-
-  Config *csw_config =
-      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 best -r2 "
-                           "best -numplays 1 -threads 1");
-
-  // Make sure the leavegen command can run without error.
-  load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed english");
-  load_and_exec_config_or_die(csw_config, "set -leaves CSW21_zeroed");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 200 1 0 -seed 0");
-  load_and_exec_config_or_die(csw_config, "create klv CSW21_zeroed_ml english");
-  load_and_exec_config_or_die(csw_config,
-                              "set -leaves CSW21_zeroed_ml -threads 11");
-  load_and_exec_config_or_die(csw_config, "leavegen 2 100 1 0");
-
-  config_destroy(csw_config);
 }
 
 void test_autoplay_divergent_games(void) {
@@ -172,19 +147,19 @@ void test_autoplay_divergent_games(void) {
 
   load_and_exec_config_or_die(csw_config, "cgp " VS_ANDY_CGP);
   game = config_get_game(csw_config);
-  autoplay_results_add_game(ar, game, 20, false);
+  autoplay_results_add_game(ar, game, 20, false, 1);
 
   load_and_exec_config_or_die(csw_config, "cgp " VS_FRENTZ_CGP);
   game = config_get_game(csw_config);
-  autoplay_results_add_game(ar, game, 20, true);
+  autoplay_results_add_game(ar, game, 20, true, 2);
 
   load_and_exec_config_or_die(csw_config, "cgp " MANY_MOVES);
   game = config_get_game(csw_config);
-  autoplay_results_add_game(ar, game, 20, false);
+  autoplay_results_add_game(ar, game, 20, false, 3);
 
   load_and_exec_config_or_die(csw_config, "cgp " UEY_CGP);
   game = config_get_game(csw_config);
-  autoplay_results_add_game(ar, game, 20, true);
+  autoplay_results_add_game(ar, game, 20, true, 4);
 
   char *ar_str = autoplay_results_to_string(ar, false, true);
   assert_autoplay_output(
@@ -217,6 +192,44 @@ void test_autoplay_divergent_games(void) {
 
   free(ar_gp_diff_lex_str);
 
+  load_and_exec_config_or_die(csw_config, "set -lex CSW21");
+
+  KLV *small_diff_klv = klv_create(DEFAULT_TEST_DATA_PATH, "CSW21");
+  const int num = klv_get_number_of_leaves(small_diff_klv);
+
+  for (int i = 0; i < num; i++) {
+    small_diff_klv->leave_values[i] += -1 + (2 * (i % 2));
+  }
+
+  char *small_diff_klv_filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, "CSW21_small_diff", DATA_FILEPATH_TYPE_KLV);
+
+  klv_write(small_diff_klv, small_diff_klv_filename);
+  free(small_diff_klv_filename);
+  klv_destroy(small_diff_klv);
+
+  load_and_exec_config_or_die(
+      csw_config,
+      "autoplay games 50 -seed 50 -k1 CSW21 -k2 CSW21_small_diff -gp true");
+
+  char *small_diff_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false, true);
+  assert_autoplay_output(
+      small_diff_str, 2,
+      (const char *[]){"autoplay games 100", "autoplay games 88"});
+
+  free(small_diff_str);
+
+  config_destroy(csw_config);
+}
+
+void test_autoplay_fj_record(void) {
+  Config *csw_config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1  -gp false -threads 11");
+  load_and_exec_config_or_die(
+      csw_config,
+      "autoplay fj 50 -seed 50 -wb 1000000 -recfile ./data/lexica/output.txt");
   config_destroy(csw_config);
 }
 
@@ -225,4 +238,6 @@ void test_autoplay(void) {
   test_autoplay_default();
   test_autoplay_leavegen();
   test_autoplay_divergent_games();
+  test_autoplay_fj_record();
+  return;
 }
