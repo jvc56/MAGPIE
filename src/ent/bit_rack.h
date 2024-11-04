@@ -29,8 +29,13 @@
 typedef unsigned __int128 BitRack;
 #else
 typedef struct {
+#if IS_LITTLE_ENDIAN
   uint64_t low;
   uint64_t high;
+#else
+  uint64_t high;
+  uint64_t low;
+#endif
 } BitRack;
 #endif
 
@@ -61,14 +66,6 @@ bit_rack_is_compatible_with_ld(const LetterDistribution *ld) {
 
 static inline bool bit_rack_type_has_expected_size(void) {
   return sizeof(BitRack) == 16;
-}
-
-static inline bool bit_rack_is_compatible_with_endianness(void) {
-#if defined(__APPLE__)
-  return OSHostByteOrder() == OSLittleEndian;
-#else
-  return __BYTE_ORDER == __LITTLE_ENDIAN;
-#endif
 }
 
 static inline BitRack bit_rack_create_empty(void) {
@@ -336,23 +333,53 @@ static inline void bit_rack_take_letter(BitRack *bit_rack, uint8_t ml) {
 
 static inline void bit_rack_write_12_bytes(const BitRack *bit_rack,
                                            uint8_t bytes[12]) {
-  // assumes little-endian
 #if USE_INT128_INTRINSIC
   memory_copy(bytes, ((uint8_t *)bit_rack), 12);
+#if !IS_LITTLE_ENDIAN
+  uint32_t high = bit_rack_get_high_64(bit_rack);
+  uint64_t low = bit_rack_get_low_64(bit_rack);
+  high = htole32(high);
+  low = htole64(low);
+  memory_copy(bytes, ((uint8_t *)&low, 8);
+  memory_copy(bytes + 4, ((uint8_t *)&high), 4);
+#endif
 #else
+#if IS_LITTLE_ENDIAN
   memory_copy(bytes, ((uint8_t *)&bit_rack->low), 8);
   memory_copy(bytes + 8, ((uint8_t *)&bit_rack->high), 4);
+#else
+  uint32_t high = bit_rack->high;
+  uint64_t low = bit_rack->low;
+  high = htole32(high);
+  low = htole64(low);
+  memory_copy(bytes, ((uint8_t *)low), 8);
+  memory_copy(bytes + 8, ((uint8_t *)&high), 4);
+#endif
 #endif
 }
 
 static inline BitRack bit_rack_read_12_bytes(const uint8_t bytes[12]) {
   BitRack bit_rack = bit_rack_create_empty();
-  // assumes little-endian
 #if USE_INT128_INTRINSIC
   memory_copy(((uint8_t *)&bit_rack), bytes, 12);
+#if !IS_LITTLE_ENDIAN
+  uint64_t low = bit_rack_get_low_64(&bit_rack);
+  uint64_t high = bit_rack_get_high_64(&bit_rack);
+  bit_rack_set_high_64(&bit_rack, le64toh(low));
+  bit_rack_set_low_64(&bit_rack, le64toh(high));
+  bit_rack >>= 32;
+#endif
 #else
+#if IS_LITTLE_ENDIAN
   memory_copy(((uint8_t *)&bit_rack.low), bytes, 8);
   memory_copy(((uint8_t *)&bit_rack.high), bytes + 8, 4);
+#else
+  uint32_t high;
+  memory_copy(((uint8_t *)&high), bytes, 4);
+  bit_rack_set_high_64(&bit_rack, le32toh(high));
+  memory_copy(((uint8_t *)&bit_rack.low), bytes + 4, 8);
+  bit_rack.low = le64toh(bit_rack.low);
+#endif
 #endif
   return bit_rack;
 }

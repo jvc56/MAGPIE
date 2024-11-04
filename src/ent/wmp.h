@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../compat/endian_conv.h"
+
 #include "../def/board_defs.h"
 #include "../def/wmp_defs.h"
 
@@ -149,6 +151,7 @@ static inline void read_uint32_from_stream(uint32_t *i, FILE *stream) {
   if (result != 1) {
     log_fatal("could not read uint32 from stream\n");
   }
+  *i = le32toh(*i);
 }
 
 static inline void read_uint32s_from_stream(uint32_t *i, size_t n,
@@ -166,6 +169,13 @@ static inline void read_wmp_entries_from_stream(WMPEntry *entries, uint32_t n,
   const size_t result = fread(entries, sizeof(WMPEntry), n, stream);
   if (result != n) {
     log_fatal("could not read WMPEntries from stream\n");
+  }
+  for (uint32_t i = 0; i < n; i++) {
+    for (uint32_t j = 0; j < WMP_QUOTIENT_BYTES; j++) {
+      WMPEntry *entry = &entries[i];
+      entry->word_start = le32toh(entry->word_start);
+      entry->num_words = le32toh(entry->num_words);
+    }
   }
 }
 
