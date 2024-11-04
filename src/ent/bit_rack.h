@@ -1,11 +1,7 @@
 #ifndef BIT_RACK_H
 #define BIT_RACK_H
 
-#if defined(__APPLE__)
-#include "../../compat/endian.h"
-#else
-#include <endian.h>
-#endif
+#include "../compat/endian_conv.h"
 
 #include <assert.h>
 #include <stdbool.h>
