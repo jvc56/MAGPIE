@@ -1,6 +1,7 @@
 #ifndef WMP_H
 #define WMP_H
 
+#include <_types/_uint64_t.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -71,8 +72,28 @@
 //           (number of word buckets must be high enough that maximum quotient
 //           fits. largest_bit_rack_for_ld(ld) / num_word_buckets < (1 << 96)).
 
-typedef struct WMPEntry {
-  uint8_t bucket_or_inline[WMP_INLINE_VALUE_BYTES];
+typedef struct __attribute__((packed)) WMPEntry {
+  union {
+    uint8_t bucket_or_inline[WMP_INLINE_VALUE_BYTES];
+    struct {
+      bool is_inline;
+      uint8_t _unused_padding1[7]; // for alignment
+      union {
+        struct {
+          uint32_t word_start;
+          uint32_t num_words;
+        };
+        struct {
+          uint32_t blank_letters;
+          uint32_t _unused_padding2;
+        };
+        struct {
+          uint32_t pair_start;
+          uint32_t num_pairs;
+        };
+      };
+    };
+  };
   uint8_t quotient[WMP_QUOTIENT_BYTES];
 } WMPEntry;
 
@@ -335,10 +356,8 @@ static inline uint32_t wmp_entry_get_num_words_or_pairs(const WMPEntry *entry) {
 static inline int wmp_entry_write_uninlined_blankless_words_to_buffer(
     const WMPEntry *entry, const WMPForLength *wfl, int word_length,
     uint8_t *buffer) {
-  const uint32_t word_start = wmp_entry_get_word_or_pair_start(entry);
-  const uint32_t num_words = wmp_entry_get_num_words_or_pairs(entry);
-  const uint8_t *letters = wfl->word_letters + word_start;
-  const int bytes_written = num_words * word_length;
+  const uint8_t *letters = wfl->word_letters + entry->word_start;
+  const int bytes_written = entry->num_words * word_length;
   memory_copy(buffer, letters, bytes_written);
   return bytes_written;
 }
@@ -347,7 +366,7 @@ static inline int
 wmp_entry_write_blankless_words_to_buffer(const WMPEntry *entry,
                                           const WMPForLength *wfl,
                                           int word_length, uint8_t *buffer) {
-  if (wmp_entry_is_inlined(entry)) {
+  if (entry->is_inline) {
     return wmp_entry_write_inlined_blankless_words_to_buffer(entry, word_length,
                                                              buffer);
   }
@@ -384,26 +403,15 @@ static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
                                                    buffer);
 }
 
-static inline uint32_t wmp_entry_get_blank_letters(const WMPEntry *entry) {
-  uint32_t blank_letters;
-  // 32-bit bitvector follows 8 bytes of empty space
-  memory_copy(&blank_letters,
-              (uint32_t *)(entry->bucket_or_inline +
-                           WORD_MAP_BLANK_LETTERS_OFFSET_BYTES),
-              sizeof(blank_letters));
-  return blank_letters;
-}
-
 static inline int wmp_entry_write_blanks_to_buffer(const WMPEntry *entry,
                                                    const WMPForLength *wfl,
                                                    BitRack *bit_rack,
                                                    int word_length,
                                                    uint8_t *buffer) {
-  const uint32_t blank_letters = wmp_entry_get_blank_letters(entry);
   int bytes_written = 0;
   bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
   for (uint8_t ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-    if (blank_letters & (1ULL << ml)) {
+    if (entry->blank_letters & (1ULL << ml)) {
       bit_rack_add_letter(bit_rack, ml);
       bytes_written += wfl_write_blankless_words_to_buffer(
           wfl, bit_rack, word_length, buffer + bytes_written);
@@ -429,10 +437,9 @@ static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
     if (!bit_rack_equals(&entry_quotient, &quotient)) {
       continue;
     }
-    uint32_t blank_letters = wmp_entry_get_blank_letters(entry);
     bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
     for (uint8_t ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-      if (blank_letters & (1ULL << ml)) {
+      if (entry->blank_letters & (1ULL << ml)) {
         bit_rack_add_letter(bit_rack, ml);
         bytes_written += wfl_write_blankless_words_to_buffer(
             wfl, bit_rack, word_length, buffer + bytes_written);
@@ -448,11 +455,9 @@ static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
 static inline int wmp_entry_write_double_blanks_to_buffer(
     const WMPEntry *entry, const WMPForLength *wfl, BitRack *bit_rack,
     int word_length, uint8_t *buffer) {
-  const uint32_t pair_start = wmp_entry_get_word_or_pair_start(entry);
-  const uint32_t num_pairs = wmp_entry_get_num_words_or_pairs(entry);
-  const uint8_t *pairs = wfl->double_blank_letters + pair_start;
+  const uint8_t *pairs = wfl->double_blank_letters + entry->pair_start;
   int bytes_written = 0;
-  for (uint32_t i = 0; i < num_pairs; i++) {
+  for (uint32_t i = 0; i < entry->num_pairs; i++) {
     const uint8_t ml1 = pairs[i * 2];
     const uint8_t ml2 = pairs[i * 2 + 1];
     bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
@@ -487,11 +492,9 @@ static inline int wfl_write_double_blanks_to_buffer(const WMPForLength *wfl,
     if (!bit_rack_equals(&entry_quotient, &quotient)) {
       continue;
     }
-    const uint32_t pair_start = wmp_entry_get_word_or_pair_start(entry);
-    const uint32_t num_pairs = wmp_entry_get_num_words_or_pairs(entry);
-    const uint8_t *pairs = wfl->double_blank_letters + pair_start;
+    const uint8_t *pairs = wfl->double_blank_letters + entry->pair_start;
     bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
-    for (uint32_t j = 0; j < num_pairs; j++) {
+    for (uint32_t j = 0; j < entry->num_pairs; j++) {
       const uint8_t ml1 = pairs[j * 2];
       const uint8_t ml2 = pairs[j * 2 + 1];
       bit_rack_add_letter(bit_rack, ml1);
