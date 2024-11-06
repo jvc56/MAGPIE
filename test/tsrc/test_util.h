@@ -4,7 +4,9 @@
 #include <stdbool.h>
 
 #include "../../src/ent/bag.h"
+#include "../../src/ent/bit_rack.h"
 #include "../../src/ent/board.h"
+#include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
@@ -84,5 +86,13 @@ void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
 void assert_stats_are_equal(const Stat *s1, const Stat *s2);
 void assert_sim_results_equal(SimResults *sr1, SimResults *sr2);
 void assert_klvs_equal(const KLV *klv1, const KLV *klv2);
+void assert_word_count(const LetterDistribution *ld, const DictionaryWordList *words,
+                       const char *human_readable_word, int expected_count);
+
+BitRack string_to_bit_rack(const LetterDistribution *ld,
+                           const char *rack_string);
+
+void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
+                           const LetterDistribution *ld, int word_idx, int length);
 
 #endif

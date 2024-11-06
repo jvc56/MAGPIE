@@ -8,6 +8,7 @@
 
 #include "klv_csv.h"
 #include "kwg_maker.h"
+#include "wmp_maker.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"
@@ -46,6 +47,14 @@ conversion_status_t convert_from_text_with_dwl(
     dictionary_word_list_add_word(strings, mls, mls_length);
   }
 
+  if (conversion_type == CONVERT_TEXT2WORDMAP) {
+    WMP *wmp = make_wmp_from_words(strings, ld);
+    if (!wmp_write_to_file(wmp, output_filename)) {
+      return CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
+    }
+    wmp_destroy(wmp);
+    return CONVERT_STATUS_SUCCESS;
+  }
   kwg_maker_output_t output_type = KWG_MAKER_OUTPUT_DAWG_AND_GADDAG;
   if (conversion_type == CONVERT_TEXT2DAWG) {
     output_type = KWG_MAKER_OUTPUT_DAWG;
@@ -71,7 +80,8 @@ conversion_status_t convert_with_filenames(
   conversion_status_t status = CONVERT_STATUS_SUCCESS;
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
-      (conversion_type == CONVERT_TEXT2KWG)) {
+      (conversion_type == CONVERT_TEXT2KWG) ||
+      (conversion_type == CONVERT_TEXT2WORDMAP)) {
     DictionaryWordList *strings = dictionary_word_list_create();
     status = convert_from_text_with_dwl(ld, conversion_type, input_filename,
                                         output_filename, strings,
@@ -104,6 +114,9 @@ get_input_filepath_type_from_conv_type(conversion_type_t conversion_type) {
   case CONVERT_TEXT2KWG:
     filepath_type = DATA_FILEPATH_TYPE_LEXICON;
     break;
+  case CONVERT_TEXT2WORDMAP:
+    filepath_type = DATA_FILEPATH_TYPE_LEXICON;
+    break;
   case CONVERT_DAWG2TEXT:
     filepath_type = DATA_FILEPATH_TYPE_KWG;
     break;
@@ -132,6 +145,9 @@ get_output_filepath_type_from_conv_type(conversion_type_t conversion_type) {
     break;
   case CONVERT_TEXT2GADDAG:
     filepath_type = DATA_FILEPATH_TYPE_KWG;
+    break;
+  case CONVERT_TEXT2WORDMAP:
+    filepath_type = DATA_FILEPATH_TYPE_WORDMAP;
     break;
   case CONVERT_TEXT2KWG:
     filepath_type = DATA_FILEPATH_TYPE_KWG;
@@ -172,6 +188,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_CSV2KLV;
   } else if (strings_equal(conversion_type_string, "klv2csv")) {
     conversion_type = CONVERT_KLV2CSV;
+  } else if (strings_equal(conversion_type_string, "text2wordmap")) {
+    conversion_type = CONVERT_TEXT2WORDMAP;
   }
   return conversion_type;
 }

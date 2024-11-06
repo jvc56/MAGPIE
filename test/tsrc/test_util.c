@@ -18,7 +18,9 @@
 #include "../../src/def/move_defs.h"
 
 #include "../../src/ent/bag.h"
+#include "../../src/ent/bit_rack.h"
 #include "../../src/ent/board.h"
+#include "../../src/ent/dictionary_word.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
@@ -706,5 +708,47 @@ void assert_klvs_equal(const KLV *klv1, const KLV *klv2) {
   for (int i = 0; i < number_of_leaves; i++) {
     assert(within_epsilon(klv_get_indexed_leave_value(klv1, i),
                           klv_get_indexed_leave_value(klv2, i)));
+  }
+}
+
+void assert_word_count(const LetterDistribution *ld,
+                       const DictionaryWordList *words,
+                       const char *human_readable_word, int expected_count) {
+  int expected_length = string_length(human_readable_word);
+  uint8_t expected[BOARD_DIM];
+  ld_str_to_mls(ld, human_readable_word, false, expected, expected_length);
+  int count = 0;
+  for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
+    DictionaryWord *word = dictionary_word_list_get_word(words, i);
+    if ((dictionary_word_get_length(word) == expected_length) &&
+        (memory_compare(dictionary_word_get_word(word), expected,
+                        expected_length) == 0)) {
+      count++;
+    }
+  }
+  assert(count == expected_count);
+}
+
+BitRack string_to_bit_rack(const LetterDistribution *ld,
+                           const char *rack_string) {
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, rack_string);
+  BitRack bit_rack = bit_rack_create_from_rack(ld, rack);
+  rack_destroy(rack);
+  return bit_rack;
+}
+
+// This only works on ASCII languages, e.g. English, French. Polish would need
+// to support multibyte user-visible characters, but Polish isn't even supported
+// for BitRack (and therefore for WMP) because the lexicon is >32 letters
+// (including the blank).
+void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
+                           const LetterDistribution *ld, int word_idx,
+                           int length) {
+  const int start = word_idx * length;
+  char hl[2] = {0, 0};
+  for (int i = 0; i < length; i++) {
+    hl[0] = expected_word[i];
+    assert(buffer[start + i] == ld_hl_to_ml(ld, hl));
   }
 }

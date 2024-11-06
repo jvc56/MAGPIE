@@ -13,23 +13,6 @@
 
 #include "test_util.h"
 
-void assert_word_count(const LetterDistribution *ld, DictionaryWordList *words,
-                       const char *human_readable_word, int expected_count) {
-  int expected_length = string_length(human_readable_word);
-  uint8_t expected[BOARD_DIM];
-  ld_str_to_mls(ld, human_readable_word, false, expected, expected_length);
-  int count = 0;
-  for (int i = 0; i < dictionary_word_list_get_count(words); i++) {
-    DictionaryWord *word = dictionary_word_list_get_word(words, i);
-    if ((dictionary_word_get_length(word) == expected_length) &&
-        (memory_compare(dictionary_word_get_word(word), expected,
-                        expected_length) == 0)) {
-      count++;
-    }
-  }
-  assert(count == expected_count);
-}
-
 void test_possible_words(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");

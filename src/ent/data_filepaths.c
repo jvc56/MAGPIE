@@ -7,6 +7,7 @@
 #include "../util/string_util.h"
 
 #define KWG_EXTENSION ".kwg"
+#define WORDMAP_EXTENSION ".wmp"
 #define KLV_EXTENSION ".klv2"
 #define LAYOUT_EXTENSION ".txt"
 #define WIN_PCT_EXTENSION ".csv"
@@ -18,6 +19,7 @@
 bool is_filepath(const char *filepath) {
   return string_contains(filepath, '/') || string_contains(filepath, '\\') ||
          has_suffix(filepath, KWG_EXTENSION) ||
+         has_suffix(filepath, WORDMAP_EXTENSION) ||
          has_suffix(filepath, KLV_EXTENSION) ||
          has_suffix(filepath, LAYOUT_EXTENSION) ||
          has_suffix(filepath, WIN_PCT_EXTENSION) ||
@@ -34,6 +36,7 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
   case DATA_FILEPATH_TYPE_KWG:
   case DATA_FILEPATH_TYPE_KLV:
   case DATA_FILEPATH_TYPE_LEXICON:
+  case DATA_FILEPATH_TYPE_WORDMAP:
     string_builder_add_formatted_string(sb, "%s/lexica/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
@@ -64,6 +67,9 @@ char *get_filepath(const char *data_path, const char *data_name,
   switch (type) {
   case DATA_FILEPATH_TYPE_KWG:
     file_ext = KWG_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_WORDMAP:
+    file_ext = WORDMAP_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_KLV:
     file_ext = KLV_EXTENSION;
