@@ -746,14 +746,14 @@ void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
 static inline void shadow_record(MoveGen *gen) {
   const double *best_leaves = gen->best_leaves;
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-        if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
-            (gen->tiles_played == gen->number_of_letters_on_rack)) {
-          const bool has_word =
-       wmp_move_gen_check_playthrough_full_rack_existence( &gen->wmp_move_gen);
-          if (!has_word) {
-            return;
-          }
-        }
+    if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
+        (gen->tiles_played == gen->number_of_letters_on_rack)) {
+      const bool has_word = wmp_move_gen_check_playthrough_full_rack_existence(
+          &gen->wmp_move_gen);
+      if (!has_word) {
+        return;
+      }
+    }
     if (!wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
         (gen->tiles_played >= MINIMUM_WORD_LENGTH)) {
       if (!wmp_move_gen_nonplaythrough_word_of_length_exists(
@@ -764,7 +764,7 @@ static inline void shadow_record(MoveGen *gen) {
         best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
             &gen->wmp_move_gen);
       }
-    }  
+    }
   }
 
   if (gen->is_wordsmog && (gen->tiles_played == RACK_SIZE) &&

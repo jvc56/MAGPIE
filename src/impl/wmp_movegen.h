@@ -4,6 +4,8 @@
 #include <stdlib.h>
 
 #include "../def/kwg_defs.h"
+#include "../def/move_defs.h"
+
 #include "../ent/bit_rack.h"
 #include "../ent/leave_map.h"
 #include "../ent/wmp.h"
@@ -34,8 +36,9 @@ typedef struct WMPMoveGen {
   bool playthrough_words_are_stale;
 } WMPMoveGen;
 
-void wmp_move_gen_init(WMPMoveGen *wmp_move_gen, const LetterDistribution *ld,
-                       Rack *player_rack, const WMP *wmp) {
+static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
+                                     const LetterDistribution *ld,
+                                     Rack *player_rack, const WMP *wmp) {
   wmp_move_gen->wmp = wmp;
   if (wmp == NULL) {
     return;
@@ -43,9 +46,11 @@ void wmp_move_gen_init(WMPMoveGen *wmp_move_gen, const LetterDistribution *ld,
   wmp_move_gen->num_tiles_played_through = 0;
   wmp_move_gen->player_bit_rack = bit_rack_create_from_rack(ld, player_rack);
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
+  memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
+         sizeof(wmp_move_gen->nonplaythrough_has_word_of_length));
 }
 
-bool wmp_move_gen_is_active(const WMPMoveGen *wmp_move_gen) {
+static inline bool wmp_move_gen_is_active(const WMPMoveGen *wmp_move_gen) {
   return wmp_move_gen->wmp != NULL;
 }
 
@@ -80,7 +85,6 @@ wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
   for (int i = 0; i < max_num_this; i++) {
     wmp_move_gen_enumerate_nonplaythrough_subracks(
         wmp_move_gen, current, next_ml + 1, count + i, leave_map);
-
     bit_rack_add_letter(current, next_ml);
     leave_map_complement_add_letter(leave_map, next_ml, i);
   }
@@ -134,9 +138,8 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
   for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
        size++) {
     const int leave_size = wmp_move_gen->full_rack_size - size;
-    // FIXME: move INITIAL_TOP_MOVE_EQUITY to a foo_def.h header
     wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
-        check_leaves ? -100000 : 0;
+        check_leaves ? INITIAL_TOP_MOVE_EQUITY : 0;
     const int offset = subracks_get_combination_offset(size);
     const int count = wmp_move_gen->count_by_size[size];
     for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
@@ -148,9 +151,11 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
         continue;
       }
       wmp_move_gen->nonplaythrough_has_word_of_length[size] = true;
-      if (check_leaves &&
-          (subrack_info->leave_value >
-           wmp_move_gen->nonplaythrough_best_leave_values[leave_size])) {
+      if (!check_leaves) {
+        break;
+      }
+      if (subrack_info->leave_value >
+          wmp_move_gen->nonplaythrough_best_leave_values[leave_size]) {
         wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
             subrack_info->leave_value;
       }
@@ -158,38 +163,41 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
   }
 }
 
-bool wmp_move_gen_nonplaythrough_word_of_length_exists(
+static inline bool wmp_move_gen_nonplaythrough_word_of_length_exists(
     const WMPMoveGen *wmp_move_gen, int word_length) {
   return wmp_move_gen->nonplaythrough_has_word_of_length[word_length];
 }
 
-const double *wmp_move_gen_get_nonplaythrough_best_leave_values(
+static inline const double *wmp_move_gen_get_nonplaythrough_best_leave_values(
     const WMPMoveGen *wmp_move_gen) {
   return wmp_move_gen->nonplaythrough_best_leave_values;
 }
 
-void wmp_move_gen_add_playthrough_letter(WMPMoveGen *wmp_move_gen, uint8_t ml) {
+static inline void wmp_move_gen_add_playthrough_letter(WMPMoveGen *wmp_move_gen,
+                                                       uint8_t ml) {
   bit_rack_add_letter(&wmp_move_gen->playthrough_bit_rack, ml);
   wmp_move_gen->num_tiles_played_through++;
 }
 
-void wmp_move_gen_save_playthrough_state(WMPMoveGen *wmp_move_gen) {
+static inline void
+wmp_move_gen_save_playthrough_state(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->playthrough_bit_rack_copy = wmp_move_gen->playthrough_bit_rack;
   wmp_move_gen->num_tiles_played_through_copy =
       wmp_move_gen->num_tiles_played_through;
 }
 
-void wmp_move_gen_restore_playthrough_state(WMPMoveGen *wmp_move_gen) {
+static inline void
+wmp_move_gen_restore_playthrough_state(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->playthrough_bit_rack = wmp_move_gen->playthrough_bit_rack_copy;
   wmp_move_gen->num_tiles_played_through =
       wmp_move_gen->num_tiles_played_through_copy;
 }
 
-bool wmp_move_gen_has_playthrough(WMPMoveGen *wmp_move_gen) {
+static inline bool wmp_move_gen_has_playthrough(WMPMoveGen *wmp_move_gen) {
   return wmp_move_gen->num_tiles_played_through > 0;
 }
 
-void wmp_move_gen_reset_playthrough(WMPMoveGen *wmp_move_gen) {
+static inline void wmp_move_gen_reset_playthrough(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->playthrough_bit_rack = bit_rack_create_empty();
   wmp_move_gen->num_tiles_played_through = 0;
 }

@@ -7,31 +7,41 @@
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/wmp_movegen.h"
 
+#include "../../src/str/rack_string.h"
+
 #include "test_util.h"
 
-void time_look_up_words(Game *game, const WMP *wmp) {
+void time_look_up_nonplaythrough(Game *game, WMPMoveGen *wgen, const WMP *wmp) {
   const LetterDistribution *ld = game_get_ld(game);
   LeaveMap leave_map;
+  for (int i = 0; i < (1 << RACK_SIZE); i++) {
+    leave_map.leave_values[i] = 0;
+  }
   const clock_t start = clock();
-  const int num_racks = 1e3;
+  const int num_racks = 1e6;
+  int has_word_of_length[RACK_SIZE + 1];
+  memset(has_word_of_length, 0, sizeof(has_word_of_length));
   for (int i = 0; i < num_racks; i++) {
     game_reset(game);
     draw_to_full_rack(game, 0);
     Player *player = game_get_player(game, 0);
     Rack *full_rack = player_get_rack(player);
     leave_map_init(full_rack, &leave_map);
-    for (int leave_map_idx = 0; leave_map_idx < 1 << RACK_SIZE;
-         leave_map_idx++) {
-      leave_map.leave_values[leave_map_idx] = 0.001 * leave_map_idx;
+    wmp_move_gen_init(wgen, ld, full_rack, wmp);
+    wmp_move_gen_check_nonplaythrough_existence(wgen, false, &leave_map);
+    for (int length = MINIMUM_WORD_LENGTH; length <= RACK_SIZE; length++) {
+      if (wmp_move_gen_nonplaythrough_word_of_length_exists(wgen, length)) {
+        has_word_of_length[length]++;
+      }
     }
-    BitRack full_bit_rack = bit_rack_create_from_rack(ld, full_rack);
-    Subracks subracks;
-    subracks_init(&subracks, &full_bit_rack, &leave_map);
-    subracks_look_up_words(&subracks, 2, false, wmp);
   }
   const clock_t end = clock();
   printf("Existence checks for %d racks in %f seconds\n", num_racks,
          (double)(end - start) / CLOCKS_PER_SEC);
+  for (int length = MINIMUM_WORD_LENGTH; length <= RACK_SIZE; length++) {
+    printf("Racks with words of length %d: %.2f%%\n", length,
+           100.0 * has_word_of_length[length] / num_racks);
+  }
 }
 
 void benchmark_csw_wmp(void) {
@@ -49,7 +59,9 @@ void benchmark_csw_wmp(void) {
   assert_word_in_buffer(buffer, "GHERAOED", ld, 0, 8);
   assert_word_in_buffer(buffer, "GOATHERD", ld, 1, 8);
 
-  time_look_up_words(game, wmp);
+  WMPMoveGen wgen;
+
+  time_look_up_nonplaythrough(game, &wgen, wmp);
 
   game_destroy(game);
   config_destroy(config);
