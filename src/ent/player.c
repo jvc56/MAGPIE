@@ -40,7 +40,6 @@ void player_update(const PlayersData *players_data, Player *player) {
   player->kwg = players_data_get_kwg(players_data, player->index);
   player->klv = players_data_get_klv(players_data, player->index);
   player->wmp = players_data_get_wmp(players_data, player->index);
-  assert(player->wmp == NULL);
   assert(player->wmp != (WMP *)0xbebebebebebebebe);
 }
 
