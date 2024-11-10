@@ -60,11 +60,13 @@ typedef enum {
   ARG_TOKEN_LEAVES,
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P1_LEXICON,
+  ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_P2_LEXICON,
+  ARG_TOKEN_P2_USE_WMP,
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
@@ -1293,6 +1295,30 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
                    config->data_paths, updated_p1_lexicon_name,
                    updated_p2_lexicon_name);
 
+  const char *p1_wmp_name = NULL;
+  const char *p2_wmp_name = NULL;
+  bool p1_use_wmp = false;
+  config_load_status_t config_load_status =
+      config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+  if (p1_use_wmp) {
+    p1_wmp_name = updated_p1_lexicon_name;
+  }
+  bool p2_use_wmp = false;
+  config_load_status =
+      config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+  if (p2_use_wmp) {
+    p2_wmp_name = updated_p2_lexicon_name;
+  }
+
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
+                   config->data_paths, p1_wmp_name, p2_wmp_name);
+
   // Load the leaves
 
   const char *existing_p1_leaves_name = players_data_get_data_name(
@@ -1680,6 +1706,8 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P1_LEXICON, "l1", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P1_USE_WMP, "wmp1", 1, 1, execute_fatal,
+                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P1_LEAVES, "k1", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1,
@@ -1689,6 +1717,8 @@ Config *config_create_default(void) {
   parsed_arg_create(config, ARG_TOKEN_P2_NAME, "p2", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P2_LEXICON, "l2", 1, 1, execute_fatal,
+                    status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_P2_USE_WMP, "wmp2", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P2_LEAVES, "k2", 1, 1, execute_fatal,
                     status_fatal);

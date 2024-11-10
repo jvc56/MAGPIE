@@ -21,6 +21,7 @@ struct PlayersData {
   void *data[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
+  bool use_wmp[2];
   char *player_names[2];
 };
 
@@ -95,6 +96,11 @@ KLV *players_data_get_klv(const PlayersData *players_data, int player_index) {
                                       player_index);
 }
 
+WMP *players_data_get_wmp(const PlayersData *players_data, int player_index) {
+  return (WMP *)players_data_get_data(players_data, PLAYERS_DATA_TYPE_WMP,
+                                      player_index);
+}
+
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data) {
@@ -113,6 +119,9 @@ void *players_data_create_data(players_data_t players_data_type,
     break;
   case PLAYERS_DATA_TYPE_KLV:
     data = klv_create(data_paths, data_name);
+    break;
+  case PLAYERS_DATA_TYPE_WMP:
+    data = wmp_create(data_paths, data_name);
     break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
@@ -133,6 +142,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_KLV:
       klv_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_WMP:
+      wmp_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -171,6 +183,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_KLV:
       data_name = klv_get_name(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_WMP:
+      data_name = wmp_get_name(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -221,12 +236,14 @@ void players_data_destroy(PlayersData *players_data) {
 void players_data_set(PlayersData *players_data,
                       players_data_t players_data_type, const char *data_paths,
                       const char *p1_data_name, const char *p2_data_name) {
-
-  if (is_string_empty_or_null(p1_data_name)) {
-    log_fatal("cannot set player one data with null or empty name");
-  }
-  if (is_string_empty_or_null(p2_data_name)) {
-    log_fatal("cannot set player two data with null or empty name");
+  // WMP is optional, KWG and KLV are required for every player.
+  if (players_data_type != PLAYERS_DATA_TYPE_WMP) {
+    if (is_string_empty_or_null(p1_data_name)) {
+      log_fatal("cannot set player one data with null or empty name");
+    }
+    if (is_string_empty_or_null(p2_data_name)) {
+      log_fatal("cannot set player two data with null or empty name");
+    }
   }
 
   const char *input_data_names[2];

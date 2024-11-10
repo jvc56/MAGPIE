@@ -15,6 +15,7 @@
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
 #include "../../src/ent/validated_move.h"
+#include "../../src/ent/wmp.h"
 
 #include "../../src/impl/cgp.h"
 #include "../../src/impl/config.h"
@@ -788,6 +789,40 @@ void movegen_var_bingo_bonus_test(void) {
   config_destroy(config);
 }
 
+void movegen_no_wmp_by_default_test(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21");
+  Game *game = config_game_create(config);
+  const WMP *wmp1 = player_get_wmp(game_get_player(game, 0));
+  assert(wmp1 == NULL);
+  const WMP *wmp2 = player_get_wmp(game_get_player(game, 1));
+  assert(wmp2 == NULL);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void movegen_only_one_player_wmp(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp1 true");
+  Game *game = config_game_create(config);
+  const WMP *wmp1 = player_get_wmp(game_get_player(game, 0));
+  assert(wmp1 != NULL);
+  const WMP *wmp2 = player_get_wmp(game_get_player(game, 1));
+  assert(wmp2 == NULL);
+  game_destroy(game);
+  config_destroy(config);
+
+  config = config_create_or_die(
+      "set -lex CSW21 -wmp2 true");
+  game = config_game_create(config);
+  wmp1 = player_get_wmp(game_get_player(game, 0));
+  assert(wmp1 == NULL);
+  wmp2 = player_get_wmp(game_get_player(game, 1));
+  assert(wmp2 != NULL);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
@@ -800,4 +835,6 @@ void test_move_gen(void) {
   wordsmog_test();
   movegen_game_update_test();
   movegen_var_bingo_bonus_test();
+  movegen_no_wmp_by_default_test();
+  movegen_only_one_player_wmp();
 }

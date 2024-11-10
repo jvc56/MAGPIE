@@ -42,6 +42,7 @@
 #include "wasm_api_test.h"
 #include "wmp_test.h"
 #include "wmp_maker_test.h"
+#include "wmp_movegen_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
 
@@ -87,6 +88,7 @@ void run_all(void) {
   test_kwg_maker();
   test_wmp_maker();
   test_wmp();
+  test_wmp_movegen();
   test_file_handler();
   test_leave_list();
   test_convert();
@@ -174,6 +176,8 @@ void run_test(const char *subtest) {
     test_wmp();
   } else if (strings_equal(subtest, "wmpmaker")) {
     test_wmp_maker();
+  } else if (strings_equal(subtest, "wmpmovegen")) {
+    test_wmp_movegen();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

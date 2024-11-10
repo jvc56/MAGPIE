@@ -6,7 +6,6 @@
 #include "../../src/ent/wmp.h"
 
 #include "../../src/impl/config.h"
-#include "../../src/impl/gameplay.h"
 #include "../../src/impl/kwg_maker.h"
 #include "../../src/impl/wmp_maker.h"
 
@@ -68,86 +67,6 @@ void write_wmp_files(void) {
   config_destroy(config);
 }
 
-void time_wmp_buffer_writes(Game *game, WMP *wmp) {
-  const LetterDistribution *ld = game_get_ld(game);
-  uint8_t *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
-  int bytes_written = 0;
-  int lookups = 0;
-  int total_bytes_written = 0;
-  const clock_t start = clock();
-  for (int i = 0; i < 1e3; i++) {
-    game_reset(game);
-    draw_to_full_rack(game, 0);
-    Player *player = game_get_player(game, 0);
-
-    Rack *full_rack = player_get_rack(player);
-    BitRack full_bit_rack = bit_rack_create_from_rack(ld, full_rack);
-
-    BitRackPowerSet set;
-    bit_rack_power_set_init(&set, &full_bit_rack);
-    for (int size = 2; size <= RACK_SIZE; size++) {
-      const int offset = bit_rack_get_combination_offset(size);
-      const int count = set.count_by_size[size];
-      for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
-        BitRack *bit_rack = &set.subracks[offset + idx_for_size];
-        bytes_written = wmp_write_words_to_buffer(wmp, bit_rack, size, buffer);
-        assert(bytes_written % size == 0);
-        total_bytes_written += bytes_written;
-        lookups++;
-      }
-    }
-  }
-  const clock_t end = clock();
-  free(buffer);
-  printf("performed %d lookups, %d bytes written in %f seconds\n", lookups,
-         total_bytes_written, (double)(end - start) / CLOCKS_PER_SEC);
-}
-
-void time_wmp_existence_checks(Game *game, WMP *wmp) {
-  const LetterDistribution *ld = game_get_ld(game);
-  int lookups = 0;
-  int num_with_solution = 0;
-  const clock_t start = clock();
-  for (int i = 0; i < 1e3; i++) {
-    game_reset(game);
-    draw_to_full_rack(game, 0);
-    Player *player = game_get_player(game, 0);
-
-    Rack *full_rack = player_get_rack(player);
-    BitRack full_bit_rack = bit_rack_create_from_rack(ld, full_rack);
-
-    BitRackPowerSet set;
-    bit_rack_power_set_init(&set, &full_bit_rack);
-    for (int size = 2; size <= RACK_SIZE; size++) {
-      const int offset = bit_rack_get_combination_offset(size);
-      const int count = set.count_by_size[size];
-      for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
-        BitRack *bit_rack = &set.subracks[offset + idx_for_size];
-        const bool has_solution = wmp_has_word(wmp, bit_rack, size);
-        num_with_solution += has_solution;
-        lookups++;
-      }
-    }
-  }
-  const clock_t end = clock();
-  printf("performed %d lookups, %d having solutions in %f seconds\n",
-         lookups, num_with_solution, (double)(end - start) / CLOCKS_PER_SEC);
-}
-
-void benchmark_csw_wmp(void) {
-  WMP *wmp = wmp_create("testdata", "CSW21");
-  assert(wmp != NULL);
-
-  Config *config = config_create_or_die("set -lex CSW21");
-  Game *game = config_game_create(config);
-  time_wmp_buffer_writes(game, wmp);
-  time_wmp_existence_checks(game, wmp);
-
-  game_destroy(game);
-  config_destroy(config);
-  wmp_destroy(wmp);
-}
-
 void test_short_and_long_words(void) {
   Config *config = config_create_or_die("set -lex CSW21");
   const LetterDistribution *ld = config_get_ld(config);
@@ -190,6 +109,5 @@ void test_short_and_long_words(void) {
 
 void test_wmp(void) {
   write_wmp_files();
-  benchmark_csw_wmp();
   test_short_and_long_words();
 }

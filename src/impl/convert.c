@@ -18,6 +18,7 @@ conversion_status_t convert_from_text_with_dwl(
     const LetterDistribution *ld, conversion_type_t conversion_type,
     const char *input_filename, const char *output_filename,
     DictionaryWordList *strings, ConversionResults *conversion_results) {
+  printf("convert from text with dwl");      
   FILE *input_file = fopen(input_filename, "r");
   if (!input_file) {
     return CONVERT_STATUS_INPUT_FILE_ERROR;
