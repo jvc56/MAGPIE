@@ -82,7 +82,7 @@ void *players_data_get_data(const PlayersData *players_data,
                             int player_index) {
   // Data must be allocated by the caller
   int data_index =
-      players_data_get_player_data_index(players_data_type, player_index);
+      players_data_get_player_data_index(players_data_type, player_index);      
   return players_data->data[data_index];
 }
 

@@ -40,6 +40,8 @@ void player_update(const PlayersData *players_data, Player *player) {
   player->kwg = players_data_get_kwg(players_data, player->index);
   player->klv = players_data_get_klv(players_data, player->index);
   player->wmp = players_data_get_wmp(players_data, player->index);
+  assert (player->wmp == NULL);
+  assert (player->wmp != (WMP *)0xbebebebebebebebe);
 }
 
 Player *player_create(const PlayersData *players_data,
@@ -64,6 +66,7 @@ Player *player_duplicate(const Player *player) {
   new_player->move_record_type = player->move_record_type;
   new_player->kwg = player->kwg;
   new_player->klv = player->klv;
+  new_player->wmp = player->wmp;
   return new_player;
 }
 
