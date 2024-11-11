@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 #include "../def/autoplay_defs.h"
 #include "../def/game_defs.h"
@@ -614,7 +613,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
       malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
   pthread_t *worker_ids =
       malloc_or_die((sizeof(pthread_t)) * (number_of_threads));
-  sleep(0);
+
   for (int thread_index = 0; thread_index < number_of_threads; thread_index++) {
     autoplay_workers[thread_index] = autoplay_worker_create(
         args, autoplay_results, thread_index, shared_data);

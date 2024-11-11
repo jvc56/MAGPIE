@@ -13,6 +13,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -27,9 +28,6 @@
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
 #include "../util/util.h"
-
-#include "../str/game_string.h"
-#include "../str/move_string.h"
 
 #include "wmp_movegen.h"
 
@@ -794,11 +792,7 @@ static inline void shadow_record(MoveGen *gen) {
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
-  // printf("shadow_record: tiles_played %d, num_tiles_played_through %d, "
-  //        "equity %f, score %d\n",
-  //        gen->tiles_played, gen->num_tiles_played_through, equity, score);
   if (equity > gen->highest_shadow_equity) {
-    // printf("shadow_record: new highest equity %f\n", equity);
     gen->highest_shadow_equity = equity;
   }
   if (gen->tiles_played > gen->max_tiles_to_play) {
@@ -1178,7 +1172,6 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
 }
 
 static inline void shadow_start_nonplaythrough(MoveGen *gen) {
-  // printf("shadow_start_nonplaythrough\n");
   const uint64_t cross_set =
       gen_cache_get_cross_set(gen, gen->current_left_col);
   const uint64_t possible_letters_here = cross_set & gen->rack_cross_set;
@@ -1218,9 +1211,8 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
 
 static inline void shadow_start_playthrough(MoveGen *gen,
                                             uint8_t current_letter) {
-  // printf("shadow_start_playthrough\n");
-  //   Traverse the full length of the tiles on the board until hitting an
-  //   empty square
+  // Traverse the full length of the tiles on the board until hitting an
+  // empty square
   for (;;) {
     const uint8_t unblanked_playthrough_ml =
         get_unblanked_machine_letter(current_letter);
@@ -1320,9 +1312,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 }
 
 void shadow_by_orientation(MoveGen *gen) {
-  // printf("shadow_by_orientation, dir %d\n", gen->dir);
   for (int row = 0; row < BOARD_DIM; row++) {
-    // printf("shadow_by_orientation, row %d\n", row);
     gen->current_row_index = row;
     if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
       continue;
@@ -1332,7 +1322,6 @@ void shadow_by_orientation(MoveGen *gen) {
                          gen->current_row_index, gen->dir);
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col)) {
-        // printf("shadow_play_for_anchor, col %d\n", col);
         shadow_play_for_anchor(gen, col);
 
         gen->last_anchor_col = col;
@@ -1499,22 +1488,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible
-      //  for this anchor, highest_possible_equity was invalid.
-      if (better_play_has_been_found(gen, anchor_highest_possible_equity)) {
-        StringBuilder *sb = string_builder_create();
-        string_builder_add_game(sb, game, NULL);
-        printf("play equity %f > highest possible equity %f\n",
-               move_get_equity(gen_get_readonly_best_move(gen)),
-               anchor_highest_possible_equity);
-        printf("better play has been found than should be possible\n%s",
-               string_builder_peek(sb));
-        string_builder_destroy(sb);
-        sb = string_builder_create();
-        string_builder_add_move(sb, game_get_board(game),
-                                gen_get_readonly_best_move(gen), ld);
-        printf("best move: %s\n", string_builder_peek(sb));
-        string_builder_destroy(sb);
-      }
+      // for this anchor, highest_possible_equity was invalid.
       assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
     }
   }

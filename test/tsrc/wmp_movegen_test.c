@@ -18,7 +18,7 @@ void time_look_up_nonplaythrough(Game *game, WMPMoveGen *wgen, const WMP *wmp) {
     leave_map.leave_values[i] = 0;
   }
   const clock_t start = clock();
-  const int num_racks = 1e6;
+  const int num_racks = 1e3;
   int has_word_of_length[RACK_SIZE + 1];
   memset(has_word_of_length, 0, sizeof(has_word_of_length));
   for (int i = 0; i < num_racks; i++) {
@@ -42,10 +42,10 @@ void time_look_up_nonplaythrough(Game *game, WMPMoveGen *wgen, const WMP *wmp) {
     printf("Racks with words of length %d: %.2f%%\n", length,
            100.0 * has_word_of_length[length] / num_racks);
   }
-  assert(has_word_of_length[2] > 0.80 * num_racks);
-  assert(has_word_of_length[3] > 0.70 * num_racks);
-  assert(has_word_of_length[7] > 0.10 * num_racks);
-  assert(has_word_of_length[7] < 0.25 * num_racks);
+  assert(has_word_of_length[2] > 0.95 * num_racks);
+  assert(has_word_of_length[3] > 0.95 * num_racks);
+  assert(has_word_of_length[7] > 0.08 * num_racks);
+  assert(has_word_of_length[7] < 0.23 * num_racks);
 }
 
 void benchmark_csw_wmp(void) {

@@ -515,7 +515,6 @@ Game *game_create(const GameArgs *game_args) {
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->backups_preallocated = false;
-
   return game;
 }
 
