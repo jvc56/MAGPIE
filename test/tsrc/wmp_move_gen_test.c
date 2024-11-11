@@ -5,7 +5,7 @@
 
 #include "../../src/impl/config.h"
 #include "../../src/impl/gameplay.h"
-#include "../../src/impl/wmp_movegen.h"
+#include "../../src/impl/wmp_move_gen.h"
 
 #include "../../src/str/rack_string.h"
 

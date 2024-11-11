@@ -29,7 +29,7 @@
 #include "../ent/static_eval.h"
 #include "../util/util.h"
 
-#include "wmp_movegen.h"
+#include "wmp_move_gen.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
