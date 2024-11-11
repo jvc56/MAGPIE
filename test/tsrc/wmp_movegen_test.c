@@ -66,6 +66,7 @@ void benchmark_csw_wmp(void) {
   WMPMoveGen wgen;
   time_look_up_nonplaythrough(game, &wgen, wmp);
 
+  free(buffer);
   game_destroy(game);
   config_destroy(config);
 }
