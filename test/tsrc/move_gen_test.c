@@ -807,6 +807,7 @@ void movegen_only_one_player_wmp(void) {
   Game *game = config_game_create(config);
   const WMP *wmp1 = player_get_wmp(game_get_player(game, 0));
   assert(wmp1 != NULL);
+  assert(wmp1 != (WMP *)0xbebebebebebebebe);
   const WMP *wmp2 = player_get_wmp(game_get_player(game, 1));
   assert(wmp2 == NULL);
   game_destroy(game);
@@ -819,6 +820,7 @@ void movegen_only_one_player_wmp(void) {
   assert(wmp1 == NULL);
   wmp2 = player_get_wmp(game_get_player(game, 1));
   assert(wmp2 != NULL);
+  assert(wmp2 != (WMP *)0xbebebebebebebebe);
   game_destroy(game);
   config_destroy(config);
 }

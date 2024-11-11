@@ -42,6 +42,10 @@ void time_look_up_nonplaythrough(Game *game, WMPMoveGen *wgen, const WMP *wmp) {
     printf("Racks with words of length %d: %.2f%%\n", length,
            100.0 * has_word_of_length[length] / num_racks);
   }
+  assert(has_word_of_length[2] > 0.80 * num_racks);
+  assert(has_word_of_length[3] > 0.70 * num_racks);
+  assert(has_word_of_length[7] > 0.10 * num_racks);
+  assert(has_word_of_length[7] < 0.25 * num_racks);
 }
 
 void benchmark_csw_wmp(void) {
@@ -60,7 +64,6 @@ void benchmark_csw_wmp(void) {
   assert_word_in_buffer(buffer, "GOATHERD", ld, 1, 8);
 
   WMPMoveGen wgen;
-
   time_look_up_nonplaythrough(game, &wgen, wmp);
 
   game_destroy(game);

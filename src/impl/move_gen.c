@@ -1031,8 +1031,12 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       const uint8_t unblanked_playthrough_ml =
           get_unblanked_machine_letter(next_letter);
       rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
-      wmp_move_gen_add_playthrough_letter(&gen->wmp_move_gen,
-                                          unblanked_playthrough_ml);
+      // Adding a letter here would be unsafe if the LetterDistribution's
+      // alphabet size exceeded BIT_RACK_MAX_ALPHABET_SIZE.
+      if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+        wmp_move_gen_add_playthrough_letter(&gen->wmp_move_gen,
+                                            unblanked_playthrough_ml);
+      }
       gen->shadow_mainword_restricted_score += gen->tile_scores[next_letter];
       gen->current_right_col++;
     }
@@ -1221,8 +1225,10 @@ static inline void shadow_start_playthrough(MoveGen *gen,
     const uint8_t unblanked_playthrough_ml =
         get_unblanked_machine_letter(current_letter);
     rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
-    wmp_move_gen_add_playthrough_letter(&gen->wmp_move_gen,
-                                        unblanked_playthrough_ml);
+    if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+      wmp_move_gen_add_playthrough_letter(&gen->wmp_move_gen,
+                                          unblanked_playthrough_ml);
+    }
     gen->shadow_mainword_restricted_score += gen->tile_scores[current_letter];
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1) {

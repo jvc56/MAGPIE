@@ -21,7 +21,6 @@ struct PlayersData {
   void *data[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
-  bool use_wmp[2];
   char *player_names[2];
 };
 
