@@ -526,13 +526,12 @@ void top_equity_play_recorder_test(void) {
 }
 
 void distinct_lexica_test(bool wmp1) {
-  Config *config = wmp1
-                       ? config_create_or_die(
-                             "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
-                             "-r1 best -r2 best -numplays 1 -wmp1 true")
-                       : config_create_or_die(
-                             "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
-                             "-r1 best -r2 best -numplays 1");
+  Config *config = wmp1 ? config_create_or_die(
+                              "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+                              "-r1 best -r2 best -numplays 1 -wmp1 true")
+                        : config_create_or_die(
+                              "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+                              "-r1 best -r2 best -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
