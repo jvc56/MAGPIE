@@ -78,7 +78,7 @@ typedef struct __attribute__((packed)) WMPEntry {
     uint8_t bucket_or_inline[WMP_INLINE_VALUE_BYTES];
     struct {
       uint8_t nonzero_if_inlined;
-      uint8_t _unused_padding1[7]; // for alignment
+      uint8_t _unused_padding1[WMP_NONINLINE_PADDING_BYTES];
       union {
         struct {
           uint32_t word_start;
@@ -251,8 +251,8 @@ static inline void wmp_load(WMP *wmp, const char *data_paths,
   wmp->name = string_duplicate(wmp_name);
 
   read_header_from_stream(wmp, stream);
-  if (wmp->version < WORD_MAP_EARLIEST_SUPPORTED_VERSION) {
-    log_fatal("wmp->version < WORD_MAP_EARLIEST_SUPPORTED_VERSION\n");
+  if (wmp->version < WMP_EARLIEST_SUPPORTED_VERSION) {
+    log_fatal("wmp->version < WMP_EARLIEST_SUPPORTED_VERSION\n");
   }
   if (wmp->board_dim != BOARD_DIM) {
     log_fatal("wmp->board_dim != BOARD_DIM\n");
@@ -321,34 +321,6 @@ static inline int wmp_entry_write_inlined_blankless_words_to_buffer(
       wmp_entry_number_of_inlined_bytes(entry, word_length);
   memory_copy(buffer, entry->bucket_or_inline, bytes_written);
   return bytes_written;
-}
-
-// Used for both blankless words and double blanks.
-// Single blank entries also store a uint32_t in this position but there's
-// a separate equivalent function since I feel that's semantically different.
-static inline uint32_t wmp_entry_get_word_or_pair_start(const WMPEntry *entry) {
-  uint32_t word_or_pair_start;
-  // 8 bytes empty at the start of the entry
-  // I think this working depends on WMPEntry and these embedded uint32_ts being
-  // 4-byte word aligned.
-  memory_copy(
-      &word_or_pair_start,
-      (uint32_t *)(entry->bucket_or_inline + WORD_MAP_WORD_START_OFFSET_BYTES),
-      sizeof(word_or_pair_start));
-  return word_or_pair_start;
-}
-
-// Used for both blankless words and double blanks.
-static inline uint32_t wmp_entry_get_num_words_or_pairs(const WMPEntry *entry) {
-  uint32_t num_words_or_pairs;
-  // num_words follows 8 bytes of empty space and 4 bytes for word_start
-  // I think this working depends on WMPEntry and these embedded uint32_ts being
-  // 4-byte word aligned.
-  memory_copy(
-      &num_words_or_pairs,
-      (uint32_t *)(entry->bucket_or_inline + WORD_MAP_NUM_WORDS_OFFSET_BYTES),
-      sizeof(num_words_or_pairs));
-  return num_words_or_pairs;
 }
 
 static inline int wmp_entry_write_uninlined_blankless_words_to_buffer(

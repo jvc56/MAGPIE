@@ -37,7 +37,7 @@ void test_make_wmp_from_words(void) {
 
   WMP *wmp = make_wmp_from_words(q_words_2to8, ld);
   assert(wmp != NULL);
-  assert(wmp->version == WORD_MAP_VERSION);
+  assert(wmp->version == WMP_VERSION);
   assert(wmp->board_dim == BOARD_DIM);
   assert(wmp->max_word_lookup_bytes == 8 * 47); // EIQSTU??
 

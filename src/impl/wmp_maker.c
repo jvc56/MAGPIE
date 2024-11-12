@@ -240,18 +240,10 @@ void write_inlined_word_range(const DictionaryWordList *words,
 }
 
 void write_uninlined_word_range(uint32_t word_start, uint32_t num_words,
-                                uint8_t bytes[WMP_INLINE_VALUE_BYTES]) {
-
-  // 8 zero bytes at start of entry designating it is uninlined
-  memset(bytes, 0, sizeof(uint64_t));
-
-  // 4 bytes for word start (index into wfl->word_letters)
-  uint32_t *p_word_start = (uint32_t *)bytes + 2;
-  *p_word_start = word_start;
-
-  // 4 bytes for number of words in anagram set
-  uint32_t *p_num_words = (uint32_t *)bytes + 3;
-  *p_num_words = num_words;
+                                WMPEntry *entry) {
+  memset(&entry->bucket_or_inline, 0, sizeof(entry->bucket_or_inline));
+  entry->word_start = word_start;
+  entry->num_words = num_words;
 }
 
 void write_letters(const MutableWordMapEntry *entry, uint32_t word_start,
@@ -279,8 +271,7 @@ uint32_t write_word_entries(const MutableWordMapBucket *bucket, int word_length,
                                entries[entry_idx].bucket_or_inline);
       continue;
     }
-    write_uninlined_word_range(*word_start, num_words,
-                               entries[entry_idx].bucket_or_inline);
+    write_uninlined_word_range(*word_start, num_words, &entries[entry_idx]);
     write_letters(entry, *word_start, word_length, letters);
     *word_start += num_words * word_length;
   }
@@ -322,8 +313,7 @@ void fill_wfl_blankless(const MutableWordsOfSameLengthMap *mwfl,
 void write_blank_wmp_entry(const MutableBlankMapEntry *entry,
                            WMPEntry *wmp_entry) {
   memset(wmp_entry->bucket_or_inline, 0, sizeof(WMPEntry));
-  memory_copy(wmp_entry->bucket_or_inline + WORD_MAP_BLANK_LETTERS_OFFSET_BYTES,
-              &entry->blank_letters, sizeof(uint32_t));
+  wmp_entry->blank_letters = entry->blank_letters;
   assert(bit_rack_fits_in_12_bytes(&entry->quotient));
   bit_rack_write_12_bytes(&entry->quotient, wmp_entry->quotient);
 }
@@ -373,35 +363,9 @@ void write_double_blank_wmp_entry(const MutableDoubleBlankMapEntry *entry,
                                   WMPEntry *wmp_entry) {
   memset(wmp_entry->bucket_or_inline, 0, sizeof(WMPEntry));
   const uint32_t first_blank_letters = mdbfl_get_first_blank_letters(entry);
-  memory_copy(wmp_entry->bucket_or_inline + WORD_MAP_BLANK_LETTERS_OFFSET_BYTES,
-              &first_blank_letters, sizeof(uint32_t));
+  wmp_entry->first_blank_letters = first_blank_letters;
   assert(bit_rack_fits_in_12_bytes(&entry->quotient));
   bit_rack_write_12_bytes(&entry->quotient, wmp_entry->quotient);
-}
-
-uint32_t write_double_blank_entries(const MutableDoubleBlankMapBucket *bucket,
-                                    WMPEntry *entries, uint8_t *letters,
-                                    uint32_t *pair_start) {
-  for (uint32_t entry_idx = 0; entry_idx < bucket->num_entries; entry_idx++) {
-    const MutableDoubleBlankMapEntry *entry = &bucket->entries[entry_idx];
-    assert(bit_rack_fits_in_12_bytes(&entry->quotient));
-    bit_rack_write_12_bytes(&entry->quotient, entries[entry_idx].quotient);
-    DictionaryWordList *pairs;
-    dictionary_word_list_copy(entry->letter_pairs, &pairs);
-    dictionary_word_list_sort(pairs);
-    const int num_pairs = dictionary_word_list_get_count(pairs);
-    write_uninlined_word_range(*pair_start, num_pairs,
-                               entries[entry_idx].bucket_or_inline);
-    for (int pair_idx = 0; pair_idx < num_pairs; pair_idx++) {
-      const DictionaryWord *pair =
-          dictionary_word_list_get_word(pairs, pair_idx);
-      const uint8_t *pair_letters = dictionary_word_get_word(pair);
-      memory_copy(letters + *pair_start + pair_idx * 2, pair_letters, 2);
-    }
-    dictionary_word_list_destroy(pairs);
-    *pair_start += num_pairs * 2;
-  }
-  return bucket->num_entries;
 }
 
 void fill_wfl_double_blanks(const MutableDoubleBlanksForSameLengthMap *mdbl,
@@ -454,7 +418,7 @@ WMP *make_wmp_from_mutables(const MutableWordMap *word_map,
   assert(double_blank_map != NULL);
   WMP *wmp = malloc_or_die(sizeof(WMP));
   wmp->name = NULL;
-  wmp->version = WORD_MAP_VERSION;
+  wmp->version = WMP_VERSION;
   wmp->board_dim = BOARD_DIM;
   wmp->max_word_lookup_bytes =
       max_word_lookup_result_size(word_map, double_blank_map);
@@ -501,7 +465,7 @@ void mutable_word_map_bucket_insert_word(MutableWordMapBucket *bucket,
 uint32_t compute_min_num_buckets(const LetterDistribution *ld) {
   const BitRack bit_rack = largest_bit_rack_for_ld(ld);
   const uint64_t high64 = bit_rack_get_high_64(&bit_rack);
-  const int num_quotient_bits = WORD_MAP_QUOTIENT_BYTES * 8;
+  const int num_quotient_bits = WMP_QUOTIENT_BYTES * 8;
   const uint64_t max_quotient_high = (1ULL << (num_quotient_bits - 64)) - 1;
   const int divisor = (high64 / max_quotient_high) + 1;
   BitRack actual_quotient;
