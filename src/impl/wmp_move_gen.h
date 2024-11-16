@@ -117,7 +117,7 @@ wmp_move_gen_check_playthrough_full_rack_existence(WMPMoveGen *wmp_move_gen) {
   // position, but only one combination is possible, and the leave is empty.
   const int size = wmp_move_gen->full_rack_size;
   const int idx = subracks_get_combination_offset(size);
-  SubrackInfo *playthrough_info = &wmp_move_gen->nonplaythrough_infos[idx];
+  SubrackInfo *playthrough_info = &wmp_move_gen->playthrough_infos[idx];
   playthrough_info->subrack = wmp_move_gen->player_bit_rack;
   bit_rack_add_bit_rack(&playthrough_info->subrack,
                         &wmp_move_gen->playthrough_bit_rack);
