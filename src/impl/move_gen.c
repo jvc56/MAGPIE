@@ -136,7 +136,15 @@ typedef struct MoveGen {
   const LetterDistribution *ld;
   const KLV *klv;
   const KWG *kwg;
+
   WMPMoveGen wmp_move_gen;
+
+  // Number of playthrough blocks used by the by current move of recursive_gen
+  // given the rightmost column of the move. Set per anchor because it depends
+  // on the anchor column.
+  uint8_t num_playthrough_blocks[BOARD_DIM];
+  uint8_t max_playthrough_blocks;
+
   // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
@@ -404,6 +412,43 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   }
 }
 
+int number_of_playthrough_blocks_in_strip(MoveGen *gen, int leftstrip,
+                                          int rightstrip) {
+  int number_of_playthrough_blocks = 0;
+  bool in_playthrough = false;
+  for (int i = leftstrip; i <= rightstrip; i++) {
+    if (gen->strip[i] == PLAYED_THROUGH_MARKER) {
+      if (!in_playthrough) {
+        in_playthrough = true;
+        number_of_playthrough_blocks++;
+      }
+    } else {
+      in_playthrough = false;
+    }
+  }
+  return number_of_playthrough_blocks;
+}
+
+void print_strip(MoveGen *gen, int current_col, int leftstrip, int rightstrip) {
+  printf("current_col: %d, leftstrip: %d, rightstrip: %d, [", current_col,
+         leftstrip, rightstrip);
+  for (int i = 0; i < BOARD_DIM; i++) {
+    char c = '.';
+    if ((i < leftstrip) || (i > rightstrip)) {
+      c = ' ';
+    } else if (gen->strip[i] != PLAYED_THROUGH_MARKER) {
+      if (get_is_blanked(gen->strip[i])) {
+        c = 'a' + get_unblanked_machine_letter(gen->strip[i]) - 1;
+      } else {
+        c = 'A' + gen->strip[i] - 1;
+      }
+    }
+    printf("%c", c);
+  }
+  printf("] playthrough_blocks: %d\n",
+         number_of_playthrough_blocks_in_strip(gen, leftstrip, rightstrip));
+}
+
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play,
            int main_word_score, int word_multiplier, int cross_score);
@@ -411,6 +456,17 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
                    int rightstrip, bool unique_play, int main_word_score,
                    int word_multiplier, int cross_score) {
+  /*
+    printf("recursive_gen: col: %d, node_index: %d, leftstrip: %d, rightstrip: "
+           "%d, unique_play: %d, main_word_score: %d, word_multiplier: %d, "
+           "cross_score: %d\n",
+           col, node_index, leftstrip, rightstrip, unique_play, main_word_score,
+           word_multiplier, cross_score);
+    print_strip(gen, col, leftstrip, rightstrip);
+  */
+  if (gen->num_playthrough_blocks[rightstrip] > gen->max_playthrough_blocks) {
+    return;
+  }
   const uint8_t current_letter = gen_cache_get_letter(gen, col);
   // If current_letter is nonempty, leftx is the set of letters that could go
   // immediately left of the current block of played tiles.
@@ -447,7 +503,8 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
           rightstrip, unique_play, main_word_score, word_multiplier,
           cross_score);
   } else if (!rack_is_empty(&gen->player_rack) &&
-             ((possible_letters_here & gen->rack_cross_set) != 0)) {
+             ((possible_letters_here & gen->rack_cross_set) != 0) &&
+             (gen->tiles_played < gen->max_tiles_to_play)) {
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
       const uint8_t ml = kwg_node_tile(node);
@@ -492,6 +549,17 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play,
            int main_word_score, int word_multiplier, int cross_score) {
+  /*
+    printf("go_on: current_col: %d, L: %d, new_node_index: %d, accepts: %d, "
+           "leftstrip: %d, rightstrip: %d, unique_play: %d, main_word_score: %d,
+    " "word_multiplier: %d, cross_score: %d\n", current_col, L, new_node_index,
+    accepts, leftstrip, rightstrip, unique_play, main_word_score,
+    word_multiplier, cross_score); print_strip(gen, current_col, leftstrip,
+    rightstrip);
+  */
+  if (gen->num_playthrough_blocks[rightstrip] > gen->max_playthrough_blocks) {
+    return;
+  }
   // Handle incremental scoring
   const uint8_t bonus_square = gen_cache_get_bonus_square(gen, current_col);
   int letter_multiplier = 1;
@@ -535,6 +603,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 
     if (accepts && no_letter_directly_left &&
         gen->tiles_played > !unique_play) {
+      assert(gen->tiles_played <= gen->max_tiles_to_play);
       record_tile_placement_move(gen, leftstrip, rightstrip,
                                  inc_main_word_score, inc_word_multiplier,
                                  inc_cross_scores);
@@ -576,6 +645,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
 
     if (accepts && no_letter_directly_right &&
         gen->tiles_played > !unique_play) {
+      assert(gen->tiles_played <= gen->max_tiles_to_play);
       record_tile_placement_move(gen, leftstrip, rightstrip,
                                  inc_main_word_score, inc_word_multiplier,
                                  inc_cross_scores);
@@ -742,6 +812,8 @@ void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
 }
 
 static inline void shadow_record(MoveGen *gen) {
+  printf("shadow_record current_left_col: %d, current_right_col: %d\n",
+         gen->current_left_col, gen->current_right_col);
   const double *best_leaves = gen->best_leaves;
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
@@ -749,6 +821,7 @@ static inline void shadow_record(MoveGen *gen) {
       const bool has_word = wmp_move_gen_check_playthrough_full_rack_existence(
           &gen->wmp_move_gen);
       if (!has_word) {
+        printf("playthrough full rack word does not exist\n");
         return;
       }
     }
@@ -756,6 +829,8 @@ static inline void shadow_record(MoveGen *gen) {
         (gen->tiles_played >= MINIMUM_WORD_LENGTH)) {
       if (!wmp_move_gen_nonplaythrough_word_of_length_exists(
               &gen->wmp_move_gen, gen->tiles_played)) {
+        printf("nonplaythrough word of length %d does not exist\n",
+               gen->tiles_played);
         return;
       }
       if (gen->number_of_tiles_in_bag > 0) {
@@ -791,6 +866,10 @@ static inline void shadow_record(MoveGen *gen) {
         gen->ld, &gen->opponent_rack, best_leaves,
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
+  }
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
+                                     equity);
   }
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
@@ -1016,12 +1095,14 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
     if (cross_set == TRIVIAL_CROSS_SET) {
       is_unique = true;
     }
+    bool found_playthrough_tile = false;
     while (gen->current_right_col + 1 < BOARD_DIM) {
       const uint8_t next_letter =
           gen_cache_get_letter(gen, gen->current_right_col + 1);
       if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         break;
       }
+      found_playthrough_tile = true;
       const uint8_t unblanked_playthrough_ml =
           get_unblanked_machine_letter(next_letter);
       rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
@@ -1033,6 +1114,11 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       }
       gen->shadow_mainword_restricted_score += gen->tile_scores[next_letter];
       gen->current_right_col++;
+    }
+    if (wmp_move_gen_is_active(&gen->wmp_move_gen) && found_playthrough_tile) {
+      wmp_move_gen_print_playthrough(&gen->wmp_move_gen);
+      printf("incrementing blocks in shadow_play_right\n");
+      wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
     }
 
     if (gen->tiles_played + is_unique >= 2) {
@@ -1233,6 +1319,11 @@ static inline void shadow_start_playthrough(MoveGen *gen,
       break;
     }
   }
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_print_playthrough(&gen->wmp_move_gen);
+    printf("incrementing blocks in shadow_start_playthrough\n");
+    wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
+  }
   playthrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
 }
 
@@ -1300,15 +1391,21 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
   wmp_move_gen_reset_playthrough(&gen->wmp_move_gen);
+  reset_anchors(&gen->wmp_move_gen);
 
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
     return;
   }
-
-  anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
-                         gen->last_anchor_col, gen->dir,
-                         gen->highest_shadow_equity);
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_print_anchors(&gen->wmp_move_gen);
+    wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
+                             gen->last_anchor_col, gen->dir, gen->anchor_list);
+  } else {
+    anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
+                           gen->last_anchor_col, gen->dir,
+                           gen->highest_shadow_equity);
+  }
 }
 
 void shadow_by_orientation(MoveGen *gen) {
@@ -1324,6 +1421,8 @@ void shadow_by_orientation(MoveGen *gen) {
       if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor(gen, col);
 
+        printf("shadow_play_for_anchor: row %d col %d dir %d\n", row, col,
+               gen->dir);
         gen->last_anchor_col = col;
         // The next anchor to search after a playthrough tile should
         // leave a gap of one square so that it will not search backwards
@@ -1348,6 +1447,108 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
   }
   memory_copy(gen->full_rack_descending_tile_scores,
               gen->descending_tile_scores, sizeof(gen->descending_tile_scores));
+}
+
+bool gen_is_left_of_playthrough(MoveGen *gen, int col) {
+  if (col == BOARD_DIM - 1) {
+    return false;
+  }
+  return !gen_cache_is_empty(gen, col + 1);
+}
+
+void calculate_playthrough_blocks(MoveGen *gen) {
+  int col = gen->current_anchor_col;
+  int blocks = 0;
+  bool in_playthrough = false;
+  if (gen_is_left_of_playthrough(gen, col) || !gen_cache_is_empty(gen, col)) {
+    blocks++;
+    in_playthrough = true;
+  }
+  gen->num_playthrough_blocks[col] = blocks;
+  for (col++; col < BOARD_DIM; col++) {
+    if (in_playthrough) {
+      if (gen_cache_is_empty(gen, col)) {
+        in_playthrough = false;
+      }
+    } else if (gen_is_left_of_playthrough(gen, col) ||
+               !gen_cache_is_empty(gen, col)) {
+      blocks++;
+      in_playthrough = true;
+    }
+    gen->num_playthrough_blocks[col] = blocks;
+  }
+  /*
+    printf("num_playthrough_blocks array: ");
+    for (int i = 0; i < BOARD_DIM; i++) {
+      if (i < gen->current_anchor_col) {
+        printf("x");
+      } else {
+        printf("%d", gen->num_playthrough_blocks[i]);
+      }
+    }
+    printf("\n");
+  */
+}
+
+bool wordmap_gen_check_playthrough(MoveGen *gen, int word_idx, int start_col) {
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const uint8_t *word = wmp_move_gen_get_word(wgen, word_idx);
+  for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
+    const int board_col = start_col + letter_idx;
+    assert(board_col < BOARD_DIM);
+    assert(board_col >= 0);
+    if (gen_cache_is_empty(gen, board_col)) {
+      continue;
+    }
+    const uint8_t board_letter = gen_cache_get_letter(gen, board_col);
+    if (board_letter != word[letter_idx]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  printf("wordmap_gen anchor: row %d col %d tiles %d blocks %d last %d dir %d "
+         "equity %f\n",
+         anchor->row, anchor->col, anchor->tiles_to_play,
+         anchor->playthrough_blocks, anchor->last_anchor_col, anchor->dir,
+         anchor->highest_possible_equity);
+  // wmp_move_gen_set_anchor_playthrough returns false if the word length
+  // required for this anchor (tiles_played + num_tiles_played_through) exceeds
+  // BOARD_DIM. It would be better for these anchors never to have been
+  // created, but this prevents us trying to look up words in the WMP that are
+  // longer than BOARD_DIM, which is not supported.
+  if (!wmp_move_gen_set_anchor_playthrough(wgen, anchor, gen->row_cache)) {
+    return;
+  }
+  const int num_subrack_combinations =
+      wmp_move_gen_get_num_subrack_combinations(wgen);
+  printf("leftmost_start_col: %d rightmost_start_col: %d\n",
+         wgen->leftmost_start_col, wgen->rightmost_start_col);
+  for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
+       subrack_idx++) {
+    if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
+      continue;
+    }
+    wmp_move_gen_print_words(wgen);
+    for (int word_idx = 0; word_idx < wmp_move_gen_get_num_words(wgen);
+         word_idx++) {
+      printf("word_idx %d\n", word_idx);
+      for (int start_col = wgen->leftmost_start_col;
+           start_col <= wgen->rightmost_start_col; start_col++) {
+        printf ("start_col %d\n", start_col);
+        if (wordmap_gen_check_playthrough(gen, word_idx, start_col)) {
+          printf("playthrough fits: row %d col %d dir %d word_idx %d start_col %d\n",
+                 anchor->row, anchor->col, anchor->dir, word_idx, start_col);
+        } else {
+          printf("playthrough does not fit: row %d col %d dir %d word_idx %d start_col %d\n",
+                 anchor->row, anchor->col, anchor->dir, word_idx, start_col);
+        }
+      }
+    }
+  }
 }
 
 void generate_moves(Game *game, move_record_t move_record_type,
@@ -1462,6 +1663,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
     rack_reset(&gen->full_player_rack);
   }
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
+    const Anchor *anchor = gen->anchor_list->anchors[i];
     double anchor_highest_possible_equity =
         anchor_get_highest_possible_equity(anchor_list, i);
     if (gen->move_record_type == MOVE_RECORD_BEST &&
@@ -1480,7 +1682,15 @@ void generate_moves(Game *game, move_record_t move_record_type,
       recursive_gen_alpha(gen, gen->current_anchor_col, gen->current_anchor_col,
                           gen->current_anchor_col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+    } else if (wmp_move_gen_should_process_anchor(&gen->wmp_move_gen, anchor)) {
+      wordmap_gen(gen, anchor);
     } else {
+      if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+        wmp_move_gen_reset_playthrough(&gen->wmp_move_gen);
+      }
+      gen->max_tiles_to_play = anchor->tiles_to_play;
+      gen->max_playthrough_blocks = anchor->playthrough_blocks;
+      calculate_playthrough_blocks(gen);
       recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
                     gen->current_anchor_col, gen->current_anchor_col,
                     gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
