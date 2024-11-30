@@ -372,28 +372,43 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
     const uint8_t ml = square_get_letter(&row_cache[col]);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       printf("col: %d, ml: _\n", col);
-      empty_squares_filled++;
+      // Don't fill more empty squares if we're already at our target number.
       if (empty_squares_filled == anchor->tiles_to_play) {
+        break;
+      }
+      empty_squares_filled++;
+      // Only break if both empty squares and playthrough blocks are satisfied.
+      // Even if we've filled all our empty squares, we may need to add the
+      // abutting playthrough block (which would have nothing more played to its
+      // right).
+      if ((empty_squares_filled == anchor->tiles_to_play) &&
+          (blocks == anchor->playthrough_blocks)) {
         break;
       }
       in_playthrough = false;
       continue;
     }
     printf("col: %d, ml: %c\n", col, 'A' + ml - 1);
-    wmp_move_gen->tiles_to_connect_playthrough = empty_squares_filled;
     if (!in_playthrough) {
-      in_playthrough = true;
-      blocks++;
-      if (blocks > anchor->playthrough_blocks) {
+      // Don't consume another playthrough block if we already have all the
+      // ones this anchor should get.
+      if (blocks == anchor->playthrough_blocks) {
+        // Backtrack to the last square that wouldn't touch this playthrough.
+        col -= 2;
         break;
       }
+      in_playthrough = true;
+      blocks++;
+      assert(blocks <= anchor->playthrough_blocks);
     }
+    wmp_move_gen->tiles_to_connect_playthrough = empty_squares_filled;
     last_playthrough_col = col;
     const uint8_t unblanked_ml = get_unblanked_machine_letter(ml);
     wmp_move_gen_add_playthrough_letter(wmp_move_gen, unblanked_ml);
     wmp_move_gen->playthrough_pattern[col] = unblanked_ml;
   }
   int rightmost_end_col = col;
+  /*
   if (col == last_playthrough_col) {
     col++;
   }
@@ -402,7 +417,9 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
       rightmost_end_col = col - 2;
       break;
     }
+    rightmost_end_col = col;
   }
+  */
   printf(" playthrough pattern: [");
   for (int i = 0; i < BOARD_DIM; i++) {
     char c = ' ';
@@ -426,6 +443,7 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
     // do i need wmp_move_gen->tiles_to_play?
     const int num_placed_outside_playthrough =
         anchor->tiles_to_play - wmp_move_gen->tiles_to_connect_playthrough;
+    assert(num_placed_outside_playthrough >= 0);
     int tiles_playable_to_right_of_playthrough =
         rightmost_end_col - last_playthrough_col;
     if (tiles_playable_to_right_of_playthrough >
@@ -448,7 +466,9 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
         pattern_start_col - tiles_needed_to_left;
   } else {
     wmp_move_gen->leftmost_start_col = anchor->col - anchor->tiles_to_play + 1;
-    wmp_move_gen->rightmost_start_col = BOARD_DIM - anchor->tiles_to_play;
+    // wmp_move_gen->rightmost_start_col = BOARD_DIM - anchor->tiles_to_play;
+    wmp_move_gen->rightmost_start_col =
+        rightmost_end_col - anchor->tiles_to_play + 1;
     if (wmp_move_gen->rightmost_start_col > anchor->col) {
       wmp_move_gen->rightmost_start_col = anchor->col;
     }
@@ -498,6 +518,14 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
 static inline int
 wmp_move_gen_get_num_subrack_combinations(const WMPMoveGen *wmp_move_gen) {
   return wmp_move_gen->count_by_size[wmp_move_gen->tiles_to_play];
+}
+
+static inline const BitRack *
+wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
+                                        int idx_for_size) {
+  const int offset =
+      subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
+  return &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size].subrack;
 }
 
 static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
