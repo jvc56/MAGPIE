@@ -256,9 +256,9 @@ static inline void wmp_move_gen_add_playthrough_letter(WMPMoveGen *wmp_move_gen,
 static inline void
 wmp_move_gen_increment_playthrough_blocks(WMPMoveGen *wmp_move_gen) {
   assert(wmp_move_gen->playthrough_blocks < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS);
-  printf("incrementing playthrough blocks from %d to %d\n",
-         wmp_move_gen->playthrough_blocks,
-         wmp_move_gen->playthrough_blocks + 1);
+  //printf("incrementing playthrough blocks from %d to %d\n",
+  //       wmp_move_gen->playthrough_blocks,
+  //       wmp_move_gen->playthrough_blocks + 1);
   wmp_move_gen->playthrough_blocks++;
 }
 
@@ -307,9 +307,9 @@ static inline Anchor *wmp_move_gen_get_anchor(WMPMoveGen *wmp_move_gen,
 static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
                                                     int tiles_played,
                                                     double equity) {
-  printf("wmp_move_gen_maybe_update_anchor blocks: %d tiles_played: %d equity: "
-         "%f\n",
-         wmp_move_gen->playthrough_blocks, tiles_played, equity);
+  //printf("wmp_move_gen_maybe_update_anchor blocks: %d tiles_played: %d equity: "
+  //       "%f\n",
+  //       wmp_move_gen->playthrough_blocks, tiles_played, equity);
   Anchor *anchor = wmp_move_gen_get_anchor(
       wmp_move_gen, wmp_move_gen->playthrough_blocks, tiles_played);
   if (tiles_played > anchor->tiles_to_play) {
@@ -407,19 +407,16 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
     wmp_move_gen_add_playthrough_letter(wmp_move_gen, unblanked_ml);
     wmp_move_gen->playthrough_pattern[col] = unblanked_ml;
   }
+  if ((col != last_playthrough_col) && (col + 1 < BOARD_DIM) &&
+      (square_get_letter(&row_cache[col + 1]) !=
+       ALPHABET_EMPTY_SQUARE_MARKER)) {
+    // If we placed our final tile on an empty square but it turns out the
+    // next column has playthrough tiles, backtrack one column to avoid touching
+    // that playthrough block. We're already at our maximum number of
+    // playthrough blocks.
+    col--;
+  }
   int rightmost_end_col = col;
-  /*
-  if (col == last_playthrough_col) {
-    col++;
-  }
-  for (; col < BOARD_DIM; col++) {
-    if (square_get_letter(&row_cache[col]) != ALPHABET_EMPTY_SQUARE_MARKER) {
-      rightmost_end_col = col - 2;
-      break;
-    }
-    rightmost_end_col = col;
-  }
-  */
   printf(" playthrough pattern: [");
   for (int i = 0; i < BOARD_DIM; i++) {
     char c = ' ';
@@ -643,5 +640,14 @@ wmp_move_gen_print_playthrough(const WMPMoveGen *wmp_move_gen) {
 static inline const uint8_t *
 wmp_move_gen_get_word(const WMPMoveGen *wmp_move_gen, int word_idx) {
   return wmp_move_gen->buffer + word_idx * wmp_move_gen->word_length;
+}
+
+static inline double
+wmp_move_gen_get_leave_value(const WMPMoveGen *wmp_move_gen, int subrack_idx) {
+  const SubrackInfo *subrack_info =
+      &wmp_move_gen->nonplaythrough_infos[subrack_idx];
+  printf("wmp_move_gen_get_leave subrack_idx: %d, leave_value: %f\n",
+         subrack_idx, subrack_info->leave_value);
+  return subrack_info->leave_value;
 }
 #endif

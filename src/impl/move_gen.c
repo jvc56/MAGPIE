@@ -302,6 +302,14 @@ static inline void update_best_move_or_insert_into_movelist(
                         start_row, start_col, tiles_played, dir, strip);
     move_set_equity(current_move,
                     get_move_equity_for_sort_type(gen, current_move, score));
+/*                    
+    printf("recursive_gen comparing moves, current_move: ");
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, NULL, current_move, gen->ld);
+    printf("%s equity %f\n", string_builder_peek(sb),
+           move_get_equity(current_move));
+    string_builder_destroy(sb);
+*/    
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
     }
@@ -818,8 +826,8 @@ void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
 }
 
 static inline void shadow_record(MoveGen *gen) {
-  printf("shadow_record current_left_col: %d, current_right_col: %d\n",
-         gen->current_left_col, gen->current_right_col);
+  //printf("shadow_record current_left_col: %d, current_right_col: %d\n",
+  //      gen->current_left_col, gen->current_right_col);
   const double *best_leaves = gen->best_leaves;
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
@@ -827,7 +835,7 @@ static inline void shadow_record(MoveGen *gen) {
       const bool has_word = wmp_move_gen_check_playthrough_full_rack_existence(
           &gen->wmp_move_gen);
       if (!has_word) {
-        printf("playthrough full rack word does not exist\n");
+        //printf("playthrough full rack word does not exist\n");
         return;
       }
     }
@@ -835,8 +843,8 @@ static inline void shadow_record(MoveGen *gen) {
         (gen->tiles_played >= MINIMUM_WORD_LENGTH)) {
       if (!wmp_move_gen_nonplaythrough_word_of_length_exists(
               &gen->wmp_move_gen, gen->tiles_played)) {
-        printf("nonplaythrough word of length %d does not exist\n",
-               gen->tiles_played);
+        //printf("nonplaythrough word of length %d does not exist\n",
+        //       gen->tiles_played);
         return;
       }
       if (gen->number_of_tiles_in_bag > 0) {
@@ -1122,8 +1130,8 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       gen->current_right_col++;
     }
     if (wmp_move_gen_is_active(&gen->wmp_move_gen) && found_playthrough_tile) {
-      wmp_move_gen_print_playthrough(&gen->wmp_move_gen);
-      printf("incrementing blocks in shadow_play_right\n");
+      //wmp_move_gen_print_playthrough(&gen->wmp_move_gen);
+      //printf("incrementing blocks in shadow_play_right\n");
       wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
     }
 
@@ -1326,8 +1334,8 @@ static inline void shadow_start_playthrough(MoveGen *gen,
     }
   }
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    wmp_move_gen_print_playthrough(&gen->wmp_move_gen);
-    printf("incrementing blocks in shadow_start_playthrough\n");
+    //wmp_move_gen_print_playthrough(&gen->wmp_move_gen);
+    //printf("incrementing blocks in shadow_start_playthrough\n");
     wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
   }
   playthrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
@@ -1426,9 +1434,8 @@ void shadow_by_orientation(MoveGen *gen) {
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor(gen, col);
-
-        printf("shadow_play_for_anchor: row %d col %d dir %d\n", row, col,
-               gen->dir);
+        //printf("shadow_play_for_anchor: row %d col %d dir %d\n", row, col,
+        //       gen->dir);
         gen->last_anchor_col = col;
         // The next anchor to search after a playthrough tile should
         // leave a gap of one square so that it will not search backwards
@@ -1510,44 +1517,51 @@ static inline void set_play_for_record_wmp(MoveGen *gen, Move *move,
 }
 
 static inline double get_move_equity_for_sort_type_wmp(MoveGen *gen, Move *move,
-                                                       int score,
-                                                       double leave) {
+                                                       const Rack *player_leave,
+                                                       double leave_value) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
+    //printf("move score: %d\n", move_get_score(move));
+    //printf("number_of_tiles_played: %d number_of_tiles_in_bag %d\n",
+    //       gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag);
     return static_eval_get_move_equity_with_leave_value(
-        gen->ld, move, &gen->player_rack, &gen->opponent_rack,
+        gen->ld, move, player_leave, &gen->opponent_rack,
         gen->opening_move_penalties, gen->board_number_of_tiles_played,
-        gen->number_of_tiles_in_bag, leave);
+        gen->number_of_tiles_in_bag, leave_value);
   }
-  return score;
+  return move_get_score(move);
 }
 
-static inline void update_best_move_or_insert_into_movelist_wmp(MoveGen *gen,
-                                                                int start_col,
-                                                                int score,
-                                                                double leave) {
+static inline void update_best_move_or_insert_into_movelist_wmp(
+    MoveGen *gen, int start_col, int score, const Rack *player_leave,
+    double leave_value) {
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record_wmp(gen, move, start_col, score);
-    move_list_insert_spare_move(
-        gen->move_list,
-        get_move_equity_for_sort_type_wmp(gen, move, score, leave));
+    move_list_insert_spare_move(gen->move_list,
+                                get_move_equity_for_sort_type_wmp(
+                                    gen, move, player_leave, leave_value));
   } else {
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
-    move_set_equity(current_move, get_move_equity_for_sort_type_wmp(
-                                      gen, current_move, score, leave));
+    move_set_equity(current_move,
+                    get_move_equity_for_sort_type_wmp(
+                        gen, current_move, player_leave, leave_value));
+/*                        
     printf("wmp comparing moves, current_move: ");
     StringBuilder *sb = string_builder_create();
     string_builder_add_move(sb, NULL, current_move, gen->ld);
-    printf("%s\n", string_builder_peek(sb));
+    printf("%s equity %f\n", string_builder_peek(sb),
+           move_get_equity(current_move));
     string_builder_destroy(sb);
+*/    
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
     }
   }
 }
 
-void record_wmp_play(MoveGen *gen, int start_col) {
+void record_wmp_play(MoveGen *gen, int start_col, Rack *player_leave,
+                     double leave_value) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const int bingo_bonus =
       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
@@ -1583,8 +1597,8 @@ void record_wmp_play(MoveGen *gen, int start_col) {
   const int score =
       (played_score_total + playthrough_score_total) * word_multiplier +
       hooked_cross_total + played_cross_total + bingo_bonus;
-  const double leave = 0; // FIXME
-  update_best_move_or_insert_into_movelist_wmp(gen, start_col, score, leave);
+  update_best_move_or_insert_into_movelist_wmp(gen, start_col, score, player_leave,
+                                               leave_value);
 }
 
 void get_blank_possibilities(const MoveGen *gen,
@@ -1594,11 +1608,12 @@ void get_blank_possibilities(const MoveGen *gen,
   const uint8_t ml = gen->playthrough_marked[current_pos];
   assert(ml != PLAYED_THROUGH_MARKER);
   assert(!get_is_blanked(ml));
+  assert(blanks_so_far >= 0);
   const int number_of_ml_in_subrack =
       bit_rack_get_letter(nonplaythrough_tiles, ml);
   const int num_blanks =
       bit_rack_get_letter(nonplaythrough_tiles, BLANK_MACHINE_LETTER);
-  const int blanks_remaining = num_blanks - blanks_so_far;
+  //const int blanks_remaining = num_blanks - blanks_so_far;
   int number_of_ml_before_current_pos = 0;
   for (int pos = 0; pos < current_pos; pos++) {
     if (gen->playthrough_marked[pos] == PLAYED_THROUGH_MARKER) {
@@ -1627,6 +1642,7 @@ void get_blank_possibilities(const MoveGen *gen,
       number_of_ml_before_current_pos + number_of_ml_at_or_after_current_pos;
   assert(total_ml_in_word <= (number_of_ml_in_subrack + num_blanks));
   const int word_ml_in_excess = total_ml_in_word - number_of_ml_in_subrack;
+/*  
   printf("ml: %c\n", 'A' + ml - 1);
   printf("number_of_ml_in_subrack: %d\n", number_of_ml_in_subrack);
   printf("number_of_ml_before_current_pos: %d\n",
@@ -1635,32 +1651,46 @@ void get_blank_possibilities(const MoveGen *gen,
          number_of_ml_at_or_after_current_pos);
   printf("word_ml_in_excess: %d\n", word_ml_in_excess);
   printf("blanks_remaining: %d\n", blanks_remaining);
+*/  
   const int ml_remaining_on_rack =
       number_of_ml_in_subrack - number_of_ml_before_current_pos;
   const int remaining_ml_in_excess =
       number_of_ml_at_or_after_current_pos - ml_remaining_on_rack;
-  printf("ml_remaining_on_rack: %d\n", ml_remaining_on_rack);
-  printf("remaining_ml_in_excess: %d\n", remaining_ml_in_excess);
+  //printf("ml_remaining_on_rack: %d\n", ml_remaining_on_rack);
+  //printf("remaining_ml_in_excess: %d\n", remaining_ml_in_excess);
   assert(remaining_ml_in_excess >= 0);
   *can_be_unblanked =
-      (ml_remaining_on_rack > 0) && (remaining_ml_in_excess < number_of_ml_at_or_after_current_pos);
+      (ml_remaining_on_rack > 0) &&
+      (remaining_ml_in_excess < number_of_ml_at_or_after_current_pos);
   *can_be_blanked = word_ml_in_excess > 0;
 }
 
 void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
                                int blanks_so_far, int pos) {
-  printf("record_wmp_plays_for_word: subrack_idx %d start_col %d blanks_so_far "
-         "%d pos %d\n",
-         subrack_idx, start_col, blanks_so_far, pos);
+  Rack *player_leave = rack_duplicate(&gen->player_rack);
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const BitRack *nonplaythrough_tiles =
       wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx);
+  for (int ml = 0; ml < ld_get_size(gen->ld); ml++) {
+    rack_take_letters(player_leave, ml,
+                      bit_rack_get_letter(nonplaythrough_tiles, ml));
+  }
+  // FIXME
+  //const double leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
+  const double leave_value = 0.0;
+/*  
+  printf("record_wmp_plays_for_word: subrack_idx %d start_col %d blanks_so_far "
+         "%d pos %d\n",
+         subrack_idx, start_col, blanks_so_far, pos);
+*/         
   const int num_blanks =
       bit_rack_get_letter(nonplaythrough_tiles, BLANK_MACHINE_LETTER);
   if (num_blanks == blanks_so_far) {
-    record_wmp_play(gen, start_col);
+    record_wmp_play(gen, start_col, player_leave, leave_value);
+    rack_destroy(player_leave);
     return;
   }
+  rack_destroy(player_leave);
   assert(pos < wgen->word_length);
   const uint8_t ml = gen->playthrough_marked[pos];
   if (ml == PLAYED_THROUGH_MARKER) {
@@ -1672,8 +1702,8 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
   bool can_be_blanked;
   get_blank_possibilities(gen, nonplaythrough_tiles, pos, blanks_so_far,
                           &can_be_unblanked, &can_be_blanked);
-  printf("can_be_unblanked: %d can_be_blanked: %d\n", can_be_unblanked,
-         can_be_blanked);
+  //printf("can_be_unblanked: %d can_be_blanked: %d\n", can_be_unblanked,
+  //       can_be_blanked);
   if (can_be_unblanked) {
     record_wmp_plays_for_word(gen, subrack_idx, start_col, blanks_so_far,
                               pos + 1);
@@ -1698,6 +1728,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
     if (gen_cache_is_empty(gen, board_col)) {
       if (!board_is_letter_allowed_in_cross_set(
               gen_cache_get_cross_set(gen, board_col), word_letter)) {
+/*                
         printf("fails cross set: %c not in ", 'A' + word_letter - 1);
         for (int i = 1; i <= 26; i++) {
           if (board_is_letter_allowed_in_cross_set(
@@ -1707,6 +1738,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
           }
         }
         printf("\n");
+*/        
         return false;
       }
       gen->playthrough_marked[letter_idx] = word_letter;
@@ -1726,13 +1758,15 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
 }
 
 void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
-  assert(anchor->tiles_to_play <= rack_get_total_letters((&gen->player_rack)));
+  assert(anchor->tiles_to_play <= rack_get_total_letters(&gen->player_rack));
   WMPMoveGen *wgen = &gen->wmp_move_gen;
+/*  
   printf("wordmap_gen anchor: row %d col %d tiles %d blocks %d last %d dir %d "
          "equity %f\n",
          anchor->row, anchor->col, anchor->tiles_to_play,
          anchor->playthrough_blocks, anchor->last_anchor_col, anchor->dir,
          anchor->highest_possible_equity);
+*/         
   // wmp_move_gen_set_anchor_playthrough returns false if the word length
   // required for this anchor (tiles_played + num_tiles_played_through)
   // exceeds BOARD_DIM. It would be better for these anchors never to have
@@ -1743,8 +1777,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   }
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
-  printf("leftmost_start_col: %d rightmost_start_col: %d\n",
-         wgen->leftmost_start_col, wgen->rightmost_start_col);
+  //printf("leftmost_start_col: %d rightmost_start_col: %d\n",
+  //       wgen->leftmost_start_col, wgen->rightmost_start_col);
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
