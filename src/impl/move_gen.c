@@ -73,8 +73,6 @@ typedef struct MoveGen {
   Move best_move_and_current_move[2];
   int best_move_index;
 
-  int bag_tiles_remaining;
-
   uint8_t strip[(MOVE_MAX_TILES)];
   uint8_t exchange_strip[(MOVE_MAX_TILES)];
   LeaveMap leave_map;
@@ -959,6 +957,15 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
     // left. Otherwise current_leftx will just be TRIVIAL_CROSS_SET.
     const uint64_t current_leftx =
         gen_cache_get_left_extension_set(gen, gen->current_right_col);
+    const uint64_t nonblank_leftx =
+        current_leftx & ~(1ULL << BLANK_MACHINE_LETTER);
+    const uint64_t nonblank_cross_set = cross_set & ~(1ULL << BLANK_MACHINE_LETTER);
+    // Which *letters* can be played here? Here we do not consider the blank to
+    // be a letter. The letter it is designated must be compatible with both the
+    // cross set and the left extension set.
+    if ((nonblank_cross_set & nonblank_leftx) == 0) {
+      break;
+    }
     const uint64_t possible_letters_here = cross_set & gen->rack_cross_set &
                                            gen->anchor_right_extension_set &
                                            current_leftx;
@@ -1089,6 +1096,8 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
 
     uint64_t possible_tiles_for_shadow_left =
         gen->anchor_left_extension_set & gen->rack_cross_set;
+    const uint64_t nonblank_leftx =
+        gen->anchor_left_extension_set & ~(1ULL << BLANK_MACHINE_LETTER);
     gen->anchor_left_extension_set = TRIVIAL_CROSS_SET;
 
     if (gen->current_left_col == 0 ||
@@ -1103,6 +1112,14 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
     gen->tiles_played++;
     const uint64_t cross_set =
         gen_cache_get_cross_set(gen, gen->current_left_col);
+    const uint64_t nonblank_cross_set =
+        cross_set & ~(1ULL << BLANK_MACHINE_LETTER);
+    // Which *letters* can be played here? Here we do not consider the blank to
+    // be a letter. The letter it is designated must be compatible with both the
+    // cross set and the left extension set.
+    if ((nonblank_cross_set & nonblank_leftx) == 0) {
+      break;
+    }
     possible_tiles_for_shadow_left &= cross_set;
     if (possible_tiles_for_shadow_left == 0) {
       break;
@@ -1262,6 +1279,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   if (gen->max_tiles_to_play == 0) {
     return;
   }
+  // printf("shadow_play_for_anchor row: %d, col: %d, dir: %d "
+  //        "highest_shadow_equity: %f\n",
+  //        gen->current_row_index, col, gen->dir, gen->highest_shadow_equity);
 
   anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
                          gen->last_anchor_col, gen->dir,
