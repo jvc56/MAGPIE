@@ -1279,9 +1279,6 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   if (gen->max_tiles_to_play == 0) {
     return;
   }
-  // printf("shadow_play_for_anchor row: %d, col: %d, dir: %d "
-  //        "highest_shadow_equity: %f\n",
-  //        gen->current_row_index, col, gen->dir, gen->highest_shadow_equity);
 
   anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
                          gen->last_anchor_col, gen->dir,
