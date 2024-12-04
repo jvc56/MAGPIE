@@ -56,6 +56,7 @@ typedef struct WMPMoveGen {
   int tiles_to_play;
   int word_length;
   int num_words;
+  double leave_value;
 } WMPMoveGen;
 
 static inline void reset_anchors(WMPMoveGen *wmp_move_gen) {
@@ -660,14 +661,14 @@ wmp_move_gen_get_word(const WMPMoveGen *wmp_move_gen, int word_idx) {
 }
 
 static inline double
-wmp_move_gen_get_leave_value(const WMPMoveGen *wmp_move_gen, int subrack_idx) {
+wmp_move_gen_get_leave_value(WMPMoveGen *wmp_move_gen, int subrack_idx) {
   const int offset =
       subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
   const SubrackInfo *subrack_info =
       &wmp_move_gen->nonplaythrough_infos[offset + subrack_idx];
-  // printf("wmp_move_gen_get_leave subrack_idx: %d, leave_value: %f\n",
-  //        subrack_idx, subrack_info->leave_value);
-  // assert(subrack_info->leave_value == 0.0);
-  return subrack_info->leave_value;
+  //printf("wmp_move_gen_get_leave subrack_idx: %d, leave_value: %f\n",
+  //       subrack_idx, subrack_info->leave_value);
+  wmp_move_gen->leave_value = subrack_info->leave_value;
+  return wmp_move_gen->leave_value;
 }
 #endif
