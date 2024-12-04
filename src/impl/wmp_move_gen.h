@@ -2,6 +2,7 @@
 #define WMP_MOVEGEN_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #include "../def/kwg_defs.h"
@@ -14,7 +15,7 @@
 #include "../ent/wmp.h"
 
 #define MAX_POSSIBLE_PLAYTHROUGH_BLOCKS ((BOARD_DIM / 2) + 1)
-#define MIN_TILES_FOR_WMP_GEN 7
+#define MIN_TILES_FOR_WMP_GEN 2
 #define MAX_WMP_MOVE_GEN_ANCHORS                                               \
   ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS)
 
@@ -58,11 +59,18 @@ typedef struct WMPMoveGen {
 } WMPMoveGen;
 
 static inline void reset_anchors(WMPMoveGen *wmp_move_gen) {
+  Anchor initial_anchor = {
+      .row = 0,
+      .col = 0,
+      .last_anchor_col = 0,
+      .dir = 0,
+      .tiles_to_play = 0,
+      .playthrough_blocks = 0,
+      .highest_possible_score = 0,
+      .highest_possible_equity = INITIAL_TOP_MOVE_EQUITY,
+  };
   for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    Anchor *anchor = &wmp_move_gen->anchors[i];
-    anchor->tiles_to_play = 0;
-    anchor->playthrough_blocks = 0;
-    anchor->highest_possible_equity = INITIAL_TOP_MOVE_EQUITY;
+    memory_copy(&wmp_move_gen->anchors[i], &initial_anchor, sizeof(Anchor));
   }
 }
 
@@ -128,47 +136,47 @@ wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
 
 static inline void playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
                                              int subrack_size) {
-  printf("playthrough_subracks_init\n");
+  // printf("playthrough_subracks_init\n");
   const int offset = subracks_get_combination_offset(subrack_size);
   const int count = wmp_move_gen->count_by_size[subrack_size];
-  printf("subrack_size: %d offset: %d, count: %d\n", subrack_size, offset,
-         count);
+  // printf("subrack_size: %d offset: %d, count: %d\n", subrack_size, offset,
+  //        count);
   for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
-    printf("idx: %d\n", offset + idx_for_size);
+    // printf("idx: %d\n", offset + idx_for_size);
     const SubrackInfo *nonplaythrough_subrack_info =
         &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size];
-    printf("nonplaythrough ");
-    for (int i = 0; i < 32; i++) {
-      for (int j = 0;
-           j < bit_rack_get_letter(&nonplaythrough_subrack_info->subrack, i);
-           j++) {
-        char c = '?';
-        if (i > 0) {
-          c = 'A' + i - 1;
+    /**
+        printf("nonplaythrough ");
+        for (int i = 0; i < 32; i++) {
+          for (int j = 0;
+               j < bit_rack_get_letter(&nonplaythrough_subrack_info->subrack,
+       i); j++) { char c = '?'; if (i > 0) { c = 'A' + i - 1;
+            }
+            printf("%c", c);
+          }
         }
-        printf("%c", c);
-      }
-    }
-    printf("\n");
-
+        printf("\n");
+    */
     SubrackInfo *playthrough_subrack_info =
         &wmp_move_gen->playthrough_infos[offset + idx_for_size];
     playthrough_subrack_info->subrack = nonplaythrough_subrack_info->subrack;
     bit_rack_add_bit_rack(&playthrough_subrack_info->subrack,
                           &wmp_move_gen->playthrough_bit_rack);
-    printf("playthrough ");
-    for (int i = 0; i < 32; i++) {
-      for (int j = 0;
-           j < bit_rack_get_letter(&playthrough_subrack_info->subrack, i);
-           j++) {
-        char c = '?';
-        if (i > 0) {
-          c = 'A' + i - 1;
+    /*
+        printf("playthrough ");
+        for (int i = 0; i < 32; i++) {
+          for (int j = 0;
+               j < bit_rack_get_letter(&playthrough_subrack_info->subrack, i);
+               j++) {
+            char c = '?';
+            if (i > 0) {
+              c = 'A' + i - 1;
+            }
+            printf("%c", c);
+          }
         }
-        printf("%c", c);
-      }
-    }
-    printf("\n");
+        printf("\n");
+    */
   }
   wmp_move_gen->tiles_to_play = subrack_size;
 }
@@ -191,7 +199,7 @@ wmp_move_gen_check_playthrough_full_rack_existence(WMPMoveGen *wmp_move_gen) {
 
 static inline void wmp_move_gen_check_nonplaythrough_existence(
     WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map) {
-  printf("wmp_move_gen_check_nonplaythrough_existence\n");
+  // printf("wmp_move_gen_check_nonplaythrough_existence\n");
   leave_map_set_current_index(leave_map,
                               (1 << wmp_move_gen->full_rack_size) - 1);
   memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
@@ -208,17 +216,16 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
     for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
       SubrackInfo *subrack_info =
           &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size];
-      for (int i = 0; i < 32; i++) {
-        for (int j = 0; j < bit_rack_get_letter(&subrack_info->subrack, i);
-             j++) {
-          char c = '?';
-          if (i > 0) {
-            c = 'A' + i - 1;
-          }
-          printf("%c", c);
-        }
-      }
-      printf("\n");
+      /*
+            for (int i = 0; i < 32; i++) {
+              for (int j = 0; j < bit_rack_get_letter(&subrack_info->subrack,
+         i); j++) { char c = '?'; if (i > 0) { c = 'A' + i - 1;
+                }
+                printf("%c", c);
+              }
+            }
+            printf("\n");
+      */
       subrack_info->wmp_entry =
           wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
       if (subrack_info->wmp_entry == NULL) {
@@ -226,7 +233,7 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
       }
       wmp_move_gen->nonplaythrough_has_word_of_length[size] = true;
       if (!check_leaves) {
-        break;
+        continue;
       }
       if (subrack_info->leave_value >
           wmp_move_gen->nonplaythrough_best_leave_values[leave_size]) {
@@ -306,6 +313,7 @@ static inline Anchor *wmp_move_gen_get_anchor(WMPMoveGen *wmp_move_gen,
 
 static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
                                                     int tiles_played,
+                                                    uint16_t score,
                                                     double equity) {
   //printf("wmp_move_gen_maybe_update_anchor blocks: %d tiles_played: %d equity: "
   //       "%f\n",
@@ -317,6 +325,9 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
   }
   if (wmp_move_gen->playthrough_blocks > anchor->playthrough_blocks) {
     anchor->playthrough_blocks = wmp_move_gen->playthrough_blocks;
+  }
+  if (score > anchor->highest_possible_score) {
+    anchor->highest_possible_score = score;
   }
   if (equity > anchor->highest_possible_equity) {
     anchor->highest_possible_equity = equity;
@@ -347,10 +358,11 @@ static inline bool
 wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
                                     const Anchor *anchor,
                                     Square row_cache[BOARD_DIM]) {
-  printf("wmp_move_gen_set_anchor_playthrough, anchor: row %d col %d tiles %d "
-         "blocks %d\n",
-         anchor->row, anchor->col, anchor->tiles_to_play,
-         anchor->playthrough_blocks);
+  /*
+    printf("wmp_move_gen_set_anchor_playthrough, anchor: row %d col %d tiles %d
+    " "blocks %d\n", anchor->row, anchor->col, anchor->tiles_to_play,
+           anchor->playthrough_blocks);
+  */
   wmp_move_gen_reset_playthrough(wmp_move_gen);
   memset(wmp_move_gen->playthrough_pattern, ALPHABET_EMPTY_SQUARE_MARKER,
          sizeof(wmp_move_gen->playthrough_pattern));
@@ -371,8 +383,8 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
   for (col = pattern_start_col; col < BOARD_DIM; col++) {
     const uint8_t ml = square_get_letter(&row_cache[col]);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
-      printf("col: %d, ml: _\n", col);
-      // Don't fill more empty squares if we're already at our target number.
+      // printf("col: %d, ml: _\n", col);
+      //  Don't fill more empty squares if we're already at our target number.
       if (empty_squares_filled == anchor->tiles_to_play) {
         break;
       }
@@ -388,7 +400,7 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
       in_playthrough = false;
       continue;
     }
-    printf("col: %d, ml: %c\n", col, 'A' + ml - 1);
+    // printf("col: %d, ml: %c\n", col, 'A' + ml - 1);
     if (!in_playthrough) {
       // Don't consume another playthrough block if we already have all the
       // ones this anchor should get.
@@ -417,16 +429,17 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
     col--;
   }
   int rightmost_end_col = col;
-  printf(" playthrough pattern: [");
-  for (int i = 0; i < BOARD_DIM; i++) {
-    char c = ' ';
-    if (wmp_move_gen->playthrough_pattern[i] != ALPHABET_EMPTY_SQUARE_MARKER) {
-      c = wmp_move_gen->playthrough_pattern[i] - 1 + 'A';
+  /*
+    printf(" playthrough pattern: [");
+    for (int i = 0; i < BOARD_DIM; i++) {
+      char c = ' ';
+      if (wmp_move_gen->playthrough_pattern[i] != ALPHABET_EMPTY_SQUARE_MARKER)
+    { c = wmp_move_gen->playthrough_pattern[i] - 1 + 'A';
+      }
+      printf("%c", c);
     }
-    printf("%c", c);
-  }
-  printf("]\n");
-
+    printf("]\n");
+  */
   if (rightmost_end_col == BOARD_DIM) {
     rightmost_end_col = BOARD_DIM - 1;
   }
@@ -435,7 +448,7 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
     assert(rightmost_end_col >= last_playthrough_col);
   }
 
-  printf("last_playthrough_col: %d\n", last_playthrough_col);
+  // printf("last_playthrough_col: %d\n", last_playthrough_col);
   if (last_playthrough_col != -1) {
     // do i need wmp_move_gen->tiles_to_play?
     const int num_placed_outside_playthrough =
@@ -447,18 +460,18 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
         num_placed_outside_playthrough) {
       tiles_playable_to_right_of_playthrough = num_placed_outside_playthrough;
     }
-    printf("num_placed_outside_playthrough: %d\n",
-           num_placed_outside_playthrough);
+    // printf("num_placed_outside_playthrough: %d\n",
+    //        num_placed_outside_playthrough);
     assert(num_placed_outside_playthrough >= 0);
-    printf("tiles_playable_to_right_of_playthrough: %d\n",
-           tiles_playable_to_right_of_playthrough);
+    // printf("tiles_playable_to_right_of_playthrough: %d\n",
+    //       tiles_playable_to_right_of_playthrough);
     assert(tiles_playable_to_right_of_playthrough >= 0);
     wmp_move_gen->leftmost_start_col =
         pattern_start_col - num_placed_outside_playthrough;
     const int tiles_needed_to_left =
         num_placed_outside_playthrough - tiles_playable_to_right_of_playthrough;
     assert(tiles_needed_to_left >= 0);
-    printf("tiles_needed_to_left: %d\n", tiles_needed_to_left);
+    // printf("tiles_needed_to_left: %d\n", tiles_needed_to_left);
     wmp_move_gen->rightmost_start_col =
         pattern_start_col - tiles_needed_to_left;
   } else {
@@ -478,32 +491,32 @@ wmp_move_gen_set_anchor_playthrough(WMPMoveGen *wmp_move_gen,
     wmp_move_gen->leftmost_start_col = anchor->last_anchor_col + 1;
   }
 
-  printf("playthrough tiles: ");
-  for (int i = 0; i < 32; i++) {
-    for (int j = 0;
-         j < bit_rack_get_letter(&wmp_move_gen->playthrough_bit_rack, i); j++) {
-      char c = '?';
-      if (i > 0) {
-        c = 'A' + i - 1;
+  /*
+    printf("playthrough tiles: ");
+    for (int i = 0; i < 32; i++) {
+      for (int j = 0;
+           j < bit_rack_get_letter(&wmp_move_gen->playthrough_bit_rack, i); j++)
+    { char c = '?'; if (i > 0) { c = 'A' + i - 1;
+        }
+        printf("%c", c);
+      }
+    }
+    printf(" playthrough pattern: [");
+    for (int i = 0; i < BOARD_DIM; i++) {
+      char c = ' ';
+      if (wmp_move_gen->playthrough_pattern[i] != ALPHABET_EMPTY_SQUARE_MARKER)
+    { c = wmp_move_gen->playthrough_pattern[i] - 1 + 'A';
       }
       printf("%c", c);
     }
-  }
-  printf(" playthrough pattern: [");
-  for (int i = 0; i < BOARD_DIM; i++) {
-    char c = ' ';
-    if (wmp_move_gen->playthrough_pattern[i] != ALPHABET_EMPTY_SQUARE_MARKER) {
-      c = wmp_move_gen->playthrough_pattern[i] - 1 + 'A';
-    }
-    printf("%c", c);
-  }
-  printf("] rightmost_end_col: %d tiles_to_connect_playthrough: %d\n",
-         rightmost_end_col, wmp_move_gen->tiles_to_connect_playthrough);
-  printf("leftmost_start_col: %d rightmost_start_col: %d\n",
-         wmp_move_gen->leftmost_start_col, wmp_move_gen->rightmost_start_col);
+    printf("] rightmost_end_col: %d tiles_to_connect_playthrough: %d\n",
+           rightmost_end_col, wmp_move_gen->tiles_to_connect_playthrough);
+    printf("leftmost_start_col: %d rightmost_start_col: %d\n",
+           wmp_move_gen->leftmost_start_col, wmp_move_gen->rightmost_start_col);
+  */
   wmp_move_gen->word_length =
       wmp_move_gen->num_tiles_played_through + anchor->tiles_to_play;
-  printf("wmp_move_gen->word_length: %d\n", wmp_move_gen->word_length);
+  // printf("wmp_move_gen->word_length: %d\n", wmp_move_gen->word_length);
   assert(wmp_move_gen->word_length > 0);
   if (wmp_move_gen->word_length > BOARD_DIM) {
     return false;
@@ -527,36 +540,36 @@ wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
 
 static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
                                                   int idx_for_size) {
-  printf("wmp_move_gen_get_subrack_words\n");
+  //printf("wmp_move_gen_get_subrack_words\n");
   /*
-    for (int size = 1; size <= wmp_move_gen->full_rack_size; size++) {
-      const int offset = subracks_get_combination_offset(size);
-      const int count = wmp_move_gen->count_by_size[size];
-      for (int idx = 0; idx < count; idx++) {
-        SubrackInfo *subrack_info =
-            &wmp_move_gen->nonplaythrough_infos[offset + idx];
-        for (int i = 0; i < 32; i++) {
-          for (int j = 0; j < bit_rack_get_letter(&subrack_info->subrack, i);
-               j++) {
-            char c = '?';
-            if (i > 0) {
-              c = 'A' + i - 1;
+      for (int size = 1; size <= wmp_move_gen->full_rack_size; size++) {
+        const int offset = subracks_get_combination_offset(size);
+        const int count = wmp_move_gen->count_by_size[size];
+        for (int idx = 0; idx < count; idx++) {
+          SubrackInfo *subrack_info =
+              &wmp_move_gen->nonplaythrough_infos[offset + idx];
+          for (int i = 0; i < 32; i++) {
+            for (int j = 0; j < bit_rack_get_letter(&subrack_info->subrack, i);
+                 j++) {
+              char c = '?';
+              if (i > 0) {
+                c = 'A' + i - 1;
+              }
+              printf("%c", c);
             }
-            printf("%c", c);
           }
+          printf("\n");
         }
-        printf("\n");
       }
-    }
   */
-  printf("getting subrack words for size %d (idx %d)\n",
-         wmp_move_gen->tiles_to_play, idx_for_size);
+  //printf("getting subrack words for size %d (idx %d)\n",
+  //       wmp_move_gen->tiles_to_play, idx_for_size);
   const int offset =
       subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
   const int subrack_idx = offset + idx_for_size;
-  printf("subrack_idx: %d\n", subrack_idx);
+  // printf("subrack_idx: %d\n", subrack_idx);
   const bool is_playthrough = wmp_move_gen->num_tiles_played_through > 0;
-  printf("is_playthrough: %d\n", is_playthrough);
+  // printf("is_playthrough: %d\n", is_playthrough);
   SubrackInfo *subrack_info =
       is_playthrough ? &wmp_move_gen->playthrough_infos[subrack_idx]
                      : &wmp_move_gen->nonplaythrough_infos[subrack_idx];
@@ -565,6 +578,8 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
     subrack_info->wmp_entry = wmp_get_word_entry(
         wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
   }
+
+/*
   printf("subrack_info's bitrack: ");
   for (int i = 0; i < 32; i++) {
     for (int j = 0; j < bit_rack_get_letter(&subrack_info->subrack, i); j++) {
@@ -576,6 +591,8 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
     }
   }
   printf("\n");
+*/
+
   if (subrack_info->wmp_entry == NULL) {
     return false;
   }
@@ -644,10 +661,13 @@ wmp_move_gen_get_word(const WMPMoveGen *wmp_move_gen, int word_idx) {
 
 static inline double
 wmp_move_gen_get_leave_value(const WMPMoveGen *wmp_move_gen, int subrack_idx) {
+  const int offset =
+      subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
   const SubrackInfo *subrack_info =
-      &wmp_move_gen->nonplaythrough_infos[subrack_idx];
-  printf("wmp_move_gen_get_leave subrack_idx: %d, leave_value: %f\n",
-         subrack_idx, subrack_info->leave_value);
+      &wmp_move_gen->nonplaythrough_infos[offset + subrack_idx];
+  // printf("wmp_move_gen_get_leave subrack_idx: %d, leave_value: %f\n",
+  //        subrack_idx, subrack_info->leave_value);
+  // assert(subrack_info->leave_value == 0.0);
   return subrack_info->leave_value;
 }
 #endif

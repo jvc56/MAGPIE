@@ -1,6 +1,7 @@
 #ifndef ANCHOR_H
 #define ANCHOR_H
 
+#include <_types/_uint16_t.h>
 #include <_types/_uint8_t.h>
 #include <stdlib.h>
 
@@ -29,6 +30,8 @@ typedef struct Anchor {
   // permitted.
   uint8_t tiles_to_play;
   uint8_t playthrough_blocks;
+
+  uint16_t highest_possible_score;
 
   // The highest possibly equity
   // that can be achieved from this
@@ -96,12 +99,14 @@ static inline int anchor_list_get_count(const AnchorList *al) {
 
 static inline void anchor_list_add_anchor(AnchorList *al, int row, int col,
                                           int last_anchor_col, int dir,
+                                          uint16_t highest_possible_score,
                                           double highest_possible_equity) {
   int i = al->count;
   al->anchors[i]->row = row;
   al->anchors[i]->col = col;
   al->anchors[i]->last_anchor_col = last_anchor_col;
   al->anchors[i]->dir = dir;
+  al->anchors[i]->highest_possible_score = highest_possible_score;
   al->anchors[i]->highest_possible_equity = highest_possible_equity;
 
   // Hackily setting these to maximums just to test recursive_gen respecting
@@ -117,6 +122,7 @@ static inline void anchor_list_add_anchor_copy(AnchorList *al, const Anchor *anc
   al->anchors[i]->col = anchor->col;
   al->anchors[i]->last_anchor_col = anchor->last_anchor_col;
   al->anchors[i]->dir = anchor->dir;
+  al->anchors[i]->highest_possible_score = anchor->highest_possible_score;
   al->anchors[i]->highest_possible_equity = anchor->highest_possible_equity;
   al->anchors[i]->tiles_to_play = anchor->tiles_to_play;
   al->anchors[i]->playthrough_blocks = anchor->playthrough_blocks;

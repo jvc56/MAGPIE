@@ -316,13 +316,12 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     log_fatal("game runner attempted to play a move when the game is over\n");
   }
   Game *game = game_runner->game;
-
+/*
   StringBuilder *sb = string_builder_create();
   string_builder_add_game(sb, game, NULL);
   printf("%s\n", string_builder_peek(sb));
   string_builder_destroy(sb);
-  sleep(0);
-
+*/
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
@@ -623,6 +622,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
       args->game_args->ld, args->data_paths, klv, number_of_threads, num_gens,
       min_leave_targets);
 
+  sleep(0);
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
   pthread_t *worker_ids =
