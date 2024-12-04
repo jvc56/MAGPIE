@@ -61,8 +61,17 @@ static inline int rack_get_letter(const Rack *rack, uint8_t machine_letter) {
   return rack->array[machine_letter];
 }
 
+static inline void rack_set_letter(Rack *rack, uint8_t machine_letter,
+                                   int count) {
+  rack->array[machine_letter] = count;
+}
+
 static inline int rack_get_total_letters(const Rack *rack) {
   return rack->number_of_letters;
+}
+
+static inline void rack_set_total_letters(Rack *rack, int total_letters) {
+  rack->number_of_letters = total_letters;
 }
 
 static inline bool rack_is_empty(const Rack *rack) {
