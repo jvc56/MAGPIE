@@ -442,7 +442,8 @@ static inline ld_t ld_get_type_from_ld_name(const char *ld_name) {
 // Use the lexicon name in combination with the constant
 // BOARD_DIM to determine a default letter distribution name.
 static inline char *ld_get_default_name_from_type(ld_t ld_type) {
-  if (BOARD_DIM != DEFAULT_BOARD_DIM && BOARD_DIM != DEFAULT_SUPER_BOARD_DIM) {
+  if ((bool)(BOARD_DIM != DEFAULT_BOARD_DIM) &&
+      (bool)(BOARD_DIM != DEFAULT_SUPER_BOARD_DIM)) {
     log_fatal("Default letter distribution not supported with a board "
               "dimension of %d. Only %d and %d have "
               "default values.",
