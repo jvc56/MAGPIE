@@ -28,6 +28,7 @@ int main(void) {
 
   MoveList *move_list = move_list_create(10000);
   WidgetLayout widget_layout;
+  //SetConfigFlags(FLAG_WINDOW_RESIZABLE);
   InitWindow(initial_window_width, initial_window_height, "maggi");
   int codepoints[512] = {0};
   for (int i = 0; i < 96; i++) {
@@ -40,7 +41,7 @@ int main(void) {
   int frame_count = 0;
   SetTargetFPS(60);
   while (!WindowShouldClose()) {
-    if (frame_count % 6 == 5) {
+    if (frame_count % 30 == 29) {
       /*
             StringBuilder *sb = string_builder_create();
             string_builder_add_game(sb, game, NULL);

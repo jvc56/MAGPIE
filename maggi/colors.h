@@ -19,7 +19,7 @@
 
 #define GRAY40PERCENT                                                          \
   CLITERAL(Color) { 0.40 * 255, 0.40 * 255, 0.40 * 255, 255 }
-  
+
 // For tiles
 #define GOLDEN                                                                 \
   CLITERAL(Color){ 240, 220, 180, 255 }
@@ -32,7 +32,7 @@
 #define PREMIUM_DARKBLUE                                                       \
   CLITERAL(Color) { 40, 80, 140, 255 }
 #define PREMIUM_PINK                                                           \
-  CLITERAL(Color) { 140, 80, 80, 255 }
+  CLITERAL(Color) { 155, 80, 80, 255 }
 #define PREMIUM_LIGHTBLUE                                                      \
   CLITERAL(Color) { 120, 140, 180, 255 }
 

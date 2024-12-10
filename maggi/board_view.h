@@ -2,6 +2,7 @@
 #define MAGGI_BOARD_VIEW_H
 
 #include "../src/ent/board.h"
+
 #include "widget_layout.h"
 
 void draw_board_view(const WidgetLayout *widget_layout, const Font *tile_font,
