@@ -256,55 +256,55 @@ bool WindowShouldClose(void)
 // Toggle fullscreen mode
 void ToggleFullscreen(void)
 {
-    TRACELOG(LOG_WARNING, "ToggleFullscreen() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "ToggleFullscreen() not available on target platform");
 }
 
 // Toggle borderless windowed mode
 void ToggleBorderlessWindowed(void)
 {
-    TRACELOG(LOG_WARNING, "ToggleBorderlessWindowed() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "ToggleBorderlessWindowed() not available on target platform");
 }
 
 // Set window state: maximized, if resizable
 void MaximizeWindow(void)
 {
-    TRACELOG(LOG_WARNING, "MaximizeWindow() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "MaximizeWindow() not available on target platform");
 }
 
 // Set window state: minimized
 void MinimizeWindow(void)
 {
-    TRACELOG(LOG_WARNING, "MinimizeWindow() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "MinimizeWindow() not available on target platform");
 }
 
 // Set window state: not minimized/maximized
 void RestoreWindow(void)
 {
-    TRACELOG(LOG_WARNING, "RestoreWindow() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "RestoreWindow() not available on target platform");
 }
 
 // Set window configuration state using flags
 void SetWindowState(unsigned int flags)
 {
-    TRACELOG(LOG_WARNING, "SetWindowState() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowState() not available on target platform");
 }
 
 // Clear window configuration state flags
 void ClearWindowState(unsigned int flags)
 {
-    TRACELOG(LOG_WARNING, "ClearWindowState() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "ClearWindowState() not available on target platform");
 }
 
 // Set icon for window
 void SetWindowIcon(Image image)
 {
-    TRACELOG(LOG_WARNING, "SetWindowIcon() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowIcon() not available on target platform");
 }
 
 // Set icon for window
 void SetWindowIcons(Image *images, int count)
 {
-    TRACELOG(LOG_WARNING, "SetWindowIcons() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowIcons() not available on target platform");
 }
 
 // Set title for window
@@ -316,13 +316,13 @@ void SetWindowTitle(const char *title)
 // Set window position on screen (windowed mode)
 void SetWindowPosition(int x, int y)
 {
-    TRACELOG(LOG_WARNING, "SetWindowPosition() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowPosition() not available on target platform");
 }
 
 // Set monitor for the current window
 void SetWindowMonitor(int monitor)
 {
-    TRACELOG(LOG_WARNING, "SetWindowMonitor() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowMonitor() not available on target platform");
 }
 
 // Set window minimum dimensions (FLAG_WINDOW_RESIZABLE)
@@ -342,46 +342,46 @@ void SetWindowMaxSize(int width, int height)
 // Set window dimensions
 void SetWindowSize(int width, int height)
 {
-    TRACELOG(LOG_WARNING, "SetWindowSize() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowSize() not available on target platform");
 }
 
 // Set window opacity, value opacity is between 0.0 and 1.0
 void SetWindowOpacity(float opacity)
 {
-    TRACELOG(LOG_WARNING, "SetWindowOpacity() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowOpacity() not available on target platform");
 }
 
 // Set window focused
 void SetWindowFocused(void)
 {
-    TRACELOG(LOG_WARNING, "SetWindowFocused() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowFocused() not available on target platform");
 }
 
 // Get native window handle
 void *GetWindowHandle(void)
 {
-    TRACELOG(LOG_WARNING, "GetWindowHandle() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetWindowHandle() not implemented on target platform");
     return NULL;
 }
 
 // Get number of monitors
 int GetMonitorCount(void)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorCount() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorCount() not implemented on target platform");
     return 1;
 }
 
 // Get number of monitors
 int GetCurrentMonitor(void)
 {
-    TRACELOG(LOG_WARNING, "GetCurrentMonitor() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetCurrentMonitor() not implemented on target platform");
     return 0;
 }
 
 // Get selected monitor position
 Vector2 GetMonitorPosition(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorPosition() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorPosition() not implemented on target platform");
     return (Vector2){ 0, 0 };
 }
 
@@ -392,7 +392,7 @@ int GetMonitorWidth(int monitor)
 
     if (monitor != 0)
     {
-        TRACELOG(LOG_WARNING, "GetMonitorWidth() implemented for first monitor only");
+        TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorWidth() implemented for first monitor only");
     }
     else if ((platform.connector) && (platform.modeIndex >= 0))
     {
@@ -409,7 +409,7 @@ int GetMonitorHeight(int monitor)
 
     if (monitor != 0)
     {
-        TRACELOG(LOG_WARNING, "GetMonitorHeight() implemented for first monitor only");
+        TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorHeight() implemented for first monitor only");
     }
     else if ((platform.connector) && (platform.modeIndex >= 0))
     {
@@ -426,7 +426,7 @@ int GetMonitorPhysicalWidth(int monitor)
 
     if (monitor != 0)
     {
-        TRACELOG(LOG_WARNING, "GetMonitorPhysicalWidth() implemented for first monitor only");
+        TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorPhysicalWidth() implemented for first monitor only");
     }
     else if ((platform.connector) && (platform.modeIndex >= 0))
     {
@@ -443,7 +443,7 @@ int GetMonitorPhysicalHeight(int monitor)
 
     if (monitor != 0)
     {
-        TRACELOG(LOG_WARNING, "GetMonitorPhysicalHeight() implemented for first monitor only");
+        TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorPhysicalHeight() implemented for first monitor only");
     }
     else if ((platform.connector) && (platform.modeIndex >= 0))
     {
@@ -473,7 +473,7 @@ const char *GetMonitorName(int monitor)
 
     if (monitor != 0)
     {
-        TRACELOG(LOG_WARNING, "GetMonitorName() implemented for first monitor only");
+        TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorName() implemented for first monitor only");
     }
     else if ((platform.connector) && (platform.modeIndex >= 0))
     {
@@ -498,14 +498,14 @@ Vector2 GetWindowScaleDPI(void)
 // Set clipboard text content
 void SetClipboardText(const char *text)
 {
-    TRACELOG(LOG_WARNING, "SetClipboardText() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetClipboardText() not implemented on target platform");
 }
 
 // Get clipboard text content
 // NOTE: returned string is allocated and freed by GLFW
 const char *GetClipboardText(void)
 {
-    TRACELOG(LOG_WARNING, "GetClipboardText() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetClipboardText() not implemented on target platform");
     return NULL;
 }
 
@@ -514,7 +514,7 @@ Image GetClipboardImage(void)
 {
     Image image = { 0 };
 
-    TRACELOG(LOG_WARNING, "GetClipboardImage() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetClipboardImage() not implemented on target platform");
 
     return image;
 }
@@ -605,7 +605,7 @@ double GetTime(void)
 // Ref: https://github.com/raysan5/raylib/issues/686
 void OpenURL(const char *url)
 {
-    TRACELOG(LOG_WARNING, "OpenURL() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "OpenURL() not implemented on target platform");
 }
 
 //----------------------------------------------------------------------------------
@@ -615,14 +615,14 @@ void OpenURL(const char *url)
 // Set internal gamepad mappings
 int SetGamepadMappings(const char *mappings)
 {
-    TRACELOG(LOG_WARNING, "SetGamepadMappings() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetGamepadMappings() not implemented on target platform");
     return 0;
 }
 
 // Set gamepad vibration
 void SetGamepadVibration(int gamepad, float leftMotor, float rightMotor, float duration)
 {
-    TRACELOG(LOG_WARNING, "GamepadSetVibration() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GamepadSetVibration() not implemented on target platform");
 }
 
 // Set mouse position XY
@@ -635,13 +635,13 @@ void SetMousePosition(int x, int y)
 // Set mouse cursor
 void SetMouseCursor(int cursor)
 {
-    TRACELOG(LOG_WARNING, "SetMouseCursor() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetMouseCursor() not implemented on target platform");
 }
 
 // Get physical key name.
 const char *GetKeyName(int key)
 {
-    TRACELOG(LOG_WARNING, "GetKeyName() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetKeyName() not implemented on target platform");
     return "";
 }
 
@@ -736,32 +736,32 @@ int InitPlatform(void)
 #if defined(DEFAULT_GRAPHIC_DEVICE_DRM)
     platform.fd = open(DEFAULT_GRAPHIC_DEVICE_DRM, O_RDWR);
 #else
-    TRACELOG(LOG_INFO, "DISPLAY: No graphic card set, trying platform-gpu-card");
+    TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: No graphic card set, trying platform-gpu-card");
     platform.fd = open("/dev/dri/by-path/platform-gpu-card",  O_RDWR); // VideoCore VI (Raspberry Pi 4)
 
     if ((platform.fd == -1) || (drmModeGetResources(platform.fd) == NULL))
     {
-        TRACELOG(LOG_INFO, "DISPLAY: Failed to open platform-gpu-card, trying card1");
+        TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Failed to open platform-gpu-card, trying card1");
         platform.fd = open("/dev/dri/card1", O_RDWR); // Other Embedded
     }
 
     if ((platform.fd == -1) || (drmModeGetResources(platform.fd) == NULL))
     {
-        TRACELOG(LOG_INFO, "DISPLAY: Failed to open graphic card1, trying card0");
+        TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Failed to open graphic card1, trying card0");
         platform.fd = open("/dev/dri/card0", O_RDWR); // VideoCore IV (Raspberry Pi 1-3)
     }
 #endif
 
     if (platform.fd == -1)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to open graphic card");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to open graphic card");
         return -1;
     }
 
     drmModeRes *res = drmModeGetResources(platform.fd);
     if (!res)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed get DRM resources");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed get DRM resources");
         return -1;
     }
 
@@ -791,7 +791,7 @@ int InitPlatform(void)
 
     if (!platform.connector)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: No suitable DRM connector found");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: No suitable DRM connector found");
         drmModeFreeResources(res);
         return -1;
     }
@@ -799,7 +799,7 @@ int InitPlatform(void)
     drmModeEncoder *enc = drmModeGetEncoder(platform.fd, platform.connector->encoder_id);
     if (!enc)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to get DRM mode encoder");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to get DRM mode encoder");
         drmModeFreeResources(res);
         return -1;
     }
@@ -807,7 +807,7 @@ int InitPlatform(void)
     platform.crtc = drmModeGetCrtc(platform.fd, enc->crtc_id);
     if (!platform.crtc)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to get DRM mode crtc");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to get DRM mode crtc");
         drmModeFreeEncoder(enc);
         drmModeFreeResources(res);
         return -1;
@@ -822,7 +822,7 @@ int InitPlatform(void)
 
         if (platform.modeIndex < 0)
         {
-            TRACELOG(LOG_WARNING, "DISPLAY: No matching DRM connector mode found");
+            TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: No matching DRM connector mode found");
             drmModeFreeEncoder(enc);
             drmModeFreeResources(res);
             return -1;
@@ -850,7 +850,7 @@ int InitPlatform(void)
     // If nothing found, there is no suitable mode
     if (platform.modeIndex < 0)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to find a suitable DRM connector mode");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to find a suitable DRM connector mode");
         drmModeFreeEncoder(enc);
         drmModeFreeResources(res);
         return -1;
@@ -859,7 +859,7 @@ int InitPlatform(void)
     CORE.Window.display.width = platform.connector->modes[platform.modeIndex].hdisplay;
     CORE.Window.display.height = platform.connector->modes[platform.modeIndex].vdisplay;
 
-    TRACELOG(LOG_INFO, "DISPLAY: Selected DRM connector mode %s (%ux%u%c@%u)", platform.connector->modes[platform.modeIndex].name,
+    TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Selected DRM connector mode %s (%ux%u%c@%u)", platform.connector->modes[platform.modeIndex].name,
         platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay,
         (platform.connector->modes[platform.modeIndex].flags & DRM_MODE_FLAG_INTERLACE)? 'i' : 'p',
         platform.connector->modes[platform.modeIndex].vrefresh);
@@ -877,7 +877,7 @@ int InitPlatform(void)
     platform.gbmDevice = gbm_create_device(platform.fd);
     if (!platform.gbmDevice)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to create GBM device");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to create GBM device");
         return -1;
     }
 
@@ -885,7 +885,7 @@ int InitPlatform(void)
         platform.connector->modes[platform.modeIndex].vdisplay, GBM_FORMAT_ARGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
     if (!platform.gbmSurface)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to create GBM surface");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to create GBM surface");
         return -1;
     }
 
@@ -895,7 +895,7 @@ int InitPlatform(void)
     {
         samples = 4;
         sampleBuffer = 1;
-        TRACELOG(LOG_INFO, "DISPLAY: Trying to enable MSAA x4");
+        TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Trying to enable MSAA x4");
     }
 
     const EGLint framebufferAttribs[] =
@@ -925,7 +925,7 @@ int InitPlatform(void)
     platform.device = eglGetDisplay((EGLNativeDisplayType)platform.gbmDevice);
     if (platform.device == EGL_NO_DISPLAY)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to initialize EGL device");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to initialize EGL device");
         return -1;
     }
 
@@ -933,13 +933,13 @@ int InitPlatform(void)
     if (eglInitialize(platform.device, NULL, NULL) == EGL_FALSE)
     {
         // If all of the calls to eglInitialize returned EGL_FALSE then an error has occurred.
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to initialize EGL device");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to initialize EGL device");
         return -1;
     }
 
     if (!eglChooseConfig(platform.device, NULL, NULL, 0, &numConfigs))
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to get EGL config count: 0x%x", eglGetError());
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to get EGL config count: 0x%x", eglGetError());
         return -1;
     }
 
@@ -948,14 +948,14 @@ int InitPlatform(void)
     EGLConfig *configs = RL_CALLOC(numConfigs, sizeof(*configs));
     if (!configs)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to get memory for EGL configs");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to get memory for EGL configs");
         return -1;
     }
 
     EGLint matchingNumConfigs = 0;
     if (!eglChooseConfig(platform.device, framebufferAttribs, configs, numConfigs, &matchingNumConfigs))
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to choose EGL config: 0x%x", eglGetError());
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to choose EGL config: 0x%x", eglGetError());
         free(configs);
         return -1;
     }
@@ -969,7 +969,7 @@ int InitPlatform(void)
         EGLint id = 0;
         if (!eglGetConfigAttrib(platform.device, configs[i], EGL_NATIVE_VISUAL_ID, &id))
         {
-            TRACELOG(LOG_WARNING, "DISPLAY: Failed to get EGL config attribute: 0x%x", eglGetError());
+            TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to get EGL config attribute: 0x%x", eglGetError());
             continue;
         }
 
@@ -986,7 +986,7 @@ int InitPlatform(void)
 
     if (!found)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to find a suitable EGL config");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to find a suitable EGL config");
         return -1;
     }
 
@@ -997,7 +997,7 @@ int InitPlatform(void)
     platform.context = eglCreateContext(platform.device, platform.config, EGL_NO_CONTEXT, contextAttribs);
     if (platform.context == EGL_NO_CONTEXT)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to create EGL context");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to create EGL context");
         return -1;
     }
 
@@ -1005,7 +1005,7 @@ int InitPlatform(void)
     platform.surface = eglCreateWindowSurface(platform.device, platform.config, (EGLNativeWindowType)platform.gbmSurface, NULL);
     if (EGL_NO_SURFACE == platform.surface)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to create EGL window surface: 0x%04x", eglGetError());
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to create EGL window surface: 0x%04x", eglGetError());
         return -1;
     }
 
@@ -1031,22 +1031,22 @@ int InitPlatform(void)
         CORE.Window.currentFbo.width = CORE.Window.render.width;
         CORE.Window.currentFbo.height = CORE.Window.render.height;
 
-        TRACELOG(LOG_INFO, "DISPLAY: Device initialized successfully");
-        TRACELOG(LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
-        TRACELOG(LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
-        TRACELOG(LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
-        TRACELOG(LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
+        TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Device initialized successfully");
+        TRACELOG(RAYLIB_LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
     }
     else
     {
-        TRACELOG(LOG_FATAL, "PLATFORM: Failed to initialize graphics device");
+        TRACELOG(RAYLIB_LOG_FATAL, "PLATFORM: Failed to initialize graphics device");
         return -1;
     }
 
     if ((CORE.Window.flags & FLAG_WINDOW_MINIMIZED) > 0) MinimizeWindow();
 
     // If graphic device is no properly initialized, we end program
-    if (!CORE.Window.ready) { TRACELOG(LOG_FATAL, "PLATFORM: Failed to initialize graphic device"); return -1; }
+    if (!CORE.Window.ready) { TRACELOG(RAYLIB_LOG_FATAL, "PLATFORM: Failed to initialize graphic device"); return -1; }
     else SetWindowPosition(GetMonitorWidth(GetCurrentMonitor())/2 - CORE.Window.screen.width/2, GetMonitorHeight(GetCurrentMonitor())/2 - CORE.Window.screen.height/2);
 
     // Set some default window flags
@@ -1080,7 +1080,7 @@ int InitPlatform(void)
     CORE.Storage.basePath = GetWorkingDirectory();
     //----------------------------------------------------------------------------
 
-    TRACELOG(LOG_INFO, "PLATFORM: DRM: Initialized successfully");
+    TRACELOG(RAYLIB_LOG_INFO, "PLATFORM: DRM: Initialized successfully");
 
     return 0;
 }
@@ -1206,7 +1206,7 @@ static void InitKeyboard(void)
     int result = ioctl(STDIN_FILENO, KDGKBMODE, &platform.defaultKeyboardMode);
 
     // In case of failure, it could mean a remote keyboard is used (SSH)
-    if (result < 0) TRACELOG(LOG_WARNING, "DRM: Failed to change keyboard mode, an SSH keyboard is probably used");
+    if (result < 0) TRACELOG(RAYLIB_LOG_WARNING, "DRM: Failed to change keyboard mode, an SSH keyboard is probably used");
     else
     {
         // Reconfigure keyboard mode to get:
@@ -1378,7 +1378,7 @@ static void InitEvdevInput(void)
 
         closedir(directory);
     }
-    else TRACELOG(LOG_WARNING, "INPUT: Failed to open linux event directory: %s", DEFAULT_EVDEV_PATH);
+    else TRACELOG(RAYLIB_LOG_WARNING, "INPUT: Failed to open linux event directory: %s", DEFAULT_EVDEV_PATH);
 }
 
 // Identifies a input device and configures it for use if appropriate
@@ -1400,7 +1400,7 @@ static void ConfigureEvdevDevice(char *device)
     int fd = open(device, O_RDONLY | O_NONBLOCK);
     if (fd < 0)
     {
-        TRACELOG(LOG_WARNING, "DRM: Failed to open input device: %s", device);
+        TRACELOG(RAYLIB_LOG_WARNING, "DRM: Failed to open input device: %s", device);
         return;
     }
 
@@ -1575,7 +1575,7 @@ static void ConfigureEvdevDevice(char *device)
         return;
     }
 
-    TRACELOG(LOG_INFO, "INPUT: Initialized input device %s as %s", device, deviceKindStr);
+    TRACELOG(RAYLIB_LOG_INFO, "INPUT: Initialized input device %s as %s", device, deviceKindStr);
 }
 
 // Poll and process evdev keyboard events

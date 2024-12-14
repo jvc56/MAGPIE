@@ -289,9 +289,9 @@
 // Standard file io library (stdio.h) included
 #define SUPPORT_STANDARD_FILEIO         1
 // Show TRACELOG() output messages
-// NOTE: By default LOG_DEBUG traces not shown
+// NOTE: By default RAYLIB_LOG_DEBUG traces not shown
 #define SUPPORT_TRACELOG                1
-//#define SUPPORT_TRACELOG_DEBUG          1
+//#define SUPPORT_TRACERAYLIB_LOG_DEBUG          1
 
 // utils: Configuration values
 //------------------------------------------------------------------------------------

@@ -1880,7 +1880,7 @@ void rlActiveDrawBuffers(int count)
 
     if (count > 0)
     {
-        if (count > 8) TRACELOG(LOG_WARNING, "GL: Max color buffers limited to 8");
+        if (count > 8) TRACELOG(RAYLIB_LOG_WARNING, "GL: Max color buffers limited to 8");
         else
         {
             unsigned int buffers[8] = {
@@ -1912,7 +1912,7 @@ void rlActiveDrawBuffers(int count)
 #endif
         }
     }
-    else TRACELOG(LOG_WARNING, "GL: One color buffer active by default");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GL: One color buffer active by default");
 #endif
 }
 
@@ -2222,10 +2222,10 @@ static void GLAPIENTRY rlDebugMessageCallback(GLenum source, GLenum type, GLuint
         default: break;
     }
 
-    TRACELOG(LOG_WARNING, "GL: OpenGL debug message: %s", message);
-    TRACELOG(LOG_WARNING, "    > Type: %s", msgType);
-    TRACELOG(LOG_WARNING, "    > Source = %s", msgSource);
-    TRACELOG(LOG_WARNING, "    > Severity = %s", msgSeverity);
+    TRACELOG(RAYLIB_LOG_WARNING, "GL: OpenGL debug message: %s", message);
+    TRACELOG(RAYLIB_LOG_WARNING, "    > Type: %s", msgType);
+    TRACELOG(RAYLIB_LOG_WARNING, "    > Source = %s", msgSource);
+    TRACELOG(RAYLIB_LOG_WARNING, "    > Severity = %s", msgSeverity);
 }
 #endif
 

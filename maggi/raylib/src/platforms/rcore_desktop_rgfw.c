@@ -315,23 +315,23 @@ void SetWindowState(unsigned int flags)
     }
     if (flags & FLAG_WINDOW_UNFOCUSED)
     {
-        TRACELOG(LOG_WARNING, "SetWindowState() - FLAG_WINDOW_UNFOCUSED is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "SetWindowState() - FLAG_WINDOW_UNFOCUSED is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_TOPMOST)
     {
-        TRACELOG(LOG_WARNING, "SetWindowState() - FLAG_WINDOW_TOPMOST is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "SetWindowState() - FLAG_WINDOW_TOPMOST is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_ALWAYS_RUN)
     {
-        TRACELOG(LOG_WARNING, "SetWindowState() - FLAG_WINDOW_ALWAYS_RUN is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "SetWindowState() - FLAG_WINDOW_ALWAYS_RUN is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_TRANSPARENT)
     {
-        TRACELOG(LOG_WARNING, "SetWindowState() - FLAG_WINDOW_TRANSPARENT post window creation post window creation is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "SetWindowState() - FLAG_WINDOW_TRANSPARENT post window creation post window creation is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_HIGHDPI)
     {
-        TRACELOG(LOG_WARNING, "SetWindowState() - FLAG_WINDOW_HIGHDPI is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "SetWindowState() - FLAG_WINDOW_HIGHDPI is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_MOUSE_PASSTHROUGH)
     {
@@ -347,7 +347,7 @@ void SetWindowState(unsigned int flags)
     }
     if (flags & FLAG_INTERLACED_HINT)
     {
-        TRACELOG(LOG_WARNING, "SetWindowState() - FLAG_INTERLACED_HINT is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "SetWindowState() - FLAG_INTERLACED_HINT is not supported on PLATFORM_DESKTOP_RGFW");
     }
 }
 
@@ -389,29 +389,29 @@ void ClearWindowState(unsigned int flags)
     }
     if (flags & FLAG_WINDOW_UNFOCUSED)
     {
-        TRACELOG(LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_UNFOCUSED is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_UNFOCUSED is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_TOPMOST)
     {
-        TRACELOG(LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_TOPMOST is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_TOPMOST is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_ALWAYS_RUN)
     {
-        TRACELOG(LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_ALWAYS_RUN is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_ALWAYS_RUN is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_TRANSPARENT)
     {
-        TRACELOG(LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_TRANSPARENT is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_TRANSPARENT is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_HIGHDPI)
     {
         // NOTE: There also doesn't seem to be a feature to disable high DPI once enabled
-        TRACELOG(LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_HIGHDPI is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_HIGHDPI is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_WINDOW_MOUSE_PASSTHROUGH)
     {
         RGFW_window_setMousePassthrough(platform.window, flags & FLAG_WINDOW_MOUSE_PASSTHROUGH);
-        TRACELOG(LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_MOUSE_PASSTHROUGH is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "ClearWindowState() - FLAG_WINDOW_MOUSE_PASSTHROUGH is not supported on PLATFORM_DESKTOP_RGFW");
     }
     if (flags & FLAG_BORDERLESS_WINDOWED_MODE)
     {
@@ -423,7 +423,7 @@ void ClearWindowState(unsigned int flags)
     }
     if (flags & FLAG_INTERLACED_HINT)
     {
-        TRACELOG(LOG_WARNING, "ClearWindowState() - FLAG_INTERLACED_HINT is not supported on PLATFORM_DESKTOP_RGFW");
+        TRACELOG(RAYLIB_LOG_WARNING, "ClearWindowState() - FLAG_INTERLACED_HINT is not supported on PLATFORM_DESKTOP_RGFW");
     }
 }
 
@@ -479,7 +479,7 @@ void SetWindowIcon(Image image)
 // Set icon for window
 void SetWindowIcons(Image *images, int count)
 {
-    TRACELOG(LOG_WARNING, "SetWindowIcons() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowIcons() not available on target platform");
 }
 
 // Set title for window
@@ -529,7 +529,7 @@ void SetWindowSize(int width, int height)
 // Set window opacity, value opacity is between 0.0 and 1.0
 void SetWindowOpacity(float opacity)
 {
-    TRACELOG(LOG_WARNING, "SetWindowOpacity() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowOpacity() not available on target platform");
 }
 
 // Set window focused
@@ -625,7 +625,7 @@ int GetMonitorPhysicalHeight(int monitor)
 // Get selected monitor refresh rate
 int GetMonitorRefreshRate(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorRefreshRate() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorRefreshRate() not implemented on target platform");
     return 0;
 }
 
@@ -688,10 +688,10 @@ Image GetClipboardImage(void)
 
     fileData  = (void*)Win32GetClipboardImageData(&width, &height, &dataSize);
 
-    if (fileData == NULL) TRACELOG(LOG_WARNING, "Clipboard image: Couldn't get clipboard data.");
+    if (fileData == NULL) TRACELOG(RAYLIB_LOG_WARNING, "Clipboard image: Couldn't get clipboard data.");
     else image = LoadImageFromMemory(".bmp", fileData, (int)dataSize);
 #else
-    TRACELOG(LOG_WARNING, "GetClipboardImage() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetClipboardImage() not implemented on target platform");
 #endif
 #endif // SUPPORT_CLIPBOARD_IMAGE
 
@@ -762,7 +762,7 @@ double GetTime(void)
 void OpenURL(const char *url)
 {
     // Security check to (partially) avoid malicious code on target platform
-    if (strchr(url, '\'') != NULL) TRACELOG(LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid [\'] character");
+    if (strchr(url, '\'') != NULL) TRACELOG(RAYLIB_LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid [\'] character");
     else
     {
         // TODO: Open URL implementation
@@ -776,7 +776,7 @@ void OpenURL(const char *url)
 // Set internal gamepad mappings
 int SetGamepadMappings(const char *mappings)
 {
-    TRACELOG(LOG_WARNING, "SetGamepadMappings() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetGamepadMappings() not implemented on target platform");
     return 0;
 }
 
@@ -797,7 +797,7 @@ void SetMouseCursor(int cursor)
 // Get physical key name.
 const char *GetKeyName(int key)
 {
-    TRACELOG(LOG_WARNING, "GetKeyName() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetKeyName() not implemented on target platform");
     return "";
 }
 
@@ -968,7 +968,7 @@ void PollInputEvents(void)
 
                         CORE.Window.dropFileCount++;
                     }
-                    else TRACELOG(LOG_WARNING, "FILE: Maximum drag and drop files at once is limited to 1024 files!");
+                    else TRACELOG(RAYLIB_LOG_WARNING, "FILE: Maximum drag and drop files at once is limited to 1024 files!");
                 }
             } break;
 
@@ -1306,15 +1306,15 @@ int InitPlatform(void)
         CORE.Window.currentFbo.width = CORE.Window.render.width;
         CORE.Window.currentFbo.height = CORE.Window.render.height;
 
-        TRACELOG(LOG_INFO, "DISPLAY: Device initialized successfully");
-        TRACELOG(LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
-        TRACELOG(LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
-        TRACELOG(LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
-        TRACELOG(LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
+        TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Device initialized successfully");
+        TRACELOG(RAYLIB_LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
     }
     else
     {
-        TRACELOG(LOG_FATAL, "PLATFORM: Failed to initialize graphics device");
+        TRACELOG(RAYLIB_LOG_FATAL, "PLATFORM: Failed to initialize graphics device");
         return -1;
     }
     //----------------------------------------------------------------------------
@@ -1327,11 +1327,11 @@ int InitPlatform(void)
     CORE.Window.currentFbo.width = CORE.Window.render.width;
     CORE.Window.currentFbo.height = CORE.Window.render.height;
 
-    TRACELOG(LOG_INFO, "DISPLAY: Device initialized successfully");
-    TRACELOG(LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
-    TRACELOG(LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
-    TRACELOG(LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
-    TRACELOG(LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
+    TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Device initialized successfully");
+    TRACELOG(RAYLIB_LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
+    TRACELOG(RAYLIB_LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
+    TRACELOG(RAYLIB_LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
+    TRACELOG(RAYLIB_LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
 
     // Load OpenGL extensions
     // NOTE: GL procedures address loader is required to load extensions
@@ -1364,7 +1364,7 @@ int InitPlatform(void)
     }
 #endif
 
-    TRACELOG(LOG_INFO, "PLATFORM: CUSTOM: Initialized successfully");
+    TRACELOG(RAYLIB_LOG_INFO, "PLATFORM: CUSTOM: Initialized successfully");
 
     return 0;
 }

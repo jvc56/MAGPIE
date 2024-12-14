@@ -161,7 +161,7 @@ void ToggleFullscreen(void)
 
         if (monitor == NULL)
         {
-            TRACELOG(LOG_WARNING, "GLFW: Failed to get monitor");
+            TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to get monitor");
 
             CORE.Window.fullscreen = false;
             CORE.Window.flags &= ~FLAG_FULLSCREEN_MODE;
@@ -267,9 +267,9 @@ void ToggleBorderlessWindowed(void)
                 CORE.Window.position.y = CORE.Window.previousPosition.y;
             }
         }
-        else TRACELOG(LOG_WARNING, "GLFW: Failed to find video mode for selected monitor");
+        else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find video mode for selected monitor");
     }
-    else TRACELOG(LOG_WARNING, "GLFW: Failed to find selected monitor");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find selected monitor");
 }
 
 // Set window state: maximized, if resizable
@@ -387,13 +387,13 @@ void SetWindowState(unsigned int flags)
     // State change: FLAG_WINDOW_TRANSPARENT
     if (((CORE.Window.flags & FLAG_WINDOW_TRANSPARENT) != (flags & FLAG_WINDOW_TRANSPARENT)) && ((flags & FLAG_WINDOW_TRANSPARENT) > 0))
     {
-        TRACELOG(LOG_WARNING, "WINDOW: Framebuffer transparency can only be configured before window initialization");
+        TRACELOG(RAYLIB_LOG_WARNING, "WINDOW: Framebuffer transparency can only be configured before window initialization");
     }
 
     // State change: FLAG_WINDOW_HIGHDPI
     if (((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) != (flags & FLAG_WINDOW_HIGHDPI)) && ((flags & FLAG_WINDOW_HIGHDPI) > 0))
     {
-        TRACELOG(LOG_WARNING, "WINDOW: High DPI can only be configured before window initialization");
+        TRACELOG(RAYLIB_LOG_WARNING, "WINDOW: High DPI can only be configured before window initialization");
     }
 
     // State change: FLAG_WINDOW_MOUSE_PASSTHROUGH
@@ -406,13 +406,13 @@ void SetWindowState(unsigned int flags)
     // State change: FLAG_MSAA_4X_HINT
     if (((CORE.Window.flags & FLAG_MSAA_4X_HINT) != (flags & FLAG_MSAA_4X_HINT)) && ((flags & FLAG_MSAA_4X_HINT) > 0))
     {
-        TRACELOG(LOG_WARNING, "WINDOW: MSAA can only be configured before window initialization");
+        TRACELOG(RAYLIB_LOG_WARNING, "WINDOW: MSAA can only be configured before window initialization");
     }
 
     // State change: FLAG_INTERLACED_HINT
     if (((CORE.Window.flags & FLAG_INTERLACED_HINT) != (flags & FLAG_INTERLACED_HINT)) && ((flags & FLAG_INTERLACED_HINT) > 0))
     {
-        TRACELOG(LOG_WARNING, "RPI: Interlaced mode can only be configured before window initialization");
+        TRACELOG(RAYLIB_LOG_WARNING, "RPI: Interlaced mode can only be configured before window initialization");
     }
 }
 
@@ -500,13 +500,13 @@ void ClearWindowState(unsigned int flags)
     // State change: FLAG_WINDOW_TRANSPARENT
     if (((CORE.Window.flags & FLAG_WINDOW_TRANSPARENT) > 0) && ((flags & FLAG_WINDOW_TRANSPARENT) > 0))
     {
-        TRACELOG(LOG_WARNING, "WINDOW: Framebuffer transparency can only be configured before window initialization");
+        TRACELOG(RAYLIB_LOG_WARNING, "WINDOW: Framebuffer transparency can only be configured before window initialization");
     }
 
     // State change: FLAG_WINDOW_HIGHDPI
     if (((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0) && ((flags & FLAG_WINDOW_HIGHDPI) > 0))
     {
-        TRACELOG(LOG_WARNING, "WINDOW: High DPI can only be configured before window initialization");
+        TRACELOG(RAYLIB_LOG_WARNING, "WINDOW: High DPI can only be configured before window initialization");
     }
 
     // State change: FLAG_WINDOW_MOUSE_PASSTHROUGH
@@ -519,13 +519,13 @@ void ClearWindowState(unsigned int flags)
     // State change: FLAG_MSAA_4X_HINT
     if (((CORE.Window.flags & FLAG_MSAA_4X_HINT) > 0) && ((flags & FLAG_MSAA_4X_HINT) > 0))
     {
-        TRACELOG(LOG_WARNING, "WINDOW: MSAA can only be configured before window initialization");
+        TRACELOG(RAYLIB_LOG_WARNING, "WINDOW: MSAA can only be configured before window initialization");
     }
 
     // State change: FLAG_INTERLACED_HINT
     if (((CORE.Window.flags & FLAG_INTERLACED_HINT) > 0) && ((flags & FLAG_INTERLACED_HINT) > 0))
     {
-        TRACELOG(LOG_WARNING, "RPI: Interlaced mode can only be configured before window initialization");
+        TRACELOG(RAYLIB_LOG_WARNING, "RPI: Interlaced mode can only be configured before window initialization");
     }
 }
 
@@ -553,7 +553,7 @@ void SetWindowIcon(Image image)
             // NOTE 2: The specified image data is copied before this function returns
             glfwSetWindowIcon(platform.handle, 1, icon);
         }
-        else TRACELOG(LOG_WARNING, "GLFW: Window icon image must be in R8G8B8A8 pixel format");
+        else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Window icon image must be in R8G8B8A8 pixel format");
     }
 }
 
@@ -583,7 +583,7 @@ void SetWindowIcons(Image *images, int count)
 
                 valid++;
             }
-            else TRACELOG(LOG_WARNING, "GLFW: Window icon image must be in R8G8B8A8 pixel format");
+            else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Window icon image must be in R8G8B8A8 pixel format");
         }
         // NOTE: Images data is copied internally before this function returns
         glfwSetWindowIcon(platform.handle, valid, icons);
@@ -618,14 +618,14 @@ void SetWindowMonitor(int monitor)
     {
         if (CORE.Window.fullscreen)
         {
-            TRACELOG(LOG_INFO, "GLFW: Selected fullscreen monitor: [%i] %s", monitor, glfwGetMonitorName(monitors[monitor]));
+            TRACELOG(RAYLIB_LOG_INFO, "GLFW: Selected fullscreen monitor: [%i] %s", monitor, glfwGetMonitorName(monitors[monitor]));
 
             const GLFWvidmode *mode = glfwGetVideoMode(monitors[monitor]);
             glfwSetWindowMonitor(platform.handle, monitors[monitor], 0, 0, mode->width, mode->height, mode->refreshRate);
         }
         else
         {
-            TRACELOG(LOG_INFO, "GLFW: Selected monitor: [%i] %s", monitor, glfwGetMonitorName(monitors[monitor]));
+            TRACELOG(RAYLIB_LOG_INFO, "GLFW: Selected monitor: [%i] %s", monitor, glfwGetMonitorName(monitors[monitor]));
 
             // Here the render width has to be used again in case high dpi flag is enabled
             const int screenWidth = CORE.Window.render.width;
@@ -646,7 +646,7 @@ void SetWindowMonitor(int monitor)
             }
         }
     }
-    else TRACELOG(LOG_WARNING, "GLFW: Failed to find selected monitor");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find selected monitor");
 }
 
 // Set window minimum dimensions (FLAG_WINDOW_RESIZABLE)
@@ -815,7 +815,7 @@ int GetCurrentMonitor(void)
                         closestDist = dist;
                     }
                 }
-                else TRACELOG(LOG_WARNING, "GLFW: Failed to find video mode for selected monitor");
+                else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find video mode for selected monitor");
             }
         }
     }
@@ -836,7 +836,7 @@ Vector2 GetMonitorPosition(int monitor)
 
         return (Vector2){ (float)x, (float)y };
     }
-    else TRACELOG(LOG_WARNING, "GLFW: Failed to find selected monitor");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find selected monitor");
     return (Vector2){ 0, 0 };
 }
 
@@ -852,9 +852,9 @@ int GetMonitorWidth(int monitor)
         const GLFWvidmode *mode = glfwGetVideoMode(monitors[monitor]);
 
         if (mode) width = mode->width;
-        else TRACELOG(LOG_WARNING, "GLFW: Failed to find video mode for selected monitor");
+        else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find video mode for selected monitor");
     }
-    else TRACELOG(LOG_WARNING, "GLFW: Failed to find selected monitor");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find selected monitor");
 
     return width;
 }
@@ -871,9 +871,9 @@ int GetMonitorHeight(int monitor)
         const GLFWvidmode *mode = glfwGetVideoMode(monitors[monitor]);
 
         if (mode) height = mode->height;
-        else TRACELOG(LOG_WARNING, "GLFW: Failed to find video mode for selected monitor");
+        else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find video mode for selected monitor");
     }
-    else TRACELOG(LOG_WARNING, "GLFW: Failed to find selected monitor");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find selected monitor");
 
     return height;
 }
@@ -886,7 +886,7 @@ int GetMonitorPhysicalWidth(int monitor)
     GLFWmonitor **monitors = glfwGetMonitors(&monitorCount);
 
     if ((monitor >= 0) && (monitor < monitorCount)) glfwGetMonitorPhysicalSize(monitors[monitor], &width, NULL);
-    else TRACELOG(LOG_WARNING, "GLFW: Failed to find selected monitor");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find selected monitor");
 
     return width;
 }
@@ -899,7 +899,7 @@ int GetMonitorPhysicalHeight(int monitor)
     GLFWmonitor **monitors = glfwGetMonitors(&monitorCount);
 
     if ((monitor >= 0) && (monitor < monitorCount)) glfwGetMonitorPhysicalSize(monitors[monitor], NULL, &height);
-    else TRACELOG(LOG_WARNING, "GLFW: Failed to find selected monitor");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find selected monitor");
 
     return height;
 }
@@ -916,7 +916,7 @@ int GetMonitorRefreshRate(int monitor)
         const GLFWvidmode *vidmode = glfwGetVideoMode(monitors[monitor]);
         refresh = vidmode->refreshRate;
     }
-    else TRACELOG(LOG_WARNING, "GLFW: Failed to find selected monitor");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find selected monitor");
 
     return refresh;
 }
@@ -931,7 +931,7 @@ const char *GetMonitorName(int monitor)
     {
         return glfwGetMonitorName(monitors[monitor]);
     }
-    else TRACELOG(LOG_WARNING, "GLFW: Failed to find selected monitor");
+    else TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to find selected monitor");
     return "";
 }
 
@@ -981,10 +981,10 @@ Image GetClipboardImage(void)
 
     fileData  = (void*)Win32GetClipboardImageData(&width, &height, &dataSize);
 
-    if (fileData == NULL) TRACELOG(LOG_WARNING, "Clipboard image: Couldn't get clipboard data.");
+    if (fileData == NULL) TRACELOG(RAYLIB_LOG_WARNING, "Clipboard image: Couldn't get clipboard data.");
     else image = LoadImageFromMemory(".bmp", fileData, (int)dataSize);
 #else
-    TRACELOG(LOG_WARNING, "GetClipboardImage() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetClipboardImage() not implemented on target platform");
 #endif
 #endif // SUPPORT_CLIPBOARD_IMAGE
 
@@ -1056,7 +1056,7 @@ double GetTime(void)
 void OpenURL(const char *url)
 {
     // Security check to (partially) avoid malicious code
-    if (strchr(url, '\'') != NULL) TRACELOG(LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid [\'] character");
+    if (strchr(url, '\'') != NULL) TRACELOG(RAYLIB_LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid [\'] character");
     else
     {
         char *cmd = (char *)RL_CALLOC(strlen(url) + 32, sizeof(char));
@@ -1070,7 +1070,7 @@ void OpenURL(const char *url)
         sprintf(cmd, "open '%s'", url);
 #endif
         int result = system(cmd);
-        if (result == -1) TRACELOG(LOG_WARNING, "OpenURL() child process could not be created");
+        if (result == -1) TRACELOG(RAYLIB_LOG_WARNING, "OpenURL() child process could not be created");
         RL_FREE(cmd);
     }
 }
@@ -1088,7 +1088,7 @@ int SetGamepadMappings(const char *mappings)
 // Set gamepad vibration
 void SetGamepadVibration(int gamepad, float leftMotor, float rightMotor, float duration)
 {
-    TRACELOG(LOG_WARNING, "GamepadSetVibration() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GamepadSetVibration() not available on target platform");
 }
 
 // Set mouse position XY
@@ -1298,7 +1298,7 @@ int InitPlatform(void)
 #endif
     // Initialize GLFW internal global state
     int result = glfwInit();
-    if (result == GLFW_FALSE) { TRACELOG(LOG_WARNING, "GLFW: Failed to initialize GLFW"); return -1; }
+    if (result == GLFW_FALSE) { TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to initialize GLFW"); return -1; }
 
     // Initialize graphic device: display/window and graphic context
     //----------------------------------------------------------------------------
@@ -1364,7 +1364,7 @@ int InitPlatform(void)
     if (CORE.Window.flags & FLAG_MSAA_4X_HINT)
     {
         // NOTE: MSAA is only enabled for main framebuffer, not user-created FBOs
-        TRACELOG(LOG_INFO, "DISPLAY: Trying to enable MSAA x4");
+        TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Trying to enable MSAA x4");
         glfwWindowHint(GLFW_SAMPLES, 4);   // Tries to enable multisampling x4 (MSAA), default is 0
     }
 
@@ -1431,7 +1431,7 @@ int InitPlatform(void)
         monitor = glfwGetPrimaryMonitor();
         if (!monitor)
         {
-          TRACELOG(LOG_WARNING, "GLFW: Failed to get primary monitor");
+          TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to get primary monitor");
           return -1;
         }
 
@@ -1472,7 +1472,7 @@ int InitPlatform(void)
             }
         }
 
-        TRACELOG(LOG_INFO, "SYSTEM: Closest fullscreen videomode: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
+        TRACELOG(RAYLIB_LOG_INFO, "SYSTEM: Closest fullscreen videomode: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
 
         // NOTE: ISSUE: Closest videomode could not match monitor aspect-ratio, for example,
         // for a desired screen size of 800x450 (16:9), closest supported videomode is 800x600 (4:3),
@@ -1520,7 +1520,7 @@ int InitPlatform(void)
         {
             // The monitor for the window-manager-created window can not be determined, so it can not be centered.
             glfwTerminate();
-            TRACELOG(LOG_WARNING, "GLFW: Failed to determine Monitor to center Window");
+            TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to determine Monitor to center Window");
             return -1;
         }
 
@@ -1534,7 +1534,7 @@ int InitPlatform(void)
     if (!platform.handle)
     {
         glfwTerminate();
-        TRACELOG(LOG_WARNING, "GLFW: Failed to initialize Window");
+        TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Failed to initialize Window");
         return -1;
     }
 
@@ -1555,7 +1555,7 @@ int InitPlatform(void)
         {
             // WARNING: It seems to hit a critical render path in Intel HD Graphics
             glfwSwapInterval(1);
-            TRACELOG(LOG_INFO, "DISPLAY: Trying to enable VSYNC");
+            TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Trying to enable VSYNC");
         }
 
         int fbWidth = CORE.Window.screen.width;
@@ -1581,22 +1581,22 @@ int InitPlatform(void)
         CORE.Window.currentFbo.width = fbWidth;
         CORE.Window.currentFbo.height = fbHeight;
 
-        TRACELOG(LOG_INFO, "DISPLAY: Device initialized successfully");
-        TRACELOG(LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
-        TRACELOG(LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
-        TRACELOG(LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
-        TRACELOG(LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
+        TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Device initialized successfully");
+        TRACELOG(RAYLIB_LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
     }
     else
     {
-        TRACELOG(LOG_FATAL, "PLATFORM: Failed to initialize graphics device");
+        TRACELOG(RAYLIB_LOG_FATAL, "PLATFORM: Failed to initialize graphics device");
         return -1;
     }
 
     if ((CORE.Window.flags & FLAG_WINDOW_MINIMIZED) > 0) MinimizeWindow();
 
     // If graphic device is no properly initialized, we end program
-    if (!CORE.Window.ready) { TRACELOG(LOG_FATAL, "PLATFORM: Failed to initialize graphic device"); return -1; }
+    if (!CORE.Window.ready) { TRACELOG(RAYLIB_LOG_FATAL, "PLATFORM: Failed to initialize graphic device"); return -1; }
     else
     {
         // Try to center window on screen but avoiding window-bar outside of screen
@@ -1682,7 +1682,7 @@ int InitPlatform(void)
     }
 #endif
 
-    TRACELOG(LOG_INFO, "PLATFORM: DESKTOP (GLFW - %s): Initialized successfully", glfwPlatform);
+    TRACELOG(RAYLIB_LOG_INFO, "PLATFORM: DESKTOP (GLFW - %s): Initialized successfully", glfwPlatform);
 
     return 0;
 }
@@ -1701,7 +1701,7 @@ void ClosePlatform(void)
 // GLFW3 Error Callback, runs on GLFW3 error
 static void ErrorCallback(int error, const char *description)
 {
-    TRACELOG(LOG_WARNING, "GLFW: Error: %i Description: %s", error, description);
+    TRACELOG(RAYLIB_LOG_WARNING, "GLFW: Error: %i Description: %s", error, description);
 }
 
 // GLFW3 WindowSize Callback, runs when window is resizedLastFrame

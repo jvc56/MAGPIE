@@ -93,55 +93,55 @@ bool WindowShouldClose(void)
 // Toggle fullscreen mode
 void ToggleFullscreen(void)
 {
-    TRACELOG(LOG_WARNING, "ToggleFullscreen() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "ToggleFullscreen() not available on target platform");
 }
 
 // Toggle borderless windowed mode
 void ToggleBorderlessWindowed(void)
 {
-    TRACELOG(LOG_WARNING, "ToggleBorderlessWindowed() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "ToggleBorderlessWindowed() not available on target platform");
 }
 
 // Set window state: maximized, if resizable
 void MaximizeWindow(void)
 {
-    TRACELOG(LOG_WARNING, "MaximizeWindow() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "MaximizeWindow() not available on target platform");
 }
 
 // Set window state: minimized
 void MinimizeWindow(void)
 {
-    TRACELOG(LOG_WARNING, "MinimizeWindow() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "MinimizeWindow() not available on target platform");
 }
 
 // Set window state: not minimized/maximized
 void RestoreWindow(void)
 {
-    TRACELOG(LOG_WARNING, "RestoreWindow() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "RestoreWindow() not available on target platform");
 }
 
 // Set window configuration state using flags
 void SetWindowState(unsigned int flags)
 {
-    TRACELOG(LOG_WARNING, "SetWindowState() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowState() not available on target platform");
 }
 
 // Clear window configuration state flags
 void ClearWindowState(unsigned int flags)
 {
-    TRACELOG(LOG_WARNING, "ClearWindowState() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "ClearWindowState() not available on target platform");
 }
 
 // Set icon for window
 void SetWindowIcon(Image image)
 {
-    TRACELOG(LOG_WARNING, "SetWindowIcon() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowIcon() not available on target platform");
 }
 
 // Set icon for window
 void SetWindowIcons(Image *images, int count)
 {
-    TRACELOG(LOG_WARNING, "SetWindowIcons() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowIcons() not available on target platform");
 }
 
 // Set title for window
@@ -153,13 +153,13 @@ void SetWindowTitle(const char *title)
 // Set window position on screen (windowed mode)
 void SetWindowPosition(int x, int y)
 {
-    TRACELOG(LOG_WARNING, "SetWindowPosition() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowPosition() not available on target platform");
 }
 
 // Set monitor for the current window
 void SetWindowMonitor(int monitor)
 {
-    TRACELOG(LOG_WARNING, "SetWindowMonitor() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowMonitor() not available on target platform");
 }
 
 // Set window minimum dimensions (FLAG_WINDOW_RESIZABLE)
@@ -179,116 +179,116 @@ void SetWindowMaxSize(int width, int height)
 // Set window dimensions
 void SetWindowSize(int width, int height)
 {
-    TRACELOG(LOG_WARNING, "SetWindowSize() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowSize() not available on target platform");
 }
 
 // Set window opacity, value opacity is between 0.0 and 1.0
 void SetWindowOpacity(float opacity)
 {
-    TRACELOG(LOG_WARNING, "SetWindowOpacity() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowOpacity() not available on target platform");
 }
 
 // Set window focused
 void SetWindowFocused(void)
 {
-    TRACELOG(LOG_WARNING, "SetWindowFocused() not available on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetWindowFocused() not available on target platform");
 }
 
 // Get native window handle
 void *GetWindowHandle(void)
 {
-    TRACELOG(LOG_WARNING, "GetWindowHandle() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetWindowHandle() not implemented on target platform");
     return NULL;
 }
 
 // Get number of monitors
 int GetMonitorCount(void)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorCount() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorCount() not implemented on target platform");
     return 1;
 }
 
 // Get number of monitors
 int GetCurrentMonitor(void)
 {
-    TRACELOG(LOG_WARNING, "GetCurrentMonitor() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetCurrentMonitor() not implemented on target platform");
     return 0;
 }
 
 // Get selected monitor position
 Vector2 GetMonitorPosition(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorPosition() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorPosition() not implemented on target platform");
     return (Vector2){ 0, 0 };
 }
 
 // Get selected monitor width (currently used by monitor)
 int GetMonitorWidth(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorWidth() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorWidth() not implemented on target platform");
     return 0;
 }
 
 // Get selected monitor height (currently used by monitor)
 int GetMonitorHeight(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorHeight() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorHeight() not implemented on target platform");
     return 0;
 }
 
 // Get selected monitor physical width in millimetres
 int GetMonitorPhysicalWidth(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorPhysicalWidth() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorPhysicalWidth() not implemented on target platform");
     return 0;
 }
 
 // Get selected monitor physical height in millimetres
 int GetMonitorPhysicalHeight(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorPhysicalHeight() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorPhysicalHeight() not implemented on target platform");
     return 0;
 }
 
 // Get selected monitor refresh rate
 int GetMonitorRefreshRate(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorRefreshRate() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorRefreshRate() not implemented on target platform");
     return 0;
 }
 
 // Get the human-readable, UTF-8 encoded name of the selected monitor
 const char *GetMonitorName(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorName() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetMonitorName() not implemented on target platform");
     return "";
 }
 
 // Get window position XY on monitor
 Vector2 GetWindowPosition(void)
 {
-    TRACELOG(LOG_WARNING, "GetWindowPosition() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetWindowPosition() not implemented on target platform");
     return (Vector2){ 0, 0 };
 }
 
 // Get window scale DPI factor for current monitor
 Vector2 GetWindowScaleDPI(void)
 {
-    TRACELOG(LOG_WARNING, "GetWindowScaleDPI() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetWindowScaleDPI() not implemented on target platform");
     return (Vector2){ 1.0f, 1.0f };
 }
 
 // Set clipboard text content
 void SetClipboardText(const char *text)
 {
-    TRACELOG(LOG_WARNING, "SetClipboardText() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetClipboardText() not implemented on target platform");
 }
 
 // Get clipboard text content
 // NOTE: returned string is allocated and freed by GLFW
 const char *GetClipboardText(void)
 {
-    TRACELOG(LOG_WARNING, "GetClipboardText() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetClipboardText() not implemented on target platform");
     return NULL;
 }
 
@@ -297,7 +297,7 @@ Image GetClipboardImage(void)
 {
     Image image = { 0 };
 
-    TRACELOG(LOG_WARNING, "GetClipboardImage() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetClipboardImage() not implemented on target platform");
 
     return image;
 }
@@ -363,7 +363,7 @@ double GetTime(void)
 void OpenURL(const char *url)
 {
     // Security check to (partially) avoid malicious code on target platform
-    if (strchr(url, '\'') != NULL) TRACELOG(LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid [\'] character");
+    if (strchr(url, '\'') != NULL) TRACELOG(RAYLIB_LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid [\'] character");
     else
     {
         // TODO:
@@ -377,7 +377,7 @@ void OpenURL(const char *url)
 // Set internal gamepad mappings
 int SetGamepadMappings(const char *mappings)
 {
-    TRACELOG(LOG_WARNING, "SetGamepadMappings() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetGamepadMappings() not implemented on target platform");
     return 0;
 }
 
@@ -391,13 +391,13 @@ void SetMousePosition(int x, int y)
 // Set mouse cursor
 void SetMouseCursor(int cursor)
 {
-    TRACELOG(LOG_WARNING, "SetMouseCursor() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "SetMouseCursor() not implemented on target platform");
 }
 
 // Get physical key name.
 const char *GetKeyName(int key)
 {
-    TRACELOG(LOG_WARNING, "GetKeyName() not implemented on target platform");
+    TRACELOG(RAYLIB_LOG_WARNING, "GetKeyName() not implemented on target platform");
     return "";
 }
 
@@ -462,7 +462,7 @@ int InitPlatform(void)
     {
         samples = 4;
         sampleBuffer = 1;
-        TRACELOG(LOG_INFO, "DISPLAY: Trying to enable MSAA x4");
+        TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Trying to enable MSAA x4");
     }
 
     const EGLint framebufferAttribs[] =
@@ -491,7 +491,7 @@ int InitPlatform(void)
     platform.device = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (platform.device == EGL_NO_DISPLAY)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to initialize EGL device");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to initialize EGL device");
         return false;
     }
 
@@ -499,7 +499,7 @@ int InitPlatform(void)
     if (eglInitialize(platform.device, NULL, NULL) == EGL_FALSE)
     {
         // If all of the calls to eglInitialize returned EGL_FALSE then an error has occurred.
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to initialize EGL device");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to initialize EGL device");
         return false;
     }
 
@@ -513,7 +513,7 @@ int InitPlatform(void)
     platform.context = eglCreateContext(platform.device, platform.config, EGL_NO_CONTEXT, contextAttribs);
     if (platform.context == EGL_NO_CONTEXT)
     {
-        TRACELOG(LOG_WARNING, "DISPLAY: Failed to create EGL context");
+        TRACELOG(RAYLIB_LOG_WARNING, "DISPLAY: Failed to create EGL context");
         return -1;
     }
 
@@ -544,15 +544,15 @@ int InitPlatform(void)
         CORE.Window.currentFbo.width = CORE.Window.render.width;
         CORE.Window.currentFbo.height = CORE.Window.render.height;
 
-        TRACELOG(LOG_INFO, "DISPLAY: Device initialized successfully");
-        TRACELOG(LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
-        TRACELOG(LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
-        TRACELOG(LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
-        TRACELOG(LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
+        TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Device initialized successfully");
+        TRACELOG(RAYLIB_LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
     }
     else
     {
-        TRACELOG(LOG_FATAL, "PLATFORM: Failed to initialize graphics device");
+        TRACELOG(RAYLIB_LOG_FATAL, "PLATFORM: Failed to initialize graphics device");
         return -1;
     }
     //----------------------------------------------------------------------------
@@ -563,11 +563,11 @@ int InitPlatform(void)
     CORE.Window.currentFbo.width = CORE.Window.render.width;
     CORE.Window.currentFbo.height = CORE.Window.render.height;
 
-    TRACELOG(LOG_INFO, "DISPLAY: Device initialized successfully");
-    TRACELOG(LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
-    TRACELOG(LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
-    TRACELOG(LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
-    TRACELOG(LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
+    TRACELOG(RAYLIB_LOG_INFO, "DISPLAY: Device initialized successfully");
+    TRACELOG(RAYLIB_LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
+    TRACELOG(RAYLIB_LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
+    TRACELOG(RAYLIB_LOG_INFO, "    > Render size:  %i x %i", CORE.Window.render.width, CORE.Window.render.height);
+    TRACELOG(RAYLIB_LOG_INFO, "    > Viewport offsets: %i, %i", CORE.Window.renderOffset.x, CORE.Window.renderOffset.y);
 
     // TODO: Load OpenGL extensions
     // NOTE: GL procedures address loader is required to load extensions
@@ -593,7 +593,7 @@ int InitPlatform(void)
     CORE.Storage.basePath = GetWorkingDirectory();
     //----------------------------------------------------------------------------
 
-    TRACELOG(LOG_INFO, "PLATFORM: CUSTOM: Initialized successfully");
+    TRACELOG(RAYLIB_LOG_INFO, "PLATFORM: CUSTOM: Initialized successfully");
 
     return 0;
 }

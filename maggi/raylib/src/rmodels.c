@@ -1115,11 +1115,11 @@ Model LoadModel(const char *fileName)
         // Upload vertex data to GPU (static meshes)
         for (int i = 0; i < model.meshCount; i++) UploadMesh(&model.meshes[i], false);
     }
-    else TRACELOG(LOG_WARNING, "MESH: [%s] Failed to load model mesh(es) data", fileName);
+    else TRACELOG(RAYLIB_LOG_WARNING, "MESH: [%s] Failed to load model mesh(es) data", fileName);
 
     if (model.materialCount == 0)
     {
-        TRACELOG(LOG_WARNING, "MATERIAL: [%s] Failed to load model material data, default to white material", fileName);
+        TRACELOG(RAYLIB_LOG_WARNING, "MATERIAL: [%s] Failed to load model material data, default to white material", fileName);
 
         model.materialCount = 1;
         model.materials = (Material *)RL_CALLOC(model.materialCount, sizeof(Material));
@@ -1210,7 +1210,7 @@ void UnloadModel(Model model)
     RL_FREE(model.bones);
     RL_FREE(model.bindPose);
 
-    TRACELOG(LOG_INFO, "MODEL: Unloaded model (and meshes) from RAM and VRAM");
+    TRACELOG(RAYLIB_LOG_INFO, "MODEL: Unloaded model (and meshes) from RAM and VRAM");
 }
 
 // Compute model bounding box limits (considers all meshes)
@@ -1254,7 +1254,7 @@ void UploadMesh(Mesh *mesh, bool dynamic)
     if (mesh->vaoId > 0)
     {
         // Check if mesh has already been loaded in GPU
-        TRACELOG(LOG_WARNING, "VAO: [ID %i] Trying to re-load an already loaded mesh", mesh->vaoId);
+        TRACELOG(RAYLIB_LOG_WARNING, "VAO: [ID %i] Trying to re-load an already loaded mesh", mesh->vaoId);
         return;
     }
 
@@ -1398,8 +1398,8 @@ void UploadMesh(Mesh *mesh, bool dynamic)
         mesh->vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES] = rlLoadVertexBufferElement(mesh->indices, mesh->triangleCount*3*sizeof(unsigned short), dynamic);
     }
 
-    if (mesh->vaoId > 0) TRACELOG(LOG_INFO, "VAO: [ID %i] Mesh uploaded successfully to VRAM (GPU)", mesh->vaoId);
-    else TRACELOG(LOG_INFO, "VBO: Mesh uploaded successfully to VRAM (GPU)");
+    if (mesh->vaoId > 0) TRACELOG(RAYLIB_LOG_INFO, "VAO: [ID %i] Mesh uploaded successfully to VRAM (GPU)", mesh->vaoId);
+    else TRACELOG(RAYLIB_LOG_INFO, "VBO: Mesh uploaded successfully to VRAM (GPU)");
 
     rlDisableVertexArray();
 #endif
@@ -2105,8 +2105,8 @@ bool ExportMeshAsCode(Mesh mesh, const char *fileName)
 
     RL_FREE(txtData);
 
-    //if (success != 0) TRACELOG(LOG_INFO, "FILEIO: [%s] Image as code exported successfully", fileName);
-    //else TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to export image as code", fileName);
+    //if (success != 0) TRACELOG(RAYLIB_LOG_INFO, "FILEIO: [%s] Image as code exported successfully", fileName);
+    //else TRACELOG(RAYLIB_LOG_WARNING, "FILEIO: [%s] Failed to export image as code", fileName);
 
     return success;
 }
@@ -2161,7 +2161,7 @@ Material *LoadMaterials(const char *fileName, int *materialCount)
         tinyobj_material_t *mats = NULL;
 
         int result = tinyobj_parse_mtl_file(&mats, &count, fileName);
-        if (result != TINYOBJ_SUCCESS) TRACELOG(LOG_WARNING, "MATERIAL: [%s] Failed to parse materials file", fileName);
+        if (result != TINYOBJ_SUCCESS) TRACELOG(RAYLIB_LOG_WARNING, "MATERIAL: [%s] Failed to parse materials file", fileName);
 
         materials = RL_MALLOC(count*sizeof(Material));
         ProcessMaterialsOBJ(materials, mats, count);
@@ -2169,7 +2169,7 @@ Material *LoadMaterials(const char *fileName, int *materialCount)
         tinyobj_materials_free(mats, count);
     }
 #else
-    TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to load material file", fileName);
+    TRACELOG(RAYLIB_LOG_WARNING, "FILEIO: [%s] Failed to load material file", fileName);
 #endif
 
     *materialCount = count;
@@ -2238,8 +2238,8 @@ void SetMaterialTexture(Material *material, int mapType, Texture2D texture)
 // Set the material for a mesh
 void SetModelMeshMaterial(Model *model, int meshId, int materialId)
 {
-    if (meshId >= model->meshCount) TRACELOG(LOG_WARNING, "MESH: Id greater than mesh count");
-    else if (materialId >= model->materialCount) TRACELOG(LOG_WARNING, "MATERIAL: Id greater than material count");
+    if (meshId >= model->meshCount) TRACELOG(RAYLIB_LOG_WARNING, "MESH: Id greater than mesh count");
+    else if (materialId >= model->materialCount) TRACELOG(RAYLIB_LOG_WARNING, "MATERIAL: Id greater than material count");
     else  model->meshMaterial[meshId] = materialId;
 }
 
@@ -2811,7 +2811,7 @@ Mesh GenMeshSphere(float radius, int rings, int slices)
         // Upload vertex data to GPU (static mesh)
         UploadMesh(&mesh, false);
     }
-    else TRACELOG(LOG_WARNING, "MESH: Failed to generate mesh: sphere");
+    else TRACELOG(RAYLIB_LOG_WARNING, "MESH: Failed to generate mesh: sphere");
 
     return mesh;
 }
@@ -2855,7 +2855,7 @@ Mesh GenMeshHemiSphere(float radius, int rings, int slices)
         // Upload vertex data to GPU (static mesh)
         UploadMesh(&mesh, false);
     }
-    else TRACELOG(LOG_WARNING, "MESH: Failed to generate mesh: hemisphere");
+    else TRACELOG(RAYLIB_LOG_WARNING, "MESH: Failed to generate mesh: hemisphere");
 
     return mesh;
 }
@@ -2919,7 +2919,7 @@ Mesh GenMeshCylinder(float radius, float height, int slices)
         // Upload vertex data to GPU (static mesh)
         UploadMesh(&mesh, false);
     }
-    else TRACELOG(LOG_WARNING, "MESH: Failed to generate mesh: cylinder");
+    else TRACELOG(RAYLIB_LOG_WARNING, "MESH: Failed to generate mesh: cylinder");
 
     return mesh;
 }
@@ -2974,7 +2974,7 @@ Mesh GenMeshCone(float radius, float height, int slices)
         // Upload vertex data to GPU (static mesh)
         UploadMesh(&mesh, false);
     }
-    else TRACELOG(LOG_WARNING, "MESH: Failed to generate mesh: cone");
+    else TRACELOG(RAYLIB_LOG_WARNING, "MESH: Failed to generate mesh: cone");
 
     return mesh;
 }
@@ -3020,7 +3020,7 @@ Mesh GenMeshTorus(float radius, float size, int radSeg, int sides)
         // Upload vertex data to GPU (static mesh)
         UploadMesh(&mesh, false);
     }
-    else TRACELOG(LOG_WARNING, "MESH: Failed to generate mesh: torus");
+    else TRACELOG(RAYLIB_LOG_WARNING, "MESH: Failed to generate mesh: torus");
 
     return mesh;
 }
@@ -3064,7 +3064,7 @@ Mesh GenMeshKnot(float radius, float size, int radSeg, int sides)
         // Upload vertex data to GPU (static mesh)
         UploadMesh(&mesh, false);
     }
-    else TRACELOG(LOG_WARNING, "MESH: Failed to generate mesh: knot");
+    else TRACELOG(RAYLIB_LOG_WARNING, "MESH: Failed to generate mesh: knot");
 
     return mesh;
 }
@@ -3585,7 +3585,7 @@ void GenMeshTangents(Mesh *mesh)
 {
     if ((mesh->vertices == NULL) || (mesh->texcoords == NULL))
     {
-        TRACELOG(LOG_WARNING, "MESH: Tangents generation requires texcoord vertex attribute data");
+        TRACELOG(RAYLIB_LOG_WARNING, "MESH: Tangents generation requires texcoord vertex attribute data");
         return;
     }
 
@@ -3601,7 +3601,7 @@ void GenMeshTangents(Mesh *mesh)
 
     if (mesh->vertexCount % 3 != 0)
     {
-        TRACELOG(LOG_WARNING, "MESH: vertexCount expected to be a multiple of 3. Expect uninitialized values.");
+        TRACELOG(RAYLIB_LOG_WARNING, "MESH: vertexCount expected to be a multiple of 3. Expect uninitialized values.");
     }
 
     for (int i = 0; i <= mesh->vertexCount - 3; i += 3)
@@ -3688,7 +3688,7 @@ void GenMeshTangents(Mesh *mesh)
         rlDisableVertexArray();
     }
 
-    TRACELOG(LOG_INFO, "MESH: Tangents data computed and uploaded for provided mesh");
+    TRACELOG(RAYLIB_LOG_INFO, "MESH: Tangents data computed and uploaded for provided mesh");
 }
 
 // Draw a model (with texture if set)
@@ -4171,7 +4171,7 @@ static void BuildPoseFromParentJoints(BoneInfo *bones, int boneCount, Transform 
         {
             if (bones[i].parent > i)
             {
-                TRACELOG(LOG_WARNING, "Assumes bones are toplogically sorted, but bone %d has parent %d. Skipping.", i, bones[i].parent);
+                TRACELOG(RAYLIB_LOG_WARNING, "Assumes bones are toplogically sorted, but bone %d has parent %d. Skipping.", i, bones[i].parent);
                 continue;
             }
             transforms[i].rotation = QuaternionMultiply(transforms[bones[i].parent].rotation, transforms[i].rotation);
@@ -4206,14 +4206,14 @@ static Model LoadOBJ(const char *fileName)
 
     if (fileText == NULL)
     {
-        TRACELOG(LOG_ERROR, "MODEL: [%s] Unable to read obj file", fileName);
+        TRACELOG(RAYLIB_LOG_ERROR, "MODEL: [%s] Unable to read obj file", fileName);
         return model;
     }
 
     char currentDir[1024] = { 0 };
     strcpy(currentDir, GetWorkingDirectory()); // Save current working directory
     const char *workingDir = GetDirectoryPath(fileName); // Switch to OBJ directory for material path correctness
-    if (CHDIR(workingDir) != 0) TRACELOG(LOG_WARNING, "MODEL: [%s] Failed to change working directory", workingDir);
+    if (CHDIR(workingDir) != 0) TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Failed to change working directory", workingDir);
 
     unsigned int dataSize = (unsigned int)strlen(fileText);
 
@@ -4222,7 +4222,7 @@ static Model LoadOBJ(const char *fileName)
 
     if (ret != TINYOBJ_SUCCESS)
     {
-        TRACELOG(LOG_ERROR, "MODEL: Unable to read obj data %s", fileName);
+        TRACELOG(RAYLIB_LOG_ERROR, "MODEL: Unable to read obj data %s", fileName);
         return model;
     }
 
@@ -4412,7 +4412,7 @@ static Model LoadOBJ(const char *fileName)
     // Restore current working directory
     if (CHDIR(currentDir) != 0)
     {
-        TRACELOG(LOG_WARNING, "MODEL: [%s] Failed to change working directory", currentDir);
+        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Failed to change working directory", currentDir);
     }
 
     return model;
@@ -4541,13 +4541,13 @@ static Model LoadIQM(const char *fileName)
 
     if (memcmp(iqmHeader->magic, IQM_MAGIC, sizeof(IQM_MAGIC)) != 0)
     {
-        TRACELOG(LOG_WARNING, "MODEL: [%s] IQM file is not a valid model", fileName);
+        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] IQM file is not a valid model", fileName);
         return model;
     }
 
     if (iqmHeader->version != IQM_VERSION)
     {
-        TRACELOG(LOG_WARNING, "MODEL: [%s] IQM file version not supported (%i)", fileName, iqmHeader->version);
+        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] IQM file version not supported (%i)", fileName, iqmHeader->version);
         return model;
     }
 
@@ -4584,7 +4584,7 @@ static Model LoadIQM(const char *fileName)
 
         model.meshMaterial[i] = i;
 
-        TRACELOG(LOG_DEBUG, "MODEL: [%s] mesh name (%s), material (%s)", fileName, name, material);
+        TRACELOG(RAYLIB_LOG_DEBUG, "MODEL: [%s] mesh name (%s), material (%s)", fileName, name, material);
 
         model.meshes[i].vertexCount = imesh[i].num_vertexes;
 
@@ -4862,13 +4862,13 @@ static ModelAnimation *LoadModelAnimationsIQM(const char *fileName, int *animCou
 
     if (memcmp(iqmHeader->magic, IQM_MAGIC, sizeof(IQM_MAGIC)) != 0)
     {
-        TRACELOG(LOG_WARNING, "MODEL: [%s] IQM file is not a valid model", fileName);
+        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] IQM file is not a valid model", fileName);
         return NULL;
     }
 
     if (iqmHeader->version != IQM_VERSION)
     {
-        TRACELOG(LOG_WARNING, "MODEL: [%s] IQM file version not supported (%i)", fileName, iqmHeader->version);
+        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] IQM file version not supported (%i)", fileName, iqmHeader->version);
         return NULL;
     }
 
@@ -4904,7 +4904,7 @@ static ModelAnimation *LoadModelAnimationsIQM(const char *fileName, int *animCou
         animations[a].bones = RL_MALLOC(iqmHeader->num_poses*sizeof(BoneInfo));
         animations[a].framePoses = RL_MALLOC(anim[a].num_frames*sizeof(Transform *));
         memcpy(animations[a].name, fileDataPtr + iqmHeader->ofs_text + anim[a].name, 32);   //  I don't like this 32 here
-        TraceLog(LOG_INFO, "IQM Anim %s", animations[a].name);
+        TraceLog(RAYLIB_LOG_INFO, "IQM Anim %s", animations[a].name);
         // animations[a].framerate = anim.framerate;     // TODO: Use animation framerate data?
 
         for (unsigned int j = 0; j < iqmHeader->num_poses; j++)
@@ -5080,7 +5080,7 @@ static Image LoadImageFromCgltfImage(cgltf_image *cgltfImage, const char *texPat
             int i = 0;
             while ((cgltfImage->uri[i] != ',') && (cgltfImage->uri[i] != 0)) i++;
 
-            if (cgltfImage->uri[i] == 0) TRACELOG(LOG_WARNING, "IMAGE: glTF data URI is not a valid image");
+            if (cgltfImage->uri[i] == 0) TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: glTF data URI is not a valid image");
             else
             {
                 int base64Size = (int)strlen(cgltfImage->uri + i + 1);
@@ -5125,7 +5125,7 @@ static Image LoadImageFromCgltfImage(cgltf_image *cgltfImage, const char *texPat
             (strcmp(cgltfImage->mime_type, "image/png") == 0)) image = LoadImageFromMemory(".png", data, (int)cgltfImage->buffer_view->size);
         else if ((strcmp(cgltfImage->mime_type, "image\\/jpeg") == 0) ||
                  (strcmp(cgltfImage->mime_type, "image/jpeg") == 0)) image = LoadImageFromMemory(".jpg", data, (int)cgltfImage->buffer_view->size);
-        else TRACELOG(LOG_WARNING, "MODEL: glTF image data MIME type not recognized", TextFormat("%s/%s", texPath, cgltfImage->uri));
+        else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: glTF image data MIME type not recognized", TextFormat("%s/%s", texPath, cgltfImage->uri));
 
         RL_FREE(data);
     }
@@ -5234,20 +5234,20 @@ static Model LoadGLTF(const char *fileName)
 
     if (result == cgltf_result_success)
     {
-        if (data->file_type == cgltf_file_type_glb) TRACELOG(LOG_INFO, "MODEL: [%s] Model basic data (glb) loaded successfully", fileName);
-        else if (data->file_type == cgltf_file_type_gltf) TRACELOG(LOG_INFO, "MODEL: [%s] Model basic data (glTF) loaded successfully", fileName);
-        else TRACELOG(LOG_WARNING, "MODEL: [%s] Model format not recognized", fileName);
+        if (data->file_type == cgltf_file_type_glb) TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] Model basic data (glb) loaded successfully", fileName);
+        else if (data->file_type == cgltf_file_type_gltf) TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] Model basic data (glTF) loaded successfully", fileName);
+        else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Model format not recognized", fileName);
 
-        TRACELOG(LOG_INFO, "    > Meshes count: %i", data->meshes_count);
-        TRACELOG(LOG_INFO, "    > Materials count: %i (+1 default)", data->materials_count);
-        TRACELOG(LOG_DEBUG, "    > Buffers count: %i", data->buffers_count);
-        TRACELOG(LOG_DEBUG, "    > Images count: %i", data->images_count);
-        TRACELOG(LOG_DEBUG, "    > Textures count: %i", data->textures_count);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Meshes count: %i", data->meshes_count);
+        TRACELOG(RAYLIB_LOG_INFO, "    > Materials count: %i (+1 default)", data->materials_count);
+        TRACELOG(RAYLIB_LOG_DEBUG, "    > Buffers count: %i", data->buffers_count);
+        TRACELOG(RAYLIB_LOG_DEBUG, "    > Images count: %i", data->images_count);
+        TRACELOG(RAYLIB_LOG_DEBUG, "    > Textures count: %i", data->textures_count);
 
         // Force reading data buffers (fills buffer_view->buffer->data)
         // NOTE: If an uri is defined to base64 data or external path, it's automatically loaded
         result = cgltf_load_buffers(&options, data, fileName);
-        if (result != cgltf_result_success) TRACELOG(LOG_INFO, "MODEL: [%s] Failed to load mesh/material buffers", fileName);
+        if (result != cgltf_result_success) TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] Failed to load mesh/material buffers", fileName);
 
         int primitivesCount = 0;
         // NOTE: We will load every primitive in the glTF as a separate raylib Mesh.
@@ -5265,7 +5265,7 @@ static Model LoadGLTF(const char *fileName)
                     primitivesCount++;
             }
         }
-        TRACELOG(LOG_DEBUG, "    > Primitives (triangles only) count based on hierarchy : %i", primitivesCount);
+        TRACELOG(RAYLIB_LOG_DEBUG, "    > Primitives (triangles only) count based on hierarchy : %i", primitivesCount);
 
         // Load our model data: meshes and materials
         model.meshCount = primitivesCount;
@@ -5435,7 +5435,7 @@ static Model LoadGLTF(const char *fileName)
                                 vertices[3*k+2] = vt.z;
                             }
                         }
-                        else TRACELOG(LOG_WARNING, "MODEL: [%s] Vertices attribute data format not supported, use vec3 float", fileName);
+                        else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Vertices attribute data format not supported, use vec3 float", fileName);
                     }
                     else if (mesh->primitives[p].attributes[j].type == cgltf_attribute_type_normal)   // NORMAL, vec3, float
                     {
@@ -5459,7 +5459,7 @@ static Model LoadGLTF(const char *fileName)
                                 normals[3*k+2] = nt.z;
                             }
                         }
-                        else TRACELOG(LOG_WARNING, "MODEL: [%s] Normal attribute data format not supported, use vec3 float", fileName);
+                        else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Normal attribute data format not supported, use vec3 float", fileName);
                     }
                     else if (mesh->primitives[p].attributes[j].type == cgltf_attribute_type_tangent)   // TANGENT, vec3, float
                     {
@@ -5483,7 +5483,7 @@ static Model LoadGLTF(const char *fileName)
                                 tangents[3*k+2] = tt.z;
                             }
                         }
-                        else TRACELOG(LOG_WARNING, "MODEL: [%s] Tangent attribute data format not supported, use vec4 float", fileName);
+                        else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Tangent attribute data format not supported, use vec4 float", fileName);
                     }
                     else if (mesh->primitives[p].attributes[j].type == cgltf_attribute_type_texcoord) // TEXCOORD_n, vec2, float/u8n/u16n
                     {
@@ -5530,16 +5530,16 @@ static Model LoadGLTF(const char *fileName)
 
                                 RL_FREE(temp);
                             }
-                            else TRACELOG(LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported", fileName);
+                            else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported", fileName);
                         }
-                        else TRACELOG(LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported, use vec2 float", fileName);
+                        else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported, use vec2 float", fileName);
 
                         int index = mesh->primitives[p].attributes[j].index;
                         if (index == 0) model.meshes[meshIndex].texcoords = texcoordPtr;
                         else if (index == 1) model.meshes[meshIndex].texcoords2 = texcoordPtr;
                         else
                         {
-                            TRACELOG(LOG_WARNING, "MODEL: [%s] No more than 2 texture coordinates attributes supported", fileName);
+                            TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] No more than 2 texture coordinates attributes supported", fileName);
                             if (texcoordPtr != NULL) RL_FREE(texcoordPtr);
                         }
                     }
@@ -5611,7 +5611,7 @@ static Model LoadGLTF(const char *fileName)
 
                                 RL_FREE(temp);
                             }
-                            else TRACELOG(LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
+                            else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
                         }
                         else if (attribute->type == cgltf_type_vec4) // RGBA
                         {
@@ -5651,9 +5651,9 @@ static Model LoadGLTF(const char *fileName)
 
                                 RL_FREE(temp);
                             }
-                            else TRACELOG(LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
+                            else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
                         }
-                        else TRACELOG(LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
+                        else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
                     }
 
                     // NOTE: Attributes related to animations are processed separately
@@ -5687,11 +5687,11 @@ static Model LoadGLTF(const char *fileName)
                         model.meshes[meshIndex].indices = RL_MALLOC(attribute->count*sizeof(unsigned short));
                         LOAD_ATTRIBUTE_CAST(attribute, 1, unsigned int, model.meshes[meshIndex].indices, unsigned short);
 
-                        TRACELOG(LOG_WARNING, "MODEL: [%s] Indices data converted from u32 to u16, possible loss of data", fileName);
+                        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Indices data converted from u32 to u16, possible loss of data", fileName);
                     }
                     else
                     {
-                        TRACELOG(LOG_WARNING, "MODEL: [%s] Indices data format not supported, use u16", fileName);
+                        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Indices data format not supported, use u16", fileName);
                     }
                 }
                 else model.meshes[meshIndex].triangleCount = model.meshes[meshIndex].vertexCount/3;    // Unindexed mesh
@@ -5746,7 +5746,7 @@ static Model LoadGLTF(const char *fileName)
         }
         if (data->skins_count > 1)
         {
-            TRACELOG(LOG_WARNING, "MODEL: [%s] can only load one skin (armature) per model, but gltf skins_count == %i", fileName, data->skins_count);
+            TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] can only load one skin (armature) per model, but gltf skins_count == %i", fileName, data->skins_count);
         }
 
         meshIndex = 0;
@@ -5803,7 +5803,7 @@ static Model LoadGLTF(const char *fileName)
                                 {
                                     if ((temp[b] > 255) && !boneIdOverflowWarning)
                                     {
-                                        TRACELOG(LOG_WARNING, "MODEL: [%s] Joint attribute data format (u16) overflow", fileName);
+                                        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Joint attribute data format (u16) overflow", fileName);
                                         boneIdOverflowWarning = true;
                                     }
 
@@ -5813,9 +5813,9 @@ static Model LoadGLTF(const char *fileName)
 
                                 RL_FREE(temp);
                             }
-                            else TRACELOG(LOG_WARNING, "MODEL: [%s] Joint attribute data format not supported", fileName);
+                            else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Joint attribute data format not supported", fileName);
                         }
-                        else TRACELOG(LOG_WARNING, "MODEL: [%s] Joint attribute data format not supported", fileName);
+                        else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Joint attribute data format not supported", fileName);
                     }
                     else if (mesh->primitives[p].attributes[j].type == cgltf_attribute_type_weights)  // WEIGHTS_n (vec4, u8n/u16n/f32)
                     {
@@ -5863,9 +5863,9 @@ static Model LoadGLTF(const char *fileName)
                                 //   - 256 values, provided as cgltf_type_vec4 of float (4 byte per joint, stride 16)
                                 LOAD_ATTRIBUTE(attribute, 4, float, model.meshes[meshIndex].boneWeights)
                             }
-                            else TRACELOG(LOG_WARNING, "MODEL: [%s] Joint weight attribute data format not supported, use vec4 float", fileName);
+                            else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Joint weight attribute data format not supported, use vec4 float", fileName);
                         }
-                        else TRACELOG(LOG_WARNING, "MODEL: [%s] Joint weight attribute data format not supported, use vec4 float", fileName);
+                        else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Joint weight attribute data format not supported, use vec4 float", fileName);
                     }
                 }
 
@@ -5895,7 +5895,7 @@ static Model LoadGLTF(const char *fileName)
         // Free all cgltf loaded data
         cgltf_free(data);
     }
-    else TRACELOG(LOG_WARNING, "MODEL: [%s] Failed to load glTF data", fileName);
+    else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Failed to load glTF data", fileName);
 
     // WARNING: cgltf requires the file pointer available while reading data
     UnloadFileData(fileData);
@@ -6057,13 +6057,13 @@ static ModelAnimation *LoadModelAnimationsGLTF(const char *fileName, int *animCo
 
     if (result != cgltf_result_success)
     {
-        TRACELOG(LOG_WARNING, "MODEL: [%s] Failed to load glTF data", fileName);
+        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Failed to load glTF data", fileName);
         *animCount = 0;
         return NULL;
     }
 
     result = cgltf_load_buffers(&options, data, fileName);
-    if (result != cgltf_result_success) TRACELOG(LOG_INFO, "MODEL: [%s] Failed to load animation buffers", fileName);
+    if (result != cgltf_result_success) TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] Failed to load animation buffers", fileName);
 
     if (result == cgltf_result_success)
     {
@@ -6127,17 +6127,17 @@ static ModelAnimation *LoadModelAnimationsGLTF(const char *fileName, int *animCo
                         }
                         else
                         {
-                            TRACELOG(LOG_WARNING, "MODEL: [%s] Unsupported target_path on channel %d's sampler for animation %d. Skipping.", fileName, j, i);
+                            TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Unsupported target_path on channel %d's sampler for animation %d. Skipping.", fileName, j, i);
                         }
                     }
-                    else TRACELOG(LOG_WARNING, "MODEL: [%s] Invalid interpolation curve encountered for GLTF animation.", fileName);
+                    else TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Invalid interpolation curve encountered for GLTF animation.", fileName);
 
                     float t = 0.0f;
                     cgltf_bool r = cgltf_accessor_read_float(channel.sampler->input, channel.sampler->input->count - 1, &t, 1);
 
                     if (!r)
                     {
-                        TRACELOG(LOG_WARNING, "MODEL: [%s] Failed to load input time", fileName);
+                        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Failed to load input time", fileName);
                         continue;
                     }
 
@@ -6168,7 +6168,7 @@ static ModelAnimation *LoadModelAnimationsGLTF(const char *fileName, int *animCo
                         {
                             if (!GetPoseAtTimeGLTF(boneChannels[k].interpolationType, boneChannels[k].translate->sampler->input, boneChannels[k].translate->sampler->output, time, &translation))
                             {
-                                TRACELOG(LOG_INFO, "MODEL: [%s] Failed to load translate pose data for bone %s", fileName, animations[i].bones[k].name);
+                                TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] Failed to load translate pose data for bone %s", fileName, animations[i].bones[k].name);
                             }
                         }
 
@@ -6176,7 +6176,7 @@ static ModelAnimation *LoadModelAnimationsGLTF(const char *fileName, int *animCo
                         {
                             if (!GetPoseAtTimeGLTF(boneChannels[k].interpolationType, boneChannels[k].rotate->sampler->input, boneChannels[k].rotate->sampler->output, time, &rotation))
                             {
-                                TRACELOG(LOG_INFO, "MODEL: [%s] Failed to load rotate pose data for bone %s", fileName, animations[i].bones[k].name);
+                                TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] Failed to load rotate pose data for bone %s", fileName, animations[i].bones[k].name);
                             }
                         }
 
@@ -6184,7 +6184,7 @@ static ModelAnimation *LoadModelAnimationsGLTF(const char *fileName, int *animCo
                         {
                             if (!GetPoseAtTimeGLTF(boneChannels[k].interpolationType, boneChannels[k].scale->sampler->input, boneChannels[k].scale->sampler->output, time, &scale))
                             {
-                                TRACELOG(LOG_INFO, "MODEL: [%s] Failed to load scale pose data for bone %s", fileName, animations[i].bones[k].name);
+                                TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] Failed to load scale pose data for bone %s", fileName, animations[i].bones[k].name);
                             }
                         }
 
@@ -6198,14 +6198,14 @@ static ModelAnimation *LoadModelAnimationsGLTF(const char *fileName, int *animCo
                     BuildPoseFromParentJoints(animations[i].bones, animations[i].boneCount, animations[i].framePoses[j]);
                 }
 
-                TRACELOG(LOG_INFO, "MODEL: [%s] Loaded animation: %s (%d frames, %fs)", fileName, (animData.name != NULL)? animData.name : "NULL", animations[i].frameCount, animDuration);
+                TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] Loaded animation: %s (%d frames, %fs)", fileName, (animData.name != NULL)? animData.name : "NULL", animations[i].frameCount, animDuration);
                 RL_FREE(boneChannels);
             }
         }
 
         if (data->skins_count > 1)
         {
-            TRACELOG(LOG_WARNING, "MODEL: [%s] expected exactly one skin to load animation data from, but found %i", fileName, data->skins_count);
+            TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] expected exactly one skin to load animation data from, but found %i", fileName, data->skins_count);
         }
 
         cgltf_free(data);
@@ -6230,7 +6230,7 @@ static Model LoadVOX(const char *fileName)
 
     if (fileData == 0)
     {
-        TRACELOG(LOG_WARNING, "MODEL: [%s] Failed to load VOX file", fileName);
+        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Failed to load VOX file", fileName);
         return model;
     }
 
@@ -6243,7 +6243,7 @@ static Model LoadVOX(const char *fileName)
         // Error
         UnloadFileData(fileData);
 
-        TRACELOG(LOG_WARNING, "MODEL: [%s] Failed to load VOX data", fileName);
+        TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Failed to load VOX data", fileName);
         return model;
     }
     else
@@ -6252,7 +6252,7 @@ static Model LoadVOX(const char *fileName)
         nbvertices = voxarray.vertices.used;
         meshescount = 1 + (nbvertices/65536);
 
-        TRACELOG(LOG_INFO, "MODEL: [%s] VOX data loaded successfully : %i vertices/%i meshes", fileName, nbvertices, meshescount);
+        TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] VOX data loaded successfully : %i vertices/%i meshes", fileName, nbvertices, meshescount);
     }
 
     // Build models from meshes
@@ -6348,12 +6348,12 @@ static Model LoadM3D(const char *fileName)
 
         if (!m3d || M3D_ERR_ISFATAL(m3d->errcode))
         {
-            TRACELOG(LOG_WARNING, "MODEL: [%s] Failed to load M3D data, error code %d", fileName, m3d? m3d->errcode : -2);
+            TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Failed to load M3D data, error code %d", fileName, m3d? m3d->errcode : -2);
             if (m3d) m3d_free(m3d);
             UnloadFileData(fileData);
             return model;
         }
-        else TRACELOG(LOG_INFO, "MODEL: [%s] M3D data loaded successfully: %i faces/%i materials", fileName, m3d->numface, m3d->nummaterial);
+        else TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] M3D data loaded successfully: %i faces/%i materials", fileName, m3d->numface, m3d->nummaterial);
 
         // no face? this is probably just a material library
         if (!m3d->numface)
@@ -6366,12 +6366,12 @@ static Model LoadM3D(const char *fileName)
         if (m3d->nummaterial > 0)
         {
             model.meshCount = model.materialCount = m3d->nummaterial;
-            TRACELOG(LOG_INFO, "MODEL: model has %i material meshes", model.materialCount);
+            TRACELOG(RAYLIB_LOG_INFO, "MODEL: model has %i material meshes", model.materialCount);
         }
         else
         {
             model.meshCount = 1; model.materialCount = 0;
-            TRACELOG(LOG_INFO, "MODEL: No materials, putting all meshes in a default material");
+            TRACELOG(RAYLIB_LOG_INFO, "MODEL: No materials, putting all meshes in a default material");
         }
 
         // We always need a default material, so we add +1
@@ -6695,11 +6695,11 @@ static ModelAnimation *LoadModelAnimationsM3D(const char *fileName, int *animCou
 
         if (!m3d || M3D_ERR_ISFATAL(m3d->errcode))
         {
-            TRACELOG(LOG_WARNING, "MODEL: [%s] Failed to load M3D data, error code %d", fileName, m3d? m3d->errcode : -2);
+            TRACELOG(RAYLIB_LOG_WARNING, "MODEL: [%s] Failed to load M3D data, error code %d", fileName, m3d? m3d->errcode : -2);
             UnloadFileData(fileData);
             return NULL;
         }
-        else TRACELOG(LOG_INFO, "MODEL: [%s] M3D data loaded successfully: %i animations, %i bones, %i skins", fileName,
+        else TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] M3D data loaded successfully: %i animations, %i bones, %i skins", fileName,
             m3d->numaction, m3d->numbone, m3d->numskin);
 
         // No animation or bone+skin?
@@ -6722,7 +6722,7 @@ static ModelAnimation *LoadModelAnimationsM3D(const char *fileName, int *animCou
             strncpy(animations[a].name, m3d->action[a].name, sizeof(animations[a].name));
             animations[a].name[sizeof(animations[a].name) - 1] = '\0';
 
-            TRACELOG(LOG_INFO, "MODEL: [%s] animation #%i: %i msec, %i frames", fileName, a, m3d->action[a].durationmsec, animations[a].frameCount);
+            TRACELOG(RAYLIB_LOG_INFO, "MODEL: [%s] animation #%i: %i msec, %i frames", fileName, a, m3d->action[a].durationmsec, animations[a].frameCount);
 
             for (i = 0; i < (int)m3d->numbone; i++)
             {

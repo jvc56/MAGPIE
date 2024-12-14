@@ -419,12 +419,12 @@ Image LoadImageFromMemory(const char *fileType, const unsigned char *fileData, i
     // Security check for input data
     if ((fileData == NULL) || (dataSize == 0))
     {
-        TRACELOG(LOG_WARNING, "IMAGE: Invalid file data");
+        TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Invalid file data");
         return image;
     }
     if (fileType == NULL)
     {
-        TRACELOG(LOG_WARNING, "IMAGE: Missing file extension");
+        TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Missing file extension");
         return image;
     }
 
@@ -493,7 +493,7 @@ Image LoadImageFromMemory(const char *fileType, const unsigned char *fileData, i
             else if (comp == 4) image.format = PIXELFORMAT_UNCOMPRESSED_R32G32B32A32;
             else
             {
-                TRACELOG(LOG_WARNING, "IMAGE: HDR file format not supported");
+                TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: HDR file format not supported");
                 UnloadImage(image);
             }
         }
@@ -544,10 +544,10 @@ Image LoadImageFromMemory(const char *fileType, const unsigned char *fileData, i
         image.data = rl_load_astc_from_memory(fileData, dataSize, &image.width, &image.height, &image.format, &image.mipmaps);
     }
 #endif
-    else TRACELOG(LOG_WARNING, "IMAGE: Data format not supported");
+    else TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Data format not supported");
 
-    if (image.data != NULL) TRACELOG(LOG_INFO, "IMAGE: Data loaded successfully (%ix%i | %s | %i mipmaps)", image.width, image.height, rlGetPixelFormatName(image.format), image.mipmaps);
-    else TRACELOG(LOG_WARNING, "IMAGE: Failed to load image data");
+    if (image.data != NULL) TRACELOG(RAYLIB_LOG_INFO, "IMAGE: Data loaded successfully (%ix%i | %s | %i mipmaps)", image.width, image.height, rlGetPixelFormatName(image.format), image.mipmaps);
+    else TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Failed to load image data");
 
     return image;
 }
@@ -575,11 +575,11 @@ Image LoadImageFromTexture(Texture2D texture)
             // original texture format is retrieved on RPI...
             image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
 #endif
-            TRACELOG(LOG_INFO, "TEXTURE: [ID %i] Pixel data retrieved successfully", texture.id);
+            TRACELOG(RAYLIB_LOG_INFO, "TEXTURE: [ID %i] Pixel data retrieved successfully", texture.id);
         }
-        else TRACELOG(LOG_WARNING, "TEXTURE: [ID %i] Failed to retrieve pixel data", texture.id);
+        else TRACELOG(RAYLIB_LOG_WARNING, "TEXTURE: [ID %i] Failed to retrieve pixel data", texture.id);
     }
-    else TRACELOG(LOG_WARNING, "TEXTURE: [ID %i] Failed to retrieve compressed pixel data", texture.id);
+    else TRACELOG(RAYLIB_LOG_WARNING, "TEXTURE: [ID %i] Failed to retrieve compressed pixel data", texture.id);
 
     return image;
 }
@@ -671,7 +671,7 @@ bool ExportImage(Image image, const char *fileName)
         channels = 0;
         if (image.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8) channels = 3;
         else if (image.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) channels = 4;
-        else TRACELOG(LOG_WARNING, "IMAGE: Image pixel format must be R8G8B8 or R8G8B8A8");
+        else TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Image pixel format must be R8G8B8 or R8G8B8A8");
 
         if ((channels == 3) || (channels == 4))
         {
@@ -701,8 +701,8 @@ bool ExportImage(Image image, const char *fileName)
     if (allocatedData) RL_FREE(imgData);
 #endif      // SUPPORT_IMAGE_EXPORT
 
-    if (result != 0) TRACELOG(LOG_INFO, "FILEIO: [%s] Image exported successfully", fileName);
-    else TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to export image", fileName);
+    if (result != 0) TRACELOG(RAYLIB_LOG_INFO, "FILEIO: [%s] Image exported successfully", fileName);
+    else TRACELOG(RAYLIB_LOG_WARNING, "FILEIO: [%s] Failed to export image", fileName);
 
     return result;
 }
@@ -787,8 +787,8 @@ bool ExportImageAsCode(Image image, const char *fileName)
 
 #endif      // SUPPORT_IMAGE_EXPORT
 
-    if (success != 0) TRACELOG(LOG_INFO, "FILEIO: [%s] Image as code exported successfully", fileName);
-    else TRACELOG(LOG_WARNING, "FILEIO: [%s] Failed to export image as code", fileName);
+    if (success != 0) TRACELOG(RAYLIB_LOG_INFO, "FILEIO: [%s] Image as code exported successfully", fileName);
+    else TRACELOG(RAYLIB_LOG_WARNING, "FILEIO: [%s] Failed to export image as code", fileName);
 
     return success;
 }
@@ -1213,12 +1213,12 @@ void ImageCrop(Image *image, Rectangle crop)
     if ((crop.y + crop.height) > image->height) crop.height = image->height - crop.y;
     if ((crop.x > image->width) || (crop.y > image->height))
     {
-        TRACELOG(LOG_WARNING, "IMAGE: Failed to crop, rectangle out of bounds");
+        TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Failed to crop, rectangle out of bounds");
         return;
     }
 
-    if (image->mipmaps > 1) TRACELOG(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "Image manipulation not supported for compressed formats");
+    if (image->mipmaps > 1) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation only applied to base mipmap level");
+    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation not supported for compressed formats");
     else
     {
         int bytesPerPixel = GetPixelDataSize(1, 1, image->format);
@@ -1455,7 +1455,7 @@ void ImageFormat(Image *image, int newFormat)
             #endif
             }
         }
-        else TRACELOG(LOG_WARNING, "IMAGE: Data format is compressed, can not be converted");
+        else TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Data format is compressed, can not be converted");
     }
 }
 
@@ -1470,7 +1470,7 @@ Image ImageText(const char *text, int fontSize, Color color)
     imText = ImageTextEx(GetFontDefault(), text, (float)fontSize, (float)spacing, color);   // WARNING: Module required: rtext
 #else
     imText = GenImageColor(200, 60, BLACK);     // Generating placeholder black image rectangle
-    TRACELOG(LOG_WARNING, "IMAGE: ImageTextEx() requires module: rtext");
+    TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: ImageTextEx() requires module: rtext");
 #endif
     return imText;
 }
@@ -1526,7 +1526,7 @@ Image ImageTextEx(Font font, const char *text, float fontSize, float spacing, Co
     if (textSize.y != imSize.y)
     {
         float scaleFactor = textSize.y/imSize.y;
-        TRACELOG(LOG_INFO, "IMAGE: Text scaled by factor: %f", scaleFactor);
+        TRACELOG(RAYLIB_LOG_INFO, "IMAGE: Text scaled by factor: %f", scaleFactor);
 
         // Using nearest-neighbor scaling algorithm for default font
         // TODO: Allow defining the preferred scaling mechanism externally
@@ -1535,7 +1535,7 @@ Image ImageTextEx(Font font, const char *text, float fontSize, float spacing, Co
     }
 #else
     imText = GenImageColor(200, 60, BLACK);     // Generating placeholder black image rectangle
-    TRACELOG(LOG_WARNING, "IMAGE: ImageTextEx() requires module: rtext");
+    TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: ImageTextEx() requires module: rtext");
 #endif
     return imText;
 }
@@ -1551,7 +1551,7 @@ Image ImageFromChannel(Image image, int selectedChannel)
     // Check selected channel is valid
     if (selectedChannel < 0)
     {
-        TRACELOG(LOG_WARNING, "Channel cannot be negative. Setting channel to 0.");
+        TRACELOG(RAYLIB_LOG_WARNING, "Channel cannot be negative. Setting channel to 0.");
         selectedChannel = 0;
     }
 
@@ -1561,7 +1561,7 @@ Image ImageFromChannel(Image image, int selectedChannel)
     {
         if (selectedChannel > 0)
         {
-            TRACELOG(LOG_WARNING, "This image has only 1 channel. Setting channel to it.");
+            TRACELOG(RAYLIB_LOG_WARNING, "This image has only 1 channel. Setting channel to it.");
             selectedChannel = 0;
         }
     }
@@ -1569,7 +1569,7 @@ Image ImageFromChannel(Image image, int selectedChannel)
     {
         if (selectedChannel > 1)
         {
-            TRACELOG(LOG_WARNING, "This image has only 2 channels. Setting channel to alpha.");
+            TRACELOG(RAYLIB_LOG_WARNING, "This image has only 2 channels. Setting channel to alpha.");
             selectedChannel = 1;
         }
     }
@@ -1580,7 +1580,7 @@ Image ImageFromChannel(Image image, int selectedChannel)
     {
         if (selectedChannel > 2)
         {
-            TRACELOG(LOG_WARNING, "This image has only 3 channels. Setting channel to red.");
+            TRACELOG(RAYLIB_LOG_WARNING, "This image has only 3 channels. Setting channel to red.");
             selectedChannel = 0;
         }
     }
@@ -1588,7 +1588,7 @@ Image ImageFromChannel(Image image, int selectedChannel)
     // Check for RGBA formats
     if (selectedChannel > 3)
     {
-        TRACELOG(LOG_WARNING, "ImageFromChannel supports channels 0 to 3 (rgba). Setting channel to alpha.");
+        TRACELOG(RAYLIB_LOG_WARNING, "ImageFromChannel supports channels 0 to 3 (rgba). Setting channel to alpha.");
         selectedChannel = 3;
     }
 
@@ -1600,7 +1600,7 @@ Image ImageFromChannel(Image image, int selectedChannel)
 
     unsigned char *pixels = (unsigned char *)RL_CALLOC(image.width*image.height, sizeof(unsigned char)); // Values from 0 to 255
 
-    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
+    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
     else
     {
         for (int i = 0, k = 0; i < image.width*image.height; i++)
@@ -1810,8 +1810,8 @@ void ImageResizeCanvas(Image *image, int newWidth, int newHeight, int offsetX, i
     // Security check to avoid program crash
     if ((image->data == NULL) || (image->width == 0) || (image->height == 0)) return;
 
-    if (image->mipmaps > 1) TRACELOG(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "Image manipulation not supported for compressed formats");
+    if (image->mipmaps > 1) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation only applied to base mipmap level");
+    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation not supported for compressed formats");
     else if ((newWidth != image->width) || (newHeight != image->height))
     {
         Rectangle srcRec = { 0, 0, (float)image->width, (float)image->height };
@@ -1907,8 +1907,8 @@ void ImageAlphaClear(Image *image, Color color, float threshold)
     // Security check to avoid program crash
     if ((image->data == NULL) || (image->width == 0) || (image->height == 0)) return;
 
-    if (image->mipmaps > 1) TRACELOG(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "Image manipulation not supported for compressed formats");
+    if (image->mipmaps > 1) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation only applied to base mipmap level");
+    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation not supported for compressed formats");
     else
     {
         switch (image->format)
@@ -2011,11 +2011,11 @@ void ImageAlphaMask(Image *image, Image alphaMask)
 {
     if ((image->width != alphaMask.width) || (image->height != alphaMask.height))
     {
-        TRACELOG(LOG_WARNING, "IMAGE: Alpha mask must be same size as image");
+        TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Alpha mask must be same size as image");
     }
     else if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB)
     {
-        TRACELOG(LOG_WARNING, "IMAGE: Alpha mask can not be applied to compressed data formats");
+        TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Alpha mask can not be applied to compressed data formats");
     }
     else
     {
@@ -2244,7 +2244,7 @@ void ImageKernelConvolution(Image *image, const float *kernel, int kernelSize)
 
     if (kernelWidth*kernelWidth != kernelSize)
     {
-        TRACELOG(LOG_WARNING, "IMAGE: Convolution kernel must be square to be applied");
+        TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Convolution kernel must be square to be applied");
         return;
     }
 
@@ -2399,7 +2399,7 @@ void ImageMipmaps(Image *image)
         void *temp = RL_REALLOC(image->data, mipSize);
 
         if (temp != NULL) image->data = temp;      // Assign new pointer (new size) to store mipmaps data
-        else TRACELOG(LOG_WARNING, "IMAGE: Mipmaps required memory could not be allocated");
+        else TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Mipmaps required memory could not be allocated");
 
         // Pointer to allocated memory point where store next mipmap level data
         unsigned char *nextmip = image->data;
@@ -2435,7 +2435,7 @@ void ImageMipmaps(Image *image)
 
         image->mipmaps = mipCount;
     }
-    else TRACELOG(LOG_WARNING, "IMAGE: Mipmaps already available");
+    else TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Mipmaps already available");
 }
 
 // Dither image data to 16bpp or lower (Floyd-Steinberg dithering)
@@ -2448,13 +2448,13 @@ void ImageDither(Image *image, int rBpp, int gBpp, int bBpp, int aBpp)
 
     if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB)
     {
-        TRACELOG(LOG_WARNING, "IMAGE: Compressed data formats can not be dithered");
+        TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Compressed data formats can not be dithered");
         return;
     }
 
     if ((rBpp + gBpp + bBpp + aBpp) > 16)
     {
-        TRACELOG(LOG_WARNING, "IMAGE: Unsupported dithering bpps (%ibpp), only 16bpp or lower modes supported", (rBpp+gBpp+bBpp+aBpp));
+        TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Unsupported dithering bpps (%ibpp), only 16bpp or lower modes supported", (rBpp+gBpp+bBpp+aBpp));
     }
     else
     {
@@ -2464,7 +2464,7 @@ void ImageDither(Image *image, int rBpp, int gBpp, int bBpp, int aBpp)
 
         if ((image->format != PIXELFORMAT_UNCOMPRESSED_R8G8B8) && (image->format != PIXELFORMAT_UNCOMPRESSED_R8G8B8A8))
         {
-            TRACELOG(LOG_WARNING, "IMAGE: Format is already 16bpp or lower, dithering could have no effect");
+            TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Format is already 16bpp or lower, dithering could have no effect");
         }
 
         // Define new image format, check if desired bpp match internal known format
@@ -2474,7 +2474,7 @@ void ImageDither(Image *image, int rBpp, int gBpp, int bBpp, int aBpp)
         else
         {
             image->format = 0;
-            TRACELOG(LOG_WARNING, "IMAGE: Unsupported dithered OpenGL internal format: %ibpp (R%iG%iB%iA%i)", (rBpp+gBpp+bBpp+aBpp), rBpp, gBpp, bBpp, aBpp);
+            TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Unsupported dithered OpenGL internal format: %ibpp (R%iG%iB%iA%i)", (rBpp+gBpp+bBpp+aBpp), rBpp, gBpp, bBpp, aBpp);
         }
 
         // NOTE: We will store the dithered data as unsigned short (16bpp)
@@ -2556,8 +2556,8 @@ void ImageFlipVertical(Image *image)
     // Security check to avoid program crash
     if ((image->data == NULL) || (image->width == 0) || (image->height == 0)) return;
 
-    if (image->mipmaps > 1) TRACELOG(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "Image manipulation not supported for compressed formats");
+    if (image->mipmaps > 1) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation only applied to base mipmap level");
+    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation not supported for compressed formats");
     else
     {
         int bytesPerPixel = GetPixelDataSize(1, 1, image->format);
@@ -2580,8 +2580,8 @@ void ImageFlipHorizontal(Image *image)
     // Security check to avoid program crash
     if ((image->data == NULL) || (image->width == 0) || (image->height == 0)) return;
 
-    if (image->mipmaps > 1) TRACELOG(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "Image manipulation not supported for compressed formats");
+    if (image->mipmaps > 1) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation only applied to base mipmap level");
+    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation not supported for compressed formats");
     else
     {
         int bytesPerPixel = GetPixelDataSize(1, 1, image->format);
@@ -2625,8 +2625,8 @@ void ImageRotate(Image *image, int degrees)
     // Security check to avoid program crash
     if ((image->data == NULL) || (image->width == 0) || (image->height == 0)) return;
 
-    if (image->mipmaps > 1) TRACELOG(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "Image manipulation not supported for compressed formats");
+    if (image->mipmaps > 1) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation only applied to base mipmap level");
+    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation not supported for compressed formats");
     else
     {
         float rad = degrees*PI/180.0f;
@@ -2684,8 +2684,8 @@ void ImageRotateCW(Image *image)
     // Security check to avoid program crash
     if ((image->data == NULL) || (image->width == 0) || (image->height == 0)) return;
 
-    if (image->mipmaps > 1) TRACELOG(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "Image manipulation not supported for compressed formats");
+    if (image->mipmaps > 1) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation only applied to base mipmap level");
+    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation not supported for compressed formats");
     else
     {
         int bytesPerPixel = GetPixelDataSize(1, 1, image->format);
@@ -2716,8 +2716,8 @@ void ImageRotateCCW(Image *image)
     // Security check to avoid program crash
     if ((image->data == NULL) || (image->width == 0) || (image->height == 0)) return;
 
-    if (image->mipmaps > 1) TRACELOG(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "Image manipulation not supported for compressed formats");
+    if (image->mipmaps > 1) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation only applied to base mipmap level");
+    if (image->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "Image manipulation not supported for compressed formats");
     else
     {
         int bytesPerPixel = GetPixelDataSize(1, 1, image->format);
@@ -2938,16 +2938,16 @@ Color *LoadImageColors(Image image)
 
     Color *pixels = (Color *)RL_MALLOC(image.width*image.height*sizeof(Color));
 
-    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
+    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
     else
     {
         if ((image.format == PIXELFORMAT_UNCOMPRESSED_R32) ||
             (image.format == PIXELFORMAT_UNCOMPRESSED_R32G32B32) ||
-            (image.format == PIXELFORMAT_UNCOMPRESSED_R32G32B32A32)) TRACELOG(LOG_WARNING, "IMAGE: Pixel format converted from 32bit to 8bit per channel");
+            (image.format == PIXELFORMAT_UNCOMPRESSED_R32G32B32A32)) TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Pixel format converted from 32bit to 8bit per channel");
 
         if ((image.format == PIXELFORMAT_UNCOMPRESSED_R16) ||
             (image.format == PIXELFORMAT_UNCOMPRESSED_R16G16B16) ||
-            (image.format == PIXELFORMAT_UNCOMPRESSED_R16G16B16A16)) TRACELOG(LOG_WARNING, "IMAGE: Pixel format converted from 16bit to 8bit per channel");
+            (image.format == PIXELFORMAT_UNCOMPRESSED_R16G16B16A16)) TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Pixel format converted from 16bit to 8bit per channel");
 
         for (int i = 0, k = 0; i < image.width*image.height; i++)
         {
@@ -3122,7 +3122,7 @@ Color *LoadImagePalette(Image image, int maxPaletteSize, int *colorCount)
                     if (palCount >= maxPaletteSize)
                     {
                         i = image.width*image.height;   // Finish palette get
-                        TRACELOG(LOG_WARNING, "IMAGE: Palette is greater than %i colors", maxPaletteSize);
+                        TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Palette is greater than %i colors", maxPaletteSize);
                     }
                 }
             }
@@ -3308,10 +3308,10 @@ Color GetImageColor(Image image, int x, int y)
                 color.a = (unsigned char)(HalfToFloat(((unsigned short *)image.data)[(y*image.width + x)*4])*255.0f);
 
             } break;
-            default: TRACELOG(LOG_WARNING, "Compressed image format does not support color reading"); break;
+            default: TRACELOG(RAYLIB_LOG_WARNING, "Compressed image format does not support color reading"); break;
         }
     }
-    else TRACELOG(LOG_WARNING, "Requested image pixel (%i, %i) out of bounds", x, y);
+    else TRACELOG(RAYLIB_LOG_WARNING, "Requested image pixel (%i, %i) out of bounds", x, y);
 
     return color;
 }
@@ -3922,7 +3922,7 @@ void ImageDraw(Image *dst, Image src, Rectangle srcRec, Rectangle dstRec, Color 
     if ((dst->data == NULL) || (dst->width == 0) || (dst->height == 0) ||
         (src.data == NULL) || (src.width == 0) || (src.height == 0)) return;
 
-    if (dst->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "Image drawing not supported for compressed formats");
+    if (dst->format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "Image drawing not supported for compressed formats");
     else
     {
         Image srcMod = { 0 };       // Source copy (in case it was required)
@@ -4076,7 +4076,7 @@ void ImageDrawText(Image *dst, const char *text, int posX, int posY, int fontSiz
     Vector2 position = { (float)posX, (float)posY };
     ImageDrawTextEx(dst, GetFontDefault(), text, position, (float)fontSize, 1.0f, color);   // WARNING: Module required: rtext
 #else
-    TRACELOG(LOG_WARNING, "IMAGE: ImageDrawText() requires module: rtext");
+    TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: ImageDrawText() requires module: rtext");
 #endif
 }
 
@@ -4122,7 +4122,7 @@ Texture2D LoadTextureFromImage(Image image)
     {
         texture.id = rlLoadTexture(image.data, image.width, image.height, image.format, image.mipmaps);
     }
-    else TRACELOG(LOG_WARNING, "IMAGE: Data is not valid to load texture");
+    else TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Data is not valid to load texture");
 
     texture.width = image.width;
     texture.height = image.height;
@@ -4226,11 +4226,11 @@ TextureCubemap LoadTextureCubemap(Image image, int layout)
             cubemap.format = faces.format;
             cubemap.mipmaps = 1;
         }
-        else TRACELOG(LOG_WARNING, "IMAGE: Failed to load cubemap image");
+        else TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Failed to load cubemap image");
 
         UnloadImage(faces);
     }
-    else TRACELOG(LOG_WARNING, "IMAGE: Failed to detect cubemap image layout");
+    else TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Failed to detect cubemap image layout");
 
     return cubemap;
 }
@@ -4266,11 +4266,11 @@ RenderTexture2D LoadRenderTexture(int width, int height)
         rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_RENDERBUFFER, 0);
 
         // Check if fbo is complete with attachments (valid)
-        if (rlFramebufferComplete(target.id)) TRACELOG(LOG_INFO, "FBO: [ID %i] Framebuffer object created successfully", target.id);
+        if (rlFramebufferComplete(target.id)) TRACELOG(RAYLIB_LOG_INFO, "FBO: [ID %i] Framebuffer object created successfully", target.id);
 
         rlDisableFramebuffer();
     }
-    else TRACELOG(LOG_WARNING, "FBO: Framebuffer object can not be created");
+    else TRACELOG(RAYLIB_LOG_WARNING, "FBO: Framebuffer object can not be created");
 
     return target;
 }
@@ -4298,7 +4298,7 @@ void UnloadTexture(Texture2D texture)
     {
         rlUnloadTexture(texture.id);
 
-        TRACELOG(LOG_INFO, "TEXTURE: [ID %i] Unloaded texture data from VRAM (GPU)", texture.id);
+        TRACELOG(RAYLIB_LOG_INFO, "TEXTURE: [ID %i] Unloaded texture data from VRAM (GPU)", texture.id);
     }
 }
 
@@ -4408,7 +4408,7 @@ void SetTextureFilter(Texture2D texture, int filter)
             }
             else
             {
-                TRACELOG(LOG_WARNING, "TEXTURE: [ID %i] No mipmaps available for TRILINEAR texture filtering", texture.id);
+                TRACELOG(RAYLIB_LOG_WARNING, "TEXTURE: [ID %i] No mipmaps available for TRILINEAR texture filtering", texture.id);
 
                 // RL_TEXTURE_FILTER_LINEAR - tex filter: BILINEAR, no mipmaps
                 rlTextureParameters(texture.id, RL_TEXTURE_MIN_FILTER, RL_TEXTURE_FILTER_LINEAR);
@@ -5415,7 +5415,7 @@ static Vector4 *LoadImageDataNormalized(Image image)
 {
     Vector4 *pixels = (Vector4 *)RL_MALLOC(image.width*image.height*sizeof(Vector4));
 
-    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
+    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) TRACELOG(RAYLIB_LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
     else
     {
         for (int i = 0, k = 0; i < image.width*image.height; i++)
