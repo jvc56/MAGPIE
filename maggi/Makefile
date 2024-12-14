@@ -336,6 +336,9 @@ all: raylib $(PROJECT_BUILD_PATH) $(PROJECT_NAME)
 raylib:
 	$(MAKE) -C $(RAYLIB_PATH)
 
+$(PROJECT_BUILD_PATH):
+	mkdir -p $(PROJECT_BUILD_PATH)
+
 # Clean everything
 clean:	clean_shell_$(PLATFORM_SHELL)
 	@echo Cleaning done
