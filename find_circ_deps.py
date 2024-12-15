@@ -5,6 +5,8 @@ import networkx as nx
 def get_files(directory):
     files_list = []
     for root, dirs, files in os.walk(directory):
+        # Skip the 'maggi/raylib' directory
+        dirs[:] = [d for d in dirs if not os.path.join(root, d).endswith('maggi/raylib')]
         for file in files:
             if file.endswith(('.h', '.c')):
                 files_list.append(os.path.join(root, file))
