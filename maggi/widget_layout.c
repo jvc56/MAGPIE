@@ -1,6 +1,7 @@
 #include "widget_layout.h"
 
 #include "../src/def/board_defs.h"
+#include "../src/def/rack_defs.h"
 
 #define BOARD_FRACTION_OF_PANEL 0.8
 #define BOARD_H_OFFSET_FRACTION ((1 - BOARD_FRACTION_OF_PANEL) / 2)
@@ -37,4 +38,15 @@ void update_widget_layout(struct WidgetLayout *layout, int window_width,
   layout->console_panel.y = 0;
   layout->console_panel.width = window_width - layout->console_panel.x;
   layout->console_panel.height = window_height;
+
+  const int rack_middle_x = layout->board_panel.width / 2;
+  const int board_bottom = layout->square[BOARD_DIM - 1][0].y +
+                           layout->square[BOARD_DIM - 1][0].height;
+  const int rack_middle_y = (board_bottom + layout->console_panel.height) / 2;
+  const int rack_width = layout->square[0][0].width * RACK_SIZE;
+  const int rack_height = layout->square[0][0].height;
+  layout->rack.x = rack_middle_x - 0.5 * rack_width;
+  layout->rack.y = rack_middle_y - 0.5 * rack_height;
+  layout->rack.width = rack_width;
+  layout->rack.height = rack_height;
 }

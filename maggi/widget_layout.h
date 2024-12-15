@@ -9,6 +9,7 @@ typedef struct WidgetLayout {
   Rectangle maggi_window;
   Rectangle board_panel;
   Rectangle square[BOARD_DIM][BOARD_DIM];
+  Rectangle rack;
   Rectangle console_panel;
 } WidgetLayout;
 

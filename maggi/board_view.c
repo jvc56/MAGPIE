@@ -1,8 +1,13 @@
 #include "board_view.h"
 
+#include "graphic_assets.h"
 #include "raylib/src/raylib.h"
 
 #include "../src/def/board_defs.h"
+
+#include "../src/ent/board.h"
+#include "../src/ent/game.h"
+#include "../src/ent/rack.h"
 
 #include "colors.h"
 #include "square_view.h"
@@ -12,9 +17,13 @@
 #define COLUMN_LABEL_MARGIN_FRACTION 0.2
 #define ROW_LABEL_MARGIN_FRACTION 0.12
 
-void draw_board_view(const WidgetLayout *widget_layout, const Font *tile_font,
-                     const Font *tile_score_font, const LetterDistribution *ld,
-                     const Board *board) {
+void draw_board_view(const WidgetLayout *widget_layout, const GraphicAssets *graphic_assets,
+                     const Game *game) {
+  const Font *tile_font = &graphic_assets->tile_font;
+  const Font *tile_score_font = &graphic_assets->tile_score_font;
+  const LetterDistribution *ld = game_get_ld(game);
+  const Board *board = game_get_board(game);
+
   // Background for board panel (contains board and rack)
   DrawRectangle(widget_layout->board_panel.x, widget_layout->board_panel.y,
                 widget_layout->board_panel.width,
@@ -26,8 +35,8 @@ void draw_board_view(const WidgetLayout *widget_layout, const Font *tile_font,
       const Square *board_square =
           board_get_readonly_square(board, row, col, BOARD_HORIZONTAL_DIRECTION,
                                     BOARD_HORIZONTAL_DIRECTION);
-              draw_square_view(&square_rect, board_square, tile_font,
-                               tile_score_font, ld);
+      draw_square_view(&square_rect, board_square, tile_font, tile_score_font,
+                       ld);
     }
   }
   const int label_font_size =
@@ -61,4 +70,7 @@ void draw_board_view(const WidgetLayout *widget_layout, const Font *tile_font,
     const Vector2 pos = {x, y};
     DrawTextEx(*tile_font, label_str, pos, 20, 0, GRAY40PERCENT);
   }
+
+  // Draw rack
+  DrawRectangleRec(widget_layout->rack, GRAY20PERCENT);
 }

@@ -10,6 +10,7 @@
 
 #include "board_view.h"
 #include "colors.h"
+#include "graphic_assets.h"
 #include "widget_layout.h"
 
 #if defined(PLATFORM_WEB)
@@ -28,26 +29,18 @@ int main(void) {
 
   MoveList *move_list = move_list_create(10000);
   WidgetLayout widget_layout;
-  //SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+  GraphicAssets graphic_assets;
+  // SetConfigFlags(FLAG_WINDOW_RESIZABLE);
   InitWindow(initial_window_width, initial_window_height, "maggi");
-  int codepoints[512] = {0};
-  for (int i = 0; i < 96; i++) {
-    codepoints[i] = 32 + i; // ASCII
-  }
-  Font tile_font =
-      LoadFontEx("maggi/fonts/ClearSans-Bold.ttf", 128, codepoints, 512);
-  Font tile_score_font =
-      LoadFontEx("maggi/fonts/Roboto-Bold.ttf", 64, codepoints, 512);
+  graphic_assets_load(&graphic_assets);
   int frame_count = 0;
   SetTargetFPS(60);
   while (!WindowShouldClose()) {
     if (frame_count % 30 == 29) {
-      /*
-            StringBuilder *sb = string_builder_create();
-            string_builder_add_game(sb, game, NULL);
-            printf("%s\n", string_builder_peek(sb));
-            string_builder_destroy(sb);
-      */
+      // StringBuilder *sb = string_builder_create();
+      // string_builder_add_game(sb, game, NULL);
+      // printf("%s\n", string_builder_peek(sb));
+      // string_builder_destroy(sb);
       if (game_over(game)) {
         game_destroy(game);
         game = config_game_create(config);
@@ -62,13 +55,11 @@ int main(void) {
                          initial_window_height);
     BeginDrawing();
     ClearBackground(GRAY8PERCENT);
-    const Board *board = game_get_board(game);
-    draw_board_view(&widget_layout, &tile_font, &tile_score_font,
-                    game_get_ld(game), board);
+    draw_board_view(&widget_layout, &graphic_assets, game);
     EndDrawing();
     frame_count++;
   }
   CloseWindow();
-  UnloadFont(tile_font);
+  graphic_assets_unload(&graphic_assets);
   return 0;
 }
