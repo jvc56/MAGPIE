@@ -322,9 +322,9 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
   return ret_str;
 }
 
-char *game_data_str(const GameData *gd, const RecorderArgs *args) {
-  if (args->human_readable) {
-    return game_data_human_readable_str(gd, args->divergent);
+char *game_data_str(const GameData *gd, bool human_readable, bool divergent) {
+  if (human_readable) {
+    return game_data_human_readable_str(gd, divergent);
   } else {
     return game_data_ucgi_str(gd);
   }
@@ -420,12 +420,14 @@ char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
   GameDataSets *sets = (GameDataSets *)recorder->data;
   StringBuilder *sb = string_builder_create();
 
-  char *all_game_str = game_data_str(sets->all_games, args);
+  char *all_game_str =
+      game_data_str(sets->all_games, args->human_readable, false);
   string_builder_add_string(sb, all_game_str);
   free(all_game_str);
 
   if (args->divergent) {
-    char *divergent_games_str = game_data_str(sets->divergent_games, args);
+    char *divergent_games_str =
+        game_data_str(sets->divergent_games, args->human_readable, true);
     string_builder_add_string(sb, divergent_games_str);
     free(divergent_games_str);
   }
@@ -566,7 +568,8 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
       fclose(shared_data->fhs[remaining_tiles]);
-      log_fatal("Error writing to fj file of index: %d\n", index);
+      log_fatal("Error writing to fj file of remaining tiles: %d\n",
+                remaining_tiles);
     }
     fflush(shared_data->fhs[remaining_tiles]);
     pthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
