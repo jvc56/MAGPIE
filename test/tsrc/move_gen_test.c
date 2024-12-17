@@ -22,6 +22,8 @@
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
 
+#include "../../src/str/game_string.h"
+#include "../../src/str/move_string.h"
 #include "../../src/util/string_util.h"
 
 #include "test_constants.h"
@@ -793,8 +795,7 @@ void movegen_var_bingo_bonus_test(void) {
 }
 
 void movegen_no_wmp_by_default_test(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21");
+  Config *config = config_create_or_die("set -lex CSW21");
   Game *game = config_game_create(config);
   const WMP *wmp1 = player_get_wmp(game_get_player(game, 0));
   assert(wmp1 == NULL);
@@ -805,8 +806,7 @@ void movegen_no_wmp_by_default_test(void) {
 }
 
 void movegen_only_one_player_wmp(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp1 true");
+  Config *config = config_create_or_die("set -lex CSW21 -wmp1 true");
   Game *game = config_game_create(config);
   const WMP *wmp1 = player_get_wmp(game_get_player(game, 0));
   assert(wmp1 != NULL);
@@ -816,8 +816,7 @@ void movegen_only_one_player_wmp(void) {
   game_destroy(game);
   config_destroy(config);
 
-  config = config_create_or_die(
-      "set -lex CSW21 -wmp2 true");
+  config = config_create_or_die("set -lex CSW21 -wmp2 true");
   game = config_game_create(config);
   wmp1 = player_get_wmp(game_get_player(game, 0));
   assert(wmp1 == NULL);
@@ -828,7 +827,7 @@ void movegen_only_one_player_wmp(void) {
   config_destroy(config);
 }
 
-void hout_all(void) {
+void hout_gaddag_all(void) {
   Config *config = config_create_or_die(
       "set -lex CSW07 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
@@ -854,7 +853,7 @@ void hout_all(void) {
   config_destroy(config);
 }
 
-void hout_best(void) {
+void hout_gaddag_best(void) {
   Config *config = config_create_or_die(
       "set -lex CSW07 -s1 equity -s2 equity -r1 best -r2 best -numplays 1");
   Game *game = config_game_create(config);
@@ -871,6 +870,13 @@ void hout_best(void) {
     sum_duration += (double)(end - start) / CLOCKS_PER_SEC;
     assert(count_scoring_plays(move_list) == 1);
     assert(count_nonscoring_plays(move_list) == 0);
+    Move *move = move_list_get_move(move_list, 0);
+    /*
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game));
+    printf("%s\n", string_builder_peek(sb));
+    string_builder_destroy(sb);
+    */
     move_list_reset(move_list);
   }
   printf("gaddag best: %fµs avg\n", 1e6 * sum_duration / 10000);
@@ -879,9 +885,48 @@ void hout_best(void) {
   config_destroy(config);
 }
 
+void hout_wmp_best(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW07 -s1 equity -s2 equity -r1 best -r2 "
+                           "best -numplays 1 -wmp1 true -wmp2 true");
+  Game *game = config_game_create(config);
+  char cgp[300] =
+      "7L2BOXEN/5ZOARIA1IF1/4FAINE6/3Q3G7/3AR2S7/3TOM1P7/4JA1E7/"
+      "3HANDLES5/4KO9/15/15/15/15/15/15 ARTHOUS/ 186/228 0 lex CSW07;";
+  game_load_cgp(game, cgp);
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_game(sb, game, NULL);
+  //printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
+  MoveList *move_list = move_list_create(10000);
+  float sum_duration = 0;
+  for (int i = 0; i < 10000; i++) {
+    const clock_t start = clock();
+    generate_moves_for_game(game, 0, move_list);
+    const clock_t end = clock();
+    sum_duration += (double)(end - start) / CLOCKS_PER_SEC;
+    assert(count_scoring_plays(move_list) == 1);
+    assert(count_nonscoring_plays(move_list) == 0);
+    /*
+    Move *move = move_list_get_move(move_list, 0);
+    sb = string_builder_create();
+    string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game));
+    printf("%s\n", string_builder_peek(sb));
+    string_builder_destroy(sb);
+    */
+    move_list_reset(move_list);
+  }
+  printf("wmp best: %fµs avg\n", 1e6 * sum_duration / 10000);
+  game_destroy(game);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
-  hout_all();
-  hout_best();
+  hout_gaddag_all();
+  hout_gaddag_best();
+  hout_wmp_best();
+
   return;
 
   leave_lookup_test();

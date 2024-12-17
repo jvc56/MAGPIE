@@ -35,14 +35,14 @@ void write_words_to_testdata_wmp(const DictionaryWordList *words,
 }
 
 void write_wmp_files(void) {
-  Config *config = config_create_or_die("set -lex CSW21");
+  Config *config = config_create_or_die("set -lex CSW07");
   const LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
   const KWG *csw_kwg = player_get_kwg(player);
   DictionaryWordList *words = dictionary_word_list_create();
   kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
-  write_words_to_testdata_wmp(words, ld, "testdata/lexica/CSW21.wmp");
+  write_words_to_testdata_wmp(words, ld, "testdata/lexica/CSW07.wmp");
   DictionaryWordList *csw2to7 = dictionary_word_list_create();
   DictionaryWordList *csw3and15 = dictionary_word_list_create();
   for (int word_idx = 0; word_idx < dictionary_word_list_get_count(words);
