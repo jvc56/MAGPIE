@@ -568,7 +568,8 @@ void fj_write_buffer_to_output(Recorder *recorder, int remaining_tiles,
     if (fputs(string_builder_peek(sb), shared_data->fhs[remaining_tiles]) ==
         EOF) {
       fclose(shared_data->fhs[remaining_tiles]);
-      log_fatal("Error writing to fj file of index: %d\n", index);
+      log_fatal("Error writing to fj file of remaining tiles: %d\n",
+                remaining_tiles);
     }
     fflush(shared_data->fhs[remaining_tiles]);
     pthread_mutex_unlock(&shared_data->fh_mutexes[remaining_tiles]);
