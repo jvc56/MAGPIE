@@ -788,7 +788,62 @@ void movegen_var_bingo_bonus_test(void) {
   config_destroy(config);
 }
 
+void hout_all(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW07 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  char cgp[300] =
+      "7L2BOXEN/5ZOARIA1IF1/4FAINE6/3Q3G7/3AR2S7/3TOM1P7/4JA1E7/"
+      "3HANDLES5/4KO9/15/15/15/15/15/15 ARTHOUS/ 186/228 0 lex CSW07;";
+  game_load_cgp(game, cgp);
+  MoveList *move_list = move_list_create(10000);
+  double sum_duration = 0;
+  for (int i = 0; i < 10000; i++) {
+    const clock_t start = clock();
+    generate_moves_for_game(game, 0, move_list);
+    const clock_t end = clock();
+    sum_duration += (double)(end - start) / CLOCKS_PER_SEC;
+    assert(count_scoring_plays(move_list) == 1144);
+    assert(count_nonscoring_plays(move_list) == 128);
+    move_list_reset(move_list);
+  }
+  printf("gaddag all: %fµs avg\n", 1e6 * sum_duration / 10000);
+
+  game_destroy(game);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+void hout_best(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW07 -s1 equity -s2 equity -r1 best -r2 best -numplays 1");
+  Game *game = config_game_create(config);
+  char cgp[300] =
+      "7L2BOXEN/5ZOARIA1IF1/4FAINE6/3Q3G7/3AR2S7/3TOM1P7/4JA1E7/"
+      "3HANDLES5/4KO9/15/15/15/15/15/15 ARTHOUS/ 186/228 0 lex CSW07;";
+  game_load_cgp(game, cgp);
+  MoveList *move_list = move_list_create(10000);
+  float sum_duration = 0;
+  for (int i = 0; i < 10000; i++) {
+    const clock_t start = clock();
+    generate_moves_for_game(game, 0, move_list);
+    const clock_t end = clock();
+    sum_duration += (double)(end - start) / CLOCKS_PER_SEC;
+    assert(count_scoring_plays(move_list) == 1);
+    assert(count_nonscoring_plays(move_list) == 0);
+    move_list_reset(move_list);
+  }
+  printf("gaddag best: %fµs avg\n", 1e6 * sum_duration / 10000);
+  game_destroy(game);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
+  hout_all();
+  hout_best();
+  return;
+
   leave_lookup_test();
   unfound_leave_lookup_test();
   macondo_tests();
