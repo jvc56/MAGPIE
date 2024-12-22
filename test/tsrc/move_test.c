@@ -40,7 +40,6 @@ void test_move_resize(void) {
 }
 
 void test_move_compare(void) {
-
   MoveList *ml = move_list_create(1);
 
   int leftstrip = 2;
@@ -122,9 +121,29 @@ void test_move_compare(void) {
   move_destroy(m);
 }
 
+void test_move_set_as_pass(void) {
+  MoveList *ml = move_list_create(1);
+
+  Move *m = move_list_get_spare_move(ml);
+
+  move_set_as_pass(m);
+
+  assert(move_get_type(m) == GAME_EVENT_PASS);
+  assert(move_get_score(m) == 0);
+  assert(move_get_row_start(m) == 0);
+  assert(move_get_col_start(m) == 0);
+  assert(move_get_tiles_played(m) == 0);
+  assert(move_get_tiles_length(m) == 0);
+  assert(move_get_dir(m) == BOARD_HORIZONTAL_DIRECTION);
+  assert(move_get_equity(m) == PASS_MOVE_EQUITY);
+
+  move_list_destroy(ml);
+}
+
 void test_move(void) {
   // The majority of the move and move list functionalities
   // are tested in movegen tests.
   test_move_resize();
   test_move_compare();
+  test_move_set_as_pass();
 }
