@@ -158,7 +158,7 @@ static inline void move_copy(Move *dest_move, const Move *src_move) {
 }
 
 static inline void move_set_as_pass(Move *move) {
-  move_set_all(move, NULL, 0, 0, 0, 0, 0, 0, 0, GAME_EVENT_PASS,
+  move_set_all(move, NULL, 0, -1, 0, 0, 0, 0, 0, GAME_EVENT_PASS,
                PASS_MOVE_EQUITY);
 }
 

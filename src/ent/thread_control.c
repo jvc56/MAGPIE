@@ -265,6 +265,7 @@ bool thread_control_get_next_iter_output(ThreadControl *thread_control,
 void thread_control_complete_iter(
     ThreadControl *thread_control,
     ThreadControlIterCompletedOutput *iter_completed_output) {
+  //printf("thread_control_complete_iter\n");
   pthread_mutex_lock(&thread_control->iter_completed_mutex);
   // Update internal fields
   thread_control->iter_count_completed++;
@@ -318,6 +319,7 @@ void thread_control_copy_to_dst_and_jump(ThreadControl *thread_control,
 // before or after a multithreaded operation. Do not call this in a
 // multithreaded context as it is intentionally not thread safe.
 uint64_t thread_control_get_iter_count(const ThreadControl *thread_control) {
+  //printf ("thread_control_get_iter_count, iter_count: %d\n", (int)thread_control->iter_count);
   return thread_control->iter_count;
 }
 
@@ -327,6 +329,7 @@ uint64_t thread_control_get_iter_count(const ThreadControl *thread_control) {
 // Resets all iteration counts and resets then starts the timer.
 void thread_control_reset(ThreadControl *thread_control,
                           uint64_t max_iter_count) {
+  //printf("thread_control_reset, max_iter_count: %d\n", (int)max_iter_count);
   thread_control->iter_count = 0;
   thread_control->iter_count_completed = 0;
   thread_control->time_elapsed = 0;

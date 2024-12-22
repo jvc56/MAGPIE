@@ -894,7 +894,7 @@ autoplay_status_t config_autoplay(const Config *config,
   config_fill_autoplay_args(config, &args, autoplay_type,
                             num_games_or_min_leave_targets,
                             games_before_force_draw_start);
-  return autoplay(&args, autoplay_results);
+  return autoplay(&args, config, autoplay_results);
 }
 
 void execute_autoplay(Config *config) {

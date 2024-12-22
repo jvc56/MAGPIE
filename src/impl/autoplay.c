@@ -1,5 +1,6 @@
 #include "autoplay.h"
 
+#include <assert.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -17,9 +18,16 @@
 #include "../ent/leave_list.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
+#include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
+
+#include "../impl/config.h"
+#include "../impl/simmer.h"
+
+#include "../str/game_string.h"
+#include "../str/move_string.h"
 
 #include "gameplay.h"
 #include "klv_csv.h"
@@ -151,6 +159,7 @@ typedef struct AutoplayWorker {
   AutoplaySharedData *shared_data;
   XoshiroPRNG *prng;
   int *min_leave_targets;
+  const Config *config;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -263,7 +272,7 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   game_runner->bag_and_rare_leave_overlap = rack_create(dist_size);
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
-  game_runner->move_list = move_list_create(1);
+  game_runner->move_list = move_list_create(2);
   return game_runner;
 }
 
@@ -307,8 +316,55 @@ bool game_runner_is_game_over(GameRunner *game_runner) {
           bag_get_tiles(game_get_bag(game_runner->game)) < (RACK_SIZE));
 }
 
+Move *get_top_simmed_move(Game *game, const Config *config, int thread_index,
+                          MoveList *move_list) {
+  generate_moves_for_game(game, thread_index, move_list);
+  printf("move_list count: %d\n", move_list_get_count(move_list));
+  for (int i = 0; i < 10; i++) {
+    if (i == move_list_get_count(move_list)) {
+      break;
+    }
+    Move *move = move_list_get_move(move_list, i);
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game));
+    printf("i: %d, %s\n", i, string_builder_peek(sb));
+    string_builder_destroy(sb);
+  }
+  SimArgs args;
+
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_threads(thread_control, 1);
+  thread_control_reset(thread_control, 100);
+  thread_control_prng_seed(thread_control, 1);
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *empty_known_opp_rack = rack_create(ld_get_size(ld));
+  args.game = game;
+  args.move_list = move_list;
+  args.known_opp_rack = empty_known_opp_rack;
+  args.thread_control = thread_control;
+  args.num_plies = 3;
+  args.win_pcts = config_get_win_pcts(config);
+  args.max_iterations = 350;
+  args.stop_cond_pct = 95;
+
+  SimResults *sim_results = sim_results_create();
+  sim_status_t sim_status = simulate(&args, sim_results);
+  assert(sim_status == SIM_STATUS_SUCCESS);
+  assert(sim_results_sort_plays_by_win_rate(sim_results));
+  SimmedPlay *best_simmed_move = sim_results_get_simmed_play(sim_results, 0);
+  Move *best_move = simmed_play_get_move(best_simmed_move);
+  move_copy(move_list_get_spare_move(move_list), best_move);
+
+  sim_results_destroy(sim_results);
+  thread_control_destroy(thread_control);
+  rack_destroy(empty_known_opp_rack);
+  // return get_top_equity_move(game, thread_index, move_list);
+  return move_list_get_spare_move(move_list);
+}
+
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
-                           GameRunner *game_runner, Move **move) {
+                           const Config *config, GameRunner *game_runner,
+                           Move **move) {
   if (game_runner_is_game_over(game_runner)) {
     log_fatal("game runner attempted to play a move when the game is over\n");
   }
@@ -371,7 +427,10 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     // Redrawn the original rack.
     draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);
   }
-  *move = get_top_equity_move(game, thread_index, game_runner->move_list);
+  *move = (game_get_player_on_turn_index(game) == 0)
+              ? get_top_equity_move(game, thread_index, game_runner->move_list)
+              : get_top_simmed_move(game, config, thread_index,
+                                    game_runner->move_list);
 
   if (lg_shared_data) {
     leave_list_add_all_subleaves(
@@ -430,6 +489,7 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
 }
 
 void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
+                                     const Config *config,
                                      GameRunner *game_runner1,
                                      GameRunner *game_runner2,
                                      ThreadControlIterOutput *iter_output) {
@@ -442,18 +502,26 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
   }
   bool games_are_divergent = false;
   while (true) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_game(sb, game_runner1->game, NULL);
+    printf("game 1:\n%s\n", string_builder_peek(sb));
+    string_builder_destroy(sb);
     Move *move1 = NULL;
     bool game1_is_over = game_runner_is_game_over(game_runner1);
     if (!game1_is_over) {
-      game_runner_play_move(autoplay_worker, game_runner1, &move1);
+      game_runner_play_move(autoplay_worker, config, game_runner1, &move1);
     }
 
     Move *move2 = NULL;
     bool game2_is_over = true;
     if (game_runner2) {
+      sb = string_builder_create();
+      string_builder_add_game(sb, game_runner2->game, NULL);
+      printf("game 2:\n%s\n", string_builder_peek(sb));
+      string_builder_destroy(sb);
       game2_is_over = game_runner_is_game_over(game_runner2);
       if (!game2_is_over) {
-        game_runner_play_move(autoplay_worker, game_runner2, &move2);
+        game_runner_play_move(autoplay_worker, config, game_runner2, &move2);
       }
     }
 
@@ -461,11 +529,35 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
       break;
     }
 
+    sb = string_builder_create();
+    if (move1) {
+      string_builder_add_move(sb, game_get_board(game_runner1->game), move1,
+                              game_get_ld(game_runner1->game));
+      printf("move 1: %s\n", string_builder_peek(sb));
+    }
+    string_builder_clear(sb);
+    if (move2) {
+      string_builder_add_move(sb, game_get_board(game_runner2->game), move2,
+                              game_get_ld(game_runner2->game));
+      printf("move 2: %s\n", string_builder_peek(sb));
+    }
+    string_builder_destroy(sb);
+
     // It is guaranteed that at least one move is not null
     // at this point.
     if (!games_are_divergent &&
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
+      /*
+            printf("divergent moves: ");
+            sb = string_builder_create();
+            string_builder_add_move(sb, game_get_board(game_runner1->game),
+         move1, game_get_ld(game_runner1->game)); printf("%s != ",
+         string_builder_peek(sb)); string_builder_clear(sb);
+            string_builder_add_move(sb, game_get_board(game_runner2->game),
+         move2, game_get_ld(game_runner2->game)); printf("%s\n",
+         string_builder_peek(sb)); string_builder_destroy(sb); abort();
+      */
       games_are_divergent = true;
     }
   }
@@ -486,7 +578,7 @@ bool target_min_leave_count_reached(AutoplayWorker *autoplay_worker) {
 }
 
 void autoplay_single_generation(AutoplayWorker *autoplay_worker,
-                                GameRunner *game_runner1,
+                                const Config *config, GameRunner *game_runner1,
                                 GameRunner *game_runner2) {
   ThreadControl *thread_control = autoplay_worker->args->thread_control;
   ThreadControlIterOutput iter_output;
@@ -498,18 +590,18 @@ void autoplay_single_generation(AutoplayWorker *autoplay_worker,
       // Check if the target minimum leave count has been reached.
       // This will never be true for the default autoplay mode.
       !target_min_leave_count_reached(autoplay_worker)) {
-    play_autoplay_game_or_game_pair(autoplay_worker, game_runner1, game_runner2,
-                                    &iter_output);
+    play_autoplay_game_or_game_pair(autoplay_worker, config, game_runner1,
+                                    game_runner2, &iter_output);
   }
 }
 
-void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
+void autoplay_leave_gen(AutoplayWorker *autoplay_worker, const Config *config,
                         GameRunner *game_runner) {
   const AutoplayArgs *args = autoplay_worker->args;
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   for (int i = 0; i < lg_shared_data->num_gens; i++) {
-    autoplay_single_generation(autoplay_worker, game_runner, NULL);
+    autoplay_single_generation(autoplay_worker, config, game_runner, NULL);
     checkpoint_wait(lg_shared_data->postgen_checkpoint, shared_data);
     if (thread_control_get_is_halted(args->thread_control)) {
       break;
@@ -519,6 +611,7 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
 
 void *autoplay_worker(void *uncasted_autoplay_worker) {
   AutoplayWorker *autoplay_worker = (AutoplayWorker *)uncasted_autoplay_worker;
+  const Config *config = autoplay_worker->config;
   const AutoplayArgs *args = autoplay_worker->args;
   GameRunner *game_runner1 = game_runner_create(autoplay_worker);
   GameRunner *game_runner2 = NULL;
@@ -527,11 +620,12 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
     if (args->use_game_pairs) {
       game_runner2 = game_runner_create(autoplay_worker);
     }
-    autoplay_single_generation(autoplay_worker, game_runner1, game_runner2);
+    autoplay_single_generation(autoplay_worker, config, game_runner1,
+                               game_runner2);
     game_runner_destroy(game_runner2);
     break;
   case AUTOPLAY_TYPE_LEAVE_GEN:
-    autoplay_leave_gen(autoplay_worker, game_runner1);
+    autoplay_leave_gen(autoplay_worker, config, game_runner1);
     break;
   }
 
@@ -556,8 +650,9 @@ bool parse_min_leave_targets(StringSplitter *split_min_leave_targets,
   return true;
 }
 
-autoplay_status_t autoplay(const AutoplayArgs *args,
+autoplay_status_t autoplay(const AutoplayArgs *args, const Config *config,
                            AutoplayResults *autoplay_results) {
+  assert(config != NULL);
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
   uint64_t num_gens = 1;
   int *min_leave_targets = NULL;
@@ -579,6 +674,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
     bool success;
     first_gen_num_games = string_to_uint64_or_set_error(
         args->num_games_or_min_leave_targets, &success);
+    printf("first_gen_num_games: %d\n", (int)first_gen_num_games);
     if (!success) {
       return AUTOPLAY_STATUS_MALFORMED_NUM_GAMES;
     }
@@ -591,6 +687,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
   autoplay_results_reset(autoplay_results);
 
   const int number_of_threads = thread_control_get_threads(thread_control);
+  // const int number_of_threads = 1;
 
   KLV *klv = NULL;
   bool show_divergent_results = args->use_game_pairs;
@@ -619,6 +716,7 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
         args, autoplay_results, thread_index, shared_data);
     autoplay_results_list[thread_index] =
         autoplay_workers[thread_index]->autoplay_results;
+    autoplay_workers[thread_index]->config = config;
     pthread_create(&worker_ids[thread_index], NULL, autoplay_worker,
                    autoplay_workers[thread_index]);
   }
