@@ -122,10 +122,7 @@ void test_move_compare(void) {
 }
 
 void test_move_set_as_pass(void) {
-  MoveList *ml = move_list_create(1);
-
-  Move *m = move_list_get_spare_move(ml);
-
+  Move *m = move_create();
   move_set_as_pass(m);
 
   assert(move_get_type(m) == GAME_EVENT_PASS);
@@ -137,7 +134,7 @@ void test_move_set_as_pass(void) {
   assert(move_get_dir(m) == BOARD_HORIZONTAL_DIRECTION);
   assert(move_get_equity(m) == PASS_MOVE_EQUITY);
 
-  move_list_destroy(ml);
+  move_destroy(m);
 }
 
 void test_move(void) {
