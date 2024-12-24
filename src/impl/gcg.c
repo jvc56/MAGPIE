@@ -157,7 +157,7 @@ GCGParser *gcg_parser_create(Config *config, GameHistory *game_history) {
   gcg_parser->note_builder = string_builder_create();
   // Allocate enough space for all of the tokens
   gcg_parser->token_regex_pairs =
-      malloc_or_die(sizeof(TokenRegexPair) * (NUMBER_OF_GCG_TOKENS));
+      malloc_or_die(sizeof(TokenRegexPair *) * (NUMBER_OF_GCG_TOKENS));
   gcg_parser->number_of_token_regex_pairs = 0;
   gcg_parser->token_regex_pairs[gcg_parser->number_of_token_regex_pairs++] =
       token_regex_pair_create(GCG_PLAYER_TOKEN, player_regex);
@@ -896,17 +896,19 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
       return GCG_PARSE_STATUS_DUPLICATE_NICKNAMES;
     }
     break;
-  case GCG_TITLE_TOKEN:;
+  case GCG_TITLE_TOKEN: {
     char *title = get_matching_group_as_string(gcg_parser, gcg_line, 1);
     game_history_set_title(game_history, title);
     free(title);
     break;
-  case GCG_DESCRIPTION_TOKEN:;
+  }
+  case GCG_DESCRIPTION_TOKEN: {
     char *description = get_matching_group_as_string(gcg_parser, gcg_line, 1);
     game_history_set_description(game_history, description);
     free(description);
     break;
-  case GCG_ID_TOKEN:;
+  }
+  case GCG_ID_TOKEN: {
     char *id_auth = get_matching_group_as_string(gcg_parser, gcg_line, 1);
     char *uid = get_matching_group_as_string(gcg_parser, gcg_line, 2);
     game_history_set_id_auth(game_history, id_auth);
@@ -914,6 +916,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     free(id_auth);
     free(uid);
     break;
+  }
   case GCG_RACK1_TOKEN:
     player_last_known_rack = get_rack_from_matching(gcg_parser, gcg_line, 1);
     if (!player_last_known_rack) {
@@ -990,24 +993,27 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     string_builder_add_formatted_string(gcg_parser->note_builder, "%s ", note);
     free(note);
     break;
-  case GCG_LEXICON_TOKEN:;
+  case GCG_LEXICON_TOKEN: {
     char *lexicon_name = get_matching_group_as_string(gcg_parser, gcg_line, 1);
     game_history_set_lexicon_name(game_history, lexicon_name);
     free(lexicon_name);
     break;
-  case GCG_BOARD_LAYOUT_TOKEN:;
+  }
+  case GCG_BOARD_LAYOUT_TOKEN: {
     char *board_layout_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
     game_history_set_board_layout_name(game_history, board_layout_name);
     free(board_layout_name);
     break;
-  case GCG_TILE_DISTRIBUTION_NAME_TOKEN:;
+  }
+  case GCG_TILE_DISTRIBUTION_NAME_TOKEN: {
     char *tile_distribution_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
     game_history_set_ld_name(game_history, tile_distribution_name);
     free(tile_distribution_name);
     break;
-  case GCG_GAME_TYPE_TOKEN:;
+  }
+  case GCG_GAME_TYPE_TOKEN: {
     char *game_variant_name =
         get_matching_group_as_string(gcg_parser, gcg_line, 1);
     game_variant_t game_variant =
@@ -1018,6 +1024,7 @@ gcg_parse_status_t parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line) {
     }
     game_history_set_game_variant(game_history, game_variant);
     break;
+  }
   case GCG_PHONY_TILES_RETURNED_TOKEN:
     game_event = game_history_create_and_add_game_event(game_history);
 

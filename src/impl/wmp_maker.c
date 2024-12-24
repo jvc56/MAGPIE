@@ -92,7 +92,10 @@ uint32_t next_prime(uint32_t n) {
       return i;
     }
   }
-  return -1;
+#if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
+  __builtin_unreachable();
+#endif
+  return 0;
 }
 
 int get_min_word_length(const MutableWordMap *word_map) {
@@ -660,7 +663,7 @@ void fill_mbfl_from_mwfl(MutableBlanksForSameLengthMap *mbfl,
                          const MutableWordsOfSameLengthMap *mwfl, int length) {
   mbfl->num_blank_buckets = next_prime(mwfl->num_word_buckets * length);
   mbfl->blank_buckets =
-      malloc_or_die(sizeof(MutableWordMapBucket) * mbfl->num_blank_buckets);
+      malloc_or_die(sizeof(MutableBlankMapBucket) * mbfl->num_blank_buckets);
   for (uint32_t bucket_idx = 0; bucket_idx < mbfl->num_blank_buckets;
        bucket_idx++) {
     mutable_blank_map_bucket_init(&mbfl->blank_buckets[bucket_idx]);
