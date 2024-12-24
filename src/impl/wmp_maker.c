@@ -94,8 +94,9 @@ uint32_t next_prime(uint32_t n) {
   }
 #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
   __builtin_unreachable();
-#endif
+#else
   return 0;
+#endif
 }
 
 int get_min_word_length(const MutableWordMap *word_map) {
