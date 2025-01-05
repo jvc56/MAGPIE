@@ -1,7 +1,5 @@
 #include "convert.h"
 
-#include "../def/cross_set_defs.h"
-
 #include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
@@ -12,7 +10,6 @@
 
 #include "../util/log.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 conversion_status_t convert_from_text_with_dwl(
     const LetterDistribution *ld, conversion_type_t conversion_type,
@@ -87,6 +84,13 @@ conversion_status_t convert_with_filenames(
                                         output_filename, strings,
                                         conversion_results);
     dictionary_word_list_destroy(strings);
+  } else if (conversion_type == CONVERT_DAWG2TEXT) {
+    KWG *kwg = kwg_create(data_paths, input_filename);
+    DictionaryWordList *words = dictionary_word_list_create();
+    kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
+    dictionary_word_list_write_to_file(words, ld, output_filename);
+    kwg_destroy(kwg);
+    dictionary_word_list_destroy(words);
   } else if (conversion_type == CONVERT_CSV2KLV) {
     KLV *klv = klv_read_from_csv(ld, data_paths, input_filename);
     klv_write(klv, output_filename);
