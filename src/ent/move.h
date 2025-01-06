@@ -35,6 +35,30 @@ typedef struct MoveList {
   Move **moves;
 } MoveList;
 
+typedef struct SmallMove {
+  // tiny_move 64-bit schema:
+  // 42 bits (7 groups of 6 bits) representing each tile value in the move.
+  // 7 bit flags, representing whether the associated tile is a blank or not (1
+  // = blank, 0 = no blank)
+  // 5 bits for row 5 bits for column 1 bit for horiz/vert (horiz = 0, vert = 1)
+
+  // If move is a pass, the entire value is 0.
+  // Bit layout:
+  // 63   59   55   51   47   43   39   35   31   27   23   19   15   11
+  //  xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx
+  //    77 7777 6666 6655 5555 4444 4433 3333 2222 2211 1111  BBB BBBB  RRR
+  //
+  // 7    3
+  // xxxx xxxx
+  // RRCC CCCV
+  uint64_t tiny_move;
+  int16_t score;
+  int16_t estimated_value;
+  //  These could be smaller but then we'll be aligned funny, I think:
+  int16_t play_length;
+  int16_t num_tiles_from_rack;
+} SmallMove;
+
 static inline Move *move_create(void) { return malloc_or_die(sizeof(Move)); }
 
 static inline void move_destroy(Move *move) {
