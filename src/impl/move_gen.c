@@ -130,7 +130,6 @@ typedef struct MoveGen {
   const LetterDistribution *ld;
   const KLV *klv;
   const KWG *kwg;
-  // Output owned by this MoveGen struct
   MoveList *move_list;
 } MoveGen;
 
@@ -959,7 +958,8 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
         gen_cache_get_left_extension_set(gen, gen->current_right_col);
     const uint64_t nonblank_leftx =
         current_leftx & ~(1ULL << BLANK_MACHINE_LETTER);
-    const uint64_t nonblank_cross_set = cross_set & ~(1ULL << BLANK_MACHINE_LETTER);
+    const uint64_t nonblank_cross_set =
+        cross_set & ~(1ULL << BLANK_MACHINE_LETTER);
     // Which *letters* can be played here? Here we do not consider the blank to
     // be a letter. The letter it is designated must be compatible with both the
     // cross set and the left extension set.
