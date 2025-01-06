@@ -1,6 +1,7 @@
 #ifndef DICTIONARY_WORD_H
 #define DICTIONARY_WORD_H
 
+#include "letter_distribution.h"
 #include <stdint.h>
 
 typedef struct DictionaryWord DictionaryWord;
@@ -28,4 +29,7 @@ void dictionary_word_list_copy(const DictionaryWordList *src,
                                DictionaryWordList **dst);                                                             
 void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list);
 
+void dictionary_word_list_write_to_file(
+    const DictionaryWordList *dictionary_word_list,
+    const LetterDistribution *ld, const char *filename);
 #endif // DICTIONARY_WORD_H

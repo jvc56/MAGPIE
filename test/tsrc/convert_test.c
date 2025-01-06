@@ -117,6 +117,9 @@ void test_convert_success(void) {
          MOVE_VALIDATION_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
+  load_and_exec_config_or_die(config,
+                              "convert text2wordmap CSW21_small CSW21_small");
+
   load_and_exec_config_or_die(config, "set -ld english_small");
   load_and_exec_config_or_die(config,
                               "convert csv2klv CSW21_small CSW21_small");

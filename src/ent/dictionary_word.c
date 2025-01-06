@@ -6,6 +6,8 @@
 #include "../def/dictionary_word_defs.h"
 #include "../def/kwg_defs.h"
 
+#include "../ent/letter_distribution.h"
+
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -129,4 +131,22 @@ void dictionary_word_list_copy(const DictionaryWordList *src,
 void dictionary_word_list_destroy(DictionaryWordList *dictionary_word_list) {
   free(dictionary_word_list->dictionary_words);
   free(dictionary_word_list);
+}
+
+void dictionary_word_list_write_to_file(
+    const DictionaryWordList *dictionary_word_list,
+    const LetterDistribution *ld, const char *filename) {
+  StringBuilder *sb = string_builder_create();
+  for (int word_idx = 0; word_idx < dictionary_word_list->count; word_idx++) {
+    const DictionaryWord *word =
+        &dictionary_word_list->dictionary_words[word_idx];
+    for (int letter_idx = 0; letter_idx < word->length; letter_idx++) {
+      char *hl = ld_ml_to_hl(ld, word->word[letter_idx]);
+      string_builder_add_string(sb, hl);
+      free(hl);
+    }
+    string_builder_add_string(sb, "\n");
+  }
+  write_string_to_file(filename, "w", string_builder_peek(sb));
+  string_builder_destroy(sb);
 }
