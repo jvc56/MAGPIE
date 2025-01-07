@@ -1,6 +1,7 @@
 #ifndef EQUITY_H
 #define EQUITY_H
 
+#include <math.h>
 #include <stdint.h>
 
 #include "../util/log.h"
@@ -11,16 +12,20 @@ typedef enum {
   EQUITY_UNDEFINED,
   EQUITY_INITIAL,
   EQUITY_PASS,
-  NUMBER_OF_RESERVED_EQUITY_CONSTANTS,
+  EQUITY_ZERO,
+  NUMBER_OF_RESERVED_EQUITY_VALUES,
 } equity_constants_t;
 
 #define MIN_EQUITY_DOUBLE -200.0
 #define MAX_EQUITY_DOUBLE 200.0
+#define EQUITY_RANGE_DOUBLE (MAX_EQUITY_DOUBLE - MIN_EQUITY_DOUBLE)
 #define INITIAL_EQUITY_DOUBLE -10000.0
 #define PASS_EQUITY_DOUBLE -1000.0
-#define NUMBER_OF_AVAILABLE_EQUITIES                                           \
-  (UINT32_MAX - NUMBER_OF_RESERVED_EQUITY_CONSTANTS)
-#define MIN_EQUITY_VALUE NUMBER_OF_RESERVED_EQUITY_CONSTANTS
+#define NUMBER_OF_AVAILABLE_EQUITY_VALUES                                      \
+  (UINT32_MAX - NUMBER_OF_RESERVED_EQUITY_VALUES)
+#define EQUITY_RESOLUTION                                                      \
+  (EQUITY_RANGE_DOUBLE / (double)NUMBER_OF_AVAILABLE_EQUITY_VALUES)
+#define MIN_EQUITY_VALUE NUMBER_OF_RESERVED_EQUITY_VALUES
 #define MAX_EQUITY_VALUE UINT32_MAX
 
 Equity double_to_equity(double x) {
@@ -29,13 +34,13 @@ Equity double_to_equity(double x) {
   } else if (x > MAX_EQUITY_DOUBLE) {
     log_fatal("Equity value above valid range: %f\n", x);
   }
-
-  double range = MAX_EQUITY_DOUBLE - MIN_EQUITY_DOUBLE;
-  Equity normalized_value =
-      (Equity)((x - MIN_EQUITY_DOUBLE) / range * NUMBER_OF_AVAILABLE_EQUITIES +
-               0.5);
-
-  return normalized_value + NUMBER_OF_RESERVED_EQUITY_CONSTANTS;
+  if (fabs(x) < EQUITY_RESOLUTION) {
+    return EQUITY_ZERO;
+  }
+  return (Equity)((x - MIN_EQUITY_DOUBLE) / EQUITY_RANGE_DOUBLE *
+                      NUMBER_OF_AVAILABLE_EQUITY_VALUES +
+                  0.5) +
+         NUMBER_OF_RESERVED_EQUITY_VALUES;
 }
 
 double equity_to_double(Equity x) {
@@ -48,11 +53,11 @@ double equity_to_double(Equity x) {
   if (x == EQUITY_PASS) {
     return PASS_EQUITY_DOUBLE;
   }
-
-  Equity normalized_value = x - NUMBER_OF_RESERVED_EQUITY_CONSTANTS;
-
-  double range = MAX_EQUITY_DOUBLE - MIN_EQUITY_DOUBLE;
-  return (double)normalized_value / NUMBER_OF_AVAILABLE_EQUITIES * range +
+  if (x == EQUITY_ZERO) {
+    return 0.0;
+  }
+  return (double)(x - NUMBER_OF_RESERVED_EQUITY_VALUES) /
+             NUMBER_OF_AVAILABLE_EQUITY_VALUES * EQUITY_RANGE_DOUBLE +
          MIN_EQUITY_DOUBLE;
 }
 
