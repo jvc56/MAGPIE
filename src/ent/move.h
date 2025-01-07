@@ -626,4 +626,43 @@ static inline void small_move_list_destroy(MoveList *ml) {
 
 static inline void small_move_list_reset(MoveList *ml) { ml->count = 0; }
 
+static inline int small_move_get_tiles_played(SmallMove *sm) {
+  return (sm->metadata >> 24) & 0xFF;
+}
+
+static inline void small_move_set_estimated_value(SmallMove *sm, int32_t val) {
+  // assume the top bits are 0. small_move_set_all should do this.
+  sm->metadata |= ((int64_t)val << 32);
+}
+
+static inline void small_move_add_estimated_value(SmallMove *sm, int32_t val) {
+  sm->metadata += ((int64_t)val << 32);
+}
+
+static inline uint16_t small_move_get_score(SmallMove *sm) {
+  return sm->metadata & 0xFFFF;
+}
+
+static bool small_move_is_pass(SmallMove *sm) { return sm->tiny_move == 0; }
+
+// Sort function from highest to lowest value:
+static int compare_small_moves_by_estimated_value(const void *a,
+                                                  const void *b) {
+  const SmallMove *sm1 = (const SmallMove *)a;
+  const SmallMove *sm2 = (const SmallMove *)b;
+
+  // Extract estimated values as int32_t from each metadata
+  int32_t estimated_value1 = (int32_t)(sm1->metadata >> 32);
+  int32_t estimated_value2 = (int32_t)(sm2->metadata >> 32);
+
+  // Compare the estimated values
+  if (estimated_value1 > estimated_value2) {
+    return -1;
+  }
+  if (estimated_value1 < estimated_value2) {
+    return 1;
+  }
+  return 0;
+}
+
 #endif

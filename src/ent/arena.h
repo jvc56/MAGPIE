@@ -71,11 +71,12 @@ Arena *create_arena(size_t initial_capacity, size_t alignment) {
   return arena;
 }
 
-void *arena_alloc(Arena *arena, size_t size, size_t alignment) {
-  if (!arena)
+void *arena_alloc(Arena *arena, size_t size) {
+  if (!arena) {
     return NULL;
+  }
 
-  // Ensure 'size' is a multiple of 16
+  // Ensure 'size' is a multiple of 16 for 16-byte alignment
   assert(size % 16 == 0 && "Allocation size must be a multiple of 16 bytes.");
 
   // Check if there's enough space; if not, grow the arena
