@@ -9,9 +9,15 @@
 #include "../def/board_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
+#include "../ent/letter_distribution.h"
 
 #include "../util/log.h"
 #include "../util/util.h"
+
+typedef enum {
+  MOVE_LIST_TYPE_DEFAULT,
+  MOVE_LIST_TYPE_SMALL,
+} move_list_type_t;
 
 typedef struct Move {
   game_event_t move_type;
@@ -27,37 +33,54 @@ typedef struct Move {
   uint8_t tiles[MOVE_MAX_TILES];
 } Move;
 
+typedef struct SmallMove {
+  // tiny_move 64-bit schema:
+  // From left to right, (63 to 0):
+  // - 1 bit (I) indicating whether this is an invalid SmallMove. If it is 1,
+  // this is not a valid move.
+  // - 1 reserved bit
+  // - 42 bits (7 groups of 6 bits) representing each tile value in the move.
+  // The tiles go from 7 to 1 (so start on the right). If a tile is 0, the move
+  // has ended.
+  // - 1 reserved bit
+  // - 7 bit flags, representing whether the associated tile is a blank or not
+  // (1 = blank, 0 = no blank)
+  // - 1 bit (E) indicating whether this small move is an exchange. We currently
+  // do not generate exchanges in endgames but we may want to expand the use of
+  // SmallMove in the future, so let's keep it flexible.
+  // - 5 bits for row
+  // - 5 bits for column
+  // - 1 bit for horiz/vert (horiz = 0, vert = 1)
+
+  // If move is a pass, the entire value is 0.
+  // Bit layout:
+  // 63   59   55   51   47   43   39   35   31   27   23   19   15   11
+  //  xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx
+  //  I 77 7777 6666 6655 5555 4444 4433 3333 2222 2211 1111  BBB BBBB ERRR
+  //
+  // 7    3
+  // xxxx xxxx
+  // RRCC CCCV
+  uint64_t tiny_move;
+  // metadata schema:
+  // From left to right (63 to 0):
+  // - estimated_value (32 signed bits)
+  // - 8 bits for num_tiles_from_rack
+  // - 8 bits for play_length (number of tiles in play, including playthrough)
+  // - 16 bits for the score of the play
+
+  int64_t metadata;
+} SmallMove;
+
 typedef struct MoveList {
   int count;
   int capacity;
   int moves_size;
   Move *spare_move;
   Move **moves;
+  SmallMove *spare_small_move;
+  SmallMove **small_moves;
 } MoveList;
-
-typedef struct SmallMove {
-  // tiny_move 64-bit schema:
-  // 42 bits (7 groups of 6 bits) representing each tile value in the move.
-  // 7 bit flags, representing whether the associated tile is a blank or not (1
-  // = blank, 0 = no blank)
-  // 5 bits for row 5 bits for column 1 bit for horiz/vert (horiz = 0, vert = 1)
-
-  // If move is a pass, the entire value is 0.
-  // Bit layout:
-  // 63   59   55   51   47   43   39   35   31   27   23   19   15   11
-  //  xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx
-  //    77 7777 6666 6655 5555 4444 4433 3333 2222 2211 1111  BBB BBBB  RRR
-  //
-  // 7    3
-  // xxxx xxxx
-  // RRCC CCCV
-  uint64_t tiny_move;
-  int16_t score;
-  int16_t estimated_value;
-  //  These could be smaller but then we'll be aligned funny, I think:
-  int16_t play_length;
-  int16_t num_tiles_from_rack;
-} SmallMove;
 
 static inline Move *move_create(void) { return malloc_or_die(sizeof(Move)); }
 
@@ -212,6 +235,74 @@ static inline void move_list_set_spare_move(MoveList *ml, uint8_t strip[],
                              move_type);
 }
 
+static inline SmallMove *small_move_list_get_spare_move(const MoveList *ml) {
+  return ml->spare_small_move;
+}
+
+static inline void small_move_set_as_pass(SmallMove *move) {
+  move->metadata = 0;
+  move->tiny_move = 0;
+}
+
+static inline void small_move_set_all(SmallMove *move, const uint8_t strip[],
+                                      int leftstrip, int rightstrip, int score,
+                                      int row_start, int col_start,
+                                      int tiles_played, bool dir_is_vertical,
+                                      game_event_t move_type) {
+
+  int play_length;
+  if (move_type == GAME_EVENT_EXCHANGE) {
+    play_length = tiles_played;
+  } else {
+    play_length = rightstrip - leftstrip + 1;
+  }
+
+  move->metadata = score + (play_length << 16) + (tiles_played << 24);
+
+  if (move_type == GAME_EVENT_PASS) {
+    move->tiny_move = 0;
+    return;
+  }
+  uint64_t move_code = 0;
+  int tidx = 0;
+  int bts = 20; // start at bitshift of 20 for the first tile
+  int blanks_mask = 0;
+  for (int i = 0; i < play_length; i++) {
+    uint8_t ml = strip[leftstrip + i];
+    if (ml == 0) {
+      // play-through tile
+      continue;
+    }
+    uint64_t val = ml;
+    if (get_is_blanked(ml)) {
+      blanks_mask |= (1 << tidx);
+      val = get_unblanked_machine_letter(ml);
+    }
+    move_code |= (val << bts);
+    tidx++;
+    bts += 6;
+  }
+  if (dir_is_vertical) {
+    move_code |= 1;
+    // swap row, col
+    int swap = row_start;
+    row_start = col_start;
+    col_start = swap;
+  }
+  move_code |= (col_start << 1);
+  move_code |= (row_start << 6);
+  move_code |= (blanks_mask << 12);
+
+  move->tiny_move = move_code;
+}
+
+static inline void small_move_destroy(SmallMove *move) {
+  if (!move) {
+    return;
+  }
+  free(move);
+}
+
 static inline bool within_epsilon_for_equity(double a, double b) {
   return fabs(a - b) < COMPARE_MOVES_EPSILON;
 }
@@ -325,6 +416,16 @@ static inline void move_list_load_with_empty_moves(MoveList *ml, int capacity) {
   }
 }
 
+static inline void move_list_load_with_empty_small_moves(MoveList *ml,
+                                                         int capacity) {
+  ml->capacity = capacity;
+
+  ml->small_moves = malloc_or_die(sizeof(SmallMove *) * ml->capacity);
+  for (int i = 0; i < ml->capacity; i++) {
+    ml->small_moves[i] = malloc_or_die(sizeof(SmallMove));
+  }
+}
+
 static inline void moves_for_move_list_destroy(MoveList *ml) {
   for (int i = 0; i < ml->moves_size; i++) {
     move_destroy(ml->moves[i]);
@@ -338,6 +439,14 @@ static inline MoveList *move_list_create(int capacity) {
   ml->spare_move = move_create();
   move_list_load_with_empty_moves(ml, capacity);
   ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
+  return ml;
+}
+
+static inline MoveList *move_list_create_small(int capacity) {
+  MoveList *ml = malloc_or_die(sizeof(MoveList));
+  ml->count = 0;
+  ml->spare_small_move = malloc_or_die(sizeof(SmallMove));
+  move_list_load_with_empty_small_moves(ml, capacity);
   return ml;
 }
 
@@ -477,5 +586,44 @@ static inline bool move_list_move_exists(MoveList *ml, Move *m) {
   }
   return false;
 }
+
+static inline void small_moves_for_move_list_destroy(MoveList *ml) {
+  for (int i = 0; i < ml->capacity; i++) {
+    small_move_destroy(ml->small_moves[i]);
+  }
+  free(ml->small_moves);
+}
+
+static inline void move_list_set_spare_small_move_as_pass(MoveList *ml) {
+  small_move_set_as_pass(ml->spare_small_move);
+}
+
+static inline void move_list_insert_spare_small_move(MoveList *ml) {
+  // small move list does not use a heap. We just append to the end of the list.
+  // we're just swapping pointers here.
+  SmallMove *swap = ml->small_moves[ml->count];
+  ml->small_moves[ml->count] = ml->spare_small_move;
+  ml->spare_small_move = swap;
+  ml->count++;
+}
+
+static inline MoveList *small_move_list_create(int capacity) {
+  MoveList *ml = malloc_or_die(sizeof(MoveList));
+  ml->count = 0;
+  ml->spare_move = malloc_or_die(sizeof(SmallMove));
+  move_list_load_with_empty_small_moves(ml, capacity);
+  return ml;
+}
+
+static inline void small_move_list_destroy(MoveList *ml) {
+  if (!ml) {
+    return;
+  }
+  small_moves_for_move_list_destroy(ml);
+  small_move_destroy(ml->spare_small_move);
+  free(ml);
+}
+
+static inline void small_move_list_reset(MoveList *ml) { ml->count = 0; }
 
 #endif

@@ -524,6 +524,32 @@ void top_equity_play_recorder_test(void) {
   config_destroy(config);
 }
 
+void small_play_recorder_test(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -s1 score -s2 score -r1 small -r2 "
+                           "small -numsmallplays 100000");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create_small(100000);
+  player_set_move_record_type(player, MOVE_RECORD_ALL_SMALL);
+
+  game_load_cgp(game, VS_JEREMY);
+  rack_set_to_string(ld, player_get_rack(player), "DDESW??");
+  // Have the opponent draw any 7 tiles to prevent exchanges
+  // from being generated
+  draw_to_full_rack(game, 1);
+
+  generate_moves_for_game(game, 0, move_list);
+
+  assert(move_list_get_count(move_list) ==
+         8286); // 8285 scoring moves and 1 pass
+
+  small_move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void distinct_lexica_test(void) {
   Config *config =
       config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
@@ -795,6 +821,7 @@ void test_move_gen(void) {
   exchange_tests();
   equity_test();
   top_equity_play_recorder_test();
+  small_play_recorder_test();
   distinct_lexica_test();
   consistent_tiebreaking_test();
   wordsmog_test();

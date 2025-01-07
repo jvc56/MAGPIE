@@ -264,6 +264,18 @@ get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, int score) {
   return score;
 }
 
+static inline void set_small_play_for_record(SmallMove *move,
+                                             game_event_t move_type,
+                                             int leftstrip, int rightstrip,
+                                             int score, int start_row,
+                                             int start_col, int tiles_played,
+                                             int dir, uint8_t strip[]) {
+
+  small_move_set_all(move, strip, leftstrip, rightstrip, score, start_row,
+                     start_col, tiles_played, board_is_dir_vertical(dir),
+                     move_type);
+}
+
 static inline void update_best_move_or_insert_into_movelist(
     MoveGen *gen, int leftstrip, int rightstrip, game_event_t move_type,
     int score, int start_row, int start_col, int tiles_played, int dir,
@@ -283,7 +295,12 @@ static inline void update_best_move_or_insert_into_movelist(
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
     }
-  } else if (gen->move_record_type == MOVE_RECORD_ALL_TINY) {
+  } else if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    SmallMove *move = small_move_list_get_spare_move(gen->move_list);
+    set_small_play_for_record(move, move_type, leftstrip, rightstrip, score,
+                              start_row, start_col, tiles_played, dir, strip);
+    // small_move doesn't use equity.
+    move_list_insert_spare_small_move(gen->move_list);
   }
 }
 
@@ -1354,7 +1371,11 @@ void generate_moves(Game *game, move_record_t move_record_type,
       board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index);
 
   // Reset the move list
-  move_list_reset(gen->move_list);
+  if (move_record_type == MOVE_RECORD_ALL_SMALL) {
+    small_move_list_reset(gen->move_list);
+  } else {
+    move_list_reset(gen->move_list);
+  }
 
   // Reset the best and current moves
   gen->best_move_index = 0;
@@ -1463,7 +1484,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     move_list_set_spare_move_as_pass(gen->move_list);
     move_list_insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
-  } else {
+  } else if (gen->move_record_type == MOVE_RECORD_BEST) {
     const Move *top_move = gen_get_readonly_best_move(gen);
     Move *spare_move = move_list_get_spare_move(gen->move_list);
     if (move_get_equity(top_move) < PASS_MOVE_EQUITY) {
@@ -1473,5 +1494,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
     }
     move_list_insert_spare_move_top_equity(gen->move_list,
                                            move_get_equity(spare_move));
+  } else if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    move_list_set_spare_small_move_as_pass(gen->move_list);
+    move_list_insert_spare_small_move(gen->move_list);
   }
 }
