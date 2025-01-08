@@ -24,6 +24,7 @@ void test_equity(void) {
                                    MIN_EQUITY_DOUBLE));
   assert(within_epsilon_for_equity(equity_to_double(MAX_EQUITY_VALUE),
                                    MAX_EQUITY_DOUBLE));
+  assert(within_epsilon_for_equity(equity_to_double(EQUITY_ZERO), 0.0));
 
   // double -> Equity
   // Extremes
