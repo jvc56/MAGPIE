@@ -642,3 +642,7 @@ void game_destroy(Game *game) {
   }
   free(game);
 }
+
+int game_get_max_scoreless_turns(Game *game) {
+  return game->max_scoreless_turns;
+}

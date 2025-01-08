@@ -10,6 +10,7 @@
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
 #include "../ent/letter_distribution.h"
+#include "board.h"
 
 #include "../util/log.h"
 #include "../util/util.h"
@@ -71,6 +72,20 @@ typedef struct SmallMove {
 
   int64_t metadata;
 } SmallMove;
+
+#define SMALL_MOVE_COL_BITMASK 0x3E   // 0b00111110
+#define SMALL_MOVE_ROW_BITMASK 0x07C0 // 0b00000111_11000000
+#define SMALL_MOVE_BLANKS_BIT_MASK (uint64_t)(127ULL << 12)
+
+static const uint64_t SMALL_MOVE_T_BITMASK[7] = {
+    (uint64_t)(63ULL << 20), // T1
+    (uint64_t)(63ULL << 26), // T2
+    (uint64_t)(63ULL << 32), // T3
+    (uint64_t)(63ULL << 38), // T4
+    (uint64_t)(63ULL << 44), // T5
+    (uint64_t)(63ULL << 50), // T6
+    (uint64_t)(63ULL << 56)  // T7
+};
 
 typedef struct MoveList {
   int count;
@@ -446,6 +461,9 @@ static inline MoveList *move_list_create_small(int capacity) {
   MoveList *ml = malloc_or_die(sizeof(MoveList));
   ml->count = 0;
   ml->spare_small_move = malloc_or_die(sizeof(SmallMove));
+  // Create spare_move as well, so that we can use it as a placeholder when
+  // converting small moves.
+  ml->spare_move = move_create();
   move_list_load_with_empty_small_moves(ml, capacity);
   return ml;
 }
@@ -621,12 +639,13 @@ static inline void small_move_list_destroy(MoveList *ml) {
   }
   small_moves_for_move_list_destroy(ml);
   small_move_destroy(ml->spare_small_move);
+  move_destroy(ml->spare_move);
   free(ml);
 }
 
 static inline void small_move_list_reset(MoveList *ml) { ml->count = 0; }
 
-static inline int small_move_get_tiles_played(SmallMove *sm) {
+static inline int small_move_get_tiles_played(const SmallMove *sm) {
   return (sm->metadata >> 24) & 0xFF;
 }
 
@@ -639,15 +658,17 @@ static inline void small_move_add_estimated_value(SmallMove *sm, int32_t val) {
   sm->metadata += ((int64_t)val << 32);
 }
 
-static inline uint16_t small_move_get_score(SmallMove *sm) {
+static inline uint16_t small_move_get_score(const SmallMove *sm) {
   return sm->metadata & 0xFFFF;
 }
 
-static bool small_move_is_pass(SmallMove *sm) { return sm->tiny_move == 0; }
+static inline bool small_move_is_pass(SmallMove *sm) {
+  return sm->tiny_move == 0;
+}
 
 // Sort function from highest to lowest value:
-static int compare_small_moves_by_estimated_value(const void *a,
-                                                  const void *b) {
+static inline int compare_small_moves_by_estimated_value(const void *a,
+                                                         const void *b) {
   const SmallMove *sm1 = (const SmallMove *)a;
   const SmallMove *sm2 = (const SmallMove *)b;
 
@@ -663,6 +684,82 @@ static int compare_small_moves_by_estimated_value(const void *a,
     return 1;
   }
   return 0;
+}
+
+// Sort function from highest to lowest score:
+static inline int compare_small_moves_by_score(const void *a, const void *b) {
+  const SmallMove *sm1 = (const SmallMove *)a;
+  const SmallMove *sm2 = (const SmallMove *)b;
+
+  // Extract estimated values as int32_t from each metadata
+  int32_t score1 = small_move_get_score(sm1);
+  int32_t score2 = small_move_get_score(sm2);
+  // Compare the estimated values
+  if (score1 > score2) {
+    return -1;
+  }
+  if (score1 < score2) {
+    return 1;
+  }
+  return 0;
+}
+
+static inline void small_move_to_move(Move *move, const SmallMove *sm,
+                                      Board *board) {
+  // Convert the small move to move, and save the move in ml->spare_move.
+  int row = (sm->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6;
+  int col = (sm->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1;
+  bool vert = false;
+  if ((sm->tiny_move & 1) > 0) {
+    vert = true;
+  }
+  int ri = vert ? 1 : 0;
+  int ci = vert ? 0 : 1;
+  int bdim = BOARD_DIM;
+  int r = row;
+  int c = col;
+  int blank_mask = (sm->tiny_move & SMALL_MOVE_BLANKS_BIT_MASK);
+  int tidx = 0;
+  int midx = 0;
+  int tile_shift = 20;
+  bool out_of_bounds = false;
+
+  while (!out_of_bounds) {
+    uint8_t on_board = board_get_letter(board, r, c);
+    r += ri;
+    c += ci;
+    if (r >= bdim || c >= bdim) {
+      out_of_bounds = true;
+    }
+    if (on_board != 0) {
+      move->tiles[midx] = 0;
+      midx++;
+      continue;
+    }
+    if (tidx > 6) {
+      break;
+    }
+    uint64_t shifted = sm->tiny_move & SMALL_MOVE_T_BITMASK[tidx];
+    uint8_t tile = shifted >> tile_shift;
+    if (tile == 0) {
+      break;
+    }
+    if (blank_mask & (1 << (tidx + 12))) {
+      tile = get_blanked_machine_letter(tile);
+    }
+    tidx++;
+    tile_shift += 6;
+    move->tiles[midx] = tile;
+    midx++;
+  }
+  move->move_type = GAME_EVENT_TILE_PLACEMENT_MOVE;
+  move->tiles_length = midx;
+  move->tiles_played = tidx;
+  move->score = small_move_get_score(sm);
+  move->row_start = row;
+  move->col_start = col;
+  move->equity = 0.0;
+  move->dir = vert ? BOARD_VERTICAL_DIRECTION : BOARD_HORIZONTAL_DIRECTION;
 }
 
 #endif

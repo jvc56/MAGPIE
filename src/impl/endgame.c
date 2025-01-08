@@ -5,11 +5,11 @@
 
 // Bit flags for move estimates. These large numbers will force these estimated
 // values to sort first.
-#define EARLY_PASS_BF 1 << 29
-#define HASH_MOVE_BF 1 << 28
-#define GOING_OUT_BF 1 << 27
+#define EARLY_PASS_BF (1 << 29)
+#define HASH_MOVE_BF (1 << 28)
+#define GOING_OUT_BF (1 << 27)
 
-#define LARGE_VALUE 1 << 30 // for ab
+#define LARGE_VALUE (1 << 30) // for ab
 
 EndgameSolver *endgame_solver_create(ThreadControl *tc, Game *game) {
   EndgameSolver *es = malloc_or_die(sizeof(EndgameSolver));
@@ -61,7 +61,7 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   free(solver_worker);
 }
 
-int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
+int generate_stm_plays(EndgameSolverWorker *worker) {
   // stm means side to move
   // This won't actually sort by score. We'll do this later.
   generate_moves(worker->game, MOVE_RECORD_ALL_SMALL, MOVE_SORT_SCORE,
@@ -72,13 +72,14 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
     // Copy by value
     arena_small_moves[i] = *(worker->move_list->small_moves[i]);
   }
+  worker->current_arena_pointer = worker->small_move_arena->size;
   // Now that the arena has these, we can deal with the move list directly
   // in the arena.
   return worker->move_list->count;
 }
 
-int assign_estimates(EndgameSolverWorker *worker, int depth, int arena_begin,
-                     int move_count) {
+void assign_estimates(EndgameSolverWorker *worker, int depth, int arena_begin,
+                      int move_count) {
   // assign estimates to arena plays.
 
   Player *player =
@@ -94,13 +95,13 @@ int assign_estimates(EndgameSolverWorker *worker, int depth, int arena_begin,
   SmallMove *small_moves =
       (SmallMove *)(worker->small_move_arena->memory + arena_begin);
 
-  for (size_t i = 0; i < move_count; i++) {
+  for (size_t i = 0; i < (size_t)move_count; i++) {
     SmallMove *current_move = &small_moves[i];
     if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
       small_move_set_estimated_value(
           current_move,
           small_move_get_score(current_move) +
-              2 * rack_get_score(game_get_ld(worker->game), other_rack) +
+              (2 * rack_get_score(game_get_ld(worker->game), other_rack)) +
               GOING_OUT_BF);
     } else if (depth > 2) {
       // some more jitter for lazysmp
@@ -132,6 +133,55 @@ int assign_estimates(EndgameSolverWorker *worker, int depth, int arena_begin,
         compare_small_moves_by_estimated_value);
 }
 
+int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
+                int32_t beta, PVLine *pv, bool pvNode) {
+
+  assert(pvNode || alpha == beta - 1);
+  int32_t alpha_orig = alpha;
+  printf("%d", alpha_orig); // delete me
+
+  if (depth == 0 ||
+      game_get_game_end_reason(worker->game) != GAME_END_REASON_NONE) {
+    // This assumes the player turn changed even though the game was already
+    // over, which appears to be the case in the code.
+    Player *player =
+        game_get_player(worker->game, worker->solver->solving_player);
+    Player *opponent =
+        game_get_player(worker->game, 1 - worker->solver->solving_player);
+    return (int32_t)(player_get_score(player) - player_get_score(opponent));
+  }
+
+  PVLine child_pv;
+  child_pv.game = worker->game;
+  printf("%p", child_pv.game); // delete me
+  printf("%d", pv->score);     // delete me
+  int nplays;
+  // Save the current move location. The generate_stm_plays will move this
+  // forward.
+  int cur_move_loc = worker->current_arena_pointer;
+  if (worker->current_iterative_deepening_depth != depth) {
+    nplays = generate_stm_plays(worker);
+    assign_estimates(worker, depth, cur_move_loc, nplays);
+  } else {
+    // Use initial moves.
+    nplays = worker->solver->n_initial_moves;
+  }
+
+  SmallMove *small_moves =
+      (SmallMove *)(worker->small_move_arena->memory + cur_move_loc);
+  for (int idx = 0; idx < nplays; idx++) {
+    SmallMove *small_move = &(small_moves[idx]);
+    printf("%p", small_move); /// delete me
+    // play small move
+    // negamax
+    // unplay last move
+    // compare values
+    // update pv
+    // break etc
+  }
+  return 10000; // change me, return best value
+}
+
 void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
   int32_t alpha = -LARGE_VALUE;
@@ -139,17 +189,24 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
 
   if (worker->solver->first_win_optim) {
     // search a very small window centered around 0; we're just trying to find
-    // something that surpasses it.
+    // something that surpasses it. This is useful to find "any win", and for
+    // a pre-endgame solver.
     alpha = -1;
     beta = 1;
   }
   assert(worker->small_move_arena->size == 0); // make sure arena is empty.
-  int initial_move_count = generate_stm_plays(worker, 0);
+  worker->current_arena_pointer = 0;
+
+  int initial_move_count = generate_stm_plays(worker);
   // Arena pointer better have started at 0, since it was empty.
   assign_estimates(worker, 0, 0, initial_move_count);
-  SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
+  worker->solver->initial_moves =
+      (SmallMove *)(worker->small_move_arena->memory);
+  worker->solver->n_initial_moves = initial_move_count;
+  assert((size_t)worker->current_arena_pointer ==
+         initial_move_count * sizeof(SmallMove));
 
-  SmallMove last_winner;
+  // SmallMove last_winner;
 
   worker->current_iterative_deepening_depth = 1;
   int start = 1;
@@ -163,12 +220,9 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     pv.game = worker->game;
     int32_t val = negamax(worker, p, alpha, beta, &pv, true);
     // sort moves by valuation for next time.
-    qsort(initial_moves, initial_move_count, sizeof(SmallMove),
+    qsort(worker->solver->initial_moves, initial_move_count, sizeof(SmallMove),
           compare_small_moves_by_estimated_value);
     worker->solver->best_pv_value = val - worker->solver->initial_spread;
     // TODO: assign PV
   }
 }
-
-int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
-                int32_t beta, PVLine *pv, bool pvNode) {}
