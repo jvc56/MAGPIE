@@ -651,18 +651,18 @@ static inline int small_move_get_tiles_played(const SmallMove *sm) {
 
 static inline void small_move_set_estimated_value(SmallMove *sm, int32_t val) {
   // assume the top bits are 0. small_move_set_all should do this.
-  sm->metadata |= ((int64_t)val << 32);
+  sm->metadata |= ((int64_t)((uint32_t)val) << 32);
 }
 
 static inline void small_move_add_estimated_value(SmallMove *sm, int32_t val) {
-  sm->metadata += ((int64_t)val << 32);
+  sm->metadata += ((int64_t)((uint32_t)val) << 32);
 }
 
 static inline uint16_t small_move_get_score(const SmallMove *sm) {
   return sm->metadata & 0xFFFF;
 }
 
-static inline bool small_move_is_pass(SmallMove *sm) {
+static inline bool small_move_is_pass(const SmallMove *sm) {
   return sm->tiny_move == 0;
 }
 
@@ -706,7 +706,11 @@ static inline int compare_small_moves_by_score(const void *a, const void *b) {
 
 static inline void small_move_to_move(Move *move, const SmallMove *sm,
                                       Board *board) {
-  // Convert the small move to move, and save the move in ml->spare_move.
+  if (small_move_is_pass(sm)) {
+    move_set_as_pass(move);
+    return;
+  }
+  // Convert the small move to a Move*
   int row = (sm->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6;
   int col = (sm->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1;
   bool vert = false;

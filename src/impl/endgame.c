@@ -1,4 +1,7 @@
+#include <pthread.h>
+
 #include "endgame.h"
+#include "gameplay.h"
 #include "move_gen.h"
 
 #define DEFAULT_ENDGAME_MOVELIST_CAPACITY 250000
@@ -8,10 +11,28 @@
 #define EARLY_PASS_BF (1 << 29)
 #define HASH_MOVE_BF (1 << 28)
 #define GOING_OUT_BF (1 << 27)
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
-#define LARGE_VALUE (1 << 30) // for ab
+const int32_t LARGE_VALUE = (1 << 30); // for alpha-beta pruning
 
-EndgameSolver *endgame_solver_create(ThreadControl *tc, Game *game) {
+void pvline_clear(PVLine *pv_line) { pv_line->num_moves = 0; }
+
+// We should check to see if dealing with pointers directly is more performant,
+// instead of all this copying.
+// Perhaps we can store regular moves in an arena as well.
+// However I don't think pvline_update gets called super often. We will profile.
+void pvline_update(PVLine *pv_line, PVLine *new_pv_line, Move *move,
+                   int32_t score) {
+  pvline_clear(pv_line);
+  move_copy(&(pv_line->moves[0]), move);
+  for (int i = 0; i < new_pv_line->num_moves; i++) {
+    move_copy(&(pv_line->moves[i + 1]), &(new_pv_line->moves[i]));
+  }
+  pv_line->num_moves = new_pv_line->num_moves + 1;
+  pv_line->score = score;
+}
+
+EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game) {
   EndgameSolver *es = malloc_or_die(sizeof(EndgameSolver));
   es->first_win_optim = false;
   es->transposition_table_optim = false; // for now
@@ -24,23 +45,31 @@ EndgameSolver *endgame_solver_create(ThreadControl *tc, Game *game) {
   Player *opponent = game_get_player(game, 1 - es->solving_player);
 
   es->initial_spread = player_get_score(player) - player_get_score(opponent);
-  es->threads = thread_control_get_threads(tc);
+  // later, when we have multi-threaded endgame:
+  // es->threads = thread_control_get_threads(tc);
   es->thread_control = tc;
+  es->game = game;
 
   return es;
 }
 
-EndgameSolverWorker *endgame_solver_create_worker(const Game *game,
-                                                  EndgameSolver *solver,
+void endgame_solver_destroy(EndgameSolver *es) {
+  if (!es) {
+    return;
+  }
+  free(es);
+}
+
+EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
                                                   int worker_index) {
 
   EndgameSolverWorker *solver_worker =
       malloc_or_die(sizeof(EndgameSolverWorker));
 
   solver_worker->thread_index = worker_index;
-  solver_worker->game = game_duplicate(game);
-  game_set_endgame_solving_mode(solver_worker->game);
-  game_set_backup_mode(solver_worker->game, BACKUP_MODE_SIMULATION);
+  solver_worker->game_copy = game_duplicate(solver->game);
+  game_set_endgame_solving_mode(solver_worker->game_copy);
+  game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 
@@ -55,7 +84,7 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   if (!solver_worker) {
     return;
   }
-  game_destroy(solver_worker->game);
+  game_destroy(solver_worker->game_copy);
   small_move_list_destroy(solver_worker->move_list);
   arena_destroy(solver_worker->small_move_arena);
   free(solver_worker);
@@ -64,7 +93,7 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
 int generate_stm_plays(EndgameSolverWorker *worker) {
   // stm means side to move
   // This won't actually sort by score. We'll do this later.
-  generate_moves(worker->game, MOVE_RECORD_ALL_SMALL, MOVE_SORT_SCORE,
+  generate_moves(worker->game_copy, MOVE_RECORD_ALL_SMALL, MOVE_SORT_SCORE,
                  worker->thread_index, worker->move_list);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
       worker->small_move_arena, worker->move_list->count * sizeof(SmallMove));
@@ -83,14 +112,14 @@ void assign_estimates(EndgameSolverWorker *worker, int depth, int arena_begin,
   // assign estimates to arena plays.
 
   Player *player =
-      game_get_player(worker->game, worker->solver->solving_player);
+      game_get_player(worker->game_copy, worker->solver->solving_player);
   Player *opponent =
-      game_get_player(worker->game, 1 - worker->solver->solving_player);
+      game_get_player(worker->game_copy, 1 - worker->solver->solving_player);
   Rack *stm_rack = player_get_rack(player);
   Rack *other_rack = player_get_rack(opponent);
   int ntiles_on_rack = stm_rack->number_of_letters;
   bool last_move_was_pass = game_get_consecutive_scoreless_turns(
-                                worker->game) == 1; // check if this is ok.
+                                worker->game_copy) == 1; // check if this is ok.
 
   SmallMove *small_moves =
       (SmallMove *)(worker->small_move_arena->memory + arena_begin);
@@ -101,7 +130,7 @@ void assign_estimates(EndgameSolverWorker *worker, int depth, int arena_begin,
       small_move_set_estimated_value(
           current_move,
           small_move_get_score(current_move) +
-              (2 * rack_get_score(game_get_ld(worker->game), other_rack)) +
+              (2 * rack_get_score(game_get_ld(worker->game_copy), other_rack)) +
               GOING_OUT_BF);
     } else if (depth > 2) {
       // some more jitter for lazysmp
@@ -134,27 +163,25 @@ void assign_estimates(EndgameSolverWorker *worker, int depth, int arena_begin,
 }
 
 int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
-                int32_t beta, PVLine *pv, bool pvNode) {
+                int32_t beta, PVLine *pv, bool pv_node) {
 
-  assert(pvNode || alpha == beta - 1);
-  int32_t alpha_orig = alpha;
-  printf("%d", alpha_orig); // delete me
+  assert(pv_node || alpha == beta - 1);
+  // int32_t alpha_orig = alpha;
 
   if (depth == 0 ||
-      game_get_game_end_reason(worker->game) != GAME_END_REASON_NONE) {
+      game_get_game_end_reason(worker->game_copy) != GAME_END_REASON_NONE) {
     // This assumes the player turn changed even though the game was already
     // over, which appears to be the case in the code.
     Player *player =
-        game_get_player(worker->game, worker->solver->solving_player);
+        game_get_player(worker->game_copy, worker->solver->solving_player);
     Player *opponent =
-        game_get_player(worker->game, 1 - worker->solver->solving_player);
+        game_get_player(worker->game_copy, 1 - worker->solver->solving_player);
     return (int32_t)(player_get_score(player) - player_get_score(opponent));
   }
 
   PVLine child_pv;
-  child_pv.game = worker->game;
-  printf("%p", child_pv.game); // delete me
-  printf("%d", pv->score);     // delete me
+  child_pv.game = worker->game_copy;
+
   int nplays;
   // Save the current move location. The generate_stm_plays will move this
   // forward.
@@ -166,20 +193,47 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
     // Use initial moves.
     nplays = worker->solver->n_initial_moves;
   }
-
+  int32_t best_value = -LARGE_VALUE;
   SmallMove *small_moves =
       (SmallMove *)(worker->small_move_arena->memory + cur_move_loc);
   for (int idx = 0; idx < nplays; idx++) {
     SmallMove *small_move = &(small_moves[idx]);
-    printf("%p", small_move); /// delete me
-    // play small move
-    // negamax
-    // unplay last move
-    // compare values
-    // update pv
-    // break etc
+    small_move_to_move(worker->move_list->spare_move, small_move,
+                       game_get_board(worker->game_copy));
+
+    play_move_status_t play_status =
+        play_move(worker->move_list->spare_move, worker->game_copy, NULL, NULL);
+    assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
+    int32_t value = 0;
+    if (idx == 0 || !worker->solver->negascout_optim) {
+      value = negamax(worker, depth - 1, -beta, -alpha, &child_pv, pv_node);
+    } else {
+      value = negamax(worker, depth - 1, -alpha - 1, -alpha, &child_pv, false);
+      if (alpha < -value && -value < beta) {
+        // re-search with wider window
+        value = negamax(worker, depth - 1, -beta, -alpha, &child_pv, pv_node);
+      }
+    }
+    game_unplay_last_move(worker->game_copy);
+
+    if (-value > best_value) {
+      best_value = -value;
+      small_move_to_move(worker->move_list->spare_move, small_move,
+                         game_get_board(worker->game_copy));
+      pvline_update(pv, &child_pv, worker->move_list->spare_move,
+                    best_value - worker->solver->initial_spread);
+    }
+    if (worker->current_iterative_deepening_depth == depth) {
+      small_move_set_estimated_value(small_move, -value);
+    }
+    alpha = MAX(alpha, best_value);
+    if (best_value >= beta) {
+      // beta cut-off
+      break;
+    }
+    pvline_clear(&child_pv);
   }
-  return 10000; // change me, return best value
+  return best_value;
 }
 
 void iterative_deepening(EndgameSolverWorker *worker, int plies) {
@@ -217,12 +271,53 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   for (int p = start; p <= plies; p++) {
     worker->current_iterative_deepening_depth = p;
     PVLine pv;
-    pv.game = worker->game;
+    pv.game = worker->game_copy;
     int32_t val = negamax(worker, p, alpha, beta, &pv, true);
     // sort moves by valuation for next time.
     qsort(worker->solver->initial_moves, initial_move_count, sizeof(SmallMove),
           compare_small_moves_by_estimated_value);
     worker->solver->best_pv_value = val - worker->solver->initial_spread;
-    // TODO: assign PV
+    worker->solver->principal_variation = pv;
   }
+}
+
+void *solver_worker(void *uncasted_solver_worker) {
+  EndgameSolverWorker *solver_worker =
+      (EndgameSolverWorker *)uncasted_solver_worker;
+  EndgameSolver *solver = solver_worker->solver;
+  // ThreadControl *thread_control = solver->thread_control;
+  // later allow thread control to quit early.
+  iterative_deepening(solver_worker, solver->requested_plies);
+  log_trace("thread %d exiting", solver_worker->thread_index);
+  return NULL;
+}
+
+PVLine endgame_solve(EndgameSolver *solver, int plies) {
+  // bag must be empty. This should be validated by the caller.
+  assert(!bag_get_tiles(game_get_bag(solver->game)));
+
+  solver->requested_plies = plies;
+  // kick-off iterative deepening thread.
+
+  EndgameSolverWorker **solver_workers =
+      malloc_or_die((sizeof(EndgameSolverWorker *)) * solver->threads);
+  pthread_t *worker_ids =
+      malloc_or_die((sizeof(pthread_t)) * (solver->threads));
+
+  for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
+    solver_workers[thread_index] =
+        endgame_solver_create_worker(solver, thread_index);
+    pthread_create(&worker_ids[thread_index], NULL, solver_worker,
+                   solver_workers[thread_index]);
+  }
+
+  for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
+    pthread_join(worker_ids[thread_index], NULL);
+    solver_worker_destroy(solver_workers[thread_index]);
+  }
+
+  free(solver_workers);
+  free(worker_ids);
+
+  return solver->principal_variation;
 }

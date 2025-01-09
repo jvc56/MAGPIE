@@ -6,17 +6,17 @@
 #include "../ent/move.h"
 #include "../ent/thread_control.h"
 
+// We don't expect an endgame length to ever be larger than this value.
+#define MAX_VARIANT_LENGTH 25
+
 typedef struct PVLine {
-  Move **moves;
+  Move moves[MAX_VARIANT_LENGTH];
   Game *game;
   int32_t score;
   int num_moves;
 } PVLine;
 
 typedef struct EndgameSolver {
-
-  Game **game_copies;
-
   int initial_spread;
   int solving_player;
   SmallMove *initial_moves;
@@ -38,17 +38,21 @@ typedef struct EndgameSolver {
 
   // Owned by the caller:
   ThreadControl *thread_control;
+  const Game *game;
 
 } EndgameSolver;
 
 typedef struct EndgameSolverWorker {
   int thread_index;
-  Game *game;
+  Game *game_copy;
   Arena *small_move_arena;
   MoveList *move_list;
   EndgameSolver *solver;
   int current_iterative_deepening_depth;
   int current_arena_pointer;
 } EndgameSolverWorker;
+
+EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game);
+PVLine endgame_solve(EndgameSolver *solver, int plies);
 
 #endif

@@ -19,7 +19,8 @@ typedef struct {
 #endif
 
 // Portable aligned allocation function
-int portable_aligned_alloc(void **ptr, size_t alignment, size_t size) {
+static inline int portable_aligned_alloc(void **ptr, size_t alignment,
+                                         size_t size) {
   if (!ptr) {
     return -1; // Invalid pointer
   }
@@ -39,7 +40,7 @@ int portable_aligned_alloc(void **ptr, size_t alignment, size_t size) {
 }
 
 // Portable aligned free function
-void portable_aligned_free(void *ptr) {
+static inline void portable_aligned_free(void *ptr) {
   if (!ptr)
     return;
 
@@ -50,7 +51,7 @@ void portable_aligned_free(void *ptr) {
 #endif
 }
 
-Arena *create_arena(size_t initial_capacity, size_t alignment) {
+static inline Arena *create_arena(size_t initial_capacity, size_t alignment) {
   // alignment = 16 for our "SmallMove" structure.
   Arena *arena = malloc(sizeof(Arena));
   if (!arena)
@@ -71,7 +72,7 @@ Arena *create_arena(size_t initial_capacity, size_t alignment) {
   return arena;
 }
 
-void *arena_alloc(Arena *arena, size_t size) {
+static inline void *arena_alloc(Arena *arena, size_t size) {
   if (!arena) {
     return NULL;
   }
@@ -108,14 +109,14 @@ void *arena_alloc(Arena *arena, size_t size) {
   return ptr;
 }
 
-void arena_reset(Arena *arena) {
+static inline void arena_reset(Arena *arena) {
   if (!arena) {
     return;
   }
   arena->size = 0;
 }
 
-void arena_destroy(Arena *arena) {
+static inline void arena_destroy(Arena *arena) {
   if (!arena) {
     return;
   }
