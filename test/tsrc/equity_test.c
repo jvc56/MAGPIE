@@ -5,10 +5,17 @@
 
 #include "test_util.h"
 
-void test_stability(Equity eq1) {
+void test_stability_and_negation(Equity eq1) {
+  if (eq1 == EQUITY_UNDEFINED_VALUE || eq1 == EQUITY_INITIAL_VALUE ||
+      eq1 == EQUITY_PASS_VALUE) {
+    return;
+  }
   double dbl1 = equity_to_double(eq1);
   Equity eq2 = double_to_equity(dbl1);
   assert(eq1 == eq2);
+  Equity eq_neg = equity_negate(eq1);
+  Equity eq_neg_neg = equity_negate(eq_neg);
+  assert(eq1 == eq_neg_neg);
 }
 
 void test_equity(void) {
@@ -18,6 +25,8 @@ void test_equity(void) {
   assert(within_epsilon(equity_to_double(EQUITY_ZERO_VALUE), 0.0));
   assert(within_epsilon(equity_to_double(EQUITY_MIN_VALUE), EQUITY_MIN_DOUBLE));
   assert(within_epsilon(equity_to_double(EQUITY_MAX_VALUE), EQUITY_MAX_DOUBLE));
+  assert(
+      within_epsilon(equity_to_double(EQUITY_PASS_VALUE), EQUITY_PASS_DOUBLE));
 
   assert(double_to_equity(0.0) == EQUITY_ZERO_VALUE);
   assert(double_to_equity(EQUITY_MIN_DOUBLE) == EQUITY_MIN_VALUE);
@@ -31,14 +40,14 @@ void test_equity(void) {
   assert(double_to_equity(-0.00000000008) == EQUITY_ZERO_VALUE);
 
   // Check stability
-  test_stability(EQUITY_MIN_VALUE);
-  test_stability(EQUITY_MAX_VALUE);
-  test_stability(EQUITY_ZERO_VALUE);
+  test_stability_and_negation(EQUITY_MIN_VALUE);
+  test_stability_and_negation(EQUITY_MAX_VALUE);
+  test_stability_and_negation(EQUITY_ZERO_VALUE);
   // Make eq_val an unsigned int to allow for overflow
   // to test a variety of different values.
   uint32_t eq_val = EQUITY_MIN_VALUE;
   for (int i = 0; i < 1000; i++) {
-    test_stability((Equity)eq_val);
+    test_stability_and_negation((Equity)eq_val);
     eq_val += 10000000;
   }
 }
