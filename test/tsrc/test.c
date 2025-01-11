@@ -18,6 +18,7 @@
 #include "create_data_test.h"
 #include "cross_set_test.h"
 #include "equity_adjustment_test.h"
+#include "equity_test.h"
 #include "file_handler_test.h"
 #include "game_test.h"
 #include "gameplay_test.h"
@@ -40,8 +41,8 @@
 #include "string_util_test.h"
 #include "validated_move_test.h"
 #include "wasm_api_test.h"
-#include "wmp_test.h"
 #include "wmp_maker_test.h"
+#include "wmp_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
 
@@ -66,6 +67,7 @@ void run_all(void) {
   test_board();
   test_board_layout_default();
   test_cross_set();
+  test_equity();
   test_move();
   test_cgp();
   test_klv();
@@ -132,8 +134,10 @@ void run_test(const char *subtest) {
     test_shadow();
   } else if (strings_equal(subtest, "movegen")) {
     test_move_gen();
-  } else if (strings_equal(subtest, "eq")) {
+  } else if (strings_equal(subtest, "eqadj")) {
     test_equity_adjustments();
+  } else if (strings_equal(subtest, "eq")) {
+    test_equity();
   } else if (strings_equal(subtest, "gameplay")) {
     test_gameplay();
   } else if (strings_equal(subtest, "stats")) {
