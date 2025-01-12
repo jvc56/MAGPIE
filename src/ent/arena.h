@@ -1,6 +1,8 @@
 #ifndef ARENA_H
 #define ARENA_H
 
+#include "../util/log.h"
+
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -107,6 +109,16 @@ static inline void *arena_alloc(Arena *arena, size_t size) {
   arena->size += size;
 
   return ptr;
+}
+
+static inline void arena_dealloc(Arena *arena, size_t size) {
+  if (!arena) {
+    return;
+  }
+
+  // Ensure 'size' is a multiple of 16 for 16-byte alignment
+  assert(size % 16 == 0 && "Allocation size must be a multiple of 16 bytes.");
+  arena->size -= size;
 }
 
 static inline void arena_reset(Arena *arena) {

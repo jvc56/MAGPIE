@@ -162,6 +162,21 @@ void assign_estimates(EndgameSolverWorker *worker, int depth, int arena_begin,
         compare_small_moves_by_estimated_value);
 }
 
+char *create_spaces(int depth) {
+  // Allocate memory for the string of spaces (+1 for the null terminator)
+  char *spaces = (char *)malloc(depth + 1);
+
+  // Fill the string with spaces
+  for (int i = 0; i < depth; i++) {
+    spaces[i] = ' ';
+  }
+
+  // Null-terminate the string
+  spaces[depth] = '\0';
+
+  return spaces;
+}
+
 int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
                 int32_t beta, PVLine *pv, bool pv_node) {
 
@@ -186,13 +201,19 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
   // Save the current move location. The generate_stm_plays will move this
   // forward.
   int cur_move_loc = worker->current_arena_pointer;
+  // char *spaces = create_spaces(depth);
+  bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
     nplays = generate_stm_plays(worker);
     assign_estimates(worker, depth, cur_move_loc, nplays);
+    // printf("%s'allocating' nplays %d total; cur_size: %ld\n", spaces, nplays,
+    //  worker->small_move_arena->size);
+    arena_alloced = true;
   } else {
     // Use initial moves.
     nplays = worker->solver->n_initial_moves;
   }
+
   int32_t best_value = -LARGE_VALUE;
   SmallMove *small_moves =
       (SmallMove *)(worker->small_move_arena->memory + cur_move_loc);
@@ -233,6 +254,11 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
     }
     pvline_clear(&child_pv);
   }
+  if (arena_alloced) {
+    arena_dealloc(worker->small_move_arena, nplays * sizeof(SmallMove));
+    // printf("%sReset back to %ld\n", spaces, worker->small_move_arena->size);
+  }
+  // free(spaces);
   return best_value;
 }
 
@@ -259,7 +285,8 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   worker->solver->n_initial_moves = initial_move_count;
   assert((size_t)worker->current_arena_pointer ==
          initial_move_count * sizeof(SmallMove));
-
+  log_warn("Generated %d initial moves; pointer is at %d", initial_move_count,
+           worker->current_arena_pointer);
   // SmallMove last_winner;
 
   worker->current_iterative_deepening_depth = 1;
