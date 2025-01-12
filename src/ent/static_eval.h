@@ -6,22 +6,23 @@
 #include "../def/rack_defs.h"
 #include "../def/static_eval_defs.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
 
-static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
+    EQUITY_ZERO_VALUE};
 
 // These are quackle values, but we can probably come up with our
 // own at some point.
 // static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
 //    0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
 
-static inline double
+static inline Equity
 placement_adjustment(const LetterDistribution *ld, const Move *move,
-                     const double *opening_move_penalties) {
+                     const Equity *opening_move_penalties) {
   int start = move_get_col_start(move);
   int offset = 0;
 
@@ -33,7 +34,7 @@ placement_adjustment(const LetterDistribution *ld, const Move *move,
   const int end = start + move_get_tiles_played(move);
 
   int j = start;
-  double penalty = 0;
+  Equity penalty = 0;
 
   while (j < end) {
     int tile = move_get_tile(move, j - start);
@@ -46,17 +47,17 @@ placement_adjustment(const LetterDistribution *ld, const Move *move,
   return penalty;
 }
 
-static inline double endgame_nonoutplay_adjustment(int player_rack_score) {
-  return ((-(double)player_rack_score) *
+static inline Equity endgame_nonoutplay_adjustment(Equity player_rack_score) {
+  return (equity_negate(player_rack_score) *
           NON_OUTPLAY_LEAVE_SCORE_MULTIPLIER_PENALTY) -
          NON_OUTPLAY_CONSTANT_PENALTY;
 }
 
-static inline double endgame_outplay_adjustment(int opponent_rack_score) {
-  return 2 * ((double)opponent_rack_score);
+static inline Equity endgame_outplay_adjustment(Equity opponent_rack_score) {
+  return 2 * opponent_rack_score;
 }
 
-static inline double standard_endgame_adjustment(const LetterDistribution *ld,
+static inline Equity standard_endgame_adjustment(const LetterDistribution *ld,
                                                  const Rack *player_leave,
                                                  const Rack *opp_rack) {
   if (!rack_is_empty(player_leave)) {
@@ -67,11 +68,10 @@ static inline double standard_endgame_adjustment(const LetterDistribution *ld,
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
-static inline double shadow_endgame_adjustment(const LetterDistribution *ld,
-                                               const Rack *opp_rack,
-                                               int number_of_letters_on_rack,
-                                               int tiles_played,
-                                               int lowest_possible_rack_score) {
+static inline Equity
+shadow_endgame_adjustment(const LetterDistribution *ld, const Rack *opp_rack,
+                          int number_of_letters_on_rack, int tiles_played,
+                          Equity lowest_possible_rack_score) {
   if (number_of_letters_on_rack > tiles_played) {
     // This play is not going out. We should penalize it by our own score
     // plus some constant.
@@ -83,10 +83,10 @@ static inline double shadow_endgame_adjustment(const LetterDistribution *ld,
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
-static inline double
+static inline Equity
 static_eval_get_shadow_equity(const LetterDistribution *ld,
-                              const Rack *opp_rack, const double *best_leaves,
-                              const uint16_t *descending_tile_scores,
+                              const Rack *opp_rack, const Equity *best_leaves,
+                              const Equity *descending_tile_scores,
                               int number_of_tiles_in_bag,
                               int number_of_letters_on_rack, int tiles_played) {
   double equity = 0;
@@ -114,13 +114,13 @@ static_eval_get_shadow_equity(const LetterDistribution *ld,
 }
 
 // Assumes all fields of the move are set except the equity.
-static inline double static_eval_get_move_equity_with_leave_value(
+static inline Equity static_eval_get_move_equity_with_leave_value(
     const LetterDistribution *ld, const Move *move, const Rack *player_leave,
-    const Rack *opp_rack, const double *opening_move_penalties,
+    const Rack *opp_rack, const Equity *opening_move_penalties,
     int board_number_of_tiles_played, int number_of_tiles_in_bag,
-    double leave_value) {
-  double leave_adjustment = 0;
-  double other_adjustments = 0;
+    Equity leave_value) {
+  Equity leave_adjustment = 0;
+  Equity other_adjustments = 0;
 
   if (board_number_of_tiles_played == 0 &&
       move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
@@ -139,16 +139,16 @@ static inline double static_eval_get_move_equity_with_leave_value(
         standard_endgame_adjustment(ld, player_leave, opp_rack);
   }
 
-  return ((double)move_get_score(move)) + leave_adjustment + other_adjustments;
+  return move_get_score(move) + leave_adjustment + other_adjustments;
 }
 
 // Assumes all fields of the move are set except the equity.
-static inline double static_eval_get_move_equity(
+static inline Equity static_eval_get_move_equity(
     const LetterDistribution *ld, const KLV *klv, const Move *move,
     const Rack *player_leave, const Rack *opp_rack,
-    const double *opening_move_penalties, int board_number_of_tiles_played,
+    const Equity *opening_move_penalties, int board_number_of_tiles_played,
     int number_of_tiles_in_bag) {
-  double leave_equity = 0;
+  Equity leave_equity = EQUITY_ZERO_VALUE;
   if (player_leave && !rack_is_empty(player_leave)) {
     leave_equity = klv_get_leave_value(klv, player_leave);
   }
@@ -157,10 +157,10 @@ static inline double static_eval_get_move_equity(
       board_number_of_tiles_played, number_of_tiles_in_bag, leave_equity);
 }
 
-static inline int static_eval_get_move_score(const LetterDistribution *ld,
-                                             const Move *move, Board *board,
-                                             int bingo_bonus,
-                                             int cross_set_index) {
+static inline Equity static_eval_get_move_score(const LetterDistribution *ld,
+                                                const Move *move, Board *board,
+                                                Equity bingo_bonus,
+                                                int cross_set_index) {
   int tiles_played = move_get_tiles_played(move);
   int tiles_length = move_get_tiles_length(move);
   int row_start = move_get_row_start(move);
@@ -176,10 +176,10 @@ static inline int static_eval_get_move_score(const LetterDistribution *ld,
     col_start = tmp_start;
   }
 
-  int ls;
-  int main_word_score = 0;
-  int cross_scores = 0;
-  int word_bingo_bonus = 0;
+  Equity ls;
+  Equity main_word_score = 0;
+  Equity cross_scores = 0;
+  Equity word_bingo_bonus = EQUITY_ZERO_VALUE;
   int word_multiplier = 1;
 
   if (tiles_played == RACK_SIZE) {
@@ -207,8 +207,9 @@ static inline int static_eval_get_move_score(const LetterDistribution *ld,
     // transposition. The conditional transposition at the
     // start of this function ensures that the indexing
     // board_get_cross_score function is correct.
-    int cs = board_get_cross_score(board, row_start, col_start + idx,
-                                   BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+    Equity cs =
+        board_get_cross_score(board, row_start, col_start + idx,
+                              BOARD_HORIZONTAL_DIRECTION, cross_set_index);
     if (get_is_blanked(ml)) {
       ls = ld_get_score(ld, BLANK_MACHINE_LETTER);
     } else {

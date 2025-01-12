@@ -4,6 +4,8 @@
 
 #include "../def/move_defs.h"
 
+#include "equity.h"
+
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
@@ -18,7 +20,7 @@ struct Player {
   int index;
   const char *name;
   Rack *rack;
-  int score;
+  Equity score;
   move_sort_t move_sort_type;
   move_record_t move_record_type;
   const KWG *kwg;
@@ -27,7 +29,7 @@ struct Player {
 
 void player_reset(Player *player) {
   rack_reset(player->rack);
-  player->score = 0;
+  player->score = EQUITY_ZERO_VALUE;
 }
 
 void player_update(const PlayersData *players_data, Player *player) {
@@ -44,7 +46,7 @@ Player *player_create(const PlayersData *players_data,
                       const LetterDistribution *ld, int player_index) {
   Player *player = malloc_or_die(sizeof(Player));
   player->index = player_index;
-  player->score = 0;
+  player->score = EQUITY_ZERO_VALUE;
   player->rack = rack_create(ld_get_size(ld));
 
   player_update(players_data, player);
@@ -93,9 +95,11 @@ const KWG *player_get_kwg(const Player *player) { return player->kwg; }
 
 const KLV *player_get_klv(const Player *player) { return player->klv; }
 
-void player_set_score(Player *player, int score) { player->score = score; }
+void player_set_score(Player *player, Equity score) { player->score = score; }
 
-void player_add_to_score(Player *player, int score) { player->score += score; }
+void player_add_to_score(Player *player, Equity score) {
+  player->score += score;
+}
 
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type) {
   player->move_sort_type = move_sort_type;

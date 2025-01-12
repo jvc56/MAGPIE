@@ -1,6 +1,5 @@
 #include "game.h"
 
-#include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -9,6 +8,8 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
+
+#include "../ent/equity.h"
 
 #include "bag.h"
 #include "board.h"
@@ -23,8 +24,8 @@ typedef struct MinimalGameBackup {
   Bag *bag;
   Rack *p0rack;
   Rack *p1rack;
-  int p0score;
-  int p1score;
+  Equity p0score;
+  Equity p1score;
   int player_on_turn_index;
   int starting_player_index;
   int consecutive_scoreless_turns;
@@ -41,7 +42,7 @@ struct Game {
   int player_on_turn_index;
   int starting_player_index;
   int consecutive_scoreless_turns;
-  int bingo_bonus;
+  Equity bingo_bonus;
   game_end_reason_t game_end_reason;
   bool data_is_shared[NUMBER_OF_DATA];
   Board *board;
@@ -65,7 +66,7 @@ struct Game {
 
 game_variant_t game_get_variant(const Game *game) { return game->variant; }
 
-int game_get_bingo_bonus(const Game *game) { return game->bingo_bonus; }
+Equity game_get_bingo_bonus(const Game *game) { return game->bingo_bonus; }
 
 game_variant_t get_game_variant_type_from_name(const char *variant_name) {
   game_variant_t game_variant = GAME_VARIANT_UNKNOWN;
@@ -140,10 +141,10 @@ void game_start_next_player_turn(Game *game) {
   game->player_on_turn_index = 1 - game->player_on_turn_index;
 }
 
-int traverse_backwards_for_score(const Board *board,
-                                 const LetterDistribution *ld, int row,
-                                 int col) {
-  int score = 0;
+Equity traverse_backwards_for_score(const Board *board,
+                                    const LetterDistribution *ld, int row,
+                                    int col) {
+  Equity score = EQUITY_ZERO_VALUE;
   while (board_is_position_in_bounds_and_not_bricked(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -210,13 +211,15 @@ static inline void game_gen_alpha_cross_set(Game *game, int row, int col,
 
   if (board_is_nonempty_or_bricked(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index, 0);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    board_set_cross_score(board, row, col, dir, cross_set_index,
+                          EQUITY_ZERO_VALUE);
     return;
   }
   if (board_are_left_and_right_empty(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index,
                         TRIVIAL_CROSS_SET);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    board_set_cross_score(board, row, col, dir, cross_set_index,
+                          EQUITY_ZERO_VALUE);
     return;
   }
 
@@ -226,7 +229,7 @@ static inline void game_gen_alpha_cross_set(Game *game, int row, int col,
       board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
   const int right_col =
       board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
-  int score = 0;
+  Equity score = 0;
 
   rack_reset(game->cross_set_rack);
   if (left_col < col) {
@@ -277,7 +280,7 @@ static inline void game_gen_classic_cross_set(Game *game, int row, int col,
       board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
   const int right_col =
       board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
-  int score = 0;
+  Equity score = EQUITY_ZERO_VALUE;
   uint64_t front_hook_set = 0;
   uint64_t back_hook_set = 0;
   uint32_t right_lnode_index = 0;
@@ -463,7 +466,7 @@ void game_set_backup_mode(Game *game, backup_mode_t backup_mode) {
 
 void game_update(Game *game, const GameArgs *game_args) {
   game->ld = game_args->ld;
-  game->bingo_bonus = game_args->bingo_bonus;
+  game->bingo_bonus = int_to_equity(game_args->bingo_bonus);
   for (int player_index = 0; player_index < 2; player_index++) {
     player_update(game_args->players_data, game->players[player_index]);
   }
@@ -485,7 +488,7 @@ void game_update(Game *game, const GameArgs *game_args) {
 Game *game_create(const GameArgs *game_args) {
   Game *game = malloc_or_die(sizeof(Game));
   game->ld = game_args->ld;
-  game->bingo_bonus = game_args->bingo_bonus;
+  game->bingo_bonus = int_to_equity(game_args->bingo_bonus);
   game->bag = bag_create(game->ld);
   game->board = board_create(game_args->board_layout);
   for (int player_index = 0; player_index < 2; player_index++) {

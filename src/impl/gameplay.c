@@ -25,7 +25,7 @@
 
 #include "../util/string_util.h"
 
-double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
+Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
     if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
       if (get_is_blanked(move_get_tile(move, i))) {
@@ -396,6 +396,7 @@ void generate_moves_for_game(Game *game, int thread_index,
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, thread_index,
                  move_list);
+  assert(equity_is_integer(move_list_get_move(move_list, 0)->score));  // DO NOT SUBMIT
   return move_list_get_move(move_list, 0);
 }
 

@@ -114,7 +114,7 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
   }
   string_builder_add_spaces(string_builder, 1);
   if (board) {
-    string_builder_add_int(string_builder, move_get_score(move));
+    string_builder_add_int(string_builder, equity_to_int(move_get_score(move)));
   }
 }
 

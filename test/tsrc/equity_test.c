@@ -22,6 +22,10 @@ void test_equity(void) {
   // This ordering is required for movegen to work
   assert(EQUITY_INITIAL_VALUE < EQUITY_PASS_VALUE);
 
+  assert(int_to_equity(0) == EQUITY_ZERO_VALUE);
+  assert(int_to_equity(1) == EQUITY_RESOLUTION);
+  assert(int_to_equity(-1) == -EQUITY_RESOLUTION);
+  
   assert(within_epsilon(equity_to_double(EQUITY_ZERO_VALUE), 0.0));
   assert(within_epsilon(equity_to_double(EQUITY_MIN_VALUE), EQUITY_MIN_DOUBLE));
   assert(within_epsilon(equity_to_double(EQUITY_MAX_VALUE), EQUITY_MAX_DOUBLE));

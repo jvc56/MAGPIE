@@ -28,6 +28,9 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+#include "../str/game_string.h"
+#include "../str/move_string.h"
+
 typedef struct LeavegenSharedData {
   int num_gens;
   int gens_completed;
@@ -372,6 +375,10 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);
   }
   *move = get_top_equity_move(game, thread_index, game_runner->move_list);
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_game(sb, game, game_runner->move_list);
+  printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
 
   if (lg_shared_data) {
     leave_list_add_all_subleaves(

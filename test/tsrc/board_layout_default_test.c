@@ -242,7 +242,7 @@ void test_board_layout_correctness(void) {
   load_game_with_test_board(game, data_paths,
                             "many_opening_hotspots_vertical_15");
 
-  double opening_penalties[BOARD_DIM * 2];
+  Equity opening_penalties[BOARD_DIM * 2];
   board_copy_opening_penalties(board, opening_penalties);
   assert(within_epsilon_for_equity(opening_penalties[0], 0));
   assert(within_epsilon_for_equity(opening_penalties[1], 0));
