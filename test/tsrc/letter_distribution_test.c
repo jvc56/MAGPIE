@@ -13,7 +13,7 @@ void test_ld_score_order(void) {
   const LetterDistribution *ld = config_get_ld(config);
   int ld_size = ld_get_size(ld);
 
-  int previous_score = 100000;
+  Equity previous_score = 100000;
   for (int i = 0; i < ld_size; i++) {
     int score_order_index = ld_get_score_order(ld, i);
     assert(ld_get_score(ld, score_order_index) <= previous_score);
