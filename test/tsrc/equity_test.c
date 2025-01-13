@@ -29,8 +29,6 @@ void test_equity(void) {
   assert(within_epsilon(equity_to_double(EQUITY_ZERO_VALUE), 0.0));
   assert(within_epsilon(equity_to_double(EQUITY_MIN_VALUE), EQUITY_MIN_DOUBLE));
   assert(within_epsilon(equity_to_double(EQUITY_MAX_VALUE), EQUITY_MAX_DOUBLE));
-  assert(
-      within_epsilon(equity_to_double(EQUITY_PASS_VALUE), EQUITY_PASS_DOUBLE));
 
   assert(double_to_equity(0.0) == EQUITY_ZERO_VALUE);
   assert(double_to_equity(EQUITY_MIN_DOUBLE) == EQUITY_MIN_VALUE);

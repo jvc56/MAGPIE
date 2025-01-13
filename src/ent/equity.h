@@ -32,7 +32,7 @@ static inline double equity_to_double(Equity eq) {
     log_fatal("cannot convert initial equity\n");
   }
   if (eq == EQUITY_PASS_VALUE) {
-    return EQUITY_PASS_DOUBLE;
+    log_fatal("cannot convert pass equity");
   }
   return (double)eq / EQUITY_RESOLUTION;
 }

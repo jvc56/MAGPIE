@@ -89,7 +89,7 @@ static_eval_get_shadow_equity(const LetterDistribution *ld,
                               const Equity *descending_tile_scores,
                               int number_of_tiles_in_bag,
                               int number_of_letters_on_rack, int tiles_played) {
-  double equity = 0;
+  Equity equity = EQUITY_ZERO_VALUE;
   if (number_of_tiles_in_bag > 0) {
     // Bag is not empty: use leave values
     equity += best_leaves[number_of_letters_on_rack - tiles_played];
@@ -138,7 +138,8 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
     other_adjustments +=
         standard_endgame_adjustment(ld, player_leave, opp_rack);
   }
-
+  //printf("score: %d leave_adjustment: %d other_adjustments: %d\n",
+  //       move_get_score(move), leave_adjustment, other_adjustments);
   return move_get_score(move) + leave_adjustment + other_adjustments;
 }
 

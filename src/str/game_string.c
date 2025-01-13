@@ -96,6 +96,8 @@ void string_builder_add_move_with_rank_and_equity(StringBuilder *game_string,
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(game_string, board, move, ld);
+  const Equity eq = move_get_equity(move);
+  string_builder_add_string(game_string, " ");
   string_builder_add_formatted_string(game_string, " %0.2f",
                                       equity_to_double(move_get_equity(move)));
 }

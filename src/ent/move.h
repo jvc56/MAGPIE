@@ -341,7 +341,7 @@ static inline void move_list_destroy(MoveList *ml) {
 
 static inline void move_list_reset(MoveList *ml) {
   ml->count = 0;
-  ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
+  ml->moves[0]->equity = EQUITY_INITIAL_VALUE;
 }
 
 static inline void up_heapify(MoveList *ml, int index) {
