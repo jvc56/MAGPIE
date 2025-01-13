@@ -15,6 +15,7 @@
 #include "../ent/thread_control.h"
 
 #include "bag_string.h"
+#include "equity_string.h"
 #include "letter_distribution_string.h"
 #include "move_string.h"
 #include "rack_string.h"
@@ -96,10 +97,9 @@ void string_builder_add_move_with_rank_and_equity(StringBuilder *game_string,
   const LetterDistribution *ld = game_get_ld(game);
   string_builder_add_formatted_string(game_string, " %d ", move_index + 1);
   string_builder_add_move(game_string, board, move, ld);
-  const Equity eq = move_get_equity(move);
   string_builder_add_string(game_string, " ");
-  string_builder_add_formatted_string(game_string, " %0.2f",
-                                      equity_to_double(move_get_equity(move)));
+    const Equity eq = move_get_equity(move);
+  string_builder_add_equity(game_string, eq, "%0.2f");
 }
 
 void string_builder_add_game(StringBuilder *game_string, const Game *game,
