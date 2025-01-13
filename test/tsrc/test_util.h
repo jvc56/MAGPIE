@@ -99,4 +99,6 @@ void assert_move_score(const Move *move, int expected_score);
 void assert_move_equity_int(const Move *move, int expected_equity);                    
 void assert_move_equity_exact(const Move *move, Equity expected_equity);
 
+void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
+                       int expected_score);
 #endif

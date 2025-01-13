@@ -765,3 +765,8 @@ void assert_move_equity_int(const Move *move, int expected_equity) {
 void assert_move_equity_exact(const Move *move, Equity expected_equity) {
   assert(move_get_equity(move) == expected_equity);
 }
+
+void assert_rack_score(const LetterDistribution *ld, const Rack *rack, 
+                       int expected_score) {
+  assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
+}
