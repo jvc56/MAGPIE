@@ -95,4 +95,8 @@ BitRack string_to_bit_rack(const LetterDistribution *ld,
 void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
                            const LetterDistribution *ld, int word_idx, int length);
 
+void assert_move_score(const Move *move, int expected_score);       
+void assert_move_equity_int(const Move *move, int expected_equity);                    
+void assert_move_equity_exact(const Move *move, Equity expected_equity);
+
 #endif

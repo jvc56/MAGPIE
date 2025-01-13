@@ -10,7 +10,7 @@
 // There is only one reserved value at the top of the equity range, but
 // we negate EQUITY_MIN_VALUE to make the range symmetrical
 #define EQUITY_MAX_VALUE (-EQUITY_MIN_VALUE)
-#define EQUITY_RESOLUTION 100
+#define EQUITY_RESOLUTION 1000
 #define EQUITY_MIN_DOUBLE ((double)EQUITY_MIN_VALUE / EQUITY_RESOLUTION)
 #define EQUITY_MAX_DOUBLE ((double)EQUITY_MAX_VALUE / EQUITY_RESOLUTION)
 
