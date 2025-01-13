@@ -37,10 +37,10 @@ void test_leaves(void) {
   while (fgets(line, sizeof(line), file)) {
     StringSplitter *leave_and_value = split_string(line, ',', true);
     rack_set_to_string(ld, rack, string_splitter_get_item(leave_and_value, 0));
-    double klv_leave_value = klv_get_leave_value(klv, rack);
+    const Equity klv_leave_value = klv_get_leave_value(klv, rack);
     assert(within_epsilon(
         klv_leave_value,
-        string_to_float(string_splitter_get_item(leave_and_value, 1))));
+        double_to_equity(string_to_float(string_splitter_get_item(leave_and_value, 1)))));
 
     string_splitter_destroy(leave_and_value);
   }
