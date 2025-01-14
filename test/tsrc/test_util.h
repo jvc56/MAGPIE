@@ -96,9 +96,11 @@ void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
                            const LetterDistribution *ld, int word_idx, int length);
 
 void assert_move_score(const Move *move, int expected_score);       
-void assert_move_equity_int(const Move *move, int expected_equity);                    
+void assert_move_equity_int(const Move *move, int expected_equity);
 void assert_move_equity_exact(const Move *move, Equity expected_equity);
-
 void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
                        int expected_score);
+void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
+                                             int expected_challenge_points);
+
 #endif

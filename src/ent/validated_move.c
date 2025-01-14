@@ -20,10 +20,10 @@ typedef struct ValidatedMove {
   FormedWords *formed_words;
   Rack *rack;
   Rack *leave;
-  int challenge_points;
+  Equity challenge_points;
   bool challenge_turn_loss;
   bool unknown_exchange;
-  double leave_value;
+  Equity leave_value;
   move_validation_status_t status;
 } ValidatedMove;
 
@@ -264,7 +264,7 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
     }
     // Equity is set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_EXCHANGE);
-    move_set_score(vm->move, 0);
+    move_set_score(vm->move, EQUITY_ZERO_VALUE);
   } else {
     // Score and equity are set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -389,7 +389,7 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
     return MOVE_VALIDATION_STATUS_INVALID_CHALLENGE_POINTS;
   }
 
-  vm->challenge_points = string_to_int(challenge_points);
+  vm->challenge_points = int_to_equity(string_to_int(challenge_points));
 
   // Validate challenge turn loss
 
@@ -453,7 +453,7 @@ validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
   const Player *player = game_get_player(game, player_index);
   const KLV *klv = player_get_klv(player);
   Board *board = game_get_board(game);
-  int score = 0;
+  Equity score = EQUITY_ZERO_VALUE;
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     const KWG *kwg = player_get_kwg(player);
@@ -493,7 +493,7 @@ validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
       move_set_equity(vm->move, score);
     }
   } else {
-    move_set_equity(vm->move, PASS_MOVE_EQUITY);
+    move_set_equity(vm->move, EQUITY_PASS_VALUE);
   }
 
   return MOVE_VALIDATION_STATUS_SUCCESS;
@@ -508,9 +508,9 @@ ValidatedMove *validated_move_create(const Game *game, int player_index,
   vm->formed_words = NULL;
   vm->rack = NULL;
   vm->leave = NULL;
-  vm->challenge_points = 0;
+  vm->challenge_points = EQUITY_ZERO_VALUE;
   vm->challenge_turn_loss = false;
-  vm->leave_value = 0;
+  vm->leave_value = EQUITY_ZERO_VALUE;
   vm->unknown_exchange = false;
   vm->move = move_create();
 
@@ -609,7 +609,7 @@ bool validated_moves_get_unknown_exchange(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->unknown_exchange;
 }
 
-int validated_moves_get_challenge_points(const ValidatedMoves *vms, int i) {
+Equity validated_moves_get_challenge_points(const ValidatedMoves *vms, int i) {
   return vms->moves[i]->challenge_points;
 }
 

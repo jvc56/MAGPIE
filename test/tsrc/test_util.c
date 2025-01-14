@@ -770,3 +770,11 @@ void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
                        int expected_score) {
   assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
 }
+
+void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
+                                             int expected_challenge_points) {
+  const Equity expected_challenge_points_eq =
+      int_to_equity(expected_challenge_points);
+  assert(validated_moves_get_challenge_points(vms, i) ==
+         expected_challenge_points_eq);
+}
