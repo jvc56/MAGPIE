@@ -31,9 +31,10 @@ typedef struct KLVCreateData {
 void klv_write_row(void *data, uint32_t word_index) {
   KLVWriteData *lasb = (KLVWriteData *)data;
   string_builder_add_rack(lasb->string_builder, lasb->leave, lasb->ld, true);
-  string_builder_add_formatted_string(
-      lasb->string_builder, ",%f\n",
+  const double value = equity_to_double(
       klv_get_indexed_leave_value(lasb->klv, word_index));
+  string_builder_add_formatted_string(
+      lasb->string_builder, ",%f\n", value);
 }
 
 void klv_add_leave_to_word_list(void *data,
@@ -181,16 +182,16 @@ KLV *klv_read_from_csv(const LetterDistribution *ld, const char *data_paths,
     char *value_str = strtok(NULL, "\n");
     if (leave_str && value_str) {
       rack_set_to_string(ld, leave_rack, leave_str);
-      int leave_index = klv_get_word_index(klv, leave_rack);
+      const int leave_index = klv_get_word_index(klv, leave_rack);
       if (leave_was_set[leave_index]) {
         log_fatal("duplicate leave: %s\n", leave_str);
       }
-      double value =
+      const double value =
           string_to_double_or_set_error(value_str, &str_to_double_success);
       if (!str_to_double_success) {
         log_fatal("malformed leave value in klv: %s\n", line);
       }
-      klv_set_indexed_leave_value(klv, leave_index, value);
+      klv_set_indexed_leave_value(klv, leave_index, double_to_equity(value));
       leave_was_set[leave_index] = true;
     } else {
       log_fatal("malformed row in klv: %s\n", line);
