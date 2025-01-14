@@ -178,7 +178,9 @@ KLV *klv_read_from_csv(const LetterDistribution *ld, const char *data_paths,
       log_fatal("line exceeds max length: %s\n", line);
     }
     char *leave_str = strtok(line, ",");
+    trim_whitespace(leave_str);
     char *value_str = strtok(NULL, "\n");
+    trim_whitespace(value_str);
     if (leave_str && value_str) {
       rack_set_to_string(ld, leave_rack, leave_str);
       int leave_index = klv_get_word_index(klv, leave_rack);
