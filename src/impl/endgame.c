@@ -242,6 +242,7 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
 
   PVLine child_pv;
   child_pv.game = worker->game_copy;
+  child_pv.num_moves = 0;
 
   int nplays;
   char *spaces = create_spaces(worker->solver->requested_plies - depth);

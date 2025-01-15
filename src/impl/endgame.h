@@ -7,7 +7,7 @@
 #include "../ent/thread_control.h"
 
 // We don't expect an endgame length to ever be larger than this value.
-#define MAX_VARIANT_LENGTH 6
+#define MAX_VARIANT_LENGTH 25
 
 typedef struct PVLine {
   SmallMove moves[MAX_VARIANT_LENGTH];

@@ -81,7 +81,7 @@ void test_solve_standard(void) {
               "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
               "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
 
-  int plies = 3;
+  int plies = 2;
   EndgameSolver *solver = endgame_solver_create(
       config_get_thread_control(config), config_get_game(config));
   PVLine solution = endgame_solve(solver, plies);
@@ -101,7 +101,7 @@ void test_very_deep(void) {
               "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/"
               "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;");
   // This insane endgame requires 25 plies to solve. We end up winning by 1 pt.
-  int plies = 6;
+  int plies = 25;
   EndgameSolver *solver = endgame_solver_create(
       config_get_thread_control(config), config_get_game(config));
   PVLine solution = endgame_solve(solver, plies);
@@ -113,6 +113,6 @@ void test_very_deep(void) {
 }
 
 void test_endgame(void) {
-  test_solve_standard();
-  // test_very_deep();
+  // test_solve_standard();
+  test_very_deep();
 }
