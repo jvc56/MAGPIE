@@ -244,7 +244,7 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
   child_pv.game = worker->game_copy;
 
   int nplays;
-  char *spaces = create_spaces(depth);
+  char *spaces = create_spaces(worker->solver->requested_plies - depth);
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
     nplays = generate_stm_plays(worker);
