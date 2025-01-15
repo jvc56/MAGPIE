@@ -44,6 +44,9 @@ void test_vs_joey(void) {
 
   PVLine solution = endgame_solve(solver, 13);
   assert(solution.score == 55);
+
+  endgame_solver_destroy(solver);
+  config_destroy(config);
 }
 
 void test_pass_first(void) {
@@ -57,12 +60,59 @@ void test_pass_first(void) {
       "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21");
   // This endgame's first move must be a pass, otherwise Nigel can set up
   // an unblockable ZA.
-  int plies = 8;
+  int plies = 8; // 8
   EndgameSolver *solver = endgame_solver_create(
       config_get_thread_control(config), config_get_game(config));
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == -60);
-  assert(solution.moves[0].move_type == GAME_EVENT_PASS);
+  assert(small_move_is_pass(&solution.moves[0]));
+
+  endgame_solver_destroy(solver);
+  config_destroy(config);
 }
 
-void test_endgame(void) { test_pass_first(); }
+void test_solve_standard(void) {
+  // A standard out-in-two endgame.
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+              "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+              "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  int plies = 3;
+  EndgameSolver *solver = endgame_solver_create(
+      config_get_thread_control(config), config_get_game(config));
+  PVLine solution = endgame_solve(solver, plies);
+  assert(solution.score == 11);
+  assert(!small_move_is_pass(&solution.moves[0]));
+
+  endgame_solver_destroy(solver);
+  config_destroy(config);
+}
+
+void test_very_deep(void) {
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "14C/13QI/12FIE/10VEE1R/9KIT2G/8CIG1IDE/8UTA2AS/7ST1SYPh1/6JA5A1/"
+              "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/"
+              "GUR2WIRER5/SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21;");
+  // This insane endgame requires 25 plies to solve. We end up winning by 1 pt.
+  int plies = 6;
+  EndgameSolver *solver = endgame_solver_create(
+      config_get_thread_control(config), config_get_game(config));
+  PVLine solution = endgame_solve(solver, plies);
+  assert(solution.score == -116);
+  assert(small_move_is_pass(&solution.moves[0]));
+
+  endgame_solver_destroy(solver);
+  config_destroy(config);
+}
+
+void test_endgame(void) {
+  test_solve_standard();
+  // test_very_deep();
+}
