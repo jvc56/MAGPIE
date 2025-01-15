@@ -501,8 +501,8 @@ void test_playmove(void) {
 
   assert(game_get_consecutive_scoreless_turns(game) == 0);
   assert(!game_over(game));
-  assert(player_get_score(player0) == 36);
-  assert(player_get_score(player1) == 0);
+  assert(equity_to_int(player_get_score(player0)) == 36);
+  assert(equity_to_int(player_get_score(player1)) == 0);
   assert(!rack_is_empty(player0_rack));
   assert(rack_get_total_letters(player0_rack) == 7);
   assert(board_get_letter(board, 7, 3) == ld_hl_to_ml(ld, "K"));
@@ -545,8 +545,8 @@ void test_playmove(void) {
   int player1_score = player_get_score(player1);
   assert(game_get_consecutive_scoreless_turns(game) == 5);
   assert(!game_over(game));
-  assert(player0_score == 517);
-  assert(player1_score == 349);
+  assert(equity_to_int(player0_score) == 517);
+  assert(equity_to_int(player1_score) == 349);
   assert(!rack_is_empty(player0_rack));
   assert(rack_get_total_letters(player0_rack) == 1);
   assert(!rack_is_empty(player1_rack));
@@ -646,13 +646,13 @@ void test_backups(void) {
   play_top_n_equity_move(game, 0);
   assert(bag_get_tiles(bag) == 74);
 
-  assert(player_get_score(player0) == 36);
-  assert(player_get_score(player1) == 131);
+  assert(equity_to_int(player_get_score(player0)) == 36);
+  assert(equity_to_int(player_get_score(player1)) == 131);
   assert(board_get_letter(board, 0, 7) == ld_hl_to_ml(ld, "Q"));
   // let's unplay QUATORZE
   game_unplay_last_move(game);
-  assert(player_get_score(player0) == 36);
-  assert(player_get_score(player1) == 0);
+  assert(equity_to_int(player_get_score(player0)) == 36);
+  assert(equity_to_int(player_get_score(player1)) == 0);
 
   assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "A")) == 1);
   assert(rack_get_letter(player1_rack, ld_hl_to_ml(ld, "O")) == 1);
