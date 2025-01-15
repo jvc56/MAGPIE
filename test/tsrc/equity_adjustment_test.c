@@ -8,7 +8,6 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/player.h"
 #include "../../src/ent/rack.h"
-#include "../../src/ent/static_eval.h"
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
@@ -34,10 +33,9 @@ void test_macondo_opening_equity_adjustments(void) {
   const Move *top_move = vortex_sorted_move_list->moves[0];
   assert(move_get_col_start(top_move) == 6);
   assert(move_get_tiles_played(top_move) == 6);
-  assert(move_get_score(top_move) == 48);
-  assert(within_epsilon((double)(move_get_score(top_move) +
-                                 get_leave_value_for_move(klv, top_move, rack)),
-                        move_get_equity(top_move)));
+  assert_move_score(top_move, 48);
+  assert_move_equity_exact(top_move, move_get_score(top_move) +
+                                         get_leave_value_for_move(klv, top_move, rack));
 
   sorted_move_list_destroy(vortex_sorted_move_list);
   game_reset(game);
@@ -51,11 +49,10 @@ void test_macondo_opening_equity_adjustments(void) {
   top_move = jibed_sorted_move_list->moves[0];
   assert(move_get_col_start(top_move) == 3);
   assert(move_get_tiles_played(top_move) == 5);
-  assert(move_get_score(top_move) == 46);
-  assert(within_epsilon((double)(move_get_score(top_move) +
-                                 get_leave_value_for_move(klv, top_move, rack) +
-                                 OPENING_HOTSPOT_PENALTY),
-                        move_get_equity(top_move)));
+  assert_move_score(top_move, 46);
+  assert_move_equity_exact(top_move, move_get_score(top_move) +
+                                  get_leave_value_for_move(klv, top_move, rack) +
+                                  OPENING_HOTSPOT_PENALTY);
 
   sorted_move_list_destroy(jibed_sorted_move_list);
   game_reset(game);
@@ -67,11 +64,10 @@ void test_macondo_opening_equity_adjustments(void) {
   top_move = facete_sorted_move_list->moves[0];
   assert(move_get_col_start(top_move) == 3);
   assert(move_get_tiles_played(top_move) == 6);
-  assert(move_get_score(top_move) == 30);
-  assert(within_epsilon((double)(move_get_score(top_move) +
-                                 get_leave_value_for_move(klv, top_move, rack) +
-                                 (2 * OPENING_HOTSPOT_PENALTY)),
-                        move_get_equity(top_move)));
+  assert_move_score(top_move, 30);
+  assert_move_equity_exact(top_move, move_get_score(top_move) +
+                                         get_leave_value_for_move(klv, top_move, rack) +
+                                         2 * OPENING_HOTSPOT_PENALTY);
   sorted_move_list_destroy(facete_sorted_move_list);
   game_reset(game);
 
@@ -82,11 +78,10 @@ void test_macondo_opening_equity_adjustments(void) {
   top_move = atalaya_sorted_move_list->moves[0];
   assert(move_get_col_start(top_move) == 6);
   assert(move_get_tiles_played(top_move) == 7);
-  assert(move_get_score(top_move) == 78);
-  assert(within_epsilon((double)(move_get_score(top_move) +
-                                 get_leave_value_for_move(klv, top_move, rack) +
-                                 (3 * OPENING_HOTSPOT_PENALTY)),
-                        move_get_equity(top_move)));
+  assert_move_score(top_move, 78);
+  assert_move_equity_exact(top_move, move_get_score(top_move) +
+                                         get_leave_value_for_move(klv, top_move, rack) +
+                                         3 * OPENING_HOTSPOT_PENALTY);
 
   sorted_move_list_destroy(atalaya_sorted_move_list);
   move_list_destroy(move_list);
@@ -111,46 +106,46 @@ void test_macondo_endgame_equity_adjustments(void) {
   SortedMoveList *endgame_sorted_move_list = sorted_move_list_create(move_list);
 
   const Move *move0 = endgame_sorted_move_list->moves[0];
-  assert(move_get_score(move0) == 8);
+  assert_move_score(move0, 8);
   assert(move_get_row_start(move0) == 1);
   assert(move_get_col_start(move0) == 10);
   assert(move_get_tiles_played(move0) == 3);
-  assert(within_epsilon(move_get_equity(move0), 12));
+  assert_move_equity_int(move0, 12);
 
   const Move *move1 = endgame_sorted_move_list->moves[1];
-  assert(move_get_score(move1) == 5);
+  assert_move_score(move1, 5);
   assert(move_get_row_start(move1) == 2);
   assert(move_get_col_start(move1) == 7);
   assert(move_get_tiles_played(move1) == 3);
-  assert(within_epsilon(move_get_equity(move1), 9));
+  assert_move_equity_int(move1, 9);
 
   const Move *move2 = endgame_sorted_move_list->moves[2];
-  assert(move_get_score(move2) == 13);
+  assert_move_score(move2, 13);
   assert(move_get_row_start(move2) == 1);
   assert(move_get_col_start(move2) == 5);
   assert(move_get_tiles_played(move2) == 2);
-  assert(within_epsilon(move_get_equity(move2), 1));
+  assert_move_equity_int(move2, 1);
 
   const Move *move3 = endgame_sorted_move_list->moves[3];
-  assert(move_get_score(move3) == 12);
+  assert_move_score(move3, 12);
   assert(move_get_row_start(move3) == 1);
   assert(move_get_col_start(move3) == 7);
   assert(move_get_tiles_played(move3) == 2);
-  assert(within_epsilon(move_get_equity(move3), 0));
+  assert_move_equity_int(move3, 0);
 
   const Move *move4 = endgame_sorted_move_list->moves[4];
-  assert(move_get_score(move4) == 11);
+  assert_move_score(move4, 11);
   assert(move_get_row_start(move4) == 1);
   assert(move_get_col_start(move4) == 9);
   assert(move_get_tiles_played(move4) == 2);
-  assert(within_epsilon(move_get_equity(move4), -1));
+  assert_move_equity_int(move4, -1);
 
   const Move *move5 = endgame_sorted_move_list->moves[5];
-  assert(move_get_score(move5) == 10);
+  assert_move_score(move5, 10);
   assert(move_get_row_start(move5) == 9);
   assert(move_get_col_start(move5) == 2);
   assert(move_get_tiles_played(move5) == 2);
-  assert(within_epsilon(move_get_equity(move5), -2));
+  assert_move_equity_int(move5, -2);
 
   sorted_move_list_destroy(endgame_sorted_move_list);
   move_list_destroy(move_list);
