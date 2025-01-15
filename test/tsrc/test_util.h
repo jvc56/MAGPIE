@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 
+#include "../../src/ent/anchor.h"
 #include "../../src/ent/bag.h"
 #include "../../src/ent/bit_rack.h"
 #include "../../src/ent/board.h"
@@ -102,5 +103,6 @@ void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
                        int expected_score);
 void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
                                              int expected_challenge_points);
-
+void assert_anchor_equity_int(const AnchorList *al, int i, int expected);
+void assert_anchor_equity_exact(const AnchorList *al, int i, Equity expected);
 #endif

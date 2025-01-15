@@ -17,6 +17,7 @@
 #include "../../src/def/letter_distribution_defs.h"
 #include "../../src/def/move_defs.h"
 
+#include "../../src/ent/anchor.h"
 #include "../../src/ent/bag.h"
 #include "../../src/ent/bit_rack.h"
 #include "../../src/ent/board.h"
@@ -759,7 +760,7 @@ void assert_move_score(const Move *move, int expected_score) {
 }
 
 void assert_move_equity_int(const Move *move, int expected_equity) {
-  assert(move_get_equity(move) == int_to_equity(expected_equity));
+  assert_move_equity_exact(move, int_to_equity(expected_equity));
 }
 
 void assert_move_equity_exact(const Move *move, Equity expected_equity) {
@@ -777,4 +778,13 @@ void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
       int_to_equity(expected_challenge_points);
   assert(validated_moves_get_challenge_points(vms, i) ==
          expected_challenge_points_eq);
+}
+
+void assert_anchor_equity_int(const AnchorList *al, int i, int expected) {
+  assert_anchor_equity_exact(al, i, int_to_equity(expected));
+}
+
+void assert_anchor_equity_exact(const AnchorList *al, int i, Equity expected) {
+  const Equity actual = anchor_get_highest_possible_equity(al, i);
+  assert(actual == expected);
 }
