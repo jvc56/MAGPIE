@@ -118,15 +118,6 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
 int generate_stm_plays(EndgameSolverWorker *worker) {
   // stm means side to move
   // This won't actually sort by score. We'll do this later.
-
-  {
-    // XXX: Remove this assert once we fix bugs
-    int letters = rack_get_total_letters(player_get_rack(game_get_player(
-        worker->game_copy, game_get_player_on_turn_index(worker->game_copy))));
-    // log_warn("generating with %d letters", letters);
-    assert(letters > 0);
-  }
-
   generate_moves(worker->game_copy, MOVE_RECORD_ALL_SMALL, MOVE_SORT_SCORE,
                  worker->thread_index, worker->move_list);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
@@ -201,6 +192,7 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
         compare_small_moves_by_estimated_value);
 }
 
+// XXX: Move this debug helper to a utility function or something.
 char *create_spaces(int depth) {
   // Allocate memory for the string of spaces (+1 for the null terminator)
   char *spaces = (char *)malloc(depth + 1);
@@ -245,7 +237,7 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
   child_pv.num_moves = 0;
 
   int nplays;
-  char *spaces = create_spaces(worker->solver->requested_plies - depth);
+  // char *spaces = create_spaces(worker->solver->requested_plies - depth);
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
     nplays = generate_stm_plays(worker);
@@ -272,13 +264,13 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
                        game_get_board(worker->game_copy));
 
     // delete me
-    StringBuilder *move_description = string_builder_create();
-    string_builder_add_move_description(move_description,
-                                        worker->move_list->spare_move,
-                                        game_get_ld(worker->game_copy));
-    log_warn("%sTrying moveidx %d, %s (tm:%x meta:%x)", spaces, idx,
-             string_builder_peek(move_description), small_move->tiny_move,
-             small_move->metadata);
+    // StringBuilder *move_description = string_builder_create();
+    // string_builder_add_move_description(move_description,
+    //                                     worker->move_list->spare_move,
+    //                                     game_get_ld(worker->game_copy));
+    // log_warn("%sTrying moveidx %d, %s (tm:%x meta:%x)", spaces, idx,
+    //          string_builder_peek(move_description), small_move->tiny_move,
+    //          small_move->metadata);
 
     play_move_status_t play_status =
         play_move(worker->move_list->spare_move, worker->game_copy, NULL, NULL);
@@ -295,27 +287,27 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
     }
     game_unplay_last_move(worker->game_copy);
 
-    log_warn("%sNow unplayed %d, %s (tm:%x meta:%x)", spaces, idx,
-             string_builder_peek(move_description), small_move->tiny_move,
-             small_move->metadata);
+    // log_warn("%sNow unplayed %d, %s (tm:%x meta:%x)", spaces, idx,
+    //          string_builder_peek(move_description), small_move->tiny_move,
+    //          small_move->metadata);
 
-    string_builder_destroy(move_description);
+    // string_builder_destroy(move_description);
 
     if (-value > best_value) {
       best_value = -value;
-      log_warn("%sUpdatePV, bestval %d", spaces, best_value);
-      StringBuilder *child_pvsb =
-          pvline_string(&child_pv, worker->game_copy, false);
-      StringBuilder *old_pvsb = pvline_string(pv, worker->game_copy, false);
+      // log_warn("%sUpdatePV, bestval %d", spaces, best_value);
+      // StringBuilder *child_pvsb =
+      //     pvline_string(&child_pv, worker->game_copy, false);
+      // StringBuilder *old_pvsb = pvline_string(pv, worker->game_copy, false);
       pvline_update(pv, &child_pv, small_move,
                     best_value - worker->solver->initial_spread);
 
-      StringBuilder *new_pvsb = pvline_string(pv, worker->game_copy, false);
-      log_warn("%schild_pv: %s", spaces, string_builder_peek(child_pvsb));
-      log_warn("%snew_pv: %s", spaces, string_builder_peek(new_pvsb));
-      string_builder_destroy(child_pvsb);
-      string_builder_destroy(old_pvsb);
-      string_builder_destroy(new_pvsb);
+      // StringBuilder *new_pvsb = pvline_string(pv, worker->game_copy, false);
+      // log_warn("%schild_pv: %s", spaces, string_builder_peek(child_pvsb));
+      // log_warn("%snew_pv: %s", spaces, string_builder_peek(new_pvsb));
+      // string_builder_destroy(child_pvsb);
+      // string_builder_destroy(old_pvsb);
+      // string_builder_destroy(new_pvsb);
     }
     if (worker->current_iterative_deepening_depth == depth) {
       // At the very top depth, set the estimated value of the small move,
@@ -336,7 +328,7 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
     // worker->small_move_arena->size); printf("%sReset back to %ld\n", spaces,
     // worker->small_move_arena->size);
   }
-  free(spaces);
+  // free(spaces);
   return best_value;
 }
 
@@ -378,6 +370,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->current_iterative_deepening_depth = p;
     PVLine pv;
     pv.game = worker->game_copy;
+    pv.num_moves = 0;
     int32_t val = negamax(worker, p, alpha, beta, &pv, true);
     // sort moves by valuation for next time.
     qsort(worker->solver->initial_moves, initial_move_count, sizeof(SmallMove),

@@ -81,7 +81,7 @@ void test_solve_standard(void) {
               "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
               "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
 
-  int plies = 2;
+  int plies = 4;
   EndgameSolver *solver = endgame_solver_create(
       config_get_thread_control(config), config_get_game(config));
   PVLine solution = endgame_solve(solver, plies);
@@ -113,6 +113,6 @@ void test_very_deep(void) {
 }
 
 void test_endgame(void) {
-  // test_solve_standard();
+  test_solve_standard();
   test_very_deep();
 }
