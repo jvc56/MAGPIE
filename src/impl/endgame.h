@@ -19,9 +19,9 @@ typedef struct PVLine {
 typedef struct EndgameSolver {
   int initial_spread;
   int solving_player;
-  SmallMove *initial_moves;
   int n_initial_moves;
 
+  int initial_small_move_arena_size;
   bool iterative_deepening_optim;
   bool first_win_optim;
   bool transposition_table_optim;

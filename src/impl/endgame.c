@@ -73,6 +73,7 @@ EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game) {
   es->solve_multiple_variations = 0;
   es->threads = 1; // for now
   es->solving_player = game_get_player_on_turn_index(game);
+  es->initial_small_move_arena_size = 1024 * 1024;
   Player *player = game_get_player(game, es->solving_player);
   Player *opponent = game_get_player(game, 1 - es->solving_player);
 
@@ -105,7 +106,8 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->move_list =
       move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
 
-  solver_worker->small_move_arena = create_arena(0, 16);
+  solver_worker->small_move_arena =
+      create_arena(solver->initial_small_move_arena_size, 16);
 
   solver_worker->solver = solver;
 
@@ -156,11 +158,10 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   int arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * move_count);
 
-  SmallMove *small_moves =
-      (SmallMove *)(worker->small_move_arena->memory + arena_offset);
-
   for (size_t i = 0; i < (size_t)move_count; i++) {
-    SmallMove *current_move = &small_moves[i];
+    size_t element_offset = arena_offset + i * sizeof(SmallMove);
+    SmallMove *current_move =
+        (SmallMove *)(worker->small_move_arena->memory + element_offset);
     // log_warn("assign estimate to move idx %d, tm %x, meta %x", i,
     //          current_move->tiny_move, current_move->metadata);
     if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
@@ -195,6 +196,8 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   }
   // sort moves by estimated value, from biggest to smallest value. A good move
   // sorting is instrumental to the performance of ab pruning.
+  SmallMove *small_moves =
+      (SmallMove *)(worker->small_move_arena->memory + arena_offset);
   qsort(small_moves, move_count, sizeof(SmallMove),
         compare_small_moves_by_estimated_value);
 }
@@ -262,11 +265,11 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
   int arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
 
-  SmallMove *small_moves =
-      (SmallMove *)(worker->small_move_arena->memory + arena_offset);
   // log_warn("Iterating through %d plays", nplays);
   for (int idx = 0; idx < nplays; idx++) {
-    SmallMove *small_move = &(small_moves[idx]);
+    size_t element_offset = arena_offset + idx * sizeof(SmallMove);
+    SmallMove *small_move =
+        (SmallMove *)(worker->small_move_arena->memory + element_offset);
     small_move_to_move(worker->move_list->spare_move, small_move,
                        game_get_board(worker->game_copy));
 
@@ -300,6 +303,10 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
 
     // string_builder_destroy(move_description);
 
+    // Re-assign small_move. Its pointer location may have changed after all
+    // the calls to negamax and possible reallocations in the small_move_arena.
+    small_move =
+        (SmallMove *)(worker->small_move_arena->memory + element_offset);
     if (-value > best_value) {
       best_value = -value;
       // log_warn("%sUpdatePV, bestval %d", spaces, best_value);
@@ -356,8 +363,6 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   int initial_move_count = generate_stm_plays(worker);
   // Arena pointer better have started at 0, since it was empty.
   assign_estimates_and_sort(worker, 0, initial_move_count);
-  worker->solver->initial_moves =
-      (SmallMove *)(worker->small_move_arena->memory);
   worker->solver->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
@@ -373,21 +378,22 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   }
 
   for (int p = start; p <= plies; p++) {
-    log_warn("Iterative deepening; ply %d", p);
+    log_info("Iterative deepening; ply %d", p);
     worker->current_iterative_deepening_depth = p;
     PVLine pv;
     pv.game = worker->game_copy;
     pv.num_moves = 0;
     int32_t val = negamax(worker, p, alpha, beta, &pv, true);
-    // sort moves by valuation for next time.
-    qsort(worker->solver->initial_moves, initial_move_count, sizeof(SmallMove),
+    // sort initial moves by valuation for next time.
+    SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
+    qsort(initial_moves, initial_move_count, sizeof(SmallMove),
           compare_small_moves_by_estimated_value);
 
     // log_warn("val returned was %d, initial spread %d", val,
     //          worker->solver->initial_spread);
     worker->solver->best_pv_value = val - worker->solver->initial_spread;
     worker->solver->principal_variation = pv;
-    log_warn("Best value so far: %d", worker->solver->best_pv_value);
+    log_info("Best value so far: %d", worker->solver->best_pv_value);
   }
 }
 
@@ -428,7 +434,7 @@ PVLine endgame_solve(EndgameSolver *solver, int plies) {
 
   StringBuilder *pvsb =
       pvline_string(&solver->principal_variation, solver->game, true);
-  log_warn("winner: %s", string_builder_peek(pvsb));
+  log_info("winner: %s", string_builder_peek(pvsb));
   string_builder_destroy(pvsb);
 
   free(solver_workers);

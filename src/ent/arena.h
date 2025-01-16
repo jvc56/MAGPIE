@@ -102,6 +102,7 @@ static inline void *arena_alloc(Arena *arena, size_t size) {
     // Update arena pointers and capacity
     arena->memory = new_memory;
     arena->capacity = new_capacity;
+    log_warn("grew arena; new capacity %d", new_capacity);
   }
 
   // "Allocate" memory

@@ -112,7 +112,33 @@ void test_very_deep(void) {
   config_destroy(config);
 }
 
+void test_small_arena_realloc(void) {
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+              "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+              "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  int plies = 4;
+  EndgameSolver *solver = endgame_solver_create(
+      config_get_thread_control(config), config_get_game(config));
+  solver->initial_small_move_arena_size = 512; // 512 bytes holds like 32 moves.
+  PVLine solution = endgame_solve(solver, plies);
+  assert(solution.score == 11);
+  assert(!small_move_is_pass(&solution.moves[0]));
+
+  endgame_solver_destroy(solver);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
+  log_set_level(LOG_INFO);
   test_solve_standard();
   test_very_deep();
+  test_small_arena_realloc();
+  test_pass_first();
+  test_vs_joey();
+  log_set_level(LOG_WARN);
 }
