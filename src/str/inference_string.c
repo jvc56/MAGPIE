@@ -260,8 +260,8 @@ void string_builder_add_ucgi_leave_rack(StringBuilder *ucgi_string_builder,
                                         bool is_exchange) {
   Rack *leave_rack_leave = leave_rack_get_leave(leave_rack);
   Rack *leave_rack_exchanged = leave_rack_get_exchanged(leave_rack);
-  int draws = leave_rack_get_draws(leave_rack);
-  double equity = leave_rack_get_equity(leave_rack);
+  const int draws = leave_rack_get_draws(leave_rack);
+  const double equity = equity_to_double(leave_rack_get_equity(leave_rack));
   if (!is_exchange) {
     string_builder_add_rack(ucgi_string_builder, leave_rack_leave, ld, false);
     string_builder_add_formatted_string(

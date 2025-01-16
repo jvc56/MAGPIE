@@ -47,13 +47,13 @@ typedef struct Inference {
   // Target player index in the game
   int target_index;
   // Target player score
-  int target_score;
+  Equity target_score;
   // Number of tiles exchanged by the target
   int target_number_of_tiles_exchanged;
   // Maximum equity loss the target can
   // lose while still being considered
   // the top move.
-  double equity_margin;
+  Equity equity_margin;
   uint64_t current_rack_index;
   uint64_t total_racks_evaluated;
   int thread_index;
@@ -130,13 +130,13 @@ void record_valid_leave(const Rack *rack, InferenceResults *results,
                         double current_leave_value,
                         uint64_t number_of_draws_for_leave) {
   stat_push(inference_results_get_equity_values(results, inference_stat_type),
-            (double)current_leave_value, number_of_draws_for_leave);
+            current_leave_value, number_of_draws_for_leave);
   increment_subtotals_for_results(rack, results, inference_stat_type,
                                   number_of_draws_for_leave);
 }
 
 void evaluate_possible_leave(Inference *inference) {
-  double current_leave_value = 0;
+  Equity current_leave_value = EQUITY_ZERO_VALUE;
   if (inference->target_number_of_tiles_exchanged == 0) {
     current_leave_value =
         klv_get_leave_value(inference->klv, inference->current_target_leave);
@@ -159,7 +159,8 @@ void evaluate_possible_leave(Inference *inference) {
         inference->bag_as_rack, inference->current_target_leave);
     if (inference->target_number_of_tiles_exchanged > 0) {
       record_valid_leave(inference->current_target_leave, inference->results,
-                         INFERENCE_TYPE_RACK, current_leave_value,
+                         INFERENCE_TYPE_RACK,
+                         equity_to_double(current_leave_value),
                          number_of_draws_for_leave);
       // The full rack for the exchange was recorded above,
       // but now we have to record the leave and the exchanged tiles
@@ -169,16 +170,16 @@ void evaluate_possible_leave(Inference *inference) {
         rack_add_letter(inference->current_target_exchanged, tile_exchanged);
         rack_take_letter(inference->current_target_leave, tile_exchanged);
       }
-      record_valid_leave(
-          inference->current_target_leave, inference->results,
-          INFERENCE_TYPE_LEAVE,
-          klv_get_leave_value(inference->klv, inference->current_target_leave),
-          number_of_draws_for_leave);
+      record_valid_leave(inference->current_target_leave, inference->results,
+                         INFERENCE_TYPE_LEAVE,
+                         equity_to_double(klv_get_leave_value(
+                             inference->klv, inference->current_target_leave)),
+                         number_of_draws_for_leave);
       record_valid_leave(
           inference->current_target_exchanged, inference->results,
           INFERENCE_TYPE_EXCHANGED,
-          klv_get_leave_value(inference->klv,
-                              inference->current_target_exchanged),
+          equity_to_double(klv_get_leave_value(
+              inference->klv, inference->current_target_exchanged)),
           number_of_draws_for_leave);
       leave_rack_list_insert_rack(
           inference->current_target_leave, inference->current_target_exchanged,
@@ -192,7 +193,7 @@ void evaluate_possible_leave(Inference *inference) {
       }
     } else {
       record_valid_leave(inference->current_target_leave, inference->results,
-                         INFERENCE_TYPE_LEAVE, current_leave_value,
+                         INFERENCE_TYPE_LEAVE, equity_to_double(current_leave_value),
                          number_of_draws_for_leave);
       leave_rack_list_insert_rack(
           inference->current_target_leave, NULL, number_of_draws_for_leave,
@@ -228,10 +229,10 @@ Inference *inference_create(const Rack *target_played_tiles, Game *game,
   inference->ld_size = rack_get_dist_size(target_played_tiles);
   inference->move_capacity = move_capacity;
   inference->target_index = target_index;
-  inference->target_score = target_score;
+  inference->target_score = int_to_equity(target_score);
   inference->target_number_of_tiles_exchanged =
       target_number_of_tiles_exchanged;
-  inference->equity_margin = equity_margin;
+  inference->equity_margin = double_to_equity(equity_margin);
   inference->current_rack_index = 0;
   inference->total_racks_evaluated = 0;
   // thread index is only meaningful for
@@ -533,7 +534,7 @@ inference_status_t verify_inference(const Inference *inference) {
   }
 
   if (inference->target_number_of_tiles_exchanged != 0 &&
-      inference->target_score != 0) {
+      inference->target_score != EQUITY_ZERO_VALUE) {
     return INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO;
   }
 

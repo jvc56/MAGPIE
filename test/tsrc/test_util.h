@@ -36,6 +36,7 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
 void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
                               MoveList *ml);
 void resort_sorted_move_list_by_score(SortedMoveList *sml);
+void assert_equal_at_equity_resolution(double a, double b);
 bool within_epsilon(double a, double b);
 int count_newlines(const char *str);
 bool equal_rack(const Rack *expected_rack, const Rack *actual_rack);

@@ -22,6 +22,7 @@
 #include "../../src/ent/bit_rack.h"
 #include "../../src/ent/board.h"
 #include "../../src/ent/dictionary_word.h"
+#include "../../src/ent/equity.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
@@ -48,6 +49,10 @@
 
 // Global variable for the timeout function.
 jmp_buf env;
+
+void assert_equal_at_equity_resolution(double a, double b) {
+  assert(double_to_equity(a) == double_to_equity(b));
+}
 
 bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
