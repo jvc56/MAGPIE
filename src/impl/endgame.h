@@ -1,9 +1,9 @@
 #ifndef ENDGAME_H
 #define ENDGAME_H
 
-#include "../ent/arena.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
+#include "../ent/small_move_arena.h"
 #include "../ent/thread_control.h"
 
 // We don't expect an endgame length to ever be larger than this value.

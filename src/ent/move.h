@@ -283,7 +283,7 @@ static inline void small_move_set_all(SmallMove *move, const uint8_t strip[],
   int blanks_mask = 0;
   for (int i = 0; i < play_length; i++) {
     uint8_t ml = strip[leftstrip + i];
-    if (ml == 0) {
+    if (ml == PLAYED_THROUGH_MARKER) {
       // play-through tile
       continue;
     }

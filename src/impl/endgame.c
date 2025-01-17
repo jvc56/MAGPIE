@@ -1,8 +1,8 @@
 #include <pthread.h>
 
-#include "../../src/ent/move.h"
-#include "../../src/str/move_string.h"
-#include "../../src/util/string_util.h"
+#include "../ent/move.h"
+#include "../str/move_string.h"
+#include "../util/string_util.h"
 #include "endgame.h"
 #include "gameplay.h"
 #include "move_gen.h"
