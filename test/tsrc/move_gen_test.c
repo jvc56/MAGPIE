@@ -524,6 +524,60 @@ void top_equity_play_recorder_test(void) {
   config_destroy(config);
 }
 
+void small_play_recorder_test(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -s1 score -s2 score -r1 small -r2 "
+                           "small -numsmallplays 100000");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create_small(100000);
+  player_set_move_record_type(player, MOVE_RECORD_ALL_SMALL);
+
+  game_load_cgp(game, VS_JEREMY);
+  rack_set_to_string(ld, player_get_rack(player), "DDESW??");
+  // Have the opponent draw any 7 tiles to prevent exchanges
+  // from being generated
+  draw_to_full_rack(game, 1);
+
+  generate_moves_for_game(game, 0, move_list);
+  int expected_count = 8286; // 8285 scoring moves and 1 pass
+  assert(move_list_get_count(move_list) == expected_count);
+
+  // Copy to a temp array by value. The qsort comparator expects SmallMove
+  // and not SmallMove*
+  SmallMove *temp_small_moves = malloc(expected_count * sizeof(SmallMove));
+  for (size_t i = 0; i < (size_t)expected_count; ++i) {
+    temp_small_moves[i] = *(move_list->small_moves[i]);
+  }
+
+  qsort(temp_small_moves, expected_count, sizeof(SmallMove),
+        compare_small_moves_by_score);
+
+  assert(small_move_get_score(&temp_small_moves[0]) == 106); // 14B hEaDW(OR)DS
+  assert(small_move_get_score(&temp_small_moves[1]) == 38);  // 14B hEaDW(OR)D
+
+  small_move_to_move(move_list->spare_move, &temp_small_moves[0],
+                     game_get_board(game));
+
+  assert(move_list->spare_move->col_start == 1);
+  assert(move_list->spare_move->row_start == 13);
+  assert(move_list->spare_move->dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert(move_list->spare_move->score == 106);
+  assert(move_list->spare_move->tiles_length == 9);
+  assert(move_list->spare_move->tiles_played == 7);
+  assert(memcmp(move_list->spare_move->tiles,
+                // h E a D W _ _ D S
+                (uint8_t[]){8 | 0x80, 5, 1 | 0x80, 4, 23, 0, 0, 4, 19},
+                9) == 0);
+
+  free(temp_small_moves);
+  small_move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void distinct_lexica_test(void) {
   Config *config =
       config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
@@ -795,6 +849,7 @@ void test_move_gen(void) {
   exchange_tests();
   equity_test();
   top_equity_play_recorder_test();
+  small_play_recorder_test();
   distinct_lexica_test();
   consistent_tiebreaking_test();
   wordsmog_test();

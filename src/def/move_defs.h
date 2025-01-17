@@ -20,6 +20,7 @@ typedef enum {
 typedef enum {
   MOVE_RECORD_ALL,
   MOVE_RECORD_BEST,
+  MOVE_RECORD_ALL_SMALL,
 } move_record_t;
 
 typedef enum {

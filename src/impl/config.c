@@ -71,10 +71,12 @@ typedef enum {
   ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
+  ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_USE_GAME_PAIRS,
+  ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
@@ -111,12 +113,14 @@ struct Config {
   exec_mode_t exec_mode;
   int bingo_bonus;
   int num_plays;
+  int num_small_plays;
   int plies;
   int max_iterations;
   double stop_cond_pct;
   double equity_margin;
   bool use_game_pairs;
   bool human_readable;
+  bool use_small_plays;
   char *record_filepath;
   game_variant_t game_variant;
   WinPct *win_pcts;
@@ -224,6 +228,9 @@ int config_get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
 
 int config_get_num_plays(const Config *config) { return config->num_plays; }
 
+int config_get_num_small_plays(const Config *config) {
+  return config->num_small_plays;
+}
 int config_get_plies(const Config *config) { return config->plies; }
 
 int config_get_max_iterations(const Config *config) {
@@ -250,6 +257,10 @@ WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
+}
+
+bool config_get_use_small_plays(const Config *config) {
+  return config->use_small_plays;
 }
 
 bool config_get_human_readable(const Config *config) {
@@ -355,13 +366,21 @@ void config_init_move_list(Config *config, int capacity) {
   }
 }
 
-void config_recreate_move_list(Config *config, int capacity) {
-  config_init_move_list(config, capacity);
-  if (move_list_get_capacity(config->move_list) == capacity) {
-    move_list_reset(config->move_list);
-  } else {
-    move_list_destroy(config->move_list);
-    config->move_list = move_list_create(capacity);
+void config_recreate_move_list(Config *config, int capacity,
+                               move_list_type_t list_type) {
+  if (list_type == MOVE_LIST_TYPE_DEFAULT) {
+    config_init_move_list(config, capacity);
+    if (move_list_get_capacity(config->move_list) == capacity) {
+      move_list_reset(config->move_list);
+    } else {
+      move_list_destroy(config->move_list);
+      config->move_list = move_list_create(capacity);
+    }
+  } else if (list_type == MOVE_LIST_TYPE_SMALL) {
+    if (!config->move_list) {
+      config->move_list = move_list_create_small(capacity);
+      move_list_reset(config->move_list);
+    }
   }
 }
 
@@ -675,7 +694,13 @@ void execute_move_gen(Config *config) {
   }
 
   config_init_game(config);
-  config_recreate_move_list(config, config_get_num_plays(config));
+  if (!config_get_use_small_plays(config)) {
+    config_recreate_move_list(config, config_get_num_plays(config),
+                              MOVE_LIST_TYPE_DEFAULT);
+  } else {
+    config_recreate_move_list(config, config_get_num_small_plays(config),
+                              MOVE_LIST_TYPE_SMALL);
+  }
   MoveList *ml = config->move_list;
   generate_moves_for_game(config->game, 0, ml);
   print_ucgi_static_moves(config->game, ml, config->thread_control);
@@ -1156,6 +1181,9 @@ config_load_status_t config_load_record_type(Config *config,
   } else if (has_iprefix(record_type_str, "all")) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_ALL);
+  } else if (has_iprefix(record_type_str, "small")) {
+    players_data_set_move_record_type(config->players_data, player_index,
+                                      MOVE_RECORD_ALL_SMALL);
   } else {
     config_load_status = CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE;
   }
@@ -1488,6 +1516,12 @@ config_load_status_t config_load_data(Config *config) {
     return config_load_status;
   }
 
+  config_load_status = config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS,
+                                        &config->use_small_plays);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
   // Human readable
 
   config_load_status = config_load_bool(config, ARG_TOKEN_HUMAN_READABLE,
@@ -1702,6 +1736,8 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1,
                     execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1,
+                    1, execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1,
@@ -1710,6 +1746,8 @@ Config *config_create_default(void) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1,
+                    execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1,
@@ -1737,11 +1775,13 @@ Config *config_create_default(void) {
   config->exec_mode = EXEC_MODE_CONSOLE;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
+  config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 2;
   config->max_iterations = 0;
   config->stop_cond_pct = 99;
   config->equity_margin = 0;
   config->use_game_pairs = true;
+  config->use_small_plays = false;
   config->human_readable = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->win_pcts = win_pct_create(config->data_paths, DEFAULT_WIN_PCT);
