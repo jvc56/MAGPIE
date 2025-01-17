@@ -20,14 +20,14 @@ game_event_t game_event_get_type(const GameEvent *event);
 void game_event_set_player_index(GameEvent *event, int player_index);
 int game_event_get_player_index(const GameEvent *event);
 
-void game_event_set_cumulative_score(GameEvent *event, int cumulative_score);
-int game_event_get_cumulative_score(const GameEvent *event);
+void game_event_set_cumulative_score(GameEvent *event, Equity cumulative_score);
+Equity game_event_get_cumulative_score(const GameEvent *event);
 
-void game_event_set_score_adjustment(GameEvent *event, int score_adjustment);
-int game_event_get_score_adjustment(const GameEvent *event);
+void game_event_set_score_adjustment(GameEvent *event, Equity score_adjustment);
+Equity game_event_get_score_adjustment(const GameEvent *event);
 
-void game_event_set_move_score(GameEvent *event, int move_score);
-int game_event_get_move_score(const GameEvent *event);
+void game_event_set_move_score(GameEvent *event, Equity move_score);
+Equity game_event_get_move_score(const GameEvent *event);
 
 void game_event_set_cgp_move_string(GameEvent *event, char *cgp_move_string);
 const char *game_event_get_cgp_move_string(const GameEvent *event);
@@ -96,7 +96,7 @@ const char *game_history_player_get_nickname(const GameHistory *game_history,
                                              int player_index);
 void game_history_player_set_score(GameHistory *game_history, int player_index,
                                    int score);
-int game_history_player_get_score(const GameHistory *game_history,
+Equity game_history_player_get_score(const GameHistory *game_history,
                                   int player_index);
 
 void game_history_player_set_next_rack_set(GameHistory *game_history,

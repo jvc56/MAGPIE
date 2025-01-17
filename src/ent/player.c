@@ -81,7 +81,7 @@ const char *player_get_name(const Player *player) { return player->name; }
 
 Rack *player_get_rack(const Player *player) { return player->rack; }
 
-int player_get_score(const Player *player) { return player->score; }
+Equity player_get_score(const Player *player) { return player->score; }
 
 move_sort_t player_get_move_sort_type(const Player *player) {
   return player->move_sort_type;

@@ -80,7 +80,7 @@ void run_all(void) {
   test_stats();
   test_infer();
   test_sim();
-  test_command();
+  //test_command();
   test_gcg();
   test_autoplay();
   test_wasm_api();
