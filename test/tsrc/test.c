@@ -19,6 +19,7 @@
 #include "cross_set_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
+#include "equity_test.h"
 #include "file_handler_test.h"
 #include "game_test.h"
 #include "gameplay_test.h"
@@ -67,6 +68,7 @@ void run_all(void) {
   test_board();
   test_board_layout_default();
   test_cross_set();
+  test_equity();
   test_move();
   test_cgp();
   test_klv();
@@ -122,7 +124,8 @@ static TestEntry test_table[] = {
     {"vm", test_validated_move},
     {"shadow", test_shadow},
     {"movegen", test_move_gen},
-    {"eq", test_equity_adjustments},
+    {"eq", test_equity},
+    {"eqadj", test_equity_adjustments},
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},
