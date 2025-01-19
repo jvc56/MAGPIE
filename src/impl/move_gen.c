@@ -29,8 +29,6 @@
 #include "../ent/static_eval.h"
 #include "../util/util.h"
 
-#include "../str/move_string.h"
-
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 typedef struct UnrestrictedMultiplier {
@@ -260,11 +258,23 @@ static inline void set_play_for_record(Move *move, game_event_t move_type,
 }
 
 static inline Equity
-get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, int score) {
+get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, Equity score) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return gen_get_static_equity(gen, move);
   }
   return score;
+}
+
+static inline void set_small_play_for_record(SmallMove *move,
+                                             game_event_t move_type,
+                                             int leftstrip, int rightstrip,
+                                             Equity score, int start_row,
+                                             int start_col, int tiles_played,
+                                             int dir, uint8_t strip[]) {
+
+  small_move_set_all(move, strip, leftstrip, rightstrip, score, start_row,
+                     start_col, tiles_played, board_is_dir_vertical(dir),
+                     move_type);
 }
 
 static inline void update_best_move_or_insert_into_movelist(
@@ -277,7 +287,7 @@ static inline void update_best_move_or_insert_into_movelist(
                         start_row, start_col, tiles_played, dir, strip);
     move_list_insert_spare_move(
         gen->move_list, get_move_equity_for_sort_type(gen, move, score));
-  } else {
+  } else if (gen->move_record_type == MOVE_RECORD_BEST) {
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
@@ -297,6 +307,12 @@ static inline void update_best_move_or_insert_into_movelist(
     } else {
       //printf("not updating best move\n");
     }
+  } else if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    SmallMove *move = small_move_list_get_spare_move(gen->move_list);
+    set_small_play_for_record(move, move_type, leftstrip, rightstrip, score,
+                              start_row, start_col, tiles_played, dir, strip);
+    // small_move doesn't use equity.
+    move_list_insert_spare_small_move(gen->move_list);
   }
 }
 
@@ -1370,7 +1386,11 @@ void generate_moves(Game *game, move_record_t move_record_type,
       board_get_cross_set_index(gen->kwgs_are_shared, gen->player_index);
 
   // Reset the move list
-  move_list_reset(gen->move_list);
+  if (move_record_type == MOVE_RECORD_ALL_SMALL) {
+    small_move_list_reset(gen->move_list);
+  } else {
+    move_list_reset(gen->move_list);
+  }
 
   // Reset the best and current moves
   gen->best_move_index = 0;
@@ -1445,7 +1465,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
     rack_reset(&gen->full_player_rack);
   }
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
-    double anchor_highest_possible_equity =
+    Equity anchor_highest_possible_equity =
         anchor_get_highest_possible_equity(anchor_list, i);
     if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(gen, anchor_highest_possible_equity)) {
@@ -1479,7 +1499,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     move_list_set_spare_move_as_pass(gen->move_list);
     move_list_insert_spare_move(gen->move_list, EQUITY_PASS_VALUE);
-  } else {
+  } else if (gen->move_record_type == MOVE_RECORD_BEST) {
     const Move *top_move = gen_get_readonly_best_move(gen);
     Move *spare_move = move_list_get_spare_move(gen->move_list);
     if (move_get_equity(top_move) < EQUITY_PASS_VALUE) {
@@ -1489,5 +1509,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
     }
     move_list_insert_spare_move_top_equity(gen->move_list,
                                            move_get_equity(spare_move));
+  } else if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    move_list_set_spare_small_move_as_pass(gen->move_list);
+    move_list_insert_spare_small_move(gen->move_list);
   }
 }

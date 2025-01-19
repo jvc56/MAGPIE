@@ -42,6 +42,7 @@ struct Game {
   int player_on_turn_index;
   int starting_player_index;
   int consecutive_scoreless_turns;
+  int max_scoreless_turns;
   Equity bingo_bonus;
   game_end_reason_t game_end_reason;
   bool data_is_shared[NUMBER_OF_DATA];
@@ -135,6 +136,15 @@ void game_set_consecutive_scoreless_turns(Game *game, int value) {
 
 void game_increment_consecutive_scoreless_turns(Game *game) {
   game->consecutive_scoreless_turns++;
+}
+
+void game_set_endgame_solving_mode(Game *game) {
+  if (game->consecutive_scoreless_turns + 1 >= game->max_scoreless_turns) {
+    game->consecutive_scoreless_turns = 1;
+  } else {
+    game->consecutive_scoreless_turns = 0;
+  }
+  game->max_scoreless_turns = 2;
 }
 
 void game_start_next_player_turn(Game *game) {
@@ -503,6 +513,7 @@ Game *game_create(const GameArgs *game_args) {
   game->starting_player_index = 0;
   game->player_on_turn_index = 0;
   game->consecutive_scoreless_turns = 0;
+  game->max_scoreless_turns = MAX_SCORELESS_TURNS;
   game->game_end_reason = GAME_END_REASON_NONE;
 
   game->variant = game_args->game_variant;
@@ -539,6 +550,7 @@ Game *game_duplicate(const Game *game) {
   new_game->player_on_turn_index = game->player_on_turn_index;
   new_game->starting_player_index = game->starting_player_index;
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
+  new_game->max_scoreless_turns = game->max_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
 
   new_game->variant = game->variant;
@@ -632,4 +644,8 @@ void game_destroy(Game *game) {
     backups_destroy(game);
   }
   free(game);
+}
+
+int game_get_max_scoreless_turns(Game *game) {
+  return game->max_scoreless_turns;
 }

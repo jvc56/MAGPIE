@@ -27,8 +27,8 @@ typedef enum {
 } ld_t;
 
 #define INVALID_LETTER (0x80 - 1)
-#define MULTICHAR_START_DELIMITIER '['
-#define MULTICHAR_END_DELIMITIER ']'
+#define MULTICHAR_START_DELIMITER '['
+#define MULTICHAR_END_DELIMITER ']'
 
 typedef struct LetterDistribution {
   char *name;
@@ -296,13 +296,13 @@ static inline int ld_str_to_mls(const LetterDistribution *ld, const char *str,
   for (size_t i = 0; i < num_bytes; i++) {
     char current_char = str[i];
     switch (current_char) {
-    case MULTICHAR_START_DELIMITIER:
+    case MULTICHAR_START_DELIMITER:
       if (building_multichar_letter || current_code_point_bytes_remaining > 0) {
         return -1;
       }
       building_multichar_letter = true;
       break;
-    case MULTICHAR_END_DELIMITIER:
+    case MULTICHAR_END_DELIMITER:
       // Return an error if
       // - multichar is not being built
       // - multichar has fewer than two letters

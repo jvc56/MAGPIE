@@ -144,15 +144,14 @@ void evaluate_possible_leave(Inference *inference) {
 
   const Move *top_move = get_top_equity_move(
       inference->game, inference->thread_index, inference->move_list);
-  bool is_within_equity_margin = inference->target_score + current_leave_value +
-                                     inference->equity_margin +
-                                     (INFERENCE_EQUITY_EPSILON) >=
+  const bool is_within_equity_margin = inference->target_score + current_leave_value +
+                                     inference->equity_margin >=
                                  move_get_equity(top_move);
-  int tiles_played = move_get_tiles_played(top_move);
-  bool number_exchanged_matches =
+  const int tiles_played = move_get_tiles_played(top_move);
+  const bool number_exchanged_matches =
       move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
       tiles_played == inference->target_number_of_tiles_exchanged;
-  bool recordable = is_within_equity_margin || number_exchanged_matches ||
+  const bool recordable = is_within_equity_margin || number_exchanged_matches ||
                     rack_is_empty(inference->bag_as_rack);
   if (recordable) {
     uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(

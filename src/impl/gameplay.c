@@ -367,7 +367,8 @@ play_move_status_t play_move(const Move *move, Game *game,
     }
   }
 
-  if (game_get_consecutive_scoreless_turns(game) == MAX_SCORELESS_TURNS) {
+  if (game_get_consecutive_scoreless_turns(game) ==
+      game_get_max_scoreless_turns(game)) {
     Player *player0 = game_get_player(game, 0);
     Player *player1 = game_get_player(game, 1);
     player_add_to_score(player0, -rack_get_score(ld, player_get_rack(player0)));

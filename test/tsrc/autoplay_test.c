@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -9,9 +8,7 @@
 
 #include "../../src/ent/autoplay_results.h"
 #include "../../src/ent/data_filepaths.h"
-#include "../../src/ent/stats.h"
 
-#include "../../src/impl/autoplay.h"
 #include "../../src/impl/config.h"
 
 #include "../../src/util/math_util.h"
