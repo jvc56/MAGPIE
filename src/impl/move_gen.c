@@ -257,8 +257,9 @@ static inline void set_play_for_record(Move *move, game_event_t move_type,
   }
 }
 
-static inline Equity
-get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, Equity score) {
+static inline Equity get_move_equity_for_sort_type(const MoveGen *gen,
+                                                   const Move *move,
+                                                   Equity score) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return gen_get_static_equity(gen, move);
   }
@@ -1258,6 +1259,21 @@ static inline void shadow_start(MoveGen *gen) {
 // For more details about the shadow playing algorithm, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
 void shadow_play_for_anchor(MoveGen *gen, int col) {
+  // Shadow playing is designed to find the best plays first. When we find plays
+  // for endgame using MOVE_RECORD_ALL_SMALL. we need to find all of the plays,
+  // and because they are ranked for search in the endgame code rather than
+  // here, they're returned unordered.
+  //
+  // It would be better not to even use these Anchor structs in the first place
+  // for MOVE_RECORD_ALL_SMALL (or MOVE_RECORD_ALL and instead to just add moves
+  // while looping over the board, but we'll put that off until after other
+  // MoveGen changes land.
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
+                           gen->last_anchor_col, gen->dir, EQUITY_MAX_VALUE);
+    return;
+  }
+
   // Set cols
   gen->current_left_col = col;
   gen->current_right_col = col;
@@ -1443,8 +1459,17 @@ void generate_moves(Game *game, move_record_t move_record_type,
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
-  anchor_list_sort(gen->anchor_list);
+  // Also unnecessary for MOVE_RECORD_ALL, but tests might care about the
+  // ordering of output.
+  if (gen->move_record_type != MOVE_RECORD_ALL_SMALL) {
+    anchor_list_sort(gen->anchor_list);
+  }
   const AnchorList *anchor_list = gen->anchor_list;
+
+  // Set these fields to values outside their valid ranges so the row cache gets
+  // loaded for the first anchor.
+  gen->current_row_index = -1;
+  gen->dir = -1;
 
   const int kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
   if (gen->is_wordsmog) {
@@ -1458,9 +1483,15 @@ void generate_moves(Game *game, move_record_t move_record_type,
       break;
     }
     gen->current_anchor_col = anchor_get_col(anchor_list, i);
-    gen->current_row_index = anchor_get_row(anchor_list, i);
+    if ((gen->current_row_index != anchor_get_row(anchor_list, i)) ||
+        (gen->dir != anchor_get_dir(anchor_list, i))) {
+      gen->current_row_index = anchor_get_row(anchor_list, i);
+      gen->dir = anchor_get_dir(anchor_list, i);
+      board_copy_row_cache(gen->lanes_cache, gen->row_cache,
+                           anchor_get_row(anchor_list, i),
+                           anchor_get_dir(anchor_list, i));
+    }
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
-    gen->dir = anchor_get_dir(anchor_list, i);
     board_copy_row_cache(gen->lanes_cache, gen->row_cache,
                          gen->current_row_index, gen->dir);
     gen->anchor_right_extension_set =
