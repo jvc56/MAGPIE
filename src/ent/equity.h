@@ -76,8 +76,7 @@ static inline Equity int_to_equity(int x) {
   if (x > EQUITY_MAX_DOUBLE || x < EQUITY_MIN_DOUBLE) {
     log_fatal("equity value out of range: %f", x);
   }
-  const int64_t multiplied = x * EQUITY_RESOLUTION;
-  return (Equity)multiplied;
+  return  x * EQUITY_RESOLUTION;
 }
 
 
