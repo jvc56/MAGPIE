@@ -563,7 +563,7 @@ void small_play_recorder_test(void) {
   assert(move_list->spare_move->row_start == 13);
   assert(move_list->spare_move->dir == BOARD_HORIZONTAL_DIRECTION);
   assert(move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE);
-  assert(move_list->spare_move->score == 106);
+  assert_move_score(move_list->spare_move, 106);
   assert(move_list->spare_move->tiles_length == 9);
   assert(move_list->spare_move->tiles_played == 7);
   assert(memcmp(move_list->spare_move->tiles,
