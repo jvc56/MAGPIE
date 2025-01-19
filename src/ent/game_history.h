@@ -97,7 +97,7 @@ const char *game_history_player_get_nickname(const GameHistory *game_history,
 void game_history_player_set_score(GameHistory *game_history, int player_index,
                                    int score);
 Equity game_history_player_get_score(const GameHistory *game_history,
-                                  int player_index);
+                                     int player_index);
 
 void game_history_player_set_next_rack_set(GameHistory *game_history,
                                            int player_index,
