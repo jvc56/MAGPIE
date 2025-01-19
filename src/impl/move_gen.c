@@ -293,19 +293,8 @@ static inline void update_best_move_or_insert_into_movelist(
                         start_row, start_col, tiles_played, dir, strip);
     move_set_equity(current_move,
                     get_move_equity_for_sort_type(gen, current_move, score));
-    // StringBuilder *sb = string_builder_create();
-    // string_builder_add_move(sb, NULL, current_move, gen->ld);
-    // printf("comparing move %s score: %d equity: %d\n", string_builder_peek(sb), move_get_score(current_move), move_get_equity(current_move));
-    // string_builder_destroy(sb);
-    // sb = string_builder_create();
-    // string_builder_add_move(sb, NULL, gen_get_readonly_best_move(gen), gen->ld);
-    //printf("best move %s score: %d equity: %d\n", string_builder_peek(sb), move_get_score(gen_get_readonly_best_move(gen)), move_get_equity(gen_get_readonly_best_move(gen)));
-    //string_builder_destroy(sb);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
-      //printf("updating best move\n");
       gen_switch_best_move_and_current_move(gen);
-    } else {
-      //printf("not updating best move\n");
     }
   } else if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     SmallMove *move = small_move_list_get_spare_move(gen->move_list);
@@ -321,20 +310,17 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
                                               int main_word_score,
                                               int word_multiplier,
                                               Equity cross_score) {
-  //printf("record_tile_placement_move\n");
-  int start_row = gen->current_row_index;
-  int start_col = leftstrip;
+  const int start_row = gen->current_row_index;
+  const int start_col = leftstrip;
   const int tiles_played = gen->tiles_played;
-
-  Equity score = 0;
 
   Equity bingo_bonus = 0;
   if (tiles_played == RACK_SIZE) {
     bingo_bonus = gen->bingo_bonus;
   }
 
-  score = main_word_score * word_multiplier + cross_score + bingo_bonus;
-  //printf("score: %d\n", score);
+  const Equity score =
+      main_word_score * word_multiplier + cross_score + bingo_bonus;
 
   update_best_move_or_insert_into_movelist(
       gen, leftstrip, rightstrip, GAME_EVENT_TILE_PLACEMENT_MOVE, score,

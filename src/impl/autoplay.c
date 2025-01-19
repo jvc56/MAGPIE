@@ -6,7 +6,6 @@
 #include <stdlib.h>
 
 #include "../def/autoplay_defs.h"
-#include "../def/game_defs.h"
 #include "../def/thread_control_defs.h"
 
 #include "../ent/autoplay_results.h"
@@ -17,7 +16,6 @@
 #include "../ent/leave_list.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
-#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 
@@ -27,9 +25,6 @@
 
 #include "../util/string_util.h"
 #include "../util/util.h"
-
-#include "../str/game_string.h"
-#include "../str/move_string.h"
 
 typedef struct LeavegenSharedData {
   int num_gens;
@@ -354,9 +349,9 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
 
     const Move *forced_move =
         get_top_equity_move(game, thread_index, game_runner->move_list);
-    leave_list_add_single_subleave(lg_shared_data->leave_list,
-                                   game_runner->rare_leave,
-                                   move_get_equity(forced_move));
+    leave_list_add_single_subleave(
+        lg_shared_data->leave_list, game_runner->rare_leave,
+        equity_to_double(move_get_equity(forced_move)));
     // Remove the rare leave from the player's rack and return the
     // tiles that remain since we know for sure that these tiles
     // were drawn from the bag.
@@ -375,11 +370,6 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);
   }
   *move = get_top_equity_move(game, thread_index, game_runner->move_list);
-  
-  // StringBuilder *sb = string_builder_create();
-  // string_builder_add_game(sb, game, game_runner->move_list);
-  // printf("%s\n", string_builder_peek(sb));
-  // string_builder_destroy(sb);
 
   if (lg_shared_data) {
     leave_list_add_all_subleaves(
@@ -388,7 +378,8 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
         // Use the bag_and_rare_leave_overlap as a scratch subleave rack
         // for the leave list add all subleaves call. It gets reset
         // before use.
-        game_runner->bag_and_rare_leave_overlap, move_get_equity(*move));
+        game_runner->bag_and_rare_leave_overlap,
+        equity_to_double(move_get_equity(*move)));
   }
   get_leave_for_move(*move, game, game_runner->leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,

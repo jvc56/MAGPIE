@@ -231,10 +231,10 @@ void test_autoplay_fj_record(void) {
 }
 
 void test_autoplay(void) {
-  //test_odds_that_player_is_better();
-  //test_autoplay_default();
-  //test_autoplay_leavegen();
+  test_odds_that_player_is_better();
+  test_autoplay_default();
+  test_autoplay_leavegen();
   test_autoplay_divergent_games();
-  //test_autoplay_fj_record();
+  test_autoplay_fj_record();
   return;
 }

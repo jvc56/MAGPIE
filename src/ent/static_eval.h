@@ -138,8 +138,6 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
     other_adjustments +=
         standard_endgame_adjustment(ld, player_leave, opp_rack);
   }
-  //printf("score: %d leave_adjustment: %d other_adjustments: %d\n",
-  //       move_get_score(move), leave_adjustment, other_adjustments);
   return move_get_score(move) + leave_adjustment + other_adjustments;
 }
 
