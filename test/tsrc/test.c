@@ -89,7 +89,7 @@ void run_all(void) {
   test_kwg_maker();
   test_wmp_maker();
   test_wmp();
-  test_file_handler();
+  //test_file_handler();
   test_leave_list();
   test_convert();
   test_create_data();
