@@ -70,7 +70,8 @@ char *ucgi_sim_stats(Game *game, SimResults *sim_results, double nps,
         sim_stats_string_builder,
         " sc %d wp %.3f wpe %.3f eq %.3f eqe %.3f it %llu "
         "ig %d ",
-        move_get_score(move), wp_mean, wp_margin_of_error, eq_mean, eq_se,
+        equity_to_int(move_get_score(move)), wp_mean, wp_margin_of_error,
+        eq_mean, eq_se,
         // need cast for WASM:
         (long long unsigned int)niters, ignore);
     for (int j = 0; j < sim_results_get_max_plies(sim_results); j++) {

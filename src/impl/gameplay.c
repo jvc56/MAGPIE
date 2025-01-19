@@ -14,7 +14,6 @@
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
-#include "../ent/game_history.h"
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -23,9 +22,7 @@
 
 #include "move_gen.h"
 
-#include "../util/string_util.h"
-
-double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
+Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
     if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
       if (get_is_blanked(move_get_tile(move, i))) {

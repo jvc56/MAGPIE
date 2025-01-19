@@ -20,12 +20,12 @@
 #include "../util/util.h"
 
 typedef struct Square {
-  uint8_t letter;
-  uint8_t bonus_square;
   uint64_t cross_set;
   uint64_t left_extension_set;
   uint64_t right_extension_set;
-  int cross_score;
+  Equity cross_score;
+  uint8_t letter;
+  uint8_t bonus_square;
   bool anchor;
   bool is_cross_word;
 } Square;
@@ -40,7 +40,7 @@ typedef struct Board {
   // the opening move for each square in both
   // horizontal and vertical directions if the
   // tile is a vowel.
-  double opening_move_penalties[BOARD_DIM * 2];
+  Equity opening_move_penalties[BOARD_DIM * 2];
   int transposed;
   int tiles_played;
   // Start coordinates used to reset the board
@@ -91,11 +91,11 @@ static inline void square_set_cross_set_letter(Square *s, uint8_t letter) {
 
 // Square: Cross scores
 
-static inline int square_get_cross_score(const Square *s) {
+static inline Equity square_get_cross_score(const Square *s) {
   return s->cross_score;
 }
 
-static inline void square_set_cross_score(Square *s, int score) {
+static inline void square_set_cross_score(Square *s, Equity score) {
   s->cross_score = score;
 }
 
@@ -304,14 +304,14 @@ static inline void board_set_cross_set_letter(Board *b, int row, int col,
 
 // Board: Cross score
 
-static inline int board_get_cross_score(const Board *b, int row, int col,
+static inline Equity board_get_cross_score(const Board *b, int row, int col,
                                         int dir, int ci) {
   return square_get_cross_score(
       board_get_readonly_square(b, row, col, dir, ci));
 }
 
 static inline void board_set_cross_score(Board *b, int row, int col, int dir,
-                                         int ci, int cross_score) {
+                                         int ci, Equity cross_score) {
   square_set_cross_score(board_get_writable_square(b, row, col, dir, ci),
                          cross_score);
 }
@@ -446,7 +446,7 @@ static inline void board_reset_is_cross_word(Board *b, int row, int col,
 
 // Board: opening penalties
 
-static inline const double *
+static inline const Equity *
 board_get_opening_move_penalties(const Board *board) {
   return board->opening_move_penalties;
 }
@@ -846,9 +846,9 @@ static inline void board_copy_row_cache(const Square *lanes_cache,
 }
 
 static inline void board_copy_opening_penalties(const Board *board,
-                                                double *opening_penalties) {
+                                                Equity *opening_penalties) {
   memory_copy(opening_penalties, board->opening_move_penalties,
-              sizeof(double) * 2 * BOARD_DIM);
+              sizeof(Equity) * 2 * BOARD_DIM);
 }
 
 static inline int board_toggle_dir(int dir) {

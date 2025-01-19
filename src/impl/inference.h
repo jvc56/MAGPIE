@@ -13,7 +13,7 @@ typedef struct InferenceArgs {
   int target_score;
   int target_num_exch;
   int move_capacity;
-  float equity_margin;
+  double equity_margin;
   Rack *target_played_tiles;
   const Game *game;
   ThreadControl *thread_control;

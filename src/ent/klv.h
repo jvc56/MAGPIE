@@ -8,6 +8,8 @@
 
 #include "../def/klv_defs.h"
 
+#include "../ent/kwg.h"
+
 #include "../compat/endian_conv.h"
 
 #include "../util/fileproxy.h"
@@ -28,7 +30,7 @@ typedef struct KLV {
   KWG *kwg;
   char *name;
   uint32_t *word_counts;
-  double *leave_values;
+  Equity *leave_values;
 } KLV;
 
 static inline const char *klv_get_name(const KLV *klv) { return klv->name; }
@@ -40,10 +42,11 @@ static inline int klv_get_number_of_leaves(const KLV *klv) {
 }
 
 static inline void klv_set_all_leave_values_to_zero(KLV *klv) {
-  memset(klv->leave_values, 0, klv->number_of_leaves * sizeof(double));
+  memset(klv->leave_values, int_to_equity(0),
+         klv->number_of_leaves * sizeof(Equity));
 }
 
-static inline double klv_get_indexed_leave_value(const KLV *klv,
+static inline Equity klv_get_indexed_leave_value(const KLV *klv,
                                                  uint32_t index) {
   if (index == KLV_UNFOUND_INDEX) {
     return 0.0;
@@ -52,8 +55,9 @@ static inline double klv_get_indexed_leave_value(const KLV *klv,
 }
 
 // Assumes the index is valid
-static inline double klv_set_indexed_leave_value(const KLV *klv, uint32_t index,
-                                                 double value) {
+static inline Equity klv_set_indexed_leave_value(const KLV *klv, uint32_t index,
+                                                 Equity value)
+{
   return klv->leave_values[index] = value;
 }
 
@@ -185,7 +189,7 @@ static inline void klv_load(KLV *klv, const char *data_paths,
   klv->number_of_leaves = number_of_leaves;
 
   klv->leave_values =
-      (double *)malloc_or_die(number_of_leaves * sizeof(double));
+      (Equity *)malloc_or_die(number_of_leaves * sizeof(Equity));
   float *temp_floats = (float *)malloc_or_die(number_of_leaves * sizeof(float));
   result = fread(temp_floats, sizeof(float), number_of_leaves, stream);
   if (result != number_of_leaves) {
@@ -195,7 +199,8 @@ static inline void klv_load(KLV *klv, const char *data_paths,
   fclose(stream);
 
   for (uint32_t i = 0; i < number_of_leaves; i++) {
-    klv->leave_values[i] = (double)convert_float_to_le(temp_floats[i]);
+    klv->leave_values[i] =
+        double_to_equity((double)convert_float_to_le(temp_floats[i]));
   }
   free(temp_floats);
 
@@ -221,7 +226,7 @@ static inline KLV *klv_create_zeroed_from_kwg(KWG *kwg, int number_of_leaves,
   klv->kwg = kwg;
   klv->name = string_duplicate(klv_name);
   klv->number_of_leaves = number_of_leaves;
-  klv->leave_values = (double *)calloc_or_die(number_of_leaves, sizeof(double));
+  klv->leave_values = (Equity *)calloc_or_die(number_of_leaves, sizeof(Equity));
   const int number_of_kwg_nodes = kwg_get_number_of_nodes(kwg);
   klv->word_counts =
       (uint32_t *)calloc_or_die(number_of_kwg_nodes, sizeof(uint32_t));
@@ -296,7 +301,7 @@ static inline int klv_get_word_index(const KLV *klv, const Rack *leave) {
                                      kwg_get_dawg_root_node_index(klv->kwg));
 }
 
-static inline double klv_get_leave_value(const KLV *klv, const Rack *leave) {
+static inline Equity klv_get_leave_value(const KLV *klv, const Rack *leave) {
   if (rack_is_empty(leave)) {
     return 0.0;
   }
@@ -348,7 +353,8 @@ static inline void klv_write(const KLV *klv, const char *klv_filename) {
 
   float *le_floats = (float *)malloc_or_die(number_of_leaves * sizeof(float));
   for (uint32_t i = 0; i < number_of_leaves; i++) {
-    le_floats[i] = convert_float_to_le((float)klv->leave_values[i]);
+    const double leave_double = equity_to_double(klv->leave_values[i]);
+    le_floats[i] = convert_float_to_le((float)leave_double);
   }
   result = fwrite(le_floats, sizeof(float), number_of_leaves, stream);
   if (result != number_of_leaves) {

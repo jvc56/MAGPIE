@@ -15,13 +15,11 @@
 #include "../../src/ent/move.h"
 #include "../../src/ent/rack.h"
 
-#include "../../src/impl/cgp.h"
 #include "../../src/impl/gcg.h"
 
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
 
-#include "test_constants.h"
 #include "test_util.h"
 
 gcg_parse_status_t test_parse_gcg(const char *gcg_filename, Config *config,
@@ -211,8 +209,10 @@ void assert_game_event(const GameHistory *game_history, int event_index,
   // Game Event assertions
   assert(game_event_get_type(game_event) == event_type);
   assert(game_event_get_player_index(game_event) == player_index);
-  assert(game_event_get_cumulative_score(game_event) == cumulative_score);
-  assert(game_event_get_score_adjustment(game_event) == score_adjustment);
+  assert(game_event_get_cumulative_score(game_event) ==
+         int_to_equity(cumulative_score));
+  assert(game_event_get_score_adjustment(game_event) ==
+         int_to_equity(score_adjustment));
   Rack *expected_rack = NULL;
   bool racks_match = false;
   if (string_length(rack_string) > 0) {
@@ -237,9 +237,8 @@ void assert_game_event(const GameHistory *game_history, int event_index,
     move = validated_moves_get_move(vms, 0);
   }
   if (move) {
-
     assert(move_get_type(move) == move_type);
-    assert(move_get_score(move) == move_score);
+    assert_move_score(move, move_score);
 
     if (move_type != GAME_EVENT_PASS) {
       assert(move_get_tiles_played(move) == tiles_played);
@@ -306,13 +305,13 @@ void test_success_standard(void) {
                        "standard15"));
   assert(strings_equal(game_history_player_get_nickname(game_history, 0),
                        "HastyBot"));
-  assert(game_history_player_get_score(game_history, 0) == 516);
+  assert(game_history_player_get_score(game_history, 0) == int_to_equity(516));
   rack_set_to_string(ld, rack, "");
   assert(racks_are_equal(
       game_history_player_get_last_known_rack(game_history, 0), NULL));
   assert(strings_equal(game_history_player_get_nickname(game_history, 1),
                        "RightBehindYou"));
-  assert(game_history_player_get_score(game_history, 1) == 358);
+  assert(game_history_player_get_score(game_history, 1) == int_to_equity(358));
   rack_set_to_string(ld, rack, "");
 
   assert(racks_are_equal(

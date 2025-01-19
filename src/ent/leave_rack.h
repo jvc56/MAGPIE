@@ -8,7 +8,7 @@ typedef struct LeaveRack LeaveRack;
 Rack *leave_rack_get_leave(const LeaveRack *leaveRack);
 Rack *leave_rack_get_exchanged(const LeaveRack *leaveRack);
 int leave_rack_get_draws(const LeaveRack *leaveRack);
-double leave_rack_get_equity(const LeaveRack *leaveRack);
+Equity leave_rack_get_equity(const LeaveRack *leaveRack);
 
 typedef struct LeaveRackList LeaveRackList;
 
@@ -22,6 +22,6 @@ const LeaveRack *leave_rack_list_get_rack(const LeaveRackList *leave_rack_list,
 
 LeaveRack *leave_rack_list_pop_rack(LeaveRackList *lrl);
 void leave_rack_list_insert_rack(const Rack *leave, const Rack *exchanged,
-                                 int number_of_draws_for_leave, double equity,
+                                 int number_of_draws_for_leave, Equity equity,
                                  LeaveRackList *lrl);
 #endif

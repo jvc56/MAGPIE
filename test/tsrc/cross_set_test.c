@@ -4,17 +4,14 @@
 #include <stdio.h>
 
 #include "../../src/def/board_defs.h"
-#include "../../src/def/cross_set_defs.h"
-#include "../../src/def/letter_distribution_defs.h"
 
 #include "../../src/ent/board.h"
+#include "../../src/ent/equity.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/letter_distribution.h"
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
-
-#include "../../src/util/string_util.h"
 
 #include "test_constants.h"
 #include "test_util.h"
@@ -38,8 +35,8 @@ void test_gen_cross_set(Game *game, int row, int col,
     free(actual_cross_set_string);
     abort();
   }
-  int actual_cross_score =
-      board_get_cross_score(board, row, col, BOARD_VERTICAL_DIRECTION, 0);
+  const int actual_cross_score = equity_to_int(
+      board_get_cross_score(board, row, col, BOARD_VERTICAL_DIRECTION, 0));
   const bool score_cond = expected_cross_score == actual_cross_score;
   if (!score_cond) {
     printf("cross score failed assertion:\n>%d<\n>%d<\nare not "

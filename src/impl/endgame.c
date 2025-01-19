@@ -77,7 +77,8 @@ EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game) {
   Player *player = game_get_player(game, es->solving_player);
   Player *opponent = game_get_player(game, 1 - es->solving_player);
 
-  es->initial_spread = player_get_score(player) - player_get_score(opponent);
+  es->initial_spread =
+      equity_to_int(player_get_score(player) - player_get_score(opponent));
   // later, when we have multi-threaded endgame:
   // es->threads = thread_control_get_threads(tc);
   es->thread_control = tc;
@@ -167,8 +168,9 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
     if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
       small_move_set_estimated_value(
           current_move,
-          small_move_get_score(current_move) +
-              (2 * rack_get_score(game_get_ld(worker->game_copy), other_rack)) +
+          equity_to_int(int_to_equity(small_move_get_score(current_move)) +
+                        (2 * rack_get_score(game_get_ld(worker->game_copy),
+                                            other_rack))) |
               GOING_OUT_BF);
     } else if (depth > 2) {
       // some more jitter for lazysmp (to be implemented)
@@ -237,7 +239,8 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
         game_get_player(worker->game_copy,
                         1 - game_get_player_on_turn_index(worker->game_copy));
 
-    int32_t spread = player_get_score(player) - player_get_score(opponent);
+    int32_t spread =
+        equity_to_int(player_get_score(player) - player_get_score(opponent));
     // log_warn("returning final spread %d", spread);
     return spread;
   }

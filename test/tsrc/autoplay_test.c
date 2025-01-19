@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -9,9 +8,7 @@
 
 #include "../../src/ent/autoplay_results.h"
 #include "../../src/ent/data_filepaths.h"
-#include "../../src/ent/stats.h"
 
-#include "../../src/impl/autoplay.h"
 #include "../../src/impl/config.h"
 
 #include "../../src/util/math_util.h"
@@ -198,7 +195,7 @@ void test_autoplay_divergent_games(void) {
   const int num = klv_get_number_of_leaves(small_diff_klv);
 
   for (int i = 0; i < num; i++) {
-    small_diff_klv->leave_values[i] += -1 + (2 * (i % 2));
+    small_diff_klv->leave_values[i] += int_to_equity(-1 + (2 * (i % 2)));
   }
 
   char *small_diff_klv_filename = data_filepaths_get_writable_filename(

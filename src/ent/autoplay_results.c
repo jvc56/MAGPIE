@@ -133,9 +133,11 @@ void game_data_destroy(GameData *gd) {
 
 void game_data_add_game(GameData *gd, const RecorderArgs *args) {
   const Game *game = args->game;
-  uint64_t turns = args->number_of_turns;
-  int p0_game_score = player_get_score(game_get_player(game, 0));
-  int p1_game_score = player_get_score(game_get_player(game, 1));
+  const uint64_t turns = args->number_of_turns;
+  const int p0_game_score =
+      equity_to_int(player_get_score(game_get_player(game, 0)));
+  const int p1_game_score =
+      equity_to_int(player_get_score(game_get_player(game, 1)));
   gd->total_games++;
   if (p0_game_score > p1_game_score) {
     gd->p0_wins++;

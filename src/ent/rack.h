@@ -149,8 +149,8 @@ static inline int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
 }
 
 // Get the sum of the tile values on the rack
-static inline int rack_get_score(const LetterDistribution *ld,
-                                 const Rack *rack) {
+static inline Equity rack_get_score(const LetterDistribution *ld,
+                                    const Rack *rack) {
   int sum = 0;
   for (int i = 0; i < rack_get_dist_size(rack); i++) {
     sum += rack_get_letter(rack, i) * ld_get_score(ld, i);
