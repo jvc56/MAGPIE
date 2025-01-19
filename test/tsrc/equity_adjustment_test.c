@@ -34,8 +34,9 @@ void test_macondo_opening_equity_adjustments(void) {
   assert(move_get_col_start(top_move) == 6);
   assert(move_get_tiles_played(top_move) == 6);
   assert_move_score(top_move, 48);
-  assert_move_equity_exact(top_move, move_get_score(top_move) +
-                                         get_leave_value_for_move(klv, top_move, rack));
+  assert_move_equity_exact(top_move,
+                           move_get_score(top_move) +
+                               get_leave_value_for_move(klv, top_move, rack));
 
   sorted_move_list_destroy(vortex_sorted_move_list);
   game_reset(game);
@@ -50,9 +51,10 @@ void test_macondo_opening_equity_adjustments(void) {
   assert(move_get_col_start(top_move) == 3);
   assert(move_get_tiles_played(top_move) == 5);
   assert_move_score(top_move, 46);
-  assert_move_equity_exact(top_move, move_get_score(top_move) +
-                                  get_leave_value_for_move(klv, top_move, rack) +
-                                  OPENING_HOTSPOT_PENALTY);
+  assert_move_equity_exact(top_move,
+                           move_get_score(top_move) +
+                               get_leave_value_for_move(klv, top_move, rack) +
+                               OPENING_HOTSPOT_PENALTY);
 
   sorted_move_list_destroy(jibed_sorted_move_list);
   game_reset(game);
@@ -65,9 +67,10 @@ void test_macondo_opening_equity_adjustments(void) {
   assert(move_get_col_start(top_move) == 3);
   assert(move_get_tiles_played(top_move) == 6);
   assert_move_score(top_move, 30);
-  assert_move_equity_exact(top_move, move_get_score(top_move) +
-                                         get_leave_value_for_move(klv, top_move, rack) +
-                                         2 * OPENING_HOTSPOT_PENALTY);
+  assert_move_equity_exact(top_move,
+                           move_get_score(top_move) +
+                               get_leave_value_for_move(klv, top_move, rack) +
+                               2 * OPENING_HOTSPOT_PENALTY);
   sorted_move_list_destroy(facete_sorted_move_list);
   game_reset(game);
 
@@ -79,9 +82,10 @@ void test_macondo_opening_equity_adjustments(void) {
   assert(move_get_col_start(top_move) == 6);
   assert(move_get_tiles_played(top_move) == 7);
   assert_move_score(top_move, 78);
-  assert_move_equity_exact(top_move, move_get_score(top_move) +
-                                         get_leave_value_for_move(klv, top_move, rack) +
-                                         3 * OPENING_HOTSPOT_PENALTY);
+  assert_move_equity_exact(top_move,
+                           move_get_score(top_move) +
+                               get_leave_value_for_move(klv, top_move, rack) +
+                               3 * OPENING_HOTSPOT_PENALTY);
 
   sorted_move_list_destroy(atalaya_sorted_move_list);
   move_list_destroy(move_list);
