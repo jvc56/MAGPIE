@@ -126,7 +126,8 @@ void test_convert_success(void) {
   const LetterDistribution *ld = config_get_ld(config);
   Rack *leave = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, leave, "AAB");
-  assert(within_epsilon_for_equity(klv_get_leave_value(klv, leave), 4.0));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, leave)), 4.0);
   rack_destroy(leave);
 
   load_and_exec_config_or_die(config,
