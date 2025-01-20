@@ -1361,7 +1361,7 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 
 void generate_moves(Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
-                    MoveList *move_list) {
+                    MoveList *move_list, const KWG *override_kwg) {
   const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   MoveGen *gen = get_movegen(thread_index);
@@ -1370,7 +1370,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
   gen->ld = ld;
-  gen->kwg = player_get_kwg(player);
+  gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   gen->klv = player_get_klv(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(board);
   gen->player_index = player_on_turn_index;

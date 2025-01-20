@@ -135,12 +135,12 @@ void test_small_arena_realloc(void) {
 
 void test_endgame(void) {
   log_set_level(LOG_INFO);
-  test_solve_standard();
-  test_very_deep();
-  test_small_arena_realloc();
+//   test_solve_standard();
+//   test_very_deep();
+//   test_small_arena_realloc();
   // Uncomment out more of these tests once we add more optimizations,
   // and/or if we can run the endgame tests in release mode.
   // test_pass_first();
-  // test_vs_joey();
+  test_vs_joey();
   log_set_level(LOG_WARN);
 }

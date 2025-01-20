@@ -14,7 +14,7 @@ typedef struct BoardRows {
   int num_rows;
 } BoardRows;
 
-void generate_possible_words(Game* game, const KWG* override_kwg,
+void generate_possible_words(const Game* game, const KWG* override_kwg,
                              DictionaryWordList* possible_word_list);
 
 #endif  // WORD_PRUNE_H

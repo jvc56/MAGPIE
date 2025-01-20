@@ -388,12 +388,12 @@ void generate_moves_for_game(Game *game, int thread_index,
       game_get_player(game, game_get_player_on_turn_index(game));
   generate_moves(game, player_get_move_record_type(player_on_turn),
                  player_get_move_sort_type(player_on_turn), thread_index,
-                 move_list);
+                 move_list, /*override_kwg=*/NULL);
 }
 
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, thread_index,
-                 move_list);
+                 move_list, /*override_kwg=*/NULL);
   return move_list_get_move(move_list, 0);
 }
 
