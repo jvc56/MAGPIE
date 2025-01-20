@@ -20,6 +20,14 @@
 #define HASH_MOVE_BF (1 << 28)
 #define GOING_OUT_BF (1 << 27)
 
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif 
+
 const int32_t LARGE_VALUE = (1 << 30); // for alpha-beta pruning
 
 void pvline_clear(PVLine *pv_line) {
