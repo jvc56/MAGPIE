@@ -1,11 +1,16 @@
 #include <pthread.h>
 
 #include "../ent/move.h"
+
 #include "../str/move_string.h"
+
 #include "../util/string_util.h"
+
 #include "endgame.h"
 #include "gameplay.h"
+#include "kwg_maker.h"
 #include "move_gen.h"
+#include "word_prune.h"
 
 #define DEFAULT_ENDGAME_MOVELIST_CAPACITY 250000
 
@@ -14,8 +19,6 @@
 #define EARLY_PASS_BF (1 << 29)
 #define HASH_MOVE_BF (1 << 28)
 #define GOING_OUT_BF (1 << 27)
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 const int32_t LARGE_VALUE = (1 << 30); // for alpha-beta pruning
 
@@ -72,12 +75,26 @@ EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game,
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
+  es->wordprune_optim = true;
   es->solve_multiple_variations = 0;
+  es->nodes_searched = 0;
   es->threads = 1; // for now
   es->solving_player = game_get_player_on_turn_index(game);
   es->initial_small_move_arena_size = 1024 * 1024;
+  es->pruned_kwg = NULL;
   Player *player = game_get_player(game, es->solving_player);
   Player *opponent = game_get_player(game, 1 - es->solving_player);
+
+  if (es->wordprune_optim) {
+    DictionaryWordList *possible_word_list = dictionary_word_list_create();
+    generate_possible_words(game, NULL, possible_word_list);
+    log_info("Using pruned kwg with %d words",
+             dictionary_word_list_get_count(possible_word_list));
+    es->pruned_kwg = make_kwg_from_words(
+        possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+    log_info("Pruned KWG created with %d nodes",
+             kwg_get_number_of_nodes(es->pruned_kwg));
+  }
 
   es->initial_spread = player_get_score(player) - player_get_score(opponent);
   // later, when we have multi-threaded endgame:
@@ -135,7 +152,8 @@ int generate_stm_plays(EndgameSolverWorker *worker) {
   // stm means side to move
   // This won't actually sort by score. We'll do this later.
   generate_moves(worker->game_copy, MOVE_RECORD_ALL_SMALL, MOVE_SORT_SCORE,
-                 worker->thread_index, worker->move_list);
+                 worker->thread_index, worker->move_list,
+                 worker->solver->pruned_kwg);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
       worker->small_move_arena, worker->move_list->count * sizeof(SmallMove));
   for (int i = 0; i < worker->move_list->count; i++) {
@@ -152,12 +170,11 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
   // assign estimates to arena plays.
   // log_warn("assigning estimates; depth %d, arena_begin %d, move_count %d",
   //          depth, worker->small_move_arena->size, move_count);
-  Player *player =
-      game_get_player(worker->game_copy, worker->solver->solving_player);
-  Player *opponent =
-      game_get_player(worker->game_copy, 1 - worker->solver->solving_player);
-  Rack *stm_rack = player_get_rack(player);
-  Rack *other_rack = player_get_rack(opponent);
+  const int player_index = game_get_player_on_turn_index(worker->game_copy);
+  const Player *player = game_get_player(worker->game_copy, player_index);
+  const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
+  const Rack *stm_rack = player_get_rack(player);
+  const Rack *other_rack = player_get_rack(opponent);
   int ntiles_on_rack = stm_rack->number_of_letters;
   bool last_move_was_pass = game_get_consecutive_scoreless_turns(
                                 worker->game_copy) == 1; // check if this is ok.
@@ -327,6 +344,10 @@ int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
         play_move(worker->move_list->spare_move, worker->game_copy, NULL, NULL);
     assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
 
+    // Implementation is currently single-threaded. Keep counts per worker if we
+    // want to keep doing this when we have multiple threads.
+    worker->solver->nodes_searched++;
+
     uint64_t child_key = 0;
     if (worker->solver->transposition_table_optim) {
       child_key = zobrist_add_move(
@@ -481,6 +502,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->solver->best_pv_value = val - worker->solver->initial_spread;
     worker->solver->principal_variation = pv;
     log_info("Best value so far: %d", worker->solver->best_pv_value);
+    log_info("Nodes: %ld", worker->solver->nodes_searched);
   }
 }
 

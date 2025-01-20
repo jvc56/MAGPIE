@@ -165,7 +165,7 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
       }
     }
     // now "play" all the tiles in the placeholder rack
-    for (int idx = 0; idx < move->tiles_played; idx++) {
+    for (int idx = 0; idx < move->tiles_length; idx++) {
       uint8_t tile = move->tiles[idx];
       if (tile == PLAYED_THROUGH_MARKER) {
         continue;

@@ -165,5 +165,6 @@ void test_hash_after_passing(void) {
 
 void test_zobrist(void) {
   test_hash_after_making_play();
+  test_hash_after_making_blank_play();
   test_hash_after_passing();
 }

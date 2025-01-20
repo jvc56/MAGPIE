@@ -2,6 +2,7 @@
 #define ENDGAME_H
 
 #include "../ent/game.h"
+#include "../ent/kwg.h"
 #include "../ent/move.h"
 #include "../ent/small_move_arena.h"
 #include "../ent/thread_control.h"
@@ -29,8 +30,12 @@ typedef struct EndgameSolver {
   bool negascout_optim;
   bool lazysmp_optim;
   bool prevent_slowroll;
+  bool wordprune_optim;
   PVLine principal_variation;
   PVLine *variations;
+
+  const KWG *pruned_kwg;
+  int nodes_searched;
 
   int solve_multiple_variations;
   int32_t best_pv_value;
