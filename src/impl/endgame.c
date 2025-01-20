@@ -98,9 +98,9 @@ EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game,
     generate_possible_words(game, NULL, possible_word_list);
     log_info("Using pruned kwg with %d words",
              dictionary_word_list_get_count(possible_word_list));
-    dictionary_word_list_destroy(possible_word_list);
     es->pruned_kwg = make_kwg_from_words(
         possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+    dictionary_word_list_destroy(possible_word_list);
     log_info("Pruned KWG created with %d nodes",
              kwg_get_number_of_nodes(es->pruned_kwg));
   }
