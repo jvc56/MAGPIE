@@ -32,7 +32,8 @@ void test_vs_joey(void) {
   7) H12 FLAM (49)
   */
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
 
   Player *p1 = game_get_player(config_get_game(config), 0);
   Rack *r1 = player_get_rack(p1);
@@ -62,7 +63,8 @@ void test_pass_first(void) {
   // an unblockable ZA.
   int plies = 8; // 8
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == -60);
   assert(small_move_is_pass(&solution.moves[0]));
@@ -83,7 +85,8 @@ void test_solve_standard(void) {
 
   int plies = 4;
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == 11);
   assert(!small_move_is_pass(&solution.moves[0]));
@@ -103,7 +106,8 @@ void test_very_deep(void) {
   // This insane endgame requires 25 plies to solve. We end up winning by 1 pt.
   int plies = 25;
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == -116);
   assert(small_move_is_pass(&solution.moves[0]));
@@ -123,7 +127,8 @@ void test_small_arena_realloc(void) {
 
   int plies = 4;
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
   solver->initial_small_move_arena_size = 512; // 512 bytes holds like 32 moves.
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == 11);

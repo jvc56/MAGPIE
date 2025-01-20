@@ -63,7 +63,8 @@ typedef struct TranspositionTable {
   atomic_int t2_collisions;
 } TranspositionTable;
 
-TranspositionTable *transposition_table_create(double fraction_of_memory) {
+static inline TranspositionTable *
+transposition_table_create(double fraction_of_memory) {
   TranspositionTable *tt = malloc_or_die(sizeof(TranspositionTable));
 
   uint64_t total_memory = get_total_memory();
@@ -100,7 +101,18 @@ TranspositionTable *transposition_table_create(double fraction_of_memory) {
   return tt;
 }
 
-TTEntry transposition_table_lookup(TranspositionTable *tt, uint64_t zval) {
+static inline void transposition_table_reset(TranspositionTable *tt) {
+  // This function resets the transposition table. If you want to reallocate
+  // space for it, destroy and recreate it with the new space.
+  memset(tt->table, 0, sizeof(TTEntry) * (tt->size_mask + 1));
+  atomic_store(&tt->created, 0);
+  atomic_store(&tt->hits, 0);
+  atomic_store(&tt->lookups, 0);
+  atomic_store(&tt->t2_collisions, 0);
+}
+
+static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
+                                                 uint64_t zval) {
   uint64_t idx = zval & tt->size_mask;
   TTEntry entry = tt->table[idx];
   atomic_fetch_add(&tt->lookups, 1);
@@ -122,8 +134,8 @@ TTEntry transposition_table_lookup(TranspositionTable *tt, uint64_t zval) {
   return entry;
 }
 
-void transposition_table_store(TranspositionTable *tt, uint64_t zval,
-                               TTEntry tentry) {
+static inline void transposition_table_store(TranspositionTable *tt,
+                                             uint64_t zval, TTEntry tentry) {
   uint64_t idx = zval & tt->size_mask;
   tentry.top_4_bytes = (uint32_t)(zval >> 32);
   tentry.fifth_byte = (uint8_t)(zval >> 24);
@@ -131,7 +143,7 @@ void transposition_table_store(TranspositionTable *tt, uint64_t zval,
   tt->table[idx] = tentry;
 }
 
-void transposition_table_destroy(TranspositionTable *tt) {
+static inline void transposition_table_destroy(TranspositionTable *tt) {
   zobrist_destroy(tt->zobrist);
   free(tt->table);
   free(tt);

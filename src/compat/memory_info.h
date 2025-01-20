@@ -12,7 +12,7 @@
 #include <string.h>
 #endif
 
-uint64_t get_total_memory(void) {
+static uint64_t get_total_memory(void) {
   uint64_t total_memory = 0;
 
 #if defined(_WIN32) || defined(_WIN64)
