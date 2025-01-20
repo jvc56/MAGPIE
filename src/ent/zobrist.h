@@ -25,7 +25,7 @@ typedef struct Zobrist {
   int board_dim;
 } Zobrist;
 
-Zobrist *zobrist_create(uint64_t seed) {
+static Zobrist *zobrist_create(uint64_t seed) {
   Zobrist *z = malloc_or_die(sizeof(Zobrist));
   z->prng = prng_create(seed);
 
@@ -65,7 +65,7 @@ Zobrist *zobrist_create(uint64_t seed) {
   return z;
 }
 
-void zobrist_destroy(Zobrist *z) {
+static void zobrist_destroy(Zobrist *z) {
   for (size_t i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
     free(z->pos_table[i]);
   }
@@ -80,9 +80,10 @@ void zobrist_destroy(Zobrist *z) {
   free(z);
 }
 
-uint64_t zobrist_calculate_hash(const Zobrist *z, const Board *game_board,
-                                const Rack *our_rack, const Rack *their_rack,
-                                bool their_turn, int scoreless_turns) {
+inline static uint64_t
+zobrist_calculate_hash(const Zobrist *z, const Board *game_board,
+                       const Rack *our_rack, const Rack *their_rack,
+                       bool their_turn, int scoreless_turns) {
 
   // Calculate the hash of a specific position/situation.
   uint64_t key = 0;

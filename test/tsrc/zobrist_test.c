@@ -57,6 +57,54 @@ void test_hash_after_making_play(void) {
   config_destroy(config);
 }
 
+void test_hash_after_making_blank_play(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "IBADAT1B7/2CAFE1OD1TRANQ/2TUT2RENIED2/3REV2YOMIM2/4RAFT1NISI2/"
+              "5COR2N1x2/6LA1AGEE2/6LIAISED2/5POKY2W3/4JOWS7/V2LUZ9/ORPIN10/"
+              "L1OE11/TUX12/I14 EEEEGH?/AGHNOSU 308/265 0 -lex CSW21;");
+
+  Game *game = config_get_game(config);
+  Zobrist *z = zobrist_create(42);
+  uint64_t h = zobrist_calculate_hash(
+      z, game_get_board(game), player_get_rack(game_get_player(game, 0)),
+      player_get_rack(game_get_player(game, 1)), false, 0);
+
+  // play 6m (x)u
+  ValidatedMoves *vms =
+      validated_moves_create(game, 0, "6m.xu", false, false, false);
+  assert(validated_moves_get_validation_status(vms) ==
+         MOVE_VALIDATION_STATUS_SUCCESS);
+
+  const LetterDistribution *ld = game_get_ld(game);
+  uint32_t ld_size = ld_get_size(ld);
+
+  Rack *rack = rack_create(ld_size);
+  rack_set_to_string(ld, rack,
+                     "EEEEGH"); // rack always contains the post-play rack, when
+                                // calling add_move
+
+  uint64_t h1 = zobrist_add_move(z, h, validated_moves_get_move(vms, 0), rack,
+                                 true, 0, 0);
+
+  // actually play the move:
+  play_move_status_t play_status =
+      play_move(validated_moves_get_move(vms, 0), game, NULL, NULL);
+  assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
+
+  uint64_t h2 = zobrist_calculate_hash(
+      z, game_get_board(game), player_get_rack(game_get_player(game, 0)),
+      player_get_rack(game_get_player(game, 1)), true, 0);
+
+  assert(h1 == h2);
+
+  validated_moves_destroy(vms);
+  rack_destroy(rack);
+  zobrist_destroy(z);
+  config_destroy(config);
+}
+
 void test_hash_after_passing(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score");
   load_and_exec_config_or_die(
