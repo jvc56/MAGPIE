@@ -1,11 +1,16 @@
 #include <pthread.h>
 
 #include "../ent/move.h"
+
 #include "../str/move_string.h"
+
 #include "../util/string_util.h"
+
 #include "endgame.h"
 #include "gameplay.h"
+#include "kwg_maker.h"
 #include "move_gen.h"
+#include "word_prune.h"
 
 #define DEFAULT_ENDGAME_MOVELIST_CAPACITY 250000
 
@@ -14,7 +19,14 @@
 #define EARLY_PASS_BF (1 << 29)
 #define HASH_MOVE_BF (1 << 28)
 #define GOING_OUT_BF (1 << 27)
+
+#ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif 
 
 const int32_t LARGE_VALUE = (1 << 30); // for alpha-beta pruning
 
@@ -64,31 +76,55 @@ StringBuilder *pvline_string(const PVLine *pv_line, const Game *game,
   return pv_description;
 }
 
-EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game) {
+EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game,
+                                     double tt_fraction_of_memory) {
   EndgameSolver *es = malloc_or_die(sizeof(EndgameSolver));
   es->first_win_optim = false;
-  es->transposition_table_optim = false; // for now
+  es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
+  es->wordprune_optim = true;
   es->solve_multiple_variations = 0;
+  es->nodes_searched = 0;
   es->threads = 1; // for now
   es->solving_player = game_get_player_on_turn_index(game);
   es->initial_small_move_arena_size = 1024 * 1024;
+  es->pruned_kwg = NULL;
   Player *player = game_get_player(game, es->solving_player);
   Player *opponent = game_get_player(game, 1 - es->solving_player);
+
+  if (es->wordprune_optim) {
+    DictionaryWordList *possible_word_list = dictionary_word_list_create();
+    generate_possible_words(game, NULL, possible_word_list);
+    log_info("Using pruned kwg with %d words",
+             dictionary_word_list_get_count(possible_word_list));
+    es->pruned_kwg = make_kwg_from_words(
+        possible_word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+    dictionary_word_list_destroy(possible_word_list);
+    log_info("Pruned KWG created with %d nodes",
+             kwg_get_number_of_nodes(es->pruned_kwg));
+  }
 
   es->initial_spread = player_get_score(player) - player_get_score(opponent);
   // later, when we have multi-threaded endgame:
   // es->threads = thread_control_get_threads(tc);
   es->thread_control = tc;
   es->game = game;
-
+  if (tt_fraction_of_memory > 0) {
+    es->transposition_table = transposition_table_create(tt_fraction_of_memory);
+  } else {
+    es->transposition_table = NULL;
+  }
   return es;
 }
 
 void endgame_solver_destroy(EndgameSolver *es) {
   if (!es) {
     return;
+  }
+  transposition_table_destroy(es->transposition_table);
+  if (es->pruned_kwg) {
+    kwg_destroy(es->pruned_kwg);
   }
   free(es);
 }
@@ -128,7 +164,8 @@ int generate_stm_plays(EndgameSolverWorker *worker) {
   // stm means side to move
   // This won't actually sort by score. We'll do this later.
   generate_moves(worker->game_copy, MOVE_RECORD_ALL_SMALL, MOVE_SORT_SCORE,
-                 worker->thread_index, worker->move_list);
+                 worker->thread_index, worker->move_list,
+                 worker->solver->pruned_kwg);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
       worker->small_move_arena, worker->move_list->count * sizeof(SmallMove));
   for (int i = 0; i < worker->move_list->count; i++) {
@@ -141,16 +178,15 @@ int generate_stm_plays(EndgameSolverWorker *worker) {
 }
 
 void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
-                               int move_count) {
+                               int move_count, uint64_t tt_move) {
   // assign estimates to arena plays.
   // log_warn("assigning estimates; depth %d, arena_begin %d, move_count %d",
   //          depth, worker->small_move_arena->size, move_count);
-  Player *player =
-      game_get_player(worker->game_copy, worker->solver->solving_player);
-  Player *opponent =
-      game_get_player(worker->game_copy, 1 - worker->solver->solving_player);
-  Rack *stm_rack = player_get_rack(player);
-  Rack *other_rack = player_get_rack(opponent);
+  const int player_index = game_get_player_on_turn_index(worker->game_copy);
+  const Player *player = game_get_player(worker->game_copy, player_index);
+  const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
+  const Rack *stm_rack = player_get_rack(player);
+  const Rack *other_rack = player_get_rack(opponent);
   int ntiles_on_rack = stm_rack->number_of_letters;
   bool last_move_was_pass = game_get_consecutive_scoreless_turns(
                                 worker->game_copy) == 1; // check if this is ok.
@@ -186,7 +222,9 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int depth,
                                      small_move_get_score(current_move));
     }
 
-    // TODO: add ttMove once available
+    if (current_move->tiny_move == tt_move) {
+      small_move_add_estimated_value(current_move, HASH_MOVE_BF);
+    }
 
     // Consider pass first if we've just passed. This will allow us to see that
     // branch of the tree faster.
@@ -221,25 +259,52 @@ char *create_spaces(int depth) {
 // void print_small_plays(EndgameSolverWorker *worker, int nplays,
 //                        int cur_move_loc) {}
 
-int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
-                int32_t beta, PVLine *pv, bool pv_node) {
+int32_t negamax(EndgameSolverWorker *worker, uint64_t node_key, int depth,
+                int32_t alpha, int32_t beta, PVLine *pv, bool pv_node) {
 
   assert(pv_node || alpha == beta - 1);
-  // int32_t alpha_orig = alpha;
+  int32_t alpha_orig = alpha;
+
+  int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
+  Player *player_on_turn = game_get_player(worker->game_copy, on_turn_idx);
+  Player *other_player = game_get_player(worker->game_copy, 1 - on_turn_idx);
+  int on_turn_spread =
+      player_get_score(player_on_turn) - player_get_score(other_player);
+  uint64_t tt_move = INVALID_TINY_MOVE;
+
+  if (worker->solver->transposition_table_optim) {
+    TTEntry tt_entry = transposition_table_lookup(
+        worker->solver->transposition_table, node_key);
+    if (ttentry_valid(tt_entry) && ttentry_depth(tt_entry) >= (uint8_t)depth) {
+      int16_t score = ttentry_score(tt_entry);
+      uint8_t flag = ttentry_flag(tt_entry);
+      // add spread back in; we subtract it when storing.
+      score += (int16_t)on_turn_spread;
+      if (flag == TT_EXACT) {
+        if (!pv_node) {
+          return score;
+        }
+      } else if (flag == TT_LOWER) {
+        alpha = MAX(alpha, score);
+      } else if (flag == TT_UPPER) {
+        beta = MIN(beta, score);
+      }
+      if (alpha >= beta) {
+        if (!pv_node) {
+          // don't cut-off PV node
+          return score;
+        }
+      }
+      // search hash move first
+      tt_move = ttentry_move(tt_entry);
+    }
+  }
 
   if (depth == 0 ||
       game_get_game_end_reason(worker->game_copy) != GAME_END_REASON_NONE) {
     // This assumes the player turn changed even though the game was already
     // over, which appears to be the case in the code.
-    Player *player = game_get_player(
-        worker->game_copy, game_get_player_on_turn_index(worker->game_copy));
-    Player *opponent =
-        game_get_player(worker->game_copy,
-                        1 - game_get_player_on_turn_index(worker->game_copy));
-
-    int32_t spread = player_get_score(player) - player_get_score(opponent);
-    // log_warn("returning final spread %d", spread);
-    return spread;
+    return on_turn_spread;
   }
 
   PVLine child_pv;
@@ -251,7 +316,7 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
     nplays = generate_stm_plays(worker);
-    assign_estimates_and_sort(worker, depth, nplays);
+    assign_estimates_and_sort(worker, depth, nplays, tt_move);
     // log_warn("generated and allocated; nplays %d, cur_size %ld", nplays,
     //          worker->small_move_arena->size);
     arena_alloced = true;
@@ -262,6 +327,7 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
   // print_small_plays(worker, nplays, cur_move_loc);
 
   int32_t best_value = -LARGE_VALUE;
+  uint64_t best_tiny_move = INVALID_TINY_MOVE;
   int arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
 
@@ -282,17 +348,39 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
     //          string_builder_peek(move_description), small_move->tiny_move,
     //          small_move->metadata);
 
+    Rack *stm_rack = player_get_rack(player_on_turn);
+
+    int last_consecutive_scoreless_turns =
+        game_get_consecutive_scoreless_turns(worker->game_copy);
     play_move_status_t play_status =
         play_move(worker->move_list->spare_move, worker->game_copy, NULL, NULL);
     assert(play_status == PLAY_MOVE_STATUS_SUCCESS);
+
+    // Implementation is currently single-threaded. Keep counts per worker if we
+    // want to keep doing this when we have multiple threads.
+    worker->solver->nodes_searched++;
+
+    uint64_t child_key = 0;
+    if (worker->solver->transposition_table_optim) {
+      child_key = zobrist_add_move(
+          worker->solver->transposition_table->zobrist, node_key,
+          worker->move_list->spare_move, stm_rack,
+          on_turn_idx == worker->solver->solving_player,
+          game_get_consecutive_scoreless_turns(worker->game_copy),
+          last_consecutive_scoreless_turns);
+    }
+
     int32_t value = 0;
     if (idx == 0 || !worker->solver->negascout_optim) {
-      value = negamax(worker, depth - 1, -beta, -alpha, &child_pv, pv_node);
+      value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
+                      pv_node);
     } else {
-      value = negamax(worker, depth - 1, -alpha - 1, -alpha, &child_pv, false);
+      value = negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
+                      &child_pv, false);
       if (alpha < -value && -value < beta) {
         // re-search with wider window
-        value = negamax(worker, depth - 1, -beta, -alpha, &child_pv, pv_node);
+        value = negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
+                        pv_node);
       }
     }
     game_unplay_last_move(worker->game_copy);
@@ -309,6 +397,7 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
         (SmallMove *)(worker->small_move_arena->memory + element_offset);
     if (-value > best_value) {
       best_value = -value;
+      best_tiny_move = small_move->tiny_move;
       // log_warn("%sUpdatePV, bestval %d", spaces, best_value);
       // StringBuilder *child_pvsb =
       //     pvline_string(&child_pv, worker->game_copy, false);
@@ -336,6 +425,24 @@ int32_t negamax(EndgameSolverWorker *worker, int depth, int32_t alpha,
     // clear the child node's pv for the next child node
     pvline_clear(&child_pv);
   }
+
+  if (worker->solver->transposition_table_optim) {
+    int16_t score = best_value - on_turn_spread;
+    uint8_t flag;
+    TTEntry entry_to_store = {.score = score};
+    if (best_value <= alpha_orig) {
+      flag = TT_UPPER;
+    } else if (best_value >= beta) {
+      flag = TT_LOWER;
+    } else {
+      flag = TT_EXACT;
+    }
+    entry_to_store.flag_and_depth = (flag << 6) + (uint8_t)depth;
+    entry_to_store.tiny_move = best_tiny_move;
+    transposition_table_store(worker->solver->transposition_table, node_key,
+                              entry_to_store);
+  }
+
   if (arena_alloced) {
     arena_dealloc(worker->small_move_arena, nplays * sizeof(SmallMove));
     // log_warn("arena_dealloced; new size: %ld",
@@ -360,9 +467,22 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   }
   assert(worker->small_move_arena->size == 0); // make sure arena is empty.
 
+  uint64_t initial_hash_key = 0;
+  if (worker->solver->transposition_table_optim) {
+    Player *solving_player =
+        game_get_player(worker->game_copy, worker->solver->solving_player);
+    Player *other_player =
+        game_get_player(worker->game_copy, 1 - worker->solver->solving_player);
+    initial_hash_key = zobrist_calculate_hash(
+        worker->solver->transposition_table->zobrist,
+        game_get_board(worker->game_copy), player_get_rack(solving_player),
+        player_get_rack(other_player), false,
+        game_get_consecutive_scoreless_turns(worker->game_copy));
+  }
+
   int initial_move_count = generate_stm_plays(worker);
   // Arena pointer better have started at 0, since it was empty.
-  assign_estimates_and_sort(worker, 0, initial_move_count);
+  assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE);
   worker->solver->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
@@ -383,7 +503,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     PVLine pv;
     pv.game = worker->game_copy;
     pv.num_moves = 0;
-    int32_t val = negamax(worker, p, alpha, beta, &pv, true);
+    int32_t val = negamax(worker, initial_hash_key, p, alpha, beta, &pv, true);
     // sort initial moves by valuation for next time.
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
     qsort(initial_moves, initial_move_count, sizeof(SmallMove),
@@ -394,6 +514,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->solver->best_pv_value = val - worker->solver->initial_spread;
     worker->solver->principal_variation = pv;
     log_info("Best value so far: %d", worker->solver->best_pv_value);
+    log_info("Nodes: %ld", worker->solver->nodes_searched);
   }
 }
 

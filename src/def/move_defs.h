@@ -8,6 +8,10 @@
 // board dimension.
 #define MOVE_MAX_TILES ((BOARD_DIM) > (RACK_SIZE) ? (BOARD_DIM) : (RACK_SIZE))
 
+// Replace this with EQUITY_MAX_VALUE once
+// https://github.com/jvc56/MAGPIE/pull/285 is merged.
+#define DEFAULT_SHADOW_MAX_EQUITY 100000
+
 #define PASS_MOVE_EQUITY -10000
 #define INITIAL_TOP_MOVE_EQUITY -100000
 #define COMPARE_MOVES_EPSILON 1e-6

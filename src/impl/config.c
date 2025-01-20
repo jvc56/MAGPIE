@@ -87,6 +87,7 @@ typedef enum {
   ARG_TOKEN_INFILE,
   ARG_TOKEN_OUTFILE,
   ARG_TOKEN_EXEC_MODE,
+  ARG_TOKEN_TT_FRACTION_OF_MEM,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -122,6 +123,7 @@ struct Config {
   bool human_readable;
   bool use_small_plays;
   char *record_filepath;
+  double tt_fraction_of_mem;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -243,6 +245,10 @@ double config_get_stop_cond_pct(const Config *config) {
 
 double config_get_equity_margin(const Config *config) {
   return config->equity_margin;
+}
+
+double config_get_tt_fraction_of_mem(const Config *config) {
+  return config->tt_fraction_of_mem;
 }
 
 BoardLayout *config_get_board_layout(const Config *config) {
@@ -1495,6 +1501,13 @@ config_load_status_t config_load_data(Config *config) {
     return config_load_status;
   }
 
+  config_load_status = config_load_double(config, ARG_TOKEN_TT_FRACTION_OF_MEM,
+                                          0, 1, &config->tt_fraction_of_mem);
+
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
   // Game variant
 
   const char *new_game_variant_str =
@@ -1768,6 +1781,8 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,
+                    execute_fatal, status_fatal);
 
   config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
@@ -1796,6 +1811,7 @@ Config *config_create_default(void) {
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->error_status = error_status_create();
+  config->tt_fraction_of_mem = 0.25;
   return config;
 }
 
