@@ -122,6 +122,9 @@ void endgame_solver_destroy(EndgameSolver *es) {
     return;
   }
   transposition_table_destroy(es->transposition_table);
+  if (es->pruned_kwg) {
+    kwg_destroy(es->pruned_kwg);
+  }
   free(es);
 }
 

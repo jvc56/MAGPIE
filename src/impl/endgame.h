@@ -34,7 +34,7 @@ typedef struct EndgameSolver {
   PVLine principal_variation;
   PVLine *variations;
 
-  const KWG *pruned_kwg;
+  KWG *pruned_kwg;
   int nodes_searched;
 
   int solve_multiple_variations;
