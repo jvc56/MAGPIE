@@ -1492,8 +1492,6 @@ void generate_moves(Game *game, move_record_t move_record_type,
                            anchor_get_dir(anchor_list, i));
     }
     gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
-    board_copy_row_cache(gen->lanes_cache, gen->row_cache,
-                         gen->current_row_index, gen->dir);
     gen->anchor_right_extension_set =
         gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
     if (gen->is_wordsmog) {
