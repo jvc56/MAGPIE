@@ -10,7 +10,7 @@ struct LeaveRack {
   Rack *leave;
   Rack *exchanged;
   int draws;
-  double equity;
+  Equity equity;
 };
 
 // Used by the inference_results
@@ -36,7 +36,7 @@ int leave_rack_get_draws(const LeaveRack *leaveRack) {
   return leaveRack->draws;
 }
 
-double leave_rack_get_equity(const LeaveRack *leaveRack) {
+Equity leave_rack_get_equity(const LeaveRack *leaveRack) {
   return leaveRack->equity;
 }
 
@@ -133,7 +133,7 @@ void down_heapify_leave_rack(LeaveRackList *lrl, int parent_node) {
 }
 
 void leave_rack_list_insert_rack(const Rack *leave, const Rack *exchanged,
-                                 int number_of_draws_for_leave, double equity,
+                                 int number_of_draws_for_leave, Equity equity,
                                  LeaveRackList *lrl) {
   rack_reset(lrl->spare_leave_rack->leave);
   for (int i = 0; i < rack_get_dist_size(leave); i++) {

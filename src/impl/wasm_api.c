@@ -3,27 +3,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
-#include "../def/rack_defs.h"
 
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
-#include "../ent/klv.h"
-#include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../ent/player.h"
-#include "../ent/rack.h"
-#include "../ent/static_eval.h"
 #include "../ent/validated_move.h"
-#include "../ent/words.h"
 
 #include "exec.h"
 #include "move_gen.h"
 
 #include "../str/game_string.h"
-#include "../str/letter_distribution_string.h"
 #include "../str/move_string.h"
 
 #include "../util/string_util.h"
@@ -103,8 +95,8 @@ char *wasm_score_move(const char *cgpstr, const char *ucgi_move_str) {
   }
 
   string_builder_add_formatted_string(return_string_builder, " sc %d eq %.3f",
-                                      move_get_score(move),
-                                      move_get_equity(move));
+                                      equity_to_int(move_get_score(move)),
+                                      equity_to_double(move_get_equity(move)));
 
   validated_moves_destroy(vms);
   free(phonies_string);
@@ -121,7 +113,8 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
   load_cgp_into_iso_config(cgpstr, num_plays);
   Game *game = config_get_game(iso_config);
   MoveList *move_list = NULL;
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list,
+                 /*override_kwg=*/NULL);
 
   // This pointer needs to be freed by the caller:
   char *val = ucgi_static_moves(game, move_list);

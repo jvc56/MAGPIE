@@ -11,8 +11,6 @@
 
 #include "../../src/impl/gameplay.h"
 
-#include "../../src/str/move_string.h"
-
 #include "test_constants.h"
 #include "test_util.h"
 
@@ -216,9 +214,9 @@ void test_validated_move_success(void) {
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_PASS);
-  assert(move_get_score(move) == 0);
-  assert(within_epsilon(move_get_equity(move), PASS_MOVE_EQUITY));
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert_move_score(move, 0);
+  assert_move_equity_exact(move, EQUITY_PASS_VALUE);
+  assert_validated_moves_challenge_points(vms, 0, 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
@@ -229,11 +227,10 @@ void test_validated_move_success(void) {
   assert(validated_moves_get_number_of_moves(vms) == 1);
   move = validated_moves_get_move(vms, 0);
   assert(move_get_type(move) == GAME_EVENT_PASS);
-  assert(move_get_score(move) == 0);
-  assert(within_epsilon(move_get_equity(move), PASS_MOVE_EQUITY));
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert_move_score(move, 0);
+  assert_move_equity_exact(move, EQUITY_PASS_VALUE);
+  assert_validated_moves_challenge_points(vms, 0, 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
-  assert(within_epsilon(move_get_equity(move), PASS_MOVE_EQUITY));
   assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
   validated_moves_destroy(vms);
 
@@ -245,13 +242,13 @@ void test_validated_move_success(void) {
   assert(move_get_type(move) == GAME_EVENT_EXCHANGE);
   assert(move_get_tiles_length(move) == 3);
   assert(move_get_tiles_played(move) == 3);
-  assert(move_get_score(move) == 0);
+  assert_move_score(move, 0);
   // Rack is empty, so equity should be zero
-  assert(within_epsilon(move_get_equity(move), 0));
+  assert_move_equity_exact(move, EQUITY_ZERO_VALUE);
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "A"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "B"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "C"));
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert_validated_moves_challenge_points(vms, 0, 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
@@ -263,9 +260,9 @@ void test_validated_move_success(void) {
   assert(move_get_type(move) == GAME_EVENT_EXCHANGE);
   assert(move_get_tiles_length(move) == 4);
   assert(move_get_tiles_played(move) == 4);
-  assert(move_get_score(move) == 0);
-  assert(within_epsilon(move_get_equity(move), 0));
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert_move_score(move, 0);
+  assert_move_equity_exact(move, EQUITY_ZERO_VALUE);
+  assert_validated_moves_challenge_points(vms, 0, 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
@@ -278,17 +275,17 @@ void test_validated_move_success(void) {
   assert(move_get_type(move) == GAME_EVENT_EXCHANGE);
   assert(move_get_tiles_length(move) == 3);
   assert(move_get_tiles_played(move) == 3);
-  assert(move_get_score(move) == 0);
+  assert_move_score(move, 0);
   rack_set_to_string(ld, leave, "DEFG");
-  assert(within_epsilon(
-      move_get_equity(move),
+  assert_move_equity_exact(
+      move,
       klv_get_leave_value(
-          players_data_get_klv(config_get_players_data(config), 0), leave)));
+          players_data_get_klv(config_get_players_data(config), 0), leave));
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "A"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "B"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "C"));
   assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert_validated_moves_challenge_points(vms, 0, 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
@@ -304,8 +301,8 @@ void test_validated_move_success(void) {
   assert(move_get_row_start(move) == 0);
   assert(move_get_col_start(move) == 7);
   assert(move_get_dir(move) == BOARD_VERTICAL_DIRECTION);
-  assert(move_get_score(move) == 74);
-  assert(within_epsilon(move_get_equity(move), 74));
+  assert_move_score(move, 74);
+  assert_move_equity_int(move, 74);
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "A"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "e"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "R"));
@@ -315,7 +312,7 @@ void test_validated_move_success(void) {
   assert(move_get_tile(move, 6) == ld_hl_to_ml(ld, "O"));
   assert(move_get_tile(move, 7) == PLAYED_THROUGH_MARKER);
   assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
-  assert(validated_moves_get_challenge_points(vms, 0) == 3);
+  assert_validated_moves_challenge_points(vms, 0, 3);
   assert(validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
@@ -340,14 +337,14 @@ void test_validated_move_success(void) {
       assert(move_get_col_start(move) == 7);
     }
     assert(move_get_dir(move) == dir);
-    assert(move_get_score(move) == 48);
+    assert_move_score(move, 48);
     assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "J"));
     assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "I"));
     assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "H"));
     assert(move_get_tile(move, 3) == ld_hl_to_ml(ld, "A"));
     assert(move_get_tile(move, 4) == ld_hl_to_ml(ld, "D"));
     assert(!validated_moves_get_rack(vms, 0));
-    assert(validated_moves_get_challenge_points(vms, 0) == 0);
+    assert_validated_moves_challenge_points(vms, 0, 0);
     assert(!validated_moves_get_challenge_turn_loss(vms, 0));
     validated_moves_destroy(vms);
   }
@@ -364,8 +361,8 @@ void test_validated_move_success(void) {
   assert(move_get_row_start(move) == 1);
   assert(move_get_col_start(move) == 7);
   assert(move_get_dir(move) == BOARD_VERTICAL_DIRECTION);
-  assert(move_get_score(move) == 66);
-  assert(within_epsilon(move_get_equity(move), 66));
+  assert_move_score(move, 66);
+  assert_move_equity_int(move, 66);
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "F"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "I"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "R"));
@@ -375,7 +372,7 @@ void test_validated_move_success(void) {
   assert(move_get_tile(move, 6) == PLAYED_THROUGH_MARKER);
   assert(move_get_tile(move, 7) == ld_hl_to_ml(ld, "G"));
   assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert_validated_moves_challenge_points(vms, 0, 0);
   assert(validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
@@ -389,7 +386,7 @@ void test_validated_move_success(void) {
   assert(move_get_row_start(move) == 10);
   assert(move_get_col_start(move) == 13);
   assert(move_get_dir(move) == BOARD_VERTICAL_DIRECTION);
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert_validated_moves_challenge_points(vms, 0, 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
@@ -405,7 +402,7 @@ void test_validated_move_success(void) {
   assert(move_get_row_start(move) == 13);
   assert(move_get_col_start(move) == 1);
   assert(move_get_dir(move) == BOARD_HORIZONTAL_DIRECTION);
-  assert(move_get_score(move) == 106);
+  assert_move_score(move, 106);
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "h"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "E"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "a"));
@@ -416,7 +413,7 @@ void test_validated_move_success(void) {
   assert(move_get_tile(move, 7) == ld_hl_to_ml(ld, "D"));
   assert(move_get_tile(move, 8) == ld_hl_to_ml(ld, "S"));
   assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert_validated_moves_challenge_points(vms, 0, 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
@@ -432,7 +429,7 @@ void test_validated_move_success(void) {
   assert(move_get_row_start(move) == 0);
   assert(move_get_col_start(move) == 0);
   assert(move_get_dir(move) == BOARD_VERTICAL_DIRECTION);
-  assert(move_get_score(move) == 1780);
+  assert_move_score(move, 1780);
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "O"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "X"));
   assert(move_get_tile(move, 2) == PLAYED_THROUGH_MARKER);
@@ -449,7 +446,7 @@ void test_validated_move_success(void) {
   assert(move_get_tile(move, 13) == PLAYED_THROUGH_MARKER);
   assert(move_get_tile(move, 14) == ld_hl_to_ml(ld, "E"));
   assert(racks_are_equal(validated_moves_get_rack(vms, 0), rack));
-  assert(validated_moves_get_challenge_points(vms, 0) == 0);
+  assert_validated_moves_challenge_points(vms, 0, 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);
 
@@ -483,13 +480,13 @@ void test_validated_move_success(void) {
   vms = assert_validated_move_success(config_get_game(config), ION_OPENING_CGP,
                                       "9G.NON.NONAIER", 0, false, false);
   move = validated_moves_get_move(vms, 0);
-  assert(move_get_score(move) == 10);
+  assert_move_score(move, 10);
   rack_set_to_string(ld, leave, "AEIR");
-  assert(within_epsilon(
-      move_get_equity(move),
-      10 + klv_get_leave_value(
-               players_data_get_klv(config_get_players_data(config), 0),
-               leave)));
+  assert_move_equity_exact(
+      move,
+      move_get_score(move) +
+          klv_get_leave_value(
+              players_data_get_klv(config_get_players_data(config), 0), leave));
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, "set -s1 score");
@@ -498,8 +495,8 @@ void test_validated_move_success(void) {
   vms = assert_validated_move_success(config_get_game(config), ION_OPENING_CGP,
                                       "9g.NON.NONAIER", 0, false, false);
   move = validated_moves_get_move(vms, 0);
-  assert(move_get_score(move) == 10);
-  assert(within_epsilon(move_get_equity(move), 10));
+  assert_move_score(move, 10);
+  assert_move_equity_int(move, 10);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, "set -ld english_blank_is_5");
@@ -508,7 +505,7 @@ void test_validated_move_success(void) {
   vms = assert_validated_move_success(config_get_game(config), EMPTY_CGP,
                                       "8D.zENAIDA", 0, false, false);
   move = validated_moves_get_move(vms, 0);
-  assert(move_get_score(move) == 84);
+  assert_move_score(move, 84);
   validated_moves_destroy(vms);
 
   rack_destroy(rack);
@@ -528,21 +525,21 @@ void test_validated_move_score(void) {
   vms = assert_validated_move_success(game, ION_OPENING_CGP, "7f.IEE", 0, true,
                                       false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 11);
+  assert_move_score(validated_moves_get_move(vms, 0), 11);
   validated_moves_destroy(vms);
 
   vms = assert_validated_move_success(
       game, THERMOS_CGP, "3B.HITHERMOST,3B.NETHERMOST", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 2);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 36);
-  assert(move_get_score(validated_moves_get_move(vms, 1)) == 30);
+  assert_move_score(validated_moves_get_move(vms, 0), 36);
+  assert_move_score(validated_moves_get_move(vms, 1), 30);
   validated_moves_destroy(vms);
 
   vms = assert_validated_move_success(game, VS_ED, "5B.AIRGLOWS,5c.REGLOWS", 0,
                                       false, false);
   assert(validated_moves_get_number_of_moves(vms) == 2);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 12);
-  assert(move_get_score(validated_moves_get_move(vms, 1)) == 11);
+  assert_move_score(validated_moves_get_move(vms, 0), 12);
+  assert_move_score(validated_moves_get_move(vms, 1), 11);
   validated_moves_destroy(vms);
 
   vms = assert_validated_move_success(game, VS_MATT,
@@ -550,35 +547,35 @@ void test_validated_move_score(void) {
                                       "TAE,K11.ED,K10.AE,K11.ETA,B9.BATHED",
                                       0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 9);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 12);
-  assert(move_get_score(validated_moves_get_move(vms, 1)) == 5);
-  assert(move_get_score(validated_moves_get_move(vms, 2)) == 38);
-  assert(move_get_score(validated_moves_get_move(vms, 3)) == 36);
-  assert(move_get_score(validated_moves_get_move(vms, 4)) == 34);
-  assert(move_get_score(validated_moves_get_move(vms, 5)) == 33);
-  assert(move_get_score(validated_moves_get_move(vms, 6)) == 30);
-  assert(move_get_score(validated_moves_get_move(vms, 7)) == 34);
-  assert(move_get_score(validated_moves_get_move(vms, 8)) == 28);
+  assert_move_score(validated_moves_get_move(vms, 0), 12);
+  assert_move_score(validated_moves_get_move(vms, 1), 5);
+  assert_move_score(validated_moves_get_move(vms, 2), 38);
+  assert_move_score(validated_moves_get_move(vms, 3), 36);
+  assert_move_score(validated_moves_get_move(vms, 4), 34);
+  assert_move_score(validated_moves_get_move(vms, 5), 33);
+  assert_move_score(validated_moves_get_move(vms, 6), 30);
+  assert_move_score(validated_moves_get_move(vms, 7), 34);
+  assert_move_score(validated_moves_get_move(vms, 8), 28);
   validated_moves_destroy(vms);
 
   vms = assert_validated_move_success(
       game, VS_JEREMY, "14B.hEaDWORDS,14B.hEaDWORD", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 2);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 106);
-  assert(move_get_score(validated_moves_get_move(vms, 1)) == 38);
+  assert_move_score(validated_moves_get_move(vms, 0), 106);
+  assert_move_score(validated_moves_get_move(vms, 1), 38);
   validated_moves_destroy(vms);
 
   vms = assert_validated_move_success(
       game, VS_OXY, "A1.OXYPHENBUTAZONE,A12.ZONE", 0, false, false);
   assert(validated_moves_get_number_of_moves(vms) == 2);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 1780);
-  assert(move_get_score(validated_moves_get_move(vms, 1)) == 160);
+  assert_move_score(validated_moves_get_move(vms, 0), 1780);
+  assert_move_score(validated_moves_get_move(vms, 1), 160);
   validated_moves_destroy(vms);
 
   vms = assert_validated_move_success(game, EMPTY_CGP, "8C.OVERDOG", 0, false,
                                       false);
   assert(validated_moves_get_number_of_moves(vms) == 1);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 82);
+  assert_move_score(validated_moves_get_move(vms, 0), 82);
   validated_moves_destroy(vms);
 
   game_destroy(game);
@@ -614,7 +611,7 @@ void test_validated_move_distinct_kwg(void) {
   vms = validated_moves_create(game, 1, "H8.SCHIZIER", false, true, false);
   assert(validated_moves_get_validation_status(vms) ==
          MOVE_VALIDATION_STATUS_SUCCESS);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 146);
+  assert_move_score(validated_moves_get_move(vms, 0), 146);
   validated_moves_destroy(vms);
 
   vms = validated_moves_create(game, 1, "M8.SCHERZI", false, true, false);

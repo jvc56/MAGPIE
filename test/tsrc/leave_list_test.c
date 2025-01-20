@@ -344,48 +344,51 @@ void test_leave_list_normal_leaves(void) {
   leave_list_write_to_klv(leave_list);
 
   rack_set_to_string(ld, rack, "J");
-  assert(
-      within_epsilon(klv_get_leave_value(klv, rack), 5.0 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)), 5.0 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "K");
-  assert(
-      within_epsilon(klv_get_leave_value(klv, rack), 6.0 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)), 6.0 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "L");
-  assert(within_epsilon(klv_get_leave_value(klv, rack),
-                        13.0 / 2 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)),
+      13.0 / 2 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "M");
-  assert(
-      within_epsilon(klv_get_leave_value(klv, rack), 7.0 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)), 7.0 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "JK");
-  assert(within_epsilon(klv_get_leave_value(klv, rack),
-                        11.0 / 2 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)),
+      11.0 / 2 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "KL");
-  assert(within_epsilon(klv_get_leave_value(klv, rack),
-                        13.0 / 2 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)),
+      13.0 / 2 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "JL");
-  assert(
-      within_epsilon(klv_get_leave_value(klv, rack), 6.0 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)), 6.0 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "LM");
-  assert(
-      within_epsilon(klv_get_leave_value(klv, rack), 7.0 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)), 7.0 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "KM");
-  assert(
-      within_epsilon(klv_get_leave_value(klv, rack), 7.0 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)), 7.0 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "JKL");
-  assert(
-      within_epsilon(klv_get_leave_value(klv, rack), 6.0 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)), 6.0 - empty_leave_mean);
 
   rack_set_to_string(ld, rack, "KLM");
-  assert(
-      within_epsilon(klv_get_leave_value(klv, rack), 7.0 - empty_leave_mean));
+  assert_equal_at_equity_resolution(
+      equity_to_double(klv_get_leave_value(klv, rack)), 7.0 - empty_leave_mean);
 
   // Ensure that adding a full rack runs without error
   const double full_rack_value = 1013.0;

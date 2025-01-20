@@ -24,7 +24,7 @@ void set_klv_leave_value(KLV *klv, const LetterDistribution *ld,
   Rack *rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, rack, rack_str);
   const int klv_word_index = klv_get_word_index(klv, rack);
-  klv_set_indexed_leave_value(klv, klv_word_index, value);
+  klv_set_indexed_leave_value(klv, klv_word_index, double_to_equity(value));
   rack_destroy(rack);
 }
 

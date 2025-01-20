@@ -2,11 +2,11 @@
 
 #include <stdlib.h>
 
-#include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 
-#include "letter_distribution.h"
+#include "../ent/equity.h"
+
 #include "rack.h"
 #include "validated_move.h"
 
@@ -17,15 +17,15 @@
 struct GameEvent {
   game_event_t event_type;
   int player_index;
-  int cumulative_score;
+  Equity cumulative_score;
   char *cgp_move_string;
-  int move_score;
+  Equity move_score;
   // Adjustment for
   // - Challenge points
   // - Time penalty
   // - End rack points
   // - End rack penalty
-  int score_adjustment;
+  Equity score_adjustment;
   Rack *rack;
   ValidatedMoves *vms;
   char *note;
@@ -35,10 +35,10 @@ GameEvent *game_event_create(void) {
   GameEvent *game_event = malloc_or_die(sizeof(GameEvent));
   game_event->event_type = GAME_EVENT_UNKNOWN;
   game_event->player_index = -1;
-  game_event->cumulative_score = 0;
-  game_event->score_adjustment = 0;
+  game_event->cumulative_score = EQUITY_ZERO_VALUE;
+  game_event->score_adjustment = EQUITY_ZERO_VALUE;
   game_event->cgp_move_string = NULL;
-  game_event->move_score = 0;
+  game_event->move_score = EQUITY_ZERO_VALUE;
   game_event->vms = NULL;
   game_event->rack = NULL;
   game_event->note = NULL;
@@ -72,19 +72,20 @@ int game_event_get_player_index(const GameEvent *event) {
   return event->player_index;
 }
 
-void game_event_set_cumulative_score(GameEvent *event, int cumulative_score) {
+void game_event_set_cumulative_score(GameEvent *event,
+                                     Equity cumulative_score) {
   event->cumulative_score = cumulative_score;
 }
 
-int game_event_get_cumulative_score(const GameEvent *event) {
+Equity game_event_get_cumulative_score(const GameEvent *event) {
   return event->cumulative_score;
 }
 
-void game_event_set_move_score(GameEvent *event, int move_score) {
+void game_event_set_move_score(GameEvent *event, Equity move_score) {
   event->move_score = move_score;
 }
 
-int game_event_get_move_score(const GameEvent *event) {
+Equity game_event_get_move_score(const GameEvent *event) {
   return event->move_score;
 }
 
@@ -97,11 +98,12 @@ const char *game_event_get_cgp_move_string(const GameEvent *event) {
   return event->cgp_move_string;
 }
 
-void game_event_set_score_adjustment(GameEvent *event, int score_adjustment) {
+void game_event_set_score_adjustment(GameEvent *event,
+                                     Equity score_adjustment) {
   event->score_adjustment = score_adjustment;
 }
 
-int game_event_get_score_adjustment(const GameEvent *event) {
+Equity game_event_get_score_adjustment(const GameEvent *event) {
   return event->score_adjustment;
 }
 
@@ -139,7 +141,7 @@ int game_event_get_turn_value(const GameEvent *event) {
 typedef struct GameHistoryPlayer {
   char *name;
   char *nickname;
-  int score;
+  Equity score;
   bool next_rack_set;
   Rack *last_known_rack;
 } GameHistoryPlayer;
@@ -163,7 +165,7 @@ GameHistoryPlayer *game_history_player_create(const char *name,
   GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
   player->name = string_duplicate(name);
   player->nickname = string_duplicate(nickname);
-  player->score = 0;
+  player->score = EQUITY_ZERO_VALUE;
   player->next_rack_set = false;
   player->last_known_rack = NULL;
   return player;
@@ -206,7 +208,7 @@ const char *game_history_player_get_nickname(const GameHistory *game_history,
 }
 
 void game_history_player_set_score(GameHistory *game_history, int player_index,
-                                   int score) {
+                                   Equity score) {
   GameHistoryPlayer *player = game_history->players[player_index];
   player->score = score;
 }

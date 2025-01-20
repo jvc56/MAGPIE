@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
-#include "../../src/def/config_defs.h"
 #include "../../src/def/inference_defs.h"
 #include "../../src/def/letter_distribution_defs.h"
 
@@ -16,7 +16,6 @@
 #include "../../src/impl/config.h"
 
 #include "../../src/impl/cgp.h"
-#include "../../src/impl/inference.h"
 
 #include "../../src/util/string_util.h"
 #include "../../src/util/util.h"
@@ -227,8 +226,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(stat_get_num_samples(equity_values) == 3);
   assert(stat_get_num_unique_samples(equity_values) == 1);
   rack_set_to_string(ld, rack, "S");
-  assert(within_epsilon(stat_get_mean(equity_values),
-                        klv_get_leave_value(klv, rack)));
+  assert(double_to_equity(stat_get_mean(equity_values)) ==
+         klv_get_leave_value(klv, rack));
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "S")) {
       assert(inference_results_get_subtotal(inference_results,
@@ -368,8 +367,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(stat_get_num_samples(equity_values) == 1);
   assert(stat_get_num_unique_samples(equity_values) == 1);
   rack_set_to_string(ld, rack, "DDSW??");
-  assert(within_epsilon(stat_get_mean(equity_values),
-                        klv_get_leave_value(klv, rack)));
+  assert(double_to_equity(stat_get_mean(equity_values)) ==
+         klv_get_leave_value(klv, rack));
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "S") || i == ld_hl_to_ml(ld, "W")) {
       assert(inference_results_get_subtotal(inference_results,
@@ -463,7 +462,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(within_epsilon(stat_get_mean(letter_stat), 1));
   assert(within_epsilon(stat_get_stdev(letter_stat), 0));
 
-  assert(within_epsilon(stat_get_stdev(equity_values), 6.53225818584641171327));
+  assert_equal_at_equity_resolution(stat_get_stdev(equity_values),
+                                    6.53225818584641171327);
 
   lrl = inference_results_get_leave_rack_list(inference_results);
 
@@ -692,8 +692,8 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(stat_get_num_samples(equity_values) == 2);
   assert(stat_get_num_unique_samples(equity_values) == 1);
   rack_set_to_string(ld, rack, "X?");
-  assert(within_epsilon(stat_get_mean(equity_values),
-                        klv_get_leave_value(klv, rack)));
+  assert(double_to_equity(stat_get_mean(equity_values)) ==
+         klv_get_leave_value(klv, rack));
   for (int i = 0; i < ld_size; i++) {
     if (i == ld_hl_to_ml(ld, "?") || i == ld_hl_to_ml(ld, "X")) {
       assert(inference_results_get_subtotal(inference_results,
@@ -728,17 +728,18 @@ void test_infer_nonerror_cases(int number_of_threads) {
   assert(stat_get_num_samples(equity_values) == 660);
   assert(stat_get_num_unique_samples(equity_values) == 3);
   rack_set_to_string(ld, rack, "?HIR");
-  double bhir_value = klv_get_leave_value(klv, rack);
-  double bhir_prop_value = bhir_value * 160;
+  const double bhir_value = equity_to_double(klv_get_leave_value(klv, rack));
+  const double bhir_prop_value = bhir_value * 160;
   rack_set_to_string(ld, rack, "?HNR");
-  double bhnr_value = klv_get_leave_value(klv, rack);
-  double bhnr_prop_value = bhnr_value * 100;
+  const double bhnr_value = equity_to_double(klv_get_leave_value(klv, rack));
+  const double bhnr_prop_value = bhnr_value * 100;
   rack_set_to_string(ld, rack, "HINR");
-  double hirn_value = klv_get_leave_value(klv, rack);
-  double hirn_prop_value = hirn_value * 400;
-  double mean_rin_leave_value =
+  const double hirn_value = equity_to_double(klv_get_leave_value(klv, rack));
+  const double hirn_prop_value = hirn_value * 400;
+  const double mean_rin_leave_value =
       (bhir_prop_value + bhnr_prop_value + hirn_prop_value) / 660;
-  assert(within_epsilon(stat_get_mean(equity_values), mean_rin_leave_value));
+  assert_equal_at_equity_resolution(stat_get_mean(equity_values),
+                                    mean_rin_leave_value);
 
   // Test exchanges
   game_load_cgp(game, VS_JEREMY);

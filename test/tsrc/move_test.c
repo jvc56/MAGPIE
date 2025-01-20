@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "../../src/def/board_defs.h"
+#include "../../src/def/equity_defs.h"
 #include "../../src/def/game_history_defs.h"
 
 #include "../../src/ent/board.h"
@@ -132,7 +133,7 @@ void test_move_set_as_pass(void) {
   assert(move_get_tiles_played(m) == 0);
   assert(move_get_tiles_length(m) == 0);
   assert(move_get_dir(m) == BOARD_HORIZONTAL_DIRECTION);
-  assert(move_get_equity(m) == PASS_MOVE_EQUITY);
+  assert(move_get_equity(m) == EQUITY_PASS_VALUE);
 
   move_destroy(m);
 }

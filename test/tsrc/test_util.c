@@ -17,10 +17,12 @@
 #include "../../src/def/letter_distribution_defs.h"
 #include "../../src/def/move_defs.h"
 
+#include "../../src/ent/anchor.h"
 #include "../../src/ent/bag.h"
 #include "../../src/ent/bit_rack.h"
 #include "../../src/ent/board.h"
 #include "../../src/ent/dictionary_word.h"
+#include "../../src/ent/equity.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
@@ -47,6 +49,10 @@
 
 // Global variable for the timeout function.
 jmp_buf env;
+
+void assert_equal_at_equity_resolution(double a, double b) {
+  assert(double_to_equity(a) == double_to_equity(b));
+}
 
 bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
@@ -259,7 +265,8 @@ void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
 
 void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list,
+                 /*override_kwg=*/NULL);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
   play_move(sorted_move_list->moves[n], game, NULL, NULL);
   sorted_move_list_destroy(sorted_move_list);
@@ -751,4 +758,39 @@ void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
     hl[0] = expected_word[i];
     assert(buffer[start + i] == ld_hl_to_ml(ld, hl));
   }
+}
+
+void assert_move_score(const Move *move, int expected_score) {
+  const Equity expected_score_eq = int_to_equity(expected_score);
+  assert(move_get_score(move) == expected_score_eq);
+}
+
+void assert_move_equity_int(const Move *move, int expected_equity) {
+  assert_move_equity_exact(move, int_to_equity(expected_equity));
+}
+
+void assert_move_equity_exact(const Move *move, Equity expected_equity) {
+  assert(move_get_equity(move) == expected_equity);
+}
+
+void assert_rack_score(const LetterDistribution *ld, const Rack *rack, 
+                       int expected_score) {
+  assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
+}
+
+void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
+                                             int expected_challenge_points) {
+  const Equity expected_challenge_points_eq =
+      int_to_equity(expected_challenge_points);
+  assert(validated_moves_get_challenge_points(vms, i) ==
+         expected_challenge_points_eq);
+}
+
+void assert_anchor_equity_int(const AnchorList *al, int i, int expected) {
+  assert_anchor_equity_exact(al, i, int_to_equity(expected));
+}
+
+void assert_anchor_equity_exact(const AnchorList *al, int i, Equity expected) {
+  const Equity actual = anchor_get_highest_possible_equity(al, i);
+  assert(actual == expected);
 }

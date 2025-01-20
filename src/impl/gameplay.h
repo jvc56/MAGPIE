@@ -27,7 +27,7 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
 void get_leave_for_move(const Move *move, Game *game, Rack *leave);
 void return_rack_to_bag(Game *game, int player_index);
 bool rack_is_drawable(Game *game, int player_index, const Rack *rack_to_draw);
-double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
+Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_tiles(Game *game);
 
 #endif

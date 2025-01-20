@@ -286,7 +286,8 @@ void leave_list_write_to_klv(LeaveList *leave_list) {
   KLV *klv = leave_list->klv;
   for (int i = 0; i < number_of_leaves; i++) {
     if (items[i]->count > 0) {
-      klv->leave_values[i] = items[i]->mean - average_leave_value;
+      klv->leave_values[i] =
+          double_to_equity(items[i]->mean - average_leave_value);
     }
   }
 }

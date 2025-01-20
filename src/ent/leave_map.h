@@ -6,6 +6,8 @@
 
 #include "../def/rack_defs.h"
 
+#include "equity.h"
+
 #include "../util/util.h"
 
 #include "rack.h"
@@ -20,7 +22,7 @@
 // one tile at a time in the LeaveMap.
 typedef struct LeaveMap {
   int rack_array_size;
-  double leave_values[1 << RACK_SIZE];
+  Equity leave_values[1 << RACK_SIZE];
   uint8_t letter_base_index_map[MAX_ALPHABET_SIZE];
   uint64_t reversed_letter_bit_map[RACK_SIZE];
   int current_index;
@@ -63,11 +65,11 @@ static inline void leave_map_set_current_index(LeaveMap *leave_map,
 }
 
 static inline void leave_map_set_current_value(LeaveMap *leave_map,
-                                               double value) {
+                                               Equity value) {
   leave_map->leave_values[leave_map->current_index] = value;
 }
 
-static inline double leave_map_get_current_value(const LeaveMap *leave_map) {
+static inline Equity leave_map_get_current_value(const LeaveMap *leave_map) {
   return leave_map->leave_values[leave_map->current_index];
 }
 

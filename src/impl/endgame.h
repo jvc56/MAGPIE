@@ -36,6 +36,8 @@ typedef struct EndgameSolver {
   int requested_plies;
   int threads;
 
+  const KWG *pruned_kwg;
+  
   // Owned by the caller:
   ThreadControl *thread_control;
   const Game *game;

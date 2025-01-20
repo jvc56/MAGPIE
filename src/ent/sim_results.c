@@ -210,26 +210,26 @@ void sim_results_unlock_simmed_plays(SimResults *sim_results) {
   pthread_mutex_unlock(&sim_results->simmed_plays_mutex);
 }
 
-void simmed_play_add_score_stat(SimmedPlay *sp, int score, bool is_bingo,
+void simmed_play_add_score_stat(SimmedPlay *sp, Equity score, bool is_bingo,
                                 int ply, bool lock) {
   if (lock) {
     pthread_mutex_lock(&sp->mutex);
   }
-  stat_push(sp->score_stat[ply], (double)score, 1);
+  stat_push(sp->score_stat[ply], equity_to_double(score), 1);
   stat_push(sp->bingo_stat[ply], (double)is_bingo, 1);
   if (lock) {
     pthread_mutex_unlock(&sp->mutex);
   }
 }
 
-void simmed_play_add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
-                                 float leftover, bool lock) {
+void simmed_play_add_equity_stat(SimmedPlay *sp, Equity initial_spread,
+                                 Equity spread, Equity leftover, bool lock) {
   if (lock) {
     pthread_mutex_lock(&sp->mutex);
   }
   stat_push(sp->equity_stat,
-            (double)(spread - initial_spread) + (double)(leftover), 1);
-  stat_push(sp->leftover_stat, (double)leftover, 1);
+            equity_to_double(spread - initial_spread + leftover), 1);
+  stat_push(sp->leftover_stat, equity_to_double(leftover), 1);
   if (lock) {
     pthread_mutex_unlock(&sp->mutex);
   }
@@ -239,21 +239,22 @@ int round_to_nearest_int(double a) {
   return (int)(a + 0.5 - (a < 0)); // truncated to 55
 }
 
-void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
-                                  float leftover,
+void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp,
+                                  Equity spread, Equity leftover,
                                   game_end_reason_t game_end_reason,
                                   int game_unseen_tiles, bool plies_are_odd,
                                   bool lock) {
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
     // the game ended; use the actual result.
-    if (spread == 0) {
+    if (spread == EQUITY_ZERO_VALUE) {
       wpct = 0.5;
-    } else if (spread > 0) {
+    } else if (spread > EQUITY_ZERO_VALUE) {
       wpct = 1.0;
     }
   } else {
-    int spread_plus_leftover = spread + round_to_nearest_int((double)leftover);
+    int spread_plus_leftover =
+        round_to_nearest_int(equity_to_double(spread + leftover));
     // for an even-ply sim, it is our opponent's turn at the end of the sim.
     // the table is calculated from our perspective, so flip the spread.
     // i.e. if we are winning by 20 pts at the end of the sim, and our opponent

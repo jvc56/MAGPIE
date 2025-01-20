@@ -9,6 +9,6 @@
 void gen_destroy_cache(void);
 void generate_moves(Game *game, move_record_t move_record_type,
                     move_sort_t move_sort_type, int thread_index,
-                    MoveList *move_list);
+                    MoveList *move_list, const KWG* override_kwg);
 
 #endif

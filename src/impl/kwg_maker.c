@@ -1,10 +1,8 @@
 #include "../def/cross_set_defs.h"
 
-#include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 
-#include "../util/log.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
