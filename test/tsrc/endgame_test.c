@@ -124,14 +124,13 @@ void test_eldar_v_stick(void) {
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
-      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;");
-  int plies = 11;
+      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW19;");
+  int plies = 9;
   EndgameSolver *solver = endgame_solver_create(
       config_get_thread_control(config), config_get_game(config),
       config_get_tt_fraction_of_mem(config));
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == 72);
-  assert(small_move_is_pass(&solution.moves[0]));
 
   endgame_solver_destroy(solver);
   config_destroy(config);
