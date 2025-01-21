@@ -259,7 +259,8 @@ void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
 
 void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list,
+                 /*override_kwg=*/NULL);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
   play_move(sorted_move_list->moves[n], game, NULL, NULL);
   sorted_move_list_destroy(sorted_move_list);

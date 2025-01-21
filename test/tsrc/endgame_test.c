@@ -32,7 +32,8 @@ void test_vs_joey(void) {
   7) H12 FLAM (49)
   */
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
 
   Player *p1 = game_get_player(config_get_game(config), 0);
   Rack *r1 = player_get_rack(p1);
@@ -62,7 +63,8 @@ void test_pass_first(void) {
   // an unblockable ZA.
   int plies = 8; // 8
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == -60);
   assert(small_move_is_pass(&solution.moves[0]));
@@ -83,7 +85,8 @@ void test_solve_standard(void) {
 
   int plies = 4;
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == 11);
   assert(!small_move_is_pass(&solution.moves[0]));
@@ -103,10 +106,31 @@ void test_very_deep(void) {
   // This insane endgame requires 25 plies to solve. We end up winning by 1 pt.
   int plies = 25;
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == -116);
   assert(small_move_is_pass(&solution.moves[0]));
+
+  endgame_solver_destroy(solver);
+  config_destroy(config);
+}
+
+void test_eldar_v_stick(void) {
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -r1 small -r2 small -threads 1");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
+      "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
+      "2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW19;");
+  int plies = 9;
+  EndgameSolver *solver = endgame_solver_create(
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
+  PVLine solution = endgame_solve(solver, plies);
+  assert(solution.score == 72);
 
   endgame_solver_destroy(solver);
   config_destroy(config);
@@ -123,7 +147,8 @@ void test_small_arena_realloc(void) {
 
   int plies = 4;
   EndgameSolver *solver = endgame_solver_create(
-      config_get_thread_control(config), config_get_game(config));
+      config_get_thread_control(config), config_get_game(config),
+      config_get_tt_fraction_of_mem(config));
   solver->initial_small_move_arena_size = 512; // 512 bytes holds like 32 moves.
   PVLine solution = endgame_solve(solver, plies);
   assert(solution.score == 11);
@@ -138,9 +163,10 @@ void test_endgame(void) {
   test_solve_standard();
   test_very_deep();
   test_small_arena_realloc();
-  // Uncomment out more of these tests once we add more optimizations,
-  // and/or if we can run the endgame tests in release mode.
-  // test_pass_first();
+  //  Uncomment out more of these tests once we add more optimizations,
+  //  and/or if we can run the endgame tests in release mode.
+  //  test_pass_first();
   // test_vs_joey();
+  // test_eldar_v_stick();
   log_set_level(LOG_WARN);
 }

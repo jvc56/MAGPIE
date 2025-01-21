@@ -40,12 +40,14 @@
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
+#include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "wasm_api_test.h"
 #include "wmp_maker_test.h"
 #include "wmp_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
+#include "zobrist_test.h"
 
 void run_all(void) {
   // Test the loading of the config
@@ -95,6 +97,8 @@ void run_all(void) {
   test_convert();
   test_create_data();
   test_endgame();
+  test_zobrist();
+  test_transposition_table();
 }
 
 typedef void (*TestFunc)(void);
@@ -147,6 +151,8 @@ static TestEntry test_table[] = {
     {"wmp", test_wmp},
     {"wmpmaker", test_wmp_maker},
     {"endgame", test_endgame},
+    {"zobrist", test_zobrist},
+    {"tt", test_transposition_table},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
