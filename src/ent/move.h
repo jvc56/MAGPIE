@@ -77,6 +77,7 @@ typedef struct SmallMove {
 #define SMALL_MOVE_COL_BITMASK 0x3E   // 0b00111110
 #define SMALL_MOVE_ROW_BITMASK 0x07C0 // 0b00000111_11000000
 #define SMALL_MOVE_BLANKS_BIT_MASK (uint64_t)(127ULL << 12)
+#define INVALID_TINY_MOVE (uint64_t)(1ULL << 63)
 
 static const uint64_t SMALL_MOVE_T_BITMASK[7] = {
     (uint64_t)(63ULL << 20), // T1

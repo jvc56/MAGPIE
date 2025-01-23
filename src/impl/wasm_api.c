@@ -113,7 +113,8 @@ char *static_evaluation(const char *cgpstr, int num_plays) {
   load_cgp_into_iso_config(cgpstr, num_plays);
   Game *game = config_get_game(iso_config);
   MoveList *move_list = NULL;
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list,
+                 /*override_kwg=*/NULL);
 
   // This pointer needs to be freed by the caller:
   char *val = ucgi_static_moves(game, move_list);

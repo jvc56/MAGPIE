@@ -49,6 +49,7 @@ double config_get_stop_cond_pct(const Config *config);
 bool config_get_use_game_pairs(const Config *config);
 bool config_get_use_small_plays(const Config *config);
 bool config_get_human_readable(const Config *config);
+double config_get_tt_fraction_of_mem(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
 LetterDistribution *config_get_ld(const Config *config);
 ThreadControl *config_get_thread_control(const Config *config);

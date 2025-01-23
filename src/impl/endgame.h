@@ -2,9 +2,11 @@
 #define ENDGAME_H
 
 #include "../ent/game.h"
+#include "../ent/kwg.h"
 #include "../ent/move.h"
 #include "../ent/small_move_arena.h"
 #include "../ent/thread_control.h"
+#include "../ent/transposition_table.h"
 
 // We don't expect an endgame length to ever be larger than this value.
 #define MAX_VARIANT_LENGTH 25
@@ -28,13 +30,18 @@ typedef struct EndgameSolver {
   bool negascout_optim;
   bool lazysmp_optim;
   bool prevent_slowroll;
+  bool wordprune_optim;
   PVLine principal_variation;
   PVLine *variations;
+
+  KWG *pruned_kwg;
+  int nodes_searched;
 
   int solve_multiple_variations;
   int32_t best_pv_value;
   int requested_plies;
   int threads;
+  TranspositionTable *transposition_table;
 
   // Owned by the caller:
   ThreadControl *thread_control;
@@ -51,7 +58,8 @@ typedef struct EndgameSolverWorker {
   int current_iterative_deepening_depth;
 } EndgameSolverWorker;
 
-EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game);
+EndgameSolver *endgame_solver_create(ThreadControl *tc, const Game *game,
+                                     double tt_fraction_of_mem);
 PVLine endgame_solve(EndgameSolver *solver, int plies);
 void endgame_solver_destroy(EndgameSolver *es);
 
