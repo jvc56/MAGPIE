@@ -321,7 +321,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker, uint64_t seed) {
       continue;
     }
 
-    Equity leftover = EQUITY_ZERO_VALUE;
+    Equity leftover = 0;
     game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
     // play move
     play_move(simmed_play_get_move(simmed_play), game, NULL, NULL);

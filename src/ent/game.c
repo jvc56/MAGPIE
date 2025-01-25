@@ -154,7 +154,7 @@ void game_start_next_player_turn(Game *game) {
 Equity traverse_backwards_for_score(const Board *board,
                                     const LetterDistribution *ld, int row,
                                     int col) {
-  Equity score = EQUITY_ZERO_VALUE;
+  Equity score = 0;
   while (board_is_position_in_bounds_and_not_bricked(board, row, col)) {
     uint8_t ml = board_get_letter(board, row, col);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -221,15 +221,13 @@ static inline void game_gen_alpha_cross_set(Game *game, int row, int col,
 
   if (board_is_nonempty_or_bricked(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index, 0);
-    board_set_cross_score(board, row, col, dir, cross_set_index,
-                          EQUITY_ZERO_VALUE);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
     return;
   }
   if (board_are_left_and_right_empty(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index,
                         TRIVIAL_CROSS_SET);
-    board_set_cross_score(board, row, col, dir, cross_set_index,
-                          EQUITY_ZERO_VALUE);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
     return;
   }
 
@@ -290,7 +288,7 @@ static inline void game_gen_classic_cross_set(Game *game, int row, int col,
       board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
   const int right_col =
       board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
-  Equity score = EQUITY_ZERO_VALUE;
+  Equity score = 0;
   uint64_t front_hook_set = 0;
   uint64_t back_hook_set = 0;
   uint32_t right_lnode_index = 0;

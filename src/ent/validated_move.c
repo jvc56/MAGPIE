@@ -264,7 +264,7 @@ validate_split_move(const StringSplitter *split_move, const Game *game,
     }
     // Equity is set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_EXCHANGE);
-    move_set_score(vm->move, EQUITY_ZERO_VALUE);
+    move_set_score(vm->move, 0);
   } else {
     // Score and equity are set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -453,7 +453,7 @@ validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
   const Player *player = game_get_player(game, player_index);
   const KLV *klv = player_get_klv(player);
   Board *board = game_get_board(game);
-  Equity score = EQUITY_ZERO_VALUE;
+  Equity score = 0;
 
   if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     const KWG *kwg = player_get_kwg(player);
@@ -508,9 +508,9 @@ ValidatedMove *validated_move_create(const Game *game, int player_index,
   vm->formed_words = NULL;
   vm->rack = NULL;
   vm->leave = NULL;
-  vm->challenge_points = EQUITY_ZERO_VALUE;
+  vm->challenge_points = 0;
   vm->challenge_turn_loss = false;
-  vm->leave_value = EQUITY_ZERO_VALUE;
+  vm->leave_value = 0;
   vm->unknown_exchange = false;
   vm->move = move_create();
 

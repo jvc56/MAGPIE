@@ -4,7 +4,6 @@
 #define EQUITY_UNDEFINED_VALUE INT32_MIN
 #define EQUITY_INITIAL_VALUE (INT32_MIN + 1)
 #define EQUITY_PASS_VALUE (INT32_MIN + 2)
-#define EQUITY_ZERO_VALUE 0
 // There are three reserved values at the bottom of the equity range
 #define EQUITY_MIN_VALUE (INT32_MIN + 3)
 // There is only one reserved value at the top of the equity range, but

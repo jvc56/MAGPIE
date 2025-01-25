@@ -35,10 +35,10 @@ GameEvent *game_event_create(void) {
   GameEvent *game_event = malloc_or_die(sizeof(GameEvent));
   game_event->event_type = GAME_EVENT_UNKNOWN;
   game_event->player_index = -1;
-  game_event->cumulative_score = EQUITY_ZERO_VALUE;
-  game_event->score_adjustment = EQUITY_ZERO_VALUE;
+  game_event->cumulative_score = 0;
+  game_event->score_adjustment = 0;
   game_event->cgp_move_string = NULL;
-  game_event->move_score = EQUITY_ZERO_VALUE;
+  game_event->move_score = 0;
   game_event->vms = NULL;
   game_event->rack = NULL;
   game_event->note = NULL;
@@ -165,7 +165,7 @@ GameHistoryPlayer *game_history_player_create(const char *name,
   GameHistoryPlayer *player = malloc_or_die(sizeof(GameHistoryPlayer));
   player->name = string_duplicate(name);
   player->nickname = string_duplicate(nickname);
-  player->score = EQUITY_ZERO_VALUE;
+  player->score = 0;
   player->next_rack_set = false;
   player->last_known_rack = NULL;
   return player;

@@ -247,9 +247,9 @@ void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp,
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
     // the game ended; use the actual result.
-    if (spread == EQUITY_ZERO_VALUE) {
+    if (spread == 0) {
       wpct = 0.5;
-    } else if (spread > EQUITY_ZERO_VALUE) {
+    } else if (spread > 0) {
       wpct = 1.0;
     }
   } else {

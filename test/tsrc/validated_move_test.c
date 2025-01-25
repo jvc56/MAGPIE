@@ -244,7 +244,7 @@ void test_validated_move_success(void) {
   assert(move_get_tiles_played(move) == 3);
   assert_move_score(move, 0);
   // Rack is empty, so equity should be zero
-  assert_move_equity_exact(move, EQUITY_ZERO_VALUE);
+  assert_move_equity_exact(move, 0);
   assert(move_get_tile(move, 0) == ld_hl_to_ml(ld, "A"));
   assert(move_get_tile(move, 1) == ld_hl_to_ml(ld, "B"));
   assert(move_get_tile(move, 2) == ld_hl_to_ml(ld, "C"));
@@ -261,7 +261,7 @@ void test_validated_move_success(void) {
   assert(move_get_tiles_length(move) == 4);
   assert(move_get_tiles_played(move) == 4);
   assert_move_score(move, 0);
-  assert_move_equity_exact(move, EQUITY_ZERO_VALUE);
+  assert_move_equity_exact(move, 0);
   assert_validated_moves_challenge_points(vms, 0, 0);
   assert(!validated_moves_get_challenge_turn_loss(vms, 0));
   validated_moves_destroy(vms);

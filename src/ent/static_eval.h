@@ -12,8 +12,7 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 
-static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
-    EQUITY_ZERO_VALUE};
+static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
 
 // These are quackle values, but we can probably come up with our
 // own at some point.
@@ -89,7 +88,7 @@ static_eval_get_shadow_equity(const LetterDistribution *ld,
                               const Equity *descending_tile_scores,
                               int number_of_tiles_in_bag,
                               int number_of_letters_on_rack, int tiles_played) {
-  Equity equity = EQUITY_ZERO_VALUE;
+  Equity equity = 0;
   if (number_of_tiles_in_bag > 0) {
     // Bag is not empty: use leave values
     equity += best_leaves[number_of_letters_on_rack - tiles_played];
@@ -147,7 +146,7 @@ static inline Equity static_eval_get_move_equity(
     const Rack *player_leave, const Rack *opp_rack,
     const Equity *opening_move_penalties, int board_number_of_tiles_played,
     int number_of_tiles_in_bag) {
-  Equity leave_equity = EQUITY_ZERO_VALUE;
+  Equity leave_equity = 0;
   if (player_leave && !rack_is_empty(player_leave)) {
     leave_equity = klv_get_leave_value(klv, player_leave);
   }
@@ -178,7 +177,7 @@ static inline Equity static_eval_get_move_score(const LetterDistribution *ld,
   Equity ls;
   Equity main_word_score = 0;
   Equity cross_scores = 0;
-  Equity word_bingo_bonus = EQUITY_ZERO_VALUE;
+  Equity word_bingo_bonus = 0;
   int word_multiplier = 1;
 
   if (tiles_played == RACK_SIZE) {

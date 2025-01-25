@@ -244,23 +244,23 @@ void test_board_layout_correctness(void) {
 
   Equity opening_penalties[BOARD_DIM * 2];
   board_copy_opening_penalties(board, opening_penalties);
-  assert(opening_penalties[0] == EQUITY_ZERO_VALUE);
-  assert(opening_penalties[1] == EQUITY_ZERO_VALUE);
+  assert(opening_penalties[0] == 0);
+  assert(opening_penalties[1] == 0);
   assert(opening_penalties[2] == OPENING_HOTSPOT_PENALTY * 3);
   assert(opening_penalties[3] == OPENING_HOTSPOT_PENALTY * 3);
   assert(opening_penalties[4] == OPENING_HOTSPOT_PENALTY * 3);
   assert(opening_penalties[5] == OPENING_HOTSPOT_PENALTY * 3);
   assert(opening_penalties[6] == OPENING_HOTSPOT_PENALTY * 3);
-  assert(opening_penalties[7] == EQUITY_ZERO_VALUE);
+  assert(opening_penalties[7] == 0);
   assert(opening_penalties[8] == OPENING_HOTSPOT_PENALTY * 1.5);
   assert(opening_penalties[9] == OPENING_HOTSPOT_PENALTY * 1.5);
   assert(opening_penalties[10] == OPENING_HOTSPOT_PENALTY * 1.5);
   assert(opening_penalties[15] == OPENING_HOTSPOT_PENALTY * 3);
   assert(opening_penalties[16] == OPENING_HOTSPOT_PENALTY * 3);
   assert(opening_penalties[17] == OPENING_HOTSPOT_PENALTY * 3);
-  assert(opening_penalties[22] == EQUITY_ZERO_VALUE);
+  assert(opening_penalties[22] == 0);
   assert(opening_penalties[23] == OPENING_HOTSPOT_PENALTY * 1.5);
-  assert(opening_penalties[24] == EQUITY_ZERO_VALUE);
+  assert(opening_penalties[24] == 0);
 
   // Validate play out of bounds
   load_game_with_test_board(game, data_paths, "standard15");

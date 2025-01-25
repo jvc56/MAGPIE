@@ -136,7 +136,7 @@ void record_valid_leave(const Rack *rack, InferenceResults *results,
 }
 
 void evaluate_possible_leave(Inference *inference) {
-  Equity current_leave_value = EQUITY_ZERO_VALUE;
+  Equity current_leave_value = 0;
   if (inference->target_number_of_tiles_exchanged == 0) {
     current_leave_value =
         klv_get_leave_value(inference->klv, inference->current_target_leave);
@@ -533,7 +533,7 @@ inference_status_t verify_inference(const Inference *inference) {
   }
 
   if (inference->target_number_of_tiles_exchanged != 0 &&
-      inference->target_score != EQUITY_ZERO_VALUE) {
+      inference->target_score != 0) {
     return INFERENCE_STATUS_EXCHANGE_SCORE_NOT_ZERO;
   }
 

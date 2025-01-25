@@ -29,7 +29,7 @@ struct Player {
 
 void player_reset(Player *player) {
   rack_reset(player->rack);
-  player->score = EQUITY_ZERO_VALUE;
+  player->score = 0;
 }
 
 void player_update(const PlayersData *players_data, Player *player) {
@@ -46,7 +46,7 @@ Player *player_create(const PlayersData *players_data,
                       const LetterDistribution *ld, int player_index) {
   Player *player = malloc_or_die(sizeof(Player));
   player->index = player_index;
-  player->score = EQUITY_ZERO_VALUE;
+  player->score = 0;
   player->rack = rack_create(ld_get_size(ld));
 
   player_update(players_data, player);

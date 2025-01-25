@@ -848,7 +848,7 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
     is_tile_placement_move = true;
   }
 
-  Equity target_score = EQUITY_ZERO_VALUE;
+  Equity target_score = 0;
 
   if (is_tile_placement_move) {
     const char *target_score_str =
