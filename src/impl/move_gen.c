@@ -16,6 +16,7 @@
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
@@ -67,7 +68,7 @@ typedef struct MoveGen {
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
   int row_number_of_anchors_cache[(BOARD_DIM) * 2];
-  double opening_move_penalties[(BOARD_DIM) * 2];
+  Equity opening_move_penalties[(BOARD_DIM) * 2];
   int board_number_of_tiles_played;
   int cross_index;
   Move best_move_and_current_move[2];
@@ -103,28 +104,28 @@ typedef struct MoveGen {
   // This is a sum of already-played crosswords and tiles restricted to a known
   // empty square (times a letter or word multiplier). It's a part of the score
   // not affected by the overall mainword multiplier.
-  int shadow_perpendicular_additional_score;
+  Equity shadow_perpendicular_additional_score;
 
   // This is a sum of both the playthrough tiles and tiles restricted to a known
   // empty square (times their letter multiplier). It will be multiplied by
   // shadow_word_multiplier as part of computing score shadow_record.
-  int shadow_mainword_restricted_score;
+  Equity shadow_mainword_restricted_score;
 
   // Product of word multipliers used by newly played tiles.
   int shadow_word_multiplier;
 
-  double highest_shadow_equity;
+  Equity highest_shadow_equity;
   uint64_t rack_cross_set;
   int number_of_letters_on_rack;
-  uint16_t full_rack_descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
-  uint16_t descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
-  uint16_t descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
-  double best_leaves[(RACK_SIZE)];
+  Equity full_rack_descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
+  Equity descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
+  Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
+  Equity best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
 
   // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
-  uint8_t tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
+  Equity tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
 
   // Owned by the caller
   const LetterDistribution *ld;
@@ -203,7 +204,7 @@ static inline uint64_t gen_cache_get_cross_set(const MoveGen *gen, int col) {
   return square_get_cross_set(&gen->row_cache[col]);
 }
 
-static inline uint8_t gen_cache_get_cross_score(const MoveGen *gen, int col) {
+static inline Equity gen_cache_get_cross_score(const MoveGen *gen, int col) {
   return square_get_cross_score(&gen->row_cache[col]);
 }
 
@@ -217,7 +218,7 @@ static inline uint64_t gen_cache_get_right_extension_set(const MoveGen *gen,
   return square_get_right_extension_set(&gen->row_cache[col]);
 }
 
-static inline double gen_get_static_equity(const MoveGen *gen,
+static inline Equity gen_get_static_equity(const MoveGen *gen,
                                            const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
       gen->ld, move, &gen->player_rack, &gen->opponent_rack,
@@ -243,9 +244,9 @@ static inline void gen_switch_best_move_and_current_move(MoveGen *gen) {
 }
 
 static inline void set_play_for_record(Move *move, game_event_t move_type,
-                                       int leftstrip, int rightstrip, int score,
-                                       int start_row, int start_col,
-                                       int tiles_played, int dir,
+                                       int leftstrip, int rightstrip,
+                                       Equity score, int start_row,
+                                       int start_col, int tiles_played, int dir,
                                        uint8_t strip[]) {
   move_set_all_except_equity(move, strip, leftstrip, rightstrip, score,
                              start_row, start_col, tiles_played, dir,
@@ -256,8 +257,8 @@ static inline void set_play_for_record(Move *move, game_event_t move_type,
   }
 }
 
-static inline double
-get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, int score) {
+static inline Equity
+get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, Equity score) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return gen_get_static_equity(gen, move);
   }
@@ -267,7 +268,7 @@ get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, int score) {
 static inline void set_small_play_for_record(SmallMove *move,
                                              game_event_t move_type,
                                              int leftstrip, int rightstrip,
-                                             int score, int start_row,
+                                             Equity score, int start_row,
                                              int start_col, int tiles_played,
                                              int dir, uint8_t strip[]) {
 
@@ -278,7 +279,7 @@ static inline void set_small_play_for_record(SmallMove *move,
 
 static inline void update_best_move_or_insert_into_movelist(
     MoveGen *gen, int leftstrip, int rightstrip, game_event_t move_type,
-    int score, int start_row, int start_col, int tiles_played, int dir,
+    Equity score, int start_row, int start_col, int tiles_played, int dir,
     uint8_t strip[]) {
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     Move *move = move_list_get_spare_move(gen->move_list);
@@ -308,19 +309,18 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
                                               int rightstrip,
                                               int main_word_score,
                                               int word_multiplier,
-                                              int cross_score) {
-  int start_row = gen->current_row_index;
-  int start_col = leftstrip;
+                                              Equity cross_score) {
+  const int start_row = gen->current_row_index;
+  const int start_col = leftstrip;
   const int tiles_played = gen->tiles_played;
 
-  int score = 0;
-
-  int bingo_bonus = 0;
+  Equity bingo_bonus = 0;
   if (tiles_played == RACK_SIZE) {
     bingo_bonus = gen->bingo_bonus;
   }
 
-  score = main_word_score * word_multiplier + cross_score + bingo_bonus;
+  const Equity score =
+      main_word_score * word_multiplier + cross_score + bingo_bonus;
 
   update_best_move_or_insert_into_movelist(
       gen, leftstrip, rightstrip, GAME_EVENT_TILE_PLACEMENT_MOVE, score,
@@ -328,18 +328,18 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
 }
 
 static inline bool better_play_has_been_found(const MoveGen *gen,
-                                              double highest_possible_value) {
+                                              Equity highest_possible_value) {
   const Move *move = gen_get_readonly_best_move(gen);
-  const double best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
+  const Equity best_value_found = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? move_get_equity(move)
                                       : move_get_score(move);
-  return highest_possible_value + COMPARE_MOVES_EPSILON <= best_value_found;
+  return highest_possible_value < best_value_found;
 }
 
 static inline void record_exchange(MoveGen *gen) {
   if ((gen->move_record_type == MOVE_RECORD_BEST) &&
       (gen->move_sort_type == MOVE_SORT_EQUITY)) {
-    const double leave_value = leave_map_get_current_value(&gen->leave_map);
+    const Equity leave_value = leave_map_get_current_value(&gen->leave_map);
     if (better_play_has_been_found(gen, leave_value)) {
       return;
     }
@@ -374,7 +374,7 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
     const int number_of_letters_on_rack =
         rack_get_total_letters(&gen->player_rack);
     if (number_of_letters_on_rack > 0) {
-      double value = 0.0;
+      Equity value = 0.0;
       if (word_index != KLV_UNFOUND_INDEX) {
         value = klv_get_indexed_leave_value(gen->klv, word_index - 1);
       }
@@ -756,23 +756,23 @@ static inline void shadow_record(MoveGen *gen) {
       !kwg_accepts_alpha_with_blanks(gen->kwg, &gen->bingo_alpha_rack)) {
     return;
   }
-  uint16_t tiles_played_score = 0;
+  Equity tiles_played_score = 0;
   for (int i = 0; i < RACK_SIZE; i++) {
     tiles_played_score += gen->descending_tile_scores[i] *
                           gen->descending_effective_letter_multipliers[i];
   }
 
-  int bingo_bonus = 0;
+  Equity bingo_bonus = 0;
   if (gen->tiles_played == RACK_SIZE) {
     bingo_bonus = gen->bingo_bonus;
   }
 
-  const int score =
+  const Equity score =
       tiles_played_score +
       (gen->shadow_mainword_restricted_score * gen->shadow_word_multiplier) +
       gen->shadow_perpendicular_additional_score + bingo_bonus;
 
-  double equity = (double)score;
+  Equity equity = score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity += static_eval_get_shadow_equity(
         gen->ld, &gen->opponent_rack, gen->best_leaves,
@@ -890,7 +890,7 @@ static inline int get_single_bit_index(uint64_t bitset) {
 // find and remove this score, shift the rest of the list to the left.
 // fill the last element with 0.
 static inline void remove_score_from_descending_tile_scores(MoveGen *gen,
-                                                            uint16_t score) {
+                                                            Equity score) {
   // The tile has already been removed from the rack, so num_available_tiles
   // is actually the desired new size we want to be in sync with.
   const int num_available_tiles = rack_get_total_letters(&gen->player_rack);
@@ -920,9 +920,9 @@ static inline bool try_restrict_tile_and_accumulate_score(
     gen->rack_cross_set &= ~possible_letters_here;
   }
   const bool is_cross_word = gen_cache_get_is_cross_word(gen, col);
-  const uint16_t tile_score = gen->tile_scores[ml];
+  const Equity tile_score = gen->tile_scores[ml];
   remove_score_from_descending_tile_scores(gen, tile_score);
-  const int lsm = tile_score * letter_multiplier;
+  const Equity lsm = tile_score * letter_multiplier;
   gen->shadow_mainword_restricted_score += lsm;
   gen->shadow_perpendicular_additional_score +=
       (lsm * this_word_multiplier) & -is_cross_word;
@@ -931,8 +931,9 @@ static inline bool try_restrict_tile_and_accumulate_score(
 
 static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // Save the score totals to be reset after shadowing right.
-  const int orig_main_restricted_score = gen->shadow_mainword_restricted_score;
-  const int orig_perp_score = gen->shadow_perpendicular_additional_score;
+  const Equity orig_main_restricted_score =
+      gen->shadow_mainword_restricted_score;
+  const Equity orig_perp_score = gen->shadow_perpendicular_additional_score;
   const int orig_wordmul = gen->shadow_word_multiplier;
 
   // Save the rack with the tiles available before beginning shadow right. Any
@@ -993,7 +994,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
     }
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_right_col);
-    const int cross_score =
+    const Equity cross_score =
         gen_cache_get_cross_score(gen, gen->current_right_col);
     const int letter_multiplier = bonus_square & 0x0F;
     const int this_word_multiplier = bonus_square >> 4;
@@ -1144,7 +1145,7 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
     }
     const uint8_t bonus_square =
         gen_cache_get_bonus_square(gen, gen->current_left_col);
-    const int cross_score =
+    const Equity cross_score =
         gen_cache_get_cross_score(gen, gen->current_left_col);
     const int letter_multiplier = bonus_square & 0x0F;
     const int this_word_multiplier = bonus_square >> 4;
@@ -1181,7 +1182,7 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   // Play tile on empty anchor square and set scoring parameters
   const uint8_t bonus_square =
       gen_cache_get_bonus_square(gen, gen->current_left_col);
-  const uint8_t cross_score =
+  const Equity cross_score =
       gen_cache_get_cross_score(gen, gen->current_left_col);
   const int letter_multiplier = bonus_square & 0x0F;
   const int this_word_multiplier = bonus_square >> 4;
@@ -1269,7 +1270,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
                            gen->last_anchor_col, gen->dir,
-                           DEFAULT_SHADOW_MAX_EQUITY);
+                           EQUITY_MAX_VALUE);
     return;
   }
 
@@ -1396,18 +1397,18 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
   // Reset the best and current moves
   gen->best_move_index = 0;
-  move_set_equity(gen_get_best_move(gen), INITIAL_TOP_MOVE_EQUITY);
+  move_set_equity(gen_get_best_move(gen), EQUITY_INITIAL_VALUE);
 
   leave_map_init(&gen->player_rack, &gen->leave_map);
   if (rack_get_total_letters(&gen->player_rack) < RACK_SIZE) {
     leave_map_set_current_value(
         &gen->leave_map, klv_get_leave_value(gen->klv, &gen->player_rack));
   } else {
-    leave_map_set_current_value(&gen->leave_map, INITIAL_TOP_MOVE_EQUITY);
+    leave_map_set_current_value(&gen->leave_map, EQUITY_INITIAL_VALUE);
   }
 
   for (int i = 0; i < (RACK_SIZE); i++) {
-    gen->best_leaves[i] = (double)(INITIAL_TOP_MOVE_EQUITY);
+    gen->best_leaves[i] = EQUITY_INITIAL_VALUE;
   }
 
   if (gen->number_of_tiles_in_bag > 0) {
@@ -1476,7 +1477,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
     rack_reset(&gen->full_player_rack);
   }
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
-    double anchor_highest_possible_equity =
+    Equity anchor_highest_possible_equity =
         anchor_get_highest_possible_equity(anchor_list, i);
     if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(gen, anchor_highest_possible_equity)) {
@@ -1517,11 +1518,11 @@ void generate_moves(Game *game, move_record_t move_record_type,
 
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     move_list_set_spare_move_as_pass(gen->move_list);
-    move_list_insert_spare_move(gen->move_list, PASS_MOVE_EQUITY);
+    move_list_insert_spare_move(gen->move_list, EQUITY_PASS_VALUE);
   } else if (gen->move_record_type == MOVE_RECORD_BEST) {
     const Move *top_move = gen_get_readonly_best_move(gen);
     Move *spare_move = move_list_get_spare_move(gen->move_list);
-    if (move_get_equity(top_move) < PASS_MOVE_EQUITY) {
+    if (move_get_equity(top_move) < EQUITY_PASS_VALUE) {
       move_list_set_spare_move_as_pass(gen->move_list);
     } else {
       move_copy(spare_move, top_move);

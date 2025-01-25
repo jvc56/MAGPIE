@@ -12,6 +12,8 @@
 #include "../ent/letter_distribution.h"
 #include "board.h"
 
+#include "../ent/equity.h"
+
 #include "../util/log.h"
 #include "../util/util.h"
 
@@ -22,14 +24,14 @@ typedef enum {
 
 typedef struct Move {
   game_event_t move_type;
-  int score;
+  Equity score;
   int row_start;
   int col_start;
   // Number of tiles played or exchanged
   int tiles_played;
   // Equal to tiles_played for exchanges
   int tiles_length;
-  double equity;
+  Equity equity;
   int dir;
   uint8_t tiles[MOVE_MAX_TILES];
 } Move;
@@ -128,7 +130,7 @@ static inline int move_get_tiles_length(const Move *move) {
   return move->tiles_length;
 }
 
-static inline double move_get_equity(const Move *move) { return move->equity; }
+static inline Equity move_get_equity(const Move *move) { return move->equity; }
 
 static inline int move_get_dir(const Move *move) { return move->dir; }
 
@@ -140,7 +142,7 @@ static inline void move_set_type(Move *move, game_event_t move_type) {
   move->move_type = move_type;
 }
 
-static inline void move_set_score(Move *move, int score) {
+static inline void move_set_score(Move *move, Equity score) {
   move->score = score;
 }
 
@@ -168,13 +170,13 @@ static inline void move_set_tile(Move *move, uint8_t tile, int index) {
   }
 }
 
-static inline void move_set_equity(Move *move, double equity) {
+static inline void move_set_equity(Move *move, Equity equity) {
   move->equity = equity;
 }
 
 static inline void move_set_all_except_equity(Move *move, const uint8_t strip[],
                                               int leftstrip, int rightstrip,
-                                              int score, int row_start,
+                                              Equity score, int row_start,
                                               int col_start, int tiles_played,
                                               int dir, game_event_t move_type) {
   move->score = score;
@@ -196,9 +198,9 @@ static inline void move_set_all_except_equity(Move *move, const uint8_t strip[],
 }
 
 static inline void move_set_all(Move *move, uint8_t strip[], int leftstrip,
-                                int rightstrip, int score, int row_start,
+                                int rightstrip, Equity score, int row_start,
                                 int col_start, int tiles_played, int dir,
-                                game_event_t move_type, double leave_value) {
+                                game_event_t move_type, Equity leave_value) {
   move_set_all_except_equity(move, strip, leftstrip, rightstrip, score,
                              row_start, col_start, tiles_played, dir,
                              move_type);
@@ -223,7 +225,7 @@ static inline void move_set_as_pass(Move *move) {
   move_set_all(move, /*strip=*/NULL, /*leftstrip=*/0, /*rightstrip=*/-1,
                /*score=*/0, /*row_start=*/0, /*col_start=*/0,
                /*tiles_played=*/0, /*dir=*/0, GAME_EVENT_PASS,
-               PASS_MOVE_EQUITY);
+               EQUITY_PASS_VALUE);
 }
 
 static inline Move *move_list_get_spare_move(const MoveList *ml) {
@@ -242,7 +244,7 @@ static inline Move *move_list_get_move(const MoveList *ml, int move_index) {
 
 static inline void move_list_set_spare_move(MoveList *ml, uint8_t strip[],
                                             int leftstrip, int rightstrip,
-                                            int score, int row_start,
+                                            Equity score, int row_start,
                                             int col_start, int tiles_played,
                                             int dir, game_event_t move_type) {
   move_set_all_except_equity(ml->spare_move, strip, leftstrip, rightstrip,
@@ -260,7 +262,7 @@ static inline void small_move_set_as_pass(SmallMove *move) {
 }
 
 static inline void small_move_set_all(SmallMove *move, const uint8_t strip[],
-                                      int leftstrip, int rightstrip, int score,
+                                      int leftstrip, int rightstrip, Equity score,
                                       int row_start, int col_start,
                                       int tiles_played, bool dir_is_vertical,
                                       game_event_t move_type) {
@@ -272,7 +274,8 @@ static inline void small_move_set_all(SmallMove *move, const uint8_t strip[],
     play_length = rightstrip - leftstrip + 1;
   }
 
-  move->metadata = score + (play_length << 16) + (tiles_played << 24);
+  const int score_int = equity_to_int(score);
+  move->metadata = score_int | (play_length << 16) | (tiles_played << 24);
 
   if (move_type == GAME_EVENT_PASS) {
     move->tiny_move = 0;
@@ -318,10 +321,6 @@ static inline void small_move_destroy(SmallMove *move) {
   free(move);
 }
 
-static inline bool within_epsilon_for_equity(double a, double b) {
-  return fabs(a - b) < COMPARE_MOVES_EPSILON;
-}
-
 // Returns 1 if move_1 is "better" than move_2
 // Returns 0 if move_2 is "better" than move_1
 // Returns -1 if the moves are equivalent
@@ -330,7 +329,7 @@ static inline bool within_epsilon_for_equity(double a, double b) {
 // Assumes the moves are not null
 static inline int compare_moves(const Move *move_1, const Move *move_2,
                                 bool allow_duplicates) {
-  if (!within_epsilon_for_equity(move_1->equity, move_2->equity)) {
+  if (move_1->equity != move_2->equity) {
     return move_1->equity > move_2->equity;
   }
   if (move_1->score != move_2->score) {
@@ -408,7 +407,7 @@ static inline int compare_moves_without_equity(const Move *move_1,
 }
 
 static inline void move_list_insert_spare_move_top_equity(MoveList *ml,
-                                                          double equity) {
+                                                          Equity equity) {
   ml->spare_move->equity = equity;
   if (compare_moves(ml->spare_move, ml->moves[0], false)) {
     Move *swap = ml->moves[0];
@@ -425,7 +424,7 @@ static inline void move_list_load_with_empty_moves(MoveList *ml, int capacity) {
   // the extra move to determine which
   // move to pop.
   ml->moves_size = ml->capacity + 1;
-  ml->moves = malloc_or_die(sizeof(Move *) * ml->moves_size);
+  ml->moves = (Move **)malloc_or_die(sizeof(Move *) * ml->moves_size);
   for (int i = 0; i < ml->moves_size; i++) {
     ml->moves[i] = move_create();
   }
@@ -435,9 +434,9 @@ static inline void move_list_load_with_empty_small_moves(MoveList *ml,
                                                          int capacity) {
   ml->capacity = capacity;
 
-  ml->small_moves = malloc_or_die(sizeof(SmallMove *) * ml->capacity);
+  ml->small_moves = (SmallMove **)malloc_or_die(sizeof(SmallMove *) * ml->capacity);
   for (int i = 0; i < ml->capacity; i++) {
-    ml->small_moves[i] = malloc_or_die(sizeof(SmallMove));
+    ml->small_moves[i] = (SmallMove *)malloc_or_die(sizeof(SmallMove));
   }
 }
 
@@ -453,7 +452,7 @@ static inline MoveList *move_list_create(int capacity) {
   ml->count = 0;
   ml->spare_move = move_create();
   move_list_load_with_empty_moves(ml, capacity);
-  ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
+  ml->moves[0]->equity = EQUITY_INITIAL_VALUE;
   return ml;
 }
 
@@ -490,7 +489,7 @@ static inline void move_list_destroy(MoveList *ml) {
 
 static inline void move_list_reset(MoveList *ml) {
   ml->count = 0;
-  ml->moves[0]->equity = INITIAL_TOP_MOVE_EQUITY;
+  ml->moves[0]->equity = EQUITY_INITIAL_VALUE;
 }
 
 static inline void up_heapify(MoveList *ml, int index) {
@@ -552,7 +551,7 @@ static inline Move *move_list_pop_move(MoveList *ml) {
   return ml->spare_move;
 }
 
-static inline void move_list_insert_spare_move(MoveList *ml, double equity) {
+static inline void move_list_insert_spare_move(MoveList *ml, Equity equity) {
   ml->spare_move->equity = equity;
 
   Move *swap = ml->moves[ml->count];
@@ -763,7 +762,7 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
   move->move_type = GAME_EVENT_TILE_PLACEMENT_MOVE;
   move->tiles_length = midx;
   move->tiles_played = tidx;
-  move->score = small_move_get_score(sm);
+  move->score = int_to_equity(small_move_get_score(sm));
   move->row_start = row;
   move->col_start = col;
   move->equity = 0.0;

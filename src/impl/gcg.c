@@ -4,15 +4,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/gameplay_defs.h"
 #include "../def/gcg_defs.h"
 #include "../def/letter_distribution_defs.h"
-#include "../def/rack_defs.h"
 
-#include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
@@ -22,7 +20,6 @@
 
 #include "config.h"
 
-#include "../impl/cgp.h"
 #include "../impl/gameplay.h"
 
 #include "../util/log.h"
@@ -364,8 +361,8 @@ void copy_cumulative_score_to_game_event(const GCGParser *gcg_parser,
                                          int group_index) {
   char *cumulative_score_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  game_event_set_cumulative_score(game_event,
-                                  string_to_int(cumulative_score_string));
+  game_event_set_cumulative_score(
+      game_event, int_to_equity(string_to_int(cumulative_score_string)));
   free(cumulative_score_string);
 }
 
@@ -375,8 +372,8 @@ void copy_score_adjustment_to_game_event(const GCGParser *gcg_parser,
                                          int group_index) {
   char *score_adjustment_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  game_event_set_score_adjustment(game_event,
-                                  string_to_int(score_adjustment_string));
+  game_event_set_score_adjustment(
+      game_event, int_to_equity(string_to_int(score_adjustment_string)));
   free(score_adjustment_string);
 }
 
@@ -428,11 +425,11 @@ void add_tiles_played_to_string_builder(StringBuilder *sb,
   free(matching_group_string);
 }
 
-int get_move_score_from_gcg_line(const GCGParser *gcg_parser,
-                                 const char *gcg_line, int group_index) {
+Equity get_move_score_from_gcg_line(const GCGParser *gcg_parser,
+                                    const char *gcg_line, int group_index) {
   char *move_score_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  int move_score = string_to_int(move_score_string);
+  const Equity move_score = int_to_equity(string_to_int(move_score_string));
   free(move_score_string);
   return move_score;
 }
@@ -639,7 +636,7 @@ gcg_parse_status_t play_game_history_turn(GameHistory *game_history, Game *game,
 
   ValidatedMoves *vms = NULL;
   const char *cgp_move_string = game_event_get_cgp_move_string(game_event);
-  int move_score = game_event_get_move_score(game_event);
+  const Equity move_score = game_event_get_move_score(game_event);
   bool game_event_is_move = false;
   switch (game_event_type) {
   case GAME_EVENT_TILE_PLACEMENT_MOVE:
