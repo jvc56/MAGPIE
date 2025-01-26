@@ -27,7 +27,8 @@ ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o 
     FSAN_ARG += -fsanitize=leak
 endif
 
-cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)
+cflags.dev := -g -O3 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror
+#cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.release := -O3 -flto -funroll-loops -march=native -Wall -Wno-trigraphs

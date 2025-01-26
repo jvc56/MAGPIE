@@ -470,19 +470,6 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   }
   assert(worker->small_move_arena->size == 0); // make sure arena is empty.
 
-  uint64_t initial_hash_key = 0;
-  if (worker->solver->transposition_table_optim) {
-    Player *solving_player =
-        game_get_player(worker->game_copy, worker->solver->solving_player);
-    Player *other_player =
-        game_get_player(worker->game_copy, 1 - worker->solver->solving_player);
-    initial_hash_key = zobrist_calculate_hash(
-        worker->solver->transposition_table->zobrist,
-        game_get_board(worker->game_copy), player_get_rack(solving_player),
-        player_get_rack(other_player), false,
-        game_get_consecutive_scoreless_turns(worker->game_copy));
-  }
-
   int initial_move_count = generate_stm_plays(worker);
   // Arena pointer better have started at 0, since it was empty.
   assign_estimates_and_sort(worker, 0, initial_move_count, INVALID_TINY_MOVE);
@@ -506,7 +493,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     PVLine pv;
     pv.game = worker->game_copy;
     pv.num_moves = 0;
-    int32_t val = negamax(worker, initial_hash_key, p, alpha, beta, &pv, true);
+    int32_t val = negamax(worker, /*node_key=*/0, p, alpha, beta, &pv, true);
     // sort initial moves by valuation for next time.
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
     qsort(initial_moves, initial_move_count, sizeof(SmallMove),
@@ -518,6 +505,11 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     worker->solver->principal_variation = pv;
     log_info("Best value so far: %d", worker->solver->best_pv_value);
     log_info("Nodes: %ld", worker->solver->nodes_searched);
+    log_info("tt created: %d, tt hits: %d, tt lookups: %d tt collisions: %d",
+             worker->solver->transposition_table->created,
+             worker->solver->transposition_table->hits,
+             worker->solver->transposition_table->lookups,
+             worker->solver->transposition_table->t2_collisions);
   }
 }
 
