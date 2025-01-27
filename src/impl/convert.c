@@ -22,6 +22,7 @@ conversion_status_t convert_from_text_with_dwl(
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
+  conversion_status_t status = CONVERT_STATUS_SUCCESS;
   while ((read = getline(&line, &len, input_file)) != -1) {
     if (read > 0 && line[read - 1] == '\n') {
       line[read - 1] = '\0';
@@ -31,27 +32,34 @@ conversion_status_t convert_from_text_with_dwl(
     const int mls_length = ld_str_to_mls(ld, line, false, mls, line_length);
     if (mls_length > BOARD_DIM) {
       log_error("word too long: %s", line);
-          free(mls);
-
-      return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
+      free(mls);
+      status = CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
+      break;
     }
     if (mls_length < 0) {
       log_error("text contains invalid letter: %s", line);
-    free(mls);
-      return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+      free(mls);
+      status = CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+      break;
     }
     if (!unblank_machine_letters(mls, mls_length)) {
       log_error("text contains invalid letter: %s", line);
-    free(mls);
-      return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+      free(mls);
+      status = CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+      break;
     }
     if (mls_length < 2) {
       log_error("word too short: %s", line);
-    free(mls);
-      return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
+      free(mls);
+      status = CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
+      break;
     }
     dictionary_word_list_add_word(strings, mls, mls_length);
     free(mls);
+  }
+  if (status != CONVERT_STATUS_SUCCESS) {
+    fclose(input_file);
+    return status;
   }
 
   if (conversion_type == CONVERT_TEXT2WORDMAP) {
@@ -68,7 +76,6 @@ conversion_status_t convert_from_text_with_dwl(
   } else if (conversion_type == CONVERT_TEXT2GADDAG) {
     output_type = KWG_MAKER_OUTPUT_GADDAG;
   }
-  conversion_status_t status = CONVERT_STATUS_SUCCESS;
   KWG *kwg = make_kwg_from_words(strings, output_type, KWG_MAKER_MERGE_EXACT);
   if (!kwg_write_to_file(kwg, output_filename)) {
     status = CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
