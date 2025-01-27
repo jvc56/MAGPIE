@@ -57,6 +57,9 @@ conversion_status_t convert_from_text_with_dwl(
     dictionary_word_list_add_word(strings, mls, mls_length);
     free(mls);
   }
+  if (line != NULL) {
+    free(line);
+  }
   if (status != CONVERT_STATUS_SUCCESS) {
     fclose(input_file);
     return status;
