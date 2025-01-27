@@ -381,7 +381,7 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);
   }
   *move = get_top_equity_move(game, thread_index, game_runner->move_list);
-
+  
   if (lg_shared_data) {
     leave_list_add_all_subleaves(
         lg_shared_data->leave_list,
@@ -427,9 +427,9 @@ void print_current_status(
 
 void autoplay_add_game(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
                        bool divergent) {
-  if (divergent) {
-    printf("divergent game\n");
-  }                        
+  //if (divergent) {
+  //  printf("divergent game\n");
+  //}                        
   autoplay_results_add_game(autoplay_worker->autoplay_results,
                             game_runner->game, game_runner->turn_number,
                             divergent, game_runner->seed);
@@ -478,7 +478,7 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
     if (!games_are_divergent &&
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
-      printf("divergent move\n");
+      //printf("divergent move\n");
       games_are_divergent = true;
     }
   }

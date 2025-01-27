@@ -6,9 +6,6 @@ for path in data/lexica/*.kwg; do
     lexicon=$(basename $path .kwg)
     echo "Converting $lexicon.kwg to $lexicon.txt"
     bin/magpie convert dawg2text "$lexicon" "$lexicon" -lex "$lexicon"
-    mv "$datadir"/"$lexicon".txt "$datadir"/"$lexicon".txt.all
-    awk 'length($1) <= 15' "$datadir"/"$lexicon".txt.all > "$datadir"/"$lexicon".txt
-    rm "$datadir"/"$lexicon".txt.all
 done
 
 for path in data/lexica/*.txt; do

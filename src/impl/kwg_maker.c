@@ -376,7 +376,7 @@ void add_gaddag_strings(const DictionaryWordList *words,
 void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
                      int prefix_length, bool accepts, DictionaryWordList *words,
                      bool *nodes_reached) {
-  if (accepts) {
+  if (accepts && (prefix_length <= BOARD_DIM)) {
     dictionary_word_list_add_word(words, prefix, prefix_length);
   }
   if (node_index == 0) {
@@ -390,7 +390,9 @@ void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
     const uint8_t ml = kwg_node_tile(node);
     const uint32_t new_node_index = kwg_node_arc_index_prefetch(node, kwg);
     const bool node_accepts = kwg_node_accepts(node);
-    prefix[prefix_length] = ml;
+    if (prefix_length < BOARD_DIM) {
+      prefix[prefix_length] = ml;
+    }
     write_words_aux(kwg, new_node_index, prefix, prefix_length + 1,
                     node_accepts, words, nodes_reached);
     if (kwg_node_is_end(node)) {
