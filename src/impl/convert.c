@@ -31,18 +31,23 @@ conversion_status_t convert_from_text_with_dwl(
     const int mls_length = ld_str_to_mls(ld, line, false, mls, line_length);
     if (mls_length > BOARD_DIM) {
       log_error("word too long: %s", line);
+          free(mls);
+
       return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
     }
     if (mls_length < 0) {
       log_error("text contains invalid letter: %s", line);
+    free(mls);
       return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
     }
     if (!unblank_machine_letters(mls, mls_length)) {
       log_error("text contains invalid letter: %s", line);
+    free(mls);
       return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
     }
     if (mls_length < 2) {
       log_error("word too short: %s", line);
+    free(mls);
       return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
     }
     dictionary_word_list_add_word(strings, mls, mls_length);
