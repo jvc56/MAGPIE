@@ -19,36 +19,34 @@ conversion_status_t convert_from_text_with_dwl(
   if (!input_file) {
     return CONVERT_STATUS_INPUT_FILE_ERROR;
   }
-  const int max_line_bytes = BOARD_DIM * MAX_LETTER_BYTE_LENGTH + 2;
-  char line[max_line_bytes];
-  uint8_t mls[BOARD_DIM];
-  while (fgets(line, max_line_bytes, input_file)) {
-    line[max_line_bytes - 1] = '\0';
-    for (int i = 0; i < max_line_bytes; i++) {
-      if (line[i] == '\n') {
-        line[i] = '\0';
-        break;
-      }
+  char *line = NULL;
+  size_t len = 0;
+  ssize_t read;
+  while ((read = getline(&line, &len, input_file)) != -1) {
+    if (read > 0 && line[read - 1] == '\n') {
+      line[read - 1] = '\0';
     }
     const int line_length = string_length(line);
+    uint8_t *mls = malloc_or_die(line_length);
     const int mls_length = ld_str_to_mls(ld, line, false, mls, line_length);
     if (mls_length > BOARD_DIM) {
-      log_fatal("word too long: %s\n", line);
+      log_error("word too long: %s", line);
       return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
     }
     if (mls_length < 0) {
-      log_fatal("text contains invalid letter: %s\n", line);
+      log_error("text contains invalid letter: %s", line);
       return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
     }
     if (!unblank_machine_letters(mls, mls_length)) {
-      log_fatal("text contains invalid letter: %s\n", line);
+      log_error("text contains invalid letter: %s", line);
       return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
     }
     if (mls_length < 2) {
-      log_fatal("word too short: %s\n", line);
+      log_error("word too short: %s", line);
       return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
     }
     dictionary_word_list_add_word(strings, mls, mls_length);
+    free(mls);
   }
 
   if (conversion_type == CONVERT_TEXT2WORDMAP) {
