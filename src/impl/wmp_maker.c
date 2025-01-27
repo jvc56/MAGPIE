@@ -6,7 +6,6 @@
 
 #include "../ent/bit_rack.h"
 #include "../ent/dictionary_word.h"
-#include "../ent/rack.h"
 #include "../ent/wmp.h"
 
 #include "wmp_maker.h"
