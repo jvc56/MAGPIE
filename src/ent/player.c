@@ -4,6 +4,8 @@
 
 #include "../def/move_defs.h"
 
+#include "equity.h"
+
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
@@ -18,7 +20,7 @@ struct Player {
   int index;
   const char *name;
   Rack *rack;
-  int score;
+  Equity score;
   move_sort_t move_sort_type;
   move_record_t move_record_type;
   const KWG *kwg;
@@ -79,7 +81,7 @@ const char *player_get_name(const Player *player) { return player->name; }
 
 Rack *player_get_rack(const Player *player) { return player->rack; }
 
-int player_get_score(const Player *player) { return player->score; }
+Equity player_get_score(const Player *player) { return player->score; }
 
 move_sort_t player_get_move_sort_type(const Player *player) {
   return player->move_sort_type;
@@ -93,9 +95,11 @@ const KWG *player_get_kwg(const Player *player) { return player->kwg; }
 
 const KLV *player_get_klv(const Player *player) { return player->klv; }
 
-void player_set_score(Player *player, int score) { player->score = score; }
+void player_set_score(Player *player, Equity score) { player->score = score; }
 
-void player_add_to_score(Player *player, int score) { player->score += score; }
+void player_add_to_score(Player *player, Equity score) {
+  player->score += score;
+}
 
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type) {
   player->move_sort_type = move_sort_type;

@@ -18,17 +18,17 @@ void test_rack_main(void) {
 
   // Test score on rack
   rack_set_to_string(ld, rack, "ABCDEFG");
-  assert(rack_get_score(ld, rack) == 16);
+  assert_rack_score(ld, rack, 16);
   rack_set_to_string(ld, rack, "XYZ");
-  assert(rack_get_score(ld, rack) == 22);
+  assert_rack_score(ld, rack, 22);
   rack_set_to_string(ld, rack, "??");
-  assert(rack_get_score(ld, rack) == 0);
+  assert_rack_score(ld, rack, 0);
   rack_set_to_string(ld, rack, "?QWERTY");
-  assert(rack_get_score(ld, rack) == 21);
+  assert_rack_score(ld, rack, 21);
   rack_set_to_string(ld, rack, "RETINAO");
-  assert(rack_get_score(ld, rack) == 7);
+  assert_rack_score(ld, rack, 7);
   rack_set_to_string(ld, rack, "AABBEWW");
-  assert(rack_get_score(ld, rack) == 17);
+  assert_rack_score(ld, rack, 17);
 
   // Test subtraction
   rack_set_to_string(ld, rack, "ABCDEFG");

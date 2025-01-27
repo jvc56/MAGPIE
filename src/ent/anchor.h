@@ -5,6 +5,8 @@
 
 #include "../def/board_defs.h"
 
+#include "../ent/equity.h"
+
 #include "../util/util.h"
 
 typedef struct Anchor {
@@ -21,7 +23,7 @@ typedef struct Anchor {
   // The highest possibly equity
   // that can be achieved from this
   // anchor column.
-  double highest_possible_equity;
+  Equity highest_possible_equity;
 } Anchor;
 
 typedef struct AnchorList {
@@ -65,7 +67,7 @@ static inline int anchor_get_dir(const AnchorList *al, int index) {
   return al->anchors[index]->dir;
 }
 
-static inline double anchor_get_highest_possible_equity(const AnchorList *al,
+static inline Equity anchor_get_highest_possible_equity(const AnchorList *al,
                                                         int index) {
   return al->anchors[index]->highest_possible_equity;
 }
@@ -84,7 +86,7 @@ static inline int anchor_list_get_count(const AnchorList *al) {
 
 static inline void anchor_list_add_anchor(AnchorList *al, int row, int col,
                                           int last_anchor_col, int dir,
-                                          double highest_possible_equity) {
+                                          Equity highest_possible_equity) {
   int i = al->count;
   al->anchors[i]->row = row;
   al->anchors[i]->col = col;

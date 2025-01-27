@@ -103,7 +103,7 @@ void test_board_layout_error(void) {
 
 void assert_opening_penalties(Game *game, const char *data_paths,
                               const char *layout, const char *rack_string,
-                              int score, double equity) {
+                              int score, Equity equity) {
   load_game_with_test_board(game, data_paths, layout);
   Player *player = game_get_player(game, game_get_player_on_turn_index(game));
   Rack *player_rack = player_get_rack(player);
@@ -111,8 +111,8 @@ void assert_opening_penalties(Game *game, const char *data_paths,
   rack_set_to_string(game_get_ld(game), player_rack, rack_string);
   generate_moves_for_game(game, 0, move_list);
   Move *move = move_list_get_move(move_list, 0);
-  assert(move_get_score(move) == score);
-  assert(within_epsilon_for_equity(move_get_equity(move), equity));
+  assert_move_score(move, score);
+  assert_move_equity_exact(move, equity);
   move_list_destroy(move_list);
 }
 
@@ -227,54 +227,40 @@ void test_board_layout_correctness(void) {
 
   // Assume players are using the same KLV
   assert_opening_penalties(game, data_paths, "standard15", "QUIRKED", 112,
-                           112 + OPENING_HOTSPOT_PENALTY);
+                           int_to_equity(112) + OPENING_HOTSPOT_PENALTY);
   assert_opening_penalties(game, data_paths, "no_bonus_squares_15", "QUIRKED",
-                           71, 71);
+                           71, int_to_equity(71));
   assert_opening_penalties(game, data_paths, "no_bonus_squares_15", "EUOUAES",
-                           57, 57);
-  assert_opening_penalties(game, data_paths, "many_opening_hotspots_15",
-                           "EUOUAES", 66,
-                           66 + ((OPENING_HOTSPOT_PENALTY / 2) * 12));
-  assert_opening_penalties(game, data_paths,
-                           "many_opening_hotspots_vertical_15", "EUOUAES", 66,
-                           66 + ((OPENING_HOTSPOT_PENALTY / 2) * 5));
+                           57, int_to_equity(57));
+  assert_opening_penalties(
+      game, data_paths, "many_opening_hotspots_15", "EUOUAES", 66,
+      int_to_equity(66) + ((OPENING_HOTSPOT_PENALTY / 2) * 12));
+  assert_opening_penalties(
+      game, data_paths, "many_opening_hotspots_vertical_15", "EUOUAES", 66,
+      int_to_equity(66) + ((OPENING_HOTSPOT_PENALTY / 2) * 5));
 
   load_game_with_test_board(game, data_paths,
                             "many_opening_hotspots_vertical_15");
 
-  double opening_penalties[BOARD_DIM * 2];
+  Equity opening_penalties[BOARD_DIM * 2];
   board_copy_opening_penalties(board, opening_penalties);
-  assert(within_epsilon_for_equity(opening_penalties[0], 0));
-  assert(within_epsilon_for_equity(opening_penalties[1], 0));
-  assert(within_epsilon_for_equity(opening_penalties[2],
-                                   OPENING_HOTSPOT_PENALTY * 3));
-  assert(within_epsilon_for_equity(opening_penalties[3],
-                                   OPENING_HOTSPOT_PENALTY * 3));
-  assert(within_epsilon_for_equity(opening_penalties[4],
-                                   OPENING_HOTSPOT_PENALTY * 3));
-  assert(within_epsilon_for_equity(opening_penalties[5],
-                                   OPENING_HOTSPOT_PENALTY * 3));
-  assert(within_epsilon_for_equity(opening_penalties[6],
-                                   OPENING_HOTSPOT_PENALTY * 3));
-  assert(within_epsilon_for_equity(opening_penalties[7], 0));
-  assert(within_epsilon_for_equity(opening_penalties[8],
-                                   OPENING_HOTSPOT_PENALTY * 1.5));
-  assert(within_epsilon_for_equity(opening_penalties[9],
-                                   OPENING_HOTSPOT_PENALTY * 1.5));
-  assert(within_epsilon_for_equity(opening_penalties[10],
-                                   OPENING_HOTSPOT_PENALTY * 1.5));
-  assert(within_epsilon_for_equity(opening_penalties[15],
-                                   OPENING_HOTSPOT_PENALTY * 3));
-  assert(within_epsilon_for_equity(opening_penalties[16],
-                                   OPENING_HOTSPOT_PENALTY * 3));
-  assert(within_epsilon_for_equity(opening_penalties[17],
-                                   OPENING_HOTSPOT_PENALTY * 3));
-  assert(within_epsilon_for_equity(opening_penalties[17],
-                                   OPENING_HOTSPOT_PENALTY * 3));
-  assert(within_epsilon_for_equity(opening_penalties[22], 0));
-  assert(within_epsilon_for_equity(opening_penalties[23],
-                                   OPENING_HOTSPOT_PENALTY * 1.5));
-  assert(within_epsilon_for_equity(opening_penalties[24], 0));
+  assert(opening_penalties[0] == 0);
+  assert(opening_penalties[1] == 0);
+  assert(opening_penalties[2] == OPENING_HOTSPOT_PENALTY * 3);
+  assert(opening_penalties[3] == OPENING_HOTSPOT_PENALTY * 3);
+  assert(opening_penalties[4] == OPENING_HOTSPOT_PENALTY * 3);
+  assert(opening_penalties[5] == OPENING_HOTSPOT_PENALTY * 3);
+  assert(opening_penalties[6] == OPENING_HOTSPOT_PENALTY * 3);
+  assert(opening_penalties[7] == 0);
+  assert(opening_penalties[8] == OPENING_HOTSPOT_PENALTY * 1.5);
+  assert(opening_penalties[9] == OPENING_HOTSPOT_PENALTY * 1.5);
+  assert(opening_penalties[10] == OPENING_HOTSPOT_PENALTY * 1.5);
+  assert(opening_penalties[15] == OPENING_HOTSPOT_PENALTY * 3);
+  assert(opening_penalties[16] == OPENING_HOTSPOT_PENALTY * 3);
+  assert(opening_penalties[17] == OPENING_HOTSPOT_PENALTY * 3);
+  assert(opening_penalties[22] == 0);
+  assert(opening_penalties[23] == OPENING_HOTSPOT_PENALTY * 1.5);
+  assert(opening_penalties[24] == 0);
 
   // Validate play out of bounds
   load_game_with_test_board(game, data_paths, "standard15");

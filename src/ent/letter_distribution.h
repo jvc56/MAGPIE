@@ -9,6 +9,8 @@
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 
+#include "../ent/equity.h"
+
 #include "data_filepaths.h"
 
 #include "../util/log.h"
@@ -25,17 +27,17 @@ typedef enum {
 } ld_t;
 
 #define INVALID_LETTER (0x80 - 1)
-#define MULTICHAR_START_DELIMITIER '['
-#define MULTICHAR_END_DELIMITIER ']'
+#define MULTICHAR_START_DELIMITER '['
+#define MULTICHAR_END_DELIMITER ']'
 
 typedef struct LetterDistribution {
   char *name;
   int size;
   int *distribution;
-  int *scores;
+  Equity *scores;
   // machine letters sorted in descending
   // score order
-  int *score_order;
+  uint8_t *score_order;
   bool *is_vowel;
   int total_tiles;
   int max_tile_length;
@@ -66,12 +68,12 @@ static inline bool unblank_machine_letters(uint8_t *mls, int size) {
 }
 
 static inline void sort_score_order(LetterDistribution *ld) {
-  int *score_order = ld->score_order;
-  int *scores = ld->scores;
+  uint8_t *score_order = ld->score_order;
+  Equity *scores = ld->scores;
   int size = ld->size;
 
   for (int i = 1; i < size; ++i) {
-    int key = score_order[i];
+    uint8_t key = score_order[i];
     int j = i - 1;
 
     while (j >= 0 && scores[score_order[j]] < scores[key]) {
@@ -104,8 +106,8 @@ static inline LetterDistribution *ld_create(const char *data_paths,
   ld->size = number_of_lines;
 
   ld->distribution = (int *)malloc_or_die(ld->size * sizeof(int));
-  ld->scores = (int *)malloc_or_die(ld->size * sizeof(int));
-  ld->score_order = (int *)malloc_or_die(ld->size * sizeof(int));
+  ld->scores = (Equity *)malloc_or_die(ld->size * sizeof(Equity));
+  ld->score_order = (uint8_t *)malloc_or_die(ld->size * sizeof(uint8_t));
   ld->is_vowel = (bool *)malloc_or_die(ld->size * sizeof(bool));
 
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
@@ -128,7 +130,9 @@ static inline LetterDistribution *ld_create(const char *data_paths,
         string_splitter_get_item(single_letter_info, 1);
     int dist = string_to_int(string_splitter_get_item(single_letter_info, 2));
     ld->total_tiles += dist;
-    int score = string_to_int(string_splitter_get_item(single_letter_info, 3));
+    const int score_int =
+        string_to_int(string_splitter_get_item(single_letter_info, 3));
+    const Equity score = int_to_equity(score_int);
     int is_vowel =
         string_to_int(string_splitter_get_item(single_letter_info, 4));
 
@@ -184,7 +188,7 @@ static inline int ld_get_dist(const LetterDistribution *ld,
   return ld->distribution[machine_letter];
 }
 
-static inline int ld_get_score(const LetterDistribution *ld,
+static inline Equity ld_get_score(const LetterDistribution *ld,
                                uint8_t machine_letter) {
   return ld->scores[machine_letter];
 }
@@ -292,13 +296,13 @@ static inline int ld_str_to_mls(const LetterDistribution *ld, const char *str,
   for (size_t i = 0; i < num_bytes; i++) {
     char current_char = str[i];
     switch (current_char) {
-    case MULTICHAR_START_DELIMITIER:
+    case MULTICHAR_START_DELIMITER:
       if (building_multichar_letter || current_code_point_bytes_remaining > 0) {
         return -1;
       }
       building_multichar_letter = true;
       break;
-    case MULTICHAR_END_DELIMITIER:
+    case MULTICHAR_END_DELIMITER:
       // Return an error if
       // - multichar is not being built
       // - multichar has fewer than two letters

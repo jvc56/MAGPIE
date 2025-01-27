@@ -4,6 +4,7 @@
 #include "../def/game_defs.h"
 
 #include "../ent/bag.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 
@@ -156,7 +157,8 @@ cgp_parse_status_t parse_cgp_scores(Game *game, const char *cgp_scores) {
       if (!success) {
         cgp_parse_status = CGP_PARSE_STATUS_MALFORMED_SCORES;
       }
-      player_set_score(game_get_player(game, player_index), player_score);
+      player_set_score(game_get_player(game, player_index),
+                       int_to_equity(player_score));
     }
   }
   string_splitter_destroy(player_scores);
@@ -224,7 +226,8 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
   game_gen_all_cross_sets(game);
   board_update_all_anchors(game_get_board(game));
 
-  if (game_get_consecutive_scoreless_turns(game) >= MAX_SCORELESS_TURNS) {
+  if (game_get_consecutive_scoreless_turns(game) >=
+      game_get_max_scoreless_turns(game)) {
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   } else if (bag_is_empty(game_get_bag(game)) &&
              (rack_is_empty(player_get_rack(game_get_player(game, 0))) ||
@@ -287,9 +290,9 @@ void string_builder_add_cgp(StringBuilder *cgp_builder, const Game *game,
 
   string_builder_add_char(cgp_builder, ' ');
 
-  string_builder_add_int(cgp_builder, player_get_score(player0));
+  string_builder_add_int(cgp_builder, equity_to_int(player_get_score(player0)));
   string_builder_add_char(cgp_builder, '/');
-  string_builder_add_int(cgp_builder, player_get_score(player1));
+  string_builder_add_int(cgp_builder, equity_to_int(player_get_score(player1)));
 
   string_builder_add_char(cgp_builder, ' ');
 

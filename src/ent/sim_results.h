@@ -21,12 +21,12 @@ int simmed_play_get_id(const SimmedPlay *simmed_play);
 bool simmed_play_get_ignore(const SimmedPlay *simmed_play);
 void simmed_play_set_ignore(SimmedPlay *simmed_play, bool ignore);
 
-void simmed_play_add_score_stat(SimmedPlay *sp, int score, bool is_bingo,
+void simmed_play_add_score_stat(SimmedPlay *sp, Equity score, bool is_bingo,
                                 int ply, bool lock);
-void simmed_play_add_equity_stat(SimmedPlay *sp, int initial_spread, int spread,
-                                 float leftover, bool lock);
-void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, int spread,
-                                  float leftover,
+void simmed_play_add_equity_stat(SimmedPlay *sp, Equity initial_spread,
+                                 Equity spread, Equity leftover, bool lock);
+void simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *sp, Equity spread,
+                                  Equity leftover,
                                   game_end_reason_t game_end_reason,
                                   int game_unseen_tiles, bool plies_are_odd,
                                   bool lock);

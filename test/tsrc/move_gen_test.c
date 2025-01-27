@@ -5,7 +5,6 @@
 #include "../../src/def/board_defs.h"
 #include "../../src/def/game_history_defs.h"
 #include "../../src/def/move_defs.h"
-#include "../../src/def/rack_defs.h"
 
 #include "../../src/ent/board.h"
 #include "../../src/ent/game.h"
@@ -180,12 +179,12 @@ void macondo_tests(void) {
   SortedMoveList *test_gen_all_moves_full_rack_sorted_move_list =
       sorted_move_list_create(move_list);
 
-  int highest_scores[] = {38, 36, 36, 34, 34, 33, 30, 30, 30, 28};
-  int number_of_highest_scores = sizeof(highest_scores) / sizeof(int);
+  const int highest_scores[] = {38, 36, 36, 34, 34, 33, 30, 30, 30, 28};
+  const int number_of_highest_scores = sizeof(highest_scores) / sizeof(int);
   for (int i = 0; i < number_of_highest_scores; i++) {
-    assert(move_get_score(
-               test_gen_all_moves_full_rack_sorted_move_list->moves[i]) ==
-           highest_scores[i]);
+    const Equity score_eq =
+        move_get_score(test_gen_all_moves_full_rack_sorted_move_list->moves[i]);
+    assert(equity_to_int(score_eq) == highest_scores[i]);
   }
 
   sorted_move_list_destroy(test_gen_all_moves_full_rack_sorted_move_list);
@@ -259,7 +258,7 @@ void macondo_tests(void) {
       sorted_move_list_create(move_list);
 
   const Move *move = test_generate_empty_board_sorted_move_list->moves[0];
-  assert(move_get_score(move) == 80);
+  assert_move_score(move, 80);
   assert(move_get_tiles_played(move) == 7);
   assert(move_get_tiles_length(move) == 7);
   assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -276,7 +275,7 @@ void macondo_tests(void) {
   SortedMoveList *test_generate_gonopore = sorted_move_list_create(move_list);
 
   move = test_generate_gonopore->moves[0];
-  assert(move_get_score(move) == 86);
+  assert_move_score(move, 86);
   assert(move_get_tiles_played(move) == 7);
   assert(move_get_tiles_length(move) == 8);
   assert(move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
@@ -343,19 +342,20 @@ void leave_lookup_test(void) {
 
   Rack *rack = rack_create(ld_get_size(ld));
   for (int i = 0; i < 2; i++) {
-    int number_of_moves = move_list_get_count(move_list);
+    const int number_of_moves = move_list_get_count(move_list);
     for (int j = 0; j < number_of_moves; j++) {
-      Move *move = move_list_get_move(move_list, j);
+      const Move *move = move_list_get_move(move_list, j);
       // This is after the opening and before the endgame
       // so the other equity adjustments will not be in effect.
-      double move_leave_value = move_get_equity(move) - move_get_score(move);
+      const Equity move_leave_value =
+          move_get_equity(move) - move_get_score(move);
       if (j == 0) {
         rack_set_to_string(ld, rack, "MOOORRT");
       } else {
         rack_set_to_string(ld, rack, "BFQRTTV");
       }
-      double leave_value = get_leave_value_for_move(klv, move, rack);
-      within_epsilon(move_leave_value, leave_value);
+      const Equity leave_value = get_leave_value_for_move(klv, move, rack);
+      assert(move_leave_value == leave_value);
     }
     play_top_n_equity_move(game, 0);
   }
@@ -384,7 +384,7 @@ void unfound_leave_lookup_test(void) {
 
   assert_move(game, move_list, NULL, 0, "8D PIZZA 56");
   // Unfound leave of QQ gets 0.0 value.
-  assert(within_epsilon(move_get_equity(move), 56.0));
+  assert_move_equity_int(move, 56);
 
   move_list_destroy(move_list);
   game_destroy(game);
@@ -405,7 +405,8 @@ void exchange_tests(void) {
   // so exchanges should not be possible.
   play_top_n_equity_move(game, 0);
 
-  generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, 0, move_list,
+                 /*override_kwg=*/NULL);
   SortedMoveList *test_not_an_exchange_sorted_move_list =
       sorted_move_list_create(move_list);
   assert(move_get_type(test_not_an_exchange_sorted_move_list->moves[0]) ==
@@ -422,7 +423,7 @@ void exchange_tests(void) {
 
   assert(move_get_type(test_exchange_sorted_move_list->moves[0]) ==
          GAME_EVENT_EXCHANGE);
-  assert(move_get_score(test_exchange_sorted_move_list->moves[0]) == 0);
+  assert_move_score(test_exchange_sorted_move_list->moves[0], 0);
   assert(move_get_tiles_length(test_exchange_sorted_move_list->moves[0]) ==
          move_get_tiles_played(test_exchange_sorted_move_list->moves[0]));
   sorted_move_list_destroy(test_exchange_sorted_move_list);
@@ -472,7 +473,7 @@ void equity_test(void) {
   SortedMoveList *equity_test_sorted_move_list =
       sorted_move_list_create(move_list);
 
-  double previous_equity = 1000000.0;
+  Equity previous_equity = EQUITY_MAX_VALUE;
   Rack *move_rack = rack_create(ld_size);
   int number_of_moves = equity_test_sorted_move_list->count;
 
@@ -480,9 +481,8 @@ void equity_test(void) {
     const Move *move = equity_test_sorted_move_list->moves[i];
     assert(move_get_equity(move) <= previous_equity);
     rack_set_to_string(ld, move_rack, "AFGIIIS");
-    double leave_value = get_leave_value_for_move(klv, move, move_rack);
-    assert(within_epsilon(move_get_equity(move),
-                          (double)move_get_score(move) + leave_value));
+    const Equity leave_value = get_leave_value_for_move(klv, move, move_rack);
+    assert(move_get_equity(move) == move_get_score(move) + leave_value);
     previous_equity = move_get_equity(move);
   }
   assert(
@@ -520,6 +520,60 @@ void top_equity_play_recorder_test(void) {
   assert_move(game, move_list, NULL, 0, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
 
   move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void small_play_recorder_test(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -s1 score -s2 score -r1 small -r2 "
+                           "small -numsmallplays 100000");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create_small(100000);
+  player_set_move_record_type(player, MOVE_RECORD_ALL_SMALL);
+
+  game_load_cgp(game, VS_JEREMY);
+  rack_set_to_string(ld, player_get_rack(player), "DDESW??");
+  // Have the opponent draw any 7 tiles to prevent exchanges
+  // from being generated
+  draw_to_full_rack(game, 1);
+
+  generate_moves_for_game(game, 0, move_list);
+  int expected_count = 8286; // 8285 scoring moves and 1 pass
+  assert(move_list_get_count(move_list) == expected_count);
+
+  // Copy to a temp array by value. The qsort comparator expects SmallMove
+  // and not SmallMove*
+  SmallMove *temp_small_moves = malloc(expected_count * sizeof(SmallMove));
+  for (size_t i = 0; i < (size_t)expected_count; ++i) {
+    temp_small_moves[i] = *(move_list->small_moves[i]);
+  }
+
+  qsort(temp_small_moves, expected_count, sizeof(SmallMove),
+        compare_small_moves_by_score);
+
+  assert(small_move_get_score(&temp_small_moves[0]) == 106); // 14B hEaDW(OR)DS
+  assert(small_move_get_score(&temp_small_moves[1]) == 38);  // 14B hEaDW(OR)D
+
+  small_move_to_move(move_list->spare_move, &temp_small_moves[0],
+                     game_get_board(game));
+
+  assert(move_list->spare_move->col_start == 1);
+  assert(move_list->spare_move->row_start == 13);
+  assert(move_list->spare_move->dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert_move_score(move_list->spare_move, 106);
+  assert(move_list->spare_move->tiles_length == 9);
+  assert(move_list->spare_move->tiles_played == 7);
+  assert(memcmp(move_list->spare_move->tiles,
+                // h E a D W _ _ D S
+                (uint8_t[]){8 | 0x80, 5, 1 | 0x80, 4, 23, 0, 0, 4, 19},
+                9) == 0);
+
+  free(temp_small_moves);
+  small_move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
@@ -757,7 +811,7 @@ void movegen_var_bingo_bonus_test(void) {
   vms = assert_validated_move_success(config_get_game(config),
                                       opening_busuuti_cgp, "8D.BUSUUTI", 0,
                                       false, false);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 64);
+  assert_move_score(validated_moves_get_move(vms, 0), 64);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, opening_busuuti_cgp_cmd);
@@ -769,7 +823,7 @@ void movegen_var_bingo_bonus_test(void) {
   vms = assert_validated_move_success(config_get_game(config),
                                       opening_busuuti_cgp, "8D.BUSUUTI", 0,
                                       false, false);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 54);
+  assert_move_score(validated_moves_get_move(vms, 0), 54);                                     
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, opening_busuuti_cgp_cmd);
@@ -781,7 +835,7 @@ void movegen_var_bingo_bonus_test(void) {
   vms = assert_validated_move_success(config_get_game(config),
                                       opening_busuuti_cgp, "8D.BUSUUTI", 0,
                                       false, false);
-  assert(move_get_score(validated_moves_get_move(vms, 0)) == 324);
+  assert_move_score(validated_moves_get_move(vms, 0), 324);                                     
   validated_moves_destroy(vms);
 
   free(opening_busuuti_cgp_cmd);
@@ -795,6 +849,7 @@ void test_move_gen(void) {
   exchange_tests();
   equity_test();
   top_equity_play_recorder_test();
+  small_play_recorder_test();
   distinct_lexica_test();
   consistent_tiebreaking_test();
   wordsmog_test();

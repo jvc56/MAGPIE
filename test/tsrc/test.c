@@ -1,7 +1,6 @@
 #include "../../src/impl/exec.h"
 
 #include "../../src/util/log.h"
-#include "../../src/util/string_util.h"
 
 #include "alphabet_test.h"
 #include "autoplay_test.h"
@@ -17,7 +16,9 @@
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
+#include "endgame_test.h"
 #include "equity_adjustment_test.h"
+#include "equity_test.h"
 #include "file_handler_test.h"
 #include "game_test.h"
 #include "gameplay_test.h"
@@ -38,12 +39,14 @@
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
+#include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "wasm_api_test.h"
-#include "wmp_test.h"
 #include "wmp_maker_test.h"
+#include "wmp_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
+#include "zobrist_test.h"
 
 void run_all(void) {
   // Test the loading of the config
@@ -66,6 +69,7 @@ void run_all(void) {
   test_board();
   test_board_layout_default();
   test_cross_set();
+  test_equity();
   test_move();
   test_cgp();
   test_klv();
@@ -91,92 +95,74 @@ void run_all(void) {
   test_leave_list();
   test_convert();
   test_create_data();
+  test_endgame();
+  test_zobrist();
+  test_transposition_table();
 }
 
+typedef void (*TestFunc)(void);
+
+typedef struct {
+  const char *name;
+  TestFunc func;
+} TestEntry;
+
+static TestEntry test_table[] = {
+    {"config", test_config},
+    {"players", test_players_data},
+    {"string", test_string_util},
+    {"alpha", test_alphabet},
+    {"ld", test_ld},
+    {"l", test_leaves},
+    {"leavemap", test_leave_map},
+    {"kwg", test_kwg_alpha},
+    {"bag", test_bag},
+    {"rack", test_rack},
+    {"bitrack", test_bit_rack},
+    {"board", test_board},
+    {"layout", test_board_layout_default},
+    {"cs", test_cross_set},
+    {"move", test_move},
+    {"game", test_game},
+    {"vm", test_validated_move},
+    {"shadow", test_shadow},
+    {"movegen", test_move_gen},
+    {"eq", test_equity},
+    {"eqadj", test_equity_adjustments},
+    {"gameplay", test_gameplay},
+    {"stats", test_stats},
+    {"infer", test_infer},
+    {"sim", test_sim},
+    {"command", test_command},
+    {"gcg", test_gcg},
+    {"autoplay", test_autoplay},
+    {"wasm", test_wasm_api},
+    {"words", test_words},
+    {"wordprune", test_word_prune},
+    {"kwgmaker", test_kwg_maker},
+    {"fh", test_file_handler},
+    {"cgp", test_cgp},
+    {"ll", test_leave_list},
+    {"ch", test_checkpoint},
+    {"klv", test_klv},
+    {"cv", test_convert},
+    {"cd", test_create_data},
+    {"wmp", test_wmp},
+    {"wmpmaker", test_wmp_maker},
+    {"endgame", test_endgame},
+    {"zobrist", test_zobrist},
+    {"tt", test_transposition_table},
+    {NULL, NULL} // Sentinel value to mark end of array
+};
+
 void run_test(const char *subtest) {
-  if (strings_equal(subtest, "config")) {
-    test_config();
-  } else if (strings_equal(subtest, "players")) {
-    test_players_data();
-  } else if (strings_equal(subtest, "string")) {
-    test_string_util();
-  } else if (strings_equal(subtest, "alpha")) {
-    test_alphabet();
-  } else if (strings_equal(subtest, "ld")) {
-    test_ld();
-  } else if (strings_equal(subtest, "l")) {
-    test_leaves();
-  } else if (strings_equal(subtest, "leavemap")) {
-    test_leave_map();
-  } else if (strings_equal(subtest, "kwg")) {
-    test_kwg_alpha();
-  } else if (strings_equal(subtest, "bag")) {
-    test_bag();
-  } else if (strings_equal(subtest, "rack")) {
-    test_rack();
-  } else if (strings_equal(subtest, "bitrack")) {
-    test_bit_rack();
-  } else if (strings_equal(subtest, "board")) {
-    test_board();
-  } else if (strings_equal(subtest, "layout")) {
-    test_board_layout_default();
-  } else if (strings_equal(subtest, "cs")) {
-    test_cross_set();
-  } else if (strings_equal(subtest, "move")) {
-    test_move();
-  } else if (strings_equal(subtest, "game")) {
-    test_game();
-  } else if (strings_equal(subtest, "vm")) {
-    test_validated_move();
-  } else if (strings_equal(subtest, "shadow")) {
-    test_shadow();
-  } else if (strings_equal(subtest, "movegen")) {
-    test_move_gen();
-  } else if (strings_equal(subtest, "eq")) {
-    test_equity_adjustments();
-  } else if (strings_equal(subtest, "gameplay")) {
-    test_gameplay();
-  } else if (strings_equal(subtest, "stats")) {
-    test_stats();
-  } else if (strings_equal(subtest, "infer")) {
-    test_infer();
-  } else if (strings_equal(subtest, "sim")) {
-    test_sim();
-  } else if (strings_equal(subtest, "command")) {
-    test_command();
-  } else if (strings_equal(subtest, "gcg")) {
-    test_gcg();
-  } else if (strings_equal(subtest, "autoplay")) {
-    test_autoplay();
-  } else if (strings_equal(subtest, "wasm")) {
-    test_wasm_api();
-  } else if (strings_equal(subtest, "words")) {
-    test_words();
-  } else if (strings_equal(subtest, "wordprune")) {
-    test_word_prune();
-  } else if (strings_equal(subtest, "kwgmaker")) {
-    test_kwg_maker();
-  } else if (strings_equal(subtest, "fh")) {
-    test_file_handler();
-  } else if (strings_equal(subtest, "cgp")) {
-    test_cgp();
-  } else if (strings_equal(subtest, "ll")) {
-    test_leave_list();
-  } else if (strings_equal(subtest, "ch")) {
-    test_checkpoint();
-  } else if (strings_equal(subtest, "klv")) {
-    test_klv();
-  } else if (strings_equal(subtest, "cv")) {
-    test_convert();
-  } else if (strings_equal(subtest, "cd")) {
-    test_create_data();
-  } else if (strings_equal(subtest, "wmp")) {
-    test_wmp();
-  } else if (strings_equal(subtest, "wmpmaker")) {
-    test_wmp_maker();
-  } else {
-    log_fatal("unrecognized test: %s\n", subtest);
+  for (int i = 0; test_table[i].name != NULL; ++i) {
+    if (strcmp(subtest, test_table[i].name) == 0) {
+      test_table[i].func();
+      return;
+    }
   }
+  log_fatal("unrecognized test: %s\n", subtest);
 }
 
 void run_all_super(void) {

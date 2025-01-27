@@ -43,7 +43,7 @@
 #define SIMILAR_PLAYS_ITER_CUTOFF 1000
 
 typedef struct Simmer {
-  int initial_spread;
+  Equity initial_spread;
   int initial_player;
   int max_iterations;
   double zval;
@@ -321,7 +321,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker, uint64_t seed) {
       continue;
     }
 
-    double leftover = 0.0;
+    Equity leftover = 0;
     game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
     // play move
     play_move(simmed_play_get_move(simmed_play), game, NULL, NULL);
@@ -342,7 +342,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker, uint64_t seed) {
       play_move(best_play, game, NULL, NULL);
       sim_results_increment_node_count(sim_results);
       if (ply == plies - 2 || ply == plies - 1) {
-        double this_leftover = get_leave_value_for_move(
+        Equity this_leftover = get_leave_value_for_move(
             player_get_klv(player_on_turn), best_play, rack_placeholder);
         if (player_on_turn_index == simmer->initial_player) {
           leftover += this_leftover;
@@ -350,12 +350,13 @@ void sim_single_iteration(SimmerWorker *simmer_worker, uint64_t seed) {
           leftover -= this_leftover;
         }
       }
-      simmed_play_add_score_stat(simmed_play, move_get_score(best_play),
+      simmed_play_add_score_stat(simmed_play,
+                                 move_get_score(best_play),
                                  move_get_tiles_played(best_play) == RACK_SIZE,
                                  ply, is_multithreaded(simmer));
     }
 
-    int spread =
+    const Equity spread =
         player_get_score(game_get_player(game, simmer->initial_player)) -
         player_get_score(game_get_player(game, 1 - simmer->initial_player));
     simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
