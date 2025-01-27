@@ -206,10 +206,6 @@ max_word_lookup_result_size(const MutableWordMap *word_map,
       max_size = size;
     }
   }
-  if (max_size > WMP_RESULT_BUFFER_SIZE) {
-    log_fatal("max word lookup bytes %d exceeds buffer size %d", max_size,
-              WMP_RESULT_BUFFER_SIZE);
-  }
   return max_size;
 }
 

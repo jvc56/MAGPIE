@@ -156,25 +156,4 @@ leave_map_add_letter_and_update_complement_index(LeaveMap *leave_map,
   const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
   leave_map->current_index &= ~reversed_bit;
 }
-
-static inline void
-leave_map_complement_take_letter(LeaveMap *leave_map, uint8_t letter,
-                                 int number_of_letter_on_rack) {
-  const int base_index = leave_map->letter_base_index_map[letter];
-  const int offset = number_of_letter_on_rack;
-  const int bit_index = base_index + offset;
-  const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
-  leave_map->current_index |= reversed_bit;
-}
-
-static inline void
-leave_map_complement_add_letter(LeaveMap *leave_map, uint8_t letter,
-                                int number_of_letter_on_rack) {
-  const int base_index = leave_map->letter_base_index_map[letter];
-  const int offset = number_of_letter_on_rack;
-  const int bit_index = base_index + offset;
-  const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
-  leave_map->current_index &= ~reversed_bit;
-}
-
 #endif

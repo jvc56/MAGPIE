@@ -60,23 +60,23 @@ typedef enum {
   ARG_TOKEN_LEAVES,
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P1_LEXICON,
-  ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_P2_LEXICON,
-  ARG_TOKEN_P2_USE_WMP,
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
+  ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
   ARG_TOKEN_MAX_ITERATIONS,
   ARG_TOKEN_STOP_COND_PCT,
   ARG_TOKEN_EQUITY_MARGIN,
   ARG_TOKEN_USE_GAME_PAIRS,
+  ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_RANDOM_SEED,
@@ -87,6 +87,7 @@ typedef enum {
   ARG_TOKEN_INFILE,
   ARG_TOKEN_OUTFILE,
   ARG_TOKEN_EXEC_MODE,
+  ARG_TOKEN_TT_FRACTION_OF_MEM,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -113,13 +114,16 @@ struct Config {
   exec_mode_t exec_mode;
   int bingo_bonus;
   int num_plays;
+  int num_small_plays;
   int plies;
   int max_iterations;
   double stop_cond_pct;
   double equity_margin;
   bool use_game_pairs;
   bool human_readable;
+  bool use_small_plays;
   char *record_filepath;
+  double tt_fraction_of_mem;
   game_variant_t game_variant;
   WinPct *win_pcts;
   BoardLayout *board_layout;
@@ -226,6 +230,9 @@ int config_get_bingo_bonus(const Config *config) { return config->bingo_bonus; }
 
 int config_get_num_plays(const Config *config) { return config->num_plays; }
 
+int config_get_num_small_plays(const Config *config) {
+  return config->num_small_plays;
+}
 int config_get_plies(const Config *config) { return config->plies; }
 
 int config_get_max_iterations(const Config *config) {
@@ -240,6 +247,10 @@ double config_get_equity_margin(const Config *config) {
   return config->equity_margin;
 }
 
+double config_get_tt_fraction_of_mem(const Config *config) {
+  return config->tt_fraction_of_mem;
+}
+
 BoardLayout *config_get_board_layout(const Config *config) {
   return config->board_layout;
 }
@@ -252,6 +263,10 @@ WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
+}
+
+bool config_get_use_small_plays(const Config *config) {
+  return config->use_small_plays;
 }
 
 bool config_get_human_readable(const Config *config) {
@@ -357,13 +372,21 @@ void config_init_move_list(Config *config, int capacity) {
   }
 }
 
-void config_recreate_move_list(Config *config, int capacity) {
-  config_init_move_list(config, capacity);
-  if (move_list_get_capacity(config->move_list) == capacity) {
-    move_list_reset(config->move_list);
-  } else {
-    move_list_destroy(config->move_list);
-    config->move_list = move_list_create(capacity);
+void config_recreate_move_list(Config *config, int capacity,
+                               move_list_type_t list_type) {
+  if (list_type == MOVE_LIST_TYPE_DEFAULT) {
+    config_init_move_list(config, capacity);
+    if (move_list_get_capacity(config->move_list) == capacity) {
+      move_list_reset(config->move_list);
+    } else {
+      move_list_destroy(config->move_list);
+      config->move_list = move_list_create(capacity);
+    }
+  } else if (list_type == MOVE_LIST_TYPE_SMALL) {
+    if (!config->move_list) {
+      config->move_list = move_list_create_small(capacity);
+      move_list_reset(config->move_list);
+    }
   }
 }
 
@@ -677,7 +700,13 @@ void execute_move_gen(Config *config) {
   }
 
   config_init_game(config);
-  config_recreate_move_list(config, config_get_num_plays(config));
+  if (!config_get_use_small_plays(config)) {
+    config_recreate_move_list(config, config_get_num_plays(config),
+                              MOVE_LIST_TYPE_DEFAULT);
+  } else {
+    config_recreate_move_list(config, config_get_num_small_plays(config),
+                              MOVE_LIST_TYPE_SMALL);
+  }
   MoveList *ml = config->move_list;
   generate_moves_for_game(config->game, 0, ml);
   print_ucgi_static_moves(config->game, ml, config->thread_control);
@@ -819,7 +848,7 @@ void execute_infer_with_rack(Config *config, Rack *target_played_tiles) {
     is_tile_placement_move = true;
   }
 
-  int target_score = 0;
+  Equity target_score = 0;
 
   if (is_tile_placement_move) {
     const char *target_score_str =
@@ -1158,6 +1187,9 @@ config_load_status_t config_load_record_type(Config *config,
   } else if (has_iprefix(record_type_str, "all")) {
     players_data_set_move_record_type(config->players_data, player_index,
                                       MOVE_RECORD_ALL);
+  } else if (has_iprefix(record_type_str, "small")) {
+    players_data_set_move_record_type(config->players_data, player_index,
+                                      MOVE_RECORD_ALL_SMALL);
   } else {
     config_load_status = CONFIG_LOAD_STATUS_MALFORMED_MOVE_RECORD_TYPE;
   }
@@ -1294,30 +1326,6 @@ config_load_status_t config_load_lexicon_dependent_data(Config *config) {
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
                    config->data_paths, updated_p1_lexicon_name,
                    updated_p2_lexicon_name);
-
-  const char *p1_wmp_name = NULL;
-  const char *p2_wmp_name = NULL;
-  bool p1_use_wmp = false;
-  config_load_status_t config_load_status =
-      config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_use_wmp);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
-  }
-  if (p1_use_wmp) {
-    p1_wmp_name = updated_p1_lexicon_name;
-  }
-  bool p2_use_wmp = false;
-  config_load_status =
-      config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_use_wmp);
-  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
-    return config_load_status;
-  }
-  if (p2_use_wmp) {
-    p2_wmp_name = updated_p2_lexicon_name;
-  }
-
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
-                   config->data_paths, p1_wmp_name, p2_wmp_name);
 
   // Load the leaves
 
@@ -1493,6 +1501,13 @@ config_load_status_t config_load_data(Config *config) {
     return config_load_status;
   }
 
+  config_load_status = config_load_double(config, ARG_TOKEN_TT_FRACTION_OF_MEM,
+                                          0, 1, &config->tt_fraction_of_mem);
+
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
   // Game variant
 
   const char *new_game_variant_str =
@@ -1510,6 +1525,12 @@ config_load_status_t config_load_data(Config *config) {
 
   config_load_status = config_load_bool(config, ARG_TOKEN_USE_GAME_PAIRS,
                                         &config->use_game_pairs);
+  if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
+    return config_load_status;
+  }
+
+  config_load_status = config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS,
+                                        &config->use_small_plays);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }
@@ -1706,8 +1727,6 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P1_LEXICON, "l1", 1, 1, execute_fatal,
                     status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P1_USE_WMP, "wmp1", 1, 1, execute_fatal,
-                    status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P1_LEAVES, "k1", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1,
@@ -1717,8 +1736,6 @@ Config *config_create_default(void) {
   parsed_arg_create(config, ARG_TOKEN_P2_NAME, "p2", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P2_LEXICON, "l2", 1, 1, execute_fatal,
-                    status_fatal);
-  parsed_arg_create(config, ARG_TOKEN_P2_USE_WMP, "wmp2", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_P2_LEAVES, "k2", 1, 1, execute_fatal,
                     status_fatal);
@@ -1732,6 +1749,8 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1,
                     execute_fatal, status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1,
+                    1, execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_MAX_ITERATIONS, "iterations", 1, 1,
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1,
@@ -1740,6 +1759,8 @@ Config *config_create_default(void) {
                     execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1,
+                    execute_fatal, status_fatal);
   parsed_arg_create(config, ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1, execute_fatal,
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1,
@@ -1760,6 +1781,8 @@ Config *config_create_default(void) {
                     status_fatal);
   parsed_arg_create(config, ARG_TOKEN_EXEC_MODE, "mode", 1, 1, execute_fatal,
                     status_fatal);
+  parsed_arg_create(config, ARG_TOKEN_TT_FRACTION_OF_MEM, "ttfraction", 1, 1,
+                    execute_fatal, status_fatal);
 
   config->data_paths = string_duplicate(DEFAULT_DATA_PATHS);
   config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
@@ -1767,11 +1790,13 @@ Config *config_create_default(void) {
   config->exec_mode = EXEC_MODE_CONSOLE;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->num_plays = DEFAULT_MOVE_LIST_CAPACITY;
+  config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 2;
   config->max_iterations = 0;
   config->stop_cond_pct = 99;
   config->equity_margin = 0;
   config->use_game_pairs = true;
+  config->use_small_plays = false;
   config->human_readable = false;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->win_pcts = win_pct_create(config->data_paths, DEFAULT_WIN_PCT);
@@ -1786,6 +1811,7 @@ Config *config_create_default(void) {
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->error_status = error_status_create();
+  config->tt_fraction_of_mem = 0.25;
   return config;
 }
 

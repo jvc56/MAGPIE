@@ -180,10 +180,6 @@ static inline void read_header_from_stream(WMP *wmp, FILE *stream) {
   read_byte_from_stream(&wmp->version, stream);
   read_byte_from_stream(&wmp->board_dim, stream);
   read_uint32_from_stream(&wmp->max_word_lookup_bytes, stream);
-  if (wmp->max_word_lookup_bytes > WMP_RESULT_BUFFER_SIZE) {
-    log_fatal("max word lookup bytes %d exceeds buffer size %d\n",
-              wmp->max_word_lookup_bytes, WMP_RESULT_BUFFER_SIZE);
-  }
 }
 
 static inline void read_wfl_blankless_words(WMPForLength *wfl, uint32_t len,

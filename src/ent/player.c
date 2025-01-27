@@ -23,7 +23,6 @@ struct Player {
   move_record_t move_record_type;
   const KWG *kwg;
   const KLV *klv;
-  const WMP *wmp;
 };
 
 void player_reset(Player *player) {
@@ -39,7 +38,6 @@ void player_update(const PlayersData *players_data, Player *player) {
       players_data_get_move_record_type(players_data, player->index);
   player->kwg = players_data_get_kwg(players_data, player->index);
   player->klv = players_data_get_klv(players_data, player->index);
-  player->wmp = players_data_get_wmp(players_data, player->index);
 }
 
 Player *player_create(const PlayersData *players_data,
@@ -64,7 +62,6 @@ Player *player_duplicate(const Player *player) {
   new_player->move_record_type = player->move_record_type;
   new_player->kwg = player->kwg;
   new_player->klv = player->klv;
-  new_player->wmp = player->wmp;
   return new_player;
 }
 
@@ -95,8 +92,6 @@ move_record_t player_get_move_record_type(const Player *player) {
 const KWG *player_get_kwg(const Player *player) { return player->kwg; }
 
 const KLV *player_get_klv(const Player *player) { return player->klv; }
-
-const WMP *player_get_wmp(const Player *player) { return player->wmp; }
 
 void player_set_score(Player *player, int score) { player->score = score; }
 

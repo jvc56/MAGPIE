@@ -4,7 +4,6 @@
 typedef enum {
   PLAYERS_DATA_TYPE_KWG,
   PLAYERS_DATA_TYPE_KLV,
-  PLAYERS_DATA_TYPE_WMP,
   NUMBER_OF_DATA
 } players_data_t;
 

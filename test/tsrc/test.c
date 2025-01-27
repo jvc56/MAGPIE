@@ -42,7 +42,6 @@
 #include "wasm_api_test.h"
 #include "wmp_test.h"
 #include "wmp_maker_test.h"
-#include "wmp_move_gen_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
 
@@ -59,9 +58,6 @@ void run_all(void) {
   test_leave_map();
   test_kwg_alpha();
   test_checkpoint();
-
-  // This creates testdata/lexica/CSW21.wmp that can be used by other tests.
-  test_wmp();
 
   // Now test the rest
   test_bag();
@@ -90,7 +86,7 @@ void run_all(void) {
   test_word_prune();
   test_kwg_maker();
   test_wmp_maker();
-  test_wmp_movegen();
+  test_wmp();
   test_file_handler();
   test_leave_list();
   test_convert();
@@ -178,8 +174,6 @@ void run_test(const char *subtest) {
     test_wmp();
   } else if (strings_equal(subtest, "wmpmaker")) {
     test_wmp_maker();
-  } else if (strings_equal(subtest, "wmpmovegen")) {
-    test_wmp_movegen();
   } else {
     log_fatal("unrecognized test: %s\n", subtest);
   }

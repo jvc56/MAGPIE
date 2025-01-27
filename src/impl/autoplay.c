@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 #include "../def/autoplay_defs.h"
 #include "../def/game_defs.h"
@@ -28,8 +27,6 @@
 
 #include "../util/string_util.h"
 #include "../util/util.h"
-
-#include "../str/game_string.h"
 
 typedef struct LeavegenSharedData {
   int num_gens;
@@ -316,12 +313,6 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     log_fatal("game runner attempted to play a move when the game is over\n");
   }
   Game *game = game_runner->game;
-/*  
-  StringBuilder *sb = string_builder_create();
-  string_builder_add_game(sb, game, NULL);
-  printf("%s\n", string_builder_peek(sb));
-  string_builder_destroy(sb);
-*/  
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
@@ -427,9 +418,6 @@ void print_current_status(
 
 void autoplay_add_game(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
                        bool divergent) {
-  //if (divergent) {
-  //  printf("divergent game\n");
-  //}                        
   autoplay_results_add_game(autoplay_worker->autoplay_results,
                             game_runner->game, game_runner->turn_number,
                             divergent, game_runner->seed);
@@ -478,7 +466,6 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
     if (!games_are_divergent &&
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
-      //printf("divergent move\n");
       games_are_divergent = true;
     }
   }
@@ -622,7 +609,6 @@ autoplay_status_t autoplay(const AutoplayArgs *args,
       args->game_args->ld, args->data_paths, klv, number_of_threads, num_gens,
       min_leave_targets);
 
-  sleep(0);
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (number_of_threads));
   pthread_t *worker_ids =
