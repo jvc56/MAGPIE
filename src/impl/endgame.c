@@ -506,10 +506,10 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     log_info("Best value so far: %d", worker->solver->best_pv_value);
     log_info("Nodes: %ld", worker->solver->nodes_searched);
     log_info("tt created: %d, tt hits: %d, tt lookups: %d tt collisions: %d",
-             worker->solver->transposition_table->created,
-             worker->solver->transposition_table->hits,
-             worker->solver->transposition_table->lookups,
-             worker->solver->transposition_table->t2_collisions);
+             atomic_load(&worker->solver->transposition_table->created),
+             atomic_load(&worker->solver->transposition_table->hits),
+             atomic_load(&worker->solver->transposition_table->lookups),
+             atomic_load(&worker->solver->transposition_table->t2_collisions));
   }
 }
 

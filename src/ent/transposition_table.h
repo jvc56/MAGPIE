@@ -1,6 +1,7 @@
 #ifndef TRANSPOSITION_TABLE_H
 #define TRANSPOSITION_TABLE_H
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
@@ -53,10 +54,10 @@ typedef struct TranspositionTable {
   int size_power_of_2;
   uint64_t size_mask;
   Zobrist *zobrist;
-  uint64_t created;
-  uint64_t hits;
-  uint64_t lookups;
-  uint64_t t2_collisions;
+  atomic_int created;
+  atomic_int hits;
+  atomic_int lookups;
+  atomic_int t2_collisions;
 } TranspositionTable;
 
 static inline TranspositionTable *
@@ -91,11 +92,10 @@ transposition_table_create(double fraction_of_memory) {
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
   tt->size_mask = num_elems - 1;
   tt->zobrist = zobrist_create(time(NULL));
-  tt->created = 0;
-  ;
-  tt->hits = 0;
-  tt->lookups = 0;
-  tt->t2_collisions = 0;
+  atomic_init(&tt->created, 0);
+  atomic_init(&tt->hits, 0);
+  atomic_init(&tt->lookups, 0);
+  atomic_init(&tt->t2_collisions, 0);
   return tt;
 }
 
@@ -103,30 +103,29 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
   // This function resets the transposition table. If you want to reallocate
   // space for it, destroy and recreate it with the new space.
   memset(tt->table, 0, sizeof(TTEntry) * (tt->size_mask + 1));
-  tt->created = 0;
-  ;
-  tt->hits = 0;
-  tt->lookups = 0;
-  tt->t2_collisions = 0;
+  atomic_store(&tt->created, 0);
+  atomic_store(&tt->hits, 0);
+  atomic_store(&tt->lookups, 0);
+  atomic_store(&tt->t2_collisions, 0);
 }
 
 static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
                                                  uint64_t zval) {
   uint64_t idx = zval & tt->size_mask;
   TTEntry entry = tt->table[idx];
-  tt->lookups++;
+  atomic_fetch_add(&tt->lookups, 1);
   uint64_t full_hash = ttentry_full_hash(entry, idx);
   if (full_hash != zval) {
     if (ttentry_valid(entry)) {
       // There is another unrelated node at this position. This is a
       // type 2 collision.
-      tt->t2_collisions++;
+      atomic_fetch_add(&tt->t2_collisions, 1);
     }
     TTEntry e;
     ttentry_reset(&e);
     return e;
   }
-  tt->hits++;
+  atomic_fetch_add(&tt->hits, 1);
   // Assume the same zobrist hash is the same position. If it's not, that's
   // a type 1 collision, which we can't do anything about. It should happen
   // extremely rarely.
@@ -137,7 +136,7 @@ static inline void transposition_table_store(TranspositionTable *tt,
                                              uint64_t zval, TTEntry tentry) {
   uint64_t idx = zval & tt->size_mask;
   tentry.top_5_bytes = zval >> 24;
-  tt->created++;
+  atomic_fetch_add(&tt->created, 1);
   tt->table[idx] = tentry;
 }
 

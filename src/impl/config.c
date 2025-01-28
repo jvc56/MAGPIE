@@ -647,7 +647,7 @@ void execute_set_rack(Config *config) {
 
   config_init_game(config);
 
-  int player_index;
+  int player_index = 0;
   config_load_status_t config_load_status =
       config_load_int(config, ARG_TOKEN_RACK, 1, 2, &player_index);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
