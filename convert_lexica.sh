@@ -25,14 +25,14 @@ for path in data/lexica/*.kwg; do
     bin/magpie convert dawg2text "$lexicon" "$lexicon" -lex "$lexicon"
 done
 
-# 5) Convert all .txt to .wmp (skip OSPS)
-for path in data/lexica/*.txt; do
-    lexicon=$(basename "$path" .txt)
+# 5) Convert all .txt (that have corresponding .kwg) to .wmp (skip OSPS)
+for path in data/lexica/*.kwg; do
+    lexicon=$(basename "$path" .kwg)
     if [[ "$lexicon" == OSPS* ]]; then
         echo "Skipping $lexicon.txt (Polish not supported)"
         continue
     fi
-    if [[ "$path" == *"_super.txt" ]]; then
+    if [[ "$path" == *"_super.kwg" ]]; then
         echo "Skipping $lexicon.txt (super)"
         continue
     fi
