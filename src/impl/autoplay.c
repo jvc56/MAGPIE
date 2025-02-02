@@ -370,7 +370,7 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     draw_rack_from_bag(game, player_on_turn_index, game_runner->original_rack);
   }
   *move = get_top_equity_move(game, thread_index, game_runner->move_list);
-  
+
   if (lg_shared_data) {
     leave_list_add_all_subleaves(
         lg_shared_data->leave_list,
