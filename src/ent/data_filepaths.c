@@ -222,8 +222,9 @@ StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
   StringSplitter *split_data_paths = split_string(data_paths, ':', true);
   const int number_of_data_paths =
       string_splitter_get_number_of_items(split_data_paths);
-  for (int i = 0; i < number_of_data_paths; i++) {
-    const char *data_path = string_splitter_get_item(split_data_paths, i);
+  for (int path_idx = 0; path_idx < number_of_data_paths; path_idx++) {
+    const char *data_path =
+        string_splitter_get_item(split_data_paths, path_idx);
     char *glob_pattern = get_filepath(data_path, "*", type);
     glob_t glob_results;
     const int glob_status = glob(glob_pattern, 0, NULL, &glob_results);
