@@ -317,8 +317,8 @@ void test_polish_gaddag(void) {
   dictionary_word_list_destroy(ziet_words);
 
   DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
-  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
-                  NULL);
+  kwg_write_gaddag_strings(kwg, kwg_get_root_node_index(kwg),
+                           encoded_gaddag_strings, NULL);
   assert_word_lists_are_equal(ziet_gaddag_strings, encoded_gaddag_strings);
   dictionary_word_list_destroy(encoded_gaddag_strings);
   dictionary_word_list_destroy(ziet_gaddag_strings);
@@ -364,8 +364,8 @@ void test_large_gaddag(void) {
   dictionary_word_list_destroy(q_words);
 
   DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
-  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
-                  NULL);
+  kwg_write_gaddag_strings(kwg, kwg_get_root_node_index(kwg),
+                           encoded_gaddag_strings, NULL);
   assert_word_lists_are_equal(q_gaddag_strings, encoded_gaddag_strings);
   dictionary_word_list_destroy(encoded_gaddag_strings);
   dictionary_word_list_destroy(q_gaddag_strings);
@@ -399,8 +399,8 @@ void test_full_csw_gaddag(void) {
   dictionary_word_list_destroy(words);
 
   DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
-  kwg_write_words(kwg, kwg_get_root_node_index(kwg), encoded_gaddag_strings,
-                  nodes_reached);
+  kwg_write_gaddag_strings(kwg, kwg_get_root_node_index(kwg),
+                           encoded_gaddag_strings, nodes_reached);
   assert_word_lists_are_equal(gaddag_strings, encoded_gaddag_strings);
   dictionary_word_list_destroy(encoded_gaddag_strings);
   dictionary_word_list_destroy(gaddag_strings);

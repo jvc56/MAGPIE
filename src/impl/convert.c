@@ -1,7 +1,5 @@
 #include "convert.h"
 
-#include "../def/cross_set_defs.h"
-
 #include "../ent/conversion_results.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
@@ -12,7 +10,6 @@
 
 #include "../util/log.h"
 #include "../util/string_util.h"
-#include "../util/util.h"
 
 conversion_status_t convert_from_text_with_dwl(
     const LetterDistribution *ld, conversion_type_t conversion_type,
@@ -22,29 +19,50 @@ conversion_status_t convert_from_text_with_dwl(
   if (!input_file) {
     return CONVERT_STATUS_INPUT_FILE_ERROR;
   }
-  char line[BOARD_DIM + 2]; // +1 for \n, +1 for \0
-  uint8_t mls[BOARD_DIM];
-  while (fgets(line, BOARD_DIM + 2, input_file)) {
-    int word_length_with_newline = string_length(line);
-    if (word_length_with_newline == BOARD_DIM + 1 &&
-        line[word_length_with_newline - 1] != '\n') {
-      return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
+  char *line = NULL;
+  size_t len = 0;
+  ssize_t read;
+  conversion_status_t status = CONVERT_STATUS_SUCCESS;
+  while ((read = getline(&line, &len, input_file)) != -1) {
+    if (read > 0 && line[read - 1] == '\n') {
+      line[read - 1] = '\0';
     }
-    if (line[word_length_with_newline - 1] == '\n') {
-      line[word_length_with_newline - 1] = '\0';
+    const int line_length = string_length(line);
+    uint8_t *mls = malloc_or_die(line_length);
+    const int mls_length = ld_str_to_mls(ld, line, false, mls, line_length);
+    if (mls_length > BOARD_DIM) {
+      log_error("word too long: %s", line);
+      free(mls);
+      status = CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_LONG;
+      break;
     }
-    int word_length = string_length(line);
-    int mls_length = ld_str_to_mls(ld, line, false, mls, word_length);
     if (mls_length < 0) {
-      return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+      log_error("text contains invalid letter: %s", line);
+      free(mls);
+      status = CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+      break;
     }
     if (!unblank_machine_letters(mls, mls_length)) {
-      return CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+      log_error("text contains invalid letter: %s", line);
+      free(mls);
+      status = CONVERT_STATUS_TEXT_CONTAINS_INVALID_LETTER;
+      break;
     }
     if (mls_length < 2) {
-      return CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
+      log_error("word too short: %s", line);
+      free(mls);
+      status = CONVERT_STATUS_TEXT_CONTAINS_WORD_TOO_SHORT;
+      break;
     }
     dictionary_word_list_add_word(strings, mls, mls_length);
+    free(mls);
+  }
+  if (line != NULL) {
+    free(line);
+  }
+  if (status != CONVERT_STATUS_SUCCESS) {
+    fclose(input_file);
+    return status;
   }
 
   if (conversion_type == CONVERT_TEXT2WORDMAP) {
@@ -61,7 +79,6 @@ conversion_status_t convert_from_text_with_dwl(
   } else if (conversion_type == CONVERT_TEXT2GADDAG) {
     output_type = KWG_MAKER_OUTPUT_GADDAG;
   }
-  conversion_status_t status = CONVERT_STATUS_SUCCESS;
   KWG *kwg = make_kwg_from_words(strings, output_type, KWG_MAKER_MERGE_EXACT);
   if (!kwg_write_to_file(kwg, output_filename)) {
     status = CONVERT_STATUS_OUTPUT_FILE_NOT_WRITABLE;
@@ -87,6 +104,13 @@ conversion_status_t convert_with_filenames(
                                         output_filename, strings,
                                         conversion_results);
     dictionary_word_list_destroy(strings);
+  } else if (conversion_type == CONVERT_DAWG2TEXT) {
+    KWG *kwg = kwg_create(data_paths, input_filename);
+    DictionaryWordList *words = dictionary_word_list_create();
+    kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
+    dictionary_word_list_write_to_file(words, ld, output_filename);
+    kwg_destroy(kwg);
+    dictionary_word_list_destroy(words);
   } else if (conversion_type == CONVERT_CSV2KLV) {
     KLV *klv = klv_read_from_csv(ld, data_paths, input_filename);
     klv_write(klv, output_filename);
