@@ -1,5 +1,6 @@
 #include "data_filepaths.h"
 
+#include <glob.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -210,4 +211,36 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
   }
   free(dir_path);
   return writable_filepath;
+}
+
+StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
+                                                   data_filepath_t type) {
+  if (!data_paths) {
+    log_error("data path is null for filepath type %d\n", type);
+    return NULL;
+  }
+  StringList *file_path_list = string_list_create();
+  StringSplitter *split_data_paths = split_string(data_paths, ':', true);
+  const int number_of_data_paths =
+      string_splitter_get_number_of_items(split_data_paths);
+  for (int path_idx = 0; path_idx < number_of_data_paths; path_idx++) {
+    const char *data_path =
+        string_splitter_get_item(split_data_paths, path_idx);
+    char *glob_pattern = get_filepath(data_path, "*", type);
+    glob_t glob_results;
+    const int glob_status = glob(glob_pattern, 0, NULL, &glob_results);
+    if (glob_status == 0) {
+      for (size_t result_idx = 0; result_idx < glob_results.gl_pathc;
+           result_idx++) {
+        string_list_add_string(file_path_list,
+                               glob_results.gl_pathv[result_idx]);
+      }
+    } else {
+      log_error("no files matched pattern %s", glob_pattern);
+    }
+    free(glob_pattern);
+    globfree(&glob_results);
+  }
+  string_splitter_destroy(split_data_paths);
+  return file_path_list;
 }

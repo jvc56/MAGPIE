@@ -79,4 +79,12 @@ char *cut_off_after_last_char(const char *str, char ch);
 char *cut_off_after_first_char(const char *str, char ch);
 char *insert_before_dot(const char *str, const char *insert);
 
+typedef struct StringList StringList;
+
+StringList *string_list_create(void);
+void string_list_add_string(StringList *string_list, const char *string);
+int string_list_get_count(const StringList *string_list);
+const char *string_list_get_string(const StringList *string_list, int index);
+void string_list_destroy(StringList *string_list);
+
 #endif

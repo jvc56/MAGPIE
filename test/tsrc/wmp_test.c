@@ -10,8 +10,6 @@
 #include "../../src/impl/kwg_maker.h"
 #include "../../src/impl/wmp_maker.h"
 
-#include "../../src/str/rack_string.h"
-
 #include "test_util.h"
 
 int get_file_size(const char *filename) {
@@ -188,8 +186,29 @@ void test_short_and_long_words(void) {
   config_destroy(config);
 }
 
+void check_all_wmp_result_sizes_fit_in_buffer(void) {
+  Config *config = config_create_or_die("");
+  const char *data_paths = config_get_data_paths(config);
+  StringList *wmp_files = data_filepaths_get_all_data_path_names(
+      data_paths, DATA_FILEPATH_TYPE_WORDMAP);
+  assert(wmp_files != NULL);
+
+  const int count = string_list_get_count(wmp_files);
+  for (int file_idx = 0; file_idx < count; file_idx++) {
+    const char *filename = string_list_get_string(wmp_files, file_idx);
+    WMP *wmp = (WMP *)malloc_or_die(sizeof(WMP));
+    wmp_load_from_filename(wmp, /*wmp_name=*/"", filename);
+    assert(wmp->max_word_lookup_bytes <= WMP_RESULT_BUFFER_SIZE);
+    wmp_destroy(wmp);
+  }
+
+  string_list_destroy(wmp_files);
+  config_destroy(config);
+}
+
 void test_wmp(void) {
   write_wmp_files();
   benchmark_csw_wmp();
   test_short_and_long_words();
+  check_all_wmp_result_sizes_fit_in_buffer();
 }

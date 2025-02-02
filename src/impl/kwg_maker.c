@@ -374,9 +374,9 @@ void add_gaddag_strings(const DictionaryWordList *words,
 }
 
 void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
-                     int prefix_length, bool accepts, DictionaryWordList *words,
-                     bool *nodes_reached) {
-  if (accepts) {
+                     int prefix_length, int max_length, bool accepts,
+                     DictionaryWordList *words, bool *nodes_reached) {
+  if (accepts && (prefix_length <= max_length)) {
     dictionary_word_list_add_word(words, prefix, prefix_length);
   }
   if (node_index == 0) {
@@ -390,8 +390,10 @@ void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
     const uint8_t ml = kwg_node_tile(node);
     const uint32_t new_node_index = kwg_node_arc_index_prefetch(node, kwg);
     const bool node_accepts = kwg_node_accepts(node);
-    prefix[prefix_length] = ml;
-    write_words_aux(kwg, new_node_index, prefix, prefix_length + 1,
+    if (prefix_length < max_length) {
+      prefix[prefix_length] = ml;
+    }
+    write_words_aux(kwg, new_node_index, prefix, prefix_length + 1, max_length,
                     node_accepts, words, nodes_reached);
     if (kwg_node_is_end(node)) {
       break;
@@ -401,8 +403,17 @@ void write_words_aux(const KWG *kwg, uint32_t node_index, uint8_t *prefix,
 
 void kwg_write_words(const KWG *kwg, uint32_t node_index,
                      DictionaryWordList *words, bool *nodes_reached) {
+  uint8_t prefix[BOARD_DIM];
+  write_words_aux(kwg, node_index, prefix, 0, BOARD_DIM, false, words,
+                  nodes_reached);
+}
+
+void kwg_write_gaddag_strings(const KWG *kwg, uint32_t node_index,
+                              DictionaryWordList *gaddag_strings,
+                              bool *nodes_reached) {
   uint8_t prefix[MAX_KWG_STRING_LENGTH];
-  write_words_aux(kwg, node_index, prefix, 0, false, words, nodes_reached);
+  write_words_aux(kwg, node_index, prefix, 0, MAX_KWG_STRING_LENGTH, false,
+                  gaddag_strings, nodes_reached);
 }
 
 int get_letters_in_common(const DictionaryWord *word, uint8_t *last_word,

@@ -11,6 +11,8 @@
 #include "../util/log.h"
 #include "../util/util.h"
 
+#define STRING_LIST_INITIAL_CAPACITY 10
+
 // Misc string functions
 
 int memory_compare(const void *s1, const void *s2, size_t n) {
@@ -823,4 +825,51 @@ char *insert_before_dot(const char *str, const char *insert) {
   }
 
   return new_str;
+}
+
+struct StringList {
+  char **strings;
+  int count;
+  int capacity;
+};
+
+StringList *string_list_create(void) {
+  StringList *string_list = malloc_or_die(sizeof(StringList));
+  string_list->strings = malloc_or_die(sizeof(char *) * STRING_LIST_INITIAL_CAPACITY);
+  string_list->count = 0;
+  string_list->capacity = STRING_LIST_INITIAL_CAPACITY;
+  return string_list;
+}
+
+void string_list_add_string(StringList *string_list, const char *str) {
+  if (string_list->count == string_list->capacity) {
+    string_list->strings = realloc_or_die(string_list->strings,
+                                          sizeof(char *) * string_list->capacity * 2);
+    string_list->capacity *= 2;
+  }
+
+  string_list->strings[string_list->count] = string_duplicate(str);
+  string_list->count++;
+}
+
+int string_list_get_count(const StringList *string_list) {
+  return string_list->count;
+}
+
+const char *string_list_get_string(const StringList *string_list, int index) {
+  if (index < 0 || index >= string_list->count) {
+    log_fatal("string index out of range: %d\n", index);
+  }
+  return string_list->strings[index];
+}
+
+void string_list_destroy(StringList *string_list) {
+  if (!string_list) {
+    return;
+  }
+  for (int i = 0; i < string_list->count; i++) {
+    free(string_list->strings[i]);
+  }
+  free(string_list->strings);
+  free(string_list);
 }
