@@ -179,6 +179,7 @@ static inline void move_set_all_except_equity(Move *move, const uint8_t strip[],
                                               Equity score, int row_start,
                                               int col_start, int tiles_played,
                                               int dir, game_event_t move_type) {
+  assert(rightstrip < BOARD_DIM);
   move->score = score;
   move->row_start = row_start;
   move->col_start = col_start;
@@ -191,7 +192,7 @@ static inline void move_set_all_except_equity(Move *move, const uint8_t strip[],
     move->tiles_length = rightstrip - leftstrip + 1;
   }
   if (move_type != GAME_EVENT_PASS) {
-    for (int i = 0; i < move->tiles_length; i++) {
+    for (int i = 0; leftstrip + i <= rightstrip; i++) {
       move->tiles[i] = strip[leftstrip + i];
     }
   }

@@ -13,46 +13,51 @@
 
 #define ZOBRIST_MAX_LETTERS 35 // For the purposes of Zobrist hashing.
 
+#define POS_HASH_TABLE_SIZE (BOARD_DIM * BOARD_DIM * ZOBRIST_MAX_LETTERS * 2)
+#define RACK_HASH_TABLE_SIZE (ZOBRIST_MAX_LETTERS * RACK_SIZE)
+
 // A Zobrist hash implementation for our fun game.
 typedef struct Zobrist {
   uint64_t their_turn;
-  uint64_t **pos_table;
-  uint64_t **our_rack_table;
-  uint64_t **their_rack_table;
+  uint64_t pos_table[POS_HASH_TABLE_SIZE];
+  uint64_t rack_tables[2 * RACK_HASH_TABLE_SIZE];
   uint64_t scoreless_turns[3];
 
   XoshiroPRNG *prng;
   int board_dim;
 } Zobrist;
 
-static Zobrist *zobrist_create(uint64_t seed) {
-  Zobrist *z = malloc_or_die(sizeof(Zobrist));
+static inline int get_pos_table_index(int row, int col, int letter_idx) {
+  return (row * BOARD_DIM + col) * ZOBRIST_MAX_LETTERS + letter_idx;
+}
+
+static inline int get_rack_table_index(int player_idx, int letter_idx,
+                                       int rack_idx) {
+  return player_idx * RACK_HASH_TABLE_SIZE + letter_idx * RACK_SIZE + rack_idx;
+}
+
+static inline Zobrist *zobrist_create(uint64_t seed) {
+  Zobrist *z = (Zobrist *)malloc_or_die(sizeof(Zobrist));
   z->prng = prng_create(seed);
 
-  // pos_table is a BOARD_DIM x BOARD_DIM 2d array of random integers
-  z->pos_table = malloc_or_die(BOARD_DIM * BOARD_DIM * sizeof(uint64_t *));
-  for (size_t i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
-    // * 2 for the blank
-    z->pos_table[i] = malloc_or_die(ZOBRIST_MAX_LETTERS * 2 * sizeof(uint64_t));
-    for (int j = 0; j < ZOBRIST_MAX_LETTERS * 2; j++) {
-      z->pos_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
-    }
-  }
-  // rack tables are ZOBRIST_MAX_LETTERS * RACK_SIZE 2D arrays of random
-  // integers
-  z->our_rack_table = malloc_or_die(ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
-  for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    z->our_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
-    for (int j = 0; j < RACK_SIZE; j++) {
-      z->our_rack_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      for (int letter_idx = 0; letter_idx < ZOBRIST_MAX_LETTERS * 2;
+           letter_idx++) {
+        z->pos_table[get_pos_table_index(row, col, letter_idx)] =
+            prng_get_random_number(z->prng, UINT64_MAX);
+      }
     }
   }
 
-  z->their_rack_table = malloc_or_die(ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
-  for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    z->their_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
-    for (int j = 0; j < RACK_SIZE; j++) {
-      z->their_rack_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
+  // rack tables are ZOBRIST_MAX_LETTERS * RACK_SIZE 2D arrays of random
+  // integers
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    for (int letter_idx = 0; letter_idx < ZOBRIST_MAX_LETTERS; letter_idx++) {
+      for (int rack_idx = 0; rack_idx < RACK_SIZE; rack_idx++) {
+        z->rack_tables[get_rack_table_index(player_idx, letter_idx, rack_idx)] =
+            prng_get_random_number(z->prng, UINT64_MAX);
+      }
     }
   }
 
@@ -65,55 +70,9 @@ static Zobrist *zobrist_create(uint64_t seed) {
   return z;
 }
 
-static void zobrist_destroy(Zobrist *z) {
-  for (size_t i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
-    free(z->pos_table[i]);
-  }
-  free(z->pos_table);
-  for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    free(z->our_rack_table[i]);
-    free(z->their_rack_table[i]);
-  }
-  free(z->our_rack_table);
-  free(z->their_rack_table);
+static inline void zobrist_destroy(Zobrist *z) {
   prng_destroy(z->prng);
   free(z);
-}
-
-inline static uint64_t
-zobrist_calculate_hash(const Zobrist *z, const Board *game_board,
-                       const Rack *our_rack, const Rack *their_rack,
-                       bool their_turn, int scoreless_turns) {
-
-  // Calculate the hash of a specific position/situation.
-  uint64_t key = 0;
-
-  for (int i = 0; i < BOARD_DIM * BOARD_DIM; i++) {
-    const Square *sq = &(game_board->squares[i]);
-    uint8_t letter = sq->letter;
-    if (letter == 0) {
-      continue;
-    }
-
-    if (get_is_blanked(letter)) {
-      letter = get_unblanked_machine_letter(letter) + ZOBRIST_MAX_LETTERS;
-    }
-    key ^= z->pos_table[i][letter];
-  }
-
-  for (int i = 0; i < our_rack->dist_size; i++) {
-    int ct = our_rack->array[i];
-    key ^= z->our_rack_table[i][ct];
-  }
-  for (int i = 0; i < their_rack->dist_size; i++) {
-    int ct = their_rack->array[i];
-    key ^= z->their_rack_table[i][ct];
-  }
-  if (their_turn) {
-    key ^= z->their_turn;
-  }
-  key ^= z->scoreless_turns[scoreless_turns];
-  return key;
 }
 
 inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
@@ -127,10 +86,7 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
   // - XOR with its position on the board
   // - XOR with the "position" on the rack hash.
   // Then XOR with p2ToMove since we always alternate.
-  uint64_t **rack_table = z->our_rack_table;
-  if (!was_our_move) {
-    rack_table = z->their_rack_table;
-  }
+  const int player_idx = was_our_move ? 0 : 1;
   if (move->move_type != GAME_EVENT_PASS) {
     // create placeholder rack to keep track of what our rack would be
     // before we made the play.
@@ -153,7 +109,9 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
       if (get_is_blanked(tile)) {
         board_tile = get_unblanked_machine_letter(tile) + ZOBRIST_MAX_LETTERS;
       }
-      key ^= z->pos_table[new_row * BOARD_DIM + new_col][board_tile];
+      const int pos_table_idx =
+          get_pos_table_index(new_row, new_col, board_tile);
+      key ^= z->pos_table[pos_table_idx];
       // Build up placeholder rack.
       int tile_idx = get_is_blanked(tile) ? 0 : tile;
       placeholder_rack[tile_idx]++;
@@ -170,10 +128,14 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
       if (tile == PLAYED_THROUGH_MARKER) {
         continue;
       }
-      int tile_idx = get_is_blanked(tile) ? 0 : tile;
-      key ^= rack_table[tile_idx][placeholder_rack[tile_idx]];
+      const int tile_idx = get_is_blanked(tile) ? 0 : tile;
       placeholder_rack[tile_idx]--;
-      key ^= rack_table[tile_idx][placeholder_rack[tile_idx]];
+      const int new_rack_table_idx = get_rack_table_index(
+          player_idx, tile_idx, placeholder_rack[tile_idx]);
+      key ^= z->rack_tables[new_rack_table_idx];
+      // This is equal to what old_rack_table_idx would have been.
+      // It doesn't matter which order we xor in, so we do it sequentially.
+      key ^= z->rack_tables[new_rack_table_idx + 1];
     }
   }
 
