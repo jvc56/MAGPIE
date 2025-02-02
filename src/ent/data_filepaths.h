@@ -27,7 +27,6 @@ char *data_filepaths_get_data_path_name(const char *data_paths,
                                         data_filepath_t type);
 
 StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
-                                                     data_filepath_t type);
-
+                                                   data_filepath_t type);
 
 #endif

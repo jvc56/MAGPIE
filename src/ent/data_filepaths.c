@@ -239,5 +239,6 @@ StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
     free(glob_pattern);
   }
 
+  string_splitter_destroy(split_data_paths);
   return file_path_list;
 }

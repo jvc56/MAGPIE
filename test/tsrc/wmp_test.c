@@ -10,8 +10,6 @@
 #include "../../src/impl/kwg_maker.h"
 #include "../../src/impl/wmp_maker.h"
 
-#include "../../src/str/rack_string.h"
-
 #include "test_util.h"
 
 int get_file_size(const char *filename) {
