@@ -237,16 +237,12 @@ static inline void read_wmp_for_length(WMP *wmp, uint32_t len, FILE *stream) {
   read_wfl_double_blanks(wfl, stream);
 }
 
-static inline void wmp_load(WMP *wmp, const char *data_paths,
-                            const char *wmp_name) {
-  char *wmp_filename = data_filepaths_get_readable_filename(
-      data_paths, wmp_name, DATA_FILEPATH_TYPE_WORDMAP);
-
+static inline void wmp_load_from_filename(WMP *wmp, const char *wmp_name,
+                                          const char *wmp_filename) {
   FILE *stream = stream_from_filename(wmp_filename);
   if (!stream) {
     log_fatal("could not open stream for filename: %s\n", wmp_filename);
   }
-  free(wmp_filename);
 
   wmp->name = string_duplicate(wmp_name);
 
@@ -261,6 +257,14 @@ static inline void wmp_load(WMP *wmp, const char *data_paths,
   for (uint32_t len = 2; len <= BOARD_DIM; len++) {
     read_wmp_for_length(wmp, len, stream);
   }
+}
+
+static inline void wmp_load(WMP *wmp, const char *data_paths,
+                            const char *wmp_name) {
+  char *wmp_filename = data_filepaths_get_readable_filename(
+      data_paths, wmp_name, DATA_FILEPATH_TYPE_WORDMAP);
+  wmp_load_from_filename(wmp, wmp_name, wmp_filename);
+  free(wmp_filename);
 }
 
 static inline WMP *wmp_create(const char *data_paths, const char *wmp_name) {
@@ -465,8 +469,8 @@ static inline int wmp_entry_write_double_blanks_to_buffer(
   for (uint8_t ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     if (entry->blank_letters & (1ULL << ml)) {
       bit_rack_add_letter(bit_rack, ml);
-      bytes_written += wfl_write_blanks_to_buffer(
-          wfl, bit_rack, word_length, ml, buffer + bytes_written);
+      bytes_written += wfl_write_blanks_to_buffer(wfl, bit_rack, word_length,
+                                                  ml, buffer + bytes_written);
       bit_rack_take_letter(bit_rack, ml);
     }
   }
