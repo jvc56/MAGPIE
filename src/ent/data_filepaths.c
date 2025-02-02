@@ -214,7 +214,7 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
 }
 
 StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
-                                                     data_filepath_t type) {
+                                                   data_filepath_t type) {
   StringList *file_path_list = string_list_create();
   if (!data_paths) {
     log_fatal("data path is null for filepath type %d\n", type);
@@ -237,8 +237,8 @@ StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
       log_error("no files matched pattern %s", glob_pattern);
     }
     free(glob_pattern);
+    globfree(&glob_results);
   }
-
   string_splitter_destroy(split_data_paths);
   return file_path_list;
 }
