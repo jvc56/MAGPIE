@@ -200,6 +200,7 @@ void check_all_wmp_result_sizes_fit_in_buffer(void) {
     WMP *wmp = (WMP *)malloc_or_die(sizeof(WMP));
     wmp_load_from_filename(wmp, /*wmp_name=*/"", filename);
     assert(wmp->max_word_lookup_bytes <= WMP_RESULT_BUFFER_SIZE);
+    wmp_destroy(wmp);
   }
 
   string_list_destroy(wmp_files);
