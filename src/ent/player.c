@@ -10,6 +10,7 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "players_data.h"
+#include "wmp.h"
 
 #include "../util/util.h"
 
@@ -25,6 +26,7 @@ struct Player {
   move_record_t move_record_type;
   const KWG *kwg;
   const KLV *klv;
+  const WMP *wmp;
 };
 
 void player_reset(Player *player) {
@@ -94,6 +96,8 @@ move_record_t player_get_move_record_type(const Player *player) {
 const KWG *player_get_kwg(const Player *player) { return player->kwg; }
 
 const KLV *player_get_klv(const Player *player) { return player->klv; }
+
+const WMP *player_get_wmp(const Player *player);
 
 void player_set_score(Player *player, Equity score) { player->score = score; }
 
