@@ -191,6 +191,7 @@ void check_all_wmp_result_sizes_fit_in_buffer(void) {
   const char *data_paths = config_get_data_paths(config);
   StringList *wmp_files = data_filepaths_get_all_data_path_names(
       data_paths, DATA_FILEPATH_TYPE_WORDMAP);
+  assert(wmp_files != NULL);
 
   const int count = string_list_get_count(wmp_files);
   for (int file_idx = 0; file_idx < count; file_idx++) {

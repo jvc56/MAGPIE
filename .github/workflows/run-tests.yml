@@ -23,8 +23,10 @@ jobs:
 
       - name: Download data files
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
-        run: >
-          ./download_data.sh
+        run: ./download_data.sh
+
+      - name: Convert lexica
+        run: ./convert_lexica.sh 
 
       - name: Run unit tests
         run: ./run u && ./run u 21

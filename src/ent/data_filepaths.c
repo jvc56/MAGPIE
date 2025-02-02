@@ -215,10 +215,11 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
 
 StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
                                                    data_filepath_t type) {
-  StringList *file_path_list = string_list_create();
   if (!data_paths) {
-    log_fatal("data path is null for filepath type %d\n", type);
+    log_error("data path is null for filepath type %d\n", type);
+    return NULL;
   }
+  StringList *file_path_list = string_list_create();
   StringSplitter *split_data_paths = split_string(data_paths, ':', true);
   const int number_of_data_paths =
       string_splitter_get_number_of_items(split_data_paths);
