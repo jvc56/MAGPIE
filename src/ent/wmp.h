@@ -633,6 +633,4 @@ static inline bool wmp_write_to_file(const WMP *wmp, const char *filename) {
   return true;
 }
 
-static inline char *wmp_get_name(const WMP *wmp) { return wmp->name; }
-
 #endif
