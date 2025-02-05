@@ -43,6 +43,7 @@
 #include "validated_move_test.h"
 #include "wasm_api_test.h"
 #include "wmp_maker_test.h"
+#include "wmp_move_gen_test.h"
 #include "wmp_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
@@ -90,6 +91,7 @@ void run_all(void) {
   test_word_prune();
   test_kwg_maker();
   test_wmp_maker();
+  test_wmp_move_gen();
   test_wmp();
   test_file_handler();
   test_leave_list();
@@ -149,6 +151,7 @@ static TestEntry test_table[] = {
     {"cd", test_create_data},
     {"wmp", test_wmp},
     {"wmpmaker", test_wmp_maker},
+    {"wmg", test_wmp_move_gen},
     {"endgame", test_endgame},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},

@@ -436,6 +436,10 @@ wfl_get_double_blank_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
   return NULL;
 }
 
+static inline const char* wmp_get_name(const WMP *wmp) {
+  return wmp->name;
+}
+
 static inline const WMPEntry *
 wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
   const WMPForLength *wfl = &wmp->wfls[word_length];
@@ -628,7 +632,5 @@ static inline bool wmp_write_to_file(const WMP *wmp, const char *filename) {
   }
   return true;
 }
-
-static inline char *wmp_get_name(const WMP *wmp) { return wmp->name; }
 
 #endif

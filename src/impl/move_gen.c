@@ -15,6 +15,7 @@
 #include "../def/thread_control_defs.h"
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
+#include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -27,6 +28,9 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
+
+#include "wmp_move_gen.h"
+
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
@@ -77,6 +81,7 @@ typedef struct MoveGen {
   uint8_t strip[(MOVE_MAX_TILES)];
   uint8_t exchange_strip[(MOVE_MAX_TILES)];
   LeaveMap leave_map;
+  BitRack player_bit_rack;
   // Shadow plays
   int current_left_col;
   int current_right_col;
@@ -122,7 +127,6 @@ typedef struct MoveGen {
   Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
   Equity best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
-
   // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
   Equity tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
@@ -132,6 +136,8 @@ typedef struct MoveGen {
   const KLV *klv;
   const KWG *kwg;
   MoveList *move_list;
+
+  WMPMoveGen wmp_move_gen;
 } MoveGen;
 
 // Cache move generators since destroying
@@ -257,8 +263,9 @@ static inline void set_play_for_record(Move *move, game_event_t move_type,
   }
 }
 
-static inline Equity
-get_move_equity_for_sort_type(const MoveGen *gen, const Move *move, Equity score) {
+static inline Equity get_move_equity_for_sort_type(const MoveGen *gen,
+                                                   const Move *move,
+                                                   Equity score) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return gen_get_static_equity(gen, move);
   }
@@ -752,6 +759,31 @@ void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
 }
 
 static inline void shadow_record(MoveGen *gen) {
+  const Equity *best_leaves = gen->best_leaves;
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
+        (gen->tiles_played == gen->number_of_letters_on_rack)) {
+      if (!wmp_move_gen_check_playthrough_full_rack_existence(
+              &gen->wmp_move_gen)) {
+        return;
+      }
+    }
+    if (!wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
+        (gen->tiles_played >= MINIMUM_WORD_LENGTH)) {
+      if (!wmp_move_gen_nonplaythrough_word_of_length_exists(
+              &gen->wmp_move_gen, gen->tiles_played)) {
+        return;
+      }
+      if (gen->number_of_tiles_in_bag > 0) {
+        best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
+            &gen->wmp_move_gen);
+        for (int i = 0; i < RACK_SIZE - gen->tiles_played; i++) {
+          assert(best_leaves[i] <= gen->best_leaves[i]);
+        }
+      }
+    }
+  }
+
   if (gen->is_wordsmog && (gen->tiles_played == RACK_SIZE) &&
       !kwg_accepts_alpha_with_blanks(gen->kwg, &gen->bingo_alpha_rack)) {
     return;
@@ -775,7 +807,7 @@ static inline void shadow_record(MoveGen *gen) {
   Equity equity = score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity += static_eval_get_shadow_equity(
-        gen->ld, &gen->opponent_rack, gen->best_leaves,
+        gen->ld, &gen->opponent_rack, best_leaves,
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
@@ -962,6 +994,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
 
   const int original_current_right_col = gen->current_right_col;
   const int original_tiles_played = gen->tiles_played;
+  wmp_move_gen_save_playthrough_state(&gen->wmp_move_gen);
 
   while (gen->current_right_col < (BOARD_DIM - 1) &&
          gen->tiles_played < gen->number_of_letters_on_rack) {
@@ -1019,8 +1052,15 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       if (next_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
         break;
       }
-      rack_add_letter(&gen->bingo_alpha_rack,
-                      get_unblanked_machine_letter(next_letter));
+      const uint8_t unblanked_playthrough_ml =
+          get_unblanked_machine_letter(next_letter);
+      rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
+      // Adding a letter here would be unsafe if the LetterDistribution's
+      // alphabet size exceeded BIT_RACK_MAX_ALPHABET_SIZE.
+      if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+        wmp_move_gen_add_playthrough_letter(&gen->wmp_move_gen,
+                                            unblanked_playthrough_ml);
+      }
       gen->shadow_mainword_restricted_score += gen->tile_scores[next_letter];
       gen->current_right_col++;
     }
@@ -1061,6 +1101,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   gen->current_right_col = original_current_right_col;
   gen->tiles_played = original_tiles_played;
   rack_copy(&gen->bingo_alpha_rack, &gen->bingo_alpha_rack_shadow_right_copy);
+  wmp_move_gen_restore_playthrough_state(&gen->wmp_move_gen);
 
   // The change of shadow_word_multiplier necessitates recalculating effective
   // multipliers.
@@ -1213,8 +1254,13 @@ static inline void shadow_start_playthrough(MoveGen *gen,
   // Traverse the full length of the tiles on the board until hitting an
   // empty square
   for (;;) {
-    rack_add_letter(&gen->bingo_alpha_rack,
-                    get_unblanked_machine_letter(current_letter));
+    const uint8_t unblanked_playthrough_ml =
+        get_unblanked_machine_letter(current_letter);
+    rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
+    if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+      wmp_move_gen_add_playthrough_letter(&gen->wmp_move_gen,
+                                          unblanked_playthrough_ml);
+    }
     gen->shadow_mainword_restricted_score += gen->tile_scores[current_letter];
     if (gen->current_left_col == 0 ||
         gen->current_left_col == gen->last_anchor_col + 1) {
@@ -1269,8 +1315,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   // MoveGen changes land.
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
-                           gen->last_anchor_col, gen->dir,
-                           EQUITY_MAX_VALUE);
+                           gen->last_anchor_col, gen->dir, EQUITY_MAX_VALUE);
     return;
   }
 
@@ -1309,6 +1354,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   // Reset tiles played
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
+  wmp_move_gen_reset_playthrough(&gen->wmp_move_gen);
 
   shadow_start(gen);
   if (gen->max_tiles_to_play == 0) {
@@ -1378,6 +1424,8 @@ void generate_moves(Game *game, move_record_t move_record_type,
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
   rack_set_dist_size(&gen->leave, ld_get_size(ld));
+  wmp_move_gen_init(&gen->wmp_move_gen, ld, &gen->player_rack,
+                    player_get_wmp(player));
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_tiles(game_get_bag(game));
@@ -1423,6 +1471,12 @@ void generate_moves(Game *game, move_record_t move_record_type,
     generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
                             gen->number_of_tiles_in_bag >= RACK_SIZE);
   }
+
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_check_nonplaythrough_existence(
+        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+  }
+
   // Set the leave_map index to 2^number_of_letters - 1, which represents
   // using (playing) zero tiles and keeping
   // gen->player_rack->number_of_letters tiles.

@@ -26,6 +26,9 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+#include "../str/game_string.h"
+#include "../str/move_string.h"
+
 typedef struct LeavegenSharedData {
   int num_gens;
   int gens_completed;
@@ -441,6 +444,11 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
   }
   bool games_are_divergent = false;
   while (true) {
+    // StringBuilder *sb = string_builder_create();
+    // string_builder_add_game(sb, game_runner1->game, NULL);
+    // printf("%s\n", string_builder_peek(sb));
+    // string_builder_destroy(sb);
+
     Move *move1 = NULL;
     bool game1_is_over = game_runner_is_game_over(game_runner1);
     if (!game1_is_over) {
@@ -465,6 +473,17 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
     if (!games_are_divergent &&
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
+      // if (move1 && move2) {
+      //   sb = string_builder_create();
+      //   string_builder_add_move(sb, game_get_board(game_runner1->game), move1,
+      //                           game_get_ld(game_runner1->game));
+      //   printf("move1: %s\n", string_builder_peek(sb));
+      //   string_builder_clear(sb);
+      //   string_builder_add_move(sb, game_get_board(game_runner2->game), move2,
+      //                           game_get_ld(game_runner2->game));
+      //   printf("move2: %s\n", string_builder_peek(sb));
+      //   string_builder_destroy(sb);
+      // }
       games_are_divergent = true;
     }
   }
