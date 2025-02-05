@@ -27,10 +27,10 @@ void load_and_generate(Game *game, MoveList *move_list, Player *player,
   rack_set_to_string(ld, player_rack, rack);
   generate_moves_for_game(game, 0, move_list);
   AnchorList *anchor_list = gen_get_anchor_list(0);
-  double previous_equity = 10000000;
+  Equity previous_equity = EQUITY_MAX_VALUE;
   int number_of_anchors = anchor_list_get_count(anchor_list);
   for (int i = 0; i < number_of_anchors; i++) {
-    double equity = anchor_get_highest_possible_equity(anchor_list, i);
+    const Equity equity = anchor_get_highest_possible_equity(anchor_list, i);
     assert(equity <= previous_equity);
     previous_equity = equity;
   }
@@ -156,7 +156,7 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(anchor_list, 7, 3);
   // E(A)a
   assert_anchor_equity_int(anchor_list, 8, 2);
-  
+
   load_and_generate(game, move_list, player, KA_OPENING_CGP, "J");
   assert(anchor_list_get_count(anchor_list) == 4);
   // J(K) vertically
@@ -193,17 +193,17 @@ void test_shadow_score(void) {
   // and JUF, doubling the F and J.
   load_and_generate(game, move_list, player, KA_OPENING_CGP, "JFU");
   assert_anchor_equity_int(anchor_list, 0, 32);
-  
+
   load_and_generate(game, move_list, player, AA_OPENING_CGP, "JFUG");
   assert_anchor_equity_int(anchor_list, 0, 47);
 
   load_and_generate(game, move_list, player, AA_OPENING_CGP, "JFUGX");
   assert_anchor_equity_int(anchor_list, 0, 61);
-  
+
   // Reaches the triple word
   load_and_generate(game, move_list, player, AA_OPENING_CGP, "JFUGXL");
   assert_anchor_equity_int(anchor_list, 0, 102);
-  
+
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "Q");
   // WINDY is not extendable, so there is no 22 for WINDYQ.
   // The highest anchor is through the W in WINDY, recording 14 for QW, as W is
@@ -214,7 +214,7 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(anchor_list, 0, 14);
   // The next highest anchor is through the I in WINDY: 11 for QI.
   assert_anchor_equity_int(anchor_list, 1, 11);
-  
+
   load_and_generate(game, move_list, player, DOUG_V_EMELY_CGP, "BD");
   // WINDY is not extendable, so there is no 17 for WINDYBD.
   // The highest anchor is 14 for 7H BD.
@@ -251,13 +251,13 @@ void test_shadow_score(void) {
   // B6 A(P)
   // D6 A(OW)
   // F6 A(EN)
-  
+
   assert_anchor_equity_int(anchor_list, 0, 6);
   assert_anchor_equity_int(anchor_list, 1, 6);
   assert_anchor_equity_int(anchor_list, 1, 6);
   assert_anchor_equity_int(anchor_list, 3, 6);
   assert_anchor_equity_int(anchor_list, 4, 5);
-  
+
   load_and_generate(game, move_list, player, TRIPLE_LETTERS_CGP, "Z");
   // Z(P) vertically
   assert_anchor_equity_int(anchor_list, 0, 33);
@@ -329,7 +329,7 @@ void test_shadow_score(void) {
 
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "ZL");
-  assert_anchor_equity_int(anchor_list, 0, 64);                  
+  assert_anchor_equity_int(anchor_list, 0, 64);
 
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "ZLI");
@@ -347,14 +347,14 @@ void test_shadow_score(void) {
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "ZLIERA");
   assert_anchor_equity_int(anchor_list, 0, 80);
-  
+
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "ZL");
-  assert_anchor_equity_int(anchor_list, 0, 64);                    
+  assert_anchor_equity_int(anchor_list, 0, 64);
 
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "ZLI");
-  assert_anchor_equity_int(anchor_list, 0, 68);                    
+  assert_anchor_equity_int(anchor_list, 0, 68);
 
   load_and_generate(game, move_list, player, LATER_BETWEEN_DOUBLE_WORDS_CGP,
                     "ZLIE");

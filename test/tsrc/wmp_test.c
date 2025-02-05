@@ -6,7 +6,6 @@
 #include "../../src/ent/wmp.h"
 
 #include "../../src/impl/config.h"
-#include "../../src/impl/gameplay.h"
 #include "../../src/impl/kwg_maker.h"
 #include "../../src/impl/wmp_maker.h"
 
