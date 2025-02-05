@@ -127,6 +127,7 @@ typedef struct MoveGen {
   Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
   Equity best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
+
   // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
   Equity tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
