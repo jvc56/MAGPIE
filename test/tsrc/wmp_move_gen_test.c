@@ -33,7 +33,7 @@ void set_dummy_leave_values(LeaveMap *leave_map) {
 }
 
 void test_nonplaythrough_existence(void) {
-  Config *config = config_create_or_die("set -lex CSW21 -wmp1 true");
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
   const LetterDistribution *ld = game_get_ld(game);
@@ -97,7 +97,7 @@ void test_nonplaythrough_existence(void) {
 }
 
 void test_playthrough_bingo_existence(void) {
-  Config *config = config_create_or_die("set -lex CSW21 -wmp1 true");
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
   const LetterDistribution *ld = game_get_ld(game);

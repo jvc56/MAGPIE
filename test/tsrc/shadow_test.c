@@ -552,6 +552,63 @@ void test_shadow_score(void) {
   config_destroy(config);
 }
 
+void test_shadow_wmp_nonplaythrough_existence(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(1000);
+  player_set_move_sort_type(player, MOVE_SORT_SCORE);
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "MUZJIKS");
+  AnchorList *anchor_list = gen_get_anchor_list(0);
+  assert(anchor_list_get_count(anchor_list) == 1);
+  assert_anchor_equity_int(anchor_list, 0, 128);
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "TRONGLE");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  // We know there are sixes with a G, and assume something could put the G on
+  // the DWS even though none do.
+  assert_anchor_equity_int(anchor_list, 0, 18);
+
+  load_and_generate(game, move_list, player, EMPTY_CGP, "VVWWXYZ");
+  assert(anchor_list_get_count(anchor_list) == 1);
+  // This is an unusual case. The 0 recorded here is as if for a one tile play
+  // in the vertical direction. We shadow these as if playing horizontally and
+  // do not check for word validity. It scores 0 for main word because the score
+  // would actually come from the vertical direction (as a hook). This doesn't
+  // make sense with an empty board but might not be worth special handling.
+  assert_anchor_equity_int(anchor_list, 0, 0);
+
+  game_destroy(game);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+void test_shadow_wmp_playthrough_bingo_existence(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(1000);
+
+  player_set_move_sort_type(player, MOVE_SORT_SCORE);
+  char qi_qis[300] =
+      "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
+      "0 lex CSW21";
+  load_and_generate(game, move_list, player, qi_qis, "FRUITED");
+  AnchorList *al = gen_get_anchor_list(0);
+  assert(anchor_list_get_count(al) == 8);
+
+  // f9 UFTRIDE for 88, not 8g (QI)DURFITE for 128
+  assert_anchor_equity_int(al, 0, 88);
+  assert(anchor_get_row(al, 0) == 5);
+  assert(anchor_get_col(al, 0) == 8);
+  assert(anchor_get_dir(al, 0) == BOARD_VERTICAL_DIRECTION);
+
+  game_destroy(game);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
 void test_shadow_top_move(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -573,5 +630,7 @@ void test_shadow_top_move(void) {
 
 void test_shadow(void) {
   test_shadow_score();
+  test_shadow_wmp_nonplaythrough_existence();
+  test_shadow_wmp_playthrough_bingo_existence();
   test_shadow_top_move();
 }
