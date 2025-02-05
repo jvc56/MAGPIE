@@ -578,10 +578,13 @@ void small_play_recorder_test(void) {
   config_destroy(config);
 }
 
-void distinct_lexica_test(void) {
-  Config *config =
-      config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
-                           "-r1 best -r2 best -numplays 1");
+void distinct_lexica_test(bool w1) {
+  Config *config = w1 ? config_create_or_die(
+                              "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+                              "-r1 best -r2 best -numplays 1 -w1 true")
+                        : config_create_or_die(
+                              "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+                              "-r1 best -r2 best -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
@@ -842,6 +845,39 @@ void movegen_var_bingo_bonus_test(void) {
   config_destroy(config);
 }
 
+void movegen_no_wmp_by_default_test(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const WMP *wmp1 = player_get_wmp(game_get_player(game, 0));
+  assert(wmp1 == NULL);
+  const WMP *wmp2 = player_get_wmp(game_get_player(game, 1));
+  assert(wmp2 == NULL);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void movegen_only_one_player_wmp(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -w1 true");
+  Game *game = config_game_create(config);
+  const WMP *wmp1 = player_get_wmp(game_get_player(game, 0));
+  assert(wmp1 != NULL);
+  assert(wmp1 != (WMP *)0xbebebebebebebebe);
+  const WMP *wmp2 = player_get_wmp(game_get_player(game, 1));
+  assert(wmp2 == NULL);
+  game_destroy(game);
+  config_destroy(config);
+
+  config = config_create_or_die("set -lex CSW21 -w2 true");
+  game = config_game_create(config);
+  wmp1 = player_get_wmp(game_get_player(game, 0));
+  assert(wmp1 == NULL);
+  wmp2 = player_get_wmp(game_get_player(game, 1));
+  assert(wmp2 != NULL);
+  assert(wmp2 != (WMP *)0xbebebebebebebebe);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   leave_lookup_test();
   unfound_leave_lookup_test();
@@ -850,9 +886,12 @@ void test_move_gen(void) {
   equity_test();
   top_equity_play_recorder_test();
   small_play_recorder_test();
-  distinct_lexica_test();
+  distinct_lexica_test(false);
+  distinct_lexica_test(true);
   consistent_tiebreaking_test();
   wordsmog_test();
   movegen_game_update_test();
   movegen_var_bingo_bonus_test();
+  movegen_no_wmp_by_default_test();
+  movegen_only_one_player_wmp();
 }
