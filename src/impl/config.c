@@ -479,7 +479,7 @@ config_load_status_t config_load_double(Config *config, arg_token_t arg_token,
 }
 
 config_load_status_t config_load_bool(Config *config, arg_token_t arg_token,
-                                      bool *value) {                                        
+                                      bool *value) {
   const char *bool_str = config_get_parg_value(config, arg_token, 0);
   if (bool_str) {
     if (has_iprefix(bool_str, "true")) {

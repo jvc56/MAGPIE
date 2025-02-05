@@ -594,6 +594,7 @@ void test_shadow_wmp_playthrough_bingo_existence(void) {
   char qi_qis[300] =
       "15/15/15/15/15/15/15/6QI7/6I8/6S8/15/15/15/15/15 FRUITED/EGGCUPS 22/12 "
       "0 lex CSW21";
+  
   load_and_generate(game, move_list, player, qi_qis, "FRUITED");
   AnchorList *al = gen_get_anchor_list(0);
   assert(anchor_list_get_count(al) == 8);
@@ -603,6 +604,15 @@ void test_shadow_wmp_playthrough_bingo_existence(void) {
   assert(anchor_get_row(al, 0) == 5);
   assert(anchor_get_col(al, 0) == 8);
   assert(anchor_get_dir(al, 0) == BOARD_VERTICAL_DIRECTION);
+
+  load_and_generate(game, move_list, player, qi_qis, "AOUNS??");
+  assert(anchor_list_get_count(al) == 9);
+
+  // 8g (QI)NghAOSU
+  assert_anchor_equity_int(al, 0, 101);
+  assert(anchor_get_row(al, 0) == 7);
+  assert(anchor_get_col(al, 0) == 7);
+  assert(anchor_get_dir(al, 0) == BOARD_HORIZONTAL_DIRECTION);
 
   game_destroy(game);
   move_list_destroy(move_list);
