@@ -68,8 +68,10 @@ void test_nonplaythrough_existence(void) {
   assert(wmp_move_gen_nonplaythrough_word_of_length_exists(&wmg, 7));
   const Equity *best_leaves =
       wmp_move_gen_get_nonplaythrough_best_leave_values(&wmg);
+
   for (int len = MINIMUM_WORD_LENGTH; len <= RACK_SIZE; len++) {
-    assert(best_leaves[len] == 0);
+    const int leave_size = RACK_SIZE - len;
+    assert(best_leaves[leave_size] == 0);
   }
 
   wmp_move_gen_check_nonplaythrough_existence(&wmg, /*check_leaves=*/true,
