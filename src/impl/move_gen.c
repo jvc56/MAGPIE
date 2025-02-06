@@ -1369,6 +1369,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
                          gen->last_anchor_col, gen->dir,
                          gen->highest_shadow_equity);
+  anchor_heap_add_unheaped_anchor(&gen->anchor_heap, gen->current_row_index,
+                                  col, gen->last_anchor_col, gen->dir,
+                                  gen->highest_shadow_equity);
 }
 
 void shadow_by_orientation(MoveGen *gen) {
@@ -1537,6 +1540,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   if (gen->is_wordsmog) {
     rack_reset(&gen->full_player_rack);
   }
+  assert(anchor_list_get_count(anchor_list) == gen->anchor_heap.count);
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
     Equity anchor_highest_possible_equity =

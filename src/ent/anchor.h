@@ -106,7 +106,7 @@ static inline void
 anchor_heap_add_unheaped_anchor(AnchorHeap *ah, uint8_t row, uint8_t col,
                                 uint8_t last_anchor_col, uint8_t dir,
                                 Equity highest_possible_equity) {
-  int i = ah->count;
+  const int i = ah->count;
   ah->anchors[i].row = row;
   ah->anchors[i].col = col;
   ah->anchors[i].last_anchor_col = last_anchor_col;
