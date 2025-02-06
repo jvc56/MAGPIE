@@ -127,6 +127,7 @@ typedef struct MoveGen {
   Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
   Equity best_leaves[(RACK_SIZE)];
   AnchorList *anchor_list;
+  AnchorHeap anchor_heap;
 
   // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
@@ -1317,6 +1318,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
     anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
                            gen->last_anchor_col, gen->dir, EQUITY_MAX_VALUE);
+    anchor_heap_add_unheaped_anchor(&gen->anchor_heap, gen->current_row_index,
+                                    col, gen->last_anchor_col, gen->dir,
+                                    EQUITY_MAX_VALUE);
     return;
   }
 
@@ -1484,6 +1488,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   leave_map_set_current_index(
       &gen->leave_map, (1 << rack_get_total_letters(&gen->player_rack)) - 1);
   anchor_list_reset(gen->anchor_list);
+  anchor_heap_reset(&gen->anchor_heap);
 
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
@@ -1519,6 +1524,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   // ordering of output.
   if (gen->move_record_type != MOVE_RECORD_ALL_SMALL) {
     anchor_list_sort(gen->anchor_list);
+    anchor_heap_heapify_all(&gen->anchor_heap);
   }
   const AnchorList *anchor_list = gen->anchor_list;
 
@@ -1532,8 +1538,10 @@ void generate_moves(Game *game, move_record_t move_record_type,
     rack_reset(&gen->full_player_rack);
   }
   for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
+    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
     Equity anchor_highest_possible_equity =
         anchor_get_highest_possible_equity(anchor_list, i);
+    assert(anchor.highest_possible_equity == anchor_highest_possible_equity);
     if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(gen, anchor_highest_possible_equity)) {
       break;
