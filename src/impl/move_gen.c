@@ -70,12 +70,6 @@ void gen_destroy_cache(void) {
   }
 }
 
-// This function is only used for testing and is exposed
-// in the move_gen_pi.h header in the test directory.
-AnchorHeap *gen_get_anchor_heap(int thread_index) {
-  return &cached_gens[thread_index]->anchor_heap;
-}
-
 // Cache getter functions
 
 static inline uint8_t gen_cache_get_letter(const MoveGen *gen, int col) {
