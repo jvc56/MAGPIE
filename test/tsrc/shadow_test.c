@@ -508,9 +508,9 @@ void test_shadow_score(void) {
   assert_anchor_equity_int(&anchor_list, 5, 14);
 
   game_reset(game);
-  char toeless[300] = "15/15/15/15/15/15/5Q2J6/5UVAE6/5I2U6/5Z9/15/15/15/15/15 "
-                      "TOELESS/EEGIPRW "
-                      "42/38 0 lex CSW21";
+  char toeless[300] =
+      "15/15/15/15/15/15/5Q2J6/5UVAE6/5I2U6/5Z9/15/15/15/15/15 TOELESS/EEGIPRW "
+      "42/38 0 lex CSW21";
   load_and_shadow(game, player, toeless, "TOELESS", &anchor_list);
 
   assert_anchor_equity_int(&anchor_list, 0, 86);
