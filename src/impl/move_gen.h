@@ -132,7 +132,7 @@ void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
                        move_sort_t move_sort_type, MoveList *move_list,
                        const KWG *override_kwg);
 
-void gen_lookup_leaves_and_record_exchanges(MoveGen *gen);
+void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 
 void gen_shadow(MoveGen *gen);
 

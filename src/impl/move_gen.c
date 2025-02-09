@@ -1354,7 +1354,7 @@ void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
 }
 
-void gen_lookup_leaves_and_record_exchanges(MoveGen *gen) {
+void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   leave_map_init(&gen->player_rack, &gen->leave_map);
   if (rack_get_total_letters(&gen->player_rack) < RACK_SIZE) {
     leave_map_set_current_value(
@@ -1477,7 +1477,7 @@ void generate_moves(Game *game, move_record_t move_record_type,
   MoveGen *gen = get_movegen(thread_index);
   gen_load_position(gen, game, move_record_type, move_sort_type, move_list,
                     override_kwg);
-  gen_lookup_leaves_and_record_exchanges(gen);
+  gen_look_up_leaves_and_record_exchanges(gen);
 
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     wmp_move_gen_check_nonplaythrough_existence(
