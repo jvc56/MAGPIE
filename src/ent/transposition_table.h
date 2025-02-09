@@ -17,19 +17,17 @@
 #define BOTTOM3_BYTE_MASK ((1 << 24) - 1)
 #define DEPTH_MASK ((1 << 6) - 1)
 
-typedef struct TTEntry {
+typedef struct __attribute__((packed)) TTEntry {
   // Don't store the full hash, but the top 5 bytes. The bottom 3 bytes
   // can be determined from the bucket in the array.
-  uint32_t top_4_bytes;
+  uint64_t top_5_bytes : 40;
   int16_t score;
-  uint8_t fifth_byte;
   uint8_t flag_and_depth;
   uint64_t tiny_move;
 } TTEntry;
 
 inline static uint64_t ttentry_full_hash(TTEntry t, uint64_t index) {
-  return ((uint64_t)(t.top_4_bytes) << 32) + ((uint64_t)(t.fifth_byte) << 24) +
-         (index & BOTTOM3_BYTE_MASK);
+  return (t.top_5_bytes << 24) | (index & BOTTOM3_BYTE_MASK);
 }
 
 inline static uint8_t ttentry_flag(TTEntry t) { return t.flag_and_depth >> 6; }
@@ -45,9 +43,8 @@ inline static bool ttentry_valid(TTEntry t) { return ttentry_flag(t) != 0; }
 inline static uint64_t ttentry_move(TTEntry t) { return t.tiny_move; }
 
 inline static void ttentry_reset(TTEntry *t) {
-  t->top_4_bytes = 0;
+  t->top_5_bytes = 0;
   t->score = 0;
-  t->fifth_byte = 0;
   t->flag_and_depth = 0;
   t->tiny_move = 0;
 }
@@ -65,7 +62,8 @@ typedef struct TranspositionTable {
 
 static inline TranspositionTable *
 transposition_table_create(double fraction_of_memory) {
-  TranspositionTable *tt = malloc_or_die(sizeof(TranspositionTable));
+  TranspositionTable *tt =
+      (TranspositionTable *)malloc_or_die(sizeof(TranspositionTable));
 
   uint64_t total_memory = get_total_memory();
   uint64_t desired_n_elems =
@@ -90,7 +88,7 @@ transposition_table_create(double fraction_of_memory) {
            "(number of elements: %d, memory required: %dMB)",
            total_memory, tt->size_power_of_2, num_elems,
            (sizeof(TTEntry) * num_elems) / (1024 * 1024));
-  tt->table = malloc_or_die(sizeof(TTEntry) * num_elems);
+  tt->table = (TTEntry *)malloc_or_die(sizeof(TTEntry) * num_elems);
   memset(tt->table, 0, sizeof(TTEntry) * num_elems);
   tt->size_mask = num_elems - 1;
   tt->zobrist = zobrist_create(time(NULL));
@@ -137,8 +135,7 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
 static inline void transposition_table_store(TranspositionTable *tt,
                                              uint64_t zval, TTEntry tentry) {
   uint64_t idx = zval & tt->size_mask;
-  tentry.top_4_bytes = (uint32_t)(zval >> 32);
-  tentry.fifth_byte = (uint8_t)(zval >> 24);
+  tentry.top_5_bytes = zval >> 24;
   atomic_fetch_add(&tt->created, 1);
   tt->table[idx] = tentry;
 }
