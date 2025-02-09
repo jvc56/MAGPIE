@@ -1,3 +1,5 @@
+#include "move_gen.h"
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -10,12 +12,9 @@
 #include "../def/klv_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
-#include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/anchor.h"
-#include "../ent/bag.h"
-#include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -35,113 +34,6 @@
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
-typedef struct UnrestrictedMultiplier {
-  uint8_t multiplier;
-  uint8_t column;
-} UnrestrictedMultiplier;
-
-typedef struct MoveGen {
-  // Owned by this MoveGen struct
-  int current_row_index;
-  int current_anchor_col;
-  uint64_t anchor_left_extension_set;
-  uint64_t anchor_right_extension_set;
-
-  int last_anchor_col;
-  int dir;
-  int max_tiles_to_play;
-  int tiles_played;
-  int number_of_plays;
-  int move_sort_type;
-  int move_record_type;
-  int number_of_tiles_in_bag;
-  int player_index;
-  int bingo_bonus;
-  bool kwgs_are_shared;
-  bool is_wordsmog;
-  Rack player_rack;
-  Rack player_rack_shadow_right_copy;
-  // Using to save the player's full rack
-  // for shadow playing and then is later
-  // used for alpha generation
-  Rack full_player_rack;
-  Rack bingo_alpha_rack;
-  Rack bingo_alpha_rack_shadow_right_copy;
-  Rack opponent_rack;
-  Rack leave;
-  Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
-  Square row_cache[BOARD_DIM];
-  int row_number_of_anchors_cache[(BOARD_DIM) * 2];
-  Equity opening_move_penalties[(BOARD_DIM) * 2];
-  int board_number_of_tiles_played;
-  int cross_index;
-  Move best_move_and_current_move[2];
-  int best_move_index;
-
-  uint8_t strip[(MOVE_MAX_TILES)];
-  uint8_t exchange_strip[(MOVE_MAX_TILES)];
-  LeaveMap leave_map;
-  BitRack player_bit_rack;
-  // Shadow plays
-  int current_left_col;
-  int current_right_col;
-
-  // Used to insert "unrestricted" multipliers into a descending list for
-  // calculating the maximum score for an anchor. We don't know which tiles will
-  // go in which multipliers so we keep a sorted list. The inner product of
-  // those and the descending tile scores is the highest possible score of a
-  // permutation of tiles in those squares.
-  UnrestrictedMultiplier
-      descending_cross_word_multipliers[WORD_ALIGNING_RACK_SIZE];
-  uint16_t descending_effective_letter_multipliers[WORD_ALIGNING_RACK_SIZE];
-  uint8_t num_unrestricted_multipliers;
-  uint8_t last_word_multiplier;
-
-  // Used to reset the arrays after finishing shadow_play_right, which may have
-  // rearranged the ordering of the multipliers used while shadowing left.
-  UnrestrictedMultiplier desc_xw_muls_copy[WORD_ALIGNING_RACK_SIZE];
-  uint16_t desc_eff_letter_muls_copy[WORD_ALIGNING_RACK_SIZE];
-
-  // Since shadow does not have backtracking besides when switching from going
-  // right back to going left, it is convenient to store these parameters here
-  // rather than using function arguments for them.
-
-  // This is a sum of already-played crosswords and tiles restricted to a known
-  // empty square (times a letter or word multiplier). It's a part of the score
-  // not affected by the overall mainword multiplier.
-  Equity shadow_perpendicular_additional_score;
-
-  // This is a sum of both the playthrough tiles and tiles restricted to a known
-  // empty square (times their letter multiplier). It will be multiplied by
-  // shadow_word_multiplier as part of computing score shadow_record.
-  Equity shadow_mainword_restricted_score;
-
-  // Product of word multipliers used by newly played tiles.
-  int shadow_word_multiplier;
-
-  Equity highest_shadow_equity;
-  uint64_t rack_cross_set;
-  int number_of_letters_on_rack;
-  Equity full_rack_descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
-  Equity descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
-  Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
-  Equity best_leaves[(RACK_SIZE)];
-  AnchorList *anchor_list;
-  AnchorHeap anchor_heap;
-
-  // Include space for blank letters so their scores can be added without
-  // checking whether tiles are blanked.
-  Equity tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
-
-  // Owned by the caller
-  const LetterDistribution *ld;
-  const KLV *klv;
-  const KWG *kwg;
-  MoveList *move_list;
-
-  WMPMoveGen wmp_move_gen;
-} MoveGen;
-
 // Cache move generators since destroying
 // and recreating a movegen for
 // every request to generate moves would
@@ -152,7 +44,6 @@ static MoveGen *cached_gens[MAX_THREADS];
 
 MoveGen *generator_create(void) {
   MoveGen *generator = malloc_or_die(sizeof(MoveGen));
-  generator->anchor_list = anchor_list_create();
   generator->tiles_played = 0;
   generator->dir = BOARD_HORIZONTAL_DIRECTION;
   return generator;
@@ -162,7 +53,6 @@ void generator_destroy(MoveGen *gen) {
   if (!gen) {
     return;
   }
-  anchor_list_destroy(gen->anchor_list);
   free(gen);
 }
 
@@ -182,8 +72,8 @@ void gen_destroy_cache(void) {
 
 // This function is only used for testing and is exposed
 // in the move_gen_pi.h header in the test directory.
-AnchorList *gen_get_anchor_list(int thread_index) {
-  return cached_gens[thread_index]->anchor_list;
+AnchorHeap *gen_get_anchor_heap(int thread_index) {
+  return &cached_gens[thread_index]->anchor_heap;
 }
 
 // Cache getter functions
@@ -1316,8 +1206,6 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   // while looping over the board, but we'll put that off until after other
   // MoveGen changes land.
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
-    anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
-                           gen->last_anchor_col, gen->dir, EQUITY_MAX_VALUE);
     anchor_heap_add_unheaped_anchor(&gen->anchor_heap, gen->current_row_index,
                                     col, gen->last_anchor_col, gen->dir,
                                     EQUITY_MAX_VALUE);
@@ -1366,9 +1254,6 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     return;
   }
 
-  anchor_list_add_anchor(gen->anchor_list, gen->current_row_index, col,
-                         gen->last_anchor_col, gen->dir,
-                         gen->highest_shadow_equity);
   anchor_heap_add_unheaped_anchor(&gen->anchor_heap, gen->current_row_index,
                                   col, gen->last_anchor_col, gen->dir,
                                   gen->highest_shadow_equity);
@@ -1413,26 +1298,23 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
               gen->descending_tile_scores, sizeof(gen->descending_tile_scores));
 }
 
-void generate_moves(Game *game, move_record_t move_record_type,
-                    move_sort_t move_sort_type, int thread_index,
-                    MoveList *move_list, const KWG *override_kwg) {
-  const Board *board = game_get_board(game);
-  const LetterDistribution *ld = game_get_ld(game);
-  MoveGen *gen = get_movegen(thread_index);
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player = game_get_player(game, player_on_turn_index);
-  Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
+                       move_sort_t move_sort_type, MoveList *move_list,
+                       const KWG *override_kwg) {
+  gen->board = game_get_board(game);
+  gen->player_index = game_get_player_on_turn_index(game);
+  Player *player = game_get_player(game, gen->player_index);
+  Player *opponent = game_get_player(game, 1 - gen->player_index);
 
-  gen->ld = ld;
+  gen->ld = game_get_ld(game);
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   gen->klv = player_get_klv(player);
-  gen->board_number_of_tiles_played = board_get_tiles_played(board);
-  gen->player_index = player_on_turn_index;
+  gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
-  rack_set_dist_size(&gen->leave, ld_get_size(ld));
-  wmp_move_gen_init(&gen->wmp_move_gen, ld, &gen->player_rack,
+  rack_set_dist_size(&gen->leave, ld_get_size(gen->ld));
+  wmp_move_gen_init(&gen->wmp_move_gen, gen->ld, &gen->player_rack,
                     player_get_wmp(player));
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
@@ -1455,6 +1337,30 @@ void generate_moves(Game *game, move_record_t move_record_type,
   gen->best_move_index = 0;
   move_set_equity(gen_get_best_move(gen), EQUITY_INITIAL_VALUE);
 
+  // Set rack cross set and cache ld's tile scores
+  gen->rack_cross_set = 0;
+  memset(gen->tile_scores, 0, sizeof(gen->tile_scores));
+  for (int i = 0; i < ld_get_size(gen->ld); i++) {
+    if (rack_get_letter(&gen->player_rack, i) > 0) {
+      gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
+    }
+    gen->tile_scores[i] = ld_get_score(gen->ld, i);
+    gen->tile_scores[get_blanked_machine_letter(i)] =
+        ld_get_score(gen->ld, BLANK_MACHINE_LETTER);
+  }
+
+  set_descending_tile_scores(gen);
+
+  board_load_number_of_row_anchors_cache(gen->board,
+                                         gen->row_number_of_anchors_cache);
+  board_load_lanes_cache(gen->board, gen->cross_index, gen->lanes_cache);
+
+  board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
+
+  gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
+}
+
+void gen_lookup_leaves_and_record_exchanges(MoveGen *gen) {
   leave_map_init(&gen->player_rack, &gen->leave_map);
   if (rack_get_total_letters(&gen->player_rack) < RACK_SIZE) {
     leave_map_set_current_value(
@@ -1479,57 +1385,31 @@ void generate_moves(Game *game, move_record_t move_record_type,
     generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
                             gen->number_of_tiles_in_bag >= RACK_SIZE);
   }
+}
 
-  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    wmp_move_gen_check_nonplaythrough_existence(
-        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
-  }
-
+void gen_shadow(MoveGen *gen) {
   // Set the leave_map index to 2^number_of_letters - 1, which represents
   // using (playing) zero tiles and keeping
   // gen->player_rack->number_of_letters tiles.
   leave_map_set_current_index(
       &gen->leave_map, (1 << rack_get_total_letters(&gen->player_rack)) - 1);
-  anchor_list_reset(gen->anchor_list);
   anchor_heap_reset(&gen->anchor_heap);
-
-  // Set rack cross set and cache ld's tile scores
-  gen->rack_cross_set = 0;
-  memset(gen->tile_scores, 0, sizeof(gen->tile_scores));
-  for (int i = 0; i < ld_get_size(gen->ld); i++) {
-    if (rack_get_letter(&gen->player_rack, i) > 0) {
-      gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
-    }
-    gen->tile_scores[i] = ld_get_score(gen->ld, i);
-    gen->tile_scores[get_blanked_machine_letter(i)] =
-        ld_get_score(gen->ld, BLANK_MACHINE_LETTER);
-  }
-
-  set_descending_tile_scores(gen);
-
-  board_load_number_of_row_anchors_cache(board,
-                                         gen->row_number_of_anchors_cache);
-  board_load_lanes_cache(board, gen->cross_index, gen->lanes_cache);
-
-  board_copy_opening_penalties(board, gen->opening_move_penalties);
-
-  gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
 
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
     shadow_by_orientation(gen);
   }
 
-  // Reset the reused generator fields
-  gen->tiles_played = 0;
-
   // Also unnecessary for MOVE_RECORD_ALL, but our tests might care about the
   // ordering of output.
   if (gen->move_record_type != MOVE_RECORD_ALL_SMALL) {
-    anchor_list_sort(gen->anchor_list);
-    anchor_heap_heapify_all(&gen->anchor_heap);
+    anchor_heapify_all(&gen->anchor_heap);
   }
-  const AnchorList *anchor_list = gen->anchor_list;
+}
+
+void gen_record_scoring_plays(MoveGen *gen) {
+  // Reset the reused generator fields
+  gen->tiles_played = 0;
 
   // Set these fields to values outside their valid ranges so the row cache gets
   // loaded for the first anchor.
@@ -1540,49 +1420,44 @@ void generate_moves(Game *game, move_record_t move_record_type,
   if (gen->is_wordsmog) {
     rack_reset(&gen->full_player_rack);
   }
-  assert(anchor_list_get_count(anchor_list) == gen->anchor_heap.count);
-  for (int i = 0; i < anchor_list_get_count(anchor_list); i++) {
+  while (gen->anchor_heap.count > 0) {
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
-    Equity anchor_highest_possible_equity =
-        anchor_get_highest_possible_equity(anchor_list, i);
-    assert(anchor.highest_possible_equity == anchor_highest_possible_equity);
     if (gen->move_record_type == MOVE_RECORD_BEST &&
-        better_play_has_been_found(gen, anchor_highest_possible_equity)) {
+        better_play_has_been_found(gen, anchor.highest_possible_equity)) {
       break;
     }
-    gen->current_anchor_col = anchor_get_col(anchor_list, i);
+    gen->current_anchor_col = anchor.col;
     // Don't recopy the row cache if we're working on the same board lane
     // as the previous anchor. When anchors have been sorted by descending
     // max equity, doing this check is a wash, but it helps for endgame when
     // we are just scanning over the board in order.
-    if ((gen->current_row_index != anchor_get_row(anchor_list, i)) ||
-        (gen->dir != anchor_get_dir(anchor_list, i))) {
-      gen->current_row_index = anchor_get_row(anchor_list, i);
-      gen->dir = anchor_get_dir(anchor_list, i);
-      board_copy_row_cache(gen->lanes_cache, gen->row_cache,
-                           anchor_get_row(anchor_list, i),
-                           anchor_get_dir(anchor_list, i));
+    if ((gen->current_row_index != anchor.row) || (gen->dir != anchor.dir)) {
+      gen->current_row_index = anchor.row;
+      gen->dir = anchor.dir;
+      board_copy_row_cache(gen->lanes_cache, gen->row_cache, anchor.row,
+                           anchor.dir);
     }
-    gen->last_anchor_col = anchor_get_last_anchor_col(anchor_list, i);
+    gen->last_anchor_col = anchor.last_anchor_col;
     gen->anchor_right_extension_set =
         gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
     if (gen->is_wordsmog) {
-      recursive_gen_alpha(gen, gen->current_anchor_col, gen->current_anchor_col,
-                          gen->current_anchor_col,
+      recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
     } else {
-      recursive_gen(gen, gen->current_anchor_col, kwg_root_node_index,
-                    gen->current_anchor_col, gen->current_anchor_col,
-                    gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+      recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
+                    anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                    0);
     }
 
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       // If a better play has been found than should have been possible for
       // this anchor, highest_possible_equity was invalid.
-      assert(!better_play_has_been_found(gen, anchor_highest_possible_equity));
+      assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
     }
   }
+}
 
+void gen_record_pass(MoveGen *gen) {
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     move_list_set_spare_move_as_pass(gen->move_list);
     move_list_insert_spare_move(gen->move_list, EQUITY_PASS_VALUE);
@@ -1600,4 +1475,22 @@ void generate_moves(Game *game, move_record_t move_record_type,
     move_list_set_spare_small_move_as_pass(gen->move_list);
     move_list_insert_spare_small_move(gen->move_list);
   }
+}
+
+void generate_moves(Game *game, move_record_t move_record_type,
+                    move_sort_t move_sort_type, int thread_index,
+                    MoveList *move_list, const KWG *override_kwg) {
+  MoveGen *gen = get_movegen(thread_index);
+  gen_load_position(gen, game, move_record_type, move_sort_type, move_list,
+                    override_kwg);
+  gen_lookup_leaves_and_record_exchanges(gen);
+
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_check_nonplaythrough_existence(
+        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+  }
+
+  gen_shadow(gen);
+  gen_record_scoring_plays(gen);
+  gen_record_pass(gen);
 }

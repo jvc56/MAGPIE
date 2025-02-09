@@ -786,11 +786,38 @@ void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
          expected_challenge_points_eq);
 }
 
-void assert_anchor_equity_int(const AnchorList *al, int i, int expected) {
-  assert_anchor_equity_exact(al, i, int_to_equity(expected));
+void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected) {
+  assert_anchor_equity_exact(ah, i, int_to_equity(expected));
 }
 
-void assert_anchor_equity_exact(const AnchorList *al, int i, Equity expected) {
-  const Equity actual = anchor_get_highest_possible_equity(al, i);
+void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected) {
+  const Equity actual = ah->anchors[i].highest_possible_equity;
   assert(actual == expected);
+}
+
+void generate_anchors_for_test(Game *game) {
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  // We don't care about them, but exchanges will be recorded while
+  // looking up leave values and it is not adding a parameter to prevent this.
+  MoveList *move_list = move_list_create(1000);
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  gen_load_position(gen, game, player_get_move_record_type(player_on_turn),
+                    player_get_move_sort_type(player_on_turn), move_list,
+                    /*override_kwg=*/NULL);
+  gen_lookup_leaves_and_record_exchanges(gen);
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_check_nonplaythrough_existence(
+        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+  }
+  gen_shadow(gen);
+}
+
+void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors) {
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  anchor_heap_reset(sorted_anchors);
+  while (gen->anchor_heap.count > 0) {
+    sorted_anchors->anchors[sorted_anchors->count++] =
+        anchor_heap_extract_max(&gen->anchor_heap);
+  }
 }
