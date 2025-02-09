@@ -32,6 +32,7 @@ typedef struct AnchorHeap {
   Anchor anchors[ANCHOR_HEAP_CAPACITY];
 } AnchorHeap;
 
+// Appends anchors to the end of the list without any comparisons.
 static inline void
 anchor_heap_add_unheaped_anchor(AnchorHeap *ah, uint8_t row, uint8_t col,
                                 uint8_t last_anchor_col, uint8_t dir,
@@ -91,6 +92,7 @@ static inline void anchor_heapify_all(AnchorHeap *heap) {
   }
 }
 
+// Removes max anchor, returns a copy.
 static inline Anchor anchor_heap_extract_max(AnchorHeap *heap) {
   const Anchor max_anchor = heap->anchors[0];
   heap->anchors[0] = heap->anchors[heap->count - 1];

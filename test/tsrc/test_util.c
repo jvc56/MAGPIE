@@ -805,7 +805,7 @@ void generate_anchors_for_test(Game *game) {
   gen_load_position(gen, game, player_get_move_record_type(player_on_turn),
                     player_get_move_sort_type(player_on_turn), move_list,
                     /*override_kwg=*/NULL);
-  gen_lookup_leaves_and_record_exchanges(gen);
+  gen_look_up_leaves_and_record_exchanges(gen);
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     wmp_move_gen_check_nonplaythrough_existence(
         &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
