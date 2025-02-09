@@ -811,6 +811,7 @@ void generate_anchors_for_test(Game *game) {
         &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
   }
   gen_shadow(gen);
+  move_list_destroy(move_list);
 }
 
 void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors) {
