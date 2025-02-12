@@ -47,6 +47,7 @@ void test_nonplaythrough_existence(void) {
   leave_map_set_current_index(&leave_map, 0);
 
   wmp_move_gen_init(&wmg, ld, rack, wmp);
+  wmp_move_gen_reset_playthrough(&wmg);
   assert(wmp_move_gen_is_active(&wmg));
   assert(!wmp_move_gen_has_playthrough(&wmg));
 
@@ -113,6 +114,7 @@ void test_playthrough_bingo_existence(void) {
   leave_map_set_current_index(&leave_map, 0);
 
   wmp_move_gen_init(&wmg, ld, rack, wmp);
+  wmp_move_gen_reset_playthrough(&wmg);
   assert(wmp_move_gen_is_active(&wmg));
   assert(!wmp_move_gen_has_playthrough(&wmg));
   // Add a letter, N. In this context we would be shadowing left.
