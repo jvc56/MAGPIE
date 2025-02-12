@@ -197,7 +197,8 @@ LeavegenSharedData *leavegen_shared_data_create(
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
   shared_data->min_leave_targets = min_leave_targets;
-  shared_data->leave_list = leave_list_create(ld, klv, min_leave_targets[0]);
+  shared_data->leave_list =
+      leave_list_create(ld, klv, min_leave_targets[0], number_of_threads);
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   return shared_data;
@@ -244,10 +245,10 @@ typedef struct GameRunner {
   uint64_t seed;
   Game *game;
   MoveList *move_list;
-  Rack *leave;
   Rack *original_rack;
   Rack *rare_leave;
   Rack *bag_and_rare_leave_overlap;
+  Rack *previous_leaves[2];
   AutoplaySharedData *shared_data;
 } GameRunner;
 
@@ -255,10 +256,11 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   const AutoplayArgs *args = autoplay_worker->args;
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
   const int dist_size = ld_get_size(args->game_args->ld);
-  game_runner->leave = rack_create(dist_size);
   game_runner->original_rack = rack_create(dist_size);
   game_runner->rare_leave = rack_create(dist_size);
   game_runner->bag_and_rare_leave_overlap = rack_create(dist_size);
+  game_runner->previous_leaves[0] = rack_create(dist_size);
+  game_runner->previous_leaves[1] = rack_create(dist_size);
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
   game_runner->move_list = move_list_create(1);
@@ -269,10 +271,11 @@ void game_runner_destroy(GameRunner *game_runner) {
   if (!game_runner) {
     return;
   }
-  rack_destroy(game_runner->leave);
   rack_destroy(game_runner->original_rack);
   rack_destroy(game_runner->rare_leave);
   rack_destroy(game_runner->bag_and_rare_leave_overlap);
+  rack_destroy(game_runner->previous_leaves[0]);
+  rack_destroy(game_runner->previous_leaves[1]);
   game_destroy(game_runner->game);
   move_list_destroy(game_runner->move_list);
   free(game_runner);
@@ -350,7 +353,8 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     const Move *forced_move =
         get_top_equity_move(game, thread_index, game_runner->move_list);
     leave_list_add_single_subleave(
-        lg_shared_data->leave_list, game_runner->rare_leave,
+        lg_shared_data->leave_list, autoplay_worker->worker_index,
+        game_runner->rare_leave,
         equity_to_double(move_get_equity(forced_move)));
     // Remove the rare leave from the player's rack and return the
     // tiles that remain since we know for sure that these tiles
@@ -372,19 +376,16 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   *move = get_top_equity_move(game, thread_index, game_runner->move_list);
 
   if (lg_shared_data) {
-    leave_list_add_all_subleaves(
-        lg_shared_data->leave_list,
-        player_get_rack(game_get_player(game, player_on_turn_index)),
-        // Use the bag_and_rare_leave_overlap as a scratch subleave rack
-        // for the leave list add all subleaves call. It gets reset
-        // before use.
-        game_runner->bag_and_rare_leave_overlap,
+    leave_list_add_single_subleave(
+        lg_shared_data->leave_list, autoplay_worker->worker_index,
+        game_runner->previous_leaves[player_on_turn_index],
         equity_to_double(move_get_equity(*move)));
   }
-  get_leave_for_move(*move, game, game_runner->leave);
+  play_move(*move, game, NULL,
+            game_runner->previous_leaves[player_on_turn_index]);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
-                            game_runner->game, *move, game_runner->leave);
-  play_move(*move, game, NULL, NULL);
+                            game_runner->game, *move,
+                            game_runner->previous_leaves[player_on_turn_index]);
   game_runner->turn_number++;
 }
 

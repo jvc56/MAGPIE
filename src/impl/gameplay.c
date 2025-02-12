@@ -35,23 +35,6 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   return klv_get_leave_value(klv, rack);
 }
 
-// Assumes the move hasn't been played yet and is in the rack
-void get_leave_for_move(const Move *move, Game *game, Rack *leave) {
-  rack_copy(leave, player_get_rack(game_get_player(
-                       game, game_get_player_on_turn_index(game))));
-  int tiles_length = move_get_tiles_length(move);
-  for (int idx = 0; idx < tiles_length; idx++) {
-    uint8_t letter = move_get_tile(move, idx);
-    if (letter == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    if (get_is_blanked(letter)) {
-      letter = BLANK_MACHINE_LETTER;
-    }
-    rack_take_letter(leave, letter);
-  }
-}
-
 void play_move_on_board(const Move *move, Game *game) {
   // PlaceMoveTiles
   Board *board = game_get_board(game);
