@@ -51,7 +51,6 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
   if (wmp == NULL) {
     return;
   }
-  wmp_move_gen->num_tiles_played_through = 0;
   wmp_move_gen->player_bit_rack = bit_rack_create_from_rack(ld, player_rack);
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
