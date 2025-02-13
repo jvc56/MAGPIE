@@ -245,9 +245,9 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
     string_builder_add_string(sb, "All Games\n\n");
   }
 
-  string_builder_add_formatted_string(sb, "Games Played: %d\n",
+  string_builder_add_formatted_string(sb, "Games Played: %llu\n",
                                       gd->total_games);
-  string_builder_add_formatted_string(sb, "Turns Played: %d\n",
+  string_builder_add_formatted_string(sb, "Turns Played: %llu\n",
                                       gd->total_turns);
 
   if (gd->total_games == 0) {
