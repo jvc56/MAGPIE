@@ -241,7 +241,7 @@ static inline void record_exchange(MoveGen *gen) {
   int tiles_exchanged = 0;
 
   for (uint8_t ml = 0; ml < rack_get_dist_size(&gen->player_rack); ml++) {
-    int num_this = rack_get_letter(&gen->player_rack, ml);
+    const int8_t num_this = rack_get_letter(&gen->player_rack, ml);
     for (int i = 0; i < num_this; i++) {
       gen->exchange_strip[tiles_exchanged] = ml;
       tiles_exchanged++;
@@ -282,8 +282,8 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   } else {
     generate_exchange_moves(gen, leave, node_index, word_index, ml + 1,
                             add_exchange);
-    const int num_this = rack_get_letter(&gen->player_rack, ml);
-    for (int i = 0; i < num_this; i++) {
+    const int8_t num_this = rack_get_letter(&gen->player_rack, ml);
+    for (int8_t i = 0; i < num_this; i++) {
       rack_add_letter(leave, ml);
       leave_map_take_letter_and_update_complement_index(&gen->leave_map,
                                                         &gen->player_rack, ml);
@@ -354,7 +354,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
       const uint8_t ml = kwg_node_tile(node);
-      int number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
@@ -514,7 +514,7 @@ void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
     const uint8_t ld_size = ld_get_size(&gen->ld);
     for (uint8_t ml = 1; ml < ld_size; ml++) {
-      int number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&

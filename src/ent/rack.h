@@ -13,9 +13,11 @@
 #include "../util/util.h"
 
 typedef struct Rack {
-  uint8_t array[MAX_ALPHABET_SIZE];
-  uint8_t dist_size;
-  uint8_t number_of_letters;
+  // counts must be signed for the sake of inference code checking that
+  // these are nonnegative (INFERENCE_STATUS_TILES_PLAYED_NOT_IN_BAG)
+  uint16_t number_of_letters;
+  uint16_t dist_size;
+  int8_t array[MAX_ALPHABET_SIZE];
 } Rack;
 
 static inline void rack_reset(Rack *rack) {
@@ -53,15 +55,15 @@ static inline void rack_destroy(Rack *rack) {
   free(rack);
 }
 
-static inline int rack_get_dist_size(const Rack *rack) {
+static inline uint16_t rack_get_dist_size(const Rack *rack) {
   return rack->dist_size;
 }
 
-static inline int rack_get_letter(const Rack *rack, uint8_t machine_letter) {
+static inline int8_t rack_get_letter(const Rack *rack, uint8_t machine_letter) {
   return rack->array[machine_letter];
 }
 
-static inline int rack_get_total_letters(const Rack *rack) {
+static inline uint16_t rack_get_total_letters(const Rack *rack) {
   return rack->number_of_letters;
 }
 
