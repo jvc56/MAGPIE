@@ -82,7 +82,7 @@ void test_leave_list_normal_leaves(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "STV", 0, 0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "SUV", 0, 0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "TUV", 0, 0);
-  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "STUV", 2,
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "STUV", 1,
                                         subleave_value);
 
   rack_destroy(rack);
