@@ -13,9 +13,9 @@
 #include "../util/util.h"
 
 typedef struct Rack {
-  int dist_size;
-  int array[MAX_ALPHABET_SIZE];
-  int number_of_letters;
+  uint8_t array[MAX_ALPHABET_SIZE];
+  uint8_t dist_size;
+  uint8_t number_of_letters;
 } Rack;
 
 static inline void rack_reset(Rack *rack) {
@@ -26,7 +26,7 @@ static inline void rack_reset(Rack *rack) {
 }
 
 static inline Rack *rack_create(int dist_size) {
-  Rack *rack = malloc_or_die(sizeof(Rack));
+  Rack *rack = (Rack *)malloc_or_die(sizeof(Rack));
   rack->dist_size = dist_size;
   rack_reset(rack);
   return rack;
