@@ -110,7 +110,7 @@ void postgen_prebroadcast_func(void *data) {
 
   string_builder_add_formatted_string(
       leave_gen_sb,
-      "\nAverage Turn Equity: %0.2f\nTarget Minimum "
+      "\nEmpty Leave Equity: %0.2f\nTarget Minimum "
       "Leave "
       "Count: %d\nLeaves Under "
       "Target Minimum Leave Count: %d\n\n",

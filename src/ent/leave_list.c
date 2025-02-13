@@ -258,12 +258,12 @@ void leave_list_add_single_subleave(LeaveList *leave_list, int thread_index,
 void leave_list_write_to_klv(LeaveList *leave_list) {
   int number_of_leaves = leave_list->number_of_leaves;
   LeaveListItem **items = leave_list->leaves_ordered_by_klv_index;
-  double average_leave_value = leave_list_get_empty_leave_mean(leave_list);
+  double empty_leave_value = leave_list_get_empty_leave_mean(leave_list);
   KLV *klv = leave_list->klv;
   for (int i = 0; i < number_of_leaves; i++) {
     if (items[i]->count > 0) {
       klv->leave_values[i] =
-          double_to_equity(items[i]->mean - average_leave_value);
+          double_to_equity(items[i]->mean - empty_leave_value);
     }
   }
 }
