@@ -1,7 +1,6 @@
 #include "move_gen.h"
 
 #include <assert.h>
-#include <mach/mach_time.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1191,9 +1190,6 @@ static inline void shadow_start(MoveGen *gen) {
 // For more details about the shadow playing algorithm, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
 void shadow_play_for_anchor(MoveGen *gen, int col) {
-  mach_timebase_info_data_t info;
-  mach_timebase_info(&info);
-  uint64_t start = mach_absolute_time();
   // Shadow playing is designed to find the best plays first. When we find plays
   // for endgame using MOVE_RECORD_ALL_SMALL. we need to find all of the plays,
   // and because they are ranked for search in the endgame code rather than
