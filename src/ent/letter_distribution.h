@@ -33,12 +33,12 @@ typedef enum {
 typedef struct LetterDistribution {
   char *name;
   int size;
-  int *distribution;
-  Equity *scores;
+  Equity scores[MACHINE_LETTER_MAX_VALUE];
+  uint8_t distribution[MACHINE_LETTER_MAX_VALUE];
   // machine letters sorted in descending
   // score order
-  uint8_t *score_order;
-  bool *is_vowel;
+  uint8_t score_order[MACHINE_LETTER_MAX_VALUE];
+  bool is_vowel[MACHINE_LETTER_MAX_VALUE];
   int total_tiles;
   int max_tile_length;
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
@@ -68,26 +68,26 @@ static inline bool unblank_machine_letters(uint8_t *mls, int size) {
 }
 
 static inline void sort_score_order(LetterDistribution *ld) {
-  uint8_t *score_order = ld->score_order;
-  Equity *scores = ld->scores;
+  const Equity *scores = ld->scores;
   int size = ld->size;
 
   for (int i = 1; i < size; ++i) {
-    uint8_t key = score_order[i];
+    uint8_t key = ld->score_order[i];
     int j = i - 1;
 
-    while (j >= 0 && scores[score_order[j]] < scores[key]) {
-      score_order[j + 1] = score_order[j];
+    while (j >= 0 && scores[ld->score_order[j]] < scores[key]) {
+      ld->score_order[j + 1] = ld->score_order[j];
       --j;
     }
 
-    score_order[j + 1] = key;
+    ld->score_order[j + 1] = key;
   }
 }
 
 static inline LetterDistribution *ld_create(const char *data_paths,
                                             const char *ld_name) {
-  LetterDistribution *ld = malloc_or_die(sizeof(LetterDistribution));
+  LetterDistribution *ld =
+      (LetterDistribution *)malloc_or_die(sizeof(LetterDistribution));
 
   // This function call opens and closes the file, so
   // call it before the fopen to prevent a nested file read
@@ -105,10 +105,10 @@ static inline LetterDistribution *ld_create(const char *data_paths,
 
   ld->size = number_of_lines;
 
-  ld->distribution = (int *)malloc_or_die(ld->size * sizeof(int));
-  ld->scores = (Equity *)malloc_or_die(ld->size * sizeof(Equity));
-  ld->score_order = (uint8_t *)malloc_or_die(ld->size * sizeof(uint8_t));
-  ld->is_vowel = (bool *)malloc_or_die(ld->size * sizeof(bool));
+  memset(ld->distribution, 0, sizeof(ld->distribution));
+  memset(ld->scores, 0, sizeof(ld->scores));
+  memset(ld->score_order, 0, sizeof(ld->score_order));
+  memset(ld->is_vowel, 0, sizeof(ld->is_vowel));
 
   for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
     ld->ld_ml_to_hl[i][0] = '\0';
@@ -170,10 +170,6 @@ static inline void ld_destroy(LetterDistribution *ld) {
     return;
   }
   free(ld->name);
-  free(ld->distribution);
-  free(ld->scores);
-  free(ld->is_vowel);
-  free(ld->score_order);
   free(ld);
 }
 

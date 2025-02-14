@@ -3,7 +3,6 @@
 
 #include "../compat/endian_conv.h"
 
-#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -100,7 +99,7 @@ static inline BitRack bit_rack_create_from_rack(const LetterDistribution *ld,
   BitRack bit_rack = {0, 0};
 #endif
   for (int ml = 0; ml < ld->size; ml++) {
-    const int num_this = rack_get_letter(rack, ml);
+    const int8_t num_this = rack_get_letter(rack, ml);
 #if USE_INT128_INTRINSIC
     bit_rack |= (unsigned __int128)num_this << (ml * BIT_RACK_BITS_PER_LETTER);
 #else
@@ -184,8 +183,6 @@ static inline void bit_rack_div_mod_no_intrinsic(const BitRack *bit_rack,
 
 static inline void bit_rack_div_mod(const BitRack *bit_rack, uint32_t divisor,
                                     BitRack *quotient, uint32_t *remainder) {
-  assert(divisor != 0);
-
 #if USE_INT128_INTRINSIC
   *quotient = *bit_rack / divisor;
   *remainder = *bit_rack % divisor;

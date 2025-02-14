@@ -215,7 +215,7 @@ void inference_results_set_stat_for_letter(InferenceResults *inference_results,
 double get_probability_for_random_minimum_draw(
     const Rack *bag_as_rack, const Rack *target_rack, uint8_t this_letter,
     int minimum, int number_of_target_played_tiles) {
-  int number_of_this_letters_already_on_rack =
+  const int8_t number_of_this_letters_already_on_rack =
       rack_get_letter(target_rack, this_letter);
   int minimum_adjusted_for_partial_rack =
       minimum - number_of_this_letters_already_on_rack;
@@ -224,8 +224,8 @@ double get_probability_for_random_minimum_draw(
   if (minimum_adjusted_for_partial_rack <= 0) {
     return 1;
   }
-  int total_number_of_letters_in_bag = rack_get_total_letters(bag_as_rack);
-  int total_number_of_letters_on_rack = rack_get_total_letters(target_rack);
+  const uint8_t total_number_of_letters_in_bag = rack_get_total_letters(bag_as_rack);
+  const uint8_t total_number_of_letters_on_rack = rack_get_total_letters(target_rack);
   int number_of_this_letter_in_bag = rack_get_letter(bag_as_rack, this_letter);
 
   // If there are not enough letters to meet the minimum, the probability

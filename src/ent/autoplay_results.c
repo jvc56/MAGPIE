@@ -591,7 +591,7 @@ void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   } else if (player_one_score > player_two_score) {
     player_one_result = 1;
   }
-  const int dist_size =
+  const uint16_t dist_size =
       rack_get_dist_size(player_get_rack(game_get_player(game, 0)));
   for (int i = 0; i < fj_data->move_count; i++) {
     FJMove *fj_move = &fj_data->moves[i];

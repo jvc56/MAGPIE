@@ -23,16 +23,16 @@ typedef enum {
 } move_list_type_t;
 
 typedef struct Move {
-  game_event_t move_type;
   Equity score;
-  int row_start;
-  int col_start;
-  // Number of tiles played or exchanged
-  int tiles_played;
-  // Equal to tiles_played for exchanges
-  int tiles_length;
   Equity equity;
-  int dir;
+  game_event_t move_type;
+  uint8_t row_start;
+  uint8_t col_start;
+  // Number of tiles played or exchanged
+  uint8_t tiles_played;
+  // Equal to tiles_played for exchanges
+  uint8_t tiles_length;
+  uint8_t dir;
   uint8_t tiles[MOVE_MAX_TILES];
 } Move;
 
@@ -99,7 +99,9 @@ typedef struct MoveList {
   SmallMove **small_moves;
 } MoveList;
 
-static inline Move *move_create(void) { return malloc_or_die(sizeof(Move)); }
+static inline Move *move_create(void) {
+  return (Move *)malloc_or_die(sizeof(Move));
+}
 
 static inline void move_destroy(Move *move) {
   if (!move) {
@@ -448,7 +450,7 @@ static inline void moves_for_move_list_destroy(MoveList *ml) {
 }
 
 static inline MoveList *move_list_create(int capacity) {
-  MoveList *ml = malloc_or_die(sizeof(MoveList));
+  MoveList *ml = (MoveList *)malloc_or_die(sizeof(MoveList));
   ml->count = 0;
   ml->spare_move = move_create();
   move_list_load_with_empty_moves(ml, capacity);
@@ -457,9 +459,9 @@ static inline MoveList *move_list_create(int capacity) {
 }
 
 static inline MoveList *move_list_create_small(int capacity) {
-  MoveList *ml = malloc_or_die(sizeof(MoveList));
+  MoveList *ml = (MoveList *)malloc_or_die(sizeof(MoveList));
   ml->count = 0;
-  ml->spare_small_move = malloc_or_die(sizeof(SmallMove));
+  ml->spare_small_move = (SmallMove *)malloc_or_die(sizeof(SmallMove));
   // Create spare_move as well, so that we can use it as a placeholder when
   // converting small moves.
   ml->spare_move = move_create();
@@ -468,7 +470,7 @@ static inline MoveList *move_list_create_small(int capacity) {
 }
 
 static inline MoveList *move_list_duplicate(const MoveList *ml) {
-  MoveList *new_ml = malloc_or_die(sizeof(MoveList));
+  MoveList *new_ml = (MoveList *)malloc_or_die(sizeof(MoveList));
   new_ml->count = ml->count;
   new_ml->spare_move = move_create();
   move_list_load_with_empty_moves(new_ml, ml->capacity);
@@ -589,7 +591,7 @@ static inline void move_list_resize(MoveList *ml, int new_capacity) {
   int old_moves_size = ml->moves_size;
   ml->capacity = new_capacity;
   ml->moves_size = new_capacity + 1;
-  ml->moves = realloc_or_die(ml->moves, sizeof(Move *) * ml->moves_size);
+  ml->moves = (Move **)realloc_or_die(ml->moves, sizeof(Move *) * ml->moves_size);
   for (int i = old_moves_size; i < ml->moves_size; i++) {
     ml->moves[i] = move_create();
   }
@@ -625,7 +627,7 @@ static inline void move_list_insert_spare_small_move(MoveList *ml) {
 }
 
 static inline MoveList *small_move_list_create(int capacity) {
-  MoveList *ml = malloc_or_die(sizeof(MoveList));
+  MoveList *ml = (MoveList *)malloc_or_die(sizeof(MoveList));
   ml->count = 0;
   ml->spare_move = malloc_or_die(sizeof(SmallMove));
   move_list_load_with_empty_small_moves(ml, capacity);

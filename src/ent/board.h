@@ -35,12 +35,13 @@ typedef struct Board {
   // - One pair for each direction
   // - One pair for each cross index
   Square squares[2 * 2 * BOARD_DIM * BOARD_DIM];
-  int number_of_row_anchors[BOARD_DIM * 2];
   // Stores the penalties to be applied to
   // the opening move for each square in both
   // horizontal and vertical directions if the
   // tile is a vowel.
   Equity opening_move_penalties[BOARD_DIM * 2];
+
+  uint8_t number_of_row_anchors[BOARD_DIM * 2];
   int transposed;
   int tiles_played;
   // Start coordinates used to reset the board
@@ -346,8 +347,8 @@ static inline void update_number_of_row_anchors(Board *b, int row, int col,
   }
 }
 
-static inline int board_get_number_of_row_anchors(const Board *board,
-                                                  int row_or_col, int dir) {
+static inline uint8_t board_get_number_of_row_anchors(const Board *board,
+                                                      int row_or_col, int dir) {
   if (board->transposed) {
     log_fatal("cannot get number of row anchors for the transposed board\n");
   }
@@ -791,7 +792,7 @@ static inline void board_copy(Board *dst, const Board *src) {
 }
 
 static inline Board *board_duplicate(const Board *board) {
-  Board *new_board = malloc_or_die(sizeof(Board));
+  Board *new_board = (Board *)malloc_or_die(sizeof(Board));
   board_copy(new_board, board);
   return new_board;
 }
@@ -804,11 +805,12 @@ static inline void board_destroy(Board *board) {
 }
 
 static inline void board_load_number_of_row_anchors_cache(const Board *b,
-                                                          int *cache) {
+                                                          uint8_t *cache) {
   if (b->transposed) {
     log_fatal("cannot load row anchor cache while board is transposed\n");
   }
-  memory_copy(cache, b->number_of_row_anchors, sizeof(int) * BOARD_DIM * 2);
+  memory_copy(cache, b->number_of_row_anchors,
+              sizeof(b->number_of_row_anchors));
 }
 
 static inline const Square *board_get_row_cache(const Square *lanes_cache,
