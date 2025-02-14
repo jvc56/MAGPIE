@@ -133,9 +133,11 @@ void game_data_destroy(GameData *gd) {
 
 void game_data_add_game(GameData *gd, const RecorderArgs *args) {
   const Game *game = args->game;
-  uint64_t turns = args->number_of_turns;
-  int p0_game_score = player_get_score(game_get_player(game, 0));
-  int p1_game_score = player_get_score(game_get_player(game, 1));
+  const uint64_t turns = args->number_of_turns;
+  const int p0_game_score =
+      equity_to_int(player_get_score(game_get_player(game, 0)));
+  const int p1_game_score =
+      equity_to_int(player_get_score(game_get_player(game, 1)));
   gd->total_games++;
   if (p0_game_score > p1_game_score) {
     gd->p0_wins++;
@@ -589,7 +591,7 @@ void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   } else if (player_one_score > player_two_score) {
     player_one_result = 1;
   }
-  const int dist_size =
+  const uint16_t dist_size =
       rack_get_dist_size(player_get_rack(game_get_player(game, 0)));
   for (int i = 0; i < fj_data->move_count; i++) {
     FJMove *fj_move = &fj_data->moves[i];

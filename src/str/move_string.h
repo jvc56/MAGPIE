@@ -11,7 +11,7 @@ void string_builder_add_move_description(StringBuilder *move_string_builder,
                                          const Move *move,
                                          const LetterDistribution *ld);
 void string_builder_add_move(StringBuilder *string_builder, const Board *board,
-                             const Move *m, const LetterDistribution *ld);
+                             const Move *m, const LetterDistribution *ld);                             
 
 void string_builder_add_ucgi_move(StringBuilder *move_string_builder,
                                   const Move *move, const Board *board,

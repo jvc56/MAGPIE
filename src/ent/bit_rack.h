@@ -3,7 +3,6 @@
 
 #include "../compat/endian_conv.h"
 
-#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -38,11 +37,6 @@ typedef struct {
 #endif
 } BitRack;
 #endif
-
-typedef struct BitRackPowerSet {
-  BitRack subracks[1 << RACK_SIZE];
-  uint8_t count_by_size[RACK_SIZE + 1];
-} BitRackPowerSet;
 
 static inline bool
 bit_rack_is_compatible_with_ld(const LetterDistribution *ld) {
@@ -105,7 +99,7 @@ static inline BitRack bit_rack_create_from_rack(const LetterDistribution *ld,
   BitRack bit_rack = {0, 0};
 #endif
   for (int ml = 0; ml < ld->size; ml++) {
-    const int num_this = rack_get_letter(rack, ml);
+    const int8_t num_this = rack_get_letter(rack, ml);
 #if USE_INT128_INTRINSIC
     bit_rack |= (unsigned __int128)num_this << (ml * BIT_RACK_BITS_PER_LETTER);
 #else
@@ -189,8 +183,6 @@ static inline void bit_rack_div_mod_no_intrinsic(const BitRack *bit_rack,
 
 static inline void bit_rack_div_mod(const BitRack *bit_rack, uint32_t divisor,
                                     BitRack *quotient, uint32_t *remainder) {
-  assert(divisor != 0);
-
 #if USE_INT128_INTRINSIC
   *quotient = *bit_rack / divisor;
   *remainder = *bit_rack % divisor;
@@ -390,44 +382,6 @@ static inline int bit_rack_num_letters(const BitRack *bit_rack) {
     num_letters += bit_rack_get_letter(bit_rack, ml);
   }
   return num_letters;
-}
-
-static const uint8_t bit_rack_combination_offsets[] = {
-    BIT_RACK_COMBINATION_OFFSETS};
-
-static inline uint8_t bit_rack_get_combination_offset(int size) {
-  return bit_rack_combination_offsets[size];
-}
-
-static inline void fill_bit_rack_power_set(const BitRack *full,
-                                           BitRack *current, uint8_t next_ml,
-                                           int count, BitRackPowerSet *set) {
-  int max_num_this = 0;
-  for (; next_ml < BIT_RACK_MAX_ALPHABET_SIZE; next_ml++) {
-    max_num_this = bit_rack_get_letter(full, next_ml);
-    if (max_num_this > 0) {
-      break;
-    }
-  }
-  if (next_ml >= BIT_RACK_MAX_ALPHABET_SIZE) {
-    const int insert_index =
-        bit_rack_get_combination_offset(count) + set->count_by_size[count];
-    set->subracks[insert_index] = *current;
-    set->count_by_size[count]++;
-    return;
-  }
-  for (int i = 0; i <= max_num_this; i++) {
-    fill_bit_rack_power_set(full, current, next_ml + 1, count + i, set);
-    bit_rack_add_letter(current, next_ml);
-  }
-  bit_rack_set_letter_count(current, next_ml, 0);
-}
-
-static inline void bit_rack_power_set_init(BitRackPowerSet *set,
-                                           const BitRack *full) {
-  memset(set->count_by_size, 0, sizeof(set->count_by_size));
-  BitRack empty = bit_rack_create_empty();
-  fill_bit_rack_power_set(full, &empty, BLANK_MACHINE_LETTER, 0, set);
 }
 
 static inline bool bit_rack_fits_in_12_bytes(const BitRack *bit_rack) {

@@ -17,10 +17,12 @@
 #include "../../src/def/letter_distribution_defs.h"
 #include "../../src/def/move_defs.h"
 
+#include "../../src/ent/anchor.h"
 #include "../../src/ent/bag.h"
 #include "../../src/ent/bit_rack.h"
 #include "../../src/ent/board.h"
 #include "../../src/ent/dictionary_word.h"
+#include "../../src/ent/equity.h"
 #include "../../src/ent/game.h"
 #include "../../src/ent/inference_results.h"
 #include "../../src/ent/letter_distribution.h"
@@ -47,6 +49,10 @@
 
 // Global variable for the timeout function.
 jmp_buf env;
+
+void assert_equal_at_equity_resolution(double a, double b) {
+  assert(double_to_equity(a) == double_to_equity(b));
+}
 
 bool within_epsilon(double a, double b) { return fabs(a - b) < 1e-6; }
 
@@ -220,7 +226,7 @@ void print_english_rack(const Rack *rack) {
   for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
     printf("?");
   }
-  const int ld_size = rack_get_dist_size(rack);
+  const uint16_t ld_size = rack_get_dist_size(rack);
   for (int i = 1; i < ld_size; i++) {
     const int num_letter = rack_get_letter(rack, i);
     for (int j = 0; j < num_letter; j++) {
@@ -259,7 +265,8 @@ void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
 
 void play_top_n_equity_move(Game *game, int n) {
   MoveList *move_list = move_list_create(n + 1);
-  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list);
+  generate_moves(game, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, move_list,
+                 /*override_kwg=*/NULL);
   SortedMoveList *sorted_move_list = sorted_move_list_create(move_list);
   play_move(sorted_move_list->moves[n], game, NULL, NULL);
   sorted_move_list_destroy(sorted_move_list);
@@ -750,5 +757,68 @@ void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
   for (int i = 0; i < length; i++) {
     hl[0] = expected_word[i];
     assert(buffer[start + i] == ld_hl_to_ml(ld, hl));
+  }
+}
+
+void assert_move_score(const Move *move, int expected_score) {
+  const Equity expected_score_eq = int_to_equity(expected_score);
+  assert(move_get_score(move) == expected_score_eq);
+}
+
+void assert_move_equity_int(const Move *move, int expected_equity) {
+  assert_move_equity_exact(move, int_to_equity(expected_equity));
+}
+
+void assert_move_equity_exact(const Move *move, Equity expected_equity) {
+  assert(move_get_equity(move) == expected_equity);
+}
+
+void assert_rack_score(const LetterDistribution *ld, const Rack *rack, 
+                       int expected_score) {
+  assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
+}
+
+void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
+                                             int expected_challenge_points) {
+  const Equity expected_challenge_points_eq =
+      int_to_equity(expected_challenge_points);
+  assert(validated_moves_get_challenge_points(vms, i) ==
+         expected_challenge_points_eq);
+}
+
+void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected) {
+  assert_anchor_equity_exact(ah, i, int_to_equity(expected));
+}
+
+void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected) {
+  const Equity actual = ah->anchors[i].highest_possible_equity;
+  assert(actual == expected);
+}
+
+void generate_anchors_for_test(Game *game) {
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  // We don't care about them, but exchanges will be recorded while
+  // looking up leave values and it is not adding a parameter to prevent this.
+  MoveList *move_list = move_list_create(1000);
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  gen_load_position(gen, game, player_get_move_record_type(player_on_turn),
+                    player_get_move_sort_type(player_on_turn), move_list,
+                    /*override_kwg=*/NULL);
+  gen_look_up_leaves_and_record_exchanges(gen);
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_check_nonplaythrough_existence(
+        &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+  }
+  gen_shadow(gen);
+  move_list_destroy(move_list);
+}
+
+void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors) {
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  anchor_heap_reset(sorted_anchors);
+  while (gen->anchor_heap.count > 0) {
+    sorted_anchors->anchors[sorted_anchors->count++] =
+        anchor_heap_extract_max(&gen->anchor_heap);
   }
 }

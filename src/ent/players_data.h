@@ -8,6 +8,7 @@
 
 #include "klv.h"
 #include "kwg.h"
+#include "wmp.h"
 
 typedef struct PlayersData PlayersData;
 
@@ -25,6 +26,7 @@ const char *players_data_get_data_name(const PlayersData *players_data,
                                        int player_index);
 KWG *players_data_get_kwg(const PlayersData *players_data, int player_index);
 KLV *players_data_get_klv(const PlayersData *players_data, int player_index);
+WMP *players_data_get_wmp(const PlayersData *players_data, int player_index);
 
 void players_data_set_name(PlayersData *players_data, int player_index,
                            const char *player_name);

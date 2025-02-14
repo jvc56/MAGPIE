@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 
+#include "../../src/ent/anchor.h"
 #include "../../src/ent/bag.h"
 #include "../../src/ent/bit_rack.h"
 #include "../../src/ent/board.h"
@@ -35,6 +36,7 @@ void print_move_list(const Board *board, const LetterDistribution *ld,
 void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
                               MoveList *ml);
 void resort_sorted_move_list_by_score(SortedMoveList *sml);
+void assert_equal_at_equity_resolution(double a, double b);
 bool within_epsilon(double a, double b);
 int count_newlines(const char *str);
 bool equal_rack(const Rack *expected_rack, const Rack *actual_rack);
@@ -95,4 +97,15 @@ BitRack string_to_bit_rack(const LetterDistribution *ld,
 void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
                            const LetterDistribution *ld, int word_idx, int length);
 
+void assert_move_score(const Move *move, int expected_score);       
+void assert_move_equity_int(const Move *move, int expected_equity);
+void assert_move_equity_exact(const Move *move, Equity expected_equity);
+void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
+                       int expected_score);
+void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
+                                             int expected_challenge_points);
+void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected);
+void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected);
+void generate_anchors_for_test(Game *game);
+void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
 #endif

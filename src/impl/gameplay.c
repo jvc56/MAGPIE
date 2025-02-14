@@ -14,7 +14,6 @@
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
-#include "../ent/game_history.h"
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -23,9 +22,7 @@
 
 #include "move_gen.h"
 
-#include "../util/string_util.h"
-
-double get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
+Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
     if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
       if (get_is_blanked(move_get_tile(move, i))) {
@@ -185,7 +182,7 @@ void draw_to_full_rack(Game *game, int player_index) {
 bool rack_is_drawable(Game *game, int player_index, const Rack *rack_to_draw) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
-  const int dist_size = rack_get_dist_size(player_rack);
+  const uint16_t dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
     if (bag_get_letter(bag, i) + rack_get_letter(player_rack, i) <
         rack_get_letter(rack_to_draw, i)) {
@@ -204,7 +201,7 @@ bool draw_rack_from_bag(Game *game, int player_index,
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
-  const int dist_size = rack_get_dist_size(player_rack);
+  const uint16_t dist_size = rack_get_dist_size(player_rack);
   rack_copy(player_rack, rack_to_draw);
   for (int i = 0; i < dist_size; i++) {
     const int rack_number_of_letter = rack_get_letter(player_rack, i);
@@ -222,7 +219,7 @@ bool draw_rack_from_bag(Game *game, int player_index,
 // and just returns whatever tiles were available.
 void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
                          const Rack *rack_to_draw) {
-  const int dist_size = rack_get_dist_size(rack_to_draw);
+  const uint16_t dist_size = rack_get_dist_size(rack_to_draw);
   for (int i = 0; i < dist_size; i++) {
     const int rack_number_of_letter = rack_get_letter(rack_to_draw, i);
     for (int j = 0; j < rack_number_of_letter; j++) {
@@ -263,8 +260,7 @@ void return_rack_to_bag(Game *game, int player_index) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
-  const int dist_size = rack_get_dist_size(player_rack);
-
+  const uint16_t dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
     const int rack_number_of_letter = rack_get_letter(player_rack, i);
     for (int j = 0; j < rack_number_of_letter; j++) {
@@ -367,7 +363,8 @@ play_move_status_t play_move(const Move *move, Game *game,
     }
   }
 
-  if (game_get_consecutive_scoreless_turns(game) == MAX_SCORELESS_TURNS) {
+  if (game_get_consecutive_scoreless_turns(game) ==
+      game_get_max_scoreless_turns(game)) {
     Player *player0 = game_get_player(game, 0);
     Player *player1 = game_get_player(game, 1);
     player_add_to_score(player0, -rack_get_score(ld, player_get_rack(player0)));
@@ -390,12 +387,12 @@ void generate_moves_for_game(Game *game, int thread_index,
       game_get_player(game, game_get_player_on_turn_index(game));
   generate_moves(game, player_get_move_record_type(player_on_turn),
                  player_get_move_sort_type(player_on_turn), thread_index,
-                 move_list);
+                 move_list, /*override_kwg=*/NULL);
 }
 
 Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
   generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, thread_index,
-                 move_list);
+                 move_list, /*override_kwg=*/NULL);
   return move_list_get_move(move_list, 0);
 }
 

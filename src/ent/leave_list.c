@@ -229,7 +229,7 @@ void leave_list_add_single_subleave(LeaveList *leave_list, const Rack *subleave,
 void generate_subleaves(LeaveList *leave_list, Rack *full_rack, Rack *subleave,
                         double move_equity, uint32_t node_index,
                         uint32_t word_index, uint8_t ml) {
-  const uint32_t ld_size = rack_get_dist_size(full_rack);
+  const uint16_t ld_size = rack_get_dist_size(full_rack);
   while (ml < ld_size && rack_get_letter(full_rack, ml) == 0) {
     ml++;
   }
@@ -286,7 +286,8 @@ void leave_list_write_to_klv(LeaveList *leave_list) {
   KLV *klv = leave_list->klv;
   for (int i = 0; i < number_of_leaves; i++) {
     if (items[i]->count > 0) {
-      klv->leave_values[i] = items[i]->mean - average_leave_value;
+      klv->leave_values[i] =
+          double_to_equity(items[i]->mean - average_leave_value);
     }
   }
 }

@@ -6,6 +6,8 @@
 
 #include "../def/rack_defs.h"
 
+#include "equity.h"
+
 #include "../util/util.h"
 
 #include "rack.h"
@@ -20,14 +22,14 @@
 // one tile at a time in the LeaveMap.
 typedef struct LeaveMap {
   int rack_array_size;
-  double leave_values[1 << RACK_SIZE];
+  Equity leave_values[1 << RACK_SIZE];
   uint8_t letter_base_index_map[MAX_ALPHABET_SIZE];
   uint64_t reversed_letter_bit_map[RACK_SIZE];
   int current_index;
 } LeaveMap;
 
 static inline LeaveMap *leave_map_create(int rack_array_size) {
-  LeaveMap *leave_map = malloc_or_die(sizeof(LeaveMap));
+  LeaveMap *leave_map = (LeaveMap *)malloc_or_die(sizeof(LeaveMap));
   leave_map->rack_array_size = rack_array_size;
   return leave_map;
 }
@@ -63,11 +65,11 @@ static inline void leave_map_set_current_index(LeaveMap *leave_map,
 }
 
 static inline void leave_map_set_current_value(LeaveMap *leave_map,
-                                               double value) {
+                                               Equity value) {
   leave_map->leave_values[leave_map->current_index] = value;
 }
 
-static inline double leave_map_get_current_value(const LeaveMap *leave_map) {
+static inline Equity leave_map_get_current_value(const LeaveMap *leave_map) {
   return leave_map->leave_values[leave_map->current_index];
 }
 
@@ -152,6 +154,26 @@ leave_map_add_letter_and_update_complement_index(LeaveMap *leave_map,
   rack_add_letter(rack, letter);
   const int base_index = leave_map->letter_base_index_map[letter];
   const int offset = rack->array[letter] - 1;
+  const int bit_index = base_index + offset;
+  const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
+  leave_map->current_index &= ~reversed_bit;
+}
+
+static inline void
+leave_map_complement_take_letter(LeaveMap *leave_map, uint8_t letter,
+                                 int number_of_letter_on_rack) {
+  const int base_index = leave_map->letter_base_index_map[letter];
+  const int offset = number_of_letter_on_rack;
+  const int bit_index = base_index + offset;
+  const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
+  leave_map->current_index |= reversed_bit;
+}
+
+static inline void
+leave_map_complement_add_letter(LeaveMap *leave_map, uint8_t letter,
+                                int number_of_letter_on_rack) {
+  const int base_index = leave_map->letter_base_index_map[letter];
+  const int offset = number_of_letter_on_rack;
   const int bit_index = base_index + offset;
   const int reversed_bit = leave_map->reversed_letter_bit_map[bit_index];
   leave_map->current_index &= ~reversed_bit;
