@@ -25,7 +25,9 @@ uint64_t leave_list_get_count_for_leave(const LeaveList *leave_list,
                                         int klv_index);
 double leave_list_get_mean_for_leave(const LeaveList *leave_list,
                                      int klv_index);
+uint64_t leave_list_get_empty_leave_count(const LeaveList *leave_list);
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list);
+uint64_t leave_list_get_count(const LeaveList *leave_list);
 double leave_list_get_mean(const LeaveList *leave_list);
 const EncodedRack *leave_list_get_encoded_rack(const LeaveList *leave_list,
                                                int klv_index);
