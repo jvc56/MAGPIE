@@ -392,6 +392,11 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
   }
 }
 
+static inline bool play_is_nonempty_and_nonduplicate(int tiles_played,
+                                                     bool is_unique) {
+  return (tiles_played > 1) || ((tiles_played == 1) && is_unique);
+}
+
 void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
            bool accepts, int leftstrip, int rightstrip, bool unique_play,
            int main_word_score, int word_multiplier, int cross_score) {
@@ -437,7 +442,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
         (current_col == 0) || gen_cache_is_empty(gen, current_col - 1);
 
     if (accepts && no_letter_directly_left &&
-        gen->tiles_played > !unique_play) {
+        play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
       record_tile_placement_move(gen, leftstrip, rightstrip,
                                  inc_main_word_score, inc_word_multiplier,
                                  inc_cross_scores);
@@ -478,7 +483,7 @@ void go_on(MoveGen *gen, int current_col, uint8_t L, uint32_t new_node_index,
                                     gen_cache_is_empty(gen, current_col + 1);
 
     if (accepts && no_letter_directly_right &&
-        gen->tiles_played > !unique_play) {
+        play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
       record_tile_placement_move(gen, leftstrip, rightstrip,
                                  inc_main_word_score, inc_word_multiplier,
                                  inc_cross_scores);
@@ -596,7 +601,7 @@ void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
         (current_col == 0) || gen_cache_is_empty(gen, current_col - 1);
 
     if (accepts && no_letter_directly_left &&
-        gen->tiles_played > !unique_play) {
+        play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
       record_tile_placement_move(gen, leftstrip, rightstrip,
                                  inc_main_word_score, inc_word_multiplier,
                                  inc_cross_scores);
@@ -630,7 +635,7 @@ void go_on_alpha(MoveGen *gen, int current_col, uint8_t L, int leftstrip,
                                     gen_cache_is_empty(gen, current_col + 1);
 
     if (accepts && no_letter_directly_right &&
-        gen->tiles_played > !unique_play) {
+        play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
       record_tile_placement_move(gen, leftstrip, rightstrip,
                                  inc_main_word_score, inc_word_multiplier,
                                  inc_cross_scores);
@@ -842,8 +847,16 @@ static inline bool try_restrict_tile_and_accumulate_score(
   remove_score_from_descending_tile_scores(gen, tile_score);
   const Equity lsm = tile_score * letter_multiplier;
   gen->shadow_mainword_restricted_score += lsm;
+
+  // Equivalent to
+  //
+  //   gen->shadow_perpendicular_additional_score +=
+  //     is_cross_word ? (lsm * this_word_multiplier) : 0;
+  //
+  // But verified with godbolt that this compiles to faster code.
   gen->shadow_perpendicular_additional_score +=
-      (lsm * this_word_multiplier) & -is_cross_word;
+      (lsm * this_word_multiplier) & (-(int)is_cross_word);
+
   return true;
 }
 
@@ -951,7 +964,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       gen->current_right_col++;
     }
 
-    if (gen->tiles_played + is_unique >= 2) {
+    if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
       // word_multiplier may have changed while playing through restricted
       // squares, in which case the restricted multiplier squares would
       // be invalidated.
@@ -1091,7 +1104,7 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
       is_unique = true;
     }
 
-    if (gen->tiles_played + is_unique >= 2) {
+    if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
       shadow_record(gen);
     }
   }
