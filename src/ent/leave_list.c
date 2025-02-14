@@ -311,18 +311,20 @@ double leave_list_get_mean_for_leave(const LeaveList *leave_list,
   return leave_list->leaves_ordered_by_klv_index[klv_index]->mean;
 }
 
-double leave_list_get_mean(const LeaveList *leave_list) {
+uint64_t leave_list_get_count(const LeaveList *leave_list) {
   uint64_t total_count = 0;
-  double mean = 0.0;
   for (int i = 0; i < leave_list->number_of_leaves; i++) {
     total_count += leave_list->leaves_ordered_by_klv_index[i]->count;
   }
   for (int i = 0; i < leave_list->number_of_threads; i++) {
     total_count += leave_list->empty_leave_counts[i];
   }
-  if (total_count == 0) {
-    return 0.0;
-  }
+  return total_count;
+}
+
+double leave_list_get_mean(const LeaveList *leave_list) {
+  uint64_t total_count = leave_list_get_count(leave_list);
+  double mean = 0.0;
   for (int i = 0; i < leave_list->number_of_threads; i++) {
     mean += leave_list->empty_leave_means[i] *
             ((double)leave_list->empty_leave_counts[i] / total_count);
@@ -334,15 +336,20 @@ double leave_list_get_mean(const LeaveList *leave_list) {
   return mean;
 }
 
-double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
-  double mean = 0.0;
+uint64_t leave_list_get_empty_leave_count(const LeaveList *leave_list) {
   uint64_t total_count = 0;
   for (int i = 0; i < leave_list->number_of_threads; i++) {
     total_count += leave_list->empty_leave_counts[i];
   }
+  return total_count;
+}
+
+double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
+  uint64_t total_count = leave_list_get_empty_leave_count(leave_list);
   if (total_count == 0) {
     return 0.0;
   }
+  double mean = 0.0;
   for (int i = 0; i < leave_list->number_of_threads; i++) {
     mean += leave_list->empty_leave_means[i] *
             ((double)leave_list->empty_leave_counts[i] / total_count);
