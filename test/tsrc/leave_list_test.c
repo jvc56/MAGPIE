@@ -26,8 +26,9 @@ void assert_leave_list_item_count_and_mean(const LetterDistribution *ld,
   rack_destroy(leave);
   rack_destroy(decoded_leave);
 
-  assert(leave_list_get_count(leave_list, klv_index) == count);
-  assert(within_epsilon(leave_list_get_mean(leave_list, klv_index), mean));
+  assert(leave_list_get_count_for_leave(leave_list, klv_index) == count);
+  assert(within_epsilon(leave_list_get_mean_for_leave(leave_list, klv_index),
+                        mean));
 }
 
 void test_leave_list_normal_leaves(void) {
@@ -64,7 +65,7 @@ void test_leave_list_normal_leaves(void) {
 
   // Test adding a subleave
 
-  const double subleave_value = 2000.0;
+  double subleave_value = 2.0;
   rack_set_to_string(ld, rack, "STUV");
   leave_list_add_single_subleave(leave_list, 0, rack, subleave_value);
 
@@ -84,6 +85,39 @@ void test_leave_list_normal_leaves(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "TUV", 0, 0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "STUV", 1,
                                         subleave_value);
+
+  subleave_value = 2.0;
+  rack_set_to_string(ld, rack, "A");
+  leave_list_add_single_subleave(leave_list, 0, rack, subleave_value);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "A", 1,
+                                        subleave_value);
+
+  subleave_value = 12.0;
+  rack_set_to_string(ld, rack, "B");
+  leave_list_add_single_subleave(leave_list, 0, rack, subleave_value);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "B", 1,
+                                        subleave_value);
+
+  subleave_value = 18.0;
+  rack_set_to_string(ld, rack, "B");
+  leave_list_add_single_subleave(leave_list, 0, rack, subleave_value);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "B", 2, 15.0);
+
+  assert(within_epsilon(leave_list_get_mean(leave_list), 34.0 / 4));
+
+  subleave_value = 11.0;
+  rack_set_to_string(ld, rack, "");
+  leave_list_add_single_subleave(leave_list, 0, rack, subleave_value);
+
+  assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 11.0));
+  assert(within_epsilon(leave_list_get_mean(leave_list), 45.0 / 5));
+
+  subleave_value = 10.0;
+  rack_set_to_string(ld, rack, "");
+  leave_list_add_single_subleave(leave_list, 0, rack, subleave_value);
+
+  assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 21.0 / 2));
+  assert(within_epsilon(leave_list_get_mean(leave_list), 55.0 / 6));
 
   rack_destroy(rack);
   rack_destroy(subrack);

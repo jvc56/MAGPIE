@@ -110,10 +110,12 @@ void postgen_prebroadcast_func(void *data) {
 
   string_builder_add_formatted_string(
       leave_gen_sb,
-      "\nEmpty Leave Equity: %0.2f\nTarget Minimum "
+      "\nAverage Leave Equity: %0.4f\nEmpty Leave Equity: %0.4f\nTarget "
+      "Minimum "
       "Leave "
       "Count: %d\nLeaves Under "
       "Target Minimum Leave Count: %d\n\n",
+      leave_list_get_mean(lg_shared_data->leave_list),
       leave_list_get_empty_leave_mean(lg_shared_data->leave_list),
       leave_list_get_target_leave_count(lg_shared_data->leave_list),
       leave_list_get_leaves_below_target_count(lg_shared_data->leave_list));

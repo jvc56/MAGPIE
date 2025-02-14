@@ -21,9 +21,12 @@ bool leave_list_get_rare_leave(LeaveList *leave_list, XoshiroPRNG *prng,
 int leave_list_get_target_leave_count(const LeaveList *leave_list);
 int leave_list_get_leaves_below_target_count(const LeaveList *leave_list);
 int leave_list_get_number_of_leaves(const LeaveList *leave_list);
-uint64_t leave_list_get_count(const LeaveList *leave_list, int klv_index);
-double leave_list_get_mean(const LeaveList *leave_list, int klv_index);
+uint64_t leave_list_get_count_for_leave(const LeaveList *leave_list,
+                                        int klv_index);
+double leave_list_get_mean_for_leave(const LeaveList *leave_list,
+                                     int klv_index);
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list);
+double leave_list_get_mean(const LeaveList *leave_list);
 const EncodedRack *leave_list_get_encoded_rack(const LeaveList *leave_list,
                                                int klv_index);
 #endif
