@@ -296,6 +296,8 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   game_seed(game, iter_output->seed);
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
+  rack_reset(game_runner->previous_leaves[0]);
+  rack_reset(game_runner->previous_leaves[1]);
   game_runner->turn_number = 0;
   game_runner->force_draw = false;
   if (game_runner->shared_data->leavegen_shared_data &&
