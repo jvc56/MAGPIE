@@ -113,7 +113,7 @@ static inline uint64_t gen_cache_get_right_extension_set(const MoveGen *gen,
 static inline Equity gen_get_static_equity(const MoveGen *gen,
                                            const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
-      gen->ld, move, &gen->player_rack, &gen->opponent_rack,
+      &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
       gen->opening_move_penalties, gen->board_number_of_tiles_played,
       gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
@@ -241,7 +241,7 @@ static inline void record_exchange(MoveGen *gen) {
   int tiles_exchanged = 0;
 
   for (uint8_t ml = 0; ml < rack_get_dist_size(&gen->player_rack); ml++) {
-    int num_this = rack_get_letter(&gen->player_rack, ml);
+    const int8_t num_this = rack_get_letter(&gen->player_rack, ml);
     for (int i = 0; i < num_this; i++) {
       gen->exchange_strip[tiles_exchanged] = ml;
       tiles_exchanged++;
@@ -259,7 +259,7 @@ static inline void record_exchange(MoveGen *gen) {
 void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
                              uint32_t word_index, uint8_t ml,
                              bool add_exchange) {
-  const uint32_t ld_size = ld_get_size(gen->ld);
+  const uint32_t ld_size = ld_get_size(&gen->ld);
   while (ml < ld_size && rack_get_letter(&gen->player_rack, ml) == 0) {
     ml++;
   }
@@ -282,8 +282,8 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
   } else {
     generate_exchange_moves(gen, leave, node_index, word_index, ml + 1,
                             add_exchange);
-    const int num_this = rack_get_letter(&gen->player_rack, ml);
-    for (int i = 0; i < num_this; i++) {
+    const int8_t num_this = rack_get_letter(&gen->player_rack, ml);
+    for (int8_t i = 0; i < num_this; i++) {
       rack_add_letter(leave, ml);
       leave_map_take_letter_and_update_complement_index(&gen->leave_map,
                                                         &gen->player_rack, ml);
@@ -354,7 +354,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
       const uint8_t ml = kwg_node_tile(node);
-      int number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
@@ -512,9 +512,9 @@ void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
     rack_take_letter(&gen->full_player_rack, raw);
   } else if (!rack_is_empty(&gen->player_rack) &&
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
-    const uint8_t ld_size = ld_get_size(gen->ld);
+    const uint8_t ld_size = ld_get_size(&gen->ld);
     for (uint8_t ml = 1; ml < ld_size; ml++) {
-      int number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
           (number_of_ml != 0 ||
            rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
@@ -693,7 +693,7 @@ static inline void shadow_record(MoveGen *gen) {
   Equity equity = score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     equity += static_eval_get_shadow_equity(
-        gen->ld, &gen->opponent_rack, best_leaves,
+        &gen->ld, &gen->opponent_rack, best_leaves,
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
@@ -1280,8 +1280,8 @@ void shadow_by_orientation(MoveGen *gen) {
 
 static inline void set_descending_tile_scores(MoveGen *gen) {
   int i = 0;
-  for (int j = 0; j < (int)ld_get_size(gen->ld); j++) {
-    int j_score_order = ld_get_score_order(gen->ld, j);
+  for (int j = 0; j < (int)ld_get_size(&gen->ld); j++) {
+    const uint8_t j_score_order = ld_get_score_order(&gen->ld, j);
     for (int k = 0; k < rack_get_letter(&gen->player_rack, j_score_order);
          k++) {
       gen->descending_tile_scores[i] = gen->tile_scores[j_score_order];
@@ -1300,15 +1300,15 @@ void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
   Player *player = game_get_player(game, gen->player_index);
   Player *opponent = game_get_player(game, 1 - gen->player_index);
 
-  gen->ld = game_get_ld(game);
+  memory_copy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   gen->klv = player_get_klv(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
-  rack_set_dist_size(&gen->leave, ld_get_size(gen->ld));
-  wmp_move_gen_init(&gen->wmp_move_gen, gen->ld, &gen->player_rack,
+  rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
+  wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     player_get_wmp(player));
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
@@ -1334,13 +1334,13 @@ void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
   memset(gen->tile_scores, 0, sizeof(gen->tile_scores));
-  for (int i = 0; i < ld_get_size(gen->ld); i++) {
+  for (int i = 0; i < ld_get_size(&gen->ld); i++) {
     if (rack_get_letter(&gen->player_rack, i) > 0) {
       gen->rack_cross_set = gen->rack_cross_set | ((uint64_t)1 << i);
     }
-    gen->tile_scores[i] = ld_get_score(gen->ld, i);
+    gen->tile_scores[i] = ld_get_score(&gen->ld, i);
     gen->tile_scores[get_blanked_machine_letter(i)] =
-        ld_get_score(gen->ld, BLANK_MACHINE_LETTER);
+        ld_get_score(&gen->ld, BLANK_MACHINE_LETTER);
   }
 
   set_descending_tile_scores(gen);

@@ -152,7 +152,7 @@ void evaluate_possible_leave(Inference *inference) {
       move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
       tiles_played == inference->target_number_of_tiles_exchanged;
   const bool recordable = is_within_equity_margin || number_exchanged_matches ||
-                    rack_is_empty(inference->bag_as_rack);
+                          rack_is_empty(inference->bag_as_rack);
   if (recordable) {
     uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
         inference->bag_as_rack, inference->current_target_leave);

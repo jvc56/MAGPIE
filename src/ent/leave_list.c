@@ -229,7 +229,7 @@ void leave_list_add_single_subleave(LeaveList *leave_list, const Rack *subleave,
 void generate_subleaves(LeaveList *leave_list, Rack *full_rack, Rack *subleave,
                         double move_equity, uint32_t node_index,
                         uint32_t word_index, uint8_t ml) {
-  const uint32_t ld_size = rack_get_dist_size(full_rack);
+  const uint16_t ld_size = rack_get_dist_size(full_rack);
   while (ml < ld_size && rack_get_letter(full_rack, ml) == 0) {
     ml++;
   }

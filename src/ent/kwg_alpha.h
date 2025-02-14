@@ -29,7 +29,7 @@ static inline bool kwg_completes_alpha_cross_set(const KWG *kwg,
                                                  uint32_t node_index,
                                                  const Rack *rack,
                                                  const uint8_t next_letter) {
-  const int dist_size = rack_get_dist_size(rack);
+  const uint16_t dist_size = rack_get_dist_size(rack);
   for (uint8_t letter = next_letter; letter < dist_size; letter++) {
     int num_letter = rack_get_letter(rack, letter);
     for (int k = 0; k < num_letter; k++) {
@@ -51,7 +51,7 @@ static inline bool kwg_accepts_alpha_with_blanks(const KWG *kwg,
   if (rack_get_letter(rack, 0) == 0) {
     return kwg_accepts_alpha(kwg, rack);
   }
-  const int dist_size = rack_get_dist_size(rack);
+  const uint16_t dist_size = rack_get_dist_size(rack);
   Rack designated_rack;
   rack_copy(&designated_rack, rack);
   rack_take_letter(&designated_rack, 0);
@@ -72,7 +72,7 @@ static inline uint64_t kwg_compute_alpha_cross_set(const KWG *kwg,
   if (node_index == 0) {
     return cross_set;
   }
-  const int dist_size = rack_get_dist_size(rack);
+  const uint16_t dist_size = rack_get_dist_size(rack);
   // Use 1 to skip the blank
   for (uint8_t letter = 1; letter < dist_size; letter++) {
     int num_letter = rack_get_letter(rack, letter);
