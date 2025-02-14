@@ -195,7 +195,7 @@ void leave_list_item_increment_empty_leave_count(LeaveList *leave_list,
                                                  int thread_index,
                                                  double equity) {
   leave_list->empty_leave_counts[thread_index]++;
-  const int count = leave_list->empty_leave_counts[thread_index];
+  const uint64_t count = leave_list->empty_leave_counts[thread_index];
   const double old_mean = leave_list->empty_leave_means[thread_index];
   leave_list->empty_leave_means[thread_index] +=
       (1.0 / count) * (equity - old_mean);
