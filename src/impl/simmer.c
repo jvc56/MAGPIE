@@ -1,6 +1,7 @@
 #include "simmer.h"
 
 #include <assert.h>
+#include <float.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -41,6 +42,7 @@
 #define MAX_STOPPING_ITERATION_CT 4000
 #define PER_PLY_STOPPING_SCALING 1250
 #define SIMILAR_PLAYS_ITER_CUTOFF 1000
+#define BAI_EPSILON 0.0000001
 
 typedef struct Simmer {
   Equity initial_spread;
@@ -350,8 +352,7 @@ void sim_single_iteration(SimmerWorker *simmer_worker, uint64_t seed) {
           leftover -= this_leftover;
         }
       }
-      simmed_play_add_score_stat(simmed_play,
-                                 move_get_score(best_play),
+      simmed_play_add_score_stat(simmed_play, move_get_score(best_play),
                                  move_get_tiles_played(best_play) == RACK_SIZE,
                                  ply, is_multithreaded(simmer));
     }
@@ -475,4 +476,145 @@ sim_status_t simulate(const SimArgs *args, SimResults *sim_results) {
   gen_destroy_cache();
 
   return sim_status;
+}
+
+double bai_within_epsilon(double x, double y) {
+  return abs(x - y) < BAI_EPSILON;
+}
+
+double alt_λ_KV(double μ1, double σ21, int w1, double μa, double σ2a, int wa) {
+  if (w1 == 0) {
+    return μa;
+  }
+  if (wa == 0 || bai_within_epsilon(μ1, μa)) {
+    return μ1;
+  }
+  double x = ((double)wa) / w1;
+  return (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
+}
+
+// FIXME: need to check if this is correct
+double dGaussian(double μ, double σ2, double λ) {
+  const double diff = μ - λ;
+  return (diff * diff) / (2 * σ2);
+}
+
+typedef struct GLRTVars {
+  double *vals;
+  double *θs;
+  int k;
+  double *λ;
+  double *ϕ2;
+  // FIXME: determine if these are needed
+  int astar;
+  double *μ;
+  double *σ2;
+} GLRTVars;
+
+GLRTVars *GLRTVars_create(int K) {
+  GLRTVars *glrt_vars = malloc_or_die(sizeof(GLRTVars));
+  glrt_vars->vals = malloc_or_die(K * sizeof(double));
+  glrt_vars->θs = malloc_or_die(K * sizeof(double));
+  glrt_vars->λ = malloc_or_die(K * sizeof(double));
+  glrt_vars->ϕ2 = malloc_or_die(K * sizeof(double));
+  glrt_vars->μ = malloc_or_die(K * sizeof(double));
+  glrt_vars->σ2 = malloc_or_die(K * sizeof(double));
+  return glrt_vars;
+}
+
+void GLRTVars_destroy(GLRTVars *glrt_vars) {
+  free(glrt_vars->vals);
+  free(glrt_vars->θs);
+  free(glrt_vars->λ);
+  free(glrt_vars->ϕ2);
+  free(glrt_vars->μ);
+  free(glrt_vars->σ2);
+  free(glrt_vars);
+}
+
+void glrt(int K, int *w, double *μ, double *σ2, GLRTVars *glrt_vars) {
+  int astar = 0;
+  for (int i = 1; i < K; i++) {
+    if (μ[i] > μ[astar]) {
+      astar = i;
+    }
+  }
+
+  double *vals = glrt_vars->vals;
+  for (int k = 0; k < K; k++) {
+    vals[k] = DBL_MAX;
+  }
+  double *θs = glrt_vars->θs;
+  // FIXME: probably just use memset here
+  for (int k = 0; k < K; k++) {
+    θs[k] = 0;
+  }
+  for (int a = 0; a < K; a++) {
+    if (a == astar) {
+      continue;
+    }
+    θs[a] = alt_λ_KV(μ[astar], σ2[astar], w[astar], μ[a], σ2[a], w[a]);
+    vals[a] = w[astar] * dGaussian(μ[astar], σ2[astar], θs[a]) +
+              w[a] * dGaussian(μ[a], σ2[a], θs[a]);
+  }
+  int k = 0;
+  // Implement argmin
+  for (int i = 1; i < K; i++) {
+    if (vals[i] < vals[k]) {
+      k = i;
+    }
+  }
+
+  for (int i = 0; i < K; i++) {
+    glrt_vars->λ[i] = μ[i];
+    glrt_vars->ϕ2[i] = σ2[i];
+    glrt_vars->μ[i] = μ[i];
+    glrt_vars->σ2[i] = σ2[i];
+  }
+  glrt_vars->λ[astar] = θs[k];
+  glrt_vars->λ[k] = θs[k];
+  glrt_vars->k = k;
+  glrt_vars->astar = astar;
+}
+
+int bai(const SimArgs *args, SimResults *sim_results) {
+  // FIXME: get threshold
+  // βs = bai_get_threshold();
+
+  const int K = move_list_get_count(args->move_list);
+  int *N = calloc_or_die(K, sizeof(int));        // counts
+  double *S = calloc_or_die(K, sizeof(double));  // sum of samples
+  double *S2 = calloc_or_die(K, sizeof(double)); // sum of squared of samples
+  for (int k = 0; k < K; k++) {
+    for (int i = 0; i < 2; i++) {
+      double _X = simmer_sample();
+      S[k] += _X;
+      S2[k] += _X * _X;
+      N[k] += 1;
+    }
+  }
+
+  // FIXME: Initialize identification strategy
+  // bai_state = bai_start(sr, N);
+  // Sβs = βs
+
+  // FIXME: t in original code is set twice:
+  // t = sum(N)
+  // t += 1
+  // figure out if this is indeed unnecessary
+  int t = K * 2;
+  double *hμ = calloc_or_die(K, sizeof(double));
+  double *hσ2 = calloc_or_die(K, sizeof(double));
+  GLRTVars *glrt_vars = GLRTVars_create(K);
+  while (true) {
+    for (int k = 0; k < K; k++) {
+      hμ[k] = S[k] / N[k];
+      hσ2[k] = S2[k] / N[k] - hμ[k] * hμ[k];
+    }
+    glrt(K, N, hμ, hσ2, glrt_vars);
+    // FIXME: implement stopping criterion
+    // if stopping_criterion () {
+    //   return R;
+    // }
+  }
 }
