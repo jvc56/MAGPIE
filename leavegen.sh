@@ -7,5 +7,7 @@ if [ "$2" == "" ]; then
     ./bin/magpie convert klv2csv $1 $1 -ld english -lex $1
     ./convert_lexica.sh
 else 
-    ./bin/magpie leavegen $3 $4 -lex $2 -leaves $1 -hr true -threads 32 -pfreq 100000 -wmp true
+    cmd="./bin/magpie leavegen $3 $4 -lex $2 -leaves $1 -hr true -threads 32 -pfreq 100000 -wmp true"
+    echo "$cmd"
+    eval "$cmd"
 fi
