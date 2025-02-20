@@ -182,7 +182,7 @@ void draw_to_full_rack(Game *game, int player_index) {
 bool rack_is_drawable(Game *game, int player_index, const Rack *rack_to_draw) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
-  const int dist_size = rack_get_dist_size(player_rack);
+  const uint16_t dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
     if (bag_get_letter(bag, i) + rack_get_letter(player_rack, i) <
         rack_get_letter(rack_to_draw, i)) {
@@ -201,7 +201,7 @@ bool draw_rack_from_bag(Game *game, int player_index,
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
-  const int dist_size = rack_get_dist_size(player_rack);
+  const uint16_t dist_size = rack_get_dist_size(player_rack);
   rack_copy(player_rack, rack_to_draw);
   for (int i = 0; i < dist_size; i++) {
     const int rack_number_of_letter = rack_get_letter(player_rack, i);
@@ -219,7 +219,7 @@ bool draw_rack_from_bag(Game *game, int player_index,
 // and just returns whatever tiles were available.
 void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
                          const Rack *rack_to_draw) {
-  const int dist_size = rack_get_dist_size(rack_to_draw);
+  const uint16_t dist_size = rack_get_dist_size(rack_to_draw);
   for (int i = 0; i < dist_size; i++) {
     const int rack_number_of_letter = rack_get_letter(rack_to_draw, i);
     for (int j = 0; j < rack_number_of_letter; j++) {
@@ -260,8 +260,7 @@ void return_rack_to_bag(Game *game, int player_index) {
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
-  const int dist_size = rack_get_dist_size(player_rack);
-
+  const uint16_t dist_size = rack_get_dist_size(player_rack);
   for (int i = 0; i < dist_size; i++) {
     const int rack_number_of_letter = rack_get_letter(player_rack, i);
     for (int j = 0; j < rack_number_of_letter; j++) {

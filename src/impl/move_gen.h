@@ -44,7 +44,7 @@ typedef struct MoveGen {
   Rack leave;
   Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
   Square row_cache[BOARD_DIM];
-  int row_number_of_anchors_cache[(BOARD_DIM) * 2];
+  uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
   Equity opening_move_penalties[(BOARD_DIM) * 2];
   int board_number_of_tiles_played;
   int cross_index;
@@ -100,14 +100,14 @@ typedef struct MoveGen {
   Equity descending_tile_scores_copy[WORD_ALIGNING_RACK_SIZE];
   Equity best_leaves[(RACK_SIZE)];
   AnchorHeap anchor_heap;
-
+  LetterDistribution ld;
+  
   // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
   Equity tile_scores[MAX_ALPHABET_SIZE + BLANK_MASK];
 
   // Owned by the caller
   const Board *board;
-  const LetterDistribution *ld;
   const KLV *klv;
   const KWG *kwg;
   MoveList *move_list;
