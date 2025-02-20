@@ -8,6 +8,7 @@
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
+#include "board_spot_test.h"
 #include "board_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
@@ -77,6 +78,7 @@ void run_all(void) {
   test_game();
   test_validated_move();
   test_shadow();
+  test_board_spot();
   test_move_gen();
   test_equity_adjustments();
   test_gameplay();
@@ -128,6 +130,7 @@ static TestEntry test_table[] = {
     {"game", test_game},
     {"vm", test_validated_move},
     {"shadow", test_shadow},
+    {"boardspot", test_board_spot},
     {"movegen", test_move_gen},
     {"eq", test_equity},
     {"eqadj", test_equity_adjustments},

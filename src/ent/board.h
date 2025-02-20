@@ -11,7 +11,9 @@
 #include "../def/rack_defs.h"
 #include "../def/static_eval_defs.h"
 
+#include "bit_rack.h"
 #include "board_layout.h"
+#include "board_spot.h"
 
 #include "letter_distribution.h"
 
@@ -35,6 +37,7 @@ typedef struct Board {
   // - One pair for each direction
   // - One pair for each cross index
   Square squares[2 * 2 * BOARD_DIM * BOARD_DIM];
+  BoardSpot board_spots[2 * 2 * RACK_SIZE * BOARD_DIM * BOARD_DIM];
   int number_of_row_anchors[BOARD_DIM * 2];
   // Stores the penalties to be applied to
   // the opening move for each square in both
@@ -685,6 +688,52 @@ static inline void board_update_all_anchors(Board *board) {
   }
 }
 
+static inline int get_spot_index(int transposed, int row, int col, int dir,
+                                 int num_tiles, int ci) {
+  const int cross_offset = ci * 2 * RACK_SIZE * BOARD_DIM * BOARD_DIM;
+  const int adjusted_dir = (dir ^ transposed);
+  const int dir_offset = adjusted_dir * RACK_SIZE * BOARD_DIM * BOARD_DIM;
+
+  int row_offset = 0;
+  int col_offset = 0;
+  // If the direction is vertical, we need to switch the
+  // row and col so that the cols in the vertical board
+  // are stored in continuous memory, which allows the
+  // movegen to access those columns in a memory-compact
+  // way.
+  if (dir == BOARD_HORIZONTAL_DIRECTION) {
+    row_offset = row * BOARD_DIM * RACK_SIZE;
+    col_offset = col * RACK_SIZE;
+  } else {
+    row_offset = col * BOARD_DIM * RACK_SIZE;
+    col_offset = row * RACK_SIZE;
+  }
+
+  const int num_tiles_offset = num_tiles - 1;
+
+  return cross_offset + dir_offset + row_offset + col_offset + num_tiles_offset;
+}
+
+static inline int board_get_spot_index(const Board *board, int row, int col,
+                                       int dir, int num_tiles, int ci) {
+  return get_spot_index(board->transposed, row, col, dir, num_tiles, ci);
+}
+
+static inline BoardSpot *board_get_writable_spot(Board *board, int row, int col,
+                                                 int dir, int num_tiles,
+                                                 int ci) {
+  return &board->board_spots[board_get_spot_index(board, row, col, dir,
+                                                  num_tiles, ci)];
+}
+
+static inline const BoardSpot *board_get_readonly_spot(const Board *board,
+                                                       int row, int col,
+                                                       int dir, int num_tiles,
+                                                       int ci) {
+  return &board->board_spots[board_get_spot_index(board, row, col, dir,
+                                                  num_tiles, ci)];
+}
+
 static inline void board_reset(Board *board) {
   // The transposed field must be set to 0 here because
   // it is used to calculate the index for board_set_letter.
@@ -791,7 +840,7 @@ static inline void board_copy(Board *dst, const Board *src) {
 }
 
 static inline Board *board_duplicate(const Board *board) {
-  Board *new_board = malloc_or_die(sizeof(Board));
+  Board *new_board = (Board *)malloc_or_die(sizeof(Board));
   board_copy(new_board, board);
   return new_board;
 }

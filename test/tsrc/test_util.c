@@ -545,6 +545,7 @@ BoardLayout *board_layout_create_for_test(const char *data_paths,
 
 void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name) {
+  printf("loading game with board layout %s\n", board_layout_name);                                
   BoardLayout *bl = board_layout_create_for_test(data_paths, board_layout_name);
   board_apply_layout(bl, game_get_board(game));
   game_reset(game);
