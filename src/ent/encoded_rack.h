@@ -129,7 +129,7 @@ static inline void rack_encode(const Rack *rack, EncodedRack *encoded_rack) {
   }
   int bit_index = 0;
   for (int ml = 0; ml < rack->dist_size; ml++) {
-    const int number_of_ml = rack_get_letter(rack, ml);
+    const int8_t number_of_ml = rack_get_letter(rack, ml);
     if (number_of_ml > 0) {
       encoded_rack_set_ml(encoded_rack, ml, &bit_index);
       encoded_rack_set_count(encoded_rack, number_of_ml, &bit_index);

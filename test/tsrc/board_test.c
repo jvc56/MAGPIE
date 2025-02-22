@@ -436,7 +436,7 @@ void test_board_all(void) {
   assert(board_get_number_of_row_anchors(board, 12, 1) == 1);
 
   // Test cache load
-  int number_of_anchors_cache[BOARD_DIM * 2];
+  uint8_t number_of_anchors_cache[BOARD_DIM * 2];
   board_load_number_of_row_anchors_cache(board, number_of_anchors_cache);
   for (int i = 0; i < BOARD_DIM * 2; i++) {
     int expected_number_of_anchors = 0;
