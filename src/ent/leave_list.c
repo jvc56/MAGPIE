@@ -376,9 +376,6 @@ uint64_t leave_list_get_empty_leave_count(const LeaveList *leave_list) {
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
   double mean = 0.0;
   uint64_t total_count = leave_list_get_empty_leave_count(leave_list);
-  for (int i = 0; i < leave_list->number_of_threads; i++) {
-    total_count += leave_list->empty_leave_counts[i];
-  }
   if (total_count == 0) {
     return 0.0;
   }
