@@ -101,6 +101,10 @@ void test_standard_empty_board(void) {
         for (int tiles = needed_to_reach_start; tiles <= RACK_SIZE; tiles++) {
           const BoardSpot *spot =
               board_get_readonly_spot(board, row, col, dir, tiles, 0);
+          if (tiles == 1) {
+            assert(!spot->is_usable);
+            continue;
+          }
           assert(spot->playthrough_bit_rack == bit_rack_create_empty());
           const int end_col = col + tiles - 1;
           const bool hits_dls = col <= 3 || end_col >= 11;
@@ -169,6 +173,10 @@ void test_asymmetrical_bricked_empty_board(void) {
       for (int tiles = needed_to_reach_start; tiles <= RACK_SIZE; tiles++) {
         const BoardSpot *spot =
             board_get_readonly_spot(board, row, col, dir, tiles, 0);
+        if (tiles == 1) {
+          assert(!spot->is_usable);
+          continue;
+        }
         assert(spot->playthrough_bit_rack == bit_rack_create_empty());
         const int end_col = col + tiles - 1;
         const bool hits_dls = col <= 3 || end_col >= 11;
@@ -217,6 +225,10 @@ void test_asymmetrical_bricked_empty_board(void) {
       for (int tiles = needed_to_reach_start; tiles <= RACK_SIZE; tiles++) {
         const BoardSpot *spot =
             board_get_readonly_spot(board, row, col, dir, tiles, 0);
+        if (tiles == 1) {
+          assert(!spot->is_usable);
+          continue;
+        }
         assert(spot->playthrough_bit_rack == bit_rack_create_empty());
         const int end_row = row + tiles - 1;
         const bool hits_dls = row <= 3 || end_row >= 11;
@@ -248,6 +260,7 @@ void test_asymmetrical_bricked_empty_board(void) {
 }
 
 void test_standard_with_word_on_board(void) {
+  // Board contains 8G VAC
   char vac[300] =
       "15/15/15/15/15/15/15/6VAC6/15/15/15/15/15/15/15 / 0/0 0 lex NWL20;";
   Config *config = config_create_or_die("set -l1 NWL20 -l2 CSW21 -wmp true");
@@ -274,8 +287,8 @@ void test_standard_with_word_on_board(void) {
         if (row <= 6 || row >= 9) {
           assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
         }
-        // Plays through VAC
         if (row == 7) {
+          // Plays through VAC
           if (col == 0) {
             // Need 6 tiles to touch played tiles.
             if (tiles < 6) {
@@ -319,6 +332,159 @@ void test_standard_with_word_on_board(void) {
               assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
             }
           }
+        } else if (row == 8) {
+          // Plays underlapping the A and C of VAC (but only in CSW).
+          if (col <= 6 || col >= 9) {
+            assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+          } else if (col == 7) {
+            assert_unusable_spot(game, row, col, dir, tiles, 0);
+            if (tiles == 1) {
+              assert_unusable_spot(game, row, col, dir, tiles, 1);
+            } else if (tiles == 2) {
+              assert_usable_spot(game, row, col, dir, tiles, 1, "",
+                                 (uint8_t[]){4, 2, 0, 0, 0, 0, 0, 0}, 4, 2);
+            } else if (tiles == 3) {
+              assert_usable_spot(game, row, col, dir, tiles, 1, "",
+                                 (uint8_t[]){4, 2, 1, 0, 0, 0, 0, 0}, 4, 3);
+            } else if (tiles == 4) {
+              assert_usable_spot(game, row, col, dir, tiles, 1, "",
+                                 (uint8_t[]){4, 2, 1, 1, 0, 0, 0, 0}, 4, 4);
+            } else if (tiles == 5) {
+              assert_usable_spot(game, row, col, dir, tiles, 1, "",
+                                 (uint8_t[]){4, 2, 1, 1, 1, 0, 0, 0}, 4, 5);
+            } else if (tiles == 6) {
+              assert_usable_spot(game, row, col, dir, tiles, 1, "",
+                                 (uint8_t[]){4, 2, 2, 1, 1, 1, 0, 0}, 4, 6);
+            } else if (tiles == 7) {
+              assert_usable_spot(game, row, col, dir, tiles, 1, "",
+                                 (uint8_t[]){4, 2, 2, 1, 1, 1, 1, 0}, 54, 7);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // VERTICAL SPOTS
+  // Plays through each letter of VAC in cols 7, 8, 9 (6, 7, 8 when 0-indexed).
+  // Plays hooking VAC -> VACS in col 10 (9 when 0-indexed).
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      for (int tiles = 1; tiles <= RACK_SIZE; tiles++) {
+        const int dir = BOARD_VERTICAL_DIRECTION;
+        if (col <= 5 || col >= 10) {
+          assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+        }
+        if (col == 6) {
+          // Plays through V
+          if (row == 0) {
+            // Need 7 tiles to touch played tiles.
+            if (tiles < 7) {
+              assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+            } else {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 2, 1, 1, 1, 1, 1, 0}, 54, 8);
+            }
+          } else if (row == 1) {
+            // Need 6 tiles to touch played tiles.
+            if (tiles < 6) {
+              assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+            } else if (tiles == 6) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 2, 1, 1, 1, 1, 0, 0}, 4, 7);
+            } else if (tiles == 7) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 2, 2, 1, 1, 1, 1, 0}, 54, 8);
+            }
+          } else if (row == 6) {
+            // rows >= 2 && rows <= 5 untested
+            if (tiles == 1) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 0, 0, 0, 0, 0, 0, 0}, 4, 2);
+            } else if (tiles == 2) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 2, 0, 0, 0, 0, 0, 0}, 4, 3);
+            } else if (tiles == 6) {
+              // tiles >= 3 && tiles <= 5 untested
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 2, 2, 1, 1, 1, 0, 0}, 4, 7);
+            } else if (tiles == 7) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 2, 2, 1, 1, 1, 1, 0}, 54, 8);
+            }
+          } else if (row == 7) {
+            // Plays through A
+            if (tiles == 1) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 0, 0, 0, 0, 0, 0, 0}, 4, 2);
+            } else if (tiles == 2) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 1, 0, 0, 0, 0, 0, 0}, 4, 3);
+            } else if (tiles == 6) {
+              // tiles >= 3 && tiles <= 5 untested
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 2, 1, 1, 1, 1, 0, 0}, 4, 7);
+            } else if (tiles == 7) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "V",
+                                 (uint8_t[]){2, 2, 1, 1, 1, 1, 1, 0}, 54, 8);
+            }
+          } else if (row >= 8) {
+            assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+          }
+        } else if (col == 7) {
+          // Plays through A
+          if (row == 0) {
+            // Need 7 tiles to touch played tiles.
+            if (tiles < 7) {
+              assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+            } else {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "A",
+                                 (uint8_t[]){6, 3, 3, 3, 3, 3, 3, 0}, 53, 8);
+            }
+          } else if (row == 6) {
+            // skipping uninteresting cases
+            // Test _A one-tile play
+            if (tiles == 1) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "A",
+                                 (uint8_t[]){1, 0, 0, 0, 0, 0, 0, 0}, 1, 2);
+            }
+          } else if (row == 7) {
+            if (tiles == 1) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "A",
+                                 (uint8_t[]){1, 0, 0, 0, 0, 0, 0, 0}, 1, 2);
+            }
+          }
+        } else if (col == 9) {
+          // Skipping plays through C, not substantially different than
+          // the logic for finding plays through V.
+          if (row == 0) {
+            // Can't reach far enough to hook VAC from the top row.
+            assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+          } else if (row == 1) {
+            // Need 7 tiles to hook VAC
+            if (tiles < 7) {
+              assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+            } else {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "",
+                                 (uint8_t[]){3, 3, 2, 1, 1, 1, 1, 0}, 58, 7);
+            }
+          } else if (row == 2) {
+            // Need 6 tiles to hook VAC
+            if (tiles < 6) {
+              assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+            } else if (tiles == 6) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "",
+                                 (uint8_t[]){3, 2, 1, 1, 1, 1, 0, 0}, 8, 6);
+            } else if (tiles == 7) {
+              assert_usable_spot(game, row, col, dir, tiles, BOTH_CI, "",
+                                 (uint8_t[]){3, 2, 1, 1, 1, 1, 1, 0}, 58, 7);
+            }
+          } else if (row == 7) {
+            if (tiles == 1) {
+              // Don't generate (VAC)S as a vertical play.
+              assert_unusable_spot(game, row, col, dir, tiles, BOTH_CI);
+            }
+          }
         }
       }
     }
@@ -328,8 +494,34 @@ void test_standard_with_word_on_board(void) {
   config_destroy(config);
 }
 
+void test_oxyphenbutazone(void) {
+  Config *config = config_create_or_die("set -lex NWL20 -wmp true");
+  Game *game = config_game_create(config);
+  assert(game_load_cgp(game, VS_OXY) == CGP_PARSE_STATUS_SUCCESS);
+
+  // 56 = 27x2 + 2 for TWSxTWSxTWSxDLS + DLS
+  // 30 = 27 + 3 for TWSxTWSxTWS + TWS
+  // 28 = 27 + 1 for TWSxTWS + cross word without premium
+  // playthrough tiles EHNNOTUY = 14. 14x27 = 378.
+  // PACIFYING = 20. 20x3 = 60.
+  // IS = 2
+  // REQUALIFIED = 24
+  // RAINWASHING = 18. 18x3 = 54.
+  // WAKEnERS = 14
+  // OnETIME = 8
+  // JACULATING = 20. 20x3 = 60.
+  // bingo bonus = 50
+  // 378 + 60 + 2 + 24 + 54 + 14 + 8 + 60 + 50 = 650
+  assert_usable_spot(game, 0, 0, BOARD_VERTICAL_DIRECTION, 7, 0, "EHNNOTUY",
+                     (uint8_t[]){56, 56, 30, 30, 30, 28, 28, 0}, 650, 15);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_board_spot(void) {
-  // test_standard_empty_board();
-  // test_asymmetrical_bricked_empty_board();
+  test_standard_empty_board();
+  test_asymmetrical_bricked_empty_board();
   test_standard_with_word_on_board();
+  test_oxyphenbutazone();
 }

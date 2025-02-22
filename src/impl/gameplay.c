@@ -339,6 +339,7 @@ play_move_status_t play_move(const Move *move, Game *game,
     }
     update_cross_set_for_move(move, game);
     game_set_consecutive_scoreless_turns(game, 0);
+    game_update_all_spots(game);
 
     player_add_to_score(player_on_turn, move_get_score(move));
     draw_to_full_rack(game, player_on_turn_index);

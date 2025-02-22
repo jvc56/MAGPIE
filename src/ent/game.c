@@ -400,11 +400,11 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
 }
 
 void game_gen_all_cross_sets(Game *game) {
-  printf("game_gen_all_cross_sets\n");
-  StringBuilder *sb = string_builder_create();
-  string_builder_add_game(sb, game, NULL);
-  printf("%s\n", string_builder_peek(sb));
-  string_builder_destroy(sb);
+  // printf("game_gen_all_cross_sets\n");
+  // StringBuilder *sb = string_builder_create();
+  // string_builder_add_game(sb, game, NULL);
+  // printf("%s\n", string_builder_peek(sb));
+  // string_builder_destroy(sb);
   Board *board = game_get_board(game);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
@@ -433,7 +433,6 @@ void game_gen_all_cross_sets(Game *game) {
 }
 
 void game_reset(Game *game) {
-  printf("game_reset\n");
   board_reset(game->board);
   bag_reset(game->ld, game->bag);
   player_reset(game->players[0]);
@@ -663,8 +662,8 @@ int game_get_max_scoreless_turns(Game *game) {
 static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
                                     int dir, int ci, int starting_sq_row,
                                     int starting_sq_col) {
-  printf("game_update_spot %d %d %d %d %d %d %d\n", row, col, num_tiles, dir,
-         ci, starting_sq_row, starting_sq_col);
+  // printf("game_update_spot %d %d %d %d %d %d %d\n", row, col, num_tiles, dir,
+  //        ci, starting_sq_row, starting_sq_col);
   Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   BoardSpot *spot =
@@ -690,14 +689,15 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
   uint8_t letter_multipliers[WORD_ALIGNING_RACK_SIZE];
   uint8_t xw_multipliers[WORD_ALIGNING_RACK_SIZE] = {0};
   bool touching = false;
+  bool hooking = false;
   while (true) {
-    if (row == 7 && dir == 0) {
-      printf("row: %d, col: %d\n", row, col);
-    }
+    // if (row == 7 && dir == 0) {
+    //   printf("row: %d, col: %d\n", row, col);
+    // }
     if (!board_is_position_in_bounds(row, col)) {
-      printf("goes out of bounds\n");
+      // printf("goes out of bounds\n");
       if (tiles == num_tiles) {
-        printf(" but we already have all tiles\n");
+        // printf(" but we already have all tiles\n");
         break;
       }
       spot->is_usable = false;
@@ -705,9 +705,9 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
     }
     const Square *sq = board_get_readonly_square(board, row, col, dir, ci);
     const uint8_t bonus_square = square_get_bonus_square(sq);
-    printf("bonus_square: %d\n", bonus_square);
+    // printf("bonus_square: %d\n", bonus_square);
     if (bonus_square == BRICK_VALUE) {
-      printf("hits brick\n");
+      // printf("hits brick\n");
       return;
     }
 
@@ -715,29 +715,30 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       const uint64_t cross_set = board_get_cross_set(board, row, col, dir, ci);
       if (cross_set == 0) {
-        printf("unhookable cross set (0)\n");
+        // printf("unhookable cross set (0)\n");
         return;
       }
       if (cross_set == TRIVIAL_CROSS_SET) {
-        printf("trivial cross set\n");
+        // printf("trivial cross set\n");
       } else {
-        printf("nontrivial cross set [");
-        for (int i = 1; i <= 26; i++) {
-          if (cross_set & (1 << i)) {
-            printf("%c", 'A' + i - 1);
-          }
-        }
-        printf("]\n");
+        hooking = true;
+        // printf("nontrivial cross set [");
+        // for (int i = 1; i <= 26; i++) {
+        //   if (cross_set & (1 << i)) {
+        //     printf("%c", 'A' + i - 1);
+        //   }
+        // }
+        // printf("]\n");
       }
 
-      printf("empty square\n");
+      // printf("empty square\n");
       if (tiles == num_tiles) {
-        printf("already have all tiles\n");
+        // printf("already have all tiles\n");
         break;
       }
       if ((cross_set != TRIVIAL_CROSS_SET) ||
           ((row == starting_sq_row) && (col == starting_sq_col))) {
-        printf("touches starting square or hooks something\n");
+        // printf("touches starting square or hooks something\n");
         touching = true;
       }
       const int sq_word_multiplier = bonus_square >> 4;
@@ -751,7 +752,7 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
       }
       tiles++;
     } else {
-      printf("non-empty square\n");
+      // printf("non-empty square\n");
       touching = true;
       if (!get_is_blanked(ml)) {
         unmultiplied_playthrough_score += ld_get_score(ld, ml);
@@ -765,22 +766,31 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
   }
   assert(tiles == num_tiles);
   if (!touching) {
-    printf("not touching\n");
+    // printf("not touching\n");
     return;
+  }
+  if (tiles == 1) {
+    if (spot->word_length == 1) {
+      // printf("single tile play, record in proper direction\n");
+      return;
+    } else if (hooking && (dir == BOARD_HORIZONTAL_DIRECTION)) {
+      // printf("single tile, 2 words, record in vertical direction\n");
+      return;
+    }
   }
   memset(spot->descending_effective_multipliers, 0,
          sizeof(spot->descending_effective_multipliers));
-  printf("word_multiplier: %d\n", word_multiplier);
-  printf("letter_multipliers: ");
-  for (int i = 0; i < num_tiles; i++) {
-    printf("%d ", letter_multipliers[i]);
-  }
-  printf("\n");
-  printf("xw_multipliers: ");
-  for (int i = 0; i < num_tiles; i++) {
-    printf("%d ", xw_multipliers[i]);
-  }
-  printf("\n");
+  // printf("word_multiplier: %d\n", word_multiplier);
+  // printf("letter_multipliers: ");
+  // for (int i = 0; i < num_tiles; i++) {
+  //   printf("%d ", letter_multipliers[i]);
+  // }
+  // printf("\n");
+  // printf("xw_multipliers: ");
+  // for (int i = 0; i < num_tiles; i++) {
+  //   printf("%d ", xw_multipliers[i]);
+  // }
+  // printf("\n");
   for (int tile_idx = 0; tile_idx < num_tiles; tile_idx++) {
     const int multiplier = word_multiplier * letter_multipliers[tile_idx] +
                            xw_multipliers[tile_idx];
@@ -798,15 +808,15 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
   spot->additional_score = unmultiplied_playthrough_score * word_multiplier +
                            perpendicular_score + bingo_bonus;
   spot->is_usable = true;
-  printf("spot->is_usable = true\n");
+  // printf("spot->is_usable = true\n");
 }
 
 void game_update_all_spots(Game *game) {
-  printf("game_update_all_spots\n");
-  StringBuilder *sb = string_builder_create();
-  string_builder_add_game(sb, game, NULL);
-  printf("%s\n", string_builder_peek(sb));
-  string_builder_destroy(sb);
+  // printf("game_update_all_spots\n");
+  // StringBuilder *sb = string_builder_create();
+  // string_builder_add_game(sb, game, NULL);
+  // printf("%s\n", string_builder_peek(sb));
+  // string_builder_destroy(sb);
   Board *board = game_get_board(game);
   memset(board->board_spots, 0, sizeof(board->board_spots));
   const int start_row = board->start_coords[0];
@@ -814,10 +824,10 @@ void game_update_all_spots(Game *game) {
   const bool generate_vertical_opening_plays =
       start_row != start_col ||
       !board_are_bonus_squares_symmetric_by_transposition(board);
-  for (int row = 0; row < BOARD_DIM; row++) {
-    for (int col = 0; col < BOARD_DIM; col++) {
-      for (int num_tiles = 1; num_tiles <= RACK_SIZE; num_tiles++) {
-        for (int dir = 0; dir < 2; dir++) {
+  for (int dir = 0; dir < 2; dir++) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        for (int num_tiles = 1; num_tiles <= RACK_SIZE; num_tiles++) {
           int starting_sq_row = start_row;
           int starting_sq_col = start_col;
           if (dir == BOARD_VERTICAL_DIRECTION &&
