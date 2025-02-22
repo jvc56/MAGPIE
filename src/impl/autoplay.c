@@ -197,7 +197,8 @@ LeavegenSharedData *leavegen_shared_data_create(
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
   shared_data->min_leave_targets = min_leave_targets;
-  shared_data->leave_list = leave_list_create(ld, klv, min_leave_targets[0]);
+  shared_data->leave_list =
+      leave_list_create(ld, klv, min_leave_targets[0], number_of_threads);
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   return shared_data;
@@ -350,7 +351,8 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     const Move *forced_move =
         get_top_equity_move(game, thread_index, game_runner->move_list);
     leave_list_add_single_subleave(
-        lg_shared_data->leave_list, game_runner->rare_leave,
+        lg_shared_data->leave_list, autoplay_worker->worker_index,
+        game_runner->rare_leave,
         equity_to_double(move_get_equity(forced_move)));
     // Remove the rare leave from the player's rack and return the
     // tiles that remain since we know for sure that these tiles
@@ -373,7 +375,7 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
 
   if (lg_shared_data) {
     leave_list_add_all_subleaves(
-        lg_shared_data->leave_list,
+        lg_shared_data->leave_list, autoplay_worker->worker_index,
         player_get_rack(game_get_player(game, player_on_turn_index)),
         // Use the bag_and_rare_leave_overlap as a scratch subleave rack
         // for the leave list add all subleaves call. It gets reset

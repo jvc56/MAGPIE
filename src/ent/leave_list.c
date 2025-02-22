@@ -35,7 +35,9 @@ struct LeaveList {
   // with an index greater than this are no longer considered rare.
   // All leaves with an index less than or equal to this are considered rare.
   int partition_index;
-  LeaveListItem *empty_leave;
+  int number_of_threads;
+  uint64_t *empty_leave_counts;
+  double *empty_leave_means;
   // Owned by the caller
   KLV *klv;
   LeaveListItem **leaves_ordered_by_klv_index;
@@ -104,8 +106,15 @@ void leave_list_item_reset(LeaveListItem *item) {
   item->mean = 0;
 }
 
+void leave_list_reset_empty_leave(LeaveList *leave_list) {
+  for (int i = 0; i < leave_list->number_of_threads; i++) {
+    leave_list->empty_leave_counts[i] = 0;
+    leave_list->empty_leave_means[i] = 0;
+  }
+}
+
 LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
-                             int target_leave_count) {
+                             int target_leave_count, int number_of_threads) {
   LeaveList *leave_list = malloc_or_die(sizeof(LeaveList));
   leave_list->klv = klv;
 
@@ -117,7 +126,12 @@ LeaveList *leave_list_create(const LetterDistribution *ld, KLV *klv,
     leave_list->leaves_ordered_by_klv_index[i] = leave_list_item_create(i);
   }
 
-  leave_list->empty_leave = leave_list_item_create(-1);
+  leave_list->number_of_threads = number_of_threads;
+  leave_list->empty_leave_counts =
+      malloc_or_die(sizeof(uint64_t) * leave_list->number_of_threads);
+  leave_list->empty_leave_means =
+      malloc_or_die(sizeof(double) * leave_list->number_of_threads);
+  leave_list_reset_empty_leave(leave_list);
 
   leave_list->leaves_partitioned_by_target_count =
       malloc_or_die(leaves_malloc_size);
@@ -159,12 +173,13 @@ void leave_list_destroy(LeaveList *leave_list) {
   }
   free(leave_list->leaves_ordered_by_klv_index);
   free(leave_list->leaves_partitioned_by_target_count);
-  free(leave_list->empty_leave);
+  free(leave_list->empty_leave_counts);
+  free(leave_list->empty_leave_means);
   free(leave_list);
 }
 
 void leave_list_reset(LeaveList *leave_list, int target_leave_count) {
-  leave_list_item_reset(leave_list->empty_leave);
+  leave_list_reset_empty_leave(leave_list);
   for (int i = 0; i < leave_list->number_of_leaves; i++) {
     leave_list_item_reset(leave_list->leaves_partitioned_by_target_count[i]);
   }
@@ -175,6 +190,16 @@ void leave_list_reset(LeaveList *leave_list, int target_leave_count) {
 void leave_list_item_increment_count(LeaveListItem *item, double equity) {
   item->count++;
   item->mean += (1.0 / item->count) * (equity - item->mean);
+}
+
+void leave_list_item_increment_empty_leave_count(LeaveList *leave_list,
+                                                 int thread_index,
+                                                 double equity) {
+  leave_list->empty_leave_counts[thread_index]++;
+  const int count = leave_list->empty_leave_counts[thread_index];
+  const double old_mean = leave_list->empty_leave_means[thread_index];
+  leave_list->empty_leave_means[thread_index] +=
+      (1.0 / count) * (equity - old_mean);
 }
 
 void leave_list_swap_items(LeaveList *leave_list, int i, int j) {
@@ -220,15 +245,20 @@ void leave_list_add_subleave_with_klv_index(LeaveList *leave_list,
 }
 
 // Adds a single subleave to the list.
-void leave_list_add_single_subleave(LeaveList *leave_list, const Rack *subleave,
-                                    double equity) {
-  leave_list_add_subleave_with_klv_index(
-      leave_list, klv_get_word_index(leave_list->klv, subleave), equity);
+void leave_list_add_single_subleave(LeaveList *leave_list, int thread_index,
+                                    const Rack *subleave, double equity) {
+  if (rack_is_empty(subleave)) {
+    leave_list_item_increment_empty_leave_count(leave_list, thread_index,
+                                                equity);
+  } else {
+    leave_list_add_subleave_with_klv_index(
+        leave_list, klv_get_word_index(leave_list->klv, subleave), equity);
+  }
 }
 
-void generate_subleaves(LeaveList *leave_list, Rack *full_rack, Rack *subleave,
-                        double move_equity, uint32_t node_index,
-                        uint32_t word_index, uint8_t ml) {
+void generate_subleaves(LeaveList *leave_list, int thread_index,
+                        Rack *full_rack, Rack *subleave, double move_equity,
+                        uint32_t node_index, uint32_t word_index, uint8_t ml) {
   const uint16_t ld_size = rack_get_dist_size(full_rack);
   while (ml < ld_size && rack_get_letter(full_rack, ml) == 0) {
     ml++;
@@ -243,11 +273,12 @@ void generate_subleaves(LeaveList *leave_list, Rack *full_rack, Rack *subleave,
                                                move_equity);
       }
     } else {
-      leave_list_item_increment_count(leave_list->empty_leave, move_equity);
+      leave_list_item_increment_empty_leave_count(leave_list, thread_index,
+                                                  move_equity);
     }
   } else {
-    generate_subleaves(leave_list, full_rack, subleave, move_equity, node_index,
-                       word_index, ml + 1);
+    generate_subleaves(leave_list, thread_index, full_rack, subleave,
+                       move_equity, node_index, word_index, ml + 1);
     const int num_this = rack_get_letter(full_rack, ml);
     for (int i = 0; i < num_this; i++) {
       rack_add_letter(subleave, ml);
@@ -260,8 +291,8 @@ void generate_subleaves(LeaveList *leave_list, Rack *full_rack, Rack *subleave,
       node_index = follow_arc(leave_list->klv, node_index, word_index,
                               &child_word_index);
       word_index = child_word_index;
-      generate_subleaves(leave_list, full_rack, subleave, move_equity,
-                         node_index, word_index, ml + 1);
+      generate_subleaves(leave_list, thread_index, full_rack, subleave,
+                         move_equity, node_index, word_index, ml + 1);
     }
 
     rack_take_letters(subleave, ml, num_this);
@@ -272,17 +303,18 @@ void generate_subleaves(LeaveList *leave_list, Rack *full_rack, Rack *subleave,
 // Adds a leave and all of its subleaves to the list. So for a
 // leave of X letters where X < RACK_SIZE, 2^X subleaves will be added.
 // Resets the subleave rack.
-void leave_list_add_all_subleaves(LeaveList *leave_list, Rack *full_rack,
-                                  Rack *subleave, double move_equity) {
+void leave_list_add_all_subleaves(LeaveList *leave_list, int thread_index,
+                                  Rack *full_rack, Rack *subleave,
+                                  double move_equity) {
   rack_reset(subleave);
-  generate_subleaves(leave_list, full_rack, subleave, move_equity,
+  generate_subleaves(leave_list, thread_index, full_rack, subleave, move_equity,
                      kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0);
 }
 
 void leave_list_write_to_klv(LeaveList *leave_list) {
   int number_of_leaves = leave_list->number_of_leaves;
   LeaveListItem **items = leave_list->leaves_ordered_by_klv_index;
-  double average_leave_value = leave_list->empty_leave->mean;
+  double average_leave_value = leave_list_get_empty_leave_mean(leave_list);
   KLV *klv = leave_list->klv;
   for (int i = 0; i < number_of_leaves; i++) {
     if (items[i]->count > 0) {
@@ -333,12 +365,28 @@ double leave_list_get_mean(const LeaveList *leave_list, int klv_index) {
   return leave_list->leaves_ordered_by_klv_index[klv_index]->mean;
 }
 
-int leave_list_get_empty_leave_count(const LeaveList *leave_list) {
-  return leave_list->empty_leave->count;
+uint64_t leave_list_get_empty_leave_count(const LeaveList *leave_list) {
+  uint64_t total_count = 0;
+  for (int i = 0; i < leave_list->number_of_threads; i++) {
+    total_count += leave_list->empty_leave_counts[i];
+  }
+  return total_count;
 }
 
 double leave_list_get_empty_leave_mean(const LeaveList *leave_list) {
-  return leave_list->empty_leave->mean;
+  double mean = 0.0;
+  uint64_t total_count = leave_list_get_empty_leave_count(leave_list);
+  for (int i = 0; i < leave_list->number_of_threads; i++) {
+    total_count += leave_list->empty_leave_counts[i];
+  }
+  if (total_count == 0) {
+    return 0.0;
+  }
+  for (int i = 0; i < leave_list->number_of_threads; i++) {
+    mean += leave_list->empty_leave_means[i] *
+            ((double)leave_list->empty_leave_counts[i] / total_count);
+  }
+  return mean;
 }
 
 int leave_list_get_count_index(const LeaveList *leave_list, int klv_index) {
