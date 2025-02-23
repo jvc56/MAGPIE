@@ -257,13 +257,10 @@ void leave_list_add_single_subleave(LeaveList *leave_list, int thread_index,
 }
 
 void generate_subleaves(LeaveList *leave_list, int thread_index,
-                        Rack *full_rack, Rack *subleave, double move_equity,
-                        uint32_t node_index, uint32_t word_index, uint8_t ml) {
-  const uint16_t ld_size = rack_get_dist_size(full_rack);
-  while (ml < ld_size && rack_get_letter(full_rack, ml) == 0) {
-    ml++;
-  }
-  if (ml == ld_size) {
+                        uint8_t *full_rack, int current_index, Rack *subleave,
+                        double move_equity, uint32_t node_index,
+                        uint32_t word_index) {
+  if (full_rack[current_index] == (MAX_ALPHABET_SIZE) + 1) {
     const int number_of_letters_in_subleave = rack_get_total_letters(subleave);
     if (number_of_letters_in_subleave > 0) {
       // Superleaves will only contain all possible subleaves
@@ -277,26 +274,23 @@ void generate_subleaves(LeaveList *leave_list, int thread_index,
                                                   move_equity);
     }
   } else {
-    generate_subleaves(leave_list, thread_index, full_rack, subleave,
-                       move_equity, node_index, word_index, ml + 1);
-    const int num_this = rack_get_letter(full_rack, ml);
-    for (int i = 0; i < num_this; i++) {
-      rack_add_letter(subleave, ml);
-      rack_take_letter(full_rack, ml);
-      uint32_t sibling_word_index;
-      node_index = increment_node_to_ml(leave_list->klv, node_index, word_index,
-                                        &sibling_word_index, ml);
-      word_index = sibling_word_index;
-      uint32_t child_word_index;
-      node_index = follow_arc(leave_list->klv, node_index, word_index,
-                              &child_word_index);
-      word_index = child_word_index;
-      generate_subleaves(leave_list, thread_index, full_rack, subleave,
-                         move_equity, node_index, word_index, ml + 1);
-    }
-
-    rack_take_letters(subleave, ml, num_this);
-    rack_add_letters(full_rack, ml, num_this);
+    // Do not add this tile to the leave
+    generate_subleaves(leave_list, thread_index, full_rack, current_index + 1,
+                       subleave, move_equity, node_index, word_index);
+    // Add this tile to the leave
+    const uint8_t ml = full_rack[current_index];
+    rack_add_letter(subleave, ml);
+    uint32_t sibling_word_index;
+    node_index = increment_node_to_ml(leave_list->klv, node_index, word_index,
+                                      &sibling_word_index, ml);
+    word_index = sibling_word_index;
+    uint32_t child_word_index;
+    node_index =
+        follow_arc(leave_list->klv, node_index, word_index, &child_word_index);
+    word_index = child_word_index;
+    generate_subleaves(leave_list, thread_index, full_rack, current_index + 1,
+                       subleave, move_equity, node_index, word_index);
+    rack_take_letter(subleave, ml);
   }
 }
 
@@ -307,8 +301,20 @@ void leave_list_add_all_subleaves(LeaveList *leave_list, int thread_index,
                                   Rack *full_rack, Rack *subleave,
                                   double move_equity) {
   rack_reset(subleave);
-  generate_subleaves(leave_list, thread_index, full_rack, subleave, move_equity,
-                     kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0, 0);
+  uint8_t full_rack_array[(RACK_SIZE) + 1];
+  int ml_index = 0;
+  const int ld_size = rack_get_dist_size(full_rack);
+  for (int i = 0; i < ld_size; i++) {
+    const int num_letter = rack_get_letter(full_rack, i);
+    for (int j = 0; j < num_letter; j++) {
+      full_rack_array[ml_index] = i;
+      ml_index++;
+    }
+  }
+  full_rack_array[ml_index] = (MAX_ALPHABET_SIZE) + 1;
+  generate_subleaves(leave_list, thread_index, full_rack_array, 0, subleave,
+                     move_equity,
+                     kwg_get_dawg_root_node_index(leave_list->klv->kwg), 0);
 }
 
 void leave_list_write_to_klv(LeaveList *leave_list) {
