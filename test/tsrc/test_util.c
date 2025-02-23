@@ -545,7 +545,7 @@ BoardLayout *board_layout_create_for_test(const char *data_paths,
 
 void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name) {
-  printf("loading game with board layout %s\n", board_layout_name);                                
+  printf("loading game with board layout %s\n", board_layout_name);
   BoardLayout *bl = board_layout_create_for_test(data_paths, board_layout_name);
   board_apply_layout(bl, game_get_board(game));
   game_reset(game);
@@ -774,7 +774,7 @@ void assert_move_equity_exact(const Move *move, Equity expected_equity) {
   assert(move_get_equity(move) == expected_equity);
 }
 
-void assert_rack_score(const LetterDistribution *ld, const Rack *rack, 
+void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
                        int expected_score) {
   assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
 }
@@ -821,5 +821,43 @@ void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors) {
   while (gen->anchor_heap.count > 0) {
     sorted_anchors->anchors[sorted_anchors->count++] =
         anchor_heap_extract_max(&gen->anchor_heap);
+  }
+}
+
+void assert_sorted_anchors_are_equal(const AnchorHeap *ah1,
+                                     const AnchorHeap *ah2) {
+  assert(ah1->count == ah2->count);
+  for (int i = 0; i < ah1->count; i++) {
+    assert(ah1->anchors[i].highest_possible_equity ==
+           ah2->anchors[i].highest_possible_equity);
+  }
+}
+
+void generate_spots_for_test(Game *game) {
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  // We don't care about them, but exchanges will be recorded while
+  // looking up leave values and it is not adding a parameter to prevent this.
+  MoveList *move_list = move_list_create(1000);
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  gen_load_position(gen, game, player_get_move_record_type(player_on_turn),
+                    player_get_move_sort_type(player_on_turn), move_list,
+                    /*override_kwg=*/NULL);
+  gen_look_up_leaves_and_record_exchanges(gen);
+  assert(wmp_move_gen_is_active(&gen->wmp_move_gen));
+  wmp_move_gen_check_nonplaythrough_existence(
+      &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+  wmp_move_gen_build_word_spot_heap(&gen->wmp_move_gen, gen->board,
+                                    gen->descending_tile_scores,
+                                    gen->best_leaves, gen->cross_index);
+  move_list_destroy(move_list);
+}
+
+void extract_sorted_spots_for_test(WordSpotHeap *sorted_spots) {
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  word_spot_heap_reset(sorted_spots);
+  while (gen->wmp_move_gen.word_spot_heap.count > 0) {
+    sorted_spots->spots[sorted_spots->count++] =
+        word_spot_heap_extract_max(&gen->wmp_move_gen.word_spot_heap);
   }
 }

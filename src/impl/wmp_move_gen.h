@@ -222,6 +222,11 @@ word_spot_heap_make_spot(WMPMoveGen *wmg, const BoardSpot *board_spot, int row,
                          const Equity *descending_tile_scores,
                          const Equity *best_leaves) {
   WordSpotHeap *heap = &wmg->word_spot_heap;
+  const bool has_playthrough = board_spot->word_length > tiles;
+  if (!has_playthrough && !wmg->nonplaythrough_has_word_of_length[tiles]) {
+    // printf("can't make word of length %d\n", tiles);
+    return;
+  }
   WordSpot *spot = &heap->spots[heap->count++];
   spot->row = row;
   spot->col = col;
@@ -237,15 +242,16 @@ word_spot_heap_make_spot(WMPMoveGen *wmg, const BoardSpot *board_spot, int row,
   spot->best_possible_equity += board_spot->additional_score;
   const int leave_size = RACK_SIZE - tiles;
   if (leave_size == 0) {
+    // printf("spot->best_possible_equity: %d\n", spot->best_possible_equity);
     return;
   }
-  const bool has_playthrough = board_spot->word_length > tiles;
   if (has_playthrough) {
     spot->best_possible_equity += best_leaves[leave_size];
   } else {
     spot->best_possible_equity +=
         wmg->nonplaythrough_best_leave_values[leave_size];
   }
+  // printf("spot->best_possible_equity: %d\n", spot->best_possible_equity);
 }
 
 static inline bool word_spot_is_better(const WordSpot *a, const WordSpot *b) {
@@ -293,15 +299,19 @@ static inline void
 wmp_move_gen_build_word_spot_heap(WMPMoveGen *wmp_move_gen, const Board *board,
                                   const Equity *descending_tile_scores,
                                   const Equity *best_leaves, int ci) {
+  // printf("wmp_move_gen_build_word_spot_heap\n");
   WordSpotHeap *heap = &wmp_move_gen->word_spot_heap;
   word_spot_heap_reset(heap);
   for (int dir = 0; dir < 2; dir++) {
     for (int row = 0; row < BOARD_DIM; row++) {
       for (int col = 0; col < BOARD_DIM; col++) {
         for (int tiles = 1; tiles <= RACK_SIZE; tiles++) {
+          // printf("row: %d, col: %d, dir: %d, tiles: %d\n", row, col, dir,
+                //  tiles);
           const BoardSpot *spot =
               board_get_readonly_spot(board, row, col, dir, tiles, ci);
           if (!spot->is_usable) {
+            // printf("unusable spot\n");
             continue;
           }
           word_spot_heap_make_spot(wmp_move_gen, spot, row, col, dir, tiles,
@@ -310,6 +320,16 @@ wmp_move_gen_build_word_spot_heap(WMPMoveGen *wmp_move_gen, const Board *board,
       }
     }
   }
+  // printf("heap->count: %d\n", heap->count);
   word_spot_heapify_all(heap);
+}
+
+// Removes max spot, returns a copy.
+static inline WordSpot word_spot_heap_extract_max(WordSpotHeap *heap) {
+  const WordSpot max_spot = heap->spots[0];
+  heap->spots[0] = heap->spots[heap->count - 1];
+  heap->count--;
+  word_spot_heapify_down(heap, 0);
+  return max_spot;
 }
 #endif

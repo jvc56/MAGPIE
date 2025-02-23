@@ -494,7 +494,7 @@ void test_standard_with_word_on_board(void) {
   config_destroy(config);
 }
 
-void test_oxyphenbutazone(void) {
+void test_oxyphenbutazone_board_spot(void) {
   Config *config = config_create_or_die("set -lex NWL20 -wmp true");
   Game *game = config_game_create(config);
   assert(game_load_cgp(game, VS_OXY) == CGP_PARSE_STATUS_SUCCESS);
@@ -523,5 +523,5 @@ void test_board_spot(void) {
   test_standard_empty_board();
   test_asymmetrical_bricked_empty_board();
   test_standard_with_word_on_board();
-  test_oxyphenbutazone();
+  test_oxyphenbutazone_board_spot();
 }
