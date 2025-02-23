@@ -1497,6 +1497,11 @@ void generate_moves(Game *game, move_record_t move_record_type,
         &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
   }
 
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    wmp_move_gen_build_word_spot_heap(&gen->wmp_move_gen, gen->board,
+                                      gen->descending_tile_scores,
+                                      gen->best_leaves, gen->cross_index);
+  }
   gen_shadow(gen);
   gen_record_scoring_plays(gen);
   gen_record_pass(gen);
