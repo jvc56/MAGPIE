@@ -17,6 +17,7 @@
 #include "../../src/ent/validated_move.h"
 
 #include "../../src/impl/config.h"
+#include "../../src/impl/wmp_move_gen.h"
 
 #define TRIVIAL_CROSS_SET_STRING "*"
 #define DEFAULT_TEST_DATA_PATH "./data:./testdata"
@@ -108,4 +109,6 @@ void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected);
 void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected);
 void generate_anchors_for_test(Game *game);
 void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
+void generate_spots_for_test(Game *game);
+void extract_sorted_spots_for_test(WordSpotHeap *sorted_spots);
 #endif
