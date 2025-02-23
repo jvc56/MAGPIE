@@ -225,6 +225,7 @@ cgp_parse_status_t game_load_cgp(Game *game, const char *cgp) {
 
   game_gen_all_cross_sets(game);
   board_update_all_anchors(game_get_board(game));
+  game_update_all_spots(game);
 
   if (game_get_consecutive_scoreless_turns(game) >=
       game_get_max_scoreless_turns(game)) {

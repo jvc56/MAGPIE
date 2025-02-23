@@ -309,6 +309,7 @@ void macondo_tests(void) {
   set_row(game_two, 9, "T");
   board_update_all_anchors(board_two);
   game_gen_all_cross_sets(game_two);
+  game_update_all_spots(game_two);
 
   assert_boards_are_equal(board, board_two);
 
