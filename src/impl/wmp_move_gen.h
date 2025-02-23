@@ -218,7 +218,7 @@ static inline void word_spot_heap_reset(WordSpotHeap *word_spot_heap) {
 
 static inline void
 word_spot_heap_make_spot(WMPMoveGen *wmg, const BoardSpot *board_spot, int row,
-                         int col, int dir, int tiles,
+                         int col, int dir, int tiles, move_sort_t move_sort_type,
                          const Equity *descending_tile_scores,
                          const Equity *best_leaves) {
   WordSpotHeap *heap = &wmg->word_spot_heap;
@@ -241,7 +241,7 @@ word_spot_heap_make_spot(WMPMoveGen *wmg, const BoardSpot *board_spot, int row,
   }
   spot->best_possible_equity += board_spot->additional_score;
   const int leave_size = RACK_SIZE - tiles;
-  if (leave_size == 0) {
+  if (leave_size == 0 || move_sort_type == MOVE_SORT_SCORE) {
     // printf("spot->best_possible_equity: %d\n", spot->best_possible_equity);
     return;
   }
@@ -295,10 +295,9 @@ static inline void word_spot_heapify_all(WordSpotHeap *heap) {
   }
 }
 
-static inline void
-wmp_move_gen_build_word_spot_heap(WMPMoveGen *wmp_move_gen, const Board *board,
-                                  const Equity *descending_tile_scores,
-                                  const Equity *best_leaves, int ci) {
+static inline void wmp_move_gen_build_word_spot_heap(
+    WMPMoveGen *wmp_move_gen, const Board *board, move_sort_t move_sort_type,
+    const Equity *descending_tile_scores, const Equity *best_leaves, int ci) {
   // printf("wmp_move_gen_build_word_spot_heap\n");
   WordSpotHeap *heap = &wmp_move_gen->word_spot_heap;
   word_spot_heap_reset(heap);
@@ -307,7 +306,7 @@ wmp_move_gen_build_word_spot_heap(WMPMoveGen *wmp_move_gen, const Board *board,
       for (int col = 0; col < BOARD_DIM; col++) {
         for (int tiles = 1; tiles <= RACK_SIZE; tiles++) {
           // printf("row: %d, col: %d, dir: %d, tiles: %d\n", row, col, dir,
-                //  tiles);
+          //  tiles);
           const BoardSpot *spot =
               board_get_readonly_spot(board, row, col, dir, tiles, ci);
           if (!spot->is_usable) {
@@ -315,6 +314,7 @@ wmp_move_gen_build_word_spot_heap(WMPMoveGen *wmp_move_gen, const Board *board,
             continue;
           }
           word_spot_heap_make_spot(wmp_move_gen, spot, row, col, dir, tiles,
+            move_sort_type,
                                    descending_tile_scores, best_leaves);
         }
       }

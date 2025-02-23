@@ -847,9 +847,9 @@ void generate_spots_for_test(Game *game) {
   assert(wmp_move_gen_is_active(&gen->wmp_move_gen));
   wmp_move_gen_check_nonplaythrough_existence(
       &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
-  wmp_move_gen_build_word_spot_heap(&gen->wmp_move_gen, gen->board,
-                                    gen->descending_tile_scores,
-                                    gen->best_leaves, gen->cross_index);
+  wmp_move_gen_build_word_spot_heap(
+      &gen->wmp_move_gen, gen->board, gen->move_sort_type,
+      gen->descending_tile_scores, gen->best_leaves, gen->cross_index);
   move_list_destroy(move_list);
 }
 
@@ -860,4 +860,12 @@ void extract_sorted_spots_for_test(WordSpotHeap *sorted_spots) {
     sorted_spots->spots[sorted_spots->count++] =
         word_spot_heap_extract_max(&gen->wmp_move_gen.word_spot_heap);
   }
+}
+
+void assert_spot_equity_exact(const WordSpot *spot, Equity expected_equity) {
+  assert(spot->best_possible_equity == expected_equity);
+}
+
+void assert_spot_equity_int(const WordSpot *spot, int expected_equity) {
+  assert_spot_equity_exact(spot, int_to_equity(expected_equity));
 }

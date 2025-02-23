@@ -111,4 +111,5 @@ void generate_anchors_for_test(Game *game);
 void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
 void generate_spots_for_test(Game *game);
 void extract_sorted_spots_for_test(WordSpotHeap *sorted_spots);
+void assert_spot_equity_int(const WordSpot *spot, int expected_equity);
 #endif
