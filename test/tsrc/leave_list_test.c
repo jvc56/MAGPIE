@@ -64,7 +64,7 @@ void test_leave_list_normal_leaves(void) {
 
   // Adding the empty leave should have no effect
   rack_set_to_string(ld, rack, "");
-  leave_list_add_all_subleaves(leave_list, 00, rack, subrack, 3.0);
+  leave_list_add_all_subleaves(leave_list, 0, rack, subrack, 3.0);
   assert(leave_list_get_empty_leave_count(leave_list) == 1);
 
   rack_set_to_string(ld, rack, "A");
