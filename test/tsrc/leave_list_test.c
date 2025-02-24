@@ -524,6 +524,25 @@ void test_leave_list_normal_leaves(void) {
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EEEII", 12, 7.0);
   assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EEEIII", 4, 7.0);
 
+  rack_set_to_string(ld, rack, "AAEEEII");
+  leave_list_add_all_subleaves(leave_list, 13, rack, subrack, 5.0);
+  assert(leave_list_get_empty_leave_count(leave_list) == 2);
+  assert(within_epsilon(leave_list_get_empty_leave_mean(leave_list), 6.0));
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "E", 7,
+                                        (7.0 * 4 + 3 * 5.0) / 7);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EE", 9,
+                                        (7.0 * 6 + 3 * 5.0) / 9);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EEE", 5,
+                                        (7.0 * 4 + 1 * 5.0) / 5);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "A", 2, 5.0);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "I", 5,
+                                        (3 * 7.0 + 2 * 5.0) / 5);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "AA", 1, 5.0);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "AI", 4, 5.0);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "AAII", 1, 5.0);
+  assert_leave_list_item_count_and_mean(ld, klv, leave_list, "EI", 18,
+                                        (7.0 * 12 + 5.0 * 6) / 18);
+
   leave_list_reset(leave_list, target_leave_count);
   rack_set_to_string(ld, rack, "STUV");
   rack_set_to_string(ld, player_rack, "STUUUVV");
