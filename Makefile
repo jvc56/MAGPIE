@@ -21,10 +21,20 @@ TEST_OBJ_SUBDIRS := $(patsubst $(TEST_DIR)/%,$(OBJ_DIR)/$(TEST_DIR)/%,$(TEST_SUB
 #dev is default, for another flavor : make BUILD=release
 BUILD := dev
 
-FSAN_ARG := -fsanitize=address,undefined,pointer-compare,pointer-subtract
+FSAN_ARG := -fsanitize=address,undefined
 # Test whether the leak flag is supported by the compiler
 ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=leak -o /dev/null >/dev/null 2>&1; echo $$?),0)
     FSAN_ARG += -fsanitize=leak
+endif
+
+# Test whether the pointer-compare flag is supported by the compiler
+ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=address,pointer-compare -o /dev/null >/dev/null 2>&1; echo $$?),0)
+    FSAN_ARG += -fsanitize=pointer-compare
+endif
+
+# Test whether the pointer-subtract flag is supported by the compiler
+ifeq ($(shell echo "int main() { return 0; }" | $(CC) -x c - -fsanitize=address,pointer-subtract -o /dev/null >/dev/null 2>&1; echo $$?),0)
+    FSAN_ARG += -fsanitize=pointer-subtract
 endif
 
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)
