@@ -351,7 +351,7 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     const Move *forced_move =
         get_top_equity_move(game, thread_index, game_runner->move_list);
     leave_list_add_single_subleave(
-        lg_shared_data->leave_list, autoplay_worker->worker_index,
+        lg_shared_data->leave_list, player_rack, autoplay_worker->worker_index,
         game_runner->rare_leave,
         equity_to_double(move_get_equity(forced_move)));
     // Remove the rare leave from the player's rack and return the

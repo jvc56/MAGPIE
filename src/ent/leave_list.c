@@ -187,11 +187,11 @@ void leave_list_reset(LeaveList *leave_list, int target_leave_count) {
   leave_list->target_leave_count = target_leave_count;
 }
 
-void leave_list_item_increment_count(LeaveListItem *item, double equity) {
-  item->count++;
-  item->mean += (1.0 / item->count) * (equity - item->mean);
+void leave_list_item_increment_count(LeaveListItem *item, int count,
+                                     double equity) {
+  item->count += count;
+  item->mean += ((double)count / item->count) * (equity - item->mean);
 }
-
 void leave_list_item_increment_empty_leave_count(LeaveList *leave_list,
                                                  int thread_index,
                                                  double equity) {
@@ -215,12 +215,15 @@ void leave_list_swap_items(LeaveList *leave_list, int i, int j) {
 }
 
 void leave_list_add_subleave_with_klv_index(LeaveList *leave_list,
-                                            int klv_index, double equity) {
+                                            int klv_index, int count,
+                                            double equity) {
   LeaveListItem *item = leave_list->leaves_ordered_by_klv_index[klv_index];
   bool item_reached_target_count = false;
   pthread_mutex_lock(&item->mutex);
-  leave_list_item_increment_count(item, equity);
-  item_reached_target_count = item->count == leave_list->target_leave_count;
+  const int old_count = item->count;
+  leave_list_item_increment_count(item, count, equity);
+  item_reached_target_count = item->count >= leave_list->target_leave_count &&
+                              old_count < leave_list->target_leave_count;
   pthread_mutex_unlock(&item->mutex);
 
   if (item_reached_target_count) {
@@ -244,15 +247,37 @@ void leave_list_add_subleave_with_klv_index(LeaveList *leave_list,
   }
 }
 
+int get_subleave_count(const Rack *full_rack, const Rack *subleave,
+                       bool add_subleave_to_total) {
+  int number_of_ways = 1;
+  const int ld_size = rack_get_dist_size(full_rack);
+  for (int i = 0; i < ld_size; i++) {
+    const int num_i_sub = rack_get_letter(subleave, i);
+    if (num_i_sub > 0) {
+      const int num_i_full = rack_get_letter(full_rack, i);
+      int num_i_total = num_i_full;
+      if (add_subleave_to_total) {
+        num_i_total += num_i_sub;
+      }
+      number_of_ways *= choose(num_i_total, num_i_sub);
+    }
+  }
+  return number_of_ways;
+}
+
 // Adds a single subleave to the list.
-void leave_list_add_single_subleave(LeaveList *leave_list, int thread_index,
+// Assumes the full_rack is the complete rack with
+// the subleave included.
+void leave_list_add_single_subleave(LeaveList *leave_list,
+                                    const Rack *full_rack, int thread_index,
                                     const Rack *subleave, double equity) {
   if (rack_is_empty(subleave)) {
     leave_list_item_increment_empty_leave_count(leave_list, thread_index,
                                                 equity);
   } else {
     leave_list_add_subleave_with_klv_index(
-        leave_list, klv_get_word_index(leave_list->klv, subleave), equity);
+        leave_list, klv_get_word_index(leave_list->klv, subleave),
+        get_subleave_count(full_rack, subleave, false), equity);
   }
 }
 
@@ -269,8 +294,9 @@ void generate_subleaves(LeaveList *leave_list, int thread_index,
       // Superleaves will only contain all possible subleaves
       // of size RACK_SIZE - 1 and below.
       if (number_of_letters_in_subleave < (RACK_SIZE)) {
-        leave_list_add_subleave_with_klv_index(leave_list, word_index - 1,
-                                               move_equity);
+        leave_list_add_subleave_with_klv_index(
+            leave_list, word_index - 1,
+            get_subleave_count(full_rack, subleave, true), move_equity);
       }
     } else {
       leave_list_item_increment_empty_leave_count(leave_list, thread_index,

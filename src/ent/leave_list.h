@@ -16,7 +16,8 @@ void leave_list_reset(LeaveList *leave_list, int target_leave_count);
 void leave_list_add_all_subleaves(LeaveList *leave_list, int thread_index,
                                   Rack *full_rack, Rack *subleave,
                                   double move_equity);
-void leave_list_add_single_subleave(LeaveList *leave_list, int thread_index,
+void leave_list_add_single_subleave(LeaveList *leave_list,
+                                    const Rack *full_rack, int thread_index,
                                     const Rack *subleave, double equity);
 void leave_list_write_to_klv(LeaveList *leave_list);
 bool leave_list_get_rare_leave(LeaveList *leave_list, XoshiroPRNG *prng,
