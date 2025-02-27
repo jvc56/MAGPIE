@@ -34,6 +34,7 @@
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "players_data_test.h"
+#include "rack_list_test.h"
 #include "rack_test.h"
 #include "shadow_test.h"
 #include "sim_test.h"
@@ -145,6 +146,7 @@ static TestEntry test_table[] = {
     {"fh", test_file_handler},
     {"cgp", test_cgp},
     {"ll", test_leave_list},
+    {"rl", test_rack_list},
     {"ch", test_checkpoint},
     {"klv", test_klv},
     {"cv", test_convert},
