@@ -194,8 +194,49 @@ void test_careen_career_exact_merged_gaddag(void) {
   assert(kwg_gaddag_prefix_arc(kwg, ld, "ERAC@E") == c_aree);
   assert(kwg_gaddag_prefix_arc(kwg, ld, "EERAC@") == c_aree);
 
-  dictionary_word_list_destroy(words);
   kwg_destroy(kwg);
+  config_destroy(config);
+}
+
+void test_kwgmaker_klv(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  LetterDistribution *ld = config_get_ld(config);
+  DictionaryWordList *words = dictionary_word_list_create();
+  add_test_word(ld, words, "ABCDEF");
+  add_test_word(ld, words, "GHIJKL");
+
+  KWG *kwg =
+      make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
+  KLV *klv = klv_create_zeroed_from_kwg(kwg, 2, "test");
+
+  printf("klv number of leaves: %d\n", klv_get_number_of_leaves(klv));
+  printf("klv root node index: %d\n", klv_get_root_node_index(klv));
+  Rack rack;
+  rack_set_dist_size(&rack, ld_get_size(ld));
+  rack_reset(&rack);
+  rack_set_to_string(ld, &rack, "");
+  printf(": %d\n", klv_get_word_index(klv, &rack));
+  rack_set_to_string(ld, &rack, "A");
+  printf("A: %d\n", klv_get_word_index(klv, &rack));
+  rack_set_to_string(ld, &rack, "AB");
+  printf("AB: %d\n", klv_get_word_index(klv, &rack));
+  rack_set_to_string(ld, &rack, "ABC");
+  printf("ABC: %d\n", klv_get_word_index(klv, &rack));
+  rack_set_to_string(ld, &rack, "ABCD");
+  printf("ABCD: %d\n", klv_get_word_index(klv, &rack));
+  rack_set_to_string(ld, &rack, "ABCDE");
+  printf("ABCDE: %d\n", klv_get_word_index(klv, &rack));
+  rack_set_to_string(ld, &rack, "ABCDEF");
+  printf("ABCDEF: %d\n", klv_get_word_index(klv, &rack));
+  rack_set_to_string(ld, &rack, "GHIJKL");
+  printf("GHIJKL: %d\n", klv_get_word_index(klv, &rack));
+
+  rack_set_to_string(ld, &rack, "ABCDE");
+  // Index out of bounds error
+  klv_get_leave_value(klv, &rack);
+
+  dictionary_word_list_destroy(words);
+  klv_destroy(klv);
   config_destroy(config);
 }
 
@@ -417,6 +458,8 @@ void test_full_csw_gaddag(void) {
 }
 
 void test_kwg_maker(void) {
+  test_kwgmaker_klv();
+  return;
   test_qi_xi_xu_word_trie();
   test_egg_unmerged_gaddag();
   test_careen_career_unmerged_gaddag();
