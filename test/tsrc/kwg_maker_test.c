@@ -194,6 +194,7 @@ void test_careen_career_exact_merged_gaddag(void) {
   assert(kwg_gaddag_prefix_arc(kwg, ld, "ERAC@E") == c_aree);
   assert(kwg_gaddag_prefix_arc(kwg, ld, "EERAC@") == c_aree);
 
+  dictionary_word_list_destroy(words);
   kwg_destroy(kwg);
   config_destroy(config);
 }
