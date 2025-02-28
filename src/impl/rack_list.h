@@ -2,7 +2,9 @@
 #define RACK_LIST_H
 
 #include "../ent/encoded_rack.h"
+#include "../ent/klv.h"
 #include "../ent/rack.h"
+#include "../ent/xoshiro.h"
 
 typedef struct RackList RackList;
 
@@ -21,4 +23,6 @@ uint64_t rack_list_get_count(const RackList *rack_list, int klv_index);
 double rack_list_get_mean(const RackList *rack_list, int klv_index);
 const EncodedRack *rack_list_get_encoded_rack(const RackList *rack_list,
                                               int klv_index);
+const KLV *rack_list_get_klv(const RackList *rack_list);
+
 #endif

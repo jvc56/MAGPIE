@@ -46,6 +46,10 @@ typedef enum {
   RACK_GEN_MODE_SET_RACK_LIST_ITEMS,
 } rack_gen_mode_t;
 
+int convert_klv_index_to_rack_list_index(int klv_index) {
+  return klv_index - (RACK_SIZE);
+}
+
 RackListItem *rack_list_item_create(int count_index) {
   RackListItem *item = malloc_or_die(sizeof(RackListItem));
   item->count = 0;
@@ -53,19 +57,6 @@ RackListItem *rack_list_item_create(int count_index) {
   item->count_index = count_index;
   pthread_mutex_init(&item->mutex, NULL);
   return item;
-}
-
-void print_er(const Rack *rack) {
-  for (int i = 0; i < rack_get_letter(rack, BLANK_MACHINE_LETTER); i++) {
-    printf("?");
-  }
-  const uint16_t ld_size = rack_get_dist_size(rack);
-  for (int i = 1; i < ld_size; i++) {
-    const int num_letter = rack_get_letter(rack, i);
-    for (int j = 0; j < num_letter; j++) {
-      printf("%c", i + 'A' - 1);
-    }
-  }
 }
 
 int rack_list_generate_all_racks(rack_gen_mode_t mode,
@@ -159,15 +150,20 @@ RackList *rack_list_create(const LetterDistribution *ld,
 
   dictionary_word_list_destroy(dwl);
 
+  rack_list->klv = klv_create_zeroed_from_kwg(kwg, rack_list->number_of_racks,
+                                              "internal_rack_list_klv");
+
+  const int klv_number_of_leaves = klv_get_number_of_leaves(rack_list->klv);
+
   const size_t racks_malloc_size =
-      sizeof(RackListItem *) * rack_list->number_of_racks;
+      sizeof(RackListItem *) * klv_number_of_leaves;
   rack_list->racks_ordered_by_klv_index = malloc_or_die(racks_malloc_size);
-  for (int i = 0; i < rack_list->number_of_racks; i++) {
+  for (int i = 0; i < klv_number_of_leaves; i++) {
     rack_list->racks_ordered_by_klv_index[i] = rack_list_item_create(i);
   }
 
-  rack_list->klv = klv_create_zeroed_from_kwg(kwg, rack_list->number_of_racks,
-                                              "internal_rack_list_klv");
+  printf("number of racks: %d\n", rack_list->number_of_racks);
+  printf("number of klv leaves: %d\n", klv_number_of_leaves);
 
   rack_list_generate_all_racks(RACK_GEN_MODE_SET_RACK_LIST_ITEMS, ld, &rack, 0,
                                NULL, NULL, rack_list,
@@ -309,4 +305,8 @@ int rack_list_get_count_index(const RackList *rack_list, int klv_index) {
 const EncodedRack *rack_list_get_encoded_rack(const RackList *rack_list,
                                               int klv_index) {
   return &rack_list->racks_ordered_by_klv_index[klv_index]->encoded_rack;
+}
+
+const KLV *rack_list_get_klv(const RackList *rack_list) {
+  return rack_list->klv;
 }
