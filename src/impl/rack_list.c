@@ -374,14 +374,14 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
     const RackListItem *rli = rack_list->racks_ordered_by_index[i];
     rack_decode(&rli->encoded_rack, &rack);
     rack_reset(&leave);
-    generate_leaves(leave_list, klv, rli->mean - average_equity,
-                    rli->total_combos, &rack, &leave,
-                    kwg_get_dawg_root_node_index(klv->kwg), 0, 0);
+    generate_leaves(leave_list, klv, rli->mean, rli->total_combos, &rack,
+                    &leave, kwg_get_dawg_root_node_index(klv->kwg), 0, 0);
   }
   for (int i = 0; i < klv_number_of_leaves; i++) {
     if (leave_list[i].count_sum > 0) {
-      klv->leave_values[i] =
-          double_to_equity(leave_list[i].equity_sum / leave_list[i].count_sum);
+      klv->leave_values[i] = double_to_equity(
+          (leave_list[i].equity_sum / leave_list[i].count_sum) -
+          average_equity);
     } else {
       klv->leave_values[i] = 0;
     }
