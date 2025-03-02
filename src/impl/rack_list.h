@@ -11,9 +11,9 @@ typedef struct RackList RackList;
 RackList *rack_list_create(const LetterDistribution *ld, int target_rack_count);
 void rack_list_destroy(RackList *rack_list);
 void rack_list_reset(RackList *rack_list, int target_rack_count);
-void rack_list_add_single_subrack(RackList *rack_list, int thread_index,
-                                  const Rack *subrack, double equity);
-void rack_list_write_to_klv(RackList *rack_list);
+void rack_list_add_rack(RackList *rack_list, const Rack *rack, double equity);
+void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
+                            KLV *klv);
 bool rack_list_get_rare_rack(RackList *rack_list, XoshiroPRNG *prng,
                              Rack *rack);
 int rack_list_get_target_rack_count(const RackList *rack_list);
