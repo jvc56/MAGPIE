@@ -869,3 +869,29 @@ void assert_spot_equity_exact(const WordSpot *spot, Equity expected_equity) {
 void assert_spot_equity_int(const WordSpot *spot, int expected_equity) {
   assert_spot_equity_exact(spot, int_to_equity(expected_equity));
 }
+
+void build_spots_for_current_position(Game *game, const char *rack,
+                                      WordSpotHeap *sorted_spots) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const int player_on_turn_idx = game_get_player_on_turn_index(game);
+  Player *player = game_get_player(game, player_on_turn_idx);
+  Rack *player_rack = player_get_rack(player);
+  rack_set_to_string(ld, player_rack, rack);
+
+  generate_spots_for_test(game);
+  extract_sorted_spots_for_test(sorted_spots);
+  Equity previous_equity = EQUITY_MAX_VALUE;
+  const int number_of_spots = sorted_spots->count;
+  for (int i = 0; i < number_of_spots; i++) {
+    const Equity equity = sorted_spots->spots[i].best_possible_equity;
+    assert(equity <= previous_equity);
+    previous_equity = equity;
+  }
+}
+
+void load_and_build_spots(Game *game, const char *cgp, const char *rack,
+                          WordSpotHeap *sorted_spots) {
+
+  game_load_cgp(game, cgp);
+  build_spots_for_current_position(game, rack, sorted_spots);
+}

@@ -89,16 +89,18 @@ void assert_game_matches_cgp(const Game *game, const char *expected_cgp,
 void assert_stats_are_equal(const Stat *s1, const Stat *s2);
 void assert_sim_results_equal(SimResults *sr1, SimResults *sr2);
 void assert_klvs_equal(const KLV *klv1, const KLV *klv2);
-void assert_word_count(const LetterDistribution *ld, const DictionaryWordList *words,
+void assert_word_count(const LetterDistribution *ld,
+                       const DictionaryWordList *words,
                        const char *human_readable_word, int expected_count);
 
 BitRack string_to_bit_rack(const LetterDistribution *ld,
                            const char *rack_string);
 
 void assert_word_in_buffer(uint8_t *buffer, const char *expected_word,
-                           const LetterDistribution *ld, int word_idx, int length);
+                           const LetterDistribution *ld, int word_idx,
+                           int length);
 
-void assert_move_score(const Move *move, int expected_score);       
+void assert_move_score(const Move *move, int expected_score);
 void assert_move_equity_int(const Move *move, int expected_equity);
 void assert_move_equity_exact(const Move *move, Equity expected_equity);
 void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
@@ -112,4 +114,9 @@ void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
 void generate_spots_for_test(Game *game);
 void extract_sorted_spots_for_test(WordSpotHeap *sorted_spots);
 void assert_spot_equity_int(const WordSpot *spot, int expected_equity);
+void build_spots_for_current_position(Game *game, const char *rack,
+                                      WordSpotHeap *sorted_spots);
+void load_and_build_spots(Game *game, const char *cgp, const char *rack,
+                          WordSpotHeap *sorted_spots);
+
 #endif

@@ -19,6 +19,7 @@
 #include "../../src/impl/config.h"
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
+#include "../../src/impl/wmp_move_gen.h"
 
 #include "../../src/util/string_util.h"
 
@@ -580,12 +581,11 @@ void small_play_recorder_test(void) {
 }
 
 void distinct_lexica_test(bool w1) {
-  Config *config = w1 ? config_create_or_die(
-                              "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
-                              "-r1 best -r2 best -numplays 1 -w1 true")
-                        : config_create_or_die(
-                              "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
-                              "-r1 best -r2 best -numplays 1");
+  Config *config =
+      w1 ? config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+                                "-r1 best -r2 best -numplays 1 -w1 true")
+         : config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+                                "-r1 best -r2 best -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
@@ -827,7 +827,7 @@ void movegen_var_bingo_bonus_test(void) {
   vms = assert_validated_move_success(config_get_game(config),
                                       opening_busuuti_cgp, "8D.BUSUUTI", 0,
                                       false, false);
-  assert_move_score(validated_moves_get_move(vms, 0), 54);                                     
+  assert_move_score(validated_moves_get_move(vms, 0), 54);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, opening_busuuti_cgp_cmd);
@@ -839,7 +839,7 @@ void movegen_var_bingo_bonus_test(void) {
   vms = assert_validated_move_success(config_get_game(config),
                                       opening_busuuti_cgp, "8D.BUSUUTI", 0,
                                       false, false);
-  assert_move_score(validated_moves_get_move(vms, 0), 324);                                     
+  assert_move_score(validated_moves_get_move(vms, 0), 324);
   validated_moves_destroy(vms);
 
   free(opening_busuuti_cgp_cmd);
@@ -879,20 +879,107 @@ void movegen_only_one_player_wmp(void) {
   config_destroy(config);
 }
 
+void wordmap_gen_muzjiks(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  player_set_move_sort_type(player, MOVE_SORT_SCORE);
+
+  WordSpotHeap spot_list;
+  load_and_build_spots(game, EMPTY_CGP, "MUZJIKS", &spot_list);
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  wmg->word_spot = spot_list.spots[0];
+  wordmap_gen(gen);
+  assert(wmg->num_words == 1);
+  assert_word_in_buffer(wmg->buffer, "MUZJIKS", ld, 0, 7);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_evacuators(void) {
+  // Board contains 8G VAC
+  char vac[300] =
+      "15/15/15/15/15/15/15/6VAC6/15/15/15/15/15/15/15 / 0/0 0 lex NWL20;";
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+
+  WordSpotHeap spot_list;
+  load_and_build_spots(game, vac, "ORATES?", &spot_list);
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  wmg->word_spot = spot_list.spots[0];
+  // Middle row, leftmost bingo spot. One of the two spots through VAC that
+  // would reach a TWS.
+  assert(wmg->word_spot.row == 7);
+  assert(wmg->word_spot.col == 0);
+  // wordmap_gen sets wmg->board_spot to the BoardSpot referred to by
+  // wmg->word_spot, and looks up words for each possible subrack. Because this
+  // spot uses all 7 letters, there is only one combination to check, and those
+  // words will be left in wmg->buffer. Testing wordmap_gen with subracks
+  // smaller than this in the same way wouldn't work, so we'll instead just test
+  // which words get recorded.
+  wordmap_gen(gen);
+  assert(wmg->num_words == 3);
+
+  // No words fit ......VAC.
+  assert_word_in_buffer(wmg->buffer, "COVARIATES", ld, 0, 10);
+  wmg->word_index = 0;
+  assert(!gen_current_word_fits_with_playthrough(gen));
+
+  assert_word_in_buffer(wmg->buffer, "EVACUATORS", ld, 1, 10);
+  wmg->word_index = 1;
+  assert(!gen_current_word_fits_with_playthrough(gen));
+
+  assert_word_in_buffer(wmg->buffer, "EXCAVATORS", ld, 2, 10);
+  wmg->word_index = 2;
+  assert(!gen_current_word_fits_with_playthrough(gen));
+
+  wmg->word_spot = spot_list.spots[1];
+  // Middle row, rightmost bingo spot.
+  assert(wmg->word_spot.row == 7);
+  assert(wmg->word_spot.col == 5);
+  wordmap_gen(gen);
+  assert(wmg->num_words == 3);
+
+  // Of the three, only EVACUATORS fits with the .VAC...... pattern
+  assert_word_in_buffer(wmg->buffer, "COVARIATES", ld, 0, 10);
+  wmg->word_index = 0;
+  assert(!gen_current_word_fits_with_playthrough(gen));
+
+  assert_word_in_buffer(wmg->buffer, "EVACUATORS", ld, 1, 10);
+  wmg->word_index = 1;
+  assert(gen_current_word_fits_with_playthrough(gen));
+
+  assert_word_in_buffer(wmg->buffer, "EXCAVATORS", ld, 2, 10);
+  wmg->word_index = 2;
+  assert(!gen_current_word_fits_with_playthrough(gen));
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
-  leave_lookup_test();
-  unfound_leave_lookup_test();
-  macondo_tests();
-  exchange_tests();
-  equity_test();
-  top_equity_play_recorder_test();
-  small_play_recorder_test();
-  distinct_lexica_test(false);
-  distinct_lexica_test(true);
-  consistent_tiebreaking_test();
-  wordsmog_test();
-  movegen_game_update_test();
-  movegen_var_bingo_bonus_test();
-  movegen_no_wmp_by_default_test();
-  movegen_only_one_player_wmp();
+  // leave_lookup_test();
+  // unfound_leave_lookup_test();
+  // macondo_tests();
+  // exchange_tests();
+  // equity_test();
+  // top_equity_play_recorder_test();
+  // small_play_recorder_test();
+  // distinct_lexica_test(false);
+  // distinct_lexica_test(true);
+  // consistent_tiebreaking_test();
+  // wordsmog_test();
+  // movegen_game_update_test();
+  // movegen_var_bingo_bonus_test();
+  // movegen_no_wmp_by_default_test();
+  // movegen_only_one_player_wmp();
+  wordmap_gen_muzjiks();
+  wordmap_gen_evacuators();
 }

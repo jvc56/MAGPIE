@@ -136,4 +136,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 
 void gen_shadow(MoveGen *gen);
 
+void wordmap_gen(MoveGen *gen);
+
+bool gen_current_word_fits_with_playthrough(MoveGen *gen);
 #endif

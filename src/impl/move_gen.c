@@ -1414,7 +1414,74 @@ void gen_shadow(MoveGen *gen) {
   }
 }
 
-void gen_record_scoring_plays(MoveGen *gen) {
+void gen_set_board_spot(MoveGen *gen) {
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  wmg->board_spot = *board_get_readonly_spot(
+      gen->board, wmg->word_spot.row, wmg->word_spot.col, wmg->word_spot.dir,
+      wmg->word_spot.num_tiles, gen->cross_index);
+}
+
+bool gen_current_word_fits_with_playthrough(MoveGen *gen) {
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  const int word_length = gen->wmp_move_gen.board_spot.word_length;
+  wmg->buffer_pos = word_length * wmg->word_index;
+  int col = gen->current_anchor_col;
+  for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+    const uint8_t board_letter = gen_cache_get_letter(gen, col);
+    const uint8_t word_letter = wmp_move_gen_get_word_letter(wmg);
+    if (board_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+      if (get_unblanked_machine_letter(board_letter) !=
+          word_letter) {
+        return false;
+      }
+    }
+    col++;
+  }
+  return true;
+}
+
+void wordmap_gen(MoveGen *gen) {
+  gen_set_board_spot(gen);
+  gen->dir = gen->wmp_move_gen.word_spot.dir;
+  if (gen->dir == BOARD_HORIZONTAL_DIRECTION) {
+    gen->current_row_index = gen->wmp_move_gen.word_spot.row;
+    gen->current_anchor_col = gen->wmp_move_gen.word_spot.col;
+  } else {
+    gen->current_row_index = gen->wmp_move_gen.word_spot.col;
+    gen->current_anchor_col = gen->wmp_move_gen.word_spot.row;
+  }
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  board_copy_row_cache(gen->lanes_cache, gen->row_cache, gen->current_row_index,
+                       gen->dir);
+  const int num_subrack_combinations =
+      wmp_move_gen_get_num_subrack_combinations(wmg);
+  const int subrack_start =
+      subracks_get_combination_offset(wmg->word_spot.num_tiles);
+  const int subrack_end = subrack_start + num_subrack_combinations;
+  for (int subrack_idx = subrack_start; subrack_idx < subrack_end;
+       subrack_idx++) {
+    wmg->leave_value = gen->number_of_tiles_in_bag > 0
+                           ? wmp_move_gen_look_up_leave_value(wmg, subrack_idx)
+                           : 0;
+    if (better_play_has_been_found(
+            gen, wmg->leave_value + wmg->word_spot.best_possible_score)) {
+      continue;
+    }
+    if (!wmp_move_gen_get_subrack_words(wmg, subrack_idx)) {
+      continue;
+    }
+  }
+}
+
+void gen_wordmap_record_scoring_plays(MoveGen *gen) {
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  while (wmg->word_spot_heap.count > 0) {
+    wmg->word_spot = word_spot_heap_extract_max(&wmg->word_spot_heap);
+    wordmap_gen(gen);
+  }
+}
+
+void gen_recursive_record_scoring_plays(MoveGen *gen) {
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
@@ -1501,8 +1568,10 @@ void generate_moves(Game *game, move_record_t move_record_type,
     wmp_move_gen_build_word_spot_heap(
         &gen->wmp_move_gen, gen->board, gen->move_sort_type,
         gen->descending_tile_scores, gen->best_leaves, gen->cross_index);
+    gen_wordmap_record_scoring_plays(gen);
+  } else {
+    gen_shadow(gen);
+    gen_recursive_record_scoring_plays(gen);
   }
-  gen_shadow(gen);
-  gen_record_scoring_plays(gen);
   gen_record_pass(gen);
 }

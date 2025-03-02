@@ -1,39 +1,10 @@
 #include <assert.h>
 
-#include "../../src/impl/move_gen.h"
-
-#include "../../src/impl/cgp.h"
 #include "../../src/impl/config.h"
 #include "../../src/impl/gameplay.h"
 
 #include "test_constants.h"
 #include "test_util.h"
-
-void build_spots_for_current_position(Game *game, const char *rack,
-                                      WordSpotHeap *sorted_spots) {
-  const LetterDistribution *ld = game_get_ld(game);
-  const int player_on_turn_idx = game_get_player_on_turn_index(game);
-  Player *player = game_get_player(game, player_on_turn_idx);
-  Rack *player_rack = player_get_rack(player);
-  rack_set_to_string(ld, player_rack, rack);
-
-  generate_spots_for_test(game);
-  extract_sorted_spots_for_test(sorted_spots);
-  Equity previous_equity = EQUITY_MAX_VALUE;
-  const int number_of_spots = sorted_spots->count;
-  for (int i = 0; i < number_of_spots; i++) {
-    const Equity equity = sorted_spots->spots[i].best_possible_equity;
-    assert(equity <= previous_equity);
-    previous_equity = equity;
-  }
-}
-
-void load_and_build_spots(Game *game, const char *cgp, const char *rack,
-                          WordSpotHeap *sorted_spots) {
-
-  game_load_cgp(game, cgp);
-  build_spots_for_current_position(game, rack, sorted_spots);
-}
 
 void test_opening_racks(void) {
   Config *config = config_create_or_die("set -lex CSW21 -wmp true");
@@ -197,7 +168,7 @@ void test_oxyphenbutazone_word_spot(void) {
   WordSpotHeap spot_list;
   load_and_build_spots(game, VS_OXY, "OXPBAZE", &spot_list);
   const WordSpot *oxyphenbutazone_spot = &spot_list.spots[0];
-  // Shadow is able to reduce this upper bound using hooks restrictions (all the
+  // Shadow is able to reduce this upper bound using hook restrictions (all the
   // way down to 1780). We don't do that for WordSpots but we can add it if it
   // helps.
   assert_spot_equity_int(oxyphenbutazone_spot, 1924);
