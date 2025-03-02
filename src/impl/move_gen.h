@@ -138,5 +138,5 @@ void gen_shadow(MoveGen *gen);
 
 void wordmap_gen(MoveGen *gen);
 
-bool gen_current_word_fits_with_playthrough(MoveGen *gen);
+bool gen_current_word_fits_with_board(MoveGen *gen);
 #endif

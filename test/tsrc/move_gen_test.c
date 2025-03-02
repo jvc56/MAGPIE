@@ -918,6 +918,7 @@ void wordmap_gen_evacuators(void) {
   // would reach a TWS.
   assert(wmg->word_spot.row == 7);
   assert(wmg->word_spot.col == 0);
+  assert(wmg->word_spot.dir == BOARD_HORIZONTAL_DIRECTION);
   // wordmap_gen sets wmg->board_spot to the BoardSpot referred to by
   // wmg->word_spot, and looks up words for each possible subrack. Because this
   // spot uses all 7 letters, there is only one combination to check, and those
@@ -930,15 +931,15 @@ void wordmap_gen_evacuators(void) {
   // No words fit ......VAC.
   assert_word_in_buffer(wmg->buffer, "COVARIATES", ld, 0, 10);
   wmg->word_index = 0;
-  assert(!gen_current_word_fits_with_playthrough(gen));
+  assert(!gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "EVACUATORS", ld, 1, 10);
   wmg->word_index = 1;
-  assert(!gen_current_word_fits_with_playthrough(gen));
+  assert(!gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "EXCAVATORS", ld, 2, 10);
   wmg->word_index = 2;
-  assert(!gen_current_word_fits_with_playthrough(gen));
+  assert(!gen_current_word_fits_with_board(gen));
 
   wmg->word_spot = spot_list.spots[1];
   // Middle row, rightmost bingo spot.
@@ -950,15 +951,58 @@ void wordmap_gen_evacuators(void) {
   // Of the three, only EVACUATORS fits with the .VAC...... pattern
   assert_word_in_buffer(wmg->buffer, "COVARIATES", ld, 0, 10);
   wmg->word_index = 0;
-  assert(!gen_current_word_fits_with_playthrough(gen));
+  assert(!gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "EVACUATORS", ld, 1, 10);
   wmg->word_index = 1;
-  assert(gen_current_word_fits_with_playthrough(gen));
+  assert(gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "EXCAVATORS", ld, 2, 10);
   wmg->word_index = 2;
-  assert(!gen_current_word_fits_with_playthrough(gen));
+  assert(!gen_current_word_fits_with_board(gen));
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_below_jeweler(void) {
+  // Board contains 8D JEWELER
+  char vac[300] =
+      "15/15/15/15/15/15/15/3JEWELER5/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;";
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+
+  WordSpotHeap spot_list;
+  load_and_build_spots(game, vac, "AEIODNS", &spot_list);
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  // We're interested in the fourth best spot, playing bingos at 9D.
+  // The spots with higher possible equity are
+  // 8A, 8B: 14-letter bingos through JEWELER to TWS
+  // K5: 2x2 hooking (JEWELER)S
+  wmg->word_spot = spot_list.spots[3];
+  // Seven-tile underlap below JEWELER.
+  assert(wmg->word_spot.row == 8);
+  assert(wmg->word_spot.col == 3);
+  assert(wmg->word_spot.dir == BOARD_HORIZONTAL_DIRECTION);
+  wordmap_gen(gen);
+  assert(wmg->num_words == 3);
+  // ADONISE and ANODISE fit beneath JEWELER, but SODAINE doesn't.
+
+  assert_word_in_buffer(wmg->buffer, "ADONISE", ld, 0, 7);
+  wmg->word_index = 0;
+  assert(gen_current_word_fits_with_board(gen));
+
+  assert_word_in_buffer(wmg->buffer, "ANODISE", ld, 1, 7);
+  wmg->word_index = 1;
+  assert(gen_current_word_fits_with_board(gen));
+
+  assert_word_in_buffer(wmg->buffer, "SODAINE", ld, 2, 7);
+  wmg->word_index = 2;
+  assert(!gen_current_word_fits_with_board(gen));
 
   game_destroy(game);
   config_destroy(config);
@@ -982,4 +1026,5 @@ void test_move_gen(void) {
   // movegen_only_one_player_wmp();
   wordmap_gen_muzjiks();
   wordmap_gen_evacuators();
+  wordmap_gen_below_jeweler();
 }

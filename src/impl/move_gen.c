@@ -1421,17 +1421,26 @@ void gen_set_board_spot(MoveGen *gen) {
       wmg->word_spot.num_tiles, gen->cross_index);
 }
 
-bool gen_current_word_fits_with_playthrough(MoveGen *gen) {
+bool gen_current_word_fits_with_board(MoveGen *gen) {
   WMPMoveGen *wmg = &gen->wmp_move_gen;
   const int word_length = gen->wmp_move_gen.board_spot.word_length;
   wmg->buffer_pos = word_length * wmg->word_index;
   int col = gen->current_anchor_col;
   for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+    // printf ("letter_idx: %d, col: %d\n", letter_idx, col);
     const uint8_t board_letter = gen_cache_get_letter(gen, col);
     const uint8_t word_letter = wmp_move_gen_get_word_letter(wmg);
+    // printf("board_letter: %c, word_letter: %c\n", board_letter + 'A' - 1,
+    //       word_letter + 'A' - 1);
     if (board_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
       if (get_unblanked_machine_letter(board_letter) !=
           word_letter) {
+        return false;
+      }
+    } else {
+      const uint64_t possible_letters_here =
+          gen_cache_get_cross_set(gen, col);
+      if ((possible_letters_here & (1 << word_letter)) == 0) {
         return false;
       }
     }
