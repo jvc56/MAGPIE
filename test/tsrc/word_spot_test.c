@@ -11,9 +11,10 @@ void test_opening_racks(void) {
   Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);
   player_set_move_sort_type(player, MOVE_SORT_SCORE);
+  MoveList *move_list = move_list_create(10);
 
   WordSpotHeap spot_list;
-  load_and_build_spots(game, EMPTY_CGP, "MUZJIKS", &spot_list);
+  load_and_build_spots(game, EMPTY_CGP, "MUZJIKS", &spot_list, move_list);
   int expected_count = 7 + 6 + 5 + 4 + 3 + 2;
   assert(spot_list.count == expected_count);
   for (int i = 0; i < expected_count; i++) {
@@ -35,7 +36,7 @@ void test_opening_racks(void) {
   assert_spot_equity_int(worst_muzjiks_spot, 36); // ZJ
   assert(worst_muzjiks_spot->num_tiles == 2);
 
-  load_and_build_spots(game, EMPTY_CGP, "TRONGLE", &spot_list);
+  load_and_build_spots(game, EMPTY_CGP, "TRONGLE", &spot_list, move_list);
   expected_count = 6 + 5 + 4 + 3 + 2; // 7-letter word is not possible
   assert(spot_list.count == expected_count);
   const WordSpot *top_trongle_spot = &spot_list.spots[0];
@@ -43,7 +44,7 @@ void test_opening_racks(void) {
   // the DWS even though none do.
   assert_spot_equity_int(top_trongle_spot, 18);
 
-  load_and_build_spots(game, EMPTY_CGP, "VVWWXYZ", &spot_list);
+  load_and_build_spots(game, EMPTY_CGP, "VVWWXYZ", &spot_list, move_list);
   // WordSpot logic handles one-tile plays differently than shadow. We do not
   // record a spot for bogus one-tile words. One tile plays only form spots when
   // playing through tiles (and only a mainword direction).
@@ -70,9 +71,10 @@ void test_best_leaves(void) {
   Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+  MoveList *move_list = move_list_create(1);
 
   WordSpotHeap spot_list;
-  load_and_build_spots(game, EMPTY_CGP, "QUACKY?", &spot_list);
+  load_and_build_spots(game, EMPTY_CGP, "QUACKY?", &spot_list, move_list);
   int expected_count = 6 + 5 + 4 + 3 + 2;
   assert(spot_list.count == expected_count);
   const WordSpot *top_quacky_spot = &spot_list.spots[0];
@@ -82,6 +84,7 @@ void test_best_leaves(void) {
   assert(top_quacky_spot->best_possible_equity ==
          quacky_score + blank_leave_value);
 
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
@@ -93,11 +96,12 @@ void test_bingos_after_vac(void) {
   Config *config = config_create_or_die("set -l1 NWL20 -l2 CSW21 -wmp true");
   Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(1);
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
 
   WordSpotHeap spot_list;
   // Player 1: NWL
-  load_and_build_spots(game, vac, "ORATES?", &spot_list);
+  load_and_build_spots(game, vac, "ORATES?", &spot_list, move_list);
   // Bingo through VAC to the TWS
   WordSpot *top_orates_spot = &spot_list.spots[0];
   assert_spot_equity_int(top_orates_spot, 95);
@@ -132,7 +136,7 @@ void test_bingos_after_vac(void) {
   // not yet restricted further when creating WordSpots as they are when
   // creating Anchors in gen_shadow.
   assert(game_get_player_on_turn_index(game) == 1);
-  build_spots_for_current_position(game, "ORATES?", &spot_list);
+  build_spots_for_current_position(game, "ORATES?", &spot_list, move_list);
   // Bingo through VAC to the TWS
   top_orates_spot = &spot_list.spots[0];
   assert_spot_equity_int(top_orates_spot, 95);
@@ -155,6 +159,7 @@ void test_bingos_after_vac(void) {
   assert(hooks_vac);
   assert(underlaps_vac);
 
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
@@ -164,9 +169,10 @@ void test_oxyphenbutazone_word_spot(void) {
   Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);
   player_set_move_sort_type(player, MOVE_SORT_SCORE);
+  MoveList *move_list = move_list_create(10);
 
   WordSpotHeap spot_list;
-  load_and_build_spots(game, VS_OXY, "OXPBAZE", &spot_list);
+  load_and_build_spots(game, VS_OXY, "OXPBAZE", &spot_list, move_list);
   const WordSpot *oxyphenbutazone_spot = &spot_list.spots[0];
   // Shadow is able to reduce this upper bound using hook restrictions (all the
   // way down to 1780). We don't do that for WordSpots but we can add it if it
@@ -177,6 +183,7 @@ void test_oxyphenbutazone_word_spot(void) {
   assert(oxyphenbutazone_spot->dir == BOARD_VERTICAL_DIRECTION);
   assert(oxyphenbutazone_spot->num_tiles == 7);
 
+  move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }

@@ -57,9 +57,11 @@ typedef struct WMPMoveGen {
   WordSpot word_spot;
   BoardSpot board_spot;
 
+  int subrack_idx;
   int num_words;
-  int word_index;
+  int word_idx;
   int buffer_pos;
+  Equity score;
   Equity leave_value;
   uint8_t buffer[WMP_RESULT_BUFFER_SIZE];
 } WMPMoveGen;
@@ -343,9 +345,8 @@ static inline WordSpot word_spot_heap_extract_max(WordSpotHeap *heap) {
 }
 
 static inline Equity
-wmp_move_gen_look_up_leave_value(const WMPMoveGen *wmp_move_gen,
-                                 int subrack_idx) {
-  return wmp_move_gen->nonplaythrough_infos[subrack_idx].leave_value;
+wmp_move_gen_look_up_leave_value(const WMPMoveGen *wmg) {                                  
+  return wmg->nonplaythrough_infos[wmg->subrack_idx].leave_value;
 }
 
 static inline int
@@ -353,21 +354,19 @@ wmp_move_gen_get_num_subrack_combinations(const WMPMoveGen *wmp_move_gen) {
   return wmp_move_gen->count_by_size[wmp_move_gen->word_spot.num_tiles];
 }
 
-static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
-                                                  int subrack_idx) {
+static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmg) {
   const bool is_playthrough =
-      wmp_move_gen->board_spot.word_length > wmp_move_gen->word_spot.num_tiles;
+      wmg->board_spot.word_length > wmg->word_spot.num_tiles;
   printf("is_playthrough: %d\n", is_playthrough);
   const SubrackInfo *nonplaythrough_info =
-      &wmp_move_gen->nonplaythrough_infos[subrack_idx];
+      &wmg->nonplaythrough_infos[wmg->subrack_idx];
   const SubrackInfo *playthrough_info =
-      &wmp_move_gen->playthrough_infos[subrack_idx];
+      &wmg->playthrough_infos[wmg->subrack_idx];
   const SubrackInfo *subrack_info =
       is_playthrough ? playthrough_info : nonplaythrough_info;
   const WMPEntry *entry = NULL;
   BitRack bit_rack = bit_rack_create_empty();
-  printf("wmp_move_gen->word_spot.num_tiles: %d\n",
-         wmp_move_gen->word_spot.num_tiles);
+  printf("wmg->word_spot.num_tiles: %d\n", wmg->word_spot.num_tiles);
   //  if (!is_playthrough || wmp_move_gen->word_spot.num_tiles == RACK_SIZE) {
   if (!is_playthrough) {
     entry = subrack_info->wmp_entry;
@@ -391,8 +390,7 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
       }
     }
     printf("\n");
-    bit_rack_add_bit_rack(&bit_rack,
-                          &wmp_move_gen->board_spot.playthrough_bit_rack);
+    bit_rack_add_bit_rack(&bit_rack, &wmg->board_spot.playthrough_bit_rack);
     printf("after adding playthrough_bit_rack: ");
     for (int i = 0; i <= 26; i++) {
       int num_this = bit_rack_get_letter(&bit_rack, i);
@@ -401,8 +399,8 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
       }
     }
     printf("\n");
-    entry = wmp_get_word_entry(wmp_move_gen->wmp, &bit_rack,
-                               wmp_move_gen->board_spot.word_length);
+    entry =
+        wmp_get_word_entry(wmg->wmp, &bit_rack, wmg->board_spot.word_length);
   }
   printf("getting words with ");
   for (int i = 0; i <= 26; i++) {
@@ -416,19 +414,22 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
     printf("entry is NULL, no words");
     return false;
   }
-  printf("wmp_move_gen->board_spot.word_length: %d\n",
-         wmp_move_gen->board_spot.word_length);
+  printf("wmg->board_spot.word_length: %d\n", wmg->board_spot.word_length);
   const int result_bytes = wmp_entry_write_words_to_buffer(
-      entry, wmp_move_gen->wmp, &bit_rack, wmp_move_gen->board_spot.word_length,
-      wmp_move_gen->buffer);
+      entry, wmg->wmp, &bit_rack, wmg->board_spot.word_length, wmg->buffer);
   printf("result_bytes: %d\n", result_bytes);
   assert(result_bytes > 0);
-  assert(result_bytes % wmp_move_gen->board_spot.word_length == 0);
-  wmp_move_gen->num_words = result_bytes / wmp_move_gen->board_spot.word_length;
+  assert(result_bytes % wmg->board_spot.word_length == 0);
+  wmg->num_words = result_bytes / wmg->board_spot.word_length;
   return true;
 }
 
 static inline uint8_t wmp_move_gen_get_word_letter(WMPMoveGen *wmp_move_gen) {
   return wmp_move_gen->buffer[wmp_move_gen->buffer_pos++];
+}
+
+static inline const BitRack *
+wmp_move_gen_get_nonplaythrough_tiles(const WMPMoveGen *wmp_move_gen) {
+  return &wmp_move_gen->nonplaythrough_infos[wmp_move_gen->subrack_idx].subrack;
 }
 #endif

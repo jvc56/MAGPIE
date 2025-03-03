@@ -111,12 +111,13 @@ void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected);
 void assert_anchor_equity_exact(const AnchorHeap *ah, int i, Equity expected);
 void generate_anchors_for_test(Game *game);
 void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors);
-void generate_spots_for_test(Game *game);
+void generate_spots_for_test(Game *game, MoveList *move_list);
 void extract_sorted_spots_for_test(WordSpotHeap *sorted_spots);
 void assert_spot_equity_int(const WordSpot *spot, int expected_equity);
 void build_spots_for_current_position(Game *game, const char *rack,
-                                      WordSpotHeap *sorted_spots);
+                                      WordSpotHeap *sorted_spots,
+                                      MoveList *move_list);
 void load_and_build_spots(Game *game, const char *cgp, const char *rack,
-                          WordSpotHeap *sorted_spots);
+                          WordSpotHeap *sorted_spots, MoveList *move_list);
 
 #endif

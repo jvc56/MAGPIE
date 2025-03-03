@@ -1423,8 +1423,8 @@ void gen_set_board_spot(MoveGen *gen) {
 
 bool gen_current_word_fits_with_board(MoveGen *gen) {
   WMPMoveGen *wmg = &gen->wmp_move_gen;
-  const int word_length = gen->wmp_move_gen.board_spot.word_length;
-  wmg->buffer_pos = word_length * wmg->word_index;
+  const int word_length = wmg->board_spot.word_length;
+  wmg->buffer_pos = word_length * wmg->word_idx;
   int col = gen->current_anchor_col;
   for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
     // printf ("letter_idx: %d, col: %d\n", letter_idx, col);
@@ -1433,13 +1433,11 @@ bool gen_current_word_fits_with_board(MoveGen *gen) {
     // printf("board_letter: %c, word_letter: %c\n", board_letter + 'A' - 1,
     //       word_letter + 'A' - 1);
     if (board_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-      if (get_unblanked_machine_letter(board_letter) !=
-          word_letter) {
+      if (get_unblanked_machine_letter(board_letter) != word_letter) {
         return false;
       }
     } else {
-      const uint64_t possible_letters_here =
-          gen_cache_get_cross_set(gen, col);
+      const uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
       if ((possible_letters_here & (1 << word_letter)) == 0) {
         return false;
       }
@@ -1447,6 +1445,159 @@ bool gen_current_word_fits_with_board(MoveGen *gen) {
     col++;
   }
   return true;
+}
+
+void set_wmp_play_for_record(MoveGen *gen, Move *move) {
+  const WMPMoveGen *wmg = &gen->wmp_move_gen;
+  const int word_length = wmg->board_spot.word_length;
+  move_set_all_except_equity(move, gen->strip, 0, word_length - 1, wmg->score,
+                             gen->current_row_index, gen->current_anchor_col,
+                             wmg->word_spot.num_tiles, gen->dir,
+                             GAME_EVENT_TILE_PLACEMENT_MOVE);
+  if (board_is_dir_vertical(gen->dir)) {
+    move_set_row_start(move, gen->current_anchor_col);
+    move_set_col_start(move, gen->current_row_index);
+  }
+}
+
+Equity get_wmp_move_equity_for_sort_type(const MoveGen *gen, Move *move) {
+  if (gen->move_sort_type == MOVE_SORT_EQUITY) {
+    return static_eval_get_move_equity_with_leave_value(
+        &gen->ld, move, &gen->leave, &gen->opponent_rack,
+        gen->opening_move_penalties, gen->board_number_of_tiles_played,
+        gen->number_of_tiles_in_bag, gen->wmp_move_gen.leave_value);
+  }
+  return move_get_score(move);
+}
+
+void update_best_wmp_move_or_insert_into_movelist(MoveGen *gen) {
+  if (gen->move_record_type == MOVE_RECORD_ALL) {
+    Move *move = move_list_get_spare_move(gen->move_list);
+    set_wmp_play_for_record(gen, move);
+    move_list_insert_spare_move(gen->move_list,
+                                get_wmp_move_equity_for_sort_type(gen, move));
+    return;
+  }
+  Move *current_move = gen_get_current_move(gen);
+  set_wmp_play_for_record(gen, current_move);
+  move_set_equity(current_move,
+                  get_wmp_move_equity_for_sort_type(gen, current_move));
+  if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
+    gen_switch_best_move_and_current_move(gen);
+  }
+}
+
+void record_wmp_play(MoveGen *gen) {
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  const int word_length = wmg->board_spot.word_length;
+  Equity crossing_total = 0;
+  Equity mainword_total = 0;
+  int word_multiplier = 1;
+  for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+    const uint8_t ml = gen->strip[letter_idx];
+    if (ml == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    const uint8_t bonus_square =
+        gen_cache_get_bonus_square(gen, gen->current_anchor_col + letter_idx);
+    const Equity letter_score = gen->tile_scores[ml];
+    const int letter_multiplier = bonus_square & 0x0F;
+    const int this_word_multiplier = bonus_square >> 4;
+    crossing_total += letter_score * letter_multiplier * this_word_multiplier;
+    mainword_total += letter_score * letter_multiplier;
+    word_multiplier *= this_word_multiplier;
+  }
+  wmg->score = crossing_total + mainword_total * word_multiplier +
+               wmg->board_spot.additional_score;
+  update_best_wmp_move_or_insert_into_movelist(gen);
+}
+
+void get_blank_possibilities(const MoveGen *gen, int pos,
+                             bool *can_be_unblanked, bool *can_be_blanked) {
+  const uint8_t ml = gen->strip[pos];
+  const WMPMoveGen *wmg = &gen->wmp_move_gen;
+  const BitRack *nonplaythrough_tiles =
+      wmp_move_gen_get_nonplaythrough_tiles(wmg);
+  const int number_of_ml_in_subrack =
+      bit_rack_get_letter(nonplaythrough_tiles, ml);
+  const int num_blanks =
+      bit_rack_get_letter(nonplaythrough_tiles, BLANK_MACHINE_LETTER);
+  int number_of_ml_before_pos = 0;
+  for (int p = 0; p < pos; p++) {
+    if (gen->strip[p] == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    if (gen->strip[p] == ml) {
+      number_of_ml_before_pos++;
+    }
+  }
+  assert(number_of_ml_before_pos <= (number_of_ml_in_subrack + num_blanks));
+  int number_of_ml_at_or_after_pos = 1;
+  for (int p = pos + 1; p < wmg->board_spot.word_length; p++) {
+    if (gen->strip[p] == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    if (gen->strip[p] == ml) {
+      number_of_ml_at_or_after_pos++;
+    }
+  }
+  const int total_ml_in_word =
+      number_of_ml_before_pos + number_of_ml_at_or_after_pos;
+  const int word_ml_in_excess = total_ml_in_word - number_of_ml_in_subrack;
+  const int ml_remaining_on_rack =
+      number_of_ml_in_subrack - number_of_ml_before_pos;
+  const int remaining_ml_in_excess =
+      number_of_ml_at_or_after_pos - ml_remaining_on_rack;
+  *can_be_unblanked = (ml_remaining_on_rack > 0) &&
+                      (remaining_ml_in_excess < number_of_ml_at_or_after_pos);
+  *can_be_blanked = word_ml_in_excess > 0;
+}
+
+void record_plays_for_current_word(MoveGen *gen, int blanks_so_far, int pos) {
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  const int word_length = wmg->board_spot.word_length;
+  wmg->buffer_pos = word_length * wmg->word_idx;
+  const BitRack *nonplaythrough_tiles =
+      wmp_move_gen_get_nonplaythrough_tiles(wmg);
+  const int num_blanks =
+      bit_rack_get_letter(nonplaythrough_tiles, BLANK_MACHINE_LETTER);
+  if (num_blanks == blanks_so_far) {
+    record_wmp_play(gen);
+    return;
+  }
+  assert(pos < word_length);
+  const uint8_t ml = gen->strip[pos];
+  if (ml == PLAYED_THROUGH_MARKER) {
+    record_plays_for_current_word(gen, blanks_so_far, pos + 1);
+    return;
+  }
+  bool can_be_unblanked;
+  bool can_be_blanked;
+  get_blank_possibilities(gen, pos, &can_be_unblanked, &can_be_blanked);
+  if (can_be_unblanked) {
+    record_plays_for_current_word(gen, blanks_so_far, pos + 1);
+  }
+  if (can_be_blanked) {
+    gen->strip[pos] = get_blanked_machine_letter(ml);
+    record_plays_for_current_word(gen, blanks_so_far + 1, pos + 1);
+    gen->strip[pos] = ml;
+  }
+}
+
+void copy_wmp_word_to_strip(MoveGen *gen) {
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  const int word_length = wmg->board_spot.word_length;
+  wmg->buffer_pos = word_length * wmg->word_idx;
+  for (int i = 0; i < word_length; i++) {
+    const uint8_t word_letter = wmp_move_gen_get_word_letter(wmg);
+    const uint8_t board_letter =
+        gen_cache_get_letter(gen, gen->current_anchor_col + i);
+    if (board_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+      gen->strip[i] = word_letter;
+    } else {
+      gen->strip[i] = PLAYED_THROUGH_MARKER;
+    }
+  }
 }
 
 void wordmap_gen(MoveGen *gen) {
@@ -1467,17 +1618,34 @@ void wordmap_gen(MoveGen *gen) {
   const int subrack_start =
       subracks_get_combination_offset(wmg->word_spot.num_tiles);
   const int subrack_end = subrack_start + num_subrack_combinations;
-  for (int subrack_idx = subrack_start; subrack_idx < subrack_end;
-       subrack_idx++) {
+  for (wmg->subrack_idx = subrack_start; wmg->subrack_idx < subrack_end;
+       wmg->subrack_idx++) {
     wmg->leave_value = gen->number_of_tiles_in_bag > 0
-                           ? wmp_move_gen_look_up_leave_value(wmg, subrack_idx)
+                           ? wmp_move_gen_look_up_leave_value(wmg)
                            : 0;
-    if (better_play_has_been_found(
+    if (gen->move_record_type == MOVE_RECORD_BEST &&
+        better_play_has_been_found(
             gen, wmg->leave_value + wmg->word_spot.best_possible_score)) {
       continue;
     }
-    if (!wmp_move_gen_get_subrack_words(wmg, subrack_idx)) {
+    if (!wmp_move_gen_get_subrack_words(wmg)) {
       continue;
+    }
+    if (gen->number_of_tiles_in_bag == 0) {
+      for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
+        const int leave_num_ml =
+            rack_get_letter(&gen->player_rack, ml) -
+            bit_rack_get_letter(wmp_move_gen_get_nonplaythrough_tiles(wmg), ml);
+        rack_set_letter(&gen->leave, ml, leave_num_ml);
+      }
+      rack_set_total_letters(&gen->leave, rack_get_total_letters(&gen->leave) -
+                                              wmg->word_spot.num_tiles);
+    }
+    for (wmg->word_idx = 0; wmg->word_idx < wmg->num_words; wmg->word_idx++) {
+      if (gen_current_word_fits_with_board(gen)) {
+        copy_wmp_word_to_strip(gen);
+        record_plays_for_current_word(gen, 0, 0);
+      }
     }
   }
 }
@@ -1494,8 +1662,8 @@ void gen_recursive_record_scoring_plays(MoveGen *gen) {
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
-  // Set these fields to values outside their valid ranges so the row cache gets
-  // loaded for the first anchor.
+  // Set these fields to values outside their valid ranges so the row cache
+  // gets loaded for the first anchor.
   gen->current_row_index = -1;
   gen->dir = -1;
 

@@ -833,12 +833,9 @@ void assert_sorted_anchors_are_equal(const AnchorHeap *ah1,
   }
 }
 
-void generate_spots_for_test(Game *game) {
+void generate_spots_for_test(Game *game, MoveList *move_list) {
   Player *player_on_turn =
       game_get_player(game, game_get_player_on_turn_index(game));
-  // We don't care about them, but exchanges will be recorded while
-  // looking up leave values and it is not adding a parameter to prevent this.
-  MoveList *move_list = move_list_create(1000);
   MoveGen *gen = get_movegen(/*thread_index=*/0);
   gen_load_position(gen, game, player_get_move_record_type(player_on_turn),
                     player_get_move_sort_type(player_on_turn), move_list,
@@ -850,7 +847,6 @@ void generate_spots_for_test(Game *game) {
   wmp_move_gen_build_word_spot_heap(
       &gen->wmp_move_gen, gen->board, gen->move_sort_type,
       gen->descending_tile_scores, gen->best_leaves, gen->cross_index);
-  move_list_destroy(move_list);
 }
 
 void extract_sorted_spots_for_test(WordSpotHeap *sorted_spots) {
@@ -871,14 +867,15 @@ void assert_spot_equity_int(const WordSpot *spot, int expected_equity) {
 }
 
 void build_spots_for_current_position(Game *game, const char *rack,
-                                      WordSpotHeap *sorted_spots) {
+                                      WordSpotHeap *sorted_spots,
+                                      MoveList *move_list) {
   const LetterDistribution *ld = game_get_ld(game);
   const int player_on_turn_idx = game_get_player_on_turn_index(game);
   Player *player = game_get_player(game, player_on_turn_idx);
   Rack *player_rack = player_get_rack(player);
   rack_set_to_string(ld, player_rack, rack);
 
-  generate_spots_for_test(game);
+  generate_spots_for_test(game, move_list);
   extract_sorted_spots_for_test(sorted_spots);
   Equity previous_equity = EQUITY_MAX_VALUE;
   const int number_of_spots = sorted_spots->count;
@@ -890,8 +887,8 @@ void build_spots_for_current_position(Game *game, const char *rack,
 }
 
 void load_and_build_spots(Game *game, const char *cgp, const char *rack,
-                          WordSpotHeap *sorted_spots) {
+                          WordSpotHeap *sorted_spots, MoveList *move_list) {
 
   game_load_cgp(game, cgp);
-  build_spots_for_current_position(game, rack, sorted_spots);
+  build_spots_for_current_position(game, rack, sorted_spots, move_list);
 }

@@ -884,10 +884,11 @@ void wordmap_gen_muzjiks(void) {
   const LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(1234);
   player_set_move_sort_type(player, MOVE_SORT_SCORE);
 
   WordSpotHeap spot_list;
-  load_and_build_spots(game, EMPTY_CGP, "MUZJIKS", &spot_list);
+  load_and_build_spots(game, EMPTY_CGP, "MUZJIKS", &spot_list, move_list);
   MoveGen *gen = get_movegen(/*thread_index=*/0);
   WMPMoveGen *wmg = &gen->wmp_move_gen;
   wmg->word_spot = spot_list.spots[0];
@@ -907,10 +908,11 @@ void wordmap_gen_evacuators(void) {
   const LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
   Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(10000);
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
 
   WordSpotHeap spot_list;
-  load_and_build_spots(game, vac, "ORATES?", &spot_list);
+  load_and_build_spots(game, vac, "ORATES?", &spot_list, move_list);
   MoveGen *gen = get_movegen(/*thread_index=*/0);
   WMPMoveGen *wmg = &gen->wmp_move_gen;
   wmg->word_spot = spot_list.spots[0];
@@ -930,15 +932,15 @@ void wordmap_gen_evacuators(void) {
 
   // No words fit ......VAC.
   assert_word_in_buffer(wmg->buffer, "COVARIATES", ld, 0, 10);
-  wmg->word_index = 0;
+  wmg->word_idx = 0;
   assert(!gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "EVACUATORS", ld, 1, 10);
-  wmg->word_index = 1;
+  wmg->word_idx = 1;
   assert(!gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "EXCAVATORS", ld, 2, 10);
-  wmg->word_index = 2;
+  wmg->word_idx = 2;
   assert(!gen_current_word_fits_with_board(gen));
 
   wmg->word_spot = spot_list.spots[1];
@@ -950,15 +952,15 @@ void wordmap_gen_evacuators(void) {
 
   // Of the three, only EVACUATORS fits with the .VAC...... pattern
   assert_word_in_buffer(wmg->buffer, "COVARIATES", ld, 0, 10);
-  wmg->word_index = 0;
+  wmg->word_idx = 0;
   assert(!gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "EVACUATORS", ld, 1, 10);
-  wmg->word_index = 1;
+  wmg->word_idx = 1;
   assert(gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "EXCAVATORS", ld, 2, 10);
-  wmg->word_index = 2;
+  wmg->word_idx = 2;
   assert(!gen_current_word_fits_with_board(gen));
 
   game_destroy(game);
@@ -967,16 +969,17 @@ void wordmap_gen_evacuators(void) {
 
 void wordmap_gen_below_jeweler(void) {
   // Board contains 8D JEWELER
-  char vac[300] =
+  char jeweler[300] =
       "15/15/15/15/15/15/15/3JEWELER5/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;";
   Config *config = config_create_or_die("set -lex CSW21 -wmp true");
   const LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
-  Player *player = game_get_player(game, 0);
+  Player *player = game_get_player(game, 0);  
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+  MoveList *move_list = move_list_create(10000);
 
   WordSpotHeap spot_list;
-  load_and_build_spots(game, vac, "AEIODNS", &spot_list);
+  load_and_build_spots(game, jeweler, "AEIODNS", &spot_list, move_list);
   MoveGen *gen = get_movegen(/*thread_index=*/0);
   WMPMoveGen *wmg = &gen->wmp_move_gen;
   // We're interested in the fourth best spot, playing bingos at 9D.
@@ -993,15 +996,15 @@ void wordmap_gen_below_jeweler(void) {
   // ADONISE and ANODISE fit beneath JEWELER, but SODAINE doesn't.
 
   assert_word_in_buffer(wmg->buffer, "ADONISE", ld, 0, 7);
-  wmg->word_index = 0;
+  wmg->word_idx = 0;
   assert(gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "ANODISE", ld, 1, 7);
-  wmg->word_index = 1;
+  wmg->word_idx = 1;
   assert(gen_current_word_fits_with_board(gen));
 
   assert_word_in_buffer(wmg->buffer, "SODAINE", ld, 2, 7);
-  wmg->word_index = 2;
+  wmg->word_idx = 2;
   assert(!gen_current_word_fits_with_board(gen));
 
   game_destroy(game);
