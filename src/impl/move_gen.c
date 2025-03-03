@@ -1498,15 +1498,20 @@ void record_wmp_play(MoveGen *gen) {
     if (ml == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    const uint8_t bonus_square =
-        gen_cache_get_bonus_square(gen, gen->current_anchor_col + letter_idx);
+    const int col = gen->current_anchor_col + letter_idx;
+    const uint8_t bonus_square = gen_cache_get_bonus_square(gen, col);
     const Equity letter_score = gen->tile_scores[ml];
+    const bool is_cross_word = gen_cache_get_is_cross_word(gen, col);
     const int letter_multiplier = bonus_square & 0x0F;
     const int this_word_multiplier = bonus_square >> 4;
-    crossing_total += letter_score * letter_multiplier * this_word_multiplier;
+    if (is_cross_word) {
+      crossing_total += letter_score * letter_multiplier * this_word_multiplier;
+    }
     mainword_total += letter_score * letter_multiplier;
     word_multiplier *= this_word_multiplier;
   }
+  printf("crossing_total: %d, mainword_total: %d, word_multiplier: %d\n",
+         crossing_total, mainword_total, word_multiplier);
   wmg->score = crossing_total + mainword_total * word_multiplier +
                wmg->board_spot.additional_score;
   update_best_wmp_move_or_insert_into_movelist(gen);

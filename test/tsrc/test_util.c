@@ -841,6 +841,8 @@ void generate_spots_for_test(Game *game, MoveList *move_list) {
                     player_get_move_sort_type(player_on_turn), move_list,
                     /*override_kwg=*/NULL);
   gen_look_up_leaves_and_record_exchanges(gen);
+  // Clear exchanges from output
+  move_list_reset(move_list);
   assert(wmp_move_gen_is_active(&gen->wmp_move_gen));
   wmp_move_gen_check_nonplaythrough_existence(
       &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
