@@ -10,7 +10,7 @@
 #include "../ent/thread_control.h"
 
 typedef struct AutoplayArgs {
-  const char *num_games_or_min_leave_targets;
+  const char *num_games_or_min_rack_targets;
   int games_before_force_draw_start;
   bool use_game_pairs;
   bool human_readable;
