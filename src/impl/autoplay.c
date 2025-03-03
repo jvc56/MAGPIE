@@ -244,19 +244,12 @@ typedef struct GameRunner {
   uint64_t seed;
   Game *game;
   MoveList *move_list;
-  Rack *leave;
-  Rack *original_rack;
-  Rack *rare_rack;
   AutoplaySharedData *shared_data;
 } GameRunner;
 
 GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   const AutoplayArgs *args = autoplay_worker->args;
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
-  const int dist_size = ld_get_size(args->game_args->ld);
-  game_runner->leave = rack_create(dist_size);
-  game_runner->original_rack = rack_create(dist_size);
-  game_runner->rare_rack = rack_create(dist_size);
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
   game_runner->move_list = move_list_create(1);
@@ -267,9 +260,6 @@ void game_runner_destroy(GameRunner *game_runner) {
   if (!game_runner) {
     return;
   }
-  rack_destroy(game_runner->leave);
-  rack_destroy(game_runner->original_rack);
-  rack_destroy(game_runner->rare_rack);
   game_destroy(game_runner->game);
   move_list_destroy(game_runner->move_list);
   free(game_runner);
@@ -318,22 +308,26 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   // drawn.
   Rack *player_rack =
       player_get_rack(game_get_player(game, player_on_turn_index));
+  const int ld_size = ld_get_size(game_get_ld(game));
+  Rack rare_rack_or_move_leave;
+  rack_set_dist_size(&rare_rack_or_move_leave, ld_size);
 
   if (game_runner->force_draw &&
       rack_list_get_rare_rack(lg_shared_data->rack_list, autoplay_worker->prng,
-                              game_runner->rare_rack)) {
+                              &rare_rack_or_move_leave)) {
     // Backup the original rack
-    rack_copy(game_runner->original_rack, player_rack);
+    Rack original_rack;
+    rack_copy(&original_rack, player_rack);
 
     // Set the rack to the rare leave
-    rack_copy(player_rack, game_runner->rare_rack);
+    rack_copy(player_rack, &rare_rack_or_move_leave);
 
     const Move *forced_move =
         get_top_equity_move(game, thread_index, game_runner->move_list);
-    rack_list_add_rack(lg_shared_data->rack_list, game_runner->rare_rack,
+    rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
                        equity_to_double(move_get_equity(forced_move)));
 
-    rack_copy(player_rack, game_runner->original_rack);
+    rack_copy(player_rack, &original_rack);
   }
   *move = get_top_equity_move(game, thread_index, game_runner->move_list);
 
@@ -341,9 +335,9 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
                        equity_to_double(move_get_equity(*move)));
   }
-  get_leave_for_move(*move, game, game_runner->leave);
+  get_leave_for_move(*move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
-                            game_runner->game, *move, game_runner->leave);
+                            game_runner->game, *move, &rare_rack_or_move_leave);
   play_move(*move, game, NULL, NULL);
   game_runner->turn_number++;
 }
