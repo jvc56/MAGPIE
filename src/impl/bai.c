@@ -42,10 +42,6 @@ int bai(bai_sampling_rule_t sr, BAIRVS *bairvs, int K, double δ) {
     }
   }
 
-  // FIXME: t in original code is set twice:
-  // t = sum(N)
-  // t += 1
-  // figure out if this is indeed unnecessary
   int t = K * 2;
   double *hμ = calloc_or_die(K, sizeof(double));
   double *hσ2 = calloc_or_die(K, sizeof(double));
@@ -53,18 +49,18 @@ int bai(bai_sampling_rule_t sr, BAIRVS *bairvs, int K, double δ) {
   int astar;
   BAISamplingRule *bai_sampling_rule = bai_sampling_rule_create(sr, N, K);
   BAIThreshold *Sβ = βs;
-  GLRTVars *glrt_vars = bai_glrt_vars_create(K);
+  BAIGLRTResults *glrt_results = bai_glrt_results_create(K);
   while (true) {
     for (int i = 0; i < K; i++) {
       hμ[i] = S[i] / N[i];
       hσ2[i] = S2[i] / N[i] - hμ[i] * hμ[i];
     }
-    bai_glrt(K, N, hμ, hσ2, glrt_vars);
-    double *Zs = glrt_vars->vals;
-    int aalt = glrt_vars->k;
-    astar = glrt_vars->astar;
-    double *ξ = glrt_vars->μ;
-    double *ϕ2 = glrt_vars->σ2;
+    bai_glrt(K, N, hμ, hσ2, glrt_results);
+    double *Zs = glrt_results->vals;
+    int aalt = glrt_results->k;
+    astar = glrt_results->astar;
+    double *ξ = glrt_results->μ;
+    double *ϕ2 = glrt_results->σ2;
     if (stopping_criterion(K, Zs, Sβ, N, hμ, hσ2, astar)) {
       break;
     }
@@ -76,7 +72,7 @@ int bai(bai_sampling_rule_t sr, BAIRVS *bairvs, int K, double δ) {
     N[k] += 1;
     t += 1;
   }
-  bai_glrt_vars_destroy(glrt_vars);
+  bai_glrt_results_destroy(glrt_results);
   bai_sampling_rule_destroy(bai_sampling_rule);
   bai_destroy_threshold(βs);
   return astar;

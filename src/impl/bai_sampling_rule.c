@@ -11,6 +11,7 @@
 typedef struct TrackAndStop {
   bool is_EV;
   BAITracking *tracking_rule;
+  BAIOracleResult *oracle_result;
 } TrackAndStop;
 
 void *track_and_stop_create(bool is_EV, bai_tracking_t tracking_type, int *N,
@@ -18,11 +19,13 @@ void *track_and_stop_create(bool is_EV, bai_tracking_t tracking_type, int *N,
   TrackAndStop *track_and_stop = malloc_or_die(sizeof(TrackAndStop));
   track_and_stop->is_EV = is_EV;
   track_and_stop->tracking_rule = bai_tracking_create(tracking_type, N, size);
+  track_and_stop->oracle_result = bai_oracle_result_create(size);
   return track_and_stop;
 }
 
 void track_and_stop_destroy(TrackAndStop *track_and_stop) {
   bai_tracking_destroy(track_and_stop->tracking_rule);
+  bai_oracle_result_destroy(track_and_stop->oracle_result);
   free(track_and_stop);
 }
 
@@ -30,9 +33,9 @@ int track_and_stop_next_sample(void *data, int astar, int aalt, double *ξ,
                                double *ϕ2, int *N, double *S, double *Zs,
                                int size) {
   TrackAndStop *track_and_stop = (TrackAndStop *)data;
-  double *w = bai_oracle(ξ, ϕ2);
-  int sample = bai_track(track_and_stop->tracking_rule, N, w, size);
-  free(w);
+  bai_oracle(ξ, ϕ2, size, track_and_stop->oracle_result);
+  int sample = bai_track(track_and_stop->tracking_rule, N,
+                         track_and_stop->oracle_result->ws_over_Σ, size);
   return sample;
 }
 
