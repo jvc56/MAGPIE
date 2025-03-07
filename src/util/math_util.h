@@ -6,5 +6,6 @@
 double p_to_z(double p);
 bool is_z_valid(double zval);
 double odds_that_player_is_better(double sampled_win_pct, int total_games);
+double zeta(double s);
 
 #endif

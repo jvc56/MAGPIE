@@ -5,6 +5,7 @@
 #include "alphabet_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
+#include "bai_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -135,6 +136,7 @@ static TestEntry test_table[] = {
     {"stats", test_stats},
     {"infer", test_infer},
     {"sim", test_sim},
+    {"bai", test_bai},
     {"command", test_command},
     {"gcg", test_gcg},
     {"autoplay", test_autoplay},

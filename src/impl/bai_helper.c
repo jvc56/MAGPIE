@@ -1,9 +1,12 @@
 #include "bai_helper.h"
 
 #include <float.h>
+#include <math.h>
 #include <stdbool.h>
 
 #include "../util/log.h"
+#include "../util/math_util.h"
+#include "../util/util.h"
 
 typedef struct HT {
   double δ;
@@ -12,7 +15,7 @@ typedef struct HT {
   bool is_EV_GLR;
   bool is_KL;
   double zetas;
-  eta;
+  double eta;
 } HT;
 
 void *create_HT(double δ, int K, int s, bool is_EV_GLR, bool is_KL) {
@@ -29,6 +32,79 @@ void *create_HT(double δ, int K, int s, bool is_EV_GLR, bool is_KL) {
 
 void destroy_HT(HT *ht) { free(ht); }
 
+double zeta(double s) {
+  if (s == 1.0) {
+    return INFINITY; // Pole at s=1
+  }
+
+  // Check for even negative integers (zeros of zeta)
+  if (s <= 0 && s == floor(s) && fmod(-s, 2) == 0) {
+    return 0.0;
+  }
+
+  // For s < 0 but not at even negative integers, use the functional equation
+  if (s < 0) {
+    // ζ(s) = 2^s * π^(s-1) * sin(πs/2) * Γ(1-s) * ζ(1-s)
+    const double reflection = 1.0 - s;
+    const double factor = pow(2.0, s) * pow(M_PI, s - 1.0) *
+                          sin(M_PI * s / 2.0) * tgamma(reflection);
+    return factor * zeta(reflection);
+  }
+
+  // For 0 < s < 1, use the functional equation as above
+  if (s > 0 && s < 1) {
+    const double reflection = 1.0 - s;
+    const double factor = pow(2.0, s) * pow(M_PI, s - 1.0) *
+                          sin(M_PI * s / 2.0) * tgamma(reflection);
+    return factor * zeta(reflection);
+  }
+
+  // For s > 1, use direct summation with Euler-Maclaurin correction
+  // Determine how many terms to use based on desired precision
+  const int terms = (int)(1000.0 + 500.0 / (s - 1.0));
+
+  // Direct summation
+  double sum = 0.0;
+  for (int n = 1; n <= terms; n++) {
+    sum += 1.0 / pow(n, s);
+  }
+
+  // Add Euler-Maclaurin correction terms for faster convergence
+  double correction = pow(terms, 1 - s) / (s - 1.0) + 0.5 / pow(terms, s);
+
+  // Add B₂/2! term
+  correction += (s / 12.0) / pow(terms, s + 1.0);
+
+  // Add B₄/4! term
+  correction -=
+      (s * (s + 1.0) * (s + 2.0) * (s + 3.0) / 720.0) / pow(terms, s + 3.0);
+
+  return sum + correction;
+}
+
+double lambertw(double x) {
+  if (x < -1.0 / M_E) {
+    return NAN; // No real solution for x < -1/e
+  }
+
+  // Initial guess: W(x) ~ ln(1 + x) for small x
+  double w = (x < 1.0) ? x : log(x);
+
+  for (int i = 0; i < 100; i++) {
+    double ew = exp(w);
+    double wewx = w * ew - x;
+    double dw = wewx / (ew * (w + 1) - ((w + 2) * wewx / (2 * w + 2)));
+
+    w -= dw;
+
+    if (fabs(dw) < 1e-10) {
+      return w;
+    }
+  }
+
+  return w; // Return the last computed value if not fully converged
+}
+
 double barW(double x, int k) {
   log_fatal("invoked unimplemented barW function");
 }
@@ -40,11 +116,11 @@ bool valid_time(HT *ht, int *N) {
   const double zetas = ht->zetas;
   const double eta = ht->eta;
   const int cst = 4;
-  const double u =
-      2 * (1 + eta) *
-      (log(cst * (K - 1) * zetas / δ) + s * log(1 + log(N) / log(1 + eta)));
-  const double val = exp(1 + lambertw((u - 1) / exp(1), 0));
   for (int i = 0; i < K; i++) {
+    const double u = 2 * (1 + eta) *
+                     (log(cst * (K - 1) * zetas / δ) +
+                      s * log(1 + log(N[i]) / log(1 + eta)));
+    const double val = exp(1 + lambertw((u - 1) / exp(1), 0));
     if (N[i] <= val) {
       return false;
     }
@@ -68,7 +144,9 @@ double get_factor_non_KL(HT *ht, int t) {
   return barW(_val_μ, -1) / (t * barW(_val_σ2, 0) - 1);
 }
 
-double HT_threshold(HT *ht, int *N, double *hμ, double *hσ2, int astar, int a) {
+double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
+                    double __attribute__((unused)) * hσ2, int astar, int a) {
+  HT *ht = (HT *)data;
   if (!valid_time(ht, N)) {
     return DBL_MAX;
   }
@@ -88,8 +166,9 @@ struct BAIThreshold {
   threshold_func_t threshold_func;
 };
 
-BAIThreshold *bai_create_threshold(bai_threshold_t type, double δ, int r, int K,
-                                   int s, double γ) {
+BAIThreshold *bai_create_threshold(bai_threshold_t type, double δ,
+                                   int __attribute__((unused)) r, int K, int s,
+                                   double __attribute__((unused)) γ) {
   BAIThreshold *bai_threshold = malloc_or_die(sizeof(BAIThreshold));
   bai_threshold->type = type;
   switch (type) {

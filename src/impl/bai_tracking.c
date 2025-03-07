@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 
+#include "../util/util.h"
+
 typedef struct CTracking {
   double *sumw;
 } CTracking;
@@ -34,7 +36,8 @@ int bai_c_track(void *data, int *N, double *w, int size) {
   return argmin;
 }
 
-int bai_d_track(void *data, int *N, double *w, int size) {
+int bai_d_track(void __attribute__((unused)) * data, int *N, double *w,
+                int size) {
   int sumN = 0;
   for (int i = 0; i < size; i++) {
     sumN += N[i];

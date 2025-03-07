@@ -7,6 +7,7 @@
 #include "bai_tracking.h"
 
 #include "../util/log.h"
+#include "../util/util.h"
 
 typedef struct TrackAndStop {
   bool is_EV;
@@ -29,9 +30,11 @@ void track_and_stop_destroy(TrackAndStop *track_and_stop) {
   free(track_and_stop);
 }
 
-int track_and_stop_next_sample(void *data, int astar, int aalt, double *ξ,
-                               double *ϕ2, int *N, double *S, double *Zs,
-                               int size) {
+int track_and_stop_next_sample(void *data, int __attribute__((unused)) astar,
+                               int __attribute__((unused)) aalt, double *ξ,
+                               double *ϕ2, int *N,
+                               double __attribute__((unused)) * S,
+                               double __attribute__((unused)) * Zs, int size) {
   TrackAndStop *track_and_stop = (TrackAndStop *)data;
   bai_oracle(ξ, ϕ2, size, track_and_stop->oracle_result);
   int sample = bai_track(track_and_stop->tracking_rule, N,

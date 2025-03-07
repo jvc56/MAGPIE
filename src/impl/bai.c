@@ -1,10 +1,10 @@
 #include <stdbool.h>
 
-#include "xoshiro.h"
+#include "../ent/random_variable.h"
+#include "../util/util.h"
 
 #include "bai_helper.h"
 #include "bai_peps.h"
-#include "bai_rvs.h"
 #include "bai_sampling_rule.h"
 
 bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *hμ,
@@ -27,7 +27,8 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
 
 // FIXME: σ2s is never used in the original code
 // μs and pep are the means and dists respectively
-int bai(bai_sampling_rule_t sr, BAIRVS *bairvs, int K, double δ) {
+int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ) {
+  const int K = rvs_get_num_rvs(rvs);
   BAIThreshold *βs = bai_create_threshold(BAI_THRESHOLD_HT, δ, 2, K, 2, 1.2);
 
   int *N = calloc_or_die(K, sizeof(int));
@@ -35,7 +36,7 @@ int bai(bai_sampling_rule_t sr, BAIRVS *bairvs, int K, double δ) {
   double *S2 = calloc_or_die(K, sizeof(double));
   for (int k = 0; k < K; k++) {
     for (int i = 0; i < 2; i++) {
-      double _X = bai_rvs_sample(bairvs, k);
+      double _X = rvs_sample(rvs, k);
       S[k] += _X;
       S2[k] += _X * _X;
       N[k] += 1;
@@ -66,7 +67,7 @@ int bai(bai_sampling_rule_t sr, BAIRVS *bairvs, int K, double δ) {
     }
     const int k = bai_sampling_rule_next_sample(bai_sampling_rule, astar, aalt,
                                                 ξ, ϕ2, N, S, Zs, K);
-    double _X = bai_rvs_sample(bairvs, k);
+    double _X = rvs_sample(rvs, k);
     S[k] += _X;
     S2[k] += _X * _X;
     N[k] += 1;

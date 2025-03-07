@@ -4,6 +4,7 @@
 #include "../util/util.h"
 
 #include <float.h>
+#include <math.h>
 #include <stdbool.h>
 
 #define BAI_EPSILON 1e-10
@@ -66,14 +67,14 @@ double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
             "f(%f) = %f\n"
             "f(%f) = %f\n"
             "mid would be %f",
-            ϵ, (BAI_BINARY_SEARCH_MAX_ITER), lo, f(lo), hi, f(hi),
+            ϵ, (BAI_BINARY_SEARCH_MAX_ITER), lo, vf(lo, args), hi, vf(hi, args),
             (lo + hi) / 2.0);
   // Unreachable but prevents compiler warnings
   return (lo + hi) / 2.0;
 }
 
-double bai_within_epsilon(double x, double y, double ϵ) {
-  return abs(x - y) < ϵ;
+bool bai_within_epsilon(double x, double y, double ϵ) {
+  return fabs(x - y) < ϵ;
 }
 
 double alt_λ_KV(double μ1, double σ21, int w1, double μa, double σ2a, int wa) {
@@ -202,8 +203,8 @@ double bai_oracle_binary_search_func(double z, void *args) {
     }
     bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], z, &bai_X_results);
     const double μx = bai_X_results.alt_λ_KV;
-    const double num = d(μs[astar], σ2s[astar], μx);
-    const double denom = d(μs[k], σ2s[k], μx);
+    const double num = dGaussian(μs[astar], σ2s[astar], μx);
+    const double denom = dGaussian(μs[k], σ2s[k], μx);
     sum += num / denom;
   }
   return sum - 1.0;

@@ -24,7 +24,7 @@ void bai_glrt(int K, int *w, double *μ, double *σ2,
               BAIGLRTResults *glrt_results);
 BAIOracleResult *bai_oracle_result_create(int size);
 void bai_oracle_result_destroy(BAIOracleResult *result);
-double *bai_oracle(double *μs, double *σ2s, int size,
-                   BAIOracleResult *oracle_result);
+void bai_oracle(double *μs, double *σ2s, int size,
+                BAIOracleResult *oracle_result);
 
 #endif
