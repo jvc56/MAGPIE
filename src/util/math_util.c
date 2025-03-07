@@ -154,7 +154,7 @@ long double erfinv_refine(long double x, int nr_iter) {
 
 // Convert a percentage to a z-score
 // This implements p = P(-Z<x<Z)
-double p_to_z(double p) { return sqrt(2) * erfinv(p / 100); };
+double p_to_z(double p) { return (SQRT2)*erfinv(p / 100); };
 
 double z_to_p_cdf(double z) { return (0.5 * (1 + erf(z / sqrt(2.0)))) * 100; }
 

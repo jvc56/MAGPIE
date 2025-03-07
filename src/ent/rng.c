@@ -8,6 +8,7 @@
 #include "xoshiro.h"
 
 #include "../util/log.h"
+#include "../util/util.h"
 
 typedef enum { RNG_XOSHIRO, RNG_FILE } rng_t;
 
@@ -35,6 +36,8 @@ RNG *rng_create(RNGArgs *args) {
     }
     break;
   case RNG_FILE:
+      // Empty statement to allow declaration
+      ;
     FILE *file = fopen(args->filename, "r");
     if (!file) {
       log_fatal("Failed to open RNG file: %s", args->filename);
@@ -51,7 +54,7 @@ RNG *rng_create(RNGArgs *args) {
     }
 
     rng->values = malloc_or_die(rng->num_values * sizeof(uint64_t));
-    rng->indexes = calloc_or_die(rng->num_values * sizeof(uint64_t));
+    rng->indexes = calloc_or_die(rng->num_values, sizeof(uint64_t));
     rewind(file);
     for (uint64_t i = 0; i < rng->num_values; i++) {
       if (fscanf(file, "%lu\n", &rng->values[i]) != 1) {
@@ -81,17 +84,19 @@ void rng_destroy(RNG *rng) {
 }
 
 uint64_t rng_uniform_uint64(RNG *rng, int thread_index) {
+  uint64_t result;
   switch (rng->type) {
   case RNG_XOSHIRO:
-    return prng_next(rng->xoshiro_prngs[thread_index]);
+    result = prng_next(rng->xoshiro_prngs[thread_index]);
     break;
   case RNG_FILE:
     if (rng->indexes[thread_index] >= rng->num_values) {
       log_fatal("RNG file for rng %d has run out of values", thread_index);
     }
-    return rng->values[rng->indexes[thread_index]++];
+    result = rng->values[rng->indexes[thread_index]++];
     break;
   }
+  return result;
 }
 
 double rng_uniform_unit(RNG *rng, int thread_index) {

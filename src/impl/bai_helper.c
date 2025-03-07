@@ -8,6 +8,9 @@
 #include "../util/math_util.h"
 #include "../util/util.h"
 
+#include "../def/bai_defs.h"
+#include "../def/math_util_defs.h"
+
 typedef struct HT {
   double δ;
   int K;
@@ -82,32 +85,60 @@ double zeta(double s) {
   return sum + correction;
 }
 
-double lambertw(double x) {
-  if (x < -1.0 / M_E) {
-    return NAN; // No real solution for x < -1/e
+// Initial approximations for branch 0
+double lambertw_branch0(double x) {
+  if (x <= 1) {
+    double sqeta = sqrt(2.0 + 2.0 * E * x);
+    double N2 =
+        3.0 * (SQRT2) + 6.0 -
+        (((2237.0 + 1457.0 * (SQRT2)) * E - 4108.0 * (SQRT2)-5764.0) * sqeta) /
+            ((215.0 + 199.0 * (SQRT2)) * E - 430.0 * (SQRT2)-796.0);
+    double N1 = (1.0 - 1.0 / (SQRT2)) * (N2 + (SQRT2));
+    return -1.0 + sqeta / (1.0 + N1 * sqeta / (N2 + sqeta));
+  } else {
+    return log(6.0 * x /
+               (5.0 * log(12.0 / 5.0 * (x / log(1.0 + 12.0 * x / 5.0)))));
   }
-
-  // Initial guess: W(x) ~ ln(1 + x) for small x
-  double w = (x < 1.0) ? x : log(x);
-
-  for (int i = 0; i < 100; i++) {
-    double ew = exp(w);
-    double wewx = w * ew - x;
-    double dw = wewx / (ew * (w + 1) - ((w + 2) * wewx / (2 * w + 2)));
-
-    w -= dw;
-
-    if (fabs(dw) < 1e-10) {
-      return w;
-    }
-  }
-
-  return w; // Return the last computed value if not fully converged
 }
 
-double barW(double x, int k) {
-  log_fatal("invoked unimplemented barW function");
+// Initial approximations for branch -1
+double lambertw_branch_neg1(double x) {
+  const double M1 = 0.3361;
+  const double M2 = -0.0042;
+  const double M3 = -0.0201;
+  double sigma = -1.0 - log(-x);
+  return -1.0 - sigma -
+         2.0 / M1 *
+             (1.0 -
+              1.0 / (1.0 + (M1 * sqrt(sigma / 2.0)) /
+                               (1.0 + M2 * sigma * exp(M3 * sqrt(sigma)))));
 }
+
+// Compute Lambert W function
+double lambertw(double x, int k) {
+  const double minx = -1.0 / E;
+  if (x < minx || (k == -1 && x >= 0)) {
+    return NAN;
+  }
+
+  double W = (k == 0) ? lambertw_branch0(x) : lambertw_branch_neg1(x);
+  double r = fabs(W - log(fabs(x)) + log(fabs(W)));
+  int n = 1;
+
+  while (r > BAI_EPSILON && n <= 5) {
+    double z = log(x / W) - W;
+    double q = 2.0 * (1.0 + W) * (1.0 + W + 2.0 / 3.0 * z);
+    double epsilon = z * (q - z) / ((1.0 + W) * (q - 2.0 * z));
+    W *= 1.0 + epsilon;
+
+    r = fabs(W - log(fabs(x)) + log(fabs(W)));
+    n++;
+  }
+
+  return W;
+}
+
+double barW(double x, int k) { return -lambertw(-exp(-x), k); }
 
 bool valid_time(HT *ht, int *N) {
   const double δ = ht->δ;

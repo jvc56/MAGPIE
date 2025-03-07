@@ -1,10 +1,13 @@
+#include <stdlib.h>
+
 #include "random_variable.h"
 #include "rng.h"
 
 #include "../util/log.h"
 #include "../util/string_util.h"
+#include "../util/util.h"
 
-typedef double (*rv_sample_func_t)(void *, int);
+typedef double (*rv_sample_func_t)(RandomVariables *, int);
 
 struct RandomVariables {
   random_variables_t type;

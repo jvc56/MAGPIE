@@ -3,11 +3,12 @@
 #include "../util/log.h"
 #include "../util/util.h"
 
+#include "../def/bai_defs.h"
+
 #include <float.h>
 #include <math.h>
 #include <stdbool.h>
 
-#define BAI_EPSILON 1e-10
 #define BAI_BINARY_SEARCH_MAX_ITER 100
 
 BAIGLRTResults *bai_glrt_results_create(int K) {

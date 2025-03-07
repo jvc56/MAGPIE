@@ -3,8 +3,8 @@
 
 #include "../../src/ent/random_variable.h"
 
-#include "../src/impl/bai.h"
-#include "../src/impl/bai_sampling_rule.h"
+#include "../../src/impl/bai.h"
+#include "../../src/impl/bai_sampling_rule.h"
 
 void test_bai_track_and_stop(void) {
   int num_rvs = 2;
