@@ -6,7 +6,8 @@
 typedef struct RNG RNG;
 
 typedef struct RNGArgs {
-  const char *filename;
+  int num_samples;
+  double *samples;
   uint64_t seed;
   int num_rngs;
 } RNGArgs;
