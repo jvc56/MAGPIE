@@ -35,7 +35,7 @@ void *create_HT(double δ, int K, int s, bool is_EV_GLR, bool is_KL) {
 
 void destroy_HT(HT *ht) { free(ht); }
 
-double barW(double x, int k) { return -lambertw(-exp(-x), k, BAI_EPSILON); }
+double barW(double x, int k) { return -lambertw(-exp(-x), k); }
 
 bool valid_time(HT *ht, int *N) {
   const double δ = ht->δ;
@@ -48,7 +48,7 @@ bool valid_time(HT *ht, int *N) {
     const double u = 2 * (1 + eta) *
                      (log(cst * (K - 1) * zetas / δ) +
                       s * log(1 + log(N[i]) / log(1 + eta)));
-    const double val = exp(1 + lambertw((u - 1) / exp(1), 0, BAI_EPSILON));
+    const double val = exp(1 + lambertw((u - 1) / exp(1), 0));
     if (N[i] <= val) {
       return false;
     }

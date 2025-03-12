@@ -32,4 +32,19 @@ void test_math_util(void) {
   assert(within_epsilon(zeta(3), 1.2020569031595951));
   assert(within_epsilon(zeta(5), 1.0369277551433709));
   assert(within_epsilon(zeta(20), 1.0000009539620338));
+
+  assert(within_epsilon(lambertw(-1 / E, 0), -1.0));
+  assert(within_epsilon(lambertw(-0.1, 0), -0.11183255915896297));
+  assert(within_epsilon(lambertw(0.0, 0), 0));
+  assert(within_epsilon(lambertw(1.0, 0), 0.5671432904097838));
+  assert(within_epsilon(lambertw(2.0, 0), 0.8526055020137254));
+  assert(within_epsilon(lambertw(3.0, 0), 1.0499088949640398));
+  assert(within_epsilon(lambertw(4.0, 0), 1.2021678731970429));
+  assert(within_epsilon(lambertw(5.0, 0), 1.3267246652422002));
+  assert(within_epsilon(lambertw(6.0, 0), 1.4324047758983003));
+  assert(within_epsilon(lambertw(1000.0, 0), 5.249602852401596));
+  assert(within_epsilon(lambertw(-1 / E, -1), -1.0));
+  assert(within_epsilon(lambertw(-0.1, -1), -3.577152063957297));
+  assert(within_epsilon(lambertw(-0.01, -1), -6.472775124394005));
+  assert(isnan(lambertw(0.0, -1)));
 }
