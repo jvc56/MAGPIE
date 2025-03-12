@@ -25,8 +25,7 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
   return true;
 }
 
-// FIXME: σ2s is never used in the original code
-// μs and pep are the means and dists respectively
+// Assumes random variables are normally distributed.
 int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ) {
   const int K = rvs_get_num_rvs(rvs);
   BAIThreshold *βs = bai_create_threshold(BAI_THRESHOLD_HT, δ, 2, K, 2, 1.2);

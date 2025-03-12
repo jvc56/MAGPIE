@@ -188,6 +188,12 @@ static double pg_horner(double x, double m, const double *p, int len) {
 // Assumes s > 0.5 and is the real part
 // Implemented using gamma.jl from the Julia SpecialFunctions package
 double zeta(double s) {
+  if (s <= 0.5) {
+    log_fatal("zeta function not implemented for values less than or equal to "
+              "0.5: %f\n",
+              s);
+  }
+
   if (fabs(s - 1.0) < 1e-6) {
     return NAN;
   }
