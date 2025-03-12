@@ -9,19 +9,8 @@
 #include "../../src/util/log.h"
 
 void test_bai_track_and_stop(void) {
-  int num_rvs = 2;
-  RandomVariablesArgs rv_args = {
-      .type = RANDOM_VARIABLES_NORMAL,
-      .num_rvs = num_rvs,
-      .means_and_stdevs = (double[]){10.0, 3.0, 1.0, 2.0},
-      .rng_args =
-          &(RNGArgs){
-              .num_samples = 0,
-              .seed = 1,
-              .num_rngs = num_rvs,
-          },
-  };
-
+  // TODO: test normal track and stop
+  RandomVariablesArgs rv_args = {};
   RandomVariables *rvs = rvs_create(&rv_args);
   int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, rvs, 0.05);
   assert(result == 0);

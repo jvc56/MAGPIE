@@ -14,7 +14,7 @@ typedef struct BAILogger {
 } BAILogger;
 
 static inline BAILogger *bai_logger_create(const char *log_filename) {
-  BAILogger *bai_logger = malloc_or_die(sizeof(BAILogger));
+  BAILogger *bai_logger = (BAILogger *)malloc_or_die(sizeof(BAILogger));
   bai_logger->fh = fopen(log_filename, "w");
   bai_logger->buffer = string_builder_create();
 }
