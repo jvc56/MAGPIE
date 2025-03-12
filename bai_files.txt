@@ -1,0 +1,924 @@
+=====================================
+=== START OF FILE: bai.c ===
+=====================================
+#include <stdbool.h>
+
+#include "../ent/random_variable.h"
+#include "../util/util.h"
+
+#include "bai_helper.h"
+#include "bai_peps.h"
+#include "bai_sampling_rule.h"
+
+bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *hμ,
+                        double *hσ2, int astar) {
+  for (int a = 0; a < K; a++) {
+    if (a == astar) {
+      continue;
+    }
+    // Original Julia code is:
+    // val = is_glr ? Zs[a] : MZs[a];
+    // cdt = val > Sβ(N, hμ, hσ2, astar, a);
+    // stop = stop && cdt;
+    const bool cdt = Zs[a] > bai_invoke_threshold(Sβ, N, hμ, hσ2, astar, a);
+    if (!cdt) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// FIXME: σ2s is never used in the original code
+// μs and pep are the means and dists respectively
+int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ) {
+  const int K = rvs_get_num_rvs(rvs);
+  BAIThreshold *βs = bai_create_threshold(BAI_THRESHOLD_HT, δ, 2, K, 2, 1.2);
+
+  int *N = calloc_or_die(K, sizeof(int));
+  double *S = calloc_or_die(K, sizeof(double));
+  double *S2 = calloc_or_die(K, sizeof(double));
+  for (int k = 0; k < K; k++) {
+    for (int i = 0; i < 2; i++) {
+      double _X = rvs_sample(rvs, k);
+      S[k] += _X;
+      S2[k] += _X * _X;
+      N[k] += 1;
+    }
+  }
+
+  int t = K * 2;
+  double *hμ = calloc_or_die(K, sizeof(double));
+  double *hσ2 = calloc_or_die(K, sizeof(double));
+  // FIXME: probably just inline this
+  int astar;
+  BAISamplingRule *bai_sampling_rule = bai_sampling_rule_create(sr, N, K);
+  BAIThreshold *Sβ = βs;
+  BAIGLRTResults *glrt_results = bai_glrt_results_create(K);
+  while (true) {
+    for (int i = 0; i < K; i++) {
+      hμ[i] = S[i] / N[i];
+      hσ2[i] = S2[i] / N[i] - hμ[i] * hμ[i];
+    }
+    bai_glrt(K, N, hμ, hσ2, glrt_results);
+    double *Zs = glrt_results->vals;
+    int aalt = glrt_results->k;
+    astar = glrt_results->astar;
+    double *ξ = glrt_results->μ;
+    double *ϕ2 = glrt_results->σ2;
+    if (stopping_criterion(K, Zs, Sβ, N, hμ, hσ2, astar)) {
+      break;
+    }
+    const int k = bai_sampling_rule_next_sample(bai_sampling_rule, astar, aalt,
+                                                ξ, ϕ2, N, S, Zs, K);
+    double _X = rvs_sample(rvs, k);
+    S[k] += _X;
+    S2[k] += _X * _X;
+    N[k] += 1;
+    t += 1;
+  }
+  bai_glrt_results_destroy(glrt_results);
+  bai_sampling_rule_destroy(bai_sampling_rule);
+  bai_destroy_threshold(βs);
+  return astar;
+}=====================================
+=== END OF FILE: bai.c ===
+=====================================
+
+=====================================
+=== START OF FILE: bai.h ===
+=====================================
+#ifndef BAI_H
+#define BAI_H
+
+#include "../ent/random_variable.h"
+
+#include "bai_sampling_rule.h"
+
+int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ);
+
+#endif=====================================
+=== END OF FILE: bai.h ===
+=====================================
+
+=====================================
+=== START OF FILE: bai_helper.c ===
+=====================================
+#include "bai_helper.h"
+
+#include <float.h>
+#include <math.h>
+#include <stdbool.h>
+
+#include "../util/log.h"
+#include "../util/math_util.h"
+#include "../util/util.h"
+
+#include "../def/bai_defs.h"
+#include "../def/math_util_defs.h"
+
+typedef struct HT {
+  double δ;
+  int K;
+  int s;
+  bool is_EV_GLR;
+  bool is_KL;
+  double zetas;
+  double eta;
+} HT;
+
+void *create_HT(double δ, int K, int s, bool is_EV_GLR, bool is_KL) {
+  HT *ht = malloc_or_die(sizeof(HT));
+  ht->δ = δ;
+  ht->K = K;
+  ht->s = s;
+  ht->is_EV_GLR = is_EV_GLR;
+  ht->is_KL = is_KL;
+  ht->zetas = zeta(s);
+  ht->eta = 1 / log(1 / δ);
+  return ht;
+}
+
+void destroy_HT(HT *ht) { free(ht); }
+
+double zeta(double s) {
+  if (s == 1.0) {
+    return INFINITY; // Pole at s=1
+  }
+
+  // Check for even negative integers (zeros of zeta)
+  if (s <= 0 && s == floor(s) && fmod(-s, 2) == 0) {
+    return 0.0;
+  }
+
+  // For s < 0 but not at even negative integers, use the functional equation
+  if (s < 0) {
+    // ζ(s) = 2^s * π^(s-1) * sin(πs/2) * Γ(1-s) * ζ(1-s)
+    const double reflection = 1.0 - s;
+    const double factor = pow(2.0, s) * pow(M_PI, s - 1.0) *
+                          sin(M_PI * s / 2.0) * tgamma(reflection);
+    return factor * zeta(reflection);
+  }
+
+  // For 0 < s < 1, use the functional equation as above
+  if (s > 0 && s < 1) {
+    const double reflection = 1.0 - s;
+    const double factor = pow(2.0, s) * pow(M_PI, s - 1.0) *
+                          sin(M_PI * s / 2.0) * tgamma(reflection);
+    return factor * zeta(reflection);
+  }
+
+  // For s > 1, use direct summation with Euler-Maclaurin correction
+  // Determine how many terms to use based on desired precision
+  const int terms = (int)(1000.0 + 500.0 / (s - 1.0));
+
+  // Direct summation
+  double sum = 0.0;
+  for (int n = 1; n <= terms; n++) {
+    sum += 1.0 / pow(n, s);
+  }
+
+  // Add Euler-Maclaurin correction terms for faster convergence
+  double correction = pow(terms, 1 - s) / (s - 1.0) + 0.5 / pow(terms, s);
+
+  // Add B₂/2! term
+  correction += (s / 12.0) / pow(terms, s + 1.0);
+
+  // Add B₄/4! term
+  correction -=
+      (s * (s + 1.0) * (s + 2.0) * (s + 3.0) / 720.0) / pow(terms, s + 3.0);
+
+  return sum + correction;
+}
+
+// Initial approximations for branch 0
+double lambertw_branch0(double x) {
+  if (x <= 1) {
+    double sqeta = sqrt(2.0 + 2.0 * E * x);
+    double N2 =
+        3.0 * (SQRT2) + 6.0 -
+        (((2237.0 + 1457.0 * (SQRT2)) * E - 4108.0 * (SQRT2)-5764.0) * sqeta) /
+            ((215.0 + 199.0 * (SQRT2)) * E - 430.0 * (SQRT2)-796.0);
+    double N1 = (1.0 - 1.0 / (SQRT2)) * (N2 + (SQRT2));
+    return -1.0 + sqeta / (1.0 + N1 * sqeta / (N2 + sqeta));
+  } else {
+    return log(6.0 * x /
+               (5.0 * log(12.0 / 5.0 * (x / log(1.0 + 12.0 * x / 5.0)))));
+  }
+}
+
+// Initial approximations for branch -1
+double lambertw_branch_neg1(double x) {
+  const double M1 = 0.3361;
+  const double M2 = -0.0042;
+  const double M3 = -0.0201;
+  double sigma = -1.0 - log(-x);
+  return -1.0 - sigma -
+         2.0 / M1 *
+             (1.0 -
+              1.0 / (1.0 + (M1 * sqrt(sigma / 2.0)) /
+                               (1.0 + M2 * sigma * exp(M3 * sqrt(sigma)))));
+}
+
+// Compute Lambert W function
+double lambertw(double x, int k) {
+  const double minx = -1.0 / E;
+  if (x < minx || (k == -1 && x >= 0)) {
+    return NAN;
+  }
+
+  double W = (k == 0) ? lambertw_branch0(x) : lambertw_branch_neg1(x);
+  double r = fabs(W - log(fabs(x)) + log(fabs(W)));
+  int n = 1;
+
+  while (r > BAI_EPSILON && n <= 5) {
+    double z = log(x / W) - W;
+    double q = 2.0 * (1.0 + W) * (1.0 + W + 2.0 / 3.0 * z);
+    double epsilon = z * (q - z) / ((1.0 + W) * (q - 2.0 * z));
+    W *= 1.0 + epsilon;
+
+    r = fabs(W - log(fabs(x)) + log(fabs(W)));
+    n++;
+  }
+
+  return W;
+}
+
+double barW(double x, int k) { return -lambertw(-exp(-x), k); }
+
+bool valid_time(HT *ht, int *N) {
+  const double δ = ht->δ;
+  const double K = ht->K;
+  const double s = ht->s;
+  const double zetas = ht->zetas;
+  const double eta = ht->eta;
+  const int cst = 4;
+  for (int i = 0; i < K; i++) {
+    const double u = 2 * (1 + eta) *
+                     (log(cst * (K - 1) * zetas / δ) +
+                      s * log(1 + log(N[i]) / log(1 + eta)));
+    const double val = exp(1 + lambertw((u - 1) / exp(1), 0));
+    if (N[i] <= val) {
+      return false;
+    }
+  }
+  return true;
+}
+
+double get_factor_non_KL(HT *ht, int t) {
+  const double δ = ht->δ;
+  const double K = ht->K;
+  const double s = ht->s;
+  const double zetas = ht->zetas;
+  const double eta = ht->eta;
+  const int cst = 4;
+  double _val_σ2 = 1 + 2 * (1 + eta) *
+                           (log(cst * (K - 1) * zetas / δ) +
+                            s * log(1 + log(t) / log(1 + eta))) /
+                           t;
+  double _val_μ = 1 + 2 * log(cst * (K - 1) * zetas / δ) +
+                  2 * s * log(1 + log(t) / (2 * s)) + 2 * s;
+  return barW(_val_μ, -1) / (t * barW(_val_σ2, 0) - 1);
+}
+
+double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
+                    double __attribute__((unused)) * hσ2, int astar, int a) {
+  HT *ht = (HT *)data;
+  if (!valid_time(ht, N)) {
+    return DBL_MAX;
+  }
+  if (!ht->is_EV_GLR) {
+    log_fatal("HT threshold not implemented for non-EV GLR");
+  }
+  double ratio_a = get_factor_non_KL(ht, N[a]);
+  double ratio_astar = get_factor_non_KL(ht, N[astar]);
+  return 0.5 * (N[a] * ratio_a + N[astar] * ratio_astar);
+}
+
+typedef double (*threshold_func_t)(void *, int *, double *, double *, int, int);
+
+struct BAIThreshold {
+  bai_threshold_t type;
+  void *data;
+  threshold_func_t threshold_func;
+};
+
+BAIThreshold *bai_create_threshold(bai_threshold_t type, double δ,
+                                   int __attribute__((unused)) r, int K, int s,
+                                   double __attribute__((unused)) γ) {
+  BAIThreshold *bai_threshold = malloc_or_die(sizeof(BAIThreshold));
+  bai_threshold->type = type;
+  switch (type) {
+  case BAI_THRESHOLD_HT:
+    bai_threshold->data = create_HT(δ, K, s, true, false);
+    bai_threshold->threshold_func = HT_threshold;
+    break;
+  }
+  return bai_threshold;
+}
+
+void bai_destroy_threshold(BAIThreshold *bai_threshold) {
+  switch (bai_threshold->type) {
+  case BAI_THRESHOLD_HT:
+    destroy_HT((HT *)bai_threshold->data);
+    break;
+  }
+  free(bai_threshold);
+}
+
+double bai_invoke_threshold(BAIThreshold *bai_threshold, int *N, double *hμ,
+                            double *hσ2, int astar, int a) {
+  return bai_threshold->threshold_func(bai_threshold->data, N, hμ, hσ2, astar,
+                                       a);
+}=====================================
+=== END OF FILE: bai_helper.c ===
+=====================================
+
+=====================================
+=== START OF FILE: bai_helper.h ===
+=====================================
+#ifndef BAI_HELPER_H
+#define BAI_HELPER_H
+
+typedef struct BAIThreshold BAIThreshold;
+
+typedef enum {
+  BAI_THRESHOLD_HT,
+} bai_threshold_t;
+
+BAIThreshold *bai_create_threshold(bai_threshold_t type, double δ, int r, int K,
+                                   int s, double γ);
+void bai_destroy_threshold(BAIThreshold *bai_threshold);
+double bai_invoke_threshold(BAIThreshold *bai_threshold, int *N, double *hμ,
+                            double *hσ2, int astar, int a);
+
+#endif=====================================
+=== END OF FILE: bai_helper.h ===
+=====================================
+
+=====================================
+=== START OF FILE: bai_peps.c ===
+=====================================
+#include "bai_peps.h"
+
+#include "../util/log.h"
+#include "../util/util.h"
+
+#include "../def/bai_defs.h"
+
+#include <float.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define BAI_BINARY_SEARCH_MAX_ITER 100
+
+BAIGLRTResults *bai_glrt_results_create(int K) {
+  BAIGLRTResults *glrt_results = malloc_or_die(sizeof(BAIGLRTResults));
+  glrt_results->vals = malloc_or_die(K * sizeof(double));
+  glrt_results->θs = malloc_or_die(K * sizeof(double));
+  glrt_results->λ = malloc_or_die(K * sizeof(double));
+  glrt_results->ϕ2 = malloc_or_die(K * sizeof(double));
+  glrt_results->μ = malloc_or_die(K * sizeof(double));
+  glrt_results->σ2 = malloc_or_die(K * sizeof(double));
+  return glrt_results;
+}
+
+void bai_glrt_results_destroy(BAIGLRTResults *glrt_results) {
+  free(glrt_results->vals);
+  free(glrt_results->θs);
+  free(glrt_results->λ);
+  free(glrt_results->ϕ2);
+  free(glrt_results->μ);
+  free(glrt_results->σ2);
+  free(glrt_results);
+}
+
+typedef double (*bai_binary_search_value_func_t)(double, void *);
+
+double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
+                         double lo, double hi, double ϵ) {
+  double flo = vf(lo, args);
+  double fhi = vf(hi, args);
+
+  if (flo > 0) {
+    log_fatal("f(%f) = %f should be negative at low end", lo, flo);
+  }
+  if (fhi < 0) {
+    log_fatal("f(%f) = %f should be positive at high end", hi, fhi);
+  }
+
+  for (int i = 0; i < (BAI_BINARY_SEARCH_MAX_ITER); i++) {
+    double mid = (lo + hi) / 2.0;
+    if (mid == lo || mid == hi) {
+      return mid;
+    }
+
+    double fmid = vf(mid, args);
+
+    if (fmid < -ϵ) {
+      lo = mid;
+    } else if (fmid > ϵ) {
+      hi = mid;
+    } else {
+      return mid;
+    }
+  }
+
+  // Log fatal error if tolerance is not reached
+  log_fatal("binary_search did not reach tolerance %g in %d iterations.\n"
+            "f(%f) = %f\n"
+            "f(%f) = %f\n"
+            "mid would be %f",
+            ϵ, (BAI_BINARY_SEARCH_MAX_ITER), lo, vf(lo, args), hi, vf(hi, args),
+            (lo + hi) / 2.0);
+  // Unreachable but prevents compiler warnings
+  return (lo + hi) / 2.0;
+}
+
+bool bai_within_epsilon(double x, double y, double ϵ) {
+  return fabs(x - y) < ϵ;
+}
+
+double alt_λ_KV(double μ1, double σ21, int w1, double μa, double σ2a, int wa) {
+  if (w1 == 0) {
+    return μa;
+  }
+  // FIXME: check if this actually does need true equality comparison here
+  if (wa == 0 || bai_within_epsilon(μ1, μa, BAI_EPSILON)) {
+    return μ1;
+  }
+  double x = ((double)wa) / w1;
+  return (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
+}
+
+// FIXME: need to check if this is correct
+double dGaussian(double μ, double σ2, double λ) {
+  const double diff = μ - λ;
+  return (diff * diff) / (2 * σ2);
+}
+
+void bai_glrt(int K, int *w, double *μ, double *σ2,
+              BAIGLRTResults *glrt_results) {
+  int astar = 0;
+  for (int i = 1; i < K; i++) {
+    if (μ[i] > μ[astar]) {
+      astar = i;
+    }
+  }
+
+  double *vals = glrt_results->vals;
+  for (int k = 0; k < K; k++) {
+    vals[k] = DBL_MAX;
+  }
+  double *θs = glrt_results->θs;
+  // FIXME: probably just use memset here
+  for (int k = 0; k < K; k++) {
+    θs[k] = 0;
+  }
+  for (int a = 0; a < K; a++) {
+    if (a == astar) {
+      continue;
+    }
+    θs[a] = alt_λ_KV(μ[astar], σ2[astar], w[astar], μ[a], σ2[a], w[a]);
+    vals[a] = w[astar] * dGaussian(μ[astar], σ2[astar], θs[a]) +
+              w[a] * dGaussian(μ[a], σ2[a], θs[a]);
+  }
+  int k = 0;
+  // Implement argmin
+  for (int i = 1; i < K; i++) {
+    if (vals[i] < vals[k]) {
+      k = i;
+    }
+  }
+
+  for (int i = 0; i < K; i++) {
+    glrt_results->λ[i] = μ[i];
+    glrt_results->ϕ2[i] = σ2[i];
+    glrt_results->μ[i] = μ[i];
+    glrt_results->σ2[i] = σ2[i];
+  }
+  glrt_results->λ[astar] = θs[k];
+  glrt_results->λ[k] = θs[k];
+  glrt_results->k = k;
+  glrt_results->astar = astar;
+}
+
+typedef struct BAIXBinarySearchArgs {
+  double μ1;
+  double σ21;
+  double μa;
+  double σ2a;
+  double v;
+} BAIXBinarySearchArgs;
+
+double bai_X_binary_search_func(double z, void *args) {
+  BAIXBinarySearchArgs *xbs_args = (BAIXBinarySearchArgs *)args;
+  const double μ1 = xbs_args->μ1;
+  const double σ21 = xbs_args->σ21;
+  const double μa = xbs_args->μa;
+  const double σ2a = xbs_args->σ2a;
+  const double v = xbs_args->v;
+  const double μz = alt_λ_KV(μ1, σ21, 1 - z, μa, σ2a, z);
+  return (1 - z) * dGaussian(μ1, σ21, μz) + z * dGaussian(μa, σ2a, μz) -
+         (1 - z) * v;
+}
+
+typedef struct BAIXResults {
+  double α_ratio;
+  double alt_λ_KV;
+} BAIXResults;
+
+void bai_X(double μ1, double σ21, double μa, double σ2a, double v,
+           BAIXResults *bai_X_results) {
+  double upd_a = dGaussian(μ1, σ21, μa);
+  BAIXBinarySearchArgs xbs_args = {
+      .μ1 = μ1,
+      .σ21 = σ21,
+      .μa = μa,
+      .σ2a = σ2a,
+      .v = v,
+  };
+  double α = bai_binary_search(bai_X_binary_search_func, &xbs_args, 0, 1,
+                               upd_a * (BAI_EPSILON));
+  bai_X_results->α_ratio = α / (1 - α);
+  bai_X_results->alt_λ_KV = alt_λ_KV(μ1, σ21, 1 - α, μa, σ2a, α);
+}
+
+typedef struct BAIOracleBinarySearchArgs {
+  const double *μs;
+  const double *σ2s;
+  int size;
+  int astar;
+} BAIOracleBinarySearchArgs;
+
+double bai_oracle_binary_search_func(double z, void *args) {
+  BAIOracleBinarySearchArgs *obs_args = (BAIOracleBinarySearchArgs *)args;
+  const double *μs = obs_args->μs;
+  const double *σ2s = obs_args->σ2s;
+  int size = obs_args->size;
+  int astar = obs_args->astar;
+  double sum = 0.0;
+  BAIXResults bai_X_results;
+  for (int k = 0; k < size; ++k) {
+    if (k == astar) {
+      continue;
+    }
+    bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], z, &bai_X_results);
+    const double μx = bai_X_results.alt_λ_KV;
+    const double num = dGaussian(μs[astar], σ2s[astar], μx);
+    const double denom = dGaussian(μs[k], σ2s[k], μx);
+    sum += num / denom;
+  }
+  return sum - 1.0;
+}
+
+BAIOracleResult *bai_oracle_result_create(int size) {
+  BAIOracleResult *result = malloc_or_die(sizeof(BAIOracleResult));
+  result->ws_over_Σ = malloc_or_die(size * sizeof(double));
+  return result;
+}
+
+void bai_oracle_result_destroy(BAIOracleResult *oracle_result) {
+  free(oracle_result->ws_over_Σ);
+  free(oracle_result);
+}
+
+void bai_oracle(double *μs, double *σ2s, int size,
+                BAIOracleResult *oracle_result) {
+  int astar = 0;
+  double μstar = μs[0];
+  bool all_equal = true;
+  for (int i = 0; i < size; i++) {
+    if (μs[i] > μstar) {
+      μstar = μs[i];
+      astar = i;
+    }
+    all_equal = all_equal && bai_within_epsilon(μs[i], μstar, BAI_EPSILON);
+  }
+  if (all_equal) {
+    oracle_result->Σ_over_val = DBL_MAX;
+    for (int i = 1; i < size + 1; i++) {
+      oracle_result->ws_over_Σ[i] = 1 / (double)size;
+    }
+    return;
+  }
+
+  double hi = DBL_MAX;
+
+  for (int k = 0; k < size; ++k) {
+    if (k == astar) {
+      continue;
+    }
+    double result = dGaussian(μs[astar], σ2s[astar], μs[k]);
+    if (result < hi) {
+      hi = result;
+    }
+  }
+
+  BAIOracleBinarySearchArgs obs_args;
+  obs_args.astar = astar;
+  obs_args.size = size;
+  obs_args.μs = μs;
+  obs_args.σ2s = σ2s;
+  double val = bai_binary_search(bai_oracle_binary_search_func, &obs_args, 0,
+                                 hi, BAI_EPSILON);
+  BAIXResults bai_X_results;
+  double Σ = 0;
+  for (int k = 0; k < size; ++k) {
+    if (k == astar) {
+      oracle_result->ws_over_Σ[k] = 1.0;
+    } else {
+      bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], val, &bai_X_results);
+      oracle_result->ws_over_Σ[k] = bai_X_results.α_ratio;
+    }
+    Σ += oracle_result->ws_over_Σ[k];
+  }
+  oracle_result->Σ_over_val = Σ / val;
+  for (int k = 0; k < size; ++k) {
+    oracle_result->ws_over_Σ[k] /= Σ;
+  }
+}=====================================
+=== END OF FILE: bai_peps.c ===
+=====================================
+
+=====================================
+=== START OF FILE: bai_peps.h ===
+=====================================
+#ifndef BAI_PEPS_H
+#define BAI_PEPS_H
+
+typedef struct BAIOracleResult {
+  double Σ_over_val;
+  double *ws_over_Σ;
+} BAIOracleResult;
+
+typedef struct BAIGLRTResults {
+  double *vals;
+  double *θs;
+  int k;
+  double *λ;
+  double *ϕ2;
+  // FIXME: determine if these are needed
+  int astar;
+  double *μ;
+  double *σ2;
+} BAIGLRTResults;
+
+BAIGLRTResults *bai_glrt_results_create(int K);
+void bai_glrt_results_destroy(BAIGLRTResults *glrt_results);
+void bai_glrt(int K, int *w, double *μ, double *σ2,
+              BAIGLRTResults *glrt_results);
+BAIOracleResult *bai_oracle_result_create(int size);
+void bai_oracle_result_destroy(BAIOracleResult *result);
+void bai_oracle(double *μs, double *σ2s, int size,
+                BAIOracleResult *oracle_result);
+
+#endif=====================================
+=== END OF FILE: bai_peps.h ===
+=====================================
+
+=====================================
+=== START OF FILE: bai_sampling_rule.c ===
+=====================================
+#include "bai_sampling_rule.h"
+
+#include <stdbool.h>
+#include <stdio.h>
+
+#include "bai_peps.h"
+#include "bai_tracking.h"
+
+#include "../util/log.h"
+#include "../util/util.h"
+
+typedef struct TrackAndStop {
+  bool is_EV;
+  BAITracking *tracking_rule;
+  BAIOracleResult *oracle_result;
+} TrackAndStop;
+
+void *track_and_stop_create(bool is_EV, bai_tracking_t tracking_type, int *N,
+                            int size) {
+  TrackAndStop *track_and_stop = malloc_or_die(sizeof(TrackAndStop));
+  track_and_stop->is_EV = is_EV;
+  track_and_stop->tracking_rule = bai_tracking_create(tracking_type, N, size);
+  track_and_stop->oracle_result = bai_oracle_result_create(size);
+  return track_and_stop;
+}
+
+void track_and_stop_destroy(TrackAndStop *track_and_stop) {
+  bai_tracking_destroy(track_and_stop->tracking_rule);
+  bai_oracle_result_destroy(track_and_stop->oracle_result);
+  free(track_and_stop);
+}
+
+int track_and_stop_next_sample(void *data, int __attribute__((unused)) astar,
+                               int __attribute__((unused)) aalt, double *ξ,
+                               double *ϕ2, int *N,
+                               double __attribute__((unused)) * S,
+                               double __attribute__((unused)) * Zs, int size) {
+  TrackAndStop *track_and_stop = (TrackAndStop *)data;
+  bai_oracle(ξ, ϕ2, size, track_and_stop->oracle_result);
+  int sample = bai_track(track_and_stop->tracking_rule, N,
+                         track_and_stop->oracle_result->ws_over_Σ, size);
+  return sample;
+}
+
+typedef int (*next_sample_func_t)(void *, int, int, double *, double *, int *,
+                                  double *, double *, int);
+
+struct BAISamplingRule {
+  bai_sampling_rule_t type;
+  void *data;
+  next_sample_func_t next_sample_func;
+};
+
+BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, int *N,
+                                          int size) {
+  BAISamplingRule *bai_sampling_rule = malloc_or_die(sizeof(BAISamplingRule));
+  bai_sampling_rule->type = type;
+  switch (type) {
+  case BAI_SAMPLING_RULE_RANDOM:
+    log_fatal("BAI_SAMPLING_RULE_RANDOM not implemented");
+    break;
+  case BAI_SAMPLING_RULE_UNIFORM:
+    log_fatal("BAI_SAMPLING_RULE_UNIFORM not implemented");
+    break;
+  case BAI_SAMPLING_RULE_TRACK_AND_STOP:
+    bai_sampling_rule->data =
+        track_and_stop_create(false, BAI_CTRACKING, N, size);
+    bai_sampling_rule->next_sample_func = track_and_stop_next_sample;
+    break;
+  }
+  return bai_sampling_rule;
+}
+
+void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule) {
+  switch (bai_sampling_rule->type) {
+  case BAI_SAMPLING_RULE_RANDOM:
+    log_fatal("BAI_SAMPLING_RULE_RANDOM not implemented");
+    break;
+  case BAI_SAMPLING_RULE_UNIFORM:
+    log_fatal("BAI_SAMPLING_RULE_UNIFORM not implemented");
+    break;
+  case BAI_SAMPLING_RULE_TRACK_AND_STOP:
+    track_and_stop_destroy((TrackAndStop *)bai_sampling_rule->data);
+    break;
+  }
+  free(bai_sampling_rule);
+}
+
+int bai_sampling_rule_next_sample(BAISamplingRule *bai_sampling_rule, int astar,
+                                  int aalt, double *ξ, double *ϕ2, int *N,
+                                  double *S, double *Zs, int size) {
+  return bai_sampling_rule->next_sample_func(bai_sampling_rule->data, astar,
+                                             aalt, ξ, ϕ2, N, S, Zs, size);
+}
+=====================================
+=== END OF FILE: bai_sampling_rule.c ===
+=====================================
+
+=====================================
+=== START OF FILE: bai_sampling_rule.h ===
+=====================================
+#ifndef BAI_SAMPLING_RULE_H
+#define BAI_SAMPLING_RULE_H
+
+typedef struct BAISamplingRule BAISamplingRule;
+
+typedef enum {
+  BAI_SAMPLING_RULE_RANDOM,
+  BAI_SAMPLING_RULE_UNIFORM,
+  BAI_SAMPLING_RULE_TRACK_AND_STOP,
+} bai_sampling_rule_t;
+
+BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, int *N,
+                                          int size);
+void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule);
+int bai_sampling_rule_next_sample(BAISamplingRule *bai_sampling_rule, int astar,
+                                  int aalt, double *ξ, double *ϕ2, int *N,
+                                  double *S, double *Zs, int size);
+
+#endif=====================================
+=== END OF FILE: bai_sampling_rule.h ===
+=====================================
+
+=====================================
+=== START OF FILE: bai_tracking.c ===
+=====================================
+#include "bai_tracking.h"
+
+#include <stdio.h>
+
+#include "../util/util.h"
+
+typedef struct CTracking {
+  double *sumw;
+} CTracking;
+
+CTracking *create_c_tracking(int *N, int size) {
+  CTracking *c_tracking = malloc_or_die(sizeof(CTracking));
+  c_tracking->sumw = malloc_or_die(size * sizeof(double));
+  for (int i = 0; i < size; i++) {
+    c_tracking->sumw[i] = (double)N[i];
+  }
+  return c_tracking;
+}
+
+void destroy_c_tracking(CTracking *c_tracking) {
+  free(c_tracking->sumw);
+  free(c_tracking);
+}
+
+int bai_c_track(void *data, int *N, double *w, int size) {
+  CTracking *t = (CTracking *)data;
+  for (int i = 0; i < size; i++) {
+    t->sumw[i] += w[i];
+  }
+  int argmin = 0;
+  for (int i = 1; i < size; i++) {
+    if (N[i] - t->sumw[i] < N[argmin] - t->sumw[argmin]) {
+      argmin = i;
+    }
+  }
+  return argmin;
+}
+
+int bai_d_track(void __attribute__((unused)) * data, int *N, double *w,
+                int size) {
+  int sumN = 0;
+  for (int i = 0; i < size; i++) {
+    sumN += N[i];
+  }
+  int argmin = 0;
+  for (int i = 1; i < size; i++) {
+    if (N[i] - sumN * w[i] < N[argmin] - sumN * w[argmin]) {
+      argmin = i;
+    }
+  }
+  return argmin;
+}
+
+typedef int (*tracking_func_t)(void *, int *, double *, int);
+
+struct BAITracking {
+  bai_tracking_t type;
+  void *data;
+  tracking_func_t tracking_func;
+};
+
+BAITracking *bai_tracking_create(bai_tracking_t type, int *N, int size) {
+  BAITracking *bai_tracking = malloc_or_die(sizeof(BAITracking));
+  bai_tracking->type = type;
+  bai_tracking->data = NULL;
+  bai_tracking->tracking_func = NULL;
+  switch (type) {
+  case BAI_CTRACKING:
+    bai_tracking->data = create_c_tracking(N, size);
+    bai_tracking->tracking_func = bai_c_track;
+    break;
+  case BAI_DTRACKING:
+    bai_tracking->tracking_func = bai_d_track;
+    break;
+  }
+  return bai_tracking;
+}
+
+void bai_tracking_destroy(BAITracking *bai_tracking) {
+  if (!bai_tracking) {
+    return;
+  }
+  switch (bai_tracking->type) {
+  case BAI_CTRACKING:
+    destroy_c_tracking((CTracking *)bai_tracking->data);
+    break;
+  case BAI_DTRACKING:
+    break;
+  }
+  free(bai_tracking);
+}
+
+int bai_track(BAITracking *bai_tracking, int *N, double *w, int size) {
+  return bai_tracking->tracking_func(bai_tracking->data, N, w, size);
+}
+=====================================
+=== END OF FILE: bai_tracking.c ===
+=====================================
+
+=====================================
+=== START OF FILE: bai_tracking.h ===
+=====================================
+#ifndef BAI_TRACKING_H
+#define BAI_TRACKING_H
+
+typedef struct BAITracking BAITracking;
+
+typedef enum { BAI_CTRACKING, BAI_DTRACKING } bai_tracking_t;
+
+BAITracking *bai_tracking_create(bai_tracking_t type, int *N, int size);
+void bai_tracking_destroy(BAITracking *bai_tracking);
+int bai_track(BAITracking *bai_tracking, int *N, double *w, int size);
+
+#endif=====================================
+=== END OF FILE: bai_tracking.h ===
+=====================================
+

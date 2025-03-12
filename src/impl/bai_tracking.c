@@ -1,5 +1,6 @@
 #include "bai_tracking.h"
 
+#include <math.h>
 #include <stdio.h>
 
 #include "../util/util.h"

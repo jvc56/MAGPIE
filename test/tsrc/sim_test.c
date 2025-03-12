@@ -74,12 +74,6 @@ void print_sim_stats(Game *game, SimResults *sim_results) {
   string_builder_destroy(move_description);
 }
 
-void test_p_to_z(void) {
-  assert(within_epsilon(p_to_z(95), 1.959964));
-  assert(within_epsilon(p_to_z(98), 2.326348));
-  assert(within_epsilon(p_to_z(99), 2.575829));
-}
-
 void test_win_pct(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all");
@@ -254,7 +248,6 @@ void test_play_similarity(void) {
 }
 
 void test_sim(void) {
-  test_p_to_z();
   test_win_pct();
   test_sim_error_cases();
   test_sim_single_iteration();

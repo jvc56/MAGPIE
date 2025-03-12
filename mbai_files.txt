@@ -1,0 +1,1448 @@
+=====================================
+=== START OF FILE: /home/josh/Dropbox/BAI/code_baiuv/binary_search.jl ===
+=====================================
+# Binary search for zero of continuous function f
+# with one zero-crossing in [lo, hi]
+function binary_search(f, lo, hi; ϵ = 1e-10, maxiter = 100)
+    if f(lo) > 0
+        @warn "f($(lo))=$(f(lo)) should be negative at low end";
+        return lo;
+    end
+    if f(hi) < 0
+        @warn "f($(hi))=$(f(hi)) should be positive at high end";
+        return hi;
+    end
+
+    for i in 1:maxiter
+        mid = (lo+hi)/2;
+        if mid == lo || mid == hi
+            return mid;
+        end
+        fmid = f(mid);
+        if fmid < -ϵ
+            lo = mid
+        elseif fmid > ϵ
+            hi = mid;
+        else
+            return mid;
+        end
+    end
+    @warn "binary_search did not reach tolerance $ϵ in $maxiter iterations.\nf($(lo)) = $(f(lo))\nf($(hi)) = $(f(hi)),\nmid would be $((lo+hi)/2)";
+    return (lo+hi)/2;
+end
+=====================================
+=== END OF FILE: /home/josh/Dropbox/BAI/code_baiuv/binary_search.jl ===
+=====================================
+
+=====================================
+=== START OF FILE: /home/josh/Dropbox/BAI/code_baiuv/expfam.jl ===
+=====================================
+# Exponential families
+include("binary_search.jl");
+
+struct Gaussian
+    σ2;
+end
+
+# Default Gaussian, simplify computations
+Gaussian() = Gaussian(1);
+
+# Sample
+sample(rng, expfam::Gaussian, μ) = μ + sqrt(expfam.σ2)*randn(rng);
+
+# KL divergence
+d(expfam::Gaussian, μ, λ) = (μ-λ)^2/(2*expfam.σ2);
+
+# KL derivatives
+dµ_d(expfam::Gaussian, μ, λ) = (µ-λ)/expfam.σ2;
+dλ_d(expfam::Gaussian, μ, λ) = (λ-µ)/expfam.σ2;
+
+# upward and downward confidence intervals (box confidence region)
+dup(expfam::Gaussian, μ, v) = μ + sqrt(2*expfam.σ2*v);
+ddn(expfam::Gaussian, μ, v) = μ - sqrt(2*expfam.σ2*v);
+
+
+struct Bernoulli
+end
+
+rel_entr(x, y) = x == 0 ? 0. : x * log(x / y);
+dx_rel_entr(x, y) = x == 0 ? 0. : log(x / y);
+dy_rel_entr(x, y) = -x / y;
+
+d(expfam::Bernoulli, μ, λ) = max(0, rel_entr(μ, λ) + rel_entr(1 - μ, 1 - λ));
+dµ_d(expfam::Bernoulli, μ, λ) = dx_rel_entr(μ, λ) - dx_rel_entr(1 - μ, 1 - λ);
+dλ_d(expfam::Bernoulli, μ, λ) = dy_rel_entr(μ, λ) - dy_rel_entr(1 - μ, 1 - λ);
+invh(expfam::Bernoulli, μ, x) = 2 * μ / (1 - x + sqrt((x - 1)^2 + 4 * x * μ));
+sample(rng, expfam::Bernoulli, μ) = rand(rng) ≤ μ;
+
+function dup(expfam::Bernoulli, μ, v)
+    μ == 1 ? 1. : binary_search(λ -> d(expfam, μ, λ) - v, μ, 1);
+end
+
+function ddn(expfam::Bernoulli, μ, v)
+    μ == 0 ? 0. : binary_search(λ -> v - d(expfam, μ, λ), 0, μ);
+end
+
+```
+Specifying variance
+```
+
+# Increasing factor
+C_cst(μ, σ2, astar, a) = (μ[astar] - μ[a])^2 / (min(σ2[a], σ2[astar]));
+C_cst(μ, σ2, astar) = maximum([C_cst(μ, σ2, astar, a) for a in 1:length(μ) if a != astar]);
+increasing_factor(μ, σ2, astar, a) = C_cst(μ, σ2, astar, a)/log(1 + C_cst(μ, σ2, astar, a));
+increasing_factor(μ, σ2, astar) = maximum([increasing_factor(μ, σ2, astar, a) for a in 1:length(μ) if a != astar]);
+
+# Additive term
+additive_term(N, hμ, hσ2, astar, a) = (hμ[astar] - hμ[a])^4 * max(N[a] / hσ2[a]^2, N[astar] / hσ2[astar]^2) / 2;
+
+# KL with variance specified
+dUV(μ, σ2, λ) = 0.5 * log(1 + (μ - λ)^2 / σ2);
+dKV(μ, σ2, λ) = 0.5 * (μ - λ)^2 / σ2;
+d(μ, σ2, λ, known_var) = known_var ? dKV(μ, σ2, λ) : dUV(μ, σ2, λ);
+
+# upward and downward confidence intervals (box confidence region)
+dupKV(μ, σ2, v) = μ + sqrt(2 * σ2 * v);
+dupUV(μ, σ2, v) = μ + sqrt(2 * σ2 * v * (1 + 2 * v));
+dup(μ, σ2, v, known_var) = known_var ? dupKV(μ, σ2, v) : dupUV(μ, σ2, v);
+ddnKV(μ, σ2, v) = μ - sqrt(2 * σ2 * v);
+ddnUV(μ, σ2, v) = μ - sqrt(2 * σ2 * v * (1 + 2 * v));
+ddn(μ, σ2, v, known_var) = known_var ? ddnKV(μ, σ2, v) : ddnUV(μ, σ2, v);
+=====================================
+=== END OF FILE: /home/josh/Dropbox/BAI/code_baiuv/expfam.jl ===
+=====================================
+
+=====================================
+=== START OF FILE: /home/josh/Dropbox/BAI/code_baiuv/tracking.jl ===
+=====================================
+# C-Tracking
+struct CTracking
+    sumw;
+    CTracking(N) = new(
+        Float64.(N)
+    ); # makes a copy of the starting situation
+end
+
+abbrev(_::Type{CTracking}) = "C";
+
+# add a weight vector and track it
+function track(t::CTracking, N, w)
+    @assert all(N .≤ t.sumw.+1) "N $N  sumw $(t.sumw)";
+    @assert all(N .≥ t.sumw.-log(length(N))) "N $N  sumw $(t.sumw)";
+    @assert sum(N) ≈ sum(t.sumw);
+
+    t.sumw .+= w;
+    argmin(N .- t.sumw);
+end
+
+# D-Tracking
+struct DTracking
+    DTracking(N) = new();
+end
+
+abbrev(_::Type{DTracking}) = "D";
+
+function track(t::DTracking, N, w)
+    argmin(N .- sum(N).*w);
+end
+
+# Wrapper to add forced exploration to a tracking rule
+struct ForcedExploration
+    t;
+end
+
+function track(fe::ForcedExploration, N, w)
+    t = sum(N);
+    K = length(N);
+    undersampled = N .≤ sqrt(t) .- K/2;
+    if any(undersampled)
+        track(fe.t, N, undersampled/sum(undersampled));
+    else
+        track(fe.t, N, w);
+    end
+end
+=====================================
+=== END OF FILE: /home/josh/Dropbox/BAI/code_baiuv/tracking.jl ===
+=====================================
+
+=====================================
+=== START OF FILE: /home/josh/Dropbox/BAI/code_baiuv/baiuv/helpers.jl ===
+=====================================
+using LambertW, SpecialFunctions;
+import Distributions;
+using JuMP;
+#import Ipopt;
+
+function get_threshold(threshold, δs, r, K, s, γ)
+    _thresholds = split(threshold, "_");
+    if length(_thresholds) == 1
+        if threshold == "GK16"
+            βs = GK16.(δs);
+        elseif threshold == "UI"
+            βs = UI.(δs, K);
+        elseif threshold == "MG10"
+            βs = MG.(δs, K, 10);
+        elseif threshold == "MG1"
+            βs = MG.(δs, K, 1);
+        elseif threshold == "MG01"
+            βs = MG.(δs, K, 0.1);
+        elseif threshold == "ST"
+            βs = ST.(δs, K, s, true, false);
+        elseif threshold == "ST-H"
+            βs = ST.(δs, K, s, false, false);
+        elseif threshold == "ST-EV"
+            βs = ST.(δs, K, s, true, true);
+        elseif threshold == "ST-EV-H"
+            βs = ST.(δs, K, s, false, true);
+        elseif threshold == "WT"
+            βs = WT.(δs, K, s, true);
+        elseif threshold == "WT-H"
+            βs = WT.(δs, K, s, false);
+        elseif threshold == "HT-L"
+            βs = HT.(δs, K, s, false, false);
+        elseif threshold == "HT-K"
+            βs = HT.(δs, K, s, false, true);
+        elseif threshold == "HT-EV"
+            βs = HT.(δs, K, s, true, false);
+        elseif threshold == "KT-H"
+            βs = KT.(δs, r, K, s, γ, true, true);
+        elseif threshold == "KT-E"
+            βs = KT.(δs, r, K, s, γ, false, true);
+        elseif threshold == "KT-D"
+            βs = KT.(δs, r, K, s, γ, false, false);
+        elseif threshold == "NT-KH"
+            βs = NT.(δs, r, K, s, γ, false, false, "H");
+        elseif threshold == "NT-KD"
+            βs = NT.(δs, r, K, s, γ, false, false, "D");
+        elseif threshold == "NT-KE"
+            βs = NT.(δs, r, K, s, γ, false, false, "E");
+        elseif threshold == "NT-KH-H"
+            βs = NT.(δs, r, K, s, γ, true, false, "H");
+        elseif threshold == "NT-KD-H"
+            βs = NT.(δs, r, K, s, γ, true, false, "D");
+        elseif threshold == "NT-KE-H"
+            βs = NT.(δs, r, K, s, γ, true, false, "E");
+        elseif threshold == "NT-KH-EV"
+            βs = NT.(δs, r, K, s, γ, false, true, "H");
+        elseif threshold == "NT-KD-EV"
+            βs = NT.(δs, r, K, s, γ, false, true, "D");
+        elseif threshold == "NT-KE-EV"
+            βs = NT.(δs, r, K, s, γ, false, true, "E");
+        elseif threshold == "NT-KH-EV-H"
+            βs = NT.(δs, r, K, s, γ, true, true, "H");
+        elseif threshold == "NT-KD-EV-H"
+            βs = NT.(δs, r, K, s, γ, true, true, "D");
+        elseif threshold == "NT-KE-EV-H"
+            βs = NT.(δs, r, K, s, γ, true, true, "E");
+        else
+            @error threshold * ": not implemented"
+        end
+    elseif length(_thresholds) == 2
+        β1s = get_threshold(_thresholds[1], δs / 2, r, K, s, γ)
+        β2s = get_threshold(_thresholds[1], δs / 2, r, K, s, γ)
+        βs = [CT(β1s[i], β2s[i]) for i in 1:length(δs)];
+    else
+        @error threshold * ": not implemented"
+    end
+    βs;
+end
+
+barW(x, k) = -lambertw.(-exp.(-x), k);
+fp(x) = (1 .+ sqrt.(1 .- x)) ./ sqrt.(x);
+fm(x) = (1 .- sqrt.(1 .- x)) ./ sqrt.(x);
+g(x, y) = 2 * x ./ (x .+ 2y .+ 0.5).^2;
+
+
+# Combined threshold
+struct CT
+    β1;
+    β2;
+    CT(β1, β2) = new(β1, β2);
+end
+
+abbrev(β::CT) = abbrev(β.β1) * "-" * abbrev(β.β2);
+
+function (β::CT)(N, hμ, hσ2, astar, a)
+    val_1 = β.β1(N, hμ, hσ2, astar, a);
+    val_2 = β.β2(N, hμ, hσ2, astar, a);
+    min(val_1, val_2)
+end
+
+# Threshold recommended by (Garivier and Kaufmann, 2016) and used extensively by subsequent publications.
+struct GK16
+    δ;
+end
+
+abbrev(β::GK16) = "GK16";
+
+function (β::GK16)(t)
+    log((log(t)+1)/β.δ)
+end
+
+function (β::GK16)(N, hμ, hσ2, astar, a)
+    t = sum(N);
+    log((log(t)+1)/β.δ);
+end
+
+# UI threshold 
+struct UI
+    δ;
+    K; # number of arms
+    UI(δ, K) = new(δ, K);
+end
+
+abbrev(β::UI) = "UI";
+
+function (β::UI)(N, hμ, hσ2, astar, a)
+    log((β.K-1)/β.δ);
+end
+
+# MG threshold 
+struct MG
+    δ;
+    K; # number of arms
+    c; # param
+    MG(δ, K, c) = new(δ, K, c);
+end
+
+abbrev(β::MG) = "MG";
+
+function (β::MG)(N, hμ, hσ2, astar, a)
+    log((β.K - 1) / β.δ) + 0.5 * log(N[astar] / (β.c ^ 2) + 1) + 0.5 * log(N[a] / (β.c ^ 2) + 1);
+end
+
+# Quantiles based threshold
+# The non-uniform (is_unif=false) version are not δ-correct
+
+# Student threshold
+# The ones for EV-GLR stopping rule have is_EV_GLR=true
+struct ST
+    δ;
+    K; # number of arms
+    s; # factor
+    is_unif; # Time uniform
+    is_EV_GLR; # EV-GLR
+    zetas;
+    t0; # initial_time
+    ST(δ, K, s, is_unif, is_EV_GLR) = new(δ, K, s, is_unif, is_EV_GLR, zeta(s),
+        max(2, (δ / (4 * (K - 1) * zeta(s)) ^ (1 / s))));
+end
+
+abbrev(β::ST) = "ST" * (β.is_EV_GLR ? "-EV" : "") * (β.is_unif ? "" : "-H");
+
+function (β::ST)(N, hμ, hσ2, astar, a)
+    t = sum(N);
+    if N[a] >= β.t0 && N[astar] >= β.t0
+        vals = zeros(2);
+        for (i, t) in enumerate([N[astar], N[a]])
+            if β.is_unif
+                α = β.δ / (4 * (β.K - 1) * β.zetas * t^β.s);
+            else
+                α = β.δ / (4 * (β.K - 1));
+            end
+            qval2 = Distributions.cquantile(Distributions.TDist(t-1), α)^2;
+            if β.is_EV_GLR
+                vals[i] = t * qval2 / (t - 1);
+            else
+                vals[i] = t * log(1 + qval2 / (t - 1));
+            end
+        end
+        maximum(vals);
+    else
+       Inf;
+    end
+end
+
+# Welch threshold for EV-GLRT
+struct WT
+    δ;
+    K; # number of arms
+    s; # factor
+    is_unif; # Time uniform flag
+    zetas;
+    t0; # initial_time
+    WT(δ, K, s, is_unif) = new(δ, K, s, is_unif, zeta(s),
+        max(2, δ / (((K - 1) * zeta(s)) ^ (1 / (2 * s)))));
+end
+
+abbrev(β::WT) = "WT";
+
+# As hσ2 is the empirical variance, we rescale it to have the unbiased one
+function (β::WT)(N, hμ, hσ2, astar, a)
+    if N[a] >= β.t0 && N[astar] >= β.t0
+        if β.is_unif
+            α = β.δ / ((β.K - 1) * β.zetas^2 * (N[a] * N[astar])^β.s);
+        else
+            α = β.δ / (4 * (β.K - 1));
+        end
+        up = hσ2[a] / (N[a] - 1) + hσ2[astar] / (N[astar] - 1);
+        dn = hσ2[a]^2 / (N[a] - 1)^3 + hσ2[astar]^2 / (N[astar] - 1)^3;
+        df = up^2 / dn;
+        qval = Distributions.cquantile(Distributions.TDist(df), α);
+        qval^2 / (2 * (1 - 1 / min(N[a], N[astar])));
+    else
+       Inf;
+    end
+end
+
+
+# Hyperbox Thresholds
+# The ones for EV-GLR stopping rule have is_EV_GLR=true
+# The ones for GLR stopping rule based on KL have is_KL=true
+struct HT
+    δ;
+    K; # dimension
+    s; # factor s
+    is_EV_GLR; # EV-GLR
+    is_KL; # KL instead of log
+    zetas;
+    eta;
+    HT(δ, K, s, is_EV_GLR, is_KL) = new(δ, K, s, is_EV_GLR, is_KL, zeta(s), 1/log(1/δ));
+end
+
+abbrev(β::HT) = "HT" * (β.is_EV_GLR ? "-EV" : (β.is_KL ? "-K" : "-L"));
+
+function (β::HT)(N, hμ, hσ2, astar, a)
+    try
+        if valid_time(β, N)
+            if β.is_EV_GLR
+                ratio_a = get_factor(β, N[a]);
+                ratio_astar = get_factor(β, N[astar]);
+
+                0.5 * (N[a] * ratio_a + N[astar] * ratio_astar);
+            else
+                if β.is_KL
+                    eps_μ_a, eps_σ2_pa, eps_σ2_ma = get_factor(β, N[a])
+                    eps_μ_astar, eps_σ2_pastar, eps_σ2_mastar = get_factor(β, N[astar])
+
+                    term_a = eps_μ_a + max(eps_σ2_pa - log(1 + eps_σ2_pa), eps_σ2_ma - log(1 + eps_σ2_ma));
+                    term_astar = eps_μ_astar + max(eps_σ2_pastar - log(1 + eps_σ2_pastar), eps_σ2_mastar - log(1 + eps_σ2_mastar));
+
+                    0.5 * (N[a] * term_a + N[astar] * term_astar);
+                else
+                    ratio_a = get_factor(β, N[a]);
+                    ratio_astar = get_factor(β, N[astar]);
+
+                    0.5 * (N[a] * log(1 + ratio_a) + N[astar] * log(1 + ratio_astar));
+                end
+            end
+        else
+           Inf;
+        end
+    catch e
+        println(e);
+        return Inf;
+    end
+end
+
+function valid_time(β::HT, N)
+    δ, K, s, zetas, eta = β.δ, β.K, β.s, β.zetas, β.eta;
+    cst = β.is_EV_GLR ? 4 : (β.is_KL ? 6 : 4);
+    u = 2 * (1 + eta) * (log(cst * (K - 1) * zetas / δ) .+ s * log.(1 .+ log.(N) / log(1 + eta)));
+    vals = exp.(1 .+ lambertw.((u .- 1) / exp(1), 0));
+    sum(N .> vals) == length(N);
+end
+
+function get_factor(β::HT, t)
+    δ, K, s, zetas, eta = β.δ, β.K, β.s, β.zetas, β.eta;
+    cst = β.is_EV_GLR ? 4 : (β.is_KL ? 6 : 4);
+
+    # Arguments of the Lambert's branches
+    _val_σ2 = 1 + 2 * (1 + eta) * (log(cst * (K - 1) * zetas / δ) + s * log(1 + log(t) / log(1 + eta))) / t;
+    _val_μ = 1 + 2 * log(cst * (K - 1) * zetas / δ) + 2 * s * log(1 + log(t) / (2 * s)) + 2 * s;
+
+    if β.is_KL
+        eps_μ = barW(_val_μ, -1) / t;
+        eps_σ2_p = barW(_val_σ2, -1) - 1 / t - 1;
+        eps_σ2_m = barW(_val_σ2, 0) - 1 / t - 1;
+        eps_μ, eps_σ2_p, eps_σ2_m;
+    else
+        # ratio of the corresponding values
+        barW(_val_μ, -1) / (t * barW(_val_σ2, 0) - 1);
+    end
+end
+
+
+# KL threshold
+# The heuristic one has is_heuri=true
+# The eigenvalue one has is_eig=true
+struct KT
+    δ;
+    r; # rank identification
+    K;
+    s; # factor s
+    γ; # factor γ
+    is_heuri;
+    is_eig;
+    zetas;
+    eta;
+    KT(δ, r, K, s, γ, is_heuri, is_eig) = new(δ, r, K, s, γ, is_heuri, is_eig, zeta(s), 1/log(1/δ));
+end
+
+abbrev(β::KT) = "KT" * (β.is_heuri ? "-H" : (β.is_eig ? "-E" : "-D"));
+
+mutable struct KTState
+    β;
+    λps;
+    λms;
+    Iswitch;
+    KTState(β) = new(β, Inf * ones(β.K), zeros(β.K), zeros(β.K));
+end
+
+function start(β::KT)
+    KTState(β);
+end
+
+function (βS::KTState)(N, hμ, hσ2, astar, a)
+    try
+        if valid_time(βS.β, N)
+            vδ = log(2 / βS.β.δ) / (2 * βS.β.r);
+            spa = βS.β.s * (log(1 + log(N[a]) / log(βS.β.γ)) + log(1 + log(N[astar]) / log(βS.β.γ))) / (2 * βS.β.r);
+            cst = 1 + log(βS.β.zetas) / 2 + log(βS.β.γ);
+            if βS.β.is_heuri
+                return 2 * βS.β.r * barW(vδ + cst + spa, -1);
+            else
+                if need_update(βS, N, a)
+                    λm_a, λp_a = get_sae(βS.β, N, hμ, hσ2, a);
+                    βS.λms[a] = λm_a;
+                    βS.λps[a] = λp_a;
+                end
+                if need_update(βS, N, astar)
+                    λm_astar, λp_astar = get_sae(βS.β, N, hμ, hσ2, astar);
+                    βS.λms[astar] = λm_astar;
+                    βS.λps[astar] = λp_astar;
+                end
+                c = βS.β.is_eig ? 1 : 2;
+                sae = (log(βS.λps[a] / βS.λms[a]) + log(βS.λps[astar] / βS.λms[astar])) / (c * βS.β.r);
+                return 2 * βS.β.r * barW(vδ + cst + sae + spa, -1);
+            end
+        else
+           Inf;
+        end
+    catch e
+        println(e);
+        return Inf;
+    end
+end
+
+function need_update(βS::KTState, N, a)
+    if !isfinite(βS.λps[a]) || (βS.λms[a] == 0) || (N[a] > (βS.β.γ)^(βS.Iswitch[a]))
+        βS.Iswitch[a] += 1;
+        return true;
+    else
+        return false;
+    end
+end
+
+function valid_time(β::KT, N)
+    δ, r, K, s, zetas, eta = β.δ, β.r, β.K, β.s, β.zetas, β.eta;
+
+    tm = exp(s / log(6 * r * (K - 1) * zetas / δ) - log(1 + eta));
+    tp = exp(s / (log(6 * r * (K - 1) * zetas / δ) - 0.5 / (1 + eta)) - log(1 + eta));
+
+    u = 2 * (1 + eta) * (log(6 * r * (K - 1) * zetas / δ) .+ s * log.(1 .+ log.(N) / log(1 + eta)));
+    vals = exp.(1 .+ lambertw.((u .- 1) / exp(1), 0));
+    sum(N .> max.(vals, max(tm, tp))) == length(N);
+end
+
+function get_sae(β::KT, N, hμ, hσ2, a)
+    δ, r, s, zetas, eta = β.δ, β.r, β.s, β.zetas, β.eta;
+
+    _val_σ2_a = 1 + 2 * (1 + eta) * (log(6 * zetas * r / δ) + s * log(1 + log(N[a]) / log(1 + eta)))/N[a];
+    eps_σ2_a = (barW(_val_σ2_a, -1) - 1 / N[a]) / (barW(_val_σ2_a, 0) - 1 / N[a]);
+    σ2p_a = hσ2[a] * eps_σ2_a;
+    σ2m_a = hσ2[a] / eps_σ2_a;
+    _val_μ_a = 1 + 2 * log(12 / δ) + 2 * s * log(2 * s + log(N[a])) + 2 * (log(zetas) + 2 * (1 - log(4)));
+    eps_μ_a = 2 * sqrt(eps_σ2_a * barW(_val_μ_a, -1) / N[a]);
+    μp_a = hμ[a] + eps_μ_a * sqrt(hσ2[a]);
+    μm_a = hμ[a] - eps_μ_a * sqrt(hσ2[a]);
+    if β.is_eig
+        μ2pp_a = max(μp_a^2, μm_a^2);
+        λp_a = sqrt(2) * σ2p_a^(1.5) .* fp(g(σ2p_a, μ2pp_a));
+        λm_a = sqrt(2) * σ2m_a^(1.5) .* fm(g(σ2m_a, μ2pp_a));
+        λm_a, λp_a;
+    else
+        detp_a = σ2p_a^2 * (sqrt(2 * σ2p_a + (μp_a - μm_a)^2) + μp_a - μm_a)^2;
+        detm_a = σ2m_a^2 * (sqrt(2 * σ2m_a + (μp_a - μm_a)^2) - μp_a + μm_a)^2;
+        detm_a, detp_a;
+    end
+end
+
+# Kinf threshold
+# The heuristic one (without splitting the deltas) has is_heuri=true
+# The one for EV-GLR has is_EV_GLR=true
+# The flag KT_type gives the type of KT to consider "E", "D", "H"
+struct NT
+    δ;
+    r; # rank identification
+    K; # number of arms
+    s; # factor s
+    γ; # factor γ
+    is_heuri;
+    is_EV_GLR;
+    KT_type;
+    zetas;
+    eta;
+    KTβ;
+    NT(δ, r, K, s, γ, is_heuri, is_EV_GLR, KT_type) = new(δ, r, K, s, γ, is_heuri, is_EV_GLR, KT_type, zeta(s), 1/log(1/δ), get_KTβ(δ, r, K, s, γ, is_heuri, KT_type));
+end
+
+function get_KTβ(δ, r, K, s, γ, is_heuri, KT_type)
+    _δ = is_heuri ? δ : δ / 2;
+    if KT_type == "H"
+        KT(_δ, r, K, s, γ, true, true);
+    elseif KT_type == "E"
+        KT(_δ, r, K, s, γ, false, true);
+    elseif KT_type == "D"
+        KT(_δ, r, K, s, γ, false, false);
+    else
+        @error KT_type * ": not implemented";
+    end
+end
+
+mutable struct NTState
+    β;
+    KTβS;
+    NTState(β, KTβS) = new(β, KTβS);
+end
+
+function start(β::NT)
+    NTState(β, start(β.KTβ));
+end
+
+
+abbrev(β::NT) = "NT-K" * β.KT_type * (β.is_EV_GLR ? "-EV" : "") * (β.is_heuri ? "-H" : "");
+
+# function (βS::NTState)(N, hμ, hσ2, astar, a)
+#     try
+#         # Get KL threshold and define constraint
+#         KL_thres = βS.KTβS(N, hμ, hσ2, astar, a);
+#         if isfinite(KL_thres)
+#             # Get Hyperbox constraint
+#             xm, xyp = get_hyperbox(βS.β, N, hμ, hσ2, astar, a);
+#             # TODO: Find a better feasible initial point. Not even clear this is feasible with the kl_const
+#             x0 = xm;
+#             y0 = 0.5 * xyp ./ xm;
+
+#             # Define model and variables
+#             m = Model(Ipopt.Optimizer);
+#             set_optimizer_attributes(m, "tol" => 1e-10, "max_iter" => 100);
+#             set_optimizer_attribute(m, "print_level", 0);
+#             set_silent(m);
+#             @variable(m, x[i=1:2], start=x0[i]);
+#             @variable(m, y[i=1:2], start=y0[i]);
+
+#             # Linear constraints
+#             @constraint(m, x .>= xm);
+#             @constraint(m, y .>= zeros(2));
+
+#             # Kinf constraint
+#             @NLconstraint(m, [i=1:2], x[i] * y[i] <= xyp[i]);
+#             @NLconstraint(m, N[astar] * ((1 + y[1]) * x[1] - 1 - log(x[1]))
+#                             + N[a] * ((1 + y[2]) * x[2] - 1 - log(x[2])) <= 2 * KL_thres);
+
+#             # Objective
+#             if βS.β.is_EV_GLR
+#                 @objective(m, Max, N[astar] * y[1] + N[a] * y[2])
+#             else
+#                 @NLobjective(m, Max, N[astar] * log(1 + y[1]) + N[a] * log(1 + y[2]));
+#             end
+
+#             # Solve optimization
+#             optimize!(m);
+#             status = raw_status(m);
+
+#             if status == "Solve_Succeeded"
+#                 0.5 * objective_value(m);
+#             else
+#                 println("Optimization failed");
+#                 Inf;
+#             end
+#         else
+#            Inf;
+#         end
+#     catch e
+#         println(e);
+#         return Inf;
+#     end
+# end
+
+function get_hyperbox(β::NT, N, hμ, hσ2, astar, a)
+    δ, r, K, s, zetas, eta = β.δ, β.r, β.K, β.s, β.zetas, β.eta;
+    xm, xyp = zeros(2), zeros(2);
+    cst = β.is_heuri ? 4 : 8;
+
+    # Hyperbox for astar
+    _val_σ2_astar = 1 + 2 * (1 + eta) * (log(cst * (K - 1) * zetas / δ) + s * log(1 + log(N[astar]) / log(1 + eta))) / N[astar];
+    _val_μ_astar = 1 + 2 * log(cst * (K - 1) * zetas / δ) + 2 * s * log(1 + log(N[astar]) / (2 * s)) + 2 * s;
+    xm[1] = barW(_val_σ2_astar, 0) - 1 / N[astar];
+    xyp[1] = barW(_val_μ_astar, -1) / N[astar];
+
+    # Hyperbox for a
+    _val_σ2_a = 1 + 2 * (1 + eta) * (log(cst * (K - 1) * zetas / δ) + s * log(1 + log(N[a]) / log(1 + eta))) / N[a];
+    _val_μ_a = 1 + 2 * log(cst * (K - 1) * zetas / δ) + 2 * s * log(1 + log(N[a]) / (2 * s)) + 2 * s;
+    xm[2] = barW(_val_σ2_a, 0) - 1 / N[a];
+    xyp[2] = barW(_val_μ_a, -1) / N[a];
+
+    return xm, xyp;
+end
+=====================================
+=== END OF FILE: /home/josh/Dropbox/BAI/code_baiuv/baiuv/helpers.jl ===
+=====================================
+
+=====================================
+=== START OF FILE: /home/josh/Dropbox/BAI/code_baiuv/baiuv/peps.jl ===
+=====================================
+using Polynomials;
+import PolynomialRoots;
+
+# a Pure Exploration problem (pep) is parameterised by
+# - a domain, M, representing the prior knowledge about the structure
+# - a query, as embodied by a correct-answer function istar
+
+# To specify a PE problem here, we need to compute the following things:
+# - nanswers: number of possible answers
+# - istar: correct answer for feasible μ
+# - glrt: value and best response (λ and ξ) to (N, μ) or (w, μ)
+# - oracle: characteristic time and oracle weights at μ
+
+```
+Best Arm
+```
+
+struct BestArm
+    expfams;    # Array of Gaussian distributions with different variance
+    known_var;  # Flag stipulating that the variance is known
+end
+
+nanswers(pep::BestArm, μ) = length(μ);
+istar(pep::BestArm, μ) = argmax(μ);
+getexpfam(pep::BestArm, k) = pep.expfams[k];
+long(pep::BestArm) = "BAI with " * (pep.known_var ? "" : "un") * "known variance";
+
+
+# Compute alternative parameter for known variance
+function alt_λ_KV(μ1, σ21, w1, μa, σ2a, wa)
+    if w1 == 0
+        return μa;
+    end
+    if wa == 0 || μ1 == μa
+        return μ1;
+    end
+    x = wa / w1;
+    return (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
+end
+
+# Compute alternative parameter for unknown variance
+function alt_λ_UV(μ1, σ21, w1, μa, σ2a, wa)
+    @assert μ1 >= μa "$(μ1) > $(μa)";
+    if w1 == 0
+        return μa;
+    end
+    if wa == 0 || μ1 == μa
+        return μ1;
+    end
+
+    x = wa / w1;
+    α2 = μa + μ1 + (μa + x * μ1) / (1 + x);
+    α1 = (σ2a + x * σ21) / (1 + x) + μa * μ1 + (μa + μ1) * (μa + x * μ1) / (1 + x);
+    α0 = (μ1 * (μa^2 + σ2a) + μa * (μ1^2 + σ21) * x) / (1 + x);
+    rs = roots(Polynomial([-α0, α1, -α2, 1.0]));
+    real_roots = real.(filter(r -> abs(imag(r)) < 1e-10, rs));
+    valid_roots = filter(r -> r - μa >= - 1e-10 && r - μ1 <= 1e-10, real_roots);
+
+    if length(valid_roots) == 0
+        @warn "Solver couldn't find a valid real roots in [$(μa), $(μ1)], only real candidate was $(real_roots[1]). Other roots were $(rs).";
+        return alt_λ_KV(μ1, σ21, w1, μa, σ2a, wa);
+    elseif length(valid_roots) == 1
+        return valid_roots[1];
+    else
+        id, v = 1, dUV(μ1, σ21, valid_roots[1]) + x * dUV(μa, σ2a, valid_roots[1]);
+        for i in 2:length(valid_roots)
+            _v = dUV(μ1, σ21, valid_roots[i]) + x * dUV(μa, σ2a, valid_roots[i]);
+            if _v < v
+                id = i;
+                v = _v;
+            end
+        end
+        return valid_roots[id];
+    end
+end
+
+# Alternative parameter
+function alt_λ(μ1, σ21, w1, μa, σ2a, wa, known_var)
+    if known_var
+        alt_λ_KV(μ1, σ21, w1, μa, σ2a, wa);
+    else
+        alt_λ_UV(μ1, σ21, w1, μa, σ2a, wa);
+    end
+end
+
+# Solve for x such that d1(μx) + x*da(μx) == v
+function X(μ1, σ21, μa, σ2a, v, known_var)
+    upd_a = d(μ1, σ21, μa, known_var); # range of V(x) is [0, upd_a]
+    @assert 0 ≤ v ≤ upd_a "0 ≤ $v ≤ $upd_a";
+    α = binary_search(
+        z -> let μz = alt_λ(μ1, σ21, 1 - z, μa, σ2a, z, known_var)
+        (1 - z) * d(μ1, σ21, μz, known_var) + z * d(μa, σ2a, μz, known_var) - (1 - z) * v
+        end,
+        0, 1, ϵ = upd_a*1e-10);
+    α/(1-α), alt_λ(μ1, σ21, 1 - α, μa, σ2a, α, known_var);
+end
+
+# Oracle solution
+function oracle(μs, σ2s, known_var)
+    μstar = maximum(μs);
+
+    if all(μs .== μstar) # yes, this happens
+        return Inf, ones(length(μs))/length(μs);
+    end
+
+    astar = argmax(μs);
+
+    # determine upper range for subsequent binary search
+    hi = minimum(
+        d(μs[astar], σ2s[astar], μs[k], known_var)
+        for k in eachindex(μs)
+        if k != astar
+    );
+
+    val = binary_search(
+        z -> sum(
+            let μx = X(μs[astar], σ2s[astar], μs[k], σ2s[k], z, known_var)[2];
+            d(μs[astar], σ2s[astar], μx, known_var) / d(μs[k], σ2s[k], μx, known_var)
+            end
+            for k in eachindex(μs)
+            if k != astar
+            ) - 1.0,
+        0, hi);
+
+    ws = [(k == astar) ? 1. : X(μs[astar], σ2s[astar], μs[k], σ2s[k], val, known_var)[1] for k in eachindex(μs)];
+    Σ = sum(ws);
+    Σ/val, ws ./ Σ;
+end
+
+function glrt(w, μ, σ2, known_var)
+    @assert length(size(μ)) == 1
+    K = length(μ);
+
+    astar = argmax(μ); # index of best arm among μ
+
+    vals = Inf * ones(K);
+    θs = zeros(K);
+    for a in 1:K
+        if a != astar
+            θs[a] = alt_λ(μ[astar], σ2[astar], w[astar], μ[a], σ2[a], w[a], known_var);
+            vals[a] = w[astar] * d(μ[astar], σ2[astar], θs[a], known_var) + w[a] * d(μ[a], σ2[a], θs[a], known_var);
+        end
+    end
+    k = argmin(vals);
+
+    λ, ϕ2 = copy(μ), copy(σ2);
+    λ[astar] = θs[k];
+    λ[k] = θs[k];
+    if !known_var
+        ϕ2[astar] += (θs[k] - μ[astar])^2;
+        ϕ2[k] += (θs[k] - μ[k])^2;
+    end
+
+    vals, (k, (λ, ϕ2)), (astar, (μ, σ2));
+end
+
+m_d(μ, σ2, w, λ, c) = 0.5 * w * log(1 + 1/(σ2 * (1 + c^2 / w) / (μ - λ)^2 + c^2 / w));
+
+function m_alt_λ(μ1, σ21, w1, μa, σ2a, wa, c)
+    @assert μ1 >= μa "$(μ1) > $(μa)";
+    if w1 == 0
+        return μa;
+    end
+    if wa == 0 || μ1 == μa
+        return μ1;
+    end
+
+    # Wolfram Mathematica computation
+    α5 = c^2 * wa / (w1 * σ21) + 
+         c^2 * w1 / (wa * σ2a);
+    α4 = c^2 * wa * (4 * μ1 + μa) / (w1 * σ21) + 
+         c^2 * w1 * (4 * μa + μ1) / (wa * σ2a);
+    α3 = c^2 * wa * (6 * μ1^2 + 4 * μa * μ1) / (w1 * σ21) + 
+         c^2 * w1 * (6 * μa^2 + 4 * μ1 * μa) / (wa * σ2a) +
+         wa * (1 + 2 * c^2 / w1) + 
+         w1 * (1 + 2 * c^2 / wa);
+    α2 = c^2 * wa * (4 * μ1^3 + 6 * μa * μ1^2) / (w1 * σ21) + 
+         c^2 * w1 * (4 * μa^3 + 6 * μ1 * μa^2) / (wa * σ2a) +
+         wa * (1 + 2 * c^2 / w1) * (μa + 2 * μ1) + 
+         w1 * (1 + 2 * c^2 / wa) * (μ1 + 2 * μa);
+    α1 = c^2 * wa * (μ1^2 + σ21^2) * (μ1^2 + 4 * μa * μ1 + σ21^2) / (w1 * σ21) + 
+         c^2 * w1 * (μa^2 + σ2a^2) * (μa^2 + 4 * μ1 * μa + σ2a^2) / (wa * σ2a) +
+         wa * (μ1^2 + σ21^2) + 
+         w1 * (μa^2 + σ2a^2) + 
+         2 * (w1 + wa) * μa * μ1;
+    α0 = c^2 * wa * μa * (μ1^2 + σ21^2) / (w1 * σ21) + 
+         c^2 * w1 * μ1 * (μa^2 + σ2a^2) / (wa * σ2a) +
+         wa * μa * (μ1^2 + σ21^2) + 
+         w1 * μ1 * (μa^2 + σ2a^2);
+
+    # Handmade computation that are likely wrong
+    # α5 = c^2 * wa / (w1 * σ21) + 
+    #      c^2 * w1 / (wa * σ2a);
+    # α4 = c^2 * wa * (4 * μa + μ1) / (w1 * σ21) + 
+    #      c^2 * w1 * (4 * μ1 + μa) / (wa * σ2a);
+    # α3 = c^2 * wa * (μa + 2 * μ1 + 5 * μa^2 + 2 * μa * μ1) / (w1 * σ21) + 
+    #      c^2 * w1 * (μ1 + 2 * μa + 5 * μ1^2 + 2 * μ1 * μa) / (wa * σ2a) +
+    #      wa * (1 + 2 * c^2 / w1) + 
+    #      w1 * (1 + 2 * c^2 / wa);
+    # α2 = c^2 * wa * (2 * μa^3 + 2 * μ1 * μa^2 + μa^2 + 4 * μa * μ1) / (w1 * σ21) + 
+    #      c^2 * w1 * (2 * μ1^3 + 2 * μa * μ1^2 + μ1^2 + 4 * μ1 * μa) / (wa * σ2a) +
+    #      wa * (1 + 2 * c^2 / w1) * (μa + 2 * μ1) + 
+    #      w1 * (1 + 2 * c^2 / wa) * (μ1 + 2 * μa);
+    # α1 = c^2 * wa * (μa^3 + 2 * μ1 * μa^2 + 2 * μ1 * μa^3) / (w1 * σ21) + 
+    #      c^2 * w1 * (μ1^3 + 2 * μa * μ1^2 + 2 * μa * μ1^3) / (wa * σ2a) +
+    #      wa * (1 + 2 * c^2 / w1) * (μ1 + 2 * μa) + 
+    #      w1 * (1 + 2 * c^2 / wa) * (μa + 2 * μ1) +
+    #      wa * σ21 * (1 + c^2 / w1) +
+    #      w1 * σ2a * (1 + c^2 / wa);
+    # α0 = c^2 * wa * μ1 * μa^4 / (w1 * σ21) + 
+    #      c^2 * w1 * μa * μ1^4 / (wa * σ2a) +
+    #      wa * (1 + 2 * c^2 / w1) * μa * μ1^2 + 
+    #      w1 * (1 + 2 * c^2 / wa) * μ1 * μa^2 +
+    #      wa * σ21 * (1 + c^2 / w1) * μa +
+    #      w1 * σ2a * (1 + c^2 / wa) * μ1;
+    rs = PolynomialRoots.roots5([-α0, α1, -α2, α3, -α4, α5]);
+    real_roots = real.(filter(r -> abs(imag(r)) < 1e-4, rs));
+    #valid_roots = filter(r -> r - μa >= - 1e-10 && r - μ1 <= 1e-10, real_roots);
+    valid_roots = real_roots;
+
+    if length(valid_roots) == 0
+        @warn "Solver couldn't find a valid real roots in [$(μa), $(μ1)], roots were $(rs).";
+        return alt_λ_UV(μ1, σ21, w1, μa, σ2a, wa);
+    elseif length(valid_roots) == 1
+        return valid_roots[1];
+    else
+        id, v = 1, m_d(μ1, σ21, w1, valid_roots[1], c) + m_d(μa, σ2a, wa, valid_roots[1], c);
+        for i in 2:length(valid_roots)
+            _v = m_d(μ1, σ21, w1, valid_roots[i], c) + m_d(μa, σ2a, wa, valid_roots[i], c);
+            if _v < v
+                id = i;
+                v = _v;
+            end
+        end
+        return valid_roots[id];
+    end
+end
+
+function mglrt(w, μ, σ2, c)
+    @assert length(size(μ)) == 1
+    K = length(μ);
+
+    astar = argmax(μ); # index of best arm among μ
+
+    vals = Inf * ones(K);
+    θs = zeros(K);
+    for a in 1:K
+        if a != astar
+            θs[a] = m_alt_λ(μ[astar], σ2[astar], w[astar], μ[a], σ2[a], w[a], c);
+            vals[a] = m_d(μ[astar], σ2[astar], w[astar], θs[a], c) + m_d(μ[a], σ2[a], w[a], θs[a], c);
+        end
+    end
+    k = argmin(vals);
+
+    λ, ϕ2 = copy(μ), copy(σ2);
+    λ[astar] = θs[k];
+    λ[k] = θs[k];
+
+    vals, (k, (λ, ϕ2)), (astar, (μ, σ2));
+end
+=====================================
+=== END OF FILE: /home/josh/Dropbox/BAI/code_baiuv/baiuv/peps.jl ===
+=====================================
+
+=====================================
+=== START OF FILE: /home/josh/Dropbox/BAI/code_baiuv/baiuv/samplingrules.jl ===
+=====================================
+# We organise them in two levels
+# - sampling rule; a factory for sampling rule states
+# - sampling rule state; keeps track of i.e. tracking information etc.
+
+include("../regret.jl");
+include("../tracking.jl");
+include("envelope.jl");
+
+```
+Uniform sampling
+```
+
+struct RoundRobin # used as factory and state
+end
+
+long(sr::RoundRobin) = "Uniform";
+abbrev(sr::RoundRobin) = "RR";
+
+function start(sr::RoundRobin, N)
+    return sr;
+end
+
+function nextsample(sr::RoundRobin, pep, astar, aalt, ξ, ϕ2, N, S, Zs, rng)
+    return 1+(sum(N) % length(N));
+end
+
+```
+Oracle sampling
+```
+
+struct FixedWeights # used as factory and state
+    w;
+    function FixedWeights(w)
+        @assert all(w .≥ 0) && sum(w) ≈ 1 "$w not in simplex";
+        new(w)
+    end
+end
+
+long(sr::FixedWeights) = "Oracle Weigths";
+abbrev(sr::FixedWeights) = "opt";
+
+function start(sr::FixedWeights, N)
+    return sr;
+end
+
+function nextsample(sr::FixedWeights, pep, astar, aalt, ξ, ϕ2, N, S, Zs, rng)
+    argmin(N .- sum(N).*sr.w);
+end
+
+```
+Track-and-Stop
+```
+# The is_EV flag means that we use BAI for known variance with plug-in variance
+
+struct TrackAndStop
+    is_EV;
+    TrackingRule;
+end
+
+long(sr::TrackAndStop) = (sr.is_EV ? "EV-" : "") * "TaS " * abbrev(sr.TrackingRule);
+abbrev(sr::TrackAndStop) = (sr.is_EV ? "EV-" : "") * "TaS-" * abbrev(sr.TrackingRule);
+
+struct TrackAndStopState
+    is_EV;
+    t;
+    TrackAndStopState(is_EV, TrackingRule, N) = new(is_EV, ForcedExploration(TrackingRule(N)));
+end
+
+function start(sr::TrackAndStop, N)
+    TrackAndStopState(sr.is_EV, sr.TrackingRule, N);
+end
+
+function nextsample(sr::TrackAndStopState, pep, astar, aalt, ξ, ϕ2, N, S, Zs, rng)
+    # oracle at (ξ, ϕ2) (the closest feasible bandit model)
+    _, w = oracle(ξ, ϕ2, sr.is_EV || pep.known_var);
+
+    # tracking
+    return track(sr.t, N, w);
+end
+
+
+```
+DKM
+```
+
+struct DKM
+    is_EV;
+    TrackingRule;
+end
+
+long(sr::DKM) = (sr.is_EV ? "EV-" : "") * "DKM " * abbrev(sr.TrackingRule);
+abbrev(sr::DKM) = (sr.is_EV ? "EV-" : "") * "DKM-" * abbrev(sr.TrackingRule);
+
+struct DKMState
+    is_EV;
+    h; # one online learner in total
+    t;
+    DKMState(is_EV, TrackingRule, N) = new(is_EV, AdaHedge(length(N)), TrackingRule(N));
+end
+
+function start(sr::DKM, N)
+    DKMState(sr.is_EV, sr.TrackingRule, N);
+end
+
+function optimistic_gradient(hμ, hσ2, t, N, λs, ψ2s, known_var)
+    [let ↑ = dup(hμ[k], hσ2[k], log(t)/N[k], known_var),
+    ↓ = ddn(hμ[k], hσ2[k], log(t)/N[k], known_var)
+    max(d(↑, hσ2[k], λs[k], known_var), d(↓, hσ2[k], λs[k], known_var), log(t)/N[k])
+    end
+    for k in eachindex(hμ)];
+end
+
+function nextsample(sr::DKMState, pep, astar, aalt, ξ, ϕ2, N, S, Zs, rng)
+    # query the learner
+    w = act(sr.h);
+
+    # best response λ-player to w
+    _, (_, (λs, ψ2s)), (_, (ξs, ϕ2s)) = glrt(w, ξ, ϕ2, sr.is_EV || pep.known_var);
+
+    # optimistic gradient
+    ∇ = optimistic_gradient(ξ, ϕ2, sum(N), N, λs, ψ2s, sr.is_EV || pep.known_var);
+    incur!(sr.h, -∇);
+
+    # tracking
+    return track(sr.t, N, w);
+end
+
+
+
+```
+Frank-Wolfe based Sampling
+```
+
+struct FWSampling
+    is_EV;
+    TrackingRule;
+end
+
+long(sr::FWSampling) = (sr.is_EV ? "EV-" : "") * "FW-Sampling " * abbrev(sr.TrackingRule);
+abbrev(sr::FWSampling) = (sr.is_EV ? "EV-" : "") * "FWS-" * abbrev(sr.TrackingRule);
+
+mutable struct FWSamplingState
+    is_EV;
+    x;
+    t;
+    FWSamplingState(is_EV, TrackingRule, N) = new(is_EV, ones(length(N)) / length(N), TrackingRule(N));
+end
+
+function start(sr::FWSampling, N)
+    FWSamplingState(sr.is_EV, sr.TrackingRule, N);
+end
+
+# Computing f and ∇f for FWSampling
+function compute_f_∇f_bai(hw, ξ, ϕ2, astar, r, K, known_var)
+    # Alternative parameters
+    λs = [alt_λ(ξ[astar], ϕ2[astar], hw[astar], ξ[k], ϕ2[k], hw[k], known_var) for k=1:K] ;
+    suboptimal = [k for k=1:K if k!=astar];
+
+    # construct ∇f
+    ∇f = [[0.0 for j=1:K] for i=1:K];
+    for k in suboptimal
+        ∇f[k][astar] = d(ξ[astar], ϕ2[astar], λs[k], known_var);
+        ∇f[k][k] = d(ξ[k], ϕ2[k], λs[k], known_var);
+    end
+
+    # construct f
+    f = [hw'∇f[k] for k in suboptimal];
+    fmin = minimum(f);
+    if r > eps()
+        fidx = [j for (idxj,j) in enumerate(suboptimal) if (f[idxj]<fmin+r)]
+    elseif abs(r)<eps()
+        fidx = [suboptimal[argmin(f)]];
+    else
+        fidx = suboptimal;
+    end
+    return f, ∇f, fidx;
+end
+
+function nextsample(sr::FWSamplingState, pep, astar, aalt, ξ, ϕ2, N, S, Zs, rng)
+    K, t = length(N), sum(N);
+    r = t^(-9.0/10)/K;
+
+    z = zeros(K);
+    if !hμ_in_lambda(ξ, astar, K) || is_complete_square(floor(Int, t/K))
+        z = ones(K) / K;
+    else
+        f, ∇f, fidx = compute_f_∇f_bai(sr.x, ξ, ϕ2, astar, r, K, sr.is_EV || pep.known_var);
+        if length(fidx) == 1 # best challenger
+            challenger_idx = argmax(∇f[fidx[1]]);
+            z = [(challenger_idx==j) ? 1 : 0 for j=1:K];
+        else # solve LP of the zero-sum matrix game
+            Σ = [[(i==j) ? 1 : 0 for j=1:K]-sr.x for i=1:K];
+            A = [[Σ[i]'∇f[j] for i=1:K] for j in fidx]; # construct payoff matrix
+            z = solveZeroSumGame(A, K, length(fidx));
+        end
+    end
+    setfield!(sr, :x, sr.x*((t-1.0)/t) + z*1.0/t);
+    return track(sr.t, N, sr.x);
+end
+
+```
+FHN procedures
+```
+struct FHN
+    is_proc2;
+    heuristic;
+end
+
+long(sr::FHN) = "FHN" * (sr.is_proc2 ? "2" : "1") * (sr.heuristic ? "-H" : "");
+abbrev(sr::FHN) = "FHN" * (sr.is_proc2 ? "2" : "1") * (sr.heuristic ? "-H" : "");
+
+# cδ to be used
+get_cδ(sr::FHN, δ, K) = sr.heuristic ? 2 * log(1 / δ) : 2 * log((K - 1) / (2 * δ));
+
+# Procedure 2 requires n0 to go to infty, while procedure 1 is highly sensitive to small initial sample size
+get_n0(sr::FHN, δ) = max(2, 10 * log(1 / δ));
+
+# Get threshold to be considered
+get_threshold(sr::FHN, c, t) = sr.heuristic ? sqrt((c + log(log(t + 1))) * (t + 1)) : sqrt((c + log(t + 1)) * (t + 1));
+
+
+```
+TopTwo
+```
+
+# Note: There is nothing to differentiate between the EV-based or Adapted TC-based Top Two.
+# This is dealt with the result from the stopping rule computations directly.
+
+struct TopTwo
+    is_EV;
+    β;
+    leader;
+    challenger;
+end
+
+long(sr::TopTwo) = sr.leader * "-" * (sr.is_EV ? "EV" : "") * sr.challenger * "-" * split(string(sr.β), ".")[2];
+abbrev(sr::TopTwo) = sr.leader * "-" * (sr.is_EV ? "EV" : "") * sr.challenger * "-" * split(string(sr.β), ".")[2];
+
+function start(sr::TopTwo, N)
+    sr;
+end
+
+function nextsample(sr::TopTwo, pep, astar, aalt, ξ, ϕ2, N, S, Zs, rng)
+    K = nanswers(pep, ξ);
+
+    # Leader
+    if sr.leader == "EB"
+        a_1 = astar;
+    else
+        @error "Undefined Top Two leader";
+    end
+
+    # Challenger
+    u = rand(rng);
+    if u <= sr.β
+        k = a_1;
+    else
+        if sr.challenger == "TC"
+            k = argmin(Zs);
+        elseif sr.challenger == "TCI"
+            k = argmin(Zs .+ log.(N));
+        else
+            @error "Undefined Top Two challenger";
+        end
+    end
+
+    return k;
+end
+
+
+```
+Fake DKM
+```
+
+struct FakeDKM
+    is_EV;
+    TrackingRule;
+end
+
+long(sr::FakeDKM) = (sr.is_EV ? "EV-" : "") * "FDKM " * abbrev(sr.TrackingRule);
+abbrev(sr::FakeDKM) = (sr.is_EV ? "EV-" : "") * "FDKM-" * abbrev(sr.TrackingRule);
+
+struct FakeDKMState
+    is_EV;
+    h; # one online learner in total
+    t;
+    FakeDKMState(is_EV, TrackingRule, N) = new(is_EV, AdaHedge(length(N)), TrackingRule(N));
+end
+
+function start(sr::FakeDKM, N)
+    FakeDKMState(sr.is_EV, sr.TrackingRule, N);
+end
+
+function optimistic_gradient(hμ, hσ2, t, N, λs, ψ2s, known_var)
+    [let ↑ = dup(hμ[k], hσ2[k], log(t)/N[k], known_var),
+    ↓ = ddn(hμ[k], hσ2[k], log(t)/N[k], known_var)
+    max(d(↑, hσ2[k], λs[k], known_var), d(↓, hσ2[k], λs[k], known_var), log(t)/N[k])
+    end
+    for k in eachindex(hμ)];
+end
+
+function nextsample(sr::FakeDKMState, pep, astar, aalt, ξ, ϕ2, N, S, Zs, rng)
+    # Get true variance
+    true_σ2s = [pep.expfams[k].σ2 for k in 1:length(N)];
+
+    # query the learner
+    w = act(sr.h);
+
+    # best response λ-player to w
+    _, (_, (λs, ψ2s)), (_, (ξs, ϕ2s)) = glrt(w, ξ, true_σ2s, sr.is_EV || pep.known_var);
+
+    # optimistic gradient
+    ∇ = optimistic_gradient(ξ, true_σ2s, sum(N), N, λs, ψ2s, sr.is_EV || pep.known_var);
+    incur!(sr.h, -∇);
+
+    # tracking
+    return track(sr.t, N, w);
+end
+
+
+```
+Fake Track-and-Stop
+```
+# The is_EV flag means that we use BAI for known variance with plug-in variance
+
+struct FakeTrackAndStop
+    is_EV;
+    TrackingRule;
+end
+
+long(sr::FakeTrackAndStop) = (sr.is_EV ? "EV-" : "") * "FTaS " * abbrev(sr.TrackingRule);
+abbrev(sr::FakeTrackAndStop) = (sr.is_EV ? "EV-" : "") * "FTaS-" * abbrev(sr.TrackingRule);
+
+struct FakeTrackAndStopState
+    is_EV;
+    t;
+    FakeTrackAndStopState(is_EV, TrackingRule, N) = new(is_EV, ForcedExploration(TrackingRule(N)));
+end
+
+function start(sr::FakeTrackAndStop, N)
+    FakeTrackAndStopState(sr.is_EV, sr.TrackingRule, N);
+end
+
+function nextsample(sr::FakeTrackAndStopState, pep, astar, aalt, ξ, ϕ2, N, S, Zs, rng)
+    # Get true variance
+    true_σ2s = [pep.expfams[k].σ2 for k in 1:length(N)];
+
+    # oracle at (ξ, ϕ2) (the closest feasible bandit model)
+    _, w = oracle(ξ, true_σ2s, sr.is_EV || pep.known_var);
+
+    # tracking
+    return track(sr.t, N, w);
+end
+=====================================
+=== END OF FILE: /home/josh/Dropbox/BAI/code_baiuv/baiuv/samplingrules.jl ===
+=====================================
+
+=====================================
+=== START OF FILE: /home/josh/Dropbox/BAI/code_baiuv/baiuv/runit.jl ===
+=====================================
+using Random;
+using CPUTime;
+
+include("peps.jl");
+include("../expfam.jl");
+include("samplingrules.jl");
+include("reco_stop_pairs.jl");
+
+# Run the learning algorithm, paramterised by a sampling rule
+# The stopping and recommendation rules are common
+#
+# βs must be a list of thresholds *in increasing order*
+
+function runit(seed, is, μs, σ2s, pep, δs)
+    sr, rsp = is;
+    is_glr = typeof(rsp) == GLRT;
+    is_dmglr = typeof(rsp) == DMGLRT;
+
+    # Get thresholds
+    βs = get_threshold(rsp.threshold, δs, 2, length(μs), 2, 1.2);
+
+    rng = MersenneTwister(seed);
+
+    K = length(μs);
+    N = zeros(Int64, K);        # counts
+    S = zeros(K);               # sum of samples
+    S2 = zeros(K);              # sum of squared samples
+    Rs = zeros(K);              # sum of corrective terms for UI
+    MZs = zeros(K);             # statistic for MGLR
+
+    baseline = CPUtime_us();
+
+    # Pull each arm twice for the variance to be defined
+    # For UI, we could do smarter definition which holds after one sample
+    for k in 1:K
+        for i in 1:2
+            _X = sample(rng, getexpfam(pep, k), μs[k]);
+            Rs[k] += 1 / 2 - ( i == 1 ? _X^2 : (_X - S[k])^2 ) / 2;
+            S[k] += _X;
+            S2[k] += _X^2;
+            N[k] += 1;
+        end
+    end
+
+    Rs0 = copy(Rs);
+
+    # Initialize identification strategy
+    state = start(sr, N);
+    if occursin("KT", abbrev(βs[1])) || occursin("NT", abbrev(βs[1]))
+        Sβs = start.(βs);
+    else
+        Sβs = βs;
+    end
+
+    R = Tuple{Int64, Array{Int64,1}, UInt64}[]; # collect return values
+
+    while true
+        t = sum(N);
+
+        # emp. estimates
+        hμ = S ./ N;
+        hσ2 = S2 ./ N - hμ .^ 2;
+
+        # test stopping criterion
+        Zs, (aalt, _), (astar, (ξ, ϕ2)) = glrt(N, hμ, hσ2, rsp.is_EV || pep.known_var);
+        if !is_glr
+            MZs, (_, _), (_, (_, _)) = mglrt(N, hμ, hσ2, Sβs[1].c);
+        end
+
+        while stopping_criterion(Zs, Sβs[1], N, hμ, hσ2, astar, Rs, MZs, is_glr)
+            popfirst!(Sβs);
+            push!(R, (astar, copy(N), CPUtime_us()-baseline));
+            if isempty(Sβs)
+                println(minimum(Zs) / minimum(MZs),",");
+                # if !is_glr
+                #     for a in 1:K
+                #         if a != astar
+                #             println("arm $(a), GLR = " * string(Zs[a]) * 
+                #             " , R = " * string(Rs[a] + N[a] * log(hσ2[a]) / 2) * 
+                #             " , R* = " * string(Rs[astar] + N[astar] * log(hσ2[astar]) / 2) * 
+                #             " , SR = " * string(Rs[a] / N[a] + log(hσ2[a]) / 2) * 
+                #             " , SR* = " * string(Rs[astar] / N[astar] + log(hσ2[astar]) / 2));
+                #         end
+                #     end
+                # end
+                #println(Rs0);
+                return R;
+            end
+        end
+
+        # invoke sampling rule
+        if is_dmglr
+            k = nextsample(state, pep, astar, aalt, ξ, ϕ2, N, S, MZs, rng);
+        else
+            k = nextsample(state, pep, astar, aalt, ξ, ϕ2, N, S, Zs, rng);
+        end 
+
+        # and actually sample
+        _X = sample(rng, getexpfam(pep, k), μs[k]);
+        S[k] += _X;
+        S2[k] += _X^2;
+        N[k] += 1;
+        Rs[k] += 0.5 * (1 - log(hσ2[k]) - (_X - hμ[k])^2 / hσ2[k]);
+        t += 1;
+    end
+end
+
+function stopping_criterion(Zs, Sβ, N, hμ, hσ2, astar, Rs, MZs, is_glr)
+    K = length(hμ);
+    stop = true;
+    for a in 1:K
+        if a != astar
+            # Command line to compare GLR with UI
+            #val = Zs[a] + (is_glr ? 0 : Rs[a] + Rs[astar] + N[a] * log(hσ2[a]) / 2 + N[astar] * log(hσ2[astar]) / 2);
+            # Command line to compare GLR with MGLR
+            val = is_glr ? Zs[a] : MZs[a];
+            cdt = val > Sβ(N, hμ, hσ2, astar, a);
+            stop = stop && cdt;
+        end
+    end
+    return stop;
+end
+=====================================
+=== END OF FILE: /home/josh/Dropbox/BAI/code_baiuv/baiuv/runit.jl ===
+=====================================
+
