@@ -185,7 +185,6 @@ static double pg_horner(double x, double m, const double *p, int len) {
   return (m + 1) * (p[0] + x * ex);
 }
 
-// Assumes s > 0.5 and is the real part
 // Implemented using gamma.jl from the Julia SpecialFunctions package
 double zeta(double s) {
   if (s <= 0.5) {
@@ -194,7 +193,7 @@ double zeta(double s) {
               s);
   }
 
-  if (fabs(s - 1.0) < 1e-6) {
+  if (fabs(s - 1.0) < 1e-10) {
     return NAN;
   }
   const double m = s - 1;
@@ -252,7 +251,6 @@ double lambertw_branch_neg1(const double x) {
                                (1.0 + M2 * sigma * exp(M3 * sqrt(sigma)))));
 }
 
-// Compute Lambert W function
 double lambertw(const double x, const int k) {
   const double minx = -1.0 / E;
   if (x < minx || (k == -1 && x >= 0)) {
@@ -268,7 +266,6 @@ double lambertw(const double x, const int k) {
     double q = 2.0 * (1.0 + W) * (1.0 + W + 2.0 / 3.0 * z);
     double epsilon = z * (q - z) / ((1.0 + W) * (q - 2.0 * z));
     W *= 1.0 + epsilon;
-
     r = fabs(W - log(fabs(x)) + log(fabs(W)));
     n++;
   }
