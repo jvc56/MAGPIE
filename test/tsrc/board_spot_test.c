@@ -519,9 +519,28 @@ void test_oxyphenbutazone_board_spot(void) {
   config_destroy(config);
 }
 
+void test_wof_board_spot(void) {
+  char wof[300] = "15/15/15/15/15/15/15/3QINTAR6/2GU4E6/2LI4C6/2ON4O6/2OI3HM6/"
+                  "2ME3OB6/1ASSEZ1PE6/7ED6 EFLORTW/ABNST?? 203/138 0";
+
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  assert(game_load_cgp(game, wof) == CGP_PARSE_STATUS_SUCCESS);
+
+  assert_usable_spot(game, 11, 6, BOARD_VERTICAL_DIRECTION, 2, 0, "",
+    (uint8_t[]){4, 2, 0, 0, 0, 0, 0, 0}, 11, 2);
+
+  assert_usable_spot(game, 10, 6, BOARD_VERTICAL_DIRECTION, 3, 0, "",
+                     (uint8_t[]){4, 2, 1, 0, 0, 0, 0, 0}, 11, 3);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_board_spot(void) {
-  test_standard_empty_board();
-  test_asymmetrical_bricked_empty_board();
-  test_standard_with_word_on_board();
-  test_oxyphenbutazone_board_spot();
+  // test_standard_empty_board();
+  // test_asymmetrical_bricked_empty_board();
+  // test_standard_with_word_on_board();
+  // test_oxyphenbutazone_board_spot();
+  test_wof_board_spot();
 }

@@ -30,6 +30,7 @@
 
 #include "wmp_move_gen.h"
 
+#include "../str/move_string.h"
 #include "../util/util.h"
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
@@ -1414,7 +1415,7 @@ void gen_shadow(MoveGen *gen) {
   }
 }
 
-void gen_set_board_spot(MoveGen *gen) {
+static inline void gen_set_board_spot(MoveGen *gen) {
   WMPMoveGen *wmg = &gen->wmp_move_gen;
   wmg->board_spot = *board_get_readonly_spot(
       gen->board, wmg->word_spot.row, wmg->word_spot.col, wmg->word_spot.dir,
@@ -1460,7 +1461,8 @@ void set_wmp_play_for_record(MoveGen *gen, Move *move) {
   }
 }
 
-Equity get_wmp_move_equity_for_sort_type(const MoveGen *gen, Move *move) {
+static inline Equity get_wmp_move_equity_for_sort_type(const MoveGen *gen,
+                                                       Move *move) {
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
     return static_eval_get_move_equity_with_leave_value(
         &gen->ld, move, &gen->leave, &gen->opponent_rack,
@@ -1470,7 +1472,7 @@ Equity get_wmp_move_equity_for_sort_type(const MoveGen *gen, Move *move) {
   return move_get_score(move);
 }
 
-void update_best_wmp_move_or_insert_into_movelist(MoveGen *gen) {
+static inline void update_best_wmp_move_or_insert_into_movelist(MoveGen *gen) {
   if (gen->move_record_type == MOVE_RECORD_ALL) {
     Move *move = move_list_get_spare_move(gen->move_list);
     set_wmp_play_for_record(gen, move);
@@ -1482,12 +1484,19 @@ void update_best_wmp_move_or_insert_into_movelist(MoveGen *gen) {
   set_wmp_play_for_record(gen, current_move);
   move_set_equity(current_move,
                   get_wmp_move_equity_for_sort_type(gen, current_move));
+  assert(move_get_equity(current_move) <=
+         gen->wmp_move_gen.word_spot.best_possible_equity);
   if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
+    // StringBuilder *sb = string_builder_create();
+    // string_builder_add_move(sb, gen->board, current_move, &gen->ld);
+    // printf("New best move: %s (%.2f)\n", string_builder_peek(sb),
+    //        move_get_equity(current_move) * 0.001);
+    // string_builder_destroy(sb);
     gen_switch_best_move_and_current_move(gen);
   }
 }
 
-void record_wmp_play(MoveGen *gen) {
+static inline void record_wmp_play(MoveGen *gen) {
   WMPMoveGen *wmg = &gen->wmp_move_gen;
   const int word_length = wmg->board_spot.word_length;
   Equity crossing_total = 0;
@@ -1510,15 +1519,16 @@ void record_wmp_play(MoveGen *gen) {
     mainword_total += letter_score * letter_multiplier;
     word_multiplier *= this_word_multiplier;
   }
-  printf("crossing_total: %d, mainword_total: %d, word_multiplier: %d\n",
-         crossing_total, mainword_total, word_multiplier);
+  // printf("crossing_total: %d, mainword_total: %d, word_multiplier: %d\n",
+  //        crossing_total, mainword_total, word_multiplier);
   wmg->score = crossing_total + mainword_total * word_multiplier +
                wmg->board_spot.additional_score;
   update_best_wmp_move_or_insert_into_movelist(gen);
 }
 
-void get_blank_possibilities(const MoveGen *gen, int pos,
-                             bool *can_be_unblanked, bool *can_be_blanked) {
+static inline void get_blank_possibilities(const MoveGen *gen, int pos,
+                                           bool *can_be_unblanked,
+                                           bool *can_be_blanked) {
   const uint8_t ml = gen->strip[pos];
   const WMPMoveGen *wmg = &gen->wmp_move_gen;
   const BitRack *nonplaythrough_tiles =
@@ -1589,7 +1599,7 @@ void record_plays_for_current_word(MoveGen *gen, int blanks_so_far, int pos) {
   }
 }
 
-void copy_wmp_word_to_strip(MoveGen *gen) {
+static inline void copy_wmp_word_to_strip(MoveGen *gen) {
   WMPMoveGen *wmg = &gen->wmp_move_gen;
   const int word_length = wmg->board_spot.word_length;
   wmg->buffer_pos = word_length * wmg->word_idx;
@@ -1616,6 +1626,8 @@ void wordmap_gen(MoveGen *gen) {
     gen->current_anchor_col = gen->wmp_move_gen.word_spot.row;
   }
   WMPMoveGen *wmg = &gen->wmp_move_gen;
+  const bool has_playthrough_tiles =
+      wmg->word_spot.num_tiles != wmg->board_spot.word_length;
   board_copy_row_cache(gen->lanes_cache, gen->row_cache, gen->current_row_index,
                        gen->dir);
   const int num_subrack_combinations =
@@ -1625,9 +1637,21 @@ void wordmap_gen(MoveGen *gen) {
   const int subrack_end = subrack_start + num_subrack_combinations;
   for (wmg->subrack_idx = subrack_start; wmg->subrack_idx < subrack_end;
        wmg->subrack_idx++) {
+    if (!has_playthrough_tiles &&
+        (wmg->nonplaythrough_infos[wmg->subrack_idx].wmp_entry == NULL)) {
+      continue;
+    }
     wmg->leave_value = gen->number_of_tiles_in_bag > 0
                            ? wmp_move_gen_look_up_leave_value(wmg)
                            : 0;
+/*                           
+    printf("best_possible_score: %.2f, leave_value: %.2f best_possible_equity: "
+           "%.2f\n",
+           wmg->word_spot.best_possible_score * 0.001, wmg->leave_value * 0.001,
+           (wmg->word_spot.best_possible_score + wmg->leave_value) * 0.001);
+*/           
+    assert(wmg->leave_value + wmg->word_spot.best_possible_score <=
+           wmg->word_spot.best_possible_equity);
     if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(
             gen, wmg->leave_value + wmg->word_spot.best_possible_score)) {
@@ -1657,10 +1681,30 @@ void wordmap_gen(MoveGen *gen) {
 
 void gen_wordmap_record_scoring_plays(MoveGen *gen) {
   WMPMoveGen *wmg = &gen->wmp_move_gen;
+  // printf("word_spot_heap.count: %d\n", wmg->word_spot_heap.count);
+  // int spots_used = 0;
   while (wmg->word_spot_heap.count > 0) {
     wmg->word_spot = word_spot_heap_extract_max(&wmg->word_spot_heap);
+    // printf("word_spot: ");
+    if (wmg->word_spot.dir == BOARD_HORIZONTAL_DIRECTION) {
+      // printf("%d%c", wmg->word_spot.row + 1, 'A' + wmg->word_spot.col);
+    } else {
+      // printf("%c%d", wmg->word_spot.col + 'A', wmg->word_spot.row + 1);
+      // assert(false);
+    }
+    // printf(" %d tiles, best_possible_equity: %.3f\n", wmg->word_spot.num_tiles,
+    //        equity_to_double(wmg->word_spot.best_possible_equity));
+
+    if (gen->move_record_type == MOVE_RECORD_BEST &&
+        better_play_has_been_found(gen, wmg->word_spot.best_possible_equity)) {
+      // printf("Better play has been found\n");
+      // printf("spots_used: %d\n", spots_used);
+      return;
+    }
+    // spots_used++;
     wordmap_gen(gen);
   }
+  // printf("spots_used: %d\n", spots_used);
 }
 
 void gen_recursive_record_scoring_plays(MoveGen *gen) {
@@ -1746,11 +1790,19 @@ void generate_moves(Game *game, move_record_t move_record_type,
         &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
   }
 
-  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen) &&
+      (gen->number_of_tiles_in_bag > RACK_SIZE)) {
+    // wmp_move_gen_nonplaythrough_word_of_length_exists(&gen->wmp_move_gen,
+    //                                                   RACK_SIZE)) {
     wmp_move_gen_build_word_spot_heap(
         &gen->wmp_move_gen, gen->board, gen->move_sort_type,
         gen->descending_tile_scores, gen->best_leaves, gen->cross_index);
     gen_wordmap_record_scoring_plays(gen);
+    // printf("num_lookups: %d\n", gen->wmp_move_gen.num_lookups);
+    // for (int i = 1; i <= RACK_SIZE; i++) {
+    //   printf("lookups of size %d: %d\n", i,
+    //          gen->wmp_move_gen.lookups_by_size[i]);
+    // }
   } else {
     gen_shadow(gen);
     gen_recursive_record_scoring_plays(gen);

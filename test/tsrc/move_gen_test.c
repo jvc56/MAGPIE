@@ -1024,6 +1024,85 @@ void wordmap_gen_below_jeweler(void) {
   config_destroy(config);
 }
 
+void wordmap_gen_trongle(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(10000);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+
+  rack_set_to_string(ld, player_get_rack(player), "TRONGLE");
+
+  generate_moves_for_game(game, 0, move_list);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "8E LONG 10");
+  assert_move_equity_exact(sml->moves[0],
+                           int_to_equity(10) + get_leave_value(game, "ERT"));
+  assert_move(game, NULL, sml, 1, "8G LONG 10");
+  assert_move_equity_exact(sml->moves[1],
+                           int_to_equity(10) + get_leave_value(game, "ERT"));
+  assert_move(game, NULL, sml, 2, "8F LONG 10");
+  assert_move_equity_exact(sml->moves[2], int_to_equity(10) +
+                                              get_leave_value(game, "ERT") +
+                                              OPENING_HOTSPOT_PENALTY);
+  assert_move(game, NULL, sml, 3, "8H LONG 10");
+  assert_move_equity_exact(sml->moves[3], int_to_equity(10) +
+                                              get_leave_value(game, "ERT") +
+                                              OPENING_HOTSPOT_PENALTY);
+  assert_move(game, NULL, sml, 4, "8D GLENT 16");
+  assert_move_equity_exact(sml->moves[4],
+                           int_to_equity(16) + get_leave_value(game, "OR"));
+
+  sorted_move_list_destroy(sml);
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_wof_movegen(void) {
+  char wof[300] = "15/15/15/15/15/15/15/3QINTAR6/2GU4E6/2LI4C6/2ON4O6/2OI3HM6/"
+                  "2ME3OB6/1ASSEZ1PE6/7ED6 EFLORTW/ABNST?? 203/138 0";
+
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(10000);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+
+  game_load_cgp(game, wof);
+  rack_set_to_string(ld, player_get_rack(player), "FLOWRET");
+
+  generate_moves_for_game(game, 0, move_list);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "G11 WOF 33");
+  assert_move_equity_exact(sml->moves[0],
+                           int_to_equity(33) + get_leave_value(game, "ELRT"));
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_oxyphenbutazone(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+  MoveList *move_list = move_list_create(10000);
+
+  game_load_cgp(game, VS_OXY);
+  rack_set_to_string(ld, player_get_rack(player), "OXPBAZE");
+
+  generate_moves_for_game(game, 0, move_list);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   // leave_lookup_test();
   // unfound_leave_lookup_test();
@@ -1043,4 +1122,7 @@ void test_move_gen(void) {
   wordmap_gen_muzjiks();
   wordmap_gen_evacuators();
   wordmap_gen_below_jeweler();
+  wordmap_gen_trongle();
+  wordmap_gen_wof_movegen();
+  wordmap_gen_oxyphenbutazone();
 }

@@ -894,3 +894,15 @@ void load_and_build_spots(Game *game, const char *cgp, const char *rack,
   game_load_cgp(game, cgp);
   build_spots_for_current_position(game, rack, sorted_spots, move_list);
 }
+
+Equity get_leave_value(const Game *game, const char *leave) {
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, leave);
+  const int player_on_turn_idx = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_on_turn_idx);
+  const KLV *klv = player_get_klv(player);
+  const Equity value = klv_get_leave_value(klv, rack);
+  rack_destroy(rack);
+  return value;
+}

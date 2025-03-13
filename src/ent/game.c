@@ -714,6 +714,12 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
     const uint8_t ml = square_get_letter(sq);
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       const uint64_t cross_set = board_get_cross_set(board, row, col, dir, ci);
+      // printf("empty square\n");
+      if (tiles == num_tiles) {
+        // printf("already have all tiles\n");
+        break;
+      }
+
       if (cross_set == 0) {
         // printf("unhookable cross set (0)\n");
         return;
@@ -731,11 +737,6 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
         // printf("]\n");
       }
 
-      // printf("empty square\n");
-      if (tiles == num_tiles) {
-        // printf("already have all tiles\n");
-        break;
-      }
       if ((cross_set != TRIVIAL_CROSS_SET) ||
           ((row == starting_sq_row) && (col == starting_sq_col))) {
         // printf("touches starting square or hooks something\n");
@@ -824,6 +825,8 @@ void game_update_all_spots(Game *game) {
   const bool generate_vertical_opening_plays =
       start_row != start_col ||
       !board_are_bonus_squares_symmetric_by_transposition(board);
+  const int num_cis =
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_WMP) ? 1 : 2;
   for (int dir = 0; dir < 2; dir++) {
     for (int row = 0; row < BOARD_DIM; row++) {
       for (int col = 0; col < BOARD_DIM; col++) {
@@ -835,7 +838,7 @@ void game_update_all_spots(Game *game) {
             starting_sq_row = -1;
             starting_sq_col = -1;
           }
-          for (int ci = 0; ci < 2; ci++) {
+          for (int ci = 0; ci < num_cis; ci++) {
             game_update_spot(game, row, col, num_tiles, dir, ci,
                              starting_sq_row, starting_sq_col);
           }

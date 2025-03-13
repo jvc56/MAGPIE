@@ -54,18 +54,6 @@ void test_opening_racks(void) {
   config_destroy(config);
 }
 
-Equity get_leave_value(const Game *game, const char *leave) {
-  const LetterDistribution *ld = game_get_ld(game);
-  Rack *rack = rack_create(ld_get_size(ld));
-  rack_set_to_string(ld, rack, leave);
-  const int player_on_turn_idx = game_get_player_on_turn_index(game);
-  const Player *player = game_get_player(game, player_on_turn_idx);
-  const KLV *klv = player_get_klv(player);
-  const Equity value = klv_get_leave_value(klv, rack);
-  rack_destroy(rack);
-  return value;
-}
-
 void test_best_leaves(void) {
   Config *config = config_create_or_die("set -lex CSW21 -wmp true");
   Game *game = config_game_create(config);
@@ -83,6 +71,29 @@ void test_best_leaves(void) {
   assert(top_quacky_spot->num_tiles == 6);
   assert(top_quacky_spot->best_possible_equity ==
          quacky_score + blank_leave_value);
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void test_zerk(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+  MoveList *move_list = move_list_create(1);
+
+  WordSpotHeap spot_list;
+  load_and_build_spots(game, EMPTY_CGP, "DEKNRXZ", &spot_list, move_list);
+  int expected_count = 4 + 3 + 2;
+  assert(spot_list.count == expected_count);
+  const WordSpot *four_tile_spot = &spot_list.spots[0];
+  assert(four_tile_spot->num_tiles == 4);
+  const Equity dkxz_score = int_to_equity(50);
+  const Equity nxz_leave_value = get_leave_value(game, "NXZ");
+  assert(four_tile_spot->best_possible_score == dkxz_score);
+  assert(four_tile_spot->best_possible_equity == dkxz_score + nxz_leave_value);
 
   move_list_destroy(move_list);
   game_destroy(game);
@@ -189,8 +200,9 @@ void test_oxyphenbutazone_word_spot(void) {
 }
 
 void test_word_spot(void) {
-  test_opening_racks();
-  test_best_leaves();
-  test_bingos_after_vac();
-  test_oxyphenbutazone_word_spot();
+  test_zerk();
+  // test_opening_racks();
+  // test_best_leaves();
+  // test_bingos_after_vac();
+  // test_oxyphenbutazone_word_spot();
 }

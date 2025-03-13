@@ -19,10 +19,13 @@
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 
+#include "cgp.h"
 #include "gameplay.h"
 #include "klv_csv.h"
 #include "move_gen.h"
 
+#include "../str/game_string.h"
+#include "../str/move_string.h"
 #include "../util/string_util.h"
 #include "../util/util.h"
 
@@ -441,6 +444,14 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
   }
   bool games_are_divergent = false;
   while (true) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_game(sb, game_runner1->game, NULL);
+    printf("%s\n", string_builder_peek(sb));
+    string_builder_destroy(sb);
+    char *cgp = game_get_cgp(game_runner1->game, false);
+    printf("cgp: %s\n", cgp);
+    free(cgp);
+
     Move *move1 = NULL;
     bool game1_is_over = game_runner_is_game_over(game_runner1);
     if (!game1_is_over) {
@@ -460,11 +471,38 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
       break;
     }
 
+    if (move1) {
+      sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(game_runner1->game), move1,
+                              game_get_ld(game_runner1->game));
+      const Equity equity = move_get_equity(move1);
+      if (equity != EQUITY_PASS_VALUE) {
+        printf("move1: %s (equity: %f)\n", string_builder_peek(sb),
+               equity_to_double(move_get_equity(move1)));
+      } else {
+        printf("move1: %s\n", string_builder_peek(sb));
+      }
+      string_builder_destroy(sb);
+    }
+    if (move2) {
+      sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(game_runner2->game), move2,
+                              game_get_ld(game_runner2->game));
+      const Equity equity = move_get_equity(move2);
+      if (equity != EQUITY_PASS_VALUE) {
+        printf("move2: %s (equity: %f)\n", string_builder_peek(sb),
+               equity_to_double(move_get_equity(move2)));
+      } else {
+        printf("move2: %s\n", string_builder_peek(sb));
+      }                              
+      string_builder_destroy(sb);
+    }
     // It is guaranteed that at least one move is not null
     // at this point.
     if (!games_are_divergent &&
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
+      printf("games are divergent\n");
       games_are_divergent = true;
     }
   }

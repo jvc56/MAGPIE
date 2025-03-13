@@ -119,5 +119,6 @@ void build_spots_for_current_position(Game *game, const char *rack,
                                       MoveList *move_list);
 void load_and_build_spots(Game *game, const char *cgp, const char *rack,
                           WordSpotHeap *sorted_spots, MoveList *move_list);
+Equity get_leave_value(const Game *game, const char *leave);
 
 #endif
