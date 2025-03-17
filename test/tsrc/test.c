@@ -37,6 +37,7 @@
 #include "move_test.h"
 #include "players_data_test.h"
 #include "rack_test.h"
+#include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
@@ -83,6 +84,7 @@ static TestEntry test_table[] = {
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},
+    {"rv", test_random_variable},
     {"sim", test_sim},
     {"math", test_math_util},
     {"bai", test_bai},

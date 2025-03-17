@@ -101,12 +101,8 @@ void test_bai_input_from_file(void) {
       .type = RANDOM_VARIABLES_NORMAL,
       .num_rvs = num_rvs,
       .means_and_stdevs = means_and_stdevs,
-      .rng_args =
-          &(RNGArgs){
-              .num_samples = num_samples,
-              .samples = samples,
-              .num_rngs = num_rvs,
-          },
+      .normal_predetermined.num_samples = num_samples,
+      .normal_predetermined.samples = samples,
   };
 
   RandomVariables *rvs = rvs_create(&rv_args);
