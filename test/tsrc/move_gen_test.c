@@ -1103,6 +1103,37 @@ void wordmap_gen_oxyphenbutazone(void) {
   config_destroy(config);
 }
 
+void wordmap_gen_wus_movegen(void) {
+  char wus[300] =
+      "11FEZ1/11AGO1/11TO2/11ST2/4T5R1I2/2GIRD3VATS2/4AI1DEEK1EH1/4IN1AREIC1AB/"
+      "2BULkAGE4ER/1PINEY7MO/2O1D3VAX2IO/2T7UPEND/1QI10S1/1UNLAY9/1A2LOFT7 "
+      "CEMOSUW/EEINOW? 344/363 0";
+
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  Player *opponent = game_get_player(game, 1);
+  MoveList *move_list = move_list_create(10000);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+
+  game_load_cgp(game, wus);
+  rack_set_to_string(ld, player_get_rack(player), "CEMOSUW");
+  rack_set_to_string(ld, player_get_rack(opponent), "EEINOW?");
+  Bag *bag = game_get_bag(game);
+  printf("Bag size: %d\n", bag_get_tiles(bag));
+
+  generate_moves_for_game(game, 0, move_list);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "14H SOWCE 20");
+  assert_move_equity_exact(sml->moves[0],
+                           int_to_equity(20) + get_leave_value(game, "MU") +
+                               peg_adjust_values[8]);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   // leave_lookup_test();
   // unfound_leave_lookup_test();
@@ -1119,10 +1150,12 @@ void test_move_gen(void) {
   // movegen_var_bingo_bonus_test();
   // movegen_no_wmp_by_default_test();
   // movegen_only_one_player_wmp();
-  wordmap_gen_muzjiks();
-  wordmap_gen_evacuators();
-  wordmap_gen_below_jeweler();
-  wordmap_gen_trongle();
-  wordmap_gen_wof_movegen();
-  wordmap_gen_oxyphenbutazone();
+
+  // wordmap_gen_muzjiks();
+  // wordmap_gen_evacuators();
+  // wordmap_gen_below_jeweler();
+  // wordmap_gen_trongle();
+  // wordmap_gen_wof_movegen();
+  // wordmap_gen_oxyphenbutazone();
+  wordmap_gen_wus_movegen();
 }

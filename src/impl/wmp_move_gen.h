@@ -12,6 +12,7 @@
 #include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/leave_map.h"
+#include "../ent/static_eval.h"
 #include "../ent/wmp.h"
 
 #define WORD_SPOT_HEAP_CAPACITY (BOARD_DIM * BOARD_DIM * RACK_SIZE)
@@ -25,6 +26,8 @@ typedef struct SubrackInfo {
 typedef struct WordSpot {
   Equity best_possible_equity;
   Equity best_possible_score;
+  Equity preendgame_adjustment;
+  Equity endgame_adjustment;
   uint8_t row;
   uint8_t col;
   uint8_t dir;
@@ -72,7 +75,8 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
                                      Rack *player_rack, const WMP *wmp) {
   wmp_move_gen->num_lookups = 0;
-  memset(wmp_move_gen->lookups_by_size, 0, sizeof(wmp_move_gen->lookups_by_size));
+  memset(wmp_move_gen->lookups_by_size, 0,
+         sizeof(wmp_move_gen->lookups_by_size));
   wmp_move_gen->wmp = wmp;
   if (wmp == NULL) {
     return;
@@ -167,7 +171,8 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
     }
     // printf("word for ");
     // for (int i = 0; i <= 26; i++) {
-    //   for (int j = 0; j < bit_rack_get_letter(&subrack_info->subrack, i); j++) {
+    //   for (int j = 0; j < bit_rack_get_letter(&subrack_info->subrack, i);
+    //   j++) {
     //     printf("%c", 'A' + i - 1);
     //   }
     // }
@@ -245,8 +250,9 @@ static inline void word_spot_heap_reset(WordSpotHeap *word_spot_heap) {
 static inline void word_spot_heap_make_spot(
     WMPMoveGen *wmg, const BoardSpot *board_spot, int row, int col, int dir,
     int tiles, move_sort_t move_sort_type, const Equity *descending_tile_scores,
-    const Equity *best_leaves) {
-  //printf("row: %d, col: %d, dir: %d, tiles: %d\n", row, col, dir, tiles);
+    const Equity *best_leaves, Equity preendgame_adjustment,
+    Equity endgame_adjustment) {
+  // printf("row: %d, col: %d, dir: %d, tiles: %d\n", row, col, dir, tiles);
   WordSpotHeap *heap = &wmg->word_spot_heap;
   const bool has_playthrough = board_spot->word_length > tiles;
   if (!has_playthrough && !wmg->nonplaythrough_has_word_of_length[tiles]) {
@@ -259,6 +265,8 @@ static inline void word_spot_heap_make_spot(
   spot->dir = dir;
   spot->num_tiles = tiles;
   spot->best_possible_score = 0;
+  spot->preendgame_adjustment = preendgame_adjustment;
+  spot->endgame_adjustment = endgame_adjustment;
   for (int tile_idx = 0; tile_idx < WORD_ALIGNING_RACK_SIZE; tile_idx++) {
     const Equity tile_score =
         descending_tile_scores[tile_idx] *
@@ -266,8 +274,9 @@ static inline void word_spot_heap_make_spot(
     spot->best_possible_score += tile_score;
   }
   spot->best_possible_score += board_spot->additional_score;
-  const int leave_size = RACK_SIZE - tiles;
-  spot->best_possible_equity = spot->best_possible_score;
+  const int leave_size = wmg->full_rack_size - tiles;
+  spot->best_possible_equity =
+      spot->best_possible_score + preendgame_adjustment + endgame_adjustment;
   if (leave_size == 0 || move_sort_type == MOVE_SORT_SCORE) {
     // printf("spot->best_possible_equity: %d\n", spot->best_possible_equity);
     return;
@@ -327,14 +336,15 @@ static inline void word_spot_heapify_all(WordSpotHeap *heap) {
 
 static inline void wmp_move_gen_build_word_spot_heap(
     WMPMoveGen *wmp_move_gen, const Board *board, move_sort_t move_sort_type,
-    const Equity *descending_tile_scores, const Equity *best_leaves, int ci) {
+    const Equity *descending_tile_scores, const Equity *best_leaves,
+    int number_of_tiles_in_bag, Equity opp_rack_score, int ci) {
   // printf("wmp_move_gen_build_word_spot_heap\n");
   WordSpotHeap *heap = &wmp_move_gen->word_spot_heap;
   word_spot_heap_reset(heap);
   for (int dir = 0; dir < 2; dir++) {
     for (int row = 0; row < BOARD_DIM; row++) {
       for (int col = 0; col < BOARD_DIM; col++) {
-        for (int tiles = 1; tiles <= RACK_SIZE; tiles++) {
+        for (int tiles = 1; tiles <= wmp_move_gen->full_rack_size; tiles++) {
           // printf("row: %d, col: %d, dir: %d, tiles: %d\n", row, col, dir,
           //  tiles);
           const BoardSpot *spot =
@@ -343,9 +353,30 @@ static inline void wmp_move_gen_build_word_spot_heap(
             // printf("unusable spot\n");
             continue;
           }
+          const int bag_plus_rack_size =
+              number_of_tiles_in_bag - tiles + RACK_SIZE;
+          const bool is_outplay = (number_of_tiles_in_bag == 0) &&
+                                  (tiles == wmp_move_gen->full_rack_size);
+          Equity lowest_possible_rack_score = 0;
+          for (int i = tiles; i < wmp_move_gen->full_rack_size; i++) {
+            lowest_possible_rack_score += descending_tile_scores[i];
+          }
+          Equity preendgame_adjustment = 0;
+          Equity endgame_adjustment = 0;
+          if (move_sort_type == MOVE_SORT_EQUITY) {
+            if (number_of_tiles_in_bag == 0) {
+              endgame_adjustment =
+                  is_outplay ? endgame_outplay_adjustment(opp_rack_score)
+                             : endgame_nonoutplay_adjustment(
+                                   lowest_possible_rack_score);
+            } else if (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) {
+              preendgame_adjustment = peg_adjust_values[bag_plus_rack_size];
+            }
+          }
           word_spot_heap_make_spot(wmp_move_gen, spot, row, col, dir, tiles,
                                    move_sort_type, descending_tile_scores,
-                                   best_leaves);
+                                   best_leaves, preendgame_adjustment,
+                                   endgame_adjustment);
         }
       }
     }
@@ -363,8 +394,7 @@ static inline WordSpot word_spot_heap_extract_max(WordSpotHeap *heap) {
   return max_spot;
 }
 
-static inline Equity
-wmp_move_gen_look_up_leave_value(const WMPMoveGen *wmg) {                                  
+static inline Equity wmp_move_gen_look_up_leave_value(const WMPMoveGen *wmg) {
   return wmg->nonplaythrough_infos[wmg->subrack_idx].leave_value;
 }
 
@@ -376,7 +406,7 @@ wmp_move_gen_get_num_subrack_combinations(const WMPMoveGen *wmp_move_gen) {
 static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmg) {
   const bool is_playthrough =
       wmg->board_spot.word_length > wmg->word_spot.num_tiles;
-  //printf("is_playthrough: %d\n", is_playthrough);
+  // printf("is_playthrough: %d\n", is_playthrough);
   const SubrackInfo *nonplaythrough_info =
       &wmg->nonplaythrough_infos[wmg->subrack_idx];
   const SubrackInfo *playthrough_info =
@@ -385,8 +415,8 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmg) {
       is_playthrough ? playthrough_info : nonplaythrough_info;
   const WMPEntry *entry = NULL;
   BitRack bit_rack = bit_rack_create_empty();
-  //printf("wmg->word_spot.num_tiles: %d\n", wmg->word_spot.num_tiles);
-  //  if (!is_playthrough || wmp_move_gen->word_spot.num_tiles == RACK_SIZE) {
+  // printf("wmg->word_spot.num_tiles: %d\n", wmg->word_spot.num_tiles);
+  //   if (!is_playthrough || wmp_move_gen->word_spot.num_tiles == RACK_SIZE) {
   if (!is_playthrough) {
     entry = subrack_info->wmp_entry;
     // printf("entry: %p\n", entry);

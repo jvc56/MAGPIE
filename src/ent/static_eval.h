@@ -12,12 +12,24 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 
-static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
+// static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
 
 // These are quackle values, but we can probably come up with our
 // own at some point.
-// static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
-//    0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
+static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
+    0,
+    -8 * EQUITY_RESOLUTION,
+    0,
+    (Equity)(-0.5 * EQUITY_RESOLUTION),
+    -2 * EQUITY_RESOLUTION,
+    (Equity)(-3.5 * EQUITY_RESOLUTION),
+    -2 * EQUITY_RESOLUTION,
+    2 * EQUITY_RESOLUTION,
+    10 * EQUITY_RESOLUTION,
+    7 * EQUITY_RESOLUTION,
+    4 * EQUITY_RESOLUTION,
+    -1 * EQUITY_RESOLUTION,
+    -2 * EQUITY_RESOLUTION};
 
 static inline Equity
 placement_adjustment(const LetterDistribution *ld, const Move *move,
@@ -59,11 +71,28 @@ static inline Equity endgame_outplay_adjustment(Equity opponent_rack_score) {
 static inline Equity standard_endgame_adjustment(const LetterDistribution *ld,
                                                  const Rack *player_leave,
                                                  const Rack *opp_rack) {
+  if (rack_is_empty(player_leave)) {
+    printf("rack is empty!\n");
+  }
   if (!rack_is_empty(player_leave)) {
     // This play is not going out. We should penalize it by our own score
     // plus some constant.
+    printf("player_leave: ");
+    for (int i = 0; i <= 26; i++) {
+      for (int j = 0; j < rack_get_letter(player_leave, i); j++) {
+        printf("%c", i + 'A' - 1);
+      }
+    }
+    printf("\n");
     return endgame_nonoutplay_adjustment(rack_get_score(ld, player_leave));
   }
+  printf("opp_rack: ");
+  for (int i = 0; i <= 26; i++) {
+    for (int j = 0; j < rack_get_letter(opp_rack, i); j++) {
+      printf("%c", i + 'A' - 1);
+    }
+  }
+  printf("\n");
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
@@ -101,7 +130,7 @@ static_eval_get_shadow_equity(const LetterDistribution *ld,
   } else {
     // Bag is empty: add double opponent's rack if playing out, otherwise
     // deduct a penalty based on the score of our tiles left after this play.
-    int lowest_possible_rack_score = 0;
+    Equity lowest_possible_rack_score = 0;
     for (int i = tiles_played; i < number_of_letters_on_rack; i++) {
       lowest_possible_rack_score += descending_tile_scores[i];
     }
@@ -128,15 +157,21 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
 
   if (number_of_tiles_in_bag > 0) {
     leave_adjustment = leave_value;
+    printf("number_of_tiles_in bag: %d, move_get_tiles_played: %d\n",
+           number_of_tiles_in_bag, move_get_tiles_played(move));
     int bag_plus_rack_size =
         number_of_tiles_in_bag - move_get_tiles_played(move) + RACK_SIZE;
     if (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) {
+      printf("bag_plus_rack_size: %d, adjustment is %d\n", bag_plus_rack_size,
+             peg_adjust_values[bag_plus_rack_size]);
       other_adjustments += peg_adjust_values[bag_plus_rack_size];
     }
   } else {
     other_adjustments +=
         standard_endgame_adjustment(ld, player_leave, opp_rack);
   }
+  printf("leave_adjustment: %d, other_adjustments: %d\n", leave_adjustment,
+         other_adjustments);
   return move_get_score(move) + leave_adjustment + other_adjustments;
 }
 

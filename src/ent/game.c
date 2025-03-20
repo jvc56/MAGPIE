@@ -700,7 +700,6 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
         // printf(" but we already have all tiles\n");
         break;
       }
-      spot->is_usable = false;
       return;
     }
     const Square *sq = board_get_readonly_square(board, row, col, dir, ci);
@@ -774,8 +773,8 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
     if (spot->word_length == 1) {
       // printf("single tile play, record in proper direction\n");
       return;
-    } else if (hooking && (dir == BOARD_HORIZONTAL_DIRECTION)) {
-      // printf("single tile, 2 words, record in vertical direction\n");
+    } else if (hooking && (dir == BOARD_VERTICAL_DIRECTION)) {
+      // printf("single tile, 2 words, record in horizontal direction\n");
       return;
     }
   }

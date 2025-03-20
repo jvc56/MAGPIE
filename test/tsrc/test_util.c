@@ -836,6 +836,8 @@ void assert_sorted_anchors_are_equal(const AnchorHeap *ah1,
 void generate_spots_for_test(Game *game, MoveList *move_list) {
   Player *player_on_turn =
       game_get_player(game, game_get_player_on_turn_index(game));
+  Player *opponent =
+      game_get_player(game, 1 - game_get_player_on_turn_index(game));
   MoveGen *gen = get_movegen(/*thread_index=*/0);
   gen_load_position(gen, game, player_get_move_record_type(player_on_turn),
                     player_get_move_sort_type(player_on_turn), move_list,
@@ -846,9 +848,12 @@ void generate_spots_for_test(Game *game, MoveList *move_list) {
   assert(wmp_move_gen_is_active(&gen->wmp_move_gen));
   wmp_move_gen_check_nonplaythrough_existence(
       &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+  const Equity opp_rack_score =
+      rack_get_score(game_get_ld(game), player_get_rack(opponent));
   wmp_move_gen_build_word_spot_heap(
       &gen->wmp_move_gen, gen->board, gen->move_sort_type,
-      gen->descending_tile_scores, gen->best_leaves, gen->cross_index);
+      gen->descending_tile_scores, gen->best_leaves,
+      gen->number_of_tiles_in_bag, opp_rack_score, gen->cross_index);
 }
 
 void extract_sorted_spots_for_test(WordSpotHeap *sorted_spots) {
