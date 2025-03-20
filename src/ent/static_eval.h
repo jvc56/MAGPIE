@@ -71,28 +71,28 @@ static inline Equity endgame_outplay_adjustment(Equity opponent_rack_score) {
 static inline Equity standard_endgame_adjustment(const LetterDistribution *ld,
                                                  const Rack *player_leave,
                                                  const Rack *opp_rack) {
-  if (rack_is_empty(player_leave)) {
-    printf("rack is empty!\n");
-  }
+  // if (rack_is_empty(player_leave)) {
+  //   printf("rack is empty!\n");
+  // }
   if (!rack_is_empty(player_leave)) {
     // This play is not going out. We should penalize it by our own score
     // plus some constant.
-    printf("player_leave: ");
-    for (int i = 0; i <= 26; i++) {
-      for (int j = 0; j < rack_get_letter(player_leave, i); j++) {
-        printf("%c", i + 'A' - 1);
-      }
-    }
-    printf("\n");
+    // printf("player_leave: ");
+    // for (int i = 0; i <= 26; i++) {
+    //   for (int j = 0; j < rack_get_letter(player_leave, i); j++) {
+    //     printf("%c", i + 'A' - 1);
+    //   }
+    // }
+    // printf("\n");
     return endgame_nonoutplay_adjustment(rack_get_score(ld, player_leave));
   }
-  printf("opp_rack: ");
-  for (int i = 0; i <= 26; i++) {
-    for (int j = 0; j < rack_get_letter(opp_rack, i); j++) {
-      printf("%c", i + 'A' - 1);
-    }
-  }
-  printf("\n");
+  // printf("opp_rack: ");
+  // for (int i = 0; i <= 26; i++) {
+  //   for (int j = 0; j < rack_get_letter(opp_rack, i); j++) {
+  //     printf("%c", i + 'A' - 1);
+  //   }
+  // }
+  // printf("\n");
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
@@ -157,21 +157,21 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
 
   if (number_of_tiles_in_bag > 0) {
     leave_adjustment = leave_value;
-    printf("number_of_tiles_in bag: %d, move_get_tiles_played: %d\n",
-           number_of_tiles_in_bag, move_get_tiles_played(move));
+    // printf("number_of_tiles_in bag: %d, move_get_tiles_played: %d\n",
+    //        number_of_tiles_in_bag, move_get_tiles_played(move));
     int bag_plus_rack_size =
         number_of_tiles_in_bag - move_get_tiles_played(move) + RACK_SIZE;
     if (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) {
-      printf("bag_plus_rack_size: %d, adjustment is %d\n", bag_plus_rack_size,
-             peg_adjust_values[bag_plus_rack_size]);
+      // printf("bag_plus_rack_size: %d, adjustment is %d\n", bag_plus_rack_size,
+      //        peg_adjust_values[bag_plus_rack_size]);
       other_adjustments += peg_adjust_values[bag_plus_rack_size];
     }
   } else {
     other_adjustments +=
         standard_endgame_adjustment(ld, player_leave, opp_rack);
   }
-  printf("leave_adjustment: %d, other_adjustments: %d\n", leave_adjustment,
-         other_adjustments);
+  // printf("leave_adjustment: %d, other_adjustments: %d\n", leave_adjustment,
+  //        other_adjustments);
   return move_get_score(move) + leave_adjustment + other_adjustments;
 }
 

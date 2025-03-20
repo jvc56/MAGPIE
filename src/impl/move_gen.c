@@ -1482,11 +1482,11 @@ static inline void update_best_wmp_move_or_insert_into_movelist(MoveGen *gen) {
     set_wmp_play_for_record(gen, move);
     move_list_insert_spare_move(gen->move_list,
                                 get_wmp_move_equity_for_sort_type(gen, move));
-    StringBuilder *sb = string_builder_create();
-    string_builder_add_move(sb, gen->board, move, &gen->ld);
-    printf("Recording move: %s (%.2f)\n", string_builder_peek(sb),
-           move_get_equity(move) * 0.001);
-    string_builder_destroy(sb);
+    // StringBuilder *sb = string_builder_create();
+    // string_builder_add_move(sb, gen->board, move, &gen->ld);
+    // printf("Recording move: %s (%.2f)\n", string_builder_peek(sb),
+    //        move_get_equity(move) * 0.001);
+    // string_builder_destroy(sb);
     return;
   }
   Move *current_move = gen_get_current_move(gen);
@@ -1496,11 +1496,11 @@ static inline void update_best_wmp_move_or_insert_into_movelist(MoveGen *gen) {
   assert(move_get_equity(current_move) <=
          gen->wmp_move_gen.word_spot.best_possible_equity);
   if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
-    StringBuilder *sb = string_builder_create();
-    string_builder_add_move(sb, gen->board, current_move, &gen->ld);
-    printf("New best move: %s (%.2f)\n", string_builder_peek(sb),
-           move_get_equity(current_move) * 0.001);
-    string_builder_destroy(sb);
+    // StringBuilder *sb = string_builder_create();
+    // string_builder_add_move(sb, gen->board, current_move, &gen->ld);
+    // printf("New best move: %s (%.2f)\n", string_builder_peek(sb),
+    //        move_get_equity(current_move) * 0.001);
+    // string_builder_destroy(sb);
     gen_switch_best_move_and_current_move(gen);
   }
 }
@@ -1664,11 +1664,15 @@ void wordmap_gen(MoveGen *gen) {
                wmg->word_spot.preendgame_adjustment +
                wmg->word_spot.endgame_adjustment <=
            wmg->word_spot.best_possible_equity);
-    // if (gen->move_record_type == MOVE_RECORD_BEST &&
-    //     better_play_has_been_found(
-    //         gen, wmg->leave_value + wmg->word_spot.best_possible_score)) {
-    //   continue;
-    // }
+    if (gen->move_record_type == MOVE_RECORD_BEST) {
+      const Equity subrack_best_possible_equity =
+          wmg->word_spot.best_possible_score +
+          wmg->word_spot.preendgame_adjustment +
+          wmg->word_spot.endgame_adjustment + wmg->leave_value;
+      if (better_play_has_been_found(gen, subrack_best_possible_equity)) {
+        continue;
+      }
+    }
     if (!wmp_move_gen_get_subrack_words(wmg)) {
       continue;
     }
@@ -1802,10 +1806,10 @@ void generate_moves(Game *game, move_record_t move_record_type,
     wmp_move_gen_check_nonplaythrough_existence(
         &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
   }
-  printf("gen->number_of_tiles_in_bag: %d\n", gen->number_of_tiles_in_bag);
+  // printf("gen->number_of_tiles_in_bag: %d\n", gen->number_of_tiles_in_bag);
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     const Equity opp_rack_score = rack_get_score(&gen->ld, &gen->opponent_rack);
-    printf("opp_rack_score: %d\n", opp_rack_score);
+    // printf("opp_rack_score: %d\n", opp_rack_score);
     wmp_move_gen_build_word_spot_heap(
         &gen->wmp_move_gen, gen->board, gen->move_sort_type,
         gen->descending_tile_scores, gen->best_leaves,
