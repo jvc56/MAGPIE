@@ -4,6 +4,8 @@
 #include <math.h>
 #include <stdbool.h>
 
+#include "../ent/bai_logger.h"
+
 #include "../util/log.h"
 #include "../util/math_util.h"
 #include "../util/util.h"
@@ -37,56 +39,112 @@ void destroy_HT(HT *ht) { free(ht); }
 
 double barW(double x, int k) { return -lambertw(-exp(-x), k); }
 
-bool valid_time(HT *ht, int *N) {
+bool valid_time(HT *ht, int *N, BAILogger *bai_logger) {
   const double δ = ht->δ;
   const double K = ht->K;
   const double s = ht->s;
   const double zetas = ht->zetas;
   const double eta = ht->eta;
   const int cst = 4;
+  int sum = 0;
+  double *u_array = NULL;
+  double *val_array = NULL;
+  if (bai_logger) {
+    u_array = malloc_or_die(K * sizeof(double));
+    val_array = malloc_or_die(K * sizeof(double));
+  }
   for (int i = 0; i < K; i++) {
     const double u = 2 * (1 + eta) *
                      (log(cst * (K - 1) * zetas / δ) +
                       s * log(1 + log(N[i]) / log(1 + eta)));
     const double val = exp(1 + lambertw((u - 1) / exp(1), 0));
-    if (N[i] <= val) {
-      return false;
+    if (bai_logger) {
+      u_array[i] = u;
+      val_array[i] = val;
+    }
+    if (N[i] > val) {
+      sum++;
     }
   }
-  return true;
+  const bool result = sum == K;
+  if (bai_logger) {
+    bai_logger_log_title(bai_logger, "VALID_TIME");
+    bai_logger_log_double(bai_logger, "delta", δ);
+    bai_logger_log_double(bai_logger, "K", K);
+    bai_logger_log_double(bai_logger, "s", s);
+    bai_logger_log_double(bai_logger, "zetas", zetas);
+    bai_logger_log_double(bai_logger, "eta", eta);
+    bai_logger_log_int(bai_logger, "cst", cst);
+    bai_logger_log_double_array(bai_logger, "u", u_array, K);
+    bai_logger_log_double_array(bai_logger, "val", val_array, K);
+    bai_logger_log_int(bai_logger, "result", result);
+    bai_logger_flush(bai_logger);
+    free(u_array);
+    free(val_array);
+  }
+  return result;
 }
 
-double get_factor_non_KL(HT *ht, int t) {
+double get_factor_non_KL(HT *ht, int t, BAILogger *bai_logger) {
   const double δ = ht->δ;
   const double K = ht->K;
   const double s = ht->s;
   const double zetas = ht->zetas;
   const double eta = ht->eta;
   const int cst = 4;
-  double _val_σ2 = 1 + 2 * (1 + eta) *
-                           (log(cst * (K - 1) * zetas / δ) +
-                            s * log(1 + log(t) / log(1 + eta))) /
-                           t;
-  double _val_μ = 1 + 2 * log(cst * (K - 1) * zetas / δ) +
-                  2 * s * log(1 + log(t) / (2 * s)) + 2 * s;
-  return barW(_val_μ, -1) / (t * barW(_val_σ2, 0) - 1);
+  const double _val_σ2 = 1 + 2 * (1 + eta) *
+                                 (log(cst * (K - 1) * zetas / δ) +
+                                  s * log(1 + log(t) / log(1 + eta))) /
+                                 t;
+  const double _val_μ = 1 + 2 * log(cst * (K - 1) * zetas / δ) +
+                        2 * s * log(1 + log(t) / (2 * s)) + 2 * s;
+  const double numerator = barW(_val_μ, -1);
+  const double denominator = (t * barW(_val_σ2, 0) - 1);
+  const double ratio = numerator / denominator;
+  bai_logger_log_title(bai_logger, "GET_FACTOR");
+  bai_logger_log_int(bai_logger, "t", t);
+  bai_logger_log_double(bai_logger, "delta", δ);
+  bai_logger_log_double(bai_logger, "K", K);
+  bai_logger_log_double(bai_logger, "s", s);
+  bai_logger_log_double(bai_logger, "zetas", zetas);
+  bai_logger_log_double(bai_logger, "eta", eta);
+  bai_logger_log_int(bai_logger, "cst", cst);
+  bai_logger_log_double(bai_logger, "_val_sigma2", _val_σ2);
+  bai_logger_log_double(bai_logger, "_val_mu", _val_μ);
+  bai_logger_log_double(bai_logger, "numerator", numerator);
+  bai_logger_log_double(bai_logger, "denominator", denominator);
+  bai_logger_log_double(bai_logger, "ratio", ratio);
+  bai_logger_flush(bai_logger);
+  return ratio;
 }
 
 double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
-                    double __attribute__((unused)) * hσ2, int astar, int a) {
+                    double __attribute__((unused)) * hσ2, int astar, int a,
+                    BAILogger *bai_logger) {
   HT *ht = (HT *)data;
-  if (!valid_time(ht, N)) {
+  bai_logger_log_title(bai_logger, "HT");
+  if (!valid_time(ht, N, bai_logger)) {
+    bai_logger_log_title(bai_logger, "invalid time");
+    bai_logger_flush(bai_logger);
     return DBL_MAX;
   }
   if (!ht->is_EV_GLR) {
     log_fatal("HT threshold not implemented for non-EV GLR");
   }
-  double ratio_a = get_factor_non_KL(ht, N[a]);
-  double ratio_astar = get_factor_non_KL(ht, N[astar]);
-  return 0.5 * (N[a] * ratio_a + N[astar] * ratio_astar);
+  double ratio_a = get_factor_non_KL(ht, N[a], bai_logger);
+  double ratio_astar = get_factor_non_KL(ht, N[astar], bai_logger);
+  const double result = 0.5 * (N[a] * ratio_a + N[astar] * ratio_astar);
+  bai_logger_log_double(bai_logger, "ratio_a", ratio_a);
+  bai_logger_log_double(bai_logger, "ratio_astar", ratio_astar);
+  bai_logger_log_double(bai_logger, "N[a]", N[a]);
+  bai_logger_log_double(bai_logger, "N[astar]", N[astar]);
+  bai_logger_log_double(bai_logger, "result", result);
+  bai_logger_flush(bai_logger);
+  return result;
 }
 
-typedef double (*threshold_func_t)(void *, int *, double *, double *, int, int);
+typedef double (*threshold_func_t)(void *, int *, double *, double *, int, int,
+                                   BAILogger *);
 
 struct BAIThreshold {
   bai_threshold_t type;
@@ -118,7 +176,8 @@ void bai_destroy_threshold(BAIThreshold *bai_threshold) {
 }
 
 double bai_invoke_threshold(BAIThreshold *bai_threshold, int *N, double *hμ,
-                            double *hσ2, int astar, int a) {
+                            double *hσ2, int astar, int a,
+                            BAILogger *bai_logger) {
   return bai_threshold->threshold_func(bai_threshold->data, N, hμ, hσ2, astar,
-                                       a);
+                                       a, bai_logger);
 }

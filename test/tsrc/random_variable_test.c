@@ -20,7 +20,8 @@ void test_random_variable_normal(void) {
 
   for (int i = 0; i < 100; i++) {
     const int k = i % num_rvs;
-    assert(within_epsilon(rvs_sample(rvs1, k), rvs_sample(rvs2, k)));
+    assert(
+        within_epsilon(rvs_sample(rvs1, k, NULL), rvs_sample(rvs2, k, NULL)));
   }
 
   rvs_destroy(rvs1);
@@ -50,8 +51,8 @@ void test_random_variable_normal_predetermined(void) {
     const int k = i % num_rvs;
     const double expected_result =
         means_and_stdevs[k * 2] + means_and_stdevs[k * 2 + 1] * samples[i];
-    assert(within_epsilon(expected_result, rvs_sample(rvs1, k)));
-    assert(within_epsilon(expected_result, rvs_sample(rvs2, k)));
+    assert(within_epsilon(expected_result, rvs_sample(rvs1, k, NULL)));
+    assert(within_epsilon(expected_result, rvs_sample(rvs2, k, NULL)));
   }
 
   rvs_destroy(rvs1);

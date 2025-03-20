@@ -3,6 +3,8 @@
 #include <math.h>
 #include <stdio.h>
 
+#include "../ent/bai_logger.h"
+
 #include "../util/util.h"
 
 typedef struct CTracking {
@@ -23,23 +25,31 @@ void destroy_c_tracking(CTracking *c_tracking) {
   free(c_tracking);
 }
 
-int bai_c_track(const void *data, const int *N, const double *w,
-                const int size) {
+int bai_c_track(const void *data, const int *N, const double *w, const int size,
+                BAILogger *bai_logger) {
   CTracking *t = (CTracking *)data;
   for (int i = 0; i < size; i++) {
     t->sumw[i] += w[i];
   }
-  int argmin = 0;
+  int min_index = 0;
   for (int i = 1; i < size; i++) {
-    if (N[i] - t->sumw[i] < N[argmin] - t->sumw[argmin]) {
-      argmin = i;
+    if (N[i] - t->sumw[i] < N[min_index] - t->sumw[min_index]) {
+      min_index = i;
     }
   }
-  return argmin;
+
+  bai_logger_log_title(bai_logger, "C_TRACK");
+  bai_logger_log_int_array(bai_logger, "N", N, size);
+  bai_logger_log_double_array(bai_logger, "t.sumw", t->sumw, size);
+  bai_logger_log_double_array(bai_logger, "w", w, size);
+  bai_logger_log_int(bai_logger, "min_index", min_index);
+  bai_logger_flush(bai_logger);
+
+  return min_index;
 }
 
 int bai_d_track(const void __attribute__((unused)) * data, const int *N,
-                const double *w, int size) {
+                const double *w, int size, BAILogger *bai_logger) {
   int sumN = 0;
   for (int i = 0; i < size; i++) {
     sumN += N[i];
@@ -50,11 +60,18 @@ int bai_d_track(const void __attribute__((unused)) * data, const int *N,
       argmin = i;
     }
   }
+
+  bai_logger_log_title(bai_logger, "D_TRACK");
+  bai_logger_log_int_array(bai_logger, "N", N, size);
+  bai_logger_log_double_array(bai_logger, "w", w, size);
+  bai_logger_log_int(bai_logger, "argmin", argmin);
+  bai_logger_flush(bai_logger);
+
   return argmin;
 }
 
 typedef int (*tracking_func_t)(const void *, const int *, const double *,
-                               const int);
+                               const int, BAILogger *);
 
 struct BAITracking {
   bai_tracking_t type;
@@ -96,7 +113,8 @@ void bai_tracking_destroy(BAITracking *bai_tracking) {
   free(bai_tracking);
 }
 
-int bai_track(BAITracking *bai_tracking, int *N, const double *w, const int K) {
+int bai_track(BAITracking *bai_tracking, int *N, const double *w, const int K,
+              BAILogger *bai_logger) {
   const int t = 0;
   for (int i = 0; i < K; i++) {
     N[i] += t;
@@ -114,10 +132,11 @@ int bai_track(BAITracking *bai_tracking, int *N, const double *w, const int K) {
     for (int i = 0; i < K; i++) {
       bai_tracking->undersampled[i] /= (double)num_undersampled;
     }
-    result = bai_tracking->tracking_func(bai_tracking->data, N,
-                                         bai_tracking->undersampled, K);
+    result = bai_tracking->tracking_func(
+        bai_tracking->data, N, bai_tracking->undersampled, K, bai_logger);
   } else {
-    result = bai_tracking->tracking_func(bai_tracking->data, N, w, K);
+    result =
+        bai_tracking->tracking_func(bai_tracking->data, N, w, K, bai_logger);
   }
   return result;
 }

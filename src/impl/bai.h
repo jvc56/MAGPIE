@@ -5,6 +5,7 @@
 
 #include "bai_sampling_rule.h"
 
-int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ);
+int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ,
+        BAILogger *bai_logger);
 
 #endif

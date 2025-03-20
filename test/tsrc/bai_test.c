@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../../src/ent/bai_logger.h"
 #include "../../src/ent/random_variable.h"
 
 #include "../../src/impl/bai.h"
@@ -10,9 +11,15 @@
 
 void test_bai_track_and_stop(void) {
   // TODO: test normal track and stop
-  RandomVariablesArgs rv_args = {};
+  double means_and_stdevs[] = {0, 1, 100, 1};
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = (sizeof(means_and_stdevs) / sizeof(double)) / 2,
+      .means_and_stdevs = means_and_stdevs,
+      .normal.seed = 10,
+  };
   RandomVariables *rvs = rvs_create(&rv_args);
-  int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, rvs, 0.05);
+  int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, rvs, 0.05, NULL);
   assert(result == 0);
   rvs_destroy(rvs);
 }
@@ -33,24 +40,20 @@ void test_bai_input_from_file(void) {
   int num_samples;
   double *samples;
 
-  // Read delta
   if (fscanf(file, "%lf", &delta) != 1) {
     log_fatal("Failed to read delta from file: %s\n", bai_input_filename);
   }
 
-  // Read num_rvs
   if (fscanf(file, "%d", &num_rvs) != 1) {
     log_fatal("Failed to read num_rvs from file: %s\n", bai_input_filename);
   }
 
-  // Allocate memory for means_and_stdevs
   means_and_stdevs = (double *)malloc(
       num_rvs * 2 * sizeof(double)); // 2 values per RV (mean and std dev)
   if (!means_and_stdevs) {
     log_fatal("Failed to allocate memory for means_and_stdevs.\n");
   }
 
-  // Read means_and_stdevs
   for (int i = 0; i < num_rvs; ++i) {
     if (fscanf(file, "%lf,%lf", &means_and_stdevs[i * 2],
                &means_and_stdevs[i * 2 + 1]) != 2) {
@@ -58,18 +61,15 @@ void test_bai_input_from_file(void) {
     }
   }
 
-  // Read num_samples
   if (fscanf(file, "%d", &num_samples) != 1) {
     log_fatal("Failed to read num_samples from file: %s\n", bai_input_filename);
   }
 
-  // Allocate memory for samples
   samples = (double *)malloc(num_samples * sizeof(double));
   if (!samples) {
     log_fatal("Failed to allocate memory for samples.\n");
   }
 
-  // Read samples
   for (int i = 0; i < num_samples; ++i) {
     if (fscanf(file, "%lf", &samples[i]) != 1) {
       log_fatal("Failed to read sample %d from file.\n", i);
@@ -78,27 +78,17 @@ void test_bai_input_from_file(void) {
 
   fclose(file);
 
-  // At this point, the variables are populated
-  // You can now process the data as needed
+  BAILogger *bai_logger = bai_logger_create("bai_log.txt");
 
-  // Print everything that was read
-  printf("delta: %.6f\n", delta);
-  printf("num_rvs: %d\n", num_rvs);
-  printf("Means and standard deviations (each pair of values corresponds to "
-         "mean and stdev for each RV):\n");
-  for (int i = 0; i < num_rvs; ++i) {
-    printf("RV %d -> Mean: %.6f, Stdev: %.6f\n", i + 1, means_and_stdevs[i * 2],
-           means_and_stdevs[i * 2 + 1]);
-  }
-
-  printf("num_samples: %d\n", num_samples);
-  printf("Samples:\n");
-  for (int i = 0; i < num_samples; ++i) {
-    printf("Sample %d: %.6f\n", i + 1, samples[i]);
-  }
+  bai_logger_log_double(bai_logger, "delta", delta);
+  bai_logger_log_int(bai_logger, "num_rvs", num_rvs);
+  bai_logger_log_double_array(bai_logger, "means_and_stdevs", means_and_stdevs,
+                              num_rvs * 2);
+  bai_logger_log_int(bai_logger, "num_samples", num_samples);
+  bai_logger_flush(bai_logger);
 
   RandomVariablesArgs rv_args = {
-      .type = RANDOM_VARIABLES_NORMAL,
+      .type = RANDOM_VARIABLES_NORMAL_PREDETERMINED,
       .num_rvs = num_rvs,
       .means_and_stdevs = means_and_stdevs,
       .normal_predetermined.num_samples = num_samples,
@@ -106,11 +96,18 @@ void test_bai_input_from_file(void) {
   };
 
   RandomVariables *rvs = rvs_create(&rv_args);
-  bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, rvs, delta);
+  const int result =
+      bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, rvs, delta, bai_logger);
+  bai_logger_log_int(bai_logger, "result", result);
+  bai_logger_flush(bai_logger);
 
+  bai_logger_destroy(bai_logger);
+  rvs_destroy(rvs);
   free(means_and_stdevs);
   free(samples);
-  rvs_destroy(rvs);
 }
 
-void test_bai(void) { test_bai_input_from_file(); }
+void test_bai(void) {
+  test_bai_track_and_stop();
+  test_bai_input_from_file();
+}

@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "bai_logger.h"
+
 typedef struct RandomVariables RandomVariables;
 
 typedef enum {
@@ -32,7 +34,7 @@ typedef struct RandomVariablesArgs {
 
 RandomVariables *rvs_create(RandomVariablesArgs *rvs_args);
 void rvs_destroy(RandomVariables *rvs);
-double rvs_sample(RandomVariables *rvs, uint64_t k);
+double rvs_sample(RandomVariables *rvs, uint64_t k, BAILogger *bai_logger);
 int rvs_get_num_rvs(RandomVariables *rvs);
 
 #endif

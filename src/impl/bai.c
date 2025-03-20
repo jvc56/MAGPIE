@@ -1,6 +1,8 @@
 #include <stdbool.h>
 
+#include "../ent/bai_logger.h"
 #include "../ent/random_variable.h"
+
 #include "../util/util.h"
 
 #include "bai_helper.h"
@@ -8,7 +10,7 @@
 #include "bai_sampling_rule.h"
 
 bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *hμ,
-                        double *hσ2, int astar) {
+                        double *hσ2, int astar, BAILogger *bai_logger) {
   for (int a = 0; a < K; a++) {
     if (a == astar) {
       continue;
@@ -17,7 +19,14 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
     // val = is_glr ? Zs[a] : MZs[a];
     // cdt = val > Sβ(N, hμ, hσ2, astar, a);
     // stop = stop && cdt;
-    const bool cdt = Zs[a] > bai_invoke_threshold(Sβ, N, hμ, hσ2, astar, a);
+    const double thres =
+        bai_invoke_threshold(Sβ, N, hμ, hσ2, astar, a, bai_logger);
+    const bool cdt = Zs[a] > thres;
+    bai_logger_log_title(bai_logger, "STOPPING_CRITERION");
+    bai_logger_log_double(bai_logger, "a", a);
+    bai_logger_log_double(bai_logger, "val", Zs[a]);
+    bai_logger_log_double(bai_logger, "thres", thres);
+    bai_logger_flush(bai_logger);
     if (!cdt) {
       return false;
     }
@@ -26,7 +35,8 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
 }
 
 // Assumes random variables are normally distributed.
-int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ) {
+int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ,
+        BAILogger *bai_logger) {
   const int K = rvs_get_num_rvs(rvs);
   BAIThreshold *βs = bai_create_threshold(BAI_THRESHOLD_HT, δ, 2, K, 2, 1.2);
 
@@ -35,7 +45,7 @@ int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ) {
   double *S2 = calloc_or_die(K, sizeof(double));
   for (int k = 0; k < K; k++) {
     for (int i = 0; i < 2; i++) {
-      double _X = rvs_sample(rvs, k);
+      double _X = rvs_sample(rvs, k, bai_logger);
       S[k] += _X;
       S2[k] += _X * _X;
       N[k] += 1;
@@ -55,18 +65,27 @@ int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ) {
       hμ[i] = S[i] / N[i];
       hσ2[i] = S2[i] / N[i] - hμ[i] * hμ[i];
     }
-    bai_glrt(K, N, hμ, hσ2, glrt_results);
+    bai_glrt(K, N, hμ, hσ2, glrt_results, bai_logger);
     double *Zs = glrt_results->vals;
     int aalt = glrt_results->k;
     astar = glrt_results->astar;
     double *ξ = glrt_results->μ;
     double *ϕ2 = glrt_results->σ2;
-    if (stopping_criterion(K, Zs, Sβ, N, hμ, hσ2, astar)) {
+
+    bai_logger_log_title(bai_logger, "GLRT_RETURN_VALUES");
+    bai_logger_log_double_array(bai_logger, "Zs", Zs, K);
+    bai_logger_log_int(bai_logger, "aalt", aalt);
+    bai_logger_log_int(bai_logger, "astar", astar);
+    bai_logger_log_double_array(bai_logger, "ksi", ξ, K);
+    bai_logger_log_double_array(bai_logger, "phi2", ϕ2, K);
+    bai_logger_flush(bai_logger);
+
+    if (stopping_criterion(K, Zs, Sβ, N, hμ, hσ2, astar, bai_logger)) {
       break;
     }
     const int k = bai_sampling_rule_next_sample(bai_sampling_rule, astar, aalt,
-                                                ξ, ϕ2, N, S, Zs, K);
-    double _X = rvs_sample(rvs, k);
+                                                ξ, ϕ2, N, S, Zs, K, bai_logger);
+    double _X = rvs_sample(rvs, k, bai_logger);
     S[k] += _X;
     S2[k] += _X * _X;
     N[k] += 1;

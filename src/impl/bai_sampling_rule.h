@@ -1,6 +1,8 @@
 #ifndef BAI_SAMPLING_RULE_H
 #define BAI_SAMPLING_RULE_H
 
+#include "../ent/bai_logger.h"
+
 typedef struct BAISamplingRule BAISamplingRule;
 
 typedef enum {
@@ -14,6 +16,7 @@ BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, int *N,
 void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule);
 int bai_sampling_rule_next_sample(BAISamplingRule *bai_sampling_rule, int astar,
                                   int aalt, double *ξ, double *ϕ2, int *N,
-                                  double *S, double *Zs, int size);
+                                  double *S, double *Zs, int size,
+                                  BAILogger *bai_logger);
 
 #endif

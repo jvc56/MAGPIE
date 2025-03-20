@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdlib.h>
 
+#include "bai_logger.h"
 #include "random_variable.h"
 #include "xoshiro.h"
 
@@ -8,7 +9,7 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-typedef double (*rvs_sample_func_t)(RandomVariables *, uint64_t);
+typedef double (*rvs_sample_func_t)(RandomVariables *, uint64_t, BAILogger *);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 
 struct RandomVariables {
@@ -27,7 +28,8 @@ double uniform_sample(XoshiroPRNG *prng) {
   return (double)prng_next(prng) / ((double)UINT64_MAX);
 }
 
-double rv_normal_sample(RandomVariables *rvs, uint64_t k) {
+double rv_normal_sample(RandomVariables *rvs, uint64_t k,
+                        BAILogger __attribute__((unused)) * bai_logger) {
   // Implements the Box-Muller transform
   RVNormal *rv_normal = (RVNormal *)rvs->data;
   double u, v, s;
@@ -67,16 +69,27 @@ typedef struct RVNormalPredetermined {
   double *samples;
 } RVNormalPredetermined;
 
-double rv_normal_predetermined_sample(RandomVariables *rvs, uint64_t k) {
+double rv_normal_predetermined_sample(RandomVariables *rvs, uint64_t k,
+                                      BAILogger *bai_logger) {
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
   if (rv_normal_predetermined->index >= rv_normal_predetermined->num_samples) {
     log_fatal("ran out of normal predetermined samples\n");
   }
-  double sample =
-      rv_normal_predetermined->samples[rv_normal_predetermined->index++];
-  return rvs->means_and_stdevs[k * 2] +
-         rvs->means_and_stdevs[k * 2 + 1] * sample;
+  const double mean = rvs->means_and_stdevs[k * 2];
+  const double sigma2 = rvs->means_and_stdevs[k * 2 + 1];
+  const int index = rv_normal_predetermined->index++;
+  const double sample = rv_normal_predetermined->samples[index];
+  const double result = mean + sqrt(sigma2) * sample;
+  bai_logger_log_title(bai_logger, "DETERMINISTIC_SAMPLE");
+  bai_logger_log_int(bai_logger, "index", index);
+  bai_logger_log_int(bai_logger, "arm", k);
+  bai_logger_log_double(bai_logger, "s", result);
+  bai_logger_log_double(bai_logger, "u", mean);
+  bai_logger_log_double(bai_logger, "sigma2", sigma2);
+  bai_logger_log_double(bai_logger, "sampe", sample);
+  bai_logger_flush(bai_logger);
+  return result;
 }
 
 void rv_normal_predetermined_destroy(RandomVariables *rvs) {
@@ -132,8 +145,8 @@ void rvs_destroy(RandomVariables *rvs) {
   free(rvs);
 }
 
-double rvs_sample(RandomVariables *rvs, uint64_t k) {
-  return rvs->sample_func(rvs, k);
+double rvs_sample(RandomVariables *rvs, uint64_t k, BAILogger *bai_logger) {
+  return rvs->sample_func(rvs, k, bai_logger);
 }
 
 int rvs_get_num_rvs(RandomVariables *rvs) { return rvs->num_rvs; }
