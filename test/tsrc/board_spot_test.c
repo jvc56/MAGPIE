@@ -1,4 +1,4 @@
-#include <assert.h>
+ #include <assert.h>
 
 #include "../../src/def/board_defs.h"
 
@@ -538,9 +538,9 @@ void test_wof_board_spot(void) {
 }
 
 void test_board_spot(void) {
-  // test_standard_empty_board();
-  // test_asymmetrical_bricked_empty_board();
-  // test_standard_with_word_on_board();
-  // test_oxyphenbutazone_board_spot();
+  test_standard_empty_board();
+  test_asymmetrical_bricked_empty_board();
+  test_standard_with_word_on_board();
+  test_oxyphenbutazone_board_spot();
   test_wof_board_spot();
 }

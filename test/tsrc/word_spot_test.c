@@ -199,48 +199,10 @@ void test_oxyphenbutazone_word_spot(void) {
   config_destroy(config);
 }
 
-void test_wus(void) {
-  char wus[300] =
-      "11FEZ1/11AGO1/11TO2/11ST2/4T5R1I2/2GIRD3VATS2/4AI1DEEK1EH1/4IN1AREIC1AB/"
-      "2BULkAGE4ER/1PINEY7MO/2O1D3VAX2IO/2T7UPEND/1QI10S1/1UNLAY9/1A2LOFT7 "
-      "CEMOSUW/EEINOW? 344/363 0";
-
-  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
-  // const LetterDistribution *ld = config_get_ld(config);
-  Game *game = config_game_create(config);
-  Player *player = game_get_player(game, 0);
-  // Player *opponent = game_get_player(game, 1);
-  MoveList *move_list = move_list_create(10000);
-  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
-
-  WordSpotHeap spot_list;
-  load_and_build_spots(game, wus, "CEMOSUW", &spot_list, move_list);
-  Bag *bag = game_get_bag(game);
-  printf("Bag size: %d\n", bag_get_tiles(bag));
-  for (int i = 0; i < spot_list.count; i++) {
-    printf("i: %d, ", i);
-    const WordSpot *spot = &spot_list.spots[i];
-    if (spot->dir == BOARD_HORIZONTAL_DIRECTION) {
-      printf("%d%c", spot->row + 1, spot->col + 'A');
-    } else {
-      printf("%c%d", spot->col + 'A', spot->row + 1);
-    }
-    printf(" (%d tiles) best_possible_score: %d, ", spot->num_tiles,
-           equity_to_int(spot->best_possible_score));
-    printf("best_possible_equity: %f\n",
-           equity_to_double(spot->best_possible_equity));
-  }
-
-  move_list_destroy(move_list);
-  game_destroy(game);
-  config_destroy(config);
-}
-
 void test_word_spot(void) {
-  // test_zerk();
-  // test_opening_racks();
-  // test_best_leaves();
-  // test_bingos_after_vac();
-  // test_oxyphenbutazone_word_spot();
-  test_wus();
+  test_zerk();
+  test_opening_racks();
+  test_best_leaves();
+  test_bingos_after_vac();
+  test_oxyphenbutazone_word_spot();
 }

@@ -565,6 +565,12 @@ static inline bool board_is_position_in_bounds(int row, int col) {
   return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM;
 }
 
+static inline bool board_is_position_in_bounds_and_nonempty(const Board *board,
+                                                            int row, int col) {
+  return board_is_position_in_bounds(row, col) &&
+         !board_is_empty(board, row, col);
+}
+
 // Returns true if
 // - The position is in bounds
 // - The position is not bricked

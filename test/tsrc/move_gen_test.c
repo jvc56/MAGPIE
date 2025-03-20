@@ -1120,8 +1120,6 @@ void wordmap_gen_wus_movegen(void) {
   game_load_cgp(game, wus);
   rack_set_to_string(ld, player_get_rack(player), "CEMOSUW");
   rack_set_to_string(ld, player_get_rack(opponent), "EEINOW?");
-  Bag *bag = game_get_bag(game);
-  printf("Bag size: %d\n", bag_get_tiles(bag));
 
   generate_moves_for_game(game, 0, move_list);
   SortedMoveList *sml = sorted_move_list_create(move_list);
@@ -1151,11 +1149,11 @@ void test_move_gen(void) {
   // movegen_no_wmp_by_default_test();
   // movegen_only_one_player_wmp();
 
-  // wordmap_gen_muzjiks();
-  // wordmap_gen_evacuators();
-  // wordmap_gen_below_jeweler();
-  // wordmap_gen_trongle();
-  // wordmap_gen_wof_movegen();
-  // wordmap_gen_oxyphenbutazone();
+  wordmap_gen_muzjiks();
+  wordmap_gen_evacuators();
+  wordmap_gen_below_jeweler();
+  wordmap_gen_trongle();
+  wordmap_gen_wof_movegen();
+  wordmap_gen_oxyphenbutazone();
   wordmap_gen_wus_movegen();
 }
