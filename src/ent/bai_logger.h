@@ -6,7 +6,7 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-#define BAI_LOGGER_NUM_DECIMALS 4
+#define BAI_LOGGER_NUM_DECIMALS 10
 
 typedef struct BAILogger {
   FILE *fh;

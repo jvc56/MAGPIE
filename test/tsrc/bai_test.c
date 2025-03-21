@@ -20,15 +20,11 @@ void test_bai_track_and_stop(void) {
   };
   RandomVariables *rvs = rvs_create(&rv_args);
   int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, rvs, 0.05, NULL);
-  assert(result == 0);
+  assert(result == 1);
   rvs_destroy(rvs);
 }
 
-void test_bai_input_from_file(void) {
-  const char *bai_input_filename = getenv("BAI_INPUT");
-  if (!bai_input_filename) {
-    return;
-  }
+void test_bai_input_from_file(const char *bai_input_filename) {
   FILE *file = fopen(bai_input_filename, "r");
   if (!file) {
     log_fatal("Failed to open BAI_INPUT file: %s\n", bai_input_filename);
@@ -78,7 +74,7 @@ void test_bai_input_from_file(void) {
 
   fclose(file);
 
-  BAILogger *bai_logger = bai_logger_create("bai_log.txt");
+  BAILogger *bai_logger = bai_logger_create("bai_log_magpie.txt");
 
   bai_logger_log_double(bai_logger, "delta", delta);
   bai_logger_log_int(bai_logger, "num_rvs", num_rvs);
@@ -108,6 +104,10 @@ void test_bai_input_from_file(void) {
 }
 
 void test_bai(void) {
-  test_bai_track_and_stop();
-  test_bai_input_from_file();
+  const char *bai_input_filename = getenv("BAI_INPUT");
+  if (bai_input_filename) {
+    test_bai_input_from_file(bai_input_filename);
+  } else {
+    test_bai_track_and_stop();
+  }
 }

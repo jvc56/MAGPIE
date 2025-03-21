@@ -37,7 +37,8 @@ void bai_glrt_results_destroy(BAIGLRTResults *glrt_results) {
 typedef double (*bai_binary_search_value_func_t)(double, void *);
 
 double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
-                         double lo, double hi, double ϵ) {
+                         double lo, double hi, double ϵ,
+                         BAILogger *bai_logger) {
   double flo = vf(lo, args);
   double fhi = vf(hi, args);
 
@@ -50,12 +51,13 @@ double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
 
   for (int i = 0; i < (BAI_BINARY_SEARCH_MAX_ITER); i++) {
     double mid = (lo + hi) / 2.0;
+    bai_logger_log_double(bai_logger, "mid", mid);
     if (mid == lo || mid == hi) {
       return mid;
     }
 
     double fmid = vf(mid, args);
-
+    bai_logger_log_double(bai_logger, "fmid", fmid);
     if (fmid < -ϵ) {
       lo = mid;
     } else if (fmid > ϵ) {
@@ -66,10 +68,10 @@ double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
   }
 
   // Log fatal error if tolerance is not reached
-  log_fatal("binary_search did not reach tolerance %g in %d iterations.\n"
-            "f(%f) = %f\n"
-            "f(%f) = %f\n"
-            "mid would be %f",
+  log_fatal("binary_search did not reach tolerance %0.20f in %d iterations.\n"
+            "f(%0.20f) = %0.20f\n"
+            "f(%0.20f) = %0.20f\n"
+            "mid would be %0.20f",
             ϵ, (BAI_BINARY_SEARCH_MAX_ITER), lo, vf(lo, args), hi, vf(hi, args),
             (lo + hi) / 2.0);
   // Unreachable but prevents compiler warnings
@@ -167,6 +169,7 @@ typedef struct BAIXBinarySearchArgs {
   double μa;
   double σ2a;
   double v;
+  BAILogger *bai_logger;
 } BAIXBinarySearchArgs;
 
 double bai_X_binary_search_func(double z, void *args) {
@@ -177,8 +180,11 @@ double bai_X_binary_search_func(double z, void *args) {
   const double σ2a = xbs_args->σ2a;
   const double v = xbs_args->v;
   const double μz = alt_λ_KV(μ1, σ21, 1 - z, μa, σ2a, z);
-  return (1 - z) * dGaussian(μ1, σ21, μz) + z * dGaussian(μa, σ2a, μz) -
-         (1 - z) * v;
+  const double result = (1 - z) * dGaussian(μ1, σ21, μz) +
+                        z * dGaussian(μa, σ2a, μz) - (1 - z) * v;
+  bai_logger_log_double(xbs_args->bai_logger, "uz", z);
+  bai_logger_log_double(xbs_args->bai_logger, "result", result);
+  return result;
 }
 
 typedef struct BAIXResults {
@@ -187,7 +193,7 @@ typedef struct BAIXResults {
 } BAIXResults;
 
 void bai_X(double μ1, double σ21, double μa, double σ2a, double v,
-           BAIXResults *bai_X_results) {
+           BAIXResults *bai_X_results, BAILogger *bai_logger) {
   double upd_a = dGaussian(μ1, σ21, μa);
   BAIXBinarySearchArgs xbs_args = {
       .μ1 = μ1,
@@ -195,11 +201,16 @@ void bai_X(double μ1, double σ21, double μa, double σ2a, double v,
       .μa = μa,
       .σ2a = σ2a,
       .v = v,
+      .bai_logger = bai_logger,
   };
   double α = bai_binary_search(bai_X_binary_search_func, &xbs_args, 0, 1,
-                               upd_a * (BAI_EPSILON));
+                               upd_a * (BAI_EPSILON), bai_logger);
   bai_X_results->α_ratio = α / (1 - α);
   bai_X_results->alt_λ_KV = alt_λ_KV(μ1, σ21, 1 - α, μa, σ2a, α);
+  bai_logger_log_double(bai_logger, "a", α);
+  bai_logger_log_double(bai_logger, "a_ratio", bai_X_results->α_ratio);
+  bai_logger_log_double(bai_logger, "alt", bai_X_results->alt_λ_KV);
+  bai_logger_flush(bai_logger);
 }
 
 typedef struct BAIOracleBinarySearchArgs {
@@ -207,6 +218,7 @@ typedef struct BAIOracleBinarySearchArgs {
   const double *σ2s;
   int size;
   int astar;
+  BAILogger *bai_logger;
 } BAIOracleBinarySearchArgs;
 
 double bai_oracle_binary_search_func(double z, void *args) {
@@ -221,11 +233,18 @@ double bai_oracle_binary_search_func(double z, void *args) {
     if (k == astar) {
       continue;
     }
-    bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], z, &bai_X_results);
+    bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], z, &bai_X_results,
+          obs_args->bai_logger);
     const double μx = bai_X_results.alt_λ_KV;
-    const double num = dGaussian(μs[astar], σ2s[astar], μx);
+    const double numer = dGaussian(μs[astar], σ2s[astar], μx);
     const double denom = dGaussian(μs[k], σ2s[k], μx);
-    sum += num / denom;
+    const double result = numer / denom;
+    bai_logger_log_int(obs_args->bai_logger, "k", k);
+    bai_logger_log_double(obs_args->bai_logger, "ux", μx);
+    bai_logger_log_double(obs_args->bai_logger, "numer", numer);
+    bai_logger_log_double(obs_args->bai_logger, "denom", denom);
+    bai_logger_log_double(obs_args->bai_logger, "result", result);
+    sum += result;
   }
   return sum - 1.0;
 }
@@ -260,7 +279,7 @@ void bai_oracle(double *μs, double *σ2s, int size,
 
   if (all_equal) {
     oracle_result->Σ_over_val = DBL_MAX;
-    for (int i = 1; i < size + 1; i++) {
+    for (int i = 0; i < size; i++) {
       oracle_result->ws_over_Σ[i] = 1 / (double)size;
     }
     bai_logger_log_title(bai_logger, "ALL_EQUAL");
@@ -291,8 +310,9 @@ void bai_oracle(double *μs, double *σ2s, int size,
   obs_args.size = size;
   obs_args.μs = μs;
   obs_args.σ2s = σ2s;
+  obs_args.bai_logger = bai_logger;
   double val = bai_binary_search(bai_oracle_binary_search_func, &obs_args, 0,
-                                 hi, BAI_EPSILON);
+                                 hi, BAI_EPSILON, bai_logger);
 
   bai_logger_log_double(bai_logger, "val", val);
   bai_logger_flush(bai_logger);
@@ -303,7 +323,8 @@ void bai_oracle(double *μs, double *σ2s, int size,
     if (k == astar) {
       oracle_result->ws_over_Σ[k] = 1.0;
     } else {
-      bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], val, &bai_X_results);
+      bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], val, &bai_X_results,
+            bai_logger);
       oracle_result->ws_over_Σ[k] = bai_X_results.α_ratio;
     }
     Σ += oracle_result->ws_over_Σ[k];

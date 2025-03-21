@@ -87,7 +87,7 @@ double rv_normal_predetermined_sample(RandomVariables *rvs, uint64_t k,
   bai_logger_log_double(bai_logger, "s", result);
   bai_logger_log_double(bai_logger, "u", mean);
   bai_logger_log_double(bai_logger, "sigma2", sigma2);
-  bai_logger_log_double(bai_logger, "sampe", sample);
+  bai_logger_log_double(bai_logger, "samp", sample);
   bai_logger_flush(bai_logger);
   return result;
 }

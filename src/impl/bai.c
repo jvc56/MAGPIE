@@ -65,6 +65,7 @@ int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ,
       hμ[i] = S[i] / N[i];
       hσ2[i] = S2[i] / N[i] - hμ[i] * hμ[i];
     }
+    bai_logger_log_int(bai_logger, "t", t);
     bai_glrt(K, N, hμ, hσ2, glrt_results, bai_logger);
     double *Zs = glrt_results->vals;
     int aalt = glrt_results->k;
@@ -93,6 +94,11 @@ int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ,
   }
   bai_glrt_results_destroy(glrt_results);
   bai_sampling_rule_destroy(bai_sampling_rule);
+  free(hσ2);
+  free(hμ);
+  free(S2);
+  free(S);
+  free(N);
   bai_destroy_threshold(βs);
   return astar;
 }
