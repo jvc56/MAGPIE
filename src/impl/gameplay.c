@@ -20,6 +20,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 
+#include "../str/move_string.h"
 #include "move_gen.h"
 
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
@@ -164,6 +165,236 @@ void update_cross_set_for_move(const Move *move, Game *game) {
   }
 }
 
+void update_spots_through_main_word_vertical(const Move *move, Game *game) {
+  const int move_row = move_get_row_start(move);
+  const int move_col = move_get_col_start(move);
+  const Board *board = game_get_board(game);
+  game_update_spots_from_square(game, move_row, move_col, 1,
+                                BOARD_VERTICAL_DIRECTION);
+  int needed_to_reach_start = 0;
+  int row = move_row - 1;
+  while (row >= 0) {
+    if (board_is_empty(board, row, move_col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start >= RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, row, move_col,
+                                  needed_to_reach_start || 1,
+                                  BOARD_VERTICAL_DIRECTION);
+    row--;
+  }
+}
+
+void update_spots_through_main_word_horizontal(const Move *move, Game *game) {
+  const int move_row = move_get_row_start(move);
+  const int move_col = move_get_col_start(move);
+  const Board *board = game_get_board(game);
+  game_update_spots_from_square(game, move_row, move_col, 1,
+                                BOARD_HORIZONTAL_DIRECTION);
+  int needed_to_reach_start = 0;
+  int col = move_col - 1;
+  while (col >= 0) {
+    if (board_is_empty(board, move_row, col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start >= RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, move_row, col,
+                                  needed_to_reach_start || 1,
+                                  BOARD_HORIZONTAL_DIRECTION);
+    col--;
+  }
+}
+
+void update_spots_through_main_word(const Move *move, Game *game) {
+  printf("update_spots_through_main_word\n");
+  switch (move_get_dir(move)) {
+  case BOARD_VERTICAL_DIRECTION:
+    update_spots_through_main_word_vertical(move, game);
+    return;
+  case BOARD_HORIZONTAL_DIRECTION:
+    update_spots_through_main_word_horizontal(move, game);
+    return;
+  }
+}
+
+void update_spots_hooking_horizontal_at_col(Game *game, int move_row,
+                                            int hook_col) {
+  const Board *board = game_get_board(game);
+  int needed_to_reach_start = 1;
+  int row = move_row;
+  while (row >= 0) {
+    if (board_is_empty(board, row, hook_col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start >= RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, row, hook_col,
+                                  needed_to_reach_start || 1,
+                                  BOARD_VERTICAL_DIRECTION);
+    row--;
+  }
+}
+
+void update_spots_hooking_horizontal(const Move *move, Game *game) {
+  const int move_row = move_get_row_start(move);
+  const int move_col_start = move_get_col_start(move);
+  const int move_col_end = move_col_start + move_get_tiles_length(move) - 1;
+  if (move_col_start - 1 >= 0) {
+    update_spots_hooking_horizontal_at_col(game, move_row, move_col_start - 1);
+  }
+  if (move_col_end + 1 < BOARD_DIM) {
+    update_spots_hooking_horizontal_at_col(game, move_row, move_col_end + 1);
+  }
+}
+
+void update_spots_hooking_vertical_at_row(Game *game, int move_col,
+                                          int hook_row) {
+  const Board *board = game_get_board(game);
+  int needed_to_reach_start = 1;
+  int col = move_col;
+  while (col >= 0) {
+    if (board_is_empty(board, hook_row, col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start >= RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, hook_row, col,
+                                  needed_to_reach_start || 1,
+                                  BOARD_HORIZONTAL_DIRECTION);
+    col--;
+  }
+}
+
+void update_spots_hooking_vertical(const Move *move, Game *game) {
+  int move_col = move_get_col_start(move);
+  int move_row_start = move_get_row_start(move);
+  int move_row_end = move_row_start + move_get_tiles_length(move) - 1;
+  if (move_row_start - 1 >= 0) {
+    update_spots_hooking_vertical_at_row(game, move_col, move_row_start - 1);
+  }
+  if (move_row_end + 1 < BOARD_DIM) {
+    update_spots_hooking_vertical_at_row(game, move_col, move_row_end + 1);
+  }
+}
+
+void update_spots_hooking(const Move *move, Game *game) {
+  printf("update_spots_hooking\n");
+  switch (move_get_dir(move)) {
+  case BOARD_VERTICAL_DIRECTION:
+    update_spots_hooking_vertical(move, game);
+    return;
+  case BOARD_HORIZONTAL_DIRECTION:
+    update_spots_hooking_horizontal(move, game);
+    return;
+  }
+}
+
+void update_spots_perpendicular_horizontal_at_col(Game *game, int move_row,
+                                                  int col) {
+  const Board *board = game_get_board(game);
+  game_update_spots_from_square(game, move_row, col, 1,
+                                BOARD_VERTICAL_DIRECTION);
+  int needed_to_reach_start = 0;
+  int row = move_row - 1;
+  while (row >= 0) {
+    if (board_is_empty(board, row, col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start >= RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, row, col, needed_to_reach_start || 1,
+                                  BOARD_VERTICAL_DIRECTION);
+    row--;
+  }
+}
+
+void update_spots_perpendicular_horizontal(const Move *move, Game *game) {
+  const int move_row = move_get_row_start(move);
+  const int move_col_start = move_get_col_start(move);
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+    const int col = move_col_start + tile_idx;
+    const uint8_t ml = move_get_tile(move, tile_idx);
+    if (ml == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    update_spots_perpendicular_horizontal_at_col(game, move_row, col);
+  }
+}
+
+void update_spots_perpendicular_vertical_at_row(Game *game, int move_col,
+                                                int row) {
+  const Board *board = game_get_board(game);
+  game_update_spots_from_square(game, row, move_col, 1,
+                                BOARD_HORIZONTAL_DIRECTION);
+  int needed_to_reach_start = 0;
+  int col = move_col - 1;
+  while (col >= 0) {
+    if (board_is_empty(board, row, col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start >= RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, row, col, needed_to_reach_start || 1,
+                                  BOARD_HORIZONTAL_DIRECTION);
+    col--;
+  }
+}
+
+void update_spots_perpendicular_vertical(const Move *move, Game *game) {
+  const int move_col = move_get_col_start(move);
+  const int move_row_start = move_get_row_start(move);
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+    const int row = move_row_start + tile_idx;
+    const uint8_t ml = move_get_tile(move, tile_idx);
+    if (ml == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    update_spots_perpendicular_vertical_at_row(game, move_col, row);
+  }
+}
+
+void update_spots_perpendicular(const Move *move, Game *game) {
+  printf("update_spots_perpendicular\n");
+  switch (move_get_dir(move)) {
+  case BOARD_VERTICAL_DIRECTION:
+    update_spots_perpendicular_vertical(move, game);
+    return;
+  case BOARD_HORIZONTAL_DIRECTION:
+    update_spots_perpendicular_horizontal(move, game);
+    return;
+  }
+}
+
+void update_spots_for_move(const Move *move, Game *game) {
+  printf("update_spots_for_move ");
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game));
+  printf("%s\n", string_builder_peek(sb));
+  string_builder_destroy(sb);
+
+  const Bag *bag = game_get_bag(game);
+  const int num_tiles_in_bag = bag_get_tiles(bag);
+  // Everything is invalidated if we need to recompute preendgame or endgame
+  // heuristics. PEG_ADJUST_VALUES_LENGTH=0 would be a good way to turn this
+  // heuristic off so I'm careful here to also check if the bag is empty.
+  if ((num_tiles_in_bag < PEG_ADJUST_VALUES_LENGTH) ||
+      (num_tiles_in_bag == 0)) {
+    game_update_all_spots(game);
+    return;
+  }
+  update_spots_through_main_word(move, game);
+  update_spots_hooking(move, game);
+  update_spots_perpendicular(move, game);
+}
+
 // Draws the required number of tiles to fill the rack to RACK_SIZE.
 void draw_to_full_rack(Game *game, int player_index) {
   Bag *bag = game_get_bag(game);
@@ -270,135 +501,140 @@ void return_rack_to_bag(Game *game, int player_index) {
   rack_reset(player_rack);
 }
 
-void set_random_rack(Game *game, int player_index, Rack *known_rack) {
-  return_rack_to_bag(game, player_index);
-  if (known_rack) {
-    draw_rack_from_bag(game, player_index, known_rack);
-  }
-  draw_to_full_rack(game, player_index);
-}
-
-void execute_exchange_move(const Move *move, Game *game, Rack *leave) {
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Rack *player_on_turn_rack =
-      player_get_rack(game_get_player(game, player_on_turn_index));
-  Bag *bag = game_get_bag(game);
-
-  for (int i = 0; i < move_get_tiles_played(move); i++) {
-    rack_take_letter(player_on_turn_rack, move_get_tile(move, i));
+  void set_random_rack(Game *game, int player_index, Rack *known_rack) {
+    return_rack_to_bag(game, player_index);
+    if (known_rack) {
+      draw_rack_from_bag(game, player_index, known_rack);
+    }
+    draw_to_full_rack(game, player_index);
   }
 
-  if (leave) {
-    rack_copy(leave, player_on_turn_rack);
-  }
+  void execute_exchange_move(const Move *move, Game *game, Rack *leave) {
+    int player_on_turn_index = game_get_player_on_turn_index(game);
+    Rack *player_on_turn_rack =
+        player_get_rack(game_get_player(game, player_on_turn_index));
+    Bag *bag = game_get_bag(game);
 
-  draw_to_full_rack(game, player_on_turn_index);
-  int player_draw_index = game_get_player_on_turn_draw_index(game);
-  for (int i = 0; i < move_get_tiles_played(move); i++) {
-    bag_add_letter(bag, move_get_tile(move, i), player_draw_index);
-  }
-}
+    for (int i = 0; i < move_get_tiles_played(move); i++) {
+      rack_take_letter(player_on_turn_rack, move_get_tile(move, i));
+    }
 
-void standard_end_of_game_calculations(Game *game) {
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  const Player *opponent = game_get_player(game, 1 - player_on_turn_index);
-  const LetterDistribution *ld = game_get_ld(game);
-
-  player_add_to_score(player_on_turn,
-                      2 * rack_get_score(ld, player_get_rack(opponent)));
-  game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
-}
-
-void draw_starting_racks(Game *game) {
-  draw_to_full_rack(game, 0);
-  draw_to_full_rack(game, 1);
-}
-
-// Assumes the move has been validated
-// If rack_to_draw is not null, it will attempt to set the
-// player rack to rack_to_draw after the play or will
-// return an error if it is not possible.
-// If the input leave rack is not null, it will record the leave of
-// the play in the leave rack.
-play_move_status_t play_move(const Move *move, Game *game,
-                             const Rack *rack_to_draw, Rack *leave) {
-  if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
-    game_backup(game);
-  }
-  const LetterDistribution *ld = game_get_ld(game);
-  int player_on_turn_index = game_get_player_on_turn_index(game);
-  Player *player_on_turn = game_get_player(game, player_on_turn_index);
-  Rack *player_on_turn_rack = player_get_rack(player_on_turn);
-  if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    play_move_on_board(move, game);
     if (leave) {
       rack_copy(leave, player_on_turn_rack);
     }
-    update_cross_set_for_move(move, game);
-    game_set_consecutive_scoreless_turns(game, 0);
-    game_update_all_spots(game);
 
-    player_add_to_score(player_on_turn, move_get_score(move));
     draw_to_full_rack(game, player_on_turn_index);
-    if (rack_is_empty(player_on_turn_rack)) {
-      standard_end_of_game_calculations(game);
+    int player_draw_index = game_get_player_on_turn_draw_index(game);
+    for (int i = 0; i < move_get_tiles_played(move); i++) {
+      bag_add_letter(bag, move_get_tile(move, i), player_draw_index);
     }
-  } else if (move_get_type(move) == GAME_EVENT_PASS) {
-    if (leave) {
-      rack_copy(leave, player_on_turn_rack);
+  }
+
+  void standard_end_of_game_calculations(Game *game) {
+    int player_on_turn_index = game_get_player_on_turn_index(game);
+
+    Player *player_on_turn = game_get_player(game, player_on_turn_index);
+    const Player *opponent = game_get_player(game, 1 - player_on_turn_index);
+    const LetterDistribution *ld = game_get_ld(game);
+
+    player_add_to_score(player_on_turn,
+                        2 * rack_get_score(ld, player_get_rack(opponent)));
+    game_set_game_end_reason(game, GAME_END_REASON_STANDARD);
+  }
+
+  void draw_starting_racks(Game *game) {
+    draw_to_full_rack(game, 0);
+    draw_to_full_rack(game, 1);
+  }
+
+  // Assumes the move has been validated
+  // If rack_to_draw is not null, it will attempt to set the
+  // player rack to rack_to_draw after the play or will
+  // return an error if it is not possible.
+  // If the input leave rack is not null, it will record the leave of
+  // the play in the leave rack.
+  play_move_status_t play_move(const Move *move, Game *game,
+                               const Rack *rack_to_draw, Rack *leave) {
+    printf("play_move\n");
+    if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
+      game_backup(game);
     }
+    const LetterDistribution *ld = game_get_ld(game);
+    int player_on_turn_index = game_get_player_on_turn_index(game);
+    Player *player_on_turn = game_get_player(game, player_on_turn_index);
+    Rack *player_on_turn_rack = player_get_rack(player_on_turn);
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      play_move_on_board(move, game);
+      if (leave) {
+        rack_copy(leave, player_on_turn_rack);
+      }
+      update_cross_set_for_move(move, game);
+      game_set_consecutive_scoreless_turns(game, 0);
+      if (game_has_wmp(game)) {
+        update_spots_for_move(move, game);
+      }
+
+      player_add_to_score(player_on_turn, move_get_score(move));
+      draw_to_full_rack(game, player_on_turn_index);
+      if (rack_is_empty(player_on_turn_rack)) {
+        standard_end_of_game_calculations(game);
+      }
+    } else if (move_get_type(move) == GAME_EVENT_PASS) {
+      if (leave) {
+        rack_copy(leave, player_on_turn_rack);
+      }
+      game_increment_consecutive_scoreless_turns(game);
+    } else if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+      execute_exchange_move(move, game, leave);
+      game_increment_consecutive_scoreless_turns(game);
+    }
+
+    if (rack_to_draw) {
+      if (rack_is_drawable(game, player_on_turn_index, rack_to_draw)) {
+        return_rack_to_bag(game, player_on_turn_index);
+        draw_rack_from_bag(game, player_on_turn_index, rack_to_draw);
+      } else {
+        return PLAY_MOVE_STATUS_RACK_TO_DRAW_NOT_IN_BAG;
+      }
+    }
+
+    if (game_get_consecutive_scoreless_turns(game) ==
+        game_get_max_scoreless_turns(game)) {
+      Player *player0 = game_get_player(game, 0);
+      Player *player1 = game_get_player(game, 1);
+      player_add_to_score(player0,
+                          -rack_get_score(ld, player_get_rack(player0)));
+      player_add_to_score(player1,
+                          -rack_get_score(ld, player_get_rack(player1)));
+      game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
+    }
+    game_start_next_player_turn(game);
+    return PLAY_MOVE_STATUS_SUCCESS;
+  }
+
+  void return_phony_tiles(Game *game) {
+    game_unplay_last_move(game);
+    game_start_next_player_turn(game);
     game_increment_consecutive_scoreless_turns(game);
-  } else if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
-    execute_exchange_move(move, game, leave);
-    game_increment_consecutive_scoreless_turns(game);
   }
 
-  if (rack_to_draw) {
-    if (rack_is_drawable(game, player_on_turn_index, rack_to_draw)) {
-      return_rack_to_bag(game, player_on_turn_index);
-      draw_rack_from_bag(game, player_on_turn_index, rack_to_draw);
-    } else {
-      return PLAY_MOVE_STATUS_RACK_TO_DRAW_NOT_IN_BAG;
-    }
+  void generate_moves_for_game(Game *game, int thread_index,
+                               MoveList *move_list) {
+    Player *player_on_turn =
+        game_get_player(game, game_get_player_on_turn_index(game));
+    generate_moves(game, player_get_move_record_type(player_on_turn),
+                   player_get_move_sort_type(player_on_turn), thread_index,
+                   move_list, /*override_kwg=*/NULL);
   }
 
-  if (game_get_consecutive_scoreless_turns(game) ==
-      game_get_max_scoreless_turns(game)) {
-    Player *player0 = game_get_player(game, 0);
-    Player *player1 = game_get_player(game, 1);
-    player_add_to_score(player0, -rack_get_score(ld, player_get_rack(player0)));
-    player_add_to_score(player1, -rack_get_score(ld, player_get_rack(player1)));
-    game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
+  Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
+    generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, thread_index,
+                   move_list, /*override_kwg=*/NULL);
+    return move_list_get_move(move_list, 0);
   }
-  game_start_next_player_turn(game);
-  return PLAY_MOVE_STATUS_SUCCESS;
-}
 
-void return_phony_tiles(Game *game) {
-  game_unplay_last_move(game);
-  game_start_next_player_turn(game);
-  game_increment_consecutive_scoreless_turns(game);
-}
-
-void generate_moves_for_game(Game *game, int thread_index,
-                             MoveList *move_list) {
-  Player *player_on_turn =
-      game_get_player(game, game_get_player_on_turn_index(game));
-  generate_moves(game, player_get_move_record_type(player_on_turn),
-                 player_get_move_sort_type(player_on_turn), thread_index,
-                 move_list, /*override_kwg=*/NULL);
-}
-
-Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list) {
-  generate_moves(game, MOVE_RECORD_BEST, MOVE_SORT_EQUITY, thread_index,
-                 move_list, /*override_kwg=*/NULL);
-  return move_list_get_move(move_list, 0);
-}
-
-void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
-                         int player_draw_index) {
-  bag_draw_letter(bag, letter, player_draw_index);
-  rack_add_letter(rack, letter);
-}
+  void draw_letter_to_rack(Bag *bag, Rack *rack, uint8_t letter,
+                           int player_draw_index) {
+    bag_draw_letter(bag, letter, player_draw_index);
+    rack_add_letter(rack, letter);
+  }

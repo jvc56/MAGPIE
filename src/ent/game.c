@@ -813,9 +813,9 @@ static inline void game_update_spot(Game *game, int row, int col, int num_tiles,
 }
 */
 
-void game_update_spots_from_square(Game *game, int start_row, int start_col,
-                                   int min_num_tiles, int dir, int ci,
-                                   int star_sq_row, int star_sq_col) {
+void game_update_spots_from_square_aux(Game *game, int start_row, int start_col,
+                                       int min_num_tiles, int dir, int ci,
+                                       int star_sq_row, int star_sq_col) {
   // printf("game_update_spots_from_square %d %d %s\n", start_row, start_col,
   //        dir == BOARD_HORIZONTAL_DIRECTION ? "horizontal" : "vertical");
   const int row_incr = dir == BOARD_HORIZONTAL_DIRECTION ? 0 : 1;
@@ -846,11 +846,13 @@ void game_update_spots_from_square(Game *game, int start_row, int start_col,
   for (int num_tiles = 0; num_tiles <= RACK_SIZE; num_tiles++) {
     BoardSpot *spot = NULL;
     if (num_tiles >= min_num_tiles) {
-      spot = board_get_writable_spot(board, start_row, start_col, dir, num_tiles, ci);
+      spot = board_get_writable_spot(board, start_row, start_col, dir,
+                                     num_tiles, ci);
     }
     if (all_spots_now_unusable) {
       if (spot != NULL) {
-        // printf("assigning to spot at %d %d %d %d %d\n", start_row, start_col, dir,
+        // printf("assigning to spot at %d %d %d %d %d\n", start_row,
+        // start_col, dir,
         //        num_tiles, ci);
         spot->is_usable = false;
       }
@@ -879,7 +881,8 @@ void game_update_spots_from_square(Game *game, int start_row, int start_col,
     if ((hooking || touching) && (num_tiles >= min_num_tiles) &&
         !ignored_one_tile_play) {
       // printf("usable play with %d tiles\n", num_tiles);
-      // printf("assigning to spot at %d %d %d %d %d\n", start_row, start_col, dir, num_tiles,
+      // printf("assigning to spot at %d %d %d %d %d\n", start_row, start_col,
+      // dir, num_tiles,
       //        ci);
       spot->is_usable = true;
       spot->word_length = word_length;
@@ -961,6 +964,17 @@ void game_update_spots_from_square(Game *game, int start_row, int start_col,
   }
 }
 
+void game_update_spots_from_square(Game *game, int start_row, int start_col,
+                                   int min_num_tiles, int dir) {
+  const int num_cis =
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_WMP) ? 1 : 2;
+  for (int ci = 0; ci < num_cis; ci++) {
+    game_update_spots_from_square_aux(game, start_row, start_col, min_num_tiles,
+                                      dir, ci, /*star_row=*/-1,
+                                      /*star_col=*/-1);
+  }
+}
+
 void game_update_all_spots(Game *game) {
   // printf("game_update_all_spots\n");
   // StringBuilder *sb = string_builder_create();
@@ -989,10 +1003,22 @@ void game_update_all_spots(Game *game) {
           star_sq_col = -1;
         }
         for (int ci = 0; ci < num_cis; ci++) {
-          game_update_spots_from_square(game, row, col, 1, dir, ci, star_sq_row,
-                                        star_sq_col);
+          game_update_spots_from_square_aux(game, row, col, 1, dir, ci,
+                                            star_sq_row, star_sq_col);
         }
       }
     }
   }
+}
+
+bool game_has_wmp(Game *game) {
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
+  if (player_get_wmp(player0) != NULL) {
+    return true;
+  }
+  if (player_get_wmp(player1) != NULL) {
+    return true;
+  }
+  return false;
 }

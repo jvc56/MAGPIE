@@ -61,6 +61,9 @@ void game_set_player_on_turn_index(Game *game, int player_on_turn_index);
 void game_gen_all_cross_sets(Game *game);
 void game_gen_cross_set(Game *game, int row, int col, int dir,
                         int cross_set_index);
-void game_update_all_spots(Game *game);                    
+void game_update_spots_from_square(Game *game, int start_row, int start_col,
+                                   int min_num_tiles, int dir);
+void game_update_all_spots(Game *game);      
+bool game_has_wmp(Game *game);              
 
 #endif

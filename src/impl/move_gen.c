@@ -1493,6 +1493,14 @@ static inline void update_best_wmp_move_or_insert_into_movelist(MoveGen *gen) {
   set_wmp_play_for_record(gen, current_move);
   move_set_equity(current_move,
                   get_wmp_move_equity_for_sort_type(gen, current_move));
+  if (move_get_equity(current_move) >
+      gen->wmp_move_gen.word_spot.best_possible_equity) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, gen->board, current_move, &gen->ld);
+    printf("This move is too good for this spot: %s (%.2f)\n",
+           string_builder_peek(sb), move_get_equity(current_move) * 0.001);
+    string_builder_destroy(sb);
+  }
   assert(move_get_equity(current_move) <=
          gen->wmp_move_gen.word_spot.best_possible_equity);
   if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
@@ -1626,15 +1634,16 @@ static inline void copy_wmp_word_to_strip(MoveGen *gen) {
 
 void wordmap_gen(MoveGen *gen) {
   gen_set_board_spot(gen);
-  gen->dir = gen->wmp_move_gen.word_spot.dir;
-  if (gen->dir == BOARD_HORIZONTAL_DIRECTION) {
-    gen->current_row_index = gen->wmp_move_gen.word_spot.row;
-    gen->current_anchor_col = gen->wmp_move_gen.word_spot.col;
-  } else {
-    gen->current_row_index = gen->wmp_move_gen.word_spot.col;
-    gen->current_anchor_col = gen->wmp_move_gen.word_spot.row;
-  }
   WMPMoveGen *wmg = &gen->wmp_move_gen;
+  gen->dir = wmg->word_spot.dir;
+  if (gen->dir == BOARD_HORIZONTAL_DIRECTION) {
+    gen->current_row_index = wmg->word_spot.row;
+    gen->current_anchor_col = wmg->word_spot.col;
+  } else {
+    gen->current_row_index = wmg->word_spot.col;
+    gen->current_anchor_col = wmg->word_spot.row;
+  }
+
   const bool has_playthrough_tiles =
       wmg->word_spot.num_tiles != wmg->board_spot.word_length;
   board_copy_row_cache(gen->lanes_cache, gen->row_cache, gen->current_row_index,
@@ -1698,31 +1707,29 @@ void wordmap_gen(MoveGen *gen) {
 
 void gen_wordmap_record_scoring_plays(MoveGen *gen) {
   WMPMoveGen *wmg = &gen->wmp_move_gen;
-  // printf("word_spot_heap.count: %d\n", wmg->word_spot_heap.count);
-  // int spots_used = 0;
+  printf("word_spot_heap.count: %d\n", wmg->word_spot_heap.count);
+  int spots_used = 0;
   while (wmg->word_spot_heap.count > 0) {
     wmg->word_spot = word_spot_heap_extract_max(&wmg->word_spot_heap);
-    // printf("word_spot: ");
+    printf("word_spot: ");
     if (wmg->word_spot.dir == BOARD_HORIZONTAL_DIRECTION) {
-      // printf("%d%c", wmg->word_spot.row + 1, 'A' + wmg->word_spot.col);
+      printf("%d%c", wmg->word_spot.row + 1, 'A' + wmg->word_spot.col);
     } else {
-      // printf("%c%d", wmg->word_spot.col + 'A', wmg->word_spot.row + 1);
-      // assert(false);
+      printf("%c%d", wmg->word_spot.col + 'A', wmg->word_spot.row + 1);
     }
-    // printf(" %d tiles, best_possible_equity: %.3f\n",
-    // wmg->word_spot.num_tiles,
-    //        equity_to_double(wmg->word_spot.best_possible_equity));
+    printf(" %d tiles, best_possible_equity: %.3f\n", wmg->word_spot.num_tiles,
+           equity_to_double(wmg->word_spot.best_possible_equity));
 
     if (gen->move_record_type == MOVE_RECORD_BEST &&
         better_play_has_been_found(gen, wmg->word_spot.best_possible_equity)) {
-      // printf("Better play has been found\n");
-      // printf("spots_used: %d\n", spots_used);
+      printf("Better play has been found\n");
+      printf("spots_used: %d\n", spots_used);
       return;
     }
-    // spots_used++;
+    spots_used++;
     wordmap_gen(gen);
   }
-  // printf("spots_used: %d\n", spots_used);
+  printf("spots_used: %d\n", spots_used);
 }
 
 void gen_recursive_record_scoring_plays(MoveGen *gen) {
