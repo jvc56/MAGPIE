@@ -42,7 +42,7 @@ int bai_c_track(const void *data, const int *N, const double *w, const int size,
   bai_logger_log_int_array(bai_logger, "N", N, size);
   bai_logger_log_double_array(bai_logger, "t.sumw", t->sumw, size);
   bai_logger_log_double_array(bai_logger, "w", w, size);
-  bai_logger_log_int(bai_logger, "min_index", min_index);
+  bai_logger_log_int(bai_logger, "min_index", min_index + 1);
   bai_logger_flush(bai_logger);
 
   return min_index;

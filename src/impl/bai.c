@@ -23,7 +23,7 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
         bai_invoke_threshold(Sβ, N, hμ, hσ2, astar, a, bai_logger);
     const bool cdt = Zs[a] > thres;
     bai_logger_log_title(bai_logger, "STOPPING_CRITERION");
-    bai_logger_log_double(bai_logger, "a", a);
+    bai_logger_log_int(bai_logger, "a", a + 1);
     bai_logger_log_double(bai_logger, "val", Zs[a]);
     bai_logger_log_double(bai_logger, "thres", thres);
     bai_logger_flush(bai_logger);
@@ -75,8 +75,8 @@ int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ,
 
     bai_logger_log_title(bai_logger, "GLRT_RETURN_VALUES");
     bai_logger_log_double_array(bai_logger, "Zs", Zs, K);
-    bai_logger_log_int(bai_logger, "aalt", aalt);
-    bai_logger_log_int(bai_logger, "astar", astar);
+    bai_logger_log_int(bai_logger, "aalt", aalt + 1);
+    bai_logger_log_int(bai_logger, "astar", astar + 1);
     bai_logger_log_double_array(bai_logger, "ksi", ξ, K);
     bai_logger_log_double_array(bai_logger, "phi2", ϕ2, K);
     bai_logger_flush(bai_logger);

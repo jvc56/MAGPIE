@@ -1,6 +1,7 @@
 #ifndef BAI_LOGGER_H
 #define BAI_LOGGER_H
 
+#include <math.h>
 #include <stdio.h>
 
 #include "../util/string_util.h"
@@ -46,14 +47,33 @@ static inline void bai_logger_log_int(BAILogger *bai_logger,
                                       x);
 }
 
+static inline void bai_logger_log_bool(BAILogger *bai_logger,
+                                       const char *bool_name, const bool x) {
+  if (!bai_logger) {
+    return;
+  }
+  string_builder_add_formatted_string(bai_logger->buffer, "%s = %s\n",
+                                      bool_name, x ? "true" : "false");
+}
+
+static inline void bai_logger_string_builder_add_double(StringBuilder *sb,
+                                                        const double x) {
+  if (isinf(x)) {
+    string_builder_add_string(sb, "Inf");
+  } else {
+    string_builder_add_formatted_string(sb, "%.*f", BAI_LOGGER_NUM_DECIMALS, x);
+  }
+}
+
 static inline void bai_logger_log_double(BAILogger *bai_logger,
                                          const char *double_name,
                                          const double x) {
   if (!bai_logger) {
     return;
   }
-  string_builder_add_formatted_string(bai_logger->buffer, "%s = %.*f\n",
-                                      double_name, BAI_LOGGER_NUM_DECIMALS, x);
+  string_builder_add_formatted_string(bai_logger->buffer, "%s = ", double_name);
+  bai_logger_string_builder_add_double(bai_logger->buffer, x);
+  string_builder_add_string(bai_logger->buffer, "\n");
 }
 
 static inline void bai_logger_log_double_array(BAILogger *bai_logger,
@@ -65,8 +85,7 @@ static inline void bai_logger_log_double_array(BAILogger *bai_logger,
   string_builder_add_formatted_string(bai_logger->buffer,
                                       "%s = ", double_array_name);
   for (int i = 0; i < size; i++) {
-    string_builder_add_formatted_string(bai_logger->buffer, "%.*f",
-                                        BAI_LOGGER_NUM_DECIMALS, x[i]);
+    bai_logger_string_builder_add_double(bai_logger->buffer, x[i]);
     if (i != size - 1) {
       string_builder_add_string(bai_logger->buffer, " ");
     }

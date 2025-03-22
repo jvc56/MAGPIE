@@ -82,16 +82,22 @@ bool bai_within_epsilon(double x, double y, double ϵ) {
   return fabs(x - y) < ϵ;
 }
 
-double alt_λ_KV(double μ1, double σ21, int w1, double μa, double σ2a, int wa) {
+double alt_λ_KV(double μ1, double σ21, double w1, double μa, double σ2a,
+                double wa, BAILogger *bai_logger) {
+  bai_logger_log_title(bai_logger, "ALT_KV");
   if (w1 == 0) {
+    bai_logger_log_double(bai_logger, "ua", μa);
     return μa;
   }
-  // FIXME: check if this actually does need true equality comparison here
-  if (wa == 0 || bai_within_epsilon(μ1, μa, BAI_EPSILON)) {
+  if (wa == 0 || μ1 == μa) {
+    bai_logger_log_double(bai_logger, "u1", μ1);
     return μ1;
   }
-  double x = ((double)wa) / w1;
-  return (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
+  const double x = ((double)wa) / w1;
+  const double result = (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
+  bai_logger_log_double(bai_logger, "x", x);
+  bai_logger_log_double(bai_logger, "result", result);
+  return result;
 }
 
 // FIXME: need to check if this is correct
@@ -110,13 +116,13 @@ void bai_glrt(int K, int *w, double *μ, double *σ2,
   }
 
   bai_logger_log_title(bai_logger, "GLRT");
-  bai_logger_log_double(bai_logger, "K", K);
-  bai_logger_log_double(bai_logger, "astar", astar);
+  bai_logger_log_int(bai_logger, "K", K);
+  bai_logger_log_int(bai_logger, "astar", astar + 1);
   bai_logger_flush(bai_logger);
 
   double *vals = glrt_results->vals;
   for (int k = 0; k < K; k++) {
-    vals[k] = DBL_MAX;
+    vals[k] = INFINITY;
   }
   double *θs = glrt_results->θs;
   // FIXME: probably just use memset here
@@ -127,10 +133,11 @@ void bai_glrt(int K, int *w, double *μ, double *σ2,
     if (a == astar) {
       continue;
     }
-    θs[a] = alt_λ_KV(μ[astar], σ2[astar], w[astar], μ[a], σ2[a], w[a]);
+    θs[a] =
+        alt_λ_KV(μ[astar], σ2[astar], w[astar], μ[a], σ2[a], w[a], bai_logger);
     vals[a] = w[astar] * dGaussian(μ[astar], σ2[astar], θs[a]) +
               w[a] * dGaussian(μ[a], σ2[a], θs[a]);
-    bai_logger_log_double(bai_logger, "arm", a);
+    bai_logger_log_int(bai_logger, "arm", a + 1);
     bai_logger_log_double(bai_logger, "theta", θs[a]);
     bai_logger_log_double(bai_logger, "val", vals[a]);
     bai_logger_flush(bai_logger);
@@ -143,7 +150,7 @@ void bai_glrt(int K, int *w, double *μ, double *σ2,
     }
   }
 
-  bai_logger_log_double(bai_logger, "k", k);
+  bai_logger_log_int(bai_logger, "k", k + 1);
   bai_logger_log_double(bai_logger, "vals[k]", vals[k]);
   bai_logger_flush(bai_logger);
 
@@ -179,10 +186,17 @@ double bai_X_binary_search_func(double z, void *args) {
   const double μa = xbs_args->μa;
   const double σ2a = xbs_args->σ2a;
   const double v = xbs_args->v;
-  const double μz = alt_λ_KV(μ1, σ21, 1 - z, μa, σ2a, z);
+  const double μz = alt_λ_KV(μ1, σ21, 1 - z, μa, σ2a, z, xbs_args->bai_logger);
   const double result = (1 - z) * dGaussian(μ1, σ21, μz) +
                         z * dGaussian(μa, σ2a, μz) - (1 - z) * v;
-  bai_logger_log_double(xbs_args->bai_logger, "uz", z);
+  bai_logger_log_double(xbs_args->bai_logger, "z", z);
+  bai_logger_log_double(xbs_args->bai_logger, "u1", μ1);
+  bai_logger_log_double(xbs_args->bai_logger, "sigma21", σ21);
+  bai_logger_log_double(xbs_args->bai_logger, "ua", μa);
+  bai_logger_log_double(xbs_args->bai_logger, "sigma2a", σ2a);
+  bai_logger_log_double(xbs_args->bai_logger, "v", v);
+  bai_logger_log_bool(xbs_args->bai_logger, "kv", true);
+  bai_logger_log_double(xbs_args->bai_logger, "uz", μz);
   bai_logger_log_double(xbs_args->bai_logger, "result", result);
   return result;
 }
@@ -206,7 +220,7 @@ void bai_X(double μ1, double σ21, double μa, double σ2a, double v,
   double α = bai_binary_search(bai_X_binary_search_func, &xbs_args, 0, 1,
                                upd_a * (BAI_EPSILON), bai_logger);
   bai_X_results->α_ratio = α / (1 - α);
-  bai_X_results->alt_λ_KV = alt_λ_KV(μ1, σ21, 1 - α, μa, σ2a, α);
+  bai_X_results->alt_λ_KV = alt_λ_KV(μ1, σ21, 1 - α, μa, σ2a, α, bai_logger);
   bai_logger_log_double(bai_logger, "a", α);
   bai_logger_log_double(bai_logger, "a_ratio", bai_X_results->α_ratio);
   bai_logger_log_double(bai_logger, "alt", bai_X_results->alt_λ_KV);
@@ -239,7 +253,7 @@ double bai_oracle_binary_search_func(double z, void *args) {
     const double numer = dGaussian(μs[astar], σ2s[astar], μx);
     const double denom = dGaussian(μs[k], σ2s[k], μx);
     const double result = numer / denom;
-    bai_logger_log_int(obs_args->bai_logger, "k", k);
+    bai_logger_log_int(obs_args->bai_logger, "k", k + 1);
     bai_logger_log_double(obs_args->bai_logger, "ux", μx);
     bai_logger_log_double(obs_args->bai_logger, "numer", numer);
     bai_logger_log_double(obs_args->bai_logger, "denom", denom);
@@ -264,21 +278,29 @@ void bai_oracle(double *μs, double *σ2s, int size,
                 BAIOracleResult *oracle_result, BAILogger *bai_logger) {
   int astar = 0;
   double μstar = μs[0];
-  bool all_equal = true;
-  for (int i = 0; i < size; i++) {
+  for (int i = 1; i < size; i++) {
     if (μs[i] > μstar) {
       μstar = μs[i];
       astar = i;
     }
-    all_equal = all_equal && bai_within_epsilon(μs[i], μstar, BAI_EPSILON);
+  }
+
+  bool all_equal = true;
+  for (int i = 0; i < size; i++) {
+    if (!bai_within_epsilon(μs[i], μstar, BAI_EPSILON)) {
+      all_equal = false;
+      break;
+    }
   }
 
   bai_logger_log_title(bai_logger, "ORACLE");
   bai_logger_log_double(bai_logger, "ustar", μstar);
+  bai_logger_log_double_array(bai_logger, "us", μs, size);
+  bai_logger_log_int(bai_logger, "size", size);
   bai_logger_flush(bai_logger);
 
   if (all_equal) {
-    oracle_result->Σ_over_val = DBL_MAX;
+    oracle_result->Σ_over_val = INFINITY;
     for (int i = 0; i < size; i++) {
       oracle_result->ws_over_Σ[i] = 1 / (double)size;
     }
@@ -287,10 +309,10 @@ void bai_oracle(double *μs, double *σ2s, int size,
     return;
   }
 
-  bai_logger_log_double(bai_logger, "astar", astar);
+  bai_logger_log_int(bai_logger, "astar", astar + 1);
   bai_logger_flush(bai_logger);
 
-  double hi = DBL_MAX;
+  double hi = INFINITY;
 
   for (int k = 0; k < size; ++k) {
     if (k == astar) {

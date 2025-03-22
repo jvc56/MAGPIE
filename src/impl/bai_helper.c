@@ -41,7 +41,7 @@ double barW(double x, int k) { return -lambertw(-exp(-x), k); }
 
 bool valid_time(HT *ht, int *N, BAILogger *bai_logger) {
   const double δ = ht->δ;
-  const double K = ht->K;
+  const int K = ht->K;
   const double s = ht->s;
   const double zetas = ht->zetas;
   const double eta = ht->eta;
@@ -70,14 +70,14 @@ bool valid_time(HT *ht, int *N, BAILogger *bai_logger) {
   if (bai_logger) {
     bai_logger_log_title(bai_logger, "VALID_TIME");
     bai_logger_log_double(bai_logger, "delta", δ);
-    bai_logger_log_double(bai_logger, "K", K);
+    bai_logger_log_int(bai_logger, "K", K);
     bai_logger_log_double(bai_logger, "s", s);
     bai_logger_log_double(bai_logger, "zetas", zetas);
     bai_logger_log_double(bai_logger, "eta", eta);
     bai_logger_log_int(bai_logger, "cst", cst);
     bai_logger_log_double_array(bai_logger, "u", u_array, K);
-    bai_logger_log_double_array(bai_logger, "val", val_array, K);
-    bai_logger_log_int(bai_logger, "result", result);
+    bai_logger_log_double_array(bai_logger, "vals", val_array, K);
+    bai_logger_log_bool(bai_logger, "result", result);
     bai_logger_flush(bai_logger);
     free(u_array);
     free(val_array);
@@ -87,7 +87,7 @@ bool valid_time(HT *ht, int *N, BAILogger *bai_logger) {
 
 double get_factor_non_KL(HT *ht, int t, BAILogger *bai_logger) {
   const double δ = ht->δ;
-  const double K = ht->K;
+  const int K = ht->K;
   const double s = ht->s;
   const double zetas = ht->zetas;
   const double eta = ht->eta;
@@ -104,7 +104,7 @@ double get_factor_non_KL(HT *ht, int t, BAILogger *bai_logger) {
   bai_logger_log_title(bai_logger, "GET_FACTOR");
   bai_logger_log_int(bai_logger, "t", t);
   bai_logger_log_double(bai_logger, "delta", δ);
-  bai_logger_log_double(bai_logger, "K", K);
+  bai_logger_log_int(bai_logger, "K", K);
   bai_logger_log_double(bai_logger, "s", s);
   bai_logger_log_double(bai_logger, "zetas", zetas);
   bai_logger_log_double(bai_logger, "eta", eta);
@@ -123,10 +123,11 @@ double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
                     BAILogger *bai_logger) {
   HT *ht = (HT *)data;
   bai_logger_log_title(bai_logger, "HT");
+  bai_logger_flush(bai_logger);
   if (!valid_time(ht, N, bai_logger)) {
     bai_logger_log_title(bai_logger, "invalid time");
     bai_logger_flush(bai_logger);
-    return DBL_MAX;
+    return INFINITY;
   }
   if (!ht->is_EV_GLR) {
     log_fatal("HT threshold not implemented for non-EV GLR");
@@ -136,8 +137,8 @@ double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
   const double result = 0.5 * (N[a] * ratio_a + N[astar] * ratio_astar);
   bai_logger_log_double(bai_logger, "ratio_a", ratio_a);
   bai_logger_log_double(bai_logger, "ratio_astar", ratio_astar);
-  bai_logger_log_double(bai_logger, "N[a]", N[a]);
-  bai_logger_log_double(bai_logger, "N[astar]", N[astar]);
+  bai_logger_log_int(bai_logger, "N[a]", N[a]);
+  bai_logger_log_int(bai_logger, "N[astar]", N[astar]);
   bai_logger_log_double(bai_logger, "result", result);
   bai_logger_flush(bai_logger);
   return result;

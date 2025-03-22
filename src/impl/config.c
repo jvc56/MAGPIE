@@ -1532,7 +1532,7 @@ config_load_status_t config_load_data(Config *config) {
   }
 
   config_load_status = config_load_double(config, ARG_TOKEN_EQUITY_MARGIN, 0,
-                                          DBL_MAX, &config->equity_margin);
+                                          1e100, &config->equity_margin);
   if (config_load_status != CONFIG_LOAD_STATUS_SUCCESS) {
     return config_load_status;
   }

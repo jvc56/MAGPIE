@@ -78,7 +78,7 @@ void test_bai_input_from_file(const char *bai_input_filename) {
 
   bai_logger_log_double(bai_logger, "delta", delta);
   bai_logger_log_int(bai_logger, "num_rvs", num_rvs);
-  bai_logger_log_double_array(bai_logger, "means_and_stdevs", means_and_stdevs,
+  bai_logger_log_double_array(bai_logger, "means_and_stddevs", means_and_stdevs,
                               num_rvs * 2);
   bai_logger_log_int(bai_logger, "num_samples", num_samples);
   bai_logger_flush(bai_logger);
@@ -94,7 +94,7 @@ void test_bai_input_from_file(const char *bai_input_filename) {
   RandomVariables *rvs = rvs_create(&rv_args);
   const int result =
       bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, rvs, delta, bai_logger);
-  bai_logger_log_int(bai_logger, "result", result);
+  bai_logger_log_int(bai_logger, "result", result + 1);
   bai_logger_flush(bai_logger);
 
   bai_logger_destroy(bai_logger);

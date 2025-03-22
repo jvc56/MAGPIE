@@ -82,8 +82,8 @@ double rv_normal_predetermined_sample(RandomVariables *rvs, uint64_t k,
   const double sample = rv_normal_predetermined->samples[index];
   const double result = mean + sqrt(sigma2) * sample;
   bai_logger_log_title(bai_logger, "DETERMINISTIC_SAMPLE");
-  bai_logger_log_int(bai_logger, "index", index);
-  bai_logger_log_int(bai_logger, "arm", k);
+  bai_logger_log_int(bai_logger, "index", index + 1);
+  bai_logger_log_int(bai_logger, "arm", k + 1);
   bai_logger_log_double(bai_logger, "s", result);
   bai_logger_log_double(bai_logger, "u", mean);
   bai_logger_log_double(bai_logger, "sigma2", sigma2);
