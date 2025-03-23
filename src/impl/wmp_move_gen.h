@@ -16,6 +16,14 @@
 #include "../ent/wmp.h"
 
 #define WORD_SPOT_HEAP_CAPACITY (BOARD_DIM * BOARD_DIM * RACK_SIZE)
+#define NUM_SUBRACKS (1 << RACK_SIZE)
+#define MAX_PLAYTHROUGH_BLOCKS ((BOARD_DIM + 1) / 2)
+#define ENTRY_INFO_TABLE_SIZE                                                  \
+  (BOARD_DIM * MAX_PLAYTHROUGH_BLOCKS * MAX_PLAYTHROUGH_BLOCKS * 2 *           \
+   NUM_SUBRACKS)
+#define ENTRY_INFO_UNKNOWN 0
+#define ENTRY_INFO_NO_WORDS 1
+#define ENTRY_INFO_HAS_WORDS 2
 
 typedef struct SubrackInfo {
   BitRack subrack;
@@ -51,8 +59,8 @@ typedef struct WMPMoveGen {
   BitRack playthrough_bit_rack_copy;
   int num_tiles_played_through_copy;
 
-  SubrackInfo nonplaythrough_infos[1 << RACK_SIZE];
-  SubrackInfo playthrough_infos[1 << RACK_SIZE];
+  SubrackInfo nonplaythrough_infos[NUM_SUBRACKS];
+  SubrackInfo playthrough_infos[NUM_SUBRACKS];
   Equity nonplaythrough_best_leave_values[RACK_SIZE + 1];
   bool nonplaythrough_has_word_of_length[RACK_SIZE + 1];
   uint8_t count_by_size[RACK_SIZE + 1];
@@ -64,19 +72,20 @@ typedef struct WMPMoveGen {
   int num_words;
   int word_idx;
   int buffer_pos;
-  int num_lookups;
-  int lookups_by_size[RACK_SIZE + 1];
+  // int num_lookups;
+  // int lookups_by_size[RACK_SIZE + 1];
   Equity score;
   Equity leave_value;
   uint8_t buffer[WMP_RESULT_BUFFER_SIZE];
+  uint8_t entry_info_table[ENTRY_INFO_TABLE_SIZE];
 } WMPMoveGen;
 
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
                                      Rack *player_rack, const WMP *wmp) {
-  wmp_move_gen->num_lookups = 0;
-  memset(wmp_move_gen->lookups_by_size, 0,
-         sizeof(wmp_move_gen->lookups_by_size));
+  // wmp_move_gen->num_lookups = 0;
+  // memset(wmp_move_gen->lookups_by_size, 0,
+  //        sizeof(wmp_move_gen->lookups_by_size));
   wmp_move_gen->wmp = wmp;
   if (wmp == NULL) {
     return;
@@ -85,6 +94,8 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
          sizeof(wmp_move_gen->nonplaythrough_has_word_of_length));
+  memset(wmp_move_gen->entry_info_table, ENTRY_INFO_UNKNOWN,
+         sizeof(wmp_move_gen->entry_info_table));
 }
 
 static inline bool wmp_move_gen_is_active(const WMPMoveGen *wmp_move_gen) {
@@ -144,8 +155,8 @@ wmp_move_gen_check_playthrough_full_rack_existence(WMPMoveGen *wmp_move_gen) {
   bit_rack_add_bit_rack(&playthrough_info->subrack,
                         &wmp_move_gen->playthrough_bit_rack);
   const int word_size = size + wmp_move_gen->num_tiles_played_through;
-  wmp_move_gen->num_lookups++;
-  wmp_move_gen->lookups_by_size[size]++;
+  // wmp_move_gen->num_lookups++;
+  // wmp_move_gen->lookups_by_size[size]++;
   playthrough_info->wmp_entry = wmp_get_word_entry(
       wmp_move_gen->wmp, &playthrough_info->subrack, word_size);
   return playthrough_info->wmp_entry != NULL;
@@ -162,8 +173,8 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
   for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
     SubrackInfo *subrack_info =
         &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size];
-    wmp_move_gen->num_lookups++;
-    wmp_move_gen->lookups_by_size[size]++;
+    // wmp_move_gen->num_lookups++;
+    // wmp_move_gen->lookups_by_size[size]++;
     subrack_info->wmp_entry =
         wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
     if (subrack_info->wmp_entry == NULL) {
@@ -415,8 +426,8 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmg) {
       is_playthrough ? playthrough_info : nonplaythrough_info;
   const WMPEntry *entry = NULL;
   BitRack bit_rack = bit_rack_create_empty();
-  // printf("wmg->word_spot.num_tiles: %d\n", wmg->word_spot.num_tiles);
-  //   if (!is_playthrough || wmp_move_gen->word_spot.num_tiles == RACK_SIZE) {
+  // printf("wmg->word_spot.num_tiles: %d, wmg->board_spot.word_length: %d\n",
+  //        wmg->word_spot.num_tiles, wmg->board_spot.word_length);
   if (!is_playthrough) {
     entry = subrack_info->wmp_entry;
     // printf("entry: %p\n", entry);
@@ -448,8 +459,8 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmg) {
     //   }
     // }
     // printf("\n");
-    wmg->num_lookups++;
-    wmg->lookups_by_size[wmg->word_spot.num_tiles]++;
+    // wmg->num_lookups++;
+    // wmg->lookups_by_size[wmg->word_spot.num_tiles]++;
     entry =
         wmp_get_word_entry(wmg->wmp, &bit_rack, wmg->board_spot.word_length);
   }
@@ -462,13 +473,11 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmg) {
   // }
   // printf("\n");
   if (entry == NULL) {
-    // printf("entry is NULL, no words");
     return false;
   }
   // printf("wmg->board_spot.word_length: %d\n", wmg->board_spot.word_length);
   const int result_bytes = wmp_entry_write_words_to_buffer(
       entry, wmg->wmp, &bit_rack, wmg->board_spot.word_length, wmg->buffer);
-  // printf("result_bytes: %d\n", result_bytes);
   assert(result_bytes > 0);
   assert(result_bytes % wmg->board_spot.word_length == 0);
   wmg->num_words = result_bytes / wmg->board_spot.word_length;
@@ -482,5 +491,19 @@ static inline uint8_t wmp_move_gen_get_word_letter(WMPMoveGen *wmp_move_gen) {
 static inline const BitRack *
 wmp_move_gen_get_nonplaythrough_tiles(const WMPMoveGen *wmp_move_gen) {
   return &wmp_move_gen->nonplaythrough_infos[wmp_move_gen->subrack_idx].subrack;
+}
+
+static inline int wmp_move_gen_get_entry_info_index(int row,
+                                                    int blocks_before_start,
+                                                    int blocks_after_end,
+                                                    int dir) {
+  const int row_offset = row * (MAX_PLAYTHROUGH_BLOCKS *
+                                MAX_PLAYTHROUGH_BLOCKS * 2 * NUM_SUBRACKS);
+  const int blocks_before_start_offset =
+      blocks_before_start * (MAX_PLAYTHROUGH_BLOCKS * 2 * NUM_SUBRACKS);
+  const int blocks_after_end_offset = blocks_after_end * (2 * NUM_SUBRACKS);
+  const int dir_offset = dir * NUM_SUBRACKS;
+  return row_offset + blocks_before_start_offset + blocks_after_end_offset +
+         dir_offset;
 }
 #endif

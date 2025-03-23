@@ -1586,7 +1586,8 @@ static inline void get_blank_possibilities(const MoveGen *gen, int pos,
 }
 
 void record_plays_for_current_word(MoveGen *gen, int blanks_so_far, int pos) {
-  // printf("record_plays_for_current_word: blanks_so_far: %d, pos: %d, strip: ",
+  // printf("record_plays_for_current_word: blanks_so_far: %d, pos: %d, strip:
+  // ",
   //        blanks_so_far, pos);
   // for (int i = 0; i < pos; i++) {
   //   const uint8_t ml = gen->strip[i];
@@ -1659,16 +1660,64 @@ void wordmap_gen(MoveGen *gen) {
       wmg->word_spot.num_tiles != wmg->board_spot.word_length;
   board_copy_row_cache(gen->lanes_cache, gen->row_cache, gen->current_row_index,
                        gen->dir);
+  int empty_squares_before_start = 0;
+  int empty_squares_after_end = 0;
+  int playthrough_blocks_before_start = 0;
+  int playthrough_blocks_after_end = 0;
+  if (has_playthrough_tiles) {
+    bool in_playthrough = false;
+    for (int col = 0; col < gen->current_anchor_col; col++) {
+      if (gen_cache_get_letter(gen, col) == ALPHABET_EMPTY_SQUARE_MARKER) {
+        in_playthrough = false;
+        empty_squares_before_start++;
+        continue;
+      }
+      if (!in_playthrough) {
+        playthrough_blocks_before_start++;
+      }
+      empty_squares_before_start = 0;
+      in_playthrough = true;
+    }
+    in_playthrough = false;
+    int last_col = gen->current_anchor_col + wmg->board_spot.word_length - 1;
+    for (int col = BOARD_DIM - 1; col > last_col; col--) {
+      if (gen_cache_get_letter(gen, col) == ALPHABET_EMPTY_SQUARE_MARKER) {
+        in_playthrough = false;
+        empty_squares_after_end++;
+        continue;
+      }
+      if (!in_playthrough) {
+        playthrough_blocks_after_end++;
+      }
+      empty_squares_after_end = 0;
+      in_playthrough = true;
+    }
+  }
+  const bool memoize_entry_info =
+      empty_squares_before_start + empty_squares_after_end > 0;
+  // printf("playthrough_blocks_before_start: %d, playthrough_blocks_after_end:
+  // %d\n",
+  //        playthrough_blocks_before_start, playthrough_blocks_after_end);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wmg);
   const int subrack_start =
       subracks_get_combination_offset(wmg->word_spot.num_tiles);
   const int subrack_end = subrack_start + num_subrack_combinations;
+  int entry_info_idx = wmp_move_gen_get_entry_info_index(
+      gen->current_row_index, playthrough_blocks_before_start,
+      playthrough_blocks_after_end, gen->dir);
   for (wmg->subrack_idx = subrack_start; wmg->subrack_idx < subrack_end;
        wmg->subrack_idx++) {
     if (!has_playthrough_tiles &&
         (wmg->nonplaythrough_infos[wmg->subrack_idx].wmp_entry == NULL)) {
       continue;
+    }
+    uint8_t entry_info = ENTRY_INFO_UNKNOWN;
+    if (memoize_entry_info) {
+      entry_info = wmg->entry_info_table[entry_info_idx + wmg->subrack_idx];
+      if (entry_info == ENTRY_INFO_NO_WORDS) {
+        continue;
+      }
     }
     wmg->leave_value = gen->number_of_tiles_in_bag > 0
                            ? wmp_move_gen_look_up_leave_value(wmg)
@@ -1694,7 +1743,15 @@ void wordmap_gen(MoveGen *gen) {
       }
     }
     if (!wmp_move_gen_get_subrack_words(wmg)) {
+      if (memoize_entry_info) {
+        wmg->entry_info_table[entry_info_idx + wmg->subrack_idx] =
+            ENTRY_INFO_NO_WORDS;
+      }
       continue;
+    }
+    if (memoize_entry_info) {
+      wmg->entry_info_table[entry_info_idx + wmg->subrack_idx] =
+          ENTRY_INFO_HAS_WORDS;
     }
     if (gen->number_of_tiles_in_bag == 0) {
       int leave_total_letters = 0;
@@ -1728,7 +1785,8 @@ void gen_wordmap_record_scoring_plays(MoveGen *gen) {
     // } else {
     //   printf("%c%d", wmg->word_spot.col + 'A', wmg->word_spot.row + 1);
     // }
-    // printf(" %d tiles, best_possible_equity: %.3f\n", wmg->word_spot.num_tiles,
+    // printf(" %d tiles, best_possible_equity: %.3f\n",
+    // wmg->word_spot.num_tiles,
     //        equity_to_double(wmg->word_spot.best_possible_equity));
 
     if (gen->move_record_type == MOVE_RECORD_BEST &&
