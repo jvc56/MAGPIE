@@ -29,6 +29,7 @@ typedef struct SubrackInfo {
   BitRack subrack;
   const WMPEntry *wmp_entry;
   Equity leave_value;
+  Equity descending_tile_scores[WORD_ALIGNING_RACK_SIZE];
 } SubrackInfo;
 
 typedef struct WordSpot {
@@ -49,6 +50,7 @@ typedef struct WordSpotHeap {
 
 typedef struct WMPMoveGen {
   const WMP *wmp;
+  LetterDistribution ld;
   BitRack player_bit_rack;
   int full_rack_size;
 
@@ -91,6 +93,7 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
     return;
   }
   wmp_move_gen->player_bit_rack = bit_rack_create_from_rack(ld, player_rack);
+  wmp_move_gen->ld = *ld;
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
          sizeof(wmp_move_gen->nonplaythrough_has_word_of_length));
@@ -127,6 +130,23 @@ wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
         wmp_move_gen->nonplaythrough_infos + insert_index;
     subrack_info->subrack = *current;
     subrack_info->leave_value = leave_map_get_current_value(leave_map);
+    int tile_idx = 0;
+    const int ld_size = wmp_move_gen->ld.size;
+    for (int i = 0; i < ld_size; i++) {
+      const uint8_t ml = ld_get_score_order(&wmp_move_gen->ld, i);
+      const int num_this = bit_rack_get_letter(current, ml);
+      if (num_this == 0) {
+        continue;
+      }
+      const Equity score = ld_get_score(&wmp_move_gen->ld, ml);
+      for (int j = 0; j < num_this; j++) {
+        subrack_info->descending_tile_scores[tile_idx] = score;
+        tile_idx++;
+      }
+    }
+    for (; tile_idx < WORD_ALIGNING_RACK_SIZE; tile_idx++) {
+      subrack_info->descending_tile_scores[tile_idx] = 0;
+    }
     wmp_move_gen->count_by_size[count]++;
     return;
   }

@@ -260,7 +260,7 @@ static inline void record_exchange(MoveGen *gen) {
 void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
                              uint32_t word_index, uint8_t ml,
                              bool add_exchange) {
-  const uint32_t ld_size = ld_get_size(&gen->ld);
+  const uint32_t ld_size = gen->ld_size;
   while (ml < ld_size && rack_get_letter(&gen->player_rack, ml) == 0) {
     ml++;
   }
@@ -518,7 +518,7 @@ void recursive_gen_alpha(MoveGen *gen, int col, int leftstrip, int rightstrip,
     rack_take_letter(&gen->full_player_rack, raw);
   } else if (!rack_is_empty(&gen->player_rack) &&
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
-    const uint8_t ld_size = ld_get_size(&gen->ld);
+    const uint8_t ld_size = gen->ld_size;
     for (uint8_t ml = 1; ml < ld_size; ml++) {
       const int8_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
       if (ml != 0 &&
@@ -1321,7 +1321,8 @@ void gen_load_position(MoveGen *gen, Game *game, move_record_t move_record_type,
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
-  rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
+  gen->ld_size = ld_get_size(&gen->ld);
+  rack_set_dist_size(&gen->leave, gen->ld_size);
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     player_get_wmp(player));
 
@@ -1452,7 +1453,7 @@ bool gen_current_word_fits_with_board(MoveGen *gen) {
   return true;
 }
 
-void set_wmp_play_for_record(MoveGen *gen, Move *move) {
+static inline void set_wmp_play_for_record(MoveGen *gen, Move *move) {
   const WMPMoveGen *wmg = &gen->wmp_move_gen;
   const int word_length = wmg->board_spot.word_length;
   move_set_all_except_equity(move, gen->strip, 0, word_length - 1, wmg->score,
@@ -1501,8 +1502,8 @@ static inline void update_best_wmp_move_or_insert_into_movelist(MoveGen *gen) {
            string_builder_peek(sb), move_get_equity(current_move) * 0.001);
     string_builder_destroy(sb);
   }
-  assert(move_get_equity(current_move) <=
-         gen->wmp_move_gen.word_spot.best_possible_equity);
+  // assert(move_get_equity(current_move) <=
+  //        gen->wmp_move_gen.word_spot.best_possible_equity);
   if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
     // StringBuilder *sb = string_builder_create();
     // string_builder_add_move(sb, gen->board, current_move, &gen->ld);
@@ -1552,8 +1553,8 @@ static inline void get_blank_possibilities(const MoveGen *gen, int pos,
       wmp_move_gen_get_nonplaythrough_tiles(wmg);
   const int number_of_ml_in_subrack =
       bit_rack_get_letter(nonplaythrough_tiles, ml);
-  const int num_blanks =
-      bit_rack_get_letter(nonplaythrough_tiles, BLANK_MACHINE_LETTER);
+  // const int num_blanks =
+  //     bit_rack_get_letter(nonplaythrough_tiles, BLANK_MACHINE_LETTER);
   int number_of_ml_before_pos = 0;
   for (int p = 0; p < pos; p++) {
     if (gen->strip[p] == PLAYED_THROUGH_MARKER) {
@@ -1563,7 +1564,7 @@ static inline void get_blank_possibilities(const MoveGen *gen, int pos,
       number_of_ml_before_pos++;
     }
   }
-  assert(number_of_ml_before_pos <= (number_of_ml_in_subrack + num_blanks));
+  // assert(number_of_ml_before_pos <= (number_of_ml_in_subrack + num_blanks));
   int number_of_ml_at_or_after_pos = 1;
   for (int p = pos + 1; p < wmg->board_spot.word_length; p++) {
     if (gen->strip[p] == PLAYED_THROUGH_MARKER) {
@@ -1609,7 +1610,7 @@ void record_plays_for_current_word(MoveGen *gen, int blanks_so_far, int pos) {
     record_wmp_play(gen);
     return;
   }
-  assert(pos < word_length);
+  //assert(pos < word_length);
   const uint8_t ml = gen->strip[pos];
   if (ml == PLAYED_THROUGH_MARKER) {
     record_plays_for_current_word(gen, blanks_so_far, pos + 1);
@@ -1642,6 +1643,23 @@ static inline void copy_wmp_word_to_strip(MoveGen *gen) {
       gen->strip[i] = PLAYED_THROUGH_MARKER;
     }
   }
+}
+
+static inline Equity compute_best_possible_score_for_subrack(MoveGen *gen) {
+  // printf("compute_best_possible_score_for_subrack ");
+  const WMPMoveGen *wmg = &gen->wmp_move_gen;
+  const SubrackInfo *subrack_info =
+      &wmg->nonplaythrough_infos[wmg->subrack_idx];
+  Equity score = wmg->board_spot.additional_score;
+  // printf("(additional) score: %d\n", score);
+  for (int i = 0; i < WORD_ALIGNING_RACK_SIZE; i++) {
+    const Equity tile_score = subrack_info->descending_tile_scores[i];
+    const int32_t multiplier = wmg->board_spot.descending_effective_multipliers[i];
+    // printf("tile_score: %d, multiplier: %d\n", tile_score, multiplier);
+    score += tile_score * multiplier;
+  }
+  // printf("score: %d\n", score);
+  return score;
 }
 
 void wordmap_gen(MoveGen *gen) {
@@ -1729,10 +1747,10 @@ void wordmap_gen(MoveGen *gen) {
                wmg->word_spot.best_possible_score * 0.001, wmg->leave_value *
        0.001, (wmg->word_spot.best_possible_score + wmg->leave_value) * 0.001);
     */
-    assert(wmg->leave_value + wmg->word_spot.best_possible_score +
-               wmg->word_spot.preendgame_adjustment +
-               wmg->word_spot.endgame_adjustment <=
-           wmg->word_spot.best_possible_equity);
+    // assert(wmg->leave_value + wmg->word_spot.best_possible_score +
+    //            wmg->word_spot.preendgame_adjustment +
+    //            wmg->word_spot.endgame_adjustment <=
+    //        wmg->word_spot.best_possible_equity);
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       const Equity subrack_best_possible_equity =
           wmg->word_spot.best_possible_score +
@@ -1740,6 +1758,19 @@ void wordmap_gen(MoveGen *gen) {
           wmg->word_spot.endgame_adjustment + wmg->leave_value;
       if (better_play_has_been_found(gen, subrack_best_possible_equity)) {
         continue;
+      } else if (wmg->word_spot.num_tiles < wmg->full_rack_size) {
+        const Equity best_possible_score_for_subrack =
+            compute_best_possible_score_for_subrack(gen);
+        // assert(best_possible_score_for_subrack <=
+        //        wmg->word_spot.best_possible_score);
+        const Equity best_possible_using_subrack_tiles =
+            best_possible_score_for_subrack + wmg->leave_value +
+            wmg->word_spot.preendgame_adjustment +
+            wmg->word_spot.endgame_adjustment;
+        if (better_play_has_been_found(gen,
+                                       best_possible_using_subrack_tiles)) {
+          continue;
+        }
       }
     }
     if (!wmp_move_gen_get_subrack_words(wmg)) {

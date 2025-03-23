@@ -185,13 +185,13 @@ static inline int ld_get_dist(const LetterDistribution *ld,
 }
 
 static inline Equity ld_get_score(const LetterDistribution *ld,
-                               uint8_t machine_letter) {
+                                  uint8_t machine_letter) {
   return ld->scores[machine_letter];
 }
 
 static inline int ld_get_score_order(const LetterDistribution *ld,
-                                     uint8_t machine_letter) {
-  return ld->score_order[machine_letter];
+                                     uint8_t index) {
+  return ld->score_order[index];
 }
 
 static inline bool ld_get_is_vowel(const LetterDistribution *ld,

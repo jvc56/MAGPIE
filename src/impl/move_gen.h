@@ -101,6 +101,7 @@ typedef struct MoveGen {
   Equity best_leaves[(RACK_SIZE)];
   AnchorHeap anchor_heap;
   LetterDistribution ld;
+  int ld_size;
   
   // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
