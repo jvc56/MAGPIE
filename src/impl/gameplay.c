@@ -472,6 +472,7 @@ void update_spots_perpendicular_and_parallel(const Move *move, Game *game) {
 }
 
 void update_spots_for_move(const Move *move, Game *game) {
+  game_update_available_tiles(game);
   // printf("update_spots_for_move ");
   // StringBuilder *sb = string_builder_create();
   // string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game));

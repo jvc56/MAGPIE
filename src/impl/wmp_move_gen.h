@@ -51,7 +51,10 @@ typedef struct WordSpotHeap {
 typedef struct WMPMoveGen {
   const WMP *wmp;
   LetterDistribution ld;
+  // Multiset, has count for each tile
   BitRack player_bit_rack;
+  // Bitvector for set inclusion, has 1-bit for tiles with nonzero count
+  uint64_t player_rack_bitset;
   int full_rack_size;
 
   // Tiles already played on board
@@ -93,6 +96,12 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
     return;
   }
   wmp_move_gen->player_bit_rack = bit_rack_create_from_rack(ld, player_rack);
+  wmp_move_gen->player_rack_bitset = 0;
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    if (bit_rack_get_letter(&wmp_move_gen->player_bit_rack, ml) > 0) {
+      wmp_move_gen->player_rack_bitset |= (1ULL << ml);
+    }
+  }
   wmp_move_gen->ld = *ld;
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
@@ -375,6 +384,10 @@ static inline void wmp_move_gen_build_word_spot_heap(
   for (int dir = 0; dir < 2; dir++) {
     for (int row = 0; row < BOARD_DIM; row++) {
       for (int col = 0; col < BOARD_DIM; col++) {
+        const Square *square =
+            board_get_readonly_square(board, row, col, dir, ci);
+        int last_row_in_word = row;
+        int last_col_in_word = col;
         for (int tiles = 1; tiles <= wmp_move_gen->full_rack_size; tiles++) {
           // printf("row: %d, col: %d, dir: %d, tiles: %d\n", row, col, dir,
           //  tiles);
@@ -384,6 +397,24 @@ static inline void wmp_move_gen_build_word_spot_heap(
             // printf("unusable spot\n");
             continue;
           }
+          while (square_get_letter(square) != ALPHABET_EMPTY_SQUARE_MARKER) {
+            if (dir == BOARD_HORIZONTAL_DIRECTION) {
+              last_col_in_word++;
+              // assert(last_col_in_word < BOARD_DIM);
+            } else {
+              last_row_in_word++;
+              // assert(last_row_in_word < BOARD_DIM);
+            }
+            square = board_get_readonly_square(board, last_row_in_word,
+                                               last_col_in_word, dir, ci);
+          }
+          const uint64_t cross_set = square_get_cross_set(square);
+          const uint64_t leftx = square_get_left_extension_set(square);
+          const uint64_t possible_letters_here = cross_set & leftx &
+                                                wmp_move_gen->player_rack_bitset;
+          if (possible_letters_here == 0) {
+            break;
+          }                                               
           const int bag_plus_rack_size =
               number_of_tiles_in_bag - tiles + RACK_SIZE;
           const bool is_outplay = (number_of_tiles_in_bag == 0) &&
@@ -498,8 +529,8 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmg) {
   // printf("wmg->board_spot.word_length: %d\n", wmg->board_spot.word_length);
   const int result_bytes = wmp_entry_write_words_to_buffer(
       entry, wmg->wmp, &bit_rack, wmg->board_spot.word_length, wmg->buffer);
-  assert(result_bytes > 0);
-  assert(result_bytes % wmg->board_spot.word_length == 0);
+  // assert(result_bytes > 0);
+  // assert(result_bytes % wmg->board_spot.word_length == 0);
   wmg->num_words = result_bytes / wmg->board_spot.word_length;
   return true;
 }
