@@ -19,7 +19,7 @@ void test_bai_track_and_stop(void) {
       .normal.seed = 10,
   };
   RandomVariables *rvs = rvs_create(&rv_args);
-  int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, rvs, 0.05, NULL);
+  int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP_EV, rvs, 0.05, NULL);
   assert(result == 1);
   rvs_destroy(rvs);
 }
@@ -93,7 +93,7 @@ void test_bai_input_from_file(const char *bai_input_filename) {
 
   RandomVariables *rvs = rvs_create(&rv_args);
   const int result =
-      bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, rvs, delta, bai_logger);
+      bai(BAI_SAMPLING_RULE_TRACK_AND_STOP_EV, rvs, delta, bai_logger);
   bai_logger_log_int(bai_logger, "result", result + 1);
   bai_logger_flush(bai_logger);
 

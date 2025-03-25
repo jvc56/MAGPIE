@@ -39,7 +39,8 @@ int track_and_stop_next_sample(void *data, int __attribute__((unused)) astar,
                                double __attribute__((unused)) * Zs, int size,
                                BAILogger *bai_logger) {
   TrackAndStop *track_and_stop = (TrackAndStop *)data;
-  bai_oracle(ξ, ϕ2, size, track_and_stop->oracle_result, bai_logger);
+  bai_oracle(ξ, ϕ2, size, track_and_stop->is_EV, track_and_stop->oracle_result,
+             bai_logger);
   int sample =
       bai_track(track_and_stop->tracking_rule, N,
                 track_and_stop->oracle_result->ws_over_Σ, size, bai_logger);
@@ -68,6 +69,11 @@ BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, int *N,
     break;
   case BAI_SAMPLING_RULE_TRACK_AND_STOP:
     bai_sampling_rule->data =
+        track_and_stop_create(true, BAI_CTRACKING, N, size);
+    bai_sampling_rule->next_sample_func = track_and_stop_next_sample;
+    break;
+  case BAI_SAMPLING_RULE_TRACK_AND_STOP_EV:
+    bai_sampling_rule->data =
         track_and_stop_create(false, BAI_CTRACKING, N, size);
     bai_sampling_rule->next_sample_func = track_and_stop_next_sample;
     break;
@@ -83,7 +89,7 @@ void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule) {
   case BAI_SAMPLING_RULE_UNIFORM:
     log_fatal("BAI_SAMPLING_RULE_UNIFORM not implemented");
     break;
-  case BAI_SAMPLING_RULE_TRACK_AND_STOP:
+  case BAI_SAMPLING_RULE_TRACK_AND_STOP_EV:
     track_and_stop_destroy((TrackAndStop *)bai_sampling_rule->data);
     break;
   }
@@ -96,4 +102,8 @@ int bai_sampling_rule_next_sample(BAISamplingRule *bai_sampling_rule, int astar,
                                   BAILogger *bai_logger) {
   return bai_sampling_rule->next_sample_func(
       bai_sampling_rule->data, astar, aalt, ξ, ϕ2, N, S, Zs, size, bai_logger);
+}
+
+bool bai_sampling_rule_is_ev(bai_sampling_rule_t type) {
+  return type == BAI_SAMPLING_RULE_TRACK_AND_STOP_EV;
 }

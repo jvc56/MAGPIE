@@ -132,9 +132,18 @@ double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
   if (!ht->is_EV_GLR) {
     log_fatal("HT threshold not implemented for non-EV GLR");
   }
-  double ratio_a = get_factor_non_KL(ht, N[a], bai_logger);
-  double ratio_astar = get_factor_non_KL(ht, N[astar], bai_logger);
-  const double result = 0.5 * (N[a] * ratio_a + N[astar] * ratio_astar);
+  double ratio_a;
+  double ratio_astar;
+  double result;
+  if (ht->is_EV_GLR) {
+    ratio_a = get_factor_non_KL(ht, N[a], bai_logger);
+    ratio_astar = get_factor_non_KL(ht, N[astar], bai_logger);
+    result = 0.5 * (N[a] * ratio_a + N[astar] * ratio_astar);
+  } else {
+    ratio_a = get_factor_non_KL(ht, N[a], bai_logger);
+    ratio_astar = get_factor_non_KL(ht, N[astar], bai_logger);
+    result = 0.5 * (N[a] * log(1 + ratio_a) + N[astar] * log(1 + ratio_astar));
+  }
   bai_logger_log_double(bai_logger, "ratio_a", ratio_a);
   bai_logger_log_double(bai_logger, "ratio_astar", ratio_astar);
   bai_logger_log_int(bai_logger, "N[a]", N[a]);
@@ -159,8 +168,12 @@ BAIThreshold *bai_create_threshold(bai_threshold_t type, double δ,
   BAIThreshold *bai_threshold = malloc_or_die(sizeof(BAIThreshold));
   bai_threshold->type = type;
   switch (type) {
-  case BAI_THRESHOLD_HT:
+  case BAI_THRESHOLD_HT_EV:
     bai_threshold->data = create_HT(δ, K, s, true, false);
+    bai_threshold->threshold_func = HT_threshold;
+    break;
+  case BAI_THRESHOLD_HT_L:
+    bai_threshold->data = create_HT(δ, K, s, false, false);
     bai_threshold->threshold_func = HT_threshold;
     break;
   }
@@ -169,7 +182,7 @@ BAIThreshold *bai_create_threshold(bai_threshold_t type, double δ,
 
 void bai_destroy_threshold(BAIThreshold *bai_threshold) {
   switch (bai_threshold->type) {
-  case BAI_THRESHOLD_HT:
+  case BAI_THRESHOLD_HT_EV:
     destroy_HT((HT *)bai_threshold->data);
     break;
   }

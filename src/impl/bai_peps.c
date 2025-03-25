@@ -93,20 +93,80 @@ double alt_λ_KV(double μ1, double σ21, double w1, double μa, double σ2a,
     bai_logger_log_double(bai_logger, "u1", μ1);
     return μ1;
   }
-  const double x = ((double)wa) / w1;
+  const double x = wa / w1;
   const double result = (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
   bai_logger_log_double(bai_logger, "x", x);
   bai_logger_log_double(bai_logger, "result", result);
   return result;
 }
 
-// FIXME: need to check if this is correct
-double dGaussian(double μ, double σ2, double λ) {
-  const double diff = μ - λ;
-  return (diff * diff) / (2 * σ2);
+double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
+                double wa, BAILogger *bai_logger) {
+  bai_logger_log_title(bai_logger, "ALT_UV");
+  if (w1 == 0) {
+    bai_logger_log_double(bai_logger, "ua", μa);
+    return μa;
+  }
+  if (wa == 0 || μ1 == μa) {
+    bai_logger_log_double(bai_logger, "u1", μ1);
+    return μ1;
+  }
+  const double x = wa / w1;
+  const double α2 = μa + μ1 + (μa + x * μ1) / (1 + x);
+  const double α1 =
+      (σ2a + x * σ21) / (1 + x) + μa * μ1 + (μa + μ1) * (μa + x * μ1) / (1 + x);
+  const double α0 = (μ1 * (μa * μa + σ2a) + μa * (μ1 * μ1 + σ21) * x) / (1 + x);
+
+  double valid_roots[3];
+  const int num_valid_roots = cubic_roots(1, -α2, α1, -α0, valid_roots);
+
+  if (num_valid_roots == 0) {
+    log_fatal("Solver couldn't find a valid real roots in [%.15f, %.15f].", μa,
+              μ1);
+  }
+  if (num_valid_roots == 1) {
+    return valid_roots[0];
+  }
+  double v = dUV(μ1, σ21, valid_roots[0]) + x * dUV(μa, σ2a, valid_roots[0]);
+  int id = 0;
+  for (int i = 1; i < num_valid_roots; i++) {
+    double _v = dUV(μ1, σ21, valid_roots[i]) + x * dUV(μa, σ2a, valid_roots[i]);
+    if (_v < v) {
+      id = i;
+      v = _v;
+    }
+  }
+  return valid_roots[id];
 }
 
-void bai_glrt(int K, int *w, double *μ, double *σ2,
+double alt_λ(double μ1, double σ21, double w1, double μa, double σ2a, double wa,
+             bool known_var, BAILogger *bai_logger) {
+  if (known_var) {
+    return alt_λ_KV(μ1, σ21, w1, μa, σ2a, wa, bai_logger);
+  } else {
+    return alt_λ_UV(μ1, σ21, w1, μa, σ2a, wa, bai_logger);
+  }
+}
+
+double bai_dUV(double μ, double σ2, double λ) {
+  const double diff = μ - λ;
+  return 0.5 * log(1 + (diff * diff) / σ2);
+}
+
+double bai_dKV(double μ, double σ2, double λ) {
+  const double diff = μ - λ;
+  return 0.5 * (diff * diff) / σ2;
+}
+
+double bai_d(double μ, double σ2, double λ, bool known_var) {
+  if (known_var) {
+    return bai_dKV(μ, σ2, λ);
+  } else {
+    return bai_dUV(μ, σ2, λ);
+  }
+}
+
+void bai_glrt(int K, int *w, double *μ, double *σ2, bool known_var,
               BAIGLRTResults *glrt_results, BAILogger *bai_logger) {
   int astar = 0;
   for (int i = 1; i < K; i++) {
@@ -133,10 +193,10 @@ void bai_glrt(int K, int *w, double *μ, double *σ2,
     if (a == astar) {
       continue;
     }
-    θs[a] =
-        alt_λ_KV(μ[astar], σ2[astar], w[astar], μ[a], σ2[a], w[a], bai_logger);
-    vals[a] = w[astar] * dGaussian(μ[astar], σ2[astar], θs[a]) +
-              w[a] * dGaussian(μ[a], σ2[a], θs[a]);
+    θs[a] = alt_λ(μ[astar], σ2[astar], w[astar], μ[a], σ2[a], w[a], known_var,
+                  bai_logger);
+    vals[a] = w[astar] * bai_d(μ[astar], σ2[astar], θs[a], known_var) +
+              w[a] * bai_d(μ[a], σ2[a], θs[a], known_var);
     bai_logger_log_int(bai_logger, "arm", a + 1);
     bai_logger_log_double(bai_logger, "theta", θs[a]);
     bai_logger_log_double(bai_logger, "val", vals[a]);
@@ -176,6 +236,7 @@ typedef struct BAIXBinarySearchArgs {
   double μa;
   double σ2a;
   double v;
+  bool known_var;
   BAILogger *bai_logger;
 } BAIXBinarySearchArgs;
 
@@ -186,9 +247,11 @@ double bai_X_binary_search_func(double z, void *args) {
   const double μa = xbs_args->μa;
   const double σ2a = xbs_args->σ2a;
   const double v = xbs_args->v;
-  const double μz = alt_λ_KV(μ1, σ21, 1 - z, μa, σ2a, z, xbs_args->bai_logger);
-  const double result = (1 - z) * dGaussian(μ1, σ21, μz) +
-                        z * dGaussian(μa, σ2a, μz) - (1 - z) * v;
+  const bool known_var = xbs_args->known_var;
+  const double μz =
+      alt_λ(μ1, σ21, 1 - z, μa, σ2a, z, known_var, xbs_args->bai_logger);
+  const double result = (1 - z) * bai_d(μ1, σ21, μz, known_var) +
+                        z * bai_d(μa, σ2a, μz, known_var) - (1 - z) * v;
   bai_logger_log_double(xbs_args->bai_logger, "z", z);
   bai_logger_log_double(xbs_args->bai_logger, "u1", μ1);
   bai_logger_log_double(xbs_args->bai_logger, "sigma21", σ21);
@@ -203,27 +266,29 @@ double bai_X_binary_search_func(double z, void *args) {
 
 typedef struct BAIXResults {
   double α_ratio;
-  double alt_λ_KV;
+  double alt_λ;
 } BAIXResults;
 
 void bai_X(double μ1, double σ21, double μa, double σ2a, double v,
-           BAIXResults *bai_X_results, BAILogger *bai_logger) {
-  double upd_a = dGaussian(μ1, σ21, μa);
+           bool known_var, BAIXResults *bai_X_results, BAILogger *bai_logger) {
+  double upd_a = bai_d(μ1, σ21, μa, known_var);
   BAIXBinarySearchArgs xbs_args = {
       .μ1 = μ1,
       .σ21 = σ21,
       .μa = μa,
       .σ2a = σ2a,
       .v = v,
+      .known_var = known_var,
       .bai_logger = bai_logger,
   };
   double α = bai_binary_search(bai_X_binary_search_func, &xbs_args, 0, 1,
                                upd_a * (BAI_EPSILON), bai_logger);
   bai_X_results->α_ratio = α / (1 - α);
-  bai_X_results->alt_λ_KV = alt_λ_KV(μ1, σ21, 1 - α, μa, σ2a, α, bai_logger);
+  bai_X_results->alt_λ =
+      alt_λ(μ1, σ21, 1 - α, μa, σ2a, α, known_var, bai_logger);
   bai_logger_log_double(bai_logger, "a", α);
   bai_logger_log_double(bai_logger, "a_ratio", bai_X_results->α_ratio);
-  bai_logger_log_double(bai_logger, "alt", bai_X_results->alt_λ_KV);
+  bai_logger_log_double(bai_logger, "alt", bai_X_results->alt_λ);
   bai_logger_flush(bai_logger);
 }
 
@@ -232,6 +297,7 @@ typedef struct BAIOracleBinarySearchArgs {
   const double *σ2s;
   int size;
   int astar;
+  bool known_var;
   BAILogger *bai_logger;
 } BAIOracleBinarySearchArgs;
 
@@ -239,19 +305,20 @@ double bai_oracle_binary_search_func(double z, void *args) {
   BAIOracleBinarySearchArgs *obs_args = (BAIOracleBinarySearchArgs *)args;
   const double *μs = obs_args->μs;
   const double *σ2s = obs_args->σ2s;
-  int size = obs_args->size;
-  int astar = obs_args->astar;
+  const int size = obs_args->size;
+  const int astar = obs_args->astar;
+  const bool known_var = obs_args->known_var;
   double sum = 0.0;
   BAIXResults bai_X_results;
   for (int k = 0; k < size; ++k) {
     if (k == astar) {
       continue;
     }
-    bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], z, &bai_X_results,
+    bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], z, known_var, &bai_X_results,
           obs_args->bai_logger);
-    const double μx = bai_X_results.alt_λ_KV;
-    const double numer = dGaussian(μs[astar], σ2s[astar], μx);
-    const double denom = dGaussian(μs[k], σ2s[k], μx);
+    const double μx = bai_X_results.alt_λ;
+    const double numer = bai_d(μs[astar], σ2s[astar], μx, known_var);
+    const double denom = bai_d(μs[k], σ2s[k], μx, known_var);
     const double result = numer / denom;
     bai_logger_log_int(obs_args->bai_logger, "k", k + 1);
     bai_logger_log_double(obs_args->bai_logger, "ux", μx);
@@ -274,7 +341,7 @@ void bai_oracle_result_destroy(BAIOracleResult *oracle_result) {
   free(oracle_result);
 }
 
-void bai_oracle(double *μs, double *σ2s, int size,
+void bai_oracle(double *μs, double *σ2s, int size, bool known_var,
                 BAIOracleResult *oracle_result, BAILogger *bai_logger) {
   int astar = 0;
   double μstar = μs[0];
@@ -318,7 +385,7 @@ void bai_oracle(double *μs, double *σ2s, int size,
     if (k == astar) {
       continue;
     }
-    double result = dGaussian(μs[astar], σ2s[astar], μs[k]);
+    double result = bai_d(μs[astar], σ2s[astar], μs[k], known_var);
     if (result < hi) {
       hi = result;
     }
@@ -327,12 +394,15 @@ void bai_oracle(double *μs, double *σ2s, int size,
   bai_logger_log_double(bai_logger, "hi", hi);
   bai_logger_flush(bai_logger);
 
-  BAIOracleBinarySearchArgs obs_args;
-  obs_args.astar = astar;
-  obs_args.size = size;
-  obs_args.μs = μs;
-  obs_args.σ2s = σ2s;
-  obs_args.bai_logger = bai_logger;
+  BAIOracleBinarySearchArgs obs_args = {
+      .astar = astar,
+      .size = size,
+      .μs = μs,
+      .σ2s = σ2s,
+      .known_var = known_var,
+      .bai_logger = bai_logger,
+  };
+
   double val = bai_binary_search(bai_oracle_binary_search_func, &obs_args, 0,
                                  hi, BAI_EPSILON, bai_logger);
 
@@ -345,8 +415,8 @@ void bai_oracle(double *μs, double *σ2s, int size,
     if (k == astar) {
       oracle_result->ws_over_Σ[k] = 1.0;
     } else {
-      bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], val, &bai_X_results,
-            bai_logger);
+      bai_X(μs[astar], σ2s[astar], μs[k], σ2s[k], val, known_var,
+            &bai_X_results, bai_logger);
       oracle_result->ws_over_Σ[k] = bai_X_results.α_ratio;
     }
     Σ += oracle_result->ws_over_Σ[k];

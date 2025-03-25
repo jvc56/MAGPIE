@@ -35,10 +35,11 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
 }
 
 // Assumes random variables are normally distributed.
-int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ,
-        BAILogger *bai_logger) {
+int bai(bai_sampling_rule_t sr, bai_threshold_t thres, RandomVariables *rvs,
+        double δ, BAILogger *bai_logger) {
+  const bool is_ev = bai_sampling_rule_is_ev(sr);
   const int K = rvs_get_num_rvs(rvs);
-  BAIThreshold *βs = bai_create_threshold(BAI_THRESHOLD_HT, δ, 2, K, 2, 1.2);
+  BAIThreshold *βs = bai_create_threshold(thres, δ, 2, K, 2, 1.2);
 
   int *N = calloc_or_die(K, sizeof(int));
   double *S = calloc_or_die(K, sizeof(double));
@@ -55,7 +56,6 @@ int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ,
   int t = K * 2;
   double *hμ = calloc_or_die(K, sizeof(double));
   double *hσ2 = calloc_or_die(K, sizeof(double));
-  // FIXME: probably just inline this
   int astar;
   BAISamplingRule *bai_sampling_rule = bai_sampling_rule_create(sr, N, K);
   BAIThreshold *Sβ = βs;
@@ -66,7 +66,7 @@ int bai(bai_sampling_rule_t sr, RandomVariables *rvs, double δ,
       hσ2[i] = S2[i] / N[i] - hμ[i] * hμ[i];
     }
     bai_logger_log_int(bai_logger, "t", t);
-    bai_glrt(K, N, hμ, hσ2, glrt_results, bai_logger);
+    bai_glrt(K, N, hμ, hσ2, is_ev, glrt_results, bai_logger);
     double *Zs = glrt_results->vals;
     int aalt = glrt_results->k;
     astar = glrt_results->astar;
