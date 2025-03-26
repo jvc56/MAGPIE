@@ -1,12 +1,14 @@
 #include "bai_peps.h"
 
 #include "../util/log.h"
+#include "../util/math_util.h"
 #include "../util/util.h"
 
 #include "../def/bai_defs.h"
 
 #include "../ent/bai_logger.h"
 
+#include <complex.h>
 #include <float.h>
 #include <math.h>
 #include <stdbool.h>
@@ -82,6 +84,24 @@ bool bai_within_epsilon(double x, double y, double ϵ) {
   return fabs(x - y) < ϵ;
 }
 
+double bai_dUV(double μ, double σ2, double λ) {
+  const double diff = μ - λ;
+  return 0.5 * log(1 + (diff * diff) / σ2);
+}
+
+double bai_dKV(double μ, double σ2, double λ) {
+  const double diff = μ - λ;
+  return 0.5 * (diff * diff) / σ2;
+}
+
+double bai_d(double μ, double σ2, double λ, bool known_var) {
+  if (known_var) {
+    return bai_dKV(μ, σ2, λ);
+  } else {
+    return bai_dUV(μ, σ2, λ);
+  }
+}
+
 double alt_λ_KV(double μ1, double σ21, double w1, double μa, double σ2a,
                 double wa, BAILogger *bai_logger) {
   bai_logger_log_title(bai_logger, "ALT_KV");
@@ -117,25 +137,51 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
       (σ2a + x * σ21) / (1 + x) + μa * μ1 + (μa + μ1) * (μa + x * μ1) / (1 + x);
   const double α0 = (μ1 * (μa * μa + σ2a) + μa * (μ1 * μ1 + σ21) * x) / (1 + x);
 
+  bai_logger_log_double(bai_logger, "x", x);
+  bai_logger_log_double(bai_logger, "alpha2", α2);
+  bai_logger_log_double(bai_logger, "alpha1", α1);
+  bai_logger_log_double(bai_logger, "alpha0", α0);
+
+  complex double roots[3];
+  const bool cubic_root_success = cubic_roots(1, -α2, α1, -α0, roots);
+  if (!cubic_root_success) {
+    log_fatal("cubic solver failed for inputs: %.15f, %.15f, %.15f, %.15f", 1,
+              -α2, α1, -α0);
+  }
+  int num_valid_roots = 0;
   double valid_roots[3];
-  const int num_valid_roots = cubic_roots(1, -α2, α1, -α0, valid_roots);
+  for (int i = 0; i < 3; i++) {
+    if (fabs(cimag(roots[i])) < 1e-10) {
+      const double r = creal(roots[i]);
+      if (r - μa >= -1e-10 && r - μ1 <= 1e-10) {
+        valid_roots[num_valid_roots] = r;
+        num_valid_roots++;
+      }
+    }
+  }
+
+  bai_logger_log_int(bai_logger, "num_valid_roots", num_valid_roots);
 
   if (num_valid_roots == 0) {
     log_fatal("Solver couldn't find a valid real roots in [%.15f, %.15f].", μa,
               μ1);
   }
   if (num_valid_roots == 1) {
+    bai_logger_log_double(bai_logger, "valid_root[1]", valid_roots[0]);
     return valid_roots[0];
   }
-  double v = dUV(μ1, σ21, valid_roots[0]) + x * dUV(μa, σ2a, valid_roots[0]);
+  double v =
+      bai_dUV(μ1, σ21, valid_roots[0]) + x * bai_dUV(μa, σ2a, valid_roots[0]);
   int id = 0;
   for (int i = 1; i < num_valid_roots; i++) {
-    double _v = dUV(μ1, σ21, valid_roots[i]) + x * dUV(μa, σ2a, valid_roots[i]);
+    double _v =
+        bai_dUV(μ1, σ21, valid_roots[i]) + x * bai_dUV(μa, σ2a, valid_roots[i]);
     if (_v < v) {
       id = i;
       v = _v;
     }
   }
+  bai_logger_log_double(bai_logger, "valid_root[id]", valid_roots[id]);
   return valid_roots[id];
 }
 
@@ -145,24 +191,6 @@ double alt_λ(double μ1, double σ21, double w1, double μa, double σ2a, doubl
     return alt_λ_KV(μ1, σ21, w1, μa, σ2a, wa, bai_logger);
   } else {
     return alt_λ_UV(μ1, σ21, w1, μa, σ2a, wa, bai_logger);
-  }
-}
-
-double bai_dUV(double μ, double σ2, double λ) {
-  const double diff = μ - λ;
-  return 0.5 * log(1 + (diff * diff) / σ2);
-}
-
-double bai_dKV(double μ, double σ2, double λ) {
-  const double diff = μ - λ;
-  return 0.5 * (diff * diff) / σ2;
-}
-
-double bai_d(double μ, double σ2, double λ, bool known_var) {
-  if (known_var) {
-    return bai_dKV(μ, σ2, λ);
-  } else {
-    return bai_dUV(μ, σ2, λ);
   }
 }
 

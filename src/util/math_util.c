@@ -26,6 +26,8 @@ SOFTWARE.
 #include <math.h>
 #include <stdbool.h>
 // FIXME: remove
+#include <complex.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "../def/math_util_defs.h"
@@ -273,55 +275,41 @@ double lambertw(const double x, const int k) {
   return W;
 }
 
-// Returns the number of real roots and fills the roots array
-int cubic_roots(double a, double b, double c, double d, double *roots,
-                double epsilon) {
-  // If a is zero, this is not a cubic equation
-  if (fabs(a) < epsilon) {
-    return 0;
+bool cubic_roots(double a, double b, double c, double d,
+                 complex double *roots) {
+  if (a == 0) {
+    return false;
   }
-  // Normalize the equation to standard form x^3 + px^2 + qx + r = 0
+  // Normalize the equation: x^3 + p*x^2 + q*x + r = 0
   const double p = b / a;
   const double q = c / a;
   const double r = d / a;
-  // Calculate intermediate values
+
+  // Intermediate calculations
   const double Q = (3 * q - p * p) / 9.0;
   const double R = (9 * p * q - 27 * r - 2 * p * p * p) / 54.0;
-  // Calculate discriminant
+
+  // Discriminant
   const double discriminant = Q * Q * Q + R * R;
-  // Number of real roots
-  int num_roots = 0;
+
   if (discriminant >= 0) {
-    // At least one real root
-    const double S = (R >= 0) ? pow(R + sqrt(discriminant), 1.0 / 3.0)
-                              : -pow(-R + sqrt(discriminant), 1.0 / 3.0);
-    const double T = (Q == 0) ? 0 : Q / S;
-    // Adjust roots
-    roots[0] = S + T - p / 3.0;
-    if (fabs(discriminant) < epsilon) {
-      // Two real roots (repeated)
-      const double other_root = -roots[0] / 2.0 - p / 3.0;
-      roots[1] = other_root;
-      roots[2] = other_root;
-    } else {
-      // One real root
-      num_roots = 1;
-    }
+    // Real roots case
+    const double S_real = cbrt(R + sqrt(discriminant));
+    const double T_real = cbrt(R - sqrt(discriminant));
+    const complex double S = S_real;
+    const complex double T = T_real;
+    // Three roots
+    roots[0] = -(S + T) / 2.0 - p / 3.0 - ((S - T) * sqrt(3.0) / 2.0) * I;
+    roots[1] = -(S + T) / 2.0 - p / 3.0 + ((S - T) * sqrt(3.0) / 2.0) * I;
+    roots[2] = S + T - p / 3.0;
   } else {
-    // Three distinct real roots
+    // All roots are real and different
     const double theta = acos(R / sqrt(-Q * Q * Q));
     const double sqrt_Q = sqrt(-Q);
-    roots[0] = 2 * sqrt_Q * cos(theta / 3.0) - p / 3.0;
+    roots[0] = 2 * sqrt_Q * cos((theta + 4 * M_PI) / 3.0) - p / 3.0;
     roots[1] = 2 * sqrt_Q * cos((theta + 2 * M_PI) / 3.0) - p / 3.0;
-    roots[2] = 2 * sqrt_Q * cos((theta + 4 * M_PI) / 3.0) - p / 3.0;
-    num_roots = 3;
+    roots[2] = 2 * sqrt_Q * cos(theta / 3.0) - p / 3.0;
   }
-  // Validate the roots
-  int num_valid_roots = 0;
-  for (int i = 0; i < num_roots; i++) {
-    if (fabs(roots[i]) < epsilon) {
-      roots[num_valid_roots++] = roots[i];
-    }
-  }
-  return num_valid_roots;
+
+  return true;
 }

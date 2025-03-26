@@ -185,6 +185,9 @@ void bai_destroy_threshold(BAIThreshold *bai_threshold) {
   case BAI_THRESHOLD_HT_EV:
     destroy_HT((HT *)bai_threshold->data);
     break;
+  case BAI_THRESHOLD_HT_L:
+    destroy_HT((HT *)bai_threshold->data);
+    break;
   }
   free(bai_threshold);
 }

@@ -89,6 +89,9 @@ void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule) {
   case BAI_SAMPLING_RULE_UNIFORM:
     log_fatal("BAI_SAMPLING_RULE_UNIFORM not implemented");
     break;
+  case BAI_SAMPLING_RULE_TRACK_AND_STOP:
+    track_and_stop_destroy((TrackAndStop *)bai_sampling_rule->data);
+    break;
   case BAI_SAMPLING_RULE_TRACK_AND_STOP_EV:
     track_and_stop_destroy((TrackAndStop *)bai_sampling_rule->data);
     break;
