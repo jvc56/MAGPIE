@@ -107,16 +107,19 @@ double alt_λ_KV(double μ1, double σ21, double w1, double μa, double σ2a,
   bai_logger_log_title(bai_logger, "ALT_KV");
   if (w1 == 0) {
     bai_logger_log_double(bai_logger, "ua", μa);
+    bai_logger_flush(bai_logger);
     return μa;
   }
   if (wa == 0 || μ1 == μa) {
     bai_logger_log_double(bai_logger, "u1", μ1);
+    bai_logger_flush(bai_logger);
     return μ1;
   }
   const double x = wa / w1;
   const double result = (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
   bai_logger_log_double(bai_logger, "x", x);
   bai_logger_log_double(bai_logger, "result", result);
+  bai_logger_flush(bai_logger);
   return result;
 }
 
@@ -125,10 +128,12 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
   bai_logger_log_title(bai_logger, "ALT_UV");
   if (w1 == 0) {
     bai_logger_log_double(bai_logger, "ua", μa);
+    bai_logger_flush(bai_logger);
     return μa;
   }
   if (wa == 0 || μ1 == μa) {
     bai_logger_log_double(bai_logger, "u1", μ1);
+    bai_logger_flush(bai_logger);
     return μ1;
   }
   const double x = wa / w1;
@@ -141,6 +146,7 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
   bai_logger_log_double(bai_logger, "alpha2", α2);
   bai_logger_log_double(bai_logger, "alpha1", α1);
   bai_logger_log_double(bai_logger, "alpha0", α0);
+  bai_logger_flush(bai_logger);
 
   complex double roots[3];
   const bool cubic_root_success = cubic_roots(1, -α2, α1, -α0, roots);
@@ -161,6 +167,7 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
   }
 
   bai_logger_log_int(bai_logger, "num_valid_roots", num_valid_roots);
+  bai_logger_flush(bai_logger);
 
   if (num_valid_roots == 0) {
     log_fatal("Solver couldn't find a valid real roots in [%.15f, %.15f].", μa,
@@ -168,6 +175,7 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
   }
   if (num_valid_roots == 1) {
     bai_logger_log_double(bai_logger, "valid_root[1]", valid_roots[0]);
+    bai_logger_flush(bai_logger);
     return valid_roots[0];
   }
   double v =
@@ -182,6 +190,7 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
     }
   }
   bai_logger_log_double(bai_logger, "valid_root[id]", valid_roots[id]);
+  bai_logger_flush(bai_logger);
   return valid_roots[id];
 }
 
