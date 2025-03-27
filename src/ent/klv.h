@@ -204,7 +204,7 @@ static inline void klv_load(KLV *klv, const char *data_paths,
   }
   free(temp_floats);
 
-  klv->word_counts = malloc_or_die(kwg_size * sizeof(uint32_t));
+  klv->word_counts = (uint32_t *)malloc_or_die(kwg_size * sizeof(uint32_t));
   for (size_t i = 0; i < kwg_size; i++) {
     klv->word_counts[i] = 0;
   }
@@ -213,7 +213,7 @@ static inline void klv_load(KLV *klv, const char *data_paths,
 }
 
 static inline KLV *klv_create(const char *data_paths, const char *klv_name) {
-  KLV *klv = malloc_or_die(sizeof(KLV));
+  KLV *klv = (KLV *)malloc_or_die(sizeof(KLV));
   klv->name = NULL;
   klv_load(klv, data_paths, klv_name);
   return klv;
@@ -222,7 +222,7 @@ static inline KLV *klv_create(const char *data_paths, const char *klv_name) {
 // Takes ownership of the KWG
 static inline KLV *klv_create_zeroed_from_kwg(KWG *kwg, int number_of_leaves,
                                               const char *klv_name) {
-  KLV *klv = malloc_or_die(sizeof(KLV));
+  KLV *klv = (KLV *)malloc_or_die(sizeof(KLV));
   klv->kwg = kwg;
   klv->name = string_duplicate(klv_name);
   klv->number_of_leaves = number_of_leaves;

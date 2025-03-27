@@ -781,7 +781,7 @@ static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
 }
 
 static inline Board *board_create(const BoardLayout *bl) {
-  Board *board = malloc_or_die(sizeof(Board));
+  Board *board = (Board *)malloc_or_die(sizeof(Board));
   board_apply_layout(bl, board);
   board_reset(board);
   return board;

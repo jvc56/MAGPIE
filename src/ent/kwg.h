@@ -148,14 +148,14 @@ static inline void load_kwg(KWG *kwg, const char *data_paths,
 }
 
 static inline KWG *kwg_create(const char *data_paths, const char *kwg_name) {
-  KWG *kwg = malloc_or_die(sizeof(KWG));
+  KWG *kwg = (KWG *)malloc_or_die(sizeof(KWG));
   kwg->name = NULL;
   load_kwg(kwg, data_paths, kwg_name);
   return kwg;
 }
 
 static inline KWG *kwg_create_empty(void) {
-  KWG *kwg = malloc_or_die(sizeof(KWG));
+  KWG *kwg = (KWG *)malloc_or_die(sizeof(KWG));
   kwg->name = NULL;
   return kwg;
 }

@@ -629,7 +629,7 @@ static inline void move_list_insert_spare_small_move(MoveList *ml) {
 static inline MoveList *small_move_list_create(int capacity) {
   MoveList *ml = (MoveList *)malloc_or_die(sizeof(MoveList));
   ml->count = 0;
-  ml->spare_move = malloc_or_die(sizeof(SmallMove));
+  ml->spare_small_move = (SmallMove *)malloc_or_die(sizeof(SmallMove));
   move_list_load_with_empty_small_moves(ml, capacity);
   return ml;
 }

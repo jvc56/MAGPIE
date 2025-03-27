@@ -3,6 +3,10 @@ bin
 obj
 cov
 covhtml
+*.o
+moc_*
+.qmake.stash
+qtpie/Makefile
 *.gcda
 *.gcno
 *.info
