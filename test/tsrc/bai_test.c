@@ -26,7 +26,7 @@ void test_bai_track_and_stop(void) {
       .seed = 10,
   };
   RandomVariables *rng = rvs_create(&rng_args);
-  int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP_EV, BAI_THRESHOLD_HT_EV,
+  int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_HT,
                    rvs, 0.05, rng, NULL);
   assert(result == 1);
   rvs_destroy(rng);
@@ -109,16 +109,24 @@ void test_bai_input_from_file(const char *bai_input_filename) {
   RandomVariables *rng = rvs_create(&rng_args);
 
   // const int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP_EV,
-  //                        BAI_THRESHOLD_HT_EV, rvs, delta, bai_logger);
-  const int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, BAI_THRESHOLD_HT_L,
+  //                        BAI_THRESHOLD_HT_EV, rvs, delta, rng, bai_logger);
+  // const int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP,
+  // BAI_THRESHOLD_HT,
+  //                        rvs, delta, rng, bai_logger);
+  // const int result = bai(BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_HT,
+  // rvs,
+  //                        delta, rng, bai_logger);
+  const int result = bai(BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_HT,
                          rvs, delta, rng, bai_logger);
   bai_logger_log_int(bai_logger, "result", result + 1);
   bai_logger_flush(bai_logger);
 
   bai_logger_destroy(bai_logger);
   rvs_destroy(rvs);
+  rvs_destroy(rng);
   free(means_and_vars);
   free(samples);
+  free(rng_samples);
 }
 
 void test_bai(void) {

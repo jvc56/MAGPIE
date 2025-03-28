@@ -159,18 +159,14 @@ struct BAIThreshold {
   threshold_func_t threshold_func;
 };
 
-BAIThreshold *bai_create_threshold(bai_threshold_t type, double δ,
+BAIThreshold *bai_create_threshold(bai_threshold_t type, bool is_EV, double δ,
                                    int __attribute__((unused)) r, int K, int s,
                                    double __attribute__((unused)) γ) {
   BAIThreshold *bai_threshold = malloc_or_die(sizeof(BAIThreshold));
   bai_threshold->type = type;
   switch (type) {
-  case BAI_THRESHOLD_HT_EV:
-    bai_threshold->data = create_HT(δ, K, s, true, false);
-    bai_threshold->threshold_func = HT_threshold;
-    break;
-  case BAI_THRESHOLD_HT_L:
-    bai_threshold->data = create_HT(δ, K, s, false, false);
+  case BAI_THRESHOLD_HT:
+    bai_threshold->data = create_HT(δ, K, s, is_EV, false);
     bai_threshold->threshold_func = HT_threshold;
     break;
   }
@@ -179,10 +175,7 @@ BAIThreshold *bai_create_threshold(bai_threshold_t type, double δ,
 
 void bai_destroy_threshold(BAIThreshold *bai_threshold) {
   switch (bai_threshold->type) {
-  case BAI_THRESHOLD_HT_EV:
-    destroy_HT((HT *)bai_threshold->data);
-    break;
-  case BAI_THRESHOLD_HT_L:
+  case BAI_THRESHOLD_HT:
     destroy_HT((HT *)bai_threshold->data);
     break;
   }

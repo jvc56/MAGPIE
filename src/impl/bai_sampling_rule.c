@@ -124,8 +124,8 @@ struct BAISamplingRule {
   next_sample_func_t next_sample_func;
 };
 
-BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, int *N,
-                                          int size) {
+BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, bool is_EV,
+                                          int *N, int size) {
   BAISamplingRule *bai_sampling_rule = malloc_or_die(sizeof(BAISamplingRule));
   bai_sampling_rule->type = type;
   switch (type) {
@@ -137,22 +137,12 @@ BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, int *N,
     break;
   case BAI_SAMPLING_RULE_TRACK_AND_STOP:
     bai_sampling_rule->data =
-        track_and_stop_create(false, BAI_CTRACKING, N, size);
-    bai_sampling_rule->next_sample_func = track_and_stop_next_sample;
-    break;
-  case BAI_SAMPLING_RULE_TRACK_AND_STOP_EV:
-    bai_sampling_rule->data =
-        track_and_stop_create(true, BAI_CTRACKING, N, size);
+        track_and_stop_create(is_EV, BAI_CTRACKING, N, size);
     bai_sampling_rule->next_sample_func = track_and_stop_next_sample;
     break;
   case BAI_SAMPLING_RULE_TOP_TWO:
     bai_sampling_rule->data =
-        top_two_create(false, 0.5, BAI_TOP_TWO_CHALLENGER_TC);
-    bai_sampling_rule->next_sample_func = top_two_next_sample;
-    break;
-  case BAI_SAMPLING_RULE_TOP_TWO_EV:
-    bai_sampling_rule->data =
-        top_two_create(true, 0.5, BAI_TOP_TWO_CHALLENGER_TC);
+        top_two_create(is_EV, 0.5, BAI_TOP_TWO_CHALLENGER_TC);
     bai_sampling_rule->next_sample_func = top_two_next_sample;
     break;
   }
@@ -170,13 +160,7 @@ void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule) {
   case BAI_SAMPLING_RULE_TRACK_AND_STOP:
     track_and_stop_destroy((TrackAndStop *)bai_sampling_rule->data);
     break;
-  case BAI_SAMPLING_RULE_TRACK_AND_STOP_EV:
-    track_and_stop_destroy((TrackAndStop *)bai_sampling_rule->data);
-    break;
   case BAI_SAMPLING_RULE_TOP_TWO:
-    top_two_destroy((TopTwo *)bai_sampling_rule->data);
-    break;
-  case BAI_SAMPLING_RULE_TOP_TWO_EV:
     top_two_destroy((TopTwo *)bai_sampling_rule->data);
     break;
   }
@@ -190,9 +174,4 @@ int bai_sampling_rule_next_sample(BAISamplingRule *bai_sampling_rule, int astar,
   return bai_sampling_rule->next_sample_func(bai_sampling_rule->data, astar,
                                              aalt, ξ, ϕ2, N, S, Zs, size, rng,
                                              bai_logger);
-}
-
-bool bai_sampling_rule_is_ev(bai_sampling_rule_t type) {
-  return type == BAI_SAMPLING_RULE_TRACK_AND_STOP_EV ||
-         type == BAI_SAMPLING_RULE_TOP_TWO_EV;
 }
