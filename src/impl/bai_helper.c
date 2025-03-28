@@ -129,9 +129,6 @@ double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
     bai_logger_flush(bai_logger);
     return INFINITY;
   }
-  if (!ht->is_EV_GLR) {
-    log_fatal("HT threshold not implemented for non-EV GLR");
-  }
   double ratio_a;
   double ratio_astar;
   double result;

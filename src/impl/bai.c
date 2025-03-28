@@ -36,7 +36,7 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
 
 // Assumes random variables are normally distributed.
 int bai(bai_sampling_rule_t sr, bai_threshold_t thres, RandomVariables *rvs,
-        double δ, BAILogger *bai_logger) {
+        double δ, RandomVariables *rng, BAILogger *bai_logger) {
   const bool is_ev = bai_sampling_rule_is_ev(sr);
   const int K = rvs_get_num_rvs(rvs);
   BAIThreshold *βs = bai_create_threshold(thres, δ, 2, K, 2, 1.2);
@@ -84,8 +84,8 @@ int bai(bai_sampling_rule_t sr, bai_threshold_t thres, RandomVariables *rvs,
     if (stopping_criterion(K, Zs, Sβ, N, hμ, hσ2, astar, bai_logger)) {
       break;
     }
-    const int k = bai_sampling_rule_next_sample(bai_sampling_rule, astar, aalt,
-                                                ξ, ϕ2, N, S, Zs, K, bai_logger);
+    const int k = bai_sampling_rule_next_sample(
+        bai_sampling_rule, astar, aalt, ξ, ϕ2, N, S, Zs, K, rng, bai_logger);
     double _X = rvs_sample(rvs, k, bai_logger);
     S[k] += _X;
     S2[k] += _X * _X;

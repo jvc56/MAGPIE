@@ -12,6 +12,8 @@ def save_normal_data(filename, delta, num_vars, means_stdevs, num_samples):
         
         samples = np.random.normal(0, 1, num_samples)
         f.write("\n".join(map(str, samples)))
+        rng_samples = np.random.uniform(0, 1, num_samples)
+        f.write("\n".join(map(str, rng_samples)))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate and save normal distribution data.")

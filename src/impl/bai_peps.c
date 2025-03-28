@@ -174,7 +174,7 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
               μ1);
   }
   if (num_valid_roots == 1) {
-    bai_logger_log_double(bai_logger, "valid_root[1]", valid_roots[0]);
+    bai_logger_log_double(bai_logger, "valid_roots[1]", valid_roots[0]);
     bai_logger_flush(bai_logger);
     return valid_roots[0];
   }
@@ -189,7 +189,7 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
       v = _v;
     }
   }
-  bai_logger_log_double(bai_logger, "valid_root[id]", valid_roots[id]);
+  bai_logger_log_double(bai_logger, "valid_roots[id]", valid_roots[id]);
   bai_logger_flush(bai_logger);
   return valid_roots[id];
 }
@@ -257,6 +257,17 @@ void bai_glrt(int K, int *w, double *μ, double *σ2, bool known_var,
     glrt_results->μ[i] = μ[i];
     glrt_results->σ2[i] = σ2[i];
   }
+
+  if (!known_var) {
+    const double astar_diff = θs[k] - glrt_results->μ[astar];
+    glrt_results->ϕ2[astar] += astar_diff * astar_diff;
+    const double u_diff = θs[k] - glrt_results->μ[k];
+    glrt_results->ϕ2[k] += u_diff * u_diff;
+    bai_logger_log_double(bai_logger, "phi2[astar]", glrt_results->ϕ2[astar]);
+    bai_logger_log_double(bai_logger, "phi2[k]", glrt_results->ϕ2[k]);
+    bai_logger_flush(bai_logger);
+  }
+
   glrt_results->λ[astar] = θs[k];
   glrt_results->λ[k] = θs[k];
   glrt_results->k = k;

@@ -8,28 +8,20 @@
 typedef struct RandomVariables RandomVariables;
 
 typedef enum {
+  RANDOM_VARIABLES_UNIFORM,
+  RANDOM_VARIABLES_UNIFORM_PREDETERMINED,
   RANDOM_VARIABLES_NORMAL,
+  RANDOM_VARIABLES_NORMAL_PREDETERMINED,
   RANDOM_VARIABLES_SIMMED_PLAYS,
-  RANDOM_VARIABLES_NORMAL_PREDETERMINED
 } random_variables_t;
-
-typedef struct RVSubArgsNormal {
-  uint64_t seed;
-} RVSubArgsNormal;
-
-typedef struct RVSubArgsNormalPredetermined {
-  uint64_t num_samples;
-  double *samples;
-} RVSubArgsNormalPredetermined;
 
 typedef struct RandomVariablesArgs {
   random_variables_t type;
   uint64_t num_rvs;
-  double *means_and_stdevs;
-  union {
-    RVSubArgsNormal normal;
-    RVSubArgsNormalPredetermined normal_predetermined;
-  };
+  uint64_t seed;
+  uint64_t num_samples;
+  const double *samples;
+  const double *means_and_vars;
 } RandomVariablesArgs;
 
 RandomVariables *rvs_create(RandomVariablesArgs *rvs_args);

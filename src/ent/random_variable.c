@@ -9,26 +9,106 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-typedef double (*rvs_sample_func_t)(RandomVariables *, uint64_t, BAILogger *);
+typedef double (*rvs_sample_func_t)(RandomVariables *, const uint64_t,
+                                    BAILogger *);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 
 struct RandomVariables {
   int num_rvs;
-  double *means_and_stdevs;
   rvs_sample_func_t sample_func;
   rvs_destroy_data_func_t destroy_data_func;
   void *data;
 };
 
-typedef struct RVNormal {
-  XoshiroPRNG *xoshiro_prng;
-} RVNormal;
-
 double uniform_sample(XoshiroPRNG *prng) {
   return (double)prng_next(prng) / ((double)UINT64_MAX);
 }
 
-double rv_normal_sample(RandomVariables *rvs, uint64_t k,
+typedef struct RVUniform {
+  XoshiroPRNG *xoshiro_prng;
+} RVUniform;
+
+double rv_uniform_sample(RandomVariables *rvs,
+                         const uint64_t __attribute__((unused)) k,
+                         BAILogger __attribute__((unused)) * bai_logger) {
+  RVUniform *rv_uniform = (RVUniform *)rvs->data;
+  return uniform_sample(rv_uniform->xoshiro_prng);
+}
+
+void rv_uniform_destroy(RandomVariables *rvs) {
+  RVUniform *rv_uniform = (RVUniform *)rvs->data;
+  prng_destroy(rv_uniform->xoshiro_prng);
+  free(rv_uniform);
+}
+
+void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
+  // Set the sample function
+  rvs->sample_func = rv_uniform_sample;
+
+  // Set the destroy function
+  rvs->destroy_data_func = rv_uniform_destroy;
+
+  // Set the data
+  RVUniform *rv_uniform = malloc_or_die(sizeof(RVUniform));
+  rv_uniform->xoshiro_prng = prng_create(seed);
+  rvs->data = rv_uniform;
+}
+
+typedef struct RVUniformPredetermined {
+  uint64_t num_samples;
+  uint64_t index;
+  double *samples;
+} RVUniformPredetermined;
+
+double rv_uniform_predetermined_sample(RandomVariables *rvs,
+                                       const uint64_t __attribute__((unused)) k,
+                                       BAILogger __attribute__((unused)) *
+                                           bai_logger) {
+  RVUniformPredetermined *rv_uniform_predetermined =
+      (RVUniformPredetermined *)rvs->data;
+  if (rv_uniform_predetermined->index >=
+      rv_uniform_predetermined->num_samples) {
+    log_fatal("ran out of uniform predetermined samples\n");
+  }
+  const int index = rv_uniform_predetermined->index++;
+  const double result = rv_uniform_predetermined->samples[index];
+  return result;
+}
+
+void rv_uniform_predetermined_destroy(RandomVariables *rvs) {
+  RVUniformPredetermined *rv_uniform_predetermined =
+      (RVUniformPredetermined *)rvs->data;
+  free(rv_uniform_predetermined->samples);
+  free(rv_uniform_predetermined);
+}
+
+void rv_uniform_predetermined_create(RandomVariables *rvs,
+                                     const double *samples,
+                                     const uint64_t num_samples) {
+  // Set the sample function
+  rvs->sample_func = rv_uniform_predetermined_sample;
+
+  // Set the destroy function
+  rvs->destroy_data_func = rv_uniform_predetermined_destroy;
+
+  // Set the data
+  RVUniformPredetermined *rv_uniform_predetermined =
+      malloc_or_die(sizeof(RVUniformPredetermined));
+  rv_uniform_predetermined->num_samples = num_samples;
+  rv_uniform_predetermined->index = 0;
+  rv_uniform_predetermined->samples =
+      malloc_or_die(rv_uniform_predetermined->num_samples * sizeof(double));
+  memory_copy(rv_uniform_predetermined->samples, samples,
+              rv_uniform_predetermined->num_samples * sizeof(double));
+  rvs->data = rv_uniform_predetermined;
+}
+
+typedef struct RVNormal {
+  XoshiroPRNG *xoshiro_prng;
+  double *means_and_vars;
+} RVNormal;
+
+double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
                         BAILogger __attribute__((unused)) * bai_logger) {
   // Implements the Box-Muller transform
   RVNormal *rv_normal = (RVNormal *)rvs->data;
@@ -40,17 +120,19 @@ double rv_normal_sample(RandomVariables *rvs, uint64_t k,
     s = u * u + v * v;
   }
   s = sqrt(-2.0 * log(s) / s);
-  return rvs->means_and_stdevs[k * 2] +
-         rvs->means_and_stdevs[k * 2 + 1] * u * s;
+  return rv_normal->means_and_vars[k * 2] +
+         rv_normal->means_and_vars[k * 2 + 1] * u * s;
 }
 
 void rv_normal_destroy(RandomVariables *rvs) {
   RVNormal *rv_normal = (RVNormal *)rvs->data;
   prng_destroy(rv_normal->xoshiro_prng);
+  free(rv_normal->means_and_vars);
   free(rv_normal);
 }
 
-void rv_normal_create(RandomVariables *rvs, RVSubArgsNormal *args) {
+void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
+                      const double *means_and_vars) {
   // Set the sample function
   rvs->sample_func = rv_normal_sample;
 
@@ -59,7 +141,10 @@ void rv_normal_create(RandomVariables *rvs, RVSubArgsNormal *args) {
 
   // Set the data
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
-  rv_normal->xoshiro_prng = prng_create(args->seed);
+  rv_normal->xoshiro_prng = prng_create(seed);
+  rv_normal->means_and_vars = malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
+  memory_copy(rv_normal->means_and_vars, means_and_vars,
+              rvs->num_rvs * 2 * sizeof(double));
   rvs->data = rv_normal;
 }
 
@@ -67,17 +152,18 @@ typedef struct RVNormalPredetermined {
   uint64_t num_samples;
   uint64_t index;
   double *samples;
+  double *means_and_vars;
 } RVNormalPredetermined;
 
-double rv_normal_predetermined_sample(RandomVariables *rvs, uint64_t k,
+double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
                                       BAILogger *bai_logger) {
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
   if (rv_normal_predetermined->index >= rv_normal_predetermined->num_samples) {
     log_fatal("ran out of normal predetermined samples\n");
   }
-  const double mean = rvs->means_and_stdevs[k * 2];
-  const double sigma2 = rvs->means_and_stdevs[k * 2 + 1];
+  const double mean = rv_normal_predetermined->means_and_vars[k * 2];
+  const double sigma2 = rv_normal_predetermined->means_and_vars[k * 2 + 1];
   const int index = rv_normal_predetermined->index++;
   const double sample = rv_normal_predetermined->samples[index];
   const double result = mean + sqrt(sigma2) * sample;
@@ -96,11 +182,13 @@ void rv_normal_predetermined_destroy(RandomVariables *rvs) {
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
   free(rv_normal_predetermined->samples);
+  free(rv_normal_predetermined->means_and_vars);
   free(rv_normal_predetermined);
 }
 
-void rv_normal_predetermined_create(RandomVariables *rvs,
-                                    RVSubArgsNormalPredetermined *args) {
+void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
+                                    const uint64_t num_samples,
+                                    const double *means_and_vars) {
   // Set the sample function
   rvs->sample_func = rv_normal_predetermined_sample;
 
@@ -110,30 +198,40 @@ void rv_normal_predetermined_create(RandomVariables *rvs,
   // Set the data
   RVNormalPredetermined *rv_normal_predetermined =
       malloc_or_die(sizeof(RVNormalPredetermined));
-  rv_normal_predetermined->num_samples = args->num_samples;
+  rv_normal_predetermined->num_samples = num_samples;
   rv_normal_predetermined->index = 0;
   rv_normal_predetermined->samples =
       malloc_or_die(rv_normal_predetermined->num_samples * sizeof(double));
-  memory_copy(rv_normal_predetermined->samples, args->samples,
+  memory_copy(rv_normal_predetermined->samples, samples,
               rv_normal_predetermined->num_samples * sizeof(double));
+  rv_normal_predetermined->means_and_vars =
+      malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
+  memory_copy(rv_normal_predetermined->means_and_vars, means_and_vars,
+              rvs->num_rvs * 2 * sizeof(double));
   rvs->data = rv_normal_predetermined;
 }
 
 RandomVariables *rvs_create(RandomVariablesArgs *rvs_args) {
   RandomVariables *rvs = malloc_or_die(sizeof(RandomVariables));
   rvs->num_rvs = rvs_args->num_rvs;
-  rvs->means_and_stdevs = malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
-  memory_copy(rvs->means_and_stdevs, rvs_args->means_and_stdevs,
-              rvs->num_rvs * 2 * sizeof(double));
   switch (rvs_args->type) {
+  case RANDOM_VARIABLES_UNIFORM:
+    rv_uniform_create(rvs, rvs_args->seed);
+    break;
+  case RANDOM_VARIABLES_UNIFORM_PREDETERMINED:
+    rv_uniform_predetermined_create(rvs, rvs_args->samples,
+                                    rvs_args->num_samples);
+    break;
   case RANDOM_VARIABLES_NORMAL:
-    rv_normal_create(rvs, &(rvs_args->normal));
+    rv_normal_create(rvs, rvs_args->seed, rvs_args->means_and_vars);
+    break;
+  case RANDOM_VARIABLES_NORMAL_PREDETERMINED:
+    rv_normal_predetermined_create(rvs, rvs_args->samples,
+                                   rvs_args->num_samples,
+                                   rvs_args->means_and_vars);
     break;
   case RANDOM_VARIABLES_SIMMED_PLAYS:
     log_fatal("rvs simmed plays not implemented\n");
-    break;
-  case RANDOM_VARIABLES_NORMAL_PREDETERMINED:
-    rv_normal_predetermined_create(rvs, &(rvs_args->normal_predetermined));
     break;
   }
   return rvs;
@@ -141,7 +239,6 @@ RandomVariables *rvs_create(RandomVariablesArgs *rvs_args) {
 
 void rvs_destroy(RandomVariables *rvs) {
   rvs->destroy_data_func(rvs);
-  free(rvs->means_and_stdevs);
   free(rvs);
 }
 
