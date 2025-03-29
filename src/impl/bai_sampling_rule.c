@@ -12,6 +12,25 @@
 #include "../util/log.h"
 #include "../util/util.h"
 
+int round_robin_next_sample(void __attribute__((unused)) * data,
+                            int __attribute__((unused)) astar,
+                            int __attribute__((unused)) aalt,
+                            double __attribute__((unused)) * ξ,
+                            double __attribute__((unused)) * ϕ2, int *N,
+                            double __attribute__((unused)) * S,
+                            double __attribute__((unused)) * Zs, int size,
+                            RandomVariables __attribute__((unused)) * rng,
+                            BAILogger *bai_logger) {
+  int sum = 0;
+  for (int i = 0; i < size; i++) {
+    sum += N[i];
+  }
+  const int sample = sum % size;
+  bai_logger_log_title(bai_logger, "ROUND_ROBIN");
+  bai_logger_log_int(bai_logger, "sample", sample + 1);
+  return sample;
+}
+
 typedef struct TrackAndStop {
   bool is_EV;
   BAITracking *tracking_rule;
@@ -129,11 +148,8 @@ BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, bool is_EV,
   BAISamplingRule *bai_sampling_rule = malloc_or_die(sizeof(BAISamplingRule));
   bai_sampling_rule->type = type;
   switch (type) {
-  case BAI_SAMPLING_RULE_RANDOM:
-    log_fatal("BAI_SAMPLING_RULE_RANDOM not implemented");
-    break;
-  case BAI_SAMPLING_RULE_UNIFORM:
-    log_fatal("BAI_SAMPLING_RULE_UNIFORM not implemented");
+  case BAI_SAMPLING_RULE_ROUND_ROBIN:
+    bai_sampling_rule->next_sample_func = round_robin_next_sample;
     break;
   case BAI_SAMPLING_RULE_TRACK_AND_STOP:
     bai_sampling_rule->data =
@@ -151,11 +167,7 @@ BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, bool is_EV,
 
 void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule) {
   switch (bai_sampling_rule->type) {
-  case BAI_SAMPLING_RULE_RANDOM:
-    log_fatal("BAI_SAMPLING_RULE_RANDOM not implemented");
-    break;
-  case BAI_SAMPLING_RULE_UNIFORM:
-    log_fatal("BAI_SAMPLING_RULE_UNIFORM not implemented");
+  case BAI_SAMPLING_RULE_ROUND_ROBIN:
     break;
   case BAI_SAMPLING_RULE_TRACK_AND_STOP:
     track_and_stop_destroy((TrackAndStop *)bai_sampling_rule->data);

@@ -7,8 +7,7 @@
 typedef struct BAISamplingRule BAISamplingRule;
 
 typedef enum {
-  BAI_SAMPLING_RULE_RANDOM,
-  BAI_SAMPLING_RULE_UNIFORM,
+  BAI_SAMPLING_RULE_ROUND_ROBIN,
   BAI_SAMPLING_RULE_TRACK_AND_STOP,
   BAI_SAMPLING_RULE_TOP_TWO,
 } bai_sampling_rule_t;

@@ -116,7 +116,9 @@ void test_bai_input_from_file(const char *bai_input_filename) {
   // const int result = bai(BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_HT,
   // rvs,
   //                        delta, rng, bai_logger);
-  const int result = bai(BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_HT,
+  // const int result = bai(BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_HT,
+  //                        rvs, delta, rng, bai_logger);
+  const int result = bai(BAI_SAMPLING_RULE_ROUND_ROBIN, false, BAI_THRESHOLD_HT,
                          rvs, delta, rng, bai_logger);
   bai_logger_log_int(bai_logger, "result", result + 1);
   bai_logger_flush(bai_logger);
