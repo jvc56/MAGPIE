@@ -8,6 +8,6 @@
 
 int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
         RandomVariables *rvs, double δ, RandomVariables *rng,
-        BAILogger *bai_logger);
+        uint64_t sample_limit, BAILogger *bai_logger);
 
 #endif

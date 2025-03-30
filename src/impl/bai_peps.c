@@ -40,7 +40,7 @@ typedef double (*bai_binary_search_value_func_t)(double, void *);
 
 double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
                          double lo, double hi, double ϵ,
-                         BAILogger *bai_logger) {
+                         BAILogger __attribute__((unused)) * bai_logger) {
   double flo = vf(lo, args);
   double fhi = vf(hi, args);
 
@@ -53,13 +53,13 @@ double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
 
   for (int i = 0; i < (BAI_BINARY_SEARCH_MAX_ITER); i++) {
     double mid = (lo + hi) / 2.0;
-    bai_logger_log_double(bai_logger, "mid", mid);
+    // bai_logger_log_double(bai_logger, "mid", mid);
     if (mid == lo || mid == hi) {
       return mid;
     }
 
     double fmid = vf(mid, args);
-    bai_logger_log_double(bai_logger, "fmid", fmid);
+    // bai_logger_log_double(bai_logger, "fmid", fmid);
     if (fmid < -ϵ) {
       lo = mid;
     } else if (fmid > ϵ) {
@@ -78,10 +78,6 @@ double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
             (lo + hi) / 2.0);
   // Unreachable but prevents compiler warnings
   return (lo + hi) / 2.0;
-}
-
-bool bai_within_epsilon(double x, double y, double ϵ) {
-  return fabs(x - y) < ϵ;
 }
 
 double bai_dUV(double μ, double σ2, double λ) {
@@ -103,37 +99,37 @@ double bai_d(double μ, double σ2, double λ, bool known_var) {
 }
 
 double alt_λ_KV(double μ1, double σ21, double w1, double μa, double σ2a,
-                double wa, BAILogger *bai_logger) {
-  bai_logger_log_title(bai_logger, "ALT_KV");
+                double wa, BAILogger __attribute__((unused)) * bai_logger) {
+  // bai_logger_log_title(bai_logger, "ALT_KV");
   if (w1 == 0) {
-    bai_logger_log_double(bai_logger, "ua", μa);
-    bai_logger_flush(bai_logger);
+    // bai_logger_log_double(bai_logger, "ua", μa);
+    // bai_logger_flush(bai_logger);
     return μa;
   }
   if (wa == 0 || μ1 == μa) {
-    bai_logger_log_double(bai_logger, "u1", μ1);
-    bai_logger_flush(bai_logger);
+    // bai_logger_log_double(bai_logger, "u1", μ1);
+    // bai_logger_flush(bai_logger);
     return μ1;
   }
   const double x = wa / w1;
   const double result = (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
-  bai_logger_log_double(bai_logger, "x", x);
-  bai_logger_log_double(bai_logger, "result", result);
-  bai_logger_flush(bai_logger);
+  // bai_logger_log_double(bai_logger, "x", x);
+  // bai_logger_log_double(bai_logger, "result", result);
+  // bai_logger_flush(bai_logger);
   return result;
 }
 
 double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
-                double wa, BAILogger *bai_logger) {
-  bai_logger_log_title(bai_logger, "ALT_UV");
+                double wa, BAILogger __attribute__((unused)) * bai_logger) {
+  // bai_logger_log_title(bai_logger, "ALT_UV");
   if (w1 == 0) {
-    bai_logger_log_double(bai_logger, "ua", μa);
-    bai_logger_flush(bai_logger);
+    // bai_logger_log_double(bai_logger, "ua", μa);
+    // bai_logger_flush(bai_logger);
     return μa;
   }
   if (wa == 0 || μ1 == μa) {
-    bai_logger_log_double(bai_logger, "u1", μ1);
-    bai_logger_flush(bai_logger);
+    // bai_logger_log_double(bai_logger, "u1", μ1);
+    // bai_logger_flush(bai_logger);
     return μ1;
   }
   const double x = wa / w1;
@@ -142,23 +138,30 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
       (σ2a + x * σ21) / (1 + x) + μa * μ1 + (μa + μ1) * (μa + x * μ1) / (1 + x);
   const double α0 = (μ1 * (μa * μa + σ2a) + μa * (μ1 * μ1 + σ21) * x) / (1 + x);
 
-  bai_logger_log_double(bai_logger, "x", x);
-  bai_logger_log_double(bai_logger, "alpha2", α2);
-  bai_logger_log_double(bai_logger, "alpha1", α1);
-  bai_logger_log_double(bai_logger, "alpha0", α0);
-  bai_logger_flush(bai_logger);
+  // bai_logger_log_double(bai_logger, "x", x);
+  // bai_logger_log_double(bai_logger, "alpha2", α2);
+  // bai_logger_log_double(bai_logger, "alpha1", α1);
+  // bai_logger_log_double(bai_logger, "alpha0", α0);
+  // bai_logger_flush(bai_logger);
 
-  complex double roots[3];
-  const bool cubic_root_success = cubic_roots(1, -α2, α1, -α0, roots);
+  complex double rs[3];
+  const bool cubic_root_success = cubic_roots(1, -α2, α1, -α0, rs);
   if (!cubic_root_success) {
     log_fatal("cubic solver failed for inputs: %.15f, %.15f, %.15f, %.15f", 1,
               -α2, α1, -α0);
   }
+
+  // FIXME: for alignment only, remove in prod
+  for (int i = 0; i < 3; i++) {
+    rs[i] = round(creal(rs[i]) * 1e10) / 1e10 +
+            (round(cimag(rs[i]) * 1e10) / 1e10) * I;
+  }
+
   int num_valid_roots = 0;
   double valid_roots[3];
   for (int i = 0; i < 3; i++) {
-    if (fabs(cimag(roots[i])) < 1e-10) {
-      const double r = creal(roots[i]);
+    if (fabs(cimag(rs[i])) < 1e-10) {
+      const double r = creal(rs[i]);
       if (r - μa >= -1e-10 && r - μ1 <= 1e-10) {
         valid_roots[num_valid_roots] = r;
         num_valid_roots++;
@@ -166,16 +169,15 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
     }
   }
 
-  bai_logger_log_int(bai_logger, "num_valid_roots", num_valid_roots);
-  bai_logger_flush(bai_logger);
+  // bai_logger_log_int(bai_logger, "num_valid_roots", num_valid_roots);
+  // bai_logger_flush(bai_logger);
 
   if (num_valid_roots == 0) {
-    log_fatal("Solver couldn't find a valid real roots in [%.15f, %.15f].", μa,
-              μ1);
+    return alt_λ_KV(μ1, σ21, w1, μa, σ2a, wa, bai_logger);
   }
   if (num_valid_roots == 1) {
-    bai_logger_log_double(bai_logger, "valid_roots[1]", valid_roots[0]);
-    bai_logger_flush(bai_logger);
+    // bai_logger_log_double(bai_logger, "valid_roots[1]", valid_roots[0]);
+    // bai_logger_flush(bai_logger);
     return valid_roots[0];
   }
   double v =
@@ -189,8 +191,9 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
       v = _v;
     }
   }
-  bai_logger_log_double(bai_logger, "valid_roots[id]", valid_roots[id]);
-  bai_logger_flush(bai_logger);
+  // bai_logger_log_int(bai_logger, "id", id + 1);
+  // bai_logger_log_double(bai_logger, "valid_roots[id]", valid_roots[id]);
+  // bai_logger_flush(bai_logger);
   return valid_roots[id];
 }
 
@@ -213,6 +216,7 @@ void bai_glrt(int K, int *w, double *μ, double *σ2, bool known_var,
   }
 
   bai_logger_log_title(bai_logger, "GLRT");
+  bai_logger_log_bool(bai_logger, "kv", known_var);
   bai_logger_log_int(bai_logger, "K", K);
   bai_logger_log_int(bai_logger, "astar", astar + 1);
   bai_logger_flush(bai_logger);
@@ -300,15 +304,15 @@ double bai_X_binary_search_func(double z, void *args) {
       alt_λ(μ1, σ21, 1 - z, μa, σ2a, z, known_var, xbs_args->bai_logger);
   const double result = (1 - z) * bai_d(μ1, σ21, μz, known_var) +
                         z * bai_d(μa, σ2a, μz, known_var) - (1 - z) * v;
-  bai_logger_log_double(xbs_args->bai_logger, "z", z);
-  bai_logger_log_double(xbs_args->bai_logger, "u1", μ1);
-  bai_logger_log_double(xbs_args->bai_logger, "sigma21", σ21);
-  bai_logger_log_double(xbs_args->bai_logger, "ua", μa);
-  bai_logger_log_double(xbs_args->bai_logger, "sigma2a", σ2a);
-  bai_logger_log_double(xbs_args->bai_logger, "v", v);
-  bai_logger_log_bool(xbs_args->bai_logger, "kv", true);
-  bai_logger_log_double(xbs_args->bai_logger, "uz", μz);
-  bai_logger_log_double(xbs_args->bai_logger, "result", result);
+  // bai_logger_log_double(xbs_args->bai_logger, "z", z);
+  // bai_logger_log_double(xbs_args->bai_logger, "u1", μ1);
+  // bai_logger_log_double(xbs_args->bai_logger, "sigma21", σ21);
+  // bai_logger_log_double(xbs_args->bai_logger, "ua", μa);
+  // bai_logger_log_double(xbs_args->bai_logger, "sigma2a", σ2a);
+  // bai_logger_log_double(xbs_args->bai_logger, "v", v);
+  // bai_logger_log_bool(xbs_args->bai_logger, "kv", true);
+  // bai_logger_log_double(xbs_args->bai_logger, "uz", μz);
+  // bai_logger_log_double(xbs_args->bai_logger, "result", result);
   return result;
 }
 
@@ -334,10 +338,10 @@ void bai_X(double μ1, double σ21, double μa, double σ2a, double v,
   bai_X_results->α_ratio = α / (1 - α);
   bai_X_results->alt_λ =
       alt_λ(μ1, σ21, 1 - α, μa, σ2a, α, known_var, bai_logger);
-  bai_logger_log_double(bai_logger, "a", α);
-  bai_logger_log_double(bai_logger, "a_ratio", bai_X_results->α_ratio);
-  bai_logger_log_double(bai_logger, "alt", bai_X_results->alt_λ);
-  bai_logger_flush(bai_logger);
+  // bai_logger_log_double(bai_logger, "a", α);
+  // bai_logger_log_double(bai_logger, "a_ratio", bai_X_results->α_ratio);
+  // bai_logger_log_double(bai_logger, "alt", bai_X_results->alt_λ);
+  // bai_logger_flush(bai_logger);
 }
 
 typedef struct BAIOracleBinarySearchArgs {
@@ -368,11 +372,11 @@ double bai_oracle_binary_search_func(double z, void *args) {
     const double numer = bai_d(μs[astar], σ2s[astar], μx, known_var);
     const double denom = bai_d(μs[k], σ2s[k], μx, known_var);
     const double result = numer / denom;
-    bai_logger_log_int(obs_args->bai_logger, "k", k + 1);
-    bai_logger_log_double(obs_args->bai_logger, "ux", μx);
-    bai_logger_log_double(obs_args->bai_logger, "numer", numer);
-    bai_logger_log_double(obs_args->bai_logger, "denom", denom);
-    bai_logger_log_double(obs_args->bai_logger, "result", result);
+    // bai_logger_log_int(obs_args->bai_logger, "k", k + 1);
+    // bai_logger_log_double(obs_args->bai_logger, "ux", μx);
+    // bai_logger_log_double(obs_args->bai_logger, "numer", numer);
+    // bai_logger_log_double(obs_args->bai_logger, "denom", denom);
+    // bai_logger_log_double(obs_args->bai_logger, "result", result);
     sum += result;
   }
   return sum - 1.0;
@@ -402,13 +406,14 @@ void bai_oracle(double *μs, double *σ2s, int size, bool known_var,
 
   bool all_equal = true;
   for (int i = 0; i < size; i++) {
-    if (!bai_within_epsilon(μs[i], μstar, BAI_EPSILON)) {
+    if (μs[i] != μstar) {
       all_equal = false;
       break;
     }
   }
 
   bai_logger_log_title(bai_logger, "ORACLE");
+  bai_logger_log_bool(bai_logger, "kv", known_var);
   bai_logger_log_double(bai_logger, "ustar", μstar);
   bai_logger_log_double_array(bai_logger, "us", μs, size);
   bai_logger_log_int(bai_logger, "size", size);

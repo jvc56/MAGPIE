@@ -40,8 +40,8 @@ int bai_c_track(const void *data, const int *N, const double *w, const int size,
 
   bai_logger_log_title(bai_logger, "C_TRACK");
   bai_logger_log_int_array(bai_logger, "N", N, size);
-  bai_logger_log_double_array(bai_logger, "t.sumw", t->sumw, size);
   bai_logger_log_double_array(bai_logger, "w", w, size);
+  bai_logger_log_double_array(bai_logger, "t.sumw", t->sumw, size);
   bai_logger_log_int(bai_logger, "min_index", min_index + 1);
   bai_logger_flush(bai_logger);
 
@@ -115,28 +115,36 @@ void bai_tracking_destroy(BAITracking *bai_tracking) {
 
 int bai_track(BAITracking *bai_tracking, int *N, const double *w, const int K,
               BAILogger *bai_logger) {
-  const int t = 0;
+  int t = 0;
   for (int i = 0; i < K; i++) {
-    N[i] += t;
+    t += N[i];
   }
   int num_undersampled = 0;
   for (int i = 0; i < K; i++) {
     bai_tracking->undersampled[i] = 0.0;
-    if (N[i] < sqrt((double)t) - (double)K / 2) {
+    if (N[i] <= sqrt((double)t) - (double)K / 2) {
       bai_tracking->undersampled[i] = 1.0;
       num_undersampled++;
     }
   }
   int result;
+  bai_logger_log_title(bai_logger, "TRACK");
+  bai_logger_log_int(bai_logger, "t", t);
+  bai_logger_log_int(bai_logger, "K", K);
+  bai_logger_log_double_array(bai_logger, "us", bai_tracking->undersampled, K);
   if (num_undersampled > 0) {
     for (int i = 0; i < K; i++) {
       bai_tracking->undersampled[i] /= (double)num_undersampled;
     }
+    bai_logger_log_double_array(bai_logger, "us", bai_tracking->undersampled,
+                                K);
     result = bai_tracking->tracking_func(
         bai_tracking->data, N, bai_tracking->undersampled, K, bai_logger);
   } else {
+    bai_logger_log_double_array(bai_logger, "w", w, K);
     result =
         bai_tracking->tracking_func(bai_tracking->data, N, w, K, bai_logger);
   }
+  bai_logger_flush(bai_logger);
   return result;
 }

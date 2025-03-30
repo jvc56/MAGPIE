@@ -27,13 +27,14 @@ void test_bai_track_and_stop(void) {
   };
   RandomVariables *rng = rvs_create(&rng_args);
   int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_HT,
-                   rvs, 0.05, rng, NULL);
+                   rvs, 0.05, rng, 1000000000, NULL);
   assert(result == 1);
   rvs_destroy(rng);
   rvs_destroy(rvs);
 }
 
-void test_bai_input_from_file(const char *bai_input_filename) {
+void test_bai_input_from_file(const char *bai_input_filename,
+                              const char *bai_params_index) {
   FILE *file = fopen(bai_input_filename, "r");
   if (!file) {
     log_fatal("Failed to open BAI_INPUT file: %s\n", bai_input_filename);
@@ -108,18 +109,28 @@ void test_bai_input_from_file(const char *bai_input_filename) {
   };
   RandomVariables *rng = rvs_create(&rng_args);
 
-  // const int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP_EV,
-  //                        BAI_THRESHOLD_HT_EV, rvs, delta, rng, bai_logger);
-  // const int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP,
-  // BAI_THRESHOLD_HT,
-  //                        rvs, delta, rng, bai_logger);
-  // const int result = bai(BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_HT,
-  // rvs,
-  //                        delta, rng, bai_logger);
-  // const int result = bai(BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_HT,
-  //                        rvs, delta, rng, bai_logger);
-  const int result = bai(BAI_SAMPLING_RULE_ROUND_ROBIN, false, BAI_THRESHOLD_HT,
-                         rvs, delta, rng, bai_logger);
+  const int bai_params_index_int = atoi(bai_params_index);
+  int result;
+  const int sample_limit = num_samples;
+  if (bai_params_index_int == 0) {
+    result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, false, BAI_THRESHOLD_HT, rvs,
+                 delta, rng, sample_limit, bai_logger);
+  } else if (bai_params_index_int == 1) {
+    result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_HT, rvs,
+                 delta, rng, sample_limit, bai_logger);
+  } else if (bai_params_index_int == 2) {
+    result = bai(BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_HT, rvs, delta,
+                 rng, sample_limit, bai_logger);
+  } else if (bai_params_index_int == 3) {
+    result = bai(BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_HT, rvs, delta,
+                 rng, sample_limit, bai_logger);
+  } else if (bai_params_index_int == 4) {
+    result = bai(BAI_SAMPLING_RULE_ROUND_ROBIN, false, BAI_THRESHOLD_HT, rvs,
+                 delta, rng, sample_limit, bai_logger);
+  } else {
+    log_fatal("Invalid bai_params_index: %s\n", bai_params_index);
+  }
+
   bai_logger_log_int(bai_logger, "result", result + 1);
   bai_logger_flush(bai_logger);
 
@@ -133,8 +144,9 @@ void test_bai_input_from_file(const char *bai_input_filename) {
 
 void test_bai(void) {
   const char *bai_input_filename = getenv("BAI_INPUT");
-  if (bai_input_filename) {
-    test_bai_input_from_file(bai_input_filename);
+  const char *bai_params_index = getenv("BAI_PARAMS_INDEX");
+  if (bai_input_filename && bai_params_index) {
+    test_bai_input_from_file(bai_input_filename, bai_params_index);
   } else {
     test_bai_track_and_stop();
   }

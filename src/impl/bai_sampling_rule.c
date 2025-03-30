@@ -99,12 +99,16 @@ int top_two_next_sample(void *data, int __attribute__((unused)) astar,
   TopTwo *top_two = (TopTwo *)data;
   const double u = rvs_sample(rng, 0, bai_logger);
   int k;
+  bai_logger_log_title(bai_logger, "TOP_TWO");
+  bai_logger_log_int(bai_logger, "astar", astar + 1);
   if (u <= top_two->β) {
+    bai_logger_log_title(bai_logger, "k = astar");
     k = astar;
   } else {
     double k_val;
     switch (top_two->challenger) {
     case BAI_TOP_TWO_CHALLENGER_TC:
+      bai_logger_log_title(bai_logger, "TC");
       k = 0;
       k_val = Zs[0];
       for (int i = 1; i < size; i++) {
@@ -115,6 +119,7 @@ int top_two_next_sample(void *data, int __attribute__((unused)) astar,
       }
       break;
     case BAI_TOP_TWO_CHALLENGER_TCI:
+      bai_logger_log_title(bai_logger, "TCI");
       k = 0;
       k_val = Zs[0] + log((double)N[0]);
       for (int i = 1; i < size; i++) {
@@ -127,7 +132,6 @@ int top_two_next_sample(void *data, int __attribute__((unused)) astar,
       break;
     }
   }
-  bai_logger_log_title(bai_logger, "TOP_TWO");
   bai_logger_log_double(bai_logger, "u", u);
   bai_logger_log_int(bai_logger, "k", k + 1);
   bai_logger_flush(bai_logger);
@@ -158,7 +162,7 @@ BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, bool is_EV,
     break;
   case BAI_SAMPLING_RULE_TOP_TWO:
     bai_sampling_rule->data =
-        top_two_create(is_EV, 0.5, BAI_TOP_TWO_CHALLENGER_TC);
+        top_two_create(is_EV, 0.5, BAI_TOP_TWO_CHALLENGER_TCI);
     bai_sampling_rule->next_sample_func = top_two_next_sample;
     break;
   }

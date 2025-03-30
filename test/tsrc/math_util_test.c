@@ -20,6 +20,39 @@ void assert_cubic_roots(double a, double b, double c, double d,
   assert(within_epsilon(cimag(actual_roots[2]), expected_roots[5]));
 }
 
+void test_alt_lambda_cubic_roots(double μ1, double σ21, double w1, double μa,
+                                 double σ2a, double wa) {
+  const double x = wa / w1;
+  const double α2 = μa + μ1 + (μa + x * μ1) / (1 + x);
+  const double α1 =
+      (σ2a + x * σ21) / (1 + x) + μa * μ1 + (μa + μ1) * (μa + x * μ1) / (1 + x);
+  const double α0 = (μ1 * (μa * μa + σ2a) + μa * (μ1 * μ1 + σ21) * x) / (1 + x);
+
+  printf("inputs: %.20f, %.20f, %.20f, %.20f\n", -α0, α1, -α2, 1.0);
+  complex double roots[3];
+  const bool cubic_root_success = cubic_roots(1, -α2, α1, -α0, roots);
+  if (!cubic_root_success) {
+    log_fatal("cubic solver failed for inputs: %.15f, %.15f, %.15f, %.15f", 1,
+              -α2, α1, -α0);
+  }
+  for (int i = 0; i < 3; i++) {
+    printf("%d: %.20f + %.20fi\n", i, creal(roots[i]), cimag(roots[i]));
+  }
+
+  for (int i = 0; i < 3; i++) {
+    if (fabs(cimag(roots[i])) < 1e-10) {
+      const double r = creal(roots[i]);
+      printf("r: %.20f ", r);
+      printf("r - μa: %.20f ", r - μa);
+      printf("r - μ1: %.20f \n", r - μ1);
+      if (r - μa >= -1e-10 && r - μ1 <= 1e-10) {
+        printf("valid root %d: %.20f + %.20fi\n", i, creal(roots[i]),
+               cimag(roots[i]));
+      }
+    }
+  }
+}
+
 void test_math_util(void) {
   // This also tests ervinv
   assert(within_epsilon(p_to_z(95), 1.959964));
@@ -65,4 +98,8 @@ void test_math_util(void) {
       1, 0, 0, -1,
       (double[]){-0.5, -0.8660254037844389, -0.5, 0.8660254037844389, 1.0, 0});
   assert_cubic_roots(1, 1, 1, 1, (double[]){0.0, -1.0, 0.0, 1.0, -1.0, 0.0});
+
+  test_alt_lambda_cubic_roots(10.00488654532730592450, 4.27548299442848644958,
+                              0.99999999988358467817, 6.63751240512570728214,
+                              3.77743784254098358133, 0.00000000011641532183);
 }
