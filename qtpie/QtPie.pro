@@ -1,5 +1,4 @@
 QT += widgets
-
 CONFIG += c++17
 
 TARGET = Magpie
@@ -16,20 +15,11 @@ HEADERS += board_panel_view.h \
            colors.h \
            responsive_layout.h
 
-# Magpie core sources and headers
-SOURCES += $$files($$PWD/../src/**/*.c)
-HEADERS += $$files($$PWD/../src/**/*.h)
+LIBS += $$PWD/../lib/libmagpie.a -lm
 
-# Magpie test sources and headers (excluding test.c which has a main function)
-TEST_SOURCES = $$files($$PWD/../test/tsrc/**/*.c)
-for(testFile, TEST_SOURCES) {
-    equals(testFile, "$$PWD/../test/tsrc/test.c") {
-        # Skip the test file with its own main()
-    } else {
-        SOURCES += $$testFile
-    }
-}
-HEADERS += $$files($$PWD/../test/tsrc/**/*.h)
+INCLUDEPATH += \
+    $$PWD/../MAGPIE/src \
+    $$PWD/../MAGPIE/test/tsrc
 
 macx {
     CONFIG += app_bundle

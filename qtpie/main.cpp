@@ -4,6 +4,7 @@
 #include <QVBoxLayout>
 #include <QScrollArea>
 
+extern "C" {
 #include "../src/ent/move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
@@ -11,6 +12,7 @@
 #include "../src/str/game_string.h"
 
 #include "../test/tsrc/test_util.h"
+}
 
 #include "board_panel_view.h"
 #include "responsive_layout.h"
@@ -25,6 +27,12 @@ public:
         draw_starting_racks(game);
       
         MoveList *move_list = move_list_create(10000);
+        Move *move = get_top_equity_move(game, 0, move_list);
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_game(sb, game, move_list);
+        printf("%s\n", string_builder_peek(sb));
+        string_builder_destroy(sb);
+        
         contentWidget = new QWidget;
 
         board = new BoardPanelView(this);
