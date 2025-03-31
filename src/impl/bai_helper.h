@@ -6,6 +6,7 @@
 typedef struct BAIThreshold BAIThreshold;
 
 typedef enum {
+  BAI_THRESHOLD_GK16,
   BAI_THRESHOLD_HT,
 } bai_threshold_t;
 

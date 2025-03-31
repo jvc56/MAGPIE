@@ -10,7 +10,7 @@
 #include "../../src/util/log.h"
 
 void test_bai_track_and_stop(void) {
-  const double means_and_vars[] = {0, 1, 100, 1};
+  const double means_and_vars[] = {-10, 1, 0, 1};
   const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
       .type = RANDOM_VARIABLES_NORMAL,
@@ -109,27 +109,28 @@ void test_bai_input_from_file(const char *bai_input_filename,
   };
   RandomVariables *rng = rvs_create(&rng_args);
 
-  const int bai_params_index_int = atoi(bai_params_index);
-  int result;
-  const int sample_limit = num_samples;
-  if (bai_params_index_int == 0) {
-    result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, false, BAI_THRESHOLD_HT, rvs,
-                 delta, rng, sample_limit, bai_logger);
-  } else if (bai_params_index_int == 1) {
-    result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_HT, rvs,
-                 delta, rng, sample_limit, bai_logger);
-  } else if (bai_params_index_int == 2) {
-    result = bai(BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_HT, rvs, delta,
-                 rng, sample_limit, bai_logger);
-  } else if (bai_params_index_int == 3) {
-    result = bai(BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_HT, rvs, delta,
-                 rng, sample_limit, bai_logger);
-  } else if (bai_params_index_int == 4) {
-    result = bai(BAI_SAMPLING_RULE_ROUND_ROBIN, false, BAI_THRESHOLD_HT, rvs,
-                 delta, rng, sample_limit, bai_logger);
-  } else {
-    log_fatal("Invalid bai_params_index: %s\n", bai_params_index);
+  const int pi = atoi(bai_params_index);
+  const int ptable[][3] = {
+      {BAI_SAMPLING_RULE_TRACK_AND_STOP, false, BAI_THRESHOLD_GK16},
+      {BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_GK16},
+      {BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_GK16},
+      {BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_GK16},
+      {BAI_SAMPLING_RULE_ROUND_ROBIN, false, BAI_THRESHOLD_GK16},
+      {BAI_SAMPLING_RULE_TRACK_AND_STOP, false, BAI_THRESHOLD_HT},
+      {BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_HT},
+      {BAI_SAMPLING_RULE_TOP_TWO, false, BAI_THRESHOLD_HT},
+      {BAI_SAMPLING_RULE_TOP_TWO, true, BAI_THRESHOLD_HT},
+      {BAI_SAMPLING_RULE_ROUND_ROBIN, false, BAI_THRESHOLD_HT},
+  };
+
+  const int num_ptable_entries = sizeof(ptable) / sizeof(ptable[0]);
+
+  if (pi < 0 || pi >= num_ptable_entries) {
+    log_fatal("Invalid BAI params index: %s\n", bai_params_index);
   }
+
+  const int result = bai(ptable[pi][0], ptable[pi][1], ptable[pi][2], rvs,
+                         delta, rng, num_samples, bai_logger);
 
   bai_logger_log_int(bai_logger, "result", result + 1);
   bai_logger_flush(bai_logger);

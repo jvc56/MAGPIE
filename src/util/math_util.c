@@ -280,30 +280,24 @@ bool cubic_roots(double a, double b, double c, double d,
   if (a == 0) {
     return false;
   }
-  // Normalize the equation: x^3 + p*x^2 + q*x + r = 0
   const double p = b / a;
   const double q = c / a;
   const double r = d / a;
 
-  // Intermediate calculations
   const double Q = (3 * q - p * p) / 9.0;
   const double R = (9 * p * q - 27 * r - 2 * p * p * p) / 54.0;
 
-  // Discriminant
   const double discriminant = Q * Q * Q + R * R;
 
   if (discriminant >= 0) {
-    // Real roots case
     const double S_real = cbrt(R + sqrt(discriminant));
     const double T_real = cbrt(R - sqrt(discriminant));
     const complex double S = S_real;
     const complex double T = T_real;
-    // Three roots
     roots[0] = -(S + T) / 2.0 - p / 3.0 - ((S - T) * sqrt(3.0) / 2.0) * I;
     roots[1] = -(S + T) / 2.0 - p / 3.0 + ((S - T) * sqrt(3.0) / 2.0) * I;
     roots[2] = S + T - p / 3.0;
   } else {
-    // All roots are real and different
     const double theta = acos(R / sqrt(-Q * Q * Q));
     const double sqrt_Q = sqrt(-Q);
     roots[0] = 2 * sqrt_Q * cos((theta + 4 * M_PI) / 3.0) - p / 3.0;

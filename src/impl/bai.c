@@ -34,7 +34,8 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
   return true;
 }
 
-// Assumes random variables are normally distributed.
+// Assumes rvs are normally distributed.
+// Assumes rng is uniformly distributed.
 int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
         RandomVariables *rvs, double δ, RandomVariables *rng,
         uint64_t sample_limit, BAILogger *bai_logger) {

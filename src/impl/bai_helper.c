@@ -13,6 +13,37 @@
 #include "../def/bai_defs.h"
 #include "../def/math_util_defs.h"
 
+typedef struct GK16 {
+  double δ;
+  int K;
+} GK16;
+
+void *create_GK16(double δ, int K) {
+  GK16 *gk16 = malloc_or_die(sizeof(GK16));
+  gk16->δ = δ;
+  gk16->K = K;
+  return gk16;
+}
+
+void destroy_GK16(GK16 *gk16) { free(gk16); }
+
+double GK16_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
+                      double __attribute__((unused)) * hσ2,
+                      int __attribute__((unused)) astar,
+                      int __attribute__((unused)) a, BAILogger *bai_logger) {
+  GK16 *gk16 = (GK16 *)data;
+  uint64_t t = 0;
+  for (int i = 0; i < gk16->K; i++) {
+    t += N[i];
+  }
+  const double result = log((log((double)t) + 1) / gk16->δ);
+  bai_logger_log_title(bai_logger, "GK16");
+  bai_logger_log_int(bai_logger, "t", t);
+  bai_logger_log_double(bai_logger, "result", result);
+  bai_logger_flush(bai_logger);
+  return result;
+}
+
 typedef struct HT {
   double δ;
   int K;
@@ -165,6 +196,10 @@ BAIThreshold *bai_create_threshold(bai_threshold_t type, bool is_EV, double δ,
   BAIThreshold *bai_threshold = malloc_or_die(sizeof(BAIThreshold));
   bai_threshold->type = type;
   switch (type) {
+  case BAI_THRESHOLD_GK16:
+    bai_threshold->data = create_GK16(δ, K);
+    bai_threshold->threshold_func = GK16_threshold;
+    break;
   case BAI_THRESHOLD_HT:
     bai_threshold->data = create_HT(δ, K, s, is_EV, false);
     bai_threshold->threshold_func = HT_threshold;
@@ -175,6 +210,9 @@ BAIThreshold *bai_create_threshold(bai_threshold_t type, bool is_EV, double δ,
 
 void bai_destroy_threshold(BAIThreshold *bai_threshold) {
   switch (bai_threshold->type) {
+  case BAI_THRESHOLD_GK16:
+    destroy_GK16((GK16 *)bai_threshold->data);
+    break;
   case BAI_THRESHOLD_HT:
     destroy_HT((HT *)bai_threshold->data);
     break;
