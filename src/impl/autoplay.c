@@ -241,6 +241,8 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
 typedef struct GameRunner {
   bool force_draw;
   int turn_number;
+  int bag_minimum_tiles_for_leavegen;
+  int bag_maximum_tiles_for_leavegen;
   uint64_t seed;
   Game *game;
   MoveList *move_list;
@@ -253,6 +255,11 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
   game_runner->move_list = move_list_create(1);
+  const int total_num_tiles = bag_get_size(game_get_bag(game_runner->game));
+  game_runner->bag_minimum_tiles_for_leavegen =
+      total_num_tiles / 4 - (2 * (RACK_SIZE));
+  game_runner->bag_maximum_tiles_for_leavegen =
+      (total_num_tiles - (total_num_tiles / 4)) - (2 * (RACK_SIZE));
   return game_runner;
 }
 
@@ -289,7 +296,8 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
 bool game_runner_is_game_over(GameRunner *game_runner) {
   return game_over(game_runner->game) ||
          (game_runner->shared_data->leavegen_shared_data &&
-          bag_get_tiles(game_get_bag(game_runner->game)) < (RACK_SIZE));
+          bag_get_tiles(game_get_bag(game_runner->game)) <
+              game_runner->bag_minimum_tiles_for_leavegen);
 }
 
 void game_runner_play_move(AutoplayWorker *autoplay_worker,
@@ -312,7 +320,12 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   Rack rare_rack_or_move_leave;
   rack_set_dist_size(&rare_rack_or_move_leave, ld_size);
 
-  if (game_runner->force_draw &&
+  const Bag *bag = game_get_bag(game);
+  const int num_tiles = bag_get_tiles(bag);
+  const bool record_leavegen_rack =
+      num_tiles >= game_runner->bag_minimum_tiles_for_leavegen &&
+      num_tiles <= game_runner->bag_maximum_tiles_for_leavegen;
+  if (record_leavegen_rack && game_runner->force_draw &&
       rack_list_get_rare_rack(lg_shared_data->rack_list, autoplay_worker->prng,
                               &rare_rack_or_move_leave)) {
     // Backup the original rack
@@ -331,7 +344,7 @@ void game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
   *move = get_top_equity_move(game, thread_index, game_runner->move_list);
 
-  if (lg_shared_data) {
+  if (record_leavegen_rack && lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
                        equity_to_double(move_get_equity(*move)));
   }
