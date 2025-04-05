@@ -545,6 +545,7 @@ BoardLayout *board_layout_create_for_test(const char *data_paths,
 
 void load_game_with_test_board(Game *game, const char *data_paths,
                                const char *board_layout_name) {
+  printf("loading game with board layout %s\n", board_layout_name);
   BoardLayout *bl = board_layout_create_for_test(data_paths, board_layout_name);
   board_apply_layout(bl, game_get_board(game));
   game_reset(game);
@@ -773,7 +774,7 @@ void assert_move_equity_exact(const Move *move, Equity expected_equity) {
   assert(move_get_equity(move) == expected_equity);
 }
 
-void assert_rack_score(const LetterDistribution *ld, const Rack *rack, 
+void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
                        int expected_score) {
   assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
 }
@@ -821,4 +822,92 @@ void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors) {
     sorted_anchors->anchors[sorted_anchors->count++] =
         anchor_heap_extract_max(&gen->anchor_heap);
   }
+}
+
+void assert_sorted_anchors_are_equal(const AnchorHeap *ah1,
+                                     const AnchorHeap *ah2) {
+  assert(ah1->count == ah2->count);
+  for (int i = 0; i < ah1->count; i++) {
+    assert(ah1->anchors[i].highest_possible_equity ==
+           ah2->anchors[i].highest_possible_equity);
+  }
+}
+
+void generate_spots_for_test(Game *game, MoveList *move_list) {
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  Player *opponent =
+      game_get_player(game, 1 - game_get_player_on_turn_index(game));
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  gen_load_position(gen, game, player_get_move_record_type(player_on_turn),
+                    player_get_move_sort_type(player_on_turn), move_list,
+                    /*override_kwg=*/NULL);
+  gen_look_up_leaves_and_record_exchanges(gen);
+  // Clear exchanges from output
+  move_list_reset(move_list);
+  assert(wmp_move_gen_is_active(&gen->wmp_move_gen));
+  wmp_move_gen_check_nonplaythrough_existence(
+      &gen->wmp_move_gen, gen->number_of_tiles_in_bag > 0, &gen->leave_map);
+  const Equity opp_rack_score =
+      rack_get_score(game_get_ld(game), player_get_rack(opponent));
+  wmp_move_gen_build_word_spot_heap(
+      &gen->wmp_move_gen, gen->board, gen->move_sort_type,
+      gen->descending_tile_scores, gen->best_leaves,
+      gen->number_of_tiles_in_bag, opp_rack_score, gen->cross_index);
+}
+
+void extract_sorted_spots_for_test(WordSpotHeap *sorted_spots) {
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  word_spot_heap_reset(sorted_spots);
+  while (gen->wmp_move_gen.word_spot_heap.count > 0) {
+    sorted_spots->spots[sorted_spots->count++] =
+        word_spot_heap_extract_max(&gen->wmp_move_gen.word_spot_heap);
+  }
+}
+
+void assert_spot_equity_exact(const WordSpot *spot, Equity expected_equity) {
+  assert(spot->best_possible_equity == expected_equity);
+}
+
+void assert_spot_equity_int(const WordSpot *spot, int expected_equity) {
+  assert_spot_equity_exact(spot, int_to_equity(expected_equity));
+}
+
+void build_spots_for_current_position(Game *game, const char *rack,
+                                      WordSpotHeap *sorted_spots,
+                                      MoveList *move_list) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const int player_on_turn_idx = game_get_player_on_turn_index(game);
+  Player *player = game_get_player(game, player_on_turn_idx);
+  Rack *player_rack = player_get_rack(player);
+  rack_set_to_string(ld, player_rack, rack);
+
+  generate_spots_for_test(game, move_list);
+  extract_sorted_spots_for_test(sorted_spots);
+  Equity previous_equity = EQUITY_MAX_VALUE;
+  const int number_of_spots = sorted_spots->count;
+  for (int i = 0; i < number_of_spots; i++) {
+    const Equity equity = sorted_spots->spots[i].best_possible_equity;
+    assert(equity <= previous_equity);
+    previous_equity = equity;
+  }
+}
+
+void load_and_build_spots(Game *game, const char *cgp, const char *rack,
+                          WordSpotHeap *sorted_spots, MoveList *move_list) {
+
+  game_load_cgp(game, cgp);
+  build_spots_for_current_position(game, rack, sorted_spots, move_list);
+}
+
+Equity get_leave_value(const Game *game, const char *leave) {
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, leave);
+  const int player_on_turn_idx = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_on_turn_idx);
+  const KLV *klv = player_get_klv(player);
+  const Equity value = klv_get_leave_value(klv, rack);
+  rack_destroy(rack);
+  return value;
 }

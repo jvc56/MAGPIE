@@ -20,6 +20,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 
+#include "../str/move_string.h"
 #include "move_gen.h"
 
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
@@ -162,6 +163,325 @@ void update_cross_set_for_move(const Move *move, Game *game) {
                     move_get_row_start(move), BOARD_VERTICAL_DIRECTION);
     board_transpose(board);
   }
+}
+
+void update_spots_through_main_word_vertical(const Move *move, Game *game) {
+  // printf("update_spots_through_main_word_vertical\n");
+  const int move_row = move_get_row_start(move);
+  const int move_col = move_get_col_start(move);
+  // This will make every square in the played move unusable as the start of a
+  // spot except for the first square in the word.
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    game_update_spots_from_square(game, move_row + i, move_col, 1,
+                                  BOARD_VERTICAL_DIRECTION);
+  }
+  // The square below the last played tile can no longer start a vertical word.
+  int row = move_row + move_get_tiles_length(move);
+  if (row < BOARD_DIM) {
+    game_update_spots_from_square(game, row, move_col, 1,
+                                  BOARD_VERTICAL_DIRECTION);
+  }
+  const Board *board = game_get_board(game);
+  int needed_to_reach_start = 0;
+  row = move_row - 1;
+  while (row >= 0) {
+    if (board_is_empty(board, row, move_col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start > RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, row, move_col, needed_to_reach_start,
+                                  BOARD_VERTICAL_DIRECTION);
+    row--;
+  }
+}
+
+void update_spots_through_main_word_horizontal(const Move *move, Game *game) {
+  // printf("update_spots_through_main_word_horizontal\n");
+  const int move_row = move_get_row_start(move);
+  const int move_col = move_get_col_start(move);
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    game_update_spots_from_square(game, move_row, move_col + i, 1,
+                                  BOARD_HORIZONTAL_DIRECTION);
+  }
+  int col = move_col + move_get_tiles_length(move);
+  // The square to the right of this played tile can no longer start a
+  // horizontal word.
+  if (col < BOARD_DIM) {
+    game_update_spots_from_square(game, move_row, col, 1,
+                                  BOARD_HORIZONTAL_DIRECTION);
+  }
+  const Board *board = game_get_board(game);
+  int needed_to_reach_start = 0;
+  col = move_col - 1;
+  while (col >= 0) {
+    if (board_is_empty(board, move_row, col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start > RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, move_row, col, needed_to_reach_start,
+                                  BOARD_HORIZONTAL_DIRECTION);
+    col--;
+  }
+}
+
+void update_spots_through_main_word(const Move *move, Game *game) {
+  // printf("update_spots_through_main_word\n");
+  switch (move_get_dir(move)) {
+  case BOARD_VERTICAL_DIRECTION:
+    update_spots_through_main_word_vertical(move, game);
+    return;
+  case BOARD_HORIZONTAL_DIRECTION:
+    update_spots_through_main_word_horizontal(move, game);
+    return;
+  }
+}
+
+void update_spots_hooking_horizontal_at_col(Game *game, int move_row,
+                                            int hook_col) {
+  // printf(
+  //     "update_spots_hooking_horizontal_at_col... move_row: %d, hook_col:
+  //     %d\n", move_row, hook_col);
+  const Board *board = game_get_board(game);
+  int needed_to_reach_start = 0;
+  int row = move_row;
+  while (row >= 0) {
+    if (board_is_empty(board, row, hook_col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start > RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, row, hook_col, needed_to_reach_start,
+                                  BOARD_VERTICAL_DIRECTION);
+    row--;
+  }
+}
+
+void update_spots_hooking_horizontal(const Move *move, Game *game) {
+  // printf("update_spots_hooking_horizontal\n");
+  const int move_row = move_get_row_start(move);
+  const int move_col_start = move_get_col_start(move);
+  const int move_col_end = move_col_start + move_get_tiles_length(move) - 1;
+  if (move_col_start - 1 >= 0) {
+    update_spots_hooking_horizontal_at_col(game, move_row, move_col_start - 1);
+  }
+  if (move_col_end + 1 < BOARD_DIM) {
+    update_spots_hooking_horizontal_at_col(game, move_row, move_col_end + 1);
+  }
+}
+
+void update_spots_hooking_vertical_at_row(Game *game, int move_col,
+                                          int hook_row) {
+  // printf("update_spots_hooking_vertical_at_row... move_col: %d, hook_row:
+  // %d\n",
+  //        move_col, hook_row);
+  const Board *board = game_get_board(game);
+  int needed_to_reach_start = 0;
+  int col = move_col;
+  while (col >= 0) {
+    if (board_is_empty(board, hook_row, col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start > RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, hook_row, col, needed_to_reach_start,
+                                  BOARD_HORIZONTAL_DIRECTION);
+    col--;
+  }
+}
+
+void update_spots_hooking_vertical(const Move *move, Game *game) {
+  // printf("update_spots_hooking_vertical\n");
+  int move_col = move_get_col_start(move);
+  int move_row_start = move_get_row_start(move);
+  int move_row_end = move_row_start + move_get_tiles_length(move) - 1;
+  if (move_row_start - 1 >= 0) {
+    update_spots_hooking_vertical_at_row(game, move_col, move_row_start - 1);
+  }
+  if (move_row_end + 1 < BOARD_DIM) {
+    update_spots_hooking_vertical_at_row(game, move_col, move_row_end + 1);
+  }
+}
+
+void update_spots_hooking(const Move *move, Game *game) {
+  // printf("update_spots_hooking\n");
+  switch (move_get_dir(move)) {
+  case BOARD_VERTICAL_DIRECTION:
+    update_spots_hooking_vertical(move, game);
+    return;
+  case BOARD_HORIZONTAL_DIRECTION:
+    update_spots_hooking_horizontal(move, game);
+    return;
+  }
+}
+
+void update_spots_perpendicular_horizontal_at_col(Game *game, int move_row,
+                                                  int col,
+                                                  int last_row_updated) {
+  // printf("update_spots_perpendicular_horizontal_at_col... move_row: %d, col: "
+  //        "%d, last_row_updated: %d\n",
+  //        move_row, col, last_row_updated);
+  const Board *board = game_get_board(game);
+  game_update_spots_from_square(game, move_row, col, 1,
+                                BOARD_VERTICAL_DIRECTION);
+  // The square below this played tile can no longer start a word.
+  int row = move_row + 1;
+  if (row < BOARD_DIM) {
+    game_update_spots_from_square(game, row, col, 1, BOARD_VERTICAL_DIRECTION);
+  }
+  int needed_to_reach_start = 0;
+  row = move_row - 1;
+  while (row > last_row_updated) {
+    assert(row >= 0);
+    if (board_is_empty(board, row, col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start > RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, row, col, needed_to_reach_start,
+                                  BOARD_VERTICAL_DIRECTION);
+    row--;
+  }
+}
+
+void update_spots_perpendicular_vertical_at_row(Game *game, int move_col,
+                                                int row, int last_col_updated) {
+  // printf("update_spots_perpendicular_vertical_at_row... move_col: %d, row: %d, "
+  //        "last_col_updated: %d\n",
+  //        move_col, row, last_col_updated);
+  const Board *board = game_get_board(game);
+  game_update_spots_from_square(game, row, move_col, 1,
+                                BOARD_HORIZONTAL_DIRECTION);
+  // The square to the right of this played tile can no longer start a word.
+  int col = move_col + 1;
+  if (col < BOARD_DIM) {
+    game_update_spots_from_square(game, row, col, 1,
+                                  BOARD_HORIZONTAL_DIRECTION);
+  }
+  int needed_to_reach_start = 0;
+  col = move_col - 1;
+  while (col > last_col_updated) {
+    assert(col >= 0);
+    if (board_is_empty(board, row, col)) {
+      needed_to_reach_start++;
+    }
+    if (needed_to_reach_start > RACK_SIZE) {
+      return;
+    }
+    game_update_spots_from_square(game, row, col, needed_to_reach_start,
+                                  BOARD_HORIZONTAL_DIRECTION);
+    col--;
+  }
+}
+
+void update_spots_perpendicular_and_parallel_horizontal(const Move *move,
+                                                        Game *game) {
+  // printf("update_spots_perpendicular_and_parallel_horizontal\n");
+  const int move_row = move_get_row_start(move);
+  const int move_col_start = move_get_col_start(move);
+  const Board *board = game_get_board(game);
+  int last_col_checked_with_hook_reaching_row[BOARD_DIM];
+  memset(last_col_checked_with_hook_reaching_row, -1, sizeof(int) * BOARD_DIM);
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+    const int col = move_col_start + tile_idx;
+    const uint8_t ml = move_get_tile(move, tile_idx);
+    if (ml == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    update_spots_perpendicular_horizontal_at_col(game, move_row, col, -1);
+    int empty_row_before_tile = move_row - 1;
+    while (empty_row_before_tile >= 0) {
+      if (board_is_empty(board, empty_row_before_tile, col)) {
+        update_spots_perpendicular_vertical_at_row(
+            game, col, empty_row_before_tile,
+            last_col_checked_with_hook_reaching_row[empty_row_before_tile]);
+        last_col_checked_with_hook_reaching_row[empty_row_before_tile] = col;
+        break;
+      }
+      empty_row_before_tile--;
+    }
+    int empty_row_after_tile = move_row + 1;
+    while (empty_row_after_tile < BOARD_DIM) {
+      if (board_is_empty(board, empty_row_after_tile, col)) {
+        update_spots_perpendicular_vertical_at_row(
+            game, col, empty_row_after_tile,
+            last_col_checked_with_hook_reaching_row[empty_row_after_tile]);
+        last_col_checked_with_hook_reaching_row[empty_row_after_tile] = col;
+        break;
+      }
+      empty_row_after_tile++;
+    }
+  }
+}
+
+void update_spots_perpendicular_and_parallel_vertical(const Move *move,
+                                                      Game *game) {
+  // printf("update_spots_perpendicular_and_parallel_vertical\n");
+  const int move_col = move_get_col_start(move);
+  const int move_row_start = move_get_row_start(move);
+  int last_row_checked_with_hook_reaching_col[BOARD_DIM];
+  memset(last_row_checked_with_hook_reaching_col, -1, sizeof(int) * BOARD_DIM);
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+    const int row = move_row_start + tile_idx;
+    const uint8_t ml = move_get_tile(move, tile_idx);
+    if (ml == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    update_spots_perpendicular_vertical_at_row(game, move_col, row, -1);
+    int empty_col_before_tile = move_col - 1;
+    while (empty_col_before_tile >= 0) {
+      if (board_is_empty(game_get_board(game), row, empty_col_before_tile)) {
+        update_spots_perpendicular_horizontal_at_col(
+            game, row, empty_col_before_tile,
+            last_row_checked_with_hook_reaching_col[empty_col_before_tile]);
+        last_row_checked_with_hook_reaching_col[empty_col_before_tile] = row;
+        break;
+      }
+      empty_col_before_tile--;
+    }
+    int empty_col_after_tile = move_col + 1;
+    while (empty_col_after_tile < BOARD_DIM) {
+      if (board_is_empty(game_get_board(game), row, empty_col_after_tile)) {
+        update_spots_perpendicular_horizontal_at_col(
+            game, row, empty_col_after_tile,
+            last_row_checked_with_hook_reaching_col[empty_col_after_tile]);
+        last_row_checked_with_hook_reaching_col[empty_col_after_tile] = row;
+        break;
+      }
+      empty_col_after_tile++;
+    }
+  }
+}
+
+void update_spots_perpendicular_and_parallel(const Move *move, Game *game) {
+  // printf("update_spots_perpendicular_and_parallel\n");
+  switch (move_get_dir(move)) {
+  case BOARD_VERTICAL_DIRECTION:
+    update_spots_perpendicular_and_parallel_vertical(move, game);
+    return;
+  case BOARD_HORIZONTAL_DIRECTION:
+    update_spots_perpendicular_and_parallel_horizontal(move, game);
+    return;
+  }
+}
+
+void update_spots_for_move(const Move *move, Game *game) {
+  game_update_available_tiles(game);
+  // printf("update_spots_for_move ");
+  // StringBuilder *sb = string_builder_create();
+  // string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game));
+  // printf("%s\n", string_builder_peek(sb));
+  // string_builder_destroy(sb);
+
+  update_spots_through_main_word(move, game);
+  update_spots_hooking(move, game);
+  update_spots_perpendicular_and_parallel(move, game);
 }
 
 // Draws the required number of tiles to fill the rack to RACK_SIZE.
@@ -324,6 +644,7 @@ void draw_starting_racks(Game *game) {
 // the play in the leave rack.
 play_move_status_t play_move(const Move *move, Game *game,
                              const Rack *rack_to_draw, Rack *leave) {
+  // printf("play_move\n");
   if (game_get_backup_mode(game) == BACKUP_MODE_SIMULATION) {
     game_backup(game);
   }
@@ -338,6 +659,47 @@ play_move_status_t play_move(const Move *move, Game *game,
     }
     update_cross_set_for_move(move, game);
     game_set_consecutive_scoreless_turns(game, 0);
+    if (game_has_wmp(game)) {
+      update_spots_for_move(move, game);
+      // Board *board = game_get_board(game);
+      // Game *game_copy = game_duplicate(game);
+      // game_update_all_spots(game_copy);
+      // for (int row = 0; row < BOARD_DIM; row++) {
+      //   for (int col = 0; col < BOARD_DIM; col++) {
+      //     for (int dir = 0; dir < 2; dir++) {
+      //       for (int num_tiles = 1; num_tiles <= RACK_SIZE; num_tiles++) {
+      //         const BoardSpot *spot_from_copy = board_get_writable_spot(
+      //             game_get_board(game_copy), row, col, dir, num_tiles, 0);
+      //         const BoardSpot *spot_from_game =
+      //             board_get_writable_spot(board, row, col, dir, num_tiles, 0);
+      //         if (!spot_from_copy->is_usable && !spot_from_game->is_usable) {
+      //           continue;
+      //         }
+      //         if (spot_from_copy->is_usable && !spot_from_game->is_usable) {
+      //           printf("spot at %d %d %d %d %d is usable in copy but not in "
+      //                  "game\n",
+      //                  row, col, dir, num_tiles, 0);
+      //         }
+      //         if (!spot_from_copy->is_usable && spot_from_game->is_usable) {
+      //           printf("spot at %d %d %d %d %d is usable in game but not in "
+      //                  "copy\n",
+      //                  row, col, dir, num_tiles, 0);
+      //         }
+      //         assert(spot_from_copy->additional_score ==
+      //                spot_from_game->additional_score);
+      //         assert(spot_from_copy->playthrough_bit_rack ==
+      //                spot_from_game->playthrough_bit_rack);
+      //         assert(spot_from_copy->word_length ==
+      //                spot_from_game->word_length);
+      //         for (int i = 0; i < RACK_SIZE; i++) {
+      //           assert(spot_from_copy->descending_effective_multipliers[i] ==
+      //                  spot_from_game->descending_effective_multipliers[i]);
+      //         }
+      //       }
+      //     }
+      //   }
+      // }
+    }
 
     player_add_to_score(player_on_turn, move_get_score(move));
     draw_to_full_rack(game, player_on_turn_index);

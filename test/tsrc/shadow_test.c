@@ -567,7 +567,7 @@ void test_shadow_wmp_nonplaythrough_existence(void) {
 
   load_and_shadow(game, player, EMPTY_CGP, "TRONGLE", &anchor_list);
   assert(anchor_list.count == 1);
-  // We know there are sixes with a G, and assume something could put the G on
+  // We know there are sixes, and assume something could put the G on
   // the DWS even though none do.
   assert_anchor_equity_int(&anchor_list, 0, 18);
 

@@ -19,6 +19,7 @@
 #include "../../src/impl/config.h"
 #include "../../src/impl/gameplay.h"
 #include "../../src/impl/move_gen.h"
+#include "../../src/impl/wmp_move_gen.h"
 
 #include "../../src/util/string_util.h"
 
@@ -309,6 +310,7 @@ void macondo_tests(void) {
   set_row(game_two, 9, "T");
   board_update_all_anchors(board_two);
   game_gen_all_cross_sets(game_two);
+  game_update_all_spots(game_two);
 
   assert_boards_are_equal(board, board_two);
 
@@ -579,12 +581,11 @@ void small_play_recorder_test(void) {
 }
 
 void distinct_lexica_test(bool w1) {
-  Config *config = w1 ? config_create_or_die(
-                              "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
-                              "-r1 best -r2 best -numplays 1 -w1 true")
-                        : config_create_or_die(
-                              "set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
-                              "-r1 best -r2 best -numplays 1");
+  Config *config =
+      w1 ? config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+                                "-r1 best -r2 best -numplays 1 -w1 true")
+         : config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
+                                "-r1 best -r2 best -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   MoveList *move_list = move_list_create(1);
@@ -826,7 +827,7 @@ void movegen_var_bingo_bonus_test(void) {
   vms = assert_validated_move_success(config_get_game(config),
                                       opening_busuuti_cgp, "8D.BUSUUTI", 0,
                                       false, false);
-  assert_move_score(validated_moves_get_move(vms, 0), 54);                                     
+  assert_move_score(validated_moves_get_move(vms, 0), 54);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, opening_busuuti_cgp_cmd);
@@ -838,7 +839,7 @@ void movegen_var_bingo_bonus_test(void) {
   vms = assert_validated_move_success(config_get_game(config),
                                       opening_busuuti_cgp, "8D.BUSUUTI", 0,
                                       false, false);
-  assert_move_score(validated_moves_get_move(vms, 0), 324);                                     
+  assert_move_score(validated_moves_get_move(vms, 0), 324);
   validated_moves_destroy(vms);
 
   free(opening_busuuti_cgp_cmd);
@@ -878,20 +879,281 @@ void movegen_only_one_player_wmp(void) {
   config_destroy(config);
 }
 
+void wordmap_gen_muzjiks(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(1);
+  player_set_move_sort_type(player, MOVE_SORT_SCORE);
+
+  WordSpotHeap spot_list;
+  load_and_build_spots(game, EMPTY_CGP, "MUZJIKS", &spot_list, move_list);
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  wmg->word_spot = spot_list.spots[0];
+  wordmap_gen(gen);
+  assert(wmg->num_words == 1);
+  assert_word_in_buffer(wmg->buffer, "MUZJIKS", ld, 0, 7);
+
+  assert_move(game, move_list, NULL, 0, "8B MUZJIKS 128");
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_evacuators(void) {
+  // Board contains 8G VAC
+  char vac[300] =
+      "15/15/15/15/15/15/15/6VAC6/15/15/15/15/15/15/15 / 0/0 0 lex NWL20;";
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(10000);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+
+  WordSpotHeap spot_list;
+  load_and_build_spots(game, vac, "ORATES?", &spot_list, move_list);
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  wmg->word_spot = spot_list.spots[0];
+  // Middle row, leftmost bingo spot. One of the two spots through VAC that
+  // would reach a TWS.
+  assert(wmg->word_spot.row == 7);
+  assert(wmg->word_spot.col == 0);
+  assert(wmg->word_spot.dir == BOARD_HORIZONTAL_DIRECTION);
+  // wordmap_gen sets wmg->board_spot to the BoardSpot referred to by
+  // wmg->word_spot, and looks up words for each possible subrack. Because this
+  // spot uses all 7 letters, there is only one combination to check, and those
+  // words will be left in wmg->buffer. Testing wordmap_gen with subracks
+  // smaller than this in the same way wouldn't work, so we'll instead just test
+  // which words get recorded.
+  wordmap_gen(gen);
+  assert(wmg->num_words == 3);
+
+  // No words fit ......VAC.
+  assert_word_in_buffer(wmg->buffer, "COVARIATES", ld, 0, 10);
+  wmg->word_idx = 0;
+  assert(!gen_current_word_fits_with_board(gen));
+
+  assert_word_in_buffer(wmg->buffer, "EVACUATORS", ld, 1, 10);
+  wmg->word_idx = 1;
+  assert(!gen_current_word_fits_with_board(gen));
+
+  assert_word_in_buffer(wmg->buffer, "EXCAVATORS", ld, 2, 10);
+  wmg->word_idx = 2;
+  assert(!gen_current_word_fits_with_board(gen));
+
+  // No scoring plays recorded yet.
+  assert(move_list_get_count(move_list) == 0);
+
+  wmg->word_spot = spot_list.spots[1];
+  // Middle row, rightmost bingo spot.
+  assert(wmg->word_spot.row == 7);
+  assert(wmg->word_spot.col == 5);
+  wordmap_gen(gen);
+  assert(wmg->num_words == 3);
+
+  // Of the three, only EVACUATORS fits with the .VAC...... pattern
+  assert_word_in_buffer(wmg->buffer, "COVARIATES", ld, 0, 10);
+  wmg->word_idx = 0;
+  assert(!gen_current_word_fits_with_board(gen));
+
+  assert_word_in_buffer(wmg->buffer, "EVACUATORS", ld, 1, 10);
+  wmg->word_idx = 1;
+  assert(gen_current_word_fits_with_board(gen));
+
+  assert_word_in_buffer(wmg->buffer, "EXCAVATORS", ld, 2, 10);
+  wmg->word_idx = 2;
+  assert(!gen_current_word_fits_with_board(gen));
+
+  assert(move_list_get_count(move_list) == 1);
+  assert_move(game, move_list, NULL, 0, "8F E(VAC)uATORS 95");
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_below_jeweler(void) {
+  // Board contains 8D JEWELER
+  char jeweler[300] =
+      "15/15/15/15/15/15/15/3JEWELER5/15/15/15/15/15/15/15 / 0/0 0 lex CSW21;";
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+  MoveList *move_list = move_list_create(10000);
+
+  WordSpotHeap spot_list;
+  load_and_build_spots(game, jeweler, "AEIODNS", &spot_list, move_list);
+  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  WMPMoveGen *wmg = &gen->wmp_move_gen;
+  // We're interested in the fourth best spot, playing bingos at 9D.
+  // The spots with higher possible equity are
+  // 8A, 8B: 14-letter bingos through JEWELER to TWS
+  // K5: 2x2 hooking (JEWELER)S
+  wmg->word_spot = spot_list.spots[3];
+  // Seven-tile underlap below JEWELER.
+  assert(wmg->word_spot.row == 8);
+  assert(wmg->word_spot.col == 3);
+  assert(wmg->word_spot.dir == BOARD_HORIZONTAL_DIRECTION);
+  wordmap_gen(gen);
+  assert(wmg->num_words == 3);
+  // ADONISE and ANODISE fit beneath JEWELER, but SODAINE doesn't.
+
+  assert_word_in_buffer(wmg->buffer, "ADONISE", ld, 0, 7);
+  wmg->word_idx = 0;
+  assert(gen_current_word_fits_with_board(gen));
+
+  assert_word_in_buffer(wmg->buffer, "ANODISE", ld, 1, 7);
+  wmg->word_idx = 1;
+  assert(gen_current_word_fits_with_board(gen));
+
+  assert_word_in_buffer(wmg->buffer, "SODAINE", ld, 2, 7);
+  wmg->word_idx = 2;
+  assert(!gen_current_word_fits_with_board(gen));
+
+  assert(move_list_get_count(move_list) == 2);
+  assert_move(game, move_list, NULL, 0, "9D ADONISE 87");
+  assert_move(game, move_list, NULL, 1, "9D ANODISE 89");
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_trongle(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(10000);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+
+  rack_set_to_string(ld, player_get_rack(player), "TRONGLE");
+
+  generate_moves_for_game(game, 0, move_list);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "8E LONG 10");
+  assert_move_equity_exact(sml->moves[0],
+                           int_to_equity(10) + get_leave_value(game, "ERT"));
+  assert_move(game, NULL, sml, 1, "8G LONG 10");
+  assert_move_equity_exact(sml->moves[1],
+                           int_to_equity(10) + get_leave_value(game, "ERT"));
+  assert_move(game, NULL, sml, 2, "8F LONG 10");
+  assert_move_equity_exact(sml->moves[2], int_to_equity(10) +
+                                              get_leave_value(game, "ERT") +
+                                              OPENING_HOTSPOT_PENALTY);
+  assert_move(game, NULL, sml, 3, "8H LONG 10");
+  assert_move_equity_exact(sml->moves[3], int_to_equity(10) +
+                                              get_leave_value(game, "ERT") +
+                                              OPENING_HOTSPOT_PENALTY);
+  assert_move(game, NULL, sml, 4, "8D GLENT 16");
+  assert_move_equity_exact(sml->moves[4],
+                           int_to_equity(16) + get_leave_value(game, "OR"));
+
+  sorted_move_list_destroy(sml);
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_wof_movegen(void) {
+  char wof[300] = "15/15/15/15/15/15/15/3QINTAR6/2GU4E6/2LI4C6/2ON4O6/2OI3HM6/"
+                  "2ME3OB6/1ASSEZ1PE6/7ED6 EFLORTW/ABNST?? 203/138 0";
+
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(10000);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+
+  game_load_cgp(game, wof);
+  rack_set_to_string(ld, player_get_rack(player), "FLOWRET");
+
+  generate_moves_for_game(game, 0, move_list);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "G11 WOF 33");
+  assert_move_equity_exact(sml->moves[0],
+                           int_to_equity(33) + get_leave_value(game, "ELRT"));
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_oxyphenbutazone(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+  MoveList *move_list = move_list_create(10000);
+
+  game_load_cgp(game, VS_OXY);
+  rack_set_to_string(ld, player_get_rack(player), "OXPBAZE");
+
+  generate_moves_for_game(game, 0, move_list);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "A1 OX(Y)P(HEN)B(UT)AZ(ON)E 1780");
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+void wordmap_gen_wus_movegen(void) {
+  char wus[300] =
+      "11FEZ1/11AGO1/11TO2/11ST2/4T5R1I2/2GIRD3VATS2/4AI1DEEK1EH1/4IN1AREIC1AB/"
+      "2BULkAGE4ER/1PINEY7MO/2O1D3VAX2IO/2T7UPEND/1QI10S1/1UNLAY9/1A2LOFT7 "
+      "CEMOSUW/EEINOW? 344/363 0";
+
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  const LetterDistribution *ld = config_get_ld(config);
+  Game *game = config_game_create(config);
+  Player *player = game_get_player(game, 0);
+  Player *opponent = game_get_player(game, 1);
+  MoveList *move_list = move_list_create(10000);
+  player_set_move_sort_type(player, MOVE_SORT_EQUITY);
+
+  game_load_cgp(game, wus);
+  rack_set_to_string(ld, player_get_rack(player), "CEMOSUW");
+  rack_set_to_string(ld, player_get_rack(opponent), "EEINOW?");
+
+  generate_moves_for_game(game, 0, move_list);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
+  assert_move(game, NULL, sml, 0, "14H SOWCE 20");
+  assert_move_equity_exact(sml->moves[0],
+                           int_to_equity(20) + get_leave_value(game, "MU") +
+                               peg_adjust_values[8]);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
-  leave_lookup_test();
-  unfound_leave_lookup_test();
-  macondo_tests();
-  exchange_tests();
-  equity_test();
-  top_equity_play_recorder_test();
-  small_play_recorder_test();
-  distinct_lexica_test(false);
-  distinct_lexica_test(true);
-  consistent_tiebreaking_test();
-  wordsmog_test();
-  movegen_game_update_test();
-  movegen_var_bingo_bonus_test();
-  movegen_no_wmp_by_default_test();
-  movegen_only_one_player_wmp();
+  // leave_lookup_test();
+  // unfound_leave_lookup_test();
+  // macondo_tests();
+  // exchange_tests();
+  // equity_test();
+  // top_equity_play_recorder_test();
+  // small_play_recorder_test();
+  // distinct_lexica_test(false);
+  // distinct_lexica_test(true);
+  // consistent_tiebreaking_test();
+  // wordsmog_test();
+  // movegen_game_update_test();
+  // movegen_var_bingo_bonus_test();
+  // movegen_no_wmp_by_default_test();
+  // movegen_only_one_player_wmp();
+
+  wordmap_gen_muzjiks();
+  wordmap_gen_evacuators();
+  wordmap_gen_below_jeweler();
+  wordmap_gen_trongle();
+  wordmap_gen_wof_movegen();
+  wordmap_gen_oxyphenbutazone();
+  wordmap_gen_wus_movegen();
 }

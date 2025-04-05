@@ -101,6 +101,7 @@ typedef struct MoveGen {
   Equity best_leaves[(RACK_SIZE)];
   AnchorHeap anchor_heap;
   LetterDistribution ld;
+  int ld_size;
   
   // Include space for blank letters so their scores can be added without
   // checking whether tiles are blanked.
@@ -136,4 +137,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 
 void gen_shadow(MoveGen *gen);
 
+void wordmap_gen(MoveGen *gen);
+
+bool gen_current_word_fits_with_board(MoveGen *gen);
 #endif
