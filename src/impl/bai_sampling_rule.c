@@ -98,31 +98,34 @@ int top_two_next_sample(void *data, int __attribute__((unused)) astar,
                         int size, RandomVariables *rng, BAILogger *bai_logger) {
   TopTwo *top_two = (TopTwo *)data;
   const double u = rvs_sample(rng, 0, bai_logger);
-  int k;
+  int k = 0;
   bai_logger_log_title(bai_logger, "TOP_TWO");
   bai_logger_log_int(bai_logger, "astar", astar + 1);
   if (u <= top_two->β) {
     bai_logger_log_title(bai_logger, "k = astar");
     k = astar;
   } else {
-    double k_val;
+    double k_val = INFINITY;
     switch (top_two->challenger) {
     case BAI_TOP_TWO_CHALLENGER_TC:
       bai_logger_log_title(bai_logger, "TC");
-      k = 0;
-      k_val = Zs[0];
-      for (int i = 1; i < size; i++) {
-        if (Zs[i] < k_val) {
+      for (int i = 0; i < size; i++) {
+        if (isnan(Zs[i])) {
           k = i;
-          k_val = Zs[i];
+          break;
+        }
+        if (Zs[i] < Zs[k]) {
+          k = i;
         }
       }
       break;
     case BAI_TOP_TWO_CHALLENGER_TCI:
       bai_logger_log_title(bai_logger, "TCI");
-      k = 0;
-      k_val = Zs[0] + log((double)N[0]);
-      for (int i = 1; i < size; i++) {
+      for (int i = 0; i < size; i++) {
+        if (isnan(Zs[i])) {
+          k = i;
+          break;
+        }
         const double val = Zs[i] + log((double)N[i]);
         if (val < k_val) {
           k = i;

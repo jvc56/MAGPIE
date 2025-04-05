@@ -7,7 +7,7 @@
 #include "bai_sampling_rule.h"
 
 int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
-        RandomVariables *rvs, double δ, RandomVariables *rng,
-        uint64_t sample_limit, BAILogger *bai_logger);
+        RandomVariables *rvs, double δ, RandomVariables *rng, int sample_limit,
+        int similar_play_min_iter_for_eval, BAILogger *bai_logger);
 
 #endif

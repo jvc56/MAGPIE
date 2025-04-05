@@ -32,7 +32,7 @@ double GK16_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
                       int __attribute__((unused)) astar,
                       int __attribute__((unused)) a, BAILogger *bai_logger) {
   GK16 *gk16 = (GK16 *)data;
-  uint64_t t = 0;
+  int t = 0;
   for (int i = 0; i < gk16->K; i++) {
     t += N[i];
   }

@@ -45,10 +45,10 @@ double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
   double fhi = vf(hi, args);
 
   if (flo > 0) {
-    log_fatal("f(%f) = %f should be negative at low end", lo, flo);
+    return lo;
   }
   if (fhi < 0) {
-    log_fatal("f(%f) = %f should be positive at high end", hi, fhi);
+    return hi;
   }
 
   for (int i = 0; i < (BAI_BINARY_SEARCH_MAX_ITER); i++) {
@@ -151,12 +151,6 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
               -α2, α1, -α0);
   }
 
-  // FIXME: for alignment only, remove in prod
-  for (int i = 0; i < 3; i++) {
-    rs[i] = round(creal(rs[i]) * 1e10) / 1e10 +
-            (round(cimag(rs[i]) * 1e10) / 1e10) * I;
-  }
-
   int num_valid_roots = 0;
   double valid_roots[3];
   for (int i = 0; i < 3; i++) {
@@ -210,6 +204,10 @@ void bai_glrt(int K, int *w, double *μ, double *σ2, bool known_var,
               BAIGLRTResults *glrt_results, BAILogger *bai_logger) {
   int astar = 0;
   for (int i = 1; i < K; i++) {
+    if (isnan(μ[i])) {
+      astar = i;
+      break;
+    }
     if (μ[i] > μ[astar]) {
       astar = i;
     }
@@ -236,16 +234,27 @@ void bai_glrt(int K, int *w, double *μ, double *σ2, bool known_var,
     }
     θs[a] = alt_λ(μ[astar], σ2[astar], w[astar], μ[a], σ2[a], w[a], known_var,
                   bai_logger);
-    vals[a] = w[astar] * bai_d(μ[astar], σ2[astar], θs[a], known_var) +
-              w[a] * bai_d(μ[a], σ2[a], θs[a], known_var);
+    const double d_astar = bai_d(μ[astar], σ2[astar], θs[a], known_var);
+    const double d_a = bai_d(μ[a], σ2[a], θs[a], known_var);
+    vals[a] = w[astar] * d_astar + w[a] * d_a;
+    bai_logger_log_double(bai_logger, "u_astar", μ[astar]);
+    bai_logger_log_double(bai_logger, "sigma2_astar", σ2[astar]);
+    bai_logger_log_double(bai_logger, "theta_a", μ[a]);
+    bai_logger_log_double(bai_logger, "w_astar", w[astar]);
+    bai_logger_log_double(bai_logger, "d_astar", d_astar);
+    bai_logger_log_double(bai_logger, "w_a", w[a]);
+    bai_logger_log_double(bai_logger, "d_a", d_a);
     bai_logger_log_int(bai_logger, "arm", a + 1);
     bai_logger_log_double(bai_logger, "theta", θs[a]);
     bai_logger_log_double(bai_logger, "val", vals[a]);
     bai_logger_flush(bai_logger);
   }
   int k = 0;
-  // Implement argmin
-  for (int i = 1; i < K; i++) {
+  for (int i = 0; i < K; i++) {
+    if (isnan(vals[i])) {
+      k = i;
+      break;
+    }
     if (vals[i] < vals[k]) {
       k = i;
     }
@@ -397,10 +406,15 @@ void bai_oracle(double *μs, double *σ2s, int size, bool known_var,
                 BAIOracleResult *oracle_result, BAILogger *bai_logger) {
   int astar = 0;
   double μstar = μs[0];
-  for (int i = 1; i < size; i++) {
-    if (μs[i] > μstar) {
-      μstar = μs[i];
+  for (int i = 0; i < size; i++) {
+    if (isnan(μs[i])) {
       astar = i;
+      μstar = μs[i];
+      break;
+    }
+    if (μs[i] > μstar) {
+      astar = i;
+      μstar = μs[i];
     }
   }
 
@@ -439,6 +453,10 @@ void bai_oracle(double *μs, double *σ2s, int size, bool known_var,
       continue;
     }
     double result = bai_d(μs[astar], σ2s[astar], μs[k], known_var);
+    if (isnan(result)) {
+      hi = result;
+      break;
+    }
     if (result < hi) {
       hi = result;
     }

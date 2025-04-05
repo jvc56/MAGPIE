@@ -7,7 +7,7 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
-#define BAI_LOGGER_NUM_DECIMALS 5
+#define BAI_LOGGER_NUM_DECIMALS 15
 
 typedef struct BAILogger {
   FILE *fh;
@@ -60,6 +60,8 @@ static inline void bai_logger_string_builder_add_double(StringBuilder *sb,
                                                         const double x) {
   if (isinf(x)) {
     string_builder_add_string(sb, "Inf");
+  } else if (isnan(x)) {
+    string_builder_add_string(sb, "NaN");
   } else {
     string_builder_add_formatted_string(sb, "%.*f", BAI_LOGGER_NUM_DECIMALS, x);
   }

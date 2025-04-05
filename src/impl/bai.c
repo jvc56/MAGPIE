@@ -9,6 +9,8 @@
 #include "bai_peps.h"
 #include "bai_sampling_rule.h"
 
+#define EPIGON_PENALTY -1e30
+
 bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *hμ,
                         double *hσ2, int astar, BAILogger *bai_logger) {
   for (int a = 0; a < K; a++) {
@@ -37,31 +39,34 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
 // Assumes rvs are normally distributed.
 // Assumes rng is uniformly distributed.
 int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
-        RandomVariables *rvs, double δ, RandomVariables *rng,
-        uint64_t sample_limit, BAILogger *bai_logger) {
+        RandomVariables *rvs, double δ, RandomVariables *rng, int sample_limit,
+        int similar_play_min_iter_for_eval, BAILogger *bai_logger) {
   const int K = rvs_get_num_rvs(rvs);
   BAIThreshold *βs = bai_create_threshold(thres, is_EV, δ, 2, K, 2, 1.2);
 
   int *N = calloc_or_die(K, sizeof(int));
   double *S = calloc_or_die(K, sizeof(double));
   double *S2 = calloc_or_die(K, sizeof(double));
+  double *hμ = calloc_or_die(K, sizeof(double));
+  double *hσ2 = calloc_or_die(K, sizeof(double));
+  bool *is_similarity_evaluated = calloc_or_die(K, sizeof(bool));
+  BAISamplingRule *bai_sampling_rule =
+      bai_sampling_rule_create(sr, is_EV, N, K);
+  BAIThreshold *Sβ = βs;
+  BAIGLRTResults *glrt_results = bai_glrt_results_create(K);
+  int t = 0;
   for (int k = 0; k < K; k++) {
     for (int i = 0; i < 2; i++) {
       double _X = rvs_sample(rvs, k, bai_logger);
       S[k] += _X;
       S2[k] += _X * _X;
       N[k] += 1;
+      t++;
     }
   }
 
-  uint64_t t = K * 2;
-  double *hμ = calloc_or_die(K, sizeof(double));
-  double *hσ2 = calloc_or_die(K, sizeof(double));
   int astar;
-  BAISamplingRule *bai_sampling_rule =
-      bai_sampling_rule_create(sr, is_EV, N, K);
-  BAIThreshold *Sβ = βs;
-  BAIGLRTResults *glrt_results = bai_glrt_results_create(K);
+  int num_epigons = 0;
   while (true) {
     for (int i = 0; i < K; i++) {
       hμ[i] = S[i] / N[i];
@@ -88,7 +93,12 @@ int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
     }
     const int k = bai_sampling_rule_next_sample(
         bai_sampling_rule, astar, aalt, ξ, ϕ2, N, S, Zs, K, rng, bai_logger);
-    double _X = rvs_sample(rvs, k, bai_logger);
+    double _X;
+    if (rvs_is_epigon(rvs, k)) {
+      _X = EPIGON_PENALTY;
+    } else {
+      _X = rvs_sample(rvs, k, bai_logger);
+    }
     S[k] += _X;
     S2[k] += _X * _X;
     N[k] += 1;
@@ -96,6 +106,22 @@ int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
     if (t >= sample_limit) {
       bai_logger_log_title(bai_logger, "REACHED_SAMPLE_LIMIT");
       break;
+    }
+    if (similar_play_min_iter_for_eval > 0 &&
+        N[astar] >= similar_play_min_iter_for_eval &&
+        !is_similarity_evaluated[astar]) {
+      for (int i = 0; i < K; i++) {
+        if (i == astar || rvs_is_epigon(rvs, i)) {
+          continue;
+        }
+        if (rvs_mark_as_epigon_if_similar(rvs, astar, i)) {
+          num_epigons++;
+        }
+      }
+      if (num_epigons == K - 1) {
+        break;
+      }
+      is_similarity_evaluated[astar] = true;
     }
   }
   bai_glrt_results_destroy(glrt_results);
@@ -105,6 +131,7 @@ int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
   free(S2);
   free(S);
   free(N);
+  free(is_similarity_evaluated);
   bai_destroy_threshold(βs);
   return astar;
 }

@@ -9,13 +9,19 @@
 #include "../util/string_util.h"
 #include "../util/util.h"
 
+#define SIMILARITY_EPSILON 1e-6
+
 typedef double (*rvs_sample_func_t)(RandomVariables *, const uint64_t,
                                     BAILogger *);
+typedef bool (*rvs_similar_func_t)(RandomVariables *, const int, const int);
+typedef bool (*rvs_is_epigon_func_t)(RandomVariables *, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 
 struct RandomVariables {
   int num_rvs;
   rvs_sample_func_t sample_func;
+  rvs_similar_func_t similar_func;
+  rvs_is_epigon_func_t is_epigon_func;
   rvs_destroy_data_func_t destroy_data_func;
   void *data;
 };
@@ -35,6 +41,19 @@ double rv_uniform_sample(RandomVariables *rvs,
   return uniform_sample(rv_uniform->xoshiro_prng);
 }
 
+bool rv_uniform_mark_as_epigon_if_similar(RandomVariables
+                                              __attribute__((unused)) *
+                                              rvs,
+                                          const int __attribute__((unused)) i,
+                                          const int __attribute__((unused)) j) {
+  return false;
+}
+
+bool rv_uniform_is_epigon(RandomVariables __attribute__((unused)) * rvs,
+                          const int __attribute__((unused)) i) {
+  return false;
+}
+
 void rv_uniform_destroy(RandomVariables *rvs) {
   RVUniform *rv_uniform = (RVUniform *)rvs->data;
   prng_destroy(rv_uniform->xoshiro_prng);
@@ -42,13 +61,10 @@ void rv_uniform_destroy(RandomVariables *rvs) {
 }
 
 void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
-  // Set the sample function
   rvs->sample_func = rv_uniform_sample;
-
-  // Set the destroy function
+  rvs->similar_func = rv_uniform_mark_as_epigon_if_similar;
+  rvs->is_epigon_func = rv_uniform_is_epigon;
   rvs->destroy_data_func = rv_uniform_destroy;
-
-  // Set the data
   RVUniform *rv_uniform = malloc_or_die(sizeof(RVUniform));
   rv_uniform->xoshiro_prng = prng_create(seed);
   rvs->data = rv_uniform;
@@ -75,6 +91,19 @@ double rv_uniform_predetermined_sample(RandomVariables *rvs,
   return result;
 }
 
+bool rv_uniform_predetermined_mark_as_epigon_if_similar(
+    RandomVariables __attribute__((unused)) * rvs,
+    const int __attribute__((unused)) i, const int __attribute__((unused)) j) {
+  return false;
+}
+
+bool rv_uniform_predetermined_is_epigon(RandomVariables
+                                            __attribute__((unused)) *
+                                            rvs,
+                                        const int __attribute__((unused)) i) {
+  return false;
+}
+
 void rv_uniform_predetermined_destroy(RandomVariables *rvs) {
   RVUniformPredetermined *rv_uniform_predetermined =
       (RVUniformPredetermined *)rvs->data;
@@ -85,13 +114,10 @@ void rv_uniform_predetermined_destroy(RandomVariables *rvs) {
 void rv_uniform_predetermined_create(RandomVariables *rvs,
                                      const double *samples,
                                      const uint64_t num_samples) {
-  // Set the sample function
   rvs->sample_func = rv_uniform_predetermined_sample;
-
-  // Set the destroy function
+  rvs->similar_func = rv_uniform_predetermined_mark_as_epigon_if_similar;
+  rvs->is_epigon_func = rv_uniform_predetermined_is_epigon;
   rvs->destroy_data_func = rv_uniform_predetermined_destroy;
-
-  // Set the data
   RVUniformPredetermined *rv_uniform_predetermined =
       malloc_or_die(sizeof(RVUniformPredetermined));
   rv_uniform_predetermined->num_samples = num_samples;
@@ -106,6 +132,7 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
 typedef struct RVNormal {
   XoshiroPRNG *xoshiro_prng;
   double *means_and_vars;
+  bool *is_epigon;
 } RVNormal;
 
 double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
@@ -124,27 +151,45 @@ double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
          rv_normal->means_and_vars[k * 2 + 1] * u * s;
 }
 
+bool rv_normal_mark_as_epigon_if_similar(RandomVariables *rvs, const int leader,
+                                         const int i) {
+  if (leader == i) {
+    return false;
+  }
+  RVNormal *rv_normal = (RVNormal *)rvs->data;
+  rv_normal->is_epigon[i] =
+      fabs(rv_normal->means_and_vars[leader * 2] -
+           rv_normal->means_and_vars[i * 2]) < SIMILARITY_EPSILON &&
+      fabs(rv_normal->means_and_vars[leader * 2 + 1] -
+           rv_normal->means_and_vars[i * 2 + 1]) < SIMILARITY_EPSILON;
+  return rv_normal->is_epigon[i];
+}
+
+bool rv_normal_is_epigon(RandomVariables *rvs, const int i) {
+  RVNormal *rv_normal = (RVNormal *)rvs->data;
+  return rv_normal->is_epigon[i];
+}
+
 void rv_normal_destroy(RandomVariables *rvs) {
   RVNormal *rv_normal = (RVNormal *)rvs->data;
   prng_destroy(rv_normal->xoshiro_prng);
   free(rv_normal->means_and_vars);
+  free(rv_normal->is_epigon);
   free(rv_normal);
 }
 
 void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
                       const double *means_and_vars) {
-  // Set the sample function
   rvs->sample_func = rv_normal_sample;
-
-  // Set the destroy function
+  rvs->similar_func = rv_normal_mark_as_epigon_if_similar;
+  rvs->is_epigon_func = rv_normal_is_epigon;
   rvs->destroy_data_func = rv_normal_destroy;
-
-  // Set the data
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
   rv_normal->xoshiro_prng = prng_create(seed);
   rv_normal->means_and_vars = malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
   memory_copy(rv_normal->means_and_vars, means_and_vars,
               rvs->num_rvs * 2 * sizeof(double));
+  rv_normal->is_epigon = calloc_or_die(rvs->num_rvs, sizeof(bool));
   rvs->data = rv_normal;
 }
 
@@ -153,6 +198,7 @@ typedef struct RVNormalPredetermined {
   uint64_t index;
   double *samples;
   double *means_and_vars;
+  bool *is_epigon;
 } RVNormalPredetermined;
 
 double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
@@ -178,24 +224,46 @@ double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
   return result;
 }
 
+bool rv_normal_predetermined_mark_as_epigon_if_similar(RandomVariables *rvs,
+                                                       const int leader,
+                                                       const int i) {
+  if (leader == i) {
+    return false;
+  }
+  RVNormalPredetermined *rv_normal_predetermined =
+      (RVNormalPredetermined *)rvs->data;
+  rv_normal_predetermined->is_epigon[i] =
+      fabs(rv_normal_predetermined->means_and_vars[leader * 2] -
+           rv_normal_predetermined->means_and_vars[i * 2]) <
+          SIMILARITY_EPSILON &&
+      fabs(rv_normal_predetermined->means_and_vars[leader * 2 + 1] -
+           rv_normal_predetermined->means_and_vars[i * 2 + 1]) <
+          SIMILARITY_EPSILON;
+  return rv_normal_predetermined->is_epigon[leader];
+}
+
+bool rv_normal_predetermined_is_epigon(RandomVariables *rvs, const int i) {
+  RVNormalPredetermined *rv_normal_predetermined =
+      (RVNormalPredetermined *)rvs->data;
+  return rv_normal_predetermined->is_epigon[i];
+}
+
 void rv_normal_predetermined_destroy(RandomVariables *rvs) {
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
   free(rv_normal_predetermined->samples);
   free(rv_normal_predetermined->means_and_vars);
+  free(rv_normal_predetermined->is_epigon);
   free(rv_normal_predetermined);
 }
 
 void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
                                     const uint64_t num_samples,
                                     const double *means_and_vars) {
-  // Set the sample function
   rvs->sample_func = rv_normal_predetermined_sample;
-
-  // Set the destroy function
+  rvs->similar_func = rv_normal_predetermined_mark_as_epigon_if_similar;
+  rvs->is_epigon_func = rv_normal_predetermined_is_epigon;
   rvs->destroy_data_func = rv_normal_predetermined_destroy;
-
-  // Set the data
   RVNormalPredetermined *rv_normal_predetermined =
       malloc_or_die(sizeof(RVNormalPredetermined));
   rv_normal_predetermined->num_samples = num_samples;
@@ -208,6 +276,8 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
       malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
   memory_copy(rv_normal_predetermined->means_and_vars, means_and_vars,
               rvs->num_rvs * 2 * sizeof(double));
+  rv_normal_predetermined->is_epigon =
+      calloc_or_die(rvs->num_rvs, sizeof(bool));
   rvs->data = rv_normal_predetermined;
 }
 
@@ -244,6 +314,16 @@ void rvs_destroy(RandomVariables *rvs) {
 
 double rvs_sample(RandomVariables *rvs, uint64_t k, BAILogger *bai_logger) {
   return rvs->sample_func(rvs, k, bai_logger);
+}
+
+// Returns the similarity between the leader and the i-th arm and marks
+// the arm accordingly.
+bool rvs_mark_as_epigon_if_similar(RandomVariables *rvs, int leader, int i) {
+  return rvs->similar_func(rvs, leader, i);
+}
+
+bool rvs_is_epigon(RandomVariables *rvs, int i) {
+  return rvs->is_epigon_func(rvs, i);
 }
 
 int rvs_get_num_rvs(RandomVariables *rvs) { return rvs->num_rvs; }
