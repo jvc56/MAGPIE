@@ -10,6 +10,7 @@
 #include "bai_sampling_rule.h"
 
 #define EPIGON_PENALTY -1e30
+#define MINIMUM_VARIANCE 1e-10
 
 bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *hμ,
                         double *hσ2, int astar, BAILogger *bai_logger) {
@@ -37,7 +38,7 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
 }
 
 // Assumes rvs are normally distributed.
-// Assumes rng is uniformly distributed.
+// Assumes rng is uniformly distributed between 0 and 1.
 int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
         RandomVariables *rvs, double δ, RandomVariables *rng, int sample_limit,
         int similar_play_min_iter_for_eval, BAILogger *bai_logger) {
@@ -47,13 +48,6 @@ int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
   int *N = calloc_or_die(K, sizeof(int));
   double *S = calloc_or_die(K, sizeof(double));
   double *S2 = calloc_or_die(K, sizeof(double));
-  double *hμ = calloc_or_die(K, sizeof(double));
-  double *hσ2 = calloc_or_die(K, sizeof(double));
-  bool *is_similarity_evaluated = calloc_or_die(K, sizeof(bool));
-  BAISamplingRule *bai_sampling_rule =
-      bai_sampling_rule_create(sr, is_EV, N, K);
-  BAIThreshold *Sβ = βs;
-  BAIGLRTResults *glrt_results = bai_glrt_results_create(K);
   int t = 0;
   for (int k = 0; k < K; k++) {
     for (int i = 0; i < 2; i++) {
@@ -65,12 +59,23 @@ int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
     }
   }
 
+  double *hμ = calloc_or_die(K, sizeof(double));
+  double *hσ2 = calloc_or_die(K, sizeof(double));
+  bool *is_similarity_evaluated = calloc_or_die(K, sizeof(bool));
+  BAISamplingRule *bai_sampling_rule =
+      bai_sampling_rule_create(sr, is_EV, N, K);
+  BAIThreshold *Sβ = βs;
+  BAIGLRTResults *glrt_results = bai_glrt_results_create(K);
   int astar;
   int num_epigons = 0;
   while (true) {
     for (int i = 0; i < K; i++) {
       hμ[i] = S[i] / N[i];
       hσ2[i] = S2[i] / N[i] - hμ[i] * hμ[i];
+      // BAI_DIFF
+      if (hσ2[i] < MINIMUM_VARIANCE) {
+        hσ2[i] = MINIMUM_VARIANCE;
+      }
     }
     bai_logger_log_int(bai_logger, "t", t);
     bai_glrt(K, N, hμ, hσ2, is_EV, glrt_results, bai_logger);
@@ -105,6 +110,7 @@ int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
     t += 1;
     if (t >= sample_limit) {
       bai_logger_log_title(bai_logger, "REACHED_SAMPLE_LIMIT");
+      astar = -1;
       break;
     }
     if (similar_play_min_iter_for_eval > 0 &&

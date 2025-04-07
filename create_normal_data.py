@@ -18,7 +18,7 @@ def save_normal_data(filename, delta, num_vars, means_stdevs, num_samples):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate and save normal distribution data.")
-    parser.add_argument("-d", "--d", type=float, default=random.uniform(0.8, 1), help="Delta value (between 0.8 and 1)")
+    parser.add_argument("-d", "--d", type=float, default=random.uniform(0.001, 0.1), help="Delta value")
     parser.add_argument("-n", "--n", type=int, default=random.randint(2, 20), help="Number of normal random variables")
     parser.add_argument("-s", "--s", type=int, default=10000, help="Number of normal samples")
     parser.add_argument("-m", "--mr", type=int, nargs=2, default=[-10, 10], help="Range for random means (min max)")

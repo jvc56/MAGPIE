@@ -24,7 +24,7 @@ typedef struct RandomVariablesArgs {
   const double *means_and_vars;
 } RandomVariablesArgs;
 
-RandomVariables *rvs_create(RandomVariablesArgs *rvs_args);
+RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args);
 void rvs_destroy(RandomVariables *rvs);
 double rvs_sample(RandomVariables *rvs, uint64_t k, BAILogger *bai_logger);
 bool rvs_mark_as_epigon_if_similar(RandomVariables *rvs, int leader, int i);

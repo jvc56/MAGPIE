@@ -239,7 +239,7 @@ bool rv_normal_predetermined_mark_as_epigon_if_similar(RandomVariables *rvs,
       fabs(rv_normal_predetermined->means_and_vars[leader * 2 + 1] -
            rv_normal_predetermined->means_and_vars[i * 2 + 1]) <
           SIMILARITY_EPSILON;
-  return rv_normal_predetermined->is_epigon[leader];
+  return rv_normal_predetermined->is_epigon[i];
 }
 
 bool rv_normal_predetermined_is_epigon(RandomVariables *rvs, const int i) {
@@ -281,7 +281,7 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
   rvs->data = rv_normal_predetermined;
 }
 
-RandomVariables *rvs_create(RandomVariablesArgs *rvs_args) {
+RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   RandomVariables *rvs = malloc_or_die(sizeof(RandomVariables));
   rvs->num_rvs = rvs_args->num_rvs;
   switch (rvs_args->type) {

@@ -105,15 +105,10 @@ int top_two_next_sample(void *data, int __attribute__((unused)) astar,
     bai_logger_log_title(bai_logger, "k = astar");
     k = astar;
   } else {
-    double k_val = INFINITY;
     switch (top_two->challenger) {
     case BAI_TOP_TWO_CHALLENGER_TC:
       bai_logger_log_title(bai_logger, "TC");
-      for (int i = 0; i < size; i++) {
-        if (isnan(Zs[i])) {
-          k = i;
-          break;
-        }
+      for (int i = 1; i < size; i++) {
         if (Zs[i] < Zs[k]) {
           k = i;
         }
@@ -121,11 +116,8 @@ int top_two_next_sample(void *data, int __attribute__((unused)) astar,
       break;
     case BAI_TOP_TWO_CHALLENGER_TCI:
       bai_logger_log_title(bai_logger, "TCI");
-      for (int i = 0; i < size; i++) {
-        if (isnan(Zs[i])) {
-          k = i;
-          break;
-        }
+      double k_val = Zs[0];
+      for (int i = 1; i < size; i++) {
         const double val = Zs[i] + log((double)N[i]);
         if (val < k_val) {
           k = i;

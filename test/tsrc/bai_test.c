@@ -48,8 +48,31 @@ void test_bai_track_and_stop(void) {
   rvs_destroy(rvs);
 }
 
+// Assumes rv_args are normal predetermined
+// Assumes rng_args are uniform
+void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
+                     const RandomVariablesArgs *rng_args) {
+  FILE *file = fopen("normal_data.txt", "w");
+  fprintf(file, "%0.20f\n", delta);
+  fprintf(file, "%lu\n", rv_args->num_rvs);
+  for (uint64_t i = 0; i < rv_args->num_rvs; i++) {
+    fprintf(file, "%0.20f,%0.20f\n", rv_args->means_and_vars[i * 2],
+            rv_args->means_and_vars[i * 2 + 1]);
+  }
+  fprintf(file, "%lu\n", rv_args->num_samples);
+  for (uint64_t i = 0; i < rv_args->num_samples; i++) {
+    fprintf(file, "%0.20f\n", rv_args->samples[i]);
+  }
+  RandomVariables *rng = rvs_create(rng_args);
+  for (uint64_t i = 0; i < rv_args->num_samples; i++) {
+    fprintf(file, "%0.20f\n", rvs_sample(rng, 0, NULL));
+  }
+  rvs_destroy(rng);
+  fclose(file);
+}
+
 void test_bai_epigons(void) {
-  const int num_samples = 500;
+  const int num_samples = 5000;
   double *samples = (double *)malloc_or_die(num_samples * sizeof(double));
   for (int i = 0; i < num_samples; i++) {
     samples[i] = 0.5;
@@ -63,44 +86,63 @@ void test_bai_epigons(void) {
       .type = RANDOM_VARIABLES_UNIFORM,
       .seed = 10,
   };
-  for (int num_rvs = 2; num_rvs <= 20; num_rvs++) {
-    double *means_and_vars =
-        (double *)malloc_or_die(num_rvs * 2 * sizeof(double));
-    for (int i = 0; i < num_rvs; i++) {
-      means_and_vars[i * 2] = 10;
-      means_and_vars[i * 2 + 1] = 20;
-    }
-    rv_args.num_rvs = num_rvs;
-    rv_args.means_and_vars = means_and_vars;
-    rng_args.num_rvs = num_rvs;
-    for (int i = 0; i < num_strategies_entries; i++) {
-      RandomVariables *rvs = rvs_create(&rv_args);
-      RandomVariables *rng = rvs_create(&rng_args);
+  const double delta = 0.01;
+  for (int max_classes = 1; max_classes <= 5; max_classes++) {
+    for (int num_rvs = 2; num_rvs <= 20; num_rvs++) {
+      double *means_and_vars =
+          (double *)malloc_or_die(num_rvs * 2 * sizeof(double));
+      for (int i = 0; i < num_rvs; i++) {
+        means_and_vars[i * 2] = 3 * ((i % max_classes) + 1);
+        means_and_vars[i * 2 + 1] = 5 * ((i % max_classes) + 1);
+      }
+      int num_classes = max_classes;
+      if (num_rvs < max_classes) {
+        num_classes = num_rvs;
+      }
+      const int expected_epigons = num_rvs - num_classes;
+      rv_args.num_rvs = num_rvs;
+      rv_args.means_and_vars = means_and_vars;
+      rng_args.num_rvs = num_rvs;
+      for (int i = 0; i < num_strategies_entries; i++) {
+        RandomVariables *rvs = rvs_create(&rv_args);
+        RandomVariables *rng = rvs_create(&rng_args);
 
-      int num_epigons = 0;
-      for (int k = 0; k < num_rvs; k++) {
-        if (rvs_is_epigon(rvs, k)) {
-          num_epigons++;
+        int num_epigons = 0;
+        for (int k = 0; k < num_rvs; k++) {
+          if (rvs_is_epigon(rvs, k)) {
+            num_epigons++;
+          }
         }
-      }
-      assert(num_epigons == 0);
-      printf("running %d rvs with strat %d\n", num_rvs, i);
-      BAILogger *bai_logger = bai_logger_create("bai.log");
-      bai(strategies[i][0], strategies[i][1], strategies[i][2], rvs, 0.99, rng,
-          num_samples, 2, bai_logger);
-      bai_logger_flush(bai_logger);
-      bai_logger_destroy(bai_logger);
-      for (int k = 0; k < num_rvs; k++) {
-        if (rvs_is_epigon(rvs, k)) {
-          num_epigons++;
+        assert(num_epigons == 0);
+        printf("SBT: running %d rvs with strat %d and %d classes\n", num_rvs, i,
+               max_classes);
+        BAILogger *bai_logger = bai_logger_create("bai.log");
+        const int result =
+            bai(strategies[i][0], strategies[i][1], strategies[i][2], rvs,
+                delta, rng, num_samples, 2, bai_logger);
+        bai_logger_log_int(bai_logger, "result", result);
+        bai_logger_flush(bai_logger);
+        bai_logger_destroy(bai_logger);
+        for (int k = 0; k < num_rvs; k++) {
+          if (rvs_is_epigon(rvs, k)) {
+            num_epigons++;
+          }
         }
+        printf("asserting $actual_epigons == $expected_epigons, %d, %d\n",
+               num_epigons, expected_epigons);
+        printf("asserting $result >= 0, %d\n", result);
+        const bool is_ok = (num_epigons == expected_epigons) && (result >= 0);
+        if (!is_ok) {
+          printf("Failed for %d rvs with strat %d and %d classes\n", num_rvs, i,
+                 max_classes);
+          write_bai_input(delta, &rv_args, &rng_args);
+          exit(1);
+        }
+        rvs_destroy(rvs);
+        rvs_destroy(rng);
       }
-      printf("num epigons: %d\n", num_epigons);
-      assert(num_epigons == num_rvs - 1);
-      rvs_destroy(rvs);
-      rvs_destroy(rng);
+      free(means_and_vars);
     }
-    free(means_and_vars);
   }
   free(samples);
 }
@@ -185,7 +227,7 @@ void test_bai_input_from_file(const char *bai_input_filename,
   if (pi < 0 || pi >= num_strategies_entries) {
     log_fatal("Invalid BAI params index: %s\n", bai_params_index);
   }
-
+  printf("magpie bai test running 0-indexed %d...\n", pi);
   const int result =
       bai(strategies[pi][0], strategies[pi][1], strategies[pi][2], rvs, delta,
           rng, num_samples, 0, bai_logger);
@@ -210,6 +252,5 @@ void test_bai(void) {
     // FIXME: uncomment
     // test_bai_track_and_stop();
     test_bai_epigons();
-    printf("nan < INFINITY: %d\n", NAN < INFINITY);
   }
 }

@@ -12,8 +12,6 @@ typedef struct BAIGLRTResults {
   double *vals;
   double *θs;
   int k;
-  double *λ;
-  double *ϕ2;
   // FIXME: determine if these are needed
   int astar;
   double *μ;

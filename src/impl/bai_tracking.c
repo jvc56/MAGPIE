@@ -32,11 +32,7 @@ int bai_c_track(const void *data, const int *N, const double *w, const int size,
     t->sumw[i] += w[i];
   }
   int min_index = 0;
-  for (int i = 0; i < size; i++) {
-    if (isnan(t->sumw[i])) {
-      min_index = i;
-      break;
-    }
+  for (int i = 1; i < size; i++) {
     if (N[i] - t->sumw[i] < N[min_index] - t->sumw[min_index]) {
       min_index = i;
     }
@@ -59,11 +55,7 @@ int bai_d_track(const void __attribute__((unused)) * data, const int *N,
     sumN += N[i];
   }
   int argmin = 0;
-  for (int i = 0; i < size; i++) {
-    if (isnan(w[i])) {
-      argmin = i;
-      break;
-    }
+  for (int i = 1; i < size; i++) {
     if (N[i] - sumN * w[i] < N[argmin] - sumN * w[argmin]) {
       argmin = i;
     }
