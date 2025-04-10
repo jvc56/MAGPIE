@@ -112,6 +112,27 @@ static inline void bai_logger_log_int_array(BAILogger *bai_logger,
   string_builder_add_string(bai_logger->buffer, "\n");
 }
 
+static inline void bai_logger_log_bool_array(BAILogger *bai_logger,
+                                             const char *double_array_name,
+                                             const bool *x, int size) {
+  if (!bai_logger) {
+    return;
+  }
+  string_builder_add_formatted_string(bai_logger->buffer,
+                                      "%s = ", double_array_name);
+  for (int i = 0; i < size; i++) {
+    if (x[i]) {
+      string_builder_add_string(bai_logger->buffer, "true");
+    } else {
+      string_builder_add_string(bai_logger->buffer, "false");
+    }
+    if (i != size - 1) {
+      string_builder_add_string(bai_logger->buffer, " ");
+    }
+  }
+  string_builder_add_string(bai_logger->buffer, "\n");
+}
+
 static inline void bai_logger_flush(BAILogger *bai_logger) {
   if (!bai_logger) {
     return;

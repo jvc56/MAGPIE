@@ -10,11 +10,13 @@ typedef enum {
   BAI_THRESHOLD_HT,
 } bai_threshold_t;
 
-BAIThreshold *bai_create_threshold(bai_threshold_t type, bool is_EV, double δ,
-                                   int r, int K, int s, double γ);
+BAIThreshold *bai_create_threshold(const bai_threshold_t type, const bool is_EV,
+                                   const double δ, const int r, const int s,
+                                   const double γ);
 void bai_destroy_threshold(BAIThreshold *bai_threshold);
-double bai_invoke_threshold(BAIThreshold *bai_threshold, int *N, double *hμ,
-                            double *hσ2, int astar, int a,
+double bai_invoke_threshold(const BAIThreshold *bai_threshold, const int *N,
+                            const int K, const double *hμ, const double *hσ2,
+                            const int astar, const int a,
                             BAILogger *bai_logger);
 
 #endif

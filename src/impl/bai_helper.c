@@ -15,25 +15,25 @@
 
 typedef struct GK16 {
   double δ;
-  int K;
 } GK16;
 
-void *create_GK16(double δ, int K) {
+void *create_GK16(const double δ) {
   GK16 *gk16 = malloc_or_die(sizeof(GK16));
   gk16->δ = δ;
-  gk16->K = K;
   return gk16;
 }
 
 void destroy_GK16(GK16 *gk16) { free(gk16); }
 
-double GK16_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
-                      double __attribute__((unused)) * hσ2,
-                      int __attribute__((unused)) astar,
-                      int __attribute__((unused)) a, BAILogger *bai_logger) {
-  GK16 *gk16 = (GK16 *)data;
+double GK16_threshold(const void *data, const int *N, const int K,
+                      const double __attribute__((unused)) * hμ,
+                      const double __attribute__((unused)) * hσ2,
+                      const int __attribute__((unused)) astar,
+                      const int __attribute__((unused)) a,
+                      BAILogger *bai_logger) {
+  const GK16 *gk16 = (GK16 *)data;
   int t = 0;
-  for (int i = 0; i < gk16->K; i++) {
+  for (int i = 0; i < K; i++) {
     t += N[i];
   }
   const double result = log((log((double)t) + 1) / gk16->δ);
@@ -54,10 +54,10 @@ typedef struct HT {
   double eta;
 } HT;
 
-void *create_HT(double δ, int K, int s, bool is_EV_GLR, bool is_KL) {
+void *create_HT(const double δ, const int s, const bool is_EV_GLR,
+                const bool is_KL) {
   HT *ht = malloc_or_die(sizeof(HT));
   ht->δ = δ;
-  ht->K = K;
   ht->s = s;
   ht->is_EV_GLR = is_EV_GLR;
   ht->is_KL = is_KL;
@@ -68,11 +68,11 @@ void *create_HT(double δ, int K, int s, bool is_EV_GLR, bool is_KL) {
 
 void destroy_HT(HT *ht) { free(ht); }
 
-double barW(double x, int k) { return -lambertw(-exp(-x), k); }
+double barW(const double x, const int k) { return -lambertw(-exp(-x), k); }
 
-bool valid_time(HT *ht, int *N, BAILogger *bai_logger) {
+bool valid_time(const HT *ht, const int *N, const int K,
+                BAILogger *bai_logger) {
   const double δ = ht->δ;
-  const int K = ht->K;
   const double s = ht->s;
   const double zetas = ht->zetas;
   const double eta = ht->eta;
@@ -108,6 +108,7 @@ bool valid_time(HT *ht, int *N, BAILogger *bai_logger) {
     bai_logger_log_int(bai_logger, "cst", cst);
     bai_logger_log_double_array(bai_logger, "u", u_array, K);
     bai_logger_log_double_array(bai_logger, "vals", val_array, K);
+    bai_logger_log_int_array(bai_logger, "N", N, K);
     bai_logger_log_bool(bai_logger, "result", result);
     bai_logger_flush(bai_logger);
     free(u_array);
@@ -116,9 +117,9 @@ bool valid_time(HT *ht, int *N, BAILogger *bai_logger) {
   return result;
 }
 
-double get_factor_non_KL(HT *ht, int t, BAILogger *bai_logger) {
+double get_factor_non_KL(const HT *ht, const int t, const int K,
+                         BAILogger *bai_logger) {
   const double δ = ht->δ;
-  const int K = ht->K;
   const double s = ht->s;
   const double zetas = ht->zetas;
   const double eta = ht->eta;
@@ -149,13 +150,14 @@ double get_factor_non_KL(HT *ht, int t, BAILogger *bai_logger) {
   return ratio;
 }
 
-double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
-                    double __attribute__((unused)) * hσ2, int astar, int a,
-                    BAILogger *bai_logger) {
-  HT *ht = (HT *)data;
+double HT_threshold(const void *data, const int *N, const int K,
+                    const double __attribute__((unused)) * hμ,
+                    const double __attribute__((unused)) * hσ2, const int astar,
+                    const int a, BAILogger *bai_logger) {
+  const HT *ht = (HT *)data;
   bai_logger_log_title(bai_logger, "HT");
   bai_logger_flush(bai_logger);
-  if (!valid_time(ht, N, bai_logger)) {
+  if (!valid_time(ht, N, K, bai_logger)) {
     bai_logger_log_title(bai_logger, "invalid time");
     bai_logger_flush(bai_logger);
     return INFINITY;
@@ -164,12 +166,12 @@ double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
   double ratio_astar;
   double result;
   if (ht->is_EV_GLR) {
-    ratio_a = get_factor_non_KL(ht, N[a], bai_logger);
-    ratio_astar = get_factor_non_KL(ht, N[astar], bai_logger);
+    ratio_a = get_factor_non_KL(ht, N[a], K, bai_logger);
+    ratio_astar = get_factor_non_KL(ht, N[astar], K, bai_logger);
     result = 0.5 * (N[a] * ratio_a + N[astar] * ratio_astar);
   } else {
-    ratio_a = get_factor_non_KL(ht, N[a], bai_logger);
-    ratio_astar = get_factor_non_KL(ht, N[astar], bai_logger);
+    ratio_a = get_factor_non_KL(ht, N[a], K, bai_logger);
+    ratio_astar = get_factor_non_KL(ht, N[astar], K, bai_logger);
     result = 0.5 * (N[a] * log(1 + ratio_a) + N[astar] * log(1 + ratio_astar));
   }
   bai_logger_log_double(bai_logger, "ratio_a", ratio_a);
@@ -181,8 +183,9 @@ double HT_threshold(void *data, int *N, double __attribute__((unused)) * hμ,
   return result;
 }
 
-typedef double (*threshold_func_t)(void *, int *, double *, double *, int, int,
-                                   BAILogger *);
+typedef double (*threshold_func_t)(const void *, const int *, const int,
+                                   const double *, const double *, const int,
+                                   const int, BAILogger *);
 
 struct BAIThreshold {
   bai_threshold_t type;
@@ -190,18 +193,20 @@ struct BAIThreshold {
   threshold_func_t threshold_func;
 };
 
-BAIThreshold *bai_create_threshold(bai_threshold_t type, bool is_EV, double δ,
-                                   int __attribute__((unused)) r, int K, int s,
-                                   double __attribute__((unused)) γ) {
+BAIThreshold *bai_create_threshold(const bai_threshold_t type, const bool is_EV,
+                                   const double δ,
+                                   const int __attribute__((unused)) r,
+                                   const int s,
+                                   const double __attribute__((unused)) γ) {
   BAIThreshold *bai_threshold = malloc_or_die(sizeof(BAIThreshold));
   bai_threshold->type = type;
   switch (type) {
   case BAI_THRESHOLD_GK16:
-    bai_threshold->data = create_GK16(δ, K);
+    bai_threshold->data = create_GK16(δ);
     bai_threshold->threshold_func = GK16_threshold;
     break;
   case BAI_THRESHOLD_HT:
-    bai_threshold->data = create_HT(δ, K, s, is_EV, false);
+    bai_threshold->data = create_HT(δ, s, is_EV, false);
     bai_threshold->threshold_func = HT_threshold;
     break;
   }
@@ -220,9 +225,10 @@ void bai_destroy_threshold(BAIThreshold *bai_threshold) {
   free(bai_threshold);
 }
 
-double bai_invoke_threshold(BAIThreshold *bai_threshold, int *N, double *hμ,
-                            double *hσ2, int astar, int a,
+double bai_invoke_threshold(const BAIThreshold *bai_threshold, const int *N,
+                            const int K, const double *hμ, const double *hσ2,
+                            const int astar, const int a,
                             BAILogger *bai_logger) {
-  return bai_threshold->threshold_func(bai_threshold->data, N, hμ, hσ2, astar,
-                                       a, bai_logger);
+  return bai_threshold->threshold_func(bai_threshold->data, N, K, hμ, hσ2,
+                                       astar, a, bai_logger);
 }

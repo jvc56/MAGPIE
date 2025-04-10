@@ -15,7 +15,7 @@
 
 #define BAI_BINARY_SEARCH_MAX_ITER 100
 
-BAIGLRTResults *bai_glrt_results_create(int K) {
+BAIGLRTResults *bai_glrt_results_create(const int K) {
   BAIGLRTResults *glrt_results = malloc_or_die(sizeof(BAIGLRTResults));
   glrt_results->vals = malloc_or_die(K * sizeof(double));
   glrt_results->θs = malloc_or_die(K * sizeof(double));
@@ -32,10 +32,10 @@ void bai_glrt_results_destroy(BAIGLRTResults *glrt_results) {
   free(glrt_results);
 }
 
-typedef double (*bai_binary_search_value_func_t)(double, void *);
+typedef double (*bai_binary_search_value_func_t)(const double, const void *);
 
-double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
-                         double lo, double hi, double ϵ,
+double bai_binary_search(bai_binary_search_value_func_t vf, const void *args,
+                         double lo, double hi, const double ϵ,
                          BAILogger *bai_logger) {
   double flo = vf(lo, args);
   double fhi = vf(hi, args);
@@ -82,17 +82,18 @@ double bai_binary_search(bai_binary_search_value_func_t vf, void *args,
   return (lo + hi) / 2.0;
 }
 
-double bai_dUV(double μ, double σ2, double λ) {
+double bai_dUV(const double μ, const double σ2, const double λ) {
   const double diff = μ - λ;
   return 0.5 * log(1 + (diff * diff) / σ2);
 }
 
-double bai_dKV(double μ, double σ2, double λ) {
+double bai_dKV(const double μ, const double σ2, const double λ) {
   const double diff = μ - λ;
   return 0.5 * (diff * diff) / σ2;
 }
 
-double bai_d(double μ, double σ2, double λ, bool known_var) {
+double bai_d(const double μ, const double σ2, const double λ,
+             const bool known_var) {
   if (known_var) {
     return bai_dKV(μ, σ2, λ);
   } else {
@@ -100,29 +101,38 @@ double bai_d(double μ, double σ2, double λ, bool known_var) {
   }
 }
 
-double alt_λ_KV(double μ1, double σ21, double w1, double μa, double σ2a,
-                double wa, BAILogger __attribute__((unused)) * bai_logger) {
-  // bai_logger_log_title(bai_logger, "ALT_KV");
+double alt_λ_KV(const double μ1, const double σ21, const double w1,
+                const double μa, const double σ2a, const double wa,
+                BAILogger __attribute__((unused)) * bai_logger) {
+  bai_logger_log_title(bai_logger, "ALT_KV");
+  bai_logger_log_double(bai_logger, "u1", μ1);
+  bai_logger_log_double(bai_logger, "sigma21", σ21);
+  bai_logger_log_double(bai_logger, "w1", w1);
+  bai_logger_log_double(bai_logger, "ua", μa);
+  bai_logger_log_double(bai_logger, "sigma2a", σ2a);
+  bai_logger_log_double(bai_logger, "wa", wa);
+  bai_logger_flush(bai_logger);
   if (w1 == 0) {
-    // bai_logger_log_double(bai_logger, "ua", μa);
-    // bai_logger_flush(bai_logger);
+    bai_logger_log_double(bai_logger, "W1_ZERO", μa);
+    bai_logger_flush(bai_logger);
     return μa;
   }
   if (wa == 0 || μ1 == μa) {
-    // bai_logger_log_double(bai_logger, "u1", μ1);
-    // bai_logger_flush(bai_logger);
+    bai_logger_log_double(bai_logger, "WA_ZERO_OR_U1_EQ_UA", μ1);
+    bai_logger_flush(bai_logger);
     return μ1;
   }
   const double x = wa / w1;
   const double result = (σ2a * μ1 + x * σ21 * μa) / (σ2a + x * σ21);
-  // bai_logger_log_double(bai_logger, "x", x);
-  // bai_logger_log_double(bai_logger, "result", result);
-  // bai_logger_flush(bai_logger);
+  bai_logger_log_double(bai_logger, "x", x);
+  bai_logger_log_double(bai_logger, "result", result);
+  bai_logger_flush(bai_logger);
   return result;
 }
 
-double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
-                double wa, BAILogger __attribute__((unused)) * bai_logger) {
+double alt_λ_UV(const double μ1, const double σ21, const double w1,
+                const double μa, const double σ2a, const double wa,
+                BAILogger __attribute__((unused)) * bai_logger) {
   bai_logger_log_title(bai_logger, "ALT_UV");
   if (w1 == 0) {
     bai_logger_log_double(bai_logger, "ua", μa);
@@ -231,8 +241,9 @@ double alt_λ_UV(double μ1, double σ21, double w1, double μa, double σ2a,
   return valid_roots[id];
 }
 
-double alt_λ(double μ1, double σ21, double w1, double μa, double σ2a, double wa,
-             bool known_var, BAILogger *bai_logger) {
+double alt_λ(const double μ1, const double σ21, const double w1,
+             const double μa, const double σ2a, const double wa,
+             const bool known_var, BAILogger *bai_logger) {
   if (known_var) {
     return alt_λ_KV(μ1, σ21, w1, μa, σ2a, wa, bai_logger);
   } else {
@@ -240,8 +251,9 @@ double alt_λ(double μ1, double σ21, double w1, double μa, double σ2a, doubl
   }
 }
 
-void bai_glrt(int K, int *w, double *μ, double *σ2, bool known_var,
-              BAIGLRTResults *glrt_results, BAILogger *bai_logger) {
+void bai_glrt(const int K, const int *w, const double *μ, const double *σ2,
+              const bool known_var, BAIGLRTResults *glrt_results,
+              BAILogger *bai_logger) {
   int astar = 0;
   for (int i = 1; i < K; i++) {
     if (μ[i] > μ[astar]) {
@@ -274,8 +286,11 @@ void bai_glrt(int K, int *w, double *μ, double *σ2, bool known_var,
     const double d_a = bai_d(μ[a], σ2[a], θs[a], known_var);
     vals[a] = w[astar] * d_astar + w[a] * d_a;
     bai_logger_log_int(bai_logger, "a", a + 1);
+    bai_logger_log_double(bai_logger, "theta", θs[a]);
     bai_logger_log_int(bai_logger, "w_astar", w[astar]);
+    bai_logger_log_double(bai_logger, "d_astar", d_astar);
     bai_logger_log_int(bai_logger, "w_a", w[a]);
+    bai_logger_log_double(bai_logger, "d_a", d_a);
     bai_logger_log_double(bai_logger, "vals[a]", vals[a]);
     bai_logger_flush(bai_logger);
   }
@@ -308,8 +323,8 @@ typedef struct BAIXBinarySearchArgs {
   BAILogger *bai_logger;
 } BAIXBinarySearchArgs;
 
-double bai_X_binary_search_func(double z, void *args) {
-  BAIXBinarySearchArgs *xbs_args = (BAIXBinarySearchArgs *)args;
+double bai_X_binary_search_func(const double z, const void *args) {
+  const BAIXBinarySearchArgs *xbs_args = (BAIXBinarySearchArgs *)args;
   const double μ1 = xbs_args->μ1;
   const double σ21 = xbs_args->σ21;
   const double μa = xbs_args->μa;
@@ -347,8 +362,9 @@ typedef struct BAIXResults {
   double alt_λ;
 } BAIXResults;
 
-void bai_X(double μ1, double σ21, double μa, double σ2a, double v,
-           bool known_var, BAIXResults *bai_X_results, BAILogger *bai_logger) {
+void bai_X(const double μ1, const double σ21, const double μa, const double σ2a,
+           const double v, const bool known_var, BAIXResults *bai_X_results,
+           BAILogger *bai_logger) {
   double upd_a = bai_d(μ1, σ21, μa, known_var);
   BAIXBinarySearchArgs xbs_args = {
       .μ1 = μ1,
@@ -379,8 +395,8 @@ typedef struct BAIOracleBinarySearchArgs {
   BAILogger *bai_logger;
 } BAIOracleBinarySearchArgs;
 
-double bai_oracle_binary_search_func(double z, void *args) {
-  BAIOracleBinarySearchArgs *obs_args = (BAIOracleBinarySearchArgs *)args;
+double bai_oracle_binary_search_func(const double z, const void *args) {
+  const BAIOracleBinarySearchArgs *obs_args = (BAIOracleBinarySearchArgs *)args;
   const double *μs = obs_args->μs;
   const double *σ2s = obs_args->σ2s;
   const int size = obs_args->size;
@@ -408,7 +424,7 @@ double bai_oracle_binary_search_func(double z, void *args) {
   return sum - 1.0;
 }
 
-BAIOracleResult *bai_oracle_result_create(int size) {
+BAIOracleResult *bai_oracle_result_create(const int size) {
   BAIOracleResult *result = malloc_or_die(sizeof(BAIOracleResult));
   result->ws_over_Σ = malloc_or_die(size * sizeof(double));
   return result;
@@ -419,8 +435,9 @@ void bai_oracle_result_destroy(BAIOracleResult *oracle_result) {
   free(oracle_result);
 }
 
-void bai_oracle(double *μs, double *σ2s, int size, bool known_var,
-                BAIOracleResult *oracle_result, BAILogger *bai_logger) {
+void bai_oracle(const double *μs, const double *σ2s, const int size,
+                const bool known_var, BAIOracleResult *oracle_result,
+                BAILogger *bai_logger) {
   int astar = 0;
   double μstar = μs[0];
   for (int i = 1; i < size; i++) {

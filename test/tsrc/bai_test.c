@@ -92,8 +92,8 @@ void test_bai_epigons(void) {
       double *means_and_vars =
           (double *)malloc_or_die(num_rvs * 2 * sizeof(double));
       for (int i = 0; i < num_rvs; i++) {
-        means_and_vars[i * 2] = 3 * ((i % max_classes) + 1);
-        means_and_vars[i * 2 + 1] = 5 * ((i % max_classes) + 1);
+        means_and_vars[i * 2] = 3 * (max_classes - (i % max_classes));
+        means_and_vars[i * 2 + 1] = 5 * (max_classes - (i % max_classes));
       }
       int num_classes = max_classes;
       if (num_rvs < max_classes) {
@@ -228,11 +228,14 @@ void test_bai_input_from_file(const char *bai_input_filename,
     log_fatal("Invalid BAI params index: %s\n", bai_params_index);
   }
   printf("magpie bai test running 0-indexed %d...\n", pi);
-  const int result =
-      bai(strategies[pi][0], strategies[pi][1], strategies[pi][2], rvs, delta,
-          rng, num_samples, 0, bai_logger);
+  int result = bai(strategies[pi][0], strategies[pi][1], strategies[pi][2], rvs,
+                   delta, rng, num_samples, 0, bai_logger);
 
-  bai_logger_log_int(bai_logger, "result", result + 1);
+  if (result >= 0) {
+    result++;
+  }
+
+  bai_logger_log_int(bai_logger, "result", result);
   bai_logger_flush(bai_logger);
 
   bai_logger_destroy(bai_logger);

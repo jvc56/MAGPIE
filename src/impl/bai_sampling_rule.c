@@ -12,13 +12,15 @@
 #include "../util/log.h"
 #include "../util/util.h"
 
-int round_robin_next_sample(void __attribute__((unused)) * data,
-                            int __attribute__((unused)) astar,
-                            int __attribute__((unused)) aalt,
-                            double __attribute__((unused)) * ξ,
-                            double __attribute__((unused)) * ϕ2, int *N,
-                            double __attribute__((unused)) * S,
-                            double __attribute__((unused)) * Zs, int size,
+int round_robin_next_sample(const void __attribute__((unused)) * data,
+                            const int __attribute__((unused)) astar,
+                            const int __attribute__((unused)) aalt,
+                            const double __attribute__((unused)) * ξ,
+                            const double __attribute__((unused)) * ϕ2,
+                            const int *N,
+                            const double __attribute__((unused)) * S,
+                            const double __attribute__((unused)) * Zs,
+                            const int size,
                             RandomVariables __attribute__((unused)) * rng,
                             BAILogger *bai_logger) {
   int sum = 0;
@@ -37,8 +39,8 @@ typedef struct TrackAndStop {
   BAIOracleResult *oracle_result;
 } TrackAndStop;
 
-void *track_and_stop_create(bool is_EV, bai_tracking_t tracking_type, int *N,
-                            int size) {
+void *track_and_stop_create(const bool is_EV, bai_tracking_t tracking_type,
+                            const int *N, const int size) {
   TrackAndStop *track_and_stop = malloc_or_die(sizeof(TrackAndStop));
   track_and_stop->is_EV = is_EV;
   track_and_stop->tracking_rule = bai_tracking_create(tracking_type, N, size);
@@ -52,20 +54,25 @@ void track_and_stop_destroy(TrackAndStop *track_and_stop) {
   free(track_and_stop);
 }
 
-int track_and_stop_next_sample(void *data, int __attribute__((unused)) astar,
-                               int __attribute__((unused)) aalt, double *ξ,
-                               double *ϕ2, int *N,
-                               double __attribute__((unused)) * S,
-                               double __attribute__((unused)) * Zs, int size,
-                               RandomVariables __attribute__((unused)) * rng,
-                               BAILogger *bai_logger) {
+int track_and_stop_next_sample(
+    const void *data, const int __attribute__((unused)) astar,
+    const int __attribute__((unused)) aalt, const double *ξ, const double *ϕ2,
+    const int *N, const double __attribute__((unused)) * S,
+    const double __attribute__((unused)) * Zs, const int size,
+    RandomVariables __attribute__((unused)) * rng, BAILogger *bai_logger) {
   TrackAndStop *track_and_stop = (TrackAndStop *)data;
   bai_oracle(ξ, ϕ2, size, track_and_stop->is_EV, track_and_stop->oracle_result,
              bai_logger);
-  int sample =
-      bai_track(track_and_stop->tracking_rule, N,
-                track_and_stop->oracle_result->ws_over_Σ, size, bai_logger);
+  int sample = bai_tracking_track(track_and_stop->tracking_rule, N,
+                                  track_and_stop->oracle_result->ws_over_Σ,
+                                  size, bai_logger);
   return sample;
+}
+
+void track_and_stop_swap_indexes(void *data, const int i, const int j,
+                                 BAILogger *bai_logger) {
+  TrackAndStop *track_and_stop = (TrackAndStop *)data;
+  bai_tracking_swap_indexes(track_and_stop->tracking_rule, i, j, bai_logger);
 }
 
 typedef enum {
@@ -79,7 +86,7 @@ typedef struct TopTwo {
   bai_top_two_challenger_t challenger;
 } TopTwo;
 
-void *top_two_create(bool is_EV, double β,
+void *top_two_create(const bool is_EV, const double β,
                      bai_top_two_challenger_t challenger) {
   TopTwo *top_two = malloc_or_die(sizeof(TopTwo));
   top_two->is_EV = is_EV;
@@ -90,12 +97,14 @@ void *top_two_create(bool is_EV, double β,
 
 void top_two_destroy(TopTwo *top_two) { free(top_two); }
 
-int top_two_next_sample(void *data, int __attribute__((unused)) astar,
-                        int __attribute__((unused)) aalt,
-                        double __attribute__((unused)) * ξ,
-                        double __attribute__((unused)) * ϕ2, int *N,
-                        double __attribute__((unused)) * S, double *Zs,
-                        int size, RandomVariables *rng, BAILogger *bai_logger) {
+int top_two_next_sample(const void *data,
+                        const int __attribute__((unused)) astar,
+                        const int __attribute__((unused)) aalt,
+                        const double __attribute__((unused)) * ξ,
+                        const double __attribute__((unused)) * ϕ2, const int *N,
+                        const double __attribute__((unused)) * S,
+                        const double *Zs, const int size, RandomVariables *rng,
+                        BAILogger *bai_logger) {
   TopTwo *top_two = (TopTwo *)data;
   const double u = rvs_sample(rng, 0, bai_logger);
   int k = 0;
@@ -116,7 +125,7 @@ int top_two_next_sample(void *data, int __attribute__((unused)) astar,
       break;
     case BAI_TOP_TWO_CHALLENGER_TCI:
       bai_logger_log_title(bai_logger, "TCI");
-      double k_val = Zs[0];
+      double k_val = Zs[0] + log((double)N[0]);
       for (int i = 1; i < size; i++) {
         const double val = Zs[i] + log((double)N[i]);
         if (val < k_val) {
@@ -132,33 +141,47 @@ int top_two_next_sample(void *data, int __attribute__((unused)) astar,
   bai_logger_flush(bai_logger);
   return k;
 }
-typedef int (*next_sample_func_t)(void *, int, int, double *, double *, int *,
-                                  double *, double *, int, RandomVariables *,
-                                  BAILogger *);
+typedef int (*next_sample_func_t)(const void *, const int, const int,
+                                  const double *, const double *, const int *,
+                                  const double *, const double *, const int,
+                                  RandomVariables *, BAILogger *);
+
+typedef void (*swap_indexes_func_t)(void *, const int, const int, BAILogger *);
+
+void bai_sampling_swap_indexes_noop(void __attribute__((unused)) * data,
+                                    const int __attribute__((unused)) i,
+                                    const int __attribute__((unused)) j,
+                                    BAILogger __attribute__((unused)) *
+                                        bai_logger) {}
 
 struct BAISamplingRule {
   bai_sampling_rule_t type;
   void *data;
   next_sample_func_t next_sample_func;
+  swap_indexes_func_t swap_indexes_func;
 };
 
-BAISamplingRule *bai_sampling_rule_create(bai_sampling_rule_t type, bool is_EV,
-                                          int *N, int size) {
+BAISamplingRule *bai_sampling_rule_create(const bai_sampling_rule_t type,
+                                          const bool is_EV, const int *N,
+                                          const int size) {
   BAISamplingRule *bai_sampling_rule = malloc_or_die(sizeof(BAISamplingRule));
   bai_sampling_rule->type = type;
   switch (type) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
     bai_sampling_rule->next_sample_func = round_robin_next_sample;
+    bai_sampling_rule->swap_indexes_func = bai_sampling_swap_indexes_noop;
     break;
   case BAI_SAMPLING_RULE_TRACK_AND_STOP:
     bai_sampling_rule->data =
         track_and_stop_create(is_EV, BAI_CTRACKING, N, size);
     bai_sampling_rule->next_sample_func = track_and_stop_next_sample;
+    bai_sampling_rule->swap_indexes_func = track_and_stop_swap_indexes;
     break;
   case BAI_SAMPLING_RULE_TOP_TWO:
     bai_sampling_rule->data =
         top_two_create(is_EV, 0.5, BAI_TOP_TWO_CHALLENGER_TCI);
     bai_sampling_rule->next_sample_func = top_two_next_sample;
+    bai_sampling_rule->swap_indexes_func = bai_sampling_swap_indexes_noop;
     break;
   }
   return bai_sampling_rule;
@@ -178,11 +201,20 @@ void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule) {
   free(bai_sampling_rule);
 }
 
-int bai_sampling_rule_next_sample(BAISamplingRule *bai_sampling_rule, int astar,
-                                  int aalt, double *ξ, double *ϕ2, int *N,
-                                  double *S, double *Zs, int size,
+int bai_sampling_rule_next_sample(const BAISamplingRule *bai_sampling_rule,
+                                  const int astar, const int aalt,
+                                  const double *ξ, const double *ϕ2,
+                                  const int *N, const double *S,
+                                  const double *Zs, const int size,
                                   RandomVariables *rng, BAILogger *bai_logger) {
   return bai_sampling_rule->next_sample_func(bai_sampling_rule->data, astar,
                                              aalt, ξ, ϕ2, N, S, Zs, size, rng,
                                              bai_logger);
+}
+
+void bai_sampling_rule_swap_indexes(BAISamplingRule *bai_sampling_rule,
+                                    const int i, const int j,
+                                    BAILogger *bai_logger) {
+  bai_sampling_rule->swap_indexes_func(bai_sampling_rule->data, i, j,
+                                       bai_logger);
 }

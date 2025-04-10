@@ -48,6 +48,15 @@ int bai_c_track(const void *data, const int *N, const double *w, const int size,
   return min_index;
 }
 
+void bai_c_swap_indexes(void __attribute__((unused)) * data, const int a,
+                        const int b,
+                        BAILogger __attribute__((unused)) * bai_logger) {
+  CTracking *t = (CTracking *)data;
+  double tmp = t->sumw[a];
+  t->sumw[a] = t->sumw[b];
+  t->sumw[b] = tmp;
+}
+
 int bai_d_track(const void __attribute__((unused)) * data, const int *N,
                 const double *w, int size, BAILogger *bai_logger) {
   int sumN = 0;
@@ -73,14 +82,24 @@ int bai_d_track(const void __attribute__((unused)) * data, const int *N,
 typedef int (*tracking_func_t)(const void *, const int *, const double *,
                                const int, BAILogger *);
 
+typedef void (*swap_indexes_func_t)(void *, const int, const int, BAILogger *);
+
+void bai_tracking_swap_indexes_noop(void __attribute__((unused)) * data,
+                                    const int __attribute__((unused)) a,
+                                    const int __attribute__((unused)) b,
+                                    BAILogger __attribute__((unused)) *
+                                        bai_logger) {}
+
 struct BAITracking {
   bai_tracking_t type;
   void *data;
   double *undersampled;
   tracking_func_t tracking_func;
+  swap_indexes_func_t swap_indexes_func;
 };
 
-BAITracking *bai_tracking_create(bai_tracking_t type, const int *N, int size) {
+BAITracking *bai_tracking_create(const bai_tracking_t type, const int *N,
+                                 const int size) {
   BAITracking *bai_tracking = malloc_or_die(sizeof(BAITracking));
   bai_tracking->type = type;
   bai_tracking->data = NULL;
@@ -90,9 +109,11 @@ BAITracking *bai_tracking_create(bai_tracking_t type, const int *N, int size) {
   case BAI_CTRACKING:
     bai_tracking->data = create_c_tracking(N, size);
     bai_tracking->tracking_func = bai_c_track;
+    bai_tracking->swap_indexes_func = bai_c_swap_indexes;
     break;
   case BAI_DTRACKING:
     bai_tracking->tracking_func = bai_d_track;
+    bai_tracking->swap_indexes_func = bai_tracking_swap_indexes_noop;
     break;
   }
   return bai_tracking;
@@ -113,8 +134,8 @@ void bai_tracking_destroy(BAITracking *bai_tracking) {
   free(bai_tracking);
 }
 
-int bai_track(BAITracking *bai_tracking, int *N, const double *w, const int K,
-              BAILogger *bai_logger) {
+int bai_tracking_track(const BAITracking *bai_tracking, const int *N,
+                       const double *w, const int K, BAILogger *bai_logger) {
   int t = 0;
   for (int i = 0; i < K; i++) {
     t += N[i];
@@ -147,4 +168,9 @@ int bai_track(BAITracking *bai_tracking, int *N, const double *w, const int K,
   }
   bai_logger_flush(bai_logger);
   return result;
+}
+
+void bai_tracking_swap_indexes(const BAITracking *bai_tracking, const int i,
+                               const int j, BAILogger *bai_logger) {
+  bai_tracking->swap_indexes_func(bai_tracking->data, i, j, bai_logger);
 }

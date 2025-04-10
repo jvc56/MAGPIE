@@ -1,19 +1,146 @@
+#include <limits.h>
 #include <stdbool.h>
 
 #include "../ent/bai_logger.h"
 #include "../ent/random_variable.h"
 
+#include "../util/log.h"
 #include "../util/util.h"
 
 #include "bai_helper.h"
 #include "bai_peps.h"
 #include "bai_sampling_rule.h"
 
-#define EPIGON_PENALTY -1e30
+#define EPIGON_AVERAGE_PENALTY -1e12
+#define EPIGON_SAMPLES 1e9
 #define MINIMUM_VARIANCE 1e-10
 
-bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *hμ,
-                        double *hσ2, int astar, BAILogger *bai_logger) {
+typedef struct BAIArmData {
+  int K;
+  int t;
+  int *N;
+  double *S;
+  double *S2;
+  double *hμ;
+  double *hσ2;
+  bool *is_similarity_evaluated;
+  int similar_play_min_iter_for_eval;
+  BAISamplingRule *bai_sampling_rule;
+  int *arm_to_rvs_map;
+} BAIArmData;
+
+BAIArmData *bai_arm_data_create(const int K,
+                                const int similar_play_min_iter_for_eval) {
+  BAIArmData *arm_data = malloc_or_die(sizeof(BAIArmData));
+  arm_data->K = K;
+  arm_data->t = 0;
+  arm_data->N = calloc_or_die(K, sizeof(int));
+  arm_data->S = calloc_or_die(K, sizeof(double));
+  arm_data->S2 = calloc_or_die(K, sizeof(double));
+  arm_data->hμ = calloc_or_die(K, sizeof(double));
+  arm_data->hσ2 = calloc_or_die(K, sizeof(double));
+  arm_data->is_similarity_evaluated = calloc_or_die(K, sizeof(bool));
+  arm_data->similar_play_min_iter_for_eval = similar_play_min_iter_for_eval;
+  arm_data->arm_to_rvs_map = malloc_or_die(K * sizeof(int));
+  for (int i = 0; i < K; i++) {
+    arm_data->arm_to_rvs_map[i] = i;
+  }
+  return arm_data;
+}
+
+void bai_arm_data_init_sampling_rule(BAIArmData *arm_data,
+                                     const bai_sampling_rule_t sr,
+                                     const bool is_EV, const int K) {
+  arm_data->bai_sampling_rule =
+      bai_sampling_rule_create(sr, is_EV, arm_data->N, K);
+}
+
+void bai_arm_data_destroy(BAIArmData *arm_data) {
+  free(arm_data->N);
+  free(arm_data->S);
+  free(arm_data->S2);
+  free(arm_data->hμ);
+  free(arm_data->hσ2);
+  free(arm_data->is_similarity_evaluated);
+  bai_sampling_rule_destroy(arm_data->bai_sampling_rule);
+  free(arm_data->arm_to_rvs_map);
+  free(arm_data);
+}
+
+void bai_arm_data_sample(BAIArmData *arm_data, RandomVariables *rvs,
+                         const int k, BAILogger *bai_logger) {
+  const double _X = rvs_sample(rvs, arm_data->arm_to_rvs_map[k], bai_logger);
+  arm_data->S[k] += _X;
+  arm_data->S2[k] += _X * _X;
+  arm_data->N[k] += 1;
+  arm_data->hμ[k] = arm_data->S[k] / arm_data->N[k];
+  arm_data->hσ2[k] =
+      arm_data->S2[k] / arm_data->N[k] - arm_data->hμ[k] * arm_data->hμ[k];
+  // BAI_DIFF
+  if (arm_data->hσ2[k] < MINIMUM_VARIANCE) {
+    arm_data->hσ2[k] = MINIMUM_VARIANCE;
+  }
+  arm_data->t++;
+}
+
+void swap_indexes_bool(bool *a, const int i, const int j) {
+  const bool tmp = a[i];
+  a[i] = a[j];
+  a[j] = tmp;
+}
+
+void swap_indexes_int(int *a, const int i, const int j) {
+  const int tmp = a[i];
+  a[i] = a[j];
+  a[j] = tmp;
+}
+
+void swap_indexes_double(double *a, const int i, const int j) {
+  const double tmp = a[i];
+  a[i] = a[j];
+  a[j] = tmp;
+}
+
+void bai_arm_data_swap(BAIArmData *arm_data, const int i, const int j,
+                       BAILogger *bai_logger) {
+  swap_indexes_int(arm_data->N, i, j);
+  swap_indexes_double(arm_data->S, i, j);
+  swap_indexes_double(arm_data->S2, i, j);
+  swap_indexes_double(arm_data->hμ, i, j);
+  swap_indexes_double(arm_data->hσ2, i, j);
+  swap_indexes_bool(arm_data->is_similarity_evaluated, i, j);
+  bai_sampling_rule_swap_indexes(arm_data->bai_sampling_rule, i, j, bai_logger);
+  swap_indexes_int(arm_data->arm_to_rvs_map, i, j);
+}
+
+void bai_arm_data_potentially_mark_epigons(BAIArmData *arm_data,
+                                           RandomVariables *rvs,
+                                           const int astar,
+                                           BAILogger *bai_logger) {
+  if (arm_data->similar_play_min_iter_for_eval == 0 ||
+      arm_data->N[astar] < arm_data->similar_play_min_iter_for_eval ||
+      arm_data->is_similarity_evaluated[astar]) {
+    return;
+  }
+  bai_logger_log_title(bai_logger, "EVAL_EPIGON");
+  // Always make astar the first arm.
+  bai_arm_data_swap(arm_data, astar, 0, bai_logger);
+  for (int i = arm_data->K - 1; i > 0; i--) {
+    if (!rvs_mark_as_epigon_if_similar(rvs, 0, i)) {
+      continue;
+    }
+    bai_arm_data_swap(arm_data, i, arm_data->K - 1, bai_logger);
+    arm_data->K--;
+    if (arm_data->K == 1) {
+      break;
+    }
+  }
+  arm_data->is_similarity_evaluated[0] = true;
+}
+
+bool stopping_criterion(const int K, const double *Zs, const BAIThreshold *Sβ,
+                        const int *N, const double *hμ, const double *hσ2,
+                        const int astar, BAILogger *bai_logger) {
   for (int a = 0; a < K; a++) {
     if (a == astar) {
       continue;
@@ -23,7 +150,7 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
     // cdt = val > Sβ(N, hμ, hσ2, astar, a);
     // stop = stop && cdt;
     const double thres =
-        bai_invoke_threshold(Sβ, N, hμ, hσ2, astar, a, bai_logger);
+        bai_invoke_threshold(Sβ, N, K, hμ, hσ2, astar, a, bai_logger);
     const bool cdt = Zs[a] > thres;
     bai_logger_log_title(bai_logger, "STOPPING_CRITERION");
     bai_logger_log_int(bai_logger, "a", a + 1);
@@ -39,46 +166,29 @@ bool stopping_criterion(int K, double *Zs, BAIThreshold *Sβ, int *N, double *h�
 
 // Assumes rvs are normally distributed.
 // Assumes rng is uniformly distributed between 0 and 1.
-int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
-        RandomVariables *rvs, double δ, RandomVariables *rng, int sample_limit,
-        int similar_play_min_iter_for_eval, BAILogger *bai_logger) {
-  const int K = rvs_get_num_rvs(rvs);
-  BAIThreshold *βs = bai_create_threshold(thres, is_EV, δ, 2, K, 2, 1.2);
+int bai(const bai_sampling_rule_t sr, const bool is_EV,
+        const bai_threshold_t thres, RandomVariables *rvs, double δ,
+        RandomVariables *rng, const int sample_limit,
+        const int similar_play_min_iter_for_eval, BAILogger *bai_logger) {
+  const int num_rvs = rvs_get_num_rvs(rvs);
+  BAIArmData *arm_data =
+      bai_arm_data_create(num_rvs, similar_play_min_iter_for_eval);
+  BAIThreshold *Sβ = bai_create_threshold(thres, is_EV, δ, 2, 2, 1.2);
+  BAIGLRTResults *glrt_results = bai_glrt_results_create(num_rvs);
 
-  int *N = calloc_or_die(K, sizeof(int));
-  double *S = calloc_or_die(K, sizeof(double));
-  double *S2 = calloc_or_die(K, sizeof(double));
-  int t = 0;
-  for (int k = 0; k < K; k++) {
+  for (int k = 0; k < num_rvs; k++) {
     for (int i = 0; i < 2; i++) {
-      double _X = rvs_sample(rvs, k, bai_logger);
-      S[k] += _X;
-      S2[k] += _X * _X;
-      N[k] += 1;
-      t++;
+      bai_arm_data_sample(arm_data, rvs, k, bai_logger);
     }
   }
 
-  double *hμ = calloc_or_die(K, sizeof(double));
-  double *hσ2 = calloc_or_die(K, sizeof(double));
-  bool *is_similarity_evaluated = calloc_or_die(K, sizeof(bool));
-  BAISamplingRule *bai_sampling_rule =
-      bai_sampling_rule_create(sr, is_EV, N, K);
-  BAIThreshold *Sβ = βs;
-  BAIGLRTResults *glrt_results = bai_glrt_results_create(K);
+  // The sampling rule must be initialized after the initial sampling.
+  bai_arm_data_init_sampling_rule(arm_data, sr, is_EV, num_rvs);
   int astar;
-  int num_epigons = 0;
   while (true) {
-    for (int i = 0; i < K; i++) {
-      hμ[i] = S[i] / N[i];
-      hσ2[i] = S2[i] / N[i] - hμ[i] * hμ[i];
-      // BAI_DIFF
-      if (hσ2[i] < MINIMUM_VARIANCE) {
-        hσ2[i] = MINIMUM_VARIANCE;
-      }
-    }
-    bai_logger_log_int(bai_logger, "t", t);
-    bai_glrt(K, N, hμ, hσ2, is_EV, glrt_results, bai_logger);
+    bai_logger_log_int(bai_logger, "t", arm_data->t);
+    bai_glrt(arm_data->K, arm_data->N, arm_data->hμ, arm_data->hσ2, is_EV,
+             glrt_results, bai_logger);
     double *Zs = glrt_results->vals;
     int aalt = glrt_results->k;
     astar = glrt_results->astar;
@@ -86,58 +196,56 @@ int bai(bai_sampling_rule_t sr, bool is_EV, bai_threshold_t thres,
     double *ϕ2 = glrt_results->σ2;
 
     bai_logger_log_title(bai_logger, "GLRT_RETURN_VALUES");
-    bai_logger_log_double_array(bai_logger, "Zs", Zs, K);
+    bai_logger_log_double_array(bai_logger, "Zs", Zs, arm_data->K);
     bai_logger_log_int(bai_logger, "aalt", aalt + 1);
     bai_logger_log_int(bai_logger, "astar", astar + 1);
-    bai_logger_log_double_array(bai_logger, "ksi", ξ, K);
-    bai_logger_log_double_array(bai_logger, "phi2", ϕ2, K);
+    bai_logger_log_double_array(bai_logger, "ksi", ξ, arm_data->K);
+    bai_logger_log_double_array(bai_logger, "phi2", ϕ2, arm_data->K);
     bai_logger_flush(bai_logger);
 
-    if (stopping_criterion(K, Zs, Sβ, N, hμ, hσ2, astar, bai_logger)) {
+    if (stopping_criterion(arm_data->K, Zs, Sβ, arm_data->N, arm_data->hμ,
+                           arm_data->hσ2, astar, bai_logger)) {
       break;
     }
     const int k = bai_sampling_rule_next_sample(
-        bai_sampling_rule, astar, aalt, ξ, ϕ2, N, S, Zs, K, rng, bai_logger);
-    double _X;
+        arm_data->bai_sampling_rule, astar, aalt, ξ, ϕ2, arm_data->N,
+        arm_data->S, Zs, arm_data->K, rng, bai_logger);
     if (rvs_is_epigon(rvs, k)) {
-      _X = EPIGON_PENALTY;
-    } else {
-      _X = rvs_sample(rvs, k, bai_logger);
+      bai_logger_log_title(bai_logger, "SAMPLING_RULE_SELECTED_EPIGON");
+      bai_logger_log_int(bai_logger, "k", k);
+      astar = -1;
+      break;
     }
-    S[k] += _X;
-    S2[k] += _X * _X;
-    N[k] += 1;
-    t += 1;
-    if (t >= sample_limit) {
+    bai_arm_data_sample(arm_data, rvs, k, bai_logger);
+    if (arm_data->t >= sample_limit) {
       bai_logger_log_title(bai_logger, "REACHED_SAMPLE_LIMIT");
       astar = -1;
       break;
     }
-    if (similar_play_min_iter_for_eval > 0 &&
-        N[astar] >= similar_play_min_iter_for_eval &&
-        !is_similarity_evaluated[astar]) {
-      for (int i = 0; i < K; i++) {
-        if (i == astar || rvs_is_epigon(rvs, i)) {
-          continue;
-        }
-        if (rvs_mark_as_epigon_if_similar(rvs, astar, i)) {
-          num_epigons++;
-        }
+    if (similar_play_min_iter_for_eval > 0) {
+      bai_logger_log_title(bai_logger, "FINISHED_SAMPLE");
+      bai_logger_log_int(bai_logger, "similar_play_min_iter_for_eval",
+                         similar_play_min_iter_for_eval);
+      bai_logger_log_int(bai_logger, "astar", astar + 1);
+      bai_logger_log_int(bai_logger, "N_astar", arm_data->N[astar]);
+      bai_logger_log_int_array(bai_logger, "N", arm_data->N, arm_data->K);
+      bai_logger_log_double_array(bai_logger, "avg", arm_data->hμ, arm_data->K);
+      bai_logger_log_bool_array(bai_logger, "is_similarity_evaluated",
+                                arm_data->is_similarity_evaluated, arm_data->K);
+      bool *is_epigon = calloc_or_die(arm_data->K, sizeof(bool));
+      for (int i = 0; i < arm_data->K; i++) {
+        is_epigon[i] = rvs_is_epigon(rvs, i);
       }
-      if (num_epigons == K - 1) {
-        break;
-      }
-      is_similarity_evaluated[astar] = true;
+      bai_logger_log_bool_array(bai_logger, "is_epigon", is_epigon,
+                                arm_data->K);
+      free(is_epigon);
+      bai_logger_flush(bai_logger);
     }
+    // BAI_DIFF
+    bai_arm_data_potentially_mark_epigons(arm_data, rvs, astar, bai_logger);
   }
   bai_glrt_results_destroy(glrt_results);
-  bai_sampling_rule_destroy(bai_sampling_rule);
-  free(hσ2);
-  free(hμ);
-  free(S2);
-  free(S);
-  free(N);
-  free(is_similarity_evaluated);
-  bai_destroy_threshold(βs);
+  bai_destroy_threshold(Sβ);
+  bai_arm_data_destroy(arm_data);
   return astar;
 }
