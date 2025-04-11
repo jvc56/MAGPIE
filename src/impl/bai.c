@@ -11,8 +11,6 @@
 #include "bai_peps.h"
 #include "bai_sampling_rule.h"
 
-#define EPIGON_AVERAGE_PENALTY -1e12
-#define EPIGON_SAMPLES 1e9
 #define MINIMUM_VARIANCE 1e-10
 
 typedef struct BAIArmData {
@@ -67,9 +65,14 @@ void bai_arm_data_destroy(BAIArmData *arm_data) {
   free(arm_data);
 }
 
+int bai_arm_data_get_rvs_index(BAIArmData *arm_data, const int k) {
+  return arm_data->arm_to_rvs_map[k];
+}
+
 void bai_arm_data_sample(BAIArmData *arm_data, RandomVariables *rvs,
                          const int k, BAILogger *bai_logger) {
-  const double _X = rvs_sample(rvs, arm_data->arm_to_rvs_map[k], bai_logger);
+  const double _X =
+      rvs_sample(rvs, bai_arm_data_get_rvs_index(arm_data, k), bai_logger);
   arm_data->S[k] += _X;
   arm_data->S2[k] += _X * _X;
   arm_data->N[k] += 1;
@@ -126,9 +129,15 @@ void bai_arm_data_potentially_mark_epigons(BAIArmData *arm_data,
   // Always make astar the first arm.
   bai_arm_data_swap(arm_data, astar, 0, bai_logger);
   for (int i = arm_data->K - 1; i > 0; i--) {
-    if (!rvs_mark_as_epigon_if_similar(rvs, 0, i)) {
+    bai_logger_log_int(bai_logger, "evale", i);
+    if (!rvs_mark_as_epigon_if_similar(
+            rvs, bai_arm_data_get_rvs_index(arm_data, 0),
+            bai_arm_data_get_rvs_index(arm_data, i))) {
+      bai_logger_log_int(bai_logger, "not_epigon", i);
       continue;
     }
+    bai_logger_log_int(bai_logger, "epigon_marked", i);
+    bai_logger_log_int(bai_logger, "swap", arm_data->K - 1);
     bai_arm_data_swap(arm_data, i, arm_data->K - 1, bai_logger);
     arm_data->K--;
     if (arm_data->K == 1) {
@@ -210,7 +219,7 @@ int bai(const bai_sampling_rule_t sr, const bool is_EV,
     const int k = bai_sampling_rule_next_sample(
         arm_data->bai_sampling_rule, astar, aalt, ξ, ϕ2, arm_data->N,
         arm_data->S, Zs, arm_data->K, rng, bai_logger);
-    if (rvs_is_epigon(rvs, k)) {
+    if (rvs_is_epigon(rvs, bai_arm_data_get_rvs_index(arm_data, k))) {
       bai_logger_log_title(bai_logger, "SAMPLING_RULE_SELECTED_EPIGON");
       bai_logger_log_int(bai_logger, "k", k);
       astar = -1;
@@ -232,9 +241,12 @@ int bai(const bai_sampling_rule_t sr, const bool is_EV,
       bai_logger_log_double_array(bai_logger, "avg", arm_data->hμ, arm_data->K);
       bai_logger_log_bool_array(bai_logger, "is_similarity_evaluated",
                                 arm_data->is_similarity_evaluated, arm_data->K);
+      bai_logger_log_int_array(bai_logger, "arm_to_rvs_map",
+                               arm_data->arm_to_rvs_map, arm_data->K);
       bool *is_epigon = calloc_or_die(arm_data->K, sizeof(bool));
       for (int i = 0; i < arm_data->K; i++) {
-        is_epigon[i] = rvs_is_epigon(rvs, i);
+        is_epigon[i] =
+            rvs_is_epigon(rvs, bai_arm_data_get_rvs_index(arm_data, i));
       }
       bai_logger_log_bool_array(bai_logger, "is_epigon", is_epigon,
                                 arm_data->K);
@@ -243,6 +255,9 @@ int bai(const bai_sampling_rule_t sr, const bool is_EV,
     }
     // BAI_DIFF
     bai_arm_data_potentially_mark_epigons(arm_data, rvs, astar, bai_logger);
+  }
+  if (astar != -1) {
+    astar = arm_data->arm_to_rvs_map[astar];
   }
   bai_glrt_results_destroy(glrt_results);
   bai_destroy_threshold(Sβ);

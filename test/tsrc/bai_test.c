@@ -91,15 +91,14 @@ void test_bai_epigons(void) {
     for (int num_rvs = 2; num_rvs <= 20; num_rvs++) {
       double *means_and_vars =
           (double *)malloc_or_die(num_rvs * 2 * sizeof(double));
+      int expected_epigons = 0;
       for (int i = 0; i < num_rvs; i++) {
         means_and_vars[i * 2] = 3 * (max_classes - (i % max_classes));
         means_and_vars[i * 2 + 1] = 5 * (max_classes - (i % max_classes));
+        if (i > 0 && i % max_classes == 0) {
+          expected_epigons++;
+        }
       }
-      int num_classes = max_classes;
-      if (num_rvs < max_classes) {
-        num_classes = num_rvs;
-      }
-      const int expected_epigons = num_rvs - num_classes;
       rv_args.num_rvs = num_rvs;
       rv_args.means_and_vars = means_and_vars;
       rng_args.num_rvs = num_rvs;
@@ -114,12 +113,14 @@ void test_bai_epigons(void) {
           }
         }
         assert(num_epigons == 0);
-        printf("SBT: running %d rvs with strat %d and %d classes\n", num_rvs, i,
-               max_classes);
+        // Use something like
         BAILogger *bai_logger = bai_logger_create("bai.log");
+        // to log the BAI output for debugging. Logging will significantly
+        // increase the runtime.
+        // BAILogger *bai_logger = NULL;
         const int result =
             bai(strategies[i][0], strategies[i][1], strategies[i][2], rvs,
-                delta, rng, num_samples, 2, bai_logger);
+                delta, rng, num_samples, 100, bai_logger);
         bai_logger_log_int(bai_logger, "result", result);
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
@@ -128,13 +129,13 @@ void test_bai_epigons(void) {
             num_epigons++;
           }
         }
-        printf("asserting $actual_epigons == $expected_epigons, %d, %d\n",
-               num_epigons, expected_epigons);
-        printf("asserting $result >= 0, %d\n", result);
         const bool is_ok = (num_epigons == expected_epigons) && (result >= 0);
         if (!is_ok) {
-          printf("Failed for %d rvs with strat %d and %d classes\n", num_rvs, i,
-                 max_classes);
+          printf("Failed for %d rvs with strat %d and %d classes\nRan the "
+                 "following assertions:\n%d == %d (epigons)\n%d >= 0 "
+                 "(nonneg result)\n",
+                 num_rvs, i, max_classes, num_epigons, expected_epigons,
+                 result);
           write_bai_input(delta, &rv_args, &rng_args);
           exit(1);
         }
