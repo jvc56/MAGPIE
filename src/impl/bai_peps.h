@@ -12,10 +12,7 @@ typedef struct BAIGLRTResults {
   double *vals;
   double *θs;
   int k;
-  // FIXME: determine if these are needed
   int astar;
-  double *μ;
-  double *σ2;
 } BAIGLRTResults;
 
 BAIGLRTResults *bai_glrt_results_create(int K);

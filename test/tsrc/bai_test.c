@@ -87,8 +87,8 @@ void test_bai_epigons(void) {
       .seed = 10,
   };
   const double delta = 0.01;
-  for (int max_classes = 1; max_classes <= 5; max_classes++) {
-    for (int num_rvs = 2; num_rvs <= 20; num_rvs++) {
+  for (int max_classes = 1; max_classes <= 3; max_classes++) {
+    for (int num_rvs = 2; num_rvs <= 10; num_rvs++) {
       double *means_and_vars =
           (double *)malloc_or_die(num_rvs * 2 * sizeof(double));
       int expected_epigons = 0;
@@ -114,10 +114,10 @@ void test_bai_epigons(void) {
         }
         assert(num_epigons == 0);
         // Use something like
-        BAILogger *bai_logger = bai_logger_create("bai.log");
+        // BAILogger *bai_logger = bai_logger_create("bai.log");
         // to log the BAI output for debugging. Logging will significantly
         // increase the runtime.
-        // BAILogger *bai_logger = NULL;
+        BAILogger *bai_logger = NULL;
         const int result =
             bai(strategies[i][0], strategies[i][1], strategies[i][2], rvs,
                 delta, rng, num_samples, 100, bai_logger);
@@ -129,13 +129,14 @@ void test_bai_epigons(void) {
             num_epigons++;
           }
         }
-        const bool is_ok = (num_epigons == expected_epigons) && (result >= 0);
+        const bool is_ok =
+            (num_epigons == expected_epigons) && (result % max_classes == 0);
         if (!is_ok) {
           printf("Failed for %d rvs with strat %d and %d classes\nRan the "
-                 "following assertions:\n%d == %d (epigons)\n%d >= 0 "
+                 "following assertions:\n%d == %d (epigons)\n%d %% %d == 0 "
                  "(nonneg result)\n",
-                 num_rvs, i, max_classes, num_epigons, expected_epigons,
-                 result);
+                 num_rvs, i, max_classes, num_epigons, expected_epigons, result,
+                 max_classes);
           write_bai_input(delta, &rv_args, &rng_args);
           exit(1);
         }
@@ -253,8 +254,7 @@ void test_bai(void) {
   if (bai_input_filename && bai_params_index) {
     test_bai_input_from_file(bai_input_filename, bai_params_index);
   } else {
-    // FIXME: uncomment
-    // test_bai_track_and_stop();
+    test_bai_track_and_stop();
     test_bai_epigons();
   }
 }

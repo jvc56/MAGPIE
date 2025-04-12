@@ -19,16 +19,12 @@ BAIGLRTResults *bai_glrt_results_create(const int K) {
   BAIGLRTResults *glrt_results = malloc_or_die(sizeof(BAIGLRTResults));
   glrt_results->vals = malloc_or_die(K * sizeof(double));
   glrt_results->θs = malloc_or_die(K * sizeof(double));
-  glrt_results->μ = malloc_or_die(K * sizeof(double));
-  glrt_results->σ2 = malloc_or_die(K * sizeof(double));
   return glrt_results;
 }
 
 void bai_glrt_results_destroy(BAIGLRTResults *glrt_results) {
   free(glrt_results->vals);
   free(glrt_results->θs);
-  free(glrt_results->μ);
-  free(glrt_results->σ2);
   free(glrt_results);
 }
 
@@ -299,10 +295,7 @@ void bai_glrt(const int K, const int *w, const double *μ, const double *σ2,
     vals[k] = INFINITY;
   }
   double *θs = glrt_results->θs;
-  // FIXME: probably just use memset here
-  for (int k = 0; k < K; k++) {
-    θs[k] = 0;
-  }
+  memset(θs, 0, K * sizeof(double));
   for (int a = 0; a < K; a++) {
     if (a == astar) {
       continue;
@@ -331,11 +324,6 @@ void bai_glrt(const int K, const int *w, const double *μ, const double *σ2,
   // bai_logger_log_int(bai_logger, "k", k + 1);
   // bai_logger_log_double(bai_logger, "vals[k]", vals[k]);
   // bai_logger_flush(bai_logger);
-
-  for (int i = 0; i < K; i++) {
-    glrt_results->μ[i] = μ[i];
-    glrt_results->σ2[i] = σ2[i];
-  }
   glrt_results->k = k;
   glrt_results->astar = astar;
 }

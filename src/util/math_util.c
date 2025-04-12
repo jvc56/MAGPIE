@@ -23,10 +23,8 @@ SOFTWARE.
 */
 
 #include "math_util.h"
-#include <math.h>
-#include <stdbool.h>
-// FIXME: remove
 #include <complex.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 

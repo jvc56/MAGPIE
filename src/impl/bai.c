@@ -121,7 +121,7 @@ void bai_arm_data_potentially_mark_epigons(BAIArmData *arm_data,
                                            const int astar,
                                            BAILogger *bai_logger) {
   if (arm_data->similar_play_min_iter_for_eval == 0 ||
-      arm_data->N[astar] < arm_data->similar_play_min_iter_for_eval ||
+      arm_data->t < arm_data->similar_play_min_iter_for_eval ||
       arm_data->is_similarity_evaluated[astar]) {
     return;
   }
@@ -198,11 +198,11 @@ int bai(const bai_sampling_rule_t sr, const bool is_EV,
     bai_logger_log_int(bai_logger, "t", arm_data->t);
     bai_glrt(arm_data->K, arm_data->N, arm_data->hμ, arm_data->hσ2, is_EV,
              glrt_results, bai_logger);
-    double *Zs = glrt_results->vals;
-    int aalt = glrt_results->k;
+    const double *Zs = glrt_results->vals;
+    const int aalt = glrt_results->k;
     astar = glrt_results->astar;
-    double *ξ = glrt_results->μ;
-    double *ϕ2 = glrt_results->σ2;
+    const double *ξ = arm_data->hμ;
+    const double *ϕ2 = arm_data->hσ2;
 
     bai_logger_log_title(bai_logger, "GLRT_RETURN_VALUES");
     bai_logger_log_double_array(bai_logger, "Zs", Zs, arm_data->K);
