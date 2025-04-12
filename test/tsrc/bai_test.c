@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../../src/def/bai_defs.h"
+
 #include "../../src/ent/bai_logger.h"
 #include "../../src/ent/random_variable.h"
 
@@ -41,8 +43,16 @@ void test_bai_track_and_stop(void) {
       .seed = 10,
   };
   RandomVariables *rng = rvs_create(&rng_args);
-  int result = bai(BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_HT,
-                   rvs, 0.05, rng, 1000000000, 0, NULL);
+
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP,
+      .threshold = BAI_THRESHOLD_HT,
+      .delta = 0.05,
+      .is_EV = true,
+      .sample_limit = 1000,
+      .similar_play_cutoff = 0,
+  };
+  int result = bai(&bai_options, rvs, rng, NULL);
   assert(result == 1);
   rvs_destroy(rng);
   rvs_destroy(rvs);
@@ -86,6 +96,13 @@ void test_bai_epigons(void) {
       .type = RANDOM_VARIABLES_UNIFORM,
       .seed = 10,
   };
+
+  BAIOptions bai_options = {
+      .delta = 0.01,
+      .sample_limit = num_samples,
+      .similar_play_cutoff = 100,
+  };
+
   const double delta = 0.01;
   for (int max_classes = 1; max_classes <= 3; max_classes++) {
     for (int num_rvs = 2; num_rvs <= 10; num_rvs++) {
@@ -118,9 +135,10 @@ void test_bai_epigons(void) {
         // to log the BAI output for debugging. Logging will significantly
         // increase the runtime.
         BAILogger *bai_logger = NULL;
-        const int result =
-            bai(strategies[i][0], strategies[i][1], strategies[i][2], rvs,
-                delta, rng, num_samples, 100, bai_logger);
+        bai_options.sampling_rule = strategies[i][0];
+        bai_options.is_EV = strategies[i][1];
+        bai_options.threshold = strategies[i][2];
+        const int result = bai(&bai_options, rvs, rng, bai_logger);
         bai_logger_log_int(bai_logger, "result", result);
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
@@ -230,8 +248,17 @@ void test_bai_input_from_file(const char *bai_input_filename,
     log_fatal("Invalid BAI params index: %s\n", bai_params_index);
   }
   printf("magpie bai test running 0-indexed %d...\n", pi);
-  int result = bai(strategies[pi][0], strategies[pi][1], strategies[pi][2], rvs,
-                   delta, rng, num_samples, 0, bai_logger);
+
+  BAIOptions bai_options = {
+      .sampling_rule = strategies[pi][0],
+      .is_EV = strategies[pi][1],
+      .threshold = strategies[pi][2],
+      .delta = delta,
+      .sample_limit = num_samples,
+      .similar_play_cutoff = 0,
+  };
+
+  int result = bai(&bai_options, rvs, rng, bai_logger);
 
   if (result >= 0) {
     result++;

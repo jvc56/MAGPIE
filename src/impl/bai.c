@@ -1,6 +1,8 @@
 #include <limits.h>
 #include <stdbool.h>
 
+#include "../def/bai_defs.h"
+
 #include "../ent/bai_logger.h"
 #include "../ent/random_variable.h"
 
@@ -175,14 +177,14 @@ bool stopping_criterion(const int K, const double *Zs, const BAIThreshold *Sβ,
 
 // Assumes rvs are normally distributed.
 // Assumes rng is uniformly distributed between 0 and 1.
-int bai(const bai_sampling_rule_t sr, const bool is_EV,
-        const bai_threshold_t thres, RandomVariables *rvs, double δ,
-        RandomVariables *rng, const int sample_limit,
-        const int similar_play_min_iter_for_eval, BAILogger *bai_logger) {
+int bai(const BAIOptions *bai_options, RandomVariables *rvs,
+        RandomVariables *rng, BAILogger *bai_logger) {
   const int num_rvs = rvs_get_num_rvs(rvs);
   BAIArmData *arm_data =
-      bai_arm_data_create(num_rvs, similar_play_min_iter_for_eval);
-  BAIThreshold *Sβ = bai_create_threshold(thres, is_EV, δ, 2, 2, 1.2);
+      bai_arm_data_create(num_rvs, bai_options->similar_play_cutoff);
+  BAIThreshold *Sβ =
+      bai_create_threshold(bai_options->threshold, bai_options->is_EV,
+                           bai_options->delta, 2, 2, 1.2);
   BAIGLRTResults *glrt_results = bai_glrt_results_create(num_rvs);
 
   for (int k = 0; k < num_rvs; k++) {
@@ -192,12 +194,13 @@ int bai(const bai_sampling_rule_t sr, const bool is_EV,
   }
 
   // The sampling rule must be initialized after the initial sampling.
-  bai_arm_data_init_sampling_rule(arm_data, sr, is_EV, num_rvs);
+  bai_arm_data_init_sampling_rule(arm_data, bai_options->sampling_rule,
+                                  bai_options->is_EV, num_rvs);
   int astar;
   while (true) {
     bai_logger_log_int(bai_logger, "t", arm_data->t);
-    bai_glrt(arm_data->K, arm_data->N, arm_data->hμ, arm_data->hσ2, is_EV,
-             glrt_results, bai_logger);
+    bai_glrt(arm_data->K, arm_data->N, arm_data->hμ, arm_data->hσ2,
+             bai_options->is_EV, glrt_results, bai_logger);
     const double *Zs = glrt_results->vals;
     const int aalt = glrt_results->k;
     astar = glrt_results->astar;
@@ -226,15 +229,15 @@ int bai(const bai_sampling_rule_t sr, const bool is_EV,
       break;
     }
     bai_arm_data_sample(arm_data, rvs, k, bai_logger);
-    if (arm_data->t >= sample_limit) {
+    if (arm_data->t >= bai_options->sample_limit) {
       bai_logger_log_title(bai_logger, "REACHED_SAMPLE_LIMIT");
       astar = -1;
       break;
     }
-    if (similar_play_min_iter_for_eval > 0) {
+    if (bai_options->similar_play_cutoff > 0) {
       bai_logger_log_title(bai_logger, "FINISHED_SAMPLE");
-      bai_logger_log_int(bai_logger, "similar_play_min_iter_for_eval",
-                         similar_play_min_iter_for_eval);
+      bai_logger_log_int(bai_logger, "similar_play_cutoff",
+                         bai_options->similar_play_cutoff);
       bai_logger_log_int(bai_logger, "astar", astar + 1);
       bai_logger_log_int(bai_logger, "N_astar", arm_data->N[astar]);
       bai_logger_log_int_array(bai_logger, "N", arm_data->N, arm_data->K);

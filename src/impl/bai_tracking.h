@@ -1,11 +1,11 @@
 #ifndef BAI_TRACKING_H
 #define BAI_TRACKING_H
 
+#include "../def/bai_defs.h"
+
 #include "../ent/bai_logger.h"
 
 typedef struct BAITracking BAITracking;
-
-typedef enum { BAI_CTRACKING, BAI_DTRACKING } bai_tracking_t;
 
 BAITracking *bai_tracking_create(bai_tracking_t type, const int *N,
                                  const int size);

@@ -4,6 +4,8 @@
 #include <math.h>
 #include <stdbool.h>
 
+#include "../def/bai_defs.h"
+
 #include "../ent/bai_logger.h"
 
 #include "../util/log.h"
@@ -209,6 +211,9 @@ BAIThreshold *bai_create_threshold(const bai_threshold_t type, const bool is_EV,
     bai_threshold->data = create_HT(δ, s, is_EV, false);
     bai_threshold->threshold_func = HT_threshold;
     break;
+  case BAI_THRESHOLD_NONE:
+    log_fatal("cannot create invalid BAI threshold type: %d", bai_threshold);
+    break;
   }
   return bai_threshold;
 }
@@ -220,6 +225,9 @@ void bai_destroy_threshold(BAIThreshold *bai_threshold) {
     break;
   case BAI_THRESHOLD_HT:
     destroy_HT((HT *)bai_threshold->data);
+    break;
+  case BAI_THRESHOLD_NONE:
+    log_fatal("cannot destroy invalid BAI threshold type: %d", bai_threshold);
     break;
   }
   free(bai_threshold);

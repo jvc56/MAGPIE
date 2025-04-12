@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include "../def/bai_defs.h"
+
 #include "../ent/bai_logger.h"
 #include "../ent/random_variable.h"
 
@@ -168,6 +170,7 @@ BAISamplingRule *bai_sampling_rule_create(const bai_sampling_rule_t type,
   bai_sampling_rule->type = type;
   switch (type) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
+  case BAI_SAMPLING_RULE_ROUND_ROBIN_COMPLETE:
     bai_sampling_rule->next_sample_func = round_robin_next_sample;
     bai_sampling_rule->swap_indexes_func = bai_sampling_swap_indexes_noop;
     break;
@@ -190,6 +193,7 @@ BAISamplingRule *bai_sampling_rule_create(const bai_sampling_rule_t type,
 void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule) {
   switch (bai_sampling_rule->type) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
+  case BAI_SAMPLING_RULE_ROUND_ROBIN_COMPLETE:
     break;
   case BAI_SAMPLING_RULE_TRACK_AND_STOP:
     track_and_stop_destroy((TrackAndStop *)bai_sampling_rule->data);

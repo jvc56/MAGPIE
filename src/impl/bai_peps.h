@@ -1,6 +1,8 @@
 #ifndef BAI_PEPS_H
 #define BAI_PEPS_H
 
+#include "../def/bai_defs.h"
+
 #include "../ent/bai_logger.h"
 
 typedef struct BAIOracleResult {

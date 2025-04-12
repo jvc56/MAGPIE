@@ -1,14 +1,11 @@
 #ifndef BAI_HELPER_H
 #define BAI_HELPER_H
 
+#include "../def/bai_defs.h"
+
 #include "../ent/bai_logger.h"
 
 typedef struct BAIThreshold BAIThreshold;
-
-typedef enum {
-  BAI_THRESHOLD_GK16,
-  BAI_THRESHOLD_HT,
-} bai_threshold_t;
 
 BAIThreshold *bai_create_threshold(const bai_threshold_t type, const bool is_EV,
                                    const double δ, const int r, const int s,
