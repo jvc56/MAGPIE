@@ -12,7 +12,6 @@ typedef enum {
 } bai_threshold_t;
 
 typedef enum {
-  BAI_SAMPLING_RULE_ROUND_ROBIN_COMPLETE,
   BAI_SAMPLING_RULE_ROUND_ROBIN,
   BAI_SAMPLING_RULE_TRACK_AND_STOP,
   BAI_SAMPLING_RULE_TOP_TWO,
@@ -33,5 +32,16 @@ typedef struct BAIOptions {
   int similar_play_cutoff;
   int max_seconds;
 } BAIOptions;
+
+typedef enum {
+  BAI_EXIT_CONDITION_THRESHOLD,
+  BAI_EXIT_CONDITION_SAMPLE_LIMIT,
+} bai_exit_cond_t;
+
+typedef struct BAIResult {
+  bai_exit_cond_t exit_cond;
+  int best_arm;
+  int total_samples;
+} BAIResult;
 
 #endif

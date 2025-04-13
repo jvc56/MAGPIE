@@ -67,7 +67,7 @@ void bai_arm_data_destroy(BAIArmData *arm_data) {
   free(arm_data);
 }
 
-int bai_arm_data_get_rvs_index(BAIArmData *arm_data, const int k) {
+int bai_arm_data_get_rvs_index(const BAIArmData *arm_data, const int k) {
   return arm_data->arm_to_rvs_map[k];
 }
 
@@ -152,6 +152,9 @@ void bai_arm_data_potentially_mark_epigons(BAIArmData *arm_data,
 bool stopping_criterion(const int K, const double *Zs, const BAIThreshold *Sβ,
                         const int *N, const double *hμ, const double *hσ2,
                         const int astar, BAILogger *bai_logger) {
+  if (!Sβ) {
+    return false;
+  }
   for (int a = 0; a < K; a++) {
     if (a == astar) {
       continue;
@@ -175,10 +178,40 @@ bool stopping_criterion(const int K, const double *Zs, const BAIThreshold *Sβ,
   return true;
 }
 
+bool bai_sample_limit_reached(const BAIOptions *bai_options,
+                              const BAIArmData *arm_data) {
+  if (bai_options->sampling_rule != BAI_SAMPLING_RULE_ROUND_ROBIN) {
+    return arm_data->t >= bai_options->sample_limit;
+  }
+  for (int i = 0; i < arm_data->K; i++) {
+    if (arm_data->N[i] < bai_options->sample_limit) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool bai_round_robin_is_complete(const BAIArmData *arm_data) {
+  const int num_arm_samples = arm_data->N[0];
+  for (int i = 1; i < arm_data->K; i++) {
+    if (arm_data->N[i] != num_arm_samples) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void bai_set_result(const bai_exit_cond_t exit_cond, const int astar,
+                    const BAIArmData *arm_data, BAIResult *bai_result) {
+  bai_result->exit_cond = exit_cond;
+  bai_result->best_arm = bai_arm_data_get_rvs_index(arm_data, astar);
+  bai_result->total_samples = arm_data->t;
+}
+
 // Assumes rvs are normally distributed.
 // Assumes rng is uniformly distributed between 0 and 1.
-int bai(const BAIOptions *bai_options, RandomVariables *rvs,
-        RandomVariables *rng, BAILogger *bai_logger) {
+void bai(const BAIOptions *bai_options, RandomVariables *rvs,
+         RandomVariables *rng, BAILogger *bai_logger, BAIResult *bai_result) {
   const int num_rvs = rvs_get_num_rvs(rvs);
   BAIArmData *arm_data =
       bai_arm_data_create(num_rvs, bai_options->similar_play_cutoff);
@@ -197,6 +230,7 @@ int bai(const BAIOptions *bai_options, RandomVariables *rvs,
   bai_arm_data_init_sampling_rule(arm_data, bai_options->sampling_rule,
                                   bai_options->is_EV, num_rvs);
   int astar;
+  bool stopping_criteration_met = false;
   while (true) {
     bai_logger_log_int(bai_logger, "t", arm_data->t);
     bai_glrt(arm_data->K, arm_data->N, arm_data->hμ, arm_data->hσ2,
@@ -215,23 +249,32 @@ int bai(const BAIOptions *bai_options, RandomVariables *rvs,
     bai_logger_log_double_array(bai_logger, "phi2", ϕ2, arm_data->K);
     bai_logger_flush(bai_logger);
 
-    if (stopping_criterion(arm_data->K, Zs, Sβ, arm_data->N, arm_data->hμ,
-                           arm_data->hσ2, astar, bai_logger)) {
+    // If the sampling rule is round robin complete, we need to complete the
+    // current round robin before finishing.
+    stopping_criteration_met =
+        stopping_criteration_met ||
+        stopping_criterion(arm_data->K, Zs, Sβ, arm_data->N, arm_data->hμ,
+                           arm_data->hσ2, astar, bai_logger);
+    if (stopping_criteration_met &&
+        (bai_options->sampling_rule != BAI_SAMPLING_RULE_ROUND_ROBIN ||
+         bai_round_robin_is_complete(arm_data))) {
+      bai_set_result(BAI_EXIT_CONDITION_THRESHOLD, astar, arm_data, bai_result);
       break;
     }
+
     const int k = bai_sampling_rule_next_sample(
         arm_data->bai_sampling_rule, astar, aalt, ξ, ϕ2, arm_data->N,
         arm_data->S, Zs, arm_data->K, rng, bai_logger);
-    if (rvs_is_epigon(rvs, bai_arm_data_get_rvs_index(arm_data, k))) {
-      bai_logger_log_title(bai_logger, "SAMPLING_RULE_SELECTED_EPIGON");
-      bai_logger_log_int(bai_logger, "k", k);
-      astar = -1;
-      break;
+    const int k_rvs_index = bai_arm_data_get_rvs_index(arm_data, k);
+    if (rvs_is_epigon(rvs, k_rvs_index)) {
+      log_fatal("bai selected an arm (%d) that was marked as an epigon (%d)", k,
+                k_rvs_index);
     }
     bai_arm_data_sample(arm_data, rvs, k, bai_logger);
-    if (arm_data->t >= bai_options->sample_limit) {
+    if (bai_sample_limit_reached(bai_options, arm_data)) {
       bai_logger_log_title(bai_logger, "REACHED_SAMPLE_LIMIT");
-      astar = -1;
+      bai_set_result(BAI_EXIT_CONDITION_SAMPLE_LIMIT, astar, arm_data,
+                     bai_result);
       break;
     }
     if (bai_options->similar_play_cutoff > 0) {
@@ -259,11 +302,7 @@ int bai(const BAIOptions *bai_options, RandomVariables *rvs,
     // BAI_DIFF
     bai_arm_data_potentially_mark_epigons(arm_data, rvs, astar, bai_logger);
   }
-  if (astar != -1) {
-    astar = arm_data->arm_to_rvs_map[astar];
-  }
   bai_glrt_results_destroy(glrt_results);
   bai_destroy_threshold(Sβ);
   bai_arm_data_destroy(arm_data);
-  return astar;
 }

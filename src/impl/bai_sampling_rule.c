@@ -25,11 +25,14 @@ int round_robin_next_sample(const void __attribute__((unused)) * data,
                             const int size,
                             RandomVariables __attribute__((unused)) * rng,
                             BAILogger *bai_logger) {
-  int sum = 0;
-  for (int i = 0; i < size; i++) {
-    sum += N[i];
+  int sample = 0;
+  int min = N[0];
+  for (int i = 1; i < size; i++) {
+    if (N[i] < min) {
+      min = N[i];
+      sample = i;
+    }
   }
-  const int sample = sum % size;
   bai_logger_log_title(bai_logger, "ROUND_ROBIN");
   bai_logger_log_int(bai_logger, "sample", sample + 1);
   return sample;
@@ -170,7 +173,6 @@ BAISamplingRule *bai_sampling_rule_create(const bai_sampling_rule_t type,
   bai_sampling_rule->type = type;
   switch (type) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
-  case BAI_SAMPLING_RULE_ROUND_ROBIN_COMPLETE:
     bai_sampling_rule->next_sample_func = round_robin_next_sample;
     bai_sampling_rule->swap_indexes_func = bai_sampling_swap_indexes_noop;
     break;
@@ -193,7 +195,6 @@ BAISamplingRule *bai_sampling_rule_create(const bai_sampling_rule_t type,
 void bai_sampling_rule_destroy(BAISamplingRule *bai_sampling_rule) {
   switch (bai_sampling_rule->type) {
   case BAI_SAMPLING_RULE_ROUND_ROBIN:
-  case BAI_SAMPLING_RULE_ROUND_ROBIN_COMPLETE:
     break;
   case BAI_SAMPLING_RULE_TRACK_AND_STOP:
     track_and_stop_destroy((TrackAndStop *)bai_sampling_rule->data);

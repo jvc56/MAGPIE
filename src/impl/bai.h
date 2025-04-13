@@ -5,7 +5,7 @@
 
 #include "../ent/random_variable.h"
 
-int bai(const BAIOptions *bai_options, RandomVariables *rvs,
-        RandomVariables *rng, BAILogger *bai_logger);
+void bai(const BAIOptions *bai_options, RandomVariables *rvs,
+         RandomVariables *rng, BAILogger *bai_logger, BAIResult *bai_result);
 
 #endif

@@ -28,7 +28,7 @@ RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args);
 void rvs_destroy(RandomVariables *rvs);
 double rvs_sample(RandomVariables *rvs, uint64_t k, BAILogger *bai_logger);
 bool rvs_mark_as_epigon_if_similar(RandomVariables *rvs, int leader, int i);
-bool rvs_is_epigon(RandomVariables *rvs, int i);
-int rvs_get_num_rvs(RandomVariables *rvs);
+bool rvs_is_epigon(const RandomVariables *rvs, int i);
+int rvs_get_num_rvs(const RandomVariables *rvs);
 
 #endif

@@ -200,25 +200,30 @@ BAIThreshold *bai_create_threshold(const bai_threshold_t type, const bool is_EV,
                                    const int __attribute__((unused)) r,
                                    const int s,
                                    const double __attribute__((unused)) γ) {
-  BAIThreshold *bai_threshold = malloc_or_die(sizeof(BAIThreshold));
-  bai_threshold->type = type;
+  BAIThreshold *bai_threshold = NULL;
   switch (type) {
   case BAI_THRESHOLD_GK16:
+    bai_threshold = malloc_or_die(sizeof(BAIThreshold));
+    bai_threshold->type = type;
     bai_threshold->data = create_GK16(δ);
     bai_threshold->threshold_func = GK16_threshold;
     break;
   case BAI_THRESHOLD_HT:
+    bai_threshold = malloc_or_die(sizeof(BAIThreshold));
+    bai_threshold->type = type;
     bai_threshold->data = create_HT(δ, s, is_EV, false);
     bai_threshold->threshold_func = HT_threshold;
     break;
   case BAI_THRESHOLD_NONE:
-    log_fatal("cannot create invalid BAI threshold type: %d", bai_threshold);
     break;
   }
   return bai_threshold;
 }
 
 void bai_destroy_threshold(BAIThreshold *bai_threshold) {
+  if (!bai_threshold) {
+    return;
+  }
   switch (bai_threshold->type) {
   case BAI_THRESHOLD_GK16:
     destroy_GK16((GK16 *)bai_threshold->data);
@@ -227,7 +232,6 @@ void bai_destroy_threshold(BAIThreshold *bai_threshold) {
     destroy_HT((HT *)bai_threshold->data);
     break;
   case BAI_THRESHOLD_NONE:
-    log_fatal("cannot destroy invalid BAI threshold type: %d", bai_threshold);
     break;
   }
   free(bai_threshold);

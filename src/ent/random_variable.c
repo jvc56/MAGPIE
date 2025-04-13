@@ -14,7 +14,7 @@
 typedef double (*rvs_sample_func_t)(RandomVariables *, const uint64_t,
                                     BAILogger *);
 typedef bool (*rvs_similar_func_t)(RandomVariables *, const int, const int);
-typedef bool (*rvs_is_epigon_func_t)(RandomVariables *, const int);
+typedef bool (*rvs_is_epigon_func_t)(const RandomVariables *, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 
 struct RandomVariables {
@@ -49,7 +49,7 @@ bool rv_uniform_mark_as_epigon_if_similar(RandomVariables
   return false;
 }
 
-bool rv_uniform_is_epigon(RandomVariables __attribute__((unused)) * rvs,
+bool rv_uniform_is_epigon(const RandomVariables __attribute__((unused)) * rvs,
                           const int __attribute__((unused)) i) {
   return false;
 }
@@ -97,7 +97,7 @@ bool rv_uniform_predetermined_mark_as_epigon_if_similar(
   return false;
 }
 
-bool rv_uniform_predetermined_is_epigon(RandomVariables
+bool rv_uniform_predetermined_is_epigon(const RandomVariables
                                             __attribute__((unused)) *
                                             rvs,
                                         const int __attribute__((unused)) i) {
@@ -165,7 +165,7 @@ bool rv_normal_mark_as_epigon_if_similar(RandomVariables *rvs, const int leader,
   return rv_normal->is_epigon[i];
 }
 
-bool rv_normal_is_epigon(RandomVariables *rvs, const int i) {
+bool rv_normal_is_epigon(const RandomVariables *rvs, const int i) {
   RVNormal *rv_normal = (RVNormal *)rvs->data;
   return rv_normal->is_epigon[i];
 }
@@ -242,7 +242,8 @@ bool rv_normal_predetermined_mark_as_epigon_if_similar(RandomVariables *rvs,
   return rv_normal_predetermined->is_epigon[i];
 }
 
-bool rv_normal_predetermined_is_epigon(RandomVariables *rvs, const int i) {
+bool rv_normal_predetermined_is_epigon(const RandomVariables *rvs,
+                                       const int i) {
   RVNormalPredetermined *rv_normal_predetermined =
       (RVNormalPredetermined *)rvs->data;
   return rv_normal_predetermined->is_epigon[i];
@@ -322,8 +323,8 @@ bool rvs_mark_as_epigon_if_similar(RandomVariables *rvs, int leader, int i) {
   return rvs->similar_func(rvs, leader, i);
 }
 
-bool rvs_is_epigon(RandomVariables *rvs, int i) {
+bool rvs_is_epigon(const RandomVariables *rvs, int i) {
   return rvs->is_epigon_func(rvs, i);
 }
 
-int rvs_get_num_rvs(RandomVariables *rvs) { return rvs->num_rvs; }
+int rvs_get_num_rvs(const RandomVariables *rvs) { return rvs->num_rvs; }

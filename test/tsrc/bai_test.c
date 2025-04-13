@@ -11,6 +11,13 @@
 #include "../../src/impl/bai_sampling_rule.h"
 #include "../../src/util/log.h"
 
+static const int sampling_rules[3] = {
+    BAI_SAMPLING_RULE_ROUND_ROBIN,
+    BAI_SAMPLING_RULE_TRACK_AND_STOP,
+    BAI_SAMPLING_RULE_TOP_TWO,
+};
+static const int num_sampling_rules = sizeof(sampling_rules) / sizeof(int);
+
 static const int strategies[][3] = {
     {BAI_SAMPLING_RULE_TRACK_AND_STOP, false, BAI_THRESHOLD_GK16},
     {BAI_SAMPLING_RULE_TRACK_AND_STOP, true, BAI_THRESHOLD_GK16},
@@ -25,6 +32,18 @@ static const int strategies[][3] = {
 };
 static const int num_strategies_entries =
     sizeof(strategies) / sizeof(strategies[0]);
+
+void assert_num_epigons(const RandomVariables *rvs,
+                        const int expected_num_epigons) {
+  const int num_rvs = rvs_get_num_rvs(rvs);
+  int actual_num_epigons = 0;
+  for (int k = 0; k < num_rvs; k++) {
+    if (rvs_is_epigon(rvs, k)) {
+      actual_num_epigons++;
+    }
+  }
+  assert(expected_num_epigons == actual_num_epigons);
+}
 
 void test_bai_track_and_stop(void) {
   const double means_and_vars[] = {-10, 1, 0, 1};
@@ -52,8 +71,53 @@ void test_bai_track_and_stop(void) {
       .sample_limit = 1000,
       .similar_play_cutoff = 0,
   };
-  int result = bai(&bai_options, rvs, rng, NULL);
-  assert(result == 1);
+  BAIResult bai_result;
+  bai(&bai_options, rvs, rng, NULL, &bai_result);
+  assert(bai_result.exit_cond == BAI_EXIT_CONDITION_THRESHOLD);
+  assert(bai_result.best_arm == 1);
+  rvs_destroy(rng);
+  rvs_destroy(rvs);
+}
+
+void test_bai_no_threshold(void) {
+  const double means_and_vars[] = {-10, 1, 0, 1, 100, 10, -20, 5};
+  const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = num_rvs,
+      .seed = 10,
+  };
+  RandomVariables *rng = rvs_create(&rng_args);
+
+  BAIOptions bai_options = {
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.05,
+      .is_EV = true,
+      .sample_limit = 100,
+      .similar_play_cutoff = 10,
+  };
+
+  BAIResult bai_result;
+  for (int i = 0; i < num_sampling_rules; i++) {
+    bai_options.sampling_rule = sampling_rules[i];
+    bai(&bai_options, rvs, rng, NULL, &bai_result);
+    assert(bai_result.exit_cond == BAI_EXIT_CONDITION_SAMPLE_LIMIT);
+    assert(bai_result.best_arm == 2);
+    int expected_num_samples = bai_options.sample_limit;
+    if (bai_options.sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
+      expected_num_samples *= num_rvs;
+    }
+    assert(bai_result.total_samples == expected_num_samples);
+    assert_num_epigons(rvs, 0);
+  }
   rvs_destroy(rng);
   rvs_destroy(rvs);
 }
@@ -96,14 +160,13 @@ void test_bai_epigons(void) {
       .type = RANDOM_VARIABLES_UNIFORM,
       .seed = 10,
   };
-
   BAIOptions bai_options = {
       .delta = 0.01,
       .sample_limit = num_samples,
       .similar_play_cutoff = 100,
   };
+  BAIResult bai_result;
 
-  const double delta = 0.01;
   for (int max_classes = 1; max_classes <= 3; max_classes++) {
     for (int num_rvs = 2; num_rvs <= 10; num_rvs++) {
       double *means_and_vars =
@@ -122,42 +185,18 @@ void test_bai_epigons(void) {
       for (int i = 0; i < num_strategies_entries; i++) {
         RandomVariables *rvs = rvs_create(&rv_args);
         RandomVariables *rng = rvs_create(&rng_args);
-
-        int num_epigons = 0;
-        for (int k = 0; k < num_rvs; k++) {
-          if (rvs_is_epigon(rvs, k)) {
-            num_epigons++;
-          }
-        }
-        assert(num_epigons == 0);
-        // Use something like
-        // BAILogger *bai_logger = bai_logger_create("bai.log");
-        // to log the BAI output for debugging. Logging will significantly
-        // increase the runtime.
+        assert_num_epigons(rvs, 0);
         BAILogger *bai_logger = NULL;
         bai_options.sampling_rule = strategies[i][0];
         bai_options.is_EV = strategies[i][1];
         bai_options.threshold = strategies[i][2];
-        const int result = bai(&bai_options, rvs, rng, bai_logger);
-        bai_logger_log_int(bai_logger, "result", result);
+        bai(&bai_options, rvs, rng, bai_logger, &bai_result);
+        bai_logger_log_int(bai_logger, "result", bai_result.best_arm + 1);
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
-        for (int k = 0; k < num_rvs; k++) {
-          if (rvs_is_epigon(rvs, k)) {
-            num_epigons++;
-          }
-        }
-        const bool is_ok =
-            (num_epigons == expected_epigons) && (result % max_classes == 0);
-        if (!is_ok) {
-          printf("Failed for %d rvs with strat %d and %d classes\nRan the "
-                 "following assertions:\n%d == %d (epigons)\n%d %% %d == 0 "
-                 "(nonneg result)\n",
-                 num_rvs, i, max_classes, num_epigons, expected_epigons, result,
-                 max_classes);
-          write_bai_input(delta, &rv_args, &rng_args);
-          exit(1);
-        }
+        assert(bai_result.best_arm % max_classes == 0);
+        assert(bai_result.exit_cond == BAI_EXIT_CONDITION_THRESHOLD);
+        assert_num_epigons(rvs, expected_epigons);
         rvs_destroy(rvs);
         rvs_destroy(rng);
       }
@@ -258,13 +297,11 @@ void test_bai_input_from_file(const char *bai_input_filename,
       .similar_play_cutoff = 0,
   };
 
-  int result = bai(&bai_options, rvs, rng, bai_logger);
+  BAIResult bai_result;
 
-  if (result >= 0) {
-    result++;
-  }
+  bai(&bai_options, rvs, rng, bai_logger, &bai_result);
 
-  bai_logger_log_int(bai_logger, "result", result);
+  bai_logger_log_int(bai_logger, "result", bai_result.best_arm + 1);
   bai_logger_flush(bai_logger);
 
   bai_logger_destroy(bai_logger);
@@ -281,6 +318,7 @@ void test_bai(void) {
   if (bai_input_filename && bai_params_index) {
     test_bai_input_from_file(bai_input_filename, bai_params_index);
   } else {
+    test_bai_no_threshold();
     test_bai_track_and_stop();
     test_bai_epigons();
   }
