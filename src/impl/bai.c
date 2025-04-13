@@ -5,6 +5,7 @@
 
 #include "../ent/bai_logger.h"
 #include "../ent/random_variable.h"
+#include "../ent/thread_control.h"
 
 #include "../util/log.h"
 #include "../util/util.h"
@@ -18,29 +19,30 @@
 typedef struct BAIArmData {
   int K;
   int t;
+  int similar_play_cutoff;
+  bool threshold_reached;
   int *N;
   double *S;
   double *S2;
   double *hμ;
   double *hσ2;
   bool *is_similarity_evaluated;
-  int similar_play_min_iter_for_eval;
   BAISamplingRule *bai_sampling_rule;
   int *arm_to_rvs_map;
 } BAIArmData;
 
-BAIArmData *bai_arm_data_create(const int K,
-                                const int similar_play_min_iter_for_eval) {
+BAIArmData *bai_arm_data_create(const int K, const int similar_play_cutoff) {
   BAIArmData *arm_data = malloc_or_die(sizeof(BAIArmData));
   arm_data->K = K;
   arm_data->t = 0;
+  arm_data->similar_play_cutoff = similar_play_cutoff;
+  arm_data->threshold_reached = false;
   arm_data->N = calloc_or_die(K, sizeof(int));
   arm_data->S = calloc_or_die(K, sizeof(double));
   arm_data->S2 = calloc_or_die(K, sizeof(double));
   arm_data->hμ = calloc_or_die(K, sizeof(double));
   arm_data->hσ2 = calloc_or_die(K, sizeof(double));
   arm_data->is_similarity_evaluated = calloc_or_die(K, sizeof(bool));
-  arm_data->similar_play_min_iter_for_eval = similar_play_min_iter_for_eval;
   arm_data->arm_to_rvs_map = malloc_or_die(K * sizeof(int));
   for (int i = 0; i < K; i++) {
     arm_data->arm_to_rvs_map[i] = i;
@@ -122,8 +124,8 @@ void bai_arm_data_potentially_mark_epigons(BAIArmData *arm_data,
                                            RandomVariables *rvs,
                                            const int astar,
                                            BAILogger *bai_logger) {
-  if (arm_data->similar_play_min_iter_for_eval == 0 ||
-      arm_data->t < arm_data->similar_play_min_iter_for_eval ||
+  if (arm_data->similar_play_cutoff == 0 ||
+      arm_data->t < arm_data->similar_play_cutoff ||
       arm_data->is_similarity_evaluated[astar]) {
     return;
   }
@@ -208,13 +210,65 @@ void bai_set_result(const bai_exit_cond_t exit_cond, const int astar,
   bai_result->total_samples = arm_data->t;
 }
 
+typedef struct BAIIsFinishedArgs {
+  const BAIOptions *bai_options;
+  BAIArmData *arm_data;
+  ThreadControl *thread_control;
+  const double *Zs;
+  const BAIThreshold *Sβ;
+  BAILogger *bai_logger;
+  BAIResult *bai_result;
+} BAIIsFinishedArgs;
+
+// Returns true and sets the bai_result if finished.
+// Returns false otherwise.
+bool bai_is_finished(BAIIsFinishedArgs *args, const bai_exit_cond_t exit_cond,
+                     const int astar) {
+  bool finished = false;
+  switch (exit_cond) {
+  case BAI_EXIT_CONDITION_NONE:
+    log_fatal("invalid bai finished exit condition: ", exit_cond);
+    break;
+  case BAI_EXIT_CONDITION_THRESHOLD:
+    args->arm_data->threshold_reached =
+        args->arm_data->threshold_reached ||
+        stopping_criterion(args->arm_data->K, args->Zs, args->Sβ,
+                           args->arm_data->N, args->arm_data->hμ,
+                           args->arm_data->hσ2, astar, args->bai_logger);
+    finished =
+        args->arm_data->threshold_reached &&
+        (args->bai_options->sampling_rule != BAI_SAMPLING_RULE_ROUND_ROBIN ||
+         bai_round_robin_is_complete(args->arm_data));
+    break;
+  case BAI_EXIT_CONDITION_SAMPLE_LIMIT:
+    finished = bai_sample_limit_reached(args->bai_options, args->arm_data);
+    break;
+  case BAI_EXIT_CONDITION_TIME_LIMIT:
+    finished = args->bai_options->time_limit_seconds > 0 &&
+               thread_control_get_seconds_elapsed(args->thread_control) >
+                   args->bai_options->time_limit_seconds;
+    break;
+  case BAI_EXIT_CONDITION_USER_INTERRUPT:
+    finished = thread_control_get_is_halted(args->thread_control);
+    break;
+  }
+  if (finished) {
+    bai_set_result(exit_cond, astar, args->arm_data, args->bai_result);
+  }
+  return finished;
+}
+
 // Assumes rvs are normally distributed.
 // Assumes rng is uniformly distributed between 0 and 1.
 void bai(const BAIOptions *bai_options, RandomVariables *rvs,
-         RandomVariables *rng, BAILogger *bai_logger, BAIResult *bai_result) {
+         RandomVariables *rng, ThreadControl *thread_control,
+         BAILogger *bai_logger, BAIResult *bai_result) {
   const int num_rvs = rvs_get_num_rvs(rvs);
   BAIArmData *arm_data =
       bai_arm_data_create(num_rvs, bai_options->similar_play_cutoff);
+
+  bai_set_result(BAI_EXIT_CONDITION_NONE, 0, arm_data, bai_result);
+
   BAIThreshold *Sβ =
       bai_create_threshold(bai_options->threshold, bai_options->is_EV,
                            bai_options->delta, 2, 2, 1.2);
@@ -230,8 +284,19 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   bai_arm_data_init_sampling_rule(arm_data, bai_options->sampling_rule,
                                   bai_options->is_EV, num_rvs);
   int astar;
-  bool stopping_criteration_met = false;
-  while (true) {
+  BAIIsFinishedArgs is_finished_args = {
+      .bai_options = bai_options,
+      .arm_data = arm_data,
+      .thread_control = thread_control,
+      .Zs = glrt_results->vals,
+      .Sβ = Sβ,
+      .bai_logger = bai_logger,
+      .bai_result = bai_result,
+  };
+  while (!bai_is_finished(&is_finished_args, BAI_EXIT_CONDITION_TIME_LIMIT,
+                          astar) &&
+         !bai_is_finished(&is_finished_args, BAI_EXIT_CONDITION_USER_INTERRUPT,
+                          astar)) {
     bai_logger_log_int(bai_logger, "t", arm_data->t);
     bai_glrt(arm_data->K, arm_data->N, arm_data->hμ, arm_data->hσ2,
              bai_options->is_EV, glrt_results, bai_logger);
@@ -249,16 +314,8 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     bai_logger_log_double_array(bai_logger, "phi2", ϕ2, arm_data->K);
     bai_logger_flush(bai_logger);
 
-    // If the sampling rule is round robin complete, we need to complete the
-    // current round robin before finishing.
-    stopping_criteration_met =
-        stopping_criteration_met ||
-        stopping_criterion(arm_data->K, Zs, Sβ, arm_data->N, arm_data->hμ,
-                           arm_data->hσ2, astar, bai_logger);
-    if (stopping_criteration_met &&
-        (bai_options->sampling_rule != BAI_SAMPLING_RULE_ROUND_ROBIN ||
-         bai_round_robin_is_complete(arm_data))) {
-      bai_set_result(BAI_EXIT_CONDITION_THRESHOLD, astar, arm_data, bai_result);
+    if (bai_is_finished(&is_finished_args, BAI_EXIT_CONDITION_THRESHOLD,
+                        astar)) {
       break;
     }
 
@@ -271,10 +328,8 @@ void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                 k_rvs_index);
     }
     bai_arm_data_sample(arm_data, rvs, k, bai_logger);
-    if (bai_sample_limit_reached(bai_options, arm_data)) {
-      bai_logger_log_title(bai_logger, "REACHED_SAMPLE_LIMIT");
-      bai_set_result(BAI_EXIT_CONDITION_SAMPLE_LIMIT, astar, arm_data,
-                     bai_result);
+    if (bai_is_finished(&is_finished_args, BAI_EXIT_CONDITION_SAMPLE_LIMIT,
+                        astar)) {
       break;
     }
     if (bai_options->similar_play_cutoff > 0) {

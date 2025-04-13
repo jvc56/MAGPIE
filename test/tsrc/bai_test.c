@@ -1,6 +1,9 @@
 #include <assert.h>
+#include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "../../src/def/bai_defs.h"
 
@@ -70,16 +73,21 @@ void test_bai_track_and_stop(void) {
       .is_EV = true,
       .sample_limit = 1000,
       .similar_play_cutoff = 0,
+      .time_limit_seconds = 0,
   };
+
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_reset(thread_control, 1);
   BAIResult bai_result;
-  bai(&bai_options, rvs, rng, NULL, &bai_result);
+  bai(&bai_options, rvs, rng, thread_control, NULL, &bai_result);
   assert(bai_result.exit_cond == BAI_EXIT_CONDITION_THRESHOLD);
   assert(bai_result.best_arm == 1);
+  thread_control_destroy(thread_control);
   rvs_destroy(rng);
   rvs_destroy(rvs);
 }
 
-void test_bai_no_threshold(void) {
+void test_bai_sample_limit(void) {
   const double means_and_vars[] = {-10, 1, 0, 1, 100, 10, -20, 5};
   const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
@@ -103,12 +111,14 @@ void test_bai_no_threshold(void) {
       .is_EV = true,
       .sample_limit = 100,
       .similar_play_cutoff = 10,
+      .time_limit_seconds = 0,
   };
-
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_reset(thread_control, 1);
   BAIResult bai_result;
   for (int i = 0; i < num_sampling_rules; i++) {
     bai_options.sampling_rule = sampling_rules[i];
-    bai(&bai_options, rvs, rng, NULL, &bai_result);
+    bai(&bai_options, rvs, rng, thread_control, NULL, &bai_result);
     assert(bai_result.exit_cond == BAI_EXIT_CONDITION_SAMPLE_LIMIT);
     assert(bai_result.best_arm == 2);
     int expected_num_samples = bai_options.sample_limit;
@@ -118,6 +128,106 @@ void test_bai_no_threshold(void) {
     assert(bai_result.total_samples == expected_num_samples);
     assert_num_epigons(rvs, 0);
   }
+  thread_control_destroy(thread_control);
+  rvs_destroy(rng);
+  rvs_destroy(rvs);
+}
+
+typedef struct BaiArgs {
+  const BAIOptions *options;
+  RandomVariables *rvs;
+  RandomVariables *rng;
+  ThreadControl *thread_control;
+  BAIResult *result;
+  pthread_mutex_t *mutex;
+  pthread_cond_t *cond;
+  int *done;
+} BaiArgs;
+
+void *bai_thread_func(void *arg) {
+  BaiArgs *args = (BaiArgs *)arg;
+  bai(args->options, args->rvs, args->rng, args->thread_control, NULL,
+      args->result);
+
+  pthread_mutex_lock(args->mutex);
+  *(args->done) = 1;
+  pthread_cond_signal(args->cond);
+  pthread_mutex_unlock(args->mutex);
+
+  return NULL;
+}
+
+void test_bai_time_limit(void) {
+  const double means_and_vars[] = {-10, 1, 0, 1, 100, 10, -20, 5};
+  const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = num_rvs,
+      .seed = 10,
+  };
+  RandomVariables *rng = rvs_create(&rng_args);
+
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TRACK_AND_STOP,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.01,
+      .is_EV = true,
+      .sample_limit = 100000000,
+      .similar_play_cutoff = 100000,
+      .time_limit_seconds = 5,
+  };
+
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_reset(thread_control, 1);
+
+  BAIResult bai_result;
+  int done = 0;
+
+  pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+  pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+  BaiArgs args = {.options = &bai_options,
+                  .rvs = rvs,
+                  .rng = rng,
+                  .thread_control = thread_control,
+                  .result = &bai_result,
+                  .mutex = &mutex,
+                  .cond = &cond,
+                  .done = &done};
+
+  pthread_t thread;
+  pthread_create(&thread, NULL, bai_thread_func, &args);
+
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  const int timeout_seconds = bai_options.time_limit_seconds + 5;
+  ts.tv_sec += timeout_seconds;
+
+  pthread_mutex_lock(&mutex);
+  while (!done) {
+    int ret = pthread_cond_timedwait(&cond, &mutex, &ts);
+    if (ret == ETIMEDOUT) {
+      printf("bai did not complete within %d seconds.\n", timeout_seconds);
+      pthread_cancel(thread);
+      pthread_mutex_unlock(&mutex);
+      assert(0);
+    }
+  }
+  pthread_mutex_unlock(&mutex);
+
+  pthread_join(thread, NULL);
+
+  assert(bai_result.exit_cond == BAI_EXIT_CONDITION_TIME_LIMIT);
+
+  thread_control_destroy(thread_control);
   rvs_destroy(rng);
   rvs_destroy(rvs);
 }
@@ -164,7 +274,11 @@ void test_bai_epigons(void) {
       .delta = 0.01,
       .sample_limit = num_samples,
       .similar_play_cutoff = 100,
+      .time_limit_seconds = 0,
   };
+
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_reset(thread_control, 1);
   BAIResult bai_result;
 
   for (int max_classes = 1; max_classes <= 3; max_classes++) {
@@ -190,7 +304,7 @@ void test_bai_epigons(void) {
         bai_options.sampling_rule = strategies[i][0];
         bai_options.is_EV = strategies[i][1];
         bai_options.threshold = strategies[i][2];
-        bai(&bai_options, rvs, rng, bai_logger, &bai_result);
+        bai(&bai_options, rvs, rng, thread_control, bai_logger, &bai_result);
         bai_logger_log_int(bai_logger, "result", bai_result.best_arm + 1);
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
@@ -204,6 +318,7 @@ void test_bai_epigons(void) {
     }
   }
   free(samples);
+  thread_control_destroy(thread_control);
 }
 
 void test_bai_input_from_file(const char *bai_input_filename,
@@ -295,16 +410,19 @@ void test_bai_input_from_file(const char *bai_input_filename,
       .delta = delta,
       .sample_limit = num_samples,
       .similar_play_cutoff = 0,
+      .time_limit_seconds = 0,
   };
-
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_reset(thread_control, 1);
   BAIResult bai_result;
 
-  bai(&bai_options, rvs, rng, bai_logger, &bai_result);
+  bai(&bai_options, rvs, rng, thread_control, bai_logger, &bai_result);
 
   bai_logger_log_int(bai_logger, "result", bai_result.best_arm + 1);
   bai_logger_flush(bai_logger);
 
   bai_logger_destroy(bai_logger);
+  thread_control_destroy(thread_control);
   rvs_destroy(rvs);
   rvs_destroy(rng);
   free(means_and_vars);
@@ -318,7 +436,8 @@ void test_bai(void) {
   if (bai_input_filename && bai_params_index) {
     test_bai_input_from_file(bai_input_filename, bai_params_index);
   } else {
-    test_bai_no_threshold();
+    test_bai_sample_limit();
+    test_bai_time_limit();
     test_bai_track_and_stop();
     test_bai_epigons();
   }

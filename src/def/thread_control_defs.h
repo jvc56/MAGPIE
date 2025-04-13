@@ -13,6 +13,7 @@ typedef enum {
 
 typedef enum {
   HALT_STATUS_NONE,
+  // FIXME: the probabilistic enum should be removed
   HALT_STATUS_PROBABILISTIC,
   HALT_STATUS_MAX_ITERATIONS,
   HALT_STATUS_USER_INTERRUPT,

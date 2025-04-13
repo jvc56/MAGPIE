@@ -30,12 +30,15 @@ typedef struct BAIOptions {
   // of the total number of samples.
   int sample_limit;
   int similar_play_cutoff;
-  int max_seconds;
+  int time_limit_seconds;
 } BAIOptions;
 
 typedef enum {
+  BAI_EXIT_CONDITION_NONE,
   BAI_EXIT_CONDITION_THRESHOLD,
   BAI_EXIT_CONDITION_SAMPLE_LIMIT,
+  BAI_EXIT_CONDITION_TIME_LIMIT,
+  BAI_EXIT_CONDITION_USER_INTERRUPT,
 } bai_exit_cond_t;
 
 typedef struct BAIResult {
