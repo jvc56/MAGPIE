@@ -282,6 +282,10 @@ void test_bai_epigons(void) {
   BAIResult bai_result;
 
   for (int max_classes = 1; max_classes <= 3; max_classes++) {
+    bai_exit_cond_t expected_exit_cond = BAI_EXIT_CONDITION_THRESHOLD;
+    if (max_classes == 1) {
+      expected_exit_cond = BAI_EXIT_CONDITION_ONE_ARM_REMAINING;
+    }
     for (int num_rvs = 2; num_rvs <= 10; num_rvs++) {
       double *means_and_vars =
           (double *)malloc_or_die(num_rvs * 2 * sizeof(double));
@@ -309,7 +313,7 @@ void test_bai_epigons(void) {
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
         assert(bai_result.best_arm % max_classes == 0);
-        assert(bai_result.exit_cond == BAI_EXIT_CONDITION_THRESHOLD);
+        assert(bai_result.exit_cond == expected_exit_cond);
         assert_num_epigons(rvs, expected_epigons);
         rvs_destroy(rvs);
         rvs_destroy(rng);
