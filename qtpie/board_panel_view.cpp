@@ -4,6 +4,11 @@
 #include <QLabel>
 #include <QPalette>
 
+extern "C" {
+#include "../src/ent/board.h"
+#include "../src/ent/game.h"
+}
+
 // Helper to create placeholder widgets.
 static QWidget* createPlaceholder(const QString &text, const QColor &bgColor = Qt::lightGray) {
     QWidget *widget = new QWidget;
@@ -28,7 +33,7 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     mainLayout->setSpacing(5);
 
     // BoardView is the square canvas displaying board contents.
-    BoardView *boardView = new BoardView(this);
+    boardView = new BoardView(this);
     boardView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
     // Placeholders for the rack view and controls beneath the board.
@@ -41,4 +46,10 @@ BoardPanelView::BoardPanelView(QWidget *parent)
     mainLayout->addWidget(boardView, 0);
     mainLayout->addWidget(rackPlaceholder, 1);
     mainLayout->addWidget(controlsPlaceholder, 1);
+}
+
+void BoardPanelView::setGame(Game *game) {
+    this->game = game;
+    Board *board = game_get_board(game);
+    boardView->setBoard(board);
 }

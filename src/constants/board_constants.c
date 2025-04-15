@@ -1,0 +1,7 @@
+#include "../def/board_defs.h"
+
+#include "board_constants.h"
+
+const int MAGPIE_BOARD_DIM = BOARD_DIM;
+const int MAGPIE_BOARD_HORIZONTAL_DIRECTION = BOARD_HORIZONTAL_DIRECTION;
+const int MAGPIE_BOARD_VERTICAL_DIRECTION = BOARD_VERTICAL_DIRECTION;

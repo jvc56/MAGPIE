@@ -32,10 +32,11 @@ public:
         string_builder_add_game(sb, game, move_list);
         printf("%s\n", string_builder_peek(sb));
         string_builder_destroy(sb);
-        
+
         contentWidget = new QWidget;
 
-        board = new BoardPanelView(this);
+        boardPanelView = new BoardPanelView(this);
+        boardPanelView->setGame(game);
         history = createWidget("History");
         analysis = createWidget("Analysis");
 
@@ -44,8 +45,9 @@ public:
         scrollArea->setWidgetResizable(true);
         scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-        layout = new ResponsiveLayout(contentWidget, scrollArea, board, history, analysis, 10, 50);
-        board->setParent(contentWidget);
+        layout = new ResponsiveLayout(contentWidget, scrollArea, boardPanelView,
+                                      history, analysis, 10, 50);
+        boardPanelView->setParent(contentWidget);
         history->setParent(contentWidget);
         analysis->setParent(contentWidget);
 
@@ -67,7 +69,7 @@ protected:
 private:
     QWidget *contentWidget;
     QScrollArea *scrollArea;
-    QWidget *board;
+    BoardPanelView *boardPanelView;
     QWidget *history;
     QWidget *analysis;
     ResponsiveLayout *layout;

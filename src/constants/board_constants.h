@@ -1,0 +1,8 @@
+#ifndef BOARD_CONSTANTS_H
+#define BOARD_CONSTANTS_H
+
+extern const int MAGPIE_BOARD_DIM;
+extern const int MAGPIE_BOARD_HORIZONTAL_DIRECTION;
+extern const int MAGPIE_BOARD_VERTICAL_DIRECTION;
+
+#endif
