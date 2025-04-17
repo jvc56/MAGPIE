@@ -1,6 +1,7 @@
 #ifndef BAI_DEFS_H
 #define BAI_DEFS_H
 
+#include "thread_control_defs.h"
 #include <stdbool.h>
 
 #define BAI_EPSILON 1e-10

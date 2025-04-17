@@ -80,7 +80,7 @@ void test_bai_track_and_stop(void) {
   thread_control_reset(thread_control, 1);
   BAIResult bai_result;
   bai(&bai_options, rvs, rng, thread_control, NULL, &bai_result);
-  assert(bai_result.exit_cond == BAI_EXIT_CONDITION_THRESHOLD);
+  assert(bai_result.exit_status == EXIT_STATUS_THRESHOLD);
   assert(bai_result.best_arm == 1);
   thread_control_destroy(thread_control);
   rvs_destroy(rng);
@@ -119,7 +119,7 @@ void test_bai_sample_limit(void) {
   for (int i = 0; i < num_sampling_rules; i++) {
     bai_options.sampling_rule = sampling_rules[i];
     bai(&bai_options, rvs, rng, thread_control, NULL, &bai_result);
-    assert(bai_result.exit_cond == BAI_EXIT_CONDITION_SAMPLE_LIMIT);
+    assert(bai_result.exit_status == EXIT_STATUS_SAMPLE_LIMIT);
     assert(bai_result.best_arm == 2);
     int expected_num_samples = bai_options.sample_limit;
     if (bai_options.sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
@@ -225,7 +225,7 @@ void test_bai_time_limit(void) {
 
   pthread_join(thread, NULL);
 
-  assert(bai_result.exit_cond == BAI_EXIT_CONDITION_TIME_LIMIT);
+  assert(bai_result.exit_status == EXIT_STATUS_TIME_LIMIT);
 
   thread_control_destroy(thread_control);
   rvs_destroy(rng);
@@ -282,9 +282,9 @@ void test_bai_epigons(void) {
   BAIResult bai_result;
 
   for (int max_classes = 1; max_classes <= 3; max_classes++) {
-    bai_exit_cond_t expected_exit_cond = BAI_EXIT_CONDITION_THRESHOLD;
+    exit_status_t expected_exit_status = EXIT_STATUS_THRESHOLD;
     if (max_classes == 1) {
-      expected_exit_cond = BAI_EXIT_CONDITION_ONE_ARM_REMAINING;
+      expected_exit_status = EXIT_STATUS_ONE_ARM_REMAINING;
     }
     for (int num_rvs = 2; num_rvs <= 10; num_rvs++) {
       double *means_and_vars =
@@ -309,11 +309,10 @@ void test_bai_epigons(void) {
         bai_options.is_EV = strategies[i][1];
         bai_options.threshold = strategies[i][2];
         bai(&bai_options, rvs, rng, thread_control, bai_logger, &bai_result);
-        bai_logger_log_int(bai_logger, "result", bai_result.best_arm + 1);
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
         assert(bai_result.best_arm % max_classes == 0);
-        assert(bai_result.exit_cond == expected_exit_cond);
+        assert(bai_result.exit_status == expected_exit_status);
         assert_num_epigons(rvs, expected_epigons);
         rvs_destroy(rvs);
         rvs_destroy(rng);
