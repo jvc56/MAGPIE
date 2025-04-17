@@ -26,10 +26,10 @@ struct ThreadControl {
   XoshiroPRNG *prng;
   check_stop_status_t check_stop_status;
   mode_search_status_t current_mode;
-  halt_status_t halt_status;
+  exit_status_t exit_status;
   pthread_mutex_t check_stopping_condition_mutex;
   pthread_mutex_t current_mode_mutex;
-  pthread_mutex_t halt_status_mutex;
+  pthread_mutex_t exit_status_mutex;
   pthread_mutex_t searching_mode_mutex;
   pthread_mutex_t iter_mutex;
   pthread_mutex_t iter_completed_mutex;
@@ -40,7 +40,7 @@ struct ThreadControl {
 
 ThreadControl *thread_control_create(void) {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
-  thread_control->halt_status = HALT_STATUS_NONE;
+  thread_control->exit_status = EXIT_STATUS_NONE;
   thread_control->current_mode = MODE_STOPPED;
   thread_control->check_stop_status = CHECK_STOP_INACTIVE;
   thread_control->number_of_threads = 1;
@@ -52,7 +52,7 @@ ThreadControl *thread_control_create(void) {
   thread_control->max_iter_count = 0;
   pthread_mutex_init(&thread_control->current_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->check_stopping_condition_mutex, NULL);
-  pthread_mutex_init(&thread_control->halt_status_mutex, NULL);
+  pthread_mutex_init(&thread_control->exit_status_mutex, NULL);
   pthread_mutex_init(&thread_control->searching_mode_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_mutex, NULL);
   pthread_mutex_init(&thread_control->iter_completed_mutex, NULL);
@@ -135,31 +135,31 @@ void thread_control_set_check_stop_interval(
       check_stopping_condition_interval;
 }
 
-halt_status_t thread_control_get_halt_status(ThreadControl *thread_control) {
-  halt_status_t halt_status;
-  pthread_mutex_lock(&thread_control->halt_status_mutex);
-  halt_status = thread_control->halt_status;
-  pthread_mutex_unlock(&thread_control->halt_status_mutex);
-  return halt_status;
+exit_status_t thread_control_get_exit_status(ThreadControl *thread_control) {
+  exit_status_t exit_status;
+  pthread_mutex_lock(&thread_control->exit_status_mutex);
+  exit_status = thread_control->exit_status;
+  pthread_mutex_unlock(&thread_control->exit_status_mutex);
+  return exit_status;
 }
 
-bool thread_control_get_is_halted(ThreadControl *thread_control) {
-  return thread_control_get_halt_status(thread_control) != HALT_STATUS_NONE;
+bool thread_control_get_is_exited(ThreadControl *thread_control) {
+  return thread_control_get_exit_status(thread_control) != EXIT_STATUS_NONE;
 }
 
-bool thread_control_halt(ThreadControl *thread_control,
-                         halt_status_t halt_status) {
+bool thread_control_exit(ThreadControl *thread_control,
+                         exit_status_t exit_status) {
   bool success = false;
-  pthread_mutex_lock(&thread_control->halt_status_mutex);
-  // Assume the first reason to thread_control_halt is the only
-  // reason we care about, so subsequent calls to thread_control_halt
+  pthread_mutex_lock(&thread_control->exit_status_mutex);
+  // Assume the first reason to thread_control_exit is the only
+  // reason we care about, so subsequent calls to thread_control_exit
   // can be ignored.
-  if (thread_control->halt_status == HALT_STATUS_NONE &&
-      halt_status != HALT_STATUS_NONE) {
-    thread_control->halt_status = halt_status;
+  if (thread_control->exit_status == EXIT_STATUS_NONE &&
+      exit_status != EXIT_STATUS_NONE) {
+    thread_control->exit_status = exit_status;
     success = true;
   }
-  pthread_mutex_unlock(&thread_control->halt_status_mutex);
+  pthread_mutex_unlock(&thread_control->exit_status_mutex);
   return success;
 }
 
@@ -331,7 +331,7 @@ void thread_control_reset(ThreadControl *thread_control,
   thread_control->iter_count_completed = 0;
   thread_control->time_elapsed = 0;
   thread_control->max_iter_count = max_iter_count;
-  thread_control->halt_status = HALT_STATUS_NONE;
+  thread_control->exit_status = EXIT_STATUS_NONE;
   mtimer_reset(thread_control->timer);
   mtimer_start(thread_control->timer);
 }

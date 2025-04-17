@@ -12,12 +12,17 @@ typedef enum {
 } mode_search_status_t;
 
 typedef enum {
-  HALT_STATUS_NONE,
-  // FIXME: the probabilistic enum should be removed
-  HALT_STATUS_PROBABILISTIC,
-  HALT_STATUS_MAX_ITERATIONS,
-  HALT_STATUS_USER_INTERRUPT,
-} halt_status_t;
+  EXIT_STATUS_NONE,
+  // FIXME: remove probabilistic enum
+  EXIT_STATUS_PROBABILISTIC,
+  EXIT_STATUS_MAX_ITERATIONS,
+  EXIT_STATUS_USER_INTERRUPT,
+  EXIT_STATUS_THRESHOLD,
+  EXIT_STATUS_SAMPLE_LIMIT,
+  EXIT_STATUS_TIME_LIMIT,
+  EXIT_STATUS_USER_INTERRUPT,
+  EXIT_STATUS_ONE_ARM_REMAINING,
+} exit_status_t;
 
 #define MAX_THREADS 512
 

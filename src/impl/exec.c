@@ -45,7 +45,7 @@
 
 // Returns NULL and prints a warning if a search is ongoing or some other error
 // occurred
-char *command_search_status(Config *config, bool should_halt) {
+char *command_search_status(Config *config, bool should_exit) {
   if (!config) {
     log_fatal("The command variables struct has not been initialized.");
   }
@@ -57,9 +57,9 @@ char *command_search_status(Config *config, bool should_halt) {
     return string_duplicate(SEARCH_STATUS_FINISHED);
   }
 
-  if (should_halt) {
-    if (!thread_control_halt(thread_control, HALT_STATUS_USER_INTERRUPT)) {
-      log_warn("Command already halted.");
+  if (should_exit) {
+    if (!thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT)) {
+      log_warn("Command already exited.");
     }
     thread_control_wait_for_mode_stopped(thread_control);
   }
@@ -133,7 +133,7 @@ void process_ucgi_command(Config *config, const char *command) {
     thread_control_print(thread_control, "id name MAGPIE 0.1\nucgiok\n");
   } else if (strings_equal(command, STOP_COMMAND_STRING)) {
     if (thread_control_get_mode(thread_control) == MODE_SEARCHING) {
-      if (!thread_control_halt(thread_control, HALT_STATUS_USER_INTERRUPT)) {
+      if (!thread_control_exit(thread_control, EXIT_STATUS_USER_INTERRUPT)) {
         log_warn("Search already received stop signal but has not stopped.");
       }
     } else {

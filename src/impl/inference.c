@@ -144,9 +144,10 @@ void evaluate_possible_leave(Inference *inference) {
 
   const Move *top_move = get_top_equity_move(
       inference->game, inference->thread_index, inference->move_list);
-  const bool is_within_equity_margin = inference->target_score + current_leave_value +
-                                     inference->equity_margin >=
-                                 move_get_equity(top_move);
+  const bool is_within_equity_margin = inference->target_score +
+                                           current_leave_value +
+                                           inference->equity_margin >=
+                                       move_get_equity(top_move);
   const int tiles_played = move_get_tiles_played(top_move);
   const bool number_exchanged_matches =
       move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
@@ -192,7 +193,8 @@ void evaluate_possible_leave(Inference *inference) {
       }
     } else {
       record_valid_leave(inference->current_target_leave, inference->results,
-                         INFERENCE_TYPE_LEAVE, equity_to_double(current_leave_value),
+                         INFERENCE_TYPE_LEAVE,
+                         equity_to_double(current_leave_value),
                          number_of_draws_for_leave);
       leave_rack_list_insert_rack(
           inference->current_target_leave, NULL, number_of_draws_for_leave,
@@ -367,7 +369,7 @@ bool should_print_info(const Inference *inference) {
 
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
-  if (thread_control_get_is_halted(inference->thread_control)) {
+  if (thread_control_get_is_exited(inference->thread_control)) {
     return;
   }
   if (tiles_to_infer == 0) {
@@ -479,7 +481,7 @@ void infer_manager(ThreadControl *thread_control, Inference *inference) {
 
   // Infer was able to finish normally, which is when it
   // iterates through every rack
-  thread_control_halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
+  thread_control_exit(thread_control, EXIT_STATUS_MAX_ITERATIONS);
 
   stats_combine(leave_stats, number_of_threads,
                 inference_results_get_equity_values(inference->results,
@@ -567,10 +569,10 @@ inference_status_t infer(InferenceArgs *args, InferenceResults *results) {
         inference->bag_as_rack, inference->results, inference->target_score,
         inference->target_number_of_tiles_exchanged, inference->equity_margin);
 
-    if (thread_control_get_halt_status(args->thread_control) ==
-        HALT_STATUS_MAX_ITERATIONS) {
+    if (thread_control_get_exit_status(args->thread_control) ==
+        EXIT_STATUS_MAX_ITERATIONS) {
       // Only print if infer was able to finish normally.
-      // If thread_control_halt status isn't max iterations, it was interrupted
+      // If thread_control_exit status isn't max iterations, it was interrupted
       // by the user and the results will not be valid.
       print_ucgi_inference(game_get_ld(inference->game), inference->results,
                            args->thread_control);

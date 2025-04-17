@@ -26,15 +26,15 @@ typedef struct ThreadControlIterCompletedOutput {
 ThreadControl *thread_control_create(void);
 void thread_control_destroy(ThreadControl *thread_control);
 
-bool thread_control_get_is_halted(ThreadControl *thread_control);
+bool thread_control_get_is_exited(ThreadControl *thread_control);
 FileHandler *thread_control_get_infile(ThreadControl *thread_control);
 int thread_control_get_print_info_interval(const ThreadControl *thread_control);
 int thread_control_get_check_stop_interval(const ThreadControl *thread_control);
 int thread_control_get_threads(const ThreadControl *thread_control);
 
-bool thread_control_halt(ThreadControl *thread_control,
-                         halt_status_t halt_status);
-halt_status_t thread_control_get_halt_status(ThreadControl *thread_control);
+bool thread_control_exit(ThreadControl *thread_control,
+                         exit_status_t exit_status);
+exit_status_t thread_control_get_exit_status(ThreadControl *thread_control);
 void thread_control_set_print_info_interval(ThreadControl *thread_control,
                                             int print_info_interval);
 void thread_control_set_check_stop_interval(

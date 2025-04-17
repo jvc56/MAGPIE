@@ -137,7 +137,7 @@ void block_for_process_command(ProcessArgs *process_args, int max_seconds) {
 
 void assert_command_status_and_output(Config *config,
                                       const char *command_without_io,
-                                      bool should_halt, int seconds_to_wait,
+                                      bool should_exit, int seconds_to_wait,
                                       int expected_output_line_count,
                                       int expected_outerror_line_count) {
   char *test_output_filename = get_test_filename("output");
@@ -158,10 +158,10 @@ void assert_command_status_and_output(Config *config,
   // Let the async command start up
   sleep(1);
 
-  if (should_halt) {
+  if (should_exit) {
     char *status_string = command_search_status(config, true);
     // For now, we do not care about the contents of of the status,
-    // we just want to thread_control_halt the command.
+    // we just want to thread_control_exit the command.
     free(status_string);
   }
   block_for_search(config, seconds_to_wait);

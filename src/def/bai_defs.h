@@ -33,17 +33,8 @@ typedef struct BAIOptions {
   int time_limit_seconds;
 } BAIOptions;
 
-typedef enum {
-  BAI_EXIT_CONDITION_NONE,
-  BAI_EXIT_CONDITION_THRESHOLD,
-  BAI_EXIT_CONDITION_SAMPLE_LIMIT,
-  BAI_EXIT_CONDITION_TIME_LIMIT,
-  BAI_EXIT_CONDITION_USER_INTERRUPT,
-  BAI_EXIT_CONDITION_ONE_ARM_REMAINING,
-} bai_exit_cond_t;
-
 typedef struct BAIResult {
-  bai_exit_cond_t exit_cond;
+  exit_status_t exit_status;
   int best_arm;
   int total_samples;
 } BAIResult;

@@ -380,10 +380,11 @@ void *simmer_worker(void *uncasted_simmer_worker) {
   ThreadControl *thread_control = simmer->thread_control;
   ThreadControlIterOutput iter_output;
   ThreadControlIterCompletedOutput iter_completed_output;
-  while (!thread_control_get_is_halted(thread_control)) {
+  while (!thread_control_get_is_exited(thread_control)) {
     if (thread_control_get_next_iter_output(simmer->thread_control,
                                             &iter_output)) {
-      thread_control_halt(thread_control, HALT_STATUS_MAX_ITERATIONS);
+      // FIXME: use sample limit instead
+      thread_control_exit(thread_control, EXIT_STATUS_MAX_ITERATIONS);
       break;
     }
     sim_single_iteration(simmer_worker, iter_output.seed);
@@ -404,9 +405,9 @@ void *simmer_worker(void *uncasted_simmer_worker) {
                 check_stopping_condition_interval ==
             0 &&
         thread_control_set_check_stop_active(thread_control)) {
-      if (!thread_control_get_is_halted(thread_control) &&
+      if (!thread_control_get_is_exited(thread_control) &&
           handle_potential_stopping_condition(simmer)) {
-        thread_control_halt(thread_control, HALT_STATUS_PROBABILISTIC);
+        thread_control_exit(thread_control, EXIT_STATUS_PROBABILISTIC);
       }
       thread_control_set_check_stop_inactive(thread_control);
     }
