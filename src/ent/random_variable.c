@@ -19,6 +19,7 @@ typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 
 struct RandomVariables {
   int num_rvs;
+  uint64_t total_samples;
   rvs_sample_func_t sample_func;
   rvs_similar_func_t similar_func;
   rvs_is_epigon_func_t is_epigon_func;
@@ -285,6 +286,7 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   RandomVariables *rvs = malloc_or_die(sizeof(RandomVariables));
   rvs->num_rvs = rvs_args->num_rvs;
+  rvs->total_samples = 0;
   switch (rvs_args->type) {
   case RANDOM_VARIABLES_UNIFORM:
     rv_uniform_create(rvs, rvs_args->seed);
@@ -314,8 +316,11 @@ void rvs_destroy(RandomVariables *rvs) {
 }
 
 double rvs_sample(RandomVariables *rvs, uint64_t k, BAILogger *bai_logger) {
+  rvs->total_samples++;
   return rvs->sample_func(rvs, k, bai_logger);
 }
+
+void rvs_reset(RandomVariables *rvs) { rvs->total_samples = 0; }
 
 // Returns the similarity between the leader and the i-th arm and marks
 // the arm accordingly.
@@ -328,3 +333,7 @@ bool rvs_is_epigon(const RandomVariables *rvs, int i) {
 }
 
 int rvs_get_num_rvs(const RandomVariables *rvs) { return rvs->num_rvs; }
+
+uint64_t rvs_get_total_samples(const RandomVariables *rvs) {
+  return rvs->total_samples;
+}
